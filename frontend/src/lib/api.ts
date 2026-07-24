@@ -46,6 +46,7 @@ import type {
   ProjectValidation,
   CreatePlotNodeRequest,
   PlotNode,
+  PlotContextPacket,
   PlotNodeList,
   SaveProjectNodeRequest,
   SavePlotNodeRequest,
@@ -811,6 +812,15 @@ export const api = {
   },
   getPlotNode(nodeId: string) {
     return request<PlotNode>(`/plots/${encodeURIComponent(nodeId)}`);
+  },
+  getPlotContext(nodeId: string, params: { scene_id?: string | null; include_future?: boolean } = {}) {
+    const search = new URLSearchParams();
+    if (params.scene_id) search.set("scene_id", params.scene_id);
+    if (params.include_future) search.set("include_future", "true");
+    const query = search.toString();
+    return request<PlotContextPacket>(
+      `/plots/${encodeURIComponent(nodeId)}/context${query ? `?${query}` : ""}`,
+    );
   },
   savePlotNode(nodeId: string, payload: SavePlotNodeRequest) {
     return request<PlotNode>(`/plots/${encodeURIComponent(nodeId)}`, {

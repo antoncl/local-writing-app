@@ -6,6 +6,8 @@
     EditableDocument,
     PlotBoardCard,
     PlotBoardSpec,
+    PlotContextClaim,
+    PlotContextPacket,
     PlotNode,
     PlotNodeSummary,
     PlotPointClaim,
@@ -88,6 +90,11 @@
   let savingMessage = $state("");
   let saveError = $state("");
   let dragOverCardId = $state<string | null>(null);
+  let includeFutureContext = $state(false);
+  let plotContext = $state<PlotContextPacket | null>(null);
+  let plotContextLoading = $state(false);
+  let plotContextError = $state("");
+  let plotContextRequest = 0;
 
   let plotNode = $derived(localPlotNode ?? asPlotNode(scene));
   let board = $derived(plotNode?.board ?? EMPTY_BOARD);
@@ -139,6 +146,7 @@
   let columns = $derived(buildColumns(structure, cards));
   let structureColumnOptions = $derived(flattenStructure(structure?.root));
   let selectedPointLabel = $derived(selectedClaim ? pointLabel(selectedClaim) : "");
+  let selectedContextSceneId = $derived(selectedCard?.node_ref ?? null);
   let selectedPaletteRow = $derived(
     selectedPalettePoint
       ? paletteRows.find((row) => selectedPalettePoint === pointKey(row.instance.id, row.point.plot_point_id)) ?? null
@@ -219,6 +227,34 @@
     });
   });
 
+  $effect(() => {
+    const boardId = plotNode?.id ?? "";
+    const boardRevision = plotNode?.revision ?? "";
+    const sceneId = selectedContextSceneId;
+    const includeFuture = includeFutureContext;
+    const req = ++plotContextRequest;
+    plotContext = null;
+    plotContextError = "";
+    if (!boardId) {
+      plotContextLoading = false;
+      return;
+    }
+    plotContextLoading = true;
+    void api.getPlotContext(boardId, {
+      scene_id: sceneId,
+      include_future: includeFuture,
+    }).then((context) => {
+      if (req !== plotContextRequest) return;
+      plotContext = context;
+    }).catch((caught) => {
+      if (req !== plotContextRequest) return;
+      plotContextError = caught instanceof Error ? caught.message : "Could not load plot context.";
+    }).finally(() => {
+      if (req === plotContextRequest) plotContextLoading = false;
+    });
+    void boardRevision;
+  });
+
   function asPlotNode(document: EditableDocument | null | undefined): PlotNode | null {
     if (!document || !("board" in document)) return null;
     return document as PlotNode;
@@ -278,6 +314,23 @@
     const instance = instanceById.get(claim.template_instance_id);
     const point = instance?.template_instance?.plot_points.find((candidate) => candidate.plot_point_id === claim.plot_point_id);
     return point?.title || claim.plot_point_id;
+  }
+
+  function contextPointLabel(claim: PlotContextClaim): string {
+    for (const instance of plotContext?.template_instances ?? []) {
+      if (instance.id !== claim.template_instance_id) continue;
+      const point = instance.plot_points.find((candidate) => candidate.plot_point_id === claim.plot_point_id);
+      if (point?.title) return point.title;
+    }
+    return claim.claim_label || claim.plot_point_id;
+  }
+
+  function contextClaimsForCard(cardId: string): PlotContextClaim[] {
+    return (plotContext?.claims ?? []).filter((claim) => claim.card_id === cardId);
+  }
+
+  function omittedCount(key: string): number {
+    return plotContext?.omitted_counts?.[key] ?? 0;
   }
 
   function pointKey(instanceId: string, pointId: string): string {
@@ -986,6 +1039,60 @@
     {:else}
       <p class="muted-line">No card selected.</p>
     {/if}
+
+    {#if plotNode}
+      <section class="context-preview" aria-label="AI plot context">
+        <header>
+          <span>AI context</span>
+          <label>
+            <input type="checkbox" bind:checked={includeFutureContext} />
+            Future
+          </label>
+        </header>
+        {#if plotContextLoading}
+          <p class="muted-line">Loading…</p>
+        {:else if plotContextError}
+          <p class="context-error">{plotContextError}</p>
+        {:else if !selectedContextSceneId && !includeFutureContext}
+          <p class="muted-line">No draft scene scope.</p>
+        {:else if plotContext}
+          <div class="context-stats">
+            <span>{plotContext.cards.length} cards</span>
+            <span>{plotContext.claims.length} claims</span>
+            <span>{omittedCount("future_cards")} future</span>
+          </div>
+          {#if plotContext.cards.length === 0}
+            <p class="muted-line">No visible plot cards.</p>
+          {:else}
+            <div class="context-card-list">
+              {#each plotContext.cards as contextCard (contextCard.id)}
+                <article class="context-card">
+                  <header>
+                    <strong>{contextCard.title}</strong>
+                    {#if contextCard.structure_title}
+                      <span>{contextCard.structure_title}</span>
+                    {/if}
+                  </header>
+                  {#if contextCard.synopsis}
+                    <p>{contextCard.synopsis}</p>
+                  {/if}
+                  {#if contextClaimsForCard(contextCard.id).length > 0}
+                    <ul>
+                      {#each contextClaimsForCard(contextCard.id) as contextClaim (contextClaim.id)}
+                        <li>
+                          <span>{contextPointLabel(contextClaim)}</span>
+                          <small>{contextClaim.claim_type}</small>
+                        </li>
+                      {/each}
+                    </ul>
+                  {/if}
+                </article>
+              {/each}
+            </div>
+          {/if}
+        {/if}
+      </section>
+    {/if}
   </aside>
 </section>
 
@@ -1531,6 +1638,140 @@
   .plot-inspector dd {
     margin: 0;
     color: var(--text-2);
+    font-size: var(--fs-sm);
+    line-height: 1.4;
+  }
+
+  .context-preview {
+    display: grid;
+    gap: var(--sp-2);
+    margin-top: var(--sp-4);
+    padding-top: var(--sp-3);
+    border-top: 1px solid var(--divider);
+  }
+
+  .context-preview > header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-2);
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  .context-preview > header label {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-1);
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+    text-transform: none;
+  }
+
+  .context-preview input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    accent-color: var(--accent);
+  }
+
+  .context-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-1);
+  }
+
+  .context-stats span {
+    padding: 2px 6px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: var(--panel);
+    color: var(--text-3);
+    font-family: var(--mono);
+    font-size: var(--fs-xs);
+  }
+
+  .context-card-list {
+    display: grid;
+    gap: var(--sp-2);
+  }
+
+  .context-card {
+    display: grid;
+    gap: var(--sp-1);
+    padding: var(--sp-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: var(--surface);
+  }
+
+  .context-card > header {
+    display: grid;
+    gap: 2px;
+  }
+
+  .context-card strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text);
+    font-size: var(--fs-sm);
+  }
+
+  .context-card header span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-3);
+    font-family: var(--mono);
+    font-size: var(--fs-xs);
+  }
+
+  .context-card p {
+    margin: 0;
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+    line-height: 1.35;
+  }
+
+  .context-card ul {
+    display: grid;
+    gap: 2px;
+    margin: var(--sp-1) 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .context-card li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-2);
+    min-width: 0;
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+  }
+
+  .context-card li span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .context-card small {
+    flex: none;
+    color: var(--text-3);
+    font-family: var(--mono);
+    font-size: var(--fs-xs);
+  }
+
+  .context-error {
+    margin: 0;
+    color: var(--danger);
     font-size: var(--fs-sm);
     line-height: 1.4;
   }

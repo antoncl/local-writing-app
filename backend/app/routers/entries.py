@@ -37,6 +37,7 @@ from app.models_views import (
 )
 from app.models_plot import (
     CreatePlotNodeRequest,
+    PlotContextPacket,
     PlotNode,
     PlotNodeList,
     SavePlotNodeRequest,
@@ -97,6 +98,21 @@ def list_plot_nodes(project: CurrentProject) -> PlotNodeList:
 def create_plot_node(project: CurrentProject, request: CreatePlotNodeRequest) -> PlotNode:
     with translate_errors():
         return project.create_plot_node(request)
+
+
+@router.get("/api/plots/{node_id}/context", response_model=PlotContextPacket)
+def get_plot_context(
+    project: CurrentProject,
+    node_id: str,
+    scene_id: str | None = Query(default=None),
+    include_future: bool = Query(default=False),
+) -> PlotContextPacket:
+    with translate_errors():
+        return project.read_plot_context(
+            node_id,
+            scene_id=scene_id,
+            include_future=include_future,
+        )
 
 
 @router.get("/api/plots/{node_id}", response_model=PlotNode)

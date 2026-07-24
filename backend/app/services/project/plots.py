@@ -15,6 +15,12 @@ from app.models_plot import (
     CreatePlotNodeRequest,
     PlotBoardLayout,
     PlotBoardSpec,
+    PlotContextCard,
+    PlotContextClaim,
+    PlotContextPacket,
+    PlotContextPoint,
+    PlotContextRelationship,
+    PlotContextTemplateInstance,
     PlotNode,
     PlotNodeList,
     PlotNodeSummary,
@@ -136,6 +142,115 @@ class PlotEntriesMixin:
             path.unlink()
         return self.list_plot_nodes()
 
+    def read_plot_context(
+        self,
+        board_id: str,
+        *,
+        scene_id: str | None = None,
+        include_future: bool = False,
+    ) -> PlotContextPacket:
+        board_node = self.read_plot_node(board_id)
+        if board_node.entry_type != "plot:board" or board_node.board is None:
+            raise ProjectServiceError(f"Plot node {board_id} is not a board.", 422)
+
+        structure = None
+        scene_order: dict[str, int] = {}
+        structure_nodes: dict[str, Any] = {}
+        try:
+            structure = self.read_structure()
+            scene_order, structure_nodes = self._plot_scene_order(structure.root)
+        except Exception:
+            structure = None
+
+        target_index = scene_order.get(scene_id or "") if scene_id else None
+        visible_cards: list[PlotContextCard] = []
+        visible_card_ids: set[str] = set()
+        omitted_future_cards = 0
+        omitted_unordered_cards = 0
+
+        for card in board_node.board.cards:
+            card_scene_id, structure_node = self._plot_card_scene(card, scene_order, structure_nodes)
+            manuscript_index = scene_order.get(card_scene_id or "")
+            visible = include_future
+            if not visible and scene_id and target_index is not None:
+                visible = manuscript_index is not None and manuscript_index <= target_index
+            if not visible:
+                if manuscript_index is None:
+                    omitted_unordered_cards += 1
+                else:
+                    omitted_future_cards += 1
+                continue
+            visible_card_ids.add(card.id)
+            visible_cards.append(
+                PlotContextCard(
+                    id=card.id,
+                    title=card.title,
+                    synopsis=card.synopsis,
+                    scene_id=card_scene_id,
+                    structure_node_id=getattr(structure_node, "id", None),
+                    structure_title=getattr(structure_node, "title", None),
+                    manuscript_index=manuscript_index,
+                    primary_plotline_id=card.primary_plotline_id,
+                )
+            )
+
+        visible_claims = [
+            PlotContextClaim(
+                id=claim.id,
+                card_id=claim.card_id,
+                template_instance_id=claim.template_instance_id,
+                plot_point_id=claim.plot_point_id,
+                plotline_id=claim.plotline_id,
+                claim_type=claim.claim_type,
+                claim_label=claim.claim_label,
+                strength=claim.strength,
+                evidence=claim.evidence,
+                rationale=claim.rationale,
+                ai_notes=claim.ai_notes,
+            )
+            for claim in board_node.board.claims
+            if claim.card_id in visible_card_ids
+        ]
+        visible_claim_ids = {claim.id for claim in visible_claims}
+        visible_relationships = [
+            PlotContextRelationship(
+                id=relationship.id,
+                from_card_id=relationship.from_card_id,
+                to_card_id=relationship.to_card_id,
+                kind=relationship.kind,
+                label=relationship.label,
+            )
+            for relationship in board_node.board.relationships
+            if relationship.from_card_id in visible_card_ids and relationship.to_card_id in visible_card_ids
+        ]
+        template_instances = self._plot_context_template_instances(visible_claims)
+        referenced_plotlines = {
+            value
+            for value in (
+                [card.primary_plotline_id for card in visible_cards]
+                + [claim.plotline_id for claim in visible_claims]
+            )
+            if value
+        }
+        plotlines = [plotline for plotline in board_node.board.plotlines if plotline.id in referenced_plotlines]
+        return PlotContextPacket(
+            board_id=board_node.id,
+            board_title=board_node.title,
+            scope_scene_id=scene_id,
+            include_future=include_future,
+            cards=visible_cards,
+            claims=visible_claims,
+            template_instances=template_instances,
+            plotlines=plotlines,
+            relationships=visible_relationships,
+            omitted_counts={
+                "future_cards": omitted_future_cards,
+                "unordered_cards": omitted_unordered_cards,
+                "claims": len(board_node.board.claims) - len(visible_claim_ids),
+                "relationships": len(board_node.board.relationships) - len(visible_relationships),
+            },
+        )
+
     def _seed_builtin_plot_templates(self, root: Any) -> None:
         plot_dir = root / "plot"
         plot_dir.mkdir(parents=True, exist_ok=True)
@@ -256,6 +371,105 @@ class PlotEntriesMixin:
         if value is not None:
             return value
         return PlotBoardSpec() if entry_type == "plot:board" else None
+
+    def _plot_context_template_instances(
+        self, claims: list[PlotContextClaim]
+    ) -> list[PlotContextTemplateInstance]:
+        point_ids_by_instance: dict[str, set[str]] = {}
+        for claim in claims:
+            point_ids_by_instance.setdefault(claim.template_instance_id, set()).add(claim.plot_point_id)
+
+        out: list[PlotContextTemplateInstance] = []
+        for instance_id, used_point_ids in sorted(point_ids_by_instance.items()):
+            try:
+                instance_node = self.read_plot_node(instance_id)
+            except ProjectServiceError:
+                continue
+            if instance_node.template_instance is None:
+                continue
+            template_points: dict[str, Any] = {}
+            template_id = instance_node.template_instance.template_id
+            if template_id:
+                try:
+                    template_node = self.read_plot_node(template_id)
+                    if template_node.template is not None:
+                        template_points = {
+                            point.id: point
+                            for point in template_node.template.plot_points
+                        }
+                except ProjectServiceError:
+                    template_points = {}
+
+            instance_points = {
+                point.plot_point_id: point
+                for point in instance_node.template_instance.plot_points
+            }
+            points: list[PlotContextPoint] = []
+            for point_id in sorted(used_point_ids):
+                base = template_points.get(point_id)
+                local = instance_points.get(point_id)
+                points.append(
+                    PlotContextPoint(
+                        plot_point_id=point_id,
+                        title=(
+                            getattr(local, "title", "")
+                            or getattr(base, "title", "")
+                            or point_id
+                        ),
+                        function_claim=(
+                            getattr(local, "function_claim", "")
+                            or getattr(base, "function_claim", "")
+                        ),
+                        description=getattr(base, "description", ""),
+                        guidance=getattr(base, "guidance", ""),
+                        notes=getattr(local, "notes", ""),
+                    )
+                )
+            out.append(
+                PlotContextTemplateInstance(
+                    id=instance_node.id,
+                    title=instance_node.title,
+                    template_id=template_id,
+                    plot_points=points,
+                )
+            )
+        return out
+
+    @staticmethod
+    def _plot_scene_order(root: Any) -> tuple[dict[str, int], dict[str, Any]]:
+        scene_order: dict[str, int] = {}
+        structure_nodes: dict[str, Any] = {}
+
+        def walk(node: Any) -> None:
+            node_id = getattr(node, "id", None)
+            if isinstance(node_id, str) and node_id:
+                structure_nodes[node_id] = node
+            node_scene_id = getattr(node, "scene_id", None)
+            if isinstance(node_scene_id, str) and node_scene_id:
+                if node_scene_id not in scene_order:
+                    scene_order[node_scene_id] = len(scene_order)
+                structure_nodes.setdefault(node_scene_id, node)
+            for child in getattr(node, "children", None) or []:
+                walk(child)
+
+        walk(root)
+        return scene_order, structure_nodes
+
+    @staticmethod
+    def _plot_card_scene(
+        card: Any,
+        scene_order: dict[str, int],
+        structure_nodes: dict[str, Any],
+    ) -> tuple[str | None, Any]:
+        node_ref = getattr(card, "node_ref", None)
+        if isinstance(node_ref, str) and node_ref:
+            if node_ref in scene_order:
+                return node_ref, structure_nodes.get(node_ref)
+            structure_node = structure_nodes.get(node_ref)
+            if structure_node is not None:
+                scene_id = getattr(structure_node, "scene_id", None)
+                return scene_id if isinstance(scene_id, str) else None, structure_node
+        return None, None
 
     @staticmethod
     def _builtin_plot_templates() -> list[tuple[str, str, str, str, list[Any]]]:

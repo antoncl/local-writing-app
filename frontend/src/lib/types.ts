@@ -716,6 +716,68 @@ export type PlotBoardSpec = {
   metadata: Record<string, unknown>;
 };
 
+export type PlotContextCard = {
+  id: string;
+  title: string;
+  synopsis: string;
+  scene_id?: string | null;
+  structure_node_id?: string | null;
+  structure_title?: string | null;
+  manuscript_index?: number | null;
+  primary_plotline_id?: string | null;
+};
+
+export type PlotContextClaim = {
+  id: string;
+  card_id: string;
+  template_instance_id: string;
+  plot_point_id: string;
+  plotline_id?: string | null;
+  claim_type: PlotClaimType;
+  claim_label?: string | null;
+  strength?: "weak" | "medium" | "strong" | null;
+  evidence?: string | null;
+  rationale?: string | null;
+  ai_notes?: string | null;
+};
+
+export type PlotContextPoint = {
+  plot_point_id: string;
+  title: string;
+  function_claim: string;
+  description: string;
+  guidance: string;
+  notes: string;
+};
+
+export type PlotContextTemplateInstance = {
+  id: string;
+  title: string;
+  template_id: string;
+  plot_points: PlotContextPoint[];
+};
+
+export type PlotContextRelationship = {
+  id: string;
+  from_card_id: string;
+  to_card_id: string;
+  kind: PlotRelationship["kind"];
+  label?: string | null;
+};
+
+export type PlotContextPacket = {
+  board_id: string;
+  board_title: string;
+  scope_scene_id?: string | null;
+  include_future: boolean;
+  cards: PlotContextCard[];
+  claims: PlotContextClaim[];
+  template_instances: PlotContextTemplateInstance[];
+  plotlines: PlotLine[];
+  relationships: PlotContextRelationship[];
+  omitted_counts: Record<string, number>;
+};
+
 export type PlotLayoutNode = {
   id: string;
   kind: string;

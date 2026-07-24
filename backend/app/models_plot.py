@@ -109,6 +109,68 @@ class PlotBoardSpec(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class PlotContextCard(BaseModel):
+    id: str
+    title: str
+    synopsis: str = ""
+    scene_id: str | None = None
+    structure_node_id: str | None = None
+    structure_title: str | None = None
+    manuscript_index: int | None = None
+    primary_plotline_id: str | None = None
+
+
+class PlotContextClaim(BaseModel):
+    id: str
+    card_id: str
+    template_instance_id: str
+    plot_point_id: str
+    plotline_id: str | None = None
+    claim_type: PlotClaimType = "satisfies"
+    claim_label: str | None = None
+    strength: Literal["weak", "medium", "strong"] | None = None
+    evidence: str | None = None
+    rationale: str | None = None
+    ai_notes: str | None = None
+
+
+class PlotContextPoint(BaseModel):
+    plot_point_id: str
+    title: str = ""
+    function_claim: str = ""
+    description: str = ""
+    guidance: str = ""
+    notes: str = ""
+
+
+class PlotContextTemplateInstance(BaseModel):
+    id: str
+    title: str
+    template_id: str = ""
+    plot_points: list[PlotContextPoint] = Field(default_factory=list)
+
+
+class PlotContextRelationship(BaseModel):
+    id: str
+    from_card_id: str
+    to_card_id: str
+    kind: Literal["causes", "blocks", "reveals", "setup_payoff", "echoes", "contrasts", "custom"] = "custom"
+    label: str | None = None
+
+
+class PlotContextPacket(BaseModel):
+    board_id: str
+    board_title: str
+    scope_scene_id: str | None = None
+    include_future: bool = False
+    cards: list[PlotContextCard] = Field(default_factory=list)
+    claims: list[PlotContextClaim] = Field(default_factory=list)
+    template_instances: list[PlotContextTemplateInstance] = Field(default_factory=list)
+    plotlines: list[PlotLine] = Field(default_factory=list)
+    relationships: list[PlotContextRelationship] = Field(default_factory=list)
+    omitted_counts: dict[str, int] = Field(default_factory=dict)
+
+
 class PlotLayoutNode(BaseModel):
     id: str
     kind: str

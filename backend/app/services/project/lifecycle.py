@@ -71,7 +71,7 @@ class ProjectLifecycleMixin:
         declaration = self._declaration_for_new_project(root, inherits)
         root.parent.mkdir(parents=True, exist_ok=True)
         root.mkdir(parents=True, exist_ok=True)
-        for folder in ["scenes", "lore", "prompts", ".cache"]:
+        for folder in ["scenes", "lore", "prompts", "plot", ".cache"]:
             (root / folder).mkdir(exist_ok=True)
         (root / "research" / "notes").mkdir(parents=True, exist_ok=True)
 
@@ -84,6 +84,7 @@ class ProjectLifecycleMixin:
         self._write_yaml(root / "project.yaml", self._new_project_manifest(title, declaration))
         self._write_yaml(root / "metadata.schema.yaml", self._empty_metadata_schema())
         self._write_yaml(root / "tags.yaml", {"tags": []})
+        self._seed_builtin_plot_templates(root)
         initial_scene = Scene(
             id=self._new_id("scene"),
             title="Untitled Scene",

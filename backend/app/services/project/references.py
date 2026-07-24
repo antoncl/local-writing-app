@@ -78,6 +78,8 @@ NODE_FAMILIES = [
     # carrying a ViewSpec in front matter. Layered like mutation sets — a view
     # can live at any project level.
     NodeFamily("view", "views", "view:view"),
+    # Plot boards and template instances are Node-shaped files under `plot/`.
+    NodeFamily("plot", "plot", "plot:board"),
 ]
 
 # The one family the out-of-tree machine layer contributes. Looked up rather
@@ -673,6 +675,7 @@ class ReferencesMixin:
             "research": "research/notes",
             "mutation_set": "mutation-sets",
             "view": "views",
+            "plot": "plot",
         }
         label_by_kind = {
             "scene": "Scene",
@@ -681,6 +684,7 @@ class ReferencesMixin:
             "research": "Research Note",
             "mutation_set": "Mutation set",
             "view": "View",
+            "plot": "Plot node",
         }
         fallback_folder = folder_by_kind.get(kind, "lore")
         fallback_path = root / fallback_folder / f"{node_id}.md"

@@ -182,10 +182,10 @@ class MetadataSchemaMixin:
 
         entry_type_id = request.entry_type_id.strip()
         if request.entry_type.kind not in {
-            "scene", "lore", "prompt", "assistant", "project", "chat", "mutation_set", "view"
+            "scene", "lore", "prompt", "assistant", "project", "chat", "mutation_set", "view", "plot"
         }:
             raise ProjectServiceError(
-                "Node type kind must be scene, lore, prompt, assistant, project, chat, mutation_set, or view.",
+                "Node type kind must be scene, lore, prompt, assistant, project, chat, mutation_set, view, or plot.",
                 422,
             )
         # Entry-type identity is the kind-qualified FQN `kind:key` (#77): that

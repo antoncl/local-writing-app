@@ -16,7 +16,7 @@ import type {
 // A lightweight handle to the open document: which kind it is + its id. The
 // pane resolves the full document into `scene`.
 export type DocumentRef = {
-  type: "scene" | "lore" | "prompt" | "assistant" | "project" | "structure_node" | "chat" | "research" | "view";
+  type: "scene" | "lore" | "prompt" | "assistant" | "project" | "structure_node" | "chat" | "research" | "view" | "plot";
   id: string;
 };
 

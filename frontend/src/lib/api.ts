@@ -44,7 +44,11 @@ import type {
   ProjectInfo,
   ProjectNode,
   ProjectValidation,
+  CreatePlotNodeRequest,
+  PlotNode,
+  PlotNodeList,
   SaveProjectNodeRequest,
+  SavePlotNodeRequest,
   PromptEntry,
   PromptEntryList,
   MutationSetEntry,
@@ -794,6 +798,29 @@ export const api = {
     return request<ViewNode>(`/views/${encodeURIComponent(viewId)}/ui`, {
       method: "PUT",
       body: JSON.stringify({ ui }),
+    });
+  },
+  listPlotNodes() {
+    return request<PlotNodeList>("/plots");
+  },
+  createPlotNode(payload: CreatePlotNodeRequest) {
+    return request<PlotNode>("/plots", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  getPlotNode(nodeId: string) {
+    return request<PlotNode>(`/plots/${encodeURIComponent(nodeId)}`);
+  },
+  savePlotNode(nodeId: string, payload: SavePlotNodeRequest) {
+    return request<PlotNode>(`/plots/${encodeURIComponent(nodeId)}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+  deletePlotNode(nodeId: string) {
+    return request<PlotNodeList>(`/plots/${encodeURIComponent(nodeId)}`, {
+      method: "DELETE",
     });
   },
   // Unified node-CRUD shim (Phase 3c). Returns the kind-specific

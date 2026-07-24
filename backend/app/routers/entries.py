@@ -35,6 +35,12 @@ from app.models_views import (
     ViewNode,
     ViewNodeList,
 )
+from app.models_plot import (
+    CreatePlotNodeRequest,
+    PlotNode,
+    PlotNodeList,
+    SavePlotNodeRequest,
+)
 from app.routers.ai import _validate_assistant_temperature
 from app.runtime import CurrentProject, translate_errors
 
@@ -79,6 +85,36 @@ def update_view_ui(project: CurrentProject, view_id: str, request: UpdateViewUiR
 def delete_view(project: CurrentProject, view_id: str) -> ViewNodeList:
     with translate_errors():
         return project.delete_view(view_id)
+
+
+@router.get("/api/plots", response_model=PlotNodeList)
+def list_plot_nodes(project: CurrentProject) -> PlotNodeList:
+    with translate_errors():
+        return project.list_plot_nodes()
+
+
+@router.post("/api/plots", response_model=PlotNode)
+def create_plot_node(project: CurrentProject, request: CreatePlotNodeRequest) -> PlotNode:
+    with translate_errors():
+        return project.create_plot_node(request)
+
+
+@router.get("/api/plots/{node_id}", response_model=PlotNode)
+def get_plot_node(project: CurrentProject, node_id: str) -> PlotNode:
+    with translate_errors():
+        return project.read_plot_node(node_id)
+
+
+@router.put("/api/plots/{node_id}", response_model=PlotNode)
+def save_plot_node(project: CurrentProject, node_id: str, request: SavePlotNodeRequest) -> PlotNode:
+    with translate_errors():
+        return project.save_plot_node(node_id, request)
+
+
+@router.delete("/api/plots/{node_id}", response_model=PlotNodeList)
+def delete_plot_node(project: CurrentProject, node_id: str) -> PlotNodeList:
+    with translate_errors():
+        return project.delete_plot_node(node_id)
 
 
 @router.get("/api/assistants", response_model=AssistantEntryList)
@@ -175,6 +211,7 @@ _SAVE_NODE_REQUEST_BY_KIND: dict[str, type] = {
     "prompt": SavePromptEntryRequest,
     "assistant": SaveAssistantEntryRequest,
     "chat": SaveChatSessionRequest,
+    "plot": SavePlotNodeRequest,
 }
 
 
@@ -288,5 +325,3 @@ def reference_graph(project: CurrentProject) -> ReferenceGraphResponse:
 def search(project: CurrentProject, request: SearchRequest) -> SearchResponse:
     with translate_errors():
         return project.search(request)
-
-

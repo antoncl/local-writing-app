@@ -210,8 +210,9 @@ class EntryTypeDefinition(BaseModel):
     # else prose). Explicit values let new shapes (chat) declare
     # themselves without retrofitting has_body/body_editor semantics.
     # "view" routes to the Svelte Flow view designer (0.5.0 step 3, #80).
+    # "plot" routes to the first plot-board surface.
     # See decisions-node-editor-modularization + decisions-node-editor-body-spec.
-    body_shape: Literal["prose", "code", "chat", "none", "view"] | None = None
+    body_shape: Literal["prose", "code", "chat", "none", "view", "plot"] | None = None
     # Starter content for new entries of this type. Used by
     # create_prompt_entry as the initial body so authoring a
     # `roleplay` (or any future type with conventions worth showing off)

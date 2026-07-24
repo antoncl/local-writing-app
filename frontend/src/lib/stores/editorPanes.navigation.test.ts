@@ -27,6 +27,7 @@ const ROUTES = [
   ["prompt", "openPrompt"],
   ["assistant", "openAssistant"],
   ["view", "openView"],
+  ["plot", "openPlotNode"],
   ["chat", "openChat"],
   ["project", "openProjectNode"],
 ] as const;

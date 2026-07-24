@@ -40,6 +40,7 @@ from app.services.project.metadata_values import MetadataValuesMixin
 from app.services.project.mutation_sets import MutationSetEntriesMixin
 from app.services.project.node_index_patch import NodeIndexPatchMixin
 from app.services.project.node_ops import NodeOpsMixin
+from app.services.project.plots import PlotEntriesMixin
 from app.services.project.project_node import ProjectNodeMixin
 from app.services.project.prompts import PromptEntriesMixin
 from app.services.project.references import ReferencesMixin
@@ -71,6 +72,7 @@ class ProjectService(
     MetadataValuesMixin,
     NodeIndexPatchMixin,
     NodeOpsMixin,
+    PlotEntriesMixin,
     ProjectLifecycleMixin,
     ProjectNodeMixin,
     PromptEntriesMixin,
@@ -141,7 +143,11 @@ class ProjectService(
         return cls(WorkScope(root=root, migrations_applied=tuple(migrations)))
 
     def _entry_markdown_paths(self, root: Path) -> list[Path]:
-        return [*(root / "scenes").glob("*.md"), *(root / "lore").glob("*.md")]
+        return [
+            *(root / "scenes").glob("*.md"),
+            *(root / "lore").glob("*.md"),
+            *(root / "plot").glob("*.md"),
+        ]
 
     def _is_relative_to(self, path: Path, possible_parent: Path) -> bool:
         try:

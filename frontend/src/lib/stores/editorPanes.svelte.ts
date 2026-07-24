@@ -64,6 +64,7 @@ import type {
   EntryMetadata,
   LoreEntry,
   MetadataSchema,
+  PlotNode,
   PromptEntry,
   PromptInputDefinition,
   ProjectNode,
@@ -236,7 +237,9 @@ class EditorPanesController {
           ? api.getLoreEntry(document.id)
           : document.type === "prompt"
             ? api.getPromptEntry(document.id)
-            : api.getScene(document.id),
+            : document.type === "plot"
+              ? api.getPlotNode(document.id)
+              : api.getScene(document.id),
       ),
     );
     const refreshedByKey = new Map(refreshedDocuments.map((document, index) => [`${documentRefs[index].type}:${document.id}`, document]));
@@ -392,6 +395,12 @@ class EditorPanesController {
         // dedicated endpoint and re-shape into the editor pane's
         // Scene-compatible draft.
         savedDocument = await api.saveProjectNode(draftDocument as ProjectNode, pane.draftMarkdown) as unknown as EditableDocument;
+      } else if (documentKind === "plot") {
+        savedDocument = await api.savePlotNode((draftDocument as PlotNode).id, {
+          ...(draftDocument as PlotNode),
+          body: pane.draftMarkdown,
+          base_revision: (draftDocument as PlotNode).revision,
+        });
       } else if (documentKind === "structure_node") {
         // Acts/Chapters are scenes with a non-"scene" entry_type — their
         // metadata + body + status round-trip via the scene endpoints.
@@ -473,6 +482,8 @@ class EditorPanesController {
       } else if (documentKind === "project") {
         // Title may have changed; reflect it on the top bar and pane.
         this.onProjectNodeSaved(savedDocument.title);
+      } else if (documentKind === "plot") {
+        await refreshKnownTags();
       } else {
         await refreshStructure();
         await refreshTodos();
@@ -551,7 +562,9 @@ class EditorPanesController {
             ? "note"
             : documentKind === "view"
               ? "view"
-              : "prompt";
+              : documentKind === "plot"
+                ? "plot node"
+                : "prompt";
     const titleLabel =
       documentKind === "scene"
         ? "Delete Scene"
@@ -561,7 +574,9 @@ class EditorPanesController {
             ? "Delete Note"
             : documentKind === "view"
               ? "Delete View"
-              : "Delete Prompt";
+              : documentKind === "plot"
+                ? "Delete Plot Node"
+                : "Delete Prompt";
     const baseMessage = `Delete "${sceneTitle}"? This removes the ${fileLabel} file from the project.`;
     const message =
       backlinks.length > 0
@@ -605,6 +620,8 @@ class EditorPanesController {
       // through api.deleteScene 404s ("Scene <view-id> does not exist").
       await api.deleteView(pane.scene.id);
       await paneViews.reload();
+    } else if (documentKind === "plot") {
+      await api.deletePlotNode(pane.scene.id);
     } else {
       setStructure(await api.deleteScene(pane.scene.id));
       await refreshTodos();
@@ -950,6 +967,63 @@ class EditorPanesController {
     this.setStatus(`Loaded ${node.title}`);
   }
 
+  async openPlotNode(nodeId: string): Promise<void> {
+    const existingPane = this.panes.find((pane) => pane.document?.type === "plot" && pane.document.id === nodeId);
+    if (existingPane) {
+      this.#focusExisting(existingPane, "open plot node");
+      return;
+    }
+    const targetPane = await this.#acquireTargetPane({ type: "plot", id: nodeId });
+    const node = await api.getPlotNode(nodeId);
+    this.panes = this.panes.map((pane) =>
+      pane.id === targetPane.id
+        ? {
+            ...pane,
+            document: { type: "plot", id: node.id },
+            scene: node,
+            dirty: false,
+            draftTitle: node.title,
+            draftMarkdown: node.body ?? "",
+            draftStatus: "",
+            draftEntryType: node.entry_type,
+            draftMetadata: cloneMetadata(node.metadata ?? {}),
+            saving: false,
+            recentlySaved: false,
+          }
+        : pane,
+    );
+    this.focusedEditorPaneId = targetPane.id;
+    this.setStatus(`Loaded ${node.title}`);
+  }
+
+  async openOrCreatePlotBoard(): Promise<void> {
+    const list = await api.listPlotNodes();
+    const existing = list.entries.find((entry) => entry.entry_type === "plot:board");
+    if (existing) {
+      await this.openPlotNode(existing.id);
+      return;
+    }
+    const node = await api.createPlotNode({
+      title: "Book plot board",
+      entry_type: "plot:board",
+      board: {
+        version: 1,
+        template_instance_ids: [],
+        plotlines: [],
+        cards: [],
+        claims: [],
+        relationships: [],
+        metadata: {},
+      },
+      layout: {
+        nodes: [],
+        edges: [],
+        viewport: { x: 0, y: 0, zoom: 1 },
+      },
+    });
+    await this.openPlotNode(node.id);
+  }
+
   // Mint a blank view anchored to `kind` and open the designer on it. Callers
   // are the per-pane ViewSwitchers (#81), which pass their pane's anchor kind
   // ("lore" / "scene" / "assistant") — `kind` is required so a view can never
@@ -1067,6 +1141,8 @@ class EditorPanesController {
         return this.openAssistant(nodeId);
       case "view":
         return this.openView(nodeId);
+      case "plot":
+        return this.openPlotNode(nodeId);
       case "chat":
         return this.openChat(nodeId);
       case "project":
@@ -1124,10 +1200,14 @@ class EditorPanesController {
   // loss) and reconcileSceneFromServer() AFTER (snap baseline + draft to the
   // returned scene and re-seed the TipTap doc so the prose reflects the change).
 
-  paneForScene(sceneId: string): EditorPaneState | undefined {
+  paneForDocument(documentId: string, documentKind?: DocumentRef["type"]): EditorPaneState | undefined {
     return this.panes.find(
-      (pane) => pane.scene?.id === sceneId && pane.document?.type === "scene",
+      (pane) => pane.scene?.id === documentId && (!documentKind || pane.document?.type === documentKind),
     );
+  }
+
+  paneForScene(sceneId: string): EditorPaneState | undefined {
+    return this.paneForDocument(sceneId, "scene");
   }
 
   async flushSceneIfDirty(sceneId: string): Promise<void> {
@@ -1161,26 +1241,30 @@ class EditorPanesController {
     return allSaved;
   }
 
-  async reconcileSceneFromServer(scene: Scene): Promise<void> {
-    const pane = this.paneForScene(scene.id);
+  async reconcileDocumentFromServer(document: EditableDocument, documentKind?: DocumentRef["type"]): Promise<void> {
+    const pane = this.paneForDocument(document.id, documentKind);
     if (!pane) return;
     this.#autosave.cancel(pane.id);
     this.panes = this.panes.map((candidate) =>
       candidate.id === pane.id
         ? {
             ...candidate,
-            scene,
+            scene: document,
             dirty: false,
-            draftTitle: scene.title,
-            draftMarkdown: scene.body,
-            draftStatus: scene.status,
-            draftEntryType: scene.entry_type,
-            draftMetadata: cloneMetadata(scene.metadata),
+            draftTitle: document.title,
+            draftMarkdown: document.body ?? "",
+            draftStatus: documentStatus(document),
+            draftEntryType: document.entry_type,
+            draftMetadata: cloneMetadata(document.metadata ?? {}),
             recentlySaved: false,
           }
         : candidate,
     );
-    await this.editorPaneComponents[pane.id]?.reloadScene(scene);
+    await this.editorPaneComponents[pane.id]?.reloadScene(document);
+  }
+
+  async reconcileSceneFromServer(scene: Scene): Promise<void> {
+    await this.reconcileDocumentFromServer(scene, "scene");
   }
 
   highlightEmbeddedTodoInOpenPane(sceneId: string, todoId: string): void {

@@ -27,6 +27,7 @@ from app.models import (
     Scene,
 )
 from app.models_views import SaveViewRequest, ViewNode
+from app.models_plot import PlotNode, SavePlotNodeRequest
 from app.services.project.errors import ProjectServiceError
 
 
@@ -42,7 +43,7 @@ class NodeOpsMixin:
 
     def read_node(
         self, node_id: str
-    ) -> Scene | LoreEntry | PromptEntry | AssistantEntry | ChatSession | ViewNode:
+    ) -> Scene | LoreEntry | PromptEntry | AssistantEntry | ChatSession | ViewNode | PlotNode:
         """Unified node-read entrypoint.
 
         Resolves the kind via the node index and dispatches to the
@@ -72,6 +73,8 @@ class NodeOpsMixin:
             return self.read_chat_session(node_id)
         if entry.kind == "view":
             return self.read_view(node_id)
+        if entry.kind == "plot":
+            return self.read_plot_node(node_id)
         raise ProjectServiceError(
             f"Unsupported node kind {entry.kind!r} for node {node_id}.", 422
         )
@@ -84,8 +87,9 @@ class NodeOpsMixin:
         | SavePromptEntryRequest
         | SaveAssistantEntryRequest
         | SaveChatSessionRequest
-        | SaveViewRequest,
-    ) -> Scene | LoreEntry | PromptEntry | AssistantEntry | ChatSession | ViewNode:
+        | SaveViewRequest
+        | SavePlotNodeRequest,
+    ) -> Scene | LoreEntry | PromptEntry | AssistantEntry | ChatSession | ViewNode | PlotNode:
         """Unified node-save entrypoint (Phase 3b-iii).
 
         Resolves the kind via the node index and dispatches to the
@@ -130,6 +134,10 @@ class NodeOpsMixin:
             if not isinstance(request, SaveViewRequest):
                 raise _mismatch()
             return self.save_view(node_id, request)
+        if entry.kind == "plot":
+            if not isinstance(request, SavePlotNodeRequest):
+                raise _mismatch()
+            return self.save_plot_node(node_id, request)
         raise ProjectServiceError(
             f"Unsupported node kind {entry.kind!r} for node {node_id}.", 422
         )
@@ -164,6 +172,9 @@ class NodeOpsMixin:
             return
         if entry.kind == "view":
             self.delete_view(node_id)
+            return
+        if entry.kind == "plot":
+            self.delete_plot_node(node_id)
             return
         raise ProjectServiceError(
             f"Unsupported node kind {entry.kind!r} for node {node_id}.", 422

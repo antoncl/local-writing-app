@@ -17,13 +17,14 @@
   import ProseBodyView from "@/components/editor/body/ProseBodyView.svelte";
   import ChatBodyView from "@/components/editor/body/ChatBodyView.svelte";
   import ViewBodyView from "@/components/editor/body/ViewBodyView.svelte";
+  import PlotBoardBodyView from "@/components/editor/body/PlotBoardBodyView.svelte";
   import { coerceInputValue, type EntryInputDraft } from "@/lib/utils/promptInputs";
   import { resolutionSceneIdFromInputs } from "@/lib/editor-core/promptResolution";
   import { api } from "@/lib/api";
   import { formatCostEur } from "@/lib/utils/money";
   import { sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import { resolveColor } from "@/lib/utils/colors";
-  import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataFieldDefinition, MetadataSchema, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
+  import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataFieldDefinition, MetadataSchema, PlotNode, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
   import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { referenceIndexStore } from "@/lib/stores/references";
@@ -81,6 +82,7 @@
     onCustomData?: ((payload: { entryType: string; kind: DocumentKind }) => void) | undefined;
     onNavigate?: ((payload: { id: string; kind: string }) => void) | undefined;
     onOpenChat?: ((payload: { entry: PromptEntrySummary; inputs: Record<string, unknown>; sceneId: string | null; assistantId: string }) => void) | undefined;
+    onPlotNodeSaved?: ((node: PlotNode) => void | Promise<void>) | undefined;
     // The view designer self-persists; it reports its save lifecycle up so the
     // pane's tab badge can reflect it (#263).
     onViewSaveState?: ((state: ViewSaveState) => void) | undefined;
@@ -113,6 +115,7 @@
     onCustomData = undefined,
     onNavigate = undefined,
     onOpenChat = undefined,
+    onPlotNodeSaved = undefined,
     onViewSaveState = undefined,
     onFlushScene = undefined,
     onSceneRestored = undefined
@@ -502,6 +505,7 @@
   function defaultEntryType() {
     if (documentKind === "lore") return "lore:lore_note";
     if (documentKind === "chat") return "chat:chat_session";
+    if (documentKind === "plot") return "plot:board";
     return "scene:scene";
   }
 
@@ -818,7 +822,7 @@
   $effect.pre(() => {
     maybeReseedInputs(scene, documentKind);
   });
-  let documentLabel = $derived(documentKind === "lore" ? "Entry" : documentKind === "structure_node" ? "Node" : documentKind === "chat" ? "Chat" : "Scene");
+  let documentLabel = $derived(documentKind === "lore" ? "Entry" : documentKind === "structure_node" ? "Node" : documentKind === "chat" ? "Chat" : documentKind === "plot" ? "Plot" : "Scene");
   // The title header's label is the intrinsic `title` field's effective label
   // for this entry type (#116) — schema-driven, so lore reads "Name" (a
   // built-in per-type override) and users can relabel per type. Falls back to
@@ -1105,6 +1109,15 @@
       onBodyChange={emitChange}
       onFocus={() => onFocus?.()}
       onSaveState={(state) => onViewSaveState?.(state)}
+    />
+  {/if}
+  {#if bodyShape === "plot"}
+    <PlotBoardBodyView
+      {scene}
+      {structure}
+      onFocus={() => onFocus?.()}
+      onNavigate={(payload) => onNavigate?.(payload)}
+      onPlotNodeSaved={(node) => onPlotNodeSaved?.(node)}
     />
   {/if}
 

@@ -20,6 +20,7 @@ or the other kinds.
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 from typing import Any
 
@@ -204,17 +205,20 @@ class ManuscriptMixin:
         purge_ids = TreeStructureService.collect_descendant_ids(
             node
         ) | TreeStructureService.collect_leaf_ids(node)
+        # Collect every scene's path first, then delete as one batch (#476): the
+        # per-id todo/snapshot cleanup still runs in the loop, but the file
+        # deletes and their index maintenance happen once, so a chapter of many
+        # scenes writes a single coalesced snapshot rather than one per scene.
+        paths: list[Path] = []
         for scene_id in scene_ids:
-            try:
-                path = self._path_for_node_id(scene_id, "scene")
-                self._delete_node_file(path)  # unlink + un-shadow the memo (#392)
-            except ProjectServiceError:
-                pass
+            with contextlib.suppress(ProjectServiceError):
+                paths.append(self._path_for_node_id(scene_id, "scene"))
             self._remove_scene_todos(scene_id)
             # A scene and its snapshots are one unit of deletion (ADR-0043).
-            # Outside the try: the store is keyed by id, so it must go even when
-            # the scene file itself could not be resolved.
+            # The store is keyed by id, so it must go even when the scene file
+            # itself could not be resolved.
             self.delete_scene_snapshots(root, scene_id)
+        self._delete_node_files(tuple(paths))  # unlink all + un-shadow the memo once
 
         TreeStructureService.remove_node_by_id(structure.root, node_id)
         self._manuscript_tree(root).write(structure)

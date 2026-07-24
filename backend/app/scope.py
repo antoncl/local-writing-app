@@ -63,14 +63,34 @@ class CurrentScope:
             return self._scope
 
     def set(self, scope: WorkScope) -> None:
+        # Flush any deferred snapshot **before** taking the lock (#476): the
+        # flush is a disk serialize + atomic write, and `get()` shares this lock
+        # on the request hot path, so holding it across the flush would stall
+        # every concurrent scope read for the duration of a project switch. The
+        # under-lock `invalidate()` still flushes-if-dirty as a backstop, but the
+        # common case is already clean here.
+        self._flush_index_memo()
         with self._lock:
             self._scope = scope
             self._drop_index_memo()
 
     def clear(self) -> None:
+        self._flush_index_memo()
         with self._lock:
             self._scope = None
             self._drop_index_memo()
+
+    @staticmethod
+    def _flush_index_memo() -> None:
+        """Write any pending node-index snapshot, off `self._lock` (#476).
+
+        Runs before the scope lock is taken so a project switch never holds the
+        lock across the flush's disk I/O. Best-effort and idempotent — a no-op
+        when nothing is pending, so calling it before every `_drop_index_memo` is
+        free in the common (clean) case."""
+        from app.services.project.node_index_gate import node_index_gate
+
+        node_index_gate.flush()
 
     @staticmethod
     def _drop_index_memo() -> None:
@@ -89,6 +109,9 @@ class CurrentScope:
         The lock order is scope→gate and never the reverse (nothing holding the
         gate lock reaches for `current_scope`), so this cannot deadlock. Imported
         lazily to keep `scope.py` free of a service-layer import at module load.
+        `invalidate()` still flushes-if-dirty before clearing (a backstop for a
+        write that raced in after `_flush_index_memo` above); that flush is the
+        rare case now, not the common one.
         """
         from app.services.project.node_index_gate import node_index_gate
 

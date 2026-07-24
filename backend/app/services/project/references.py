@@ -436,7 +436,21 @@ class ReferencesMixin:
         root = self.root_path.resolve()
         resolved = tuple(path.resolve() for path in paths)
         node_index_gate.apply(
-            root, lambda current: self._mutate_index_for_write(current, resolved, structural)
+            root,
+            lambda current: self._mutate_index_for_write(current, resolved, structural),
+            self._flush_resolved_index,
+        )
+
+    def _flush_resolved_index(self, resolved: ResolvedIndex) -> None:
+        """Write the deferred snapshot for a patched memo (#476).
+
+        The gate holds this as a thunk and fires it at a boundary (next read,
+        scope change, shutdown). Everything the write needs rides on the
+        `ResolvedIndex`, so it is self-contained — the gate can flush without a
+        live `ProjectService`, and the write is against the exact index that was
+        published, never a later one."""
+        self._write_index_snapshot(
+            resolved.root, resolved.index, layers=list(resolved.layers), manifest=resolved.manifest
         )
 
     def _mutate_index_for_write(
@@ -477,11 +491,8 @@ class ReferencesMixin:
             # re-reads the schema and re-derives the state, exactly as this path
             # did before the schema was memoised.
             return self._resolve_index_cold(current.root)
-        if not structural and len(placeable) == 1:
-            before = self._index_signature_from_memo(current.index, placeable[0])
-            after = self._index_signature_from_disk(placeable[0], layers, schema)
-            if before is not None and before == after:
-                return None  # prose-only: nothing the index holds moved.
+        if self._write_leaves_index_unchanged(current, placeable, structural, layers, schema):
+            return None  # nothing the index holds moved — leave the memo untouched.
         new_index = self._clone_node_index(current.index)
         changed = tuple(str(path) for path in placeable)
         try:
@@ -501,11 +512,48 @@ class ReferencesMixin:
                 manifest.pop(str(path), None)
             else:
                 manifest[str(path)] = fingerprint
-        self._write_index_snapshot(current.root, new_index, layers=layers, manifest=manifest)
-        # Carry the schema forward (#392): a patched memo must keep the schema
-        # its predecessor held, or the next save's change-gate would see None and
-        # rebuild — or worse, silently drop an edge change it could not compute.
+        # The snapshot write is **deferred** (#476): the gate registers a pending
+        # flush against this `ResolvedIndex` and fires it at the next boundary, so
+        # a burst of structural writes coalesces to one snapshot serialization
+        # instead of one per file. Carry the schema forward (#392): a patched memo
+        # must keep the schema its predecessor held, or the next save's change-gate
+        # would see None and rebuild — or worse, silently drop an edge change it
+        # could not compute.
         return ResolvedIndex(current.root, new_index, current.layers, manifest, schema)
+
+    def _write_leaves_index_unchanged(
+        self,
+        current: ResolvedIndex,
+        placeable: list[Path],
+        structural: bool,
+        layers: list[IndexLayer],
+        schema: MetadataSchema,
+    ) -> bool:
+        """Whether the write changes nothing the index holds, so the memo can be
+        left untouched — no clone, no patch, no snapshot flush.
+
+        Two no-op shapes, one per gesture:
+
+        - a plain single-file save (`#392`): the file's index signature (id,
+          kind, entry_type, title, edges) is unmoved — a prose-only edit;
+        - a **structural** write (`#476`): it skips the signature comparison (a
+          delete moves the path set), but is still a no-op when *every* path was
+          absent from the index **and** is gone from disk now — a delete of a
+          file that was never indexed (already gone, or an unindexed note). A
+          path that had an entry (a real delete) or exists now (a rename's new
+          name, a restore) fails the test and takes the patch path.
+        """
+        if structural:
+            for path in placeable:
+                was_indexed = self._index_signature_from_memo(current.index, path) is not None
+                if was_indexed or path.exists():
+                    return False
+            return True
+        if len(placeable) == 1:
+            before = self._index_signature_from_memo(current.index, placeable[0])
+            after = self._index_signature_from_disk(placeable[0], layers, schema)
+            return before is not None and before == after
+        return False
 
     def _index_signature_from_memo(
         self, index: NodeIndex, path: Path
@@ -585,11 +633,29 @@ class ReferencesMixin:
         ancestor's must make the ancestor visible again (#307), which the patch
         does by re-resolving a shorter candidate list.
         """
-        if path.exists():
-            path.unlink()
-        # Notify even when the file was already gone: the caller treated it as a
-        # delete, and a memo entry may still describe it.
-        self._apply_index_write((path,), structural=True)
+        # The single-file case of the batch below — one unlink, one structural
+        # notify. Delegating keeps the unlink-then-notify in one place; a single
+        # placeable path still applies even when the file was already gone, so
+        # the "notify even when absent" behaviour is preserved.
+        self._delete_node_files((path,))
+
+    def _delete_node_files(self, paths: tuple[Path, ...]) -> None:
+        """Batch form of `_delete_node_file` for a subtree delete (#476).
+
+        A chapter delete unlinks every scene under it. Routing each through
+        `_delete_node_file` would maintain the index once per file — and because
+        the surrounding loop resolves the index to map each id to its path, the
+        deferred flush fires between deletes, so a 20-scene chapter wrote ~20
+        snapshots. Collecting the paths first and maintaining the index **once**
+        collapses that to a single deferred flush: one clone, one patch over all
+        paths, one write at the next boundary. `_patch_node_index` already takes
+        a tuple of paths, so the batch is free on the maintenance side.
+        """
+        for path in paths:
+            if path.exists():
+                path.unlink()
+        if paths:
+            self._apply_index_write(paths, structural=True)
 
     def _collect_chat_entries(self, *, layer: IndexLayer, index: NodeIndex) -> None:
         """Walk <project>/chats/*.yaml and add an index entry per session.

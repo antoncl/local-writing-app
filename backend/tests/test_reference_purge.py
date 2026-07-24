@@ -171,8 +171,11 @@ class PurgeStillRemovesDanglingReferencesTests(ReferencePurgeTestCase):
         # Nothing was deleted, so both still resolve and nothing is stripped.
         self.assertEqual(self._refs_of("honor"), ["seren", "nimitz"])
 
-        (self.root / "lore" / "nimitz.md").unlink()
-        (self.root / "lore" / "seren.md").unlink()
+        # Delete through the node primitive, as the delete routes do: it
+        # un-shadows the in-memory index (#392) exactly as a raw unlink + reopen
+        # would, so the purge below reads a memo that reflects the deletions.
+        self.service._delete_node_file(self.root / "lore" / "nimitz.md")
+        self.service._delete_node_file(self.root / "lore" / "seren.md")
         self.service._purge_references_to({"seren", "nimitz"}, self.root)
 
         # `seren` un-shadowed to the universe and survives; `nimitz` is gone.

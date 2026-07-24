@@ -207,8 +207,7 @@ class ManuscriptMixin:
         for scene_id in scene_ids:
             try:
                 path = self._path_for_node_id(scene_id, "scene")
-                if path.exists():
-                    path.unlink()
+                self._delete_node_file(path)  # unlink + un-shadow the memo (#392)
             except ProjectServiceError:
                 pass
             self._remove_scene_todos(scene_id)
@@ -431,9 +430,8 @@ class ManuscriptMixin:
     def delete_scene(self, scene_id: str) -> StructureDocument:
         root = self._require_project()  # see delete_structure_node (#381)
         path = self._path_for_node_id(scene_id, "scene")
-        node_id = self._node_id_for_path(path)
-        if path.exists():
-            path.unlink()
+        node_id = self._node_id_for_path(path)  # read the id before the unlink
+        self._delete_node_file(path)  # unlink + un-shadow the memo (#392)
         # A scene and its snapshots are one unit of deletion (ADR-0043): a
         # partial delete leaves exactly the unreachable residue that ADR rejects.
         self.delete_scene_snapshots(root, node_id)

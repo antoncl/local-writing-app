@@ -163,7 +163,6 @@ class LoreEntriesMixin:
         # mid-operation (#381).
         root = self._require_project()
         path = self._path_for_node_id(entry_id, "lore")
-        if path.exists():
-            path.unlink()
+        self._delete_node_file(path)  # unlink + un-shadow the memo (#392)
         self._purge_references_to({entry_id}, root)
         return self.list_lore_entries()

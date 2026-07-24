@@ -31,6 +31,8 @@ from app.services.project.embedded_todos import EmbeddedTodosMixin
 # Re-exported so the historic import path
 # `from app.services.project_service import ProjectServiceError` keeps working.
 from app.services.project.errors import ProjectServiceError
+from app.services.project.layers import MANIFEST_FILENAME as INDEX_MANIFEST_FILENAME
+from app.services.project.layers import SCHEMA_FILENAME as INDEX_SCHEMA_FILENAME
 from app.services.project.layers import LayerWalkMixin
 from app.services.project.lifecycle import ProjectLifecycleMixin
 from app.services.project.lore import LoreEntriesMixin
@@ -38,7 +40,11 @@ from app.services.project.lore_mutations import LoreMutationsMixin
 from app.services.project.manuscript import ManuscriptMixin
 from app.services.project.metadata_values import MetadataValuesMixin
 from app.services.project.mutation_sets import MutationSetEntriesMixin
+from app.services.project.node_index_gate import node_index_gate
 from app.services.project.node_index_patch import NodeIndexPatchMixin
+from app.services.project.node_index_snapshot import (
+    SNAPSHOT_RELATIVE_PATH as _SNAPSHOT_RELATIVE_PATH,
+)
 from app.services.project.node_ops import NodeOpsMixin
 from app.services.project.project_node import ProjectNodeMixin
 from app.services.project.prompts import PromptEntriesMixin
@@ -55,6 +61,10 @@ from app.services.project.todos import TodosMixin
 from app.services.project.views import ViewsMixin
 
 logger = logging.getLogger(__name__)
+
+# The derived snapshot's filename — skipped by the write hook so writing it does
+# not re-enter the change-gate (#392).
+NODE_INDEX_SNAPSHOT_FILENAME = _SNAPSHOT_RELATIVE_PATH.name
 
 
 class ProjectService(
@@ -319,6 +329,30 @@ class ProjectService(
             temp.flush()
             temp_path = Path(temp.name)
         temp_path.replace(path)
+        self._maintain_index_after_write(path)
+
+    def _maintain_index_after_write(self, path: Path) -> None:
+        """Keep the node-index memo coherent after any write (#392).
+
+        This is the one unavoidable choke every node write already passes
+        through, so hooking it here — rather than trusting each of the ~8 node
+        writers to remember — is what makes the change-gate an *encapsulation*
+        and not a convention. A path that is not an index input is left alone by
+        the change-gate itself (`_apply_index_write` no-ops on an unplaceable
+        path), so this only needs to route the two special cases:
+
+        - the **snapshot** is derived, not a node — and re-entering the funnel
+          for it would be a wasted round trip inside the write that produced it;
+        - **`project.yaml` / `metadata.schema.yaml`** fan out across the chain
+          (the walk itself, and every node's edges), so there is no cheap patch:
+          drop the whole memo and let the next resolve rebuild.
+        """
+        if path.name == NODE_INDEX_SNAPSHOT_FILENAME:
+            return
+        if path.name in (INDEX_MANIFEST_FILENAME, INDEX_SCHEMA_FILENAME):
+            node_index_gate.invalidate()
+            return
+        self._apply_index_write((path,), structural=False)
 
     def _read_markdown_with_front_matter(self, path: Path, *, strict: bool = False) -> tuple[dict[str, Any], str]:
         text = path.read_text(encoding="utf-8")
@@ -438,6 +472,10 @@ class ProjectService(
             # later save re-attempts the rename.
             logger.warning("kept filename %s; rename to %s failed", path.name, target.name)
             return path
+        # The path is part of a node's index entry, so a rename moves it —
+        # structural even though the id is unchanged (#392). The just-written
+        # save already notified for the old path; this re-points it to the new.
+        self._apply_index_write((path, target), structural=True)
         return target
 
     @staticmethod

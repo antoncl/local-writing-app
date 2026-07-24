@@ -65,7 +65,31 @@ class CurrentScope:
     def set(self, scope: WorkScope) -> None:
         with self._lock:
             self._scope = scope
+            self._drop_index_memo()
 
     def clear(self) -> None:
         with self._lock:
             self._scope = None
+            self._drop_index_memo()
+
+    @staticmethod
+    def _drop_index_memo() -> None:
+        """Invalidate the process-global node-index memo on every scope change.
+
+        Unconditional — it must fire even when the new scope has the **same
+        root** as the old one (#392). The memo is keyed by root, so a re-open of
+        the same project would otherwise serve the index built before it: exactly
+        the bug when a user reverts files from a backup while the server keeps
+        running and then reopens the project. Clearing on the open event makes
+        the next resolve rebuild from disk.
+
+        Held **under `self._lock`**, so the new scope and the dropped memo become
+        visible together: a concurrent request that resolves the just-set scope
+        cannot slip in between and read the pre-restore index for the same root.
+        The lock order is scope→gate and never the reverse (nothing holding the
+        gate lock reaches for `current_scope`), so this cannot deadlock. Imported
+        lazily to keep `scope.py` free of a service-layer import at module load.
+        """
+        from app.services.project.node_index_gate import node_index_gate
+
+        node_index_gate.invalidate()

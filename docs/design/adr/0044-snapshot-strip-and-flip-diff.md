@@ -12,6 +12,10 @@
   · **Amendment 2 (2026-07-22, #409):** the greyscale channel is the edge's **shape**, not its
   colour — which settles Open item 5; and a block the construct scan cannot account for stacks
   rather than being wrapped whole.
+  · **Amendment 3 (2026-07-23, #468):** the description edits behind a pencil (settles Open item 4);
+  delete confirms and pin does not, and neither is a new control surface.
+  · **Amendment 4 (2026-07-24, #419):** adopting one run is a **click** that re-projects locally — no
+  glyph (§J holds as written), no typing (§G/§I hold), no round trip.
 - Feature: #6 · Companion: ADR-0043 (the model) · Follows: ADR-0013 (the scrubber), ADR-0030 (the
   design language), ADR-0038 §A (compact at rest), ADR-0042 (the layer picker, the same gesture on
   the hierarchy axis)
@@ -438,6 +442,69 @@ snapshot (§B; ADR-0043).
   affordance *is* the one-way rule, with nothing to press back. Pinning flips the tier, so the notch
   redraws `kept` (taller, a step darker, §C) under the author's cursor: the shape change is the
   confirmation, not a jump, and it is the honest picture of a record that genuinely changed tier.
+
+## Amendment 4 — adopting one run is a click, not a glyph; the compare view gains a pointer gesture and stays keyboard-read-only (2026-07-24, #419)
+
+From the #419 design pass. Parked on a notch and reading one changed region, an author often wants
+*that region's* snapshot wording back without restoring the whole scene — "copy-paste from a cool
+area into a warm one," at the granularity the diff already computes. Evidence, built on the real token
+layer and iterated with Anton: [`../mockups/0419-adopt-run.html`](../mockups/0419-adopt-run.html).
+
+### There is only one operation, and it has one verb
+
+While parked, the live scene **is** the warm projection of the runs — so "keep the current words"
+changes nothing. The only act that alters the document is **take the snapshot's version of a region**,
+and that single verb covers every change shape §F names: a *modification* swaps the words, a *deletion*
+restores them, and an *insertion*'s snapshot version is empty, so it drops the added text. What the
+issue framed as two directions — adopt a cool run, discard a warm run — is one operation seen from
+either end.
+
+### The gesture is a click on the run, and it adds no glyph
+
+The author clicks the version they want. The mental model is **"which of these two is better?"**, not
+"revert": clicking either side **settles that region** — its tint clears and it reads as plain prose —
+and clicking the *cool* side additionally rewrites the scene. Keeping the warm side is a no-op on the
+document but not on the view: it is the author answering the question and moving on, which is why it
+earns a click rather than being inert.
+
+This is the option that leaves the design language untouched. **No glyph is added** — the tinted run's
+own colour becomes the affordance — so §J holds exactly as written: colour still marks the view, and
+nothing permanent-looking is drawn on a temporary condition. The annotation-vs-operation question §J
+did not anticipate never has to be decided, because this gesture never reaches for a mark. (For the
+record, and for whatever axis the app grows next: an affordance that *performs* an operation is the
+camera's category, not an annotation — §J bars the second, not the first.)
+
+### It does not break §G or §I
+
+Two invariants read as if this crosses them; neither does.
+
+- **§G — the live buffer is never touched.** A click that adopts a region hands the host a new body
+  through **the same path a Restore already uses**. It is a restore at region granularity, not an
+  editing surface layered over the compare view: the author still cannot *type* into the comparison.
+  The buffer is written exactly as Restore writes it, and only then.
+- **§I — the compare view is read-only, so the whole keyboard is free.** "Read-only" there means *no
+  typing* — the fact that lets A/S/B and the arrows claim the unmodified keyboard. A deliberate pointer
+  click takes no key, so that freedom is untouched. The compare view gains one mouse gesture and loses
+  no keyboard axis.
+
+### No round trip: adopting re-projects locally
+
+The runs already carry **all** the text of both sides (§G, Amendment 1), so adopting a region needs no
+second request: the frontend marks that region resolved and re-renders the overlay from the runs it
+already holds, and the disk write rides the Restore path in the background. The diff is **never
+re-requested mid-review** — which is strictly more faithful to §G's "computed once, at a discrete
+moment" than a re-diff would be, and is also what keeps the work coherent: a re-diff after one adoption
+would recompute every *other* region from the unchanged document and so **resurrect the regions the
+author had already settled**. Local re-projection settles them for good.
+
+The cost this gesture carries is **discoverability** — nothing announces that a tinted run is
+clickable. The accepted default: a one-line hint in the parked actions row on first park ("Click a
+passage to keep that version"), retired after first use, plus a pointer cursor and the existing hover
+treatment. Exact wording and retirement are an implementation judgement, not a decision here.
+
+**Still not this ADR:** an editable compare overlay (the issue's own non-goal, and ADR-0025's).
+Adopting a whole region by projection is not free-form editing while comparing — it takes no keystroke
+and recomputes no diff as anyone types.
 
 ## Non-goals
 

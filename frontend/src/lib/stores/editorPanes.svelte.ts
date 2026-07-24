@@ -1090,9 +1090,16 @@ class EditorPanesController {
   // NodeEditor picker calls this after its confirm-on-entry gate; the value
   // rides the next `saveLoreEntry` and routes the write (owning-file direct edit
   // vs sparse override delta at L). Non-sticky — `openLore` reseeds the default.
+  //
+  // Clears `recentlySaved`: the "Saved to <layer>" footer echo reads the CURRENT
+  // L, but that flag belongs to the LAST save's target. Changing L within the 2s
+  // flash window would otherwise echo the new target as if a write had already
+  // landed there — a false provenance claim, the one thing the strip must never
+  // make. The picker only calls this on an actual change (its no-op early-return
+  // guards it), so nothing legitimate is suppressed.
   setEditorPaneAuthoringLayer(id: string, layerId: string | null): void {
     this.panes = this.panes.map((pane) =>
-      pane.id === id ? { ...pane, authoringLayerId: layerId } : pane,
+      pane.id === id ? { ...pane, authoringLayerId: layerId, recentlySaved: false } : pane,
     );
   }
 

@@ -46,6 +46,7 @@ from app.services.project.node_index_snapshot import (
     SNAPSHOT_RELATIVE_PATH as _SNAPSHOT_RELATIVE_PATH,
 )
 from app.services.project.node_ops import NodeOpsMixin
+from app.services.project.overrides import OVERRIDES_FOLDER, LayerOverridesMixin
 from app.services.project.project_node import ProjectNodeMixin
 from app.services.project.prompts import PromptEntriesMixin
 from app.services.project.references import ReferencesMixin
@@ -80,6 +81,7 @@ class ProjectService(
     MetadataSchemaMixin,
     MetadataValuesMixin,
     NodeIndexPatchMixin,
+    LayerOverridesMixin,
     NodeOpsMixin,
     ProjectLifecycleMixin,
     ProjectNodeMixin,
@@ -350,6 +352,13 @@ class ProjectService(
         if path.name == NODE_INDEX_SNAPSHOT_FILENAME:
             return
         if path.name in (INDEX_MANIFEST_FILENAME, INDEX_SCHEMA_FILENAME):
+            node_index_gate.invalidate()
+            return
+        # A layer-override write (#314) fans out just like a schema edit: it
+        # changes a target's *effective* edges without touching that target's
+        # node file, which the incremental patch does not model. Drop the whole
+        # memo and let the next resolve rebuild cold (where the fold lives).
+        if path.parent.name == OVERRIDES_FOLDER:
             node_index_gate.invalidate()
             return
         self._apply_index_write((path,), structural=False)

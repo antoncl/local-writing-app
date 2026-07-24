@@ -324,7 +324,17 @@ class ReferencesMixin:
         # Stamping afterwards inverts that: the manifest would vouch for content
         # the index never saw, and the snapshot would be silently short a node.
         manifest = self._build_index_manifest(layers)
-        loaded = self._load_index_snapshot(root, layers=layers, manifest=manifest)
+        # A chain carrying layer overrides (#314) is always built by full cold
+        # walk: the snapshot fast paths and the incremental patch model raw edges
+        # per file, and an override folds *effective* edges across the chain —
+        # the same class of invalidation ADR-0040 Amendment 1 (#390) exists to
+        # model, deliberately not yet built incrementally. So overrides skip the
+        # snapshot read/patch/write entirely and refold on every cold build. Flat
+        # projects (no overrides — the common case) keep every fast path
+        # unchanged. The in-memory memo (#392) still caches the result, so this is
+        # one full build per project open, not per read.
+        has_overrides = self._chain_has_overrides(layers)
+        loaded = None if has_overrides else self._load_index_snapshot(root, layers=layers, manifest=manifest)
         if loaded is not None and loaded.is_fresh:
             # The snapshot carries the edges but not the schema they were drawn
             # from; the memo stashes it (#392) so the change-gate reuses it
@@ -384,12 +394,20 @@ class ReferencesMixin:
             root,
             include_machine=True,
         )
+        if has_overrides:
+            # Collect the deltas (a parallel pass, not nodes), then fold effective
+            # edges onto each overridden target's winner *before* `resolve()`
+            # derives the winner edge views — so backlinks / References / Nest see
+            # the folded graph with no scope parameter (#314 / ADR-0039).
+            self._collect_all_overrides(index, layers)
+            self._fold_override_edges(index, root, schema)
         # One post-walk pass: order the candidate lists innermost-first, derive
         # `by_id` / `edges_by_src` from the winners, emit the shadow warnings and
         # build the reverse edge map. Nothing before this point resolves a
         # shadow — that is what stops the walk destroying an ancestor.
         index.resolve()
-        self._write_index_snapshot(root, index, layers=layers, manifest=manifest)
+        if not has_overrides:
+            self._write_index_snapshot(root, index, layers=layers, manifest=manifest)
         return ResolvedIndex(root, index, tuple(layers), manifest, schema)
 
     def _read_schema_or_none(self, root: Path) -> MetadataSchema | None:
@@ -463,6 +481,13 @@ class ReferencesMixin:
         fan-out file) — it rebuilds cold and republishes, so the memo is never
         left describing a pre-write state.
         """
+        # A node write in an override-bearing chain (#314) rebuilds cold: the
+        # incremental patch would recompute the written node's edges from its own
+        # file, dropping the override edge-fold that only the cold path applies.
+        # Overrides are sparse, so this only affects chains that actually use
+        # them; flat projects never enter this branch.
+        if current.index.overrides_by_target:
+            return self._resolve_index_cold(current.root)
         layers = list(current.layers)
         # Keep only paths this index actually holds. `_patch_unit` places a node
         # file against the walk's own folder rules and raises for anything else,
@@ -617,6 +642,12 @@ class ReferencesMixin:
         clone = NodeIndex()
         clone.candidates = {node_id: list(entries) for node_id, entries in index.candidates.items()}
         clone.edges_by_layer_src = {key: list(edges) for key, edges in index.edges_by_layer_src.items()}
+        # Carried for completeness — a patch of an override-bearing chain rebuilds
+        # cold (`_mutate_index_for_write`) rather than reaching here, but a clone
+        # must never silently drop the fold input if that guard ever moves.
+        clone.overrides_by_target = {
+            target: list(records) for target, records in index.overrides_by_target.items()
+        }
         clone.warnings = list(index.warnings)
         clone.errors = list(index.errors)
         clone.degraded = index.degraded

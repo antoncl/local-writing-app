@@ -44,6 +44,7 @@ from app.models import (
     UpsertMetadataFieldRequest,
     UpsertMetadataGroupRequest,
 )
+from app.services.project import schema_cache
 from app.services.project.default_schema import (
     AUTHORABLE_COMPUTED_FUNCTIONS,
     DEFAULT_METADATA_SCHEMA,
@@ -111,13 +112,42 @@ class MetadataSchemaMixin:
         the default, merges the whole chain to the open project, which is what
         every resolution-scope read wants and gets unchanged; only the write
         path passes L, via `_schema_as_authored`.
+
+        **The result is a shared, cached instance (#394) — treat it as
+        read-only.** The resolved-definitions cache returns the same object to
+        every caller of a given chain, so mutating it (or a nested `entry_types`
+        / `fields` member) corrupts it for all of them. `MetadataSchema` is
+        frozen against top-level reassignment; the nested collections rely on
+        this contract. To change definitions, write a layer (the schema-CRUD
+        methods), which reads YAML directly and never mutates this result.
         """
         root = root or self._require_project()
+        paths = self._metadata_schema_layer_paths(root, up_to_layer_id=up_to_layer_id)
+        # The resolved-definitions cache (#394) — one door, so the index build,
+        # the as-of-L authoring reads, and every endpoint here share one merged
+        # artefact rather than each re-parsing the chain. `paths` is the chain
+        # identity (already truncated for as-of-L); the cache stamps it with the
+        # layer fingerprints + `build_identity()` and folds only on a miss.
+        return schema_cache.resolved_schema(paths, self._build_metadata_schema)
+
+    def _build_metadata_schema(
+        self, paths: list[Path], fingerprints: list[schema_cache.Fingerprint]
+    ) -> MetadataSchema:
+        """Fold the chain into a validated schema — the cache's rebuild path.
+
+        Runs only on a merged-cache miss. Each existing layer's parse is served
+        from the per-layer atom cache (no YAML re-parse for an unchanged file),
+        and copied on loan: `_merge_metadata_schema_layer` aliases layer values
+        into its output (`schema.py` `_merge_metadata_schema_section`), so the
+        shared atom must not reach the mutating fold uncopied — this preserves
+        the fresh-dict-per-build semantics the pre-cache code had for free.
+        """
         data = deepcopy(DEFAULT_METADATA_SCHEMA)
-        for path in self._metadata_schema_layer_paths(root, up_to_layer_id=up_to_layer_id):
-            if path.exists():
-                layer_data = self._read_metadata_schema_layer(path)
-                self._merge_metadata_schema_layer(data, layer_data)
+        for path, fp in zip(paths, fingerprints, strict=True):
+            if fp is None:  # no schema file at this layer — a stored value, not a miss
+                continue
+            layer_data = schema_cache.layer_parse(path, fp, self._read_metadata_schema_layer)
+            self._merge_metadata_schema_layer(data, deepcopy(layer_data))
         data = self._resolve_metadata_schema_inheritance(data)
         return MetadataSchema.model_validate(data)
 

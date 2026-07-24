@@ -36,7 +36,8 @@ import {
 import { confirmService } from "@/lib/stores/confirmService.svelte";
 import { clearImplicitContext, implicitContextFor } from "@/lib/stores/implicitContext.svelte";
 import { findNodeBySceneId, findStructureNodeById } from "@/lib/utils/treeHelpers";
-import { metadataSchemaStore } from "@/lib/stores/schema";
+import { metadataSchemaStore, projectSchemaLayerId } from "@/lib/stores/schema";
+import { authoringDefaultLayerId } from "@/lib/utils/layerAuthoring";
 import {
   structureStore,
   researchStructureStore,
@@ -97,6 +98,14 @@ const AUTO_SAVE_IDLE_MS = 6000;
 // draft fields rather than snapping them to the server's copy).
 const AUTO_SAVE_MAX_WAIT_MS = 30000;
 const SAVED_INDICATOR_MS = 2000;
+
+// The rest-position authoring layer L for a freshly-loaded lore entry (#314 /
+// ADR-0042), read against the current open project. Non-sticky: recomputed every
+// time a pane loads an entry, so the picker never carries a target across an
+// entry switch. The rule itself is the pure `authoringDefaultLayerId`.
+function defaultAuthoringLayerId(entry: LoreEntry): string | null {
+  return authoringDefaultLayerId(entry.source_layer_id, projectSchemaLayerId());
+}
 
 // A project node reached by id that is not the OPEN project's — an ancestor
 // layer's project.md, which #334 made addressable and #344 made reachable from
@@ -377,7 +386,11 @@ class EditorPanesController {
       };
       let savedDocument: EditableDocument;
       if (documentKind === "lore") {
-        savedDocument = await api.saveLoreEntry(draftDocument as LoreEntry, pane.draftMarkdown);
+        // L rides the save (#314 / ADR-0042): the rail picker's target routes the
+        // write. Preserved across the save reconciliation below (the pane spread
+        // keeps `authoringLayerId`), so a deliberate override target survives an
+        // autosave — L is non-sticky only across an *entry switch*, not a save.
+        savedDocument = await api.saveLoreEntry(draftDocument as LoreEntry, pane.draftMarkdown, pane.authoringLayerId);
       } else if (documentKind === "research") {
         savedDocument = await api.saveResearchNote(draftDocument as ResearchNote, pane.draftMarkdown);
       } else if (documentKind === "prompt") {
@@ -1023,6 +1036,10 @@ class EditorPanesController {
             draftMetadata: cloneMetadata(entry.metadata),
             saving: false,
             recentlySaved: false,
+            // Seed L to the rest-position override (open project if inherited,
+            // else null) so an autosave never fires without a write target and
+            // 409s an inherited entry (#314 / ADR-0042).
+            authoringLayerId: defaultAuthoringLayerId(entry),
           }
         : pane,
     );
@@ -1060,10 +1077,23 @@ class EditorPanesController {
             draftMetadata: cloneMetadata(entry.metadata),
             saving: false,
             recentlySaved: false,
+            // The entry is now local — it owns its own file, so there is no
+            // override target and the rail picker disappears (#314).
+            authoringLayerId: null,
           }
         : pane,
     );
     this.setStatus(`Forked ${entry.title} into this project`);
+  }
+
+  // Set the rail picker's authoring layer L for a pane (#314 / ADR-0042). The
+  // NodeEditor picker calls this after its confirm-on-entry gate; the value
+  // rides the next `saveLoreEntry` and routes the write (owning-file direct edit
+  // vs sparse override delta at L). Non-sticky — `openLore` reseeds the default.
+  setEditorPaneAuthoringLayer(id: string, layerId: string | null): void {
+    this.panes = this.panes.map((pane) =>
+      pane.id === id ? { ...pane, authoringLayerId: layerId } : pane,
+    );
   }
 
   // Open any node given its kind — the one place cross-kind navigation

@@ -661,7 +661,12 @@ export const api = {
   forkLoreEntry(entryId: string) {
     return request<LoreEntry>(`/lore/${entryId}/fork`, { method: "POST" });
   },
-  saveLoreEntry(entry: LoreEntry, body: string) {
+  // `authoringLayerId` is ADR-0042's layer L (#314): the write target the rail
+  // picker chose. `null` = no explicit target — the open project for a local
+  // entry; for an *inherited* entry the backend then 409s rather than silently
+  // rewriting ancestor canon. When set, `L == owning layer` edits the owning
+  // file, `L < owning` writes a sparse override delta at L.
+  saveLoreEntry(entry: LoreEntry, body: string, authoringLayerId: string | null = null) {
     return request<LoreEntry>(`/lore/${entry.id}`, {
       method: "PUT",
       body: JSON.stringify({
@@ -670,6 +675,7 @@ export const api = {
         base_revision: entry.revision,
         entry_type: entry.entry_type,
         metadata: entry.metadata,
+        authoring_layer_id: authoringLayerId,
       }),
     });
   },

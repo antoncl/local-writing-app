@@ -865,6 +865,8 @@
         metadataReload={editorPanes.metadataReloadsByPane[editorPane.id] ?? null}
         titleReload={editorPanes.titleReloadsByPane[editorPane.id] ?? null}
         dirty={editorPane.dirty}
+        recentlySaved={editorPane.recentlySaved}
+        authoringLayerId={editorPane.authoringLayerId}
         todoStatusHint={editorPane.document?.type === "scene" && editorPane.scene && sceneEntryHasBody(editorPane.scene as Scene) ? embeddedHintForScene(editorPane.scene.id) : ""}
         onFocus={() => workspaceLayout.focus(editorPane.id)}
         onChange={(detail) =>
@@ -881,6 +883,7 @@
         onNavigate={(detail) => navigateToBacklink(detail.id, detail.kind)}
         onOpenChat={(detail) => chatSessions.openChatFromPromptEntry(detail.entry, detail.inputs, detail.sceneId, detail.assistantId)}
         onViewSaveState={(state) => editorPanes.setViewSaveState(editorPane.id, state)}
+        onAuthoringLayerChange={(layerId) => editorPanes.setEditorPaneAuthoringLayer(editorPane.id, layerId)}
         onFlushScene={async () => {
           // A capture photographs the file and a restore overwrites it, so both
           // must run against a file that already holds the author's latest

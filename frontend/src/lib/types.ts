@@ -224,6 +224,11 @@ export type LoreEntry = {
   // Set when this entry was fork-to-here'd (#313): the relative path from the
   // base folder to the layer it was copied down from. Null for a plain entry.
   forked_from?: string | null;
+  // Metadata fields whose effective value comes from a layer override in this
+  // project's chain rather than inherited canon (#314 / ADR-0039). The backend
+  // computes it during the fold; the rail draws the `ti-versions` override mark
+  // against these. Empty for an entry with no overrides above its owning layer.
+  overridden_fields?: string[];
 };
 
 // One leaf in the research tree — prose body + tags-only metadata.

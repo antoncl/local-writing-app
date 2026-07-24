@@ -84,6 +84,15 @@ def save_lore_entry(project: CurrentProject, entry_id: str, request: SaveLoreEnt
         return project.save_lore_entry(entry_id, request)
 
 
+@router.post("/api/lore/{entry_id}/fork", response_model=LoreEntry)
+def fork_lore_entry(project: CurrentProject, entry_id: str) -> LoreEntry:
+    """Fork-to-here (#313 / ADR-0039): copy an inherited lore entry down into the
+    current project, keeping its id, and stop inheriting it. Returns the now-local
+    entry."""
+    with translate_errors():
+        return project.fork_lore_entry(entry_id)
+
+
 @router.delete("/api/lore/{entry_id}", response_model=LoreEntryList)
 def delete_lore_entry(project: CurrentProject, entry_id: str) -> LoreEntryList:
     with translate_errors():

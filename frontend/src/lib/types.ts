@@ -221,6 +221,9 @@ export type LoreEntry = {
   computed_metadata: EntryMetadata;
   source_layer_id?: string;
   source_layer_label?: string;
+  // Set when this entry was fork-to-here'd (#313): the relative path from the
+  // base folder to the layer it was copied down from. Null for a plain entry.
+  forked_from?: string | null;
 };
 
 // One leaf in the research tree — prose body + tags-only metadata.

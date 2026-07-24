@@ -66,6 +66,7 @@
     metadataSchemaStore,
     projectSchemaLayerId,
   } from "@/lib/stores/schema";
+  import { isInherited } from "@/lib/utils/provenance";
   import { implicitContextMatcherStore } from "@/lib/stores/derived";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
@@ -450,11 +451,9 @@
   }
 
   function paneEntryFromAncestor(pane: EditorPaneState): boolean {
-    const layerId = pane.scene?.source_layer_id;
-    if (!layerId) return false;
-    const projectLayer = projectSchemaLayerId();
-    if (!projectLayer) return false;
-    return layerId !== projectLayer;
+    // One definition of "is this node inherited" (#313), shared with the level
+    // pill and the rail treatment.
+    return isInherited({ source_layer_id: pane.scene?.source_layer_id }, projectSchemaLayerId());
   }
 
   function openPromptsPane() {
@@ -834,7 +833,18 @@
     {#if editorPane}
       {#if paneEntryFromAncestor(editorPane)}
         <div class="ancestor-banner" title="This entry lives in an ancestor project. Edits write back to the original file.">
-          from {editorPane.scene?.source_layer_label ?? "ancestor"}
+          <span>from {editorPane.scene?.source_layer_label ?? "ancestor"}</span>
+          {#if editorPane.document?.type === "lore" && editorPane.scene}
+            <button
+              class="fork-button"
+              type="button"
+              title="Fork into an editable copy in this project — keeps the id, stops inheriting"
+              aria-label="Fork into this project"
+              onclick={() => run(() => editorPanes.forkLore(editorPane.scene!.id))}
+            >
+              <span aria-hidden="true">⧉</span> Fork here
+            </button>
+          {/if}
         </div>
       {/if}
       <NodeEditor
@@ -1020,11 +1030,30 @@
      back to the ancestor file). Replaces the old header tint + badge. */
   .ancestor-banner {
     flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-2);
     padding: var(--sp-1) var(--sp-3);
     background: var(--star-soft);
     border-bottom: 1px solid var(--star-border);
     color: var(--text-2);
     font-size: var(--fs-xs);
+  }
+
+  .ancestor-banner .fork-button {
+    flex: 0 0 auto;
+    padding: 2px var(--sp-2);
+    border: 1px solid var(--star-border);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--star);
+    font-size: var(--fs-xs);
+    cursor: pointer;
+  }
+
+  .ancestor-banner .fork-button:hover {
+    background: color-mix(in oklab, var(--star) 16%, transparent);
   }
 
   .error-toast {

@@ -16,7 +16,8 @@
     PromptEntrySummary,
     StructureDocument,
   } from "@/lib/types";
-  import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
+  import { inheritedLayerLabel } from "@/lib/utils/provenance";
 
   interface Props {
     entryType: string;
@@ -34,6 +35,12 @@
     researchStructure?: StructureDocument | null;
     implicitContextMatcher?: import("@/lib/editor-core/implicitContextMatcher").CompiledMatcher | null;
     excludeId?: string | null;
+    // Provenance (#313 / ADR-0039): the entry's owning layer when it is inherited
+    // from an ancestor project. Drives the layer treatment at the top of the
+    // rail — the rail is where an edit reaching an ancestor most needs to be
+    // visible. Null / matching the open project = authored here, no treatment.
+    sourceLayerId?: string | null;
+    sourceLayerLabel?: string | null;
     computedFieldString?: (fieldId: string) => string;
     // Time-travel overlay (#64, ADR-0013): when scrubbed to a mutation point the
     // rail renders effective values read-only. `effectiveOverrides` holds ONLY
@@ -77,6 +84,8 @@
     researchStructure = null,
     implicitContextMatcher = null,
     excludeId = null,
+    sourceLayerId = null,
+    sourceLayerLabel = null,
     computedFieldString = () => "",
     effectiveOverrides = null,
     compare = null,
@@ -92,6 +101,16 @@
   // Step 2). This panel only mounts inside NodeEditor's `{#if metadataSchema}`
   // guard, so the non-null assertion holds (matches the prior non-null prop).
   const metadataSchema = $derived($metadataSchemaStore as MetadataSchema);
+
+  // The owning layer's label when this entry is inherited from an ancestor
+  // project (#313), else null. `$projectLayerIdStore` is the open project's own
+  // layer, tracked so this recomputes when the schema loads.
+  const inheritedFromLabel = $derived(
+    inheritedLayerLabel(
+      { source_layer_id: sourceLayerId ?? undefined, source_layer_label: sourceLayerLabel ?? undefined },
+      $projectLayerIdStore,
+    ),
+  );
 
   // Assistants surface ai_provider / ai_capability_tier / ai_model via
   // the bespoke ProviderTierPicker rendered above the schema fields.
@@ -201,6 +220,15 @@
       Edit type…
     </button>
   </div>
+
+  {#if inheritedFromLabel}
+    <!-- Provenance treatment (#313 / ADR-0039): this entry is owned by an
+         ancestor layer. Same --star axis as the level pill and the ancestor
+         banner, so the three provenance surfaces read as one vocabulary. -->
+    <div class="rail-provenance" title="This entry is inherited from an ancestor project; edits write back to the original.">
+      <span>Inherited from <strong>{inheritedFromLabel}</strong></span>
+    </div>
+  {/if}
 
   {#if documentKind === "assistant"}
     <div class="rail-assistant">
@@ -326,6 +354,21 @@
     gap: 8px;
     padding: 8px 12px 10px;
     border-bottom: 1px solid var(--divider);
+  }
+  /* Provenance treatment (#313) — the --star axis, matching the level pill and
+     the inherited-entry banner. Sits directly under the type header. */
+  .rail-provenance {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: var(--star-soft);
+    border-bottom: 1px solid var(--star-border);
+    color: var(--star);
+    font-size: var(--fs-xs);
+  }
+  .rail-provenance strong {
+    font-weight: 700;
   }
   .rail-type-select {
     display: flex;

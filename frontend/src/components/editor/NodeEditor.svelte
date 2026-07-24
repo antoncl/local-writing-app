@@ -904,6 +904,8 @@
       researchStructure={researchStructure}
       implicitContextMatcher={implicitContextMatcher}
       excludeId={scene?.id ?? null}
+      sourceLayerId={scene?.source_layer_id ?? null}
+      sourceLayerLabel={scene?.source_layer_label ?? null}
       computedFieldString={computedFieldString}
       effectiveOverrides={scrubbed ? scrub.overrides : null}
       compare={snapshotCompare}

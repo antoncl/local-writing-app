@@ -66,6 +66,7 @@
     metadataSchemaStore,
     projectSchemaLayerId,
   } from "@/lib/stores/schema";
+  import { isInherited } from "@/lib/utils/provenance";
   import { implicitContextMatcherStore } from "@/lib/stores/derived";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
@@ -450,11 +451,9 @@
   }
 
   function paneEntryFromAncestor(pane: EditorPaneState): boolean {
-    const layerId = pane.scene?.source_layer_id;
-    if (!layerId) return false;
-    const projectLayer = projectSchemaLayerId();
-    if (!projectLayer) return false;
-    return layerId !== projectLayer;
+    // One definition of "is this node inherited" (#313), shared with the level
+    // pill and the rail treatment.
+    return isInherited({ source_layer_id: pane.scene?.source_layer_id }, projectSchemaLayerId());
   }
 
   function openPromptsPane() {

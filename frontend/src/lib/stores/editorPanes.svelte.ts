@@ -1035,6 +1035,17 @@ class EditorPanesController {
   // edits stop writing back to the ancestor. Refreshes the roster so the Lore
   // pane's provenance pill updates too.
   async forkLore(entryId: string): Promise<void> {
+    // Flush unsaved edits first, then fork. The store's autosave invariant is
+    // that every pane transition saves if dirty; a fork that reset the pane
+    // without it dropped whatever was typed inside the 6s debounce — and those
+    // edits belong in the fork, not the void. Cancel the pending timer so it
+    // cannot fire against the baseline this save is about to move. A save that
+    // 409s throws out of here, aborting the fork with the draft intact.
+    const open = this.paneForScene(entryId);
+    if (open?.dirty) {
+      this.#autosave.cancel(open.id);
+      await this.saveEditorPane(open.id);
+    }
     const entry = await api.forkLoreEntry(entryId);
     await refreshLoreEntries();
     this.panes = this.panes.map((pane) =>

@@ -16,7 +16,7 @@
     PromptEntrySummary,
     StructureDocument,
   } from "@/lib/types";
-  import { metadataSchemaStore, metadataSchemaLayersStore } from "@/lib/stores/schema";
+  import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
   import { inheritedLayerLabel } from "@/lib/utils/provenance";
 
   interface Props {
@@ -103,14 +103,12 @@
   const metadataSchema = $derived($metadataSchemaStore as MetadataSchema);
 
   // The owning layer's label when this entry is inherited from an ancestor
-  // project (#313), else null. Reads the layer stack reactively; the innermost
-  // layer is the open project's own (same "nearest layer" rule as
-  // projectSchemaLayerId()).
-  const schemaLayers = $derived($metadataSchemaLayersStore);
+  // project (#313), else null. `$projectLayerIdStore` is the open project's own
+  // layer, tracked so this recomputes when the schema loads.
   const inheritedFromLabel = $derived(
     inheritedLayerLabel(
       { source_layer_id: sourceLayerId ?? undefined, source_layer_label: sourceLayerLabel ?? undefined },
-      schemaLayers[schemaLayers.length - 1]?.id ?? "",
+      $projectLayerIdStore,
     ),
   );
 
@@ -227,7 +225,7 @@
     <!-- Provenance treatment (#313 / ADR-0039): this entry is owned by an
          ancestor layer. Same --star axis as the level pill and the ancestor
          banner, so the three provenance surfaces read as one vocabulary. -->
-    <div class="rail-provenance" title="This entry is inherited; edits reach the ancestor unless you fork it.">
+    <div class="rail-provenance" title="This entry is inherited from an ancestor project; edits write back to the original.">
       <span>Inherited from <strong>{inheritedFromLabel}</strong></span>
     </div>
   {/if}

@@ -13,7 +13,7 @@
   import { getSwatch, resolveColorForType } from "@/lib/utils/colors";
   import { defaultView } from "@/lib/views/evaluateView";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
-  import { metadataSchemaStore, metadataSchemaLayersStore } from "@/lib/stores/schema";
+  import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
   import { inheritedLayerLabel } from "@/lib/utils/provenance";
@@ -30,10 +30,8 @@
   // Active-row highlight + pin-star read from the editor-focus store, not props (#14 Step 2).
   $: focusedDocument = $focusedDocumentStore;
   // The open project's own (innermost) layer id — a row whose source layer
-  // differs is inherited and gets a level pill (#313). Same "nearest layer" rule
-  // as projectSchemaLayerId(), read reactively off the layer stack here.
-  $: schemaLayers = $metadataSchemaLayersStore;
-  $: ownLayerId = schemaLayers[schemaLayers.length - 1]?.id ?? "";
+  // differs is inherited and gets a level pill (#313).
+  $: ownLayerId = $projectLayerIdStore;
   // Open an entry in an editor pane (App owns the pane set).
   export let onOpenEntry: (entryId: string) => void;
 

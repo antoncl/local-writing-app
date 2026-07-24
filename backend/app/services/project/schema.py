@@ -93,7 +93,9 @@ def _schema_layer_from(layer: IndexLayer) -> MetadataSchemaLayer:
 
 
 class MetadataSchemaMixin:
-    def read_metadata_schema(self, root: Path | None = None) -> MetadataSchema:
+    def read_metadata_schema(
+        self, root: Path | None = None, *, up_to_layer_id: str | None = None
+    ) -> MetadataSchema:
         """The merged schema for `root`, defaulting to the open project.
 
         `root` is explicit for callers that must not straddle a concurrent
@@ -101,15 +103,48 @@ class MetadataSchemaMixin:
         whose `root_path` mutates in place, so an operation that resolves the
         project more than once can read one project's schema against another's
         files.
+
+        `up_to_layer_id` resolves the schema **as of** authoring layer L
+        (ADR-0042 §3, #393): the merge stops at L, so a field a more-local
+        layer defines is absent — the roster can only shrink as L rises towards
+        the base, never offer a field the target layer cannot store. `None`,
+        the default, merges the whole chain to the open project, which is what
+        every resolution-scope read wants and gets unchanged; only the write
+        path passes L, via `_schema_as_authored`.
         """
         root = root or self._require_project()
         data = deepcopy(DEFAULT_METADATA_SCHEMA)
-        for path in self._metadata_schema_layer_paths(root):
+        for path in self._metadata_schema_layer_paths(root, up_to_layer_id=up_to_layer_id):
             if path.exists():
                 layer_data = self._read_metadata_schema_layer(path)
                 self._merge_metadata_schema_layer(data, layer_data)
         data = self._resolve_metadata_schema_inheritance(data)
         return MetadataSchema.model_validate(data)
+
+    def _schema_as_authored(self, root: Path | None = None) -> MetadataSchema:
+        """The schema a write in this unit must validate against (#393).
+
+        ADR-0042 binds a write to an authoring layer L; the field roster it may
+        use is the schema resolved base → L, never the fuller resolution-scope
+        schema. Validating a write against a chain deeper than its own target
+        would accept a field the target layer cannot store, and fail only
+        later, when a sibling book reads it (ADR-0045 §4).
+
+        L rides the immutable `WorkScope` (`scope.authoring_layer`) and defaults
+        to the resolution scope, so a unit with no rail picker behind it — every
+        client today — resolves the whole chain, exactly as before. #313/#314
+        populate L by changing the resolver alone; nothing here changes when
+        they do. Its sole caller today is the lore save, the one node kind that
+        is inherited and so can be authored above the book.
+        """
+        scope = self.scope
+        layer = scope.authoring_layer if scope is not None else None
+        up_to_layer_id = (
+            self._metadata_schema_layer_id(layer.resolve()) if layer is not None else None
+        )
+        # `root` (defaulted inside `read_metadata_schema`) is the resolution
+        # scope; `up_to_layer_id` truncates it to L.
+        return self.read_metadata_schema(root, up_to_layer_id=up_to_layer_id)
 
     def entry_type_ancestry(
         self,

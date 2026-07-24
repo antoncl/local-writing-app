@@ -132,8 +132,19 @@ class LoreEntriesMixin:
         if markdown_errors:
             raise ProjectServiceError(" ".join(markdown_errors), 422)
 
-        schema = self.read_metadata_schema()
+        # As of the authoring layer L, not the resolution scope (#393): a write
+        # is validated against what its own target layer can store. Absent L
+        # (every client today) this is the full-chain schema, unchanged. Lore is
+        # the only inherited node kind, so it is the only save that can be
+        # authored above the book — scenes and research notes are book-local.
+        schema = self._schema_as_authored()
         metadata = self._normalise_metadata(request.metadata, path)
+        # NOTE: the tag *vocabulary* stays full-chain here — the schema is
+        # as-of-L but `_canonicalise_metadata_tags` still reads all layers and
+        # writes its assertion back to the resolution scope's tags.yaml. Scoping
+        # it to L means moving the write *target*, not just the read, which #393
+        # did not do. ADR-0045 §4 requires this closed by #313/#314 at the
+        # latest — earlier is welcome, it is a deadline and not a reservation.
         metadata = self._canonicalise_metadata_tags(metadata, schema, kind="lore", entry_type=request.entry_type)
 
         entry = LoreEntry(

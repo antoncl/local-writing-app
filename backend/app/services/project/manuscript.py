@@ -389,6 +389,10 @@ class ManuscriptMixin:
         if markdown_errors:
             raise ProjectServiceError(" ".join(markdown_errors), 422)
 
+        # Not as-of-L (#393): a scene is book-scoped — the manuscript is per-book
+        # and an inherited scene has no position in an inheriting book (ADR-0039),
+        # so a scene is never authored above the book. As-of-L is for inherited
+        # nodes (lore); here L is always the resolution scope.
         schema = self.read_metadata_schema()
         metadata = self._normalise_metadata(request.metadata, path)
         metadata = self._canonicalise_metadata_tags(metadata, schema, kind="scene", entry_type=request.entry_type)

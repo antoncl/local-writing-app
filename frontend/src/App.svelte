@@ -873,7 +873,6 @@
         onCustomData={(detail) => schemaPanes?.openForCustomData(detail.entryType, detail.kind)}
         onNavigate={(detail) => navigateToBacklink(detail.id, detail.kind)}
         onOpenChat={(detail) => chatSessions.openChatFromPromptEntry(detail.entry, detail.inputs, detail.sceneId, detail.assistantId)}
-        onPlotNodeSaved={(node) => editorPanes.reconcileDocumentFromServer(node, "plot")}
         onViewSaveState={(state) => editorPanes.setViewSaveState(editorPane.id, state)}
         onFlushScene={async () => {
           // A capture photographs the file and a restore overwrites it, so both

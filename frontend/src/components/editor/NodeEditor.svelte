@@ -24,7 +24,7 @@
   import { formatCostEur } from "@/lib/utils/money";
   import { sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import { resolveColor } from "@/lib/utils/colors";
-  import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataFieldDefinition, MetadataSchema, PlotNode, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
+  import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataFieldDefinition, MetadataSchema, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
   import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { referenceIndexStore } from "@/lib/stores/references";
@@ -82,7 +82,6 @@
     onCustomData?: ((payload: { entryType: string; kind: DocumentKind }) => void) | undefined;
     onNavigate?: ((payload: { id: string; kind: string }) => void) | undefined;
     onOpenChat?: ((payload: { entry: PromptEntrySummary; inputs: Record<string, unknown>; sceneId: string | null; assistantId: string }) => void) | undefined;
-    onPlotNodeSaved?: ((node: PlotNode) => void | Promise<void>) | undefined;
     // The view designer self-persists; it reports its save lifecycle up so the
     // pane's tab badge can reflect it (#263).
     onViewSaveState?: ((state: ViewSaveState) => void) | undefined;
@@ -115,7 +114,6 @@
     onCustomData = undefined,
     onNavigate = undefined,
     onOpenChat = undefined,
-    onPlotNodeSaved = undefined,
     onViewSaveState = undefined,
     onFlushScene = undefined,
     onSceneRestored = undefined
@@ -1117,7 +1115,6 @@
       {structure}
       onFocus={() => onFocus?.()}
       onNavigate={(payload) => onNavigate?.(payload)}
-      onPlotNodeSaved={(node) => onPlotNodeSaved?.(node)}
     />
   {/if}
 

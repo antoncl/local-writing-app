@@ -19,7 +19,6 @@
     structure?: StructureDocument | null;
     onFocus?: () => void;
     onNavigate?: (payload: { id: string; kind: string }) => void;
-    onPlotNodeSaved?: (node: PlotNode) => void | Promise<void>;
   }
 
   let {
@@ -27,7 +26,6 @@
     structure = null,
     onFocus,
     onNavigate,
-    onPlotNodeSaved,
   }: Props = $props();
 
   type BoardColumn = {
@@ -48,6 +46,22 @@
     | { kind: "plot-claim"; claim_id: string };
 
   const PLOT_DND_TYPE = "application/x-local-writing-plot";
+  const CLAIM_TYPE_OPTIONS: { value: PlotPointClaim["claim_type"]; label: string }[] = [
+    { value: "satisfies", label: "Satisfies" },
+    { value: "partially_satisfies", label: "Partially satisfies" },
+    { value: "subverts", label: "Subverts" },
+    { value: "foreshadows", label: "Foreshadows" },
+    { value: "pays_off", label: "Pays off" },
+    { value: "raises_question", label: "Raises question" },
+    { value: "rejects", label: "Rejects" },
+    { value: "custom", label: "Custom" },
+  ];
+  const CLAIM_STRENGTH_OPTIONS: { value: "" | NonNullable<PlotPointClaim["strength"]>; label: string }[] = [
+    { value: "", label: "Not set" },
+    { value: "weak", label: "Weak" },
+    { value: "medium", label: "Medium" },
+    { value: "strong", label: "Strong" },
+  ];
 
   const EMPTY_BOARD = {
     version: 1,
@@ -123,6 +137,7 @@
     return rows;
   });
   let columns = $derived(buildColumns(structure, cards));
+  let structureColumnOptions = $derived(flattenStructure(structure?.root));
   let selectedPointLabel = $derived(selectedClaim ? pointLabel(selectedClaim) : "");
   let selectedPaletteRow = $derived(
     selectedPalettePoint
@@ -135,12 +150,33 @@
     const id = incoming?.id ?? null;
     const revision = incoming?.revision ?? null;
     if (id === loadedPlotId && revision === loadedPlotRevision) return;
+    const sameNode = Boolean(id && id === loadedPlotId);
     loadedPlotId = id;
     loadedPlotRevision = revision;
     localPlotNode = incoming;
-    selectedCardId = incoming?.board?.cards?.[0]?.id ?? null;
-    selectedClaimId = null;
-    selectedPalettePoint = null;
+
+    const nextCards = incoming?.board?.cards ?? [];
+    const nextClaims = incoming?.board?.claims ?? [];
+    if (!sameNode) {
+      selectedCardId = nextCards[0]?.id ?? null;
+      selectedClaimId = null;
+      selectedPalettePoint = null;
+      return;
+    }
+
+    if (selectedClaimId) {
+      const claim = nextClaims.find((candidate) => candidate.id === selectedClaimId);
+      if (claim) {
+        selectedCardId = claim.card_id;
+        selectedPalettePoint = pointKey(claim.template_instance_id, claim.plot_point_id);
+        return;
+      }
+      selectedClaimId = null;
+    }
+
+    if (selectedCardId && nextCards.some((card) => card.id === selectedCardId)) return;
+    if (selectedPalettePoint) return;
+    selectedCardId = nextCards[0]?.id ?? null;
   });
 
   $effect(() => {
@@ -205,6 +241,14 @@
     }
 
     const out: BoardColumn[] = [];
+    const unplacedCards = cardsByColumn.get("__unplaced") ?? [];
+    cardsByColumn.delete("__unplaced");
+    out.push({
+      id: "__unplaced",
+      title: "Unplaced",
+      cards: unplacedCards,
+    });
+
     const structureColumns = flattenStructure(currentStructure?.root);
     for (const column of structureColumns) {
       out.push({
@@ -218,7 +262,7 @@
     for (const [id, columnCards] of cardsByColumn.entries()) {
       out.push({
         id,
-        title: id === "__unplaced" ? "Unplaced" : id,
+        title: id,
         cards: columnCards,
       });
     }
@@ -227,12 +271,6 @@
       return [{ id: "__unplaced", title: "Unplaced", cards: [] }];
     }
     return out;
-  }
-
-  function claimTypeLabel(type: PlotPointClaim["claim_type"]): string {
-    return type
-      .replace(/_/g, " ")
-      .replace(/^\w/, (letter) => letter.toUpperCase());
   }
 
   function pointLabel(claim: PlotPointClaim): string {
@@ -368,7 +406,6 @@
         base_revision: plotNode.revision,
       });
       localPlotNode = saved;
-      await onPlotNodeSaved?.(saved);
       return saved;
     } catch (caught) {
       saveError = caught instanceof Error ? caught.message : "Could not save plot board.";
@@ -376,6 +413,89 @@
     } finally {
       savingMessage = "";
     }
+  }
+
+  function optionalText(value: string): string | null {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+  }
+
+  async function updateSelectedCard(patch: Partial<PlotBoardCard>, message = "Saving card"): Promise<void> {
+    const card = selectedCard;
+    if (!card || savingMessage) return;
+    const nextBoard = cloneBoardSpec(board);
+    nextBoard.cards = (nextBoard.cards ?? []).map((candidate) =>
+      candidate.id === card.id ? { ...candidate, ...patch } : candidate,
+    );
+    await persistBoard(nextBoard, message);
+  }
+
+  async function updateSelectedClaim(patch: Partial<PlotPointClaim>, message = "Saving claim"): Promise<void> {
+    const claim = selectedClaim;
+    if (!claim || savingMessage) return;
+    const nextBoard = cloneBoardSpec(board);
+    nextBoard.claims = (nextBoard.claims ?? []).map((candidate) =>
+      candidate.id === claim.id ? { ...candidate, ...patch } : candidate,
+    );
+    await persistBoard(nextBoard, message);
+  }
+
+  function commitCardTitle(event: Event): void {
+    const value = (event.currentTarget as HTMLInputElement).value.trim();
+    if (!selectedCard || !value || value === selectedCard.title) return;
+    void updateSelectedCard({ title: value });
+  }
+
+  function commitCardSynopsis(event: Event): void {
+    const value = (event.currentTarget as HTMLTextAreaElement).value;
+    if (!selectedCard || value === selectedCard.synopsis) return;
+    void updateSelectedCard({ synopsis: value });
+  }
+
+  function changeCardColumn(event: Event): void {
+    const value = (event.currentTarget as HTMLSelectElement).value;
+    const structureColumnId = value === "__unplaced" ? null : value;
+    if (!selectedCard || (selectedCard.structure_column_id ?? null) === structureColumnId) return;
+    void updateSelectedCard({ structure_column_id: structureColumnId });
+  }
+
+  function changeCardPlotline(event: Event): void {
+    const value = (event.currentTarget as HTMLSelectElement).value;
+    const plotlineId = value || null;
+    if (!selectedCard || (selectedCard.primary_plotline_id ?? null) === plotlineId) return;
+    void updateSelectedCard({ primary_plotline_id: plotlineId });
+  }
+
+  function commitClaimLabel(event: Event): void {
+    const value = optionalText((event.currentTarget as HTMLInputElement).value);
+    if (!selectedClaim || (selectedClaim.claim_label ?? null) === value) return;
+    void updateSelectedClaim({ claim_label: value });
+  }
+
+  function changeClaimType(event: Event): void {
+    const value = (event.currentTarget as HTMLSelectElement).value as PlotPointClaim["claim_type"];
+    if (!selectedClaim || selectedClaim.claim_type === value) return;
+    void updateSelectedClaim({ claim_type: value });
+  }
+
+  function changeClaimStrength(event: Event): void {
+    const value = (event.currentTarget as HTMLSelectElement).value as "" | NonNullable<PlotPointClaim["strength"]>;
+    const strength = value || null;
+    if (!selectedClaim || (selectedClaim.strength ?? null) === strength) return;
+    void updateSelectedClaim({ strength });
+  }
+
+  function changeClaimPlotline(event: Event): void {
+    const value = (event.currentTarget as HTMLSelectElement).value;
+    const plotlineId = value || null;
+    if (!selectedClaim || (selectedClaim.plotline_id ?? null) === plotlineId) return;
+    void updateSelectedClaim({ plotline_id: plotlineId });
+  }
+
+  function commitClaimTextField(field: "evidence" | "rationale" | "ai_notes", event: Event): void {
+    const value = optionalText((event.currentTarget as HTMLTextAreaElement).value);
+    if (!selectedClaim || (selectedClaim[field] ?? null) === value) return;
+    void updateSelectedClaim({ [field]: value });
   }
 
   async function addTemplateInstance(): Promise<void> {
@@ -722,40 +842,128 @@
         <span>Claim</span>
         <strong>{selectedPointLabel}</strong>
       </header>
-      <dl>
-        <dt>Card</dt>
-        <dd>{selectedCard?.title ?? selectedClaim.card_id}</dd>
-        <dt>Type</dt>
-        <dd>{claimTypeLabel(selectedClaim.claim_type)}</dd>
-        {#if selectedClaim.strength}
-          <dt>Strength</dt>
-          <dd>{selectedClaim.strength}</dd>
+      <div class="inspector-form">
+        <label>
+          Label override
+          <input
+            value={selectedClaim.claim_label ?? ""}
+            placeholder={selectedPointLabel}
+            disabled={Boolean(savingMessage)}
+            onblur={commitClaimLabel}
+          />
+        </label>
+        <label>
+          Card
+          <input value={selectedCard?.title ?? selectedClaim.card_id} disabled />
+        </label>
+        <label>
+          Type
+          <select value={selectedClaim.claim_type} disabled={Boolean(savingMessage)} onchange={changeClaimType}>
+            {#each CLAIM_TYPE_OPTIONS as option (option.value)}
+              <option value={option.value}>{option.label}</option>
+            {/each}
+          </select>
+        </label>
+        <label>
+          Strength
+          <select value={selectedClaim.strength ?? ""} disabled={Boolean(savingMessage)} onchange={changeClaimStrength}>
+            {#each CLAIM_STRENGTH_OPTIONS as option (option.value)}
+              <option value={option.value}>{option.label}</option>
+            {/each}
+          </select>
+        </label>
+        {#if board.plotlines.length > 0}
+          <label>
+            Plotline
+            <select value={selectedClaim.plotline_id ?? ""} disabled={Boolean(savingMessage)} onchange={changeClaimPlotline}>
+              <option value="">None</option>
+              {#each board.plotlines as line (line.id)}
+                <option value={line.id}>{line.title}</option>
+              {/each}
+            </select>
+          </label>
         {/if}
-        {#if selectedClaim.rationale}
-          <dt>Rationale</dt>
-          <dd>{selectedClaim.rationale}</dd>
-        {/if}
-        {#if selectedClaim.evidence}
-          <dt>Evidence</dt>
-          <dd>{selectedClaim.evidence}</dd>
-        {/if}
-      </dl>
+        <label>
+          Specific rationale
+          <textarea
+            rows="4"
+            value={selectedClaim.rationale ?? ""}
+            disabled={Boolean(savingMessage)}
+            onblur={(event) => commitClaimTextField("rationale", event)}
+          ></textarea>
+        </label>
+        <label>
+          Evidence
+          <textarea
+            rows="3"
+            value={selectedClaim.evidence ?? ""}
+            disabled={Boolean(savingMessage)}
+            onblur={(event) => commitClaimTextField("evidence", event)}
+          ></textarea>
+        </label>
+        <label>
+          AI notes
+          <textarea
+            rows="3"
+            value={selectedClaim.ai_notes ?? ""}
+            disabled={Boolean(savingMessage)}
+            onblur={(event) => commitClaimTextField("ai_notes", event)}
+          ></textarea>
+        </label>
+      </div>
     {:else if selectedCard}
       <header class="inspector-head">
         <span>Card</span>
         <strong>{selectedCard.title}</strong>
       </header>
-      {#if selectedCard.synopsis}
-        <p class="inspector-copy">{selectedCard.synopsis}</p>
-      {/if}
-      <dl>
-        <dt>Claims</dt>
-        <dd>{(claimsByCard.get(selectedCard.id) ?? []).length}</dd>
-        {#if selectedCard.node_ref}
-          <dt>Draft node</dt>
-          <dd>{selectedCard.node_ref}</dd>
+      <div class="inspector-form">
+        <label>
+          Title
+          <input value={selectedCard.title} disabled={Boolean(savingMessage)} onblur={commitCardTitle} />
+        </label>
+        <label>
+          Synopsis
+          <textarea
+            rows="5"
+            value={selectedCard.synopsis}
+            disabled={Boolean(savingMessage)}
+            onblur={commitCardSynopsis}
+          ></textarea>
+        </label>
+        <label>
+          Manuscript position
+          <select value={selectedCard.structure_column_id ?? "__unplaced"} disabled={Boolean(savingMessage)} onchange={changeCardColumn}>
+            <option value="__unplaced">Unplaced</option>
+            {#each structureColumnOptions as column (column.id)}
+              <option value={column.id}>{"\u00a0".repeat(Math.max(0, column.depth - 1) * 2)}{column.title}</option>
+            {/each}
+          </select>
+        </label>
+        {#if board.plotlines.length > 0}
+          <label>
+            Primary plotline
+            <select value={selectedCard.primary_plotline_id ?? ""} disabled={Boolean(savingMessage)} onchange={changeCardPlotline}>
+              <option value="">None</option>
+              {#each board.plotlines as line (line.id)}
+                <option value={line.id}>{line.title}</option>
+              {/each}
+            </select>
+          </label>
         {/if}
-      </dl>
+        <div class="inspector-stat">
+          <span>Claims</span>
+          <strong>{(claimsByCard.get(selectedCard.id) ?? []).length}</strong>
+        </div>
+        {#if selectedCard.node_ref}
+          <div class="inspector-stat">
+            <span>Draft node</span>
+            <button type="button" class="link-button" onclick={(event) => selectedCard && openCardNode(selectedCard, event)}>
+              {selectedCard.node_ref}
+              <i class="ti ti-arrow-up-right" aria-hidden="true"></i>
+            </button>
+          </div>
+        {/if}
+      </div>
     {:else if selectedPaletteRow}
       <header class="inspector-head">
         <span>Function point</span>
@@ -1091,8 +1299,7 @@
     font-size: var(--fs-md);
   }
 
-  .plot-card p,
-  .inspector-copy {
+  .plot-card p {
     margin: 0;
     color: var(--text-2);
     font-size: var(--fs-sm);
@@ -1214,6 +1421,97 @@
   .inspector-head strong {
     font-family: var(--serif);
     font-size: var(--fs-lg);
+  }
+
+  .inspector-form {
+    display: grid;
+    gap: var(--sp-3);
+  }
+
+  .inspector-form label {
+    display: grid;
+    gap: var(--sp-1);
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  .inspector-form input,
+  .inspector-form select,
+  .inspector-form textarea {
+    width: 100%;
+    min-width: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: var(--surface);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: var(--fs-sm);
+    font-weight: 400;
+    line-height: 1.4;
+    text-transform: none;
+  }
+
+  .inspector-form input,
+  .inspector-form select {
+    min-height: 30px;
+    padding: 0 var(--sp-2);
+  }
+
+  .inspector-form textarea {
+    resize: vertical;
+    padding: var(--sp-2);
+  }
+
+  .inspector-form input:focus,
+  .inspector-form select:focus,
+  .inspector-form textarea:focus {
+    border-color: var(--accent);
+    outline: 1px solid var(--accent);
+    outline-offset: 0;
+  }
+
+  .inspector-form input:disabled,
+  .inspector-form select:disabled,
+  .inspector-form textarea:disabled {
+    cursor: not-allowed;
+    opacity: 0.7;
+  }
+
+  .inspector-stat {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-2);
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  .inspector-stat strong {
+    color: var(--text-2);
+    font-family: var(--mono);
+    font-size: var(--fs-sm);
+  }
+
+  .link-button {
+    display: inline-flex;
+    min-width: 0;
+    align-items: center;
+    gap: var(--sp-1);
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--accent-deep);
+    font-family: var(--mono);
+    font-size: var(--fs-xs);
+    cursor: pointer;
+  }
+
+  .link-button:hover {
+    text-decoration: underline;
   }
 
   .plot-inspector dl {

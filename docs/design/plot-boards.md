@@ -2,6 +2,10 @@
 
 Status: draft for discussion · 2026-07-18
 
+Related mockup:
+
+- [Plot board drag-and-drop mockup](mockups/plot-board-drag-and-drop.html)
+
 ## What This Is
 
 Plot boards are a planning surface for applying story-structure templates to a

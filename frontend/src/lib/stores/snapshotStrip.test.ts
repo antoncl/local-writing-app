@@ -11,15 +11,24 @@ import type { SnapshotDiff } from "@/lib/types";
 
 const diffSnapshot = vi.fn();
 const listSnapshots = vi.fn();
+const pinSnapshot = vi.fn();
+const setSnapshotDescription = vi.fn();
+const deleteSnapshot = vi.fn();
+const restoreSnapshot = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   api: {
     diffSnapshot: (...args: unknown[]) => diffSnapshot(...args),
     listSnapshots: (...args: unknown[]) => listSnapshots(...args),
+    pinSnapshot: (...args: unknown[]) => pinSnapshot(...args),
+    setSnapshotDescription: (...args: unknown[]) => setSnapshotDescription(...args),
+    deleteSnapshot: (...args: unknown[]) => deleteSnapshot(...args),
+    restoreSnapshot: (...args: unknown[]) => restoreSnapshot(...args),
   },
 }));
 
 const { SnapshotStripController } = await import("./snapshotStrip.svelte");
+const { confirmService } = await import("./confirmService.svelte");
 
 const SNAPSHOT = {
   id: "snap_1",
@@ -29,6 +38,7 @@ const SNAPSHOT = {
   // its bytes are the previous sitting's (#458).
   content_written_at: "2026-07-21T18:00:00.000000+00:00",
   retention: "kept" as const,
+  description: "",
   schema_version: 5,
 };
 
@@ -95,6 +105,11 @@ async function parked(resolve: () => Promise<SnapshotDiff>) {
 beforeEach(() => {
   diffSnapshot.mockReset();
   listSnapshots.mockReset();
+  pinSnapshot.mockReset();
+  setSnapshotDescription.mockReset();
+  deleteSnapshot.mockReset();
+  restoreSnapshot.mockReset();
+  confirmService.dismiss();
 });
 
 describe("the order the strip holds", () => {
@@ -388,5 +403,98 @@ describe("a keypress landing while the diff is still in flight", () => {
     await Promise.all([first, second]);
 
     expect(strip.bodyHtml).not.toContain("STALE");
+  });
+});
+
+/**
+ * The author's three new gestures (#468, slice 4). The load-bearing property
+ * here is the asymmetry ADR-0043 makes deliberate: delete confirms because it
+ * is irreversible; restore does not, because it captures first.
+ */
+describe("author gestures", () => {
+  it("pin promotes the parked snapshot and re-lists", async () => {
+    const strip = await parked(async () => diff());
+    await strip.park("snap_1");
+    pinSnapshot.mockResolvedValue({ ...SNAPSHOT, retention: "kept" });
+    listSnapshots.mockResolvedValue({ snapshots: [{ ...SNAPSHOT, retention: "kept" }] });
+
+    await strip.pin();
+
+    expect(pinSnapshot).toHaveBeenCalledWith("scene_1", "snap_1");
+  });
+
+  it("describe sends the trimmed text", async () => {
+    const strip = await parked(async () => diff());
+    await strip.park("snap_1");
+    setSnapshotDescription.mockResolvedValue({ ...SNAPSHOT, description: "A note" });
+    listSnapshots.mockResolvedValue({ snapshots: [{ ...SNAPSHOT, description: "A note" }] });
+
+    await strip.describe("  A note  ");
+    expect(setSnapshotDescription).toHaveBeenCalledWith("scene_1", "snap_1", "A note");
+  });
+
+  it("a no-op edit writes nothing — closing the editor unchanged is the common gesture", async () => {
+    // The guard lives on the controller precisely so this is reachable: there
+    // is no component harness, so a guard in the blur handler could be dropped
+    // with the whole suite still green.
+    const described = { ...SNAPSHOT, description: "A note" };
+    listSnapshots.mockResolvedValue({ snapshots: [described] });
+    diffSnapshot.mockImplementation(async () => diff());
+    const strip = new SnapshotStripController();
+    strip.load("scene_1");
+    await vi.waitFor(() => expect(strip.snapshots.length).toBe(1));
+    await strip.park("snap_1");
+
+    await strip.describe("A note"); // unchanged
+    await strip.describe("  A note  "); // unchanged but for whitespace
+    expect(setSnapshotDescription).not.toHaveBeenCalled();
+
+    // ...and an actual change still goes through.
+    await strip.describe("A different note");
+    expect(setSnapshotDescription).toHaveBeenCalledWith("scene_1", "snap_1", "A different note");
+  });
+
+  it("clearing a description is a real change, not a no-op", async () => {
+    const described = { ...SNAPSHOT, description: "A note" };
+    listSnapshots.mockResolvedValue({ snapshots: [described] });
+    diffSnapshot.mockImplementation(async () => diff());
+    const strip = new SnapshotStripController();
+    strip.load("scene_1");
+    await vi.waitFor(() => expect(strip.snapshots.length).toBe(1));
+    await strip.park("snap_1");
+    setSnapshotDescription.mockResolvedValue({ ...SNAPSHOT, description: "" });
+
+    await strip.describe("");
+    expect(setSnapshotDescription).toHaveBeenCalledWith("scene_1", "snap_1", "");
+  });
+
+  it("delete asks first — the modal opens and nothing is deleted until it resolves", async () => {
+    const strip = await parked(async () => diff());
+    await strip.park("snap_1");
+    deleteSnapshot.mockResolvedValue({ snapshots: [] });
+    listSnapshots.mockResolvedValue({ snapshots: [] });
+
+    strip.del();
+    // The gate is up: the confirmation is showing and nothing has been removed.
+    expect(confirmService.active).not.toBe(null);
+    expect(confirmService.active?.cannotBeUndone).toBe(true);
+    expect(deleteSnapshot).not.toHaveBeenCalled();
+
+    await confirmService.resolve();
+    expect(deleteSnapshot).toHaveBeenCalledWith("scene_1", "snap_1");
+    // Deleting the parked notch returns to Live — the id no longer exists.
+    await vi.waitFor(() => expect(strip.parked).toBe(null));
+  });
+
+  it("restore does not ask — it captured first, so there is nothing to confirm", async () => {
+    const strip = await parked(async () => diff());
+    await strip.park("snap_1");
+    restoreSnapshot.mockResolvedValue({ id: "scene_1", title: "The Tide", body: "back" });
+    listSnapshots.mockResolvedValue({ snapshots: [SNAPSHOT] });
+
+    await strip.restore();
+
+    expect(confirmService.active).toBe(null);
+    expect(restoreSnapshot).toHaveBeenCalledWith("scene_1", "snap_1");
   });
 });

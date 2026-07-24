@@ -64,12 +64,16 @@ export function notchWhen(snapshot: Snapshot | null | undefined, now: Date = new
 }
 
 /**
- * A notch's tooltip. Most snapshots have no description — every automatic one,
- * and every explicit one taken in flow — so slice 1's tooltip is the date line
- * alone (§L: the absent case is the COMMON case and must read well on its own).
- * A description is an enrichment on top of it, and arrives with slice 4.
+ * A notch's tooltip: the relative date, whether it is kept, and the one-line
+ * description if it has one (ADR-0044 §L, #468).
+ *
+ * Most snapshots have no description — every automatic one, and every explicit
+ * one taken in flow — so the date line must read well on its own (§L: the
+ * absent case is the COMMON case). The description therefore *augments* the
+ * date and is appended only when present; it never replaces it.
  */
 export function notchTooltip(snapshot: Snapshot, now: Date = new Date()): string {
   const when = notchWhen(snapshot, now);
-  return snapshot.retention === "kept" ? `Snapshot · ${when} · kept` : `Snapshot · ${when}`;
+  const base = snapshot.retention === "kept" ? `Snapshot · ${when} · kept` : `Snapshot · ${when}`;
+  return snapshot.description ? `${base} — ${snapshot.description}` : base;
 }

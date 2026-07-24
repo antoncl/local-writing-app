@@ -617,6 +617,33 @@ export const api = {
       { method: "POST" },
     );
   },
+  /** Pin an automatic snapshot: flip `retention` from thinned to kept so it
+   *  survives thinning without re-capturing it (ADR-0043 Amendment 1).
+   *  Idempotent — pinning an already-kept snapshot returns it unchanged. */
+  pinSnapshot(sceneId: string, snapshotId: string) {
+    return request<Snapshot>(
+      `/scenes/${encodeURIComponent(sceneId)}/snapshots/${encodeURIComponent(snapshotId)}/pin`,
+      { method: "POST" },
+    );
+  },
+  /** Set (or clear, with `""`) the snapshot's one-line description (#468).
+   *  Writes the sidecar's authorial half only — the body and witness are
+   *  frozen. */
+  setSnapshotDescription(sceneId: string, snapshotId: string, description: string) {
+    return request<Snapshot>(
+      `/scenes/${encodeURIComponent(sceneId)}/snapshots/${encodeURIComponent(snapshotId)}/description`,
+      { method: "PUT", body: JSON.stringify({ description }) },
+    );
+  },
+  /** Delete one snapshot — the feature's only irreversible gesture, which is
+   *  why the surface confirms it (ADR-0043). Returns what remains, so the strip
+   *  re-lists in one call. */
+  deleteSnapshot(sceneId: string, snapshotId: string) {
+    return request<SnapshotList>(
+      `/scenes/${encodeURIComponent(sceneId)}/snapshots/${encodeURIComponent(snapshotId)}`,
+      { method: "DELETE" },
+    );
+  },
   listLoreEntries() {
     return request<LoreEntryList>("/lore");
   },

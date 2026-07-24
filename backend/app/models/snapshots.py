@@ -156,6 +156,19 @@ class Snapshot(BaseModel):
     # one; the surface needs the honest one.
     content_written_at: str = ""
     retention: Retention
+    # The author's one-line note on this snapshot (ADR-0043 Amendment 1, #468).
+    #
+    # Original data that exists nowhere else — deliberately **not** the
+    # denormalized `title` an earlier draft carried and removed: a title is a
+    # copy of something in the byte-copy's front matter, a description is the
+    # author's own. Same file, opposite reasoning.
+    #
+    # Part of the sidecar's **mutable, authorial half** (ADR-0043 Amendment 4),
+    # with `retention`. The evidentiary half — the `.md` body and the `witness`
+    # — is frozen: a witness describes the bytes it accompanies, and rewriting it
+    # destroys what makes it a witness. Setting a description never touches
+    # either.
+    description: str = ""
     # The schema version in force at capture. Snapshots are immutable, so a
     # restore that crosses a version boundary runs the ladder over that one body
     # on the way out — the stored record is never rewritten (ADR-0043).
@@ -187,10 +200,22 @@ class CaptureSnapshotRequest(BaseModel):
     That distinction is what stops a capture from a caller with no prose editor
     behind it from reporting every implicitly-detected entity as removed later.
 
-    The description field is slice 4; guessing its shape here would fix it.
+    The description field is set through its own route, not here: it is the
+    author's annotation of an *existing* record, not part of taking one.
     """
 
     dynamic_context: list[str] | None = None
+
+
+class SetSnapshotDescriptionRequest(BaseModel):
+    """Set (or clear, with `""`) a snapshot's one-line description (#468).
+
+    Touches only the sidecar's authorial half — never the `.md` body and never
+    the `witness` (ADR-0043 Amendment 4). A description is original data; a
+    title is a copy, and this is not that.
+    """
+
+    description: str = ""
 
 
 class SnapshotDetail(BaseModel):

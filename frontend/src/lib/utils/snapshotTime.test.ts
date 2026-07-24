@@ -27,6 +27,7 @@ function snapshot(id: string, capturedAt: string, contentWrittenAt: string, rete
     captured_at: capturedAt,
     content_written_at: contentWrittenAt,
     retention,
+    description: "",
     schema_version: 5,
   };
 }
@@ -110,5 +111,16 @@ describe("what the strip says out loud", () => {
     expect(notchTooltip({ ...AUTOMATIC, retention: "kept" }, NOW)).toBe(
       "Snapshot · Thursday 9th · kept",
     );
+  });
+
+  it("appends a description when there is one, and augments the date rather than replacing it", () => {
+    // §L: the description is an enrichment on top of the date, never instead of
+    // it. The common (empty) case is unchanged — the bare date line above.
+    expect(notchTooltip({ ...AUTOMATIC, description: "Before the rewrite" }, NOW)).toBe(
+      "Snapshot · Thursday 9th — Before the rewrite",
+    );
+    expect(
+      notchTooltip({ ...AUTOMATIC, retention: "kept", description: "Before the rewrite" }, NOW),
+    ).toBe("Snapshot · Thursday 9th · kept — Before the rewrite");
   });
 });

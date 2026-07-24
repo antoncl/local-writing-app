@@ -394,6 +394,51 @@ anything precedes its marker.
 The same rule covers a change that would escape its structural container: a run spanning a newline
 crosses into the next quoted line or list item, and one spanning `|` crosses a table cell.
 
+## Amendment 3 — the description edits behind a pencil; the two destructive verbs get opposite gates (2026-07-23, #468)
+
+From implementing slice 4 (pin · delete · description). Settles Open item 4 and records the surface for
+the two gestures §B already named but did not draw.
+
+### The description: shown when it exists, edited behind a pencil
+
+§L fixed two things and left the layout open: most snapshots have **no** description (every automatic
+one, and every explicit one taken in flow), so the empty case is the *common* case and must read well;
+and the description *augments* the date, never replaces it. Three candidate edit surfaces were built
+on the real token layer and compared in both themes, with and without a description —
+[`../mockups/0468-snapshot-description.html`](../mockups/0468-snapshot-description.html), the evidence
+for what follows.
+
+**Chosen: the description edits behind a pencil.** At rest the actions row shows only what exists — the
+one-liner in quotes with a small ✎ to edit it, or, when there is none, a single quiet `+ describe`. The
+text input appears *only* on the pencil. The two rejected candidates each put something permanent in the
+row for a field the author usually leaves blank: an always-present input (which a mostly-empty field
+made noise, and crowded the A/S/B control and Restore onto a second line on a narrow pane), and a
+second line under the date (always two lines tall, even blank). The pencil is the only one where the
+**common empty case shows nothing to fill in** — which is what §L asks for, and is the same
+reveal-on-engage shape the strip's own compact-at-rest rule already uses (§B). The cost, accepted: the
+enrichment is one gesture less discoverable, which is the right trade for a field whose absence is
+normal.
+
+The description also rides the notch **tooltip** (§L), appended after the date and the kept marker, and
+only when present.
+
+### Delete confirms, pin does not, and neither is a new control surface
+
+Both live in the parked actions row beside Restore — delete is reachable **only** from a parked notch,
+the same rule restore follows, so the drift report is on screen for every gesture that acts on the
+snapshot (§B; ADR-0043).
+
+- **Delete** routes through the app's existing destructive-confirm modal, which names what is going and
+  is styled for an irreversible action — and deliberately carries **no** "don't show again". This is
+  ADR-0043's asymmetry made concrete: restore captures first and asks nothing, delete is the one
+  irreversible gesture and is the one place the confirm habit has not been spent.
+
+- **Pin** appears only on a `thinned` notch. An explicit snapshot is already `kept`, and pin is
+  one-directional (ADR-0043 Amendment 4), so a pinned notch simply stops offering the button — the
+  affordance *is* the one-way rule, with nothing to press back. Pinning flips the tier, so the notch
+  redraws `kept` (taller, a step darker, §C) under the author's cursor: the shape change is the
+  confirmation, not a jump, and it is the honest picture of a record that genuinely changed tier.
+
 ## Non-goals
 
 - **A clean-reading mode for a snapshot.** The tint decision (F) costs the "read the snapshot as
@@ -414,7 +459,8 @@ crosses into the next quoted line or list item, and one spanning `|` crosses a t
    proportional.
 3. **Discoverability of the compact strip.** It may now be quiet enough that a new author never
    learns snapshots exist.
-4. **The description's presentation** (L).
+4. ~~**The description's presentation** (L).~~ **Settled by [Amendment 3](#amendment-3--the-description-edits-behind-a-pencil-the-two-destructive-verbs-get-opposite-gates-2026-07-23-468).**
+   Edited behind a pencil, so the common empty case shows nothing to fill in.
 5. ~~**The exact hex values** (H).~~ **Settled by [Amendment 2](#amendment-2--the-greyscale-channel-is-shape-and-an-unreadable-block-stacks-2026-07-22).**
    The greyscale re-check found that no hex value could satisfy the constraint, because §H's
    equal-chroma rule makes the pair equally luminous by construction. The values stand; the edges

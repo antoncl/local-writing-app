@@ -15,7 +15,8 @@
   // Compact at rest: while writing this is a quiet ruled line — small notches,
   // camera only, no labels. Parking is what earns the taller strip, the scale
   // ticks and the actions row (ADR-0038 §A's shape, applied to size).
-  import type { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
+  import { tick } from "svelte";
+  import { SNAPSHOT_DESCRIPTION_MAX, type SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
   import DriftReport from "@/components/editor/DriftReport.svelte";
   import { notchAges, notchTooltip, notchWhen } from "@/lib/utils/snapshotTime";
   import { LIVE_LEFT, TICKS, agePosition, notchPositions, trackSpanMinutes } from "@/lib/utils/snapshotTrack";
@@ -125,6 +126,47 @@
     }
     event.preventDefault();
   }
+
+  // The description edits in place (variant B, ADR-0044 §L / Open item 4): at
+  // rest the row shows only what exists — the one-liner with a pencil, or a
+  // quiet "+ describe" when there is none — so the common empty case shows
+  // nothing to fill in. The input appears only on the pencil.
+  let editingDesc = $state(false);
+  let descDraft = $state("");
+  let descInput = $state<HTMLInputElement | null>(null);
+
+  // Stepping to another notch abandons an open editor — the draft belonged to
+  // the notch the author just left. Reading `strip.parked` registers it as the
+  // dependency; `beginEdit` does not touch it, so opening the editor is safe.
+  $effect(() => {
+    strip.parked;
+    editingDesc = false;
+  });
+
+  async function beginEdit(): Promise<void> {
+    descDraft = strip.current?.description ?? "";
+    editingDesc = true;
+    await tick();
+    descInput?.focus();
+  }
+
+  function commitDesc(): void {
+    if (!editingDesc) return;
+    editingDesc = false;
+    // Trimming and the unchanged-text guard both live in `describe`, where a
+    // test can reach them — closing the editor without editing costs nothing.
+    void strip.describe(descDraft);
+  }
+
+  function onDescKeydown(event: KeyboardEvent): void {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      descInput?.blur(); // commits via onblur
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      editingDesc = false; // abandon; the window handler ignores INPUT targets
+    }
+  }
 </script>
 
 <svelte:window onkeydown={onKeydown} />
@@ -194,6 +236,36 @@
   <div class="snapshot-actions">
     <span class="asof">Snapshot · {notchWhen(strip.current)}</span>
 
+    <!-- The description (variant B). Nothing empty is shown: with a note, the
+         one-liner and a pencil to edit it; without one, a quiet "+ describe".
+         The input appears only on the pencil, so the common empty case is a
+         clean row (§L). Lives here because it is variable-width, like every
+         other thing in this row — the track never sees it (§E). -->
+    {#if editingDesc}
+      <input
+        class="desc-input"
+        type="text"
+        bind:value={descDraft}
+        bind:this={descInput}
+        placeholder="A one-line note…"
+        aria-label="Snapshot description"
+        maxlength={SNAPSHOT_DESCRIPTION_MAX}
+        onblur={commitDesc}
+        onkeydown={onDescKeydown}
+      />
+    {:else if strip.current?.description}
+      <span class="desc">
+        <span class="desc-text" title={strip.current.description}>“{strip.current.description}”</span>
+        <button type="button" class="icon-btn" title="Edit description" aria-label="Edit description" onclick={beginEdit}>
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" />
+          </svg>
+        </button>
+      </span>
+    {:else}
+      <button type="button" class="add-desc" onclick={beginEdit}>+ describe</button>
+    {/if}
+
     <!-- The compare axis. It lives HERE and not beside the track because it is
          variable-width, and nothing sharing the track's row may change width —
          that would slide every notch along the timeline (§E). -->
@@ -214,6 +286,19 @@
     <div class="spacer"></div>
     <button type="button" class="act act-restore" disabled={strip.busy} onclick={() => void strip.restore()}>
       Restore
+    </button>
+    <!-- Pin promotes an automatic to kept; an explicit one is already kept, so
+         the button appears only on a `thinned` notch and a pinned one simply
+         stops offering it — the affordance IS the one-directional rule. -->
+    {#if strip.current?.retention === "thinned"}
+      <button type="button" class="act" disabled={strip.busy} onclick={() => void strip.pin()}>
+        Pin
+      </button>
+    {/if}
+    <!-- Delete is the one irreversible gesture, so it is the one that confirms
+         (restore captures first, so it does not). -->
+    <button type="button" class="act act-del" disabled={strip.busy} onclick={() => strip.del()}>
+      Delete
     </button>
   </div>
 
@@ -556,5 +641,79 @@
     border-color: var(--accent);
     color: var(--accent-emphasis);
     font-weight: 600;
+  }
+  /* Delete is destructive, so it borrows `--danger` on hover — but only on
+     hover: a resting red button in a quiet writing desk reads as an alarm, and
+     the confirmation is what actually guards the action (ADR-0043). */
+  .act-del:hover:not(:disabled) {
+    border-color: var(--danger);
+    color: var(--danger);
+  }
+
+  /* The description surface (variant B). At rest it shows only what exists. */
+  .desc {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+  }
+  .desc-text {
+    font-style: italic;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 32ch;
+  }
+  .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text-3);
+    cursor: pointer;
+    border-radius: var(--r-sm);
+    transition: color 80ms linear, background-color 80ms linear;
+  }
+  .icon-btn:hover {
+    color: var(--accent-emphasis);
+    background: var(--accent-soft);
+  }
+  /* The empty case: a quiet invitation, never an empty box (§L). */
+  .add-desc {
+    font-size: var(--fs-sm);
+    color: var(--text-3);
+    background: none;
+    border: 0;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: var(--r-sm);
+  }
+  .add-desc:hover {
+    color: var(--accent-emphasis);
+  }
+  .desc-input {
+    font: inherit;
+    font-size: var(--fs-sm);
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 3px 8px;
+    min-width: 140px;
+    flex: 0 1 240px;
+  }
+  .desc-input::placeholder {
+    color: var(--text-3);
+    font-style: italic;
+  }
+  .desc-input:focus {
+    outline: none;
+    border-color: var(--accent);
   }
 </style>

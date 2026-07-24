@@ -27,6 +27,7 @@ import ast
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from layer_fixtures import set_projects_root
 
@@ -285,6 +286,42 @@ class ChangeGateEfficiencyTests(MemoTestCase):
             self.service._read_yaml = original  # type: ignore[method-assign]
 
         self.assertNotIn(other_path, read_paths, "saving one chat re-parsed another chat's file")
+
+    def test_change_gate_places_a_machine_write_under_a_noncanonical_folder(self) -> None:
+        """The machine layer folder must be canonical, or the change-gate's path
+        comparison misses a machine-layer write (#392).
+
+        Reproduces the CI failure without needing an 8.3 alias: a `..` detour is
+        the same kind of non-canonical spelling that differs from its `resolve()`
+        in string form. With the machine folder resolved, the just-written
+        assistant is placed into the memo; without it, the write no-ops and the
+        assistant vanishes until a reopen.
+        """
+        machine = self.base / "machine"
+        (machine / "assistants").mkdir(parents=True)
+        (machine / "assistants" / "seed.md").write_text(
+            "---\nid: seed\ntitle: Seed\nentry_type: assistant:assistant\nmetadata: {}\n---\n",
+            encoding="utf-8",
+        )
+        (machine / "sub").mkdir()
+        # Points at machine/assistants, but spelled with a `..` so it is not its
+        # own `resolve()`.
+        noncanonical = machine / "sub" / ".." / "assistants"
+
+        with patch("app.services.machine_settings.assistants_dir", return_value=noncanonical):
+            self.service._build_node_index(self.root)  # warm the memo, machine layer included
+            self.service._write_node_entry_file(
+                machine / "assistants" / "added.md",
+                "added_assistant",
+                "Added",
+                "assistant:assistant",
+                {},
+                "",
+            )
+            index = self.service._build_node_index(self.root)
+
+        self.assertIn("added_assistant", index.by_id, "the change-gate dropped a machine-layer write")
+        self.assertEqual(index.by_id["added_assistant"].kind, "assistant")
 
 
 class ScopeInvalidationTests(MemoTestCase):

@@ -136,6 +136,60 @@ discredit the whole report.
 This does not weaken the independence argument, which was about *not blocking on #314*. It narrows
 what #314 will fix for free: the token gets better, and this axis still needs its own record.
 
+## Amendment 4 — a sidecar has two halves; only the authorial one is mutable (2026-07-23, #468)
+
+Found while building slice 4 (pin · delete · description), which is the first work to *write* to a
+store this ADR calls immutable. "Immutable" was true and is still true, but it was stated about the
+snapshot as a whole, and the slice needs the boundary drawn one level finer — because pin changes
+`retention` and a description writes a field, and both are edits to a stored record. The rule the
+implementation must not cross has to say *which bytes*, not *the record*.
+
+**A sidecar has an evidentiary half and an authorial half, and immutability is a claim about the
+first.**
+
+- **Evidentiary — frozen.** The `.md` byte-copy, the `witness`, and the capture facts that date and
+  place it: `captured_at`, `content_written_at`, `schema_version`, `id`, `snapshot_of`. These are the
+  record of *what was there*, and the immutability this ADR already argues is exactly about them: **a
+  witness describes the bytes it accompanies**, so rewriting it — or the bytes, or the times that
+  pair them — destroys what makes it a witness. Nothing in this feature touches them; the migration
+  contract above (immutable at rest, migrate at restore) is the same rule for the same reason.
+
+- **Authorial — mutable.** `retention` and `description`. These are the author's *classification and
+  annotation* of the record, not the record of the world. Flipping `retention` from `thinned` to
+  `kept` changes whether the app may thin the snapshot; it says nothing about what the snapshot
+  witnessed. A description is original data the author adds *about* the record. Editing either leaves
+  every evidentiary claim byte-for-byte intact, so it is not the immutability violation it superficially
+  resembles — the reason delete was already argued not to contradict immutability (Amendment 1)
+  generalises to these.
+
+The boundary is made mechanical rather than trusted: one helper (`_mutate_sidecar`) rewrites *only*
+the authorial keys it is handed, reads and writes the `witness` block back unchanged, and never opens
+the `.md`. It is only ever handed `retention` and `description`. A test freezes the pair: after a pin
+and a description write, the body bytes and the witness are identical and only the authorial half moved.
+
+**Three consequences of the three gestures, stated so they are decided rather than discovered:**
+
+- **Pin is one-directional — there is no unpin.** `kept` means precisely "not subject to thinning",
+  and the store keeps no separate record of whether a snapshot was captured explicitly or promoted.
+  Letting `kept` fall back to `thinned` would therefore put an *explicit* capture at risk of the very
+  thinning its tier exists to escape — "explicit ones are never thinned" would stop holding. The
+  gesture only promotes; the surface offers it only on a `thinned` notch, so a pinned one simply stops
+  offering it.
+
+- **Pinning frees an automatic slot, and that is correct.** `_thin` keeps the last `AUTOMATIC_KEEP`
+  *thinned* records and `kept` ones never count, so pinning the oldest automatic makes room for one
+  more automatic on the next capture. The keep-five budget is a **window over a set the author can now
+  remove things from**, not a fixed-size drawer — which is the same property that makes single-snapshot
+  delete safe.
+
+- **Delete is the one irreversible gesture, so it is the one that confirms.** Restore captures first
+  and is therefore undoable (Amendment 1), so it asks nothing; delete is the opposite, and the
+  contrast is load-bearing rather than an inconsistency to iron out — a gate in front of a reversible
+  action only teaches the habit of clicking through gates, and a gate in front of the *only*
+  irreversible action is the one place that habit has not already been spent. The confirmation names
+  what is going, and carries **no** "don't show again": suppressing this gate is spending the one
+  habit the asymmetry exists to protect.
+
 ## Context
 
 Issue #6 records that "revisions" is ambiguous and lists four candidate meanings: per-save snapshots,

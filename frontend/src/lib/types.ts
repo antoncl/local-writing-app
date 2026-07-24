@@ -84,6 +84,10 @@ export type Snapshot = {
   content_written_at: string;
   /** `thinned` = automatic, subject to keep-five; `kept` = explicit, never thinned. */
   retention: "thinned" | "kept";
+  /** The author's optional one-line note (#468). Original data, not the
+   *  denormalized title — empty on every automatic snapshot and every explicit
+   *  one taken in flow, which is the common case (ADR-0044 §L). */
+  description: string;
   schema_version: number;
 };
 

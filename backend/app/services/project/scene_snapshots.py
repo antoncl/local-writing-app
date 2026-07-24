@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -69,6 +70,11 @@ SESSION_GAP_MINUTES = 30
 # recall of recent states, and that is roughly the depth a person holds. A
 # considered default, not a measured optimum.
 AUTOMATIC_KEEP = 5
+
+# A description is a one-liner (ADR-0044 §L). This caps a paste, not the
+# author's intent — long enough that no real note is truncated, short enough
+# that the sidecar cannot be made unbounded through this field.
+SNAPSHOT_DESCRIPTION_MAX = 280
 
 
 def _read_body_and_content_time(path: Path) -> tuple[bytes, str]:
@@ -163,6 +169,10 @@ class SceneSnapshotsMixin:
             # ADR forbids rewriting a stored snapshot in any case.
             content_written_at=str(data.get("content_written_at") or captured_at),
             retention=retention,
+            # Authorial half, absent on every snapshot taken before #468 and on
+            # every one the author never annotated — the common case (ADR-0044
+            # §L). Empty string, never `None`, so the field is uniform.
+            description=str(data.get("description") or ""),
             schema_version=int(data.get("schema_version") or 0),
         )
 
@@ -421,7 +431,111 @@ class SceneSnapshotsMixin:
         temp_path.write_bytes(data)
         temp_path.replace(path)
 
+    # ----- author gestures: pin · describe (ADR-0043 Amdt 1/4, #468) --------
+    #
+    # A snapshot's sidecar has two halves. The **evidentiary** half — the
+    # `witness`, `captured_at`, `content_written_at`, `schema_version`, `id`,
+    # `snapshot_of` — is frozen, because a witness describes the bytes it
+    # accompanies and rewriting it destroys what makes it a witness. The
+    # **authorial** half — `retention` and `description` — is the author's
+    # control over the record, and `_mutate_sidecar` is the only place it moves.
+    # Neither gesture opens the `.md`; the byte-copy is never touched.
+
+    def _mutate_sidecar(
+        self, root: Path, node_id: str, snapshot_id: str, **changes: Any
+    ) -> Snapshot:
+        """Rewrite only the named authorial keys of one sidecar.
+
+        Every other key — the `witness` among them — is read and written back
+        unchanged, so its content survives whole (`_write_yaml` is
+        `sort_keys=False`, so the frozen block keeps its shape as well as its
+        meaning). The scene body is never opened. This is the boundary ADR-0043
+        Amendment 4 draws made mechanical: the method physically cannot alter
+        anything but the keys it is handed, and it is only ever handed
+        `retention` and `description`.
+        """
+        self._require_snapshot(root, node_id, snapshot_id)
+        sidecar = self._snapshots_dir(root, node_id) / f"{snapshot_id}.yaml"
+        data = self._read_yaml(sidecar)
+        data.update(changes)
+        self._write_yaml(sidecar, data)
+        return self._read_snapshot_record(sidecar)
+
+    def pin_snapshot(self, scene_id: str, snapshot_id: str) -> Snapshot:
+        """Flip `retention` from `thinned` to `kept` — the third case the enum
+        was chosen for (ADR-0043 Amendment 1).
+
+        An automatic snapshot the author notices is worth keeping does not have
+        to be re-captured to become permanent. One-directional: there is no
+        unpin, because `kept` is exactly "not subject to thinning" and there is
+        no distinct 'this was captured explicitly' state to fall back to —
+        letting a `kept` record become `thinned` again would put an explicit
+        capture at risk of the very thinning the tier exists to escape.
+
+        Pinning an already-`kept` snapshot is a no-op, so the gesture is
+        idempotent and a double click cannot error.
+
+        **Pinning frees an automatic slot, and that is intended, not a leak.**
+        `_thin` keeps the last `AUTOMATIC_KEEP` *thinned* records and `kept`
+        ones never count, so pinning the oldest automatic makes room for one
+        more automatic on the next capture. The budget is a window over a set
+        the author can now take things out of.
+        """
+        root = self._require_project()
+        node_id = self._snapshot_source_id(scene_id)
+        record = self._require_snapshot(root, node_id, snapshot_id)
+        if record.retention == "kept":
+            return record
+        return self._mutate_sidecar(root, node_id, snapshot_id, retention="kept")
+
+    def set_snapshot_description(
+        self, scene_id: str, snapshot_id: str, description: str
+    ) -> Snapshot:
+        """Set (or clear, with `""`) the one-line description (#468).
+
+        Collapsed to a single line and trimmed: it is a one-liner by contract
+        (ADR-0044 §L), and a stored newline would break the tooltip and the
+        actions-row label that render it. Capped so a paste cannot make the
+        sidecar unbounded.
+        """
+        root = self._require_project()
+        node_id = self._snapshot_source_id(scene_id)
+        cleaned = " ".join(description.split())[:SNAPSHOT_DESCRIPTION_MAX]
+        return self._mutate_sidecar(root, node_id, snapshot_id, description=cleaned)
+
     # ----- deletion ---------------------------------------------------------
+
+    def delete_snapshot(self, scene_id: str, snapshot_id: str) -> SnapshotList:
+        """Remove one snapshot — the only irreversible gesture in the feature.
+
+        Both files go, or the leftover is exactly the unreachable residue
+        ADR-0043 rejects: a `.md` nothing lists, or a sidecar with no body to
+        view or restore. Returns what remains, so the strip re-lists in one call.
+
+        Thinning is untouched by the gap this leaves. `_thin` counts the
+        *thinned* records that exist at capture time, so removing one now simply
+        means the next automatic capture has one more slot before it evicts —
+        the same window, over a smaller set. There is no undelete: scene and
+        lore deletes are already hard deletes, and a feature that quietly
+        retained data after a delete would be the only such thing in the project.
+        """
+        root = self._require_project()
+        node_id = self._snapshot_source_id(scene_id)
+        self._require_snapshot(root, node_id, snapshot_id)
+        folder = self._snapshots_dir(root, node_id)
+        (folder / f"{snapshot_id}.md").unlink(missing_ok=True)
+        (folder / f"{snapshot_id}.yaml").unlink(missing_ok=True)
+        remaining = self._snapshot_records(root, node_id)
+        if not remaining:
+            # The last one goes with its directory. "Both files go" has to mean
+            # the store is back to how it was before the first capture, or every
+            # scene the author ever snapshotted and then cleared leaves an empty
+            # folder behind — the residue ADR-0043 rejects, in miniature.
+            # `rmdir` refuses a non-empty directory, so an unexpected file is
+            # left in place rather than swept up with the record.
+            with suppress(OSError):
+                folder.rmdir()
+        return SnapshotList(snapshots=remaining)
 
     def delete_scene_snapshots(self, root: Path, node_id: str) -> None:
         """A scene and its snapshots are one unit of deletion (ADR-0043).

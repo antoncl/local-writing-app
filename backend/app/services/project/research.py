@@ -27,6 +27,7 @@ slice 1).
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 from typing import Any
 
@@ -229,12 +230,13 @@ class ResearchNotesMixin:
         purge_ids = TreeStructureService.collect_descendant_ids(
             node
         ) | TreeStructureService.collect_leaf_ids(node)
+        # Collect first, then delete as one batch (#476) so a research subtree of
+        # many notes writes a single coalesced snapshot instead of one per note.
+        paths: list[Path] = []
         for note_id in note_ids:
-            try:
-                path = self._path_for_node_id(note_id, "research")
-                self._delete_node_file(path)  # unlink + un-shadow the memo (#392)
-            except ProjectServiceError:
-                pass
+            with contextlib.suppress(ProjectServiceError):
+                paths.append(self._path_for_node_id(note_id, "research"))
+        self._delete_node_files(tuple(paths))  # unlink all + un-shadow the memo once
 
         TreeStructureService.remove_node_by_id(document.root, node_id)
         tree.write(document)

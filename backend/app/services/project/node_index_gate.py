@@ -32,6 +32,26 @@ index: a unit resolves its index once and never sees it change under it. The
 transient second copy a swap costs is free against ADR-0040's measured memory
 headroom (three orders of magnitude).
 
+## The snapshot flush is deferred behind a dirty flag (#476 / ADR-0040)
+
+The in-memory patch is eager — a write publishes the new index immediately, so
+every reader sees the change at once. The **snapshot** it derives is not: writing
+it is ~16–31 ms of serialize + atomic write, and it is pure rebuildable cache (a
+crash before it lands loses nothing the next open's manifest diff cannot
+recover). So a structural write patches the memo and registers a **pending
+flush** rather than writing then and there; the flush fires at a boundary the app
+already reaches — the next `resolve()` (a read is here anyway), `invalidate()`
+(flush-if-dirty *before* clearing, so a project switch never strands a write),
+and clean shutdown. This is ADR-0040's "dirty-flag" reading, chosen over its
+"debounce" reading: no background timer thread, and — per ADR-0043 Amendment 2's
+own logic — an idle/close timer is the one trigger a crash does not fire, so it
+cannot be what durability rests on. Here nothing durable rests on it anyway.
+
+Each new write **overwrites** the pending flush with its own, so a burst of
+structural edits (a chapter delete unlinks 20 scenes, the reference purge then
+rewrites every referencing file) coalesces to a single snapshot write at the next
+boundary instead of one per file.
+
 ## Invalidation is keyed to the *open event*, not the root path
 
 `CurrentScope.set` clears the memo on every scope change (`invalidate`). That is
@@ -89,6 +109,12 @@ class NodeIndexGate:
         # call the build path without deadlocking on the lock it already holds.
         self._lock = threading.RLock()
         self._current: ResolvedIndex | None = None
+        # A deferred snapshot write (#476). Set when a write patches the memo,
+        # cleared when it flushes. A self-contained thunk — it captures the
+        # writer and the index to write — so `invalidate()` and the shutdown
+        # hook can fire it without a `ProjectService` in hand. Overwritten by
+        # each new write, which is how a burst coalesces to one flush.
+        self._pending_flush: Callable[[], None] | None = None
 
     def peek(self, root: Path) -> ResolvedIndex | None:
         """The held index for `root`, or None. Lock-free — a single attribute
@@ -108,25 +134,45 @@ class NodeIndexGate:
         """
         hit = self.peek(root)
         if hit is not None:
+            # A read is here anyway — flush a deferred snapshot now so the disk
+            # cache tracks the memo. The unlocked pre-check keeps the common
+            # clean read (nothing pending) lock-free; a stale read of the flag
+            # only ever defers the flush one more `resolve`, never loses it.
+            if self._pending_flush is not None:
+                self.flush()
             return hit.index
         with self._lock:
             hit = self.peek(root)
             if hit is not None:
+                if self._pending_flush is not None:
+                    self._flush_locked()
                 return hit.index
+            # A pending flush here belongs to the *outgoing* current (a miss means
+            # a different root, or none): flush it before building so its snapshot
+            # is never dropped. In normal flow `invalidate` already did on the
+            # scope change; this makes the gate correct even without that. The
+            # cold build then writes its own snapshot, so nothing is pending for
+            # what we publish.
+            self._flush_locked()
             built = build()
             self._current = built
             return built.index
 
     def apply(
-        self, root: Path, mutate: Callable[[ResolvedIndex], ResolvedIndex | None]
+        self,
+        root: Path,
+        mutate: Callable[[ResolvedIndex], ResolvedIndex | None],
+        flush: Callable[[ResolvedIndex], None],
     ) -> None:
         """Run `mutate` against the held index for `root`, under the lock.
 
         `mutate` returns the new `ResolvedIndex` to publish, or None to leave the
         slot untouched — the change-gate's no-op verdict for a write that changed
-        nothing the index holds. If no index is held for `root` (nothing was ever
-        resolved, or the scope moved on), there is nothing to maintain and this
-        is a no-op: the next `resolve` will build cold.
+        nothing the index holds. On a publish, `flush` is captured as the pending
+        snapshot write (#476) rather than run now; it fires at the next boundary.
+        If no index is held for `root` (nothing was ever resolved, or the scope
+        moved on), there is nothing to maintain and this is a no-op: the next
+        `resolve` will build cold.
         """
         with self._lock:
             current = self._current
@@ -135,11 +181,38 @@ class NodeIndexGate:
             updated = mutate(current)
             if updated is not None:
                 self._current = updated
+                self._pending_flush = lambda: flush(updated)
+
+    def flush(self) -> None:
+        """Write any deferred snapshot now. A no-op when nothing is pending.
+
+        Called from `resolve` (a reader arrived) and the clean-shutdown hook. The
+        write runs under the lock — the same footing as the synchronous write it
+        replaced — and is best-effort: `_write_index_snapshot` swallows an
+        `OSError`, so a read-only cache folder costs the next open its speed and
+        nothing else.
+        """
+        with self._lock:
+            self._flush_locked()
+
+    def _flush_locked(self) -> None:
+        pending = self._pending_flush
+        if pending is not None:
+            # Clear first: the write is idempotent, and clearing before running
+            # means a write that somehow re-enters cannot loop on its own thunk.
+            self._pending_flush = None
+            pending()
 
     def invalidate(self) -> None:
         """Drop the memo. Called on every scope change (`CurrentScope.set`), so a
-        re-open of the same project rebuilds rather than serving a stale index."""
+        re-open of the same project rebuilds rather than serving a stale index.
+
+        Flushes a pending snapshot **before** clearing (#476): a scope switch
+        would otherwise strand the outgoing project's deferred write, and the
+        incoming project's open does not rebuild it. The flush writes the
+        outgoing root's index, which is exactly what the captured thunk holds."""
         with self._lock:
+            self._flush_locked()
             self._current = None
 
 

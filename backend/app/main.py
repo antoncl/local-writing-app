@@ -8,6 +8,10 @@ here. The shared `ProjectService` singleton + error translation live in
 
 from __future__ import annotations
 
+import atexit
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -21,8 +25,24 @@ from app.routers import (
     scenes,
     snapshots,
 )
+from app.services.project.node_index_gate import node_index_gate
 
-app = FastAPI(title="Local Writing Service", version="0.5.4")
+# The node-index snapshot is flushed lazily behind a dirty flag (#476); write any
+# pending one out on a clean shutdown so the next open serves it rather than
+# rebuilding. Safe by construction either way — a kill that fires neither hook
+# loses only rebuildable cache, which the next open's manifest diff recovers.
+# `atexit` is the catch-all (covers uvicorn's graceful stop and any non-server
+# entrypoint); the lifespan shutdown is the server's first-class hook.
+atexit.register(node_index_gate.flush)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    yield
+    node_index_gate.flush()
+
+
+app = FastAPI(title="Local Writing Service", version="0.5.4", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     # Local-first: the backend only ever binds 127.0.0.1 (never network-exposed),

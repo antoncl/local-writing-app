@@ -77,6 +77,18 @@ class ProjectNodeMixin:
         self._write_project_node_file(path, node)
         # project.yaml's title is the single source (#399 retired the cached
         # copy on the service), so keep it in step with the node's.
+        #
+        # Ordering note (#476): the project.md write above patches the memo's
+        # project-node title and marks a deferred flush; this project.yaml write
+        # then invalidates the whole memo (project.yaml fans out —
+        # `_maintain_index_after_write`). The patch is **not** lost — invalidate
+        # now flushes-before-clear, and the next resolve rebuilds cold and reads
+        # the title back from project.md. The narrower "only invalidate when
+        # `inherits` changed" rule the #476 comment floats is deliberately NOT
+        # taken: the index reads its project-node title from project.md, never
+        # from project.yaml, so a title sync is already index-irrelevant, and a
+        # chain-diff that guessed wrong would serve a stale layer chain — a
+        # silent-staleness bug traded for skipping one rebuild on a rare rename.
         self._sync_project_yaml_title(request.title)
         return self.read_project_node()
 

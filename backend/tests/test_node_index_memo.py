@@ -34,8 +34,11 @@ from layer_fixtures import set_projects_root
 from app.models import (
     CreateChatSessionRequest,
     CreateLoreEntryRequest,
+    CreateSceneRequest,
+    CreateStructureNodeRequest,
     SaveChatSessionRequest,
     SaveLoreEntryRequest,
+    SaveProjectNodeRequest,
     SaveSceneRequest,
 )
 from app.services.project.node_index_gate import node_index_gate
@@ -322,6 +325,115 @@ class ChangeGateEfficiencyTests(MemoTestCase):
 
         self.assertIn("added_assistant", index.by_id, "the change-gate dropped a machine-layer write")
         self.assertEqual(index.by_id["added_assistant"].kind, "assistant")
+
+
+class DeferredFlushTests(MemoTestCase):
+    """The write-back is deferred behind a dirty flag and coalesced (#476).
+
+    A structural write patches the memo eagerly but registers the snapshot write
+    as a *pending flush* rather than doing it then and there; the flush fires at a
+    boundary — the next read, a scope invalidation, or clean shutdown. A burst of
+    structural writes therefore collapses to one snapshot write.
+    """
+
+    def test_structural_writes_defer_and_coalesce_to_one_flush(self) -> None:
+        scene_id = self._first_scene_id()
+        path = self.service._path_for_node_id(scene_id, "scene")
+        self.service._build_node_index(self.root)  # warm the memo
+
+        writes = self._spy("_write_index_snapshot")
+        # Three structural notifications with no interleaved read.
+        for _ in range(3):
+            self.service._apply_index_write((path,), structural=True)
+        self.assertEqual(writes[0], 0, "a structural write flushed synchronously instead of deferring")
+
+        # The next read is the boundary: the coalesced snapshot is written once.
+        self.service._build_node_index(self.root)
+        self.assertEqual(writes[0], 1, "three structural writes did not coalesce to a single flush")
+
+        # And the flush is one-shot — a second read finds nothing pending.
+        self.service._build_node_index(self.root)
+        self.assertEqual(writes[0], 1, "the pending flush was not cleared after firing")
+
+    def test_a_batch_delete_writes_far_fewer_snapshots_than_it_deletes(self) -> None:
+        """Deleting a chapter unlinks every scene under it; under #476 those
+        per-file writes collapse to a handful of flushes instead of one each."""
+        structure = self.service.read_structure()
+        doc = self.service.create_structure_node(
+            CreateStructureNodeRequest(title="Chapter", entry_type="scene:chapter", parent_id=structure.root.id)
+        )
+        chapter_id = next(c.id for c in doc.root.children if c.type == "scene:chapter")
+        scene_count = 12
+        for i in range(scene_count):
+            self.service.create_scene(CreateSceneRequest(title=f"Scene {i}", parent_id=chapter_id))
+        self.service._build_node_index(self.root)  # warm
+
+        writes = self._spy("_write_index_snapshot")
+        self.service.delete_structure_node(chapter_id)
+        # The pre-#476 behaviour was one full snapshot serialization per deleted
+        # scene (plus the purge's rewrites). Coalesced, it is a small constant.
+        self.assertLess(
+            writes[0], scene_count, f"{scene_count} deletes wrote {writes[0]} snapshots; they did not coalesce"
+        )
+
+    def test_invalidate_flushes_a_pending_snapshot_before_clearing(self) -> None:
+        scene_id = self._first_scene_id()
+        path = self.service._path_for_node_id(scene_id, "scene")
+        self.service._build_node_index(self.root)  # warm
+
+        writes = self._spy("_write_index_snapshot")
+        self.service._apply_index_write((path,), structural=True)  # deferred
+        self.assertEqual(writes[0], 0)
+
+        node_index_gate.invalidate()
+        self.assertEqual(writes[0], 1, "invalidate cleared the memo without flushing the pending write")
+        self.assertIsNone(node_index_gate.peek(self.root), "the memo survived invalidation")
+
+    def test_clean_shutdown_flush_writes_a_pending_snapshot(self) -> None:
+        scene_id = self._first_scene_id()
+        path = self.service._path_for_node_id(scene_id, "scene")
+        self.service._build_node_index(self.root)  # warm
+
+        writes = self._spy("_write_index_snapshot")
+        self.service._apply_index_write((path,), structural=True)  # deferred
+
+        node_index_gate.flush()  # the shutdown hook
+        self.assertEqual(writes[0], 1, "the shutdown flush did not write the pending snapshot")
+        node_index_gate.flush()
+        self.assertEqual(writes[0], 1, "the shutdown flush was not idempotent")
+
+    def test_deleting_a_never_indexed_file_defers_nothing(self) -> None:
+        """Finding 2 (#476): `structural=True` skips the value comparison, so a
+        delete of a file that was never indexed and is already gone must be
+        recognised as a no-op — no snapshot write, and nothing left pending."""
+        self.service._build_node_index(self.root)  # warm
+
+        ghost = self.root / "scenes" / "ghost-never-indexed.md"
+        writes = self._spy("_write_index_snapshot")
+        self.service._delete_node_file(ghost)
+        self.assertEqual(writes[0], 0, "a no-op delete wrote a snapshot")
+
+        self.service._build_node_index(self.root)
+        self.assertEqual(writes[0], 0, "a no-op delete left a pending flush behind")
+
+    def test_a_project_node_rename_survives_the_project_yaml_write(self) -> None:
+        """Finding 3 (#476): save_project_node patches the memo (project.md) then
+        the title sync writes project.yaml, which invalidates the memo. The patch
+        must not be lost — invalidate flushes-before-clears and the next resolve
+        rebuilds from project.md."""
+        current = self.service.read_project_node()
+        project_id = current.id
+        self.service._build_node_index(self.root)  # warm
+
+        self.service.save_project_node(
+            SaveProjectNodeRequest(title="Renamed Book", body="", entry_type=current.entry_type, metadata={})
+        )
+        self.assertEqual(self.service.read_project_node().title, "Renamed Book")
+        self.assertEqual(
+            self.service._build_node_index(self.root).by_id[project_id].title,
+            "Renamed Book",
+            "the project-node rename was lost when project.yaml invalidated the memo",
+        )
 
 
 class ScopeInvalidationTests(MemoTestCase):

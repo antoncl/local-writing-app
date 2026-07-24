@@ -298,6 +298,14 @@ class ResearchNotesMixin:
                 "The note was modified by someone else. Reload and retry.", 409
             )
         node_id = self._node_id_for_path(path, front_matter)
+        # Not as-of-L (#393): research is organised as a per-project tree
+        # (`research.structure.yaml`) and nothing inherits that tree across
+        # layers, so a note is only ever authored at the resolution scope.
+        # Inheriting research is arguable in principle — unlike a scene, a note
+        # is fairly self-contained — but the tree is the knot: an inherited note
+        # has no defined position in the inheriting project's tree, the same
+        # obstacle an inherited scene hits in the manuscript. **Not planned, and
+        # not a deferred TODO.** As-of-L is for inherited nodes (lore).
         schema = self.read_metadata_schema()
         entry_type = request.entry_type or "research:note"
         if entry_type not in schema.entry_types:

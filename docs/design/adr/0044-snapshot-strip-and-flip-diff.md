@@ -506,6 +506,61 @@ treatment. Exact wording and retirement are an implementation judgement, not a d
 Adopting a whole region by projection is not free-form editing while comparing — it takes no keystroke
 and recomputes no diff as anyone types.
 
+## Amendment 5 — resting snapshots carry the cool tint, and a playhead marks the parked notch (2026-07-24, #481)
+
+From testing the shipped strip. It *works*, but two things read wrong, both in the **engaged** states
+(the compact quiet of §B while writing is right and stays): the notches are hard to see, and it is
+hard to tell which one is active. Evidence built on the real token layer and iterated with Anton,
+including a `filter: grayscale(1)` toggle that made the §H constraint visible.
+
+### The notches were grey-on-grey; snapshots now carry the cool tint
+
+§H already assigns the pair: Live warm and present, snapshots cool and past. But the shipped strip
+coloured only the *active* notch cool and left every resting one on the neutral ramp
+(`--border-strong`) — one step from the rule's own `--border`. A faint 2px stick against a hairline of
+nearly the same grey. Parking bought no legibility either; the automatic notches stayed grey.
+
+**So resting snapshots now take the cool tint at full strength** — `--diff-was`, lifting §H's identity
+from the active-only case to every snapshot mark. *Full* strength, not a quieter resting step, is a
+deliberate call (Anton): absent a population of test users to tune a middle ground, always-legible
+beats the quietest desk. This trades a little of §B's quiet-at-rest, weighed and accepted.
+
+### The tint cannot be what makes a notch visible — that was §H's own finding
+
+Amendment 2 measured it: warm and cool are equal-luminance by construction (greyscale ΔL 0.1–5.4 out
+of 255), so they are the *same grey*. It follows that colour can only ever be the **meaning** layer
+here; it can never be the channel that makes a mark legible. Legibility rides the two channels that
+carry luminance and form: an automatic capture is **hollow**, a kept one **filled** — the class reads
+as shape, which survives greyscale — and engagement lifts height, not hue. Per Amendment 2's
+generalised rule, every distinction keeps a non-colour backstop: present/past by **position** (Live is
+always the rightmost mark), active/resting by the **playhead** below, kept/automatic by **shape**.
+
+### The active notch gets a playhead, not a recoloured mark
+
+"Which notch is active" was encoded as a 1px width bump, a colour swap, and a small dot below the foot
+— all modifications *to the mark*, none of them a **position**. Meanwhile Live already carried a proper
+halo, so the present was well-marked and the parked past was not. **A playhead resolves it**: a
+full-height hairline riding the parked notch's position, capped by a downward triangle. It reads as a
+place rather than a property, and it is the one cue that stays legible in greyscale — so its cap is
+sized generously (≈12×8px), because in greyscale the cap *is* the "you are here."
+
+The playhead is **cool, always, and exists only while parked** — parking is only ever onto a snapshot
+(Live is never a parked notch), so Live keeps its own warm halo and shows no playhead. This holds §J
+as written: the cursor is present only during the temporary parked condition and vanishes with it.
+
+**Its motion is load-bearing, not decoration** (Anton): the slide between notches carries the eye to
+the new position, and its length reads as how far back in time the jump was. It uses the strip's own
+160ms ease-out so it reads as part of the strip moving. Because the motion *is* the cue,
+`prefers-reduced-motion` does not drop it silently — the slide is removed but a persistent halo keeps
+the cursor findable at its destination.
+
+### Reveal-on-approach was considered and dropped
+
+An earlier draft kept the resting notches quiet and *revealed* them (height and contrast) as the
+pointer neared the track — the trick the capture button uses — to reconcile visibility with §B. Once
+rest-visibility went to maximum there was nothing faint left to reveal, so the mechanism earned
+nothing and was cut. The capture button's own reveal is unrelated and stays.
+
 ## Non-goals
 
 - **A clean-reading mode for a snapshot.** The tint decision (F) costs the "read the snapshot as

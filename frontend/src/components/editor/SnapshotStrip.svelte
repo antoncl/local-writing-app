@@ -35,6 +35,17 @@
   let visibleTicks = $derived(TICKS.filter((tick) => tick.minutes <= span));
   let parked = $derived(strip.parked !== null);
 
+  // The playhead marks the parked notch: a cursor rides its position rather than
+  // recolouring the mark, so "which is active" reads as a place, not a 1px width
+  // change. Cool always — parking is only ever onto a snapshot (Live is never
+  // parked, so it keeps its own warm halo and shows no playhead). `-1` at Live
+  // gates the element out of the DOM entirely (§J: no permanent glyph on a
+  // temporary condition).
+  let currentIndex = $derived(
+    strip.parked === null ? -1 : strip.snapshots.findIndex((snapshot) => snapshot.id === strip.parked),
+  );
+  let playheadLeft = $derived(currentIndex >= 0 ? positions[currentIndex] : LIVE_LEFT);
+
   // ← → move through time; Esc returns to Live. No held modifier: repeatedly
   // holding Shift trips Windows FilterKeys and five presses fire Sticky Keys,
   // and this is a Windows-first app. It is not needed anyway — the compare view
@@ -208,6 +219,13 @@
       aria-pressed={!parked}
       onclick={() => void strip.park(null)}
     ><i></i></button>
+
+    {#if parked && currentIndex >= 0}
+      <!-- The playhead: the parked cursor. It rides the notch's position and
+           animates between notches so the eye is carried to the new one; the
+           slide length also reads as how far back in time the jump was. -->
+      <div class="playhead" style={`left: ${playheadLeft}%`} aria-hidden="true"></div>
+    {/if}
   </div>
 
   <!-- Fixed width in BOTH states. Anything here that grew or vanished would
@@ -451,60 +469,99 @@
        the notches hanging above the strip while it grows (#406 follow-up). */
     transition: bottom 160ms ease-out;
   }
+  /* Snapshots read as the past, so they carry the diff's cool tint at full
+     strength (#481) — with no test-user population to tune a quieter resting
+     state, always-legible beats the quietest desk. Automatic captures are
+     HOLLOW, kept ones FILLED: the class reads as SHAPE, which survives greyscale
+     where the tint cannot (ADR-0044 §H — warm and cool are equal-luminance by
+     construction, so hue can only ever be the meaning layer, never the one that
+     makes a mark visible). */
   .notch i {
     display: block;
-    width: 2px;
+    width: 4px;
     height: 9px;
+    border: 1.5px solid var(--diff-was);
     border-radius: 1px;
-    background: var(--border-strong);
-    transition: background-color 80ms linear, height 80ms linear;
+    background: transparent;
+    transition: height 80ms linear, box-shadow 80ms linear;
   }
   .notch.kept i {
-    height: 17px;
-    background: var(--text-3);
-  }
-  .notch:hover i,
-  .notch:focus-visible i {
-    background: var(--diff-was);
-  }
-  .notch.current i {
     width: 3px;
+    height: 17px;
+    border: 0;
     background: var(--diff-was);
   }
-  /* The parked marker sits at the foot of the notch, ABOVE the rule (#406
-     follow-up). It used to hang below the rule (bottom:-4px), which was clear
-     when ticks lived above the line but now lands in the tick band — parking a
-     notch onto a 1h/1d/1w tick reprinted the collision the tick fix removed.
-     Above the rule there are no ticks, so the marker cannot meet one whatever
-     the spacing does. */
-  .notch.current::after {
-    content: "";
-    position: absolute;
-    bottom: 0;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: var(--diff-was);
+  /* Hover, focus and the parked notch are affordance only — the tint is already
+     full — so they add the soft wash as a HALO rather than a colour change.
+     Scoped off Live, which owns the warm treatment below. The playhead is the
+     primary "you are here"; this halo is the quiet confirmation under it. */
+  .notch:not(.notch-live):hover i,
+  .notch:not(.notch-live):focus-visible i,
+  .notch:not(.notch-live).current i {
+    box-shadow: 0 0 0 2px var(--diff-was-soft);
   }
 
   /* Live is warm and reads as the present; the snapshots are cool and read as
-     the past (§H). Colour, never a glyph: a snapshot difference exists only
-     while parked, and a glyph would put a permanent-looking mark on a temporary
-     condition (§J). */
-  /* `.notch.notch-live`, not `.notch-live`, and the doubled class is
-     load-bearing: Live is `.current` at rest, and `.notch.current i` above
-     would otherwise outrank a single-class rule and paint the present in the
-     PAST's colour — the one thing this pair must never do. */
+     the past (§H). Colour, never a glyph (§J). Live is FILLED warm — it must
+     override the hollow-cool base every snapshot notch now uses, so it resets
+     both the border and the background. */
+  /* `.notch.notch-live`, not `.notch-live`: the doubled class keeps Live's fill
+     ahead of the shared `.notch i` base whatever order the file lands in. */
   .notch.notch-live i {
     width: 3px;
     height: 21px;
+    border: 0;
     border-radius: 2px;
     background: var(--diff-now);
   }
   .notch-live.current i {
     box-shadow: 0 0 0 3px var(--diff-now-soft);
+  }
+
+  /* The playhead — the parked cursor. A hairline riding the notch's position
+     with a downward cap; the eye tracks it to the notch and the slide reads as
+     distance travelled in time. Cool always: parking is only ever onto a
+     snapshot. The cap is deliberately chunky (12×8) so it carries the "you are
+     here" cue in greyscale, where the cool tint flattens into the notches' own
+     grey (§H). */
+  .playhead {
+    position: absolute;
+    bottom: var(--rule-bottom);
+    width: 0;
+    transform: translateX(-50%);
+    pointer-events: none;
+    transition: left 160ms ease-out, bottom 160ms ease-out;
+  }
+  .playhead::before {
+    content: "";
+    position: absolute;
+    left: -0.75px;
+    bottom: 0;
+    width: 1.5px;
+    height: 28px;
+    background: var(--diff-was);
+  }
+  .playhead::after {
+    content: "";
+    position: absolute;
+    left: -6px;
+    bottom: 27px;
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 8px solid var(--diff-was);
+  }
+  /* Motion is the attention cue here, so reduced-motion must not drop it in
+     silence: the slide is removed, but a persistent halo keeps the cursor
+     findable at its new position. */
+  @media (prefers-reduced-motion: reduce) {
+    .playhead {
+      transition: none;
+    }
+    .playhead::before {
+      box-shadow: 0 0 0 2px var(--diff-was-soft);
+    }
   }
 
   .strip-right {

@@ -18,6 +18,7 @@
     ribbon = "",
     ribbonMark = "",
     tone = "mutation",
+    onRunClick,
   }: {
     html: string;
     label: string;
@@ -28,17 +29,56 @@
     ribbonMark?: string;
     /** Which axis this overlay belongs to, which is all the colour means. */
     tone?: "mutation" | "snapshot";
+    /** When set, changed runs become clickable to adopt one region while parked
+     *  (ADR-0044 Amendment 4). No glyph is added — the run's own colour is the
+     *  affordance (§J) — and this is a pointer gesture only, so the compare
+     *  view's whole keyboard stays free for A/S/B (§I). */
+    onRunClick?: (regionId: number, kind: "now" | "was") => void;
   } = $props();
+
+  let contentEl: HTMLElement | undefined = $state();
+
+  /** A click on the rendered HTML: find the run the author hit and hand its
+   *  region + side up. */
+  function handleRunClick(event: MouseEvent): void {
+    if (!onRunClick) return;
+    const hit = (event.target as HTMLElement | null)?.closest?.("[data-region]") as HTMLElement | null;
+    if (!hit) return;
+    const regionId = Number(hit.dataset.region);
+    if (!Number.isInteger(regionId)) return;
+    const kind = hit.classList.contains("r-was") || hit.classList.contains("blk-was")
+      ? "was"
+      : hit.classList.contains("r-now") || hit.classList.contains("blk-now")
+        ? "now"
+        : null;
+    if (kind) onRunClick(regionId, kind);
+  }
+
+  // Delegated because the runs come from `{@html}` — there is nothing to bind a
+  // handler to per run — and attached imperatively so the static container needs
+  // no interactive ARIA role. It is a pointer gesture only: adopting takes no
+  // key, so A/S/B and the arrows stay free (ADR-0044 §I).
+  $effect(() => {
+    const el = contentEl;
+    if (!el || !onRunClick) return;
+    el.addEventListener("click", handleRunClick);
+    return () => el.removeEventListener("click", handleRunClick);
+  });
 </script>
 
-<div class="effective-body" class:snapshot={tone === "snapshot"} aria-label={label}>
+<div
+  class="effective-body"
+  class:snapshot={tone === "snapshot"}
+  class:interactive={!!onRunClick}
+  aria-label={label}
+>
   {#if ribbon}
     <div class="effective-body-ribbon">
       {#if ribbonMark}<span aria-hidden="true">{ribbonMark}</span>{/if}
       {ribbon}
     </div>
   {/if}
-  <div class="effective-body-content">
+  <div class="effective-body-content" bind:this={contentEl}>
     <!-- eslint-disable-next-line svelte/no-at-html-tags — sceneMarkdownToHtml output, same trust level as the editor load path -->
     {@html html}
   </div>
@@ -154,5 +194,30 @@
   }
   .effective-body-content :global(.blk p:last-child) {
     margin-bottom: 0;
+  }
+
+  /* ---- Adopting a region (ADR-0044 Amendment 4, #419) ----------------------
+     Only when the overlay is interactive. The colour is already the affordance
+     (§J adds no glyph); hover only firms the edge of the run under the cursor —
+     the warm side deepens its wash, the cool side trades its dotted rule for a
+     solid one — so the target reads without a new mark. Pointer-only (§I). */
+  .effective-body.interactive :global(.r-now),
+  .effective-body.interactive :global(.r-was),
+  .effective-body.interactive :global(.blk-now),
+  .effective-body.interactive :global(.blk-was) {
+    cursor: pointer;
+  }
+  .effective-body.interactive :global(.r-now:hover) {
+    background: var(--diff-now-edge);
+  }
+  .effective-body.interactive :global(.r-was:hover) {
+    box-shadow: inset 0 -2px 0 var(--diff-was);
+  }
+  .effective-body.interactive :global(.blk-now:hover) {
+    border-left-width: 5px;
+  }
+  .effective-body.interactive :global(.blk-was:hover) {
+    border-left-style: solid;
+    border-left-width: 5px;
   }
 </style>

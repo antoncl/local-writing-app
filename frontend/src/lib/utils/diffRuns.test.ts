@@ -26,7 +26,7 @@
  */
 import { describe, expect, it } from "vitest";
 import fixtures from "./diffRuns.fixtures.json";
-import { renderDiffRuns } from "./diffRuns";
+import { adoptRegion, groupRuns, renderDiffRuns } from "./diffRuns";
 import { sceneMarkdownToHtml } from "./markdown";
 import type { DiffRun, DiffView } from "@/lib/types";
 
@@ -83,12 +83,14 @@ function leaks(html: string): string[] {
  * swap moves them to the wrong class; a dropped wrapper changes the count.
  */
 function marks(html: string): Record<string, number> {
+  // The runs now carry a `data-region` and a `title` (Amendment 4), so the
+  // class is no longer the whole opening tag — match up to the `>`.
   const count = (pattern: RegExp) => (html.match(pattern) ?? []).length;
   return {
-    "r-now": count(/<span class="r-now">/g),
-    "r-was": count(/<span class="r-was">/g),
-    "blk-now": count(/<div class="blk blk-now">/g),
-    "blk-was": count(/<div class="blk blk-was">/g),
+    "r-now": count(/<span class="r-now"[^>]*>/g),
+    "r-was": count(/<span class="r-was"[^>]*>/g),
+    "blk-now": count(/<div class="blk blk-now"[^>]*>/g),
+    "blk-was": count(/<div class="blk blk-was"[^>]*>/g),
   };
 }
 
@@ -118,7 +120,7 @@ b` and `a b` both reduce to "a b". Stripping the wrappers and comparing
  * own matching close tag, counting depth.
  */
 function stripWrappers(html: string): string {
-  const OPEN = /<span class="r-(?:now|was)">|<div class="blk blk-(?:now|was)">/;
+  const OPEN = /<span class="r-(?:now|was)"[^>]*>|<div class="blk blk-(?:now|was)"[^>]*>/;
   let out = html;
   for (;;) {
     const match = OPEN.exec(out);
@@ -242,5 +244,88 @@ describe("`both` puts two copies of a marker in the DOM at once", () => {
       const single = await renderDiffRuns(runs, view);
       expect((single.match(/data-mutation-id="m1"/g) ?? []).length).toBe(1);
     }
+  });
+});
+
+// A document carrying all three change shapes, and its two projections, reused
+// across the adopt tests. now = everything not `was`; was = everything not `now`
+// — the same reassembly the render tests pin above.
+const SHAPES: DiffRun[] = [
+  { kind: "equal", text: "The harbour lay " },
+  { kind: "was", text: "still" }, // region 0: a modification …
+  { kind: "now", text: "restless" }, // … cool + warm adjacent
+  { kind: "equal", text: " under a sky. " },
+  { kind: "now", text: "Nothing moved. " }, // region 1: a lone insertion
+  { kind: "equal", text: "Mara counted twice" },
+  { kind: "was", text: ", as taught," }, // region 2: a lone deletion
+  { kind: "equal", text: "." },
+];
+const NOW = "The harbour lay restless under a sky. Nothing moved. Mara counted twice.";
+const WAS = "The harbour lay still under a sky. Mara counted twice, as taught,.";
+
+describe("groupRuns splits the flat runs into changed regions", () => {
+  it("gives a modification both sides, and each lone change only its own", () => {
+    const { regions, regionIdByRun } = groupRuns(SHAPES);
+    expect(regions).toEqual([
+      { id: 0, wasText: "still", nowText: "restless" },
+      { id: 1, wasText: "", nowText: "Nothing moved. " },
+      { id: 2, wasText: ", as taught,", nowText: "" },
+    ]);
+    // `equal` runs belong to no region; every changed run maps to exactly one.
+    expect(regionIdByRun).toEqual([null, 0, 0, null, 1, null, 2, null]);
+  });
+});
+
+describe("adoptRegion re-projects one region, and only writes when the scene changes", () => {
+  it("SHAPES reassembles to its two sides — the invariant adopt rides on", () => {
+    expect(SHAPES.filter((r) => r.kind !== "was").map((r) => r.text).join("")).toBe(NOW);
+    expect(SHAPES.filter((r) => r.kind !== "now").map((r) => r.text).join("")).toBe(WAS);
+  });
+
+  it("restores a modification's snapshot wording (click cool)", () => {
+    const { runs, body } = adoptRegion(SHAPES, 0, "was");
+    expect(body).toBe("The harbour lay still under a sky. Nothing moved. Mara counted twice.");
+    // The region is now plain text; the rest of the diff is untouched.
+    expect(runs.filter((r) => r.kind !== "was").map((r) => r.text).join("")).toBe(body);
+    expect(groupRuns(runs).regions).toHaveLength(2);
+  });
+
+  it("keeps a modification's current wording without a write (click warm)", () => {
+    const { runs, body } = adoptRegion(SHAPES, 0, "now");
+    expect(body).toBeNull(); // the scene already reads this way
+    expect(runs.filter((r) => r.kind !== "was").map((r) => r.text).join("")).toBe(NOW);
+    expect(groupRuns(runs).regions).toHaveLength(2);
+  });
+
+  it("drops a lone insertion (click warm — its only move)", () => {
+    const { runs, body } = adoptRegion(SHAPES, 1, "now");
+    expect(body).toBe("The harbour lay restless under a sky. Mara counted twice.");
+    expect(runs.filter((r) => r.kind !== "was").map((r) => r.text).join("")).toBe(body);
+  });
+
+  it("restores a lone deletion (click cool)", () => {
+    const { runs, body } = adoptRegion(SHAPES, 2, "was");
+    expect(body).toBe("The harbour lay restless under a sky. Nothing moved. Mara counted twice, as taught,.");
+    expect(runs.filter((r) => r.kind !== "was").map((r) => r.text).join("")).toBe(body);
+  });
+
+  it("is a no-op on an unknown region", () => {
+    const { runs, body } = adoptRegion(SHAPES, 9, "was");
+    expect(body).toBeNull();
+    expect(runs).toBe(SHAPES);
+  });
+});
+
+describe("each changed run carries the action as its title (Amendment 4)", () => {
+  // The tooltip is the whole discoverability affordance — no banner, no glyph —
+  // so the words are a contract, not decoration. A lone insertion says *remove*,
+  // and that is what makes the one asymmetry (warm keeps, but a lone insertion
+  // drops) legible at the point of the click.
+  it("cool restores, warm keeps, and a lone insertion removes", async () => {
+    const html = await renderDiffRuns(SHAPES, "both");
+    expect(html).toContain('<span class="r-was" data-region="0" title="Restore this">still</span>');
+    expect(html).toContain('<span class="r-now" data-region="0" title="Keep this">restless</span>');
+    expect(html).toContain('<span class="r-now" data-region="1" title="Remove this">Nothing moved. </span>');
+    expect(html).toContain('<span class="r-was" data-region="2" title="Restore this">, as taught,</span>');
   });
 });

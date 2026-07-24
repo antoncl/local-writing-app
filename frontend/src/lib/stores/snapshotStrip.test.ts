@@ -498,3 +498,56 @@ describe("author gestures", () => {
     expect(restoreSnapshot).toHaveBeenCalledWith("scene_1", "snap_1");
   });
 });
+
+/**
+ * Adopting one region while parked (ADR-0044 Amendment 4). The re-projection
+ * logic is `adoptRegion`'s, tested exhaustively in `diffRuns.test.ts`; these pin
+ * the controller's half — the `onAdopt` wiring, and that it never re-diffs.
+ */
+describe("adopting a region", () => {
+  it("restores the snapshot side into the buffer, and does not re-diff", async () => {
+    const strip = await parked(async () => diff());
+    await strip.park("snap_1");
+    const adopted: string[] = [];
+    strip.onAdopt = (body) => {
+      adopted.push(body);
+    };
+    diffSnapshot.mockClear();
+
+    await strip.adopt(0, "was");
+
+    expect(adopted).toEqual(["The tide went out further than she had seen."]);
+    // The region is resolved and the payload was re-projected in hand — no
+    // round trip, so a region settled earlier cannot resurface.
+    expect(strip.runs.every((run) => run.kind === "equal")).toBe(true);
+    expect(diffSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("keeps the current wording without writing the document", async () => {
+    const strip = await parked(async () => diff());
+    await strip.park("snap_1");
+    const adopted: string[] = [];
+    strip.onAdopt = (body) => {
+      adopted.push(body);
+    };
+
+    await strip.adopt(0, "now");
+
+    expect(adopted).toEqual([]);
+    expect(strip.runs.map((run) => run.text).join("")).toBe(
+      "The tide went out much further than she had seen.",
+    );
+  });
+
+  it("does nothing when not parked", async () => {
+    const strip = await parked(async () => diff());
+    const adopted: string[] = [];
+    strip.onAdopt = (body) => {
+      adopted.push(body);
+    };
+
+    await strip.adopt(0, "was");
+
+    expect(adopted).toEqual([]);
+  });
+});

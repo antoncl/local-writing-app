@@ -165,6 +165,10 @@
   $effect(() => {
     snapshots.flushScene = onFlushScene ?? null;
     snapshots.onRestored = onSceneRestored ?? null;
+    // Adopting a region writes only the prose, through the hidden buffer restore
+    // already owns — so it goes straight to the view, not back through the
+    // server (ADR-0044 Amendment 4). Evaluated at call time, like `readLive`.
+    snapshots.onAdopt = (body) => proseBodyView?.adoptBody(body);
     // What the diff compares against: the BUFFER, not the file. Autosave lags
     // by up to six seconds, so the file is not reliably what the author is
     // looking at — and parking is a reading gesture, so flushing to make it
@@ -1054,6 +1058,7 @@
         label="Snapshot body (read-only)"
         ribbon={snapshotRibbon}
         tone="snapshot"
+        onRunClick={(regionId, kind) => snapshots.adopt(regionId, kind)}
       />
     {/if}
     <div class="prose-body-host" class:hidden={scrubbed || snapshotParked}>

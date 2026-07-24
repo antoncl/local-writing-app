@@ -13,6 +13,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.services.project.overrides import LayerOverride
 
 
 @dataclass(frozen=True)
@@ -114,6 +118,13 @@ class NodeIndex:
     # a shadowed ancestor keeps its edges, so un-shadowing on delete restores a
     # node *with its references*, not a stripped one.
     edges_by_layer_src: dict[tuple[str, str], list[ReferenceEdge]] = field(default_factory=dict)
+    # Layer overrides (#314 / ADR-0039), keyed by **target node id**. Collected
+    # in a parallel pass, not as nodes: an override is a sparse delta, filtered
+    # out of `candidates` / `by_id` / pickers / views by construction. The fold
+    # reads these — values on read (`read_lore_entry`), edges here at build time
+    # (`_fold_override_edges` rewrites the target's `edges_by_layer_src` entry
+    # before `resolve()`), so backlinks / References / Nest need no scope param.
+    overrides_by_target: dict[str, list[LayerOverride]] = field(default_factory=dict)
     # --- derived (see `resolve`) ---
     by_id: dict[str, NodeIndexEntry] = field(default_factory=dict)
     edges_by_src: dict[str, list[ReferenceEdge]] = field(default_factory=dict)

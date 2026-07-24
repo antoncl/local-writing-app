@@ -159,6 +159,12 @@ class LoreEntry(BaseModel):
     # inheritance and silences the shadow warning for the copied id. `None` for
     # an ordinary entry that never forked.
     forked_from: str | None = None
+    # The metadata fields whose effective value comes from a layer override in
+    # this project's chain rather than from inherited canon (#314 / ADR-0039).
+    # The backend computes it during the fold; the frontend renders the
+    # `ti-versions` override mark against these fields (deferred to #314 slice-E
+    # PR 2). Empty for an entry with no overrides above its owning layer.
+    overridden_fields: list[str] = Field(default_factory=list)
 
 
 class LoreEntryList(BaseModel):
@@ -176,6 +182,14 @@ class SaveLoreEntryRequest(BaseModel):
     base_revision: str | None = None
     entry_type: str = "lore:lore_note"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+    # ADR-0042's authoring layer L, as a layer id (#314 / ADR-0045). The save
+    # *is* the 0042 edit unit, so L rides its request body rather than an ambient
+    # header. `None` = no explicit write target: a save of an *inherited* entry
+    # then fails loudly rather than silently choosing one (ADR-0039). When set,
+    # `L == owning layer` writes the owning file (direct edit) and `L < owning`
+    # writes a sparse override delta at L. The frontend rail picker (PR 2) sends
+    # it, defaulting to the open project (the rest-position override).
+    authoring_layer_id: str | None = None
 
 
 class PromptEntrySummary(BaseModel):

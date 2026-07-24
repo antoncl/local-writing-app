@@ -151,7 +151,9 @@ class MetadataSchemaMixin:
         data = self._resolve_metadata_schema_inheritance(data)
         return MetadataSchema.model_validate(data)
 
-    def _schema_as_authored(self, root: Path | None = None) -> MetadataSchema:
+    def _schema_as_authored(
+        self, root: Path | None = None, *, authoring_layer: Path | None = None
+    ) -> MetadataSchema:
         """The schema a write in this unit must validate against (#393).
 
         ADR-0042 binds a write to an authoring layer L; the field roster it may
@@ -160,21 +162,25 @@ class MetadataSchemaMixin:
         would accept a field the target layer cannot store, and fail only
         later, when a sibling book reads it (ADR-0045 §4).
 
-        L rides the immutable `WorkScope` (`scope.authoring_layer`) and defaults
-        to the resolution scope, so a unit with no rail picker behind it — every
-        client today — resolves the whole chain, exactly as before. #313/#314
-        populate L by changing the resolver alone; nothing here changes when
-        they do. Its sole caller today is the lore save, the one node kind that
-        is inherited and so can be authored above the book.
+        L is supplied one of two ways. `#314`'s lore save passes `authoring_layer`
+        explicitly — the save *is* ADR-0042's edit unit, so L rides its request
+        body (the rail picker's write target) rather than an ambient header.
+        Absent that, it falls back to the immutable `WorkScope`
+        (`scope.authoring_layer`), which defaults to the resolution scope — so a
+        unit with no rail picker behind it resolves the whole chain, exactly as
+        before.
         """
-        scope = self.scope
-        layer = scope.authoring_layer if scope is not None else None
+        layer = authoring_layer if authoring_layer is not None else self._scope_authoring_layer()
         up_to_layer_id = (
             self._metadata_schema_layer_id(layer.resolve()) if layer is not None else None
         )
         # `root` (defaulted inside `read_metadata_schema`) is the resolution
         # scope; `up_to_layer_id` truncates it to L.
         return self.read_metadata_schema(root, up_to_layer_id=up_to_layer_id)
+
+    def _scope_authoring_layer(self) -> Path | None:
+        scope = self.scope
+        return scope.authoring_layer if scope is not None else None
 
     def entry_type_ancestry(
         self,

@@ -113,16 +113,6 @@
   let schemaTypeInitPrompt: PromptEntryTypeExtras | null = $state(null);
   let schemaTypeDraftToken = $state(0);
 
-  function isSchemaKind(kind: string | null | undefined): kind is SchemaKind {
-    return kind === "scene" ||
-      kind === "lore" ||
-      kind === "research" ||
-      kind === "plotting" ||
-      kind === "prompt" ||
-      kind === "assistant" ||
-      kind === "project";
-  }
-
   // --- Field-row drag-reorder (own fields of a type) --------------------------
   let fieldDragId: string | null = null;
   let fieldDropTarget: { id: string; position: "before" | "after" } | null = $state(null);
@@ -132,7 +122,18 @@
     schemaSelectedEntryType = metadataSchema?.entry_types[schemaFieldEntryType] ?? metadataSchema?.entry_types["scene:scene"] ?? null;
   });
   $effect.pre(() => {
-    schemaFieldKind = isSchemaKind(schemaSelectedEntryType?.kind) ? schemaSelectedEntryType.kind : "scene";
+    schemaFieldKind =
+      schemaSelectedEntryType?.kind === "lore"
+        ? "lore"
+        : schemaSelectedEntryType?.kind === "research"
+          ? "research"
+          : schemaSelectedEntryType?.kind === "prompt"
+            ? "prompt"
+            : schemaSelectedEntryType?.kind === "assistant"
+              ? "assistant"
+              : schemaSelectedEntryType?.kind === "project"
+                ? "project"
+                : "scene";
   });
   $effect.pre(() => {
     schemaNodeTypeTree = buildNodeTypeTree(metadataSchema, schemaFieldKind);
@@ -163,18 +164,16 @@
   let availableGroupEntries = $derived(Object.entries(metadataSchema?.groups ?? {}));
   let schemaContextHeading =
     $derived(schemaFieldKind === "lore"
-        ? "Lore Entry Types"
-        : schemaFieldKind === "research"
-          ? "Research Types"
-          : schemaFieldKind === "plotting"
-            ? "Plotting Types"
-            : schemaFieldKind === "prompt"
-              ? "Prompt Types"
-              : schemaFieldKind === "assistant"
-                ? "Assistant Types"
-                : schemaFieldKind === "project"
-                  ? "Project Types"
-                  : "Scene Types");
+      ? "Lore Entry Types"
+      : schemaFieldKind === "research"
+        ? "Research Types"
+        : schemaFieldKind === "prompt"
+          ? "Prompt Types"
+          : schemaFieldKind === "assistant"
+            ? "Assistant Types"
+            : schemaFieldKind === "project"
+              ? "Project Types"
+              : "Scene Types");
 
   // --- Entry points App still drives (via bind:this) --------------------------
   export function syncSelection() {
@@ -282,7 +281,16 @@
   function createSchemaTypeDraft(layerId = projectSchemaLayerId(), parentTypeId = "") {
     selectedSchemaTypeId = null;
     const parentType = parentTypeId ? metadataSchema?.entry_types[parentTypeId] : null;
-    schemaTypeKind = isSchemaKind(parentType?.kind) ? parentType.kind : schemaFieldKind;
+    schemaTypeKind =
+      parentType?.kind === "scene"
+        ? "scene"
+        : parentType?.kind === "lore"
+          ? "lore"
+          : parentType?.kind === "prompt"
+            ? "prompt"
+            : parentType?.kind === "assistant"
+              ? "assistant"
+              : schemaFieldKind;
     schemaTypeParent = parentTypeId || (schemaSelectedEntryType?.abstract || schemaFieldEntryType !== "scene:scene" ? schemaFieldEntryType : defaultSchemaParentType(schemaFieldKind));
     schemaTypeAbstract = false;
     schemaTypeReadonly = false;
@@ -300,7 +308,14 @@
     if (!entryType) return;
     const source = schemaTypeSource(typeId);
     selectedSchemaTypeId = typeId;
-    schemaTypeKind = isSchemaKind(entryType.kind) ? entryType.kind : "lore";
+    schemaTypeKind =
+      entryType.kind === "scene"
+        ? "scene"
+        : entryType.kind === "prompt"
+          ? "prompt"
+          : entryType.kind === "assistant"
+            ? "assistant"
+            : "lore";
     schemaTypeParent = entryType.parent ?? "";
     schemaTypeAbstract = Boolean(entryType.abstract);
     schemaTypeReadonly = Boolean(source?.built_in);
@@ -319,7 +334,6 @@
     if (kind === "lore" && metadataSchema?.entry_types["lore:base"]) return "lore:base";
     if (kind === "prompt" && metadataSchema?.entry_types["prompt:base"]) return "prompt:base";
     if (kind === "research" && metadataSchema?.entry_types["research:base"]) return "research:base";
-    if (kind === "plotting" && metadataSchema?.entry_types["plotting:base"]) return "plotting:base";
     return "";
   }
 
@@ -360,7 +374,7 @@
   }
 
   function defaultSchemaEntryType(kind: SchemaKind) {
-    const fallback = kind === "lore" ? "lore:lore_note" : kind === "research" ? "research:note" : kind === "plotting" ? "plotting:base" : kind === "prompt" ? "prompt:base" : kind === "assistant" ? "assistant:assistant" : kind === "project" ? "project:project" : "scene:scene";
+    const fallback = kind === "lore" ? "lore:lore_note" : kind === "research" ? "research:note" : kind === "prompt" ? "prompt:base" : kind === "assistant" ? "assistant:assistant" : kind === "project" ? "project:project" : "scene:scene";
     return Object.entries(metadataSchema?.entry_types ?? {}).find(([, definition]) => definition.kind === kind)?.[0] ?? fallback;
   }
 

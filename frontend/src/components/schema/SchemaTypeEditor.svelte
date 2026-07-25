@@ -75,7 +75,7 @@
     // Unsaved-changes flag the host reads to guard closing the pane (#68).
     dirty?: boolean;
     // Read-only type context (parent computes in create/open + re-supplies on save):
-    schemaTypeKind?: "scene" | "lore" | "research" | "plotting" | "prompt" | "assistant" | "project";
+    schemaTypeKind?: "scene" | "lore" | "research" | "prompt" | "assistant" | "project";
     schemaTypeParent?: string;
     schemaTypeReadonly?: boolean;
     selectedSchemaTypeId?: string | null;

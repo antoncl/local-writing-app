@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MetadataSchema } from "@/lib/types";
-import { buildNodeTypeTree, kindEntryTypeFqns, kindEntryTypeOptions } from "@/lib/utils/schemaTypeHelpers";
+import { kindEntryTypeFqns, kindEntryTypeOptions } from "@/lib/utils/schemaTypeHelpers";
 
 // The entry_type roster shared by the view designer (ViewFlowNode pickers) and the
 // runtime param strip (viewParams). `type` / `field → entry_type` want concrete
@@ -11,9 +11,6 @@ const SCHEMA = {
     "lore:base": { name: "Lore", kind: "lore", abstract: true },
     "lore:character": { name: "Character", kind: "lore" },
     "lore:place": { name: "Place", kind: "lore" },
-    "plotting:base": { name: "Plotting", kind: "plotting", abstract: true },
-    "plotting:arc": { name: "Arc", kind: "plotting", parent: "plotting:base" },
-    "plotting:character_arc": { name: "Character Arc", kind: "plotting", parent: "plotting:arc" },
     "scene:scene": { name: "Scene", kind: "scene" },
   },
   fields: {},
@@ -44,16 +41,5 @@ describe("kindEntryTypeOptions", () => {
 describe("kindEntryTypeFqns (delegates to the concrete roster)", () => {
   it("returns concrete FQNs only", () => {
     expect(kindEntryTypeFqns(SCHEMA, "lore")).toEqual(["lore:character", "lore:place"]);
-  });
-});
-
-describe("buildNodeTypeTree", () => {
-  it("uses plotting:base as the Plotting root and nests subtypes under it", () => {
-    const tree = buildNodeTypeTree(SCHEMA, "plotting");
-
-    expect(tree.map((node) => node.id)).toEqual(["plotting:base"]);
-    expect(tree[0].label).toBe("Plotting");
-    expect(tree[0].children.map((node) => node.id)).toEqual(["plotting:arc"]);
-    expect(tree[0].children[0].children.map((node) => node.id)).toEqual(["plotting:character_arc"]);
   });
 });

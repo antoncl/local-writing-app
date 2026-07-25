@@ -19,7 +19,7 @@ import type {
 // The schema's kind universe (a Node's "class"). Narrower than the wider
 // DocumentKind, which also covers chat / snippet / structure_node — none
 // of which have their own schema-type tree.
-export type SchemaKind = "scene" | "lore" | "research" | "plotting" | "prompt" | "assistant" | "project";
+export type SchemaKind = "scene" | "lore" | "research" | "prompt" | "assistant" | "project";
 
 // A field's effective display label, resolved against an ANCHOR entry type
 // (#116, ADR-0029 §F). A per-type `field_overrides[key].label` on the anchor
@@ -163,7 +163,6 @@ export function nodeTypeDisplayName(
 ): string {
   if (typeId === "scene:scene") return "Scenes";
   if (typeId === "lore:base") return "Lore Entries";
-  if (typeId === "plotting:base") return "Plotting";
   if (typeId === "prompt:base") return "Prompts";
   return definition?.name ?? typeId;
 }
@@ -297,10 +296,8 @@ export function buildNodeTypeTree(
       ? ["lore:base"]
       : kind === "prompt" && entryTypes["prompt:base"]
         ? ["prompt:base"]
-      : kind === "research" && entryTypes["research:base"]
-        ? ["research:base"]
-        : kind === "plotting" && entryTypes["plotting:base"]
-          ? ["plotting:base"]
+        : kind === "research" && entryTypes["research:base"]
+          ? ["research:base"]
           : roots.sort(compareByName);
   const fieldsRegistry = schema?.fields ?? {};
   const buildNode = (typeId: string, depth: number): NodeTypeTreeNode | null => {

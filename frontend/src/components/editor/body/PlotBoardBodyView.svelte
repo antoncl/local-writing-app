@@ -182,6 +182,7 @@
     selectedClaimId,
     dragOverCardId,
     cardById,
+    cardColumnTitle,
     claimsForCard,
     pointLabel,
     selectCard,
@@ -399,6 +400,13 @@
 
   function cardById(cardId: string): PlotBoardCard | null {
     return cards.find((card) => card.id === cardId) ?? null;
+  }
+
+  function cardColumnTitle(cardId: string): string {
+    for (const column of columns) {
+      if (column.cards.some((card) => card.id === cardId)) return column.title;
+    }
+    return "Unplaced";
   }
 
   function claimsForCard(cardId: string): PlotPointClaim[] {
@@ -1015,6 +1023,35 @@
         <i class="ti ti-library-plus" aria-hidden="true"></i>
         Chapter
       </button>
+    </div>
+    <div class="structure-lanes" aria-label="Manuscript Structure lanes">
+      {#each columns as column (column.id)}
+        <section class="structure-lane" class:active={selectedCard ? (selectedCard.structure_column_id ?? "__unplaced") === column.id : false}>
+          <button
+            type="button"
+            class="lane-main"
+            title={column.title}
+            onclick={() => {
+              selectedCardId = column.cards[0]?.id ?? null;
+              selectedClaimId = null;
+              selectedPalettePoint = null;
+            }}
+          >
+            <span>{column.title}</span>
+            <small>{column.cards.length}</small>
+          </button>
+          <button
+            type="button"
+            class="lane-add"
+            title={`Add card to ${column.title}`}
+            aria-label={`Add card to ${column.title}`}
+            disabled={Boolean(savingMessage)}
+            onclick={() => addPlaceholderCard(column.id)}
+          >
+            <i class="ti ti-plus" aria-hidden="true"></i>
+          </button>
+        </section>
+      {/each}
     </div>
     <div class="flow-canvas">
       <SvelteFlow

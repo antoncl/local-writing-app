@@ -14,7 +14,6 @@ from pydantic import BaseModel, Field
 
 from app.models.entries import Scene, StructureDocument
 
-
 PlotClaimType = Literal[
     "satisfies",
     "partially_satisfies",

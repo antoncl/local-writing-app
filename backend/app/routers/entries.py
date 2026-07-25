@@ -28,13 +28,6 @@ from app.models import (
     UnlistAssistantRequest,
     UpdateTodoRequest,
 )
-from app.models_views import (
-    CreateViewRequest,
-    SaveViewRequest,
-    UpdateViewUiRequest,
-    ViewNode,
-    ViewNodeList,
-)
 from app.models_plot import (
     CreatePlotNodeRequest,
     PlotContextPacket,
@@ -43,6 +36,13 @@ from app.models_plot import (
     PromotePlotCardRequest,
     PromotePlotCardResponse,
     SavePlotNodeRequest,
+)
+from app.models_views import (
+    CreateViewRequest,
+    SaveViewRequest,
+    UpdateViewUiRequest,
+    ViewNode,
+    ViewNodeList,
 )
 from app.routers.ai import _validate_assistant_temperature
 from app.runtime import CurrentProject, translate_errors

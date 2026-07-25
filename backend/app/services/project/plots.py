@@ -25,10 +25,10 @@ from app.models_plot import (
     PlotNode,
     PlotNodeList,
     PlotNodeSummary,
-    PromotePlotCardRequest,
-    PromotePlotCardResponse,
     PlotTemplateInstanceSpec,
     PlotTemplateSpec,
+    PromotePlotCardRequest,
+    PromotePlotCardResponse,
     SavePlotNodeRequest,
 )
 from app.services.project.errors import ProjectServiceError
@@ -155,7 +155,7 @@ class PlotEntriesMixin:
             front_matter = self._read_front_matter_only(path, strict=True)
             if self._plot_system(front_matter):
                 raise ProjectServiceError("A system plot node cannot be deleted.", 403)
-            path.unlink()
+            self._delete_node_file(path)
         return self.list_plot_nodes()
 
     def promote_plot_card(self, node_id: str, request: PromotePlotCardRequest) -> PromotePlotCardResponse:
@@ -319,9 +319,10 @@ class PlotEntriesMixin:
     def _seed_builtin_plot_templates(self, root: Any) -> None:
         plot_dir = root / "plot"
         plot_dir.mkdir(parents=True, exist_ok=True)
+        inherited_ids = self._inherited_plot_node_ids(root)
         for filename, node_id, title, body, points in self._builtin_plot_templates():
             path = plot_dir / filename
-            if path.exists():
+            if path.exists() or node_id in inherited_ids:
                 continue
             self._write_plot_file(
                 path,
@@ -334,6 +335,22 @@ class PlotEntriesMixin:
             )
 
     # ----- helpers --------------------------------------------------------
+
+    def _inherited_plot_node_ids(self, root: Any) -> set[str]:
+        root_path = root.resolve()
+        ids: set[str] = set()
+        for layer in self.collect_layers(root_path):
+            if layer.folder == root_path:
+                continue
+            for path in sorted((layer.folder / "plot").glob("*.md")):
+                try:
+                    front_matter = self._read_front_matter_only(path, strict=False)
+                except ProjectServiceError:
+                    continue
+                raw_id = front_matter.get("id")
+                if isinstance(raw_id, str) and raw_id.strip():
+                    ids.add(raw_id.strip())
+        return ids
 
     def _write_plot_file(
         self,

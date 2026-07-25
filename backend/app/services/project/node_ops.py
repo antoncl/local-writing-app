@@ -26,8 +26,8 @@ from app.models import (
     SaveSceneRequest,
     Scene,
 )
-from app.models_views import SaveViewRequest, ViewNode
 from app.models_plot import PlotNode, SavePlotNodeRequest
+from app.models_views import SaveViewRequest, ViewNode
 from app.services.project.errors import ProjectServiceError
 
 

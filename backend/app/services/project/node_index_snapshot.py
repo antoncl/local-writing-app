@@ -192,6 +192,7 @@ def serialize(
                 "path": str(entry.path),
                 "title": entry.title,
                 "layer": layer_index_by_id[entry.source_layer_id],
+                "system": entry.system,
                 # A fork records the layer it severed from as a layer *index*, not
                 # an id — layer ids are `sha256(path)` and must never land on disk
                 # (`_layer_id_for_folder`). `None` for an ordinary entry.
@@ -363,6 +364,7 @@ def _rehydrate(payload: dict, layers: list[IndexLayer]) -> NodeIndex:
                 title=entry["title"],
                 source_layer_id=layer.id,
                 source_layer_label=layer.label,
+                system=entry.get("system") is True,
                 forked_from_layer_id=forked_from_layer_id,
             )
         )

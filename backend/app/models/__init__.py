@@ -138,25 +138,6 @@ from app.models.project import (
     SaveProjectNodeRequest,
     UpdateProjectSettingsRequest,
 )
-from app.models_plot import (
-    CreatePlotNodeRequest,
-    PlotBoardCard,
-    PlotBoardLayout,
-    PlotBoardSpec,
-    PlotLine,
-    PlotNode,
-    PlotNodeList,
-    PlotNodeSummary,
-    PlotPointClaim,
-    PromotePlotCardRequest,
-    PromotePlotCardResponse,
-    PlotRelationship,
-    PlotTemplateInstancePoint,
-    PlotTemplateInstanceSpec,
-    PlotTemplatePoint,
-    PlotTemplateSpec,
-    SavePlotNodeRequest,
-)
 from app.models.schema import (
     DeleteMetadataEntryTypeRequest,
     DeleteMetadataFieldRequest,
@@ -204,6 +185,25 @@ from app.models.snapshots import (
     WitnessEntity,
     WitnessFieldDrift,
     WitnessFieldType,
+)
+from app.models_plot import (
+    CreatePlotNodeRequest,
+    PlotBoardCard,
+    PlotBoardLayout,
+    PlotBoardSpec,
+    PlotLine,
+    PlotNode,
+    PlotNodeList,
+    PlotNodeSummary,
+    PlotPointClaim,
+    PlotRelationship,
+    PlotTemplateInstancePoint,
+    PlotTemplateInstanceSpec,
+    PlotTemplatePoint,
+    PlotTemplateSpec,
+    PromotePlotCardRequest,
+    PromotePlotCardResponse,
+    SavePlotNodeRequest,
 )
 
 # Preserve the documented `from app.models import NodePickerConfig` contract

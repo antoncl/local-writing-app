@@ -6,6 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
+from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import (
@@ -17,11 +18,10 @@ from app.models import (
     UpsertMetadataEntryTypeRequest,
     UpsertMetadataFieldRequest,
 )
+from app.models_plot import CreatePlotNodeRequest
 from app.services.ai.helpers import create_environment_for_project
 from app.services.ai.templates import render_template
-from app.models_plot import CreatePlotNodeRequest
 from app.services.project_service import ProjectService
-from project_fixtures import open_test_project
 
 
 class PlotNodeTests(unittest.TestCase):

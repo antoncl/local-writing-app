@@ -124,6 +124,31 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertNotIn("faction", schema.entry_types)
         self.assertEqual(schema.entry_types["lore:faction"].kind, "lore")
 
+    def test_upsert_entry_type_accepts_detail_type_kinds(self) -> None:
+        # Every kind shown in the Detail Types window must be saveable through
+        # the same entry-type authoring endpoint.
+        layer_id = self.service._metadata_schema_layer_id(self.root)
+
+        schema = self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=layer_id,
+                entry_type_id="source",
+                entry_type=EntryTypeDefinition(name="Source", kind="research", parent="research:base"),
+                allow_existing=False,
+            )
+        )
+        schema = self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=layer_id,
+                entry_type_id="milestone",
+                entry_type=EntryTypeDefinition(name="Milestone", kind="plotting", parent="plotting:base"),
+                allow_existing=False,
+            )
+        )
+
+        self.assertEqual(schema.entry_types["research:source"].kind, "research")
+        self.assertEqual(schema.entry_types["plotting:milestone"].parent, "plotting:base")
+
     def test_upsert_entry_type_rejects_kind_prefix_mismatch(self) -> None:
         # An explicit FQN id whose prefix disagrees with the declared kind is a
         # cross-kind identity error and must be rejected.
@@ -1663,6 +1688,25 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertNotIn("aliases", schema.entry_types["research:note"].fields)
         self.assertNotIn("related_entries", schema.entry_types["research:note"].fields)
         self.assertNotIn("context_policy", schema.entry_types["research:note"].fields)
+
+    def test_default_schema_includes_plotting_kind_with_types_and_subtypes(self) -> None:
+        schema = self.service.read_metadata_schema()
+
+        self.assertTrue(schema.entry_types["plotting:base"].abstract)
+        self.assertEqual(schema.entry_types["plotting:base"].kind, "plotting")
+        self.assertEqual(schema.entry_types["plotting:base"].own_fields, ["summary", "tags", "color"])
+        self.assertEqual(schema.entry_types["plotting:base"].color, "amber")
+
+        self.assertEqual(schema.entry_types["plotting:arc"].parent, "plotting:base")
+        self.assertEqual(schema.entry_types["plotting:character_arc"].parent, "plotting:arc")
+        self.assertIn("characters", schema.entry_types["plotting:character_arc"].fields)
+
+        self.assertEqual(schema.entry_types["plotting:plotline"].parent, "plotting:base")
+        self.assertEqual(schema.entry_types["plotting:subplot"].parent, "plotting:plotline")
+
+        self.assertEqual(schema.entry_types["plotting:beat"].parent, "plotting:base")
+        self.assertEqual(schema.entry_types["plotting:turning_point"].parent, "plotting:beat")
+        self.assertIn("locations", schema.entry_types["plotting:beat"].fields)
 
     def test_lore_note_is_marked_deprecated(self) -> None:
         # lore_note stays readable for legacy projects but is soft-deprecated

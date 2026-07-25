@@ -70,6 +70,7 @@
     { id: "scene", label: "Scene" },
     { id: "lore", label: "Lore" },
     { id: "research", label: "Research" },
+    { id: "plotting", label: "Plotting" },
     { id: "prompt", label: "Prompt" },
     { id: "assistant", label: "Assistant" },
     { id: "project", label: "Project" },

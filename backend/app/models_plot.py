@@ -127,7 +127,7 @@ class PlotTemplatePoint(BaseModel):
         return next_data
 
     @model_validator(mode="after")
-    def _backfill_legacy_point_fields(self) -> "PlotTemplatePoint":
+    def _backfill_legacy_point_fields(self) -> PlotTemplatePoint:
         if not self.key:
             self.key = self.id
         if not self.label:
@@ -197,7 +197,7 @@ class PlotTemplateInstancePoint(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _backfill_note_fields(self) -> "PlotTemplateInstancePoint":
+    def _backfill_note_fields(self) -> PlotTemplateInstancePoint:
         if not self.local_label and self.title:
             self.local_label = self.title
         if not self.title and self.local_label:
@@ -232,10 +232,7 @@ class PlotTemplateInstanceSpec(BaseModel):
             for point_id, raw_note in raw_notes.items():
                 if not isinstance(point_id, str) or not point_id:
                     continue
-                if isinstance(raw_note, dict):
-                    note = dict(raw_note)
-                else:
-                    note = {}
+                note = dict(raw_note) if isinstance(raw_note, dict) else {}
                 points.append(
                     {
                         "plot_point_id": point_id,
@@ -253,7 +250,7 @@ class PlotTemplateInstanceSpec(BaseModel):
         return next_data
 
     @model_validator(mode="after")
-    def _sync_point_notes(self) -> "PlotTemplateInstanceSpec":
+    def _sync_point_notes(self) -> PlotTemplateInstanceSpec:
         for point in self.plot_points:
             existing = self.point_notes.get(point.plot_point_id)
             if existing is None:

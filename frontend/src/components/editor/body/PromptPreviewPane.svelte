@@ -19,6 +19,7 @@
     DocumentKind,
     EditableDocument,
     LoreEntrySummary,
+    PlotNodeSummary,
     PreviewErrorInfo,
     PromptEntrySummary,
     PromptInputDefinition,
@@ -34,6 +35,7 @@
     researchStructure?: StructureDocument | null;
     loreEntries?: LoreEntrySummary[];
     promptEntries?: PromptEntrySummary[];
+    plotEntries?: PlotNodeSummary[];
     availableScenes?: { id: string; title: string }[];
     loadedSceneId?: string | null;
     // Gutter diagnostics driven by render errors — bound OUT to the parent's
@@ -54,6 +56,7 @@
     researchStructure = null,
     loreEntries = [],
     promptEntries = [],
+    plotEntries = [],
     availableScenes = [],
     loadedSceneId = null,
     diagnostics = $bindable([]),
@@ -361,6 +364,7 @@
                 researchStructure={researchStructure}
                 loreEntries={loreEntries}
                 promptEntries={promptEntries}
+                plotEntries={plotEntries}
                 on:change={(event) => promptPreviewInputDrafts = {...promptPreviewInputDrafts, [inputDef.name]: event.detail.value}}
               />
             </label>

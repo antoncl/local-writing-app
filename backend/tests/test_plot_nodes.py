@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -287,6 +288,73 @@ class PlotNodeTests(unittest.TestCase):
         out = render_template(
             '{% role "user" %}{{ plot_context("' + board.id + '", scene=scene) }}{% endrole %}',
             context={"scene": target},
+            env=env,
+        )
+        text = out.messages[0].blocks[0].text
+        self.assertIn("Archive Break-in", text)
+        self.assertIn("claim_first_turn", text)
+        self.assertNotIn("Butler Reveal", text)
+        self.assertNotIn("butler did it", text)
+
+    def test_plot_context_helper_accepts_context_pick_board_ref(self) -> None:
+        early = self.service.create_scene(CreateSceneRequest(title="Archive Break-in"))
+        target = self.service.create_scene(CreateSceneRequest(title="Quiet Aftermath"))
+        future = self.service.create_scene(CreateSceneRequest(title="Butler Reveal"))
+        instance = self.service.create_plot_node(
+            CreatePlotNodeRequest(
+                title="Main plot structure",
+                entry_type="plot:template_instance",
+                template_instance={
+                    "template_id": "plot_template_three_act",
+                    "plot_points": [
+                        {"plot_point_id": "first_turn", "notes": "Visible setup."},
+                        {"plot_point_id": "resolution", "notes": "Future spoiler: the butler did it."},
+                    ],
+                },
+            )
+        )
+        board = self.service.create_plot_node(
+            CreatePlotNodeRequest(
+                title="Book plot board",
+                entry_type="plot:board",
+                board={
+                    "template_instance_ids": [instance.id],
+                    "cards": [
+                        {"id": "card_archive", "title": "Archive Break-in", "node_ref": early.id},
+                        {"id": "card_reveal", "title": "Butler Reveal", "node_ref": future.id},
+                    ],
+                    "claims": [
+                        {
+                            "id": "claim_first_turn",
+                            "card_id": "card_archive",
+                            "template_instance_id": instance.id,
+                            "plot_point_id": "first_turn",
+                        },
+                        {
+                            "id": "claim_resolution",
+                            "card_id": "card_reveal",
+                            "template_instance_id": instance.id,
+                            "plot_point_id": "resolution",
+                            "rationale": "Future spoiler: the butler did it.",
+                        },
+                    ],
+                },
+            )
+        )
+        picked_board = json.dumps(
+            [
+                {
+                    "id": board.id,
+                    "kind": "plot",
+                    "title": board.title,
+                    "entry_type": "plot:board",
+                }
+            ]
+        )
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "user" %}{{ plot_context(input.board, scene=scene) }}{% endrole %}',
+            context={"input": {"board": picked_board}, "scene": target},
             env=env,
         )
         text = out.messages[0].blocks[0].text

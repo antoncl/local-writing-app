@@ -871,7 +871,7 @@ export type NodePickerConfig = {
 // target; the picker UI enforces single-selection.
 export type NodePickerRef = {
   id: string;
-  kind: "scene" | "lore" | "snippet" | "assistant" | "research" | "preset";
+  kind: "scene" | "lore" | "snippet" | "assistant" | "research" | "plot" | "preset";
   title: string;
   entry_type?: string;
   target?: boolean;

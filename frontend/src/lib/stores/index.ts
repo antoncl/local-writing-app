@@ -6,6 +6,7 @@
 import { refreshStructure, refreshResearchStructure, clearStructure } from "@/lib/stores/structure";
 import { refreshLoreEntries, clearLore } from "@/lib/stores/lore";
 import { refreshPromptEntries, clearPrompts } from "@/lib/stores/prompts";
+import { refreshPlotEntries, clearPlots } from "@/lib/stores/plots";
 import { refreshMutationSetEntries, clearMutationSets } from "@/lib/stores/mutationSets";
 import { refreshSchema, clearSchema } from "@/lib/stores/schema";
 import { refreshReferenceIndex, clearReferenceIndex } from "@/lib/stores/references";
@@ -27,6 +28,7 @@ export async function loadProjectData(): Promise<void> {
     refreshResearchStructure(),
     refreshLoreEntries(),
     refreshPromptEntries(),
+    refreshPlotEntries(),
     refreshMutationSetEntries(),
     refreshSchema(),
     refreshReferenceIndex(),
@@ -42,6 +44,7 @@ export function clearProjectData(): void {
   clearStructure();
   clearLore();
   clearPrompts();
+  clearPlots();
   clearMutationSets();
   clearSchema();
   clearReferenceIndex();

@@ -34,6 +34,7 @@
     ChatSessionMessage,
     EditableDocument,
     LoreEntrySummary,
+    PlotNodeSummary,
     PromptEntrySummary,
     SaveChatSessionRequest,
     StructureDocument,
@@ -61,6 +62,7 @@
     promptEntries?: PromptEntrySummary[];
     assistantEntries?: AssistantEntrySummary[];
     loreEntries?: LoreEntrySummary[];
+    plotEntries?: PlotNodeSummary[];
     structure?: StructureDocument | null;
     // Research tree (sibling to manuscript) — threaded to the picker.
     researchStructure?: StructureDocument | null;
@@ -79,6 +81,7 @@
     promptEntries = [],
     assistantEntries = [],
     loreEntries = [],
+    plotEntries = [],
     structure = null,
     researchStructure = null,
     defaultAssistantId = "",
@@ -401,6 +404,12 @@
     const cost_delta_usd = pendingTurnCost ?? undefined;
     const cache_write_slots =
       pendingTurnCacheWriteSlots.length > 0 ? [...pendingTurnCacheWriteSlots] : undefined;
+    const inputs: Record<string, unknown> = {};
+    for (const input of activePromptEntry?.inputs ?? []) {
+      const raw = chatInputDrafts[input.name] ?? "";
+      const coerced = coerceChatInputValue(raw, input.type);
+      if (coerced !== null && coerced !== "") inputs[input.name] = coerced;
+    }
     return {
       title,
       prompt_entry_id: chatPromptEntryId,
@@ -417,7 +426,7 @@
         usage: m.usage ?? null,
         cost_usd: m.cost_usd ?? null,
       })),
-      inputs: {},
+      inputs,
       cost_delta_usd,
       cache_write_slots,
     };
@@ -944,6 +953,7 @@
         {researchStructure}
         {loreEntries}
         {promptEntries}
+        {plotEntries}
         {implicitContextMatcher}
         onDraftChange={(name, value) => void updateChatInputDraft(name, value)}
       />

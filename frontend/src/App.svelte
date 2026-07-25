@@ -57,6 +57,10 @@
     setPromptEntries,
   } from "@/lib/stores/prompts";
   import {
+    plotEntriesStore,
+    refreshPlotEntries as storeRefreshPlotEntries,
+  } from "@/lib/stores/plots";
+  import {
     assistantEntriesStore,
     defaultAssistantIdStore,
     refreshAssistantEntries as storeRefreshAssistantEntries,
@@ -466,7 +470,10 @@
   }
 
   function openPlotBoardPane() {
-    void run(() => editorPanes.openOrCreatePlotBoard());
+    void run(async () => {
+      await editorPanes.openOrCreatePlotBoard();
+      await storeRefreshPlotEntries();
+    });
   }
 
   function openAssistantsPane() {
@@ -563,6 +570,7 @@
   let validation = $derived($validationStore);
   let metadataSchema = $derived($metadataSchemaStore);
   let promptEntries = $derived($promptEntriesStore);
+  let plotEntries = $derived($plotEntriesStore);
   let assistantEntries = $derived($assistantEntriesStore);
   // The per-pane selected-view spec is no longer derived here: an explicit-view
   // pane declares `view: { kind }` on its region entry, and the central RegionBody
@@ -845,6 +853,7 @@
         scene={editorPane.scene}
         documentKind={editorPane.document?.type ?? "scene"}
         promptEntries={promptEntries}
+        plotEntries={plotEntries}
         structure={structure}
         researchStructure={researchStructure}
         loreEntries={loreEntries}

@@ -24,7 +24,7 @@
   import { formatCostEur } from "@/lib/utils/money";
   import { sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import { resolveColor } from "@/lib/utils/colors";
-  import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataFieldDefinition, MetadataSchema, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
+  import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataFieldDefinition, MetadataSchema, PlotNodeSummary, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
   import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { referenceIndexStore } from "@/lib/stores/references";
@@ -60,6 +60,7 @@
     scene?: EditableDocument | null;
     documentKind?: DocumentKind;
     promptEntries?: PromptEntrySummary[];
+    plotEntries?: PlotNodeSummary[];
     // dialog. Optional — the picker degrades to "no items" when missing.
     structure?: import("@/lib/types").StructureDocument | null;
     // research notes.
@@ -97,6 +98,7 @@
     scene = null,
     documentKind = "scene",
     promptEntries = [],
+    plotEntries = [],
     structure = null,
     researchStructure = null,
     loreEntries = [],
@@ -898,6 +900,7 @@
       knownTags={knownTags}
       loreEntries={loreEntries}
       promptEntries={promptEntries}
+      plotEntries={plotEntries}
       structure={structure}
       researchStructure={researchStructure}
       implicitContextMatcher={implicitContextMatcher}
@@ -1031,6 +1034,7 @@
       {researchStructure}
       {loreEntries}
       {promptEntries}
+      {plotEntries}
       {availableScenes}
       {rawBodyLanguage}
       {loadedSceneId}
@@ -1085,6 +1089,7 @@
       bind:this={chatBodyView}
       {scene}
       {promptEntries}
+      {plotEntries}
       {assistantEntries}
       {loreEntries}
       {structure}
@@ -1156,6 +1161,7 @@
     researchStructure={researchStructure}
     loreEntries={loreEntries}
     promptEntries={promptEntries}
+    plotEntries={plotEntries}
     excludeId={scene?.id ?? null}
     implicitContextMatcher={implicitContextMatcher}
     on:updateDraft={(event) => updateInputsDialogDraft(event.detail.name, event.detail.value)}

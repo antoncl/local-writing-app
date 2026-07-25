@@ -98,6 +98,9 @@ Supported `type` values:
 | `select` | dropdown (uses `options`) | string |
 | `entity_ref` | `ReferencePicker` (single) | string id |
 | `entity_ref_list` | `ReferencePicker` (multi) | list of string ids |
+| `context_pick` | `NodePicker` over scenes, lore, prompts, research, assistants, presets, or plot nodes | JSON string of picked node refs |
+| `scene_ref` | single scene picker | string scene id |
+| `color` | color swatch picker | string color id |
 
 For `entity_ref` and `entity_ref_list`, an optional `target` carries a `NodePickerConfig` that constrains the picker — same shape as `context_pick` inputs and `entity_ref` metadata fields' `picker_config`:
 
@@ -120,6 +123,35 @@ Inside the template the value is the raw id (or list of ids). Wrap with `entry()
 {{ entry(input.character).title }}
 {% for r in input.related %}- {{ entry(r).title }}{% endfor %}
 ```
+
+### Picking plot boards for prompt context
+
+Use `context_pick` when the prompt needs to choose one or more nodes as context rather than store a bare lore id. Plot-board prompts usually declare a single `context_pick` input constrained to `plot:board`, then pass that value directly to `plot_context(...)`.
+
+```yaml
+- name: board
+  type: context_pick
+  label: Plot board
+  target:
+    kinds: [plot]
+    entry_types:
+      plot: [plot:board]
+    multiple: false
+  required: true
+```
+
+```jinja
+{% role "user" %}
+Use the active plot board while evaluating the current scene.
+
+{{ plot_context(input.board, scene=scene) }}
+
+Scene:
+{{ scene.body }}
+{% endrole %}
+```
+
+`context_pick` values are serialized picked refs, not prose. Helpers decide what to materialize. For plot boards, `plot_context(input.board, scene=scene)` expands the selected board into cards, claims, template guidance, point notes, and scene-scoped omissions.
 
 ## File layout
 

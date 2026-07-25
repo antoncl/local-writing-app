@@ -5,7 +5,7 @@ Functions callable from a prompt template. All are registered as globals on the 
 There are two flavors:
 
 - **Pure helpers** (`last_words`) need no project state. Always available.
-- **Project-bound helpers** (`pov`, `scenes_before`, `relevant_lore`) need to look up nodes, walk the reference graph, or read prior scenes. They are bound to a specific project at env-construction time.
+- **Project-bound helpers** (`pov`, `scenes_before`, `relevant_lore`, `plot_context`) need to look up nodes, walk the reference graph, or read prior scenes. They are bound to a specific project at env-construction time.
 
 Two values that look like helpers but are actually template **variables**, populated by the dispatch layer per call:
 
@@ -357,6 +357,103 @@ Your rank as of this point: {{ effective(character, "rank", input.as_of or scene
 Unlike `context_pick`, a `scene_ref` value injects **no content** — it is only the resolution
 setting (ADR-0012). An empty `scene_ref` and no anchored `scene` resolves at **end-of-book**
 (full knowledge), the safe default for a non-manuscript chat.
+
+## `plot_context(board=None, scene=scene, include_future=False)`
+
+Returns an XML block describing a plot board in a form that is safe to paste into a prompt. It is the prompt-facing bridge for plot templates, template instances, board cards, point claims, and card relationships.
+
+**Signature**
+```python
+plot_context(board=None, scene=None, include_future: bool = False) -> str
+```
+
+**Accepted `board` shapes**:
+
+- omitted or empty string: uses the first plot board in the current project
+- a plot board id string
+- a picked node object/dict with an `id`
+- a list of picked node refs, where the first ref wins
+- a JSON string containing that picked-ref list, which is what `context_pick` inputs provide
+
+**Scene scoping**: if `scene` is supplied, future cards and claims are omitted by default. This lets a scene-scoped prompt see the plot evidence available up to that manuscript point without leaking later twists. Pass `include_future=True` only for outline, audit, or whole-book prompts where spoilers are intended.
+
+**Output shape**:
+```xml
+<plot_context board_id="plot_board_main" board_title="Book plot board" include_future="false" scope_scene_id="scene_after_breakin">
+  <omitted future_cards="1" />
+  <plotline id="plotline_main" title="Main" />
+  <template_instance id="plot_inst_main" title="Main structure" template_slug="three-act" template_family="act">
+    <ai_use_guidance>Use as a generic diagnostic lens; do not treat point order as a required outline.</ai_use_guidance>
+    <plot_point id="first_turn" title="First turn" status="planned">
+      <function_claim>Makes the old path unavailable.</function_claim>
+      <notes>Mara steals the ledger.</notes>
+      <open_questions>
+        <question>Who sees her leave?</question>
+      </open_questions>
+      <ai_rubric>{"criteria":["Cite a card."]}</ai_rubric>
+    </plot_point>
+  </template_instance>
+  <card id="card_archive" title="Archive Break-in" scene_id="scene_archive">
+    <synopsis>Mara steals the ledger.</synopsis>
+    <claim id="claim_first_turn" template_instance_id="plot_inst_main" plot_point_id="first_turn" claim_type="satisfies">
+      <rationale>The old path is unavailable.</rationale>
+    </claim>
+  </card>
+</plot_context>
+```
+
+**Example - board picked by the prompt form**
+```jinja
+{% role "user" %}
+Evaluate whether this scene pays off the active plot promises.
+
+{{ plot_context(input.board, scene=scene) }}
+
+Scene:
+{{ scene.body }}
+{% endrole %}
+```
+
+The matching prompt input declaration:
+
+```yaml
+- name: board
+  type: context_pick
+  label: Plot board
+  target:
+    kinds: [plot]
+    entry_types:
+      plot: [plot:board]
+    multiple: false
+  required: true
+```
+
+**Example - whole-board audit**
+```jinja
+{% role "user" %}
+Find weak or unsupported plot-point claims across the whole board.
+
+{{ plot_context(input.board, include_future=True) }}
+{% endrole %}
+```
+
+**What plot templates contribute**
+
+Plot template and template-instance metadata is included alongside board cards. In practice this means prompts can see:
+
+- template-level `ai_use_guidance`
+- template-level `global_diagnostic_questions`
+- plot-point `function_claim`, `description`, and `guidance`
+- instance-level point `notes`, `author_intent`, `expected_role`, and `open_questions`
+- point `placement`, `compression`, and `ai_rubric`
+- card claims with `evidence`, `rationale`, and `ai_notes`
+
+**Caveats**:
+
+- Empty string means "no usable board" and produces no prompt content. Wrap it in an `{% if %}` if the surrounding wording depends on it.
+- The helper returns a serialized XML-like block, not structured Python objects to loop over.
+- Scene scoping depends on linked board cards resolving to manuscript-order scenes. Placeholder cards without a `node_ref` can still appear, but they cannot prove where they sit in the manuscript.
+- The built-in templates (`Three Act Structure`, `Heroine Journey`, `Mystery Spine`) are generic diagnostic lenses, not prescriptive beat sheets.
 
 ## Sessions
 

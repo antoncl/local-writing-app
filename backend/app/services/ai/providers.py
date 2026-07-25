@@ -12,6 +12,12 @@ from app.services.machine_settings import MachineSettings
 CLOUD_PROVIDERS = {"anthropic", "openai", "openrouter"}
 LOCAL_PROVIDERS = {"ollama"}
 KNOWN_PROVIDERS = CLOUD_PROVIDERS | LOCAL_PROVIDERS
+PROVIDER_DISPLAY_NAMES = {
+    "anthropic": "Anthropic",
+    "openai": "OpenAI",
+    "openrouter": "OpenRouter",
+    "ollama": "Ollama",
+}
 
 DEFAULT_CHAT_MAX_TOKENS = 1024
 
@@ -95,6 +101,7 @@ def health_check(
             _ping_openai_compatible(
                 base_url="https://api.openai.com/v1",
                 api_key=settings.providers.openai_api_key,
+                provider_name="openai",
                 model=model,
                 requires_key=True,
             )
@@ -102,6 +109,7 @@ def health_check(
             _ping_openai_compatible(
                 base_url="https://openrouter.ai/api/v1",
                 api_key=settings.providers.openrouter_api_key,
+                provider_name="openrouter",
                 model=model,
                 requires_key=True,
             )
@@ -112,6 +120,7 @@ def health_check(
             _ping_openai_compatible(
                 base_url=base,
                 api_key="ollama",
+                provider_name="ollama",
                 model=model,
                 requires_key=False,
             )
@@ -148,9 +157,40 @@ class _ProviderError(RuntimeError):
     pass
 
 
-def _ping_anthropic(api_key: str, model: str) -> None:
+def _key_provider_hint(api_key: str) -> str | None:
+    key = api_key.strip()
+    if key.startswith("sk-ant-"):
+        return "anthropic"
+    if key.startswith("sk-or-"):
+        return "openrouter"
+    if key.startswith("sk-"):
+        return "openai"
+    return None
+
+
+def _ensure_provider_key(provider_name: str, api_key: str) -> None:
+    if provider_name not in CLOUD_PROVIDERS:
+        return
+    display_name = PROVIDER_DISPLAY_NAMES.get(provider_name, provider_name)
     if not api_key:
-        raise _ProviderError("Anthropic API key is not configured.")
+        raise _ProviderError(f"{display_name} API key is not configured.")
+    hint = _key_provider_hint(api_key)
+    if hint is None or hint == provider_name:
+        return
+    hinted_name = PROVIDER_DISPLAY_NAMES.get(hint, hint)
+    expected = {
+        "anthropic": "sk-ant-...",
+        "openai": "sk-... or sk-proj-...",
+        "openrouter": "sk-or-...",
+    }.get(provider_name, "the provider's key")
+    raise _ProviderError(
+        f"{display_name} API key appears to contain a {hinted_name} key. "
+        f"Check Machine Settings and put a {expected} key in the {display_name} field."
+    )
+
+
+def _ping_anthropic(api_key: str, model: str) -> None:
+    _ensure_provider_key("anthropic", api_key)
     try:
         from anthropic import Anthropic
     except ImportError as exc:
@@ -165,10 +205,10 @@ def _ping_anthropic(api_key: str, model: str) -> None:
 
 
 def _ping_openai_compatible(
-    *, base_url: str, api_key: str, model: str, requires_key: bool
+    *, base_url: str, api_key: str, provider_name: str, model: str, requires_key: bool
 ) -> None:
-    if requires_key and not api_key:
-        raise _ProviderError("API key is not configured for this provider.")
+    if requires_key:
+        _ensure_provider_key(provider_name, api_key)
     try:
         from openai import OpenAI
     except ImportError as exc:
@@ -253,6 +293,7 @@ def chat(
     started = time.perf_counter()
     try:
         if provider_name == "anthropic":
+            _ensure_provider_key("anthropic", settings.providers.anthropic_api_key)
             content, stop_reason, raw = _anthropic_chat(
                 api_key=settings.providers.anthropic_api_key,
                 model=model,
@@ -263,17 +304,20 @@ def chat(
                 system_blocks=system_blocks,
             )
         elif provider_name == "openai":
+            _ensure_provider_key("openai", settings.providers.openai_api_key)
             content, stop_reason, raw = _openai_compatible_chat(
                 base_url="https://api.openai.com/v1",
                 api_key=settings.providers.openai_api_key,
                 model=model,
                 system_prompt=effective_system_prompt,
+                provider_name="openai",
                 messages=messages,
                 max_tokens=max_tokens,
                 requires_key=True,
                 temperature=temperature,
             )
         elif provider_name == "openrouter":
+            _ensure_provider_key("openrouter", settings.providers.openrouter_api_key)
             from app.services.ai.profiles.openrouter import caching_style_for_model
             content, stop_reason, raw = _openrouter_chat(
                 api_key=settings.providers.openrouter_api_key,
@@ -295,6 +339,7 @@ def chat(
                 api_key="ollama",
                 model=model,
                 system_prompt=effective_system_prompt,
+                provider_name="ollama",
                 messages=messages,
                 max_tokens=max_tokens,
                 requires_key=False,
@@ -366,8 +411,7 @@ def _anthropic_chat(
 ) -> tuple[str, str | None, Any]:
     """Returns (content, stop_reason, raw_response). Caller extracts
     usage from raw_response via the matching ProviderProfile."""
-    if not api_key:
-        raise _ProviderError("Anthropic API key is not configured.")
+    _ensure_provider_key("anthropic", api_key)
     try:
         from anthropic import Anthropic
     except ImportError as exc:
@@ -479,8 +523,7 @@ def _openrouter_chat(
 
     Returns (content, stop_reason, raw_response). Caller extracts usage.
     """
-    if not api_key:
-        raise _ProviderError("API key is not configured for this provider.")
+    _ensure_provider_key("openrouter", api_key)
     try:
         from openai import OpenAI
     except ImportError as exc:
@@ -518,8 +561,8 @@ def _openrouter_chat_stream(
     session_id: str | None = None,
 ) -> Iterator[StreamDelta | StreamThinking | _StreamFinal]:
     """Streaming variant of _openrouter_chat. Same cache-marker semantics."""
-    if requires_key and not api_key:
-        raise _ProviderError("API key is not configured for this provider.")
+    if requires_key:
+        _ensure_provider_key("openrouter", api_key)
     try:
         from openai import OpenAI
     except ImportError as exc:
@@ -573,14 +616,14 @@ def _openrouter_chat_stream(
 
 def _openai_compatible_chat(
     *, base_url: str, api_key: str, model: str, system_prompt: str,
-    messages: list[dict[str, str]], max_tokens: int, requires_key: bool,
+    provider_name: str, messages: list[dict[str, str]], max_tokens: int, requires_key: bool,
     temperature: float | None = None,
 ) -> tuple[str, str | None, Any]:
     """Returns (content, stop_reason, raw_response). Caller extracts
     usage via the appropriate ProviderProfile for the originating
     provider (OpenAI vs Ollama have different shapes)."""
-    if requires_key and not api_key:
-        raise _ProviderError("API key is not configured for this provider.")
+    if requires_key:
+        _ensure_provider_key(provider_name, api_key)
     try:
         from openai import OpenAI
     except ImportError as exc:
@@ -777,6 +820,7 @@ def chat_stream(
     usage: UsageMetrics | None = None
     try:
         if provider_name == "anthropic":
+            _ensure_provider_key("anthropic", settings.providers.anthropic_api_key)
             for ev in _anthropic_chat_stream(
                 api_key=settings.providers.anthropic_api_key,
                 model=model, system_prompt=system_prompt, messages=messages,
@@ -790,6 +834,7 @@ def chat_stream(
                     stop_reason = ev.stop_reason
                     usage = ev.usage
         elif provider_name == "openrouter":
+            _ensure_provider_key("openrouter", settings.providers.openrouter_api_key)
             from app.services.ai.profiles.openrouter import caching_style_for_model
             for ev in _openrouter_chat_stream(
                 api_key=settings.providers.openrouter_api_key,
@@ -809,6 +854,7 @@ def chat_stream(
             if provider_name == "openai":
                 base_url = "https://api.openai.com/v1"
                 api_key = settings.providers.openai_api_key
+                _ensure_provider_key("openai", api_key)
                 requires_key = True
             else:
                 base = settings.providers.ollama_host.rstrip("/")
@@ -930,8 +976,8 @@ def _openai_compatible_chat_stream(
     """`provider_name` selects the response-shape parser for usage extraction.
     Pass "openai" or "ollama" — callers route both through this helper.
     """
-    if requires_key and not api_key:
-        raise _ProviderError("API key is not configured for this provider.")
+    if requires_key:
+        _ensure_provider_key(provider_name, api_key)
     try:
         from openai import OpenAI
     except ImportError as exc:

@@ -284,6 +284,26 @@ class ChatEndpointTests(unittest.TestCase):
         self.assertFalse(body["truncated"])
         self.assertEqual(body["stop_reason"], "end_turn")
 
+
+    def test_openai_key_slot_rejects_openrouter_key_before_provider_call(self) -> None:
+        self._allow_cloud()
+        loaded = _set_machine_keys(openai="sk-or-v1-not-an-openai-key", default_provider="openai")
+        with patch("app.services.machine_settings.load_settings", return_value=loaded), \
+             patch("app.services.ai.providers._openai_compatible_chat") as mock_chat:
+            response = self.client.post(
+                "/api/ai/chat",
+                json={
+                    "provider": "openai",
+                    "model": "gpt-4o-mini",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertFalse(body["ok"])
+        self.assertIn("OpenAI API key appears to contain a OpenRouter key", body["error"])
+        mock_chat.assert_not_called()
+
     def test_provider_defaults_from_machine_settings(self) -> None:
         self._allow_local_only()
         loaded = _set_machine_keys(default_provider="ollama")
@@ -330,6 +350,31 @@ class ChatStreamEndpointTests(unittest.TestCase):
             if line:
                 events.append(json.loads(line))
         return events
+
+
+    def test_chat_stream_rejects_openai_key_in_openrouter_slot_before_provider_call(self) -> None:
+        self.service.update_project_settings(
+            UpdateProjectSettingsRequest(ai_policy="cloud-allowed")
+        )
+        loaded = _set_machine_keys(
+            openrouter="sk-proj-not-an-openrouter-key",
+            default_provider="openrouter",
+        )
+        with patch("app.services.machine_settings.load_settings", return_value=loaded), \
+             patch("app.services.ai.providers._openrouter_chat_stream") as mock_stream:
+            response = self.client.post(
+                "/api/ai/chat/stream",
+                json={
+                    "provider": "openrouter",
+                    "model": "anthropic/claude-haiku-4.5",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        events = self._parse_ndjson(response.text)
+        self.assertEqual(events[0]["type"], "error")
+        self.assertIn("OpenRouter API key appears to contain a OpenAI key", events[0]["error"])
+        mock_stream.assert_not_called()
 
     def test_chat_stream_emits_deltas_then_done(self) -> None:
         from app.services.ai import providers as ai_providers

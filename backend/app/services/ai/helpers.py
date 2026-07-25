@@ -1110,21 +1110,67 @@ def _format_plot_context_block(packet: Any) -> str:
         attrs = [f"id={quoteattr(instance.id)}", f"title={quoteattr(instance.title)}"]
         if instance.template_id:
             attrs.append(f"template_id={quoteattr(instance.template_id)}")
+        if getattr(instance, "template_slug", ""):
+            attrs.append(f"template_slug={quoteattr(instance.template_slug)}")
+        if getattr(instance, "template_family", ""):
+            attrs.append(f"template_family={quoteattr(instance.template_family)}")
         lines.append(f"  <template_instance {' '.join(attrs)}>")
+        for tag, value in (
+            ("template_description", getattr(instance, "template_description", "")),
+            ("ai_use_guidance", getattr(instance, "ai_use_guidance", "")),
+        ):
+            if value:
+                lines.append(f"    <{tag}>{xml_escape(str(value).strip())}</{tag}>")
+        questions = getattr(instance, "global_diagnostic_questions", None) or []
+        if questions:
+            lines.append("    <global_diagnostic_questions>")
+            for question in questions:
+                lines.append(f"      <question>{xml_escape(str(question).strip())}</question>")
+            lines.append("    </global_diagnostic_questions>")
         for point in instance.plot_points:
             point_attrs = [
                 f"id={quoteattr(point.plot_point_id)}",
                 f"title={quoteattr(point.title)}",
             ]
+            if getattr(point, "local_label", ""):
+                point_attrs.append(f"local_label={quoteattr(point.local_label)}")
+            if getattr(point, "status", ""):
+                point_attrs.append(f"status={quoteattr(point.status)}")
             lines.append(f"    <plot_point {' '.join(point_attrs)}>")
             for tag, value in (
                 ("function_claim", point.function_claim),
                 ("description", point.description),
                 ("guidance", point.guidance),
                 ("notes", point.notes),
+                ("author_intent", getattr(point, "author_intent", "")),
+                ("expected_role", getattr(point, "expected_role", "")),
             ):
                 if value:
                     lines.append(f"      <{tag}>{xml_escape(str(value).strip())}</{tag}>")
+            questions = getattr(point, "open_questions", None) or []
+            if questions:
+                lines.append("      <open_questions>")
+                for question in questions:
+                    lines.append(f"        <question>{xml_escape(str(question).strip())}</question>")
+                lines.append("      </open_questions>")
+            diagnostic_questions = getattr(point, "diagnostic_questions", None) or []
+            if diagnostic_questions:
+                lines.append("      <diagnostic_questions>")
+                for question in diagnostic_questions:
+                    lines.append(f"        <question>{xml_escape(str(question).strip())}</question>")
+                lines.append("      </diagnostic_questions>")
+            for tag in ("placement", "compression", "ai_rubric"):
+                value = getattr(point, tag, None)
+                if value is None:
+                    continue
+                payload = (
+                    value.model_dump(exclude_none=True)
+                    if hasattr(value, "model_dump")
+                    else value
+                )
+                lines.append(
+                    f"      <{tag}>{xml_escape(json.dumps(payload, ensure_ascii=False))}</{tag}>"
+                )
             lines.append("    </plot_point>")
         lines.append("  </template_instance>")
     for card in getattr(packet, "cards", None) or []:

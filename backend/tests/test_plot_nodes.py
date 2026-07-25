@@ -18,7 +18,11 @@ from app.models import (
     UpsertMetadataEntryTypeRequest,
     UpsertMetadataFieldRequest,
 )
-from app.models_plot import CreatePlotNodeRequest
+from app.models_plot import (
+    CreatePlotNodeRequest,
+    PlotTemplateInstanceSpec,
+    PlotTemplateSpec,
+)
 from app.services.ai.helpers import create_environment_for_project
 from app.services.ai.templates import render_template
 from app.services.project_service import ProjectService
@@ -137,7 +141,15 @@ class PlotNodeTests(unittest.TestCase):
                 "body": "Book-specific notes.",
                 "template_instance": {
                     "template_id": "plot_template_three_act",
+                    "enabled_point_ids": ["first_turn"],
                     "plot_points": [{"plot_point_id": "first_turn", "notes": "The archive theft."}],
+                    "point_notes": {
+                        "first_turn": {
+                            "status": "planned",
+                            "author_intent": "Mara commits by stealing the ledger.",
+                            "open_questions": ["Who sees her leave?"],
+                        }
+                    },
                 },
             },
         )
@@ -145,6 +157,60 @@ class PlotNodeTests(unittest.TestCase):
         body = created.json()
         self.assertEqual(body["body"], "Book-specific notes.")
         self.assertEqual(body["template_instance"]["template_id"], "plot_template_three_act")
+        self.assertEqual(body["template_instance"]["enabled_point_ids"], ["first_turn"])
+        note = body["template_instance"]["point_notes"]["first_turn"]
+        self.assertEqual(note["status"], "planned")
+        self.assertEqual(note["author_intent"], "Mara commits by stealing the ledger.")
+        self.assertEqual(note["open_questions"], ["Who sees her leave?"])
+
+    def test_plot_template_contract_accepts_design_doc_names(self) -> None:
+        template = PlotTemplateSpec.model_validate(
+            {
+                "slug": "three-act",
+                "display_name": "Three Act",
+                "family": "act",
+                "source_refs": [{"id": "src", "title": "Generic craft note"}],
+                "ip_risk": "low",
+                "builtin_policy": "seed_generic",
+                "points": [
+                    {
+                        "id": "first_turn",
+                        "key": "first_turn",
+                        "order_index": 2,
+                        "label": "First Turning Point",
+                        "function": {"claim": "Makes the old path unavailable."},
+                        "placement": {"phase_label": "Act I"},
+                        "compression": {"can_compress": True},
+                        "ai_rubric": {"criteria": ["Cites evidence."]},
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(template.plot_points[0].title, "First Turning Point")
+        self.assertEqual(template.plot_points[0].function_claim, "Makes the old path unavailable.")
+        self.assertEqual(template.plot_points[0].placement.phase_label, "Act I")
+        self.assertTrue(template.plot_points[0].compression.can_compress)
+        self.assertEqual(template.plot_points[0].ai_rubric.criteria, ["Cites evidence."])
+
+        instance = PlotTemplateInstanceSpec.model_validate(
+            {
+                "template_ref": "plot_template_three_act",
+                "enabled_point_ids": ["first_turn"],
+                "point_notes": {
+                    "first_turn": {
+                        "local_label": "Archive turn",
+                        "status": "planned",
+                        "author_intent": "Mara chooses theft over duty.",
+                        "open_questions": ["What does this cost her?"],
+                    }
+                },
+            }
+        )
+        self.assertEqual(instance.template_id, "plot_template_three_act")
+        self.assertEqual(instance.plot_points[0].plot_point_id, "first_turn")
+        self.assertEqual(instance.plot_points[0].status, "planned")
+        self.assertEqual(instance.point_notes["first_turn"].author_intent, "Mara chooses theft over duty.")
 
     def test_invalid_board_front_matter_is_rejected(self) -> None:
         (self.root / "plot" / "Broken Board.md").write_text(
@@ -334,6 +400,100 @@ board:
             [claim["id"] for claim in future_context["claims"]],
             ["claim_first_turn", "claim_resolution"],
         )
+
+    def test_plot_context_resolves_design_shaped_template_instance_contract(self) -> None:
+        scene = self.service.create_scene(CreateSceneRequest(title="Archive Break-in"))
+        template = self.client.post(
+            "/api/plots",
+            json={
+                "title": "Local Structure",
+                "entry_type": "plot:template",
+                "template": {
+                    "slug": "local-structure",
+                    "display_name": "Local Structure",
+                    "family": "act",
+                    "description": "A local diagnostic lens.",
+                    "ai_use_guidance": "Ask for evidence before claiming satisfaction.",
+                    "global_diagnostic_questions": ["What pressure changes?"],
+                    "source_refs": [{"id": "src", "title": "Local note"}],
+                    "ip_risk": "low",
+                    "builtin_policy": "user_authored",
+                    "points": [
+                        {
+                            "id": "first_turn",
+                            "label": "First Turning Point",
+                            "function": {"claim": "Makes the old path unavailable."},
+                            "placement": {"phase_label": "Act I"},
+                            "compression": {"can_compress": True},
+                            "ai_rubric": {"criteria": ["Cite a card."]},
+                            "diagnostic_questions": ["What decision closes the old path?"],
+                        }
+                    ],
+                },
+            },
+        ).json()
+        instance = self.client.post(
+            "/api/plots",
+            json={
+                "title": "Main Structure",
+                "entry_type": "plot:template_instance",
+                "template_instance": {
+                    "template_ref": template["id"],
+                    "enabled_point_ids": ["first_turn"],
+                    "point_notes": {
+                        "first_turn": {
+                            "local_label": "Archive commitment",
+                            "status": "planned",
+                            "author_intent": "Mara chooses theft over duty.",
+                            "open_questions": ["Who catches the clue?"],
+                        }
+                    },
+                },
+            },
+        ).json()
+        board = self.client.post(
+            "/api/plots",
+            json={
+                "title": "Book plot board",
+                "entry_type": "plot:board",
+                "board": {
+                    "template_instance_ids": [instance["id"]],
+                    "cards": [
+                        {
+                            "id": "card_archive",
+                            "title": "Archive Break-in",
+                            "node_ref": scene.id,
+                        }
+                    ],
+                    "claims": [
+                        {
+                            "id": "claim_first_turn",
+                            "card_id": "card_archive",
+                            "template_instance_id": instance["id"],
+                            "plot_point_id": "first_turn",
+                        }
+                    ],
+                },
+            },
+        ).json()
+
+        context = self.client.get(
+            f"/api/plots/{board['id']}/context",
+            params={"scene_id": scene.id},
+        ).json()
+
+        context_instance = context["template_instances"][0]
+        self.assertEqual(context_instance["template_slug"], "local-structure")
+        self.assertEqual(context_instance["template_family"], "act")
+        self.assertEqual(context_instance["ai_use_guidance"], "Ask for evidence before claiming satisfaction.")
+        context_point = context_instance["plot_points"][0]
+        self.assertEqual(context_point["title"], "Archive commitment")
+        self.assertEqual(context_point["status"], "planned")
+        self.assertEqual(context_point["author_intent"], "Mara chooses theft over duty.")
+        self.assertEqual(context_point["open_questions"], ["Who catches the clue?"])
+        self.assertEqual(context_point["placement"]["phase_label"], "Act I")
+        self.assertTrue(context_point["compression"]["can_compress"])
+        self.assertEqual(context_point["ai_rubric"]["criteria"], ["Cite a card."])
 
     def test_plot_context_helper_renders_scene_scoped_context(self) -> None:
         early = self.service.create_scene(CreateSceneRequest(title="Archive Break-in"))

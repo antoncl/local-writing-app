@@ -74,3 +74,6 @@ per-machine settings, never in the project folder.
   state. The earlier pointer-capture/state-only version looked right but did not
   move panes reliably in the local browser runtime; do not "simplify" this path
   without re-testing drag and resize in the actual app.
+
+## Branching
+Work related to plotting/template contracts should be based on `origin/plotting`, not `master`.

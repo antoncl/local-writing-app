@@ -21,6 +21,7 @@
     structure?: StructureDocument | null;
     onFocus?: () => void;
     onNavigate?: (payload: { id: string; kind: string }) => void;
+    onSaved?: (plot: PlotNode) => void;
   }
 
   let {
@@ -28,6 +29,7 @@
     structure = null,
     onFocus,
     onNavigate,
+    onSaved,
   }: Props = $props();
 
   type BoardColumn = {
@@ -459,6 +461,7 @@
         base_revision: plotNode.revision,
       });
       localPlotNode = saved;
+      onSaved?.(saved);
       return saved;
     } catch (caught) {
       saveError = caught instanceof Error ? caught.message : "Could not save plot board.";
@@ -588,7 +591,15 @@
           metadata: {},
         },
       ];
-      await persistBoard(nextBoard, "Adding template instance");
+      const saved = await persistBoard(nextBoard, "Adding template instance");
+      if (!saved) {
+        try {
+          await api.deletePlotNode(instance.id);
+        } catch {
+          saveError = `${saveError || "Could not link template instance to board."} The new template instance could not be cleaned up automatically.`;
+        }
+        return;
+      }
     } catch (caught) {
       saveError = caught instanceof Error ? caught.message : "Could not add template instance.";
     } finally {
@@ -707,6 +718,7 @@
         base_revision: plotNode.revision,
       });
       localPlotNode = response.plot;
+      onSaved?.(response.plot);
       setStructure(response.structure);
       selectedCardId = card.id;
       selectedClaimId = null;

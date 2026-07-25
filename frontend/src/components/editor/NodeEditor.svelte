@@ -24,7 +24,7 @@
   import { formatCostEur } from "@/lib/utils/money";
   import { sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import { resolveColor } from "@/lib/utils/colors";
-  import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataFieldDefinition, MetadataSchema, PlotNodeSummary, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
+  import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataFieldDefinition, MetadataSchema, PlotNode, PlotNodeSummary, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
   import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { referenceIndexStore } from "@/lib/stores/references";
@@ -86,6 +86,7 @@
     // The view designer self-persists; it reports its save lifecycle up so the
     // pane's tab badge can reflect it (#263).
     onViewSaveState?: ((state: ViewSaveState) => void) | undefined;
+    onPlotSaved?: ((plot: PlotNode) => void | Promise<void>) | undefined;
     // Snapshots (#401). Autosave lags the buffer by up to 6 seconds, and both
     // capture and restore read the FILE — so the strip asks the host to write
     // pending edits first, and hands the restored document back for the host to
@@ -117,6 +118,7 @@
     onNavigate = undefined,
     onOpenChat = undefined,
     onViewSaveState = undefined,
+    onPlotSaved = undefined,
     onFlushScene = undefined,
     onSceneRestored = undefined
   }: Props = $props();
@@ -1120,6 +1122,7 @@
       {structure}
       onFocus={() => onFocus?.()}
       onNavigate={(payload) => onNavigate?.(payload)}
+      onSaved={(plot) => onPlotSaved?.(plot)}
     />
   {/if}
 

@@ -87,6 +87,7 @@ class PlotEntriesMixin:
         resolved_id = self._node_id_for_path(path, front_matter)
         entry_type = self._plot_entry_type(front_matter)
         schema = self.read_metadata_schema()
+        plot_family = self._plot_data_family(entry_type, schema=schema)
         metadata = self._strip_unknown_metadata_fields(
             self._normalise_metadata(front_matter.get("metadata"), path),
             entry_type,
@@ -101,10 +102,22 @@ class PlotEntriesMixin:
             body=body.rstrip(),
             metadata=metadata,
             computed_metadata=self._computed_entry_metadata(body, node_id=resolved_id, entry_type=entry_type, schema=schema),
-            template=self._parse_plot_template(front_matter.get("template")),
-            template_instance=self._parse_plot_template_instance(front_matter.get("template_instance")),
-            board=self._parse_plot_board(front_matter.get("board")),
-            layout=self._parse_plot_layout(front_matter.get("layout")),
+            template=self._parse_plot_template(
+                front_matter.get("template"),
+                node_id=resolved_id,
+                required=plot_family == "template",
+            ),
+            template_instance=self._parse_plot_template_instance(
+                front_matter.get("template_instance"),
+                node_id=resolved_id,
+                required=plot_family == "template_instance",
+            ),
+            board=self._parse_plot_board(
+                front_matter.get("board"),
+                node_id=resolved_id,
+                required=plot_family == "board",
+            ),
+            layout=self._parse_plot_layout(front_matter.get("layout"), node_id=resolved_id),
             system=self._plot_system(front_matter),
             source_layer_id=index_entry.source_layer_id if index_entry else "",
             source_layer_label=index_entry.source_layer_label if index_entry else "",
@@ -368,61 +381,103 @@ class PlotEntriesMixin:
     def _plot_system(front_matter: dict[str, Any]) -> bool:
         return front_matter.get("system") is True
 
+    def _plot_data_family(self, entry_type: str, *, schema: Any | None = None) -> str | None:
+        ancestry = self.entry_type_ancestry(entry_type, schema=schema)
+        if "plot:template" in ancestry:
+            return "template"
+        if "plot:template_instance" in ancestry:
+            return "template_instance"
+        if "plot:board" in ancestry:
+            return "board"
+        return None
+
     @staticmethod
-    def _parse_plot_template(raw: Any) -> PlotTemplateSpec | None:
-        if not isinstance(raw, dict):
+    def _invalid_plot_data(node_id: str, section: str, exc: ValidationError | None = None) -> ProjectServiceError:
+        message = f"Plot node {node_id} has invalid {section} data."
+        if exc is not None and exc.errors():
+            message = f"{message} {exc.errors()[0].get('msg', '')}".strip()
+        return ProjectServiceError(message, 422)
+
+    def _parse_plot_template(
+        self,
+        raw: Any,
+        *,
+        node_id: str,
+        required: bool = False,
+    ) -> PlotTemplateSpec | None:
+        if raw is None:
+            if required:
+                raise ProjectServiceError(f"Plot node {node_id} is missing template data.", 422)
             return None
+        if not isinstance(raw, dict):
+            raise self._invalid_plot_data(node_id, "template")
         try:
             return PlotTemplateSpec.model_validate(raw)
-        except ValidationError:
-            return None
+        except ValidationError as exc:
+            raise self._invalid_plot_data(node_id, "template", exc) from exc
 
-    @staticmethod
-    def _parse_plot_template_instance(raw: Any) -> PlotTemplateInstanceSpec | None:
-        if not isinstance(raw, dict):
+    def _parse_plot_template_instance(
+        self,
+        raw: Any,
+        *,
+        node_id: str,
+        required: bool = False,
+    ) -> PlotTemplateInstanceSpec | None:
+        if raw is None:
+            if required:
+                raise ProjectServiceError(f"Plot node {node_id} is missing template_instance data.", 422)
             return None
+        if not isinstance(raw, dict):
+            raise self._invalid_plot_data(node_id, "template_instance")
         try:
             return PlotTemplateInstanceSpec.model_validate(raw)
-        except ValidationError:
-            return None
+        except ValidationError as exc:
+            raise self._invalid_plot_data(node_id, "template_instance", exc) from exc
 
-    @staticmethod
-    def _parse_plot_board(raw: Any) -> PlotBoardSpec | None:
-        if not isinstance(raw, dict):
+    def _parse_plot_board(
+        self,
+        raw: Any,
+        *,
+        node_id: str,
+        required: bool = False,
+    ) -> PlotBoardSpec | None:
+        if raw is None:
+            if required:
+                raise ProjectServiceError(f"Plot node {node_id} is missing board data.", 422)
             return None
+        if not isinstance(raw, dict):
+            raise self._invalid_plot_data(node_id, "board")
         try:
             return PlotBoardSpec.model_validate(raw)
-        except ValidationError:
-            return None
+        except ValidationError as exc:
+            raise self._invalid_plot_data(node_id, "board", exc) from exc
 
-    @staticmethod
-    def _parse_plot_layout(raw: Any) -> PlotBoardLayout | None:
-        if not isinstance(raw, dict):
+    def _parse_plot_layout(self, raw: Any, *, node_id: str) -> PlotBoardLayout | None:
+        if raw is None:
             return None
+        if not isinstance(raw, dict):
+            raise self._invalid_plot_data(node_id, "layout")
         try:
             return PlotBoardLayout.model_validate(raw)
-        except ValidationError:
-            return None
+        except ValidationError as exc:
+            raise self._invalid_plot_data(node_id, "layout", exc) from exc
 
-    @staticmethod
-    def _default_template(entry_type: str, value: PlotTemplateSpec | None) -> PlotTemplateSpec | None:
+    def _default_template(self, entry_type: str, value: PlotTemplateSpec | None) -> PlotTemplateSpec | None:
         if value is not None:
             return value
-        return PlotTemplateSpec() if entry_type == "plot:template" else None
+        return PlotTemplateSpec() if self._plot_data_family(entry_type) == "template" else None
 
-    @staticmethod
     def _default_template_instance(
-        entry_type: str, value: PlotTemplateInstanceSpec | None
+        self, entry_type: str, value: PlotTemplateInstanceSpec | None
     ) -> PlotTemplateInstanceSpec | None:
         if value is not None:
             return value
-        return PlotTemplateInstanceSpec() if entry_type == "plot:template_instance" else None
+        return PlotTemplateInstanceSpec() if self._plot_data_family(entry_type) == "template_instance" else None
 
-    @staticmethod
-    def _default_board(entry_type: str, value: PlotBoardSpec | None) -> PlotBoardSpec | None:
+    def _default_board(self, entry_type: str, value: PlotBoardSpec | None) -> PlotBoardSpec | None:
         if value is not None:
             return value
-        return PlotBoardSpec() if entry_type == "plot:board" else None
+        return PlotBoardSpec() if self._plot_data_family(entry_type) == "board" else None
 
     def _plot_context_template_instances(
         self, claims: list[PlotContextClaim]

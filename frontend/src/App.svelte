@@ -883,6 +883,7 @@
         onNavigate={(detail) => navigateToBacklink(detail.id, detail.kind)}
         onOpenChat={(detail) => chatSessions.openChatFromPromptEntry(detail.entry, detail.inputs, detail.sceneId, detail.assistantId)}
         onViewSaveState={(state) => editorPanes.setViewSaveState(editorPane.id, state)}
+        onPlotSaved={(plot) => editorPanes.reconcilePlotBodySave(plot)}
         onFlushScene={async () => {
           // A capture photographs the file and a restore overwrites it, so both
           // must run against a file that already holds the author's latest

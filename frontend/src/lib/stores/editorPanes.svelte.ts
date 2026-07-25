@@ -1267,6 +1267,35 @@ class EditorPanesController {
     await this.reconcileDocumentFromServer(scene, "scene");
   }
 
+  reconcilePlotBodySave(plot: PlotNode): void {
+    const pane = this.paneForDocument(plot.id, "plot");
+    if (!pane) return;
+    this.panes = this.panes.map((candidate) => {
+      if (candidate.id !== pane.id) return candidate;
+      const dirty = isEditorPaneDirty(
+        plot,
+        candidate.draftTitle,
+        candidate.draftMarkdown,
+        candidate.draftStatus,
+        candidate.draftEntryType,
+        candidate.draftMetadata,
+        candidate.draftInputs,
+      );
+      return {
+        ...candidate,
+        scene: plot,
+        dirty,
+        saving: false,
+        recentlySaved: !dirty,
+        saveError: false,
+      };
+    });
+    this.setStatus(`Saved ${plot.title}`);
+    if (!this.panes.find((candidate) => candidate.id === pane.id)?.dirty) {
+      this.#autosave.flashSaved(pane.id);
+    }
+  }
+
   highlightEmbeddedTodoInOpenPane(sceneId: string, todoId: string): void {
     const pane = this.panes.find((candidate) => candidate.scene?.id === sceneId);
     if (!pane) return;

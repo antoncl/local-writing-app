@@ -146,6 +146,25 @@ class PlotNodeTests(unittest.TestCase):
         self.assertEqual(body["body"], "Book-specific notes.")
         self.assertEqual(body["template_instance"]["template_id"], "plot_template_three_act")
 
+    def test_invalid_board_front_matter_is_rejected(self) -> None:
+        (self.root / "plot" / "Broken Board.md").write_text(
+            """---
+id: plot_broken
+title: Broken Board
+entry_type: plot:board
+board:
+  cards:
+    - id: ""
+      title: Bad card
+---
+""",
+            encoding="utf-8",
+        )
+
+        response = self.client.get("/api/plots/plot_broken")
+        self.assertEqual(response.status_code, 422, response.text)
+        self.assertIn("invalid board data", response.json()["detail"])
+
     def test_placeholder_card_can_be_promoted_to_scene(self) -> None:
         board = self.client.post(
             "/api/plots",
@@ -465,6 +484,13 @@ class PlotNodeTests(unittest.TestCase):
 
         self.assertIn("plot:subplot_board", schema.entry_types)
         self.assertEqual(schema.entry_types["plot:subplot_board"].kind, "plot")
+
+        created = self.client.post(
+            "/api/plots",
+            json={"title": "Romance subplot", "entry_type": "plot:subplot_board"},
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        self.assertEqual(created.json()["board"]["cards"], [])
 
     def test_schema_field_changes_update_plot_metadata_files(self) -> None:
         layer_id = self.service._metadata_schema_layer_id(self.root)

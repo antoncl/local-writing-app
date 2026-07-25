@@ -1,17 +1,24 @@
 <script lang="ts">
+  import "@xyflow/svelte/dist/style.css";
   import "./PlotBoardBodyView.css";
+  import { SvelteFlow, Controls, MiniMap, type Connection, type Edge, type Node as FlowNode, type OnMoveEnd, type Viewport } from "@xyflow/svelte";
+  import { untrack } from "svelte";
   import { api } from "@/lib/api";
   import { setStructure } from "@/lib/stores/structure";
   import { isLeafNode } from "@/lib/utils/treeHelpers";
+  import PlotBoardFlowCard from "./PlotBoardFlowCard.svelte";
+  import { setPlotBoardContext } from "./plotBoardContext";
   import type {
     EditableDocument,
     PlotBoardCard,
+    PlotBoardLayout,
     PlotBoardSpec,
     PlotContextClaim,
     PlotContextPacket,
     PlotNode,
     PlotNodeSummary,
     PlotPointClaim,
+    PlotRelationship,
     PlotTemplateInstancePoint,
     StructureDocument,
     StructureNode,
@@ -50,7 +57,15 @@
     | { kind: "plot-point"; template_instance_id: string; plot_point_id: string }
     | { kind: "plot-claim"; claim_id: string };
 
+  type PlotFlowData = { cardId: string };
+  type CanvasPoint = { x: number; y: number };
+
   const PLOT_DND_TYPE = "application/x-local-writing-plot";
+  const CARD_NODE_WIDTH = 250;
+  const CARD_ROW_HEIGHT = 170;
+  const CARD_COLUMN_WIDTH = 310;
+  const DEFAULT_VIEWPORT: Viewport = { x: 24, y: 24, zoom: 1 };
+  const nodeTypes = { plotCard: PlotBoardFlowCard };
   const CLAIM_TYPE_OPTIONS: { value: PlotPointClaim["claim_type"]; label: string }[] = [
     { value: "satisfies", label: "Satisfies" },
     { value: "partially_satisfies", label: "Partially satisfies" },
@@ -98,6 +113,11 @@
   let plotContextLoading = $state(false);
   let plotContextError = $state("");
   let plotContextRequest = 0;
+  let flowNodes: FlowNode<PlotFlowData>[] = $state([]);
+  let flowEdges: Edge[] = $state([]);
+  let flowViewport = $state<Viewport>(DEFAULT_VIEWPORT);
+  let canvasHydrating = false;
+  let lastCanvasSnapshot = "";
 
   let plotNode = $derived(localPlotNode ?? asPlotNode(scene));
   let board = $derived(plotNode?.board ?? EMPTY_BOARD);
@@ -155,6 +175,26 @@
       ? paletteRows.find((row) => selectedPalettePoint === pointKey(row.instance.id, row.point.plot_point_id)) ?? null
       : null,
   );
+
+  setPlotBoardContext(() => ({
+    saving: Boolean(savingMessage),
+    selectedCardId,
+    selectedClaimId,
+    dragOverCardId,
+    cardById,
+    claimsForCard,
+    pointLabel,
+    selectCard,
+    selectClaim,
+    dragClaim,
+    clearDragOver,
+    allowCardDrop,
+    leaveCardDrop,
+    dropOnCard,
+    removeClaim,
+    openCardNode,
+    promoteCard,
+  }));
 
   $effect(() => {
     const incoming = asPlotNode(scene);
@@ -258,6 +298,23 @@
     void boardRevision;
   });
 
+  $effect(() => {
+    const id = plotNode?.id ?? "";
+    const revision = plotNode?.revision ?? "";
+    const cardIds = cards.map((card) => card.id).join("|");
+    const relationshipIds = (board.relationships ?? []).map((rel) => rel.id).join("|");
+    canvasHydrating = true;
+    flowViewport = plotNode?.layout?.viewport ?? DEFAULT_VIEWPORT;
+    flowNodes = buildFlowNodes(cards, columns, plotNode?.layout ?? null);
+    flowEdges = buildFlowEdges(board.relationships ?? [], cards);
+    lastCanvasSnapshot = untrack(() => canvasSnapshot(flowViewport));
+    queueMicrotask(() => (canvasHydrating = false));
+    void id;
+    void revision;
+    void cardIds;
+    void relationshipIds;
+  });
+
   function asPlotNode(document: EditableDocument | null | undefined): PlotNode | null {
     if (!document || !("board" in document)) return null;
     return document as PlotNode;
@@ -340,6 +397,14 @@
     return `${instanceId}:${pointId}`;
   }
 
+  function cardById(cardId: string): PlotBoardCard | null {
+    return cards.find((card) => card.id === cardId) ?? null;
+  }
+
+  function claimsForCard(cardId: string): PlotPointClaim[] {
+    return claimsByCard.get(cardId) ?? [];
+  }
+
   function selectCard(cardId: string): void {
     selectedCardId = cardId;
     selectedClaimId = null;
@@ -416,6 +481,10 @@
     setPlotDragPayload(event, { kind: "plot-claim", claim_id: claim.id });
   }
 
+  function clearDragOver(): void {
+    dragOverCardId = null;
+  }
+
   function allowCardDrop(cardId: string, event: DragEvent): void {
     event.preventDefault();
     if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
@@ -445,7 +514,81 @@
     return `${prefix}_${raw.replace(/-/g, "").slice(0, 12)}`;
   }
 
-  async function persistBoard(nextBoard: PlotBoardSpec, message: string): Promise<PlotNode | null> {
+  function positionFromRecord(position: Record<string, number> | undefined): CanvasPoint | null {
+    const x = position?.x;
+    const y = position?.y;
+    return typeof x === "number" && Number.isFinite(x) && typeof y === "number" && Number.isFinite(y) ? { x, y } : null;
+  }
+
+  function defaultCardPosition(card: PlotBoardCard, currentColumns: BoardColumn[]): CanvasPoint {
+    const columnIndex = Math.max(0, currentColumns.findIndex((column) => column.cards.some((candidate) => candidate.id === card.id)));
+    const column = currentColumns[columnIndex];
+    const rowIndex = Math.max(0, column?.cards.findIndex((candidate) => candidate.id === card.id) ?? 0);
+    return {
+      x: columnIndex * CARD_COLUMN_WIDTH,
+      y: rowIndex * CARD_ROW_HEIGHT,
+    };
+  }
+
+  function buildFlowNodes(currentCards: PlotBoardCard[], currentColumns: BoardColumn[], layout: PlotBoardLayout | null): FlowNode<PlotFlowData>[] {
+    const layoutById = new Map((layout?.nodes ?? []).map((node) => [node.id, node]));
+    const currentById = new Map(untrack(() => flowNodes).map((node) => [node.id, node]));
+    return currentCards.map((card) => {
+      const persisted = positionFromRecord(layoutById.get(card.id)?.position);
+      const current = currentById.get(card.id)?.position;
+      return {
+        id: card.id,
+        type: "plotCard",
+        position: persisted ?? current ?? defaultCardPosition(card, currentColumns),
+        data: { cardId: card.id },
+        width: CARD_NODE_WIDTH,
+      };
+    });
+  }
+
+  function relationshipLabel(relationship: PlotRelationship): string {
+    return relationship.label || relationship.kind.replace(/_/g, " ");
+  }
+
+  function buildFlowEdges(relationships: PlotRelationship[], currentCards: PlotBoardCard[]): Edge[] {
+    const cardIds = new Set(currentCards.map((card) => card.id));
+    return relationships
+      .filter((relationship) => cardIds.has(relationship.from_card_id) && cardIds.has(relationship.to_card_id))
+      .map((relationship) => ({
+        id: relationship.id,
+        source: relationship.from_card_id,
+        target: relationship.to_card_id,
+        sourceHandle: "out",
+        targetHandle: "in",
+        label: relationshipLabel(relationship),
+        class: `relationship-edge ${relationship.kind}`,
+      }));
+  }
+
+  function toLayout(viewport: Viewport = flowViewport): PlotBoardLayout {
+    return {
+      nodes: flowNodes.map((node) => ({
+        id: node.id,
+        kind: "card",
+        position: { x: node.position.x, y: node.position.y },
+        cfg: {},
+      })),
+      edges: flowEdges.map((edge) => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        source_handle: edge.sourceHandle ?? null,
+        target_handle: edge.targetHandle ?? null,
+      })),
+      viewport,
+    };
+  }
+
+  function canvasSnapshot(viewport: Viewport = flowViewport): string {
+    return JSON.stringify(toLayout(viewport));
+  }
+
+  async function persistPlot(nextBoard: PlotBoardSpec, nextLayout: PlotBoardLayout | null, message: string): Promise<PlotNode | null> {
     if (!plotNode) return null;
     savingMessage = message;
     saveError = "";
@@ -458,7 +601,7 @@
         template: plotNode.template ?? null,
         template_instance: plotNode.template_instance ?? null,
         board: nextBoard,
-        layout: plotNode.layout ?? null,
+        layout: nextLayout,
         base_revision: plotNode.revision,
       });
       localPlotNode = saved;
@@ -470,6 +613,18 @@
     } finally {
       savingMessage = "";
     }
+  }
+
+  async function persistBoard(nextBoard: PlotBoardSpec, message: string): Promise<PlotNode | null> {
+    return persistPlot(nextBoard, toLayout(), message);
+  }
+
+  async function persistCanvas(viewport: Viewport = flowViewport): Promise<void> {
+    if (!plotNode || canvasHydrating) return;
+    const snapshot = canvasSnapshot(viewport);
+    if (snapshot === lastCanvasSnapshot) return;
+    const saved = await persistPlot(board, toLayout(viewport), "Saving layout");
+    if (saved) lastCanvasSnapshot = snapshot;
   }
 
   function optionalText(value: string): string | null {
@@ -744,6 +899,31 @@
       savingMessage = "";
     }
   }
+
+  const handleMoveEnd: OnMoveEnd = (_, viewport) => {
+    flowViewport = viewport;
+    void persistCanvas(viewport);
+  };
+
+  function handleNodeDragStop(): void {
+    void persistCanvas();
+  }
+
+  function connectRelationship(connection: Connection): void {
+    if (!connection.source || !connection.target || connection.source === connection.target || savingMessage) return;
+    const relationship: PlotRelationship = {
+      id: newLocalId("relationship"),
+      from_card_id: connection.source,
+      to_card_id: connection.target,
+      kind: "causes",
+      label: null,
+      metadata: {},
+    };
+    const nextBoard = cloneBoardSpec(board);
+    nextBoard.relationships = [...(nextBoard.relationships ?? []), relationship];
+    flowEdges = buildFlowEdges(nextBoard.relationships, cards);
+    void persistBoard(nextBoard, "Adding relationship");
+  }
 </script>
 
 <section class="plot-board" onfocusin={() => onFocus?.()}>
@@ -836,102 +1016,25 @@
         Chapter
       </button>
     </div>
-    <div class="column-strip">
-      {#each columns as column (column.id)}
-        <section class="draft-column">
-          <header>
-            <span>{column.title}</span>
-            <button
-              type="button"
-              class="column-add"
-              title={`Add card to ${column.title}`}
-              aria-label={`Add card to ${column.title}`}
-              disabled={Boolean(savingMessage)}
-              onclick={() => addPlaceholderCard(column.id)}
-            >+</button>
-          </header>
-          <div class="column-cards">
-            {#if column.cards.length === 0}
-              <p class="empty-column">No cards.</p>
-            {:else}
-              {#each column.cards as card (card.id)}
-                <article
-                  class="plot-card"
-                  class:selected={selectedCardId === card.id && !selectedClaimId}
-                  class:drag-over={dragOverCardId === card.id}
-                  ondragenter={(event) => allowCardDrop(card.id, event)}
-                  ondragover={(event) => allowCardDrop(card.id, event)}
-                  ondragleave={(event) => leaveCardDrop(card.id, event)}
-                  ondrop={(event) => dropOnCard(card.id, event)}
-                >
-                  <header>
-                    <button type="button" class="card-select" onclick={() => selectCard(card.id)}>
-                      <strong>{card.title}</strong>
-                    </button>
-                    {#if card.node_ref}
-                      <button
-                        type="button"
-                        class="open-node"
-                        title="Open linked scene"
-                        aria-label={`Open linked scene for ${card.title}`}
-                        onclick={(event) => openCardNode(card, event)}
-                      ><i class="ti ti-arrow-up-right" aria-hidden="true"></i></button>
-                    {:else}
-                      <button
-                        type="button"
-                        class="open-node"
-                        title="Promote to scene"
-                        aria-label={`Promote ${card.title} to scene`}
-                        disabled={Boolean(savingMessage)}
-                        onclick={(event) => promoteCard(card, event)}
-                      ><i class="ti ti-file-plus" aria-hidden="true"></i></button>
-                    {/if}
-                  </header>
-                  {#if card.synopsis}
-                    <p>{card.synopsis}</p>
-                  {/if}
-                  <div class="claim-chips">
-                    {#each claimsByCard.get(card.id) ?? [] as claim (claim.id)}
-                      <span
-                        class="claim-chip"
-                        class:selected={claim.id === selectedClaimId}
-                        role="group"
-                        aria-label={`Claim ${pointLabel(claim)}`}
-                        draggable={true}
-                        ondragstart={(event) => dragClaim(claim, event)}
-                        ondragend={() => {
-                          dragOverCardId = null;
-                        }}
-                      >
-                        <button
-                          type="button"
-                          class="claim-chip-main"
-                          onclick={(event) => {
-                            event.stopPropagation();
-                            selectClaim(claim);
-                          }}
-                        >
-                          <span>{pointLabel(claim)}</span>
-                        </button>
-                        <button
-                          type="button"
-                          class="claim-remove"
-                          title={`Remove ${pointLabel(claim)}`}
-                          aria-label={`Remove ${pointLabel(claim)}`}
-                          disabled={Boolean(savingMessage)}
-                          onclick={(event) => removeClaim(claim, event)}
-                        >
-                          <i class="ti ti-x" aria-hidden="true"></i>
-                        </button>
-                      </span>
-                    {/each}
-                  </div>
-                </article>
-              {/each}
-            {/if}
-          </div>
-        </section>
-      {/each}
+    <div class="flow-canvas">
+      <SvelteFlow
+        bind:nodes={flowNodes}
+        bind:edges={flowEdges}
+        bind:viewport={flowViewport}
+        {nodeTypes}
+        onconnect={connectRelationship}
+        onnodedragstop={handleNodeDragStop}
+        onmoveend={handleMoveEnd}
+        fitView
+        minZoom={0.25}
+        maxZoom={1.8}
+      >
+        <Controls />
+        <MiniMap pannable zoomable nodeColor="var(--accent)" nodeStrokeColor="var(--border-strong)" />
+      </SvelteFlow>
+      {#if cards.length === 0}
+        <div class="empty-hint">Add a card to start mapping the board.</div>
+      {/if}
     </div>
   </main>
 

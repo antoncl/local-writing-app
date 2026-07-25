@@ -482,7 +482,10 @@ class PatchDeclinesWhenTheDiffIsHugeTests(PatchTestCase):
     triggers are ordinary: a `git pull`, a cloud sync that moves every mtime."""
 
     def test_a_diff_covering_most_of_the_project_rebuilds(self) -> None:
-        for i in range(8):
+        baseline_node_count = len(self._open_index().candidates)
+        changed_node_count = baseline_node_count + 1
+
+        for i in range(changed_node_count):
             self._write_lore(self.root, f"n{i}", f"Node {i}")
         self._open_index()
 
@@ -490,7 +493,7 @@ class PatchDeclinesWhenTheDiffIsHugeTests(PatchTestCase):
         # lands on the *next open* at once — the case the ~36% crossover is
         # about. In-app edits would patch one file at a time and never present a
         # batch, which is exactly why patching stays the cheap path in a session.
-        for i in range(8):
+        for i in range(changed_node_count):
             self._write_lore_externally(self.root, f"n{i}", f"Node {i} edited")
 
         self.assertFalse(self._patched_without_full_walk())

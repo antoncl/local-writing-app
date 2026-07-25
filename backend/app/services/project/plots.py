@@ -55,7 +55,9 @@ class PlotEntriesMixin:
                     source_layer_label=entry.source_layer_label,
                 )
             )
-        entries.sort(key=lambda entry: (entry.entry_type, entry.title.lower(), entry.id))
+        entries.sort(
+            key=lambda entry: (entry.entry_type, entry.title.lower(), entry.id)
+        )
         return PlotNodeList(entries=entries)
 
     def create_plot_node(self, request: CreatePlotNodeRequest) -> PlotNode:
@@ -71,7 +73,9 @@ class PlotEntriesMixin:
             request.body,
             metadata=self._normalise_metadata(request.metadata, path),
             template=self._default_template(request.entry_type, request.template),
-            template_instance=self._default_template_instance(request.entry_type, request.template_instance),
+            template_instance=self._default_template_instance(
+                request.entry_type, request.template_instance
+            ),
             board=self._default_board(request.entry_type, request.board),
             layout=request.layout,
         )
@@ -93,7 +97,9 @@ class PlotEntriesMixin:
             entry_type,
             schema,
         )
-        metadata = self._strip_dangling_references(metadata, schema, self._build_node_index())
+        metadata = self._strip_dangling_references(
+            metadata, schema, self._build_node_index()
+        )
         return PlotNode(
             id=resolved_id,
             title=str(front_matter.get("title") or resolved_id),
@@ -101,7 +107,9 @@ class PlotEntriesMixin:
             entry_type=entry_type,
             body=body.rstrip(),
             metadata=metadata,
-            computed_metadata=self._computed_entry_metadata(body, node_id=resolved_id, entry_type=entry_type, schema=schema),
+            computed_metadata=self._computed_entry_metadata(
+                body, node_id=resolved_id, entry_type=entry_type, schema=schema
+            ),
             template=self._parse_plot_template(
                 front_matter.get("template"),
                 node_id=resolved_id,
@@ -117,7 +125,9 @@ class PlotEntriesMixin:
                 node_id=resolved_id,
                 required=plot_family == "board",
             ),
-            layout=self._parse_plot_layout(front_matter.get("layout"), node_id=resolved_id),
+            layout=self._parse_plot_layout(
+                front_matter.get("layout"), node_id=resolved_id
+            ),
             system=self._plot_system(front_matter),
             source_layer_id=index_entry.source_layer_id if index_entry else "",
             source_layer_label=index_entry.source_layer_label if index_entry else "",
@@ -128,10 +138,14 @@ class PlotEntriesMixin:
         front_matter = self._read_front_matter_only(path, strict=True)
         resolved_id = self._node_id_for_path(path, front_matter)
         if self._plot_system(front_matter):
-            raise ProjectServiceError("A system plot node cannot be edited; duplicate it first.", 403)
+            raise ProjectServiceError(
+                "A system plot node cannot be edited; duplicate it first.", 403
+            )
         current_revision = self._revision(path)
         if request.base_revision and request.base_revision != current_revision:
-            raise ProjectServiceError("Plot node changed on disk after it was opened.", 409)
+            raise ProjectServiceError(
+                "Plot node changed on disk after it was opened.", 409
+            )
         self._check_entry_type_kind(request.entry_type, "plot")
         metadata = self._normalise_metadata(request.metadata, path)
         self._write_plot_file(
@@ -142,7 +156,9 @@ class PlotEntriesMixin:
             request.body,
             metadata=metadata,
             template=self._default_template(request.entry_type, request.template),
-            template_instance=self._default_template_instance(request.entry_type, request.template_instance),
+            template_instance=self._default_template_instance(
+                request.entry_type, request.template_instance
+            ),
             board=self._default_board(request.entry_type, request.board),
             layout=request.layout,
         )
@@ -158,24 +174,36 @@ class PlotEntriesMixin:
             self._delete_node_file(path)
         return self.list_plot_nodes()
 
-    def promote_plot_card(self, node_id: str, request: PromotePlotCardRequest) -> PromotePlotCardResponse:
+    def promote_plot_card(
+        self, node_id: str, request: PromotePlotCardRequest
+    ) -> PromotePlotCardResponse:
         path = self._path_for_node_id(node_id, "plot")
         front_matter = self._read_front_matter_only(path, strict=True)
         if self._plot_system(front_matter):
-            raise ProjectServiceError("A system plot node cannot be edited; duplicate it first.", 403)
+            raise ProjectServiceError(
+                "A system plot node cannot be edited; duplicate it first.", 403
+            )
 
         plot_node = self.read_plot_node(node_id)
         if plot_node.entry_type != "plot:board" or plot_node.board is None:
             raise ProjectServiceError(f"Plot node {node_id} is not a board.", 422)
         if request.base_revision and request.base_revision != plot_node.revision:
-            raise ProjectServiceError("Plot node changed on disk after it was opened.", 409)
+            raise ProjectServiceError(
+                "Plot node changed on disk after it was opened.", 409
+            )
 
         card_index = next(
-            (index for index, candidate in enumerate(plot_node.board.cards) if candidate.id == request.card_id),
+            (
+                index
+                for index, candidate in enumerate(plot_node.board.cards)
+                if candidate.id == request.card_id
+            ),
             None,
         )
         if card_index is None:
-            raise ProjectServiceError(f"Plot card {request.card_id} does not exist.", 404)
+            raise ProjectServiceError(
+                f"Plot card {request.card_id} does not exist.", 404
+            )
 
         card = plot_node.board.cards[card_index]
         if card.node_ref:
@@ -188,7 +216,9 @@ class PlotEntriesMixin:
         scene = self.create_scene(CreateSceneRequest(title=title, parent_id=parent_id))
 
         next_board = plot_node.board.model_copy(deep=True)
-        next_board.cards[card_index] = card.model_copy(update={"title": title, "node_ref": scene.id})
+        next_board.cards[card_index] = card.model_copy(
+            update={"title": title, "node_ref": scene.id}
+        )
         self._write_plot_file(
             path,
             plot_node.id,
@@ -234,11 +264,15 @@ class PlotEntriesMixin:
         omitted_unordered_cards = 0
 
         for card in board_node.board.cards:
-            card_scene_id, structure_node = self._plot_card_scene(card, scene_order, structure_nodes)
+            card_scene_id, structure_node = self._plot_card_scene(
+                card, scene_order, structure_nodes
+            )
             manuscript_index = scene_order.get(card_scene_id or "")
             visible = include_future
             if not visible and scene_id and target_index is not None:
-                visible = manuscript_index is not None and manuscript_index <= target_index
+                visible = (
+                    manuscript_index is not None and manuscript_index <= target_index
+                )
             if not visible:
                 if manuscript_index is None:
                     omitted_unordered_cards += 1
@@ -286,7 +320,8 @@ class PlotEntriesMixin:
                 label=relationship.label,
             )
             for relationship in board_node.board.relationships
-            if relationship.from_card_id in visible_card_ids and relationship.to_card_id in visible_card_ids
+            if relationship.from_card_id in visible_card_ids
+            and relationship.to_card_id in visible_card_ids
         ]
         template_instances = self._plot_context_template_instances(visible_claims)
         referenced_plotlines = {
@@ -297,7 +332,11 @@ class PlotEntriesMixin:
             )
             if value
         }
-        plotlines = [plotline for plotline in board_node.board.plotlines if plotline.id in referenced_plotlines]
+        plotlines = [
+            plotline
+            for plotline in board_node.board.plotlines
+            if plotline.id in referenced_plotlines
+        ]
         return PlotContextPacket(
             board_id=board_node.id,
             board_title=board_node.title,
@@ -312,7 +351,8 @@ class PlotEntriesMixin:
                 "future_cards": omitted_future_cards,
                 "unordered_cards": omitted_unordered_cards,
                 "claims": len(board_node.board.claims) - len(visible_claim_ids),
-                "relationships": len(board_node.board.relationships) - len(visible_relationships),
+                "relationships": len(board_node.board.relationships)
+                - len(visible_relationships),
             },
         )
 
@@ -320,36 +360,29 @@ class PlotEntriesMixin:
         plot_dir = root / "plot"
         plot_dir.mkdir(parents=True, exist_ok=True)
         inherited_ids = self._inherited_plot_node_ids(root)
-        for filename, node_id, title, body, points in self._builtin_plot_templates():
+        for builtin in self._builtin_plot_templates():
+            filename = builtin["filename"]
+            node_id = builtin["node_id"]
+            title = builtin["title"]
             path = plot_dir / filename
-            if path.exists() or node_id in inherited_ids:
+            if node_id in inherited_ids:
                 continue
+            if path.exists():
+                try:
+                    front_matter = self._read_front_matter_only(path, strict=False)
+                except ProjectServiceError:
+                    continue
+                if front_matter.get("id") != node_id or not self._plot_system(
+                    front_matter
+                ):
+                    continue
             self._write_plot_file(
                 path,
                 node_id,
                 title,
                 "plot:template",
-                body,
-                template=PlotTemplateSpec(
-                    slug=filename.removesuffix(".md").lower().replace(" ", "-"),
-                    display_name=title,
-                    family=self._builtin_template_family(node_id),
-                    description=body,
-                    prescriptiveness="diagnostic",
-                    ai_use_guidance="Use as a generic diagnostic lens; do not treat point order as a required outline.",
-                    supports_compression=True,
-                    supports_expansion=True,
-                    source_refs=[
-                        {
-                            "id": "local_writing_app_generic",
-                            "title": "Local Writing App generic plotting rubric",
-                            "note": "Generic structure guidance authored for the app, not imported from a protected beat sheet.",
-                        }
-                    ],
-                    ip_risk="low",
-                    builtin_policy="seed_generic",
-                    plot_points=points,
-                ),
+                builtin["body"],
+                template=builtin["template"],
                 system=True,
             )
 
@@ -417,7 +450,9 @@ class PlotEntriesMixin:
     def _plot_system(front_matter: dict[str, Any]) -> bool:
         return front_matter.get("system") is True
 
-    def _plot_data_family(self, entry_type: str, *, schema: Any | None = None) -> str | None:
+    def _plot_data_family(
+        self, entry_type: str, *, schema: Any | None = None
+    ) -> str | None:
         ancestry = self.entry_type_ancestry(entry_type, schema=schema)
         if "plot:template" in ancestry:
             return "template"
@@ -428,7 +463,9 @@ class PlotEntriesMixin:
         return None
 
     @staticmethod
-    def _invalid_plot_data(node_id: str, section: str, exc: ValidationError | None = None) -> ProjectServiceError:
+    def _invalid_plot_data(
+        node_id: str, section: str, exc: ValidationError | None = None
+    ) -> ProjectServiceError:
         message = f"Plot node {node_id} has invalid {section} data."
         if exc is not None and exc.errors():
             message = f"{message} {exc.errors()[0].get('msg', '')}".strip()
@@ -443,7 +480,9 @@ class PlotEntriesMixin:
     ) -> PlotTemplateSpec | None:
         if raw is None:
             if required:
-                raise ProjectServiceError(f"Plot node {node_id} is missing template data.", 422)
+                raise ProjectServiceError(
+                    f"Plot node {node_id} is missing template data.", 422
+                )
             return None
         if not isinstance(raw, dict):
             raise self._invalid_plot_data(node_id, "template")
@@ -461,7 +500,9 @@ class PlotEntriesMixin:
     ) -> PlotTemplateInstanceSpec | None:
         if raw is None:
             if required:
-                raise ProjectServiceError(f"Plot node {node_id} is missing template_instance data.", 422)
+                raise ProjectServiceError(
+                    f"Plot node {node_id} is missing template_instance data.", 422
+                )
             return None
         if not isinstance(raw, dict):
             raise self._invalid_plot_data(node_id, "template_instance")
@@ -479,7 +520,9 @@ class PlotEntriesMixin:
     ) -> PlotBoardSpec | None:
         if raw is None:
             if required:
-                raise ProjectServiceError(f"Plot node {node_id} is missing board data.", 422)
+                raise ProjectServiceError(
+                    f"Plot node {node_id} is missing board data.", 422
+                )
             return None
         if not isinstance(raw, dict):
             raise self._invalid_plot_data(node_id, "board")
@@ -498,29 +541,45 @@ class PlotEntriesMixin:
         except ValidationError as exc:
             raise self._invalid_plot_data(node_id, "layout", exc) from exc
 
-    def _default_template(self, entry_type: str, value: PlotTemplateSpec | None) -> PlotTemplateSpec | None:
+    def _default_template(
+        self, entry_type: str, value: PlotTemplateSpec | None
+    ) -> PlotTemplateSpec | None:
         if value is not None:
             return value
-        return PlotTemplateSpec() if self._plot_data_family(entry_type) == "template" else None
+        return (
+            PlotTemplateSpec()
+            if self._plot_data_family(entry_type) == "template"
+            else None
+        )
 
     def _default_template_instance(
         self, entry_type: str, value: PlotTemplateInstanceSpec | None
     ) -> PlotTemplateInstanceSpec | None:
         if value is not None:
             return value
-        return PlotTemplateInstanceSpec() if self._plot_data_family(entry_type) == "template_instance" else None
+        return (
+            PlotTemplateInstanceSpec()
+            if self._plot_data_family(entry_type) == "template_instance"
+            else None
+        )
 
-    def _default_board(self, entry_type: str, value: PlotBoardSpec | None) -> PlotBoardSpec | None:
+    def _default_board(
+        self, entry_type: str, value: PlotBoardSpec | None
+    ) -> PlotBoardSpec | None:
         if value is not None:
             return value
-        return PlotBoardSpec() if self._plot_data_family(entry_type) == "board" else None
+        return (
+            PlotBoardSpec() if self._plot_data_family(entry_type) == "board" else None
+        )
 
     def _plot_context_template_instances(
         self, claims: list[PlotContextClaim]
     ) -> list[PlotContextTemplateInstance]:
         point_ids_by_instance: dict[str, set[str]] = {}
         for claim in claims:
-            point_ids_by_instance.setdefault(claim.template_instance_id, set()).add(claim.plot_point_id)
+            point_ids_by_instance.setdefault(claim.template_instance_id, set()).add(
+                claim.plot_point_id
+            )
 
         out: list[PlotContextTemplateInstance] = []
         for instance_id, used_point_ids in sorted(point_ids_by_instance.items()):
@@ -553,7 +612,8 @@ class PlotEntriesMixin:
             for point_id in sorted(used_point_ids):
                 if (
                     instance_node.template_instance.enabled_point_ids
-                    and point_id not in instance_node.template_instance.enabled_point_ids
+                    and point_id
+                    not in instance_node.template_instance.enabled_point_ids
                 ):
                     continue
                 base = template_points.get(point_id)
@@ -564,11 +624,16 @@ class PlotEntriesMixin:
                         plot_point_id=point_id,
                         local_label=(
                             getattr(note, "local_label", "")
-                            if note is not None else getattr(local, "local_label", "")
+                            if note is not None
+                            else getattr(local, "local_label", "")
                         ),
                         title=(
                             getattr(local, "title", "")
-                            or (getattr(note, "local_label", "") if note is not None else "")
+                            or (
+                                getattr(note, "local_label", "")
+                                if note is not None
+                                else ""
+                            )
                             or getattr(base, "title", "")
                             or point_id
                         ),
@@ -580,29 +645,36 @@ class PlotEntriesMixin:
                         guidance=getattr(base, "guidance", ""),
                         notes=(
                             getattr(note, "notes", "")
-                            if note is not None else getattr(local, "notes", "")
+                            if note is not None
+                            else getattr(local, "notes", "")
                         ),
                         author_intent=(
                             getattr(note, "author_intent", "")
-                            if note is not None else getattr(local, "author_intent", "")
+                            if note is not None
+                            else getattr(local, "author_intent", "")
                         ),
                         expected_role=(
                             getattr(note, "expected_role", "")
-                            if note is not None else getattr(local, "expected_role", "")
+                            if note is not None
+                            else getattr(local, "expected_role", "")
                         ),
                         open_questions=(
                             getattr(note, "open_questions", [])
-                            if note is not None else getattr(local, "open_questions", [])
+                            if note is not None
+                            else getattr(local, "open_questions", [])
                         ),
                         status=(
                             getattr(note, "status", "unplanned")
-                            if note is not None else getattr(local, "status", "unplanned")
+                            if note is not None
+                            else getattr(local, "status", "unplanned")
                         ),
                         placement=getattr(base, "placement", None),
                         diagnostic_questions=getattr(base, "diagnostic_questions", []),
                         failure_modes=getattr(base, "failure_modes", []),
                         compression=getattr(base, "compression", None),
-                        claim_evidence_prompts=getattr(base, "claim_evidence_prompts", []),
+                        claim_evidence_prompts=getattr(
+                            base, "claim_evidence_prompts", []
+                        ),
                         ai_rubric=getattr(base, "ai_rubric", None),
                     )
                 )
@@ -611,13 +683,22 @@ class PlotEntriesMixin:
                     id=instance_node.id,
                     title=instance_node.title,
                     template_id=template_id,
-                    template_slug=getattr(template_spec, "slug", "") if template_spec is not None else "",
-                    template_family=getattr(template_spec, "family", "custom") if template_spec is not None else "custom",
-                    template_description=getattr(template_spec, "description", "") if template_spec is not None else "",
-                    ai_use_guidance=getattr(template_spec, "ai_use_guidance", "") if template_spec is not None else "",
+                    template_slug=getattr(template_spec, "slug", "")
+                    if template_spec is not None
+                    else "",
+                    template_family=getattr(template_spec, "family", "custom")
+                    if template_spec is not None
+                    else "custom",
+                    template_description=getattr(template_spec, "description", "")
+                    if template_spec is not None
+                    else "",
+                    ai_use_guidance=getattr(template_spec, "ai_use_guidance", "")
+                    if template_spec is not None
+                    else "",
                     global_diagnostic_questions=(
                         getattr(template_spec, "global_diagnostic_questions", [])
-                        if template_spec is not None else []
+                        if template_spec is not None
+                        else []
                     ),
                     plot_points=points,
                 )
@@ -661,54 +742,7 @@ class PlotEntriesMixin:
         return None, None
 
     @staticmethod
-    def _builtin_plot_templates() -> list[tuple[str, str, str, str, list[Any]]]:
-        from app.models_plot import PlotTemplatePoint
+    def _builtin_plot_templates() -> list[dict[str, Any]]:
+        from app.services.project.plot_builtin_templates import builtin_plot_templates
 
-        return [
-            (
-                "Three Act Structure.md",
-                "plot_template_three_act",
-                "Three Act Structure",
-                "A generic three-part structure template. Duplicate into the book plot folder before editing.",
-                [
-                    PlotTemplatePoint(id="setup_pressure", title="Setup pressure", function_claim="Establishes the central pressure before commitment."),
-                    PlotTemplatePoint(id="first_turn", title="First turn", function_claim="Makes the old path unavailable."),
-                    PlotTemplatePoint(id="midpoint_reversal", title="Midpoint reversal", function_claim="Changes the power balance or reframes the goal."),
-                    PlotTemplatePoint(id="crisis", title="Crisis", function_claim="Forces the hard choice before resolution."),
-                    PlotTemplatePoint(id="resolution", title="Resolution", function_claim="Shows the consequence of the final choice."),
-                ],
-            ),
-            (
-                "Heroine Journey.md",
-                "plot_template_heroine_journey",
-                "Heroine Journey",
-                "A generic internal-integration journey template. Duplicate into the book plot folder before editing.",
-                [
-                    PlotTemplatePoint(id="separation", title="Separation", function_claim="The protagonist is pushed away from an old identity or belonging."),
-                    PlotTemplatePoint(id="descent", title="Descent", function_claim="Pressure exposes the limits of the old survival strategy."),
-                    PlotTemplatePoint(id="reconnection", title="Reconnection", function_claim="The protagonist claims or rebuilds a needed source of belonging."),
-                    PlotTemplatePoint(id="integration", title="Integration", function_claim="Inner and outer choices align in action."),
-                ],
-            ),
-            (
-                "Mystery Spine.md",
-                "plot_template_mystery_spine",
-                "Mystery Spine",
-                "A generic fair-play mystery spine. Duplicate into the book plot folder before editing.",
-                [
-                    PlotTemplatePoint(id="crime_or_question", title="Crime or question", function_claim="Creates the explicit puzzle the reader tracks."),
-                    PlotTemplatePoint(id="first_clue", title="First clue", function_claim="Provides inspectable evidence, not just atmosphere."),
-                    PlotTemplatePoint(id="red_herring", title="Red herring", function_claim="Supports a plausible but wrong interpretation."),
-                    PlotTemplatePoint(id="reveal_chain", title="Reveal chain", function_claim="Lets the solution feel earned before confirmation."),
-                    PlotTemplatePoint(id="solution", title="Solution", function_claim="Resolves the puzzle with evidence already made available."),
-                ],
-            ),
-        ]
-
-    @staticmethod
-    def _builtin_template_family(node_id: str) -> str:
-        if "mystery" in node_id:
-            return "puzzle"
-        if "journey" in node_id:
-            return "journey"
-        return "act"
+        return builtin_plot_templates()

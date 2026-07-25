@@ -42,16 +42,45 @@ class PlotNodeTests(unittest.TestCase):
         response = self.client.get("/api/plots")
         self.assertEqual(response.status_code, 200, response.text)
         templates = [
-            entry for entry in response.json()["entries"]
+            entry
+            for entry in response.json()["entries"]
             if entry["entry_type"] == "plot:template"
         ]
-        self.assertGreaterEqual(len(templates), 3)
+        expected_template_ids = {
+            "plot_template_three_act",
+            "plot_template_fifteen_beat_transformation",
+            "plot_template_mythic_quest",
+            "plot_template_twelve_step_quest",
+            "plot_template_heroine_journey",
+            "plot_template_circular_change",
+            "plot_template_seven_point",
+            "plot_template_kishotenketsu",
+            "plot_template_romance_relationship",
+            "plot_template_mystery_spine",
+            "plot_template_thriller_escalation",
+            "plot_template_positive_character_change",
+            "plot_template_negative_character_change",
+            "plot_template_steadfast_character",
+        }
+        self.assertTrue(
+            expected_template_ids.issubset({entry["id"] for entry in templates})
+        )
         self.assertTrue(all(entry["system"] for entry in templates))
 
-        node = self.client.get(f"/api/plots/{templates[0]['id']}").json()
+        node = self.client.get("/api/plots/plot_template_seven_point").json()
         self.assertEqual(node["entry_type"], "plot:template")
         self.assertTrue(node["system"])
-        self.assertGreater(len(node["template"]["plot_points"]), 0)
+        self.assertEqual(node["template"]["family"], "act")
+        self.assertEqual(node["template"]["builtin_policy"], "seed_generic")
+        midpoint = next(
+            point
+            for point in node["template"]["plot_points"]
+            if point["id"] == "midpoint_shift"
+        )
+        self.assertEqual(midpoint["placement"]["phase_label"], "Middle")
+        self.assertTrue(midpoint["compression"]["can_compress"])
+        self.assertGreater(len(midpoint["diagnostic_questions"]), 0)
+        self.assertGreater(len(midpoint["ai_rubric"]["evidence_prompts"]), 0)
 
     def test_open_project_backfills_missing_builtin_templates(self) -> None:
         for path in (self.root / "plot").glob("*.md"):
@@ -59,15 +88,50 @@ class PlotNodeTests(unittest.TestCase):
 
         reopened = ProjectService.opened_at(self.root)
         templates = [
-            entry for entry in reopened.list_plot_nodes().entries
+            entry
+            for entry in reopened.list_plot_nodes().entries
             if entry.entry_type == "plot:template"
         ]
-        self.assertGreaterEqual(len(templates), 3)
+        self.assertGreaterEqual(len(templates), 14)
         self.assertTrue(all(entry.system for entry in templates))
+
+    def test_open_project_refreshes_sparse_system_builtin_templates(self) -> None:
+        (self.root / "plot" / "Three Act Structure.md").write_text(
+            """---
+id: plot_template_three_act
+title: Three Act Structure
+entry_type: plot:template
+system: true
+template:
+  slug: three-act-structure
+  display_name: Three Act Structure
+  family: act
+  plot_points:
+    - id: first_turn
+      title: First turn
+      function_claim: Old sparse claim.
+---
+Old sparse body.
+""",
+            encoding="utf-8",
+        )
+
+        reopened = ProjectService.opened_at(self.root)
+        node = reopened.read_plot_node("plot_template_three_act")
+
+        self.assertEqual(node.title, "Three-Act Story Arc")
+        self.assertEqual(node.template.display_name, "Three-Act Story Arc")
+        point_ids = {point.id for point in node.template.plot_points}
+        self.assertIn("inciting_change", point_ids)
+        first_point = node.template.plot_points[0]
+        self.assertGreater(len(first_point.diagnostic_questions), 0)
+        self.assertIsNotNone(first_point.ai_rubric)
 
     def test_system_template_rejects_save_and_delete(self) -> None:
         templates = self.client.get("/api/plots").json()["entries"]
-        template = next(entry for entry in templates if entry["entry_type"] == "plot:template")
+        template = next(
+            entry for entry in templates if entry["entry_type"] == "plot:template"
+        )
         node = self.client.get(f"/api/plots/{template['id']}").json()
 
         save = self.client.put(
@@ -113,7 +177,14 @@ class PlotNodeTests(unittest.TestCase):
                 ],
             },
             "layout": {
-                "nodes": [{"id": "card_archive", "kind": "card", "position": {"x": 20, "y": 40}, "cfg": {}}],
+                "nodes": [
+                    {
+                        "id": "card_archive",
+                        "kind": "card",
+                        "position": {"x": 20, "y": 40},
+                        "cfg": {},
+                    }
+                ],
                 "edges": [],
                 "viewport": {"x": 0, "y": 0, "zoom": 0.85},
             },
@@ -142,7 +213,9 @@ class PlotNodeTests(unittest.TestCase):
                 "template_instance": {
                     "template_id": "plot_template_three_act",
                     "enabled_point_ids": ["first_turn"],
-                    "plot_points": [{"plot_point_id": "first_turn", "notes": "The archive theft."}],
+                    "plot_points": [
+                        {"plot_point_id": "first_turn", "notes": "The archive theft."}
+                    ],
                     "point_notes": {
                         "first_turn": {
                             "status": "planned",
@@ -156,7 +229,9 @@ class PlotNodeTests(unittest.TestCase):
         self.assertEqual(created.status_code, 200, created.text)
         body = created.json()
         self.assertEqual(body["body"], "Book-specific notes.")
-        self.assertEqual(body["template_instance"]["template_id"], "plot_template_three_act")
+        self.assertEqual(
+            body["template_instance"]["template_id"], "plot_template_three_act"
+        )
         self.assertEqual(body["template_instance"]["enabled_point_ids"], ["first_turn"])
         note = body["template_instance"]["point_notes"]["first_turn"]
         self.assertEqual(note["status"], "planned")
@@ -188,10 +263,14 @@ class PlotNodeTests(unittest.TestCase):
         )
 
         self.assertEqual(template.plot_points[0].title, "First Turning Point")
-        self.assertEqual(template.plot_points[0].function_claim, "Makes the old path unavailable.")
+        self.assertEqual(
+            template.plot_points[0].function_claim, "Makes the old path unavailable."
+        )
         self.assertEqual(template.plot_points[0].placement.phase_label, "Act I")
         self.assertTrue(template.plot_points[0].compression.can_compress)
-        self.assertEqual(template.plot_points[0].ai_rubric.criteria, ["Cites evidence."])
+        self.assertEqual(
+            template.plot_points[0].ai_rubric.criteria, ["Cites evidence."]
+        )
 
         instance = PlotTemplateInstanceSpec.model_validate(
             {
@@ -210,7 +289,10 @@ class PlotNodeTests(unittest.TestCase):
         self.assertEqual(instance.template_id, "plot_template_three_act")
         self.assertEqual(instance.plot_points[0].plot_point_id, "first_turn")
         self.assertEqual(instance.plot_points[0].status, "planned")
-        self.assertEqual(instance.point_notes["first_turn"].author_intent, "Mara chooses theft over duty.")
+        self.assertEqual(
+            instance.point_notes["first_turn"].author_intent,
+            "Mara chooses theft over duty.",
+        )
 
     def test_invalid_board_front_matter_is_rejected(self) -> None:
         (self.root / "plot" / "Broken Board.md").write_text(
@@ -270,11 +352,16 @@ board:
         promoted_card = payload["plot"]["board"]["cards"][0]
         self.assertEqual(promoted_card["id"], "card_archive")
         self.assertEqual(promoted_card["node_ref"], scene["id"])
-        self.assertEqual(payload["plot"]["board"]["claims"][0]["card_id"], "card_archive")
+        self.assertEqual(
+            payload["plot"]["board"]["claims"][0]["card_id"], "card_archive"
+        )
 
         persisted = self.client.get(f"/api/plots/{board['id']}").json()
         self.assertEqual(persisted["board"]["cards"][0]["node_ref"], scene["id"])
-        self.assertEqual(self.client.get(f"/api/scenes/{scene['id']}").json()["title"], "Archive Break-in")
+        self.assertEqual(
+            self.client.get(f"/api/scenes/{scene['id']}").json()["title"],
+            "Archive Break-in",
+        )
 
         def has_scene(node: dict) -> bool:
             if node.get("scene_id") == scene["id"]:
@@ -387,7 +474,9 @@ board:
         self.assertEqual(response.status_code, 200, response.text)
         context = response.json()
         self.assertEqual([card["id"] for card in context["cards"]], ["card_archive"])
-        self.assertEqual([claim["id"] for claim in context["claims"]], ["claim_first_turn"])
+        self.assertEqual(
+            [claim["id"] for claim in context["claims"]], ["claim_first_turn"]
+        )
         self.assertEqual(context["omitted_counts"]["future_cards"], 1)
         self.assertNotIn("Butler Reveal", str(context))
         self.assertNotIn("butler did it", str(context))
@@ -401,7 +490,9 @@ board:
             ["claim_first_turn", "claim_resolution"],
         )
 
-    def test_plot_context_resolves_design_shaped_template_instance_contract(self) -> None:
+    def test_plot_context_resolves_design_shaped_template_instance_contract(
+        self,
+    ) -> None:
         scene = self.service.create_scene(CreateSceneRequest(title="Archive Break-in"))
         template = self.client.post(
             "/api/plots",
@@ -426,7 +517,9 @@ board:
                             "placement": {"phase_label": "Act I"},
                             "compression": {"can_compress": True},
                             "ai_rubric": {"criteria": ["Cite a card."]},
-                            "diagnostic_questions": ["What decision closes the old path?"],
+                            "diagnostic_questions": [
+                                "What decision closes the old path?"
+                            ],
                         }
                     ],
                 },
@@ -485,11 +578,16 @@ board:
         context_instance = context["template_instances"][0]
         self.assertEqual(context_instance["template_slug"], "local-structure")
         self.assertEqual(context_instance["template_family"], "act")
-        self.assertEqual(context_instance["ai_use_guidance"], "Ask for evidence before claiming satisfaction.")
+        self.assertEqual(
+            context_instance["ai_use_guidance"],
+            "Ask for evidence before claiming satisfaction.",
+        )
         context_point = context_instance["plot_points"][0]
         self.assertEqual(context_point["title"], "Archive commitment")
         self.assertEqual(context_point["status"], "planned")
-        self.assertEqual(context_point["author_intent"], "Mara chooses theft over duty.")
+        self.assertEqual(
+            context_point["author_intent"], "Mara chooses theft over duty."
+        )
         self.assertEqual(context_point["open_questions"], ["Who catches the clue?"])
         self.assertEqual(context_point["placement"]["phase_label"], "Act I")
         self.assertTrue(context_point["compression"]["can_compress"])
@@ -507,7 +605,10 @@ board:
                     "template_id": "plot_template_three_act",
                     "plot_points": [
                         {"plot_point_id": "first_turn", "notes": "Visible setup."},
-                        {"plot_point_id": "resolution", "notes": "Future spoiler: the butler did it."},
+                        {
+                            "plot_point_id": "resolution",
+                            "notes": "Future spoiler: the butler did it.",
+                        },
                     ],
                 },
             )
@@ -519,8 +620,16 @@ board:
                 board={
                     "template_instance_ids": [instance.id],
                     "cards": [
-                        {"id": "card_archive", "title": "Archive Break-in", "node_ref": early.id},
-                        {"id": "card_reveal", "title": "Butler Reveal", "node_ref": future.id},
+                        {
+                            "id": "card_archive",
+                            "title": "Archive Break-in",
+                            "node_ref": early.id,
+                        },
+                        {
+                            "id": "card_reveal",
+                            "title": "Butler Reveal",
+                            "node_ref": future.id,
+                        },
                     ],
                     "claims": [
                         {
@@ -542,7 +651,9 @@ board:
         )
         env = create_environment_for_project(self.service)
         out = render_template(
-            '{% role "user" %}{{ plot_context("' + board.id + '", scene=scene) }}{% endrole %}',
+            '{% role "user" %}{{ plot_context("'
+            + board.id
+            + '", scene=scene) }}{% endrole %}',
             context={"scene": target},
             env=env,
         )
@@ -564,7 +675,10 @@ board:
                     "template_id": "plot_template_three_act",
                     "plot_points": [
                         {"plot_point_id": "first_turn", "notes": "Visible setup."},
-                        {"plot_point_id": "resolution", "notes": "Future spoiler: the butler did it."},
+                        {
+                            "plot_point_id": "resolution",
+                            "notes": "Future spoiler: the butler did it.",
+                        },
                     ],
                 },
             )
@@ -576,8 +690,16 @@ board:
                 board={
                     "template_instance_ids": [instance.id],
                     "cards": [
-                        {"id": "card_archive", "title": "Archive Break-in", "node_ref": early.id},
-                        {"id": "card_reveal", "title": "Butler Reveal", "node_ref": future.id},
+                        {
+                            "id": "card_archive",
+                            "title": "Archive Break-in",
+                            "node_ref": early.id,
+                        },
+                        {
+                            "id": "card_reveal",
+                            "title": "Butler Reveal",
+                            "node_ref": future.id,
+                        },
                     ],
                     "claims": [
                         {

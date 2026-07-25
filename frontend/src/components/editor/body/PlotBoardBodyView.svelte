@@ -694,6 +694,30 @@
     }
   }
 
+  async function promoteCard(card: PlotBoardCard, event?: MouseEvent): Promise<void> {
+    event?.stopPropagation();
+    if (!plotNode || card.node_ref || savingMessage) return;
+    saveError = "";
+    savingMessage = "Promoting card";
+    try {
+      const response = await api.promotePlotCard(plotNode.id, {
+        card_id: card.id,
+        title: card.title,
+        parent_id: card.structure_column_id ?? null,
+        base_revision: plotNode.revision,
+      });
+      localPlotNode = response.plot;
+      setStructure(response.structure);
+      selectedCardId = card.id;
+      selectedClaimId = null;
+      selectedPalettePoint = null;
+    } catch (caught) {
+      saveError = caught instanceof Error ? caught.message : "Could not promote card.";
+    } finally {
+      savingMessage = "";
+    }
+  }
+
   async function addChapter(): Promise<void> {
     const title = window.prompt("Chapter title", "New chapter")?.trim();
     if (!title) return;
@@ -839,6 +863,15 @@
                         aria-label={`Open linked scene for ${card.title}`}
                         onclick={(event) => openCardNode(card, event)}
                       ><i class="ti ti-arrow-up-right" aria-hidden="true"></i></button>
+                    {:else}
+                      <button
+                        type="button"
+                        class="open-node"
+                        title="Promote to scene"
+                        aria-label={`Promote ${card.title} to scene`}
+                        disabled={Boolean(savingMessage)}
+                        onclick={(event) => promoteCard(card, event)}
+                      ><i class="ti ti-file-plus" aria-hidden="true"></i></button>
                     {/if}
                   </header>
                   {#if card.synopsis}
@@ -1015,6 +1048,16 @@
               <i class="ti ti-arrow-up-right" aria-hidden="true"></i>
             </button>
           </div>
+        {:else}
+          <button
+            type="button"
+            class="tool-button inspector-action"
+            disabled={Boolean(savingMessage)}
+            onclick={(event) => selectedCard && promoteCard(selectedCard, event)}
+          >
+            <i class="ti ti-file-plus" aria-hidden="true"></i>
+            Promote to scene
+          </button>
         {/if}
       </div>
     {:else if selectedPaletteRow}
@@ -1433,6 +1476,11 @@
     color: var(--accent-deep);
   }
 
+  .open-node:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+
   .claim-chips {
     display: grid;
     justify-items: start;
@@ -1533,6 +1581,10 @@
   .inspector-form {
     display: grid;
     gap: var(--sp-3);
+  }
+
+  .inspector-action {
+    width: 100%;
   }
 
   .inspector-form label {

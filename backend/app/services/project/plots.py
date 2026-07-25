@@ -11,6 +11,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from app.models.entries import CreateSceneRequest
 from app.models_plot import (
     CreatePlotNodeRequest,
     PlotBoardLayout,
@@ -24,6 +25,8 @@ from app.models_plot import (
     PlotNode,
     PlotNodeList,
     PlotNodeSummary,
+    PromotePlotCardRequest,
+    PromotePlotCardResponse,
     PlotTemplateInstanceSpec,
     PlotTemplateSpec,
     SavePlotNodeRequest,
@@ -141,6 +144,55 @@ class PlotEntriesMixin:
                 raise ProjectServiceError("A system plot node cannot be deleted.", 403)
             path.unlink()
         return self.list_plot_nodes()
+
+    def promote_plot_card(self, node_id: str, request: PromotePlotCardRequest) -> PromotePlotCardResponse:
+        path = self._path_for_node_id(node_id, "plot")
+        front_matter = self._read_front_matter_only(path, strict=True)
+        if self._plot_system(front_matter):
+            raise ProjectServiceError("A system plot node cannot be edited; duplicate it first.", 403)
+
+        plot_node = self.read_plot_node(node_id)
+        if plot_node.entry_type != "plot:board" or plot_node.board is None:
+            raise ProjectServiceError(f"Plot node {node_id} is not a board.", 422)
+        if request.base_revision and request.base_revision != plot_node.revision:
+            raise ProjectServiceError("Plot node changed on disk after it was opened.", 409)
+
+        card_index = next(
+            (index for index, candidate in enumerate(plot_node.board.cards) if candidate.id == request.card_id),
+            None,
+        )
+        if card_index is None:
+            raise ProjectServiceError(f"Plot card {request.card_id} does not exist.", 404)
+
+        card = plot_node.board.cards[card_index]
+        if card.node_ref:
+            raise ProjectServiceError("Plot card is already linked to a scene.", 422)
+
+        title = (request.title or card.title).strip()
+        if not title:
+            raise ProjectServiceError("Scene title cannot be empty.", 422)
+        parent_id = request.parent_id or card.structure_column_id
+        scene = self.create_scene(CreateSceneRequest(title=title, parent_id=parent_id))
+
+        next_board = plot_node.board.model_copy(deep=True)
+        next_board.cards[card_index] = card.model_copy(update={"title": title, "node_ref": scene.id})
+        self._write_plot_file(
+            path,
+            plot_node.id,
+            plot_node.title,
+            plot_node.entry_type,
+            plot_node.body,
+            metadata=plot_node.metadata,
+            template=plot_node.template,
+            template_instance=plot_node.template_instance,
+            board=next_board,
+            layout=plot_node.layout,
+        )
+        return PromotePlotCardResponse(
+            plot=self.read_plot_node(plot_node.id),
+            scene=scene,
+            structure=self.read_structure(),
+        )
 
     def read_plot_context(
         self,

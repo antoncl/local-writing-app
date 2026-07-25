@@ -146,6 +146,83 @@ class PlotNodeTests(unittest.TestCase):
         self.assertEqual(body["body"], "Book-specific notes.")
         self.assertEqual(body["template_instance"]["template_id"], "plot_template_three_act")
 
+    def test_placeholder_card_can_be_promoted_to_scene(self) -> None:
+        board = self.client.post(
+            "/api/plots",
+            json={
+                "title": "Book plot board",
+                "entry_type": "plot:board",
+                "board": {
+                    "cards": [
+                        {
+                            "id": "card_archive",
+                            "title": "Archive Break-in",
+                            "synopsis": "Mara steals the ledger.",
+                        }
+                    ],
+                    "claims": [
+                        {
+                            "id": "claim_first_turn",
+                            "card_id": "card_archive",
+                            "template_instance_id": "plot_instance_main",
+                            "plot_point_id": "first_turn",
+                            "claim_type": "satisfies",
+                        }
+                    ],
+                },
+            },
+        ).json()
+
+        response = self.client.post(
+            f"/api/plots/{board['id']}/promote-card",
+            json={"card_id": "card_archive", "base_revision": board["revision"]},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        scene = payload["scene"]
+        self.assertEqual(scene["title"], "Archive Break-in")
+
+        promoted_card = payload["plot"]["board"]["cards"][0]
+        self.assertEqual(promoted_card["id"], "card_archive")
+        self.assertEqual(promoted_card["node_ref"], scene["id"])
+        self.assertEqual(payload["plot"]["board"]["claims"][0]["card_id"], "card_archive")
+
+        persisted = self.client.get(f"/api/plots/{board['id']}").json()
+        self.assertEqual(persisted["board"]["cards"][0]["node_ref"], scene["id"])
+        self.assertEqual(self.client.get(f"/api/scenes/{scene['id']}").json()["title"], "Archive Break-in")
+
+        def has_scene(node: dict) -> bool:
+            if node.get("scene_id") == scene["id"]:
+                return True
+            return any(has_scene(child) for child in node.get("children", []))
+
+        self.assertTrue(has_scene(payload["structure"]["root"]))
+
+    def test_promoting_linked_plot_card_is_rejected(self) -> None:
+        scene = self.service.create_scene(CreateSceneRequest(title="Archive Break-in"))
+        board = self.client.post(
+            "/api/plots",
+            json={
+                "title": "Book plot board",
+                "entry_type": "plot:board",
+                "board": {
+                    "cards": [
+                        {
+                            "id": "card_archive",
+                            "title": "Archive Break-in",
+                            "node_ref": scene.id,
+                        }
+                    ],
+                },
+            },
+        ).json()
+
+        response = self.client.post(
+            f"/api/plots/{board['id']}/promote-card",
+            json={"card_id": "card_archive", "base_revision": board["revision"]},
+        )
+        self.assertEqual(response.status_code, 422, response.text)
+
     def test_plot_context_omits_future_cards_claims_and_point_notes(self) -> None:
         early = self.service.create_scene(CreateSceneRequest(title="Archive Break-in"))
         target = self.service.create_scene(CreateSceneRequest(title="Quiet Aftermath"))

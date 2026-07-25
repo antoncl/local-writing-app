@@ -48,6 +48,8 @@ import type {
   PlotNode,
   PlotContextPacket,
   PlotNodeList,
+  PromotePlotCardRequest,
+  PromotePlotCardResponse,
   SaveProjectNodeRequest,
   SavePlotNodeRequest,
   PromptEntry,
@@ -821,6 +823,12 @@ export const api = {
     return request<PlotContextPacket>(
       `/plots/${encodeURIComponent(nodeId)}/context${query ? `?${query}` : ""}`,
     );
+  },
+  promotePlotCard(nodeId: string, payload: PromotePlotCardRequest) {
+    return request<PromotePlotCardResponse>(`/plots/${encodeURIComponent(nodeId)}/promote-card`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
   },
   savePlotNode(nodeId: string, payload: SavePlotNodeRequest) {
     return request<PlotNode>(`/plots/${encodeURIComponent(nodeId)}`, {

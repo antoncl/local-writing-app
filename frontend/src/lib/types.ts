@@ -844,6 +844,19 @@ export type SavePlotNodeRequest = CreatePlotNodeRequest & {
   base_revision?: string | null;
 };
 
+export type PromotePlotCardRequest = {
+  card_id: string;
+  title?: string | null;
+  parent_id?: string | null;
+  base_revision?: string | null;
+};
+
+export type PromotePlotCardResponse = {
+  plot: PlotNode;
+  scene: Scene;
+  structure: StructureDocument;
+};
+
 // A picker membership source: an inline ViewSpec or a saved-view ref.
 export type ViewSource = ViewSpec | ViewRef;
 

@@ -12,6 +12,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from app.models.entries import Scene, StructureDocument
+
 
 PlotClaimType = Literal[
     "satisfies",
@@ -249,3 +251,16 @@ class SavePlotNodeRequest(BaseModel):
     template_instance: PlotTemplateInstanceSpec | None = None
     board: PlotBoardSpec | None = None
     layout: PlotBoardLayout | None = None
+
+
+class PromotePlotCardRequest(BaseModel):
+    card_id: str = Field(min_length=1)
+    title: str | None = None
+    parent_id: str | None = None
+    base_revision: str | None = None
+
+
+class PromotePlotCardResponse(BaseModel):
+    plot: PlotNode
+    scene: Scene
+    structure: StructureDocument

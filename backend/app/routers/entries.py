@@ -40,6 +40,8 @@ from app.models_plot import (
     PlotContextPacket,
     PlotNode,
     PlotNodeList,
+    PromotePlotCardRequest,
+    PromotePlotCardResponse,
     SavePlotNodeRequest,
 )
 from app.routers.ai import _validate_assistant_temperature
@@ -119,6 +121,16 @@ def get_plot_context(
 def get_plot_node(project: CurrentProject, node_id: str) -> PlotNode:
     with translate_errors():
         return project.read_plot_node(node_id)
+
+
+@router.post("/api/plots/{node_id}/promote-card", response_model=PromotePlotCardResponse)
+def promote_plot_card(
+    project: CurrentProject,
+    node_id: str,
+    request: PromotePlotCardRequest,
+) -> PromotePlotCardResponse:
+    with translate_errors():
+        return project.promote_plot_card(node_id, request)
 
 
 @router.put("/api/plots/{node_id}", response_model=PlotNode)

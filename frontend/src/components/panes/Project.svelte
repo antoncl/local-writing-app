@@ -52,7 +52,6 @@
   export let onHealthCheck: () => void;
   export let onOpenPrompts: () => void;
   export let onOpenMutations: () => void;
-  export let onOpenPlotBoard: () => void;
   export let onRepair: () => void;
   // Opening a child is a resolution-scope change, i.e. a unit boundary
   // (ADR-0045) — App routes it through the same open path as the switcher
@@ -189,13 +188,6 @@
       </NodeList>
     </section>
   {/if}
-
-  <section class="project-tools" aria-label="Writing tools">
-    <h3>Writing</h3>
-    <div class="button-row">
-      <button type="button" on:click={onOpenPlotBoard}>Plot Board…</button>
-    </div>
-  </section>
 {/if}
 
 <section class="ai-settings" aria-label="AI settings" class:disabled-section={!isProjectOpen}>
@@ -341,7 +333,6 @@
      they carry the canonical card chrome and need nothing here. */
   .project-inherits,
   .project-children,
-  .project-tools,
   .ai-settings {
     display: grid;
     gap: 10px;
@@ -352,7 +343,6 @@
 
   .project-inherits h3,
   .project-children h3,
-  .project-tools h3,
   .ai-settings h3 {
     margin: 0;
     font-size: var(--fs-md);

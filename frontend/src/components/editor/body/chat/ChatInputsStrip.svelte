@@ -9,7 +9,6 @@
   import { isInputMissing } from "@/components/editor/body/chat/chatInputs";
   import type {
     LoreEntrySummary,
-    PlotNodeSummary,
     PromptEntrySummary,
     PromptInputDefinition,
     StructureDocument,
@@ -24,7 +23,6 @@
     researchStructure: StructureDocument | null;
     loreEntries: LoreEntrySummary[];
     promptEntries: PromptEntrySummary[];
-    plotEntries: PlotNodeSummary[];
     implicitContextMatcher: import("@/lib/editor-core/implicitContextMatcher").CompiledMatcher | null;
     onDraftChange: (name: string, value: string) => void;
   }
@@ -38,7 +36,6 @@
     researchStructure,
     loreEntries,
     promptEntries,
-    plotEntries,
     implicitContextMatcher,
     onDraftChange,
   }: Props = $props();
@@ -70,7 +67,6 @@
             researchStructure={researchStructure}
             loreEntries={loreEntries}
             promptEntries={promptEntries}
-            plotEntries={plotEntries}
             implicitContextMatcher={implicitContextMatcher}
             on:change={(event) => !isLocked && onDraftChange(input.name, event.detail.value)}
           />

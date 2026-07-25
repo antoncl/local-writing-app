@@ -14,7 +14,6 @@
     NodePickerRef,
     LoreEntrySummary,
     MetadataFieldDefinition,
-    PlotNodeSummary,
     PromptEntrySummary,
     PromptInputDefinition,
     StructureDocument,
@@ -31,7 +30,6 @@
   export let researchStructure: StructureDocument | null = null;
   export let loreEntries: LoreEntrySummary[] = [];
   export let promptEntries: PromptEntrySummary[] = [];
-  export let plotEntries: PlotNodeSummary[] = [];
   // Optional matcher pass-through for implicit-context highlighting on
   // long_text inputs. Other input types ignore it.
   export let implicitContextMatcher: import("@/lib/editor-core/implicitContextMatcher").CompiledMatcher | null = null;
@@ -144,7 +142,6 @@
     researchStructure={researchStructure}
     loreEntries={loreEntries}
     promptEntries={promptEntries}
-    plotEntries={plotEntries}
     on:change={(event) => dispatch("change", { value: encodeRefValue(event.detail.value) })}
   />
 {:else if input.type === "context_pick"}
@@ -156,7 +153,6 @@
     researchStructure={researchStructure}
     loreEntries={loreEntries}
     promptEntries={promptEntries}
-    plotEntries={plotEntries}
     on:change={(event) => dispatch("change", { value: JSON.stringify(event.detail.value) })}
   />
 {:else}

@@ -1,5 +1,3 @@
-import type { PlotNode } from "./plotTypes";
-
 // --- Tiled workspace shell (#32) ------------------------------------------
 // A PanelId names a piece of content shown as a tab — a fixed region ("lore")
 // or an editor document ("editor_1"). The layout is a tree: Split nodes tile
@@ -250,7 +248,7 @@ export type ResearchNote = {
   source_layer_label?: string;
 };
 
-export type EditableDocument = Scene | LoreEntry | PromptEntry | AssistantEntry | ResearchNote | ViewNode | PlotNode;
+export type EditableDocument = Scene | LoreEntry | PromptEntry | AssistantEntry | ResearchNote | ViewNode;
 
 // Document-kind discriminator shared across editor components. Broader than
 // MetadataSchema.entry_types[*].kind: includes the synthetic shapes the
@@ -265,8 +263,7 @@ export type DocumentKind =
   | "chat"
   | "project"
   | "structure_node"
-  | "view"
-  | "plot";
+  | "view";
 
 export type LoreEntryList = {
   entries: LoreEntrySummary[];
@@ -648,7 +645,6 @@ export type SaveViewRequest = {
 // A saved-view reference used as a picker source (carries the view's own kind).
 export type ViewRef = { view: string };
 
-export * from "./plotTypes";
 // A picker membership source: an inline ViewSpec or a saved-view ref.
 export type ViewSource = ViewSpec | ViewRef;
 
@@ -676,7 +672,7 @@ export type NodePickerConfig = {
 // target; the picker UI enforces single-selection.
 export type NodePickerRef = {
   id: string;
-  kind: "scene" | "lore" | "snippet" | "assistant" | "research" | "plot" | "preset";
+  kind: "scene" | "lore" | "snippet" | "assistant" | "research" | "preset";
   title: string;
   entry_type?: string;
   target?: boolean;
@@ -708,7 +704,7 @@ export type PromptEntryTypeExtras = {
 
 export type EntryBodyEditor = "wysiwyg" | "code";
 export type EntryBodyLanguage = "markdown" | "jinja2" | "plain";
-export type BodyShape = "prose" | "code" | "chat" | "none" | "view" | "plot";
+export type BodyShape = "prose" | "code" | "chat" | "none" | "view";
 
 export type EntryTypeDefinition = {
   name: string;

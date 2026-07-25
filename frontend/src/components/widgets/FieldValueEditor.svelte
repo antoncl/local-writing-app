@@ -15,7 +15,6 @@
     LoreEntrySummary,
     MetadataFieldDefinition,
     MetadataValue,
-    PlotNodeSummary,
     PromptEntrySummary,
     ScopedTag,
     StructureDocument,
@@ -33,7 +32,6 @@
     ariaLabel?: string;
     loreEntries?: LoreEntrySummary[];
     promptEntries?: PromptEntrySummary[];
-    plotEntries?: PlotNodeSummary[];
     structure?: StructureDocument | null;
     researchStructure?: StructureDocument | null;
     implicitContextMatcher?: import("@/lib/editor-core/implicitContextMatcher").CompiledMatcher | null;
@@ -55,7 +53,6 @@
     ariaLabel,
     loreEntries = [],
     promptEntries = [],
-    plotEntries = [],
     structure = null,
     researchStructure = null,
     implicitContextMatcher = null,
@@ -170,7 +167,6 @@
     researchStructure={researchStructure}
     loreEntries={loreEntries}
     promptEntries={promptEntries}
-    plotEntries={plotEntries}
     on:change={(event) => emit(event.detail.value)}
     on:navigate={(event) => onNavigate?.(event.detail)}
   />

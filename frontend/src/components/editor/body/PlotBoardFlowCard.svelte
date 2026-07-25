@@ -7,6 +7,7 @@
   const getCtx = usePlotBoardContext();
   let ctx = $derived(getCtx());
   let card = $derived(ctx.cardById(data.cardId));
+  let columnTitle = $derived(ctx.cardColumnTitle(data.cardId));
   let cardClaims = $derived(ctx.claimsForCard(data.cardId));
 </script>
 
@@ -26,6 +27,7 @@
     <header>
       <button type="button" class="card-select nodrag" onclick={() => ctx.selectCard(card.id)}>
         <strong>{card.title}</strong>
+        <span class="card-position">{columnTitle}</span>
       </button>
       {#if card.node_ref}
         <button

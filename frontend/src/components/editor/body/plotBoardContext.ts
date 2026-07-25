@@ -7,6 +7,7 @@ export type PlotBoardContext = {
   selectedClaimId: string | null;
   dragOverCardId: string | null;
   cardById: (cardId: string) => PlotBoardCard | null;
+  cardColumnTitle: (cardId: string) => string;
   claimsForCard: (cardId: string) => PlotPointClaim[];
   pointLabel: (claim: PlotPointClaim) => string;
   selectCard: (cardId: string) => void;

@@ -1,0 +1,1224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plot Board Mockup Drag</title>
+<style>:root{color-scheme:dark;background:#171716}html,body{margin:0;background:#171716}body{box-sizing:border-box;padding:0;color:#f2f0e8}iframe{display:block;width:100%;max-width:none;min-height:100vh;height:1500px;margin:0;border:0;background:#171716}</style>
+</head>
+<body>
+<iframe sandbox="allow-scripts" referrerpolicy="no-referrer" title="Plot Board Mockup Drag" srcdoc="&lt;div id=&quot;plot-board-drag-mockup&quot; class=&quot;plot-board-drag-mockup&quot; aria-label=&quot;Plot board drag-and-drop function point mockup&quot;&gt;
+  &lt;style&gt;
+    #plot-board-drag-mockup {
+      --background: #171716;
+      --foreground: #f2f0e8;
+      --card: #22211f;
+      --card-foreground: #f6f3ea;
+      --muted: #34312d;
+      --muted-foreground: #aaa49a;
+      --border: #3a3834;
+      --accent: #5c7045;
+      --ring: #d08b54;
+      --viz-series-2: #d08b54;
+      --viz-series-3: #7aa596;
+      --viz-series-4: #b7798c;
+      color-scheme: dark;
+      color: var(--foreground);
+      background: var(--background);
+      border: 1px solid var(--border);
+      display: grid;
+      grid-template-rows: auto auto;
+      font-size: var(--font-size-base);
+    }
+
+    #plot-board-drag-mockup * {
+      box-sizing: border-box;
+    }
+
+    #plot-board-drag-mockup button,
+    #plot-board-drag-mockup select,
+    #plot-board-drag-mockup textarea,
+    #plot-board-drag-mockup input {
+      font: inherit;
+    }
+
+    #plot-board-drag-mockup .topbar {
+      min-height: 54px;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      background: var(--card);
+      color: var(--card-foreground);
+      display: grid;
+      grid-template-columns: minmax(220px, 300px) 1fr auto;
+      gap: 12px;
+      align-items: center;
+    }
+
+    #plot-board-drag-mockup .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      font-weight: 500;
+    }
+
+    #plot-board-drag-mockup .brand-mark,
+    #plot-board-drag-mockup .icon-btn {
+      width: 32px;
+      height: 32px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--border);
+      background: var(--background);
+      color: var(--foreground);
+    }
+
+    #plot-board-drag-mockup .title-stack {
+      min-width: 0;
+      display: grid;
+      gap: 1px;
+    }
+
+    #plot-board-drag-mockup .title-stack span {
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    #plot-board-drag-mockup .muted {
+      color: var(--muted-foreground);
+      font-weight: 400;
+    }
+
+    #plot-board-drag-mockup .toolbar,
+    #plot-board-drag-mockup .actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+    }
+
+    #plot-board-drag-mockup .pill-btn,
+    #plot-board-drag-mockup .select,
+    #plot-board-drag-mockup .field-input {
+      min-height: 32px;
+      border: 1px solid var(--border);
+      background: var(--background);
+      color: var(--foreground);
+      padding: 5px 9px;
+    }
+
+    #plot-board-drag-mockup .pill-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    #plot-board-drag-mockup .app {
+      display: grid;
+      grid-template-columns: 54px 300px minmax(620px, 1fr) 330px;
+    }
+
+    #plot-board-drag-mockup .rail {
+      border-right: 1px solid var(--border);
+      background: color-mix(in srgb, var(--muted) 28%, transparent);
+      padding: 8px;
+      display: grid;
+      align-content: start;
+      gap: 8px;
+    }
+
+    #plot-board-drag-mockup .rail button {
+      width: 38px;
+      height: 38px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--muted-foreground);
+      display: grid;
+      place-items: center;
+    }
+
+    #plot-board-drag-mockup .rail button.is-active {
+      border-color: var(--border);
+      background: var(--card);
+      color: var(--foreground);
+    }
+
+    #plot-board-drag-mockup .left,
+    #plot-board-drag-mockup .right {
+      min-width: 0;
+      border-right: 1px solid var(--border);
+      background: color-mix(in srgb, var(--card) 78%, var(--background));
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    #plot-board-drag-mockup .right {
+      border-right: 0;
+      border-left: 1px solid var(--border);
+    }
+
+    #plot-board-drag-mockup .panel-head {
+      min-height: 48px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    #plot-board-drag-mockup .panel-title {
+      font-weight: 500;
+      min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    #plot-board-drag-mockup .panel-body {
+      padding: 10px;
+      display: grid;
+      align-content: start;
+      gap: 12px;
+    }
+
+    #plot-board-drag-mockup .field {
+      display: grid;
+      gap: 6px;
+    }
+
+    #plot-board-drag-mockup .label {
+      color: var(--muted-foreground);
+      font-weight: 500;
+    }
+
+    #plot-board-drag-mockup .function-set {
+      display: grid;
+      gap: 8px;
+      border: 1px solid var(--border);
+      background: color-mix(in srgb, var(--card) 88%, var(--background));
+      padding: 10px;
+      text-align: left;
+    }
+
+    #plot-board-drag-mockup .function-set[data-selected=&quot;true&quot;] {
+      outline: 2px solid var(--ring);
+      outline-offset: -2px;
+    }
+
+    #plot-board-drag-mockup .instance-frame-head {
+      display: grid;
+      gap: 3px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+    }
+
+    #plot-board-drag-mockup .instance-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+      font-weight: 500;
+    }
+
+    #plot-board-drag-mockup .function-point {
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--card-foreground);
+      padding: 8px;
+      text-align: left;
+      display: grid;
+      gap: 5px;
+      cursor: grab;
+    }
+
+    #plot-board-drag-mockup .function-point:active {
+      cursor: grabbing;
+    }
+
+    #plot-board-drag-mockup .function-point[data-selected=&quot;true&quot;] {
+      border-color: var(--ring);
+      background: color-mix(in srgb, var(--ring) 16%, var(--card));
+      outline: 2px solid color-mix(in srgb, var(--ring) 78%, transparent);
+      outline-offset: -2px;
+    }
+
+    #plot-board-drag-mockup .function-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-weight: 500;
+    }
+
+    #plot-board-drag-mockup .canvas-shell {
+      min-width: 0;
+      background:
+        linear-gradient(color-mix(in srgb, var(--border) 32%, transparent) 1px, transparent 1px),
+        linear-gradient(90deg, color-mix(in srgb, var(--border) 32%, transparent) 1px, transparent 1px);
+      background-size: 32px 32px;
+      display: block;
+      position: relative;
+    }
+
+    #plot-board-drag-mockup .board-head {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      background: color-mix(in srgb, var(--card) 86%, transparent);
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      min-height: 54px;
+    }
+
+    #plot-board-drag-mockup .board-title {
+      display: grid;
+      gap: 3px;
+      min-width: 0;
+      align-content: center;
+      flex: 1 1 auto;
+    }
+
+    #plot-board-drag-mockup .board-title .panel-title {
+      line-height: 1.2;
+      display: block;
+    }
+
+    #plot-board-drag-mockup .board {
+      padding: 18px;
+      display: grid;
+      grid-template-columns: repeat(6, minmax(126px, 1fr));
+      grid-template-rows: auto auto minmax(420px, auto);
+      gap: 10px;
+    }
+
+    #plot-board-drag-mockup .act-label,
+    #plot-board-drag-mockup .chapter-label {
+      border-bottom: 1px solid var(--border);
+      background: color-mix(in srgb, var(--muted) 16%, transparent);
+      padding: 7px;
+      display: grid;
+      gap: 2px;
+    }
+
+    #plot-board-drag-mockup .act-label {
+      text-align: center;
+      font-weight: 500;
+      color: var(--foreground);
+    }
+
+    #plot-board-drag-mockup .chapter-title {
+      color: var(--foreground);
+      font-weight: 500;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    #plot-board-drag-mockup .chapter-meta {
+      color: var(--muted-foreground);
+    }
+
+    #plot-board-drag-mockup .chapter-column {
+      min-height: 420px;
+      border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+      background: color-mix(in srgb, var(--background) 78%, transparent);
+      padding: 8px;
+      display: grid;
+      align-content: start;
+      gap: 8px;
+    }
+
+    #plot-board-drag-mockup .chapter-column.is-drop {
+      outline: 2px solid var(--ring);
+      outline-offset: -2px;
+      background: color-mix(in srgb, var(--accent) 14%, transparent);
+    }
+
+    #plot-board-drag-mockup .plot-card {
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--card-foreground);
+      min-height: 96px;
+      padding: 8px;
+      display: grid;
+      gap: 7px;
+      text-align: left;
+      width: 100%;
+      cursor: pointer;
+    }
+
+    #plot-board-drag-mockup .plot-card[data-selected=&quot;true&quot;] {
+      outline: 2px solid var(--ring);
+      outline-offset: -2px;
+    }
+
+    #plot-board-drag-mockup .plot-card[data-template-highlight=&quot;true&quot;] {
+      border-color: color-mix(in srgb, var(--ring) 74%, var(--border));
+      background: color-mix(in srgb, var(--ring) 9%, var(--card));
+    }
+
+    #plot-board-drag-mockup .plot-card[data-function-highlight=&quot;true&quot;] {
+      border-color: var(--ring);
+      box-shadow: inset 3px 0 0 var(--ring);
+    }
+
+    #plot-board-drag-mockup .plot-card.placeholder {
+      border-style: dashed;
+      background: color-mix(in srgb, var(--accent) 12%, var(--card));
+    }
+
+    #plot-board-drag-mockup .card-title {
+      display: flex;
+      align-items: start;
+      gap: 6px;
+      justify-content: space-between;
+      font-weight: 500;
+    }
+
+    #plot-board-drag-mockup .card-text {
+      color: var(--muted-foreground);
+    }
+
+    #plot-board-drag-mockup .badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+
+    #plot-board-drag-mockup .badge {
+      border: 1px solid var(--border);
+      color: var(--foreground);
+      background: color-mix(in srgb, var(--accent) 18%, transparent);
+      padding: 2px 3px 2px 6px;
+      white-space: nowrap;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      line-height: 1.2;
+    }
+
+    #plot-board-drag-mockup .plot-card .badge {
+      cursor: grab;
+    }
+
+    #plot-board-drag-mockup .plot-card .badge:active {
+      cursor: grabbing;
+    }
+
+    #plot-board-drag-mockup .plot-card .badge[data-dragging=&quot;true&quot;] {
+      opacity: 0.62;
+    }
+
+    #plot-board-drag-mockup .badge-x {
+      border: 0;
+      background: color-mix(in srgb, var(--background) 42%, transparent);
+      color: inherit;
+      padding: 0;
+      width: 15px;
+      height: 15px;
+      display: inline-grid;
+      place-items: center;
+      cursor: pointer;
+      margin-left: 1px;
+      line-height: 1;
+      font-weight: 500;
+      flex: 0 0 auto;
+    }
+
+    #plot-board-drag-mockup .badge[data-selected=&quot;true&quot;],
+    #plot-board-drag-mockup .badge[data-template-highlight=&quot;true&quot;] {
+      border-color: var(--ring);
+      background: color-mix(in srgb, var(--ring) 22%, transparent);
+    }
+
+    #plot-board-drag-mockup .badge[data-selected=&quot;true&quot;] {
+      outline: 2px solid color-mix(in srgb, var(--ring) 76%, transparent);
+      outline-offset: 1px;
+    }
+
+    #plot-board-drag-mockup .badge[data-template=&quot;main&quot;] {
+      background: color-mix(in srgb, var(--viz-series-2) 28%, transparent);
+      border-color: color-mix(in srgb, var(--viz-series-2) 55%, var(--border));
+    }
+
+    #plot-board-drag-mockup .badge[data-template=&quot;mystery&quot;] {
+      background: color-mix(in srgb, var(--viz-series-3) 24%, transparent);
+      border-color: color-mix(in srgb, var(--viz-series-3) 55%, var(--border));
+    }
+
+    #plot-board-drag-mockup .badge[data-template=&quot;romance&quot;] {
+      background: color-mix(in srgb, var(--viz-series-4) 24%, transparent);
+      border-color: color-mix(in srgb, var(--viz-series-4) 55%, var(--border));
+    }
+
+    #plot-board-drag-mockup .badge.weak {
+      border-style: dashed;
+    }
+
+    #plot-board-drag-mockup .claim-editor {
+      display: grid;
+      gap: 10px;
+    }
+
+    #plot-board-drag-mockup textarea.field-input {
+      min-height: 86px;
+      resize: vertical;
+    }
+
+    #plot-board-drag-mockup .flow-controls {
+      position: absolute;
+      left: 14px;
+      bottom: 14px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 5px;
+      border: 1px solid var(--border);
+      background: color-mix(in srgb, var(--card) 92%, transparent);
+      z-index: 2;
+    }
+
+    #plot-board-drag-mockup .zoom-readout {
+      min-width: 46px;
+      text-align: center;
+      color: var(--muted-foreground);
+    }
+
+    #plot-board-drag-mockup .flow-minimap {
+      position: absolute;
+      right: 14px;
+      bottom: 14px;
+      width: 104px;
+      height: 72px;
+      border: 1px solid var(--border);
+      background: color-mix(in srgb, var(--card) 84%, transparent);
+      padding: 7px;
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 4px;
+      z-index: 2;
+    }
+
+    #plot-board-drag-mockup .flow-minimap span {
+      display: block;
+      border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+      background: color-mix(in srgb, var(--accent) 16%, transparent);
+    }
+
+    #plot-board-drag-mockup .flow-minimap span:nth-child(2),
+    #plot-board-drag-mockup .flow-minimap span:nth-child(5) {
+      background: color-mix(in srgb, var(--ring) 18%, transparent);
+    }
+
+    @media (max-width: 1200px) {
+      #plot-board-drag-mockup .app {
+        grid-template-columns: 50px 260px 1fr;
+      }
+
+      #plot-board-drag-mockup .right {
+        grid-column: 2 / 4;
+        border-left: 0;
+        border-top: 1px solid var(--border);
+      }
+    }
+
+    @media (max-width: 760px) {
+      #plot-board-drag-mockup .topbar,
+      #plot-board-drag-mockup .board-head,
+      #plot-board-drag-mockup .app {
+        grid-template-columns: 1fr;
+      }
+
+      #plot-board-drag-mockup .rail {
+        display: none;
+      }
+
+      #plot-board-drag-mockup .left,
+      #plot-board-drag-mockup .right {
+        border: 0;
+        border-bottom: 1px solid var(--border);
+      }
+
+      #plot-board-drag-mockup .board {
+        grid-template-columns: 1fr;
+      }
+
+      #plot-board-drag-mockup .act-label {
+        display: none;
+      }
+    }
+  &lt;/style&gt;
+
+  &lt;div class=&quot;topbar&quot;&gt;
+    &lt;div class=&quot;brand&quot;&gt;
+      &lt;div class=&quot;brand-mark&quot;&gt;&lt;i data-lucide=&quot;git-branch&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/div&gt;
+      &lt;div class=&quot;title-stack&quot;&gt;
+        &lt;span&gt;Main Novel Plot&lt;/span&gt;
+        &lt;span class=&quot;muted&quot;&gt;Drag function points onto scene cards&lt;/span&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+    &lt;div class=&quot;toolbar&quot; aria-label=&quot;Board tools&quot;&gt;
+      &lt;button class=&quot;pill-btn&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;layout-dashboard&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt; Board&lt;/button&gt;
+      &lt;button class=&quot;pill-btn&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;sparkles&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt; Brainstorm&lt;/button&gt;
+      &lt;button class=&quot;pill-btn&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;list-tree&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt; Outline&lt;/button&gt;
+    &lt;/div&gt;
+    &lt;div class=&quot;actions&quot;&gt;
+      &lt;button class=&quot;icon-btn&quot; type=&quot;button&quot; aria-label=&quot;Fit board&quot;&gt;&lt;i data-lucide=&quot;scan&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+      &lt;button class=&quot;icon-btn&quot; type=&quot;button&quot; aria-label=&quot;Add chapter&quot;&gt;&lt;i data-lucide=&quot;plus&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+
+  &lt;div class=&quot;app&quot;&gt;
+    &lt;nav class=&quot;rail&quot; aria-label=&quot;Workspace&quot;&gt;
+      &lt;button type=&quot;button&quot; aria-label=&quot;Draft&quot;&gt;&lt;i data-lucide=&quot;book-open&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+      &lt;button type=&quot;button&quot; aria-label=&quot;Lore&quot;&gt;&lt;i data-lucide=&quot;library&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+      &lt;button class=&quot;is-active&quot; type=&quot;button&quot; aria-label=&quot;Plot&quot;&gt;&lt;i data-lucide=&quot;git-branch&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+      &lt;button type=&quot;button&quot; aria-label=&quot;Prompts&quot;&gt;&lt;i data-lucide=&quot;message-square-text&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+      &lt;button type=&quot;button&quot; aria-label=&quot;Search&quot;&gt;&lt;i data-lucide=&quot;search&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+    &lt;/nav&gt;
+
+    &lt;aside class=&quot;left&quot;&gt;
+      &lt;div class=&quot;panel-head&quot;&gt;
+        &lt;div class=&quot;panel-title&quot;&gt;Function points&lt;/div&gt;
+        &lt;button class=&quot;icon-btn&quot; type=&quot;button&quot; aria-label=&quot;Add template instance&quot;&gt;&lt;i data-lucide=&quot;plus&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;panel-body&quot;&gt;
+        &lt;label class=&quot;field&quot;&gt;
+          &lt;span class=&quot;label&quot;&gt;Plot template instance&lt;/span&gt;
+          &lt;select class=&quot;select&quot; id=&quot;template-filter&quot;&gt;
+            &lt;option value=&quot;all&quot; selected&gt;&lt;/option&gt;
+            &lt;option value=&quot;main&quot;&gt;Main plot structure&lt;/option&gt;
+            &lt;option value=&quot;mystery&quot;&gt;Fair-play mystery&lt;/option&gt;
+            &lt;option value=&quot;romance&quot;&gt;Romance arc&lt;/option&gt;
+          &lt;/select&gt;
+        &lt;/label&gt;
+        &lt;div class=&quot;actions&quot;&gt;
+          &lt;button class=&quot;pill-btn&quot; type=&quot;button&quot; id=&quot;highlight-template&quot;&gt;&lt;i data-lucide=&quot;scan-search&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt; Highlight cards&lt;/button&gt;
+          &lt;button class=&quot;icon-btn&quot; type=&quot;button&quot; id=&quot;clear-highlight&quot; aria-label=&quot;Clear board highlight&quot;&gt;&lt;i data-lucide=&quot;x&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;function-set&quot; data-template-set=&quot;main&quot;&gt;
+          &lt;div class=&quot;instance-frame-head&quot;&gt;
+            &lt;span class=&quot;instance-title&quot;&gt;&lt;span&gt;Main plot structure&lt;/span&gt;&lt;span class=&quot;badge&quot; data-template=&quot;main&quot;&gt;4 / 7&lt;/span&gt;&lt;/span&gt;
+            &lt;span class=&quot;muted&quot;&gt;Local template-instance node · applies the structure rubric to this book.&lt;/span&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;function-point&quot; draggable=&quot;true&quot; data-template=&quot;main&quot; data-point=&quot;Opening pressure&quot; data-strength=&quot;medium&quot;&gt;
+            &lt;span class=&quot;function-title&quot;&gt;&lt;span&gt;Opening pressure&lt;/span&gt;&lt;span class=&quot;badge&quot; data-template=&quot;main&quot;&gt;used&lt;/span&gt;&lt;/span&gt;
+            &lt;span class=&quot;muted&quot;&gt;The story problem starts applying pressure before commitment.&lt;/span&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;function-point&quot; draggable=&quot;true&quot; data-template=&quot;main&quot; data-point=&quot;First turn&quot; data-strength=&quot;strong&quot;&gt;
+            &lt;span class=&quot;function-title&quot;&gt;&lt;span&gt;First turn&lt;/span&gt;&lt;span class=&quot;badge&quot; data-template=&quot;main&quot;&gt;used&lt;/span&gt;&lt;/span&gt;
+            &lt;span class=&quot;muted&quot;&gt;A choice or event makes the old path unavailable.&lt;/span&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;function-point&quot; draggable=&quot;true&quot; data-template=&quot;main&quot; data-point=&quot;Midpoint reversal&quot; data-strength=&quot;weak&quot;&gt;
+            &lt;span class=&quot;function-title&quot;&gt;&lt;span&gt;Midpoint reversal&lt;/span&gt;&lt;span class=&quot;badge weak&quot; data-template=&quot;main&quot;&gt;missing&lt;/span&gt;&lt;/span&gt;
+            &lt;span class=&quot;muted&quot;&gt;The power balance changes and reframes the goal.&lt;/span&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;function-point&quot; draggable=&quot;true&quot; data-template=&quot;main&quot; data-point=&quot;Crisis&quot; data-strength=&quot;medium&quot;&gt;
+            &lt;span class=&quot;function-title&quot;&gt;&lt;span&gt;Crisis&lt;/span&gt;&lt;span class=&quot;badge&quot; data-template=&quot;main&quot;&gt;partial&lt;/span&gt;&lt;/span&gt;
+            &lt;span class=&quot;muted&quot;&gt;A late pressure point forces the hard choice.&lt;/span&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;function-set&quot; data-template-set=&quot;mystery&quot; hidden&gt;
+          &lt;div class=&quot;instance-frame-head&quot;&gt;
+            &lt;span class=&quot;instance-title&quot;&gt;&lt;span&gt;Fair-play mystery&lt;/span&gt;&lt;span class=&quot;badge&quot; data-template=&quot;mystery&quot;&gt;3 / 9&lt;/span&gt;&lt;/span&gt;
+            &lt;span class=&quot;muted&quot;&gt;Local template-instance node · tracks clue/reveal obligations for this book.&lt;/span&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;function-point&quot; draggable=&quot;true&quot; data-template=&quot;mystery&quot; data-point=&quot;First clue&quot; data-strength=&quot;strong&quot;&gt;
+            &lt;span class=&quot;function-title&quot;&gt;&lt;span&gt;First clue&lt;/span&gt;&lt;span class=&quot;badge&quot; data-template=&quot;mystery&quot;&gt;used&lt;/span&gt;&lt;/span&gt;
+            &lt;span class=&quot;muted&quot;&gt;A fair-play clue that the reader can inspect.&lt;/span&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;function-point&quot; draggable=&quot;true&quot; data-template=&quot;mystery&quot; data-point=&quot;Red herring&quot; data-strength=&quot;medium&quot;&gt;
+            &lt;span class=&quot;function-title&quot;&gt;&lt;span&gt;Red herring&lt;/span&gt;&lt;span class=&quot;badge&quot; data-template=&quot;mystery&quot;&gt;used&lt;/span&gt;&lt;/span&gt;
+            &lt;span class=&quot;muted&quot;&gt;A plausible but wrong interpretation of evidence.&lt;/span&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;function-point&quot; draggable=&quot;true&quot; data-template=&quot;mystery&quot; data-point=&quot;Reveal chain&quot; data-strength=&quot;weak&quot;&gt;
+            &lt;span class=&quot;function-title&quot;&gt;&lt;span&gt;Reveal chain&lt;/span&gt;&lt;span class=&quot;badge weak&quot; data-template=&quot;mystery&quot;&gt;missing&lt;/span&gt;&lt;/span&gt;
+            &lt;span class=&quot;muted&quot;&gt;The sequence that lets the solution feel earned.&lt;/span&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;function-set&quot; data-template-set=&quot;romance&quot; hidden&gt;
+          &lt;div class=&quot;instance-frame-head&quot;&gt;
+            &lt;span class=&quot;instance-title&quot;&gt;&lt;span&gt;Romance arc&lt;/span&gt;&lt;span class=&quot;badge&quot; data-template=&quot;romance&quot;&gt;2 / 6&lt;/span&gt;&lt;/span&gt;
+            &lt;span class=&quot;muted&quot;&gt;Local template-instance node · captures the relationship arc for this book.&lt;/span&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;function-point&quot; draggable=&quot;true&quot; data-template=&quot;romance&quot; data-point=&quot;Forced proximity&quot; data-strength=&quot;strong&quot;&gt;
+            &lt;span class=&quot;function-title&quot;&gt;&lt;span&gt;Forced proximity&lt;/span&gt;&lt;span class=&quot;badge&quot; data-template=&quot;romance&quot;&gt;used&lt;/span&gt;&lt;/span&gt;
+            &lt;span class=&quot;muted&quot;&gt;They cannot avoid each other, practically or emotionally.&lt;/span&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;function-point&quot; draggable=&quot;true&quot; data-template=&quot;romance&quot; data-point=&quot;Vulnerability shift&quot; data-strength=&quot;weak&quot;&gt;
+            &lt;span class=&quot;function-title&quot;&gt;&lt;span&gt;Vulnerability shift&lt;/span&gt;&lt;span class=&quot;badge weak&quot; data-template=&quot;romance&quot;&gt;missing&lt;/span&gt;&lt;/span&gt;
+            &lt;span class=&quot;muted&quot;&gt;A choice exposes need, fear, or trust.&lt;/span&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;function-point&quot; draggable=&quot;true&quot; data-template=&quot;romance&quot; data-point=&quot;Dark moment&quot; data-strength=&quot;weak&quot;&gt;
+            &lt;span class=&quot;function-title&quot;&gt;&lt;span&gt;Dark moment&lt;/span&gt;&lt;span class=&quot;badge weak&quot; data-template=&quot;romance&quot;&gt;missing&lt;/span&gt;&lt;/span&gt;
+            &lt;span class=&quot;muted&quot;&gt;The relationship appears to fail for a real reason.&lt;/span&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/aside&gt;
+
+    &lt;main class=&quot;canvas-shell&quot;&gt;
+      &lt;div class=&quot;board-head&quot;&gt;
+        &lt;div class=&quot;board-title&quot;&gt;
+          &lt;span class=&quot;panel-title&quot;&gt;Book plot board&lt;/span&gt;
+          &lt;span class=&quot;muted&quot;&gt;Cards are arranged by draft structure. Function points attach as editable claims.&lt;/span&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;actions&quot;&gt;
+          &lt;button class=&quot;icon-btn&quot; type=&quot;button&quot; aria-label=&quot;Undo&quot;&gt;&lt;i data-lucide=&quot;undo-2&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+          &lt;button class=&quot;icon-btn&quot; type=&quot;button&quot; aria-label=&quot;Redo&quot;&gt;&lt;i data-lucide=&quot;redo-2&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+          &lt;button class=&quot;pill-btn&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;plus&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt; Chapter&lt;/button&gt;
+          &lt;button class=&quot;pill-btn&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;file-plus&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt; Placeholder card&lt;/button&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+
+      &lt;section class=&quot;board&quot; aria-label=&quot;Chapter-based plot board&quot;&gt;
+        &lt;div class=&quot;act-label&quot; style=&quot;grid-column: 1 / span 2;&quot;&gt;Act I&lt;/div&gt;
+        &lt;div class=&quot;act-label&quot; style=&quot;grid-column: 3 / span 3;&quot;&gt;Act II&lt;/div&gt;
+        &lt;div class=&quot;act-label&quot; style=&quot;grid-column: 6 / span 1;&quot;&gt;Act III&lt;/div&gt;
+
+        &lt;div class=&quot;chapter-label&quot;&gt;&lt;span class=&quot;chapter-title&quot;&gt;Ch 1 · The Archive&lt;/span&gt;&lt;span class=&quot;chapter-meta&quot;&gt;2 scenes&lt;/span&gt;&lt;/div&gt;
+        &lt;div class=&quot;chapter-label&quot;&gt;&lt;span class=&quot;chapter-title&quot;&gt;Ch 2 · The Vault&lt;/span&gt;&lt;span class=&quot;chapter-meta&quot;&gt;3 scenes&lt;/span&gt;&lt;/div&gt;
+        &lt;div class=&quot;chapter-label&quot;&gt;&lt;span class=&quot;chapter-title&quot;&gt;Ch 3 · Evidence&lt;/span&gt;&lt;span class=&quot;chapter-meta&quot;&gt;1 scene&lt;/span&gt;&lt;/div&gt;
+        &lt;div class=&quot;chapter-label&quot;&gt;&lt;span class=&quot;chapter-title&quot;&gt;Ch 4 · Reversal&lt;/span&gt;&lt;span class=&quot;chapter-meta&quot;&gt;placeholder&lt;/span&gt;&lt;/div&gt;
+        &lt;div class=&quot;chapter-label&quot;&gt;&lt;span class=&quot;chapter-title&quot;&gt;Ch 5 · Accusation&lt;/span&gt;&lt;span class=&quot;chapter-meta&quot;&gt;2 scenes&lt;/span&gt;&lt;/div&gt;
+        &lt;div class=&quot;chapter-label&quot;&gt;&lt;span class=&quot;chapter-title&quot;&gt;+ Add chapter&lt;/span&gt;&lt;span class=&quot;chapter-meta&quot;&gt;draft structure&lt;/span&gt;&lt;/div&gt;
+
+        &lt;div class=&quot;chapter-column&quot; data-column=&quot;chapter-1&quot;&gt;
+          &lt;div class=&quot;plot-card&quot; role=&quot;button&quot; tabindex=&quot;0&quot; data-card=&quot;archive&quot;&gt;
+            &lt;span class=&quot;card-title&quot;&gt;&lt;span&gt;Archive Break-in&lt;/span&gt;&lt;i data-lucide=&quot;file-text&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/span&gt;
+            &lt;span class=&quot;card-text&quot;&gt;Mara steals the ledger instead of reporting it.&lt;/span&gt;
+            &lt;span class=&quot;badges&quot;&gt;&lt;span class=&quot;badge&quot; data-template=&quot;main&quot;&gt;First turn&lt;button class=&quot;badge-x&quot; type=&quot;button&quot; aria-label=&quot;Remove First turn&quot;&gt;×&lt;/button&gt;&lt;/span&gt;&lt;span class=&quot;badge&quot; data-template=&quot;mystery&quot;&gt;First clue&lt;button class=&quot;badge-x&quot; type=&quot;button&quot; aria-label=&quot;Remove First clue&quot;&gt;×&lt;/button&gt;&lt;/span&gt;&lt;/span&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;chapter-column&quot; data-column=&quot;chapter-2&quot;&gt;
+          &lt;div class=&quot;plot-card&quot; role=&quot;button&quot; tabindex=&quot;0&quot; data-card=&quot;locked&quot;&gt;
+            &lt;span class=&quot;card-title&quot;&gt;&lt;span&gt;Locked in the Vault&lt;/span&gt;&lt;i data-lucide=&quot;file-text&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/span&gt;
+            &lt;span class=&quot;card-text&quot;&gt;Mara and Ilyan must trust each other long enough to escape.&lt;/span&gt;
+            &lt;span class=&quot;badges&quot;&gt;&lt;span class=&quot;badge&quot; data-template=&quot;romance&quot;&gt;Forced proximity&lt;button class=&quot;badge-x&quot; type=&quot;button&quot; aria-label=&quot;Remove Forced proximity&quot;&gt;×&lt;/button&gt;&lt;/span&gt;&lt;span class=&quot;badge weak&quot; data-template=&quot;main&quot;&gt;Partial&lt;button class=&quot;badge-x&quot; type=&quot;button&quot; aria-label=&quot;Remove Partial claim&quot;&gt;×&lt;/button&gt;&lt;/span&gt;&lt;/span&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;plot-card&quot; role=&quot;button&quot; tabindex=&quot;0&quot; data-card=&quot;clue&quot;&gt;
+            &lt;span class=&quot;card-title&quot;&gt;&lt;span&gt;Ledger Contradiction&lt;/span&gt;&lt;i data-lucide=&quot;file-text&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/span&gt;
+            &lt;span class=&quot;card-text&quot;&gt;The dates prove the official timeline is false.&lt;/span&gt;
+            &lt;span class=&quot;badges&quot;&gt;&lt;span class=&quot;badge&quot; data-template=&quot;mystery&quot;&gt;First clue&lt;button class=&quot;badge-x&quot; type=&quot;button&quot; aria-label=&quot;Remove First clue&quot;&gt;×&lt;/button&gt;&lt;/span&gt;&lt;/span&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;chapter-column&quot; data-column=&quot;chapter-3&quot;&gt;
+          &lt;div class=&quot;plot-card&quot; role=&quot;button&quot; tabindex=&quot;0&quot; data-card=&quot;mentor&quot;&gt;
+            &lt;span class=&quot;card-title&quot;&gt;&lt;span&gt;Mentor Refuses Help&lt;/span&gt;&lt;i data-lucide=&quot;file-text&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/span&gt;
+            &lt;span class=&quot;card-text&quot;&gt;Mara has to act without institutional permission.&lt;/span&gt;
+            &lt;span class=&quot;badges&quot;&gt;&lt;span class=&quot;badge&quot;&gt;Lie tested&lt;button class=&quot;badge-x&quot; type=&quot;button&quot; aria-label=&quot;Remove Lie tested&quot;&gt;×&lt;/button&gt;&lt;/span&gt;&lt;/span&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;chapter-column&quot; data-column=&quot;chapter-4&quot;&gt;
+          &lt;div class=&quot;plot-card placeholder&quot; role=&quot;button&quot; tabindex=&quot;0&quot; data-card=&quot;midpoint&quot;&gt;
+            &lt;span class=&quot;card-title&quot;&gt;&lt;span&gt;Midpoint reversal&lt;/span&gt;&lt;i data-lucide=&quot;plus-circle&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/span&gt;
+            &lt;span class=&quot;card-text&quot;&gt;Placeholder. Needs an irreversible shift in who controls the archive.&lt;/span&gt;
+            &lt;span class=&quot;badges&quot;&gt;&lt;span class=&quot;badge weak&quot; data-template=&quot;main&quot;&gt;Unresolved&lt;button class=&quot;badge-x&quot; type=&quot;button&quot; aria-label=&quot;Remove Unresolved&quot;&gt;×&lt;/button&gt;&lt;/span&gt;&lt;/span&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;chapter-column&quot; data-column=&quot;chapter-5&quot;&gt;
+          &lt;div class=&quot;plot-card&quot; role=&quot;button&quot; tabindex=&quot;0&quot; data-card=&quot;redherring&quot;&gt;
+            &lt;span class=&quot;card-title&quot;&gt;&lt;span&gt;The Curator Lies&lt;/span&gt;&lt;i data-lucide=&quot;file-text&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/span&gt;
+            &lt;span class=&quot;card-text&quot;&gt;A plausible suspect points Mara away from the real conspiracy.&lt;/span&gt;
+            &lt;span class=&quot;badges&quot;&gt;&lt;span class=&quot;badge&quot; data-template=&quot;mystery&quot;&gt;Red herring&lt;button class=&quot;badge-x&quot; type=&quot;button&quot; aria-label=&quot;Remove Red herring&quot;&gt;×&lt;/button&gt;&lt;/span&gt;&lt;/span&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;plot-card&quot; role=&quot;button&quot; tabindex=&quot;0&quot; data-card=&quot;trial&quot;&gt;
+            &lt;span class=&quot;card-title&quot;&gt;&lt;span&gt;Public Accusation&lt;/span&gt;&lt;i data-lucide=&quot;file-text&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/span&gt;
+            &lt;span class=&quot;card-text&quot;&gt;The forged ledger becomes impossible to hide.&lt;/span&gt;
+            &lt;span class=&quot;badges&quot;&gt;&lt;span class=&quot;badge&quot; data-template=&quot;main&quot;&gt;Crisis&lt;button class=&quot;badge-x&quot; type=&quot;button&quot; aria-label=&quot;Remove Crisis&quot;&gt;×&lt;/button&gt;&lt;/span&gt;&lt;/span&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;chapter-column&quot; data-column=&quot;chapter-6&quot;&gt;
+          &lt;div class=&quot;plot-card placeholder&quot; role=&quot;button&quot; tabindex=&quot;0&quot; data-card=&quot;vulnerable&quot;&gt;
+            &lt;span class=&quot;card-title&quot;&gt;&lt;span&gt;Vulnerability shift&lt;/span&gt;&lt;i data-lucide=&quot;plus-circle&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/span&gt;
+            &lt;span class=&quot;card-text&quot;&gt;Placeholder. Needs a choice, not just confession.&lt;/span&gt;
+            &lt;span class=&quot;badges&quot;&gt;&lt;span class=&quot;badge weak&quot; data-template=&quot;romance&quot;&gt;Weak&lt;button class=&quot;badge-x&quot; type=&quot;button&quot; aria-label=&quot;Remove Weak claim&quot;&gt;×&lt;/button&gt;&lt;/span&gt;&lt;/span&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/section&gt;
+      &lt;div class=&quot;flow-controls&quot; aria-label=&quot;Board viewport controls&quot;&gt;
+        &lt;button class=&quot;icon-btn&quot; type=&quot;button&quot; aria-label=&quot;Pan board&quot;&gt;&lt;i data-lucide=&quot;hand&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+        &lt;button class=&quot;icon-btn&quot; type=&quot;button&quot; aria-label=&quot;Zoom out&quot;&gt;&lt;i data-lucide=&quot;zoom-out&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+        &lt;span class=&quot;zoom-readout&quot; aria-label=&quot;Zoom level&quot;&gt;100%&lt;/span&gt;
+        &lt;button class=&quot;icon-btn&quot; type=&quot;button&quot; aria-label=&quot;Zoom in&quot;&gt;&lt;i data-lucide=&quot;zoom-in&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+        &lt;button class=&quot;icon-btn&quot; type=&quot;button&quot; aria-label=&quot;Fit viewport&quot;&gt;&lt;i data-lucide=&quot;scan&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;flow-minimap&quot; aria-label=&quot;Board minimap&quot;&gt;
+        &lt;span&gt;&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;span&gt;&lt;/span&gt;
+        &lt;span&gt;&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;span&gt;&lt;/span&gt;&lt;span&gt;&lt;/span&gt;
+      &lt;/div&gt;
+    &lt;/main&gt;
+
+    &lt;aside class=&quot;right&quot;&gt;
+      &lt;div class=&quot;panel-head&quot;&gt;
+        &lt;div class=&quot;panel-title&quot; id=&quot;inspector-title&quot;&gt;Archive Break-in&lt;/div&gt;
+        &lt;button class=&quot;icon-btn&quot; type=&quot;button&quot; aria-label=&quot;Open source scene&quot;&gt;&lt;i data-lucide=&quot;external-link&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;panel-body claim-editor&quot; id=&quot;inspector-body&quot;&gt;
+        &lt;div class=&quot;field&quot;&gt;
+          &lt;span class=&quot;label&quot;&gt;Selected card&lt;/span&gt;
+          &lt;span&gt;Scene · Archive Break-in&lt;/span&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;field&quot;&gt;
+          &lt;span class=&quot;label&quot;&gt;Claim&lt;/span&gt;
+          &lt;input class=&quot;field-input&quot; value=&quot;First turn&quot; aria-label=&quot;Function point label&quot;&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;field&quot;&gt;
+          &lt;span class=&quot;label&quot;&gt;Claim type&lt;/span&gt;
+          &lt;select class=&quot;select&quot; aria-label=&quot;Claim type&quot;&gt;
+            &lt;option&gt;satisfies&lt;/option&gt;
+            &lt;option&gt;partially satisfies&lt;/option&gt;
+            &lt;option&gt;subverts&lt;/option&gt;
+            &lt;option&gt;foreshadows&lt;/option&gt;
+          &lt;/select&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;field&quot;&gt;
+          &lt;span class=&quot;label&quot;&gt;Specific rationale&lt;/span&gt;
+          &lt;textarea class=&quot;field-input&quot; aria-label=&quot;Claim rationale&quot;&gt;Mara steals the ledger instead of reporting it, making the old path unavailable.&lt;/textarea&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;actions&quot;&gt;
+          &lt;button class=&quot;pill-btn&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;sparkles&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt; Critique claim&lt;/button&gt;
+          &lt;button class=&quot;pill-btn&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;trash-2&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt; Remove&lt;/button&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/aside&gt;
+  &lt;/div&gt;
+
+  &lt;script&gt;
+    (() =&gt; {
+      const root = document.getElementById(&quot;plot-board-drag-mockup&quot;);
+      const templateFilter = root.querySelector(&quot;#template-filter&quot;);
+      const highlightTemplateButton = root.querySelector(&quot;#highlight-template&quot;);
+      const clearHighlightButton = root.querySelector(&quot;#clear-highlight&quot;);
+      const sets = Array.from(root.querySelectorAll(&quot;.function-set&quot;));
+      const points = Array.from(root.querySelectorAll(&quot;.function-point&quot;));
+      const cards = Array.from(root.querySelectorAll(&quot;.plot-card&quot;));
+      const columns = Array.from(root.querySelectorAll(&quot;.chapter-column&quot;));
+      const inspectorTitle = root.querySelector(&quot;#inspector-title&quot;);
+      const inspectorBody = root.querySelector(&quot;#inspector-body&quot;);
+      let dragged = null;
+      let draggedBadge = null;
+
+      const cardSummaries = {
+        archive: &quot;Scene · Archive Break-in&quot;,
+        locked: &quot;Scene · Locked in the Vault&quot;,
+        clue: &quot;Scene · Ledger Contradiction&quot;,
+        mentor: &quot;Scene · Mentor Refuses Help&quot;,
+        midpoint: &quot;Placeholder card&quot;,
+        redherring: &quot;Scene · The Curator Lies&quot;,
+        trial: &quot;Scene · Public Accusation&quot;,
+        vulnerable: &quot;Placeholder card&quot;
+      };
+
+      function escapeHtml(value) {
+        return String(value).replace(/[&amp;&lt;&gt;&quot;']/g, (char) =&gt; ({
+          &quot;&amp;&quot;: &quot;&amp;amp;&quot;,
+          &quot;&lt;&quot;: &quot;&amp;lt;&quot;,
+          &quot;&gt;&quot;: &quot;&amp;gt;&quot;,
+          &quot;\&quot;&quot;: &quot;&amp;quot;&quot;,
+          &quot;'&quot;: &quot;&amp;#39;&quot;
+        })[char]);
+      }
+
+      function badgeLabel(badge) {
+        return Array.from(badge.childNodes)
+          .filter((node) =&gt; node.nodeType === Node.TEXT_NODE)
+          .map((node) =&gt; node.textContent.trim())
+          .join(&quot; &quot;)
+          .trim() || badge.textContent.replace(&quot;×&quot;, &quot;&quot;).trim();
+      }
+
+      function boardBadges() {
+        return Array.from(root.querySelectorAll(&quot;.plot-card .badge&quot;));
+      }
+
+      function makeBadgeDraggable(badge) {
+        badge.draggable = true;
+        badge.setAttribute(&quot;aria-label&quot;, `Function claim ${badgeLabel(badge)}`);
+      }
+
+      function syncBadgeDragging() {
+        boardBadges().forEach(makeBadgeDraggable);
+      }
+
+      function activeTemplateSet() {
+        return sets.find((set) =&gt; set.dataset.selected === &quot;true&quot;)
+          || (templateFilter.value !== &quot;all&quot; ? sets.find((set) =&gt; set.dataset.templateSet === templateFilter.value) : null);
+      }
+
+      function clearPointSelection() {
+        points.forEach((item) =&gt; item.dataset.selected = &quot;false&quot;);
+      }
+
+      function clearFunctionHighlights() {
+        cards.forEach((card) =&gt; card.dataset.functionHighlight = &quot;false&quot;);
+        boardBadges().forEach((badge) =&gt; badge.dataset.selected = &quot;false&quot;);
+      }
+
+      function clearTemplateHighlights() {
+        cards.forEach((card) =&gt; card.dataset.templateHighlight = &quot;false&quot;);
+        boardBadges().forEach((badge) =&gt; badge.dataset.templateHighlight = &quot;false&quot;);
+      }
+
+      function clearBoardHighlights() {
+        clearFunctionHighlights();
+        clearTemplateHighlights();
+      }
+
+      function selectedTemplateValue() {
+        const active = activeTemplateSet();
+        return active?.dataset.templateSet || (templateFilter.value !== &quot;all&quot; ? templateFilter.value : &quot;&quot;);
+      }
+
+      function updateHighlightButton() {
+        highlightTemplateButton.disabled = !selectedTemplateValue();
+      }
+
+      function selectTemplateSet(set, clearCards = true) {
+        if (clearCards) cards.forEach((item) =&gt; item.dataset.selected = &quot;false&quot;);
+        sets.forEach((item) =&gt; item.dataset.selected = String(item === set));
+        updateHighlightButton();
+      }
+
+      function highlightFunctionInstances(point) {
+        clearFunctionHighlights();
+        const claim = point.dataset.point || &quot;&quot;;
+        const template = point.dataset.template || &quot;&quot;;
+        boardBadges().forEach((badge) =&gt; {
+          const matches = badgeLabel(badge) === claim &amp;&amp; (!template || badge.dataset.template === template);
+          badge.dataset.selected = String(matches);
+          const card = badge.closest(&quot;.plot-card&quot;);
+          if (matches &amp;&amp; card) card.dataset.functionHighlight = &quot;true&quot;;
+        });
+      }
+
+      function applyTemplateHighlight(template) {
+        clearTemplateHighlights();
+        if (!template) return;
+        boardBadges().forEach((badge) =&gt; {
+          const matches = badge.dataset.template === template;
+          badge.dataset.templateHighlight = String(matches);
+          const card = badge.closest(&quot;.plot-card&quot;);
+          if (matches &amp;&amp; card) card.dataset.templateHighlight = &quot;true&quot;;
+        });
+      }
+
+      function currentTemplateHighlight() {
+        return boardBadges().find((badge) =&gt; badge.dataset.templateHighlight === &quot;true&quot;)?.dataset.template || &quot;&quot;;
+      }
+
+      function selectFunctionPoint(point, options = {}) {
+        const { clearCards = true, ensureVisible = false } = options;
+        const set = point.closest(&quot;.function-set&quot;) || activeTemplateSet();
+        if (ensureVisible &amp;&amp; templateFilter.value !== &quot;all&quot; &amp;&amp; set.dataset.templateSet !== templateFilter.value) {
+          templateFilter.value = set.dataset.templateSet || templateFilter.value;
+          showTemplate(templateFilter.value);
+        }
+        selectTemplateSet(set, clearCards);
+        clearPointSelection();
+        point.dataset.selected = &quot;true&quot;;
+        highlightFunctionInstances(point);
+      }
+
+      function pointForBadge(badge) {
+        const claim = badgeLabel(badge);
+        const template = badge.dataset.template;
+        return points.find((point) =&gt; {
+          const templateMatches = !template || point.dataset.template === template;
+          return templateMatches &amp;&amp; point.dataset.point === claim;
+        });
+      }
+
+      function showTemplate(value) {
+        sets.forEach((set) =&gt; {
+          const visible = value === &quot;all&quot; || set.dataset.templateSet === value;
+          set.hidden = !visible;
+          set.dataset.selected = value !== &quot;all&quot; &amp;&amp; set.dataset.templateSet === value ? &quot;true&quot; : &quot;false&quot;;
+        });
+        updateHighlightButton();
+      }
+
+      function selectCard(card) {
+        cards.forEach((item) =&gt; item.dataset.selected = String(item === card));
+        sets.forEach((item) =&gt; item.dataset.selected = &quot;false&quot;);
+        clearPointSelection();
+        clearFunctionHighlights();
+        updateHighlightButton();
+        inspectorTitle.textContent = card.querySelector(&quot;.card-title span&quot;)?.textContent || &quot;Selected card&quot;;
+      }
+
+      function renderPaletteOverview() {
+        cards.forEach((item) =&gt; item.dataset.selected = &quot;false&quot;);
+        sets.forEach((item) =&gt; item.dataset.selected = &quot;false&quot;);
+        clearPointSelection();
+        clearFunctionHighlights();
+        updateHighlightButton();
+        inspectorTitle.textContent = &quot;Plot template instances&quot;;
+        inspectorBody.innerHTML = `
+          &lt;div class=&quot;field&quot;&gt;
+            &lt;span class=&quot;label&quot;&gt;Palette filter&lt;/span&gt;
+            &lt;span&gt;All local template-instance nodes are visible.&lt;/span&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;field&quot;&gt;
+            &lt;span class=&quot;label&quot;&gt;Board highlight&lt;/span&gt;
+            &lt;span&gt;Select a template instance, then highlight participating cards.&lt;/span&gt;
+          &lt;/div&gt;
+        `;
+      }
+
+      function renderTemplateEditor(set, options = {}) {
+        const { highlightBoard = false } = options;
+        const title = set.querySelector(&quot;.instance-title span&quot;)?.textContent || &quot;Plot template instance&quot;;
+        const summary = set.querySelector(&quot;.instance-frame-head .muted&quot;)?.textContent || &quot;Local template-instance node.&quot;;
+        const total = set.querySelectorAll(&quot;.function-point&quot;).length;
+        const missing = set.querySelectorAll(&quot;.function-point .badge.weak&quot;).length;
+        selectTemplateSet(set);
+        clearPointSelection();
+        clearFunctionHighlights();
+        if (highlightBoard) applyTemplateHighlight(set.dataset.templateSet);
+        inspectorTitle.textContent = title;
+        inspectorBody.innerHTML = `
+          &lt;div class=&quot;field&quot;&gt;
+            &lt;span class=&quot;label&quot;&gt;Selected palette object&lt;/span&gt;
+            &lt;span&gt;${escapeHtml(summary)}&lt;/span&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;field&quot;&gt;
+            &lt;span class=&quot;label&quot;&gt;Local node&lt;/span&gt;
+            &lt;input class=&quot;field-input&quot; value=&quot;plot/${escapeHtml(set.dataset.templateSet)}-plot-instance.md&quot; aria-label=&quot;Template instance file&quot;&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;field&quot;&gt;
+            &lt;span class=&quot;label&quot;&gt;Coverage&lt;/span&gt;
+            &lt;span&gt;${total - missing} assigned · ${missing} needs attention&lt;/span&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;field&quot;&gt;
+            &lt;span class=&quot;label&quot;&gt;Context guard&lt;/span&gt;
+            &lt;select class=&quot;select&quot; aria-label=&quot;Context guard&quot;&gt;
+              &lt;option&gt;visible up to current mutation&lt;/option&gt;
+              &lt;option&gt;visible to brainstorming only&lt;/option&gt;
+              &lt;option&gt;hidden from prose generation&lt;/option&gt;
+            &lt;/select&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;actions&quot;&gt;
+            &lt;button class=&quot;pill-btn&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;sparkles&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt; Brainstorm gaps&lt;/button&gt;
+            &lt;button class=&quot;pill-btn&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;copy&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt; Duplicate&lt;/button&gt;
+          &lt;/div&gt;
+        `;
+        if (window.lucide) window.lucide.createIcons({ attrs: { width: 16, height: 16 } });
+      }
+
+      function renderFunctionPointEditor(point) {
+        const claim = point.dataset.point || &quot;Function point&quot;;
+        const set = point.closest(&quot;.function-set&quot;) || activeTemplateSet();
+        const instance = set.querySelector(&quot;.instance-title span&quot;)?.textContent || &quot;Plot template instance&quot;;
+        const description = point.querySelector(&quot;.muted&quot;)?.textContent || &quot;&quot;;
+        selectFunctionPoint(point, { clearCards: true });
+        inspectorTitle.textContent = claim;
+        inspectorBody.innerHTML = `
+          &lt;div class=&quot;field&quot;&gt;
+            &lt;span class=&quot;label&quot;&gt;Palette function point&lt;/span&gt;
+            &lt;span&gt;${escapeHtml(instance)}&lt;/span&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;field&quot;&gt;
+            &lt;span class=&quot;label&quot;&gt;Function claim&lt;/span&gt;
+            &lt;input class=&quot;field-input&quot; value=&quot;${escapeHtml(claim)}&quot; aria-label=&quot;Function point&quot;&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;field&quot;&gt;
+            &lt;span class=&quot;label&quot;&gt;Template guidance&lt;/span&gt;
+            &lt;textarea class=&quot;field-input&quot; aria-label=&quot;Template guidance&quot;&gt;${escapeHtml(description)}&lt;/textarea&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;field&quot;&gt;
+            &lt;span class=&quot;label&quot;&gt;Default claim type&lt;/span&gt;
+            &lt;select class=&quot;select&quot; aria-label=&quot;Default claim type&quot;&gt;
+              &lt;option&gt;satisfies&lt;/option&gt;
+              &lt;option&gt;partially satisfies&lt;/option&gt;
+              &lt;option&gt;subverts&lt;/option&gt;
+              &lt;option&gt;foreshadows&lt;/option&gt;
+            &lt;/select&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;actions&quot;&gt;
+            &lt;button class=&quot;pill-btn&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;sparkles&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt; Brainstorm cards&lt;/button&gt;
+            &lt;button class=&quot;pill-btn&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;plus&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt; Add to board&lt;/button&gt;
+          &lt;/div&gt;
+        `;
+        if (window.lucide) window.lucide.createIcons({ attrs: { width: 16, height: 16 } });
+      }
+
+      function renderClaimEditor(card, badge) {
+        const title = card.querySelector(&quot;.card-title span&quot;)?.textContent || &quot;Selected card&quot;;
+        const claim = badgeLabel(badge) || &quot;Function point&quot;;
+        const point = pointForBadge(badge);
+        if (point) {
+          selectFunctionPoint(point, { clearCards: false, ensureVisible: true });
+        } else {
+          clearPointSelection();
+          clearFunctionHighlights();
+        }
+        inspectorTitle.textContent = claim;
+        inspectorBody.innerHTML = `
+          &lt;div class=&quot;field&quot;&gt;
+            &lt;span class=&quot;label&quot;&gt;Selected card&lt;/span&gt;
+            &lt;span&gt;${escapeHtml(cardSummaries[card.dataset.card] || title)}&lt;/span&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;field&quot;&gt;
+            &lt;span class=&quot;label&quot;&gt;Claim&lt;/span&gt;
+            &lt;input class=&quot;field-input&quot; value=&quot;${escapeHtml(claim)}&quot; aria-label=&quot;Function point label&quot;&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;field&quot;&gt;
+            &lt;span class=&quot;label&quot;&gt;Claim type&lt;/span&gt;
+            &lt;select class=&quot;select&quot; aria-label=&quot;Claim type&quot;&gt;
+              &lt;option&gt;satisfies&lt;/option&gt;
+              &lt;option&gt;partially satisfies&lt;/option&gt;
+              &lt;option&gt;subverts&lt;/option&gt;
+              &lt;option&gt;foreshadows&lt;/option&gt;
+            &lt;/select&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;field&quot;&gt;
+            &lt;span class=&quot;label&quot;&gt;Specific rationale&lt;/span&gt;
+            &lt;textarea class=&quot;field-input&quot; aria-label=&quot;Claim rationale&quot;&gt;${escapeHtml(claim)} is attached to ${escapeHtml(title)}. Add the book-specific evidence here.&lt;/textarea&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;actions&quot;&gt;
+            &lt;button class=&quot;pill-btn&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;sparkles&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt; Critique claim&lt;/button&gt;
+            &lt;button class=&quot;pill-btn&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;trash-2&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt; Remove&lt;/button&gt;
+          &lt;/div&gt;
+        `;
+        if (window.lucide) window.lucide.createIcons({ attrs: { width: 16, height: 16 } });
+      }
+
+      function addBadge(card, point) {
+        const badges = card.querySelector(&quot;.badges&quot;);
+        const badge = document.createElement(&quot;span&quot;);
+        badge.className = `badge ${point.dataset.strength === &quot;weak&quot; ? &quot;weak&quot; : &quot;&quot;}`;
+        badge.dataset.template = point.dataset.template;
+        badge.append(document.createTextNode(point.dataset.point || &quot;Function point&quot;));
+        const remove = document.createElement(&quot;button&quot;);
+        remove.className = &quot;badge-x&quot;;
+        remove.type = &quot;button&quot;;
+        remove.setAttribute(&quot;aria-label&quot;, `Remove ${point.dataset.point || &quot;claim&quot;}`);
+        remove.textContent = &quot;×&quot;;
+        badge.appendChild(remove);
+        makeBadgeDraggable(badge);
+        badges.appendChild(badge);
+        selectCard(card);
+        renderClaimEditor(card, badge);
+      }
+
+      function moveBadge(card, badge) {
+        const badges = card.querySelector(&quot;.badges&quot;);
+        if (!badges || badge.closest(&quot;.plot-card&quot;) === card) return;
+        const templateHighlight = currentTemplateHighlight();
+        badges.appendChild(badge);
+        badge.dataset.dragging = &quot;false&quot;;
+        selectCard(card);
+        renderClaimEditor(card, badge);
+        if (templateHighlight) applyTemplateHighlight(templateHighlight);
+      }
+
+      templateFilter.addEventListener(&quot;change&quot;, () =&gt; {
+        showTemplate(templateFilter.value);
+        const active = activeTemplateSet();
+        if (active) {
+          renderTemplateEditor(active);
+        } else {
+          renderPaletteOverview();
+        }
+      });
+      highlightTemplateButton.addEventListener(&quot;click&quot;, () =&gt; {
+        const template = selectedTemplateValue();
+        if (template) applyTemplateHighlight(template);
+      });
+      clearHighlightButton.addEventListener(&quot;click&quot;, () =&gt; {
+        clearTemplateHighlights();
+      });
+      sets.forEach((set) =&gt; {
+        set.addEventListener(&quot;click&quot;, (event) =&gt; {
+          const point = event.target.closest(&quot;.function-point&quot;);
+          if (point) {
+            renderFunctionPointEditor(point);
+          } else {
+            renderTemplateEditor(set, { highlightBoard: true });
+          }
+        });
+      });
+      points.forEach((point) =&gt; {
+        point.addEventListener(&quot;dragstart&quot;, (event) =&gt; {
+          dragged = point;
+          draggedBadge = null;
+          event.dataTransfer.effectAllowed = &quot;copy&quot;;
+          event.dataTransfer?.setData(&quot;text/plain&quot;, point.dataset.point || &quot;&quot;);
+        });
+        point.addEventListener(&quot;dragend&quot;, () =&gt; {
+          dragged = null;
+        });
+      });
+      root.addEventListener(&quot;dragstart&quot;, (event) =&gt; {
+        const badge = event.target.closest(&quot;.plot-card .badge&quot;);
+        if (!badge || event.target.closest(&quot;.badge-x&quot;)) return;
+        draggedBadge = badge;
+        dragged = null;
+        badge.dataset.dragging = &quot;true&quot;;
+        event.dataTransfer.effectAllowed = &quot;move&quot;;
+        event.dataTransfer?.setData(&quot;text/plain&quot;, badgeLabel(badge));
+      });
+      root.addEventListener(&quot;dragend&quot;, () =&gt; {
+        if (draggedBadge) draggedBadge.dataset.dragging = &quot;false&quot;;
+        draggedBadge = null;
+      });
+      columns.forEach((column) =&gt; {
+        column.addEventListener(&quot;dragover&quot;, (event) =&gt; {
+          event.preventDefault();
+          column.classList.add(&quot;is-drop&quot;);
+        });
+        column.addEventListener(&quot;dragleave&quot;, () =&gt; column.classList.remove(&quot;is-drop&quot;));
+        column.addEventListener(&quot;drop&quot;, (event) =&gt; {
+          event.preventDefault();
+          column.classList.remove(&quot;is-drop&quot;);
+          const card = event.target.closest(&quot;.plot-card&quot;) || column.querySelector(&quot;.plot-card&quot;);
+          if (draggedBadge &amp;&amp; card) moveBadge(card, draggedBadge);
+          else if (dragged &amp;&amp; card) addBadge(card, dragged);
+        });
+      });
+      cards.forEach((card) =&gt; {
+        card.addEventListener(&quot;dragover&quot;, (event) =&gt; event.preventDefault());
+        card.addEventListener(&quot;drop&quot;, (event) =&gt; {
+          event.preventDefault();
+          if (draggedBadge) moveBadge(card, draggedBadge);
+          else if (dragged) addBadge(card, dragged);
+        });
+        card.addEventListener(&quot;click&quot;, (event) =&gt; {
+          const remove = event.target.closest(&quot;.badge-x&quot;);
+          if (remove) {
+            event.stopPropagation();
+            const badge = remove.closest(&quot;.badge&quot;);
+            const templateHighlight = currentTemplateHighlight();
+            badge?.remove();
+            selectCard(card);
+            if (templateHighlight) applyTemplateHighlight(templateHighlight);
+            inspectorTitle.textContent = card.querySelector(&quot;.card-title span&quot;)?.textContent || &quot;Selected card&quot;;
+            return;
+          }
+          const badge = event.target.closest(&quot;.badge&quot;);
+          selectCard(card);
+          if (badge) {
+            event.stopPropagation();
+            renderClaimEditor(card, badge);
+          } else {
+            inspectorTitle.textContent = card.querySelector(&quot;.card-title span&quot;)?.textContent || &quot;Selected card&quot;;
+          }
+        });
+      });
+      syncBadgeDragging();
+      showTemplate(templateFilter.value);
+      selectCard(cards[0]);
+    })();
+  &lt;/script&gt;
+&lt;/div&gt;
+"></iframe>
+</body>
+</html>

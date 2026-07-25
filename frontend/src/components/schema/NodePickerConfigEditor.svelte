@@ -8,7 +8,7 @@
   //   all descendants; indeterminate when partial). Tree is derived
   //   from the project's metadata schema, so user-added sub-types of
   //   character / place / etc. surface automatically.
-  // - Only scene + lore kinds. Snippets are template fragments (you
+  // - Scene, lore, and plot kinds. Snippets are template fragments (you
   //   `{% include %}` them), assistants are personas (you assign them)
   //   — neither is data the model should "know about." Dropped from
   //   the editor entirely.
@@ -93,7 +93,7 @@
   // --- Saved views (ADR-0023 "…or use a saved view") -----------------
   // Besides the degenerate checkbox tree, a picker source can be a saved
   // view referenced by id ({ view: <id> }). We list the project's views,
-  // keep only those anchored to a kind this editor offers (scene / lore),
+  // keep only those anchored to a kind this editor offers (scene / lore / plot),
   // and let the author add/remove them as chips. The tree's writeSelection
   // preserves these refs (they can't be expressed as checkboxes).
   let availableViews = $state<ViewNodeSummary[]>([]);
@@ -153,10 +153,11 @@
     { value: "context_pick", label: "Context Picker" },
   ];
 
-  type Kind = "scene" | "lore";
+  type Kind = "scene" | "lore" | "plot";
   const KINDS: { id: Kind; label: string }[] = [
     { id: "scene", label: "Scenes" },
     { id: "lore", label: "Lore" },
+    { id: "plot", label: "Plot" },
   ];
 
   const PRESETS: { id: "full_outline" | "full_text"; label: string; tooltip: string }[] = [
@@ -297,6 +298,7 @@
   const trees = $derived({
     scene: buildTree(metadataSchema, "scene"),
     lore: buildTree(metadataSchema, "lore"),
+    plot: buildTree(metadataSchema, "plot"),
   });
   // Pre-computed render lists per kind, including each node's checkbox
   // state. Runes `$derived` tracks reactive reads inside called functions
@@ -306,12 +308,14 @@
   const renderedByKind = $derived({
     scene: flattenForRender(trees.scene, selectionFor("scene"), collapsedIds),
     lore: flattenForRender(trees.lore, selectionFor("lore"), collapsedIds),
+    plot: flattenForRender(trees.plot, selectionFor("plot"), collapsedIds),
   });
 
   // Per-kind picked-leaf totals (for the kind-bar count).
   const pickedCountByKind = $derived({
     scene: selectionFor("scene").size,
     lore: selectionFor("lore").size,
+    plot: selectionFor("plot").size,
   });
 
   // Chip projection.
@@ -358,6 +362,7 @@
   const hasAnySource = $derived(
     renderedByKind.scene.some((n) => n.state !== "unchecked") ||
       renderedByKind.lore.some((n) => n.state !== "unchecked") ||
+      renderedByKind.plot.some((n) => n.state !== "unchecked") ||
       viewRefs.length > 0 ||
       (config.presets ?? []).length > 0,
   );
@@ -639,7 +644,7 @@
           {/each}
         </select>
       {:else if availableViews.length === 0}
-        <p class="ctx-muted">No saved views for scenes or lore yet.</p>
+        <p class="ctx-muted">No saved views for scenes, lore, or plot yet.</p>
       {/if}
     {/if}
   </section>

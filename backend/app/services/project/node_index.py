@@ -28,6 +28,7 @@ class NodeIndexEntry:
     title: str = ""
     source_layer_id: str = ""
     source_layer_label: str = ""
+    system: bool = False
     # The layer id this entry was fork-to-here'd from (#313 / ADR-0039), resolved
     # from the front-matter `forked_from` relative path at collection time. When
     # it equals the id of the layer this entry shadows, `resolve()` treats the
@@ -217,6 +218,10 @@ class NodeIndex:
             # the shadower forked from exactly the layer it shadows, the shadow
             # is deliberate, not an accidental id collision, so it is silent.
             if shadower.forked_from_layer_id != shadowed.source_layer_id
+            # Built-in plot templates are system data. A child project can carry
+            # them from before an ancestor was promoted into a project, so keep
+            # the real entry collision warning without surfacing those defaults.
+            and not _is_builtin_plot_template_shadow(shadower, shadowed)
         ]
         self.warnings.extend(self._shadow_warnings)
         self.rebuild_reverse_edges()
@@ -242,3 +247,14 @@ class NodeIndex:
         for edges in reverse.values():
             edges.sort(key=lambda edge: (edge.src, edge.field_id))
         self.edges_by_dst = reverse
+
+
+def _is_builtin_plot_template_shadow(shadower: NodeIndexEntry, shadowed: NodeIndexEntry) -> bool:
+    return (
+        shadower.kind == "plot"
+        and shadowed.kind == "plot"
+        and shadower.entry_type == "plot:template"
+        and shadowed.entry_type == "plot:template"
+        and shadower.system
+        and shadowed.system
+    )

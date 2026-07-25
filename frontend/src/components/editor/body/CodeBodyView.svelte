@@ -23,6 +23,7 @@
     EditableDocument,
     EntryBodyLanguage,
     LoreEntrySummary,
+    PlotNodeSummary,
     PromptEntrySummary,
     StructureDocument,
   } from "@/lib/types";
@@ -39,6 +40,7 @@
     researchStructure?: StructureDocument | null;
     loreEntries?: LoreEntrySummary[];
     promptEntries?: PromptEntrySummary[];
+    plotEntries?: PlotNodeSummary[];
     availableScenes?: { id: string; title: string }[];
     rawBodyLanguage?: EntryBodyLanguage;
     loadedSceneId?: string | null;
@@ -60,6 +62,7 @@
     researchStructure = null,
     loreEntries = [],
     promptEntries = [],
+    plotEntries = [],
     availableScenes = [],
     rawBodyLanguage = "markdown",
     loadedSceneId = null,
@@ -271,6 +274,7 @@
     {researchStructure}
     {loreEntries}
     {promptEntries}
+    {plotEntries}
     {availableScenes}
     {loadedSceneId}
   />

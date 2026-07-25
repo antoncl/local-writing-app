@@ -13,6 +13,7 @@
     MetadataFieldDefinition,
     MetadataSchema,
     MetadataValue,
+    PlotNodeSummary,
     PromptEntrySummary,
     StructureDocument,
   } from "@/lib/types";
@@ -30,6 +31,7 @@
     knownTags?: import("@/lib/types").ScopedTag[];
     loreEntries?: LoreEntrySummary[];
     promptEntries?: PromptEntrySummary[];
+    plotEntries?: PlotNodeSummary[];
     structure?: StructureDocument | null;
     // Research tree (sibling to manuscript) — threaded to the picker.
     researchStructure?: StructureDocument | null;
@@ -86,6 +88,7 @@
     knownTags = [],
     loreEntries = [],
     promptEntries = [],
+    plotEntries = [],
     structure = null,
     researchStructure = null,
     implicitContextMatcher = null,
@@ -312,6 +315,7 @@
                 ariaLabel={fieldLabel}
                 loreEntries={loreEntries}
                 promptEntries={promptEntries}
+                plotEntries={plotEntries}
                 structure={structure}
                 researchStructure={researchStructure}
                 implicitContextMatcher={implicitContextMatcher}

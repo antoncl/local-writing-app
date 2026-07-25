@@ -44,7 +44,14 @@ import type {
   ProjectInfo,
   ProjectNode,
   ProjectValidation,
+  CreatePlotNodeRequest,
+  PlotNode,
+  PlotContextPacket,
+  PlotNodeList,
+  PromotePlotCardRequest,
+  PromotePlotCardResponse,
   SaveProjectNodeRequest,
+  SavePlotNodeRequest,
   PromptEntry,
   PromptEntryList,
   MutationSetEntry,
@@ -832,6 +839,44 @@ export const api = {
     return request<ViewNode>(`/views/${encodeURIComponent(viewId)}/ui`, {
       method: "PUT",
       body: JSON.stringify({ ui }),
+    });
+  },
+  listPlotNodes() {
+    return request<PlotNodeList>("/plots");
+  },
+  createPlotNode(payload: CreatePlotNodeRequest) {
+    return request<PlotNode>("/plots", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  getPlotNode(nodeId: string) {
+    return request<PlotNode>(`/plots/${encodeURIComponent(nodeId)}`);
+  },
+  getPlotContext(nodeId: string, params: { scene_id?: string | null; include_future?: boolean } = {}) {
+    const search = new URLSearchParams();
+    if (params.scene_id) search.set("scene_id", params.scene_id);
+    if (params.include_future) search.set("include_future", "true");
+    const query = search.toString();
+    return request<PlotContextPacket>(
+      `/plots/${encodeURIComponent(nodeId)}/context${query ? `?${query}` : ""}`,
+    );
+  },
+  promotePlotCard(nodeId: string, payload: PromotePlotCardRequest) {
+    return request<PromotePlotCardResponse>(`/plots/${encodeURIComponent(nodeId)}/promote-card`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  savePlotNode(nodeId: string, payload: SavePlotNodeRequest) {
+    return request<PlotNode>(`/plots/${encodeURIComponent(nodeId)}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+  deletePlotNode(nodeId: string) {
+    return request<PlotNodeList>(`/plots/${encodeURIComponent(nodeId)}`, {
+      method: "DELETE",
     });
   },
   // Unified node-CRUD shim (Phase 3c). Returns the kind-specific

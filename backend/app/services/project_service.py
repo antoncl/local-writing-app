@@ -47,6 +47,7 @@ from app.services.project.node_index_snapshot import (
 )
 from app.services.project.node_ops import NodeOpsMixin
 from app.services.project.overrides import OVERRIDES_FOLDER, LayerOverridesMixin
+from app.services.project.plots import PlotEntriesMixin
 from app.services.project.project_node import ProjectNodeMixin
 from app.services.project.prompts import PromptEntriesMixin
 from app.services.project.references import ReferencesMixin
@@ -83,6 +84,7 @@ class ProjectService(
     NodeIndexPatchMixin,
     LayerOverridesMixin,
     NodeOpsMixin,
+    PlotEntriesMixin,
     ProjectLifecycleMixin,
     ProjectNodeMixin,
     PromptEntriesMixin,
@@ -150,10 +152,16 @@ class ProjectService(
             migrations = migrate_project(root)
         except Exception as exc:  # noqa: BLE001
             raise ProjectServiceError(f"Project migration failed: {exc}", 500) from exc
-        return cls(WorkScope(root=root, migrations_applied=tuple(migrations)))
+        service = cls(WorkScope(root=root, migrations_applied=tuple(migrations)))
+        service._seed_builtin_plot_templates(root)
+        return service
 
     def _entry_markdown_paths(self, root: Path) -> list[Path]:
-        return [*(root / "scenes").glob("*.md"), *(root / "lore").glob("*.md")]
+        return [
+            *(root / "scenes").glob("*.md"),
+            *(root / "lore").glob("*.md"),
+            *(root / "plot").glob("*.md"),
+        ]
 
     def _is_relative_to(self, path: Path, possible_parent: Path) -> bool:
         try:

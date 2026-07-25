@@ -28,6 +28,15 @@ from app.models import (
     UnlistAssistantRequest,
     UpdateTodoRequest,
 )
+from app.models_plot import (
+    CreatePlotNodeRequest,
+    PlotContextPacket,
+    PlotNode,
+    PlotNodeList,
+    PromotePlotCardRequest,
+    PromotePlotCardResponse,
+    SavePlotNodeRequest,
+)
 from app.models_views import (
     CreateViewRequest,
     SaveViewRequest,
@@ -79,6 +88,61 @@ def update_view_ui(project: CurrentProject, view_id: str, request: UpdateViewUiR
 def delete_view(project: CurrentProject, view_id: str) -> ViewNodeList:
     with translate_errors():
         return project.delete_view(view_id)
+
+
+@router.get("/api/plots", response_model=PlotNodeList)
+def list_plot_nodes(project: CurrentProject) -> PlotNodeList:
+    with translate_errors():
+        return project.list_plot_nodes()
+
+
+@router.post("/api/plots", response_model=PlotNode)
+def create_plot_node(project: CurrentProject, request: CreatePlotNodeRequest) -> PlotNode:
+    with translate_errors():
+        return project.create_plot_node(request)
+
+
+@router.get("/api/plots/{node_id}/context", response_model=PlotContextPacket)
+def get_plot_context(
+    project: CurrentProject,
+    node_id: str,
+    scene_id: str | None = Query(default=None),
+    include_future: bool = Query(default=False),
+) -> PlotContextPacket:
+    with translate_errors():
+        return project.read_plot_context(
+            node_id,
+            scene_id=scene_id,
+            include_future=include_future,
+        )
+
+
+@router.get("/api/plots/{node_id}", response_model=PlotNode)
+def get_plot_node(project: CurrentProject, node_id: str) -> PlotNode:
+    with translate_errors():
+        return project.read_plot_node(node_id)
+
+
+@router.post("/api/plots/{node_id}/promote-card", response_model=PromotePlotCardResponse)
+def promote_plot_card(
+    project: CurrentProject,
+    node_id: str,
+    request: PromotePlotCardRequest,
+) -> PromotePlotCardResponse:
+    with translate_errors():
+        return project.promote_plot_card(node_id, request)
+
+
+@router.put("/api/plots/{node_id}", response_model=PlotNode)
+def save_plot_node(project: CurrentProject, node_id: str, request: SavePlotNodeRequest) -> PlotNode:
+    with translate_errors():
+        return project.save_plot_node(node_id, request)
+
+
+@router.delete("/api/plots/{node_id}", response_model=PlotNodeList)
+def delete_plot_node(project: CurrentProject, node_id: str) -> PlotNodeList:
+    with translate_errors():
+        return project.delete_plot_node(node_id)
 
 
 @router.get("/api/assistants", response_model=AssistantEntryList)
@@ -175,6 +239,7 @@ _SAVE_NODE_REQUEST_BY_KIND: dict[str, type] = {
     "prompt": SavePromptEntryRequest,
     "assistant": SaveAssistantEntryRequest,
     "chat": SaveChatSessionRequest,
+    "plot": SavePlotNodeRequest,
 }
 
 
@@ -288,5 +353,3 @@ def reference_graph(project: CurrentProject) -> ReferenceGraphResponse:
 def search(project: CurrentProject, request: SearchRequest) -> SearchResponse:
     with translate_errors():
         return project.search(request)
-
-

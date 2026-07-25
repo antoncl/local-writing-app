@@ -57,6 +57,10 @@
     setPromptEntries,
   } from "@/lib/stores/prompts";
   import {
+    plotEntriesStore,
+    refreshPlotEntries as storeRefreshPlotEntries,
+  } from "@/lib/stores/plots";
+  import {
     assistantEntriesStore,
     defaultAssistantIdStore,
     refreshAssistantEntries as storeRefreshAssistantEntries,
@@ -464,6 +468,13 @@
     workspaceLayout.ensureVisible("mutations");
   }
 
+  function openPlotBoardPane() {
+    void run(async () => {
+      await editorPanes.openOrCreatePlotBoard();
+      await storeRefreshPlotEntries();
+    });
+  }
+
   function openAssistantsPane() {
     void refreshAssistantEntries();
     workspaceLayout.ensureVisible("assistants");
@@ -558,6 +569,7 @@
   let validation = $derived($validationStore);
   let metadataSchema = $derived($metadataSchemaStore);
   let promptEntries = $derived($promptEntriesStore);
+  let plotEntries = $derived($plotEntriesStore);
   let assistantEntries = $derived($assistantEntriesStore);
   // The per-pane selected-view spec is no longer derived here: an explicit-view
   // pane declares `view: { kind }` on its region entry, and the central RegionBody
@@ -673,6 +685,7 @@
         onHealthCheck={() => aiSettings.runHealthCheck()}
         onOpenPrompts={openPromptsPane}
         onOpenMutations={openMutationsPane}
+        onOpenPlotBoard={openPlotBoardPane}
         onRepair={repairProject}
       />
     </div>
@@ -852,6 +865,7 @@
         scene={editorPane.scene}
         documentKind={editorPane.document?.type ?? "scene"}
         promptEntries={promptEntries}
+        plotEntries={plotEntries}
         structure={structure}
         researchStructure={researchStructure}
         loreEntries={loreEntries}
@@ -883,6 +897,7 @@
         onNavigate={(detail) => navigateToBacklink(detail.id, detail.kind)}
         onOpenChat={(detail) => chatSessions.openChatFromPromptEntry(detail.entry, detail.inputs, detail.sceneId, detail.assistantId)}
         onViewSaveState={(state) => editorPanes.setViewSaveState(editorPane.id, state)}
+        onPlotSaved={(plot) => editorPanes.reconcilePlotBodySave(plot)}
         onAuthoringLayerChange={(layerId) => editorPanes.setEditorPaneAuthoringLayer(editorPane.id, layerId)}
         onFlushScene={async () => {
           // A capture photographs the file and a restore overwrites it, so both
@@ -1105,4 +1120,3 @@
     background: color-mix(in srgb, var(--danger) 12%, transparent);
   }
 </style>
-

@@ -17,6 +17,7 @@
     AssistantEntrySummary,
     LoreEntrySummary,
     MetadataSchema,
+    PlotNodeSummary,
     PromptEntrySummary,
     PromptInputDefinition,
     StructureDocument,
@@ -38,6 +39,7 @@
   export let researchStructure: StructureDocument | null = null;
   export let loreEntries: LoreEntrySummary[] = [];
   export let promptEntries: PromptEntrySummary[] = [];
+  export let plotEntries: PlotNodeSummary[] = [];
   export let excludeId: string | null = null;
   export let implicitContextMatcher: import("@/lib/editor-core/implicitContextMatcher").CompiledMatcher | null = null;
 
@@ -89,6 +91,7 @@
             researchStructure={researchStructure}
             loreEntries={loreEntries}
             promptEntries={promptEntries}
+            plotEntries={plotEntries}
             implicitContextMatcher={implicitContextMatcher}
             on:change={(event) => dispatch("updateDraft", { name: input.name, value: event.detail.value })}
           />

@@ -21,6 +21,7 @@
     NodePickerRef,
     LoreEntrySummary,
     MetadataSchema,
+    PlotNodeSummary,
     PromptEntrySummary,
     StructureDocument,
     StructureNode,
@@ -60,6 +61,7 @@
   export let researchStructure: StructureDocument | null = null;
   export let loreEntries: LoreEntrySummary[] = [];
   export let promptEntries: PromptEntrySummary[] = [];
+  export let plotEntries: PlotNodeSummary[] = [];
   // Assistants are machine-global nodes; enumerated here so views/pickers can
   // hand-pick them (the view designer's hand_picked leaf over kind=assistant).
   export let assistantEntries: AssistantEntrySummary[] = [];
@@ -80,7 +82,7 @@
 
   const dispatch = createEventDispatcher<{ change: { value: NodePickerRef[] } }>();
 
-  type Category = "scene" | "lore" | "snippet" | "assistant" | "research";
+  type Category = "scene" | "lore" | "snippet" | "assistant" | "research" | "plot";
 
   let open = false;
   let search = "";
@@ -317,6 +319,17 @@
     search,
   );
 
+  // Plot nodes are picked by prompts that call helpers such as
+  // `plot_context(input.board, scene=scene)`. They are node refs, not prose
+  // context bodies; the helper materializes the AI-safe packet server-side.
+  $: plotCandidates = filterByTitle(
+    plotEntries.filter((p) => {
+      const allowed = new Set(membership.entryTypes.plot ?? []);
+      return allowed.size === 0 || allowed.has(p.entry_type);
+    }),
+    search,
+  );
+
   // Chip text resolution. Show the entry-type's display name from the
   // schema when known; fall back to a sensible singular for the kind.
   // Fixes the inverted-affordance bug where `character` chips read the
@@ -327,6 +340,7 @@
     research: "Note",
     snippet: "Snippet",
     assistant: "Assistant",
+    plot: "Plot",
     preset: "Preset",
   };
 
@@ -450,6 +464,17 @@
         })),
       );
       if (items.length > 0) groups.push({ id: "assistants", label: "Assistants", items });
+    }
+
+    if (allowedKinds.includes("plot")) {
+      const items = dropExcluded(
+        plotCandidates.map((p) => ({
+          ref: { id: p.id, kind: "plot" as const, title: p.title, entry_type: p.entry_type },
+          tag: itemTag("plot", p.entry_type),
+          monogram: itemMonogram("plot", p.entry_type),
+        })),
+      );
+      if (items.length > 0) groups.push({ id: "plots", label: "Plot", items });
     }
 
     return groups;

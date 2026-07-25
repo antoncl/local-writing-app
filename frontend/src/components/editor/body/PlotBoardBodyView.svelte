@@ -315,7 +315,7 @@
   function pointLabel(claim: PlotPointClaim): string {
     if (claim.claim_label) return claim.claim_label;
     const instance = instanceById.get(claim.template_instance_id);
-    const point = instance?.template_instance?.plot_points.find((candidate) => candidate.plot_point_id === claim.plot_point_id);
+    const point = instance?.template_instance?.plot_points?.find((candidate) => candidate.plot_point_id === claim.plot_point_id);
     return point?.title || claim.plot_point_id;
   }
 
@@ -790,7 +790,7 @@
           <section class="template-block">
             <header>
               <strong>{instance.title}</strong>
-              <span>{instance.template_instance?.plot_points.length ?? 0}</span>
+              <span>{instance.template_instance?.plot_points?.length ?? 0}</span>
             </header>
             {#each paletteRows.filter((row) => row.instance.id === instance.id) as row (row.point.plot_point_id)}
               <button

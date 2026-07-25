@@ -330,7 +330,26 @@ class PlotEntriesMixin:
                 title,
                 "plot:template",
                 body,
-                template=PlotTemplateSpec(plot_points=points),
+                template=PlotTemplateSpec(
+                    slug=filename.removesuffix(".md").lower().replace(" ", "-"),
+                    display_name=title,
+                    family=self._builtin_template_family(node_id),
+                    description=body,
+                    prescriptiveness="diagnostic",
+                    ai_use_guidance="Use as a generic diagnostic lens; do not treat point order as a required outline.",
+                    supports_compression=True,
+                    supports_expansion=True,
+                    source_refs=[
+                        {
+                            "id": "local_writing_app_generic",
+                            "title": "Local Writing App generic plotting rubric",
+                            "note": "Generic structure guidance authored for the app, not imported from a protected beat sheet.",
+                        }
+                    ],
+                    ip_risk="low",
+                    builtin_policy="seed_generic",
+                    plot_points=points,
+                ),
                 system=True,
             )
 
@@ -512,11 +531,13 @@ class PlotEntriesMixin:
             if instance_node.template_instance is None:
                 continue
             template_points: dict[str, Any] = {}
+            template_spec: PlotTemplateSpec | None = None
             template_id = instance_node.template_instance.template_id
             if template_id:
                 try:
                     template_node = self.read_plot_node(template_id)
                     if template_node.template is not None:
+                        template_spec = template_node.template
                         template_points = {
                             point.id: point
                             for point in template_node.template.plot_points
@@ -530,13 +551,24 @@ class PlotEntriesMixin:
             }
             points: list[PlotContextPoint] = []
             for point_id in sorted(used_point_ids):
+                if (
+                    instance_node.template_instance.enabled_point_ids
+                    and point_id not in instance_node.template_instance.enabled_point_ids
+                ):
+                    continue
                 base = template_points.get(point_id)
                 local = instance_points.get(point_id)
+                note = instance_node.template_instance.point_notes.get(point_id)
                 points.append(
                     PlotContextPoint(
                         plot_point_id=point_id,
+                        local_label=(
+                            getattr(note, "local_label", "")
+                            if note is not None else getattr(local, "local_label", "")
+                        ),
                         title=(
                             getattr(local, "title", "")
+                            or (getattr(note, "local_label", "") if note is not None else "")
                             or getattr(base, "title", "")
                             or point_id
                         ),
@@ -546,7 +578,32 @@ class PlotEntriesMixin:
                         ),
                         description=getattr(base, "description", ""),
                         guidance=getattr(base, "guidance", ""),
-                        notes=getattr(local, "notes", ""),
+                        notes=(
+                            getattr(note, "notes", "")
+                            if note is not None else getattr(local, "notes", "")
+                        ),
+                        author_intent=(
+                            getattr(note, "author_intent", "")
+                            if note is not None else getattr(local, "author_intent", "")
+                        ),
+                        expected_role=(
+                            getattr(note, "expected_role", "")
+                            if note is not None else getattr(local, "expected_role", "")
+                        ),
+                        open_questions=(
+                            getattr(note, "open_questions", [])
+                            if note is not None else getattr(local, "open_questions", [])
+                        ),
+                        status=(
+                            getattr(note, "status", "unplanned")
+                            if note is not None else getattr(local, "status", "unplanned")
+                        ),
+                        placement=getattr(base, "placement", None),
+                        diagnostic_questions=getattr(base, "diagnostic_questions", []),
+                        failure_modes=getattr(base, "failure_modes", []),
+                        compression=getattr(base, "compression", None),
+                        claim_evidence_prompts=getattr(base, "claim_evidence_prompts", []),
+                        ai_rubric=getattr(base, "ai_rubric", None),
                     )
                 )
             out.append(
@@ -554,6 +611,14 @@ class PlotEntriesMixin:
                     id=instance_node.id,
                     title=instance_node.title,
                     template_id=template_id,
+                    template_slug=getattr(template_spec, "slug", "") if template_spec is not None else "",
+                    template_family=getattr(template_spec, "family", "custom") if template_spec is not None else "custom",
+                    template_description=getattr(template_spec, "description", "") if template_spec is not None else "",
+                    ai_use_guidance=getattr(template_spec, "ai_use_guidance", "") if template_spec is not None else "",
+                    global_diagnostic_questions=(
+                        getattr(template_spec, "global_diagnostic_questions", [])
+                        if template_spec is not None else []
+                    ),
                     plot_points=points,
                 )
             )
@@ -639,3 +704,11 @@ class PlotEntriesMixin:
                 ],
             ),
         ]
+
+    @staticmethod
+    def _builtin_template_family(node_id: str) -> str:
+        if "mystery" in node_id:
+            return "puzzle"
+        if "journey" in node_id:
+            return "journey"
+        return "act"

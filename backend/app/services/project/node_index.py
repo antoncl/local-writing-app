@@ -13,6 +13,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.services.project.overrides import LayerOverride
 
 
 @dataclass(frozen=True)
@@ -24,6 +28,12 @@ class NodeIndexEntry:
     title: str = ""
     source_layer_id: str = ""
     source_layer_label: str = ""
+    # The layer id this entry was fork-to-here'd from (#313 / ADR-0039), resolved
+    # from the front-matter `forked_from` relative path at collection time. When
+    # it equals the id of the layer this entry shadows, `resolve()` treats the
+    # shadow as deliberate and stays quiet; "" (an ordinary entry) keeps the
+    # warning loud for an accidental collision.
+    forked_from_layer_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -108,6 +118,13 @@ class NodeIndex:
     # a shadowed ancestor keeps its edges, so un-shadowing on delete restores a
     # node *with its references*, not a stripped one.
     edges_by_layer_src: dict[tuple[str, str], list[ReferenceEdge]] = field(default_factory=dict)
+    # Layer overrides (#314 / ADR-0039), keyed by **target node id**. Collected
+    # in a parallel pass, not as nodes: an override is a sparse delta, filtered
+    # out of `candidates` / `by_id` / pickers / views by construction. The fold
+    # reads these — values on read (`read_lore_entry`), edges here at build time
+    # (`_fold_override_edges` rewrites the target's `edges_by_layer_src` entry
+    # before `resolve()`), so backlinks / References / Nest need no scope param.
+    overrides_by_target: dict[str, list[LayerOverride]] = field(default_factory=dict)
     # --- derived (see `resolve`) ---
     by_id: dict[str, NodeIndexEntry] = field(default_factory=dict)
     edges_by_src: dict[str, list[ReferenceEdge]] = field(default_factory=dict)
@@ -196,6 +213,10 @@ class NodeIndex:
             f"{shadowed.source_layer_label}."
             for node_id, entries in self.candidates.items()
             for shadower, shadowed in zip(entries, entries[1:], strict=False)
+            # A fork-to-here copy declares its severance (#313 / ADR-0039): when
+            # the shadower forked from exactly the layer it shadows, the shadow
+            # is deliberate, not an accidental id collision, so it is silent.
+            if shadower.forked_from_layer_id != shadowed.source_layer_id
         ]
         self.warnings.extend(self._shadow_warnings)
         self.rebuild_reverse_edges()

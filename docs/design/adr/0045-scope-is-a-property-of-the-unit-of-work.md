@@ -184,9 +184,19 @@ side.
 a chain deeper than its own target is validated against rules its file does not live under — it would
 accept fields the target layer cannot store, and fail only later, when a sibling book reads it.
 
-⚠ **Known gap as of `6284bda`.** The node save paths resolve the schema through the resolution scope,
-not as of `L`; the as-of-`L` resolution exists but is used only by schema authoring. This is latent
-only because no picker ships yet. **#313/#314 must not ship without closing it.**
+⚠ **Known gap as of `6284bda` — partly closed by #393.** The node save paths resolved the schema
+through the resolution scope, not as of `L`. #393 added the as-of-`L` schema read
+(`read_metadata_schema(up_to_layer_id=…)`, truncating the layer walk after `L`) and put the **lore**
+save on it — lore being the one inherited node kind, and therefore the only save whose `L` can differ
+from the resolution scope at all: a scene is book-scoped (no position in an inheriting book) and a
+research note sits in a per-project tree, so neither is ever authored above the book.
+
+What remains open is the rest of the constraining vocabulary: tag canonicalisation on that same save
+still resolves the **full chain**, and still writes its assertion back to the resolution scope's
+`tags.yaml` rather than to `L`. Closing it means the write *target* moves too, not just the read.
+Still latent only because no picker ships yet. **#313/#314 must not ship without closing the
+remainder** — which is a deadline, not a reservation: any earlier issue that can close a piece of it
+should, as #393 did.
 
 ### 5. One choke point, where the scope is read
 

@@ -466,3 +466,12 @@ def _migrate_default_models_to_files_if_empty(settings: MachineSettings) -> None
         (folder / f"{assistant_id}.md").write_text(
             f"---\n{front_text}\n---\n\n", encoding="utf-8"
         )
+    # These assistant files go straight to disk, outside `ProjectService`'s
+    # `_atomic_write` change-gate, so a node-index memo held for an open project
+    # would not see them (#392). First-run only, so a coarse drop is right:
+    # the machine assistant layer is part of any open project's chain, and the
+    # next resolve rebuilds it. Lazy import keeps this module free of a
+    # service-layer dependency at load.
+    from app.services.project.node_index_gate import node_index_gate
+
+    node_index_gate.invalidate()

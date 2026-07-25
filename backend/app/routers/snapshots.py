@@ -11,6 +11,7 @@ from fastapi import APIRouter
 from app.models import (
     CaptureSnapshotRequest,
     Scene,
+    SetSnapshotDescriptionRequest,
     Snapshot,
     SnapshotDetail,
     SnapshotDiff,
@@ -82,3 +83,44 @@ def diff_snapshot(
     """
     with translate_errors():
         return project.diff_snapshot(scene_id, snapshot_id, live)
+
+
+@router.post("/api/scenes/{scene_id}/snapshots/{snapshot_id}/pin", response_model=Snapshot)
+def pin_snapshot(project: CurrentProject, scene_id: str, snapshot_id: str) -> Snapshot:
+    """Flip `retention` from `thinned` to `kept` — make an automatic snapshot
+    survive thinning without re-capturing it (ADR-0043 Amendment 1).
+
+    Idempotent: pinning an already-`kept` snapshot returns it unchanged. Touches
+    only the sidecar's authorial half — never the body, never the witness.
+    """
+    with translate_errors():
+        return project.pin_snapshot(scene_id, snapshot_id)
+
+
+@router.put(
+    "/api/scenes/{scene_id}/snapshots/{snapshot_id}/description", response_model=Snapshot
+)
+def set_snapshot_description(
+    project: CurrentProject,
+    scene_id: str,
+    snapshot_id: str,
+    request: SetSnapshotDescriptionRequest,
+) -> Snapshot:
+    """Set (or clear) the snapshot's one-line description (#468).
+
+    Original data the author owns, not the denormalized `title`. A sidecar
+    write to the authorial half; the body and witness are frozen.
+    """
+    with translate_errors():
+        return project.set_snapshot_description(scene_id, snapshot_id, request.description)
+
+
+@router.delete("/api/scenes/{scene_id}/snapshots/{snapshot_id}", response_model=SnapshotList)
+def delete_snapshot(project: CurrentProject, scene_id: str, snapshot_id: str) -> SnapshotList:
+    """Remove one snapshot — the feature's only irreversible gesture, which is
+    why the surface confirms it and restore does not (ADR-0043 Amendment 1).
+
+    Both files go; returns what remains so the strip re-lists in one call.
+    """
+    with translate_errors():
+        return project.delete_snapshot(scene_id, snapshot_id)

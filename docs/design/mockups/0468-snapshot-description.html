@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  #468 (slice 4) — where the snapshot DESCRIPTION lives in the surface.
+
+  ADR-0044 §L settles two things and leaves one open:
+    · settled — most snapshots have NO description (every automatic one, and
+      every explicit one taken in flow), so the ABSENT case is the COMMON case
+      and must read well on its own.
+    · settled — the description AUGMENTS the date line, never replaces it.
+    · OPEN (Open item 4) — where it sits, and how it is edited.
+
+  This mockup tries the three candidate edit surfaces on the real token layer,
+  in both the "has a description" and the (common) empty state, in both themes.
+  It is the evidence for that decision, in the house style of
+  0044-snapshot-strip.html — self-contained, no build step, fixture data.
+
+  The tokens below are COPIES of frontend/src/styles.css taken while drafting;
+  they will drift, and that is fine. Do not import from this file.
+-->
+<style>*{box-sizing:border-box}</style>
+</head>
+<body>
+<title>Snapshot description — where it lives</title>
+
+<div class="sheet">
+
+  <header class="mock-head">
+    <p class="eyebrow">#468 · ADR-0044 §L / Open item 4</p>
+    <h1>The snapshot description — three places it could live</h1>
+    <p class="lede">The sidecar gains an optional one-line <code>description</code> (ADR-0043
+      Amendment 1). §L already fixes that it <em>augments</em> the date and that the
+      <b>empty case is the common case</b>. What is open is the edit surface. Pick the row that
+      reads best <em>while parked</em> — with a description and, more importantly, without one —
+      in both themes.</p>
+  </header>
+
+  <section class="bench" aria-label="Controls">
+    <div class="bench-row">
+      <span class="bench-label">Variant</span>
+      <div class="seg" id="variant" role="group" aria-label="Description variant">
+        <button type="button" data-v="a" class="on">A · inline field</button>
+        <button type="button" data-v="b">B · behind a pencil</button>
+        <button type="button" data-v="c">C · second line</button>
+      </div>
+      <label class="bench-check"><input type="checkbox" id="empty"> show the empty (common) case</label>
+      <label class="bench-check"><input type="checkbox" id="narrow"> narrow pane</label>
+      <button type="button" class="act" id="theme-btn">Theme: auto</button>
+    </div>
+    <p class="bench-note" id="v-note"></p>
+  </section>
+
+  <!-- the editor pane, foot-docked strip, parked on a notch -->
+  <section class="pane" id="pane" aria-label="Scene editor (mockup)">
+    <div class="pane-head">
+      <div class="pane-title"><span class="kind-label">Scene</span><h2>The Salt Line</h2></div>
+      <span class="wordcount">412 words</span>
+    </div>
+
+    <div class="prose">
+      <p>The tide went out further than Maren had ever seen it, and kept going. Where the harbour
+        should have been there was only ribbed sand, black with weed, and the boats lying over on
+        their sides like something sleeping.</p>
+      <p class="muted">…parked on a snapshot — the body above is the read-only overlay. This mockup
+        is only about the row below.</p>
+    </div>
+
+    <!-- the strip (foot-docked), parked -->
+    <div class="strip" role="group" aria-label="Snapshots">
+      <div class="strip-track" id="track"></div>
+      <div class="strip-right">
+        <button class="capture" type="button" title="Take a snapshot" aria-label="Take a snapshot">
+          <svg class="cam" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 7h3l1.6-2h6.8L17 7h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1z"/>
+            <circle cx="12" cy="13" r="3.4"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- the actions row — its inner layout is the whole question, so it is
+         rebuilt per variant by script. Everything variable lives here (§E), so
+         a description field of any width never touches the track. -->
+    <div class="actions" id="actions"></div>
+  </section>
+
+  <section class="notes">
+    <h3>What each row is trying to be</h3>
+    <div class="note"><h4>A · an inline field in the actions row</h4>
+      <p>A quiet one-line input sits in the row, between the date and the controls. Empty, it shows
+        a faint <em>Add a description…</em> placeholder; it is always there, so it is discoverable
+        without a gesture. Cost: it is always there — a field the author mostly leaves blank, taking
+        row width the A/S/B control and Restore also want. Watch the narrow-pane case.</p></div>
+    <div class="note"><h4>B · behind a pencil</h4>
+      <p>At rest the row shows only what exists: the date, and the description after it when there
+        is one. A small ✎ edits it; with none, a faint <em>+ describe</em> appears. Nothing empty is
+        ever shown. Cost: writing a description is a click behind an affordance the author has to
+        notice — the enrichment is one step less discoverable.</p></div>
+    <div class="note"><h4>C · a second line under the date</h4>
+      <p>The row's left cell stacks: date on top, description beneath it, full-width, with the
+        controls to the right unchanged. Groups the description with the <em>when</em> rather than
+        the verbs, and gives a one-liner room to be read. Cost: the row is always two lines tall
+        even when the description is blank, unless the empty line collapses — which is what the
+        empty toggle tests.</p></div>
+  </section>
+
+  <p class="foot-note">All three keep §L's contract: the date line survives, and the empty state is
+    never an empty box begging to be filled. The tooltip carries the description too (as in
+    0044-snapshot-strip.html); this is only about the parked row.</p>
+
+</div>
+
+<style>
+  :root {
+    color-scheme: light;
+    --surface:#fff; --board:#f4f6f5; --panel:#edf3f1; --inset:#f1f5f3;
+    --tier2:#dde7e3; --border:#cbd6d2; --border-strong:#b4c2bc; --divider:#e2e8e5;
+    --text:#242424; --text-2:#4d5753; --text-3:#74817b;
+    --accent:#2f6f5e; --accent-strong:#234e43; --accent-emphasis:#234e43;
+    --accent-soft:#edf6f2; --accent-soft2:#dff0ea;
+    --danger:#a64a4a; --warn:#8a520d;
+    --app-bg:#f5f7f6; --shadow:rgba(36,36,36,.06);
+    --diff-now:#a2542f; --diff-now-soft:#fbe4d3; --diff-now-edge:#d59a6c;
+    --diff-was:#3d6b88; --diff-was-soft:#dfeaf4; --diff-was-edge:#90b8d4;
+    --sans:"Segoe UI",system-ui,sans-serif; --serif:Georgia,"Times New Roman",serif;
+    --mono:Consolas,ui-monospace,monospace;
+    --fs-xs:11px; --fs-sm:12px; --fs-md:13px; --fs-lg:15px; --fs-xl:16px; --fs-2xl:20px; --fs-prose:16px;
+    --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px; --sp-6:32px;
+    --r-sm:4px; --r-md:6px; --r-lg:10px; --t-fast:80ms linear; --t-base:160ms ease-out;
+  }
+  @media (prefers-color-scheme:dark){ :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --surface:#1f2522; --board:#181c1a; --panel:#20272a; --inset:#242a28;
+    --tier2:#2d3633; --border:#3a4541; --border-strong:#4a5651; --divider:#2a322f;
+    --text:#e8edeb; --text-2:#a9b6b0; --text-3:#7e8a84;
+    --accent:#6cc4a6; --accent-strong:#4ea88c; --accent-emphasis:#7cc0a1;
+    --accent-soft:#1f3a32; --accent-soft2:#2a4a3f;
+    --danger:#d97070; --warn:#e6c084;
+    --app-bg:#14181a; --shadow:rgba(0,0,0,.40);
+    --diff-now:#d9a184; --diff-now-soft:#3b2a21; --diff-now-edge:#6d4a36;
+    --diff-was:#8fb6d2; --diff-was-soft:#1f2d38; --diff-was-edge:#3d5a70;
+  }}
+  :root[data-theme="dark"]{
+    color-scheme:dark;
+    --surface:#1f2522; --board:#181c1a; --panel:#20272a; --inset:#242a28;
+    --tier2:#2d3633; --border:#3a4541; --border-strong:#4a5651; --divider:#2a322f;
+    --text:#e8edeb; --text-2:#a9b6b0; --text-3:#7e8a84;
+    --accent:#6cc4a6; --accent-strong:#4ea88c; --accent-emphasis:#7cc0a1;
+    --accent-soft:#1f3a32; --accent-soft2:#2a4a3f;
+    --danger:#d97070; --warn:#e6c084;
+    --app-bg:#14181a; --shadow:rgba(0,0,0,.40);
+    --diff-now:#d9a184; --diff-now-soft:#3b2a21; --diff-now-edge:#6d4a36;
+    --diff-was:#8fb6d2; --diff-was-soft:#1f2d38; --diff-was-edge:#3d5a70;
+  }
+
+  body{ margin:0; background:var(--app-bg); color:var(--text);
+        font-family:var(--sans); font-size:var(--fs-md); }
+  .sheet{ max-width:920px; margin:0 auto; padding:var(--sp-6) var(--sp-4) 64px;
+          display:flex; flex-direction:column; gap:var(--sp-5); }
+  .mock-head .eyebrow{ margin:0 0 var(--sp-2); font-size:var(--fs-xs); letter-spacing:.09em;
+    text-transform:uppercase; color:var(--text-3); }
+  .mock-head h1{ margin:0; font-family:var(--serif); font-size:26px; font-weight:700; }
+  .lede{ margin:var(--sp-3) 0 0; max-width:70ch; color:var(--text-2); line-height:1.6; }
+  code{ font-family:var(--mono); font-size:.93em; background:var(--inset); padding:1px 5px;
+        border-radius:var(--r-sm); }
+
+  /* bench */
+  .bench{ background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg);
+    padding:var(--sp-3) var(--sp-4); }
+  .bench-row{ display:flex; align-items:center; gap:var(--sp-3); flex-wrap:wrap; }
+  .bench-label{ font-size:var(--fs-xs); letter-spacing:.09em; text-transform:uppercase; color:var(--text-3); }
+  .bench-check{ display:inline-flex; align-items:center; gap:6px; font-size:var(--fs-sm); color:var(--text-2); cursor:pointer; }
+  .bench-note{ margin:var(--sp-3) 0 0; font-size:var(--fs-sm); color:var(--text-3); line-height:1.5; max-width:82ch; }
+  .seg{ display:inline-flex; border:1px solid var(--border); border-radius:var(--r-md); overflow:hidden; }
+  .seg button{ font-family:var(--sans); font-size:var(--fs-sm); padding:5px 11px; background:var(--surface);
+    color:var(--text-2); border:0; border-right:1px solid var(--border); cursor:pointer; transition:background var(--t-fast); }
+  .seg button:last-child{ border-right:0; }
+  .seg button:hover{ background:var(--tier2); }
+  .seg button.on{ background:var(--accent-soft); color:var(--accent-emphasis); font-weight:600; }
+
+  /* pane */
+  .pane{ background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg);
+    box-shadow:0 2px 8px var(--shadow); overflow:hidden; transition:max-width var(--t-base); }
+  .pane.narrow{ max-width:560px; }
+  .pane-head{ display:flex; align-items:flex-end; justify-content:space-between; gap:var(--sp-4);
+    padding:var(--sp-4) var(--sp-5) var(--sp-3); border-bottom:1px solid var(--divider); }
+  .kind-label{ display:block; font-size:var(--fs-xs); letter-spacing:.09em; text-transform:uppercase;
+    color:var(--text-3); margin-bottom:2px; }
+  .pane-title h2{ margin:0; font-family:var(--serif); font-size:var(--fs-2xl); font-weight:700; }
+  .wordcount{ font-size:var(--fs-sm); color:var(--text-3); }
+  .prose{ padding:var(--sp-5); font-family:var(--serif); font-size:var(--fs-prose); line-height:1.72; }
+  .prose p{ margin:0 0 1em; max-width:62ch; }
+  .prose p:last-child{ margin-bottom:0; }
+  .prose .muted{ font-family:var(--sans); font-size:var(--fs-sm); color:var(--text-3); font-style:italic; }
+
+  /* strip — copied geometry from 0044-snapshot-strip.html (parked state) */
+  .strip{ display:flex; align-items:stretch; gap:var(--sp-4); border-top:1px solid var(--divider);
+    background:var(--inset); padding:var(--sp-2) var(--sp-4); min-height:46px; }
+  .strip-track{ position:relative; flex:1 1 auto; min-width:0; padding-bottom:9px; }
+  .strip-track::before{ content:""; position:absolute; left:0; right:0; bottom:8px; height:1px; background:var(--border); }
+  .tick{ position:absolute; bottom:8px; transform:translateX(-50%); display:flex; flex-direction:column;
+    align-items:center; pointer-events:none; }
+  .tick b{ display:block; width:1px; height:5px; background:var(--border); }
+  .tick em{ font-style:normal; font-size:9px; color:var(--text-3); opacity:.75; margin-top:1px; }
+  .notch{ position:absolute; bottom:8px; transform:translateX(-50%); width:14px; padding:0; border:0;
+    background:none; cursor:pointer; display:flex; align-items:flex-end; justify-content:center; }
+  .notch i{ display:block; width:2px; border-radius:1px; background:var(--border-strong);
+    transition:background var(--t-fast), height var(--t-fast); }
+  .notch.auto i{ height:9px; }
+  .notch.kept i{ height:17px; background:var(--text-3); }
+  .notch:hover i{ background:var(--diff-was); }
+  .notch.current i{ background:var(--diff-was); width:3px; }
+  .notch.current::after{ content:""; position:absolute; bottom:0; left:50%; transform:translateX(-50%);
+    width:5px; height:5px; border-radius:50%; background:var(--diff-was); }
+  .notch-live i{ height:21px; width:3px; background:var(--diff-now); border-radius:2px; }
+  .strip-right{ display:flex; align-items:center; flex:none; width:34px; justify-content:flex-end; }
+  .capture{ display:inline-flex; align-items:center; justify-content:center; color:var(--text-2);
+    background:var(--surface); border:1px solid var(--border); border-radius:var(--r-md);
+    width:30px; height:26px; padding:0; cursor:pointer; }
+  .cam{ width:16px; height:16px; }
+
+  /* actions row shell */
+  .actions{ display:flex; align-items:center; gap:var(--sp-3); flex-wrap:wrap;
+    padding:var(--sp-2) var(--sp-4); border-top:1px solid var(--divider); background:var(--panel); }
+  .asof{ font-size:var(--fs-sm); color:var(--diff-was); font-weight:600; white-space:nowrap;
+    font-variant-numeric:tabular-nums; }
+  .spacer{ flex:1 1 auto; }
+  .view-toggle{ display:inline-flex; border:1px solid var(--border); border-radius:var(--r-md); overflow:hidden; }
+  .view-toggle button{ font-size:var(--fs-sm); padding:4px 10px; background:var(--surface); color:var(--text-2);
+    border:0; border-right:1px solid var(--border); cursor:pointer; }
+  .view-toggle button:last-child{ border-right:0; }
+  .view-toggle button.on{ background:var(--accent-soft); color:var(--accent-emphasis); font-weight:600; }
+  .keys{ font-size:var(--fs-xs); color:var(--text-3); display:inline-flex; align-items:center; gap:4px; }
+  kbd{ font-family:var(--sans); font-size:10px; border:1px solid var(--border); border-bottom-width:2px;
+    border-radius:var(--r-sm); padding:1px 5px; background:var(--surface); color:var(--text-2); }
+  .act{ font-family:var(--sans); font-size:var(--fs-sm); padding:4px 11px; background:var(--surface);
+    border:1px solid var(--border); border-radius:var(--r-md); color:var(--text-2); cursor:pointer;
+    transition:border-color var(--t-fast), color var(--t-fast); }
+  .act:hover{ border-color:var(--border-strong); color:var(--text); }
+  .act-restore{ border-color:var(--accent); color:var(--accent-emphasis); font-weight:600; }
+  .act-del:hover{ border-color:var(--danger); color:var(--danger); }
+
+  /* the description field, shared across variants */
+  .desc-input{ font-family:var(--sans); font-size:var(--fs-sm); color:var(--text); background:var(--surface);
+    border:1px solid var(--border); border-radius:var(--r-md); padding:3px 8px; min-width:120px;
+    transition:border-color var(--t-fast); }
+  .desc-input::placeholder{ color:var(--text-3); font-style:italic; }
+  .desc-input:focus{ outline:none; border-color:var(--accent); }
+  .desc-input.flex{ flex:1 1 180px; }
+
+  /* A — inline field */
+  .desc-a{ flex:1 1 180px; min-width:120px; }
+
+  /* B — pencil */
+  .desc-b{ display:inline-flex; align-items:center; gap:6px; font-size:var(--fs-sm); color:var(--text-2); }
+  .desc-b .desc-text{ font-style:italic; color:var(--text-2); }
+  .icon-btn{ display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px;
+    padding:0; border:0; background:none; color:var(--text-3); cursor:pointer; border-radius:var(--r-sm);
+    transition:color var(--t-fast), background var(--t-fast); }
+  .icon-btn:hover{ color:var(--accent-emphasis); background:var(--accent-soft); }
+  .add-desc{ font-size:var(--fs-sm); color:var(--text-3); background:none; border:0; cursor:pointer;
+    padding:2px 4px; border-radius:var(--r-sm); }
+  .add-desc:hover{ color:var(--accent-emphasis); }
+
+  /* C — second line */
+  .actions.stacked{ align-items:flex-start; }
+  .when-block{ display:flex; flex-direction:column; gap:4px; min-width:0; flex:1 1 220px; }
+  .when-block .row1{ display:flex; align-items:center; gap:var(--sp-3); flex-wrap:wrap; }
+  .desc-c{ width:100%; max-width:52ch; }
+  .desc-c-empty{ font-size:var(--fs-sm); color:var(--text-3); font-style:italic; background:none;
+    border:1px dashed var(--border); border-radius:var(--r-md); padding:3px 8px; cursor:text; text-align:left;
+    width:fit-content; }
+  .desc-c-empty:hover{ border-color:var(--border-strong); color:var(--text-2); }
+
+  /* notes */
+  .notes{ background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); padding:var(--sp-5); }
+  .notes h3{ margin:0 0 var(--sp-4); font-family:var(--serif); font-size:var(--fs-xl); font-weight:700; }
+  .note{ padding:var(--sp-3) 0; border-top:1px solid var(--divider); }
+  .note:first-of-type{ border-top:0; padding-top:0; }
+  .note h4{ margin:0 0 4px; font-size:var(--fs-md); font-weight:600; }
+  .note p{ margin:0; color:var(--text-2); line-height:1.6; max-width:76ch; }
+  .foot-note{ margin:0; font-size:var(--fs-sm); color:var(--text-3); line-height:1.6; max-width:80ch; }
+
+  button:focus-visible,.notch:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; border-radius:var(--r-sm); }
+</style>
+
+<script>
+  // fixture — parked on "2 hours ago" (an explicit/kept notch that carries a
+  // description). Oldest → newest; `age` in minutes; `kept` = explicit.
+  const SNAPS = [
+    { id:"s1", rel:"Wednesday 12th", age:7160, kept:true },
+    { id:"s2", rel:"yesterday",      age:1490, kept:false },
+    { id:"s3", rel:"this morning",   age:158,  kept:false },
+    { id:"s4", rel:"2 hours ago",    age:120,  kept:true },
+    { id:"s5", rel:"5 minutes ago",  age:5,    kept:false }
+  ];
+  const PARKED = 3;                         // index into SNAPS
+  const DESC = "Before the flashback rewrite";
+
+  const TRACK_L = 1, TRACK_R = 88, MIN_GAP = 4.5;
+  const TICKS = [ {age:60,label:"1h"}, {age:1440,label:"1d"}, {age:10080,label:"1w"} ];
+
+  function positions(){
+    const maxAge = Math.max(60, ...SNAPS.map(s=>s.age));
+    const span = Math.log(1+maxAge);
+    const raw = SNAPS.map(s => TRACK_L + (TRACK_R-TRACK_L)*(1 - Math.log(1+s.age)/span));
+    for(let i=1;i<raw.length;i++) if(raw[i]-raw[i-1]<MIN_GAP) raw[i]=raw[i-1]+MIN_GAP;
+    return raw;
+  }
+
+  function renderStrip(){
+    const track = document.getElementById("track");
+    track.innerHTML = "";
+    const maxAge = Math.max(60, ...SNAPS.map(s=>s.age));
+    const span = Math.log(1+maxAge);
+    for(const t of TICKS){
+      if(t.age>maxAge) continue;
+      const x = TRACK_L + (TRACK_R-TRACK_L)*(1 - Math.log(1+t.age)/span);
+      const el = document.createElement("span"); el.className="tick"; el.style.left=x+"%";
+      el.innerHTML = `<b></b><em>${t.label}</em>`; track.append(el);
+    }
+    const xs = positions();
+    SNAPS.forEach((s,i)=>{
+      const b = document.createElement("button"); b.type="button";
+      b.className = `notch ${s.kept?"kept":"auto"}${i===PARKED?" current":""}`;
+      b.style.left = xs[i]+"%"; b.innerHTML="<i></i>";
+      b.setAttribute("aria-label", `Snapshot ${s.rel}`);
+      track.append(b);
+    });
+    const live = document.createElement("span");
+    live.className = "notch notch-live"; live.style.left = "96%"; live.innerHTML="<i></i>";
+    track.append(live);
+  }
+
+  // shared bits of the actions row
+  function compareToggle(){
+    return `<div class="view-toggle" role="group" aria-label="Compare view">
+      <button type="button" class="on">Both</button><button type="button">Now</button>
+      <button type="button">Snapshot</button></div>`;
+  }
+  function keysHint(){ return `<span class="keys"><kbd>←</kbd><kbd>→</kbd> when · <kbd>Esc</kbd> live</span>`; }
+  function verbs(){
+    return `<button type="button" class="act act-restore">Restore</button>
+      <button type="button" class="act">Pin</button>
+      <button type="button" class="act act-del">Delete</button>`;
+  }
+
+  const NOTES = {
+    a:"A — the field is always present, so writing a description needs no discovery. The tradeoff is "
+      + "a mostly-empty input permanently occupying row width; the narrow-pane toggle shows when it "
+      + "starts crowding the A/S/B control and Restore onto a second line.",
+    b:"B — nothing empty is ever shown: no description means a single faint '+ describe'. Cleanest at "
+      + "rest, and honest about the common case. The cost is that the enrichment hides behind a pencil "
+      + "the author must first notice.",
+    c:"C — the description gets its own line and room to be read, grouped with the WHEN rather than the "
+      + "verbs. With the empty toggle on, note whether a blank second line reads as deliberate space or "
+      + "as an unfinished row."
+  };
+
+  let variant = "a";
+  function renderActions(){
+    const empty = document.getElementById("empty").checked;
+    const actions = document.getElementById("actions");
+    actions.className = "actions" + (variant==="c" ? " stacked" : "");
+    const when = `<span class="asof">Snapshot · ${SNAPS[PARKED].rel}</span>`;
+
+    if(variant==="a"){
+      const field = `<input class="desc-input desc-a" type="text"
+        placeholder="Add a description…" ${empty?"":`value="${DESC}"`} aria-label="Snapshot description">`;
+      actions.innerHTML = `${when}${field}${compareToggle()}${keysHint()}<div class="spacer"></div>${verbs()}`;
+    }
+    else if(variant==="b"){
+      let descPart;
+      if(empty){
+        descPart = `<button type="button" class="add-desc">+ describe</button>`;
+      } else {
+        descPart = `<span class="desc-b"><span class="desc-text">“${DESC}”</span>
+          <button type="button" class="icon-btn" title="Edit description" aria-label="Edit description">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+              stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+          </button></span>`;
+      }
+      actions.innerHTML = `${when}${descPart}${compareToggle()}${keysHint()}<div class="spacer"></div>${verbs()}`;
+    }
+    else {  // c — second line under the date
+      const line2 = empty
+        ? `<button type="button" class="desc-c-empty">Add a description…</button>`
+        : `<input class="desc-input desc-c" type="text" value="${DESC}" aria-label="Snapshot description">`;
+      const whenBlock = `<div class="when-block"><div class="row1">${when}${compareToggle()}${keysHint()}</div>${line2}</div>`;
+      actions.innerHTML = `${whenBlock}<div class="spacer"></div>${verbs()}`;
+    }
+    document.getElementById("v-note").textContent = NOTES[variant];
+  }
+
+  document.getElementById("variant").addEventListener("click", (e)=>{
+    const b = e.target.closest("button[data-v]"); if(!b) return;
+    variant = b.dataset.v;
+    for(const x of document.querySelectorAll("#variant button")) x.classList.toggle("on", x===b);
+    renderActions();
+  });
+  document.getElementById("empty").addEventListener("change", renderActions);
+  document.getElementById("narrow").addEventListener("change", (e)=>{
+    document.getElementById("pane").classList.toggle("narrow", e.target.checked);
+  });
+
+  const THEMES = ["auto","light","dark"]; let ti=0;
+  document.getElementById("theme-btn").addEventListener("click",(e)=>{
+    ti=(ti+1)%THEMES.length; const t=THEMES[ti];
+    if(t==="auto") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", t);
+    e.target.textContent = `Theme: ${t}`;
+  });
+
+  renderStrip();
+  renderActions();
+</script>
+
+</body>
+</html>

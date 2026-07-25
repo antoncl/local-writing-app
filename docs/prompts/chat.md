@@ -55,13 +55,20 @@
 
 ## Policy enforcement
 
-The endpoint reads `ai_policy` from the open project's `project.yaml` and applies it:
+The endpoint reads `ai_policy` — resolved over the project's declared layer
+chain, not from its own `project.yaml` alone (#312) — and applies it:
 
 | Policy | Behavior |
 | --- | --- |
 | `off` | All calls fail with `policy: off`. Provider drivers are never invoked. |
 | `local-only` | Cloud providers (`anthropic`, `openai`, `openrouter`) are rejected. `ollama` runs as normal. |
 | `cloud-allowed` | All providers are permitted. |
+
+Resolution is **nearest explicit statement wins**: a layer that states no
+`settings.ai.policy` has no opinion and defers outward, so a universe set to
+`cloud-allowed` covers every book that declares it, and a book stating `off` is
+off regardless of what sits above it. A chain that states nothing anywhere is
+`off`, and so is a value the reader does not recognise.
 
 Policy is checked **before** any API key is sent anywhere. A misconfigured key won't leak even briefly when policy says no.
 

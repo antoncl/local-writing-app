@@ -15,8 +15,10 @@
 // this feature exists to prevent — so both flush first, and the flush is the
 // host's job because the pane store owns the document lifecycle.
 import { api } from "@/lib/api";
+import { confirmService } from "@/lib/stores/confirmService.svelte";
 import type { DiffRun, DiffView, FieldDiff, Scene, Snapshot, SnapshotDrift } from "@/lib/types";
-import { renderDiffRuns } from "@/lib/utils/diffRuns";
+import { adoptRegion, renderDiffRuns } from "@/lib/utils/diffRuns";
+import { inNotchOrder, notchWhen } from "@/lib/utils/snapshotTime";
 
 /** What the diff compares the snapshot against: the buffer, not the file.
  *  Autosave lags by up to six seconds and parking must not write. */
@@ -50,8 +52,21 @@ const NO_DRIFT: SnapshotDrift = {
  *  unacknowledged, which is the only case worth spending an affordance on. */
 const SLOW_PARK_MS = 2000;
 
+/** How long a snapshot description may be.
+ *
+ *  Mirrors `SNAPSHOT_DESCRIPTION_MAX` in
+ *  `backend/app/services/project/scene_snapshots.py`, which is the authority —
+ *  it collapses to one line and truncates regardless of what the client sends.
+ *  This exists so the input stops the author at the same point rather than
+ *  accepting text the server will silently drop, and it lives here rather than
+ *  inline in the markup so the pairing has one place to be found and changed. */
+export const SNAPSHOT_DESCRIPTION_MAX = 280;
+
 export class SnapshotStripController {
-  /** Oldest first, as the backend lists them — the order the strip lays out. */
+  /** Oldest first **by content time** (`inNotchOrder`) — the order the strip
+   *  lays out, and therefore the order ← / → walk. Deliberately not the
+   *  backend's listing order, which is by record time: that is the right key for
+   *  thinning and the wrong one for a track laid out by age (#458). */
   snapshots = $state<Snapshot[]>([]);
   /** `null` = Live. Otherwise the parked snapshot's id. */
   parked = $state<string | null>(null);
@@ -118,6 +133,10 @@ export class SnapshotStripController {
   flushScene: (() => Promise<void>) | null = null;
   /** Hand the restored document back to the host, which owns the buffer. */
   onRestored: ((scene: Scene) => void | Promise<void>) | null = null;
+  /** Hand a re-projected body to the host after adopting a region (Amendment
+   *  4). Distinct from `onRestored`: no backend round trip and no `Scene` — only
+   *  the prose changes, and the host writes it into the buffer marked dirty. */
+  onAdopt: ((body: string) => void | Promise<void>) | null = null;
   /** Read the buffer's current state for the diff. Deliberately NOT a flush:
    *  parking is a reading gesture, and writing the file to read it would touch
    *  mtime, which is what the session-gap capture trigger reads. */
@@ -195,7 +214,7 @@ export class SnapshotStripController {
     if (!sceneId) return;
     try {
       const list = await api.listSnapshots(sceneId);
-      if (this.#sceneId === sceneId) this.snapshots = list.snapshots;
+      if (this.#sceneId === sceneId) this.snapshots = inNotchOrder(list.snapshots);
     } catch {
       // A strip that cannot list is an empty strip, not an error dialog: the
       // author is writing, and this is a safety net rather than the task.
@@ -279,6 +298,38 @@ export class SnapshotStripController {
    *  interleaving, and there is no third thing to show (§F). */
   fieldSide(): "now" | "was" {
     return this.view === "was" ? "was" : "now";
+  }
+
+  /**
+   * Adopt one region while parked (ADR-0044 Amendment 4). `clicked` is the side
+   * of the run the author clicked — the overlay reads it from the run's class.
+   *
+   * **No round trip.** The runs carry both versions, so this re-projects them
+   * locally and re-renders from what is already in hand; the diff is never
+   * re-requested, which is what keeps regions settled earlier from resurfacing.
+   * When the scene actually changes (the snapshot side won), the new body rides
+   * `onAdopt` into the buffer in the background — the same buffer restore writes,
+   * so §G holds: the compare view is not an editing surface.
+   *
+   * `busy` guards the same gate restore/capture/pin use, for two reasons: it
+   * serialises against those gestures (a click must not write the buffer
+   * underneath an in-flight restore), and — because region ids are positional
+   * and shift when one collapses — it blocks a second click landing before the
+   * re-render repaints, which would otherwise resolve a stale id.
+   */
+  async adopt(regionId: number, clicked: "now" | "was"): Promise<void> {
+    if (this.parked === null || this.busy) return;
+    this.busy = true;
+    try {
+      const { runs, body } = adoptRegion(this.runs, regionId, clicked);
+      this.runs = runs;
+      if (body !== null) await this.onAdopt?.(body);
+      await this.#renderBody();
+    } catch {
+      // Leave the strip as it was; a failed adopt must not move the author.
+    } finally {
+      this.busy = false;
+    }
   }
 
   /**
@@ -367,6 +418,93 @@ export class SnapshotStripController {
       return true;
     } catch {
       return false;
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  // ---- author gestures: pin · describe · delete (ADR-0043 Amdt 1, #468) -----
+  //
+  // All three act on the parked notch and on nothing else — delete is reachable
+  // only here, the same rule restore follows, so "the report is on screen when
+  // you act" holds for every gesture. None flushes: they touch the sidecar's
+  // authorial half, not the scene file, so there is no buffer to lose.
+
+  /** Pin the parked automatic snapshot so thinning cannot drop it. The notch
+   *  redraws as `kept` (taller, a step darker) under the author's cursor —
+   *  honest feedback that the tier changed. One-directional: no unpin, because
+   *  `kept` is exactly "not thinnable" and there is no explicit/automatic origin
+   *  to fall back to. The button that offers it is shown only on a `thinned`
+   *  notch, so a pinned one simply stops offering it. */
+  async pin(): Promise<void> {
+    const sceneId = this.#sceneId;
+    const id = this.parked;
+    if (!sceneId || !id || this.busy) return;
+    this.busy = true;
+    try {
+      await api.pinSnapshot(sceneId, id);
+      await this.refresh();
+    } catch {
+      // Leave the strip as it was; a failed pin must not move the author.
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /** Set (or clear, with `""`) the parked snapshot's one-line description.
+   *
+   *  **The unchanged-text guard lives here, not in the component**, so it is
+   *  reachable by a test: the strip has no component harness, and a guard in
+   *  the blur handler could be dropped with the suite still green. Closing the
+   *  editor without editing is the common gesture, and it must cost neither a
+   *  sidecar write nor a re-list. */
+  async describe(description: string): Promise<void> {
+    const sceneId = this.#sceneId;
+    const id = this.parked;
+    if (!sceneId || !id || this.busy) return;
+    const next = description.trim();
+    if (next === (this.current?.description ?? "")) return;
+    this.busy = true;
+    try {
+      await api.setSnapshotDescription(sceneId, id, next);
+      await this.refresh();
+    } catch {
+      // Leave the strip as it was.
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /** Delete the parked snapshot. **The one gesture that confirms**, because it
+   *  is the one that is irreversible — restore captures first and so does not.
+   *  The confirmation names what is going (ADR-0043). Deliberately no
+   *  "don't show again": a gate in front of the only irreversible action is the
+   *  one place the click-through habit has not already been spent. */
+  del(): void {
+    const sceneId = this.#sceneId;
+    const id = this.parked;
+    const target = this.current;
+    if (!sceneId || !id || !target || this.busy) return;
+    const when = notchWhen(target);
+    const named = target.description ? `“${target.description}” (${when})` : `the snapshot from ${when}`;
+    confirmService.request({
+      title: "Delete snapshot",
+      message: `Delete ${named}? Its words are the only copy — this cannot be undone.`,
+      confirmLabel: "Delete snapshot",
+      destructive: true,
+      cannotBeUndone: true,
+      onConfirm: () => this.#removeParked(sceneId, id),
+    });
+  }
+
+  async #removeParked(sceneId: string, id: string): Promise<void> {
+    this.busy = true;
+    try {
+      await api.deleteSnapshot(sceneId, id);
+      // Back to Live first — the parked id no longer exists — then re-list so
+      // the gap is gone from the strip.
+      await this.park(null);
+      await this.refresh();
     } finally {
       this.busy = false;
     }

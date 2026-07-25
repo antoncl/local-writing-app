@@ -27,7 +27,9 @@ with a resolution scope it carries explicitly (ADR-0045, same reasoning as
 
 from __future__ import annotations
 
+import os
 import shutil
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -69,6 +71,63 @@ SESSION_GAP_MINUTES = 30
 # considered default, not a measured optimum.
 AUTOMATIC_KEEP = 5
 
+# A description is a one-liner (ADR-0044 §L). This caps a paste, not the
+# author's intent — long enough that no real note is truncated, short enough
+# that the sidecar cannot be made unbounded through this field.
+SNAPSHOT_DESCRIPTION_MAX = 280
+
+
+def _read_body_and_content_time(path: Path) -> tuple[bytes, str]:
+    """The bytes to copy, and when those bytes were **written** — from one file.
+
+    The timestamp is what the strip lays out by. `captured_at` is right for the
+    camera and wrong for every automatic capture: `maybe_capture_session_
+    boundary` fires *before* the save, so the file still holds what the previous
+    sitting wrote — that is the whole point, and
+    `test_the_captured_bytes_are_the_pre_save_state` pins it. The record then
+    claimed "just now" about prose last touched a fortnight ago (#458).
+
+    Not cosmetic: ADR-0044's strip lays notches out **by age**, so the one surface
+    built for navigating time was the surface misreporting it — and because
+    explicit captures *were* dated correctly, automatic and explicit notches on
+    the same track meant different things with nothing to tell them apart.
+
+    **Why this is a second field rather than a redefinition of `captured_at`.**
+    Stamping `captured_at` from the mtime was the first attempt and it broke the
+    total order the store depends on. Two explicit captures with no edit between
+    them read the *same* mtime, so they tie; `_snapshot_records` then falls back
+    to the random `id`, and "oldest first" — the listing contract, and the basis
+    on which `_thin` drops "the oldest" — becomes arbitrary. Creation time is
+    monotonic and content time is not, so they are genuinely two facts and the
+    record keeps both.
+
+    Read as "when this content was last written to the scene file", which stays
+    honest after a restore: restoring old prose writes it now, so a later
+    snapshot of it is dated now, because that is when those bytes became the
+    file's contents.
+
+    **One open handle, read then `fstat`** — not `stat()` beside `read_bytes()`.
+    Scene routes are `def`, so FastAPI runs them in a threadpool and two panes on
+    one scene interleave; a write landing between two separate calls would pair
+    one version's bytes with the other version's time, baking #458 in miniature
+    into a record ADR-0043 forbids rewriting. Every writer here replaces the file
+    atomically, so the handle pins the version that was read and `fstat` cannot
+    describe anything else.
+
+    No `OSError` fallback: this **is** the read, so a failure here is exactly the
+    failure `read_bytes` already raised, and it belongs to the caller that owns
+    "a capture is never the reason a save fails" (`maybe_capture_session_
+    boundary`, which returns early on a missing file).
+
+    Microseconds are pinned for the same reason `captured_at` pins them: an
+    `isoformat` that omits them on the exact second makes two stamps compare as
+    strings of different shapes.
+    """
+    with path.open("rb") as handle:
+        body = handle.read()
+        written = datetime.fromtimestamp(os.fstat(handle.fileno()).st_mtime, UTC)
+    return body, written.isoformat(timespec="microseconds")
+
 
 class SceneSnapshotsMixin:
     """Composed onto `ProjectService`; the project IO helpers it uses
@@ -99,11 +158,21 @@ class SceneSnapshotsMixin:
             raise ProjectServiceError(
                 f"Snapshot {sidecar.stem} has an unreadable retention value.", 422
             )
+        captured_at = str(data.get("captured_at") or "")
         return Snapshot(
             id=str(data.get("id") or sidecar.stem),
             snapshot_of=str(data.get("snapshot_of") or ""),
-            captured_at=str(data.get("captured_at") or ""),
+            captured_at=captured_at,
+            # Falls back to `captured_at` on every snapshot taken before #458,
+            # which is exactly what those records have always displayed. An
+            # additive field with a defensive read, not a migration — and the
+            # ADR forbids rewriting a stored snapshot in any case.
+            content_written_at=str(data.get("content_written_at") or captured_at),
             retention=retention,
+            # Authorial half, absent on every snapshot taken before #468 and on
+            # every one the author never annotated — the common case (ADR-0044
+            # §L). Empty string, never `None`, so the field is uniform.
+            description=str(data.get("description") or ""),
             schema_version=int(data.get("schema_version") or 0),
         )
 
@@ -221,6 +290,10 @@ class SceneSnapshotsMixin:
         land, leaving the `.md` holding post-write bytes and the sidecar
         describing the world before them.
 
+        `content_written_at` is not a second read for the same reason: it comes
+        off the handle the bytes came from, so no write can slip between the two
+        and leave the record dating one version's bytes by another's clock.
+
         The witness is written once, here, and never rewritten: letting a later
         save land a fresh context set in an existing sidecar would leave the body
         at the start of the session and the witness at its end.
@@ -231,17 +304,25 @@ class SceneSnapshotsMixin:
         folder = self._snapshots_dir(root, node_id)
         folder.mkdir(parents=True, exist_ok=True)
         snapshot_id = self._new_id("snap")
-        body = path.read_bytes()
+        # One read, so the timestamp describes the bytes beside it even if the
+        # file is rewritten a moment later — the same invariant the witness gets
+        # from following this line, stated in the docstring below.
+        body, content_written_at = _read_body_and_content_time(path)
         witness = self.build_witness(node_id, dynamic_context)
         record: dict[str, Any] = {
             "id": snapshot_id,
             "snapshot_of": node_id,
+            # When the RECORD was made. Monotonic across captures, so it is what
+            # the listing sorts by and what `_thin` calls "the oldest".
+            #
             # Microseconds are pinned rather than left to `isoformat`, which
             # omits them on the exact second — two captures in one second would
             # then be compared as strings of different shapes, and the sort that
             # decides which snapshot is "the oldest" would rest on where "+"
             # falls against "." in ASCII.
             "captured_at": datetime.now(UTC).isoformat(timespec="microseconds"),
+            # When the CONTENT was written. What the strip lays out by (#458).
+            "content_written_at": content_written_at,
             "retention": retention,
             "schema_version": CURRENT_VERSION,
         }
@@ -333,6 +414,12 @@ class SceneSnapshotsMixin:
 
         stored = self._snapshots_dir(root, node_id) / f"{snapshot_id}.md"
         self._atomic_write_bytes(path, stored.read_bytes())
+        # `_atomic_write_bytes` deliberately bypasses the text writer, so it also
+        # bypasses the change-gate hook on `_atomic_write` — a restore that
+        # changed the scene's title, entry_type, or a reference field would
+        # otherwise leave the in-memory node index describing the pre-restore
+        # state (#392). Restore is always structural (the content is replaced).
+        self._apply_index_write((path,), structural=True)
 
         front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
         # The filename stays as it is — it is cosmetic, and reads resolve by id.
@@ -350,7 +437,111 @@ class SceneSnapshotsMixin:
         temp_path.write_bytes(data)
         temp_path.replace(path)
 
+    # ----- author gestures: pin · describe (ADR-0043 Amdt 1/4, #468) --------
+    #
+    # A snapshot's sidecar has two halves. The **evidentiary** half — the
+    # `witness`, `captured_at`, `content_written_at`, `schema_version`, `id`,
+    # `snapshot_of` — is frozen, because a witness describes the bytes it
+    # accompanies and rewriting it destroys what makes it a witness. The
+    # **authorial** half — `retention` and `description` — is the author's
+    # control over the record, and `_mutate_sidecar` is the only place it moves.
+    # Neither gesture opens the `.md`; the byte-copy is never touched.
+
+    def _mutate_sidecar(
+        self, root: Path, node_id: str, snapshot_id: str, **changes: Any
+    ) -> Snapshot:
+        """Rewrite only the named authorial keys of one sidecar.
+
+        Every other key — the `witness` among them — is read and written back
+        unchanged, so its content survives whole (`_write_yaml` is
+        `sort_keys=False`, so the frozen block keeps its shape as well as its
+        meaning). The scene body is never opened. This is the boundary ADR-0043
+        Amendment 4 draws made mechanical: the method physically cannot alter
+        anything but the keys it is handed, and it is only ever handed
+        `retention` and `description`.
+        """
+        self._require_snapshot(root, node_id, snapshot_id)
+        sidecar = self._snapshots_dir(root, node_id) / f"{snapshot_id}.yaml"
+        data = self._read_yaml(sidecar)
+        data.update(changes)
+        self._write_yaml(sidecar, data)
+        return self._read_snapshot_record(sidecar)
+
+    def pin_snapshot(self, scene_id: str, snapshot_id: str) -> Snapshot:
+        """Flip `retention` from `thinned` to `kept` — the third case the enum
+        was chosen for (ADR-0043 Amendment 1).
+
+        An automatic snapshot the author notices is worth keeping does not have
+        to be re-captured to become permanent. One-directional: there is no
+        unpin, because `kept` is exactly "not subject to thinning" and there is
+        no distinct 'this was captured explicitly' state to fall back to —
+        letting a `kept` record become `thinned` again would put an explicit
+        capture at risk of the very thinning the tier exists to escape.
+
+        Pinning an already-`kept` snapshot is a no-op, so the gesture is
+        idempotent and a double click cannot error.
+
+        **Pinning frees an automatic slot, and that is intended, not a leak.**
+        `_thin` keeps the last `AUTOMATIC_KEEP` *thinned* records and `kept`
+        ones never count, so pinning the oldest automatic makes room for one
+        more automatic on the next capture. The budget is a window over a set
+        the author can now take things out of.
+        """
+        root = self._require_project()
+        node_id = self._snapshot_source_id(scene_id)
+        record = self._require_snapshot(root, node_id, snapshot_id)
+        if record.retention == "kept":
+            return record
+        return self._mutate_sidecar(root, node_id, snapshot_id, retention="kept")
+
+    def set_snapshot_description(
+        self, scene_id: str, snapshot_id: str, description: str
+    ) -> Snapshot:
+        """Set (or clear, with `""`) the one-line description (#468).
+
+        Collapsed to a single line and trimmed: it is a one-liner by contract
+        (ADR-0044 §L), and a stored newline would break the tooltip and the
+        actions-row label that render it. Capped so a paste cannot make the
+        sidecar unbounded.
+        """
+        root = self._require_project()
+        node_id = self._snapshot_source_id(scene_id)
+        cleaned = " ".join(description.split())[:SNAPSHOT_DESCRIPTION_MAX]
+        return self._mutate_sidecar(root, node_id, snapshot_id, description=cleaned)
+
     # ----- deletion ---------------------------------------------------------
+
+    def delete_snapshot(self, scene_id: str, snapshot_id: str) -> SnapshotList:
+        """Remove one snapshot — the only irreversible gesture in the feature.
+
+        Both files go, or the leftover is exactly the unreachable residue
+        ADR-0043 rejects: a `.md` nothing lists, or a sidecar with no body to
+        view or restore. Returns what remains, so the strip re-lists in one call.
+
+        Thinning is untouched by the gap this leaves. `_thin` counts the
+        *thinned* records that exist at capture time, so removing one now simply
+        means the next automatic capture has one more slot before it evicts —
+        the same window, over a smaller set. There is no undelete: scene and
+        lore deletes are already hard deletes, and a feature that quietly
+        retained data after a delete would be the only such thing in the project.
+        """
+        root = self._require_project()
+        node_id = self._snapshot_source_id(scene_id)
+        self._require_snapshot(root, node_id, snapshot_id)
+        folder = self._snapshots_dir(root, node_id)
+        (folder / f"{snapshot_id}.md").unlink(missing_ok=True)
+        (folder / f"{snapshot_id}.yaml").unlink(missing_ok=True)
+        remaining = self._snapshot_records(root, node_id)
+        if not remaining:
+            # The last one goes with its directory. "Both files go" has to mean
+            # the store is back to how it was before the first capture, or every
+            # scene the author ever snapshotted and then cleared leaves an empty
+            # folder behind — the residue ADR-0043 rejects, in miniature.
+            # `rmdir` refuses a non-empty directory, so an unexpected file is
+            # left in place rather than swept up with the record.
+            with suppress(OSError):
+                folder.rmdir()
+        return SnapshotList(snapshots=remaining)
 
     def delete_scene_snapshots(self, root: Path, node_id: str) -> None:
         """A scene and its snapshots are one unit of deletion (ADR-0043).

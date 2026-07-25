@@ -17,7 +17,8 @@
     PromptEntrySummary,
     StructureDocument,
   } from "@/lib/types";
-  import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
+  import { inheritedLayerLabel } from "@/lib/utils/provenance";
 
   interface Props {
     entryType: string;
@@ -36,6 +37,18 @@
     researchStructure?: StructureDocument | null;
     implicitContextMatcher?: import("@/lib/editor-core/implicitContextMatcher").CompiledMatcher | null;
     excludeId?: string | null;
+    // Provenance (#313 / ADR-0039): the entry's owning layer when it is inherited
+    // from an ancestor project. Drives the layer treatment at the top of the
+    // rail — the rail is where an edit reaching an ancestor most needs to be
+    // visible. Null / matching the open project = authored here, no treatment.
+    sourceLayerId?: string | null;
+    sourceLayerLabel?: string | null;
+    // Layer-override marks (#314 / ADR-0039): the metadata fields whose effective
+    // value comes from an override in this project's chain, not inherited canon.
+    // Each such field leads its value with the `ti-versions` mark — the hierarchy
+    // twin of the manuscript `⤳` mutation mark (design-language.md §marks). A
+    // field can be both overridden and mutated; the two marks then co-occur.
+    overriddenFields?: string[];
     computedFieldString?: (fieldId: string) => string;
     // Time-travel overlay (#64, ADR-0013): when scrubbed to a mutation point the
     // rail renders effective values read-only. `effectiveOverrides` holds ONLY
@@ -80,6 +93,9 @@
     researchStructure = null,
     implicitContextMatcher = null,
     excludeId = null,
+    sourceLayerId = null,
+    sourceLayerLabel = null,
+    overriddenFields = [],
     computedFieldString = () => "",
     effectiveOverrides = null,
     compare = null,
@@ -95,6 +111,16 @@
   // Step 2). This panel only mounts inside NodeEditor's `{#if metadataSchema}`
   // guard, so the non-null assertion holds (matches the prior non-null prop).
   const metadataSchema = $derived($metadataSchemaStore as MetadataSchema);
+
+  // The owning layer's label when this entry is inherited from an ancestor
+  // project (#313), else null. `$projectLayerIdStore` is the open project's own
+  // layer, tracked so this recomputes when the schema loads.
+  const inheritedFromLabel = $derived(
+    inheritedLayerLabel(
+      { source_layer_id: sourceLayerId ?? undefined, source_layer_label: sourceLayerLabel ?? undefined },
+      $projectLayerIdStore,
+    ),
+  );
 
   // Assistants surface ai_provider / ai_capability_tier / ai_model via
   // the bespoke ProviderTierPicker rendered above the schema fields.
@@ -165,6 +191,13 @@
     return effectiveOverrides != null && fieldId in effectiveOverrides;
   }
 
+  // Whether this field's effective value comes from a layer override (#314).
+  // A permanent fact about the value — like `⤳`, it draws a glyph — so it is a
+  // separate axis from the snapshot-compare lens (which gets colour, not a glyph).
+  function isOverridden(fieldId: string): boolean {
+    return overriddenFields.includes(fieldId);
+  }
+
   function displayValue(fieldId: string): MetadataValue {
     if (isMutated(fieldId)) return effectiveOverrides?.[fieldId] ?? "";
     const flipped = compare?.fields[fieldId];
@@ -205,6 +238,15 @@
     </button>
   </div>
 
+  {#if inheritedFromLabel}
+    <!-- Provenance treatment (#313 / ADR-0039): this entry is owned by an
+         ancestor layer. Same --star axis as the level pill and the ancestor
+         banner, so the three provenance surfaces read as one vocabulary. -->
+    <div class="rail-provenance" title="This entry is inherited from an ancestor project; edits write back to the original.">
+      <span>Inherited from <strong>{inheritedFromLabel}</strong></span>
+    </div>
+  {/if}
+
   {#if documentKind === "assistant"}
     <div class="rail-assistant">
       <ProviderTierPicker
@@ -231,10 +273,11 @@
       {#if metadataSchema.fields[fieldId] && !metadataSchema.fields[fieldId].intrinsic && !effectiveFieldHidden(metadataSchema, entryType, fieldId)}
         {@const field = metadataSchema.fields[fieldId]}
         {@const fieldLabel = effectiveFieldLabel(metadataSchema, entryType, fieldId)}
-        <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field)} class:inherited={isInherited(fieldId)} class:mutated={isMutated(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && compare?.side === "was"}>
+        <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field)} class:inherited={isInherited(fieldId)} class:mutated={isMutated(fieldId)} class:overridden={isOverridden(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && compare?.side === "was"}>
           <span class="fr-icon"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
           <span class="fr-name">{fieldLabel}{#if isMutated(fieldId)}<span class="fr-mutated-marker" title="Changed by here">⤳</span>{/if}</span>
           <div class="fr-val">
+            {#if isOverridden(fieldId)}<i class="ti ti-versions fr-override-marker" title={`Overridden here — this value comes from a layer override in this project, not from ${sourceLayerLabel ?? "inherited canon"}`}></i>{/if}
             {#if fieldId === "status"}
               <!-- status is stored off `metadata` and edited via onStatusChange. -->
               <ColoredSelect
@@ -330,6 +373,21 @@
     gap: 8px;
     padding: 8px 12px 10px;
     border-bottom: 1px solid var(--divider);
+  }
+  /* Provenance treatment (#313) — the --star axis, matching the level pill and
+     the inherited-entry banner. Sits directly under the type header. */
+  .rail-provenance {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: var(--star-soft);
+    border-bottom: 1px solid var(--star-border);
+    color: var(--star);
+    font-size: var(--fs-xs);
+  }
+  .rail-provenance strong {
+    font-weight: 700;
   }
   .rail-type-select {
     display: flex;
@@ -440,6 +498,21 @@
     color: var(--mutation-color);
     font-weight: 700;
     font-size: var(--fs-sm);
+  }
+
+  /* Layer-override mark (#314): the hierarchy twin of `⤳`, leading the value.
+     On the `--star` provenance axis — the same vocabulary as the level pill,
+     ancestor banner and rail-provenance block — because it says where this
+     value came from. `flex: 0 0 auto` keeps the glyph from being stretched by
+     the wide-field `.fr-val > *` rule below. */
+  .fr-override-marker {
+    flex: 0 0 auto;
+    color: var(--star);
+    font-size: var(--fs-md);
+    line-height: 1;
+  }
+  .field-row.wide .fr-val > .fr-override-marker {
+    flex: 0 0 auto;
   }
   .field-row.mutated .fr-name {
     color: var(--mutation-color);

@@ -250,6 +250,5 @@ class ChatSessionsMixin:
 
     def delete_chat_session(self, chat_id: str) -> ChatSessionList:
         path = self._chat_path(chat_id)
-        if path.exists():
-            path.unlink()
+        self._delete_node_file(path)  # unlink + un-shadow the memo (#392)
         return self.list_chat_sessions()

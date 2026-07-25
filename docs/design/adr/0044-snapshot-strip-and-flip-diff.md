@@ -12,6 +12,10 @@
   · **Amendment 2 (2026-07-22, #409):** the greyscale channel is the edge's **shape**, not its
   colour — which settles Open item 5; and a block the construct scan cannot account for stacks
   rather than being wrapped whole.
+  · **Amendment 3 (2026-07-23, #468):** the description edits behind a pencil (settles Open item 4);
+  delete confirms and pin does not, and neither is a new control surface.
+  · **Amendment 4 (2026-07-24, #419):** adopting one run is a **click** that re-projects locally — no
+  glyph (§J holds as written), no typing (§G/§I hold), no round trip.
 - Feature: #6 · Companion: ADR-0043 (the model) · Follows: ADR-0013 (the scrubber), ADR-0030 (the
   design language), ADR-0038 §A (compact at rest), ADR-0042 (the layer picker, the same gesture on
   the hierarchy axis)
@@ -80,6 +84,20 @@ having — and precisely why linear time fails. One snapshot from last week plus
 morning piles the recent four into an unreadable clump at the right edge, and those are the ones an
 author reaches for.
 
+> **Whose age: the *content*'s, not the record's** (#458, 2026-07-23). An automatic capture fires
+> before the save, so its bytes are the previous sitting's while its record is made at the start of
+> this one — the two can be a fortnight apart. Explicit captures were dated correctly, so laying
+> out by record time meant automatic and explicit notches on the same track described different
+> things with nothing to tell them apart. The sidecar carries both times; the strip positions and
+> labels by `content_written_at`.
+>
+> **Record time stays the sort and thinning key**, and the two keys are not interchangeable:
+> repeated captures of unchanged content share an mtime, so content time has ties where creation
+> time cannot. What follows is that the *listing* order and the *layout* order can disagree —
+> whenever an mtime moves backwards relative to record order (a restore from backup, a cloud sync,
+> an NTP correction) — and the strip must hold the layout order, or ← / → walk one sequence while
+> the eye reads another.
+
 **A log scale** spreads recent history and compresses deep history. Faint `1h / 1d / 1w` ticks make
 the scale legible rather than merely implied, and a minimum gap keeps notches from touching however
 they bunch.
@@ -87,6 +105,12 @@ they bunch.
 **Known ambiguity, stated so it is not later mistaken for a defect:** under keep-five thinning, a gap
 can mean *"a week passed"* or *"a snapshot used to be there"*. A lone explicit notch far left is
 "the oldest thing I chose to keep", not "the oldest thing that existed".
+
+**A second one, from #458's two keys:** captures of *unchanged* content share a content time, so the
+minimum-gap pass draws them a gap apart although no time passed between them. On a surface whose
+premise is "spacing is the timeline" that gap encodes nothing — it is the price of notches that
+never touch and stay individually clickable. It is bounded and self-announcing: the notches carry
+identical date lines, which is the tell that the space between them is separation, not duration.
 
 ### E. Nothing inside the strip may change the track's width
 
@@ -374,6 +398,169 @@ anything precedes its marker.
 The same rule covers a change that would escape its structural container: a run spanning a newline
 crosses into the next quoted line or list item, and one spanning `|` crosses a table cell.
 
+## Amendment 3 — the description edits behind a pencil; the two destructive verbs get opposite gates (2026-07-23, #468)
+
+From implementing slice 4 (pin · delete · description). Settles Open item 4 and records the surface for
+the two gestures §B already named but did not draw.
+
+### The description: shown when it exists, edited behind a pencil
+
+§L fixed two things and left the layout open: most snapshots have **no** description (every automatic
+one, and every explicit one taken in flow), so the empty case is the *common* case and must read well;
+and the description *augments* the date, never replaces it. Three candidate edit surfaces were built
+on the real token layer and compared in both themes, with and without a description —
+[`../mockups/0468-snapshot-description.html`](../mockups/0468-snapshot-description.html), the evidence
+for what follows.
+
+**Chosen: the description edits behind a pencil.** At rest the actions row shows only what exists — the
+one-liner in quotes with a small ✎ to edit it, or, when there is none, a single quiet `+ describe`. The
+text input appears *only* on the pencil. The two rejected candidates each put something permanent in the
+row for a field the author usually leaves blank: an always-present input (which a mostly-empty field
+made noise, and crowded the A/S/B control and Restore onto a second line on a narrow pane), and a
+second line under the date (always two lines tall, even blank). The pencil is the only one where the
+**common empty case shows nothing to fill in** — which is what §L asks for, and is the same
+reveal-on-engage shape the strip's own compact-at-rest rule already uses (§B). The cost, accepted: the
+enrichment is one gesture less discoverable, which is the right trade for a field whose absence is
+normal.
+
+The description also rides the notch **tooltip** (§L), appended after the date and the kept marker, and
+only when present.
+
+### Delete confirms, pin does not, and neither is a new control surface
+
+Both live in the parked actions row beside Restore — delete is reachable **only** from a parked notch,
+the same rule restore follows, so the drift report is on screen for every gesture that acts on the
+snapshot (§B; ADR-0043).
+
+- **Delete** routes through the app's existing destructive-confirm modal, which names what is going and
+  is styled for an irreversible action — and deliberately carries **no** "don't show again". This is
+  ADR-0043's asymmetry made concrete: restore captures first and asks nothing, delete is the one
+  irreversible gesture and is the one place the confirm habit has not been spent.
+
+- **Pin** appears only on a `thinned` notch. An explicit snapshot is already `kept`, and pin is
+  one-directional (ADR-0043 Amendment 4), so a pinned notch simply stops offering the button — the
+  affordance *is* the one-way rule, with nothing to press back. Pinning flips the tier, so the notch
+  redraws `kept` (taller, a step darker, §C) under the author's cursor: the shape change is the
+  confirmation, not a jump, and it is the honest picture of a record that genuinely changed tier.
+
+## Amendment 4 — adopting one run is a click, not a glyph; the compare view gains a pointer gesture and stays keyboard-read-only (2026-07-24, #419)
+
+From the #419 design pass. Parked on a notch and reading one changed region, an author often wants
+*that region's* snapshot wording back without restoring the whole scene — "copy-paste from a cool
+area into a warm one," at the granularity the diff already computes. Evidence, built on the real token
+layer and iterated with Anton: [`../mockups/0419-adopt-run.html`](../mockups/0419-adopt-run.html).
+
+### There is only one operation, and it has one verb
+
+While parked, the live scene **is** the warm projection of the runs — so "keep the current words"
+changes nothing. The only act that alters the document is **take the snapshot's version of a region**,
+and that single verb covers every change shape §F names: a *modification* swaps the words, a *deletion*
+restores them, and an *insertion*'s snapshot version is empty, so it drops the added text. What the
+issue framed as two directions — adopt a cool run, discard a warm run — is one operation seen from
+either end.
+
+### The gesture is a click on the run, and it adds no glyph
+
+The author clicks the version they want. The mental model is **"which of these two is better?"**, not
+"revert": clicking either side **settles that region** — its tint clears and it reads as plain prose —
+and clicking the *cool* side additionally rewrites the scene. Keeping the warm side is a no-op on the
+document but not on the view: it is the author answering the question and moving on, which is why it
+earns a click rather than being inert.
+
+This is the option that leaves the design language untouched. **No glyph is added** — the tinted run's
+own colour becomes the affordance — so §J holds exactly as written: colour still marks the view, and
+nothing permanent-looking is drawn on a temporary condition. The annotation-vs-operation question §J
+did not anticipate never has to be decided, because this gesture never reaches for a mark. (For the
+record, and for whatever axis the app grows next: an affordance that *performs* an operation is the
+camera's category, not an annotation — §J bars the second, not the first.)
+
+### It does not break §G or §I
+
+Two invariants read as if this crosses them; neither does.
+
+- **§G — the live buffer is never touched.** A click that adopts a region hands the host a new body
+  through **the same path a Restore already uses**. It is a restore at region granularity, not an
+  editing surface layered over the compare view: the author still cannot *type* into the comparison.
+  The buffer is written exactly as Restore writes it, and only then.
+- **§I — the compare view is read-only, so the whole keyboard is free.** "Read-only" there means *no
+  typing* — the fact that lets A/S/B and the arrows claim the unmodified keyboard. A deliberate pointer
+  click takes no key, so that freedom is untouched. The compare view gains one mouse gesture and loses
+  no keyboard axis.
+
+### No round trip: adopting re-projects locally
+
+The runs already carry **all** the text of both sides (§G, Amendment 1), so adopting a region needs no
+second request: the frontend marks that region resolved and re-renders the overlay from the runs it
+already holds, and the disk write rides the Restore path in the background. The diff is **never
+re-requested mid-review** — which is strictly more faithful to §G's "computed once, at a discrete
+moment" than a re-diff would be, and is also what keeps the work coherent: a re-diff after one adoption
+would recompute every *other* region from the unchanged document and so **resurrect the regions the
+author had already settled**. Local re-projection settles them for good.
+
+The cost this gesture carries is **discoverability** — nothing announces that a tinted run is
+clickable. The accepted default: a one-line hint in the parked actions row on first park ("Click a
+passage to keep that version"), retired after first use, plus a pointer cursor and the existing hover
+treatment. Exact wording and retirement are an implementation judgement, not a decision here.
+
+**Still not this ADR:** an editable compare overlay (the issue's own non-goal, and ADR-0025's).
+Adopting a whole region by projection is not free-form editing while comparing — it takes no keystroke
+and recomputes no diff as anyone types.
+
+## Amendment 5 — resting snapshots carry the cool tint, and a playhead marks the parked notch (2026-07-24, #481)
+
+From testing the shipped strip. It *works*, but two things read wrong, both in the **engaged** states
+(the compact quiet of §B while writing is right and stays): the notches are hard to see, and it is
+hard to tell which one is active. Evidence built on the real token layer and iterated with Anton,
+including a `filter: grayscale(1)` toggle that made the §H constraint visible.
+
+### The notches were grey-on-grey; snapshots now carry the cool tint
+
+§H already assigns the pair: Live warm and present, snapshots cool and past. But the shipped strip
+coloured only the *active* notch cool and left every resting one on the neutral ramp
+(`--border-strong`) — one step from the rule's own `--border`. A faint 2px stick against a hairline of
+nearly the same grey. Parking bought no legibility either; the automatic notches stayed grey.
+
+**So resting snapshots now take the cool tint at full strength** — `--diff-was`, lifting §H's identity
+from the active-only case to every snapshot mark. *Full* strength, not a quieter resting step, is a
+deliberate call (Anton): absent a population of test users to tune a middle ground, always-legible
+beats the quietest desk. This trades a little of §B's quiet-at-rest, weighed and accepted.
+
+### The tint cannot be what makes a notch visible — that was §H's own finding
+
+Amendment 2 measured it: warm and cool are equal-luminance by construction (greyscale ΔL 0.1–5.4 out
+of 255), so they are the *same grey*. It follows that colour can only ever be the **meaning** layer
+here; it can never be the channel that makes a mark legible. Legibility rides the two channels that
+carry luminance and form: an automatic capture is **hollow**, a kept one **filled** — the class reads
+as shape, which survives greyscale — and engagement lifts height, not hue. Per Amendment 2's
+generalised rule, every distinction keeps a non-colour backstop: present/past by **position** (Live is
+always the rightmost mark), active/resting by the **playhead** below, kept/automatic by **shape**.
+
+### The active notch gets a playhead, not a recoloured mark
+
+"Which notch is active" was encoded as a 1px width bump, a colour swap, and a small dot below the foot
+— all modifications *to the mark*, none of them a **position**. Meanwhile Live already carried a proper
+halo, so the present was well-marked and the parked past was not. **A playhead resolves it**: a
+full-height hairline riding the parked notch's position, capped by a downward triangle. It reads as a
+place rather than a property, and it is the one cue that stays legible in greyscale — so its cap is
+sized generously (≈12×8px), because in greyscale the cap *is* the "you are here."
+
+The playhead is **cool, always, and exists only while parked** — parking is only ever onto a snapshot
+(Live is never a parked notch), so Live keeps its own warm halo and shows no playhead. This holds §J
+as written: the cursor is present only during the temporary parked condition and vanishes with it.
+
+**Its motion is load-bearing, not decoration** (Anton): the slide between notches carries the eye to
+the new position, and its length reads as how far back in time the jump was. It uses the strip's own
+160ms ease-out so it reads as part of the strip moving. Because the motion *is* the cue,
+`prefers-reduced-motion` does not drop it silently — the slide is removed but a persistent halo keeps
+the cursor findable at its destination.
+
+### Reveal-on-approach was considered and dropped
+
+An earlier draft kept the resting notches quiet and *revealed* them (height and contrast) as the
+pointer neared the track — the trick the capture button uses — to reconcile visibility with §B. Once
+rest-visibility went to maximum there was nothing faint left to reveal, so the mechanism earned
+nothing and was cut. The capture button's own reveal is unrelated and stays.
+
 ## Non-goals
 
 - **A clean-reading mode for a snapshot.** The tint decision (F) costs the "read the snapshot as
@@ -394,7 +581,8 @@ crosses into the next quoted line or list item, and one spanning `|` crosses a t
    proportional.
 3. **Discoverability of the compact strip.** It may now be quiet enough that a new author never
    learns snapshots exist.
-4. **The description's presentation** (L).
+4. ~~**The description's presentation** (L).~~ **Settled by [Amendment 3](#amendment-3--the-description-edits-behind-a-pencil-the-two-destructive-verbs-get-opposite-gates-2026-07-23-468).**
+   Edited behind a pencil, so the common empty case shows nothing to fill in.
 5. ~~**The exact hex values** (H).~~ **Settled by [Amendment 2](#amendment-2--the-greyscale-channel-is-shape-and-an-unreadable-block-stacks-2026-07-22).**
    The greyscale re-check found that no hex value could satisfy the constraint, because §H's
    equal-chroma rule makes the pair equally luminous by construction. The values stand; the edges

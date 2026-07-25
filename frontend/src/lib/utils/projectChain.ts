@@ -24,15 +24,41 @@ export type ChainCrumb = {
  * as the project switcher rather than as a crumb.
  *
  * Gaps stay legal upstream (a project may declare a grandparent and not its
- * parent), so this remains a path through the ancestry rather than a walk of
- * consecutive folders — see #431 for the fact that the bar does not yet SAY
- * so. Rendering it honestly is that issue's job; this one only makes sure
- * there is a single source to render.
+ * parent), so this is a path through the ancestry rather than a walk of
+ * consecutive folders. #431 settled that the bar does NOT mark the gap: the
+ * undeclared middle folder is not in `chain` (the backend yields only
+ * `is_project and inherited` layers), so there is nothing here to hide or to
+ * flag — the honest treatment of a deliberate, legal gap is to render the
+ * declared layers contiguously, which is all this can do.
  */
 export function declaredChain(chain: ProjectChainLayer[] | undefined): ChainCrumb[] {
   return (chain ?? [])
     .filter((layer) => !layer.is_root)
     .map((layer) => ({ path: layer.path, label: layer.label }));
+}
+
+/**
+ * Does the open project inherit from nothing at all (#427)?
+ *
+ * Distinguishes the two ways `declaredChain` returns nothing, which the bar
+ * has to render differently:
+ *
+ * - **no project open** — the chain is absent or empty, and the bar has no
+ *   subject to say anything about;
+ * - **a flat project** — the chain holds the open project and nothing else,
+ *   because it declares no ancestors (ADR-0039 Amendment 1: absent means
+ *   inherits nothing).
+ *
+ * The second used to render as blank space, which left the switcher button
+ * beside it reading as a one-item breadcrumb — the mechanism behind the
+ * misclick in #427. It gets a stated note instead.
+ */
+export function inheritsNothing(chain: ProjectChainLayer[] | undefined): boolean {
+  const layers = chain ?? [];
+  // "A project is open but has no crumbs" — i.e. every layer is the root. This
+  // is the same predicate `declaredChain` filters on (`!is_root`), inlined to
+  // avoid building the two throwaway arrays just to read their length.
+  return layers.length > 0 && layers.every((layer) => layer.is_root);
 }
 
 /**
@@ -101,6 +127,31 @@ export function declarationRows(ancestors: AncestorCandidate[] | undefined): Dec
       toggleable: row.inherited,
     };
   });
+}
+
+/**
+ * Would the declaration editor have anything to act on for this project (#427)?
+ *
+ * The gate on the empty-chain note's "set up…" remedy. Offering the link when
+ * the editor opens onto nothing tickable is the same defect the note removes —
+ * an affordance that promises something it does not have — so it is withheld in
+ * exactly the cases `declarationRows` produces no actionable row:
+ *
+ * - **outside the machine root, or none set (#429)** — the enumeration is
+ *   empty, so there are no rows at all;
+ * - **a top-level project** directly inside the projects folder — its only
+ *   enumerated ancestor is that root folder, which is not a project and renders
+ *   as a permanently-disabled row.
+ *
+ * Derived FROM `declarationRows` rather than re-deriving "is_project means
+ * declarable" inline, so the breadcrumb and the editor cannot disagree about
+ * what is actionable. `toggleable` — not `is_project` — is the right test: a
+ * declared ancestor that stopped being a project (#431's stale case) is not a
+ * project yet is still repairable by unticking, and the editor offers exactly
+ * that, so the remedy should point there too.
+ */
+export function canDeclareInheritance(ancestors: AncestorCandidate[] | undefined): boolean {
+  return declarationRows(ancestors).some((row) => row.toggleable);
 }
 
 /**

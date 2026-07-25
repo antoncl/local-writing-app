@@ -24,7 +24,7 @@
   import TopBar from "@/components/chrome/TopBar.svelte";
   import { installThemeWiring, themePreference, nextPreference, type ThemePreference } from "@/lib/utils/theme";
   import { renderChatContent } from "@/lib/utils/chatMessageRender";
-  import { toggledDeclaration } from "@/lib/utils/projectChain";
+  import { canDeclareInheritance, toggledDeclaration } from "@/lib/utils/projectChain";
   import { get } from "svelte/store";
   import {
     chatSessionsStore,
@@ -70,6 +70,7 @@
     metadataSchemaStore,
     projectSchemaLayerId,
   } from "@/lib/stores/schema";
+  import { isInherited } from "@/lib/utils/provenance";
   import { implicitContextMatcherStore } from "@/lib/stores/derived";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
@@ -454,11 +455,9 @@
   }
 
   function paneEntryFromAncestor(pane: EditorPaneState): boolean {
-    const layerId = pane.scene?.source_layer_id;
-    if (!layerId) return false;
-    const projectLayer = projectSchemaLayerId();
-    if (!projectLayer) return false;
-    return layerId !== projectLayer;
+    // One definition of "is this node inherited" (#313), shared with the level
+    // pill and the rail treatment.
+    return isInherited({ source_layer_id: pane.scene?.source_layer_id }, projectSchemaLayerId());
   }
 
   function openPromptsPane() {
@@ -608,6 +607,8 @@
   onOpenSettings={() => void projectSession.openMachineSettings()}
   onOpenDetailTypes={() => schemaPanes?.openDetailTypes()}
   onOpenProjectNode={() => void editorPanes.openProjectNode()}
+  onOpenInheritance={() => workspaceLayout.ensureVisible("project")}
+  canDeclareInheritance={canDeclareInheritance(project?.ancestors)}
   activePreset={workspaceLayout.activePreset}
   userPresets={layoutPresets.presets.map((preset) => preset.name)}
   onApplyPreset={(name) => workspaceLayout.applyPreset(name as PresetName)}
@@ -845,7 +846,18 @@
     {#if editorPane}
       {#if paneEntryFromAncestor(editorPane)}
         <div class="ancestor-banner" title="This entry lives in an ancestor project. Edits write back to the original file.">
-          from {editorPane.scene?.source_layer_label ?? "ancestor"}
+          <span>from {editorPane.scene?.source_layer_label ?? "ancestor"}</span>
+          {#if editorPane.document?.type === "lore" && editorPane.scene}
+            <button
+              class="fork-button"
+              type="button"
+              title="Fork into an editable copy in this project — keeps the id, stops inheriting"
+              aria-label="Fork into this project"
+              onclick={() => run(() => editorPanes.forkLore(editorPane.scene!.id))}
+            >
+              <span aria-hidden="true">⧉</span> Fork here
+            </button>
+          {/if}
         </div>
       {/if}
       <NodeEditor
@@ -867,6 +879,8 @@
         metadataReload={editorPanes.metadataReloadsByPane[editorPane.id] ?? null}
         titleReload={editorPanes.titleReloadsByPane[editorPane.id] ?? null}
         dirty={editorPane.dirty}
+        recentlySaved={editorPane.recentlySaved}
+        authoringLayerId={editorPane.authoringLayerId}
         todoStatusHint={editorPane.document?.type === "scene" && editorPane.scene && sceneEntryHasBody(editorPane.scene as Scene) ? embeddedHintForScene(editorPane.scene.id) : ""}
         onFocus={() => workspaceLayout.focus(editorPane.id)}
         onChange={(detail) =>
@@ -884,6 +898,7 @@
         onOpenChat={(detail) => chatSessions.openChatFromPromptEntry(detail.entry, detail.inputs, detail.sceneId, detail.assistantId)}
         onViewSaveState={(state) => editorPanes.setViewSaveState(editorPane.id, state)}
         onPlotSaved={(plot) => editorPanes.reconcilePlotBodySave(plot)}
+        onAuthoringLayerChange={(layerId) => editorPanes.setEditorPaneAuthoringLayer(editorPane.id, layerId)}
         onFlushScene={async () => {
           // A capture photographs the file and a restore overwrites it, so both
           // must run against a file that already holds the author's latest
@@ -1033,11 +1048,30 @@
      back to the ancestor file). Replaces the old header tint + badge. */
   .ancestor-banner {
     flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-2);
     padding: var(--sp-1) var(--sp-3);
     background: var(--star-soft);
     border-bottom: 1px solid var(--star-border);
     color: var(--text-2);
     font-size: var(--fs-xs);
+  }
+
+  .ancestor-banner .fork-button {
+    flex: 0 0 auto;
+    padding: 2px var(--sp-2);
+    border: 1px solid var(--star-border);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--star);
+    font-size: var(--fs-xs);
+    cursor: pointer;
+  }
+
+  .ancestor-banner .fork-button:hover {
+    background: color-mix(in oklab, var(--star) 16%, transparent);
   }
 
   .error-toast {

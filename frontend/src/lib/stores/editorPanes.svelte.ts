@@ -36,7 +36,8 @@ import {
 import { confirmService } from "@/lib/stores/confirmService.svelte";
 import { clearImplicitContext, implicitContextFor } from "@/lib/stores/implicitContext.svelte";
 import { findNodeBySceneId, findStructureNodeById } from "@/lib/utils/treeHelpers";
-import { metadataSchemaStore } from "@/lib/stores/schema";
+import { metadataSchemaStore, projectSchemaLayerId } from "@/lib/stores/schema";
+import { authoringDefaultLayerId } from "@/lib/utils/layerAuthoring";
 import {
   structureStore,
   researchStructureStore,
@@ -98,6 +99,14 @@ const AUTO_SAVE_IDLE_MS = 6000;
 // draft fields rather than snapping them to the server's copy).
 const AUTO_SAVE_MAX_WAIT_MS = 30000;
 const SAVED_INDICATOR_MS = 2000;
+
+// The rest-position authoring layer L for a freshly-loaded lore entry (#314 /
+// ADR-0042), read against the current open project. Non-sticky: recomputed every
+// time a pane loads an entry, so the picker never carries a target across an
+// entry switch. The rule itself is the pure `authoringDefaultLayerId`.
+function defaultAuthoringLayerId(entry: LoreEntry): string | null {
+  return authoringDefaultLayerId(entry.source_layer_id, projectSchemaLayerId());
+}
 
 // A project node reached by id that is not the OPEN project's — an ancestor
 // layer's project.md, which #334 made addressable and #344 made reachable from
@@ -380,7 +389,11 @@ class EditorPanesController {
       };
       let savedDocument: EditableDocument;
       if (documentKind === "lore") {
-        savedDocument = await api.saveLoreEntry(draftDocument as LoreEntry, pane.draftMarkdown);
+        // L rides the save (#314 / ADR-0042): the rail picker's target routes the
+        // write. Preserved across the save reconciliation below (the pane spread
+        // keeps `authoringLayerId`), so a deliberate override target survives an
+        // autosave — L is non-sticky only across an *entry switch*, not a save.
+        savedDocument = await api.saveLoreEntry(draftDocument as LoreEntry, pane.draftMarkdown, pane.authoringLayerId);
       } else if (documentKind === "research") {
         savedDocument = await api.saveResearchNote(draftDocument as ResearchNote, pane.draftMarkdown);
       } else if (documentKind === "prompt") {
@@ -1097,11 +1110,71 @@ class EditorPanesController {
             draftMetadata: cloneMetadata(entry.metadata),
             saving: false,
             recentlySaved: false,
+            // Seed L to the rest-position override (open project if inherited,
+            // else null) so an autosave never fires without a write target and
+            // 409s an inherited entry (#314 / ADR-0042).
+            authoringLayerId: defaultAuthoringLayerId(entry),
           }
         : pane,
     );
     this.focusedEditorPaneId = targetPane.id;
     this.setStatus(`Loaded ${entry.title}`);
+  }
+
+  // Fork-to-here (#313): sever an inherited lore entry into a local copy, then
+  // reset the open pane to the now-local entry so the ancestor banner clears and
+  // edits stop writing back to the ancestor. Refreshes the roster so the Lore
+  // pane's provenance pill updates too.
+  async forkLore(entryId: string): Promise<void> {
+    // Flush unsaved edits first, then fork. The store's autosave invariant is
+    // that every pane transition saves if dirty; a fork that reset the pane
+    // without it dropped whatever was typed inside the 6s debounce — and those
+    // edits belong in the fork, not the void. Cancel the pending timer so it
+    // cannot fire against the baseline this save is about to move. A save that
+    // 409s throws out of here, aborting the fork with the draft intact.
+    const open = this.paneForScene(entryId);
+    if (open?.dirty) {
+      this.#autosave.cancel(open.id);
+      await this.saveEditorPane(open.id);
+    }
+    const entry = await api.forkLoreEntry(entryId);
+    await refreshLoreEntries();
+    this.panes = this.panes.map((pane) =>
+      pane.document?.type === "lore" && pane.document.id === entryId
+        ? {
+            ...pane,
+            scene: entry,
+            dirty: false,
+            draftTitle: entry.title,
+            draftMarkdown: entry.body,
+            draftEntryType: entry.entry_type,
+            draftMetadata: cloneMetadata(entry.metadata),
+            saving: false,
+            recentlySaved: false,
+            // The entry is now local — it owns its own file, so there is no
+            // override target and the rail picker disappears (#314).
+            authoringLayerId: null,
+          }
+        : pane,
+    );
+    this.setStatus(`Forked ${entry.title} into this project`);
+  }
+
+  // Set the rail picker's authoring layer L for a pane (#314 / ADR-0042). The
+  // NodeEditor picker calls this after its confirm-on-entry gate; the value
+  // rides the next `saveLoreEntry` and routes the write (owning-file direct edit
+  // vs sparse override delta at L). Non-sticky — `openLore` reseeds the default.
+  //
+  // Clears `recentlySaved`: the "Saved to <layer>" footer echo reads the CURRENT
+  // L, but that flag belongs to the LAST save's target. Changing L within the 2s
+  // flash window would otherwise echo the new target as if a write had already
+  // landed there — a false provenance claim, the one thing the strip must never
+  // make. The picker only calls this on an actual change (its no-op early-return
+  // guards it), so nothing legitimate is suppressed.
+  setEditorPaneAuthoringLayer(id: string, layerId: string | null): void {
+    this.panes = this.panes.map((pane) =>
+      pane.id === id ? { ...pane, authoringLayerId: layerId, recentlySaved: false } : pane,
+    );
   }
 
   // Open any node given its kind — the one place cross-kind navigation

@@ -45,6 +45,12 @@ export type EditorPaneState = {
   // only on the next successful save. Today only view panes set it (they run their
   // own persist loop, bypassing the generic autosave), but the field is generic.
   saveError: boolean;
+  // ADR-0042's authoring layer L (#314), a layer id, for a lore pane: the write
+  // target the rail picker chose. `null` for a local entry (save goes to its own
+  // file). For an *inherited* entry the pane store seeds it to the open project's
+  // layer id — the rest-position override — and the picker moves it up the chain.
+  // Non-sticky: reset when the pane loads a different entry (openLore / forkLore).
+  authoringLayerId: string | null;
 };
 
 // The save-lifecycle transitions a self-persisting body (the view designer, #263)
@@ -68,6 +74,7 @@ export function createEmptyEditorPane(id: string): EditorPaneState {
     saving: false,
     recentlySaved: false,
     saveError: false,
+    authoringLayerId: null,
   };
 }
 

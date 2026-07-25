@@ -24,11 +24,25 @@ from layer_fixtures import declare_full_chain
 
 from app.services.project import node_index_snapshot as snapshot
 from app.services.project.errors import ProjectServiceError
+from app.services.project.node_index_gate import node_index_gate
 from app.services.project_service import ProjectService
 
 
 class SnapshotTestCase(unittest.TestCase):
     """A book under a universe under the configured base folder."""
+
+    def _open_index(self) -> object:
+        """Build the index as a *fresh open* would (#392).
+
+        This suite pins the on-disk snapshot layer — staleness detection,
+        integrity, patch-vs-rebuild — which runs only on a fresh open, when the
+        in-memory memo is empty. Each build here models such an open, so it drops
+        the memo first. The memo's own behaviour (a warm hit does no disk work;
+        an external edit mid-session is not seen until the next open) is pinned
+        separately, in test_node_index_memo.py.
+        """
+        node_index_gate.invalidate()
+        return self.service._build_node_index(self.root)
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
@@ -88,14 +102,14 @@ class SnapshotTestCase(unittest.TestCase):
 
 class SnapshotIsUsedTests(SnapshotTestCase):
     def test_first_build_writes_a_snapshot(self) -> None:
-        self.service._build_node_index(self.root)
+        self._open_index()
         self.assertTrue(snapshot.snapshot_path(self.root).exists())
 
     def test_second_build_reads_it_instead_of_reparsing(self) -> None:
         self._write_lore(self.root, "seren", "Seren")
-        self.service._build_node_index(self.root)
+        self._open_index()
         calls = self._count_collections()
-        self.service._build_node_index(self.root)
+        self._open_index()
         self.assertEqual(calls[0], 0)
 
     def test_rehydrated_index_matches_a_cold_build(self) -> None:
@@ -108,8 +122,8 @@ class SnapshotIsUsedTests(SnapshotTestCase):
         self._write_lore(self.root, "seren", "Seren (book)", refs=["harrington"])
         self._write_lore(self.universe, "harrington", "Harrington")
 
-        cold = self.service._build_node_index(self.root)
-        warm = self.service._build_node_index(self.root)
+        cold = self._open_index()
+        warm = self._open_index()
 
         self.assertEqual(warm.by_id.keys(), cold.by_id.keys())
         self.assertEqual(
@@ -130,8 +144,8 @@ class SnapshotIsUsedTests(SnapshotTestCase):
         self._write_lore(self.universe, "seren", "Seren (universe)")
         self._write_lore(self.root, "seren", "Seren (book)")
 
-        cold = self.service._build_node_index(self.root)
-        warm = self.service._build_node_index(self.root)
+        cold = self._open_index()
+        warm = self._open_index()
         shadow = [w for w in warm.warnings if "shadows" in w]
 
         self.assertEqual(len(shadow), 1)
@@ -147,8 +161,8 @@ class SnapshotIsUsedTests(SnapshotTestCase):
         self._write_lore(self.universe, "seren", "Seren (universe)")
         self._write_lore(self.root, "seren", "Seren (book)")
 
-        self.service._build_node_index(self.root)
-        warm = self.service._build_node_index(self.root)
+        self._open_index()
+        warm = self._open_index()
 
         self.assertEqual(
             [entry.title for entry in warm.candidates["seren"]],
@@ -171,42 +185,42 @@ class StalenessTests(SnapshotTestCase):
 
     def _rebuilt(self) -> bool:
         calls = self._count_collections()
-        self.service._build_node_index(self.root)
+        self._open_index()
         rebuilt = calls[0] > 0
         self.service._collect_layer_entries = ProjectService._collect_layer_entries.__get__(self.service)
         return rebuilt
 
     def test_edited_file_is_not_served_from_the_snapshot(self) -> None:
         path = self._write_lore(self.root, "seren", "Seren")
-        self.service._build_node_index(self.root)
+        self._open_index()
         self._write_lore(self.root, "seren", "Seren, renamed")
         self.assertTrue(path.exists())
-        self.assertEqual(self.service._build_node_index(self.root).by_id["seren"].title, "Seren, renamed")
+        self.assertEqual(self._open_index().by_id["seren"].title, "Seren, renamed")
 
     def test_deleted_file_is_not_served_from_the_snapshot(self) -> None:
         """A delete re-collects nothing — there is no file to parse — so this
         asserts the observable outcome rather than the mechanism."""
         path = self._write_lore(self.root, "seren", "Seren")
-        self.service._build_node_index(self.root)
+        self._open_index()
         path.unlink()
-        self.assertNotIn("seren", self.service._build_node_index(self.root).by_id)
+        self.assertNotIn("seren", self._open_index().by_id)
 
     def test_added_file_is_not_served_from_the_snapshot(self) -> None:
         """The case a stat-sweep over known paths cannot see: a file dropped
         into an ancestor's `lore/` from Explorer, or arriving via `git pull`."""
-        self.service._build_node_index(self.root)
+        self._open_index()
         self._write_lore(self.universe, "seren", "Seren (universe)")
-        self.assertIn("seren", self.service._build_node_index(self.root).by_id)
+        self.assertIn("seren", self._open_index().by_id)
 
     def test_untouched_project_does_not_rebuild(self) -> None:
         self._write_lore(self.root, "seren", "Seren")
-        self.service._build_node_index(self.root)
+        self._open_index()
         self.assertFalse(self._rebuilt())
 
     def test_schema_file_appearing_at_a_layer_rebuilds(self) -> None:
         """It carries no id and is not a node, but it decides what every node's
         fields mean — and therefore which edges exist."""
-        self.service._build_node_index(self.root)
+        self._open_index()
         (self.universe / "metadata.schema.yaml").write_text("version: 1\n", encoding="utf-8")
         self.assertTrue(self._rebuilt())
 
@@ -226,7 +240,7 @@ class StalenessTests(SnapshotTestCase):
         """
         self._set_base_folder(self.universe)
         before = self.service.collect_layers(self.root, include_machine=True)
-        self.service._build_node_index(self.root)
+        self._open_index()
         (self.base / "metadata.schema.yaml").write_text("version: 1\n", encoding="utf-8")
         after = self.service.collect_layers(self.root, include_machine=True)
 
@@ -236,7 +250,7 @@ class StalenessTests(SnapshotTestCase):
     def test_a_layer_appearing_rebuilds(self) -> None:
         """Same mechanism, stated directly: the chain the walk yields is part of
         the snapshot's identity, not merely of its content."""
-        self.service._build_node_index(self.root)
+        self._open_index()
         self.service = ProjectService.created_at(self.universe, "Honorverse")
         self.service = ProjectService.opened_at(self.root)
         self.assertTrue(self._rebuilt())
@@ -244,7 +258,7 @@ class StalenessTests(SnapshotTestCase):
     def test_project_manifest_edit_rebuilds(self) -> None:
         """`project.yaml` is what routes the extent rule, so it is an input to
         the chain's shape and not only to a layer's content."""
-        self.service._build_node_index(self.root)
+        self._open_index()
         self._set_base_folder(self.universe)
         self.assertTrue(self._rebuilt())
 
@@ -252,13 +266,13 @@ class StalenessTests(SnapshotTestCase):
 class SnapshotIntegrityTests(SnapshotTestCase):
     def _rebuilds(self) -> bool:
         calls = self._count_collections()
-        self.service._build_node_index(self.root)
+        self._open_index()
         rebuilt = calls[0] > 0
         self.service._collect_layer_entries = ProjectService._collect_layer_entries.__get__(self.service)
         return rebuilt
 
     def test_corrupt_payload_rebuilds(self) -> None:
-        self.service._build_node_index(self.root)
+        self._open_index()
         snapshot.snapshot_path(self.root).write_text("{not json", encoding="utf-8")
         self.assertTrue(self._rebuilds())
 
@@ -267,7 +281,7 @@ class SnapshotIntegrityTests(SnapshotTestCase):
         which `read_text` raises before any JSON handling sees it. Uncaught it
         escapes the build and 500s every endpoint that touches the index —
         a derived, self-healing file making the project unopenable."""
-        self.service._build_node_index(self.root)
+        self._open_index()
         snapshot.snapshot_path(self.root).write_bytes(b'{"format_version": 1, \xff\xfe\x00 truncated')
         self.assertTrue(self._rebuilds())
 
@@ -276,7 +290,7 @@ class SnapshotIntegrityTests(SnapshotTestCase):
         guard as the rest. Decoded above it, one non-numeric fingerprint raised
         straight out of the build — 500ing every endpoint that touches the
         index, for a file that exists to be thrown away."""
-        self.service._build_node_index(self.root)
+        self._open_index()
         payload = self._snapshot_payload()
         payload["manifest"][sorted(payload["manifest"])[0]] = ["notanint", "alsonot"]
         self._write_payload(payload)
@@ -285,7 +299,7 @@ class SnapshotIntegrityTests(SnapshotTestCase):
     def test_warnings_of_the_wrong_shape_rebuild(self) -> None:
         """`list("boom")` is four warnings, one per character — and
         `validate_project` shows warnings to the user verbatim."""
-        self.service._build_node_index(self.root)
+        self._open_index()
         payload = self._snapshot_payload()
         payload["warnings"] = "boom"
         self._write_payload(payload)
@@ -296,7 +310,7 @@ class SnapshotIntegrityTests(SnapshotTestCase):
         silently re-stamp entries onto the innermost layer — a wrong
         `source_layer` on a node, which is what ADR-0042's layer picker reads."""
         self._write_lore(self.root, "seren", "Seren")
-        self.service._build_node_index(self.root)
+        self._open_index()
         payload = self._snapshot_payload()
         payload["entries"][0]["layer"] = -1
         self._write_payload(payload)
@@ -304,26 +318,26 @@ class SnapshotIntegrityTests(SnapshotTestCase):
 
     def test_wrong_shape_rebuilds(self) -> None:
         """Parses, passes every header check, and is still not what we wrote."""
-        self.service._build_node_index(self.root)
+        self._open_index()
         payload = self._snapshot_payload()
         payload["entries"] = [{"id": "seren"}]
         self._write_payload(payload)
         self.assertTrue(self._rebuilds())
 
     def test_format_version_mismatch_rebuilds_and_unlinks(self) -> None:
-        self.service._build_node_index(self.root)
+        self._open_index()
         payload = self._snapshot_payload()
         payload["format_version"] = snapshot.SNAPSHOT_FORMAT_VERSION + 1
         self._write_payload(payload)
         calls = self._count_collections()
-        self.service._build_node_index(self.root)
+        self._open_index()
         self.assertGreater(calls[0], 0)
         self.assertEqual(self._snapshot_payload()["format_version"], snapshot.SNAPSHOT_FORMAT_VERSION)
 
     def test_copied_project_folder_rebuilds(self) -> None:
         """Users copy book folders. Without the `root` key the copy reads the
         original's cache — every path in it pointing at the original."""
-        self.service._build_node_index(self.root)
+        self._open_index()
         payload = self._snapshot_payload()
         payload["root"] = str(self.universe / "book99")
         self._write_payload(payload)
@@ -341,7 +355,7 @@ class SnapshotIntegrityTests(SnapshotTestCase):
         user behaviour: without it, "positions still mean what they meant" is an
         assumption rather than a check.
         """
-        self.service._build_node_index(self.root)
+        self._open_index()
         payload = self._snapshot_payload()
         payload["layer_folders"] = [*payload["layer_folders"], str(self.root / "invented")]
         self._write_payload(payload)
@@ -351,7 +365,7 @@ class SnapshotIntegrityTests(SnapshotTestCase):
         """`layers.py` states layer ids are never persisted — a path hash
         survives neither a moved folder nor a re-resolved symlink. The payload
         must therefore not carry one to be believed."""
-        self.service._build_node_index(self.root)
+        self._open_index()
         payload = self._snapshot_payload()
         blob = json.dumps(payload)
         for layer in self.service.collect_layers(self.root, include_machine=True):
@@ -366,12 +380,12 @@ class SnapshotIntegrityTests(SnapshotTestCase):
         into a `PermissionError` raised out of the read path, 500ing every index
         consumer. The rebuild overwrites the file moments later regardless.
         """
-        self.service._build_node_index(self.root)
+        self._open_index()
         payload = self._snapshot_payload()
         payload["build_identity"] = "0" * 16
         self._write_payload(payload)
         with snapshot.snapshot_path(self.root).open(encoding="utf-8"):
-            index = self.service._build_node_index(self.root)
+            index = self._open_index()
         self.assertIn("project", {entry.kind for entry in index.by_id.values()})
 
     def test_non_canonical_root_still_hits_the_cache(self) -> None:
@@ -385,7 +399,7 @@ class SnapshotIntegrityTests(SnapshotTestCase):
         normalises `..` lexically and would have let that pass — which is what
         the first version of this test did, green locally and red on Linux CI.
         """
-        self.service._build_node_index(self.root)
+        self._open_index()
         detour = self.universe.parent / self.universe.name / ".." / self.universe.name / self.root.name
         calls = self._count_collections()
         self.service._build_node_index(detour)
@@ -403,7 +417,7 @@ class SnapshotIntegrityTests(SnapshotTestCase):
 
         self.service._atomic_write = failing  # type: ignore[method-assign]
         self._write_lore(self.root, "seren", "Seren")
-        index = self.service._build_node_index(self.root)
+        index = self._open_index()
         self.assertEqual(index.by_id["seren"].title, "Seren")
 
 
@@ -428,12 +442,12 @@ class DegradedBuildTests(SnapshotTestCase):
         self._write_lore(self.root, "hero", "Hero", refs=["sphinx"])
         real = self.service.read_metadata_schema
         self._with_failing_schema_read(OSError("locked by a scanner"))
-        degraded = self.service._build_node_index(self.root)
+        degraded = self._open_index()
         self.assertEqual(degraded.edges_by_src, {})
         self.assertFalse(snapshot.snapshot_path(self.root).exists())
 
         self.service.read_metadata_schema = real  # type: ignore[method-assign]
-        recovered = self.service._build_node_index(self.root)
+        recovered = self._open_index()
         self.assertIn("hero", recovered.edges_by_src)
 
     def test_malformed_schema_IS_cached(self) -> None:
@@ -442,7 +456,7 @@ class DegradedBuildTests(SnapshotTestCase):
         index — and fixing it moves that file's mtime, so the cache self-heals.
         Refusing to cache it would mean a project with one typo never caches."""
         self._with_failing_schema_read(ProjectServiceError("metadata.schema.yaml is not valid YAML"))
-        index = self.service._build_node_index(self.root)
+        index = self._open_index()
         self.assertTrue(index.errors)
         self.assertTrue(snapshot.snapshot_path(self.root).exists())
 
@@ -458,7 +472,7 @@ class DegradedBuildTests(SnapshotTestCase):
             return real(path, *args, **kwargs)
 
         self.service._read_yaml = failing  # type: ignore[method-assign]
-        degraded = self.service._build_node_index(self.root)
+        degraded = self._open_index()
         self.assertNotIn("chat_1", degraded.by_id)
         self.assertFalse(snapshot.snapshot_path(self.root).exists())
 
@@ -471,12 +485,12 @@ class BuildIdentityTests(SnapshotTestCase):
         """Ship a release that adds an `entity_ref` field to a built-in entry
         type and every project file is byte-identical — the new edges would
         never appear until the user edited something unrelated."""
-        self.service._build_node_index(self.root)
+        self._open_index()
         payload = self._snapshot_payload()
         payload["build_identity"] = "0" * 16
         self._write_payload(payload)
         calls = self._count_collections()
-        self.service._build_node_index(self.root)
+        self._open_index()
         self.assertGreater(calls[0], 0)
 
     def test_identity_tracks_the_source_that_decides_a_build(self) -> None:
@@ -492,7 +506,7 @@ class BuildIdentityTests(SnapshotTestCase):
         warning that says "this is a bug" — on every user's first open after any
         upgrade that adds a key. The identity check catches it first, and only
         because this module is inside `_SOURCE_ROOTS`."""
-        self.service._build_node_index(self.root)
+        self._open_index()
         payload = self._snapshot_payload()
         # What an upgrade actually leaves behind: written by older code (so the
         # identity differs) *and* missing the key that code never wrote.

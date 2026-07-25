@@ -8,7 +8,7 @@
 // The schema-authoring fallback (which entry_type/layer the editor points at)
 // stays in App.svelte — it's UI-local authoring state, not server-mirrored.
 
-import { get, writable } from "svelte/store";
+import { derived, get, writable } from "svelte/store";
 import { api } from "@/lib/api";
 import type {
   MetadataSchema,
@@ -20,14 +20,24 @@ export const metadataSchemaStore = writable<MetadataSchema | null>(null);
 export const metadataSchemaOverviewStore = writable<MetadataSchemaOverview | null>(null);
 export const metadataSchemaLayersStore = writable<MetadataSchemaLayer[]>([]);
 
-// The project-local (nearest) schema layer — the last entry in the merged layer
-// stack. Defaults for new types/fields land here, and authoring selection falls
-// back to it. Reads the store live (`get`) so callers invoked right after a
-// store set still see the fresh value (the `$store` alias lags a flush).
-export function projectSchemaLayerId(): string {
-  const layers = get(metadataSchemaLayersStore);
+// The project-local (nearest) schema layer is the last entry in the merged layer
+// stack. One definition of that rule, so imperative and reactive readers cannot
+// drift (#313).
+function nearestLayerId(layers: MetadataSchemaLayer[]): string {
   return layers[layers.length - 1]?.id ?? "";
 }
+
+// Defaults for new types/fields land here, and authoring selection falls back to
+// it. Reads the store live (`get`) so callers invoked right after a store set
+// still see the fresh value (the `$store` alias lags a flush).
+export function projectSchemaLayerId(): string {
+  return nearestLayerId(get(metadataSchemaLayersStore));
+}
+
+// Reactive form for Svelte components deciding per-node provenance (#313): a node
+// whose `source_layer_id` differs from this is inherited. Same rule as
+// projectSchemaLayerId(), tracked so a component recomputes when the schema loads.
+export const projectLayerIdStore = derived(metadataSchemaLayersStore, nearestLayerId);
 
 // Fan one overview payload into all three slices. The single source of truth for
 // keeping the trio coherent.

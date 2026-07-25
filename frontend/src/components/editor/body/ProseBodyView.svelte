@@ -323,6 +323,18 @@
     syncEditorEmpty();
   }
 
+  /** Replace the buffer with a body the author adopted from a snapshot region
+   *  (ADR-0044 Amendment 4). Unlike `loadScene`, which loads a clean server
+   *  state, this emits an update (`setContent(…, true)`) so the pane goes dirty
+   *  and autosaves — the adoption is a genuine edit, made through the same
+   *  buffer restore writes rather than a new editing surface. The `onUpdate`
+   *  path does the rest of the housekeeping (word count, implicit context). */
+  export async function adoptBody(markdown: string): Promise<void> {
+    if (!editor) return;
+    const html = await sceneMarkdownToHtml(markdown);
+    editor.commands.setContent(html || "<p></p>", true);
+  }
+
   export function highlightEmbeddedTodo(todoId: string): void {
     if (!editorElement) return;
     const target = editorElement.querySelector<HTMLElement>(`[data-todo-id="${CSS.escape(todoId)}"]`);

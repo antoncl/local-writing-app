@@ -20,6 +20,7 @@ or the other kinds.
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 from typing import Any
 
@@ -204,18 +205,20 @@ class ManuscriptMixin:
         purge_ids = TreeStructureService.collect_descendant_ids(
             node
         ) | TreeStructureService.collect_leaf_ids(node)
+        # Collect every scene's path first, then delete as one batch (#476): the
+        # per-id todo/snapshot cleanup still runs in the loop, but the file
+        # deletes and their index maintenance happen once, so a chapter of many
+        # scenes writes a single coalesced snapshot rather than one per scene.
+        paths: list[Path] = []
         for scene_id in scene_ids:
-            try:
-                path = self._path_for_node_id(scene_id, "scene")
-                if path.exists():
-                    path.unlink()
-            except ProjectServiceError:
-                pass
+            with contextlib.suppress(ProjectServiceError):
+                paths.append(self._path_for_node_id(scene_id, "scene"))
             self._remove_scene_todos(scene_id)
             # A scene and its snapshots are one unit of deletion (ADR-0043).
-            # Outside the try: the store is keyed by id, so it must go even when
-            # the scene file itself could not be resolved.
+            # The store is keyed by id, so it must go even when the scene file
+            # itself could not be resolved.
             self.delete_scene_snapshots(root, scene_id)
+        self._delete_node_files(tuple(paths))  # unlink all + un-shadow the memo once
 
         TreeStructureService.remove_node_by_id(structure.root, node_id)
         self._manuscript_tree(root).write(structure)
@@ -389,6 +392,10 @@ class ManuscriptMixin:
         if markdown_errors:
             raise ProjectServiceError(" ".join(markdown_errors), 422)
 
+        # Not as-of-L (#393): a scene is book-scoped — the manuscript is per-book
+        # and an inherited scene has no position in an inheriting book (ADR-0039),
+        # so a scene is never authored above the book. As-of-L is for inherited
+        # nodes (lore); here L is always the resolution scope.
         schema = self.read_metadata_schema()
         metadata = self._normalise_metadata(request.metadata, path)
         metadata = self._canonicalise_metadata_tags(metadata, schema, kind="scene", entry_type=request.entry_type)
@@ -431,9 +438,8 @@ class ManuscriptMixin:
     def delete_scene(self, scene_id: str) -> StructureDocument:
         root = self._require_project()  # see delete_structure_node (#381)
         path = self._path_for_node_id(scene_id, "scene")
-        node_id = self._node_id_for_path(path)
-        if path.exists():
-            path.unlink()
+        node_id = self._node_id_for_path(path)  # read the id before the unlink
+        self._delete_node_file(path)  # unlink + un-shadow the memo (#392)
         # A scene and its snapshots are one unit of deletion (ADR-0043): a
         # partial delete leaves exactly the unreachable residue that ADR rejects.
         self.delete_scene_snapshots(root, node_id)

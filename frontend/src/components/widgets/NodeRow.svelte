@@ -65,6 +65,11 @@
     // chip). Colors the tag as a Chip (a distinct color system from the kind
     // Stripe — widget taxonomy). Used by the assistant-tag vocabulary (#88).
     tagColor?: ((tag: string) => string | null) | null;
+    // Provenance: the owning layer's label when this node is inherited from an
+    // ancestor project (#313 / ADR-0039). Renders a small "level pill" on the
+    // right of the row, in the `--star` provenance treatment. Null / omitted for
+    // a node owned by the open project — own-project rows stay clean.
+    layerLabel?: string | null;
     // Group-header treatment: serif title + a hairline rule under the
     // row. Pair with variant="tree", a caret in leading, and a count
     // pill in trailing. The "chapter divider" look from the Editorial
@@ -130,6 +135,7 @@
     role = null,
     tags = [],
     tagColor = null,
+    layerLabel = null,
     groupHeader = false,
     collapsed = false,
     draggable = false,
@@ -192,7 +198,7 @@
   {ondragover}
   {ondragleave}
   {ondrop}
->{#if leading}{@render leading()}{/if}{#if titleSlot}{@render titleSlot()}{:else if clickable}<button type="button" class="node-row-click" onclick={onClick} ondblclick={onDblClick}><span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag" style={tagStyle(tag)}>{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span></button>{:else}<span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag" style={tagStyle(tag)}>{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span>{/if}{#if trailing}<span class="node-row-trailing">{@render trailing()}</span>{/if}</div>
+>{#if leading}{@render leading()}{/if}{#if titleSlot}{@render titleSlot()}{:else if clickable}<button type="button" class="node-row-click" onclick={onClick} ondblclick={onDblClick}><span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag" style={tagStyle(tag)}>{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span></button>{:else}<span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag" style={tagStyle(tag)}>{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span>{/if}{#if layerLabel}<span class="node-row-layer" title={`Inherited from ${layerLabel}`}>{layerLabel}</span>{/if}{#if trailing}<span class="node-row-trailing">{@render trailing()}</span>{/if}</div>
 
 {#if nested && !collapsed}
   <div class="node-row-group-children">{@render nested()}</div>
@@ -359,6 +365,25 @@
   .node-row-tag-overflow {
     color: var(--text-3);
     background: var(--surface);
+  }
+
+  /* Provenance "level pill" — the owning layer of an inherited node (#313).
+     Uses the --star axis (the same warm treatment as the inherited-entry
+     banner and the inherited-entity prose underline), so it never collides
+     with the neutral tag chips or the teal accent / violet mutation axes. */
+  .node-row-layer {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 8px;
+    border: 1px solid var(--star-border);
+    border-radius: 999px;
+    background: var(--star-soft);
+    color: var(--star);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    line-height: 1.45;
+    white-space: nowrap;
   }
 
   .node-row-trailing {

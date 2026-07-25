@@ -174,8 +174,7 @@ class ViewsMixin:
 
     def delete_view(self, view_id: str) -> ViewNodeList:
         path = self._path_for_node_id(view_id, "view")
-        if path.exists():
-            path.unlink()
+        self._delete_node_file(path)  # unlink + un-shadow the memo (#392)
         return self.list_views()
 
     def _materialize_default_view(self, view_id: str, ui: ViewUiState) -> ViewNode:

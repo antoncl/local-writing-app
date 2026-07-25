@@ -19,9 +19,11 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import yaml
 from layer_fixtures import declare_full_chain
 
 from app.services.project.node_index import NodeIndex
+from app.services.project.node_index_gate import node_index_gate
 from app.services.project_service import ProjectService
 
 
@@ -57,6 +59,19 @@ class PatchTestCase(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
+    def _open_index(self) -> NodeIndex:
+        """Build the index as a *fresh open* would (#392).
+
+        These tests pin the open-time patch path — a stale snapshot turned into a
+        work list — which runs when the in-memory memo is empty. Each build here
+        models a fresh open, so it drops the memo first; otherwise a raw on-disk
+        mutation (an `unlink`, a `rename`) that bypasses the write funnel would be
+        masked by the warm memo, which by design does not see external edits
+        mid-session.
+        """
+        node_index_gate.invalidate()
+        return self.service._build_node_index(self.root)
+
     def _write_lore(self, folder: Path, node_id: str, title: str, *, refs: list[str] | None = None) -> Path:
         (folder / "lore").mkdir(parents=True, exist_ok=True)
         path = folder / "lore" / f"{node_id}.md"
@@ -72,16 +87,43 @@ class PatchTestCase(unittest.TestCase):
         )
         return path
 
+    def _write_lore_externally(
+        self, folder: Path, node_id: str, title: str, *, refs: list[str] | None = None
+    ) -> Path:
+        """Write a node file **outside** the app's write path (#392).
+
+        A raw `write_text`, so it does not pass through `_atomic_write`'s
+        change-gate — it models an external editor or a `git pull` touching the
+        file while the memo is empty. That is the only way the *open-time* patch
+        decisions (a huge batch diff rebuilds; an unparsed node forces a rebuild)
+        are reachable now: an in-app edit patches incrementally at write time and
+        never presents a batch to the next open.
+        """
+        (folder / "lore").mkdir(parents=True, exist_ok=True)
+        path = folder / "lore" / f"{node_id}.md"
+        front_matter = yaml.safe_dump(
+            {
+                "id": node_id,
+                "title": title,
+                "entry_type": "lore:character",
+                "metadata": {"related_entries": refs} if refs else {},
+            },
+            sort_keys=False,
+            allow_unicode=True,
+        ).strip()
+        path.write_text(f"---\n{front_matter}\n---\n\nBody.\n", encoding="utf-8")
+        return path
+
     def _cold_build(self) -> NodeIndex:
         """A from-scratch index over the current files, bypassing the cache."""
         from app.services.project import node_index_snapshot as snapshot
 
         snapshot.snapshot_path(self.root).unlink(missing_ok=True)
-        return self.service._build_node_index(self.root)
+        return self._open_index()
 
     def _assert_patch_matches_cold_build(self) -> NodeIndex:
         """Patch, then compare against a cold build of the same tree."""
-        patched = self.service._build_node_index(self.root)
+        patched = self._open_index()
         expected = _fingerprint(patched)
         self.assertEqual(expected, _fingerprint(self._cold_build()))
         return patched
@@ -102,7 +144,7 @@ class PatchTestCase(unittest.TestCase):
 
         self.service._collect_layer_entries = counting  # type: ignore[method-assign]
         try:
-            self.service._build_node_index(self.root)
+            self._open_index()
         finally:
             self.service._collect_layer_entries = original  # type: ignore[method-assign]
         return calls[0] <= 1
@@ -111,7 +153,7 @@ class PatchTestCase(unittest.TestCase):
 class PatchedIndexMatchesAColdBuildTests(PatchTestCase):
     def test_an_edited_file(self) -> None:
         self._write_lore(self.root, "seren", "Seren")
-        self.service._build_node_index(self.root)
+        self._open_index()
 
         self._write_lore(self.root, "seren", "Seren, renamed")
 
@@ -120,7 +162,7 @@ class PatchedIndexMatchesAColdBuildTests(PatchTestCase):
     def test_an_added_file_in_an_ancestor(self) -> None:
         """A `.md` dropped into an ancestor's `lore/` from Explorer, or arriving
         with a `git pull` — the case no stat-sweep over known paths can see."""
-        self.service._build_node_index(self.root)
+        self._open_index()
 
         self._write_lore(self.universe, "nimitz", "Nimitz")
 
@@ -129,7 +171,7 @@ class PatchedIndexMatchesAColdBuildTests(PatchTestCase):
     def test_a_deleted_file(self) -> None:
         path = self._write_lore(self.root, "seren", "Seren")
         self._write_lore(self.root, "honor", "Honor", refs=["seren"])
-        self.service._build_node_index(self.root)
+        self._open_index()
 
         path.unlink()
 
@@ -140,7 +182,7 @@ class PatchedIndexMatchesAColdBuildTests(PatchTestCase):
         plus an add. Patching it as an update would leave the old id claiming a
         file that no longer declares it."""
         path = self._write_lore(self.root, "seren", "Seren")
-        self.service._build_node_index(self.root)
+        self._open_index()
 
         self.service._write_markdown_with_front_matter(
             path, {"id": "seren_renamed", "title": "Seren", "entry_type": "lore:character", "metadata": {}}, "Body."
@@ -153,7 +195,7 @@ class PatchedIndexMatchesAColdBuildTests(PatchTestCase):
     def test_several_files_at_once(self) -> None:
         self._write_lore(self.root, "seren", "Seren")
         self._write_lore(self.root, "honor", "Honor")
-        self.service._build_node_index(self.root)
+        self._open_index()
 
         self._write_lore(self.root, "seren", "Seren, edited")
         self._write_lore(self.root, "nimitz", "Nimitz")
@@ -178,7 +220,7 @@ class RenameTests(PatchTestCase):
     def test_renaming_the_file_keeps_the_node(self) -> None:
         path = self._write_lore(self.root, "seren", "Seren")
         self._write_lore(self.root, "honor", "Honor", refs=["seren"])
-        self.service._build_node_index(self.root)
+        self._open_index()
 
         path.rename(path.with_name("aaa-seren-renamed.md"))
 
@@ -189,7 +231,7 @@ class RenameTests(PatchTestCase):
     def test_renaming_to_a_name_sorting_after_the_old_one(self) -> None:
         """The mirror ordering, so the fix cannot be a lucky sort."""
         path = self._write_lore(self.root, "seren", "Seren")
-        self.service._build_node_index(self.root)
+        self._open_index()
 
         path.rename(path.with_name("zzz-seren-renamed.md"))
 
@@ -200,7 +242,7 @@ class RenameTests(PatchTestCase):
     def test_the_renamed_node_keeps_its_edges(self) -> None:
         self._write_lore(self.root, "nimitz", "Nimitz")
         path = self._write_lore(self.root, "seren", "Seren", refs=["nimitz"])
-        self.service._build_node_index(self.root)
+        self._open_index()
 
         path.rename(path.with_name("aaa-seren.md"))
 
@@ -214,7 +256,7 @@ class UnShadowingTests(PatchTestCase):
     def test_deleting_a_shadowing_node_promotes_the_ancestor(self) -> None:
         self._write_lore(self.universe, "seren", "Seren (universe)")
         self._write_lore(self.root, "seren", "Seren (book)")
-        self.service._build_node_index(self.root)
+        self._open_index()
 
         (self.root / "lore" / "seren.md").unlink()
 
@@ -229,8 +271,8 @@ class UnShadowingTests(PatchTestCase):
         self._write_lore(self.universe, "nimitz", "Nimitz")
         self._write_lore(self.universe, "seren", "Seren (universe)", refs=["nimitz"])
         self._write_lore(self.root, "seren", "Seren (book)")
-        self.service._build_node_index(self.root)
-        self.assertEqual(self.service._build_node_index(self.root).edges_by_src.get("seren"), None)
+        self._open_index()
+        self.assertEqual(self._open_index().edges_by_src.get("seren"), None)
 
         (self.root / "lore" / "seren.md").unlink()
 
@@ -243,7 +285,7 @@ class UnShadowingTests(PatchTestCase):
         entry from Honorverse" is user-visible wrong output."""
         self._write_lore(self.universe, "seren", "Seren (universe)")
         self._write_lore(self.root, "seren", "Seren (book)")
-        self.assertTrue([w for w in self.service._build_node_index(self.root).warnings if "shadows" in w])
+        self.assertTrue([w for w in self._open_index().warnings if "shadows" in w])
 
         (self.root / "lore" / "seren.md").unlink()
 
@@ -254,7 +296,7 @@ class UnShadowingTests(PatchTestCase):
         """The mirror: adding a file that shadows must emit the warning and move
         the winner inward."""
         self._write_lore(self.universe, "seren", "Seren (universe)")
-        self.service._build_node_index(self.root)
+        self._open_index()
 
         self._write_lore(self.root, "seren", "Seren (book)")
 
@@ -272,7 +314,7 @@ class PatchDeclinesWhenTheChangeFansOutTests(PatchTestCase):
         invalidates the edges of every node of the affected entry types across
         the chain — not one file."""
         self._write_lore(self.root, "seren", "Seren")
-        self.service._build_node_index(self.root)
+        self._open_index()
 
         (self.universe / "metadata.schema.yaml").write_text("version: 1\n", encoding="utf-8")
 
@@ -282,7 +324,7 @@ class PatchDeclinesWhenTheChangeFansOutTests(PatchTestCase):
     def test_a_project_manifest_edit_rebuilds(self) -> None:
         """`project.yaml` routes the layer walk itself."""
         self._write_lore(self.root, "seren", "Seren")
-        self.service._build_node_index(self.root)
+        self._open_index()
         manifest = self.service._read_yaml(self.root / "project.yaml")
         manifest["title"] = "Book One"
         self.service._write_yaml(self.root / "project.yaml", manifest)
@@ -300,12 +342,15 @@ class PatchDeclinesWhenTheChangeFansOutTests(PatchTestCase):
             broken.read_text(encoding="utf-8").replace("title: Seren (universe)", "title: Seren: Elder"),
             encoding="utf-8",
         )
-        self.assertTrue(self.service._build_node_index(self.root).has_unparsed_nodes)
+        self.assertTrue(self._open_index().has_unparsed_nodes)
 
-        self._write_lore(self.root, "honor", "Honor")
+        # External, so the decision falls to the open-time patch — an in-app save
+        # would patch-decline at write time instead (both reach a rebuild; this
+        # is the case the test names).
+        self._write_lore_externally(self.root, "honor", "Honor")
 
         self.assertFalse(self._patched_without_full_walk())
-        self.assertTrue(self.service._build_node_index(self.root).has_unparsed_nodes)
+        self.assertTrue(self._open_index().has_unparsed_nodes)
 
     def test_fixing_the_typo_clears_the_flag(self) -> None:
         broken = self._write_lore(self.universe, "seren", "Seren (universe)")
@@ -313,11 +358,11 @@ class PatchDeclinesWhenTheChangeFansOutTests(PatchTestCase):
             broken.read_text(encoding="utf-8").replace("title: Seren (universe)", "title: Seren: Elder"),
             encoding="utf-8",
         )
-        self.assertTrue(self.service._build_node_index(self.root).has_unparsed_nodes)
+        self.assertTrue(self._open_index().has_unparsed_nodes)
 
         self._write_lore(self.universe, "seren", "Seren (universe)")
 
-        rebuilt = self.service._build_node_index(self.root)
+        rebuilt = self._open_index()
         self.assertFalse(rebuilt.has_unparsed_nodes)
         self.assertIn("seren", rebuilt.by_id)
 
@@ -335,7 +380,7 @@ class CandidateOrderTests(PatchTestCase):
     def test_editing_a_shadowed_ancestor_keeps_the_descendant_winning(self) -> None:
         self._write_lore(self.universe, "seren", "Seren (universe)")
         self._write_lore(self.root, "seren", "Seren (book)")
-        self.service._build_node_index(self.root)
+        self._open_index()
 
         self._write_lore(self.universe, "seren", "Seren (universe, edited)")
 
@@ -345,7 +390,7 @@ class CandidateOrderTests(PatchTestCase):
 
     def test_adding_a_shadowed_ancestor_keeps_the_descendant_winning(self) -> None:
         self._write_lore(self.root, "seren", "Seren (book)")
-        self.service._build_node_index(self.root)
+        self._open_index()
 
         self._write_lore(self.universe, "seren", "Seren (universe)")
 
@@ -356,7 +401,7 @@ class CandidateOrderTests(PatchTestCase):
         self._write_lore(self.universe, "nimitz", "Nimitz")
         self._write_lore(self.universe, "seren", "Seren (universe)", refs=["nimitz"])
         self._write_lore(self.root, "seren", "Seren (book)")
-        self.service._build_node_index(self.root)
+        self._open_index()
 
         self._write_lore(self.universe, "seren", "Seren (universe, edited)", refs=["nimitz"])
 
@@ -369,7 +414,7 @@ class CandidateOrderTests(PatchTestCase):
         self._write_lore(self.root, "nimitz", "Nimitz")
         self._write_lore(self.root, "aaa", "A", refs=["nimitz"])
         self._write_lore(self.root, "bbb", "B", refs=["nimitz"])
-        self.service._build_node_index(self.root)
+        self._open_index()
 
         self._write_lore(self.root, "aaa", "A edited", refs=["nimitz"])
 
@@ -398,7 +443,7 @@ class PatchRequiresACleanIndexTests(PatchTestCase):
         self.service._write_markdown_with_front_matter(
             path, {"title": "No id", "entry_type": "lore:character"}, "Body."
         )
-        self.assertTrue(self.service._build_node_index(self.root).warnings)
+        self.assertTrue(self._open_index().warnings)
 
         self.service._write_markdown_with_front_matter(
             path, {"id": "noid", "title": "Now has one", "entry_type": "lore:character"}, "Body."
@@ -413,7 +458,7 @@ class PatchRequiresACleanIndexTests(PatchTestCase):
             self.service._write_markdown_with_front_matter(
                 path, {"title": f"No id {i}", "entry_type": "lore:character"}, "Body."
             )
-            self.service._build_node_index(self.root)
+            self._open_index()
 
         self.assertEqual(len(self._assert_patch_matches_cold_build().warnings), 1)
 
@@ -423,7 +468,7 @@ class PatchRequiresACleanIndexTests(PatchTestCase):
         promotes it — and `_strip_dangling_references` would otherwise strip
         every link to the id on the next read."""
         self._write_duplicate_id()
-        self.service._build_node_index(self.root)
+        self._open_index()
 
         (self.root / "lore" / "aaa.md").unlink()
 
@@ -439,10 +484,14 @@ class PatchDeclinesWhenTheDiffIsHugeTests(PatchTestCase):
     def test_a_diff_covering_most_of_the_project_rebuilds(self) -> None:
         for i in range(8):
             self._write_lore(self.root, f"n{i}", f"Node {i}")
-        self.service._build_node_index(self.root)
+        self._open_index()
 
+        # Edited externally (a `git pull` / cloud re-sync), so the whole batch
+        # lands on the *next open* at once — the case the ~36% crossover is
+        # about. In-app edits would patch one file at a time and never present a
+        # batch, which is exactly why patching stays the cheap path in a session.
         for i in range(8):
-            self._write_lore(self.root, f"n{i}", f"Node {i} edited")
+            self._write_lore_externally(self.root, f"n{i}", f"Node {i} edited")
 
         self.assertFalse(self._patched_without_full_walk())
         self._assert_patch_matches_cold_build()
@@ -455,7 +504,7 @@ class PatchAvoidsTheFullWalkTests(PatchTestCase):
     def test_one_edited_file_does_not_re_walk_the_chain(self) -> None:
         self._write_lore(self.root, "seren", "Seren")
         self._write_lore(self.universe, "nimitz", "Nimitz")
-        self.service._build_node_index(self.root)
+        self._open_index()
 
         self._write_lore(self.root, "seren", "Seren, edited")
 
@@ -467,7 +516,7 @@ class PatchAvoidsTheFullWalkTests(PatchTestCase):
         in the same folder one unit of work rather than two conflicting ones."""
         path = self._write_lore(self.root, "seren", "Seren")
         self._write_lore(self.universe, "nimitz", "Nimitz")
-        self.service._build_node_index(self.root)
+        self._open_index()
 
         path.unlink()
 

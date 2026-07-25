@@ -113,8 +113,7 @@ class MutationSetEntriesMixin:
 
     def delete_mutation_set_entry(self, entry_id: str) -> MutationSetEntryList:
         path = self._path_for_node_id(entry_id, "mutation_set")
-        if path.exists():
-            path.unlink()
+        self._delete_node_file(path)  # unlink + un-shadow the memo (#392)
         return self.list_mutation_set_entries()
 
     # ----- helpers --------------------------------------------------------

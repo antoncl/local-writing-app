@@ -13,9 +13,10 @@
   import { getSwatch, resolveColorForType } from "@/lib/utils/colors";
   import { defaultView } from "@/lib/views/evaluateView";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
-  import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
+  import { inheritedLayerLabel } from "@/lib/utils/provenance";
   import type { ViewSpec } from "@/lib/types";
 
   export let entries: LoreEntrySummary[];
@@ -28,6 +29,9 @@
   $: schema = $metadataSchemaStore;
   // Active-row highlight + pin-star read from the editor-focus store, not props (#14 Step 2).
   $: focusedDocument = $focusedDocumentStore;
+  // The open project's own (innermost) layer id — a row whose source layer
+  // differs is inherited and gets a level pill (#313).
+  $: ownLayerId = $projectLayerIdStore;
   // Open an entry in an editor pane (App owns the pane set).
   export let onOpenEntry: (entryId: string) => void;
 
@@ -160,6 +164,7 @@
     title={entry.title}
     detail={entryDetailText(entry)}
     tags={entryTags(entry)}
+    layerLabel={inheritedLayerLabel(entry, ownLayerId)}
     depth={ctx.depth}
     active={ctx.active}
     stripeColor={stripeFor(entry, ctx)}

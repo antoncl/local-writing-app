@@ -95,12 +95,25 @@ class AiPolicyReadTests(unittest.TestCase):
 
     # ----- the point of the change -------------------------------------
 
-    def test_it_reads_one_file_regardless_of_how_deep_the_chain_is(self) -> None:
-        """The regression test. `current_project()` scales with the shelf.
+    def test_it_reads_the_chain_and_nothing_beside_it(self) -> None:
+        """The regression test, **rewritten for #312**.
 
-        A four-level chain with three sibling books: `current_project()` parses
-        the root manifest several times over, one manifest per project ancestor
-        and one per child. `ai_policy()` must not care that any of that exists.
+        It used to assert one file, full stop — the whole point of #433. Policy
+        now resolves over the layer chain, so that is no longer true and could
+        not be: a rule that consults ancestors has to read them.
+
+        What still holds, and is what #433 actually bought, is the *shape* of
+        the cost: bounded by the chain's depth, and blind to everything beside
+        it. `current_project()` scales with the shelf — an `iterdir()` plus a
+        manifest parse per **child** project (#310) — and on the prompt-preview
+        path that ran on a typing debounce. Sibling books must not appear in the
+        reads below no matter how many of them there are.
+
+        Asserting the set of folders rather than a count, deliberately: a count
+        pins today's redundancy (the walk reads each layer's manifest for its
+        label, then this reads it again for the policy — #466's territory, noted
+        on `_resolved_ai_policy`) and would go red on the memo that removes it,
+        which is a change nobody should have to touch this test for.
         """
         universe = self.base / "universe"
         series = universe / "series"
@@ -132,10 +145,14 @@ class AiPolicyReadTests(unittest.TestCase):
             del service._read_yaml  # type: ignore[attr-defined]
 
         self.assertEqual(
-            reads,
-            [book / "project.yaml"],
-            "ai_policy() must read the open project's manifest and nothing else; "
+            {path.parent for path in reads},
+            {self.base, universe, series, book},
+            "ai_policy() must read the chain's manifests and nothing else; "
             f"it read {[str(p) for p in reads]}",
+        )
+        self.assertTrue(
+            all(path.name == "project.yaml" for path in reads),
+            f"ai_policy() must read manifests only; it read {[str(p) for p in reads]}",
         )
 
     def test_an_unreadable_ancestor_manifest_cannot_change_the_answer(self) -> None:

@@ -44,6 +44,7 @@ from app.models import (
     UpsertMetadataFieldRequest,
     UpsertMetadataGroupRequest,
 )
+from app.services.project import schema_cache
 from app.services.project.default_schema import (
     AUTHORABLE_COMPUTED_FUNCTIONS,
     DEFAULT_METADATA_SCHEMA,
@@ -93,7 +94,9 @@ def _schema_layer_from(layer: IndexLayer) -> MetadataSchemaLayer:
 
 
 class MetadataSchemaMixin:
-    def read_metadata_schema(self, root: Path | None = None) -> MetadataSchema:
+    def read_metadata_schema(
+        self, root: Path | None = None, *, up_to_layer_id: str | None = None
+    ) -> MetadataSchema:
         """The merged schema for `root`, defaulting to the open project.
 
         `root` is explicit for callers that must not straddle a concurrent
@@ -101,15 +104,83 @@ class MetadataSchemaMixin:
         whose `root_path` mutates in place, so an operation that resolves the
         project more than once can read one project's schema against another's
         files.
+
+        `up_to_layer_id` resolves the schema **as of** authoring layer L
+        (ADR-0042 §3, #393): the merge stops at L, so a field a more-local
+        layer defines is absent — the roster can only shrink as L rises towards
+        the base, never offer a field the target layer cannot store. `None`,
+        the default, merges the whole chain to the open project, which is what
+        every resolution-scope read wants and gets unchanged; only the write
+        path passes L, via `_schema_as_authored`.
+
+        **The result is a shared, cached instance (#394) — treat it as
+        read-only.** The resolved-definitions cache returns the same object to
+        every caller of a given chain, so mutating it (or a nested `entry_types`
+        / `fields` member) corrupts it for all of them. `MetadataSchema` is
+        frozen against top-level reassignment; the nested collections rely on
+        this contract. To change definitions, write a layer (the schema-CRUD
+        methods), which reads YAML directly and never mutates this result.
         """
         root = root or self._require_project()
+        paths = self._metadata_schema_layer_paths(root, up_to_layer_id=up_to_layer_id)
+        # The resolved-definitions cache (#394) — one door, so the index build,
+        # the as-of-L authoring reads, and every endpoint here share one merged
+        # artefact rather than each re-parsing the chain. `paths` is the chain
+        # identity (already truncated for as-of-L); the cache stamps it with the
+        # layer fingerprints + `build_identity()` and folds only on a miss.
+        return schema_cache.resolved_schema(paths, self._build_metadata_schema)
+
+    def _build_metadata_schema(
+        self, paths: list[Path], fingerprints: list[schema_cache.Fingerprint]
+    ) -> MetadataSchema:
+        """Fold the chain into a validated schema — the cache's rebuild path.
+
+        Runs only on a merged-cache miss. Each existing layer's parse is served
+        from the per-layer atom cache (no YAML re-parse for an unchanged file),
+        and copied on loan: `_merge_metadata_schema_layer` aliases layer values
+        into its output (`schema.py` `_merge_metadata_schema_section`), so the
+        shared atom must not reach the mutating fold uncopied — this preserves
+        the fresh-dict-per-build semantics the pre-cache code had for free.
+        """
         data = deepcopy(DEFAULT_METADATA_SCHEMA)
-        for path in self._metadata_schema_layer_paths(root):
-            if path.exists():
-                layer_data = self._read_metadata_schema_layer(path)
-                self._merge_metadata_schema_layer(data, layer_data)
+        for path, fp in zip(paths, fingerprints, strict=True):
+            if fp is None:  # no schema file at this layer — a stored value, not a miss
+                continue
+            layer_data = schema_cache.layer_parse(path, fp, self._read_metadata_schema_layer)
+            self._merge_metadata_schema_layer(data, deepcopy(layer_data))
         data = self._resolve_metadata_schema_inheritance(data)
         return MetadataSchema.model_validate(data)
+
+    def _schema_as_authored(
+        self, root: Path | None = None, *, authoring_layer: Path | None = None
+    ) -> MetadataSchema:
+        """The schema a write in this unit must validate against (#393).
+
+        ADR-0042 binds a write to an authoring layer L; the field roster it may
+        use is the schema resolved base → L, never the fuller resolution-scope
+        schema. Validating a write against a chain deeper than its own target
+        would accept a field the target layer cannot store, and fail only
+        later, when a sibling book reads it (ADR-0045 §4).
+
+        L is supplied one of two ways. `#314`'s lore save passes `authoring_layer`
+        explicitly — the save *is* ADR-0042's edit unit, so L rides its request
+        body (the rail picker's write target) rather than an ambient header.
+        Absent that, it falls back to the immutable `WorkScope`
+        (`scope.authoring_layer`), which defaults to the resolution scope — so a
+        unit with no rail picker behind it resolves the whole chain, exactly as
+        before.
+        """
+        layer = authoring_layer if authoring_layer is not None else self._scope_authoring_layer()
+        up_to_layer_id = (
+            self._metadata_schema_layer_id(layer.resolve()) if layer is not None else None
+        )
+        # `root` (defaulted inside `read_metadata_schema`) is the resolution
+        # scope; `up_to_layer_id` truncates it to L.
+        return self.read_metadata_schema(root, up_to_layer_id=up_to_layer_id)
+
+    def _scope_authoring_layer(self) -> Path | None:
+        scope = self.scope
+        return scope.authoring_layer if scope is not None else None
 
     def entry_type_ancestry(
         self,

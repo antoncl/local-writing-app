@@ -231,11 +231,15 @@ export function createMutationCloseMark({ labelForClose }: MutationCloseResolver
     renderHTML({ node, HTMLAttributes }) {
       const label = labelForClose(String(node.attrs.ref ?? ""));
       const full = label ? `Closes ${label}` : "Closes a mutation";
-      const compact = label ? `⤳✕ ${label}` : "⤳✕";
+      // "mutation ends here": ti-arrow-bar-to-right (a single lexicon-sanctioned
+      // annotation glyph) rather than the banned `⤳✕` compound (#304). The mark
+      // round-trips to an HTML comment, so this string is display-only.
+      const icon = ["i", { class: "ti ti-arrow-bar-to-right", "aria-hidden": "true" }];
       return [
         "span",
         mergeAttributes(HTMLAttributes, { class: "mutation-pill mutation-pill-close", title: full }),
-        compact,
+        icon,
+        ...(label ? [label] : []),
       ];
     },
   });

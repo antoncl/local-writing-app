@@ -192,6 +192,10 @@ def serialize(
                 "path": str(entry.path),
                 "title": entry.title,
                 "layer": layer_index_by_id[entry.source_layer_id],
+                # A fork records the layer it severed from as a layer *index*, not
+                # an id — layer ids are `sha256(path)` and must never land on disk
+                # (`_layer_id_for_folder`). `None` for an ordinary entry.
+                "forked_from_layer": layer_index_by_id.get(entry.forked_from_layer_id),
             }
             for entries in index.candidates.values()
             for entry in entries
@@ -341,6 +345,15 @@ def _rehydrate(payload: dict, layers: list[IndexLayer]) -> NodeIndex:
         if not isinstance(position, int) or not 0 <= position < len(layers):
             raise ValueError(f"entry {entry.get('id')!r} names layer {position!r}")
         layer = layers[position]
+        # A fork's severed-from layer, restored from its index back to the id the
+        # fresh walk stamps this session (mirrors source_layer_id above); "" for
+        # an ordinary entry or a payload predating forks.
+        forked_position = entry.get("forked_from_layer")
+        forked_from_layer_id = (
+            layers[forked_position].id
+            if isinstance(forked_position, int) and 0 <= forked_position < len(layers)
+            else ""
+        )
         index.add(
             NodeIndexEntry(
                 id=entry["id"],
@@ -350,6 +363,7 @@ def _rehydrate(payload: dict, layers: list[IndexLayer]) -> NodeIndex:
                 title=entry["title"],
                 source_layer_id=layer.id,
                 source_layer_label=layer.label,
+                forked_from_layer_id=forked_from_layer_id,
             )
         )
     # `add` front-inserts, which is only innermost-first if entries arrive in

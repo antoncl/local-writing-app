@@ -68,10 +68,26 @@ export type Scene = {
 export type Snapshot = {
   id: string;
   snapshot_of: string;
-  /** ISO 8601, UTC. The strip positions notches by age from this. */
+  /** ISO 8601, UTC. When the *record* was made — monotonic, so the backend
+   *  sorts and thins by it. **Not** what the strip lays out by. */
   captured_at: string;
+  /** ISO 8601, UTC. When the *content* was written (#458).
+   *
+   *  This is what the strip positions and labels notches by. An automatic
+   *  capture fires before the save, so its bytes are the previous sitting's —
+   *  laying out by `captured_at` put a fortnight-old body at "just now", while
+   *  explicit captures were dated correctly, so the two tiers meant different
+   *  things on one age-laid-out track.
+   *
+   *  Falls back to `captured_at` server-side on snapshots taken before the
+   *  field existed, so it is always populated. */
+  content_written_at: string;
   /** `thinned` = automatic, subject to keep-five; `kept` = explicit, never thinned. */
   retention: "thinned" | "kept";
+  /** The author's optional one-line note (#468). Original data, not the
+   *  denormalized title — empty on every automatic snapshot and every explicit
+   *  one taken in flow, which is the common case (ADR-0044 §L). */
+  description: string;
   schema_version: number;
 };
 
@@ -205,6 +221,14 @@ export type LoreEntry = {
   computed_metadata: EntryMetadata;
   source_layer_id?: string;
   source_layer_label?: string;
+  // Set when this entry was fork-to-here'd (#313): the relative path from the
+  // base folder to the layer it was copied down from. Null for a plain entry.
+  forked_from?: string | null;
+  // Metadata fields whose effective value comes from a layer override in this
+  // project's chain rather than inherited canon (#314 / ADR-0039). The backend
+  // computes it during the fold; the rail draws the `ti-versions` override mark
+  // against these. Empty for an entry with no overrides above its owning layer.
+  overridden_fields?: string[];
 };
 
 // One leaf in the research tree — prose body + tags-only metadata.

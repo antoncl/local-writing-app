@@ -15,33 +15,36 @@
   // Compact at rest: while writing this is a quiet ruled line — small notches,
   // camera only, no labels. Parking is what earns the taller strip, the scale
   // ticks and the actions row (ADR-0038 §A's shape, applied to size).
-  import type { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
+  import { tick } from "svelte";
+  import { SNAPSHOT_DESCRIPTION_MAX, type SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
   import DriftReport from "@/components/editor/DriftReport.svelte";
-  import { relativeTime } from "@/lib/utils/relativeTime";
-  import { LIVE_LEFT, TICKS, ageMinutes, agePosition, notchPositions, trackSpanMinutes } from "@/lib/utils/snapshotTrack";
+  import { notchAges, notchTooltip, notchWhen } from "@/lib/utils/snapshotTime";
+  import { LIVE_LEFT, TICKS, agePosition, notchPositions, trackSpanMinutes } from "@/lib/utils/snapshotTrack";
 
   let { strip }: { strip: SnapshotStripController } = $props();
 
   // Ages are read once per render against a single `now`, so every notch and
   // tick on one paint shares a clock. Recomputed whenever the list changes.
-  let ages = $derived.by(() => {
-    const now = new Date();
-    return strip.snapshots.map((snapshot) => ageMinutes(snapshot.captured_at, now));
-  });
+  //
+  // By CONTENT age, not record age (#458) — and the list arrives ordered by the
+  // same key, which is `notchPositions`' input contract. Both rules live in
+  // `snapshotTime`, where they can be tested.
+  let ages = $derived(notchAges(strip.snapshots, new Date()));
   let positions = $derived(notchPositions(ages));
   let span = $derived(trackSpanMinutes(ages));
   let visibleTicks = $derived(TICKS.filter((tick) => tick.minutes <= span));
   let parked = $derived(strip.parked !== null);
 
-  function tooltip(index: number): string {
-    const snapshot = strip.snapshots[index];
-    // Most snapshots have no description — every automatic one, and every
-    // explicit one taken in flow — so slice 1's tooltip is the date line alone
-    // (§L: the absent case is the COMMON case and must read well on its own).
-    // A description is an enrichment on top of it, and arrives with slice 4.
-    const when = relativeTime(snapshot.captured_at);
-    return snapshot.retention === "kept" ? `Snapshot · ${when} · kept` : `Snapshot · ${when}`;
-  }
+  // The playhead marks the parked notch: a cursor rides its position rather than
+  // recolouring the mark, so "which is active" reads as a place, not a 1px width
+  // change. Cool always — parking is only ever onto a snapshot (Live is never
+  // parked, so it keeps its own warm halo and shows no playhead). `-1` at Live
+  // gates the element out of the DOM entirely (§J: no permanent glyph on a
+  // temporary condition).
+  let currentIndex = $derived(
+    strip.parked === null ? -1 : strip.snapshots.findIndex((snapshot) => snapshot.id === strip.parked),
+  );
+  let playheadLeft = $derived(currentIndex >= 0 ? positions[currentIndex] : LIVE_LEFT);
 
   // ← → move through time; Esc returns to Live. No held modifier: repeatedly
   // holding Shift trips Windows FilterKeys and five presses fire Sticky Keys,
@@ -134,6 +137,47 @@
     }
     event.preventDefault();
   }
+
+  // The description edits in place (variant B, ADR-0044 §L / Open item 4): at
+  // rest the row shows only what exists — the one-liner with a pencil, or a
+  // quiet "+ describe" when there is none — so the common empty case shows
+  // nothing to fill in. The input appears only on the pencil.
+  let editingDesc = $state(false);
+  let descDraft = $state("");
+  let descInput = $state<HTMLInputElement | null>(null);
+
+  // Stepping to another notch abandons an open editor — the draft belonged to
+  // the notch the author just left. Reading `strip.parked` registers it as the
+  // dependency; `beginEdit` does not touch it, so opening the editor is safe.
+  $effect(() => {
+    strip.parked;
+    editingDesc = false;
+  });
+
+  async function beginEdit(): Promise<void> {
+    descDraft = strip.current?.description ?? "";
+    editingDesc = true;
+    await tick();
+    descInput?.focus();
+  }
+
+  function commitDesc(): void {
+    if (!editingDesc) return;
+    editingDesc = false;
+    // Trimming and the unchanged-text guard both live in `describe`, where a
+    // test can reach them — closing the editor without editing costs nothing.
+    void strip.describe(descDraft);
+  }
+
+  function onDescKeydown(event: KeyboardEvent): void {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      descInput?.blur(); // commits via onblur
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      editingDesc = false; // abandon; the window handler ignores INPUT targets
+    }
+  }
 </script>
 
 <svelte:window onkeydown={onKeydown} />
@@ -158,8 +202,8 @@
         class:kept={snapshot.retention === "kept"}
         class:current={strip.parked === snapshot.id}
         style={`left: ${positions[index]}%`}
-        title={tooltip(index)}
-        aria-label={tooltip(index)}
+        title={notchTooltip(snapshot)}
+        aria-label={notchTooltip(snapshot)}
         aria-pressed={strip.parked === snapshot.id}
         onclick={() => void strip.park(strip.parked === snapshot.id ? null : snapshot.id)}
       ><i></i></button>
@@ -175,6 +219,13 @@
       aria-pressed={!parked}
       onclick={() => void strip.park(null)}
     ><i></i></button>
+
+    {#if parked && currentIndex >= 0}
+      <!-- The playhead: the parked cursor. It rides the notch's position and
+           animates between notches so the eye is carried to the new one; the
+           slide length also reads as how far back in time the jump was. -->
+      <div class="playhead" style={`left: ${playheadLeft}%`} aria-hidden="true"></div>
+    {/if}
   </div>
 
   <!-- Fixed width in BOTH states. Anything here that grew or vanished would
@@ -201,7 +252,37 @@
      here rather than beside the track — so it can be any width it likes. -->
 {#if parked}
   <div class="snapshot-actions">
-    <span class="asof">Snapshot · {relativeTime(strip.current?.captured_at ?? "")}</span>
+    <span class="asof">Snapshot · {notchWhen(strip.current)}</span>
+
+    <!-- The description (variant B). Nothing empty is shown: with a note, the
+         one-liner and a pencil to edit it; without one, a quiet "+ describe".
+         The input appears only on the pencil, so the common empty case is a
+         clean row (§L). Lives here because it is variable-width, like every
+         other thing in this row — the track never sees it (§E). -->
+    {#if editingDesc}
+      <input
+        class="desc-input"
+        type="text"
+        bind:value={descDraft}
+        bind:this={descInput}
+        placeholder="A one-line note…"
+        aria-label="Snapshot description"
+        maxlength={SNAPSHOT_DESCRIPTION_MAX}
+        onblur={commitDesc}
+        onkeydown={onDescKeydown}
+      />
+    {:else if strip.current?.description}
+      <span class="desc">
+        <span class="desc-text" title={strip.current.description}>“{strip.current.description}”</span>
+        <button type="button" class="icon-btn" title="Edit description" aria-label="Edit description" onclick={beginEdit}>
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" />
+          </svg>
+        </button>
+      </span>
+    {:else}
+      <button type="button" class="add-desc" onclick={beginEdit}>+ describe</button>
+    {/if}
 
     <!-- The compare axis. It lives HERE and not beside the track because it is
          variable-width, and nothing sharing the track's row may change width —
@@ -223,6 +304,19 @@
     <div class="spacer"></div>
     <button type="button" class="act act-restore" disabled={strip.busy} onclick={() => void strip.restore()}>
       Restore
+    </button>
+    <!-- Pin promotes an automatic to kept; an explicit one is already kept, so
+         the button appears only on a `thinned` notch and a pinned one simply
+         stops offering it — the affordance IS the one-directional rule. -->
+    {#if strip.current?.retention === "thinned"}
+      <button type="button" class="act" disabled={strip.busy} onclick={() => void strip.pin()}>
+        Pin
+      </button>
+    {/if}
+    <!-- Delete is the one irreversible gesture, so it is the one that confirms
+         (restore captures first, so it does not). -->
+    <button type="button" class="act act-del" disabled={strip.busy} onclick={() => strip.del()}>
+      Delete
     </button>
   </div>
 
@@ -255,7 +349,16 @@
     align-items: stretch;
     gap: 16px;
     padding: 8px 14px;
-    min-height: 46px;
+    /* Tall enough for the notches above the rule AND the scale below it
+       (#406). Only while parked — compact overrides it below, and parking is
+       what earns the taller strip in the first place (§B). */
+    min-height: 61px;
+    /* One baseline for everything that lines up on the rule — the rule itself,
+       the notches above it, the ticks below it (#406). Written once here and
+       once in `.compact`; every consumer reads `var(--rule-bottom)`, so the two
+       states are the only places the number lives and nothing can drift off the
+       rule the way #406 did. */
+    --rule-bottom: 23px;
     border-top: 1px solid var(--divider);
     background: var(--inset);
     transition: min-height 160ms ease-out, padding 160ms ease-out, background-color 160ms ease-out;
@@ -264,15 +367,7 @@
     min-height: 27px;
     padding: 0 14px;
     background: transparent;
-  }
-  .snapshot-strip.compact .strip-track {
-    padding-bottom: 6px;
-  }
-  .snapshot-strip.compact .strip-track::before {
-    bottom: 5px;
-  }
-  .snapshot-strip.compact .notch {
-    bottom: 5px;
+    --rule-bottom: 5px;
   }
   .snapshot-strip.compact .tick {
     display: none;
@@ -311,7 +406,7 @@
     position: relative;
     flex: 1 1 auto;
     min-width: 0;
-    padding-bottom: 9px;
+    padding-bottom: calc(var(--rule-bottom) + 1px);
     transition: padding 160ms ease-out;
   }
   .strip-track::before {
@@ -319,15 +414,25 @@
     position: absolute;
     left: 0;
     right: 0;
-    bottom: 8px;
+    bottom: var(--rule-bottom);
     height: 1px;
     background: var(--border);
+    /* Moves with the rule baseline in lockstep with the strip's min-height, so
+       parking doesn't snap the rule while the height animates (#406 follow-up). */
+    transition: bottom 160ms ease-out;
   }
 
+  /* The scale hangs BELOW the rule; notches rise above it (#406). They used to
+     share the band above the line — 1px of width and one step of neutral grey
+     apart — so a notch landing on `1h` was hard to pick out and the tick's
+     label read as an annotation *of that notch*. The notch could not be the
+     thing that moved: its position **is** the timeline (§D/§E). Two marks on
+     opposite sides of one line can never be the same mark in the same place,
+     whatever the spacing does. */
   .tick {
     position: absolute;
-    bottom: 8px;
-    transform: translateX(-50%);
+    bottom: var(--rule-bottom);
+    transform: translate(-50%, 100%);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -350,7 +455,7 @@
 
   .notch {
     position: absolute;
-    bottom: 8px;
+    bottom: var(--rule-bottom);
     transform: translateX(-50%);
     width: 14px;
     padding: 0;
@@ -360,55 +465,103 @@
     display: flex;
     align-items: flex-end;
     justify-content: center;
+    /* In lockstep with the rule and the strip height, so parking doesn't leave
+       the notches hanging above the strip while it grows (#406 follow-up). */
+    transition: bottom 160ms ease-out;
   }
+  /* Snapshots read as the past, so they carry the diff's cool tint at full
+     strength (#481) — with no test-user population to tune a quieter resting
+     state, always-legible beats the quietest desk. Automatic captures are
+     HOLLOW, kept ones FILLED: the class reads as SHAPE, which survives greyscale
+     where the tint cannot (ADR-0044 §H — warm and cool are equal-luminance by
+     construction, so hue can only ever be the meaning layer, never the one that
+     makes a mark visible). */
   .notch i {
     display: block;
-    width: 2px;
+    width: 4px;
     height: 9px;
+    border: 1.5px solid var(--diff-was);
     border-radius: 1px;
-    background: var(--border-strong);
-    transition: background-color 80ms linear, height 80ms linear;
+    background: transparent;
+    transition: height 80ms linear, box-shadow 80ms linear;
   }
   .notch.kept i {
-    height: 17px;
-    background: var(--text-3);
-  }
-  .notch:hover i,
-  .notch:focus-visible i {
-    background: var(--diff-was);
-  }
-  .notch.current i {
     width: 3px;
+    height: 17px;
+    border: 0;
     background: var(--diff-was);
   }
-  .notch.current::after {
-    content: "";
-    position: absolute;
-    bottom: -4px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: var(--diff-was);
+  /* Hover, focus and the parked notch are affordance only — the tint is already
+     full — so they add the soft wash as a HALO rather than a colour change.
+     Scoped off Live, which owns the warm treatment below. The playhead is the
+     primary "you are here"; this halo is the quiet confirmation under it. */
+  .notch:not(.notch-live):hover i,
+  .notch:not(.notch-live):focus-visible i,
+  .notch:not(.notch-live).current i {
+    box-shadow: 0 0 0 2px var(--diff-was-soft);
   }
 
   /* Live is warm and reads as the present; the snapshots are cool and read as
-     the past (§H). Colour, never a glyph: a snapshot difference exists only
-     while parked, and a glyph would put a permanent-looking mark on a temporary
-     condition (§J). */
-  /* `.notch.notch-live`, not `.notch-live`, and the doubled class is
-     load-bearing: Live is `.current` at rest, and `.notch.current i` above
-     would otherwise outrank a single-class rule and paint the present in the
-     PAST's colour — the one thing this pair must never do. */
+     the past (§H). Colour, never a glyph (§J). Live is FILLED warm — it must
+     override the hollow-cool base every snapshot notch now uses, so it resets
+     both the border and the background. */
+  /* `.notch.notch-live`, not `.notch-live`: the doubled class keeps Live's fill
+     ahead of the shared `.notch i` base whatever order the file lands in. */
   .notch.notch-live i {
     width: 3px;
     height: 21px;
+    border: 0;
     border-radius: 2px;
     background: var(--diff-now);
   }
   .notch-live.current i {
     box-shadow: 0 0 0 3px var(--diff-now-soft);
+  }
+
+  /* The playhead — the parked cursor. A hairline riding the notch's position
+     with a downward cap; the eye tracks it to the notch and the slide reads as
+     distance travelled in time. Cool always: parking is only ever onto a
+     snapshot. The cap is deliberately chunky (12×8) so it carries the "you are
+     here" cue in greyscale, where the cool tint flattens into the notches' own
+     grey (§H). */
+  .playhead {
+    position: absolute;
+    bottom: var(--rule-bottom);
+    width: 0;
+    transform: translateX(-50%);
+    pointer-events: none;
+    transition: left 160ms ease-out, bottom 160ms ease-out;
+  }
+  .playhead::before {
+    content: "";
+    position: absolute;
+    left: -0.75px;
+    bottom: 0;
+    width: 1.5px;
+    height: 28px;
+    background: var(--diff-was);
+  }
+  .playhead::after {
+    content: "";
+    position: absolute;
+    left: -6px;
+    bottom: 27px;
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 8px solid var(--diff-was);
+  }
+  /* Motion is the attention cue here, so reduced-motion must not drop it in
+     silence: the slide is removed, but a persistent halo keeps the cursor
+     findable at its new position. */
+  @media (prefers-reduced-motion: reduce) {
+    .playhead {
+      transition: none;
+    }
+    .playhead::before {
+      box-shadow: 0 0 0 2px var(--diff-was-soft);
+    }
   }
 
   .strip-right {
@@ -545,5 +698,79 @@
     border-color: var(--accent);
     color: var(--accent-emphasis);
     font-weight: 600;
+  }
+  /* Delete is destructive, so it borrows `--danger` on hover — but only on
+     hover: a resting red button in a quiet writing desk reads as an alarm, and
+     the confirmation is what actually guards the action (ADR-0043). */
+  .act-del:hover:not(:disabled) {
+    border-color: var(--danger);
+    color: var(--danger);
+  }
+
+  /* The description surface (variant B). At rest it shows only what exists. */
+  .desc {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+  }
+  .desc-text {
+    font-style: italic;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 32ch;
+  }
+  .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text-3);
+    cursor: pointer;
+    border-radius: var(--r-sm);
+    transition: color 80ms linear, background-color 80ms linear;
+  }
+  .icon-btn:hover {
+    color: var(--accent-emphasis);
+    background: var(--accent-soft);
+  }
+  /* The empty case: a quiet invitation, never an empty box (§L). */
+  .add-desc {
+    font-size: var(--fs-sm);
+    color: var(--text-3);
+    background: none;
+    border: 0;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: var(--r-sm);
+  }
+  .add-desc:hover {
+    color: var(--accent-emphasis);
+  }
+  .desc-input {
+    font: inherit;
+    font-size: var(--fs-sm);
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 3px 8px;
+    min-width: 140px;
+    flex: 0 1 240px;
+  }
+  .desc-input::placeholder {
+    color: var(--text-3);
+    font-style: italic;
+  }
+  .desc-input:focus {
+    outline: none;
+    border-color: var(--accent);
   }
 </style>

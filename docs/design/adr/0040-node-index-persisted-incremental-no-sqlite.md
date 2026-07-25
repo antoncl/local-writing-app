@@ -316,6 +316,12 @@ schema (found in #381).
 there; its design belongs to a separate issue, or ADR-0040 acquires a second subject that ADR-0042's
 surfaces would then have to share.
 
+> **Designed in `docs/design/resolved-definitions-cache.md` (#394).** The storage this amendment
+> declined to specify is settled there — a two-level cache (a shared per-layer parse atom keyed by the
+> schema file's identity; a derived merged result keyed by chain identity plus `build_identity()`),
+> in-memory only, behind the one `read_metadata_schema` door. ADR-0040 keeps its single subject and
+> points there rather than growing a second.
+
 ### References must be two-layered
 
 **An edge is a function of a value AND a definition** — literally so:

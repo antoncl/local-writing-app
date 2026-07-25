@@ -42,6 +42,7 @@ const KIND_DEFAULT_SWATCH: Record<string, string> = {
   assistant: "graphite",
   project: "violet",
   research: "teal",
+  plotting: "amber",
   prompt: "indigo",
   mutation_set: "violet",
 };

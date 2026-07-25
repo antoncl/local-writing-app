@@ -155,6 +155,54 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "fields": ["tags"],
             "has_body": True,
         },
+        "plotting:base": {
+            # Abstract parent for authored plot-planning detail types. This is
+            # schema-authoring only for now: the Detail Types window can shape a
+            # plotting taxonomy before the app grows a dedicated Plotting pane or
+            # node CRUD surface.
+            "name": "Plotting",
+            "kind": "plotting",
+            "abstract": True,
+            "fields": ["summary", "tags", "color"],
+            "color": "amber",
+            "has_body": False,
+        },
+        "plotting:arc": {
+            "name": "Arc",
+            "kind": "plotting",
+            "parent": "plotting:base",
+            "fields": [],
+        },
+        "plotting:character_arc": {
+            "name": "Character Arc",
+            "kind": "plotting",
+            "parent": "plotting:arc",
+            "fields": ["characters"],
+        },
+        "plotting:plotline": {
+            "name": "Plotline",
+            "kind": "plotting",
+            "parent": "plotting:base",
+            "fields": [],
+        },
+        "plotting:subplot": {
+            "name": "Subplot",
+            "kind": "plotting",
+            "parent": "plotting:plotline",
+            "fields": [],
+        },
+        "plotting:beat": {
+            "name": "Beat",
+            "kind": "plotting",
+            "parent": "plotting:base",
+            "fields": ["characters", "locations"],
+        },
+        "plotting:turning_point": {
+            "name": "Turning Point",
+            "kind": "plotting",
+            "parent": "plotting:beat",
+            "fields": [],
+        },
         "mutation_set:mutation_set": {
             # Reusable mutation set (#62): a body-less bundle of
             # (field, op, value) rows + a target lore entry-type. Concrete (not

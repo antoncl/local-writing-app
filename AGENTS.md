@@ -76,4 +76,4 @@ per-machine settings, never in the project folder.
   without re-testing drag and resize in the actual app.
 
 ## Branching
-Work related to plotting/template contracts should be based on `origin/plotting`, not `master`.
+Work related to plotting/template contracts **must** based on `origin/plotting`, not `master`. The plotting branch is to be considered a feature branch, and every interaction with github *must* follow that workflow.

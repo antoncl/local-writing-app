@@ -17,14 +17,13 @@
   import ProseBodyView from "@/components/editor/body/ProseBodyView.svelte";
   import ChatBodyView from "@/components/editor/body/ChatBodyView.svelte";
   import ViewBodyView from "@/components/editor/body/ViewBodyView.svelte";
-  import PlotBoardBodyView from "@/components/editor/body/PlotBoardBodyView.svelte";
   import { coerceInputValue, type EntryInputDraft } from "@/lib/utils/promptInputs";
   import { resolutionSceneIdFromInputs } from "@/lib/editor-core/promptResolution";
   import { api } from "@/lib/api";
   import { formatCostEur } from "@/lib/utils/money";
   import { sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import { resolveColor } from "@/lib/utils/colors";
-  import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataFieldDefinition, MetadataSchema, PlotNode, PlotNodeSummary, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
+  import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataFieldDefinition, MetadataSchema, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
   import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import LayerAuthoringBar from "@/components/editor/LayerAuthoringBar.svelte";
@@ -61,7 +60,6 @@
     scene?: EditableDocument | null;
     documentKind?: DocumentKind;
     promptEntries?: PromptEntrySummary[];
-    plotEntries?: PlotNodeSummary[];
     // dialog. Optional — the picker degrades to "no items" when missing.
     structure?: import("@/lib/types").StructureDocument | null;
     // research notes.
@@ -95,7 +93,6 @@
     // The view designer self-persists; it reports its save lifecycle up so the
     // pane's tab badge can reflect it (#263).
     onViewSaveState?: ((state: ViewSaveState) => void) | undefined;
-    onPlotSaved?: ((plot: PlotNode) => void | Promise<void>) | undefined;
     // The rail layer picker chose a new authoring layer L (#314). Fires only
     // after the confirm-on-entry gate for a target beyond the open project.
     onAuthoringLayerChange?: ((layerId: string | null) => void) | undefined;
@@ -111,7 +108,6 @@
     scene = null,
     documentKind = "scene",
     promptEntries = [],
-    plotEntries = [],
     structure = null,
     researchStructure = null,
     loreEntries = [],
@@ -132,7 +128,6 @@
     onNavigate = undefined,
     onOpenChat = undefined,
     onViewSaveState = undefined,
-    onPlotSaved = undefined,
     onAuthoringLayerChange = undefined,
     onFlushScene = undefined,
     onSceneRestored = undefined
@@ -526,7 +521,6 @@
   function defaultEntryType() {
     if (documentKind === "lore") return "lore:lore_note";
     if (documentKind === "chat") return "chat:chat_session";
-    if (documentKind === "plot") return "plot:board";
     return "scene:scene";
   }
 
@@ -843,7 +837,7 @@
   $effect.pre(() => {
     maybeReseedInputs(scene, documentKind);
   });
-  let documentLabel = $derived(documentKind === "lore" ? "Entry" : documentKind === "structure_node" ? "Node" : documentKind === "chat" ? "Chat" : documentKind === "plot" ? "Plot" : "Scene");
+  let documentLabel = $derived(documentKind === "lore" ? "Entry" : documentKind === "structure_node" ? "Node" : documentKind === "chat" ? "Chat" : "Scene");
 
   // Fields whose value comes from a layer override (#314), passed to the rail so
   // it can lead them with the `ti-versions` mark. The picker itself lives in
@@ -930,7 +924,6 @@
       knownTags={knownTags}
       loreEntries={loreEntries}
       promptEntries={promptEntries}
-      plotEntries={plotEntries}
       structure={structure}
       researchStructure={researchStructure}
       implicitContextMatcher={implicitContextMatcher}
@@ -1077,7 +1070,6 @@
       {researchStructure}
       {loreEntries}
       {promptEntries}
-      {plotEntries}
       {availableScenes}
       {rawBodyLanguage}
       {loadedSceneId}
@@ -1133,7 +1125,6 @@
       bind:this={chatBodyView}
       {scene}
       {promptEntries}
-      {plotEntries}
       {assistantEntries}
       {loreEntries}
       {structure}
@@ -1156,15 +1147,6 @@
       onBodyChange={emitChange}
       onFocus={() => onFocus?.()}
       onSaveState={(state) => onViewSaveState?.(state)}
-    />
-  {/if}
-  {#if bodyShape === "plot"}
-    <PlotBoardBodyView
-      {scene}
-      {structure}
-      onFocus={() => onFocus?.()}
-      onNavigate={(payload) => onNavigate?.(payload)}
-      onSaved={(plot) => onPlotSaved?.(plot)}
     />
   {/if}
 
@@ -1206,7 +1188,6 @@
     researchStructure={researchStructure}
     loreEntries={loreEntries}
     promptEntries={promptEntries}
-    plotEntries={plotEntries}
     excludeId={scene?.id ?? null}
     implicitContextMatcher={implicitContextMatcher}
     on:updateDraft={(event) => updateInputsDialogDraft(event.detail.name, event.detail.value)}

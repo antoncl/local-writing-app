@@ -8,7 +8,7 @@
   // id<->ref translation.
   //
   // No server-side candidate listing — the in-memory data sources
-  // (structure, loreEntries, promptEntries, plotEntries) the rest of the UI uses are
+  // (structure, loreEntries, promptEntries) the rest of the UI uses are
   // canonical. excludeId becomes NodePicker.excludeIds.
 
   import { createEventDispatcher } from "svelte";
@@ -25,7 +25,6 @@
     NodePickerRef,
     LoreEntrySummary,
     MetadataFieldDefinition,
-    PlotNodeSummary,
     PromptEntrySummary,
     StructureDocument,
     StructureNode,
@@ -51,7 +50,6 @@
   export let researchStructure: StructureDocument | null = null;
   export let loreEntries: LoreEntrySummary[] = [];
   export let promptEntries: PromptEntrySummary[] = [];
-  export let plotEntries: PlotNodeSummary[] = [];
 
   const dispatch = createEventDispatcher<{
     change: { value: string | string[] };
@@ -96,7 +94,6 @@
   $: sceneIndex = structure ? flattenScenesAll(structure.root) : new Map<string, { id: string; title: string; entry_type: string }>();
   $: loreIndex = new Map(loreEntries.map((e) => [e.id, e] as const));
   $: promptIndex = new Map(promptEntries.map((e) => [e.id, e] as const));
-  $: plotIndex = new Map(plotEntries.map((e) => [e.id, e] as const));
   $: assistantIndex = new Map($assistantEntriesStore.map((e) => [e.id, e] as const));
   $: selectedRefs = selectedIds.map((id) => resolveRefById(id));
   $: refNodes = selectedRefs.map((ref): RefNode => ({ ...ref, entry_type: ref.entry_type ?? "" }));
@@ -130,8 +127,6 @@
     if (snippet) return { id, kind: "snippet", title: snippet.title, entry_type: snippet.entry_type };
     const assistant = assistantIndex.get(id);
     if (assistant) return { id, kind: "assistant", title: assistant.title, entry_type: assistant.entry_type };
-    const plot = plotIndex.get(id);
-    if (plot) return { id, kind: "plot", title: plot.title, entry_type: plot.entry_type };
     // Fall back to the picker's configured kind so a freshly-saved ref whose
     // index hasn't refreshed yet still shows the right type-pill color.
     const fallbackKind = (targetKind || "lore") as NodePickerRef["kind"];
@@ -211,7 +206,6 @@
             researchStructure={researchStructure}
             loreEntries={loreEntries}
             promptEntries={promptEntries}
-            plotEntries={plotEntries}
             assistantEntries={$assistantEntriesStore}
             on:change={handlePickerChange}
           />

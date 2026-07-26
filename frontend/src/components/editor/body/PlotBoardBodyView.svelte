@@ -63,7 +63,7 @@
     instance: PlotNode;
     point: PlotTemplateInstancePoint;
     status: "missing" | "partial" | "used";
-    claim: PlotPointClaim | null;
+    claims: PlotPointClaim[];
   };
 
   type PlotDragPayload =
@@ -146,16 +146,20 @@
     const rows: TemplatePointRow[] = [];
     for (const instance of visibleTemplateInstances) {
       for (const point of instance.template_instance?.plot_points ?? []) {
-        const claim = claims.find(
+        const pointClaims = claims.filter(
           (candidate) =>
             candidate.template_instance_id === instance.id &&
             candidate.plot_point_id === point.plot_point_id,
-        ) ?? null;
+        );
         rows.push({
           instance,
           point,
-          claim,
-          status: claim ? (claim.claim_type === "partially_satisfies" ? "partial" : "used") : "missing",
+          claims: pointClaims,
+          status: pointClaims.length === 0
+            ? "missing"
+            : pointClaims.some((claim) => claim.claim_type !== "partially_satisfies")
+              ? "used"
+              : "partial",
         });
       }
     }
@@ -589,10 +593,6 @@
 
   function selectPalettePoint(row: TemplatePointRow): void {
     selectedPalettePoint = pointKey(row.instance.id, row.point.plot_point_id);
-    if (row.claim) {
-      selectClaim(row.claim);
-      return;
-    }
     selectedCardId = null;
     selectedClaimId = null;
     selectedCanvasColumnId = null;
@@ -1411,6 +1411,7 @@
     {selectedContextSceneId}
     {selectedPaletteRow}
     {selectedPointLabel}
+    {selectClaim}
     {structureColumnOptions}
     {changeCardColumn}
     {changeCardPlotline}

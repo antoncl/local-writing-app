@@ -19,7 +19,7 @@
     instance: PlotNode;
     point: PlotTemplateInstancePoint;
     status: "missing" | "partial" | "used";
-    claim: PlotPointClaim | null;
+    claims: PlotPointClaim[];
   };
 
   interface Props {
@@ -42,6 +42,7 @@
     selectedContextSceneId: string | null;
     selectedPaletteRow: TemplatePointRow | null;
     selectedPointLabel: string;
+    selectClaim: (claim: PlotPointClaim) => void;
     structureColumnOptions: StructureColumnOption[];
     changeCardColumn: (event: Event) => void;
     changeCardPlotline: (event: Event) => void;
@@ -74,6 +75,7 @@
     selectedContextSceneId,
     selectedPaletteRow,
     selectedPointLabel,
+    selectClaim,
     structureColumnOptions,
     changeCardColumn,
     changeCardPlotline,
@@ -105,6 +107,10 @@
 
   function claimTypeLabel(value: PlotContextClaim["claim_type"] | PlotPointClaim["claim_type"]): string {
     return CLAIM_TYPE_OPTIONS.find((option) => option.value === value)?.label ?? value;
+  }
+
+  function cardTitle(cardId: string): string {
+    return board.cards.find((card) => card.id === cardId)?.title ?? cardId;
   }
 </script>
 
@@ -279,6 +285,24 @@
         <dt>Notes</dt>
         <dd>{selectedPaletteRow.point.notes}</dd>
       {/if}
+      <dt>Function badges</dt>
+      <dd>
+        {#if selectedPaletteRow.claims.length === 0}
+          No cards claim this plot beat yet.
+        {:else}
+          <div class="beat-claim-list">
+            {#each selectedPaletteRow.claims as claim (claim.id)}
+              <button type="button" class="beat-claim-button" onclick={() => selectClaim(claim)}>
+                <strong>{claim.claim_label || cardTitle(claim.card_id)}</strong>
+                <span>{claimTypeLabel(claim.claim_type)}</span>
+                {#if claim.strength}
+                  <small>{claim.strength}</small>
+                {/if}
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </dd>
     </dl>
   {:else}
     <p class="muted-line">No card selected.</p>

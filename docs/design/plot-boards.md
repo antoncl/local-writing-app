@@ -1,6 +1,6 @@
 # Plot Boards and Plot Templates
 
-Status: draft for discussion · 2026-07-18
+Status: draft for discussion - updated 2026-07-26
 
 Related mockup:
 
@@ -30,10 +30,10 @@ or subverted.
 - Cards are board state over existing project nodes. They are not a second scene
   system.
 - Placeholders are allowed, and may later be promoted into real scenes.
-- The board's horizontal structure should be tied to the draft structure where
-  possible: acts, chapters, sequences, or whatever structure node types the
-  project allows. Plot phases and template placement guidance are overlays, not
-  the primary manuscript axis.
+- The board's structure should be tied to the draft structure where possible:
+  acts, chapters, sequences, or whatever structure node types the project
+  allows. Plot phases and template placement guidance are overlays, not the
+  primary manuscript organization.
 - AI must read semantic board data, not Svelte Flow coordinates.
 - System-provided templates are read-only. Editing starts by duplicating them
   into a local layer, matching the saved-view pattern.
@@ -287,9 +287,16 @@ type PlotStructureColumn = {
 ```
 
 When `source` is `draft_structure`, columns are backed by Manuscript Structure
-nodes such as acts, chapters, or sequences. When the author adds a chapter from
-the board, the board should call the same backend structure mutation used by the
-Draft pane and then refresh the axis from canonical structure data.
+nodes such as acts, chapters, or sequences. The word `columns` is historical:
+visually, structure nodes may render as nested Svelte Flow groups rather than
+strict vertical columns. Acts and other top-level containers can arrange
+left-to-right across the canvas; chapters and child containers can sit inside
+their parents; cards sit inside the currently assigned structure group.
+
+`parent_structure_node_id` carries the hierarchy. When the author adds or moves
+a chapter/container from the board, the board should call the same backend
+structure mutation used by the Draft pane and then refresh the axis from
+canonical structure data.
 
 When `source` is `manual`, columns are planning-only buckets. This should be a
 fallback for scratch boards, not the default book plotting model.
@@ -311,8 +318,8 @@ type PlotCard = {
 
 `node_ref` should use the existing node identity vocabulary where possible. A
 placeholder card has no `node_ref`; promotion creates a real scene and adds one.
-`structure_column_id` places the card under an act/chapter/sequence column
-without implying that the card itself owns the structure node.
+`structure_column_id` places the card inside an act/chapter/sequence structure
+group without implying that the card itself owns the structure node.
 
 ### PlotPointClaim
 
@@ -386,6 +393,17 @@ pan, zoom, fit-to-view, and a minimap/overview when the board grows beyond the
 current viewport. These controls are presentation state, but they matter to the
 authoring workflow because a single board may contain the book's plot,
 subplots, character arcs, and unresolved placeholders.
+
+Structure groups are Svelte Flow subflows over semantic board data. Dragging a
+card into a different group updates that card's `structure_column_id`. Dragging a
+chapter or other movable container into a different parent routes through the
+Manuscript Structure move API. The rendered node parentage and coordinates are
+layout state; the board and structure records remain the source of truth.
+
+The default layout should make manuscript organization legible before manual
+tuning: top-level containers left-to-right, nested containers left-to-right
+within their parent, and cards top-to-bottom within the most specific assigned
+container.
 
 Function-claim badges are board interactions over semantic `PlotPointClaim`
 records. Dragging from the palette creates a claim on a card. Dragging an
@@ -479,7 +497,10 @@ V1 should be a thin vertical slice:
 - duplicate a system template into a local `plot:template_instance` node;
 - list/read/save local `plot:template_instance` nodes referenced by a board;
 - add board-local plotlines;
-- show a draft-structure-backed horizontal axis;
+- show draft-structure-backed nested groups on a Svelte Flow canvas;
+- move cards between structure groups by updating `structure_column_id`;
+- move chapters/containers between supported parents by reusing existing
+  Manuscript Structure mutations;
 - add a new chapter/structure node from the board by reusing existing structure
   mutations;
 - add placeholder cards;

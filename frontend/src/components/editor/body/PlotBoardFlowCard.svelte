@@ -58,8 +58,8 @@
           class="claim-chip nodrag"
           class:selected={claim.id === ctx.selectedClaimId}
           role="group"
-          aria-label={`Claim ${ctx.pointLabel(claim)}. Drag to move to another card.`}
-          title={`Drag ${ctx.pointLabel(claim)} to another card`}
+          aria-label={`Function badge ${ctx.pointLabel(claim)}. Drag to move to another card.`}
+          title={`Drag ${ctx.pointLabel(claim)} badge to another card`}
           draggable={true}
           ondragstart={(event) => ctx.dragClaim(claim, event)}
           ondragend={() => ctx.clearDragOver()}
@@ -79,8 +79,8 @@
           <button
             type="button"
             class="claim-remove"
-            title={`Remove ${ctx.pointLabel(claim)}`}
-            aria-label={`Remove ${ctx.pointLabel(claim)}`}
+            title={`Remove ${ctx.pointLabel(claim)} badge`}
+            aria-label={`Remove ${ctx.pointLabel(claim)} badge`}
             disabled={ctx.saving}
             onclick={(event) => ctx.removeClaim(claim, event)}
           >

@@ -100,17 +100,21 @@
     { value: "medium", label: "Medium" },
     { value: "strong", label: "Strong" },
   ];
+
+  function claimTypeLabel(value: PlotContextClaim["claim_type"] | PlotPointClaim["claim_type"]): string {
+    return CLAIM_TYPE_OPTIONS.find((option) => option.value === value)?.label ?? value;
+  }
 </script>
 
 <aside class="plot-inspector" aria-label="Plot selection">
   {#if selectedClaim}
     <header class="inspector-head">
-      <span>Claim</span>
+      <span>Function badge</span>
       <strong>{selectedPointLabel}</strong>
     </header>
     <div class="inspector-form">
       <label>
-        Label override
+        Badge label
         <input
           value={selectedClaim.claim_label ?? ""}
           placeholder={selectedPointLabel}
@@ -122,8 +126,14 @@
         Card
         <input value={selectedCard?.title ?? selectedClaim.card_id} disabled />
       </label>
+      {#if selectedPaletteRow?.point.function_claim}
+        <label>
+          Story function
+          <textarea rows="3" value={selectedPaletteRow.point.function_claim} disabled></textarea>
+        </label>
+      {/if}
       <label>
-        Type
+        Assignment
         <select value={selectedClaim.claim_type} disabled={Boolean(savingMessage)} onchange={changeClaimType}>
           {#each CLAIM_TYPE_OPTIONS as option (option.value)}
             <option value={option.value}>{option.label}</option>
@@ -150,7 +160,7 @@
         </label>
       {/if}
       <label>
-        Specific rationale
+        Rationale
         <textarea
           rows="4"
           value={selectedClaim.rationale ?? ""}
@@ -217,7 +227,7 @@
         </label>
       {/if}
       <div class="inspector-stat">
-        <span>Claims</span>
+        <span>Function badges</span>
         <strong>{(claimsByCard.get(selectedCard.id) ?? []).length}</strong>
       </div>
       {#if selectedCard.node_ref}
@@ -242,16 +252,16 @@
     </div>
   {:else if selectedPaletteRow}
     <header class="inspector-head">
-      <span>Function point</span>
+      <span>Plot point</span>
       <strong>{selectedPaletteRow.point.title || selectedPaletteRow.point.plot_point_id}</strong>
     </header>
     <dl>
-      <dt>Template instance</dt>
+      <dt>Template</dt>
       <dd>{selectedPaletteRow.instance.title}</dd>
       <dt>Status</dt>
       <dd>{selectedPaletteRow.status}</dd>
       {#if selectedPaletteRow.point.function_claim}
-        <dt>Function claim</dt>
+        <dt>Story function</dt>
         <dd>{selectedPaletteRow.point.function_claim}</dd>
       {/if}
       {#if selectedPaletteRow.point.notes}
@@ -281,7 +291,7 @@
       {:else if plotContext}
         <div class="context-stats">
           <span>{plotContext.cards.length} cards</span>
-          <span>{plotContext.claims.length} claims</span>
+          <span>{plotContext.claims.length} badges</span>
           <span>{omittedCount("future_cards")} future</span>
         </div>
         {#if plotContext.cards.length === 0}
@@ -304,7 +314,7 @@
                     {#each contextClaimsForCard(contextCard.id) as contextClaim (contextClaim.id)}
                       <li>
                         <span>{contextPointLabel(contextClaim)}</span>
-                        <small>{contextClaim.claim_type}</small>
+                        <small>{claimTypeLabel(contextClaim.claim_type)}</small>
                       </li>
                     {/each}
                   </ul>

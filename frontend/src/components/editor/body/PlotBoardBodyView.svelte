@@ -283,7 +283,7 @@
       if (req !== templateRequest) return;
       templateInstances = nodes.filter((node): node is PlotNode => Boolean(node));
       if (templateInstances.length !== ids.length) {
-        templateLoadError = "Some template instances could not be loaded.";
+        templateLoadError = "Some templates could not be loaded.";
       }
     });
   });
@@ -994,7 +994,7 @@
     await persistBoard(nextBoard, message);
   }
 
-  async function updateSelectedClaim(patch: Partial<PlotPointClaim>, message = "Saving claim"): Promise<void> {
+  async function updateSelectedClaim(patch: Partial<PlotPointClaim>, message = "Saving badge"): Promise<void> {
     const claim = selectedClaim;
     if (!claim || savingMessage) return;
     const nextBoard = cloneBoardSpec(board);
@@ -1138,7 +1138,7 @@
     };
     const nextBoard = cloneBoardSpec(board);
     nextBoard.claims = [...(nextBoard.claims ?? []), nextClaim];
-    const saved = await persistBoard(nextBoard, "Attaching function point");
+    const saved = await persistBoard(nextBoard, "Attaching badge");
     if (saved) {
       selectedCardId = cardId;
       selectedClaimId = nextClaim.id;
@@ -1158,7 +1158,7 @@
     nextBoard.claims = (nextBoard.claims ?? []).map((candidate) =>
       candidate.id === claimId ? { ...candidate, card_id: cardId } : candidate,
     );
-    const saved = await persistBoard(nextBoard, "Moving claim");
+    const saved = await persistBoard(nextBoard, "Moving badge");
     if (saved) {
       selectedCardId = cardId;
       selectedClaimId = claimId;
@@ -1171,7 +1171,7 @@
     if (savingMessage) return;
     const nextBoard = cloneBoardSpec(board);
     nextBoard.claims = (nextBoard.claims ?? []).filter((candidate) => candidate.id !== claim.id);
-    const saved = await persistBoard(nextBoard, "Removing claim");
+    const saved = await persistBoard(nextBoard, "Removing badge");
     if (saved) {
       selectedClaimId = null;
       selectedPalettePoint = pointKey(claim.template_instance_id, claim.plot_point_id);
@@ -1341,10 +1341,10 @@
 </script>
 
 <section class="plot-board" onfocusin={() => onFocus?.()}>
-  <aside class="plot-palette" aria-label="Plot template instances">
+  <aside class="plot-palette" aria-label="Plot templates">
     <div class="add-template">
       <label class="filter-label">
-        Add instance
+        Add template
         <select bind:value={templateToAddId}>
           {#each availableTemplates as template (template.id)}
             <option value={template.id}>{template.title}</option>
@@ -1354,8 +1354,8 @@
       <button
         type="button"
         class="tool-button icon-only"
-        title="Add template instance"
-        aria-label="Add template instance"
+        title="Add template to board"
+        aria-label="Add template to board"
         disabled={!templateToAddId || Boolean(savingMessage)}
         onclick={() => addTemplateInstance()}
       >
@@ -1366,7 +1366,7 @@
     <label class="filter-label template-filter">
       Template
       <select bind:value={templateFilterId}>
-        <option value="">All template instances</option>
+        <option value="">All templates on board</option>
         {#each templateInstances as instance (instance.id)}
           <option value={instance.id}>{instance.title}</option>
         {/each}
@@ -1378,13 +1378,13 @@
         <p class="muted-line">{templateLoadError}</p>
       {/if}
       {#if visibleTemplateInstances.length === 0}
-        <p class="muted-line">No template instances on this board.</p>
+        <p class="muted-line">No templates on this board.</p>
       {:else}
         {#each visibleTemplateInstances as instance (instance.id)}
           <section class="template-block">
             <header>
               <strong>{instance.title}</strong>
-              <span>{instance.template_instance?.plot_points?.length ?? 0}</span>
+              <span>{instance.template_instance?.plot_points?.length ?? 0} points</span>
             </header>
             {#each paletteRows.filter((row) => row.instance.id === instance.id) as row (row.point.plot_point_id)}
               <button
@@ -1413,7 +1413,7 @@
   <main class="plot-canvas" aria-label="Plot board cards">
     <div class="board-toolbar">
       <span>{cards.length} cards</span>
-      <span>{claims.length} claims</span>
+      <span>{claims.length} badges</span>
       <span>{board.relationships.length} relationships</span>
       {#if savingMessage}
         <span>{savingMessage}...</span>

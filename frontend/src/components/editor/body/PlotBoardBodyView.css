@@ -795,6 +795,11 @@
   gap: var(--sp-1);
 }
 
+.beat-claim-panel {
+  display: grid;
+  gap: var(--sp-1);
+}
+
 .beat-claim-button {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

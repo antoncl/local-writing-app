@@ -2,7 +2,8 @@
 
 - Status: **Accepted** — 2026-07-21 (Anton, PR #351). Designed with him over #308 across two sessions:
   the in-context reach and the bounded authoring layer (§1–§4), **§5 including its no-"between"
-  boundary**, and the reach cue (§8 — header strip, entry gate, footer echo, non-sticky L).
+  boundary**, and the reach cue (§8 — header strip, entry gate, footer echo, non-sticky L). ·
+  **Amendment 1: clear-to-inherit — the inverse gesture (→ `create-project-wizard.md`)**
 - Feature: #7 · Issue: #308 · Gates: #313 (slice D) · #314 (slice E)
 - Follows: ADR-0039 (the hierarchy model), ADR-0013 (+ Amendment 1 — **this ADR settles its open
   question**), ADR-0016 (the mutation unit), ADR-0017 (collection deltas authored as list edits),
@@ -260,3 +261,38 @@ disagree with it.
 - **The picker needs the layer roster on the wire** — the chain with ranks, which #334 provides.
 - **Still open, and small:** the exact visual of the rail treatment is #313's to render within the
   design language. This ADR fixes only its register, and the requirement that a gate accompany it.
+
+## Amendment 1 — clear-to-inherit: the inverse gesture, one field-display language (2026-07-25)
+
+Full design: `docs/design/create-project-wizard.md` §8 (mockup `0471-clear-to-inherit.html`). This ADR
+built the gesture that *authors* an override at a layer; it never specified the **inverse** — returning
+a field to inherited. That inverse is a general field-display concern, not wizard chrome: it lands in
+`FieldValueEditor` / `MetadataPanel`, so it touches every field.
+
+**Two resolution models, one intent — unset ⇒ inherit.**
+
+- *Id-keyed overrides* (lore): clearing drops just that field's row(s) from the layer's `overrides/`
+  delta — a targeted single-field unset, versus today's all-or-nothing whole-file deletion (which fires
+  only when the author retypes the exact inherited value). Rides `_diff_metadata_to_override_rows` /
+  `materialize_override_metadata`.
+- *Chain-walk fields* (project-node authored fields per ADR-0039 Amendment 3, and settings / AI
+  policy): clearing **pops the key** so the walk defers to an ancestor. `_stated_ai_policy` already
+  reads a missing key as "no opinion"; the gap was only a write path that removes it (#471).
+
+**One visual language, tuned quiet.**
+
+- Provenance is carried by **tint**: an inherited value is a *gentle text dim* — no filled/boxed
+  treatment, so dark mode is not overpowered — while an overridden value is live, leading with **this
+  ADR's own `ti-versions` mark** (slice D's glyph, now made interactive, never a new one). The glyph is
+  the primary signal; the tint is a quiet second.
+- Inheriting is the common case, so an inherited row carries **no persistent source label** — the
+  source is in the tooltip.
+- The reset **action** appears only on an overridden row, on hover, above the `ti-versions` mark, and
+  **names the source rather than "inherit"**: *"Reset to <source>"*.
+
+**AI policy is the same pattern as a three-stop slider** (Off · Local · Cloud, glyphs above each stop),
+carrying the identical tint and hover reset; at the machine-settings root there is nothing to inherit,
+so it shows no reset.
+
+The write-side gesture (§1–§8) is untouched — L-picker, `--warn` header, entry gate and footer echo
+all stand. Clear-to-inherit is their inverse, at the same rail.

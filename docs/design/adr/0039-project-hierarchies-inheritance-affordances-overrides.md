@@ -2,7 +2,8 @@
 
 - Status: **Accepted** — 0.7.0, 2026-07-19 (PR #319) · rewritten 2026-07-19 after two rounds of
   adversarial review · **Amendment 1: inheritance is declared, not inferred** · **Amendment 2: one
-  traversal; the root is stipulated, not inferred from a stray `metadata.schema.yaml`**
+  traversal; the root is stipulated, not inferred from a stray `metadata.schema.yaml`** · **Amendment
+  3: the create-project wizard + authored-field inheritance (→ `create-project-wizard.md`)**
 - Feature: #7 (epic) full project hierarchies
 - Companion: ADR-0040 (the index — which *materializes* the chain, not merely caches it)
 - Amends: ADR-0013 (see its Amendment 1) · Gesture UX: **ADR-0042** (co-designed with mutation
@@ -419,3 +420,32 @@ unsettled builds on sand — and #309 waits on #306.
 - **Overriding a `body` field.** ADR-0013's scope is deliberately total — title, body and every field
   travel. Overrides are per-field and body is a field, so a layer-level body override is expressible
   and lands on 0013's buffer-safe read-only body overlay. Permitted; slice E states the interaction.
+
+## Amendment 3 — the create-project wizard, and authored-field inheritance (2026-07-25)
+
+Full design and mockups: `docs/design/create-project-wizard.md` (`0318-create-wizard.html`,
+`0471-clear-to-inherit.html`). This amendment records only what binds to *this* ADR's model; the
+wizard's flow, field set and chrome live in the design doc.
+
+**The wizard is where the declaration (Amendment 1) is made.** It presents the filesystem-enumerated
+candidate ancestors and the author ticks the ones to inherit from — the create-time counterpart of the
+post-hoc declaration editor. Because the project does not exist yet, candidate enumeration runs against
+the *prospective* folder over the same `declared_ancestor_candidates` walk; the walk and its bound are
+unchanged.
+
+**Authored project-node fields inherit by the settings walk, not the override index.** #317 exposed
+that the project node's authored fields (measurement, tense, spelling, language, POV, …) never resolved
+over the chain. They now resolve **nearest-explicit-wins over the declared ancestry** — the rule this
+ADR already applies to lore and #312 applies to settings. Crucially it is *not* the id-keyed override
+index: the project node is already indexed (#334) with a deliberately unique id per layer (#343), so
+there is no shared-id shadow to merge. "Inherit" is a field's key being **absent** at a layer. The one
+law, stated once: **a field left undefined resolves to the nearest ancestor that defines it.**
+
+**No leaf/container declaration.** The wizard does not ask "book or universe." Consistent with this ADR
+("a universe is just a project whose scenes folder is empty"), the runtime never classifies by level —
+a child roster shows iff a project has child-project folders, a manuscript pane iff it has scenes. Every
+new project is seeded one scene at creation and opens ready to write; the only rule the wizard must
+honour is to **never seed a scene at open-time** (which would give a container a stray scene).
+
+**`genre` is removed** (pre-1.0, no migration): a keyword cannot carry it; its replacement is a
+Lore-entry treatment, out of scope.

@@ -18,10 +18,76 @@ The core distinction:
   point notes, local labels, status, and author intent for this story.
 - `plot:board` is an application of one or more templates to a specific story.
 
-A plot point is a story function claim, not a required location in the manuscript.
-One scene may satisfy several plot points across several plotlines; one plot point
-may be satisfied by several scenes; a plot point may also be intentionally omitted
-or subverted.
+A plot point is a template's named expectation for part of a story, not a
+required location in the manuscript. A plot function is the story job that helps
+meet that expectation: commitment, reversal, reveal, escalation, payoff,
+refusal, transformation, and so on. One scene may perform several functions
+across several plotlines; several cards may combine to satisfy one plot point; a
+plot point may also be intentionally omitted or subverted.
+
+For authors, the model should feel like this:
+
+- arrange acts, chapters, sequences, and cards on a canvas;
+- use plot templates as optional lenses over those cards;
+- attach plot-function badges to the cards that perform those functions;
+- draw relationships between cards when order, causality, setup/payoff, or
+  contrast matters.
+
+The implementation has three separate layers:
+
+- Manuscript Structure owns acts, chapters, sequences, and scene ordering.
+- Plot Board owns cards, plotlines, function badges, and relationships.
+- Svelte Flow layout owns coordinates, viewport, and visual nesting.
+
+The UI should keep those layers mostly invisible. Authors should not need to
+learn "axis", "columns", "claims", or "template instances" to use the board.
+
+### Example: One Plot Point, Several Functions
+
+In a three-act template, the plot point "First Turning Point" might mean "the
+protagonist crosses a threshold into the main conflict." In this book, that
+expectation may be satisfied by a chapter where Mara steals a ledger and can no
+longer return to her old life.
+
+Several functions combine to make that plot point credible:
+
+- commitment: Mara chooses theft over obedience;
+- lock-in: returning the ledger would expose her;
+- escalation: the antagonist now has a reason to hunt her;
+- question: what secret is valuable enough to risk exile?
+
+The three layers express the same material differently:
+
+```yaml
+manuscript_structure:
+  act: Act I
+  chapter: Chapter 4 - The Ledger
+  scene: scene_archive_breakin
+
+plot_board:
+  card:
+    id: card_archive_breakin
+    title: Archive Break-in
+    node_ref: scene:scene_archive_breakin
+    structure_column_id: chapter_4
+  function_badges:
+    - template_plot_point: first_turning_point
+      claim_type: satisfies
+      evidence:
+        - commitment
+        - lock-in
+        - escalation
+        - raises_question
+
+layout:
+  group: chapter_4
+  node: card_archive_breakin
+  position: { x: 80, y: 140 }
+```
+
+The manuscript layer says where the scene lives. The plot-board layer says what
+story work the card is doing. The layout layer says where the card appears on
+the canvas.
 
 ## Design Principles
 
@@ -56,6 +122,23 @@ threads, and any other lines of story pressure. In the current model this lives
 inside the board. There is no separate book-level plotline registry unless a
 future workflow proves one is needed.
 
+**Plot point** means a named expectation in a template. "First Turning Point",
+"Midpoint", "Climax", and "Dark Night" are plot points when a template uses
+those labels.
+
+**Plot function** means the story job performed by a card or scene. A function
+may help satisfy a plot point, and several functions may combine before the plot
+point feels earned.
+
+**Structure group** means a visual group on the plot board backed by an act,
+chapter, sequence, or other Manuscript Structure node. The board may render
+these as nested Svelte Flow groups, but the board does not own the manuscript
+hierarchy.
+
+**Function badge** is the user-facing term for assigning a template plot point
+to a card. The internal model may still call this a claim because AI and
+diagnostic workflows need evidence, confidence, and rationale.
+
 The expectation is one primary plot board per book. That board can still contain
 many plotlines and many template instances. Multiple boards may exist later for
 experimentation, alternate structures, or scratch work, but they are not the
@@ -77,7 +160,7 @@ plot:template_instance
 plot:board
 ```
 
-Both are ordinary file-backed nodes. A likely folder layout:
+All three are ordinary file-backed nodes. A likely folder layout:
 
 ```text
 plots/
@@ -106,7 +189,7 @@ hallucinating. Treating template instances as nodes lets the existing mutation /
 effective-state machinery hide or rewrite future-sensitive plot information for
 the active manuscript position.
 
-## Template As Class, Board As Instance
+## Template, Story Use, and Board
 
 A template defines the general class of a plotting rubric:
 
@@ -148,7 +231,7 @@ id: board_main_plot
 entry_type: plot:board
 title: Main Plot Board
 board:
-  template_instance_refs:
+  template_instance_ids:
     - inst_main_three_act
   plotlines:
     - id: main
@@ -173,7 +256,7 @@ board:
 
 The template explains what a plot point means in general. The template-instance
 node records what that point means in this book. The board displays and edits
-claims against those instances.
+function badges against those instances.
 
 ## Data Contracts
 
@@ -255,51 +338,24 @@ type PlotPointInstanceNote = {
 
 ```ts
 type PlotBoardSpec = {
-  template_instance_refs: string[];
-  structure_axis?: PlotStructureAxis;
-  plotlines: Plotline[];
+  template_instance_ids: string[];
+  plotlines: PlotLine[];
   cards: PlotCard[];
   claims: PlotPointClaim[];
   relationships?: PlotRelationship[];
 };
 ```
 
-### PlotStructureAxis
+`PlotBoardSpec` does not need a board-owned structure tree for the normal book
+plotting workflow. Draft-backed structure groups are derived from Manuscript
+Structure at render time. When the author adds or moves a chapter/container from
+the board, the board should call the same backend structure mutation used by the
+Draft pane and then refresh from canonical structure data.
 
-```ts
-type PlotStructureAxis = {
-  source: "draft_structure" | "manual";
-  columns: PlotStructureColumn[];
-};
-```
-
-```ts
-type PlotStructureColumn = {
-  id: string;
-  title: string;
-  structure_node_id?: string;
-  parent_structure_node_id?: string;
-  entry_type?: string;
-  kind?: "act" | "chapter" | "sequence" | "manual" | "custom";
-  position: number;
-  metadata?: Record<string, unknown>;
-};
-```
-
-When `source` is `draft_structure`, columns are backed by Manuscript Structure
-nodes such as acts, chapters, or sequences. The word `columns` is historical:
-visually, structure nodes may render as nested Svelte Flow groups rather than
-strict vertical columns. Acts and other top-level containers can arrange
-left-to-right across the canvas; chapters and child containers can sit inside
-their parents; cards sit inside the currently assigned structure group.
-
-`parent_structure_node_id` carries the hierarchy. When the author adds or moves
-a chapter/container from the board, the board should call the same backend
-structure mutation used by the Draft pane and then refresh the axis from
-canonical structure data.
-
-When `source` is `manual`, columns are planning-only buckets. This should be a
-fallback for scratch boards, not the default book plotting model.
+Manual planning-only groups may be useful later for scratch boards, but they
+should not be the default book plotting model. If added, they should be clearly
+separate from Manuscript Structure groups so the board does not become a second
+canonical manuscript hierarchy.
 
 ### PlotCard
 
@@ -319,9 +375,12 @@ type PlotCard = {
 `node_ref` should use the existing node identity vocabulary where possible. A
 placeholder card has no `node_ref`; promotion creates a real scene and adds one.
 `structure_column_id` places the card inside an act/chapter/sequence structure
-group without implying that the card itself owns the structure node.
+group without implying that the card itself owns the structure node. The name is
+legacy from the earlier column-strip prototype; conceptually this is a structure
+reference and should migrate toward a clearer name such as `structure_ref_id`
+when a schema migration is worth the churn.
 
-### PlotPointClaim
+### Function Badge
 
 ```ts
 type PlotPointClaim = {
@@ -341,7 +400,12 @@ type PlotPointClaim = {
 };
 ```
 
-Initial claim vocabulary:
+The internal name is `PlotPointClaim` because this record makes a specific
+assertion: this card performs this plot function, with optional evidence and
+rationale. The user-facing surface should call these function badges, plot
+badges, beats, or roles rather than claims.
+
+Initial badge assignment vocabulary:
 
 ```ts
 type PlotClaimType =
@@ -394,22 +458,23 @@ current viewport. These controls are presentation state, but they matter to the
 authoring workflow because a single board may contain the book's plot,
 subplots, character arcs, and unresolved placeholders.
 
-Structure groups are Svelte Flow subflows over semantic board data. Dragging a
-card into a different group updates that card's `structure_column_id`. Dragging a
-chapter or other movable container into a different parent routes through the
-Manuscript Structure move API. The rendered node parentage and coordinates are
-layout state; the board and structure records remain the source of truth.
+Structure groups are Svelte Flow subflows projected from Manuscript Structure.
+Dragging a card into a different group updates the card's structure reference
+(`structure_column_id` in the current contract). Dragging a chapter or other
+movable container into a different parent routes through the Manuscript
+Structure move API. The rendered node parentage and coordinates are layout
+state; the board and structure records remain the source of truth.
 
 The default layout should make manuscript organization legible before manual
 tuning: top-level containers left-to-right, nested containers left-to-right
 within their parent, and cards top-to-bottom within the most specific assigned
 container.
 
-Function-claim badges are board interactions over semantic `PlotPointClaim`
-records. Dragging from the palette creates a claim on a card. Dragging an
-existing badge from one card to another moves that claim by changing its
-`card_id`; it does not create a duplicate claim unless the user explicitly asks
-for copy/duplicate behavior.
+Function badges are board interactions over semantic `PlotPointClaim` records.
+Dragging from the palette creates a badge on a card. Dragging an existing badge
+from one card to another moves that assignment by changing its `card_id`; it
+does not create a duplicate unless the user explicitly asks for copy/duplicate
+behavior.
 
 ## AI Context
 
@@ -428,18 +493,19 @@ A board context packet should include:
 - template instances with resolved template and plot-point definitions;
 - plotlines;
 - cards with titles, synopses, node refs, and resolved node summaries;
-- claims grouped by template instance and plotline;
+- function badges/claims grouped by template instance and plotline;
 - unresolved, weak, partial, rejected, or intentionally omitted points;
 - relationships between cards;
 - optional selected cards or selected plot points as target context.
 
 The likely UI is a specialized Plot Context Picker: similar in spirit to the
 existing `context_pick`, but centered on boards, template instances, plot points,
-cards, claims, and plotlines. It should let an author choose "this board", "these
-plot points", "these weak claims", or "this card and its related claims" without
-forcing a generic node picker to understand plot-specific intent.
+cards, function badges, and plotlines. It should let an author choose "this
+board", "these plot points", "these weak badges", or "this card and its related
+plot functions" without forcing a generic node picker to understand
+plot-specific intent.
 
-The AI contract should ask for evidence before making a claim:
+The AI contract should ask for evidence before making an assignment:
 
 ```text
 Do not mark a plot point satisfied unless you can cite a card, scene summary,
@@ -450,7 +516,7 @@ partially_satisfies with rationale.
 AI outputs should land as draft artifacts:
 
 - suggested cards;
-- suggested claims;
+- suggested function badges/claims;
 - suggested relationship edges;
 - critique notes;
 - alternate template-instance mappings;
@@ -498,7 +564,8 @@ V1 should be a thin vertical slice:
 - list/read/save local `plot:template_instance` nodes referenced by a board;
 - add board-local plotlines;
 - show draft-structure-backed nested groups on a Svelte Flow canvas;
-- move cards between structure groups by updating `structure_column_id`;
+- move cards between structure groups by updating the card's structure
+  reference;
 - move chapters/containers between supported parents by reusing existing
   Manuscript Structure mutations;
 - add a new chapter/structure node from the board by reusing existing structure
@@ -506,8 +573,8 @@ V1 should be a thin vertical slice:
 - add placeholder cards;
 - attach existing scene nodes to cards;
 - expose an affordance on placeholder cards for promoting them to scenes;
-- add/edit/remove function claims;
-- support undo/redo for claim attachment/removal and card/structure edits;
+- add/edit/remove function badges;
+- support undo/redo for badge attachment/removal and card/structure edits;
 - persist Svelte Flow layout;
 - serialize board context for AI prompts.
 
@@ -527,7 +594,7 @@ Some interaction details should wait for sketches or a working prototype:
 - the exact card affordance for promoting a placeholder into a scene;
 - the exact Plot Context Picker surface beyond selecting a template-instance
   band or a specific card;
-- how function-claim badges, bands, lanes, and cards are visually balanced on
+- how function badges, bands, lanes, and cards are visually balanced on
   the canvas.
 
 These are not model blockers. The data model should leave room for those

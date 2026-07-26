@@ -6,6 +6,7 @@
     PlotContextPacket,
     PlotNode,
     PlotPointClaim,
+    PlotPointNoteStatus,
     PlotTemplateInstancePoint,
   } from "@/lib/types";
 
@@ -49,10 +50,16 @@
     changeClaimPlotline: (event: Event) => void;
     changeClaimStrength: (event: Event) => void;
     changeClaimType: (event: Event) => void;
+    changePalettePointStatus: (event: Event) => void;
     commitCardSynopsis: (event: Event) => void;
     commitCardTitle: (event: Event) => void;
     commitClaimLabel: (event: Event) => void;
     commitClaimTextField: (field: "evidence" | "rationale" | "ai_notes", event: Event) => void;
+    commitPalettePointOpenQuestions: (event: Event) => void;
+    commitPalettePointTextField: (
+      field: "title" | "notes" | "author_intent" | "expected_role",
+      event: Event,
+    ) => void;
   }
 
   let {
@@ -82,10 +89,13 @@
     changeClaimPlotline,
     changeClaimStrength,
     changeClaimType,
+    changePalettePointStatus,
     commitCardSynopsis,
     commitCardTitle,
     commitClaimLabel,
     commitClaimTextField,
+    commitPalettePointOpenQuestions,
+    commitPalettePointTextField,
   }: Props = $props();
 
   const CLAIM_TYPE_OPTIONS: { value: PlotPointClaim["claim_type"]; label: string }[] = [
@@ -104,9 +114,20 @@
     { value: "medium", label: "Medium" },
     { value: "strong", label: "Strong" },
   ];
+  const POINT_STATUS_OPTIONS: { value: PlotPointNoteStatus; label: string }[] = [
+    { value: "unplanned", label: "Unplanned" },
+    { value: "planned", label: "Planned" },
+    { value: "drafted", label: "Drafted" },
+    { value: "satisfied", label: "Satisfied" },
+    { value: "intentionally_omitted", label: "Intentionally omitted" },
+  ];
 
   function claimTypeLabel(value: PlotContextClaim["claim_type"] | PlotPointClaim["claim_type"]): string {
     return CLAIM_TYPE_OPTIONS.find((option) => option.value === value)?.label ?? value;
+  }
+
+  function questionText(point: PlotTemplateInstancePoint): string {
+    return (point.open_questions ?? []).join("\n");
   }
 
   function cardTitle(cardId: string): string {
@@ -272,23 +293,84 @@
       <span>Plot beat</span>
       <strong>{selectedPaletteRow.point.title || selectedPaletteRow.point.plot_point_id}</strong>
     </header>
-    <dl>
-      <dt>Template</dt>
-      <dd>{selectedPaletteRow.instance.title}</dd>
-      <dt>Status</dt>
-      <dd>{selectedPaletteRow.status}</dd>
+    <div class="inspector-form">
+      <label>
+        Template
+        <input value={selectedPaletteRow.instance.title} disabled />
+      </label>
+      <label>
+        Story label
+        <input
+          value={selectedPaletteRow.point.local_label || selectedPaletteRow.point.title}
+          disabled={Boolean(savingMessage)}
+          onblur={(event) => commitPalettePointTextField("title", event)}
+        />
+      </label>
+      <label>
+        Beat status
+        <select
+          value={selectedPaletteRow.point.status ?? "unplanned"}
+          disabled={Boolean(savingMessage)}
+          onchange={changePalettePointStatus}
+        >
+          {#each POINT_STATUS_OPTIONS as option (option.value)}
+            <option value={option.value}>{option.label}</option>
+          {/each}
+        </select>
+      </label>
+      <label>
+        Board use
+        <input value={selectedPaletteRow.status} disabled />
+      </label>
       {#if selectedPaletteRow.point.function_claim}
-        <dt>Story function</dt>
-        <dd>{selectedPaletteRow.point.function_claim}</dd>
+        <label>
+          Template function
+          <textarea rows="3" value={selectedPaletteRow.point.function_claim} disabled></textarea>
+        </label>
       {/if}
-      {#if selectedPaletteRow.point.notes}
-        <dt>Notes</dt>
-        <dd>{selectedPaletteRow.point.notes}</dd>
-      {/if}
-      <dt>Function badges</dt>
-      <dd>
+      <label>
+        Story specifics
+        <textarea
+          rows="5"
+          value={selectedPaletteRow.point.notes}
+          disabled={Boolean(savingMessage)}
+          onblur={(event) => commitPalettePointTextField("notes", event)}
+        ></textarea>
+      </label>
+      <label>
+        Author intent
+        <textarea
+          rows="3"
+          value={selectedPaletteRow.point.author_intent ?? ""}
+          disabled={Boolean(savingMessage)}
+          onblur={(event) => commitPalettePointTextField("author_intent", event)}
+        ></textarea>
+      </label>
+      <label>
+        Expected role
+        <textarea
+          rows="3"
+          value={selectedPaletteRow.point.expected_role ?? ""}
+          disabled={Boolean(savingMessage)}
+          onblur={(event) => commitPalettePointTextField("expected_role", event)}
+        ></textarea>
+      </label>
+      <label>
+        Open questions
+        <textarea
+          rows="4"
+          value={questionText(selectedPaletteRow.point)}
+          disabled={Boolean(savingMessage)}
+          onblur={commitPalettePointOpenQuestions}
+        ></textarea>
+      </label>
+      <div class="inspector-stat">
+        <span>Function badges</span>
+        <strong>{selectedPaletteRow.claims.length}</strong>
+      </div>
+      <div class="beat-claim-panel">
         {#if selectedPaletteRow.claims.length === 0}
-          No cards claim this plot beat yet.
+          <p class="muted-line">No cards claim this plot beat yet.</p>
         {:else}
           <div class="beat-claim-list">
             {#each selectedPaletteRow.claims as claim (claim.id)}
@@ -302,8 +384,8 @@
             {/each}
           </div>
         {/if}
-      </dd>
-    </dl>
+      </div>
+    </div>
   {:else}
     <p class="muted-line">No card selected.</p>
   {/if}

@@ -11,6 +11,7 @@
   import PlotBoardInspector from "./PlotBoardInspector.svelte";
   import PlotBoardPalette from "./PlotBoardPalette.svelte";
   import { setPlotBoardContext } from "./plotBoardContext";
+  import { saveTemplateInstancePoint } from "./plotBoardTemplateInstances";
   import {
     CARD_NODE_WIDTH,
     CARD_ROW_HEIGHT,
@@ -38,6 +39,7 @@
     PlotNode,
     PlotNodeSummary,
     PlotPointClaim,
+    PlotPointNoteStatus,
     PlotRelationship,
     PlotTemplateInstancePoint,
     StructureDocument,
@@ -277,6 +279,9 @@
   $effect(() => {
     const boardId = plotNode?.id ?? "";
     const boardRevision = plotNode?.revision ?? "";
+    const templateRevisionSignature = templateInstances
+      .map((instance) => `${instance.id}:${instance.revision}`)
+      .join("|");
     const sceneId = selectedContextSceneId;
     const includeFuture = includeFutureContext;
     const req = ++plotContextRequest;
@@ -300,6 +305,7 @@
       if (req === plotContextRequest) plotContextLoading = false;
     });
     void boardRevision;
+    void templateRevisionSignature;
   });
 
   $effect(() => {
@@ -1026,6 +1032,67 @@
     void updateSelectedClaim({ [field]: value });
   }
 
+  async function updateSelectedPalettePoint(
+    patch: Partial<PlotTemplateInstancePoint>,
+    message = "Saving plot beat",
+  ): Promise<void> {
+    const row = selectedPaletteRow;
+    const instance = row?.instance;
+    if (!row || !instance || savingMessage) return;
+
+    savingMessage = message;
+    saveError = "";
+    try {
+      const savedInstance = await saveTemplateInstancePoint(instance, row.point.plot_point_id, patch);
+      if (!savedInstance) throw new Error("Could not find the selected plot beat.");
+      templateInstances = templateInstances.map((candidate) => (candidate.id === savedInstance.id ? savedInstance : candidate));
+    } catch (caught) {
+      saveError = caught instanceof Error ? caught.message : "Could not save plot beat.";
+    } finally {
+      savingMessage = "";
+    }
+  }
+
+  function commitPalettePointTextField(
+    field: "title" | "notes" | "author_intent" | "expected_role",
+    event: Event,
+  ): void {
+    const row = selectedPaletteRow;
+    if (!row) return;
+    const value = field === "title"
+      ? (event.currentTarget as HTMLInputElement).value.trim()
+      : (event.currentTarget as HTMLTextAreaElement).value;
+    const current = field === "title"
+      ? (row.point.local_label || row.point.title)
+      : (row.point[field] ?? "");
+    if (field === "title") {
+      if (!value || value === current) return;
+      void updateSelectedPalettePoint({ title: value, local_label: value });
+      return;
+    }
+    if (value === current) return;
+    void updateSelectedPalettePoint({ [field]: value });
+  }
+
+  function changePalettePointStatus(event: Event): void {
+    const row = selectedPaletteRow;
+    const value = (event.currentTarget as HTMLSelectElement).value as PlotPointNoteStatus;
+    if (!row || (row.point.status ?? "unplanned") === value) return;
+    void updateSelectedPalettePoint({ status: value });
+  }
+
+  function commitPalettePointOpenQuestions(event: Event): void {
+    const row = selectedPaletteRow;
+    if (!row) return;
+    const questions = (event.currentTarget as HTMLTextAreaElement).value
+      .split(/\r?\n/)
+      .map((question) => question.trim())
+      .filter(Boolean);
+    const current = row.point.open_questions ?? [];
+    if (JSON.stringify(current) === JSON.stringify(questions)) return;
+    void updateSelectedPalettePoint({ open_questions: questions });
+  }
+
   async function addTemplateInstance(): Promise<void> {
     if (!templateToAddId) return;
     savingMessage = "Adding template instance";
@@ -1418,9 +1485,12 @@
     {changeClaimPlotline}
     {changeClaimStrength}
     {changeClaimType}
+    {changePalettePointStatus}
     {commitCardSynopsis}
     {commitCardTitle}
     {commitClaimLabel}
     {commitClaimTextField}
+    {commitPalettePointOpenQuestions}
+    {commitPalettePointTextField}
   />
 </section>

@@ -17,6 +17,7 @@
     data-card-id={card.id}
     class:selected={ctx.selectedCardId === card.id && !ctx.selectedClaimId}
     class:drag-over={ctx.dragOverCardId === card.id}
+    class:untagged={cardClaims.length === 0}
     ondragenter={(event) => ctx.allowCardDrop(card.id, event)}
     ondragover={(event) => ctx.allowCardDrop(card.id, event)}
     ondragleave={(event) => ctx.leaveCardDrop(card.id, event)}
@@ -53,6 +54,9 @@
       <p>{card.synopsis}</p>
     {/if}
     <div class="claim-chips">
+      {#if cardClaims.length === 0}
+        <span class="function-gap">No function markers</span>
+      {/if}
       {#each cardClaims as claim (claim.id)}
         <span
           class="claim-chip nodrag"

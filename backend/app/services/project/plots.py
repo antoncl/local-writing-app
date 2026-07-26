@@ -356,6 +356,114 @@ class PlotEntriesMixin:
             },
         )
 
+    def read_plot_context_for_selection(
+        self,
+        node_id: str,
+        *,
+        scene_id: str | None = None,
+        include_future: bool = False,
+    ) -> PlotContextPacket:
+        plot_node = self.read_plot_node(node_id)
+        if plot_node.entry_type == "plot:board":
+            return self.read_plot_context(
+                plot_node.id,
+                scene_id=scene_id,
+                include_future=include_future,
+            )
+        if plot_node.entry_type == "plot:template_instance":
+            board_id = self._plot_board_id_for_template_instance(plot_node.id)
+            if not board_id:
+                raise ProjectServiceError(
+                    f"Plot template instance {plot_node.id} is not linked to a board.",
+                    422,
+                )
+            packet = self.read_plot_context(
+                board_id,
+                scene_id=scene_id,
+                include_future=include_future,
+            )
+            return self._filter_plot_context_to_template_instance(
+                packet,
+                plot_node.id,
+            )
+        raise ProjectServiceError(
+            f"Plot node {node_id} cannot be used as prompt plot context.",
+            422,
+        )
+
+    def _plot_board_id_for_template_instance(self, instance_id: str) -> str | None:
+        for summary in self.list_plot_nodes().entries:
+            if summary.entry_type != "plot:board":
+                continue
+            try:
+                board_node = self.read_plot_node(summary.id)
+            except ProjectServiceError:
+                continue
+            board = board_node.board
+            if board is None:
+                continue
+            if instance_id in board.template_instance_ids:
+                return board_node.id
+            if any(plotline.template_instance_id == instance_id for plotline in board.plotlines):
+                return board_node.id
+            if any(claim.template_instance_id == instance_id for claim in board.claims):
+                return board_node.id
+        return None
+
+    def _filter_plot_context_to_template_instance(
+        self,
+        packet: PlotContextPacket,
+        template_instance_id: str,
+    ) -> PlotContextPacket:
+        claims = [
+            claim
+            for claim in packet.claims
+            if claim.template_instance_id == template_instance_id
+        ]
+        card_ids = {claim.card_id for claim in claims}
+        cards = [card for card in packet.cards if card.id in card_ids]
+        relationships = [
+            relationship
+            for relationship in packet.relationships
+            if relationship.from_card_id in card_ids and relationship.to_card_id in card_ids
+        ]
+        plotlines = [
+            plotline
+            for plotline in packet.plotlines
+            if plotline.template_instance_id == template_instance_id
+            or any(claim.plotline_id == plotline.id for claim in claims)
+            or any(card.primary_plotline_id == plotline.id for card in cards)
+        ]
+        template_instances = [
+            instance
+            for instance in packet.template_instances
+            if instance.id == template_instance_id
+        ]
+        if not template_instances:
+            instance = self._plot_context_template_instance(template_instance_id, None)
+            if instance is not None:
+                template_instances = [instance]
+
+        omitted = dict(packet.omitted_counts)
+        omitted["other_template_instances"] = max(
+            0, len(packet.template_instances) - len(template_instances)
+        )
+        omitted["other_claims"] = max(0, len(packet.claims) - len(claims))
+        omitted["other_cards"] = max(0, len(packet.cards) - len(cards))
+        omitted["other_relationships"] = max(
+            0, len(packet.relationships) - len(relationships)
+        )
+        return packet.model_copy(
+            update={
+                "cards": cards,
+                "claims": claims,
+                "template_instances": template_instances,
+                "plotlines": plotlines,
+                "relationships": relationships,
+                "omitted_counts": omitted,
+            }
+        )
+
     def _seed_builtin_plot_templates(self, root: Any) -> None:
         plot_dir = root / "plot"
         plot_dir.mkdir(parents=True, exist_ok=True)
@@ -583,127 +691,161 @@ class PlotEntriesMixin:
 
         out: list[PlotContextTemplateInstance] = []
         for instance_id, used_point_ids in sorted(point_ids_by_instance.items()):
-            try:
-                instance_node = self.read_plot_node(instance_id)
-            except ProjectServiceError:
-                continue
-            if instance_node.template_instance is None:
-                continue
-            template_points: dict[str, Any] = {}
-            template_spec: PlotTemplateSpec | None = None
-            template_id = instance_node.template_instance.template_id
-            if template_id:
-                try:
-                    template_node = self.read_plot_node(template_id)
-                    if template_node.template is not None:
-                        template_spec = template_node.template
-                        template_points = {
-                            point.id: point
-                            for point in template_node.template.plot_points
-                        }
-                except ProjectServiceError:
-                    template_points = {}
+            instance = self._plot_context_template_instance(instance_id, used_point_ids)
+            if instance is not None:
+                out.append(instance)
+        return out
 
-            instance_points = {
-                point.plot_point_id: point
-                for point in instance_node.template_instance.plot_points
-            }
-            points: list[PlotContextPoint] = []
-            for point_id in sorted(used_point_ids):
-                if (
-                    instance_node.template_instance.enabled_point_ids
-                    and point_id
-                    not in instance_node.template_instance.enabled_point_ids
-                ):
-                    continue
-                base = template_points.get(point_id)
-                local = instance_points.get(point_id)
-                note = instance_node.template_instance.point_notes.get(point_id)
-                points.append(
-                    PlotContextPoint(
-                        plot_point_id=point_id,
-                        local_label=(
+    def _plot_context_template_instance(
+        self,
+        instance_id: str,
+        used_point_ids: set[str] | None,
+    ) -> PlotContextTemplateInstance | None:
+        try:
+            instance_node = self.read_plot_node(instance_id)
+        except ProjectServiceError:
+            return None
+        if instance_node.template_instance is None:
+            return None
+        template_points: dict[str, Any] = {}
+        template_spec: PlotTemplateSpec | None = None
+        template_id = instance_node.template_instance.template_id
+        if template_id:
+            try:
+                template_node = self.read_plot_node(template_id)
+                if template_node.template is not None:
+                    template_spec = template_node.template
+                    template_points = {
+                        point.id: point
+                        for point in template_node.template.plot_points
+                    }
+            except ProjectServiceError:
+                template_points = {}
+
+        instance_points = {
+            point.plot_point_id: point
+            for point in instance_node.template_instance.plot_points
+        }
+        enabled = set(instance_node.template_instance.enabled_point_ids)
+        point_note_ids = set(instance_node.template_instance.point_notes)
+        if used_point_ids is None:
+            point_ids = enabled or set(template_points) | set(instance_points) | point_note_ids
+        else:
+            point_ids = used_point_ids
+
+        points: list[PlotContextPoint] = []
+        for point_id in self._ordered_plot_point_ids(
+            point_ids,
+            template_spec,
+            instance_node.template_instance,
+        ):
+            if enabled and point_id not in enabled:
+                continue
+            base = template_points.get(point_id)
+            local = instance_points.get(point_id)
+            note = instance_node.template_instance.point_notes.get(point_id)
+            points.append(
+                PlotContextPoint(
+                    plot_point_id=point_id,
+                    local_label=(
+                        getattr(note, "local_label", "")
+                        if note is not None
+                        else getattr(local, "local_label", "")
+                    ),
+                    title=(
+                        getattr(local, "title", "")
+                        or (
                             getattr(note, "local_label", "")
                             if note is not None
-                            else getattr(local, "local_label", "")
-                        ),
-                        title=(
-                            getattr(local, "title", "")
-                            or (
-                                getattr(note, "local_label", "")
-                                if note is not None
-                                else ""
-                            )
-                            or getattr(base, "title", "")
-                            or point_id
-                        ),
-                        function_claim=(
-                            getattr(local, "function_claim", "")
-                            or getattr(base, "function_claim", "")
-                        ),
-                        description=getattr(base, "description", ""),
-                        guidance=getattr(base, "guidance", ""),
-                        notes=(
-                            getattr(note, "notes", "")
-                            if note is not None
-                            else getattr(local, "notes", "")
-                        ),
-                        author_intent=(
-                            getattr(note, "author_intent", "")
-                            if note is not None
-                            else getattr(local, "author_intent", "")
-                        ),
-                        expected_role=(
-                            getattr(note, "expected_role", "")
-                            if note is not None
-                            else getattr(local, "expected_role", "")
-                        ),
-                        open_questions=(
-                            getattr(note, "open_questions", [])
-                            if note is not None
-                            else getattr(local, "open_questions", [])
-                        ),
-                        status=(
-                            getattr(note, "status", "unplanned")
-                            if note is not None
-                            else getattr(local, "status", "unplanned")
-                        ),
-                        placement=getattr(base, "placement", None),
-                        diagnostic_questions=getattr(base, "diagnostic_questions", []),
-                        failure_modes=getattr(base, "failure_modes", []),
-                        compression=getattr(base, "compression", None),
-                        claim_evidence_prompts=getattr(
-                            base, "claim_evidence_prompts", []
-                        ),
-                        ai_rubric=getattr(base, "ai_rubric", None),
-                    )
-                )
-            out.append(
-                PlotContextTemplateInstance(
-                    id=instance_node.id,
-                    title=instance_node.title,
-                    template_id=template_id,
-                    template_slug=getattr(template_spec, "slug", "")
-                    if template_spec is not None
-                    else "",
-                    template_family=getattr(template_spec, "family", "custom")
-                    if template_spec is not None
-                    else "custom",
-                    template_description=getattr(template_spec, "description", "")
-                    if template_spec is not None
-                    else "",
-                    ai_use_guidance=getattr(template_spec, "ai_use_guidance", "")
-                    if template_spec is not None
-                    else "",
-                    global_diagnostic_questions=(
-                        getattr(template_spec, "global_diagnostic_questions", [])
-                        if template_spec is not None
-                        else []
+                            else ""
+                        )
+                        or getattr(base, "title", "")
+                        or point_id
                     ),
-                    plot_points=points,
+                    function_claim=(
+                        getattr(local, "function_claim", "")
+                        or getattr(base, "function_claim", "")
+                    ),
+                    guidance=getattr(base, "guidance", ""),
+                    notes=(
+                        getattr(note, "notes", "")
+                        if note is not None
+                        else getattr(local, "notes", "")
+                    ),
+                    author_intent=(
+                        getattr(note, "author_intent", "")
+                        if note is not None
+                        else getattr(local, "author_intent", "")
+                    ),
+                    expected_role=(
+                        getattr(note, "expected_role", "")
+                        if note is not None
+                        else getattr(local, "expected_role", "")
+                    ),
+                    open_questions=(
+                        getattr(note, "open_questions", [])
+                        if note is not None
+                        else getattr(local, "open_questions", [])
+                    ),
+                    status=(
+                        getattr(note, "status", "unplanned")
+                        if note is not None
+                        else getattr(local, "status", "unplanned")
+                    ),
                 )
             )
-        return out
+
+        return PlotContextTemplateInstance(
+            id=instance_node.id,
+            title=instance_node.title,
+            template_id=template_id,
+            template_slug=getattr(template_spec, "slug", "")
+            if template_spec is not None
+            else "",
+            template_family=getattr(template_spec, "family", "custom")
+            if template_spec is not None
+            else "custom",
+            template_description=getattr(template_spec, "description", "")
+            if template_spec is not None
+            else "",
+            ai_use_guidance=getattr(template_spec, "ai_use_guidance", "")
+            if template_spec is not None
+            else "",
+            global_diagnostic_questions=(
+                getattr(template_spec, "global_diagnostic_questions", [])
+                if template_spec is not None
+                else []
+            ),
+            plot_points=points,
+        )
+
+    @staticmethod
+    def _ordered_plot_point_ids(
+        point_ids: set[str],
+        template_spec: PlotTemplateSpec | None,
+        template_instance: Any,
+    ) -> list[str]:
+        ordered: list[str] = []
+        seen: set[str] = set()
+
+        def add(point_id: Any) -> None:
+            if not isinstance(point_id, str) or point_id not in point_ids or point_id in seen:
+                return
+            ordered.append(point_id)
+            seen.add(point_id)
+
+        if template_spec is not None:
+            for point in template_spec.plot_points:
+                add(getattr(point, "id", None))
+
+        for point in getattr(template_instance, "plot_points", None) or []:
+            add(getattr(point, "plot_point_id", None))
+        for point_id in getattr(template_instance, "point_notes", {}) or {}:
+            add(point_id)
+        for point_id in sorted(point_ids - seen):
+            add(point_id)
+
+        return ordered
 
     @staticmethod
     def _plot_scene_order(root: Any) -> tuple[dict[str, int], dict[str, Any]]:

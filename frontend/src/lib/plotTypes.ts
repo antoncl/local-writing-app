@@ -39,60 +39,12 @@ export type SourceRef = {
   metadata?: Record<string, unknown>;
 };
 
-export type PlotPointFunction = {
-  claim?: string;
-  description?: string;
-  metadata?: Record<string, unknown>;
-};
-
-export type PlotPointPlacement = {
-  phase_label?: string;
-  target_position?: number | null;
-  min_position?: number | null;
-  max_position?: number | null;
-  structure_hint?: string;
-  metadata?: Record<string, unknown>;
-};
-
-export type PlotPointCompression = {
-  can_compress?: boolean | null;
-  can_expand?: boolean | null;
-  merge_with_point_ids?: string[];
-  guidance?: string;
-  metadata?: Record<string, unknown>;
-};
-
-export type PlotPointAIRubric = {
-  criteria?: string[];
-  evidence_prompts?: string[];
-  failure_signals?: string[];
-  guidance?: string;
-  metadata?: Record<string, unknown>;
-};
-
 export type PlotTemplatePoint = {
   id: string;
-  key?: string;
   title: string;
-  label?: string;
-  label_variants?: string[];
-  short_label?: string;
-  phase_label?: string;
-  parent_point_id?: string | null;
-  order_index?: number;
   function_claim: string;
-  function?: PlotPointFunction;
-  description: string;
   guidance: string;
   required: boolean;
-  sort_order: number;
-  placement?: PlotPointPlacement | null;
-  diagnostic_questions?: string[];
-  failure_modes?: string[];
-  compression?: PlotPointCompression | null;
-  claim_evidence_prompts?: string[];
-  ai_rubric?: PlotPointAIRubric | null;
-  source_ref_ids?: string[];
   metadata: Record<string, unknown>;
 };
 
@@ -107,8 +59,6 @@ export type PlotTemplateSpec = {
   prescriptiveness?: PlotTemplatePrescriptiveness;
   ai_use_guidance?: string;
   global_diagnostic_questions?: string[];
-  supports_compression?: boolean;
-  supports_expansion?: boolean;
   source_refs?: SourceRef[];
   ip_risk?: PlotTemplateIPRisk;
   builtin_policy?: PlotTemplateBuiltinPolicy;
@@ -116,8 +66,9 @@ export type PlotTemplateSpec = {
   locale?: string;
   /** Legacy/current emitted name. Backend also accepts design-doc `points`. */
   plot_points?: PlotTemplatePoint[];
-  /** Design-doc input alias accepted by the backend. Responses use `plot_points`. */
+  /** Design-doc input aliases accepted by the backend. Responses use `plot_points`. */
   points?: PlotTemplatePoint[];
+  beats?: PlotTemplatePoint[];
   metadata: Record<string, unknown>;
 };
 
@@ -241,19 +192,12 @@ export type PlotContextPoint = {
   title: string;
   local_label?: string;
   function_claim: string;
-  description: string;
   guidance: string;
   notes: string;
   author_intent?: string;
   expected_role?: string;
   open_questions?: string[];
   status?: PlotPointNoteStatus;
-  placement?: PlotPointPlacement | null;
-  diagnostic_questions: string[];
-  failure_modes: string[];
-  compression?: PlotPointCompression | null;
-  claim_evidence_prompts: string[];
-  ai_rubric?: PlotPointAIRubric | null;
 };
 
 export type PlotContextTemplateInstance = {

@@ -25,43 +25,12 @@ def builtin_plot_templates() -> list[dict[str, Any]]:
         guidance: str = "",
         metadata: dict[str, Any] | None = None,
     ) -> PlotTemplatePoint:
-        question_list = questions or ["What changes because this function is present?"]
-        failure_list = failures or [
-            "The event happens, but no goal, pressure, knowledge, or relationship state changes."
-        ]
-        evidence_list = evidence or [
-            "Quote the card or scene evidence that supports this claim."
-        ]
+        del order, phase, min_position, max_position, questions, failures, evidence
         return PlotTemplatePoint(
             id=point_id,
-            key=point_id,
             title=title,
-            label=title,
-            short_label=title,
-            order_index=order,
-            sort_order=order,
             function_claim=claim,
-            function={"claim": claim},
             guidance=guidance,
-            placement={
-                "phase_label": phase,
-                "min_position": min_position,
-                "max_position": max_position,
-            },
-            diagnostic_questions=question_list,
-            failure_modes=failure_list,
-            compression={
-                "can_compress": True,
-                "can_expand": True,
-                "guidance": "A point may share a scene with other functions or stretch across several cards when the story earns it.",
-            },
-            claim_evidence_prompts=evidence_list,
-            ai_rubric={
-                "criteria": question_list,
-                "evidence_prompts": evidence_list,
-                "failure_signals": failure_list,
-                "guidance": "Treat this as a diagnostic story function. Ask for evidence before marking a claim as satisfied.",
-            },
             metadata=metadata or {},
         )
 
@@ -96,12 +65,10 @@ def builtin_plot_templates() -> list[dict[str, Any]]:
                     "or require every point to be isolated in its own scene."
                 ),
                 global_diagnostic_questions=[
-                    "Which story state changes at this point?",
-                    "What evidence supports the claim?",
-                    "Is this function compressed with another point or expanded over several cards?",
+                    "Which story state changes because of this beat?",
+                    "Which cards or scenes provide evidence for the function marker?",
+                    "Does the set of claimed cards make the beat feel earned?",
                 ],
-                supports_compression=True,
-                supports_expansion=True,
                 source_refs=[
                     {
                         "id": "local_writing_app_generic",

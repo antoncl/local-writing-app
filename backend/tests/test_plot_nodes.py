@@ -10,6 +10,7 @@ from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import (
+    CreatePromptEntryRequest,
     CreateSceneRequest,
     DeleteMetadataFieldRequest,
     EntryTypeDefinition,
@@ -77,10 +78,13 @@ class PlotNodeTests(unittest.TestCase):
             for point in node["template"]["plot_points"]
             if point["id"] == "midpoint_shift"
         )
-        self.assertEqual(midpoint["placement"]["phase_label"], "Middle")
-        self.assertTrue(midpoint["compression"]["can_compress"])
-        self.assertGreater(len(midpoint["diagnostic_questions"]), 0)
-        self.assertGreater(len(midpoint["ai_rubric"]["evidence_prompts"]), 0)
+        self.assertEqual(
+            midpoint["function_claim"],
+            "Moves the protagonist from reaction toward action.",
+        )
+        self.assertNotIn("placement", midpoint)
+        self.assertNotIn("compression", midpoint)
+        self.assertNotIn("ai_rubric", midpoint)
 
     def test_open_project_backfills_missing_builtin_templates(self) -> None:
         for path in (self.root / "plot").glob("*.md"):
@@ -124,8 +128,11 @@ Old sparse body.
         point_ids = {point.id for point in node.template.plot_points}
         self.assertIn("inciting_change", point_ids)
         first_point = node.template.plot_points[0]
-        self.assertGreater(len(first_point.diagnostic_questions), 0)
-        self.assertIsNotNone(first_point.ai_rubric)
+        self.assertEqual(first_point.id, "setup_pressure")
+        self.assertEqual(
+            first_point.function_claim,
+            "Establishes ordinary conditions, desire, and pressure before commitment.",
+        )
 
     def test_system_template_rejects_save_and_delete(self) -> None:
         templates = self.client.get("/api/plots").json()["entries"]
@@ -266,11 +273,10 @@ Old sparse body.
         self.assertEqual(
             template.plot_points[0].function_claim, "Makes the old path unavailable."
         )
-        self.assertEqual(template.plot_points[0].placement.phase_label, "Act I")
-        self.assertTrue(template.plot_points[0].compression.can_compress)
-        self.assertEqual(
-            template.plot_points[0].ai_rubric.criteria, ["Cites evidence."]
-        )
+        dumped = template.model_dump()
+        self.assertNotIn("placement", dumped["plot_points"][0])
+        self.assertNotIn("compression", dumped["plot_points"][0])
+        self.assertNotIn("ai_rubric", dumped["plot_points"][0])
 
         instance = PlotTemplateInstanceSpec.model_validate(
             {
@@ -589,9 +595,12 @@ board:
             context_point["author_intent"], "Mara chooses theft over duty."
         )
         self.assertEqual(context_point["open_questions"], ["Who catches the clue?"])
-        self.assertEqual(context_point["placement"]["phase_label"], "Act I")
-        self.assertTrue(context_point["compression"]["can_compress"])
-        self.assertEqual(context_point["ai_rubric"]["criteria"], ["Cite a card."])
+        self.assertEqual(
+            context_point["function_claim"], "Makes the old path unavailable."
+        )
+        self.assertNotIn("placement", context_point)
+        self.assertNotIn("compression", context_point)
+        self.assertNotIn("ai_rubric", context_point)
 
     def test_plot_context_helper_renders_scene_scoped_context(self) -> None:
         early = self.service.create_scene(CreateSceneRequest(title="Archive Break-in"))
@@ -651,13 +660,15 @@ board:
         )
         env = create_environment_for_project(self.service)
         out = render_template(
-            '{% role "user" %}{{ plot_context("'
+            '{% role "user" %}{{ context_xml(plot_context("'
             + board.id
-            + '", scene=scene) }}{% endrole %}',
+            + '", as_of=scene)) }}{% endrole %}',
             context={"scene": target},
             env=env,
         )
         text = out.messages[0].blocks[0].text
+        self.assertIn('completeness="through_as_of"', text)
+        self.assertIn(f'as_of_scene_id="{target.id}"', text)
         self.assertIn("Archive Break-in", text)
         self.assertIn("claim_first_turn", text)
         self.assertNotIn("Butler Reveal", text)
@@ -731,8 +742,8 @@ board:
         )
         env = create_environment_for_project(self.service)
         out = render_template(
-            '{% role "user" %}{{ plot_context(input.board, scene=scene) }}{% endrole %}',
-            context={"input": {"board": picked_board}, "scene": target},
+            '{% role "user" %}{{ context_xml(plot_context(input.plot, as_of=scene)) }}{% endrole %}',
+            context={"input": {"plot": picked_board}, "scene": target},
             env=env,
         )
         text = out.messages[0].blocks[0].text
@@ -740,6 +751,324 @@ board:
         self.assertIn("claim_first_turn", text)
         self.assertNotIn("Butler Reveal", text)
         self.assertNotIn("butler did it", text)
+
+    def test_plot_context_without_as_of_renders_whole_selected_board(self) -> None:
+        early = self.service.create_scene(CreateSceneRequest(title="Archive Break-in"))
+        future = self.service.create_scene(CreateSceneRequest(title="Butler Reveal"))
+        instance = self.service.create_plot_node(
+            CreatePlotNodeRequest(
+                title="Main plot structure",
+                entry_type="plot:template_instance",
+                template_instance={
+                    "template_id": "plot_template_three_act",
+                    "plot_points": [
+                        {"plot_point_id": "first_turn", "notes": "Visible setup."},
+                        {"plot_point_id": "resolution", "notes": "Future reveal."},
+                    ],
+                },
+            )
+        )
+        board = self.service.create_plot_node(
+            CreatePlotNodeRequest(
+                title="Book plot board",
+                entry_type="plot:board",
+                board={
+                    "template_instance_ids": [instance.id],
+                    "cards": [
+                        {
+                            "id": "card_archive",
+                            "title": "Archive Break-in",
+                            "node_ref": early.id,
+                        },
+                        {
+                            "id": "card_reveal",
+                            "title": "Butler Reveal",
+                            "node_ref": future.id,
+                        },
+                    ],
+                    "claims": [
+                        {
+                            "id": "claim_first_turn",
+                            "card_id": "card_archive",
+                            "template_instance_id": instance.id,
+                            "plot_point_id": "first_turn",
+                        },
+                        {
+                            "id": "claim_resolution",
+                            "card_id": "card_reveal",
+                            "template_instance_id": instance.id,
+                            "plot_point_id": "resolution",
+                        },
+                    ],
+                },
+            )
+        )
+
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "user" %}{{ context_xml(plot_context(input.plot)) }}{% endrole %}',
+            context={"input": {"plot": board.id}},
+            env=env,
+        )
+        text = out.messages[0].blocks[0].text
+        self.assertIn('completeness="whole_selection"', text)
+        self.assertIn("Archive Break-in", text)
+        self.assertIn("Butler Reveal", text)
+        self.assertIn("claim_first_turn", text)
+        self.assertIn("claim_resolution", text)
+        self.assertNotIn("<placement", text)
+        self.assertNotIn("<compression", text)
+        self.assertNotIn("<ai_rubric", text)
+        self.assertNotIn("<diagnostic_questions", text)
+        self.assertNotIn("<failure_modes", text)
+        self.assertNotIn("<claim_evidence_prompts", text)
+        self.assertNotIn('{"', text)
+        self.assertNotIn('"metadata"', text)
+
+    def test_plot_context_accepts_template_instance_selection(self) -> None:
+        archive = self.service.create_scene(CreateSceneRequest(title="Archive Break-in"))
+        reveal = self.service.create_scene(CreateSceneRequest(title="Butler Reveal"))
+        main_instance = self.service.create_plot_node(
+            CreatePlotNodeRequest(
+                title="Main plot structure",
+                entry_type="plot:template_instance",
+                template_instance={
+                    "template_id": "plot_template_three_act",
+                    "plot_points": [{"plot_point_id": "first_turn", "notes": "Visible setup."}],
+                },
+            )
+        )
+        subplot_instance = self.service.create_plot_node(
+            CreatePlotNodeRequest(
+                title="Subplot structure",
+                entry_type="plot:template_instance",
+                template_instance={
+                    "template_id": "plot_template_three_act",
+                    "plot_points": [{"plot_point_id": "resolution", "notes": "Other line."}],
+                },
+            )
+        )
+        board = self.service.create_plot_node(
+            CreatePlotNodeRequest(
+                title="Book plot board",
+                entry_type="plot:board",
+                board={
+                    "template_instance_ids": [main_instance.id, subplot_instance.id],
+                    "cards": [
+                        {
+                            "id": "card_archive",
+                            "title": "Archive Break-in",
+                            "node_ref": archive.id,
+                        },
+                        {
+                            "id": "card_reveal",
+                            "title": "Butler Reveal",
+                            "node_ref": reveal.id,
+                        },
+                    ],
+                    "claims": [
+                        {
+                            "id": "claim_first_turn",
+                            "card_id": "card_archive",
+                            "template_instance_id": main_instance.id,
+                            "plot_point_id": "first_turn",
+                        },
+                        {
+                            "id": "claim_resolution",
+                            "card_id": "card_reveal",
+                            "template_instance_id": subplot_instance.id,
+                            "plot_point_id": "resolution",
+                        },
+                    ],
+                },
+            )
+        )
+        self.assertEqual(board.entry_type, "plot:board")
+        picked_instance = json.dumps(
+            [
+                {
+                    "id": main_instance.id,
+                    "kind": "plot",
+                    "title": main_instance.title,
+                    "entry_type": "plot:template_instance",
+                }
+            ]
+        )
+
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "user" %}{{ context_xml(plot_context(input.plot)) }}{% endrole %}',
+            context={"input": {"plot": picked_instance}},
+            env=env,
+        )
+
+        text = out.messages[0].blocks[0].text
+        self.assertIn(main_instance.title, text)
+        self.assertIn("Visible setup.", text)
+        self.assertIn("Archive Break-in", text)
+        self.assertIn("claim_first_turn", text)
+        self.assertNotIn(subplot_instance.title, text)
+        self.assertNotIn("Other line.", text)
+        self.assertNotIn("Butler Reveal", text)
+        self.assertNotIn("claim_resolution", text)
+
+    def test_plot_context_template_instance_selection_includes_unclaimed_points(self) -> None:
+        instance = self.service.create_plot_node(
+            CreatePlotNodeRequest(
+                title="Unclaimed main structure",
+                entry_type="plot:template_instance",
+                template_instance={
+                    "template_id": "plot_template_three_act",
+                    "enabled_point_ids": ["inciting_change", "first_turn"],
+                    "point_notes": {
+                        "inciting_change": {
+                            "status": "planned",
+                            "notes": "The invitation arrives.",
+                        }
+                    },
+                },
+            )
+        )
+        self.service.create_plot_node(
+            CreatePlotNodeRequest(
+                title="Book plot board",
+                entry_type="plot:board",
+                board={"template_instance_ids": [instance.id]},
+            )
+        )
+
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "user" %}{{ context_xml(plot_context(input.plot)) }}{% endrole %}',
+            context={"input": {"plot": instance.id}},
+            env=env,
+        )
+
+        text = out.messages[0].blocks[0].text
+        self.assertIn("Unclaimed main structure", text)
+        self.assertIn("inciting_change", text)
+        self.assertIn("The invitation arrives.", text)
+        self.assertIn("first_turn", text)
+        self.assertLess(text.index("inciting_change"), text.index("first_turn"))
+
+    def test_plot_context_jinja_iteration_keeps_order_and_beat_fields(self) -> None:
+        instance = self.service.create_plot_node(
+            CreatePlotNodeRequest(
+                title="Selected main structure",
+                entry_type="plot:template_instance",
+                template_instance={
+                    "template_id": "plot_template_three_act",
+                    "enabled_point_ids": ["inciting_change", "first_turn"],
+                },
+            )
+        )
+        self.service.create_plot_node(
+            CreatePlotNodeRequest(
+                title="Book plot board",
+                entry_type="plot:board",
+                board={"template_instance_ids": [instance.id]},
+            )
+        )
+
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            """{% role "user" %}
+{% set plot = plot_context(input.plot) %}
+{% for instance in plot.template_instances %}
+{% for point in instance.plot_points %}
+{{ point.title }}|{{ point.function_claim }}|{{ point.guidance }}
+{% endfor %}
+{% endfor %}
+{% endrole %}""",
+            context={"input": {"plot": instance.id}},
+            env=env,
+        )
+
+        text = out.messages[0].blocks[0].text
+        self.assertLess(text.index("Inciting change"), text.index("First turn"))
+        self.assertIn("Introduces a disruption", text)
+        self.assertNotIn("Act I", text)
+        self.assertNotIn("What changes because this function is present?", text)
+
+    def test_plot_brainstorm_default_prompt_renders_plot_context(self) -> None:
+        target = self.service.create_scene(CreateSceneRequest(title="Quiet Aftermath"))
+        instance = self.service.create_plot_node(
+            CreatePlotNodeRequest(
+                title="Main plot structure",
+                entry_type="plot:template_instance",
+                template_instance={
+                    "template_id": "plot_template_three_act",
+                    "plot_points": [{"plot_point_id": "first_turn", "notes": "Visible setup."}],
+                },
+            )
+        )
+        board = self.service.create_plot_node(
+            CreatePlotNodeRequest(
+                title="Book plot board",
+                entry_type="plot:board",
+                board={
+                    "template_instance_ids": [instance.id],
+                    "cards": [
+                        {
+                            "id": "card_archive",
+                            "title": "Archive Break-in",
+                            "synopsis": "Mara steals the ledger.",
+                            "node_ref": target.id,
+                        }
+                    ],
+                    "claims": [
+                        {
+                            "id": "claim_first_turn",
+                            "card_id": "card_archive",
+                            "template_instance_id": instance.id,
+                            "plot_point_id": "first_turn",
+                        }
+                    ],
+                },
+            )
+        )
+        prompt = self.service.create_prompt_entry(
+            CreatePromptEntryRequest(
+                title="Brainstorm from plot board",
+                entry_type="prompt:plot_brainstorm",
+            )
+        )
+        picked_board = json.dumps(
+            [
+                {
+                    "id": board.id,
+                    "kind": "plot",
+                    "title": board.title,
+                    "entry_type": "plot:board",
+                }
+            ]
+        )
+
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            prompt.body,
+            context={
+                "input": {
+                    "plot": picked_board,
+                    "focus": "Find pressure points.",
+                },
+                "scene": target,
+            },
+            env=env,
+        )
+
+        self.assertEqual([message.role for message in out.messages], ["system", "user"])
+        system_text = out.messages[0].blocks[0].text
+        user_text = out.messages[1].blocks[0].text
+        self.assertIn("Do not draft the novel for the author", system_text)
+        self.assertIn("Find pressure points.", user_text)
+        self.assertIn('completeness="whole_selection"', user_text)
+        self.assertIn("Book plot board", user_text)
+        self.assertIn("Archive Break-in", user_text)
+        self.assertIn("Visible setup.", user_text)
+        self.assertNotIn("<ai_rubric", user_text)
+        self.assertNotIn("<criterion>", user_text)
+        self.assertNotIn('{"', user_text)
 
     def test_plot_node_is_available_via_unified_node_read(self) -> None:
         created = self.client.post(

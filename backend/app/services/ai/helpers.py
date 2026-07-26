@@ -29,6 +29,13 @@ from xml.sax.saxutils import quoteattr
 from jinja2 import pass_context
 from jinja2.sandbox import SandboxedEnvironment
 
+from app.services.ai.plot_context import (
+    PromptSnippetLoader,
+    context_xml,
+)
+from app.services.ai.plot_context import (
+    plot_context as _plot_context,
+)
 from app.services.ai.sessions import AISession
 
 if TYPE_CHECKING:
@@ -391,15 +398,18 @@ def register_helpers(
     @pass_context
     def _plot_context_global(
         ctx: Any,
-        board: Any = None,
+        selection: Any = None,
+        as_of: Any = None,
         scene: Any = None,
-        include_future: bool = False,
-    ) -> str:
+        include_future: Any = None,
+    ) -> Any:
+        del ctx
         return _plot_context(
             project,
-            board,
-            scene if scene is not None else ctx.get("scene"),
-            include_future,
+            selection,
+            as_of=as_of,
+            scene=scene if scene is not None else None,
+            include_future=include_future,
         )
 
     env.globals["last_words"] = last_words
@@ -420,6 +430,8 @@ def register_helpers(
     env.globals["full_outline"] = lambda: _full_outline(project)
     env.globals["full_text"] = lambda: _full_text(project)
     env.globals["plot_context"] = _plot_context_global
+    env.globals["context_xml"] = context_xml
+    env.filters["context_xml"] = context_xml
     env.globals["character_thread"] = (
         lambda scene, character: _character_thread(project, schema, scene, character)
     )
@@ -435,6 +447,7 @@ def create_environment_for_project(
     from app.services.ai.templates import create_environment
 
     env = create_environment()
+    env.loader = PromptSnippetLoader(project)
     register_helpers(env, project, session, journal)
     return env
 
@@ -1016,221 +1029,6 @@ def _render_lore_xml_entry(
     if body:
         return f"<{tag} {attr_str}>\n{xml_escape(body)}\n</{tag}>"
     return f"<{tag} {attr_str} />"
-
-
-# ----- `plot_context(board=None, scene=scene)` -----------------------------
-
-
-def _plot_context(
-    project: ProjectService,
-    board: Any = None,
-    scene: Any = None,
-    include_future: bool = False,
-) -> str:
-    board_id = _plot_board_id(project, board)
-    if not board_id:
-        return ""
-    scene_id = _scene_id_of(scene) if scene is not None else None
-    try:
-        packet = project.read_plot_context(
-            board_id,
-            scene_id=scene_id,
-            include_future=_truthy_arg(include_future),
-        )
-    except Exception:
-        return ""
-    return _format_plot_context_block(packet)
-
-
-def _plot_board_id(project: ProjectService, board: Any = None) -> str | None:
-    if board is None or board == "":
-        try:
-            boards = [
-                entry
-                for entry in project.list_plot_nodes().entries
-                if entry.entry_type == "plot:board"
-            ]
-        except Exception:
-            return None
-        return boards[0].id if boards else None
-    if isinstance(board, str):
-        stripped = board.strip()
-        if stripped.startswith("[") and stripped.endswith("]"):
-            try:
-                return _plot_board_id(project, json.loads(stripped))
-            except (TypeError, ValueError):
-                return None
-        return stripped or None
-    if isinstance(board, list):
-        return _plot_board_id(project, board[0]) if board else None
-    if isinstance(board, dict):
-        raw = board.get("id")
-        return raw if isinstance(raw, str) and raw else None
-    raw = getattr(board, "id", None)
-    return raw if isinstance(raw, str) and raw else None
-
-
-def _truthy_arg(value: Any) -> bool:
-    if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "on"}
-    return bool(value)
-
-
-def _format_plot_context_block(packet: Any) -> str:
-    claims_by_card: dict[str, list[Any]] = {}
-    for claim in getattr(packet, "claims", None) or []:
-        claims_by_card.setdefault(claim.card_id, []).append(claim)
-
-    lines = [
-        (
-            f"<plot_context board_id={quoteattr(packet.board_id)} "
-            f"board_title={quoteattr(packet.board_title)} "
-            f"include_future={quoteattr(str(bool(packet.include_future)).lower())}"
-            + (
-                f" scope_scene_id={quoteattr(packet.scope_scene_id)}"
-                if getattr(packet, "scope_scene_id", None)
-                else ""
-            )
-            + ">"
-        )
-    ]
-    omitted = getattr(packet, "omitted_counts", None) or {}
-    if omitted:
-        attrs = " ".join(
-            f"{_xml_safe_attr(key)}={quoteattr(str(value))}"
-            for key, value in sorted(omitted.items())
-        )
-        lines.append(f"  <omitted {attrs} />")
-    for plotline in getattr(packet, "plotlines", None) or []:
-        attrs = [f"id={quoteattr(plotline.id)}", f"title={quoteattr(plotline.title)}"]
-        if plotline.template_instance_id:
-            attrs.append(f"template_instance_id={quoteattr(plotline.template_instance_id)}")
-        lines.append(f"  <plotline {' '.join(attrs)} />")
-    for instance in getattr(packet, "template_instances", None) or []:
-        attrs = [f"id={quoteattr(instance.id)}", f"title={quoteattr(instance.title)}"]
-        if instance.template_id:
-            attrs.append(f"template_id={quoteattr(instance.template_id)}")
-        if getattr(instance, "template_slug", ""):
-            attrs.append(f"template_slug={quoteattr(instance.template_slug)}")
-        if getattr(instance, "template_family", ""):
-            attrs.append(f"template_family={quoteattr(instance.template_family)}")
-        lines.append(f"  <template_instance {' '.join(attrs)}>")
-        for tag, value in (
-            ("template_description", getattr(instance, "template_description", "")),
-            ("ai_use_guidance", getattr(instance, "ai_use_guidance", "")),
-        ):
-            if value:
-                lines.append(f"    <{tag}>{xml_escape(str(value).strip())}</{tag}>")
-        questions = getattr(instance, "global_diagnostic_questions", None) or []
-        if questions:
-            lines.append("    <global_diagnostic_questions>")
-            for question in questions:
-                lines.append(f"      <question>{xml_escape(str(question).strip())}</question>")
-            lines.append("    </global_diagnostic_questions>")
-        for point in instance.plot_points:
-            point_attrs = [
-                f"id={quoteattr(point.plot_point_id)}",
-                f"title={quoteattr(point.title)}",
-            ]
-            if getattr(point, "local_label", ""):
-                point_attrs.append(f"local_label={quoteattr(point.local_label)}")
-            if getattr(point, "status", ""):
-                point_attrs.append(f"status={quoteattr(point.status)}")
-            lines.append(f"    <plot_point {' '.join(point_attrs)}>")
-            for tag, value in (
-                ("function_claim", point.function_claim),
-                ("description", point.description),
-                ("guidance", point.guidance),
-                ("notes", point.notes),
-                ("author_intent", getattr(point, "author_intent", "")),
-                ("expected_role", getattr(point, "expected_role", "")),
-            ):
-                if value:
-                    lines.append(f"      <{tag}>{xml_escape(str(value).strip())}</{tag}>")
-            questions = getattr(point, "open_questions", None) or []
-            if questions:
-                lines.append("      <open_questions>")
-                for question in questions:
-                    lines.append(f"        <question>{xml_escape(str(question).strip())}</question>")
-                lines.append("      </open_questions>")
-            diagnostic_questions = getattr(point, "diagnostic_questions", None) or []
-            if diagnostic_questions:
-                lines.append("      <diagnostic_questions>")
-                for question in diagnostic_questions:
-                    lines.append(f"        <question>{xml_escape(str(question).strip())}</question>")
-                lines.append("      </diagnostic_questions>")
-            for tag in ("placement", "compression", "ai_rubric"):
-                value = getattr(point, tag, None)
-                if value is None:
-                    continue
-                payload = (
-                    value.model_dump(exclude_none=True)
-                    if hasattr(value, "model_dump")
-                    else value
-                )
-                lines.append(
-                    f"      <{tag}>{xml_escape(json.dumps(payload, ensure_ascii=False))}</{tag}>"
-                )
-            lines.append("    </plot_point>")
-        lines.append("  </template_instance>")
-    for card in getattr(packet, "cards", None) or []:
-        attrs = [f"id={quoteattr(card.id)}", f"title={quoteattr(card.title)}"]
-        if card.scene_id:
-            attrs.append(f"scene_id={quoteattr(card.scene_id)}")
-        if card.structure_title:
-            attrs.append(f"structure_title={quoteattr(card.structure_title)}")
-        if card.manuscript_index is not None:
-            attrs.append(f"manuscript_index={quoteattr(str(card.manuscript_index))}")
-        lines.append(f"  <card {' '.join(attrs)}>")
-        if card.synopsis:
-            lines.append(f"    <synopsis>{xml_escape(card.synopsis.strip())}</synopsis>")
-        for claim in claims_by_card.get(card.id, []):
-            lines.extend(_render_plot_claim_xml(claim))
-        lines.append("  </card>")
-    for relationship in getattr(packet, "relationships", None) or []:
-        attrs = [
-            f"id={quoteattr(relationship.id)}",
-            f"from_card_id={quoteattr(relationship.from_card_id)}",
-            f"to_card_id={quoteattr(relationship.to_card_id)}",
-            f"kind={quoteattr(relationship.kind)}",
-        ]
-        if relationship.label:
-            attrs.append(f"label={quoteattr(relationship.label)}")
-        lines.append(f"  <relationship {' '.join(attrs)} />")
-    lines.append("</plot_context>")
-    return "\n".join(lines)
-
-
-def _render_plot_claim_xml(claim: Any) -> list[str]:
-    attrs = [
-        f"id={quoteattr(claim.id)}",
-        f"template_instance_id={quoteattr(claim.template_instance_id)}",
-        f"plot_point_id={quoteattr(claim.plot_point_id)}",
-        f"claim_type={quoteattr(claim.claim_type)}",
-    ]
-    if claim.plotline_id:
-        attrs.append(f"plotline_id={quoteattr(claim.plotline_id)}")
-    if claim.claim_label:
-        attrs.append(f"label={quoteattr(claim.claim_label)}")
-    if claim.strength:
-        attrs.append(f"strength={quoteattr(claim.strength)}")
-    lines = [f"    <claim {' '.join(attrs)}>"]
-    for tag, value in (
-        ("evidence", claim.evidence),
-        ("rationale", claim.rationale),
-        ("ai_notes", claim.ai_notes),
-    ):
-        if value:
-            lines.append(f"      <{tag}>{xml_escape(str(value).strip())}</{tag}>")
-    lines.append("    </claim>")
-    return lines
-
-
-def _xml_safe_attr(name: Any) -> str:
-    cleaned = re.sub(r"[^A-Za-z0-9_]", "_", str(name).strip())
-    if not cleaned or cleaned[0].isdigit():
-        return "value"
-    return cleaned
 
 
 _XML_TAG_FALLBACK = "lore_entry"

@@ -198,7 +198,15 @@ class MetadataValidationTests(unittest.TestCase):
 
     def test_prompt_subtypes_inherit_code_and_jinja2(self) -> None:
         schema = self.service.read_metadata_schema()
-        for type_id in ("prompt:base", "prompt:continuation", "prompt:revise", "prompt:general", "prompt:snippet"):
+        for type_id in (
+            "prompt:base",
+            "prompt:continuation",
+            "prompt:revise",
+            "prompt:general",
+            "prompt:roleplay",
+            "prompt:plot_brainstorm",
+            "prompt:snippet",
+        ):
             definition = schema.entry_types[type_id]
             self.assertEqual(definition.body_editor, "code", msg=type_id)
             self.assertEqual(definition.body_language, "jinja2", msg=type_id)
@@ -2157,7 +2165,7 @@ class MetadataValidationTests(unittest.TestCase):
             {"kinds": ["lore"], "entry_types": {"lore": ["character"]}},
         )
 
-    def test_default_schema_seeds_four_prompt_bases(self) -> None:
+    def test_default_schema_seeds_prompt_bases(self) -> None:
         """continuation/revise/general/snippet are concrete bases with preset
         output kinds; users instantiate them directly or sub-type them to add
         personality. Inputs live on the instance (not the type) so the bases
@@ -2185,6 +2193,47 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual(general_prompt.context_strategy.output, {"kind": "chat_panel"})
 
         self.assertIsNone(schema.entry_types["prompt:snippet"].prompt)
+
+    def test_plot_brainstorm_prompt_seeds_board_context_inputs(self) -> None:
+        from app.models import CreatePromptEntryRequest
+
+        schema = self.service.read_metadata_schema()
+        prompt_type = schema.entry_types["prompt:plot_brainstorm"]
+        self.assertEqual(prompt_type.parent, "prompt:general")
+        self.assertIn("context_xml(plot_context(input.plot))", prompt_type.default_body)
+        self.assertIn("Do not draft the novel for the author", prompt_type.default_body)
+
+        defaults_by_name = {item.name: item for item in prompt_type.default_inputs}
+        self.assertEqual(set(defaults_by_name), {"plot", "focus"})
+        self.assertEqual(defaults_by_name["plot"].type, "context_pick")
+        self.assertTrue(defaults_by_name["plot"].required)
+        self.assertEqual(
+            defaults_by_name["plot"].target,
+            {
+                "sources": [
+                    {
+                        "kind": "plot",
+                        "expr": {
+                            "union": [
+                                {"type": "plot:board"},
+                                {"type": "plot:template_instance"},
+                            ]
+                        },
+                    }
+                ],
+                "multiple": False,
+            },
+        )
+
+        created = self.service.create_prompt_entry(
+            CreatePromptEntryRequest(
+                title="Brainstorm from plot board",
+                entry_type="prompt:plot_brainstorm",
+            )
+        )
+        self.assertEqual(created.entry_type, "prompt:plot_brainstorm")
+        self.assertEqual([item.name for item in created.inputs], ["plot", "focus"])
+        self.assertIn("context_xml(plot_context(input.plot))", created.body)
 
     def test_concrete_subtype_inherits_output_kind_from_abstract_base(self) -> None:
         """A user creates `bob extends general`; the output disposition is inherited."""

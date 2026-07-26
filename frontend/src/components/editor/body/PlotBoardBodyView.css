@@ -97,6 +97,7 @@
 
 .template-block > header {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
   padding-bottom: var(--sp-1);
@@ -104,7 +105,73 @@
   font-size: var(--fs-sm);
 }
 
+.template-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.template-title-row strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.template-title-input {
+  min-width: 0;
+  width: 100%;
+  height: 26px;
+  padding: 0 var(--sp-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.template-title-input:focus {
+  border-color: var(--accent);
+  outline: 1px solid var(--accent);
+  outline-offset: 0;
+}
+
+.template-title-action {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.template-title-action:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+}
+
+.template-title-action.danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--danger);
+}
+
+.template-title-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .template-block > header span {
+  flex: none;
   color: var(--text-3);
   font-family: var(--mono);
   font-size: var(--fs-xs);
@@ -407,6 +474,10 @@
   background: var(--accent-soft);
 }
 
+.plot-card.untagged {
+  border-left-color: var(--warn);
+}
+
 .plot-card > header {
   display: flex;
   align-items: start;
@@ -551,6 +622,15 @@
 .claim-remove:disabled {
   cursor: not-allowed;
   opacity: 0.5;
+}
+
+.function-gap {
+  padding: 3px 6px;
+  border: 1px dashed var(--warn);
+  border-radius: var(--r-sm);
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
 }
 
 .empty-column,

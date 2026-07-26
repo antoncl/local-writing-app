@@ -1,12 +1,14 @@
 <script lang="ts">
   import "@xyflow/svelte/dist/style.css";
   import "./PlotBoardBodyView.css";
-  import { SvelteFlow, Controls, MiniMap, type Connection, type Edge, type Node as FlowNode, type OnMoveEnd, type Viewport } from "@xyflow/svelte";
+  import { SvelteFlow, Controls, MiniMap, type Connection, type Edge, type Node as FlowNode, type NodeTargetEventWithPointer, type OnMoveEnd, type Viewport } from "@xyflow/svelte";
   import { untrack } from "svelte";
   import { api } from "@/lib/api";
   import { setStructure } from "@/lib/stores/structure";
   import { isLeafNode } from "@/lib/utils/treeHelpers";
   import PlotBoardFlowCard from "./PlotBoardFlowCard.svelte";
+  import PlotBoardFlowGroup from "./PlotBoardFlowGroup.svelte";
+  import PlotBoardInspector from "./PlotBoardInspector.svelte";
   import { setPlotBoardContext } from "./plotBoardContext";
   import type {
     EditableDocument,
@@ -43,6 +45,9 @@
   type BoardColumn = {
     id: string;
     title: string;
+    type: string;
+    parentId: string | null;
+    depth: number;
     cards: PlotBoardCard[];
   };
 
@@ -57,32 +62,38 @@
     | { kind: "plot-point"; template_instance_id: string; plot_point_id: string }
     | { kind: "plot-claim"; claim_id: string };
 
-  type PlotFlowData = { cardId: string };
+  type PlotCardFlowData = { kind: "card"; cardId: string };
+  type PlotGroupFlowData = {
+    kind: "group";
+    columnId: string;
+    title: string;
+    count: number;
+    columnType: string;
+    parentColumnId: string | null;
+  };
+  type PlotFlowData = PlotCardFlowData | PlotGroupFlowData;
   type CanvasPoint = { x: number; y: number };
+  type NodeDragStopPayload = Parameters<NodeTargetEventWithPointer<MouseEvent | TouchEvent, FlowNode<PlotFlowData>>>[0];
+  type GroupFrame = {
+    id: string;
+    parentId: string | null;
+    position: CanvasPoint;
+    absolute: CanvasPoint;
+    width: number;
+    height: number;
+  };
 
   const PLOT_DND_TYPE = "application/x-local-writing-plot";
   const CARD_NODE_WIDTH = 250;
   const CARD_ROW_HEIGHT = 170;
   const CARD_COLUMN_WIDTH = 310;
+  const GROUP_HEADER_HEIGHT = 64;
+  const GROUP_INSET = 24;
+  const GROUP_GAP = 30;
+  const GROUP_MIN_HEIGHT = 280;
+  const GROUP_MIN_WIDTH = 310;
   const DEFAULT_VIEWPORT: Viewport = { x: 24, y: 24, zoom: 1 };
-  const nodeTypes = { plotCard: PlotBoardFlowCard };
-  const CLAIM_TYPE_OPTIONS: { value: PlotPointClaim["claim_type"]; label: string }[] = [
-    { value: "satisfies", label: "Satisfies" },
-    { value: "partially_satisfies", label: "Partially satisfies" },
-    { value: "subverts", label: "Subverts" },
-    { value: "foreshadows", label: "Foreshadows" },
-    { value: "pays_off", label: "Pays off" },
-    { value: "raises_question", label: "Raises question" },
-    { value: "rejects", label: "Rejects" },
-    { value: "custom", label: "Custom" },
-  ];
-  const CLAIM_STRENGTH_OPTIONS: { value: "" | NonNullable<PlotPointClaim["strength"]>; label: string }[] = [
-    { value: "", label: "Not set" },
-    { value: "weak", label: "Weak" },
-    { value: "medium", label: "Medium" },
-    { value: "strong", label: "Strong" },
-  ];
-
+  const nodeTypes = { plotCard: PlotBoardFlowCard, plotGroup: PlotBoardFlowGroup };
   const EMPTY_BOARD = {
     version: 1,
     template_instance_ids: [],
@@ -95,6 +106,7 @@
 
   let selectedCardId = $state<string | null>(null);
   let selectedClaimId = $state<string | null>(null);
+  let selectedCanvasColumnId = $state<string | null>(null);
   let selectedPalettePoint = $state<string | null>(null);
   let templateFilterId = $state("");
   let templateToAddId = $state("");
@@ -143,6 +155,7 @@
   });
   let instanceById = $derived.by(() => new Map(templateInstances.map((node) => [node.id, node])));
   let selectedCard = $derived(cards.find((card) => card.id === selectedCardId) ?? null);
+  let selectedColumnId = $derived(selectedCard ? (selectedCard.structure_column_id ?? "__unplaced") : selectedCanvasColumnId);
   let selectedClaim = $derived(claims.find((claim) => claim.id === selectedClaimId) ?? null);
   let visibleTemplateInstances = $derived(
     templateFilterId ? templateInstances.filter((node) => node.id === templateFilterId) : templateInstances,
@@ -167,6 +180,7 @@
     return rows;
   });
   let columns = $derived(buildColumns(structure, cards));
+  let selectedColumn = $derived(selectedColumnId ? columns.find((column) => column.id === selectedColumnId) ?? null : null);
   let structureColumnOptions = $derived(flattenStructure(structure?.root));
   let selectedPointLabel = $derived(selectedClaim ? pointLabel(selectedClaim) : "");
   let selectedContextSceneId = $derived(selectedCard?.node_ref ?? null);
@@ -180,10 +194,13 @@
     saving: Boolean(savingMessage),
     selectedCardId,
     selectedClaimId,
+    selectedColumnId,
     dragOverCardId,
     cardById,
     cardColumnTitle,
     claimsForCard,
+    selectColumn,
+    addCardToColumn,
     pointLabel,
     selectCard,
     selectClaim,
@@ -321,10 +338,18 @@
     return document as PlotNode;
   }
 
-  function flattenStructure(root: StructureNode | null | undefined, depth = 0, acc: { id: string; title: string; depth: number }[] = []) {
+  function flattenStructure(
+    root: StructureNode | null | undefined,
+    depth = 0,
+    parentId: string | null = null,
+    acc: { id: string; title: string; type: string; parentId: string | null; depth: number }[] = [],
+  ) {
     if (!root) return acc;
-    if (depth > 0 && !isLeafNode(root)) acc.push({ id: root.id, title: root.title, depth });
-    for (const child of root.children ?? []) flattenStructure(child, depth + 1, acc);
+    const isContainer = depth > 0 && !isLeafNode(root);
+    if (isContainer) acc.push({ id: root.id, title: root.title, type: root.type, parentId, depth });
+    for (const child of root.children ?? []) {
+      flattenStructure(child, depth + 1, isContainer ? root.id : parentId, acc);
+    }
     return acc;
   }
 
@@ -343,6 +368,9 @@
     out.push({
       id: "__unplaced",
       title: "Unplaced",
+      type: "plot:unplaced",
+      parentId: null,
+      depth: 0,
       cards: unplacedCards,
     });
 
@@ -351,6 +379,9 @@
       out.push({
         id: column.id,
         title: column.title,
+        type: column.type,
+        parentId: column.parentId,
+        depth: column.depth,
         cards: cardsByColumn.get(column.id) ?? [],
       });
       cardsByColumn.delete(column.id);
@@ -360,12 +391,15 @@
       out.push({
         id,
         title: id,
+        type: "plot:unknown_structure",
+        parentId: null,
+        depth: 0,
         cards: columnCards,
       });
     }
 
     if (out.length === 0) {
-      return [{ id: "__unplaced", title: "Unplaced", cards: [] }];
+      return [{ id: "__unplaced", title: "Unplaced", type: "plot:unplaced", parentId: null, depth: 0, cards: [] }];
     }
     return out;
   }
@@ -409,11 +443,25 @@
     return "Unplaced";
   }
 
+  function selectColumn(columnId: string): void {
+    const column = columns.find((candidate) => candidate.id === columnId);
+    selectedCanvasColumnId = columnId;
+    selectedCardId = column?.cards[0]?.id ?? null;
+    selectedClaimId = null;
+    selectedPalettePoint = null;
+  }
+
+  function addCardToColumn(columnId: string): void {
+    void addPlaceholderCard(columnId);
+  }
+
   function claimsForCard(cardId: string): PlotPointClaim[] {
     return claimsByCard.get(cardId) ?? [];
   }
 
   function selectCard(cardId: string): void {
+    const card = cardById(cardId);
+    selectedCanvasColumnId = card?.structure_column_id ?? "__unplaced";
     selectedCardId = cardId;
     selectedClaimId = null;
     selectedPalettePoint = null;
@@ -421,6 +469,8 @@
   }
 
   function selectClaim(claim: PlotPointClaim): void {
+    const card = cardById(claim.card_id);
+    selectedCanvasColumnId = card?.structure_column_id ?? "__unplaced";
     selectedCardId = claim.card_id;
     selectedClaimId = claim.id;
     selectedPalettePoint = pointKey(claim.template_instance_id, claim.plot_point_id);
@@ -435,6 +485,7 @@
     }
     selectedCardId = null;
     selectedClaimId = null;
+    selectedCanvasColumnId = null;
     onFocus?.();
   }
 
@@ -495,7 +546,33 @@
 
   function allowCardDrop(cardId: string, event: DragEvent): void {
     event.preventDefault();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    const payload = readPlotDragPayload(event);
+    if (event.dataTransfer) event.dataTransfer.dropEffect = payload?.kind === "plot-point" ? "copy" : "move";
+    dragOverCardId = cardId;
+  }
+
+  function cardIdAtPoint(event: DragEvent): string | null {
+    const elements = Array.from(document.querySelectorAll<HTMLElement>(".plot-card[data-card-id]"));
+    for (const element of elements) {
+      const rect = element.getBoundingClientRect();
+      if (
+        event.clientX >= rect.left &&
+        event.clientX <= rect.right &&
+        event.clientY >= rect.top &&
+        event.clientY <= rect.bottom
+      ) {
+        return element.dataset.cardId ?? null;
+      }
+    }
+    return null;
+  }
+
+  function allowCanvasDrop(event: DragEvent): void {
+    const cardId = cardIdAtPoint(event);
+    if (!cardId) return;
+    event.preventDefault();
+    const payload = readPlotDragPayload(event);
+    if (event.dataTransfer) event.dataTransfer.dropEffect = payload?.kind === "plot-point" ? "copy" : "move";
     dragOverCardId = cardId;
   }
 
@@ -528,30 +605,167 @@
     return typeof x === "number" && Number.isFinite(x) && typeof y === "number" && Number.isFinite(y) ? { x, y } : null;
   }
 
-  function defaultCardPosition(card: PlotBoardCard, currentColumns: BoardColumn[]): CanvasPoint {
-    const columnIndex = Math.max(0, currentColumns.findIndex((column) => column.cards.some((candidate) => candidate.id === card.id)));
-    const column = currentColumns[columnIndex];
-    const rowIndex = Math.max(0, column?.cards.findIndex((candidate) => candidate.id === card.id) ?? 0);
+  function defaultCardPosition(card: PlotBoardCard, column: BoardColumn): CanvasPoint {
+    const rowIndex = Math.max(0, column.cards.findIndex((candidate) => candidate.id === card.id));
     return {
-      x: columnIndex * CARD_COLUMN_WIDTH,
-      y: rowIndex * CARD_ROW_HEIGHT,
+      x: GROUP_INSET,
+      y: GROUP_HEADER_HEIGHT + rowIndex * CARD_ROW_HEIGHT,
     };
+  }
+
+  function groupNodeId(columnId: string): string {
+    return `structure:${columnId}`;
+  }
+
+  function groupHeight(column: BoardColumn): number {
+    return Math.max(GROUP_MIN_HEIGHT, GROUP_HEADER_HEIGHT + GROUP_INSET + Math.max(1, column.cards.length) * CARD_ROW_HEIGHT);
+  }
+
+  function groupChildren(column: BoardColumn, currentColumns: BoardColumn[]): BoardColumn[] {
+    return currentColumns.filter((candidate) => candidate.parentId === column.id);
+  }
+
+  function rootGroups(currentColumns: BoardColumn[]): BoardColumn[] {
+    const ids = new Set(currentColumns.map((column) => column.id));
+    return currentColumns.filter((column) => column.id === "__unplaced" || !column.parentId || !ids.has(column.parentId));
+  }
+
+  function cardLaneWidth(column: BoardColumn): number {
+    return column.cards.length > 0 ? CARD_COLUMN_WIDTH : 0;
+  }
+
+  function groupWidth(column: BoardColumn, currentColumns: BoardColumn[]): number {
+    const children = groupChildren(column, currentColumns);
+    const childWidths = children.map((child) => groupWidth(child, currentColumns));
+    const laneWidths = [cardLaneWidth(column), ...childWidths].filter((width) => width > 0);
+    if (laneWidths.length === 0) return GROUP_MIN_WIDTH;
+    return Math.max(GROUP_MIN_WIDTH, GROUP_INSET * 2 + laneWidths.reduce((total, width) => total + width, 0) + Math.max(0, laneWidths.length - 1) * GROUP_GAP);
+  }
+
+  function nestedGroupHeight(column: BoardColumn, currentColumns: BoardColumn[]): number {
+    const children = groupChildren(column, currentColumns);
+    const childHeights = children.map((child) => nestedGroupHeight(child, currentColumns));
+    const cardHeight = column.cards.length > 0 ? groupHeight(column) : 0;
+    if (childHeights.length === 0) return cardHeight || GROUP_MIN_HEIGHT;
+    return Math.max(
+      GROUP_MIN_HEIGHT,
+      GROUP_HEADER_HEIGHT + GROUP_INSET + Math.max(cardHeight, ...childHeights),
+    );
+  }
+
+  function buildGroupFrames(currentColumns: BoardColumn[]): Map<string, GroupFrame> {
+    const frames = new Map<string, GroupFrame>();
+    const addFrame = (column: BoardColumn, parentFrame: GroupFrame | null, position: CanvasPoint) => {
+      const id = groupNodeId(column.id);
+      const width = groupWidth(column, currentColumns);
+      const height = nestedGroupHeight(column, currentColumns);
+      const absolute = parentFrame
+        ? { x: parentFrame.absolute.x + position.x, y: parentFrame.absolute.y + position.y }
+        : { ...position };
+      const frame: GroupFrame = {
+        id,
+        parentId: parentFrame?.id ?? null,
+        position,
+        absolute,
+        width,
+        height,
+      };
+      frames.set(column.id, frame);
+
+      let childX = GROUP_INSET + (column.cards.length > 0 ? CARD_COLUMN_WIDTH + GROUP_GAP : 0);
+      for (const child of groupChildren(column, currentColumns)) {
+        addFrame(child, frame, { x: childX, y: GROUP_HEADER_HEIGHT });
+        childX += groupWidth(child, currentColumns) + GROUP_GAP;
+      }
+    };
+
+    let rootX = 0;
+    for (const column of rootGroups(currentColumns)) {
+      const width = groupWidth(column, currentColumns);
+      addFrame(column, null, { x: rootX, y: 0 });
+      rootX += width + GROUP_GAP;
+    }
+    return frames;
+  }
+
+  function nestedCardPosition(
+    card: PlotBoardCard,
+    column: BoardColumn,
+    currentColumns: BoardColumn[],
+    frames: Map<string, GroupFrame>,
+    persisted: CanvasPoint | null,
+    current: FlowNode<PlotFlowData> | undefined,
+  ): CanvasPoint {
+    if (current?.parentId === groupNodeId(column.id)) {
+      return {
+        x: GROUP_INSET,
+        y: Math.max(GROUP_HEADER_HEIGHT, current.position.y),
+      };
+    }
+    const frame = frames.get(column.id);
+    if (persisted) {
+      const looksAbsolute = frame && persisted.x >= frame.absolute.x - GROUP_INSET;
+      if (looksAbsolute) {
+        return {
+          x: GROUP_INSET,
+          y: Math.max(GROUP_HEADER_HEIGHT, persisted.y - frame.absolute.y + GROUP_HEADER_HEIGHT),
+        };
+      }
+      if (persisted.y >= GROUP_HEADER_HEIGHT) return { x: GROUP_INSET, y: persisted.y };
+    }
+    return defaultCardPosition(card, column);
   }
 
   function buildFlowNodes(currentCards: PlotBoardCard[], currentColumns: BoardColumn[], layout: PlotBoardLayout | null): FlowNode<PlotFlowData>[] {
     const layoutById = new Map((layout?.nodes ?? []).map((node) => [node.id, node]));
     const currentById = new Map(untrack(() => flowNodes).map((node) => [node.id, node]));
-    return currentCards.map((card) => {
+    const frames = buildGroupFrames(currentColumns);
+    const groupNodes = currentColumns.map((column): FlowNode<PlotFlowData> => {
+      const id = groupNodeId(column.id);
+      const frame = frames.get(column.id) ?? {
+        id,
+        parentId: null,
+        position: { x: 0, y: 0 },
+        absolute: { x: 0, y: 0 },
+        width: CARD_COLUMN_WIDTH,
+        height: groupHeight(column),
+      };
+      return {
+        id,
+        type: "plotGroup",
+        parentId: frame.parentId ?? undefined,
+        position: frame.position,
+        data: {
+          kind: "group",
+          columnId: column.id,
+          title: column.title,
+          count: column.cards.length,
+          columnType: column.type,
+          parentColumnId: column.parentId,
+        },
+        width: frame.width,
+        height: frame.height,
+        style: `width: ${frame.width}px; height: ${frame.height}px;`,
+        dragHandle: ".group-drag-handle",
+        zIndex: frame.parentId ? 1 : 0,
+      };
+    });
+    const cardNodes = currentCards.map((card): FlowNode<PlotFlowData> => {
       const persisted = positionFromRecord(layoutById.get(card.id)?.position);
-      const current = currentById.get(card.id)?.position;
+      const current = currentById.get(card.id);
+      const columnId = card.structure_column_id ?? "__unplaced";
+      const column = currentColumns.find((candidate) => candidate.id === columnId) ?? currentColumns[0];
       return {
         id: card.id,
         type: "plotCard",
-        position: persisted ?? current ?? defaultCardPosition(card, currentColumns),
-        data: { cardId: card.id },
+        position: nestedCardPosition(card, column, currentColumns, frames, persisted, current),
+        parentId: groupNodeId(column.id),
+        data: { kind: "card", cardId: card.id },
         width: CARD_NODE_WIDTH,
+        zIndex: 2,
       };
     });
+    return [...groupNodes, ...cardNodes];
   }
 
   function relationshipLabel(relationship: PlotRelationship): string {
@@ -575,12 +789,14 @@
 
   function toLayout(viewport: Viewport = flowViewport): PlotBoardLayout {
     return {
-      nodes: flowNodes.map((node) => ({
-        id: node.id,
-        kind: "card",
-        position: { x: node.position.x, y: node.position.y },
-        cfg: {},
-      })),
+      nodes: flowNodes
+        .filter((node) => node.data.kind === "card")
+        .map((node) => ({
+          id: node.id,
+          kind: "card",
+          position: { x: node.position.x, y: node.position.y },
+          cfg: {},
+        })),
       edges: flowEdges.map((edge) => ({
         id: edge.id,
         source: edge.source,
@@ -594,6 +810,134 @@
 
   function canvasSnapshot(viewport: Viewport = flowViewport): string {
     return JSON.stringify(toLayout(viewport));
+  }
+
+  function flowNodeById(): Map<string, FlowNode<PlotFlowData>> {
+    return new Map(flowNodes.map((node) => [node.id, node]));
+  }
+
+  function nodeAbsolutePosition(node: FlowNode<PlotFlowData>, nodesById: Map<string, FlowNode<PlotFlowData>>): CanvasPoint {
+    if (!node.parentId) return node.position;
+    const parent = nodesById.get(node.parentId);
+    if (!parent) return node.position;
+    const parentPosition = nodeAbsolutePosition(parent, nodesById);
+    return {
+      x: parentPosition.x + node.position.x,
+      y: parentPosition.y + node.position.y,
+    };
+  }
+
+  function nodeCenter(node: FlowNode<PlotFlowData>, nodesById: Map<string, FlowNode<PlotFlowData>>): CanvasPoint {
+    const position = nodeAbsolutePosition(node, nodesById);
+    return {
+      x: position.x + (node.width ?? CARD_NODE_WIDTH) / 2,
+      y: position.y + (node.height ?? CARD_ROW_HEIGHT) / 2,
+    };
+  }
+
+  function containsPoint(node: FlowNode<PlotFlowData>, point: CanvasPoint, nodesById: Map<string, FlowNode<PlotFlowData>>): boolean {
+    const position = nodeAbsolutePosition(node, nodesById);
+    const width = node.width ?? GROUP_MIN_WIDTH;
+    const height = node.height ?? GROUP_MIN_HEIGHT;
+    return point.x >= position.x && point.x <= position.x + width && point.y >= position.y && point.y <= position.y + height;
+  }
+
+  function smallestGroupAt(
+    point: CanvasPoint,
+    predicate: (node: FlowNode<PlotFlowData>) => boolean,
+    nodesById: Map<string, FlowNode<PlotFlowData>>,
+  ): FlowNode<PlotFlowData> | null {
+    return flowNodes
+      .filter((node) => node.data.kind === "group" && predicate(node) && containsPoint(node, point, nodesById))
+      .sort((a, b) => ((a.width ?? GROUP_MIN_WIDTH) * (a.height ?? GROUP_MIN_HEIGHT)) - ((b.width ?? GROUP_MIN_WIDTH) * (b.height ?? GROUP_MIN_HEIGHT)))[0] ?? null;
+  }
+
+  function cardLocalPositionInGroup(
+    cardNode: FlowNode<PlotFlowData>,
+    targetGroup: FlowNode<PlotFlowData>,
+    nodesById: Map<string, FlowNode<PlotFlowData>>,
+  ): CanvasPoint {
+    const cardAbsolute = nodeAbsolutePosition(cardNode, nodesById);
+    const groupAbsolute = nodeAbsolutePosition(targetGroup, nodesById);
+    return {
+      x: GROUP_INSET,
+      y: Math.max(GROUP_HEADER_HEIGHT, cardAbsolute.y - groupAbsolute.y),
+    };
+  }
+
+  function normalizeCardNodePosition(cardNode: FlowNode<PlotFlowData>): void {
+    flowNodes = flowNodes.map((node) =>
+      node.id === cardNode.id
+        ? { ...node, position: { x: GROUP_INSET, y: Math.max(GROUP_HEADER_HEIGHT, node.position.y) } }
+        : node,
+    );
+  }
+
+  async function moveCardToColumn(cardNode: FlowNode<PlotFlowData>, targetColumnId: string): Promise<boolean> {
+    const data = cardNode.data;
+    if (data.kind !== "card" || savingMessage) return false;
+    const card = cards.find((candidate) => candidate.id === data.cardId);
+    if (!card) return false;
+    const nextStructureColumnId = targetColumnId === "__unplaced" ? null : targetColumnId;
+    if ((card.structure_column_id ?? null) === nextStructureColumnId) return false;
+    const nodesById = flowNodeById();
+    const targetGroup = nodesById.get(groupNodeId(targetColumnId));
+    if (!targetGroup) return false;
+    const nextPosition = cardLocalPositionInGroup(cardNode, targetGroup, nodesById);
+    flowNodes = flowNodes.map((node) =>
+      node.id === cardNode.id
+        ? { ...node, parentId: targetGroup.id, position: nextPosition }
+        : node,
+    );
+    const nextBoard = cloneBoardSpec(board);
+    nextBoard.cards = (nextBoard.cards ?? []).map((candidate) =>
+      candidate.id === card.id ? { ...candidate, structure_column_id: nextStructureColumnId } : candidate,
+    );
+    const saved = await persistBoard(nextBoard, "Moving card");
+    if (saved) {
+      selectedCanvasColumnId = targetColumnId;
+      selectedCardId = card.id;
+      selectedClaimId = null;
+      selectedPalettePoint = null;
+    }
+    return Boolean(saved);
+  }
+
+  function chapterDropPosition(chapterId: string, targetActId: string, dropX: number): number {
+    const nodesById = flowNodeById();
+    let position = 0;
+    for (const column of columns) {
+      if (column.id === chapterId || column.type !== "scene:chapter" || column.parentId !== targetActId) continue;
+      const node = nodesById.get(groupNodeId(column.id));
+      if (!node) continue;
+      if (dropX > nodeCenter(node, nodesById).x) position += 1;
+    }
+    return position;
+  }
+
+  async function moveChapterToAct(chapterNode: FlowNode<PlotFlowData>, targetActId: string): Promise<boolean> {
+    const data = chapterNode.data;
+    if (data.kind !== "group" || data.columnType !== "scene:chapter" || savingMessage) return false;
+    const position = chapterDropPosition(data.columnId, targetActId, nodeCenter(chapterNode, flowNodeById()).x);
+    const currentSiblings = columns.filter((column) => column.type === "scene:chapter" && column.parentId === targetActId);
+    const currentIndex = currentSiblings.findIndex((column) => column.id === data.columnId);
+    if (data.parentColumnId === targetActId && currentIndex === position) return false;
+    savingMessage = "Moving chapter";
+    saveError = "";
+    try {
+      const nextStructure = await api.moveStructureNode(data.columnId, targetActId, position);
+      setStructure(nextStructure);
+      selectedCanvasColumnId = data.columnId;
+      selectedCardId = null;
+      selectedClaimId = null;
+      selectedPalettePoint = null;
+      return true;
+    } catch (caught) {
+      saveError = caught instanceof Error ? caught.message : "Could not move chapter.";
+      return false;
+    } finally {
+      savingMessage = "";
+    }
   }
 
   async function persistPlot(nextBoard: PlotBoardSpec, nextLayout: PlotBoardLayout | null, message: string): Promise<PlotNode | null> {
@@ -847,6 +1191,12 @@
     await attachPointToCard(cardId, payload.template_instance_id, payload.plot_point_id);
   }
 
+  async function dropOnCanvas(event: DragEvent): Promise<void> {
+    const cardId = cardIdAtPoint(event);
+    if (!cardId) return;
+    await dropOnCard(cardId, event);
+  }
+
   async function addPlaceholderCard(columnId: string | null): Promise<void> {
     const title = window.prompt("Card title", "New plot card")?.trim();
     if (!title) return;
@@ -894,13 +1244,33 @@
     }
   }
 
+  async function addAct(): Promise<void> {
+    const title = window.prompt("Act title", "New act")?.trim();
+    if (!title) return;
+    saveError = "";
+    savingMessage = "Adding act";
+    try {
+      setStructure(await api.createStructureNode(title, "scene:act"));
+    } catch (caught) {
+      saveError = caught instanceof Error ? caught.message : "Could not add act.";
+    } finally {
+      savingMessage = "";
+    }
+  }
+
   async function addChapter(): Promise<void> {
     const title = window.prompt("Chapter title", "New chapter")?.trim();
     if (!title) return;
     saveError = "";
     savingMessage = "Adding chapter";
+    const parentId =
+      selectedColumn?.type === "scene:act"
+        ? selectedColumn.id
+        : selectedColumn?.type === "scene:chapter"
+          ? selectedColumn.parentId
+          : null;
     try {
-      setStructure(await api.createStructureNode(title, "scene:chapter"));
+      setStructure(await api.createStructureNode(title, "scene:chapter", parentId));
     } catch (caught) {
       saveError = caught instanceof Error ? caught.message : "Could not add chapter.";
     } finally {
@@ -913,7 +1283,43 @@
     void persistCanvas(viewport);
   };
 
-  function handleNodeDragStop(): void {
+  function handleNodeDragStop({ nodes }: NodeDragStopPayload): void {
+    const dragged = nodes[0];
+    if (!dragged) {
+      void persistCanvas();
+      return;
+    }
+    const nodesById = flowNodeById();
+    const center = nodeCenter(dragged, nodesById);
+    if (dragged.data.kind === "card") {
+      const target = smallestGroupAt(center, () => true, nodesById);
+      if (target?.data.kind === "group" && target.id !== dragged.parentId) {
+        void moveCardToColumn(dragged, target.data.columnId).then((moved) => {
+          if (!moved) {
+            normalizeCardNodePosition(dragged);
+            void persistCanvas();
+          }
+        });
+        return;
+      }
+      normalizeCardNodePosition(dragged);
+      void persistCanvas();
+      return;
+    }
+    if (dragged.data.kind === "group" && dragged.data.columnType === "scene:chapter") {
+      const draggedColumnId = dragged.data.columnId;
+      const targetAct = smallestGroupAt(
+        center,
+        (node) => node.data.kind === "group" && node.data.columnType === "scene:act" && node.data.columnId !== draggedColumnId,
+        nodesById,
+      );
+      if (targetAct?.data.kind === "group") {
+        void moveChapterToAct(dragged, targetAct.data.columnId).then((moved) => {
+          if (!moved) void persistCanvas();
+        });
+        return;
+      }
+    }
     void persistCanvas();
   }
 
@@ -1010,7 +1416,7 @@
       <span>{claims.length} claims</span>
       <span>{board.relationships.length} relationships</span>
       {#if savingMessage}
-        <span>{savingMessage}…</span>
+        <span>{savingMessage}...</span>
       {/if}
       {#if saveError}
         <span class="toolbar-error">{saveError}</span>
@@ -1019,41 +1425,16 @@
         <i class="ti ti-note" aria-hidden="true"></i>
         Card
       </button>
+      <button type="button" class="tool-button" disabled={Boolean(savingMessage)} onclick={() => addAct()}>
+        <i class="ti ti-columns-3" aria-hidden="true"></i>
+        Act
+      </button>
       <button type="button" class="tool-button" disabled={Boolean(savingMessage)} onclick={() => addChapter()}>
         <i class="ti ti-library-plus" aria-hidden="true"></i>
         Chapter
       </button>
     </div>
-    <div class="structure-lanes" aria-label="Manuscript Structure lanes">
-      {#each columns as column (column.id)}
-        <section class="structure-lane" class:active={selectedCard ? (selectedCard.structure_column_id ?? "__unplaced") === column.id : false}>
-          <button
-            type="button"
-            class="lane-main"
-            title={column.title}
-            onclick={() => {
-              selectedCardId = column.cards[0]?.id ?? null;
-              selectedClaimId = null;
-              selectedPalettePoint = null;
-            }}
-          >
-            <span>{column.title}</span>
-            <small>{column.cards.length}</small>
-          </button>
-          <button
-            type="button"
-            class="lane-add"
-            title={`Add card to ${column.title}`}
-            aria-label={`Add card to ${column.title}`}
-            disabled={Boolean(savingMessage)}
-            onclick={() => addPlaceholderCard(column.id)}
-          >
-            <i class="ti ti-plus" aria-hidden="true"></i>
-          </button>
-        </section>
-      {/each}
-    </div>
-    <div class="flow-canvas">
+    <div class="flow-canvas" role="region" aria-label="Plot board canvas" ondragover={allowCanvasDrop} ondrop={dropOnCanvas}>
       <SvelteFlow
         bind:nodes={flowNodes}
         bind:edges={flowEdges}
@@ -1075,219 +1456,34 @@
     </div>
   </main>
 
-  <aside class="plot-inspector" aria-label="Plot selection">
-    {#if selectedClaim}
-      <header class="inspector-head">
-        <span>Claim</span>
-        <strong>{selectedPointLabel}</strong>
-      </header>
-      <div class="inspector-form">
-        <label>
-          Label override
-          <input
-            value={selectedClaim.claim_label ?? ""}
-            placeholder={selectedPointLabel}
-            disabled={Boolean(savingMessage)}
-            onblur={commitClaimLabel}
-          />
-        </label>
-        <label>
-          Card
-          <input value={selectedCard?.title ?? selectedClaim.card_id} disabled />
-        </label>
-        <label>
-          Type
-          <select value={selectedClaim.claim_type} disabled={Boolean(savingMessage)} onchange={changeClaimType}>
-            {#each CLAIM_TYPE_OPTIONS as option (option.value)}
-              <option value={option.value}>{option.label}</option>
-            {/each}
-          </select>
-        </label>
-        <label>
-          Strength
-          <select value={selectedClaim.strength ?? ""} disabled={Boolean(savingMessage)} onchange={changeClaimStrength}>
-            {#each CLAIM_STRENGTH_OPTIONS as option (option.value)}
-              <option value={option.value}>{option.label}</option>
-            {/each}
-          </select>
-        </label>
-        {#if board.plotlines.length > 0}
-          <label>
-            Plotline
-            <select value={selectedClaim.plotline_id ?? ""} disabled={Boolean(savingMessage)} onchange={changeClaimPlotline}>
-              <option value="">None</option>
-              {#each board.plotlines as line (line.id)}
-                <option value={line.id}>{line.title}</option>
-              {/each}
-            </select>
-          </label>
-        {/if}
-        <label>
-          Specific rationale
-          <textarea
-            rows="4"
-            value={selectedClaim.rationale ?? ""}
-            disabled={Boolean(savingMessage)}
-            onblur={(event) => commitClaimTextField("rationale", event)}
-          ></textarea>
-        </label>
-        <label>
-          Evidence
-          <textarea
-            rows="3"
-            value={selectedClaim.evidence ?? ""}
-            disabled={Boolean(savingMessage)}
-            onblur={(event) => commitClaimTextField("evidence", event)}
-          ></textarea>
-        </label>
-        <label>
-          AI notes
-          <textarea
-            rows="3"
-            value={selectedClaim.ai_notes ?? ""}
-            disabled={Boolean(savingMessage)}
-            onblur={(event) => commitClaimTextField("ai_notes", event)}
-          ></textarea>
-        </label>
-      </div>
-    {:else if selectedCard}
-      <header class="inspector-head">
-        <span>Card</span>
-        <strong>{selectedCard.title}</strong>
-      </header>
-      <div class="inspector-form">
-        <label>
-          Title
-          <input value={selectedCard.title} disabled={Boolean(savingMessage)} onblur={commitCardTitle} />
-        </label>
-        <label>
-          Synopsis
-          <textarea
-            rows="5"
-            value={selectedCard.synopsis}
-            disabled={Boolean(savingMessage)}
-            onblur={commitCardSynopsis}
-          ></textarea>
-        </label>
-        <label>
-          Manuscript position
-          <select value={selectedCard.structure_column_id ?? "__unplaced"} disabled={Boolean(savingMessage)} onchange={changeCardColumn}>
-            <option value="__unplaced">Unplaced</option>
-            {#each structureColumnOptions as column (column.id)}
-              <option value={column.id}>{"\u00a0".repeat(Math.max(0, column.depth - 1) * 2)}{column.title}</option>
-            {/each}
-          </select>
-        </label>
-        {#if board.plotlines.length > 0}
-          <label>
-            Primary plotline
-            <select value={selectedCard.primary_plotline_id ?? ""} disabled={Boolean(savingMessage)} onchange={changeCardPlotline}>
-              <option value="">None</option>
-              {#each board.plotlines as line (line.id)}
-                <option value={line.id}>{line.title}</option>
-              {/each}
-            </select>
-          </label>
-        {/if}
-        <div class="inspector-stat">
-          <span>Claims</span>
-          <strong>{(claimsByCard.get(selectedCard.id) ?? []).length}</strong>
-        </div>
-        {#if selectedCard.node_ref}
-          <div class="inspector-stat">
-            <span>Draft node</span>
-            <button type="button" class="link-button" onclick={(event) => selectedCard && openCardNode(selectedCard, event)}>
-              {selectedCard.node_ref}
-              <i class="ti ti-arrow-up-right" aria-hidden="true"></i>
-            </button>
-          </div>
-        {:else}
-          <button
-            type="button"
-            class="tool-button inspector-action"
-            disabled={Boolean(savingMessage)}
-            onclick={(event) => selectedCard && promoteCard(selectedCard, event)}
-          >
-            <i class="ti ti-file-plus" aria-hidden="true"></i>
-            Promote to scene
-          </button>
-        {/if}
-      </div>
-    {:else if selectedPaletteRow}
-      <header class="inspector-head">
-        <span>Function point</span>
-        <strong>{selectedPaletteRow.point.title || selectedPaletteRow.point.plot_point_id}</strong>
-      </header>
-      <dl>
-        <dt>Template instance</dt>
-        <dd>{selectedPaletteRow.instance.title}</dd>
-        <dt>Status</dt>
-        <dd>{selectedPaletteRow.status}</dd>
-        {#if selectedPaletteRow.point.function_claim}
-          <dt>Function claim</dt>
-          <dd>{selectedPaletteRow.point.function_claim}</dd>
-        {/if}
-        {#if selectedPaletteRow.point.notes}
-          <dt>Notes</dt>
-          <dd>{selectedPaletteRow.point.notes}</dd>
-        {/if}
-      </dl>
-    {:else}
-      <p class="muted-line">No card selected.</p>
-    {/if}
-
-    {#if plotNode}
-      <section class="context-preview" aria-label="AI plot context">
-        <header>
-          <span>AI context</span>
-          <label>
-            <input type="checkbox" bind:checked={includeFutureContext} />
-            Future
-          </label>
-        </header>
-        {#if plotContextLoading}
-          <p class="muted-line">Loading…</p>
-        {:else if plotContextError}
-          <p class="context-error">{plotContextError}</p>
-        {:else if !selectedContextSceneId && !includeFutureContext}
-          <p class="muted-line">No draft scene scope.</p>
-        {:else if plotContext}
-          <div class="context-stats">
-            <span>{plotContext.cards.length} cards</span>
-            <span>{plotContext.claims.length} claims</span>
-            <span>{omittedCount("future_cards")} future</span>
-          </div>
-          {#if plotContext.cards.length === 0}
-            <p class="muted-line">No visible plot cards.</p>
-          {:else}
-            <div class="context-card-list">
-              {#each plotContext.cards as contextCard (contextCard.id)}
-                <article class="context-card">
-                  <header>
-                    <strong>{contextCard.title}</strong>
-                    {#if contextCard.structure_title}
-                      <span>{contextCard.structure_title}</span>
-                    {/if}
-                  </header>
-                  {#if contextCard.synopsis}
-                    <p>{contextCard.synopsis}</p>
-                  {/if}
-                  {#if contextClaimsForCard(contextCard.id).length > 0}
-                    <ul>
-                      {#each contextClaimsForCard(contextCard.id) as contextClaim (contextClaim.id)}
-                        <li>
-                          <span>{contextPointLabel(contextClaim)}</span>
-                          <small>{contextClaim.claim_type}</small>
-                        </li>
-                      {/each}
-                    </ul>
-                  {/if}
-                </article>
-              {/each}
-            </div>
-          {/if}
-        {/if}
-      </section>
-    {/if}
-  </aside>
+  <PlotBoardInspector
+    {board}
+    {claimsByCard}
+    {contextClaimsForCard}
+    {contextPointLabel}
+    bind:includeFutureContext
+    {omittedCount}
+    {openCardNode}
+    {plotContext}
+    {plotContextError}
+    {plotContextLoading}
+    {plotNode}
+    {promoteCard}
+    {savingMessage}
+    {selectedCard}
+    {selectedClaim}
+    {selectedContextSceneId}
+    {selectedPaletteRow}
+    {selectedPointLabel}
+    {structureColumnOptions}
+    {changeCardColumn}
+    {changeCardPlotline}
+    {changeClaimPlotline}
+    {changeClaimStrength}
+    {changeClaimType}
+    {commitCardSynopsis}
+    {commitCardTitle}
+    {commitClaimLabel}
+    {commitClaimTextField}
+  />
 </section>

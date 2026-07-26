@@ -74,6 +74,15 @@
   color: var(--accent-deep);
 }
 
+.tool-button.danger {
+  color: var(--danger);
+}
+
+.tool-button.danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
 .tool-button:disabled {
   cursor: not-allowed;
   opacity: 0.55;

@@ -916,6 +916,48 @@
     await persistBoard(nextBoard, message);
   }
 
+  async function deleteCard(card: PlotBoardCard, event?: MouseEvent): Promise<void> {
+    event?.stopPropagation();
+    if (!plotNode || savingMessage) return;
+    const claimCount = (board.claims ?? []).filter((claim) => claim.card_id === card.id).length;
+    const relationshipCount = (board.relationships ?? []).filter(
+      (relationship) => relationship.from_card_id === card.id || relationship.to_card_id === card.id,
+    ).length;
+    const removedParts = [
+      claimCount > 0 ? `${claimCount} function ${claimCount === 1 ? "badge" : "badges"}` : "",
+      relationshipCount > 0 ? `${relationshipCount} ${relationshipCount === 1 ? "relationship" : "relationships"}` : "",
+    ].filter(Boolean);
+    const details = [
+      removedParts.length > 0 ? `This also removes ${removedParts.join(" and ")}.` : "",
+      card.node_ref ? "The linked draft scene will not be deleted." : "",
+    ].filter(Boolean);
+    const confirmed = window.confirm(
+      `Delete "${card.title}" from this plot board?${details.length > 0 ? `\n\n${details.join("\n")}` : ""}`,
+    );
+    if (!confirmed) return;
+
+    const nextBoard = cloneBoardSpec(board);
+    nextBoard.cards = (nextBoard.cards ?? []).filter((candidate) => candidate.id !== card.id);
+    nextBoard.claims = (nextBoard.claims ?? []).filter((claim) => claim.card_id !== card.id);
+    nextBoard.relationships = (nextBoard.relationships ?? []).filter(
+      (relationship) => relationship.from_card_id !== card.id && relationship.to_card_id !== card.id,
+    );
+    const nextLayout = toLayout();
+    nextLayout.nodes = nextLayout.nodes.filter((node) => node.id !== card.id);
+    nextLayout.edges = nextLayout.edges.filter((edge) => edge.source !== card.id && edge.target !== card.id);
+    const saved = await persistPlot(nextBoard, nextLayout, "Deleting card");
+    if (saved) {
+      flowNodes = flowNodes.filter((node) => node.id !== card.id);
+      flowEdges = flowEdges.filter((edge) => edge.source !== card.id && edge.target !== card.id);
+      const sameColumnId = card.structure_column_id ?? null;
+      const nextSelectedCard = nextBoard.cards.find((candidate) => (candidate.structure_column_id ?? null) === sameColumnId) ?? nextBoard.cards[0] ?? null;
+      selectedCardId = nextSelectedCard?.id ?? null;
+      selectedCanvasColumnId = nextSelectedCard ? (nextSelectedCard.structure_column_id ?? "__unplaced") : (card.structure_column_id ?? "__unplaced");
+      selectedClaimId = null;
+      selectedPalettePoint = null;
+    }
+  }
+
   async function updateSelectedClaim(patch: Partial<PlotPointClaim>, message = "Saving badge"): Promise<void> {
     const claim = selectedClaim;
     if (!claim || savingMessage) return;
@@ -1361,6 +1403,7 @@
     {plotContextError}
     {plotContextLoading}
     {plotNode}
+    {deleteCard}
     {promoteCard}
     {savingMessage}
     {selectedCard}

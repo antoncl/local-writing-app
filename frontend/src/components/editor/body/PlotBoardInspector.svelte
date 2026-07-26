@@ -34,6 +34,7 @@
     plotContextError: string;
     plotContextLoading: boolean;
     plotNode: PlotNode | null;
+    deleteCard: (card: PlotBoardCard, event: MouseEvent) => void;
     promoteCard: (card: PlotBoardCard, event: MouseEvent) => void;
     savingMessage: string;
     selectedCard: PlotBoardCard | null;
@@ -65,6 +66,7 @@
     plotContextError,
     plotContextLoading,
     plotNode,
+    deleteCard,
     promoteCard,
     savingMessage,
     selectedCard,
@@ -249,6 +251,15 @@
           Promote to scene
         </button>
       {/if}
+      <button
+        type="button"
+        class="tool-button inspector-action danger"
+        disabled={Boolean(savingMessage)}
+        onclick={(event) => deleteCard(selectedCard, event)}
+      >
+        <i class="ti ti-trash" aria-hidden="true"></i>
+        Delete card
+      </button>
     </div>
   {:else if selectedPaletteRow}
     <header class="inspector-head">

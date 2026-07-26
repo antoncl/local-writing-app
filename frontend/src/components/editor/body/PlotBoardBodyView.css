@@ -179,7 +179,7 @@
 
 .point-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) max-content;
   align-items: center;
   gap: var(--sp-2);
   width: 100%;
@@ -206,9 +206,15 @@
   font-size: var(--fs-sm);
 }
 
-.point-row span:last-child {
+.point-status {
+  justify-self: end;
+  min-width: 7ch;
+  overflow: visible;
+  text-align: right;
+  white-space: nowrap;
   font-family: var(--mono);
   font-size: var(--fs-xs);
+  line-height: 1.2;
   color: var(--text-3);
 }
 

@@ -4,7 +4,7 @@ Functions callable from a prompt template. All are registered as globals on the 
 
 There are two flavors:
 
-- **Pure helpers** (`last_words`) need no project state. Always available.
+- **Pure helpers** (`last_words`, `context_xml`) need no project state. Always available.
 - **Project-bound helpers** (`pov`, `scenes_before`, `relevant_lore`, `plot_context`) need to look up nodes, walk the reference graph, or read prior scenes. They are bound to a specific project at env-construction time.
 
 Two values that look like helpers but are actually template **variables**, populated by the dispatch layer per call:
@@ -358,28 +358,40 @@ Unlike `context_pick`, a `scene_ref` value injects **no content** — it is only
 setting (ADR-0012). An empty `scene_ref` and no anchored `scene` resolves at **end-of-book**
 (full knowledge), the safe default for a non-manuscript chat.
 
-## `plot_context(board=None, scene=scene, include_future=False)`
+## `plot_context(selection, as_of=None)`
 
-Returns an XML block describing a plot board in a form that is safe to paste into a prompt. It is the prompt-facing bridge for plot templates, template instances, board cards, point claims, and card relationships.
+Materializes plot-board context for a prompt. The picker decides what plot object
+the prompt is about; `as_of` is only an optional spoiler boundary. If the user
+picks a template instance, the context is filtered to that specific instance.
+
+Use `context_xml(...)` to render the returned context as XML-like text for the
+model. For reusable prompt snippets, prefer iterating the returned structure and
+rendering the fields the snippet needs.
 
 **Signature**
 ```python
-plot_context(board=None, scene=None, include_future: bool = False) -> str
+plot_context(selection, as_of=None) -> PlotContext
+context_xml(value) -> str
 ```
 
-**Accepted `board` shapes**:
+**Accepted `selection` shapes**:
 
-- omitted or empty string: uses the first plot board in the current project
 - a plot board id string
+- a plot template-instance id string, resolved through the board that uses it
 - a picked node object/dict with an `id`
 - a list of picked node refs, where the first ref wins
 - a JSON string containing that picked-ref list, which is what `context_pick` inputs provide
 
-**Scene scoping**: if `scene` is supplied, future cards and claims are omitted by default. This lets a scene-scoped prompt see the plot evidence available up to that manuscript point without leaking later twists. Pass `include_future=True` only for outline, audit, or whole-book prompts where spoilers are intended.
+If `as_of` is omitted, the selected plot context is materialized fully. If
+`as_of` is supplied, manuscript-positioned cards and claims after that story
+moment are omitted. In practice `as_of=scene` lets a scene-scoped prompt avoid
+future spoilers. Selecting a template instance filters the owning board down to
+that instance's template guidance, claims, contributing cards, and card-to-card
+relationships.
 
-**Output shape**:
+**Default XML shape**:
 ```xml
-<plot_context board_id="plot_board_main" board_title="Book plot board" include_future="false" scope_scene_id="scene_after_breakin">
+<plot_context board_id="plot_board_main" board_title="Book plot board" completeness="through_as_of" as_of_scene_id="scene_after_breakin">
   <omitted future_cards="1" />
   <plotline id="plotline_main" title="Main" />
   <template_instance id="plot_inst_main" title="Main structure" template_slug="three-act" template_family="act">
@@ -390,7 +402,6 @@ plot_context(board=None, scene=None, include_future: bool = False) -> str
       <open_questions>
         <question>Who sees her leave?</question>
       </open_questions>
-      <ai_rubric>{"criteria":["Cite a card."]}</ai_rubric>
     </plot_point>
   </template_instance>
   <card id="card_archive" title="Archive Break-in" scene_id="scene_archive">
@@ -407,7 +418,7 @@ plot_context(board=None, scene=None, include_future: bool = False) -> str
 {% role "user" %}
 Evaluate whether this scene pays off the active plot promises.
 
-{{ plot_context(input.board, scene=scene) }}
+{{ context_xml(plot_context(input.plot, as_of=scene)) }}
 
 Scene:
 {{ scene.body }}
@@ -417,13 +428,16 @@ Scene:
 The matching prompt input declaration:
 
 ```yaml
-- name: board
+- name: plot
   type: context_pick
-  label: Plot board
+  label: Plot context
   target:
-    kinds: [plot]
-    entry_types:
-      plot: [plot:board]
+    sources:
+      - kind: plot
+        expr:
+          union:
+            - type: plot:board
+            - type: plot:template_instance
     multiple: false
   required: true
 ```
@@ -431,28 +445,49 @@ The matching prompt input declaration:
 **Example - whole-board audit**
 ```jinja
 {% role "user" %}
-Find weak or unsupported plot-point claims across the whole board.
+Find weak or unsupported plot-beat claims across the whole board.
 
-{{ plot_context(input.board, include_future=True) }}
+{{ context_xml(plot_context(input.plot)) }}
 {% endrole %}
+```
+
+**Example - snippet-style template instance rendering**
+```jinja
+{% set plot = plot_context(input.plot) %}
+
+{% for instance in plot.template_instances %}
+## {{ instance.title }}
+{{ instance.ai_use_guidance }}
+
+{% for point in instance.plot_points %}
+### {{ point.title }}
+Function: {{ point.function_claim }}
+
+{% if point.guidance %}
+Guidance: {{ point.guidance }}
+{% endif %}
+{% if point.notes %}
+Author notes: {{ point.notes }}
+{% endif %}
+{% endfor %}
+{% endfor %}
 ```
 
 **What plot templates contribute**
 
-Plot template and template-instance metadata is included alongside board cards. In practice this means prompts can see:
+Plot template and template-instance metadata is included alongside board cards.
+In practice this means snippets can see:
 
 - template-level `ai_use_guidance`
-- template-level `global_diagnostic_questions`
-- plot-point `function_claim`, `description`, and `guidance`
+- plot-beat `function_claim` and `guidance`
 - instance-level point `notes`, `author_intent`, `expected_role`, and `open_questions`
-- point `placement`, `compression`, and `ai_rubric`
 - card claims with `evidence`, `rationale`, and `ai_notes`
 
 **Caveats**:
 
-- Empty string means "no usable board" and produces no prompt content. Wrap it in an `{% if %}` if the surrounding wording depends on it.
-- The helper returns a serialized XML-like block, not structured Python objects to loop over.
-- Scene scoping depends on linked board cards resolving to manuscript-order scenes. Placeholder cards without a `node_ref` can still appear, but they cannot prove where they sit in the manuscript.
+- Empty string means "no usable selection" and produces no prompt content. Wrap it in an `{% if %}` if the surrounding wording depends on it.
+- `plot_context(...)` returns structured context. `context_xml(...)` turns that context into XML-like text.
+- `as_of` filtering depends on linked board cards resolving to manuscript-order scenes. Placeholder cards without a `node_ref` can still appear in whole-context prompts, but they cannot prove where they sit in the manuscript.
 - The built-in templates (`Three Act Structure`, `Heroine Journey`, `Mystery Spine`) are generic diagnostic lenses, not prescriptive beat sheets.
 
 ## Sessions

@@ -4,6 +4,7 @@
   import { SvelteFlow, Controls, MiniMap, type Connection, type Edge, type Node as FlowNode, type NodeTargetEventWithPointer, type OnMoveEnd, type Viewport } from "@xyflow/svelte";
   import { untrack } from "svelte";
   import { api } from "@/lib/api";
+  import { refreshPlotEntries } from "@/lib/stores/plots";
   import { setStructure } from "@/lib/stores/structure";
   import { isLeafNode } from "@/lib/utils/treeHelpers";
   import PlotBoardFlowCard from "./PlotBoardFlowCard.svelte";
@@ -113,6 +114,8 @@
   let templateInstances: PlotNode[] = $state([]);
   let availableTemplates: PlotNodeSummary[] = $state([]);
   let templateLoadError = $state("");
+  let renamingTemplateInstanceId = $state<string | null>(null);
+  let renamingTemplateInstanceTitle = $state("");
   let templateRequest = 0;
   let loadedPlotId = $state<string | null>(null);
   let loadedPlotRevision = $state<string | null>(null);
@@ -321,6 +324,9 @@
     const revision = plotNode?.revision ?? "";
     const cardIds = cards.map((card) => card.id).join("|");
     const relationshipIds = (board.relationships ?? []).map((rel) => rel.id).join("|");
+    const templateSignature = templateInstances
+      .map((instance) => `${instance.id}:${rawInstanceTitle(instance)}:${(instance.template_instance?.plot_points ?? []).map((point) => point.plot_point_id).join(",")}`)
+      .join("|");
     canvasHydrating = true;
     flowViewport = plotNode?.layout?.viewport ?? DEFAULT_VIEWPORT;
     flowNodes = buildFlowNodes(cards, columns, plotNode?.layout ?? null);
@@ -331,6 +337,7 @@
     void revision;
     void cardIds;
     void relationshipIds;
+    void templateSignature;
   });
 
   function asPlotNode(document: EditableDocument | null | undefined): PlotNode | null {
@@ -408,14 +415,19 @@
     if (claim.claim_label) return claim.claim_label;
     const instance = instanceById.get(claim.template_instance_id);
     const point = instance?.template_instance?.plot_points?.find((candidate) => candidate.plot_point_id === claim.plot_point_id);
-    return point?.title || claim.plot_point_id;
+    const label = point?.title || claim.plot_point_id;
+    return instance && templateInstances.length > 1 ? `${label} - ${instanceDisplayTitle(instance)}` : label;
   }
 
   function contextPointLabel(claim: PlotContextClaim): string {
     for (const instance of plotContext?.template_instances ?? []) {
       if (instance.id !== claim.template_instance_id) continue;
       const point = instance.plot_points.find((candidate) => candidate.plot_point_id === claim.plot_point_id);
-      if (point?.title) return point.title;
+      if (point?.title) {
+        return (plotContext?.template_instances.length ?? 0) > 1
+          ? `${point.title} - ${contextInstanceDisplayTitle(instance)}`
+          : point.title;
+      }
     }
     return claim.claim_label || claim.plot_point_id;
   }
@@ -430,6 +442,182 @@
 
   function pointKey(instanceId: string, pointId: string): string {
     return `${instanceId}:${pointId}`;
+  }
+
+  function rawInstanceTitle(instance: Pick<PlotNode, "id" | "title" | "template_instance">): string {
+    return instance.title || instance.template_instance?.title || instance.id;
+  }
+
+  function instanceDisplayTitle(instance: PlotNode): string {
+    const title = rawInstanceTitle(instance);
+    const matching = templateInstances.filter((candidate) => rawInstanceTitle(candidate) === title);
+    if (matching.length <= 1) return title;
+    return `${title} #${matching.findIndex((candidate) => candidate.id === instance.id) + 1}`;
+  }
+
+  function contextInstanceDisplayTitle(instance: { id: string; title: string }): string {
+    const title = instance.title || instance.id;
+    const matching = (plotContext?.template_instances ?? []).filter((candidate) => (candidate.title || candidate.id) === title);
+    if (matching.length <= 1) return title;
+    return `${title} #${matching.findIndex((candidate) => candidate.id === instance.id) + 1}`;
+  }
+
+  function nextTemplateInstanceTitle(template: PlotNode): string {
+    const baseTitle = `${template.title} plot`;
+    const existingCount = templateInstances.filter((instance) => instance.template_instance?.template_id === template.id).length;
+    if (existingCount === 0) return baseTitle;
+    return `${baseTitle} ${existingCount + 1}`;
+  }
+
+  function startRenameTemplateInstance(instance: PlotNode): void {
+    renamingTemplateInstanceId = instance.id;
+    renamingTemplateInstanceTitle = rawInstanceTitle(instance);
+    saveError = "";
+  }
+
+  function cancelRenameTemplateInstance(): void {
+    renamingTemplateInstanceId = null;
+    renamingTemplateInstanceTitle = "";
+  }
+
+  function focusRenameInput(node: HTMLInputElement): { destroy: () => void } {
+    const timeout = window.setTimeout(() => {
+      node.focus();
+      node.select();
+    });
+    return {
+      destroy: () => window.clearTimeout(timeout),
+    };
+  }
+
+  function handleTemplateRenameKeydown(instance: PlotNode, event: KeyboardEvent): void {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void commitTemplateInstanceRename(instance);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      cancelRenameTemplateInstance();
+    }
+  }
+
+  async function commitTemplateInstanceRename(instance: PlotNode): Promise<void> {
+    if (renamingTemplateInstanceId !== instance.id || savingMessage) return;
+    const title = renamingTemplateInstanceTitle.trim();
+    if (!title) {
+      saveError = "Template instance name is required.";
+      return;
+    }
+    if (title === rawInstanceTitle(instance)) {
+      cancelRenameTemplateInstance();
+      return;
+    }
+
+    savingMessage = "Renaming template instance";
+    saveError = "";
+    try {
+      const savedInstance = await api.savePlotNode(instance.id, {
+        title,
+        entry_type: instance.entry_type,
+        body: instance.body ?? "",
+        metadata: instance.metadata ?? {},
+        template: instance.template ?? null,
+        template_instance: instance.template_instance
+          ? {
+              ...instance.template_instance,
+              title,
+              metadata: instance.template_instance.metadata ?? {},
+            }
+          : null,
+        board: instance.board ?? null,
+        layout: instance.layout ?? null,
+        base_revision: instance.revision,
+      });
+      templateInstances = templateInstances.map((candidate) => (candidate.id === savedInstance.id ? savedInstance : candidate));
+
+      if (plotNode) {
+        const nextBoard = cloneBoardSpec(board);
+        let boardChanged = false;
+        nextBoard.plotlines = (nextBoard.plotlines ?? []).map((line) => {
+          if (line.template_instance_id !== instance.id || line.title === title) return line;
+          boardChanged = true;
+          return { ...line, title };
+        });
+        if (boardChanged) {
+          const savedBoard = await api.savePlotNode(plotNode.id, {
+            title: plotNode.title,
+            entry_type: plotNode.entry_type,
+            body: plotNode.body ?? "",
+            metadata: plotNode.metadata ?? {},
+            template: plotNode.template ?? null,
+            template_instance: plotNode.template_instance ?? null,
+            board: nextBoard,
+            layout: toLayout(),
+            base_revision: plotNode.revision,
+          });
+          localPlotNode = savedBoard;
+          onSaved?.(savedBoard);
+        }
+      }
+
+      await refreshPlotEntries();
+      cancelRenameTemplateInstance();
+    } catch (caught) {
+      saveError = caught instanceof Error ? caught.message : "Could not rename template instance.";
+    } finally {
+      savingMessage = "";
+    }
+  }
+
+  async function deleteTemplateInstance(instance: PlotNode): Promise<void> {
+    if (savingMessage || !plotNode) return;
+    const title = rawInstanceTitle(instance);
+    const confirmed = window.confirm(`Delete "${title}" from this plot board? Its plot beat claims on this board will also be removed.`);
+    if (!confirmed) return;
+
+    savingMessage = "Deleting template instance";
+    saveError = "";
+    try {
+      const removedPlotlineIds = new Set(
+        (board.plotlines ?? [])
+          .filter((line) => line.template_instance_id === instance.id)
+          .map((line) => line.id),
+      );
+      const nextBoard = cloneBoardSpec(board);
+      nextBoard.template_instance_ids = (nextBoard.template_instance_ids ?? []).filter((id) => id !== instance.id);
+      nextBoard.plotlines = (nextBoard.plotlines ?? []).filter((line) => line.template_instance_id !== instance.id);
+      nextBoard.claims = (nextBoard.claims ?? []).filter((claim) => claim.template_instance_id !== instance.id);
+      nextBoard.cards = (nextBoard.cards ?? []).map((card) =>
+        card.primary_plotline_id && removedPlotlineIds.has(card.primary_plotline_id)
+          ? { ...card, primary_plotline_id: null }
+          : card,
+      );
+
+      const savedBoard = await api.savePlotNode(plotNode.id, {
+        title: plotNode.title,
+        entry_type: plotNode.entry_type,
+        body: plotNode.body ?? "",
+        metadata: plotNode.metadata ?? {},
+        template: plotNode.template ?? null,
+        template_instance: plotNode.template_instance ?? null,
+        board: nextBoard,
+        layout: toLayout(),
+        base_revision: plotNode.revision,
+      });
+      localPlotNode = savedBoard;
+      onSaved?.(savedBoard);
+
+      await api.deletePlotNode(instance.id);
+      await refreshPlotEntries();
+      templateInstances = templateInstances.filter((candidate) => candidate.id !== instance.id);
+      if (templateFilterId === instance.id) templateFilterId = "";
+      if (renamingTemplateInstanceId === instance.id) cancelRenameTemplateInstance();
+      if (selectedPalettePoint?.startsWith(`${instance.id}:`)) selectedPalettePoint = null;
+      if (selectedClaimId && !nextBoard.claims.some((claim) => claim.id === selectedClaimId)) selectedClaimId = null;
+    } catch (caught) {
+      saveError = caught instanceof Error ? caught.message : "Could not delete template instance.";
+    } finally {
+      savingMessage = "";
+    }
   }
 
   function cardById(cardId: string): PlotBoardCard | null {
@@ -455,8 +643,17 @@
     void addPlaceholderCard(columnId);
   }
 
+  function claimSortKey(claim: PlotPointClaim): string {
+    const foundInstanceIndex = templateInstances.findIndex((instance) => instance.id === claim.template_instance_id);
+    const instanceIndex = foundInstanceIndex >= 0 ? foundInstanceIndex : 9999;
+    const instance = foundInstanceIndex >= 0 ? templateInstances[foundInstanceIndex] : null;
+    const foundPointIndex = instance?.template_instance?.plot_points?.findIndex((point) => point.plot_point_id === claim.plot_point_id) ?? -1;
+    const pointIndex = foundPointIndex >= 0 ? foundPointIndex : 9999;
+    return `${String(instanceIndex).padStart(4, "0")}:${String(pointIndex).padStart(4, "0")}:${claim.id}`;
+  }
+
   function claimsForCard(cardId: string): PlotPointClaim[] {
-    return claimsByCard.get(cardId) ?? [];
+    return [...(claimsByCard.get(cardId) ?? [])].sort((a, b) => claimSortKey(a).localeCompare(claimSortKey(b)));
   }
 
   function selectCard(cardId: string): void {
@@ -716,7 +913,11 @@
     return defaultCardPosition(card, column);
   }
 
-  function buildFlowNodes(currentCards: PlotBoardCard[], currentColumns: BoardColumn[], layout: PlotBoardLayout | null): FlowNode<PlotFlowData>[] {
+  function buildFlowNodes(
+    currentCards: PlotBoardCard[],
+    currentColumns: BoardColumn[],
+    layout: PlotBoardLayout | null,
+  ): FlowNode<PlotFlowData>[] {
     const layoutById = new Map((layout?.nodes ?? []).map((node) => [node.id, node]));
     const currentById = new Map(untrack(() => flowNodes).map((node) => [node.id, node]));
     const frames = buildGroupFrames(currentColumns);
@@ -793,7 +994,7 @@
         .filter((node) => node.data.kind === "card")
         .map((node) => ({
           id: node.id,
-          kind: "card",
+          kind: node.data.kind,
           position: { x: node.position.x, y: node.position.y },
           cfg: {},
         })),
@@ -1068,8 +1269,9 @@
     saveError = "";
     try {
       const template = await api.getPlotNode(templateToAddId);
+      const title = nextTemplateInstanceTitle(template);
       const instance = await api.createPlotNode({
-        title: `${template.title} plot`,
+        title,
         entry_type: "plot:template_instance",
         body: template.body ?? "",
         metadata: {},
@@ -1085,6 +1287,7 @@
           metadata: {},
         },
       });
+      await refreshPlotEntries();
       const nextBoard = cloneBoardSpec(board);
       if (!nextBoard.template_instance_ids.includes(instance.id)) {
         nextBoard.template_instance_ids = [...nextBoard.template_instance_ids, instance.id];
@@ -1093,7 +1296,7 @@
         ...nextBoard.plotlines,
         {
           id: newLocalId("plotline"),
-          title: instance.title,
+          title,
           template_instance_id: instance.id,
           color: null,
           metadata: {},
@@ -1103,6 +1306,7 @@
       if (!saved) {
         try {
           await api.deletePlotNode(instance.id);
+          await refreshPlotEntries();
         } catch {
           saveError = `${saveError || "Could not link template instance to board."} The new template instance could not be cleaned up automatically.`;
         }
@@ -1121,6 +1325,13 @@
 
   async function attachPointToCard(cardId: string, templateInstanceId: string, plotPointId: string): Promise<void> {
     if (savingMessage) return;
+    const existing = claims.find(
+      (claim) => claim.card_id === cardId && claim.template_instance_id === templateInstanceId && claim.plot_point_id === plotPointId,
+    );
+    if (existing) {
+      selectClaim(existing);
+      return;
+    }
     const nextClaim: PlotPointClaim = {
       id: newLocalId("claim"),
       card_id: cardId,
@@ -1325,6 +1536,7 @@
 
   function connectRelationship(connection: Connection): void {
     if (!connection.source || !connection.target || connection.source === connection.target || savingMessage) return;
+    if (!cards.some((card) => card.id === connection.source) || !cards.some((card) => card.id === connection.target)) return;
     const relationship: PlotRelationship = {
       id: newLocalId("relationship"),
       from_card_id: connection.source,
@@ -1368,7 +1580,7 @@
       <select bind:value={templateFilterId}>
         <option value="">All templates on board</option>
         {#each templateInstances as instance (instance.id)}
-          <option value={instance.id}>{instance.title}</option>
+          <option value={instance.id}>{instanceDisplayTitle(instance)}</option>
         {/each}
       </select>
     </label>
@@ -1383,7 +1595,69 @@
         {#each visibleTemplateInstances as instance (instance.id)}
           <section class="template-block">
             <header>
-              <strong>{instance.title}</strong>
+              <div class="template-title-row">
+                {#if renamingTemplateInstanceId === instance.id}
+                  <input
+                    class="template-title-input"
+                    aria-label="Template instance name"
+                    bind:value={renamingTemplateInstanceTitle}
+                    disabled={Boolean(savingMessage)}
+                    use:focusRenameInput
+                    onkeydown={(event) => handleTemplateRenameKeydown(instance, event)}
+                    onblur={() => {
+                      void commitTemplateInstanceRename(instance);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    class="template-title-action"
+                    title="Save name"
+                    aria-label="Save name"
+                    disabled={Boolean(savingMessage)}
+                    onmousedown={(event) => event.preventDefault()}
+                    onclick={() => {
+                      void commitTemplateInstanceRename(instance);
+                    }}
+                  >
+                    <i class="ti ti-check" aria-hidden="true"></i>
+                  </button>
+                  <button
+                    type="button"
+                    class="template-title-action"
+                    title="Cancel rename"
+                    aria-label="Cancel rename"
+                    disabled={Boolean(savingMessage)}
+                    onmousedown={(event) => event.preventDefault()}
+                    onclick={cancelRenameTemplateInstance}
+                  >
+                    <i class="ti ti-x" aria-hidden="true"></i>
+                  </button>
+                {:else}
+                  <strong title={rawInstanceTitle(instance)}>{instanceDisplayTitle(instance)}</strong>
+                  <button
+                    type="button"
+                    class="template-title-action"
+                    title="Rename template instance"
+                    aria-label="Rename template instance"
+                    disabled={Boolean(savingMessage)}
+                    onclick={() => startRenameTemplateInstance(instance)}
+                  >
+                    <i class="ti ti-pencil" aria-hidden="true"></i>
+                  </button>
+                  <button
+                    type="button"
+                    class="template-title-action danger"
+                    title="Delete template instance"
+                    aria-label="Delete template instance"
+                    disabled={Boolean(savingMessage)}
+                    onclick={() => {
+                      void deleteTemplateInstance(instance);
+                    }}
+                  >
+                    <i class="ti ti-trash" aria-hidden="true"></i>
+                  </button>
+                {/if}
+              </div>
               <span>{instance.template_instance?.plot_points?.length ?? 0} points</span>
             </header>
             {#each paletteRows.filter((row) => row.instance.id === instance.id) as row (row.point.plot_point_id)}

@@ -44,15 +44,18 @@ A prompt is everything required to invoke the AI for one specific task. It pairs
 
 ### Abstract parent + concrete sub-types
 
-`prompt` is an **abstract** entry type. Four concrete bases under it ship seeded:
-`continuation`, `revise`, `general`, `snippet`. Users may instantiate the bases
-directly, or sub-type one to declare the behavior for a specific task:
+`prompt` is an **abstract** entry type. Concrete bases under it ship seeded:
+`continuation`, `revise`, `general`, and `snippet`. Users may instantiate the
+bases directly, or sub-type one to declare the behavior for a specific task.
+Some task-specific seeded prompt types also ship with starter inputs and bodies:
+`roleplay` and `plot_brainstorm`.
 
 | Planned sub-type | What it does |
 | --- | --- |
 | `prompt.continue_scene` | Generate prose from cursor + beat instructions (output: insert at cursor, visual diff) |
 | `prompt.revise_selection` | Rewrite a marked selection (output: replace selection, visual diff) |
 | `prompt.freeform` | Sparring / brainstorming / research (output: chat panel) |
+| `prompt.plot_brainstorm` | Brainstorm from a picked plot board and its template guidance (output: chat panel) |
 | `prompt.summarize` | Body → summary field (output: replace field, auto-apply + undo) |
 | `prompt.lore_query` | Research over lore canon (output: chat panel) |
 | `prompt.character_query` | Roleplay as a character at the current scene's effective state — used to verify mutable-metadata timelines (output: chat panel) |
@@ -126,16 +129,19 @@ Inside the template the value is the raw id (or list of ids). Wrap with `entry()
 
 ### Picking plot boards for prompt context
 
-Use `context_pick` when the prompt needs to choose one or more nodes as context rather than store a bare lore id. Plot-board prompts usually declare a single `context_pick` input constrained to `plot:board`, then pass that value directly to `plot_context(...)`.
+Use `context_pick` when the prompt needs to choose one or more nodes as context rather than store a bare lore id. Plot prompts usually declare a single `context_pick` input constrained to the relevant plot objects, then pass that value to `plot_context(...)`. A prompt can render the default XML with `context_xml(...)`, or a snippet can iterate the returned structure and choose its own fields.
 
 ```yaml
-- name: board
+- name: plot
   type: context_pick
-  label: Plot board
+  label: Plot context
   target:
-    kinds: [plot]
-    entry_types:
-      plot: [plot:board]
+    sources:
+      - kind: plot
+        expr:
+          union:
+            - type: plot:board
+            - type: plot:template_instance
     multiple: false
   required: true
 ```
@@ -144,14 +150,27 @@ Use `context_pick` when the prompt needs to choose one or more nodes as context 
 {% role "user" %}
 Use the active plot board while evaluating the current scene.
 
-{{ plot_context(input.board, scene=scene) }}
+{{ context_xml(plot_context(input.plot, as_of=scene)) }}
 
 Scene:
 {{ scene.body }}
 {% endrole %}
 ```
 
-`context_pick` values are serialized picked refs, not prose. Helpers decide what to materialize. For plot boards, `plot_context(input.board, scene=scene)` expands the selected board into cards, claims, template guidance, point notes, and scene-scoped omissions.
+`context_pick` values are serialized picked refs, not prose. Helpers decide what to materialize. For plot boards, `plot_context(input.plot)` expands the selected board into cards, claims, template guidance, beat notes, and relationships. For plot template instances, it resolves the board that uses the instance and filters the context down to that template line. Supplying `as_of=scene` filters future manuscript-positioned cards and claims. Template-instance plot beats are returned in template order, so snippets can iterate `plot.template_instances` and `instance.plot_points` directly.
+
+### Seeded Plot Brainstorm prompt
+
+New projects include a `Plot Brainstorm` prompt subtype. Creating a prompt of
+that type seeds:
+
+- `plot`: a required `context_pick` constrained to plot boards and template instances
+- `focus`: a long-text note for the current brainstorming question
+
+The starter body calls `context_xml(plot_context(input.plot))` and frames the
+model as a brainstorming partner. It asks for options, tradeoffs, weak claims,
+and next questions; it explicitly tells the model not to draft the novel or
+treat templates as mandatory rules.
 
 ## File layout
 

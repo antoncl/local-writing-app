@@ -252,7 +252,7 @@
     </div>
   {:else if selectedPaletteRow}
     <header class="inspector-head">
-      <span>Plot point</span>
+      <span>Plot beat</span>
       <strong>{selectedPaletteRow.point.title || selectedPaletteRow.point.plot_point_id}</strong>
     </header>
     <dl>

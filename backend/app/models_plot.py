@@ -56,65 +56,19 @@ class SourceRef(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class PlotPointFunction(BaseModel):
-    claim: str = ""
-    description: str = ""
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class PlotPointPlacement(BaseModel):
-    phase_label: str = ""
-    target_position: float | None = None
-    min_position: float | None = None
-    max_position: float | None = None
-    structure_hint: str = ""
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class PlotPointCompression(BaseModel):
-    can_compress: bool | None = None
-    can_expand: bool | None = None
-    merge_with_point_ids: list[str] = Field(default_factory=list)
-    guidance: str = ""
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class PlotPointAIRubric(BaseModel):
-    criteria: list[str] = Field(default_factory=list)
-    evidence_prompts: list[str] = Field(default_factory=list)
-    failure_signals: list[str] = Field(default_factory=list)
-    guidance: str = ""
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
 class PlotTemplatePoint(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     id: str = Field(min_length=1)
-    key: str = ""
     title: str = Field(min_length=1)
-    label: str = ""
-    label_variants: list[str] = Field(default_factory=list)
-    short_label: str = ""
-    phase_label: str = ""
-    parent_point_id: str | None = None
-    order_index: int = 0
     function_claim: str = ""
-    function: PlotPointFunction = Field(default_factory=PlotPointFunction)
-    description: str = ""
     guidance: str = ""
     required: bool = True
-    sort_order: int = 0
-    placement: PlotPointPlacement | None = None
-    diagnostic_questions: list[str] = Field(default_factory=list)
-    failure_modes: list[str] = Field(default_factory=list)
-    compression: PlotPointCompression | None = None
-    claim_evidence_prompts: list[str] = Field(default_factory=list)
-    ai_rubric: PlotPointAIRubric | None = None
-    source_ref_ids: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="before")
     @classmethod
-    def _accept_design_doc_label(cls, data: Any) -> Any:
+    def _accept_legacy_point_fields(cls, data: Any) -> Any:
         if not isinstance(data, dict):
             return data
         next_data = dict(data)
@@ -127,23 +81,9 @@ class PlotTemplatePoint(BaseModel):
         return next_data
 
     @model_validator(mode="after")
-    def _backfill_legacy_point_fields(self) -> PlotTemplatePoint:
-        if not self.key:
-            self.key = self.id
-        if not self.label:
-            self.label = self.title
+    def _backfill_title(self) -> PlotTemplatePoint:
         if not self.title:
-            self.title = self.label or self.id
-        if not self.short_label:
-            self.short_label = self.label
-        if self.order_index == 0 and self.sort_order != 0:
-            self.order_index = self.sort_order
-        if self.sort_order == 0 and self.order_index != 0:
-            self.sort_order = self.order_index
-        if not self.function_claim and self.function.claim:
-            self.function_claim = self.function.claim
-        if not self.function.claim and self.function_claim:
-            self.function.claim = self.function_claim
+            self.title = self.id
         return self
 
 
@@ -160,8 +100,6 @@ class PlotTemplateSpec(BaseModel):
     prescriptiveness: PlotTemplatePrescriptiveness = "diagnostic"
     ai_use_guidance: str = ""
     global_diagnostic_questions: list[str] = Field(default_factory=list)
-    supports_compression: bool = False
-    supports_expansion: bool = False
     source_refs: list[SourceRef] = Field(default_factory=list)
     ip_risk: PlotTemplateIPRisk = "unknown"
     builtin_policy: PlotTemplateBuiltinPolicy = "user_authored"
@@ -169,7 +107,7 @@ class PlotTemplateSpec(BaseModel):
     locale: str = ""
     plot_points: list[PlotTemplatePoint] = Field(
         default_factory=list,
-        validation_alias=AliasChoices("plot_points", "points"),
+        validation_alias=AliasChoices("plot_points", "points", "beats"),
     )
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -364,19 +302,12 @@ class PlotContextPoint(BaseModel):
     title: str = ""
     local_label: str = ""
     function_claim: str = ""
-    description: str = ""
     guidance: str = ""
     notes: str = ""
     author_intent: str = ""
     expected_role: str = ""
     open_questions: list[str] = Field(default_factory=list)
     status: PlotPointNoteStatus = "unplanned"
-    placement: PlotPointPlacement | None = None
-    diagnostic_questions: list[str] = Field(default_factory=list)
-    failure_modes: list[str] = Field(default_factory=list)
-    compression: PlotPointCompression | None = None
-    claim_evidence_prompts: list[str] = Field(default_factory=list)
-    ai_rubric: PlotPointAIRubric | None = None
 
 
 class PlotContextTemplateInstance(BaseModel):

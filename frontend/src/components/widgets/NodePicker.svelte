@@ -320,7 +320,7 @@
   );
 
   // Plot nodes are picked by prompts that call helpers such as
-  // `plot_context(input.board, scene=scene)`. They are node refs, not prose
+  // `context_xml(plot_context(input.plot, as_of=scene))`. They are node refs, not prose
   // context bodies; the helper materializes the AI-safe packet server-side.
   $: plotCandidates = filterByTitle(
     plotEntries.filter((p) => {

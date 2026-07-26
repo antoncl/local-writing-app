@@ -57,6 +57,7 @@ import { defaultView } from "@/lib/views/evaluateView";
 import { refreshTodos, refreshEmbeddedTodos } from "@/lib/stores/todos";
 import { paneViews } from "@/lib/stores/paneViews.svelte";
 import { chatSessionsStore, refreshChatSessions, setChatSessions } from "@/lib/stores/chats";
+import { refreshPlotEntries, setPlotEntries } from "@/lib/stores/plots";
 import { bodyHasMutationMarkers, mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
 import type {
   AssistantEntry,
@@ -634,7 +635,7 @@ class EditorPanesController {
       await api.deleteView(pane.scene.id);
       await paneViews.reload();
     } else if (documentKind === "plot") {
-      await api.deletePlotNode(pane.scene.id);
+      setPlotEntries((await api.deletePlotNode(pane.scene.id)).entries);
     } else {
       setStructure(await api.deleteScene(pane.scene.id));
       await refreshTodos();
@@ -1011,6 +1012,7 @@ class EditorPanesController {
 
   async openOrCreatePlotBoard(): Promise<void> {
     const list = await api.listPlotNodes();
+    setPlotEntries(list.entries);
     const existing = list.entries.find((entry) => entry.entry_type === "plot:board");
     if (existing) {
       await this.openPlotNode(existing.id);
@@ -1034,6 +1036,7 @@ class EditorPanesController {
         viewport: { x: 0, y: 0, zoom: 1 },
       },
     });
+    await refreshPlotEntries();
     await this.openPlotNode(node.id);
   }
 

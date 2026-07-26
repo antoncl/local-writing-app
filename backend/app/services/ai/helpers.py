@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 from xml.sax.saxutils import escape as xml_escape
 from xml.sax.saxutils import quoteattr
 
-from jinja2 import pass_context
+from jinja2 import BaseLoader, TemplateNotFound, pass_context
 from jinja2.sandbox import SandboxedEnvironment
 
 from app.services.ai.sessions import AISession
@@ -391,15 +391,17 @@ def register_helpers(
     @pass_context
     def _plot_context_global(
         ctx: Any,
-        board: Any = None,
+        selection: Any = None,
+        as_of: Any = None,
         scene: Any = None,
-        include_future: bool = False,
-    ) -> str:
+        include_future: Any = None,
+    ) -> Any:
         return _plot_context(
             project,
-            board,
-            scene if scene is not None else ctx.get("scene"),
-            include_future,
+            selection,
+            as_of=as_of,
+            scene=scene if scene is not None else None,
+            include_future=include_future,
         )
 
     env.globals["last_words"] = last_words
@@ -420,6 +422,8 @@ def register_helpers(
     env.globals["full_outline"] = lambda: _full_outline(project)
     env.globals["full_text"] = lambda: _full_text(project)
     env.globals["plot_context"] = _plot_context_global
+    env.globals["context_xml"] = context_xml
+    env.filters["context_xml"] = context_xml
     env.globals["character_thread"] = (
         lambda scene, character: _character_thread(project, schema, scene, character)
     )
@@ -435,11 +439,68 @@ def create_environment_for_project(
     from app.services.ai.templates import create_environment
 
     env = create_environment()
+    env.loader = _PromptSnippetLoader(project)
     register_helpers(env, project, session, journal)
     return env
 
 
+class _PromptSnippetLoader(BaseLoader):
+    """Resolve Jinja `{% include %}` names against prompt snippet entries."""
+
+    def __init__(self, project: ProjectService) -> None:
+        self.project = project
+
+    def get_source(self, environment: Any, template: str) -> tuple[str, str | None, Any]:
+        del environment
+        entry = self._resolve_snippet(template)
+        if entry is None:
+            raise TemplateNotFound(template)
+        return entry.body, entry.id, lambda: False
+
+    def _resolve_snippet(self, raw_name: str) -> Any | None:
+        name = raw_name.strip()
+        stem = name[:-3] if name.lower().endswith(".md") else name
+        try:
+            schema = self.project.read_metadata_schema()
+            entries = self.project.list_prompt_entries().entries
+        except Exception:
+            return None
+
+        snippets = [
+            entry
+            for entry in entries
+            if _entry_type_descends_from(schema, entry.entry_type, "prompt:snippet")
+        ]
+        for entry in snippets:
+            if entry.id == name or entry.id == stem:
+                try:
+                    return self.project.read_prompt_entry(entry.id)
+                except Exception:
+                    return None
+
+        title_matches = [entry for entry in snippets if entry.title in {name, stem}]
+        if len(title_matches) != 1:
+            return None
+        try:
+            return self.project.read_prompt_entry(title_matches[0].id)
+        except Exception:
+            return None
+
+
 # ----- Internal: data access -----------------------------------------------
+
+
+def _entry_type_descends_from(schema: Any, entry_type: Any, ancestor: str) -> bool:
+    cursor = str(entry_type or "")
+    seen: set[str] = set()
+    while cursor and cursor not in seen:
+        if cursor == ancestor:
+            return True
+        seen.add(cursor)
+        definition = getattr(schema, "entry_types", {}).get(cursor)
+        parent = getattr(definition, "parent", "") if definition is not None else ""
+        cursor = parent if isinstance(parent, str) else ""
+    return False
 
 
 def _is_a(project: ProjectService, schema: Any, node: Any, entry_type_fqn: Any) -> bool:
@@ -1018,55 +1079,101 @@ def _render_lore_xml_entry(
     return f"<{tag} {attr_str} />"
 
 
-# ----- `plot_context(board=None, scene=scene)` -----------------------------
+# ----- `plot_context(selection, as_of=None)` and `context_xml(...)` ---------
 
 
 def _plot_context(
     project: ProjectService,
-    board: Any = None,
+    selection: Any = None,
+    *,
+    as_of: Any = None,
     scene: Any = None,
-    include_future: bool = False,
-) -> str:
-    board_id = _plot_board_id(project, board)
-    if not board_id:
+    include_future: Any = None,
+) -> Any:
+    selection_id = _plot_selection_id(selection)
+    if not selection_id:
         return ""
-    scene_id = _scene_id_of(scene) if scene is not None else None
+    # `scene=` and `include_future=` are legacy names kept so existing prompt
+    # bodies do not fail immediately. New prompts should use `as_of=...`; when
+    # no anchor is supplied, a picked board means the whole selected board.
+    anchor = as_of if as_of is not None else scene
+    scene_id = _scene_id_of(anchor) if anchor is not None else None
+    include_all = _truthy_arg(include_future) if include_future is not None else scene_id is None
     try:
-        packet = project.read_plot_context(
-            board_id,
+        packet = project.read_plot_context_for_selection(
+            selection_id,
             scene_id=scene_id,
-            include_future=_truthy_arg(include_future),
+            include_future=include_all,
         )
     except Exception:
         return ""
-    return _format_plot_context_block(packet)
+    return _ContextValue(packet, _format_plot_context_block)
 
 
-def _plot_board_id(project: ProjectService, board: Any = None) -> str | None:
-    if board is None or board == "":
-        try:
-            boards = [
-                entry
-                for entry in project.list_plot_nodes().entries
-                if entry.entry_type == "plot:board"
-            ]
-        except Exception:
-            return None
-        return boards[0].id if boards else None
-    if isinstance(board, str):
-        stripped = board.strip()
+class _ContextValue:
+    """Prompt-context object that remains readable if rendered directly.
+
+    Templates should call `context_xml(value)` explicitly, but a direct
+    `{{ plot_context(...) }}` still produces XML instead of a Pydantic repr.
+    Attribute access delegates to the structured payload so advanced templates
+    can inspect counts or titles before choosing whether to render it.
+    """
+
+    __slots__ = ("payload", "_renderer")
+
+    def __init__(self, payload: Any, renderer: Any) -> None:
+        self.payload = payload
+        self._renderer = renderer
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.payload, name)
+
+    def __bool__(self) -> bool:
+        return self.payload is not None
+
+    def __str__(self) -> str:
+        return self._renderer(self.payload)
+
+
+def context_xml(value: Any, root: str = "context") -> str:
+    """Render structured prompt context as XML-like text.
+
+    Plot context uses its hand-shaped XML for readability. Dict/list payloads
+    fall through to a simple generic serializer so the helper can be reused by
+    future context materializers.
+    """
+    if value is None or value == "":
+        return ""
+    if isinstance(value, _ContextValue):
+        return str(value)
+    if _looks_like_plot_context_packet(value):
+        return _format_plot_context_block(value)
+    if isinstance(value, str):
+        return value
+    return _generic_context_xml(value, root)
+
+
+def _looks_like_plot_context_packet(value: Any) -> bool:
+    return hasattr(value, "board_id") and hasattr(value, "cards") and hasattr(value, "template_instances")
+
+
+def _plot_selection_id(selection: Any = None) -> str | None:
+    if selection is None or selection == "":
+        return None
+    if isinstance(selection, str):
+        stripped = selection.strip()
         if stripped.startswith("[") and stripped.endswith("]"):
             try:
-                return _plot_board_id(project, json.loads(stripped))
+                return _plot_selection_id(json.loads(stripped))
             except (TypeError, ValueError):
                 return None
         return stripped or None
-    if isinstance(board, list):
-        return _plot_board_id(project, board[0]) if board else None
-    if isinstance(board, dict):
-        raw = board.get("id")
+    if isinstance(selection, list):
+        return _plot_selection_id(selection[0]) if selection else None
+    if isinstance(selection, dict):
+        raw = selection.get("id")
         return raw if isinstance(raw, str) and raw else None
-    raw = getattr(board, "id", None)
+    raw = getattr(selection, "id", None)
     return raw if isinstance(raw, str) and raw else None
 
 
@@ -1076,18 +1183,55 @@ def _truthy_arg(value: Any) -> bool:
     return bool(value)
 
 
+def _generic_context_xml(value: Any, root: str) -> str:
+    tag = _xml_safe_tag(root)
+    if hasattr(value, "model_dump"):
+        value = value.model_dump(exclude_none=True)
+    return _render_generic_xml_value(tag, value, 0)
+
+
+def _render_generic_xml_value(tag: str, value: Any, depth: int) -> str:
+    indent = "  " * depth
+    if hasattr(value, "model_dump"):
+        value = value.model_dump(exclude_none=True)
+    if isinstance(value, dict):
+        if not value:
+            return f"{indent}<{tag} />"
+        lines = [f"{indent}<{tag}>"]
+        for key, child in value.items():
+            lines.append(_render_generic_xml_value(_xml_safe_tag(key), child, depth + 1))
+        lines.append(f"{indent}</{tag}>")
+        return "\n".join(lines)
+    if isinstance(value, list):
+        if not value:
+            return f"{indent}<{tag} />"
+        lines = [f"{indent}<{tag}>"]
+        item_tag = _xml_safe_tag(tag[:-1] if tag.endswith("s") and len(tag) > 1 else "item")
+        for child in value:
+            lines.append(_render_generic_xml_value(item_tag, child, depth + 1))
+        lines.append(f"{indent}</{tag}>")
+        return "\n".join(lines)
+    text = xml_escape(str(value))
+    return f"{indent}<{tag}>{text}</{tag}>"
+
+
 def _format_plot_context_block(packet: Any) -> str:
     claims_by_card: dict[str, list[Any]] = {}
     for claim in getattr(packet, "claims", None) or []:
         claims_by_card.setdefault(claim.card_id, []).append(claim)
 
+    completeness = (
+        "whole_selection"
+        if bool(getattr(packet, "include_future", False)) or not getattr(packet, "scope_scene_id", None)
+        else "through_as_of"
+    )
     lines = [
         (
             f"<plot_context board_id={quoteattr(packet.board_id)} "
             f"board_title={quoteattr(packet.board_title)} "
-            f"include_future={quoteattr(str(bool(packet.include_future)).lower())}"
+            f"completeness={quoteattr(completeness)}"
             + (
-                f" scope_scene_id={quoteattr(packet.scope_scene_id)}"
+                f" as_of_scene_id={quoteattr(packet.scope_scene_id)}"
                 if getattr(packet, "scope_scene_id", None)
                 else ""
             )
@@ -1121,12 +1265,6 @@ def _format_plot_context_block(packet: Any) -> str:
         ):
             if value:
                 lines.append(f"    <{tag}>{xml_escape(str(value).strip())}</{tag}>")
-        questions = getattr(instance, "global_diagnostic_questions", None) or []
-        if questions:
-            lines.append("    <global_diagnostic_questions>")
-            for question in questions:
-                lines.append(f"      <question>{xml_escape(str(question).strip())}</question>")
-            lines.append("    </global_diagnostic_questions>")
         for point in instance.plot_points:
             point_attrs = [
                 f"id={quoteattr(point.plot_point_id)}",
@@ -1139,7 +1277,6 @@ def _format_plot_context_block(packet: Any) -> str:
             lines.append(f"    <plot_point {' '.join(point_attrs)}>")
             for tag, value in (
                 ("function_claim", point.function_claim),
-                ("description", point.description),
                 ("guidance", point.guidance),
                 ("notes", point.notes),
                 ("author_intent", getattr(point, "author_intent", "")),
@@ -1153,24 +1290,6 @@ def _format_plot_context_block(packet: Any) -> str:
                 for question in questions:
                     lines.append(f"        <question>{xml_escape(str(question).strip())}</question>")
                 lines.append("      </open_questions>")
-            diagnostic_questions = getattr(point, "diagnostic_questions", None) or []
-            if diagnostic_questions:
-                lines.append("      <diagnostic_questions>")
-                for question in diagnostic_questions:
-                    lines.append(f"        <question>{xml_escape(str(question).strip())}</question>")
-                lines.append("      </diagnostic_questions>")
-            for tag in ("placement", "compression", "ai_rubric"):
-                value = getattr(point, tag, None)
-                if value is None:
-                    continue
-                payload = (
-                    value.model_dump(exclude_none=True)
-                    if hasattr(value, "model_dump")
-                    else value
-                )
-                lines.append(
-                    f"      <{tag}>{xml_escape(json.dumps(payload, ensure_ascii=False))}</{tag}>"
-                )
             lines.append("    </plot_point>")
         lines.append("  </template_instance>")
     for card in getattr(packet, "cards", None) or []:

@@ -328,6 +328,77 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 },
             },
         },
+        "prompt:plot_brainstorm": {
+            "name": "Plot Brainstorm",
+            "kind": "prompt",
+            "parent": "prompt:general",
+            "fields": [],
+            "has_body": True,
+            "default_inputs": [
+                {
+                    "name": "plot",
+                    "type": "context_pick",
+                    "label": "Plot context",
+                    "required": True,
+                    "target": {
+                        "sources": [
+                            {
+                                "kind": "plot",
+                                "expr": {
+                                    "union": [
+                                        {"type": "plot:board"},
+                                        {"type": "plot:template_instance"},
+                                    ]
+                                },
+                            }
+                        ],
+                        "multiple": False,
+                    },
+                },
+                {
+                    "name": "focus",
+                    "type": "long_text",
+                    "label": "Brainstorming focus",
+                    "default": "Look for useful next questions, options, and pressure points.",
+                },
+            ],
+            "default_body": (
+                "{% set selected_scene = scene if scene is defined else none %}\n"
+                "{% role \"system\" %}\n"
+                "You are an AI-assisted fiction-writing brainstorming partner for a novelist. "
+                "Use the author's plot board and selected plot templates as a scaffold for thinking. "
+                "Do not draft the novel for the author, invent final canon, or treat templates as mandatory rules. "
+                "Offer concrete options, tradeoffs, questions, and pressure tests that help the author decide what to write.\n"
+                "{% endrole %}\n"
+                "\n"
+                "{% role \"user\" %}\n"
+                "Use this plot board and its template guidance as the main brainstorming scaffold.\n"
+                "\n"
+                "{% if input.focus is defined and input.focus %}\n"
+                "## Current focus\n"
+                "{{ input.focus }}\n"
+                "\n"
+                "{% endif %}\n"
+                "## Plot board and templates\n"
+                "{{ context_xml(plot_context(input.plot)) }}\n"
+                "\n"
+                "{% if selected_scene %}\n"
+                "## Current scene\n"
+                "Title: {{ selected_scene.title }}\n"
+                "{% set scene_summary = selected_scene.metadata.get(\"summary\") if selected_scene.metadata is defined else \"\" %}\n"
+                "{% if scene_summary %}\n"
+                "Summary: {{ scene_summary }}\n"
+                "{% endif %}\n"
+                "{% endif %}\n"
+                "\n"
+                "Respond with:\n"
+                "1. The strongest available story direction.\n"
+                "2. Two or three alternate directions worth considering.\n"
+                "3. Weak or unsupported plot-beat claims to investigate.\n"
+                "4. Specific questions the author should answer next.\n"
+                "{% endrole %}\n"
+            ),
+        },
         "prompt:snippet": {
             "name": "Snippet",
             "kind": "prompt",

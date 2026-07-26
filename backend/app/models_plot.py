@@ -272,17 +272,6 @@ class PlotBoardSpec(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class PlotContextCard(BaseModel):
-    id: str
-    title: str
-    synopsis: str = ""
-    scene_id: str | None = None
-    structure_node_id: str | None = None
-    structure_title: str | None = None
-    manuscript_index: int | None = None
-    primary_plotline_id: str | None = None
-
-
 class PlotContextClaim(BaseModel):
     id: str
     card_id: str
@@ -295,6 +284,18 @@ class PlotContextClaim(BaseModel):
     evidence: str | None = None
     rationale: str | None = None
     ai_notes: str | None = None
+
+
+class PlotContextCard(BaseModel):
+    id: str
+    title: str
+    synopsis: str = ""
+    scene_id: str | None = None
+    structure_node_id: str | None = None
+    structure_title: str | None = None
+    manuscript_index: int | None = None
+    primary_plotline_id: str | None = None
+    claims: list[PlotContextClaim] = Field(default_factory=list)
 
 
 class PlotContextPoint(BaseModel):

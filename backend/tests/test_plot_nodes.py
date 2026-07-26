@@ -481,6 +481,10 @@ board:
         context = response.json()
         self.assertEqual([card["id"] for card in context["cards"]], ["card_archive"])
         self.assertEqual(
+            [claim["id"] for claim in context["cards"][0]["claims"]],
+            ["claim_first_turn"],
+        )
+        self.assertEqual(
             [claim["id"] for claim in context["claims"]], ["claim_first_turn"]
         )
         self.assertEqual(context["omitted_counts"]["future_cards"], 1)
@@ -493,6 +497,10 @@ board:
         ).json()
         self.assertEqual(
             [claim["id"] for claim in future_context["claims"]],
+            ["claim_first_turn", "claim_resolution"],
+        )
+        self.assertEqual(
+            [claim["id"] for card in future_context["cards"] for claim in card["claims"]],
             ["claim_first_turn", "claim_resolution"],
         )
 
@@ -989,6 +997,81 @@ board:
         self.assertIn("Introduces a disruption", text)
         self.assertNotIn("Act I", text)
         self.assertNotIn("What changes because this function is present?", text)
+
+    def test_plot_context_jinja_iteration_exposes_card_claims(self) -> None:
+        main_instance = self.service.create_plot_node(
+            CreatePlotNodeRequest(
+                title="Main plot structure",
+                entry_type="plot:template_instance",
+                template_instance={
+                    "template_id": "plot_template_three_act",
+                    "plot_points": [{"plot_point_id": "first_turn", "notes": "Visible setup."}],
+                },
+            )
+        )
+        subplot_instance = self.service.create_plot_node(
+            CreatePlotNodeRequest(
+                title="Subplot structure",
+                entry_type="plot:template_instance",
+                template_instance={
+                    "template_id": "plot_template_three_act",
+                    "plot_points": [{"plot_point_id": "resolution", "notes": "Other line."}],
+                },
+            )
+        )
+        self.service.create_plot_node(
+            CreatePlotNodeRequest(
+                title="Book plot board",
+                entry_type="plot:board",
+                board={
+                    "template_instance_ids": [main_instance.id, subplot_instance.id],
+                    "cards": [
+                        {
+                            "id": "card_archive",
+                            "title": "Archive Break-in",
+                            "synopsis": "Mara steals the ledger.",
+                        }
+                    ],
+                    "claims": [
+                        {
+                            "id": "claim_first_turn",
+                            "card_id": "card_archive",
+                            "template_instance_id": main_instance.id,
+                            "plot_point_id": "first_turn",
+                            "rationale": "The old path is unavailable.",
+                        },
+                        {
+                            "id": "claim_resolution",
+                            "card_id": "card_archive",
+                            "template_instance_id": subplot_instance.id,
+                            "plot_point_id": "resolution",
+                            "rationale": "This belongs to the subplot.",
+                        },
+                    ],
+                },
+            )
+        )
+
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            """{% role "user" %}
+{% set plot = plot_context(input.plot) %}
+{% for card in plot.cards %}
+CARD {{ card.title }}: {{ card.synopsis }}
+{% for claim in card.claims %}
+CLAIM {{ claim.plot_point_id }}: {{ claim.rationale }}
+{% endfor %}
+{% endfor %}
+{% endrole %}""",
+            context={"input": {"plot": main_instance.id}},
+            env=env,
+        )
+
+        text = out.messages[0].blocks[0].text
+        self.assertIn("CARD Archive Break-in: Mara steals the ledger.", text)
+        self.assertIn("CLAIM first_turn: The old path is unavailable.", text)
+        self.assertNotIn("resolution", text)
+        self.assertNotIn("This belongs to the subplot.", text)
 
     def test_plot_brainstorm_default_prompt_renders_plot_context(self) -> None:
         target = self.service.create_scene(CreateSceneRequest(title="Quiet Aftermath"))

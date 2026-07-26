@@ -171,6 +171,7 @@ export type PlotContextCard = {
   structure_title?: string | null;
   manuscript_index?: number | null;
   primary_plotline_id?: string | null;
+  claims: PlotContextClaim[];
 };
 
 export type PlotContextClaim = {

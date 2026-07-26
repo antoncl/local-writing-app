@@ -10,7 +10,7 @@
     instance: PlotNode;
     point: PlotTemplateInstancePoint;
     status: "missing" | "partial" | "used";
-    claim: PlotPointClaim | null;
+    claims: PlotPointClaim[];
   };
 
   type RenameAction = (node: HTMLInputElement) => { destroy: () => void };

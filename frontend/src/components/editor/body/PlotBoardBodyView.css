@@ -790,6 +790,51 @@
   line-height: 1.4;
 }
 
+.beat-claim-list {
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.beat-claim-button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-1);
+  width: 100%;
+  min-height: 32px;
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.beat-claim-button:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.beat-claim-button strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-sm);
+}
+
+.beat-claim-button span,
+.beat-claim-button small {
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+.beat-claim-button small {
+  grid-column: 1 / -1;
+}
+
 .context-preview {
   display: grid;
   gap: var(--sp-2);

@@ -473,6 +473,29 @@ Author notes: {{ point.notes }}
 {% endfor %}
 ```
 
+**Example - card-oriented snippet**
+```jinja
+{% set plot = plot_context(input.plot) %}
+
+{% for card in plot.cards %}
+<plot_card id="{{ card.id }}" title="{{ card.title }}">
+{% if card.synopsis %}
+  <synopsis>{{ card.synopsis }}</synopsis>
+{% endif %}
+{% for claim in card.claims %}
+  <function_badge plot_point_id="{{ claim.plot_point_id }}" claim_type="{{ claim.claim_type }}">
+{% if claim.rationale %}
+    <rationale>{{ claim.rationale }}</rationale>
+{% endif %}
+{% if claim.evidence %}
+    <evidence>{{ claim.evidence }}</evidence>
+{% endif %}
+  </function_badge>
+{% endfor %}
+</plot_card>
+{% endfor %}
+```
+
 **What plot templates contribute**
 
 Plot template and template-instance metadata is included alongside board cards.
@@ -481,7 +504,8 @@ In practice this means snippets can see:
 - template-level `ai_use_guidance`
 - plot-beat `function_claim` and `guidance`
 - instance-level point `notes`, `author_intent`, `expected_role`, and `open_questions`
-- card claims with `evidence`, `rationale`, and `ai_notes`
+- `plot.cards`, with each `card.claims` filtered to the same selection and `as_of` boundary
+- board-level `plot.claims` for cross-card audits, including `evidence`, `rationale`, and `ai_notes`
 
 **Caveats**:
 

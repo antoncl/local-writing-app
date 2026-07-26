@@ -310,6 +310,10 @@ class PlotEntriesMixin:
             for claim in board_node.board.claims
             if claim.card_id in visible_card_ids
         ]
+        visible_cards = self._plot_context_cards_with_claims(
+            visible_cards,
+            visible_claims,
+        )
         visible_claim_ids = {claim.id for claim in visible_claims}
         visible_relationships = [
             PlotContextRelationship(
@@ -422,6 +426,7 @@ class PlotEntriesMixin:
         ]
         card_ids = {claim.card_id for claim in claims}
         cards = [card for card in packet.cards if card.id in card_ids]
+        cards = self._plot_context_cards_with_claims(cards, claims)
         relationships = [
             relationship
             for relationship in packet.relationships
@@ -463,6 +468,19 @@ class PlotEntriesMixin:
                 "omitted_counts": omitted,
             }
         )
+
+    @staticmethod
+    def _plot_context_cards_with_claims(
+        cards: list[PlotContextCard],
+        claims: list[PlotContextClaim],
+    ) -> list[PlotContextCard]:
+        claims_by_card: dict[str, list[PlotContextClaim]] = {}
+        for claim in claims:
+            claims_by_card.setdefault(claim.card_id, []).append(claim)
+        return [
+            card.model_copy(update={"claims": claims_by_card.get(card.id, [])})
+            for card in cards
+        ]
 
     def _seed_builtin_plot_templates(self, root: Any) -> None:
         plot_dir = root / "plot"

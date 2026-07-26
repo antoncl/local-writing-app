@@ -188,7 +188,7 @@
               ondragend={clearDragOver}
             >
               <span class="point-title">{row.point.title || row.point.plot_point_id}</span>
-              <span class:used={row.status === "used"} class:partial={row.status === "partial"} class:missing={row.status === "missing"}>
+              <span class="point-status" class:used={row.status === "used"} class:partial={row.status === "partial"} class:missing={row.status === "missing"}>
                 {row.status}
               </span>
             </button>

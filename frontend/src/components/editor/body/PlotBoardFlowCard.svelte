@@ -2,7 +2,7 @@
   import { Handle, Position } from "@xyflow/svelte";
   import { usePlotBoardContext } from "./plotBoardContext";
 
-  let { data }: { data: { cardId: string } } = $props();
+  let { data }: { data: { kind: "card"; cardId: string } } = $props();
 
   const getCtx = usePlotBoardContext();
   let ctx = $derived(getCtx());
@@ -14,6 +14,7 @@
 {#if card}
   <article
     class="plot-card"
+    data-card-id={card.id}
     class:selected={ctx.selectedCardId === card.id && !ctx.selectedClaimId}
     class:drag-over={ctx.dragOverCardId === card.id}
     ondragenter={(event) => ctx.allowCardDrop(card.id, event)}
@@ -57,7 +58,8 @@
           class="claim-chip nodrag"
           class:selected={claim.id === ctx.selectedClaimId}
           role="group"
-          aria-label={`Claim ${ctx.pointLabel(claim)}`}
+          aria-label={`Claim ${ctx.pointLabel(claim)}. Drag to move to another card.`}
+          title={`Drag ${ctx.pointLabel(claim)} to another card`}
           draggable={true}
           ondragstart={(event) => ctx.dragClaim(claim, event)}
           ondragend={() => ctx.clearDragOver()}
@@ -65,6 +67,8 @@
           <button
             type="button"
             class="claim-chip-main"
+            draggable={true}
+            ondragstart={(event) => ctx.dragClaim(claim, event)}
             onclick={(event) => {
               event.stopPropagation();
               ctx.selectClaim(claim);

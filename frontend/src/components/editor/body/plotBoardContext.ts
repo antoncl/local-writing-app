@@ -5,10 +5,13 @@ export type PlotBoardContext = {
   saving: boolean;
   selectedCardId: string | null;
   selectedClaimId: string | null;
+  selectedColumnId: string | null;
   dragOverCardId: string | null;
   cardById: (cardId: string) => PlotBoardCard | null;
   cardColumnTitle: (cardId: string) => string;
   claimsForCard: (cardId: string) => PlotPointClaim[];
+  selectColumn: (columnId: string) => void;
+  addCardToColumn: (columnId: string) => void;
   pointLabel: (claim: PlotPointClaim) => string;
   selectCard: (cardId: string) => void;
   selectClaim: (claim: PlotPointClaim) => void;

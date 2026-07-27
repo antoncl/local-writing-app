@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { MetadataSchema } from "@/lib/types";
-import { kindEntryTypeFqns, kindEntryTypeOptions } from "@/lib/utils/schemaTypeHelpers";
+import {
+  isMetadataValuePresent,
+  kindEntryTypeFqns,
+  kindEntryTypeOptions,
+} from "@/lib/utils/schemaTypeHelpers";
 
 // The entry_type roster shared by the view designer (ViewFlowNode pickers) and the
 // runtime param strip (viewParams). `type` / `field → entry_type` want concrete
@@ -41,5 +45,28 @@ describe("kindEntryTypeOptions", () => {
 describe("kindEntryTypeFqns (delegates to the concrete roster)", () => {
   it("returns concrete FQNs only", () => {
     expect(kindEntryTypeFqns(SCHEMA, "lore")).toEqual(["lore:character", "lore:place"]);
+  });
+});
+
+describe("isMetadataValuePresent", () => {
+  it("treats undefined / null / empty string / empty list as unset", () => {
+    expect(isMetadataValuePresent(undefined)).toBe(false);
+    expect(isMetadataValuePresent(null)).toBe(false);
+    expect(isMetadataValuePresent("")).toBe(false);
+    expect(isMetadataValuePresent([])).toBe(false);
+  });
+
+  it("treats false and 0 as present — the sharp boolean case (#522)", () => {
+    // A boolean field set to false is SET, not unset; a two-state toggle would
+    // otherwise render it identically to an untouched (absent) field.
+    expect(isMetadataValuePresent(false)).toBe(true);
+    expect(isMetadataValuePresent(0)).toBe(true);
+  });
+
+  it("treats non-empty scalars and lists as present", () => {
+    expect(isMetadataValuePresent(true)).toBe(true);
+    expect(isMetadataValuePresent("first")).toBe(true);
+    expect(isMetadataValuePresent(42)).toBe(true);
+    expect(isMetadataValuePresent(["a"])).toBe(true);
   });
 });

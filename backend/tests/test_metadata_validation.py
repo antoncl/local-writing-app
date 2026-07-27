@@ -870,6 +870,105 @@ class MetadataValidationTests(unittest.TestCase):
             validation.errors,
         )
 
+    def _add_clearable_fields(self, root: Path, entry_type: str) -> None:
+        # One stored field of each awkward-to-unset type (#522). `flagged` carries
+        # a default so we can prove clearing does NOT re-seed it.
+        schema_path = root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        fields = data.setdefault("fields", {})
+        fields["flagged"] = {"name": "Flagged", "type": "boolean", "default": True}
+        fields["rank"] = {"name": "Rank", "type": "number"}
+        fields["tier"] = {
+            "name": "Tier",
+            "type": "select",
+            "options": [{"value": "a", "label": "A"}, {"value": "b", "label": "B"}],
+        }
+        tdef = data["entry_types"].get(entry_type) or {}
+        existing = list(tdef.get("fields") or [])
+        for key in ("flagged", "rank", "tier"):
+            if key not in existing:
+                existing.append(key)
+        tdef["fields"] = existing
+        data["entry_types"][entry_type] = tdef
+        self.service._write_yaml(schema_path, data)
+
+    def test_owned_lore_save_clears_omitted_fields_per_type(self) -> None:
+        # #522: reverting a field = deleting its sparse YAML key (unset ⇒ absent).
+        # An owned save must persist an omitted scalar as ABSENT — never re-seed
+        # the default, never coerce a missing boolean to False.
+        self._add_clearable_fields(self.root, "lore:character")
+        hero = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Seren", entry_type="lore:character")
+        )
+        # Create seeded the boolean default — the "stuck at a value" starting point.
+        self.assertEqual(hero.metadata.get("flagged"), True)
+
+        self.service.save_lore_entry(
+            hero.id,
+            SaveLoreEntryRequest(
+                title=hero.title,
+                body=hero.body,
+                base_revision=hero.revision,
+                entry_type="lore:character",
+                metadata={"flagged": False, "rank": 3, "tier": "b"},
+            ),
+        )
+        entry = self.service.read_lore_entry(hero.id)
+        self.assertEqual(entry.metadata.get("flagged"), False)
+        self.assertEqual(entry.metadata.get("rank"), 3)
+        self.assertEqual(entry.metadata.get("tier"), "b")
+
+        # Clear = omit the keys.
+        self.service.save_lore_entry(
+            hero.id,
+            SaveLoreEntryRequest(
+                title=entry.title,
+                body=entry.body,
+                base_revision=entry.revision,
+                entry_type="lore:character",
+                metadata={},
+            ),
+        )
+        cleared = self.service.read_lore_entry(hero.id)
+        self.assertNotIn("flagged", cleared.metadata)  # not re-seeded to True, not coerced to False
+        self.assertNotIn("rank", cleared.metadata)
+        self.assertNotIn("tier", cleared.metadata)
+
+    def test_owned_scene_save_clears_omitted_fields_per_type(self) -> None:
+        # Scene parity for the same round-trip (#522).
+        self._add_clearable_fields(self.root, "scene:scene")
+        scene = self.service.read_scene(self.scene_id)
+        self.service.save_scene(
+            self.scene_id,
+            SaveSceneRequest(
+                title=scene.title,
+                body=scene.body,
+                base_revision=scene.revision,
+                status="draft",
+                entry_type="scene:scene",
+                metadata={"flagged": False, "rank": 7, "tier": "a"},
+            ),
+        )
+        scene = self.service.read_scene(self.scene_id)
+        self.assertEqual(scene.metadata.get("flagged"), False)
+        self.assertEqual(scene.metadata.get("rank"), 7)
+
+        self.service.save_scene(
+            self.scene_id,
+            SaveSceneRequest(
+                title=scene.title,
+                body=scene.body,
+                base_revision=scene.revision,
+                status="draft",
+                entry_type="scene:scene",
+                metadata={},
+            ),
+        )
+        cleared = self.service.read_scene(self.scene_id)
+        self.assertNotIn("flagged", cleared.metadata)
+        self.assertNotIn("rank", cleared.metadata)
+        self.assertNotIn("tier", cleared.metadata)
+
     def test_metadata_schema_layers_apply_from_base_to_project(self) -> None:
         self.service._write_yaml(
             self.base / "metadata.schema.yaml",

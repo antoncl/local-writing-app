@@ -71,3 +71,30 @@ export function fieldProvenance(
   if (overriddenFields.includes(fieldId)) return "overridden";
   return entryIsInherited ? "layer-inherited" : "local";
 }
+
+/**
+ * Whether an owned entry's field offers the clear-to-default gesture (#522) —
+ * the intra-project twin of the #517 layer reset. A field qualifies only when it
+ * is authored in the open project (not `entryIsInherited`), is not a layer
+ * override (those revert via #517), is an editable stored field (never `status`,
+ * which has its own control, nor `computed`, which is read-only — ADR-0029 §D),
+ * and currently carries a value in its own metadata (`hasStoredValue`), so there
+ * is something to delete. Pure so the gate is unit-tested rather than buried in
+ * the component (the frontend has no component-test infra).
+ */
+export function isFieldOwnClearable(params: {
+  fieldId: string;
+  fieldExists: boolean;
+  fieldType?: string;
+  fieldCategory?: string;
+  entryIsInherited: boolean;
+  isOverridden: boolean;
+  hasStoredValue: boolean;
+}): boolean {
+  const { fieldId, fieldExists, fieldType, fieldCategory, entryIsInherited, isOverridden, hasStoredValue } =
+    params;
+  if (!fieldExists) return false;
+  if (entryIsInherited || isOverridden) return false;
+  if (fieldId === "status" || fieldType === "computed" || fieldCategory === "computed") return false;
+  return hasStoredValue;
+}

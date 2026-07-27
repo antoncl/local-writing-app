@@ -14,7 +14,19 @@ import type {
   MetadataFieldDefinition,
   MetadataSchema,
   MetadataSchemaLayer,
+  MetadataValue,
 } from "@/lib/types";
+
+// Whether a metadata value is "present" on an instance — i.e. the field carries
+// a value, as opposed to being unset. `false` and `0` are present; `undefined`,
+// `null`, `""` and an empty list are not. Used to tell a *set* boolean apart
+// from a *cleared* one (#522): a two-state toggle otherwise renders "unset"
+// identically to "off", which is the sharp case the clear-to-default gesture
+// exists to fix. Pure so it can be unit-tested without a component.
+export function isMetadataValuePresent(value: MetadataValue | undefined): boolean {
+  if (Array.isArray(value)) return value.length > 0;
+  return value !== undefined && value !== null && value !== "";
+}
 
 // The schema's kind universe (a Node's "class"). Narrower than the wider
 // DocumentKind, which also covers chat / snippet / structure_node — none

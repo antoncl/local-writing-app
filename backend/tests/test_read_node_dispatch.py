@@ -15,6 +15,7 @@ from project_fixtures import open_test_project
 from app.models import (
     AssistantEntry,
     ChatSession,
+    CreateAssistantEntryRequest,
     CreateChatSessionRequest,
     LoreEntry,
     PromptEntry,
@@ -61,13 +62,15 @@ class ReadNodeDispatchTests(unittest.TestCase):
         self.assertEqual(result.id, created.id)
 
     def test_dispatches_to_assistant_reader(self) -> None:
-        # Machine-layer assistants are populated by default — find any.
-        assistants = self.service.list_assistant_entries().entries
-        if not assistants:
-            self.skipTest("no assistants registered on this machine")
-        result = self.service.read_node(assistants[0].id)
+        # Build our own fixture rather than depending on machine state: the
+        # conftest autouse fixture isolates the machine config dir per-test, so
+        # a default create lands on that (temp) machine layer.
+        created = self.service.create_assistant_entry(
+            CreateAssistantEntryRequest(title="Test Assistant")
+        )
+        result = self.service.read_node(created.id)
         self.assertIsInstance(result, AssistantEntry)
-        self.assertEqual(result.id, assistants[0].id)
+        self.assertEqual(result.id, created.id)
 
     def test_dispatches_to_chat_reader(self) -> None:
         created = self.service.create_chat_session(

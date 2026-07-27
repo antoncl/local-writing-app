@@ -1058,7 +1058,12 @@ class EditorPanesController {
     // edits belong in the fork, not the void. Cancel the pending timer so it
     // cannot fire against the baseline this save is about to move. A save that
     // 409s throws out of here, aborting the fork with the draft intact.
-    const open = this.paneForScene(entryId);
+    //
+    // Match the lore pane directly — `paneForScene` is scene-only and would miss
+    // it, so the flush was dead for lore and dropped in-debounce edits (#520, a
+    // regression of the very case #313 fixed). Same predicate the reconcile
+    // `map` below uses, and the fix applied to `resetLoreOverrideField` (#518).
+    const open = this.panes.find((p) => p.document?.type === "lore" && p.document.id === entryId);
     if (open?.dirty) {
       this.#autosave.cancel(open.id);
       await this.saveEditorPane(open.id);

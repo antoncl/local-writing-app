@@ -197,6 +197,12 @@ be copied manually today and turned into explicit apply actions later. The
 prompt tells the model to omit placeholder suggestions and only return concrete
 draft changes.
 
+When an assistant response contains a `<plot_suggestions>` block, the chat
+transcript hides the raw XML from the normal prose rendering and shows each
+concrete suggestion in a compact read-only list. This is display-only for now:
+accepting, editing, or applying suggestions to the plot board remains a later
+explicit workflow.
+
 ## File layout
 
 A fresh M2-era project has:

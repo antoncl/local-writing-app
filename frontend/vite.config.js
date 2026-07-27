@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath, URL } from "node:url";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
-import { defineConfig } from "vite";
+import { createLogger, defineConfig } from "vite";
 
 // Where `scripts/dev_backend.py` publishes the port Claude Code assigned it.
 const backendPortFile = fileURLToPath(
@@ -38,7 +38,7 @@ function claudeBackendBase() {
   return `http://127.0.0.1:${port}/api`;
 }
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ command, mode }) => {
   // Anton's stack, unchanged: pinned and strict, so a stale server holding
   // 5173 surfaces as an error instead of silently drifting to another port.
   const server = { host: "127.0.0.1", port: 5173, strictPort: true };
@@ -54,8 +54,49 @@ export default defineConfig(({ mode }) => {
     define["import.meta.env.VITE_API_BASE"] = JSON.stringify(claudeBackendBase());
   }
 
+  // Fail the production build on any warning, so a regression like a CSS
+  // comment closed early by a stray `*/` (#538) cannot ship green again (#540).
+  // svelte-check never runs the minifier, so that class of warning is invisible
+  // to every other gate. Vite routes esbuild's CSS-minify warnings through
+  // `config.logger.warn`; a logger that records them plus a closeBundle hook
+  // that throws if any were seen turns the whole class into a hard failure.
+  //
+  // The bundle chunk-size advisory is deliberately excused: it is a standing
+  // note about bundle bloat, not a per-build regression, and silencing it by
+  // raising chunkSizeWarningLimit would mask a real signal. It still prints.
+  const buildWarnings = [];
+  const isExcused = (msg) =>
+    typeof msg === "string" && msg.includes("Some chunks are larger");
+
+  let customLogger;
+  if (command === "build") {
+    const base = createLogger();
+    const record = (fn) => (msg, opts) => {
+      if (!isExcused(msg)) buildWarnings.push(msg);
+      fn(msg, opts);
+    };
+    customLogger = {
+      ...base,
+      warn: record(base.warn.bind(base)),
+      warnOnce: record(base.warnOnce.bind(base)),
+    };
+  }
+
+  const failOnBuildWarnings = {
+    name: "fail-on-build-warnings",
+    apply: "build",
+    closeBundle() {
+      if (buildWarnings.length === 0) return;
+      const list = buildWarnings.map((w) => `  - ${w}`).join("\n");
+      throw new Error(
+        `Frontend build emitted ${buildWarnings.length} warning(s); builds ` +
+          `must be warning-free (#540):\n${list}`,
+      );
+    },
+  };
+
   return {
-    plugins: [svelte()],
+    plugins: [svelte(), failOnBuildWarnings],
     resolve: {
       alias: {
         "@": fileURLToPath(new URL("./src", import.meta.url)),
@@ -63,5 +104,6 @@ export default defineConfig(({ mode }) => {
     },
     server,
     define,
+    customLogger,
   };
 });

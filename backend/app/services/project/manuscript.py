@@ -36,6 +36,7 @@ from app.models import (
 )
 from app.services.markdown_validation import validate_scene_markdown
 from app.services.project.errors import ProjectServiceError
+from app.services.project.node_index_gate import node_index_gate
 from app.services.project.tree_configs import MANUSCRIPT_TREE_CONFIG
 from app.services.tree_structure import TreeStructureService
 
@@ -338,6 +339,105 @@ class ManuscriptMixin:
         TreeStructureService.insert_node(parent, new_node)
         self._manuscript_tree(root).write(structure)
         return self._read_structure(root)
+
+    def import_loose_scenes(self, scene_ids: list[str] | None = None) -> StructureDocument:
+        """Register scene files present under `scenes/` that no manuscript node
+        references, appending them at the manuscript root (#4).
+
+        Each file is normalised into a canonical scene file: a raw dropped `.md`
+        with no front matter gains an `id`, a `title` (its first heading, else
+        the filename), `entry_type: scene:scene`, and `status: draft`; a file
+        that already carries valid front matter keeps it. `scene_ids` None/empty
+        imports every loose scene; otherwise only the listed ids that are in fact
+        loose. A file whose front-matter id already belongs to a manuscript node
+        is a duplicate the node index shadows — it never reaches `loose`, so
+        import cannot overwrite an existing scene. A file too malformed to
+        normalise is skipped (left untouched and loose), so one bad file cannot
+        abort the whole batch.
+        """
+        root = self._require_project()
+        # Scan disk truth, for the same reason validate does (#4): a file dropped
+        # into scenes/ while the app stayed open is invisible to a warm memo.
+        node_index_gate.invalidate()
+        schema = self.read_metadata_schema()
+        structure = self._read_structure(root)
+        node_index = self._build_node_index(root)
+        referenced = TreeStructureService.collect_leaf_ids(structure.root)
+
+        loose = {
+            entry.id: entry
+            for entry in node_index.by_id.values()
+            if entry.kind == "scene" and entry.id not in referenced
+        }
+        wanted = set(scene_ids) if scene_ids else set(loose)
+        targets = [loose[scene_id] for scene_id in sorted(loose) if scene_id in wanted]
+
+        for entry in targets:
+            try:
+                # Everything that can reject a malformed file happens before the
+                # first write: read, entry-type coercion, metadata normalisation.
+                front_matter, body = self._read_markdown_with_front_matter(entry.path)
+                entry_type = self._import_scene_entry_type(front_matter.get("entry_type"), schema)
+                metadata = self._normalise_metadata(front_matter.get("metadata"), entry.path)
+            except ProjectServiceError:
+                # A malformed loose file (e.g. non-dict metadata, unreadable front
+                # matter) is left untouched and stays loose rather than aborting
+                # the batch — validate already surfaces why. The user fixes it and
+                # re-imports; the good files in the same click still land.
+                continue
+
+            fm_id = front_matter.get("id")
+            # A raw dropped file has no front-matter id (the index keyed it by its
+            # filename stem); mint a canonical one. A file that already carries a
+            # valid id keeps it.
+            final_id = fm_id if isinstance(fm_id, str) and fm_id.strip() else self._new_id("scene")
+            title = self._derive_import_title(front_matter.get("title"), body, entry.path)
+            scene = Scene(
+                id=final_id,
+                title=title,
+                body=body,
+                revision="",
+                status=str(front_matter.get("status") or "draft"),
+                entry_type=entry_type,
+                metadata=metadata,
+            )
+            self._write_scene_file(entry.path, scene)
+
+            new_node = StructureNode(
+                id=self._new_id("node"),
+                type=entry_type,
+                title=title,
+                scene_id=final_id,
+            )
+            TreeStructureService.insert_node(structure.root, new_node)
+
+        self._manuscript_tree(root).write(structure)
+        return self._read_structure(root)
+
+    def _import_scene_entry_type(self, raw: object, schema: MetadataSchema) -> str:
+        """The scene entry type to stamp on an imported file: keep the file's own
+        if it names a concrete scene type this schema knows, else `scene:scene`."""
+        if isinstance(raw, str):
+            candidate = schema.entry_types.get(raw)
+            if candidate is not None and candidate.kind == "scene" and not candidate.abstract:
+                return raw
+        return "scene:scene"
+
+    def _derive_import_title(self, raw_title: object, body: str, path: Path) -> str:
+        """Title for an imported scene: its front-matter title, else its first
+        Markdown heading, else the filename stem."""
+        if isinstance(raw_title, str) and raw_title.strip():
+            return raw_title.strip()
+        for line in body.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith("#"):
+                heading = stripped.lstrip("#").strip()
+                if heading:
+                    return heading
+            break
+        return path.stem
 
     def read_scene(self, scene_id: str) -> Scene:
         index = self._build_node_index()

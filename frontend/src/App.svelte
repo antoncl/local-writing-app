@@ -550,6 +550,22 @@
     });
   }
 
+  async function importLooseScenes(sceneIds: string[]) {
+    await run(async () => {
+      await api.importLooseScenes(sceneIds);
+      await refreshStructure();
+      // Re-validate so the panel's loose-scene offer clears (and re-surfaces any
+      // that couldn't be imported).
+      const result = await api.validateProject();
+      setValidation(result);
+      // Count what actually landed: a requested id no longer loose was imported.
+      // A malformed file the backend skipped stays loose, so it isn't counted.
+      const stillLoose = new Set(result.loose_scenes.map((loose) => loose.id));
+      const added = sceneIds.filter((id) => !stillLoose.has(id)).length;
+      status = added === 1 ? "Added 1 scene to the manuscript" : `Added ${added} scenes to the manuscript`;
+    });
+  }
+
   // AI chat sessions. Per-chat state (history, composer, cost/TTL) lives
   // inside ChatBodyView now; App only tracks the session roster (Chats pane)
   // and which chat is currently open in an editor pane (active-row highlight).
@@ -709,6 +725,7 @@
         effectiveAiPolicy={project?.ai_policy ?? "off"}
         bind:projectCostExpanded
         onValidate={validateProject}
+        onImportScenes={importLooseScenes}
         onOpenChats={openChatsPane}
         onSaveAISettings={() => aiSettings.save()}
         onHealthCheck={() => aiSettings.runHealthCheck()}

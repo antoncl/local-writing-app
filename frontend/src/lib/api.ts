@@ -368,6 +368,12 @@ export const api = {
       body: JSON.stringify({ title, entry_type: entryType, parent_id: parentId ?? null }),
     });
   },
+  importLooseScenes(sceneIds: string[]) {
+    return request<StructureDocument>("/structure/import-loose", {
+      method: "POST",
+      body: JSON.stringify({ scene_ids: sceneIds }),
+    });
+  },
   renameStructureNode(nodeId: string, title: string) {
     return request<StructureDocument>(`/structure/nodes/${encodeURIComponent(nodeId)}`, {
       method: "PATCH",

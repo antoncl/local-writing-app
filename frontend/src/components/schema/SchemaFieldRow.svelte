@@ -90,8 +90,8 @@
   >
     <span class="sfr-grip" title="Drag to reorder" aria-hidden="true"><i class="ti ti-grip-vertical"></i></span>
     <span class="sfr-tile"><i class={iconClass} aria-hidden="true"></i></span>
-    <span class="sfr-name">{name}</span>
-    <span class="sfr-typechip">{typeLabel}</span>
+    <span class="sfr-name" title={name}>{name}</span>
+    <span class="sfr-typechip" title={typeLabel}>{typeLabel}</span>
     <span class="sfr-meta">{@render meta?.()}</span>
   </button>
 {:else}
@@ -118,8 +118,8 @@
   >
     <span class="sfr-grip" aria-hidden="true"><i class="ti ti-grip-vertical"></i></span>
     <span class="sfr-tile"><i class={iconClass} aria-hidden="true"></i></span>
-    <span class="sfr-name">{name}</span>
-    <span class="sfr-typechip">{typeLabel}</span>
+    <span class="sfr-name" title={name}>{name}</span>
+    <span class="sfr-typechip" title={typeLabel}>{typeLabel}</span>
     <span class="sfr-meta">{@render meta?.()}</span>
   </div>
 {/if}
@@ -194,13 +194,26 @@
   .draggable-row .sfr-grip {
     cursor: grab;
   }
+  /* Name and type chip stay on ONE line and truncate under pressure rather than
+     wrapping — a long type label (entity_ref_list → "Entry Reference, Multiple")
+     in a narrow pane otherwise wrapped the row to double height (#523). The chip
+     may shrink as a last resort so the name never fully disappears; `min-width`
+     keeps each partly visible. Full text stays available on hover (title). */
   .sfr-name {
     flex: 0 1 auto;
+    min-width: 2.5rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     font-size: var(--fs-md);
     color: var(--text);
   }
   .sfr-typechip {
-    flex: none;
+    flex: 0 1 auto;
+    min-width: 3.5rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     padding: 1px 8px;
     border-radius: 6px;
     border: 1px solid var(--k-snippet);
@@ -210,8 +223,11 @@
     font-size: var(--fs-xs);
     font-weight: 600;
   }
+  /* `min-width: 0` lets the meta cluster's inherited-label truncate instead of
+     forcing the row wider (the icons inside it stay fixed — see the consumer). */
   .sfr-meta {
     margin-left: auto;
+    min-width: 0;
     display: inline-flex;
     align-items: center;
     gap: 7px;

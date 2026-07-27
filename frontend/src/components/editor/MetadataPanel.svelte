@@ -17,7 +17,7 @@
     StructureDocument,
   } from "@/lib/types";
   import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
-  import { inheritedLayerLabel, fieldProvenance } from "@/lib/utils/provenance";
+  import { inheritedLayerLabel, fieldProvenance, isFieldOwnClearable } from "@/lib/utils/provenance";
 
   interface Props {
     entryType: string;
@@ -212,6 +212,42 @@
   // editable — a scrubbed / snapshot-parked pane shows the mark inertly.
   const canResetOverride = $derived(onResetField != null && !readOnly);
 
+  // Clear-to-default (#522): the intra-project twin of #517's layer reset. On a
+  // locally-owned entry, a field carrying its own stored value can be reverted to
+  // its type/kind default — or to unset — by DELETING its sparse metadata key
+  // (the owned save drops an omitted key; defaults are seeded only at create, so
+  // an absent key stays absent). Inherited entries revert via the #517 override
+  // reset instead, so this is gated to non-inherited entries and never collides
+  // with it. Same gesture as #517 — the `ti-versions` mark + "Reset to …" chip,
+  // just a different target — so a user never wonders why one field reverts and
+  // another doesn't. Editable-rail-only, like the override reset.
+  const canClearOwn = $derived(onMetadataChange != null && !readOnly);
+  function isOwnClearable(fieldId: string): boolean {
+    const field = metadataSchema.fields[fieldId];
+    // status has its own "(no status)" control; computed is read-only;
+    // intrinsics never reach this loop — the pure gate encodes all of that.
+    return isFieldOwnClearable({
+      fieldId,
+      fieldExists: field != null,
+      fieldType: field?.type,
+      fieldCategory: field?.category,
+      entryIsInherited,
+      isOverridden: isOverridden(fieldId),
+      hasStoredValue: fieldId in metadata,
+    });
+  }
+  function clearField(fieldId: string) {
+    const next = { ...metadata };
+    delete next[fieldId];
+    onMetadataChange?.(next);
+  }
+  // The default a cleared field falls back to, named for the chip/tooltip so the
+  // gesture "shows what the default is" (#522). Empty when the field defines no
+  // default — reverting then simply unsets it.
+  function defaultHint(fieldId: string): string {
+    return metadataValueString(metadataSchema.fields[fieldId]?.default ?? undefined);
+  }
+
   function displayValue(fieldId: string): MetadataValue {
     if (isMutated(fieldId)) return effectiveOverrides?.[fieldId] ?? "";
     const flipped = compare?.fields[fieldId];
@@ -288,7 +324,30 @@
         {@const field = metadataSchema.fields[fieldId]}
         {@const fieldLabel = effectiveFieldLabel(metadataSchema, entryType, fieldId)}
         <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field)} class:inherited={isInherited(fieldId)} class:layer-inherited={isLayerInherited(fieldId)} class:mutated={isMutated(fieldId)} class:overridden={isOverridden(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && compare?.side === "was"}>
-          <span class="fr-icon"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
+          {#if canClearOwn && isOwnClearable(fieldId)}
+            <!-- Clear-to-default (#522): the intra-project twin of #517's reset.
+                 #517 hangs its "Reset to <source>" gesture off the `ti-versions`
+                 override-delta glyph — which only exists on an overridden field.
+                 An intra-project node has no such glyph, but every field carries
+                 its own default glyph (the type/field icon, rendered on every
+                 row), so THAT glyph becomes the affordance here: hover it to
+                 reveal a "Reset to default" chip, click it to delete the sparse
+                 metadata key and revert the field to its default / unset. -->
+            <button
+              type="button"
+              class="fr-icon fr-icon-reset"
+              title={defaultHint(fieldId)
+                ? `Set here — reset ${fieldLabel} to its default (${defaultHint(fieldId)})`
+                : `Set here — clear ${fieldLabel} (revert to default)`}
+              aria-label={`Reset ${fieldLabel} to default`}
+              onclick={() => clearField(fieldId)}
+            >
+              <i class={fieldIconClass(field)} aria-hidden="true"></i>
+              <span class="fr-reset-chip">Reset to default</span>
+            </button>
+          {:else}
+            <span class="fr-icon"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
+          {/if}
           <span class="fr-name">{fieldLabel}{#if isMutated(fieldId)}<span class="fr-mutated-marker" title="Changed by here">⤳</span>{/if}</span>
           <div class="fr-val" title={isLayerInherited(fieldId) && inheritedFromLabel ? `Inherited from ${inheritedFromLabel}` : undefined}>
             {#if isOverridden(fieldId)}
@@ -333,7 +392,7 @@
               <SwatchPicker
                 value={metadataValueString(displayValue(fieldId)) || null}
                 {readOnly}
-                onChange={(id) => onMetadataChange?.({ ...metadata, [fieldId]: id ?? "" })}
+                onChange={(id) => (id ? onMetadataChange?.({ ...metadata, [fieldId]: id }) : clearField(fieldId))}
               />
               {#if !metadataValueString(displayValue(fieldId))}
                 {@const inherited = metadataSchema.entry_types[entryType]?.color}
@@ -343,6 +402,7 @@
               <FieldValueEditor
                 {field}
                 {readOnly}
+                allowUnset={true}
                 value={displayValue(fieldId)}
                 ariaLabel={fieldLabel}
                 loreEntries={loreEntries}
@@ -584,6 +644,37 @@
   }
   .field-row.wide .fr-val > .fr-override-marker {
     flex: 0 0 auto;
+  }
+
+  /* Clear-to-default (#522): the field's own default glyph (the `.fr-icon` box,
+     rendered on every row) becomes the reset control on a locally-owned field
+     that carries a value — the intra-project twin of #517's override-glyph
+     reset. Neutral tint, NOT the `--star` provenance axis: reverting to a type
+     default is not a provenance fact, so it must not borrow the inherited/
+     override vocabulary. Hover/focus reveals the "Reset to default" chip; the
+     button is the tab stop, so the reset is keyboard-reachable, not hover-only. */
+  button.fr-icon-reset {
+    position: relative;
+    cursor: pointer;
+    padding: 0;
+    font-size: var(--fs-md);
+    transition: border-color 120ms ease, color 120ms ease;
+  }
+  button.fr-icon-reset:hover,
+  button.fr-icon-reset:focus-visible {
+    border-color: var(--accent);
+    color: var(--accent-strong);
+  }
+  button.fr-icon-reset:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  button.fr-icon-reset .fr-reset-chip {
+    color: var(--text-2);
+  }
+  button.fr-icon-reset:hover .fr-reset-chip,
+  button.fr-icon-reset:focus-visible .fr-reset-chip {
+    display: inline-flex;
   }
 
   /* Layer-inherited fields (#517 / §8): the value flows from an ancestor, so it

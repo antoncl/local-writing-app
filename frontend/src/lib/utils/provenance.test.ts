@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { fieldProvenance, inheritedLayerLabel, isInherited } from "@/lib/utils/provenance";
+import {
+  fieldProvenance,
+  inheritedLayerLabel,
+  isFieldOwnClearable,
+  isInherited,
+} from "@/lib/utils/provenance";
 
 describe("inheritedLayerLabel", () => {
   it("returns the ancestor label when the node is owned by another layer", () => {
@@ -49,5 +54,40 @@ describe("fieldProvenance", () => {
 
   it("marks a field 'local' on an entry authored in the open project", () => {
     expect(fieldProvenance("spelling", false, [])).toBe("local");
+  });
+});
+
+describe("isFieldOwnClearable", () => {
+  const base = {
+    fieldId: "rank",
+    fieldExists: true,
+    fieldType: "number",
+    fieldCategory: "stored",
+    entryIsInherited: false,
+    isOverridden: false,
+    hasStoredValue: true,
+  };
+
+  it("is true for a locally-owned stored field that carries a value", () => {
+    expect(isFieldOwnClearable(base)).toBe(true);
+  });
+
+  it("is false when the field has no stored value (nothing to clear)", () => {
+    expect(isFieldOwnClearable({ ...base, hasStoredValue: false })).toBe(false);
+  });
+
+  it("is false on an inherited entry or a layer override (those use #517)", () => {
+    expect(isFieldOwnClearable({ ...base, entryIsInherited: true })).toBe(false);
+    expect(isFieldOwnClearable({ ...base, isOverridden: true })).toBe(false);
+  });
+
+  it("is false for status (own control) and computed fields (read-only)", () => {
+    expect(isFieldOwnClearable({ ...base, fieldId: "status" })).toBe(false);
+    expect(isFieldOwnClearable({ ...base, fieldType: "computed" })).toBe(false);
+    expect(isFieldOwnClearable({ ...base, fieldCategory: "computed" })).toBe(false);
+  });
+
+  it("is false for an unknown field", () => {
+    expect(isFieldOwnClearable({ ...base, fieldExists: false })).toBe(false);
   });
 });

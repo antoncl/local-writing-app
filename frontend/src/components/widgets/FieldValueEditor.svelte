@@ -11,6 +11,7 @@
   import ColoredSelect from "@/components/widgets/ColoredSelect.svelte";
   import TagPicker from "@/components/widgets/TagPicker.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
+  import { isMetadataValuePresent } from "@/lib/utils/schemaTypeHelpers";
   import type {
     LoreEntrySummary,
     MetadataFieldDefinition,
@@ -29,6 +30,13 @@
      *  through the same widget vocabulary (chips, pills, swatch, toggle) —
      *  never a raw string dump. `onChange` is never called. */
     readOnly?: boolean;
+    /** Whether "unset" is a distinct, reachable state (#522). Only the metadata
+     *  rail sets this — there a cleared field genuinely has no value and a
+     *  `boolean` must show tri-state (a set `false` reads "off", an absent value
+     *  reads dimmed "not set"). Authoring surfaces that always carry a concrete
+     *  value (mutation rows, view params) leave it false and keep the 2-state
+     *  toggle, so an untouched row never *looks* unset while saving `false`. */
+    allowUnset?: boolean;
     ariaLabel?: string;
     loreEntries?: LoreEntrySummary[];
     promptEntries?: PromptEntrySummary[];
@@ -50,6 +58,7 @@
     value,
     onChange,
     readOnly = false,
+    allowUnset = false,
     ariaLabel,
     loreEntries = [],
     promptEntries = [],
@@ -198,14 +207,22 @@
 {:else if field.type === "select"}
   <ColoredSelect value={currentValue} options={field.options} ariaLabel={label} {readOnly} onChange={(v) => emit(v)} />
 {:else if field.type === "boolean"}
-  {@const on = metadataValueBool(value)}
+  <!-- Tri-state display (#522), rail-only via `allowUnset`: a two-state toggle
+       can't tell "unset" from "off", so an untouched boolean looks false. When
+       unset is a real state and the value is absent, the toggle reads
+       dimmed/indeterminate (knob centred); getting *back* to unset is the row's
+       revert affordance, not this control. Authoring surfaces (mutation rows,
+       view params) leave `allowUnset` false and keep the plain 2-state toggle. -->
+  {@const set = !allowUnset || isMetadataValuePresent(value)}
+  {@const on = set && metadataValueBool(value)}
   <button
     type="button"
     role="switch"
     class="fr-toggle"
     class:on={on}
+    class:unset={!set}
     aria-checked={on}
-    aria-label={label}
+    aria-label={set ? label : `${label} (not set)`}
     disabled={readOnly}
     onclick={readOnly ? undefined : () => emit(!on)}
   >
@@ -289,6 +306,16 @@
   }
   .fr-toggle.on .fr-toggle-knob {
     transform: translateX(14px);
+  }
+  /* Unset (#522): neither on nor off — a dashed, dimmed track with the knob
+     parked centre so "not set" never reads as a deliberate "off". */
+  .fr-toggle.unset {
+    opacity: 0.55;
+    border-style: dashed;
+    background: var(--inset);
+  }
+  .fr-toggle.unset .fr-toggle-knob {
+    transform: translateX(7px);
   }
 
   .multi-select-chips {

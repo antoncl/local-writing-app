@@ -100,7 +100,7 @@ Respond with:
 PLOT_CLAIM_AUDIT_BODY = """{% set selected_scene = scene if scene is defined else none %}
 {% set plot = plot_context(input.plot, as_of=selected_scene) if selected_scene else plot_context(input.plot) %}
 {% role "system" %}
-You are an experienced fiction editor auditing a plot board. A plot beat is a story milestone or required story function. A function badge is a card-local claim that the card helps satisfy that beat. Judge whether the listed cards collectively make each beat feel earned. Do not draft prose, invent canon, or treat the template as a rigid formula. Identify evidence, gaps, weak logic, duplicated work, and useful next questions.
+You are an experienced fiction editor helping a novelist strengthen a plot board. A plot beat is a story milestone or required story function. A function badge is a card-local claim that the card helps satisfy that beat. Treat diagnostics as signals, not verdicts. Diagnose gaps, then offer concrete repair options the author can choose from. Do not draft prose, invent final canon, or treat the template as a rigid formula.
 {% endrole %}
 
 {% role "user" %}
@@ -168,9 +168,10 @@ You are an experienced fiction editor auditing a plot board. A plot beat is a st
 </plot_claim_audit>
 
 Respond with:
-1. Beats whose claims look strong, partial, weak, or unsupported.
-2. Cards that appear untagged or not clearly advancing the story.
-3. Duplicated or overloaded cards where one card may be doing too much.
-4. Specific evidence or story decisions the author should add next.
+1. A brief diagnosis of the selected focus: what is strong, weak, unsupported, missing, duplicated, or overloaded.
+2. Specific repair options: narrative actions, obstacles, choices, reveals, consequences, or relationship/status changes that would make the beat or card stronger.
+3. Claim changes to consider: add, remove, move, split, downgrade, or strengthen function badges.
+4. Evidence the author could add to the card or scene to make the claim feel earned.
+5. Questions only where an author decision is genuinely needed.
 {% endrole %}
 """

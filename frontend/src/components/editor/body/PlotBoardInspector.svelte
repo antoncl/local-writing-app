@@ -53,6 +53,7 @@
     plotNode: PlotNode | null;
     deleteCard: (card: PlotBoardCard, event: MouseEvent) => void;
     promoteCard: (card: PlotBoardCard, event: MouseEvent) => void;
+    startCardAssist: () => void;
     startPlotClaimAudit: () => void;
     savingMessage: string;
     selectedCard: PlotBoardCard | null;
@@ -97,6 +98,7 @@
     plotNode,
     deleteCard,
     promoteCard,
+    startCardAssist,
     startPlotClaimAudit,
     savingMessage,
     selectedCard,
@@ -478,6 +480,15 @@
         {/if}
       </section>
       {@render diagnosticList(selectedCardDiagnostics)}
+      <button
+        type="button"
+        class="tool-button inspector-action"
+        disabled={Boolean(savingMessage)}
+        onclick={startCardAssist}
+      >
+        <i class="ti ti-sparkles" aria-hidden="true"></i>
+        Help make this stronger
+      </button>
       {#if selectedCard.node_ref}
         <div class="inspector-stat">
           <span>Draft node</span>

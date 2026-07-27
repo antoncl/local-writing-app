@@ -706,6 +706,13 @@
     onNavigate?.({ id: card.node_ref, kind: "scene" });
   }
 
+  function openTemplateNode(instance: PlotNode, event: MouseEvent): void {
+    event.stopPropagation();
+    const templateId = instance.template_instance?.template_id;
+    if (!templateId) return;
+    onNavigate?.({ id: templateId, kind: "plot" });
+  }
+
   function cloneBoardSpec(source: PlotBoardSpec): PlotBoardSpec {
     return JSON.parse(JSON.stringify(source)) as PlotBoardSpec;
   }
@@ -1396,6 +1403,7 @@
     {focusRenameInput}
     {handleTemplateRenameKeydown}
     {instanceDisplayTitle}
+    {openTemplateNode}
     {paletteRows}
     {pointKey}
     {rawInstanceTitle}

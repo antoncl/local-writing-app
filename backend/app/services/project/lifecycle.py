@@ -57,6 +57,15 @@ from app.services.project.tree_configs import (
 )
 from app.services.tree_structure import TreeStructureService
 
+# A verified project's own structural folders — its guts, never a place a user
+# opens or creates a project. The directory picker hides these when browsing
+# *inside* a project (#559). Stated in full rather than derived from
+# `create_project`'s create-time list, which is a subset: `overrides/` is written
+# lazily on the first layer override, and `research/` holds `notes/`.
+PROJECT_INTERNAL_FOLDER_NAMES = frozenset(
+    {"scenes", "lore", "prompts", "research", "overrides", ".cache"}
+)
+
 
 class _AIPolicyResolver(LayerVisitor):
     """Keeps the innermost layer's stated policy (#312).
@@ -751,12 +760,26 @@ class ProjectLifecycleMixin:
 
         directories = [self._directory_entry(child) for child in children]
 
+        target_is_project = self._is_project_dir(target)
+        if target_is_project:
+            # Inside a project, its structural folders are clutter — never a place
+            # to open or create a project. Hidden only under two guards so a real
+            # target is never lost: the *browsed* folder must itself be a project
+            # (a top-level folder merely named "lore" is untouched), and a child
+            # project that happens to share one of these names is kept, since
+            # `is_project` entries always survive the filter (#559).
+            directories = [
+                entry
+                for entry in directories
+                if entry.is_project or entry.name not in PROJECT_INTERNAL_FOLDER_NAMES
+            ]
+
         parent = target.parent if target.parent != target else None
         return DirectoryListing(
             path=str(target),
             parent_path=str(parent) if parent else None,
             directories=directories,
-            is_project=self._is_project_dir(target),
+            is_project=target_is_project,
         )
 
     def list_directory_roots(self) -> list[DirectoryRoot]:

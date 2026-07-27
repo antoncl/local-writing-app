@@ -26,7 +26,7 @@
     focusRenameInput: RenameAction;
     handleTemplateRenameKeydown: (instance: PlotNode, event: KeyboardEvent) => void;
     instanceDisplayTitle: (instance: PlotNode) => string;
-    openTemplateNode: (instance: PlotNode, event: MouseEvent) => void;
+    onNavigate?: (payload: { id: string; kind: string }) => void;
     paletteRows: TemplatePointRow[];
     pointKey: (instanceId: string, pointId: string) => string;
     rawInstanceTitle: (instance: Pick<PlotNode, "id" | "title" | "template_instance">) => string;
@@ -54,7 +54,7 @@
     focusRenameInput,
     handleTemplateRenameKeydown,
     instanceDisplayTitle,
-    openTemplateNode,
+    onNavigate,
     paletteRows,
     pointKey,
     rawInstanceTitle,
@@ -70,6 +70,13 @@
     templateToAddId = $bindable(""),
     visibleTemplateInstances,
   }: Props = $props();
+
+  function openTemplateNode(instance: PlotNode, event: MouseEvent): void {
+    event.stopPropagation();
+    const templateId = instance.template_instance?.template_id;
+    if (!templateId) return;
+    onNavigate?.({ id: templateId, kind: "plot" });
+  }
 </script>
 
 <aside class="plot-palette" aria-label="Plot templates">

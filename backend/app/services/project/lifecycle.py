@@ -172,7 +172,7 @@ class ProjectLifecycleMixin:
         # `.cache/` holds derived indexes carrying absolute paths (node-index.json
         # since #306); self-exclude it so a version-controlled project never
         # commits a machine-specific, churning snapshot (#378).
-        (root / ".cache" / ".gitignore").write_text("*\n", encoding="utf-8")
+        (root / ".cache" / ".gitignore").write_text("*\n", encoding="utf-8", newline="\n")
 
         # Project node singleton — book metadata, blurb, etc. live here. It is
         # written BEFORE project.yaml: open_project gates on the manifest, so

@@ -35,7 +35,9 @@ class ProjectNodeServiceTests(unittest.TestCase):
         # a version-controlled project must not commit them (#378).
         gitignore = self.root / ".cache" / ".gitignore"
         self.assertTrue(gitignore.exists())
-        self.assertEqual(gitignore.read_text(encoding="utf-8"), "*\n")
+        # read_bytes, not read_text: read_text normalizes newlines, so it would
+        # pass even if the file were written CRLF. Pin the exact on-disk bytes.
+        self.assertEqual(gitignore.read_bytes(), b"*\n")
 
     def test_project_node_id_is_minted_and_stable(self) -> None:
         # #343: the project node is *addressed* by path, but its identity is

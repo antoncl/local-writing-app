@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 PLOT_CONTEXT_INPUT: dict[str, Any] = {
     "name": "plot",
     "type": "context_pick",

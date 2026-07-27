@@ -26,6 +26,7 @@
     focusRenameInput: RenameAction;
     handleTemplateRenameKeydown: (instance: PlotNode, event: KeyboardEvent) => void;
     instanceDisplayTitle: (instance: PlotNode) => string;
+    onNavigate?: (payload: { id: string; kind: string }) => void;
     paletteRows: TemplatePointRow[];
     pointKey: (instanceId: string, pointId: string) => string;
     rawInstanceTitle: (instance: Pick<PlotNode, "id" | "title" | "template_instance">) => string;
@@ -53,6 +54,7 @@
     focusRenameInput,
     handleTemplateRenameKeydown,
     instanceDisplayTitle,
+    onNavigate,
     paletteRows,
     pointKey,
     rawInstanceTitle,
@@ -68,6 +70,13 @@
     templateToAddId = $bindable(""),
     visibleTemplateInstances,
   }: Props = $props();
+
+  function openTemplateNode(instance: PlotNode, event: MouseEvent): void {
+    event.stopPropagation();
+    const templateId = instance.template_instance?.template_id;
+    if (!templateId) return;
+    onNavigate?.({ id: templateId, kind: "plot" });
+  }
 </script>
 
 <aside class="plot-palette" aria-label="Plot templates">
@@ -151,6 +160,16 @@
                 </button>
               {:else}
                 <strong title={rawInstanceTitle(instance)}>{instanceDisplayTitle(instance)}</strong>
+                <button
+                  type="button"
+                  class="template-title-action"
+                  title="Open template guide"
+                  aria-label="Open template guide"
+                  disabled={!instance.template_instance?.template_id}
+                  onclick={(event) => openTemplateNode(instance, event)}
+                >
+                  <i class="ti ti-book-2" aria-hidden="true"></i>
+                </button>
                 <button
                   type="button"
                   class="template-title-action"

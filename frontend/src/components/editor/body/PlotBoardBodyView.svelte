@@ -1396,6 +1396,7 @@
     {focusRenameInput}
     {handleTemplateRenameKeydown}
     {instanceDisplayTitle}
+    {onNavigate}
     {paletteRows}
     {pointKey}
     {rawInstanceTitle}

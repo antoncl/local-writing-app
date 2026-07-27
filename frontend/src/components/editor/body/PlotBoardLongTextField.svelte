@@ -42,35 +42,6 @@
   }
 </script>
 
-{#if disabled}
-  <div class="plot-long-text-static" aria-label={ariaLabel}>
-    {#if draft}
-      {draft}
-    {:else}
-      <span>-</span>
-    {/if}
-  </div>
-{:else}
-  <div class="plot-long-text-field" on:focusout={handleFocusOut}>
-    <MetadataLongTextEditor {ariaLabel} value={draft} on:change={handleChange} />
-  </div>
-{/if}
-
-<style>
-  .plot-long-text-static {
-    min-height: 84px;
-    padding: 8px 10px;
-    border: 1px solid var(--divider);
-    border-radius: 6px;
-    background: var(--inset);
-    color: var(--text);
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-    font-size: var(--fs-md);
-    line-height: 1.45;
-  }
-
-  .plot-long-text-static span {
-    color: var(--text-3);
-  }
-</style>
+<div class="plot-long-text-field" on:focusout={handleFocusOut}>
+  <MetadataLongTextEditor {ariaLabel} value={draft} {disabled} on:change={handleChange} />
+</div>

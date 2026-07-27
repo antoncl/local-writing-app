@@ -55,6 +55,23 @@ export function parsePlotSuggestions(text: string): PlotSuggestion[] {
   return out;
 }
 
+export function plotSuggestionClipboardText(
+  suggestion: PlotSuggestion,
+  field: "proposed_change" | "evidence_to_add",
+): string {
+  const label = field === "proposed_change" ? "Proposed change" : "Evidence to add";
+  const lines = [
+    suggestion.title,
+    `${label}: ${suggestion[field]}`,
+    suggestion.reason ? `Reason: ${suggestion.reason}` : "",
+    suggestion.target_card_id ? `Card: ${suggestion.target_card_id}` : "",
+    suggestion.target_claim_id ? `Claim: ${suggestion.target_claim_id}` : "",
+    suggestion.template_instance_id ? `Template instance: ${suggestion.template_instance_id}` : "",
+    suggestion.plot_point_id ? `Plot beat: ${suggestion.plot_point_id}` : "",
+  ];
+  return lines.filter(Boolean).join("\n");
+}
+
 function parseAttributes(text: string): Record<string, string> {
   const attrs: Record<string, string> = {};
   for (const match of matchAll(text, /([A-Za-z_][\w:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {

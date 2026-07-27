@@ -199,9 +199,9 @@ draft changes.
 
 When an assistant response contains a `<plot_suggestions>` block, the chat
 transcript hides the raw XML from the normal prose rendering and shows each
-concrete suggestion in a compact read-only list. This is display-only for now:
-accepting, editing, or applying suggestions to the plot board remains a later
-explicit workflow.
+concrete suggestion in a compact read-only list. The author can copy proposed
+changes or evidence notes from that list, but accepting, editing, or applying
+suggestions to the plot board remains a later explicit workflow.
 
 ## File layout
 

@@ -1,13 +1,19 @@
 <!--
   ChatTranscript — presentational message list for ChatBodyView (#99).
-  Pure render of chatHistory; owns no state. The scroll element is bound
-  back to the parent via `bind:scrollEl` so ChatBodyView keeps driving
-  scroll-to-bottom during streaming exactly as before.
+  Mostly renders chatHistory; owns only transient copied-button feedback.
+  The scroll element is bound back to the parent via `bind:scrollEl` so
+  ChatBodyView keeps driving scroll-to-bottom during streaming exactly as before.
 -->
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import { renderChatContent } from "@/lib/utils/chatMessageRender";
   import { formatCostEur } from "@/lib/utils/money";
-  import { parsePlotSuggestions, stripPlotSuggestions } from "@/lib/plotSuggestions";
+  import {
+    parsePlotSuggestions,
+    plotSuggestionClipboardText,
+    stripPlotSuggestions,
+    type PlotSuggestion,
+  } from "@/lib/plotSuggestions";
   import type { ChatMessage } from "@/lib/types";
 
   interface Props {
@@ -17,6 +23,42 @@
   }
 
   let { chatHistory, chatRunning, scrollEl = $bindable(null) }: Props = $props();
+
+  let copiedKey = $state("");
+  let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
+
+  onDestroy(() => {
+    if (copyResetTimer) clearTimeout(copyResetTimer);
+  });
+
+  function suggestionKey(
+    suggestion: PlotSuggestion,
+    messageIndex: number,
+    index: number,
+    field: "proposed_change" | "evidence_to_add",
+  ): string {
+    return `${messageIndex}-${suggestion.kind}-${suggestion.target_card_id}-${suggestion.target_claim_id}-${index}-${field}`;
+  }
+
+  async function copySuggestion(
+    suggestion: PlotSuggestion,
+    key: string,
+    field: "proposed_change" | "evidence_to_add",
+  ): Promise<void> {
+    const text = plotSuggestionClipboardText(suggestion, field);
+    if (!text.trim()) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      copiedKey = key;
+      if (copyResetTimer) clearTimeout(copyResetTimer);
+      copyResetTimer = setTimeout(() => {
+        copiedKey = "";
+        copyResetTimer = null;
+      }, 1600);
+    } catch {
+      copiedKey = "";
+    }
+  }
 </script>
 
 <div class="cbv-messages" bind:this={scrollEl} aria-label="Chat history">
@@ -66,6 +108,30 @@
                     {#if suggestion.target_claim_id}<code>{suggestion.target_claim_id}</code>{/if}
                     {#if suggestion.template_instance_id}<code>{suggestion.template_instance_id}</code>{/if}
                     {#if suggestion.plot_point_id}<code>{suggestion.plot_point_id}</code>{/if}
+                  </div>
+                  <div class="cbv-plot-suggestion-actions">
+                    {#if suggestion.proposed_change}
+                      {@const changeKey = suggestionKey(suggestion, i, j, "proposed_change")}
+                      <button
+                        type="button"
+                        title="Copy proposed change"
+                        onclick={() => void copySuggestion(suggestion, changeKey, "proposed_change")}
+                      >
+                        <i class="ti ti-copy" aria-hidden="true"></i>
+                        {copiedKey === changeKey ? "Copied" : "Copy change"}
+                      </button>
+                    {/if}
+                    {#if suggestion.evidence_to_add}
+                      {@const evidenceKey = suggestionKey(suggestion, i, j, "evidence_to_add")}
+                      <button
+                        type="button"
+                        title="Copy evidence to add"
+                        onclick={() => void copySuggestion(suggestion, evidenceKey, "evidence_to_add")}
+                      >
+                        <i class="ti ti-copy" aria-hidden="true"></i>
+                        {copiedKey === evidenceKey ? "Copied" : "Copy evidence"}
+                      </button>
+                    {/if}
                   </div>
                 </article>
               {/each}
@@ -231,5 +297,27 @@
     font-family: var(--mono);
     font-size: var(--fs-xs);
     color: var(--text-2);
+  }
+  .cbv-plot-suggestion-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-top: 2px;
+  }
+  .cbv-plot-suggestion-actions button {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--accent-soft2);
+    background: var(--surface);
+    color: var(--text-2);
+    font: inherit;
+    font-size: var(--fs-xs);
+    cursor: pointer;
+  }
+  .cbv-plot-suggestion-actions button:hover {
+    background: var(--inset);
   }
 </style>

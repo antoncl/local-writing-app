@@ -10,6 +10,7 @@
   let columnTitle = $derived(ctx.cardColumnTitle(data.cardId));
   let cardClaims = $derived(ctx.claimsForCard(data.cardId));
   let cardDiagnostics = $derived(ctx.diagnosticsForCard(data.cardId));
+  let hasUntaggedDiagnostic = $derived(cardDiagnostics.some((diagnostic) => diagnostic.key === "untagged"));
 
   function claimTypeShort(claimType: string): string {
     switch (claimType) {
@@ -80,7 +81,7 @@
       </div>
     {/if}
     <div class="claim-chips">
-      {#if cardClaims.length === 0}
+      {#if cardClaims.length === 0 && !hasUntaggedDiagnostic}
         <span class="function-gap">No function markers</span>
       {/if}
       {#each cardClaims as claim (claim.id)}

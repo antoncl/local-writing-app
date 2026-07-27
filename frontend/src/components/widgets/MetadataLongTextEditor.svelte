@@ -13,6 +13,7 @@
 
   export let value = "";
   export let ariaLabel = "Long text metadata";
+  export let disabled = false;
   // Optional implicit-context matcher — when provided, lore-name matches
   // get inline highlighting + hover preview. Null disables.
   export let matcher: CompiledMatcher | null = null;
@@ -36,6 +37,7 @@
   }
 
   $: if (editor) updateMatcher(matcher);
+  $: if (editor) editor.setEditable(!disabled);
   function updateMatcher(next: CompiledMatcher | null): void {
     if (!editor) return;
     const ext = editor.extensionManager.extensions.find(
@@ -60,6 +62,7 @@
         TableCell,
         ImplicitContextHighlight.configure({ matcher }),
       ],
+      editable: !disabled,
       content: "",
       editorProps: {
         attributes: {
@@ -93,24 +96,25 @@
   }
 
   function run(command: () => void) {
+    if (disabled) return;
     command();
     editor?.commands.focus();
   }
 </script>
 
-<div class="metadata-long-text">
+<div class="metadata-long-text" class:disabled>
   <div class="metadata-long-text-toolbar" aria-label={`${ariaLabel} formatting`}>
-    <button type="button" title="Bold" on:mousedown|preventDefault={() => run(() => editor?.chain().focus().toggleBold().run())}>B</button>
-    <button type="button" title="Italic" on:mousedown|preventDefault={() => run(() => editor?.chain().focus().toggleItalic().run())}>I</button>
-    <button type="button" title="Heading 1" on:mousedown|preventDefault={() => run(() => editor?.chain().focus().toggleHeading({ level: 1 }).run())}>H1</button>
-    <button type="button" title="Heading 2" on:mousedown|preventDefault={() => run(() => editor?.chain().focus().toggleHeading({ level: 2 }).run())}>H2</button>
-    <button type="button" title="Bullet list" on:mousedown|preventDefault={() => run(() => editor?.chain().focus().toggleBulletList().run())}>List</button>
-    <button type="button" title="Numbered list" on:mousedown|preventDefault={() => run(() => editor?.chain().focus().toggleOrderedList().run())}>1.</button>
-    <button type="button" title="Quote" on:mousedown|preventDefault={() => run(() => editor?.chain().focus().toggleBlockquote().run())}>Quote</button>
-    <button type="button" title="Table" on:mousedown|preventDefault={() => run(() => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run())}>Table</button>
+    <button type="button" title="Bold" {disabled} on:mousedown|preventDefault={() => run(() => editor?.chain().focus().toggleBold().run())}>B</button>
+    <button type="button" title="Italic" {disabled} on:mousedown|preventDefault={() => run(() => editor?.chain().focus().toggleItalic().run())}>I</button>
+    <button type="button" title="Heading 1" {disabled} on:mousedown|preventDefault={() => run(() => editor?.chain().focus().toggleHeading({ level: 1 }).run())}>H1</button>
+    <button type="button" title="Heading 2" {disabled} on:mousedown|preventDefault={() => run(() => editor?.chain().focus().toggleHeading({ level: 2 }).run())}>H2</button>
+    <button type="button" title="Bullet list" {disabled} on:mousedown|preventDefault={() => run(() => editor?.chain().focus().toggleBulletList().run())}>List</button>
+    <button type="button" title="Numbered list" {disabled} on:mousedown|preventDefault={() => run(() => editor?.chain().focus().toggleOrderedList().run())}>1.</button>
+    <button type="button" title="Quote" {disabled} on:mousedown|preventDefault={() => run(() => editor?.chain().focus().toggleBlockquote().run())}>Quote</button>
+    <button type="button" title="Table" {disabled} on:mousedown|preventDefault={() => run(() => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run())}>Table</button>
   </div>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div on:mousedown={() => editor?.commands.focus()} bind:this={editorElement}></div>
+  <div on:mousedown={() => !disabled && editor?.commands.focus()} bind:this={editorElement}></div>
 </div>
 
 <style>
@@ -135,6 +139,15 @@
   .metadata-long-text-toolbar button {
     padding: 3px 6px;
     font-size: var(--fs-sm);
+  }
+
+  .metadata-long-text.disabled {
+    opacity: 0.82;
+  }
+
+  .metadata-long-text-toolbar button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
   }
 
   :global(.metadata-long-text-body) {

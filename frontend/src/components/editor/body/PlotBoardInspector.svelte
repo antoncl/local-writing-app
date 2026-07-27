@@ -32,6 +32,7 @@
     includeFutureContext: boolean;
     omittedCount: (key: string) => number;
     openCardNode: (card: PlotBoardCard, event: MouseEvent) => void;
+    paletteRows: TemplatePointRow[];
     plotContext: PlotContextPacket | null;
     plotContextError: string;
     plotContextLoading: boolean;
@@ -44,6 +45,8 @@
     selectedContextSceneId: string | null;
     selectedPaletteRow: TemplatePointRow | null;
     selectedPointLabel: string;
+    addClaimToCard: (cardId: string, templateInstanceId: string, plotPointId: string) => Promise<void>;
+    pointLabel: (claim: PlotPointClaim) => string;
     selectClaim: (claim: PlotPointClaim) => void;
     structureColumnOptions: StructureColumnOption[];
     changeCardColumn: (event: Event) => void;
@@ -71,6 +74,7 @@
     includeFutureContext = $bindable(false),
     omittedCount,
     openCardNode,
+    paletteRows,
     plotContext,
     plotContextError,
     plotContextLoading,
@@ -83,6 +87,8 @@
     selectedContextSceneId,
     selectedPaletteRow,
     selectedPointLabel,
+    addClaimToCard,
+    pointLabel,
     selectClaim,
     structureColumnOptions,
     changeCardColumn,
@@ -123,8 +129,55 @@
     { value: "intentionally_omitted", label: "Intentionally omitted" },
   ];
 
+  let claimToAddKey = $state("");
+
+  let selectedCardClaims = $derived.by(() => {
+    if (!selectedCard) return [];
+    return [...(claimsByCard.get(selectedCard.id) ?? [])].sort((a, b) =>
+      claimOrderKey(a).localeCompare(claimOrderKey(b)),
+    );
+  });
+
+  let addClaimOptions = $derived.by(() => {
+    if (!selectedCard) return [];
+    const existing = new Set(
+      selectedCardClaims.map((claim) => `${claim.template_instance_id}:${claim.plot_point_id}`),
+    );
+    return paletteRows
+      .filter((row) => !existing.has(`${row.instance.id}:${row.point.plot_point_id}`))
+      .map((row) => {
+        const title = row.point.title || row.point.plot_point_id;
+        return {
+          key: `${row.instance.id}:${row.point.plot_point_id}`,
+          templateInstanceId: row.instance.id,
+          plotPointId: row.point.plot_point_id,
+          label: `${title} - ${row.instance.title}`,
+        };
+      });
+  });
+
+  $effect(() => {
+    if (addClaimOptions.length === 0) {
+      claimToAddKey = "";
+      return;
+    }
+    if (!addClaimOptions.some((option) => option.key === claimToAddKey)) {
+      claimToAddKey = addClaimOptions[0].key;
+    }
+  });
+
   function claimTypeLabel(value: PlotContextClaim["claim_type"] | PlotPointClaim["claim_type"]): string {
     return CLAIM_TYPE_OPTIONS.find((option) => option.value === value)?.label ?? value;
+  }
+
+  function claimOrderKey(claim: PlotPointClaim): string {
+    const rowIndex = paletteRows.findIndex(
+      (row) =>
+        row.instance.id === claim.template_instance_id &&
+        row.point.plot_point_id === claim.plot_point_id,
+    );
+    const templateIndex = paletteRows.findIndex((row) => row.instance.id === claim.template_instance_id);
+    return `${String(rowIndex >= 0 ? rowIndex : 9999).padStart(4, "0")}:${String(templateIndex >= 0 ? templateIndex : 9999).padStart(4, "0")}:${claim.id}`;
   }
 
   function questionText(point: PlotTemplateInstancePoint): string {
@@ -133,6 +186,26 @@
 
   function cardTitle(cardId: string): string {
     return board.cards.find((card) => card.id === cardId)?.title ?? cardId;
+  }
+
+  function cardForClaim(claim: PlotPointClaim): PlotBoardCard | null {
+    return board.cards.find((card) => card.id === claim.card_id) ?? null;
+  }
+
+  function plotlineTitleForClaim(claim: PlotPointClaim): string {
+    if (!claim.plotline_id) return "";
+    return board.plotlines.find((line) => line.id === claim.plotline_id)?.title ?? claim.plotline_id;
+  }
+
+  function claimSummary(claim: PlotPointClaim): string {
+    return claim.rationale || claim.evidence || claim.ai_notes || "";
+  }
+
+  function addSelectedClaim(): void {
+    if (!selectedCard || !claimToAddKey) return;
+    const option = addClaimOptions.find((candidate) => candidate.key === claimToAddKey);
+    if (!option) return;
+    void addClaimToCard(selectedCard.id, option.templateInstanceId, option.plotPointId);
   }
 </script>
 
@@ -189,33 +262,33 @@
           </select>
         </label>
       {/if}
-      <label>
-        Rationale
+      <div class="inspector-field">
+        <span>Rationale</span>
         <PlotBoardLongTextField
           ariaLabel="Rationale"
           value={selectedClaim.rationale ?? ""}
           disabled={Boolean(savingMessage)}
           on:commit={(event) => commitClaimTextField("rationale", event.detail.value)}
         />
-      </label>
-      <label>
-        Evidence
+      </div>
+      <div class="inspector-field">
+        <span>Evidence</span>
         <PlotBoardLongTextField
           ariaLabel="Evidence"
           value={selectedClaim.evidence ?? ""}
           disabled={Boolean(savingMessage)}
           on:commit={(event) => commitClaimTextField("evidence", event.detail.value)}
         />
-      </label>
-      <label>
-        AI notes
+      </div>
+      <div class="inspector-field">
+        <span>AI notes</span>
         <PlotBoardLongTextField
           ariaLabel="AI notes"
           value={selectedClaim.ai_notes ?? ""}
           disabled={Boolean(savingMessage)}
           on:commit={(event) => commitClaimTextField("ai_notes", event.detail.value)}
         />
-      </label>
+      </div>
     </div>
   {:else if selectedCard}
     <header class="inspector-head">
@@ -227,15 +300,15 @@
         Title
         <input value={selectedCard.title} disabled={Boolean(savingMessage)} onblur={commitCardTitle} />
       </label>
-      <label>
-        Synopsis
+      <div class="inspector-field">
+        <span>Synopsis</span>
         <PlotBoardLongTextField
           ariaLabel="Synopsis"
           value={selectedCard.synopsis}
           disabled={Boolean(savingMessage)}
           on:commit={(event) => commitCardSynopsis(event.detail.value)}
         />
-      </label>
+      </div>
       <label>
         Manuscript position
         <select value={selectedCard.structure_column_id ?? "__unplaced"} disabled={Boolean(savingMessage)} onchange={changeCardColumn}>
@@ -256,10 +329,64 @@
           </select>
         </label>
       {/if}
-      <div class="inspector-stat">
-        <span>Function badges</span>
-        <strong>{(claimsByCard.get(selectedCard.id) ?? []).length}</strong>
-      </div>
+      <section class="claim-section" aria-label="Card function badges">
+        <div class="section-title-row">
+          <span>Function badges</span>
+          <strong>{selectedCardClaims.length}</strong>
+        </div>
+        {#if addClaimOptions.length > 0}
+          <div class="claim-add-row">
+            <select
+              aria-label="Plot beat to add"
+              bind:value={claimToAddKey}
+              disabled={Boolean(savingMessage)}
+            >
+              {#each addClaimOptions as option (option.key)}
+                <option value={option.key}>{option.label}</option>
+              {/each}
+            </select>
+            <button
+              type="button"
+              class="tool-button icon-only"
+              title="Add function badge"
+              aria-label="Add function badge"
+              disabled={!claimToAddKey || Boolean(savingMessage)}
+              onclick={addSelectedClaim}
+            >
+              <i class="ti ti-plus" aria-hidden="true"></i>
+            </button>
+          </div>
+        {:else}
+          <p class="muted-line">
+            {paletteRows.length === 0
+              ? "Add a template to make plot beats available."
+              : "All visible plot beats are already attached to this card."}
+          </p>
+        {/if}
+        {#if selectedCardClaims.length > 0}
+          <div class="card-claim-list">
+            {#each selectedCardClaims as claim (claim.id)}
+              <button
+                type="button"
+                class="card-claim-button"
+                onclick={() => selectClaim(claim)}
+              >
+                <strong>{pointLabel(claim)}</strong>
+                <span>{claimTypeLabel(claim.claim_type)}</span>
+                {#if plotlineTitleForClaim(claim)}
+                  <small>{plotlineTitleForClaim(claim)}</small>
+                {/if}
+                {#if claim.strength}
+                  <small>{claim.strength}</small>
+                {/if}
+                {#if claimSummary(claim)}
+                  <p>{claimSummary(claim)}</p>
+                {/if}
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </section>
       {#if selectedCard.node_ref}
         <div class="inspector-stat">
           <span>Draft node</span>
@@ -329,42 +456,42 @@
           <textarea rows="3" value={selectedPaletteRow.point.function_claim} disabled></textarea>
         </label>
       {/if}
-      <label>
-        Story specifics
+      <div class="inspector-field">
+        <span>Story specifics</span>
         <PlotBoardLongTextField
           ariaLabel="Story specifics"
           value={selectedPaletteRow.point.notes}
           disabled={Boolean(savingMessage)}
           on:commit={(event) => commitPalettePointTextField("notes", event.detail.value)}
         />
-      </label>
-      <label>
-        Author intent
+      </div>
+      <div class="inspector-field">
+        <span>Author intent</span>
         <PlotBoardLongTextField
           ariaLabel="Author intent"
           value={selectedPaletteRow.point.author_intent ?? ""}
           disabled={Boolean(savingMessage)}
           on:commit={(event) => commitPalettePointTextField("author_intent", event.detail.value)}
         />
-      </label>
-      <label>
-        Expected role
+      </div>
+      <div class="inspector-field">
+        <span>Expected role</span>
         <PlotBoardLongTextField
           ariaLabel="Expected role"
           value={selectedPaletteRow.point.expected_role ?? ""}
           disabled={Boolean(savingMessage)}
           on:commit={(event) => commitPalettePointTextField("expected_role", event.detail.value)}
         />
-      </label>
-      <label>
-        Open questions
+      </div>
+      <div class="inspector-field">
+        <span>Open questions</span>
         <PlotBoardLongTextField
           ariaLabel="Open questions"
           value={questionText(selectedPaletteRow.point)}
           disabled={Boolean(savingMessage)}
           on:commit={(event) => commitPalettePointOpenQuestions(event.detail.value)}
         />
-      </label>
+      </div>
       <div class="inspector-stat">
         <span>Function badges</span>
         <strong>{selectedPaletteRow.claims.length}</strong>
@@ -375,11 +502,18 @@
         {:else}
           <div class="beat-claim-list">
             {#each selectedPaletteRow.claims as claim (claim.id)}
+              {@const claimCard = cardForClaim(claim)}
               <button type="button" class="beat-claim-button" onclick={() => selectClaim(claim)}>
                 <strong>{claim.claim_label || cardTitle(claim.card_id)}</strong>
                 <span>{claimTypeLabel(claim.claim_type)}</span>
                 {#if claim.strength}
                   <small>{claim.strength}</small>
+                {/if}
+                {#if claimCard?.synopsis}
+                  <p>{claimCard.synopsis}</p>
+                {/if}
+                {#if claimSummary(claim)}
+                  <p>{claimSummary(claim)}</p>
                 {/if}
               </button>
             {/each}

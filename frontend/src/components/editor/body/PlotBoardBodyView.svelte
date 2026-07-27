@@ -10,6 +10,7 @@
   import PlotBoardFlowGroup from "./PlotBoardFlowGroup.svelte";
   import PlotBoardInspector from "./PlotBoardInspector.svelte";
   import PlotBoardPalette from "./PlotBoardPalette.svelte";
+  import PlotBoardToolbar from "./PlotBoardToolbar.svelte";
   import { setPlotBoardContext } from "./plotBoardContext";
   import { saveTemplateInstancePoint } from "./plotBoardTemplateInstances";
   import {
@@ -1414,29 +1415,16 @@
   />
 
   <main class="plot-canvas" aria-label="Plot board cards">
-    <div class="board-toolbar">
-      <span>{cards.length} cards</span>
-      <span>{claims.length} badges</span>
-      <span>{board.relationships.length} relationships</span>
-      {#if savingMessage}
-        <span>{savingMessage}...</span>
-      {/if}
-      {#if saveError}
-        <span class="toolbar-error">{saveError}</span>
-      {/if}
-      <button type="button" class="tool-button" disabled={Boolean(savingMessage)} onclick={() => addPlaceholderCard(null)}>
-        <i class="ti ti-note" aria-hidden="true"></i>
-        Card
-      </button>
-      <button type="button" class="tool-button" disabled={Boolean(savingMessage)} onclick={() => addAct()}>
-        <i class="ti ti-columns-3" aria-hidden="true"></i>
-        Act
-      </button>
-      <button type="button" class="tool-button" disabled={Boolean(savingMessage)} onclick={() => addChapter()}>
-        <i class="ti ti-library-plus" aria-hidden="true"></i>
-        Chapter
-      </button>
-    </div>
+    <PlotBoardToolbar
+      cardCount={cards.length}
+      claimCount={claims.length}
+      relationshipCount={board.relationships.length}
+      {savingMessage}
+      {saveError}
+      addCard={() => addPlaceholderCard(null)}
+      addAct={() => addAct()}
+      addChapter={() => addChapter()}
+    />
     <div class="flow-canvas" role="region" aria-label="Plot board canvas" ondragover={allowCanvasDrop} ondrop={dropOnCanvas}>
       <SvelteFlow
         bind:nodes={flowNodes}
@@ -1467,6 +1455,7 @@
     bind:includeFutureContext
     {omittedCount}
     {openCardNode}
+    {paletteRows}
     {plotContext}
     {plotContextError}
     {plotContextLoading}
@@ -1479,6 +1468,8 @@
     {selectedContextSceneId}
     {selectedPaletteRow}
     {selectedPointLabel}
+    addClaimToCard={attachPointToCard}
+    {pointLabel}
     {selectClaim}
     {structureColumnOptions}
     {changeCardColumn}

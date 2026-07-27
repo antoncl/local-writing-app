@@ -683,13 +683,23 @@
   width: 100%;
 }
 
-.inspector-form label {
+.inspector-form label,
+.inspector-field {
   display: grid;
   gap: var(--sp-1);
   color: var(--text-3);
   font-size: var(--fs-xs);
   font-weight: 700;
   text-transform: uppercase;
+}
+
+.inspector-field > span {
+  display: block;
+}
+
+.inspector-field .metadata-long-text,
+.inspector-field .metadata-long-text-body {
+  text-transform: none;
 }
 
 .inspector-form input,
@@ -749,6 +759,92 @@
   color: var(--text-2);
   font-family: var(--mono);
   font-size: var(--fs-sm);
+}
+
+.claim-section {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.section-title-row strong {
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+}
+
+.claim-add-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--sp-1);
+}
+
+.claim-add-row select {
+  width: 100%;
+}
+
+.card-claim-list {
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.card-claim-button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px var(--sp-2);
+  width: 100%;
+  min-height: 34px;
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.card-claim-button:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.card-claim-button strong,
+.card-claim-button p {
+  grid-column: 1 / -1;
+}
+
+.card-claim-button strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-sm);
+}
+
+.card-claim-button span,
+.card-claim-button small {
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+.card-claim-button p,
+.beat-claim-button p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  line-height: 1.35;
 }
 
 .link-button {
@@ -837,6 +933,10 @@
 }
 
 .beat-claim-button small {
+  grid-column: 1 / -1;
+}
+
+.beat-claim-button p {
   grid-column: 1 / -1;
 }
 

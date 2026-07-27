@@ -10,6 +10,13 @@ import type { AssistantEntrySummary } from "@/lib/types";
 
 export const assistantEntriesStore = writable<AssistantEntrySummary[]>([]);
 
+// Whether an assistant is in the active roster (vs. un-listed). `listed` is a
+// computed field stamped by the layer traversal (#332/#333); this predicate is
+// the single definition, shared by the Assistants pane and the create wizard.
+export function isAssistantListed(entry: AssistantEntrySummary): boolean {
+  return entry.computed_metadata?.listed === "listed";
+}
+
 // The dynamic default assistant id: the **topmost** entry in roster (manual
 // drag) order, or "" if none. The ★ is_default flag is retired (ADR-0024) —
 // manual order already expresses global preference. A derived store (not a

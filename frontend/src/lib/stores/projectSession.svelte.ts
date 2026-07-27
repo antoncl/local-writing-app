@@ -25,10 +25,12 @@ import { createWizard } from "@/lib/stores/createWizard.svelte";
 import { editorPanes } from "@/lib/stores/editorPanes.svelte";
 import { loadProjectData } from "@/lib/stores/index";
 import type {
+  AIPolicy,
   MachineSettingsDraft,
   MachineSettingsUpdate,
   MachineSettingsView,
   ProjectInfo,
+  ProviderCredentialsView,
   RecentProject,
   StructureNode,
 } from "@/lib/types";
@@ -194,14 +196,41 @@ class ProjectSession {
     });
   }
 
+  // Write a single provider credential from the wizard's AI step (#547). Sparse
+  // partial PUT: `merge_update` skips unsent fields and preserves masked ones,
+  // so adding one key never clobbers the others. Re-syncs `machineSettings` so
+  // the provider chooser's "configured" set updates reactively.
+  async saveProviderCredential(
+    field: keyof ProviderCredentialsView,
+    value: string,
+  ): Promise<void> {
+    await this.run(async () => {
+      this.machineSettings = await api.updateMachineSettings({ providers: { [field]: value } });
+    });
+  }
+
   // ---- Project lifecycle entry points ----
   // Create a project at the given path with the given title. The layer walk's
   // bound is the machine root (#429), so creation neither takes nor sends one.
   // `inherits` is the wizard's declaration (#318); omitted defaults to a flat
   // project (its call sites all pass an explicit list).
-  async createProjectAt(path: string, title: string, inherits: string[] = []): Promise<void> {
+  //
+  // `aiPolicy` (#547) is the wizard's chosen AI policy, applied right after
+  // create: `POST /project/create` records the new scope, so the following
+  // settings PATCH targets the new project. Undefined leaves no stated policy,
+  // so the chain resolves it (§7's inheritance law) — the wizard passes it only
+  // when the author overrode the inherited default with a concrete stop.
+  async createProjectAt(
+    path: string,
+    title: string,
+    inherits: string[] = [],
+    aiPolicy?: AIPolicy,
+  ): Promise<void> {
     await this.run(async () => {
-      const openedProject = await api.createProject(path, title, inherits);
+      let openedProject = await api.createProject(path, title, inherits);
+      if (aiPolicy) {
+        openedProject = await api.updateProjectSettings({ ai_policy: aiPolicy });
+      }
       this.rememberLastProject(openedProject.root_path);
       this.onOpenWorkspace(openedProject);
       await loadProjectData();

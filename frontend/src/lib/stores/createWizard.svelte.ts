@@ -12,10 +12,27 @@
 // them by extending wizardSteps.ts, not this controller's shape.
 
 import { api } from "@/lib/api";
-import type { AncestorCandidate } from "@/lib/types";
+import type {
+  AICapabilityTier,
+  AIPolicy,
+  AncestorCandidate,
+  MachineSettingsView,
+  ProviderCredentialsView,
+} from "@/lib/types";
 import { joinPath, slugifyProjectName } from "@/lib/utils/projectPath";
 import { declarationRows, toggledDeclaration } from "@/lib/utils/projectChain";
+import {
+  addableCloudProviders,
+  cloudKeyField,
+  configuredCloudProviders,
+  type ProviderOption,
+} from "@/lib/utils/aiProviders";
 import { activeSteps, indexOfStep, stepComplete, type WizardStepId } from "@/lib/utils/wizardSteps";
+
+// The AI-policy draft: the three concrete stops plus the wire-only "inherit"
+// (state no policy of your own — the chain resolves it, #471). Mirrors the
+// AIPolicyDraft used by the Project pane.
+export type AiPolicyDraft = AIPolicy | "inherit";
 
 class CreateWizard {
   open = $state(false);
@@ -40,6 +57,26 @@ class CreateWizard {
   // flip each candidate's `inherited` — this array *is* the round trip.
   inherits = $state<string[]>([]);
 
+  // ---- Step 3: AI (design-doc §5 step 3) ----
+  // The policy slider leads the step and gates the reveal below it. Default
+  // "inherit" = state no policy; with a declared chain that inherits from the
+  // ancestors, with none it resolves to the backend default (off). Picking a
+  // concrete stop overrides here and unfolds the provider + assistant surface.
+  aiPolicy = $state<AiPolicyDraft>("inherit");
+  // "+ Add provider" credential entry (cloud only; Ollama's host is edited
+  // inline under Local policy).
+  addingProvider = $state(false);
+  providerDraftId = $state("");
+  providerDraftSecret = $state("");
+  // Inline "Hire an assistant" draft.
+  hiring = $state(false);
+  hireTitle = $state("");
+  hireProvider = $state("");
+  hireTier = $state<AICapabilityTier | "">("");
+  hireModel = $state("");
+  // Guards the async provider-save / hire / curation buttons.
+  aiBusy = $state(false);
+
   // ---- Wizard-owned directory picker (its own instance, layered over Modal) ----
   pickerOpen = $state(false);
   #pickerMode = $state<"root" | "location" | null>(null);
@@ -50,8 +87,35 @@ class CreateWizard {
   // ---- Injected host hooks (set in App.onMount) ----
   onError: (message: string) => void = () => {};
   onSaveRootFolder: (folder: string) => Promise<void> = async () => {};
-  onCreateProject: (root: string, title: string, inherits: string[]) => Promise<void> = async () => {};
+  // aiPolicy is applied to the freshly-created (now open) project by the host,
+  // right after create; undefined leaves no stated policy (inherit).
+  onCreateProject: (
+    root: string,
+    title: string,
+    inherits: string[],
+    aiPolicy: AIPolicy | undefined,
+  ) => Promise<void> = async () => {};
   getStartPath: () => string = () => "";
+  // Reads the live machine settings (the provider chooser's source of truth).
+  // Injected rather than imported to avoid a cycle with projectSession; a
+  // $derived that calls it still tracks the rune read at runtime, so the
+  // "configured" set stays reactive when a credential is added.
+  getMachineSettings: () => MachineSettingsView | null = () => null;
+  // Provider credentials + assistants are machine-global substrate, so the host
+  // writes them straight to the machine layer (layer_id ""); the new book
+  // inherits the result. See the create-timing note on #547.
+  onSaveProviderCredential: (
+    field: keyof ProviderCredentialsView,
+    value: string,
+  ) => Promise<void> = async () => {};
+  onHireAssistant: (
+    title: string,
+    provider: string,
+    tier: AICapabilityTier | "",
+    model: string,
+  ) => Promise<void> = async () => {};
+  onReorderAssistants: (orderedIds: string[]) => Promise<void> = async () => {};
+  onUnlistAssistant: (entryId: string) => Promise<void> = async () => {};
 
   // ---- Derived ----
   needsRootFolder = $derived(!this.defaultProjectsFolder.trim());
@@ -61,6 +125,38 @@ class CreateWizard {
   isFinalStep = $derived(this.currentIndex === this.steps.length - 1);
 
   resolvedRoot = $derived(joinPath(this.pickedFolder, slugifyProjectName(this.title)));
+
+  // ---- AI-step derived ----
+  // Inheriting is only meaningful when the author ticked an ancestor to inherit
+  // from; a standalone / first-run project has nothing above it.
+  canInheritPolicy = $derived(this.inherits.length > 0);
+  // What the slider renders: with nothing to inherit, a resting "inherit" has no
+  // stop to sit on, so it reads as the concrete default (off).
+  aiSliderValue = $derived<AiPolicyDraft>(
+    this.canInheritPolicy ? this.aiPolicy : this.aiPolicy === "inherit" ? "off" : this.aiPolicy,
+  );
+  // The provider + assistant surface unfolds only for a concrete on-policy stated
+  // here. Off hides it; inheriting hides it too (you are taking the ancestors'
+  // whole AI setup, providers included — nothing to configure at this layer).
+  showProviderSurface = $derived(
+    this.aiPolicy === "local-only" || this.aiPolicy === "cloud-allowed",
+  );
+  providerModeCloud = $derived(this.aiPolicy === "cloud-allowed");
+  // The provider chooser's data, derived from the live machine settings so it
+  // updates the moment a credential is written.
+  configuredProviders = $derived<ProviderOption[]>(
+    configuredCloudProviders(this.getMachineSettings()?.providers),
+  );
+  addableProviders = $derived<ProviderOption[]>(
+    addableCloudProviders(this.getMachineSettings()?.providers),
+  );
+  defaultProviderId = $derived(this.getMachineSettings()?.default_provider ?? "");
+  ollamaHost = $derived(this.getMachineSettings()?.providers.ollama_host ?? "");
+  // Persisted to the new project only when a concrete policy is stated here;
+  // "inherit" writes nothing so the chain resolves it (§7's inheritance law).
+  #aiPolicyToPersist = $derived<AIPolicy | undefined>(
+    this.aiPolicy === "inherit" ? undefined : this.aiPolicy,
+  );
 
   // Overlay the local selection onto each candidate's `inherited` flag so the
   // existing declarationRows / toggledDeclaration helpers work EXACTLY as they
@@ -113,6 +209,10 @@ class CreateWizard {
     this.candidates = [];
     this.candidatesLoading = false;
     this.inherits = [];
+    this.aiPolicy = "inherit";
+    this.cancelAddProvider();
+    this.cancelHire();
+    this.aiBusy = false;
     this.#stepIndex = 0;
     this.pickerOpen = false;
     this.#pickerMode = null;
@@ -211,10 +311,104 @@ class CreateWizard {
     this.inherits = toggledDeclaration(this.#selectedCandidates, path);
   }
 
+  // ---- AI step ----
+  // Runs an async curation gesture under the shared busy guard: re-entrant calls
+  // are dropped, and aiBusy is always cleared. Every provider/assistant write
+  // goes through here so the guarding rule lives in one place.
+  async #withBusy(fn: () => Promise<void>) {
+    if (this.aiBusy) return;
+    this.aiBusy = true;
+    try {
+      await fn();
+    } finally {
+      this.aiBusy = false;
+    }
+  }
+
+  #resetHireDraft() {
+    this.hireTitle = "";
+    this.hireProvider = "";
+    this.hireTier = "";
+    this.hireModel = "";
+  }
+
+  setAiPolicy(next: AiPolicyDraft) {
+    this.aiPolicy = next;
+    // Leaving an on-policy collapses the provider surface, so drop any half-typed
+    // add-provider / hire drafts rather than carry them into a hidden section.
+    if (next === "off" || next === "inherit") {
+      this.cancelAddProvider();
+      this.cancelHire();
+    }
+  }
+
+  beginAddProvider(providerId: string) {
+    this.addingProvider = true;
+    this.providerDraftId = providerId;
+    this.providerDraftSecret = "";
+  }
+
+  cancelAddProvider() {
+    this.addingProvider = false;
+    this.providerDraftId = "";
+    this.providerDraftSecret = "";
+  }
+
+  async saveProvider() {
+    const field = cloudKeyField(this.providerDraftId);
+    const value = this.providerDraftSecret.trim();
+    if (!field || !value) return;
+    await this.#withBusy(async () => {
+      await this.onSaveProviderCredential(field, value);
+      this.cancelAddProvider();
+    });
+  }
+
+  beginHire() {
+    this.hiring = true;
+    this.#resetHireDraft();
+  }
+
+  cancelHire() {
+    this.hiring = false;
+    this.#resetHireDraft();
+  }
+
+  setHireProvider(provider: string, tier: AICapabilityTier | "", model: string) {
+    this.hireProvider = provider;
+    this.hireTier = tier;
+    this.hireModel = model;
+  }
+
+  async submitHire() {
+    await this.#withBusy(async () => {
+      await this.onHireAssistant(
+        this.hireTitle.trim() || "New assistant",
+        this.hireProvider,
+        this.hireTier,
+        this.hireModel,
+      );
+      this.cancelHire();
+    });
+  }
+
+  async reorderAssistants(orderedIds: string[]) {
+    await this.#withBusy(() => this.onReorderAssistants(orderedIds));
+  }
+
+  async unlistAssistant(entryId: string) {
+    await this.#withBusy(() => this.onUnlistAssistant(entryId));
+  }
+
   // ---- Final action ----
   async submit() {
     if (!this.isFinalStep || !this.canAdvance) return;
-    await this.onCreateProject(this.resolvedRoot, this.title.trim(), this.inherits);
+    await this.onCreateProject(
+      this.resolvedRoot,
+      this.title.trim(),
+      this.inherits,
+      this.#aiPolicyToPersist,
+    );
     this.close();
   }
 }

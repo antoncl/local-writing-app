@@ -11,11 +11,16 @@ const EMPTY: WizardSnapshot = { rootFolderDraft: "", title: "", pickedFolder: ""
 
 describe("activeSteps", () => {
   it("includes the root-folder step only on first run", () => {
-    expect(activeSteps(true).map((s) => s.id)).toEqual(["root", "location"]);
+    expect(activeSteps(true).map((s) => s.id)).toEqual(["root", "location", "ai"]);
   });
 
   it("drops the root-folder step once a default folder is configured", () => {
-    expect(activeSteps(false).map((s) => s.id)).toEqual(["location"]);
+    expect(activeSteps(false).map((s) => s.id)).toEqual(["location", "ai"]);
+  });
+
+  it("places the ai step immediately after location", () => {
+    const ids = activeSteps(false).map((s) => s.id);
+    expect(ids.indexOf("ai")).toBe(ids.indexOf("location") + 1);
   });
 });
 
@@ -51,5 +56,10 @@ describe("stepComplete", () => {
     expect(
       stepComplete("location", { ...EMPTY, title: "Standalone", pickedFolder: "D:\\writing" }),
     ).toBe(true);
+  });
+
+  it("never gates the ai step (Off is a legal terminal policy)", () => {
+    // The policy slider always holds a value, so the step is always consistent.
+    expect(stepComplete("ai", EMPTY)).toBe(true);
   });
 });

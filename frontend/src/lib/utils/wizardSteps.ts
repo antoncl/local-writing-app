@@ -3,16 +3,18 @@
 // the frontend has no component-test infra, so the wizard's control flow lives
 // here rather than inside the Svelte view.
 //
-// This slice ships steps 1–2; later slices insert "ai" | "review" | "describe"
-// between "location" and the final Create action.
+// Steps 1–2 shipped in slice 2; slice 3 (#547) inserts "ai" between "location"
+// and the final Create action. Later slices insert "review" | "describe" after
+// it, moving Create onto the last of them.
 
-export type WizardStepId = "root" | "location";
+export type WizardStepId = "root" | "location" | "ai";
 
 export type StepDef = { id: WizardStepId; label: string };
 
 const ALL_STEPS: StepDef[] = [
   { id: "root", label: "Root folder" },
   { id: "location", label: "Location" },
+  { id: "ai", label: "AI" },
 ];
 
 // The root-folder step is machine substrate (#429): it exists only on first
@@ -44,5 +46,9 @@ export function stepComplete(id: WizardStepId, snapshot: WizardSnapshot): boolea
       return snapshot.rootFolderDraft.trim().length > 0;
     case "location":
       return snapshot.title.trim().length > 0 && snapshot.pickedFolder.trim().length > 0;
+    case "ai":
+      // The policy slider always holds a value (Off is a legal terminal state),
+      // so the AI step is never inconsistent — like inheritance, it has no gate.
+      return true;
   }
 }

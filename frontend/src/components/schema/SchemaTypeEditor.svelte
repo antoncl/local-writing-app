@@ -712,9 +712,13 @@
   }
   /* Per-type override bar under an OWN field row (ADR-0029 §H). Own rows are
      interactive <button>s, so their relabel / hide controls can't nest inside;
-     they sit in a compact sibling bar aligned under the row's name column. */
+     they sit in a compact sibling bar. It is RIGHT-aligned (#525) so the hide /
+     rename buttons land in the same rightmost column as every inherited row's
+     inline controls — `fieldOverrideButtons`' "one aligned rightmost column" —
+     rather than dangling at the left under the name. */
   .sfr-own-ovr {
     display: flex;
+    justify-content: flex-end;
     gap: 4px;
     padding: 0 12px 4px 34px;
   }

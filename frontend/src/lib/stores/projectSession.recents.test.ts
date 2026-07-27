@@ -57,4 +57,25 @@ describe("removeRecentProject (#423)", () => {
 
     expect(updateMachineSettings).toHaveBeenCalledWith({ recent_projects: current });
   });
+
+  it("serializes a burst of removes so none is lost (#423 review)", async () => {
+    // Server echoes whatever list it is sent, so the only thing that decides the
+    // outcome is which list each remove computed from.
+    updateMachineSettings.mockImplementation((update) =>
+      Promise.resolve(view(update.recent_projects ?? [])),
+    );
+
+    // Two removes fired without awaiting between them — a burst of × clicks.
+    const first = projectSession.removeRecentProject("/b");
+    const second = projectSession.removeRecentProject("/c");
+    await Promise.all([first, second]);
+
+    // Both removals survive. Without serialization the second read the stale
+    // pre-removal list and the later response resurrected /b or /c.
+    expect(projectSession.recentProjects.map((r) => r.path)).toEqual(["/a"]);
+    // The second PUT was computed AFTER the first landed — it saw [/a,/c].
+    expect(updateMachineSettings).toHaveBeenNthCalledWith(2, {
+      recent_projects: [recent("/a", "A")],
+    });
+  });
 });

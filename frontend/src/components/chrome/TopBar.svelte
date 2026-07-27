@@ -2,6 +2,7 @@
   import type { ProjectChainLayer, ProjectChild, RecentProject } from "@/lib/types";
   import type { ThemePreference } from "@/lib/utils/theme";
 
+  import { tick } from "svelte";
   import ProjectBreadcrumb from "./ProjectBreadcrumb.svelte";
 
   // Null when no project is open — switcher shows "Open a project…".
@@ -34,8 +35,9 @@
   // purely presentational + dropdown state.
   export let onSelectRecent: (path: string) => void = () => {};
   // Forget a stale recents entry (#423). The switcher stays open so several can
-  // be cleared in one visit.
-  export let onRemoveRecent: (path: string) => void = () => {};
+  // be cleared in one visit. Returns a promise so focus can be restored after
+  // the row unmounts (#423 review).
+  export let onRemoveRecent: (path: string) => void | Promise<void> = () => {};
   export let onOpenFolder: () => void = () => {};
   export let onNewProject: () => void = () => {};
   // Assistants (like Detail Types / Project) is project-scoped — its editor
@@ -127,6 +129,7 @@
 
   let switcherOpen = false;
   let switcherButton: HTMLButtonElement | null = null;
+  let switcherMenuEl: HTMLElement | null = null;
 
   function toggleSwitcher() {
     switcherOpen = !switcherOpen;
@@ -141,10 +144,19 @@
     onSelectRecent(path);
   }
 
-  function handleRemoveRecent(path: string) {
+  async function handleRemoveRecent(path: string, index: number) {
     // Deliberately does NOT close the switcher — clearing dead rows is a
-    // housekeeping pass, not a navigation (#423).
-    onRemoveRecent(path);
+    // housekeeping pass, not a navigation (#423). Keep keyboard focus inside the
+    // switcher after the row unmounts (#423 review): land on the remove button
+    // that slid into this slot (or the last remaining one), else the toggle.
+    await onRemoveRecent(path);
+    await tick();
+    const removes = switcherMenuEl?.querySelectorAll<HTMLButtonElement>(".recent-remove");
+    if (removes && removes.length > 0) {
+      removes[Math.min(index, removes.length - 1)].focus();
+    } else {
+      switcherButton?.focus();
+    }
   }
 
   function handleOpenProjectPath(path: string) {
@@ -243,7 +255,7 @@
         on:click={closeSwitcher}
       ></div>
 
-      <div class="switcher-menu" role="menu" aria-label="Project switcher">
+      <div class="switcher-menu" role="menu" aria-label="Project switcher" bind:this={switcherMenuEl}>
         {#if childProjects.length > 0}
           <div class="switcher-section-label">Contains</div>
           {#each childProjects as child (child.path)}
@@ -263,7 +275,7 @@
         {/if}
         {#if recentProjects.length > 0}
           <div class="switcher-section-label">Recent</div>
-          {#each recentProjects as recent (recent.path)}
+          {#each recentProjects as recent, i (recent.path)}
             <div class="recent-row">
               <button
                 type="button"
@@ -282,7 +294,7 @@
                 class="recent-remove"
                 title="Remove from recent projects"
                 aria-label={`Remove ${recent.title} from recent projects`}
-                on:click|stopPropagation={() => handleRemoveRecent(recent.path)}
+                on:click|stopPropagation={() => handleRemoveRecent(recent.path, i)}
               >×</button>
             </div>
           {/each}

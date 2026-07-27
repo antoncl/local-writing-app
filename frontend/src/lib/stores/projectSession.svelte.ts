@@ -186,6 +186,15 @@ class ProjectSession {
     });
   }
 
+  // Serializes recents writes (#423 review). The switcher stays open to invite
+  // clearing several dead rows in a burst, and each remove is a read-modify-write
+  // of `recentProjects`; overlapping them would let two clicks both compute from
+  // the pre-removal list, so the later server response resurrects a row the user
+  // removed — and concurrent PUTs would also race the backend's load-modify-save
+  // of config.yaml. Chaining makes each remove read the list only after the
+  // previous write has landed.
+  private recentsWrite: Promise<void> = Promise.resolve();
+
   // Forget one recents entry (#423). Recents is a machine-global MRU that can
   // outlive the projects it points at (moved, renamed, deleted, unmounted), and
   // a dead row is otherwise permanent — it fails every time it is clicked with
@@ -193,12 +202,21 @@ class ProjectSession {
   // liveness (that would mis-drop a project on a disconnected drive): send the
   // list minus this path and take the server's rewritten list as canonical.
   async removeRecentProject(path: string): Promise<void> {
-    await this.run(async () => {
-      const next = this.recentProjects.filter((r) => r.path !== path);
-      const view = await api.updateMachineSettings({ recent_projects: next });
-      this.machineSettings = view;
-      this.recentProjects = view.recent_projects ?? [];
-    });
+    const chained = this.recentsWrite.then(() =>
+      this.run(async () => {
+        const next = this.recentProjects.filter((r) => r.path !== path);
+        const view = await api.updateMachineSettings({ recent_projects: next });
+        this.machineSettings = view;
+        this.recentProjects = view.recent_projects ?? [];
+      }),
+    );
+    // Absorb the boolean and any rejection so one failed write never poisons the
+    // queue for later removes.
+    this.recentsWrite = chained.then(
+      () => undefined,
+      () => undefined,
+    );
+    await this.recentsWrite;
   }
 
   // Open the create-project wizard, reading fresh machine settings first (#556).

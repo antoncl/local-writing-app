@@ -7,6 +7,7 @@
 <script lang="ts">
   import { renderChatContent } from "@/lib/utils/chatMessageRender";
   import { formatCostEur } from "@/lib/utils/money";
+  import { parsePlotSuggestions, stripPlotSuggestions } from "@/lib/plotSuggestions";
   import type { ChatMessage } from "@/lib/types";
 
   interface Props {
@@ -37,7 +38,39 @@
         <div class="cbv-message-content cbv-typing">…thinking</div>
       {:else if message.content}
         {#if message.role === "assistant"}
-          <div class="cbv-message-content cbv-message-rendered">{@html renderChatContent(message.content)}</div>
+          {@const suggestions = parsePlotSuggestions(message.content)}
+          {@const renderedContent = stripPlotSuggestions(message.content)}
+          {#if renderedContent}
+            <div class="cbv-message-content cbv-message-rendered">{@html renderChatContent(renderedContent)}</div>
+          {/if}
+          {#if suggestions.length > 0}
+            <div class="cbv-plot-suggestions" aria-label="Plot suggestions">
+              <header>Plot suggestions</header>
+              {#each suggestions as suggestion, j (`${suggestion.kind}-${suggestion.target_card_id}-${suggestion.target_claim_id}-${j}`)}
+                <article class="cbv-plot-suggestion">
+                  <div class="cbv-plot-suggestion-head">
+                    <strong>{suggestion.title || "Untitled suggestion"}</strong>
+                    <span>{suggestion.kind.replace(/_/g, " ")}</span>
+                  </div>
+                  {#if suggestion.proposed_change}
+                    <p>{suggestion.proposed_change}</p>
+                  {/if}
+                  {#if suggestion.reason}
+                    <small>Reason: {suggestion.reason}</small>
+                  {/if}
+                  {#if suggestion.evidence_to_add}
+                    <small>Evidence to add: {suggestion.evidence_to_add}</small>
+                  {/if}
+                  <div class="cbv-plot-suggestion-targets">
+                    {#if suggestion.target_card_id}<code>{suggestion.target_card_id}</code>{/if}
+                    {#if suggestion.target_claim_id}<code>{suggestion.target_claim_id}</code>{/if}
+                    {#if suggestion.template_instance_id}<code>{suggestion.template_instance_id}</code>{/if}
+                    {#if suggestion.plot_point_id}<code>{suggestion.plot_point_id}</code>{/if}
+                  </div>
+                </article>
+              {/each}
+            </div>
+          {/if}
         {:else}
           <div class="cbv-message-content">{message.content}</div>
         {/if}
@@ -143,5 +176,60 @@
   .cbv-turn-meta {
     display: flex; align-items: center; gap: 12px; padding: 0 2px;
     font-family: var(--mono); font-size: var(--fs-xs); color: var(--text-3);
+  }
+
+  .cbv-plot-suggestions {
+    max-width: 82%;
+    display: grid;
+    gap: 8px;
+    color: var(--text);
+  }
+  .cbv-plot-suggestions > header {
+    font-size: var(--fs-xs);
+    font-weight: 800;
+    letter-spacing: 0;
+    text-transform: uppercase;
+    color: var(--accent-emphasis);
+  }
+  .cbv-plot-suggestion {
+    display: grid;
+    gap: 5px;
+    padding: 9px 10px;
+    border: 1px solid var(--accent-soft2);
+    border-radius: 8px;
+    background: var(--accent-soft);
+  }
+  .cbv-plot-suggestion-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .cbv-plot-suggestion-head strong {
+    font-size: var(--fs-sm);
+    font-weight: 700;
+  }
+  .cbv-plot-suggestion-head span,
+  .cbv-plot-suggestion small {
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+  }
+  .cbv-plot-suggestion p {
+    margin: 0;
+    font-size: var(--fs-sm);
+    line-height: 1.45;
+  }
+  .cbv-plot-suggestion-targets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+  .cbv-plot-suggestion-targets code {
+    padding: 2px 6px;
+    border-radius: 5px;
+    background: var(--inset);
+    font-family: var(--mono);
+    font-size: var(--fs-xs);
+    color: var(--text-2);
   }
 </style>

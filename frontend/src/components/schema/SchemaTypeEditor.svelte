@@ -485,6 +485,13 @@
             {#if isOwn}
               {@const fieldSource = metadataSchemaOverview?.field_sources[fieldId]}
               {@const isExpanded = expandedSchemaFieldId === fieldId}
+              <!-- Own field: the interactive row and its per-type override
+                   controls (hide / rename, ADR-0029 §H) share ONE line (#527).
+                   The controls stay a SIBLING of the row — the row is a
+                   <button>, so nesting the control buttons is illegal — but a
+                   flex line places them inline at the right rather than on a
+                   second row below. -->
+              <div class="sfr-own-line">
               <SchemaFieldRow
                 iconClass={fieldIconClass(field)}
                 name={effectiveFieldLabel(metadataSchema, selectedSchemaTypeId, fieldId)}
@@ -505,12 +512,13 @@
                   <i class={`ti sfr-cog ${isExpanded ? "ti-chevron-up" : "ti-settings"}`} aria-hidden="true"></i>
                 {/snippet}
               </SchemaFieldRow>
-              <!-- Own rows expose the per-type override controls too (ADR-0029
-                   §H). SchemaFieldRow is an interactive <button>, so the override
-                   buttons render as a sibling bar beneath it (nesting buttons is
-                   illegal) rather than in the row's meta cluster. -->
               {#if !field.group_origin}
                 <div class="sfr-own-ovr">{@render fieldOverrideButtons(fieldId, field, true)}</div>
+              {/if}
+              </div>
+              <!-- The rename input and the expanded inline editor render on
+                   their own full-width rows BELOW the line, not inside it. -->
+              {#if !field.group_origin}
                 {@render fieldRenameBox(fieldId, field)}
               {/if}
               {#if isExpanded}
@@ -711,16 +719,27 @@
     color: var(--accent);
   }
   /* Per-type override bar under an OWN field row (ADR-0029 §H). Own rows are
-     interactive <button>s, so their relabel / hide controls can't nest inside;
-     they sit in a compact sibling bar. It is RIGHT-aligned (#525) so the hide /
-     rename buttons land in the same rightmost column as every inherited row's
-     inline controls — `fieldOverrideButtons`' "one aligned rightmost column" —
-     rather than dangling at the left under the name. */
-  .sfr-own-ovr {
+     interactive <button>s, so their relabel / hide controls can't nest inside.
+     They stay a SIBLING, but `.sfr-own-line` lays the row and the controls out
+     on ONE flex line (#527), so the controls sit inline at the right — in the
+     same rightmost column as every inherited row's inline controls — instead of
+     a second row below. */
+  .sfr-own-line {
     display: flex;
-    justify-content: flex-end;
+    align-items: center;
+  }
+  /* Neutralise the row's own `width: 100%` so it shares the line with the
+     control bar instead of pushing it off. */
+  .sfr-own-line > :global(.schema-field-row) {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+  }
+  .sfr-own-ovr {
+    flex: none;
+    display: flex;
     gap: 4px;
-    padding: 0 12px 4px 34px;
+    padding-right: 12px;
   }
   /* Inline rename input, rendered beneath the row (mirrors the field inline
      editor's placement). */

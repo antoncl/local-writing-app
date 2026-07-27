@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from app.models.base import (
@@ -107,6 +109,14 @@ class ProjectInfo(BaseModel):
     # chain of length one.
     projects_base_folder: str | None = None
     ai_policy: AIPolicy = "off"
+    # Whether this project states no policy of its own, so `ai_policy` above is
+    # inherited from an ancestor rather than set here (#471). The Project pane's
+    # "Inherit" option needs it to show the deferred state as selected: without
+    # it, clearing a policy would appear to snap the radio to whatever the chain
+    # resolves to, with no sign the clear took. This is only the on/off of
+    # "has an opinion here" — *which* ancestor supplied the value is provenance
+    # (#313), deliberately not surfaced by this field.
+    ai_policy_inherited: bool = False
     # Outermost first, matching layer rank. Carries the whole enumeration with
     # a flag rather than the declared subset: #311's switcher filters this,
     # while #318's wizard needs the *un*declared rows to offer them, and one
@@ -124,7 +134,13 @@ class UpdateProjectSettingsRequest(BaseModel):
     # No `projects_base_folder` (#429): the walk's bound is the machine root,
     # so it is changed in machine settings, once, for every project — not per
     # project, which is what let two levels of one chain disagree.
-    ai_policy: AIPolicy | None = None
+    # `None` leaves it unchanged (partial update, like `inherits`); one of the
+    # three policies sets it explicitly; `"inherit"` *clears* it back to no
+    # opinion so the chain resolves it (#471) — the only way back once a radio
+    # has been clicked. `"inherit"` is a wire-only signal: the stored and
+    # resolved type stays the three real policies, because inheriting is the
+    # *absence* of a stated policy on disk, not a fourth value of it.
+    ai_policy: AIPolicy | Literal["inherit"] | None = None
     # The declaration (#309). Partial update like the rest: `None` leaves it
     # alone, `[]` clears it. Entries may be absolute or relative to the
     # project; they are stored relative so a renamed shelf does not invalidate

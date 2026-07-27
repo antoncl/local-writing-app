@@ -242,7 +242,9 @@ export const api = {
   // `inherits: []` is therefore a deliberate flat project, not "no opinion" —
   // which is what makes unticking the last layer expressible (#426).
   updateProjectSettings(updates: {
-    ai_policy?: AIPolicy;
+    // "inherit" clears the policy back to no-opinion so the layer chain
+    // resolves it (#471); omitting the key leaves it unchanged.
+    ai_policy?: AIPolicy | "inherit";
     inherits?: string[];
   }) {
     return request<ProjectInfo>("/project/settings", {

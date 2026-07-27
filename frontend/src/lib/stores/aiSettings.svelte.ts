@@ -23,9 +23,15 @@ import { metadataSchemaStore } from "@/lib/stores/schema";
 import { resolveColor } from "@/lib/utils/colors";
 import type { AIHealthResponse, AIPolicy, ProjectInfo } from "@/lib/types";
 
+// The pane's draft carries one value the stored/resolved policy cannot:
+// "inherit" — the deferred state a project is in when it states no policy of
+// its own (#471). Saving it clears the key; it is never persisted or resolved
+// as a value, only sent and reflected back.
+export type AIPolicyDraft = AIPolicy | "inherit";
+
 class AISettings {
   // ---- Per-project AI settings draft (bound by the Project pane) ----
-  policy: AIPolicy = $state("off");
+  policy: AIPolicyDraft = $state("off");
 
   // ---- Provider health check ----
   healthResult = $state<AIHealthResponse | null>(null);
@@ -51,7 +57,10 @@ class AISettings {
   // Seed from a freshly opened project (replaces App's inline reset). Clears the
   // health result and color so nothing leaks across a project switch.
   seedFromProject(project: ProjectInfo): void {
-    this.policy = project.ai_policy;
+    // A project that states no policy shows "Inherit" selected, not the value
+    // it happens to resolve to (#471) — otherwise an inherited "off" is
+    // indistinguishable from one set here, and the clear is invisible.
+    this.policy = project.ai_policy_inherited ? "inherit" : project.ai_policy;
     this.healthResult = null;
     this.projectColor = null;
   }
@@ -76,7 +85,11 @@ class AISettings {
         ai_policy: this.policy,
       });
       this.onProjectUpdated(updatedProject);
-      this.policy = updatedProject.ai_policy;
+      // Re-derive the draft from the saved project: clearing lands as
+      // inherited, so echo "inherit" back rather than the resolved value (#471).
+      this.policy = updatedProject.ai_policy_inherited
+        ? "inherit"
+        : updatedProject.ai_policy;
       this.setStatus("Updated AI settings");
     });
   }

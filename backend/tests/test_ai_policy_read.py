@@ -23,6 +23,7 @@ from typing import Any
 from layer_fixtures import declare_full_chain, make_project_folder
 from project_fixtures import open_test_project
 
+from app.models.project import UpdateProjectSettingsRequest
 from app.services.project.errors import ProjectServiceError
 from app.services.project_service import ProjectService
 
@@ -52,6 +53,57 @@ class AiPolicyReadTests(unittest.TestCase):
     def test_a_project_with_no_ai_block_is_off(self) -> None:
         service = open_test_project(self.base / "bare", "Bare")
         self.assertEqual(service.ai_policy(), "off")
+
+    # ----- clearing back to inherit (#471) ------------------------------
+
+    def test_clearing_a_stated_policy_drops_the_key_and_the_block(self) -> None:
+        """#471 — `"inherit"` returns the manifest to a fresh project's form.
+
+        Not just the `policy` key: an inert `settings.ai: {}` left behind still
+        reads as a block, and is not what a project that never stated a policy
+        has on disk. Both the key and the emptied block go, so `_stated_ai_policy`
+        reads "no opinion" again.
+        """
+        root = self.base / "book"
+        service = open_test_project(root, "Book")
+        _set_policy(service, root, "cloud-allowed")
+
+        info = service.update_project_settings(
+            UpdateProjectSettingsRequest(ai_policy="inherit")
+        )
+
+        self.assertIsNone(service._stated_ai_policy(root))
+        self.assertTrue(info.ai_policy_inherited)
+        manifest = service._read_yaml(root / "project.yaml")
+        self.assertNotIn("ai", manifest.get("settings", {}))
+
+    def test_clearing_a_policy_that_was_never_set_is_a_no_op(self) -> None:
+        """The gesture is idempotent — clearing "no opinion" leaves "no opinion".
+
+        The pane can send `"inherit"` for a project that already inherits (the
+        radio was on Inherit and Save was pressed), and it must not error or
+        invent a block to then drop.
+        """
+        root = self.base / "bare"
+        service = open_test_project(root, "Bare")
+
+        info = service.update_project_settings(
+            UpdateProjectSettingsRequest(ai_policy="inherit")
+        )
+
+        self.assertIsNone(service._stated_ai_policy(root))
+        self.assertTrue(info.ai_policy_inherited)
+
+    def test_a_stated_policy_is_not_flagged_inherited(self) -> None:
+        """`ai_policy_inherited` is the inverse of "states a policy here".
+
+        Pin both sides so the flag cannot quietly become a constant: a project
+        that set its own policy is not inheriting it.
+        """
+        root = self.base / "stated"
+        service = open_test_project(root, "Stated")
+        _set_policy(service, root, "local-only")
+        self.assertFalse(service.current_project().ai_policy_inherited)
 
     def test_a_hand_edited_policy_typo_does_not_make_the_project_unopenable(self) -> None:
         """A value the Literal does not admit must fall closed in BOTH readers.

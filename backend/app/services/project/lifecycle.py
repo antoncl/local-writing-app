@@ -238,6 +238,12 @@ class ProjectLifecycleMixin:
             # the bound described a chain that does not exist.
             projects_base_folder=str(base_folder) if base_folder else None,
             ai_policy=self._resolved_ai_policy(root),
+            # The open project's own manifest says nothing ⇒ the resolved value
+            # above is inherited (#471). `_stated_ai_policy` on the root reads
+            # only this project's manifest, so it cannot fall closed on an
+            # unreadable ancestor — an open project's own manifest was already
+            # read to get here.
+            ai_policy_inherited=self._stated_ai_policy(root) is None,
             ancestors=self._ancestor_candidates_for_api(root),
             chain=self._project_chain_for_api(root),
             children=self._project_children(root),
@@ -416,8 +422,15 @@ class ProjectLifecycleMixin:
         ai_settings = settings.get("ai")
         if not isinstance(ai_settings, dict):
             ai_settings = {}
-        # Partial update: a field left unset is left unchanged.
-        if request.ai_policy is not None:
+        # Partial update: a field left unset is left unchanged. `"inherit"` is
+        # the clear signal (#471) — pop the key so the chain resolves the
+        # policy, restoring the "no opinion" state a fresh project has. Without
+        # it the first radio click would pin this project's policy forever,
+        # reintroducing one click later the seeded `policy: "off"` that #312
+        # removed so inheritance could work at all.
+        if request.ai_policy == "inherit":
+            ai_settings.pop("policy", None)
+        elif request.ai_policy is not None:
             ai_settings["policy"] = request.ai_policy
         if request.inherits is not None:
             # Validated against the machine root (#429). There is no pending
@@ -428,6 +441,12 @@ class ProjectLifecycleMixin:
             manifest[INHERITS_KEY] = self._validated_declaration(request.inherits, root)
         if ai_settings:
             settings["ai"] = ai_settings
+        else:
+            # Clearing the last key empties the block; drop it rather than leave
+            # an inert `settings.ai: {}` on disk, so the manifest returns to the
+            # exact form a fresh project has and `_stated_ai_policy` reads "no
+            # opinion" (#471).
+            settings.pop("ai", None)
         manifest["settings"] = settings
         self._write_yaml(root / "project.yaml", manifest)
         return self.current_project()

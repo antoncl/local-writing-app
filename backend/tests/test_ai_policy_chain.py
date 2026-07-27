@@ -34,6 +34,7 @@ from layer_fixtures import (
 )
 from project_fixtures import open_test_project
 
+from app.models.project import UpdateProjectSettingsRequest
 from app.services.project_service import ProjectService
 
 
@@ -99,6 +100,27 @@ class AiPolicyChainTests(unittest.TestCase):
         """The shelf is a layer too — resolution does not stop at the parent."""
         _set_policy(self.service, self.base, "local-only")
         self.assertEqual(self.service.ai_policy(), "local-only")
+
+    def test_clearing_a_books_policy_reinherits_the_universe(self) -> None:
+        """#471 — the gesture that puts a book back into "no opinion".
+
+        Once a radio is clicked the book *states* a policy, and #312's
+        nearest-wins makes that stick: change the universe afterwards and the
+        book does not follow. Clearing to `"inherit"` pops the key, so the
+        universe's value reaches the book again — the whole point of the
+        feature, and the failure mode #312 removed from *newly created* projects
+        by dropping the seeded `off`, reintroduced one radio click later.
+        """
+        _set_policy(self.service, self.universe, "cloud-allowed")
+        _set_policy(self.service, self.book, "off")
+        self.assertEqual(self.service.ai_policy(), "off")  # stated here, pins it
+
+        info = self.service.update_project_settings(
+            UpdateProjectSettingsRequest(ai_policy="inherit")
+        )
+
+        self.assertEqual(self.service.ai_policy(), "cloud-allowed")  # re-inherited
+        self.assertTrue(info.ai_policy_inherited)
 
     def test_current_project_reports_the_same_resolved_value(self) -> None:
         """The two readers must not disagree — that is #433's lesson restated.

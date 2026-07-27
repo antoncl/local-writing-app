@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   appendPlotSuggestionEvidence,
+  appendPlotSuggestionText,
   parsePlotSuggestions,
   plotSuggestionClipboardText,
   stripPlotSuggestions,
@@ -97,6 +98,14 @@ describe("appendPlotSuggestionEvidence", () => {
   it("does not treat partial text matches as already applied", () => {
     expect(appendPlotSuggestionEvidence("Show the consequence clearly.", "Show the consequence.")).toBe(
       "Show the consequence clearly.\n\nShow the consequence.",
+    );
+  });
+});
+
+describe("appendPlotSuggestionText", () => {
+  it("supports the same append behavior for non-evidence note fields", () => {
+    expect(appendPlotSuggestionText("Existing note.", "Try a sharper consequence.")).toBe(
+      "Existing note.\n\nTry a sharper consequence.",
     );
   });
 });

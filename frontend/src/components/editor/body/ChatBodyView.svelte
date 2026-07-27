@@ -25,7 +25,7 @@
   import ChatTranscript from "@/components/editor/body/chat/ChatTranscript.svelte";
   import ChatInputsStrip from "@/components/editor/body/chat/ChatInputsStrip.svelte";
   import ChatJournalScope from "@/components/editor/body/chat/ChatJournalScope.svelte";
-  import { appendPlotSuggestionEvidence, type PlotSuggestion } from "@/lib/plotSuggestions";
+  import { appendPlotSuggestionText, type PlotSuggestion } from "@/lib/plotSuggestions";
   import { formatCostEur, formatTokens } from "@/lib/utils/money";
   import type {
     AssistantEntrySummary,
@@ -253,11 +253,15 @@
     return Array.from(new Set([...selectedIds, ...boardIds]));
   }
 
-  async function applyPlotSuggestionEvidence(suggestion: PlotSuggestion): Promise<void> {
+  async function appendPlotSuggestionClaimField(
+    suggestion: PlotSuggestion,
+    field: "evidence" | "ai_notes",
+    value: string,
+  ): Promise<void> {
     const targetClaimId = suggestion.target_claim_id.trim();
-    const evidenceToAdd = suggestion.evidence_to_add.trim();
-    if (!targetClaimId || !evidenceToAdd) {
-      chatError = "This suggestion does not identify both a target claim and evidence to add.";
+    const textToAdd = value.trim();
+    if (!targetClaimId || !textToAdd) {
+      chatError = "This suggestion does not identify both a target claim and text to apply.";
       throw new Error(chatError);
     }
 
@@ -278,10 +282,10 @@
       const nextClaims = (board.claims ?? []).map((claim) => {
         if (claim.id !== targetClaimId) return claim;
         matched = true;
-        const nextEvidence = appendPlotSuggestionEvidence(claim.evidence, evidenceToAdd);
-        if (nextEvidence === (claim.evidence ?? "")) return claim;
+        const nextValue = appendPlotSuggestionText(claim[field], textToAdd);
+        if (nextValue === (claim[field] ?? "")) return claim;
         changed = true;
-        return { ...claim, evidence: nextEvidence };
+        return { ...claim, [field]: nextValue };
       });
       if (!matched) continue;
       if (!changed) {
@@ -307,6 +311,14 @@
 
     chatError = `Could not find claim ${targetClaimId} on a plot board.`;
     throw new Error(chatError);
+  }
+
+  async function applyPlotSuggestionEvidence(suggestion: PlotSuggestion): Promise<void> {
+    await appendPlotSuggestionClaimField(suggestion, "evidence", suggestion.evidence_to_add);
+  }
+
+  async function applyPlotSuggestionNote(suggestion: PlotSuggestion): Promise<void> {
+    await appendPlotSuggestionClaimField(suggestion, "ai_notes", suggestion.proposed_change);
   }
 
   // Mirrors App.svelte's applyChatSession (the source of truth for the
@@ -1030,6 +1042,7 @@
       {chatRunning}
       bind:scrollEl={chatScrollEl}
       onApplyEvidence={applyPlotSuggestionEvidence}
+      onApplyNote={applyPlotSuggestionNote}
     />
 
     {#if declaredInputs.length > 0}

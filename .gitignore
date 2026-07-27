@@ -7,6 +7,8 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .cache/
+.pytest_cache/
+.pytest-tmp/
 work/
 
 # Scratch / working files and throwaway test projects

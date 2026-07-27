@@ -546,6 +546,28 @@ AI outputs should land as draft artifacts:
 
 No AI operation should silently mutate the board or manuscript.
 
+### Near-Term Essentials
+
+The remaining plotting work should keep sight of these essentials:
+
+- apply AI suggestions back into the board as explicit, user-approved draft
+  edits;
+- support claim/beat assist at the right granularity: card, function marker,
+  plot beat, template instance, and whole board;
+- make evidence a first-class workflow so the author can see why a card or
+  linked scene does or does not satisfy a function marker;
+- keep template-instance editing clear, including renaming, deletion, beat
+  specifics, author intent, expected role, and open questions;
+- provide a board-level overview for weak, missing, overloaded, duplicated, and
+  untagged story work;
+- define relationship and sequence semantics well enough that edges mean
+  causality, setup/payoff, contrast, blocking, reveal, or custom intent rather
+  than just visual lines;
+- polish prompt context so XML dumps and Jinja access stay consistent,
+  complete, ordered, and understandable to prompt authors and AIs;
+- remove usability friction around deleting cards, moving markers, clipped
+  statuses, dense rails, and hard-to-grab nested containers.
+
 ## Built-In Template Policy
 
 Initial candidates for low-risk generic built-ins:

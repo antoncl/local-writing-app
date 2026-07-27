@@ -50,11 +50,14 @@ describe("cardAssistFocus", () => {
       diagnostics,
     });
 
-    expect(focus).toContain('Help make card "Opening" stronger');
+    expect(focus).toContain('Help make card "Opening" (id: card_opening) stronger');
     expect(focus).toContain("No rationale or evidence");
     expect(focus).toContain("Marked weak");
+    expect(focus).toContain("[claim_setup]");
     expect(focus).toContain("Mara decides to steal the ledger.");
     expect(focus).toContain("narrative actions");
+    expect(focus).toContain("draft suggestions with target ids");
     expect(focus).toContain("Do not draft prose");
+    expect(focus).toContain("later apply manually");
   });
 });

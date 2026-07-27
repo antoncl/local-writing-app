@@ -100,7 +100,7 @@ Respond with:
 PLOT_CLAIM_AUDIT_BODY = """{% set selected_scene = scene if scene is defined else none %}
 {% set plot = plot_context(input.plot, as_of=selected_scene) if selected_scene else plot_context(input.plot) %}
 {% role "system" %}
-You are an experienced fiction editor helping a novelist strengthen a plot board. A plot beat is a story milestone or required story function. A function badge is a card-local claim that the card helps satisfy that beat. Treat diagnostics as signals, not verdicts. Diagnose gaps, then offer concrete repair options the author can choose from. Do not draft prose, invent final canon, or treat the template as a rigid formula.
+You are an experienced fiction editor helping a novelist strengthen a plot board. A plot beat is a story milestone or required story function. A function badge is a card-local claim that the card helps satisfy that beat. Treat diagnostics as signals, not verdicts. Diagnose gaps, then offer concrete repair options the author can choose from. Do not draft prose, invent final canon, mutate the board, or treat the template as a rigid formula.
 {% endrole %}
 
 {% role "user" %}
@@ -111,12 +111,12 @@ You are an experienced fiction editor helping a novelist strengthen a plot board
 {% endif %}
 <plot_claim_audit board_title="{{ plot.board_title | e }}">
 {% for instance in plot.template_instances %}
-  <template_instance title="{{ instance.title | e }}">
+  <template_instance id="{{ instance.id | e }}" title="{{ instance.title | e }}">
 {% if instance.ai_use_guidance %}
     <ai_use_guidance>{{ instance.ai_use_guidance | e }}</ai_use_guidance>
 {% endif %}
 {% for point in instance.plot_points %}
-    <plot_beat title="{{ point.title | e }}" status="{{ point.status | default('unplanned') | e }}">
+    <plot_beat id="{{ point.plot_point_id | e }}" title="{{ point.title | e }}" status="{{ point.status | default('unplanned') | e }}">
       <function_claim>{{ point.function_claim | e }}</function_claim>
 {% if point.notes %}
       <story_specifics>{{ point.notes | e }}</story_specifics>
@@ -131,7 +131,7 @@ You are an experienced fiction editor helping a novelist strengthen a plot board
 {% for claim in point.claims %}
         <claim id="{{ claim.id | e }}" type="{{ claim.claim_type | e }}" strength="{{ claim.strength | default('', true) | e }}">
 {% if claim.card %}
-          <card title="{{ claim.card.title | e }}">
+          <card id="{{ claim.card.id | e }}" title="{{ claim.card.title | e }}">
 {% if claim.card.synopsis %}
             <synopsis>{{ claim.card.synopsis | e }}</synopsis>
 {% endif %}
@@ -159,7 +159,7 @@ You are an experienced fiction editor helping a novelist strengthen a plot board
   <untagged_cards>
 {% for card in plot.cards %}
 {% if not card.claims %}
-    <card title="{{ card.title | e }}">
+    <card id="{{ card.id | e }}" title="{{ card.title | e }}">
 {% if card.synopsis %}<synopsis>{{ card.synopsis | e }}</synopsis>{% endif %}
     </card>
 {% endif %}
@@ -173,5 +173,16 @@ Respond with:
 3. Claim changes to consider: add, remove, move, split, downgrade, or strengthen function badges.
 4. Evidence the author could add to the card or scene to make the claim feel earned.
 5. Questions only where an author decision is genuinely needed.
+
+Then include an optional machine-readable suggestion block. Use target ids from the context whenever possible. Keep every suggestion as a draft the author can accept, edit, or ignore. Do not emit placeholder suggestions. Omit the block entirely if there is no concrete proposed change.
+
+<plot_suggestions>
+  <suggestion kind="card_revision|claim_change|new_claim|relationship_change|scene_promotion|question" target_card_id="card_id_if_known" target_claim_id="claim_id_if_known" template_instance_id="template_instance_id_if_known" plot_point_id="plot_point_id_if_known">
+    <title>Short label for a real suggestion</title>
+    <reason>Why this concrete change would strengthen the story function.</reason>
+    <proposed_change>Specific board-level edit or author decision, not drafted prose.</proposed_change>
+    <evidence_to_add>Concrete evidence the card or linked scene would need.</evidence_to_add>
+  </suggestion>
+</plot_suggestions>
 {% endrole %}
 """

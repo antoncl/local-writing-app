@@ -169,6 +169,10 @@ class ProjectLifecycleMixin:
         for folder in ["scenes", "lore", "prompts", ".cache"]:
             (root / folder).mkdir(exist_ok=True)
         (root / "research" / "notes").mkdir(parents=True, exist_ok=True)
+        # `.cache/` holds derived indexes carrying absolute paths (node-index.json
+        # since #306); self-exclude it so a version-controlled project never
+        # commits a machine-specific, churning snapshot (#378).
+        (root / ".cache" / ".gitignore").write_text("*\n", encoding="utf-8", newline="\n")
 
         # Project node singleton — book metadata, blurb, etc. live here. It is
         # written BEFORE project.yaml: open_project gates on the manifest, so

@@ -343,6 +343,17 @@
   </NodeList>
 {/snippet}
 
+{#snippet deleteAction(node: EvalNode)}
+  <!-- Shared × delete affordance: the same requestDelete + confirm path for a
+       leaf (scene, #465) and a container. Kept in one place so the two branches
+       cannot diverge. -->
+  <button
+    class="row-action-delete"
+    title={`Delete ${entryTypeName(node.entry_type, schema)}`}
+    onclick={(event) => { event.stopPropagation(); requestDelete(node); }}
+  >×</button>
+{/snippet}
+
 {#snippet row(node: EvalNode, ctx: RowCtx<EvalNode>)}
   {@const leaf = node.entry_type === config.leafType}
   {@const editing = ctx.editing}
@@ -409,6 +420,10 @@
           >⋮⋮</span>
         {/if}
       {/snippet}
+      {#snippet trailing()}
+        <!-- A scene is deletable like its container (#465). No `+`: no children. -->
+        {@render deleteAction(node)}
+      {/snippet}
     </NodeRow>
   {:else}
     <!-- Container (real-node parent). Single click defers collapse to
@@ -461,11 +476,7 @@
             onclick={(event) => { event.stopPropagation(); ctx.toggleAddMenu(event); }}
           >+</button>
         </div>
-        <button
-          class="row-action-delete"
-          title={`Delete ${entryTypeName(node.entry_type, schema)}`}
-          onclick={(event) => { event.stopPropagation(); requestDelete(node); }}
-        >×</button>
+        {@render deleteAction(node)}
       {/snippet}
     </NodeRow>
   {/if}

@@ -18,6 +18,7 @@
   import { nodeSummary } from "@/lib/views/nodeSummary";
   import { toMultiValued } from "@/lib/views/viewParams";
   import { effectiveFieldType, isSortableField } from "@/lib/views/fieldAccess";
+  import { setLevelField, toggleLevelOrder } from "@/lib/views/groupLevelEdits";
   import { useDesignerContext } from "./designerContext";
   import type { MetadataFieldType, MetadataValue, NodePickerRef, ViewGroupByLevel, ViewLeafValue, ViewSort } from "@/lib/types";
   import type { Snippet } from "svelte";
@@ -511,12 +512,14 @@
     const pick = groupableFields.find((f) => !usedFields(levels).has(f.key));
     if (pick) commit([...levels, { field: pick.key }]);
   }
+  // `setLevelField` / `toggleLevelOrder` are pure and unit-tested in
+  // groupLevelEdits.test.ts — the show_empty-preservation invariant (#374)
+  // lives there, not in these thin commit wrappers.
   function setLevelFieldAt(levels: ViewGroupByLevel[], commit: LevelCommit, i: number, field: string) {
-    commit(levels.map((l, j) => (j === i ? { ...l, field } : l)));
+    commit(setLevelField(levels, i, field));
   }
-  // first-seen (undefined) ⇄ alphabetical-by-label ("label").
   function toggleLevelOrderAt(levels: ViewGroupByLevel[], commit: LevelCommit, i: number) {
-    commit(levels.map((l, j) => (j === i ? { field: l.field, ...(l.order === "label" ? {} : { order: "label" }) } : l)));
+    commit(toggleLevelOrder(levels, i));
   }
   function removeLevelAt(levels: ViewGroupByLevel[], commit: LevelCommit, i: number) {
     commit(levels.filter((_, j) => j !== i));

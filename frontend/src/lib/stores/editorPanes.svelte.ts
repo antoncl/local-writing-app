@@ -1086,6 +1086,64 @@ class EditorPanesController {
     this.setStatus(`Forked ${entry.title} into this project`);
   }
 
+  // Clear-to-inherit (#517 / create-project-wizard.md §8): drop one field's
+  // override at L so it reverts to the inherited value. The save carries the
+  // current draft (so any pending edits persist) plus the explicit
+  // `clear_override_fields` signal; the backend drops that field's row(s) and
+  // returns the re-read entry. Cancel the debounce first — the same
+  // baseline-moves-under-a-pending-timer hazard `forkLore` guards. A 409 throws
+  // out of here (the caller's `run()` surfaces it) with the draft intact.
+  async resetLoreOverrideField(entryId: string, fieldId: string): Promise<void> {
+    // Match the lore pane directly — `paneForScene` is scene-only and would miss
+    // it (the same predicate `forkLore` uses to reconcile its pane).
+    const pane = this.panes.find((p) => p.document?.type === "lore" && p.document.id === entryId);
+    if (!pane?.scene) return;
+    this.#autosave.cancel(pane.id);
+    const draftDocument = {
+      ...pane.scene,
+      title: pane.draftTitle,
+      entry_type: pane.draftEntryType,
+      metadata: cloneMetadata(pane.draftMetadata),
+    };
+    const entry = await api.saveLoreEntry(
+      draftDocument as LoreEntry,
+      pane.draftMarkdown,
+      pane.authoringLayerId,
+      [fieldId],
+    );
+    const reloadToken = this.nextMetadataReloadToken++;
+    this.panes = this.panes.map((candidate) =>
+      candidate.id === pane.id
+        ? {
+            ...candidate,
+            scene: entry,
+            dirty: false,
+            draftTitle: entry.title,
+            draftMarkdown: entry.body,
+            draftEntryType: entry.entry_type,
+            // Snap the draft to the re-read entry — the cleared field now shows
+            // its inherited value and the rest matches what this save persisted.
+            draftMetadata: cloneMetadata(entry.metadata),
+            saving: false,
+            recentlySaved: false,
+          }
+        : candidate,
+    );
+    // Bump the reload signal so NodeEditor resyncs its own `metadata` state to the
+    // reverted value — replacing the pane's scene alone doesn't reseed the
+    // editor's local copy (the same signal openLore / reconcile use).
+    this.metadataReloadsByPane = {
+      ...this.metadataReloadsByPane,
+      [pane.id]: {
+        token: reloadToken,
+        metadata: cloneMetadata(entry.metadata),
+        status: "",
+        entryType: entry.entry_type,
+      },
+    };
+    this.setStatus(`Reset ${fieldId} to inherited`);
+  }
+
   // Set the rail picker's authoring layer L for a pane (#314 / ADR-0042). The
   // NodeEditor picker calls this after its confirm-on-entry gate; the value
   // rides the next `saveLoreEntry` and routes the write (owning-file direct edit

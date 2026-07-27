@@ -306,6 +306,15 @@ class LoreEntriesMixin:
             raise ProjectServiceError("Lore Entry changed on disk after it was opened.", 409)
 
         rows = self._diff_metadata_to_override_rows(base_above_layer, submitted, field_types)
+        # Clear-to-inherit (#517): drop the row(s) for any field the client asked
+        # to reset. The submitted metadata still carries the overridden value (the
+        # reset gesture does not know the above-L value to echo back), so the diff
+        # produced a row for it — dropping it here is what reverts the field to the
+        # inherited value. An empty result then deletes the file below, exactly as
+        # a full revert-to-canon does.
+        if request.clear_override_fields:
+            cleared = set(request.clear_override_fields)
+            rows = [row for row in rows if row.field not in cleared]
         # Validate the entry *as L would resolve it* against L's own roster — a
         # field only the book defines cannot be stored at a series (ADR-0045 §4).
         preview = LayerOverride(entry_id, authoring_layer.id, authoring_layer.rank, authoring_layer.label, winner.path, tuple(rows))

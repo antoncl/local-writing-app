@@ -42,3 +42,32 @@ export function inheritedLayerLabel(
 export function isInherited(node: NodeProvenance, ownLayerId: string): boolean {
   return inheritedLayerLabel(node, ownLayerId) !== null;
 }
+
+/** How a metadata field's effective value is sourced, for the rail's tint (#517). */
+export type FieldProvenance = "local" | "layer-inherited" | "overridden";
+
+/**
+ * Classify one field's provenance on the entry the rail is showing — the
+ * "one visual language" of create-project-wizard.md §8:
+ *
+ * - `overridden` — the entry is inherited but this field's value comes from an
+ *   override at a consuming layer. Reads *live*, led by the interactive
+ *   `ti-versions` mark whose hover reveals the "Reset to <source>" gesture.
+ * - `layer-inherited` — the entry is inherited and this field is not overridden,
+ *   so its value flows from the owning ancestor. Reads *muted*, source in the
+ *   tooltip, no reset (nothing to clear).
+ * - `local` — the entry is authored in the open project. No layer treatment.
+ *
+ * `entryIsInherited` is `inheritedLayerLabel(...) !== null`, passed in rather
+ * than recomputed so the caller keeps the single provenance read. An overridden
+ * field wins even if `entryIsInherited` were somehow false — the override is the
+ * stronger fact — so the check is ordered override-first.
+ */
+export function fieldProvenance(
+  fieldId: string,
+  entryIsInherited: boolean,
+  overriddenFields: readonly string[],
+): FieldProvenance {
+  if (overriddenFields.includes(fieldId)) return "overridden";
+  return entryIsInherited ? "layer-inherited" : "local";
+}

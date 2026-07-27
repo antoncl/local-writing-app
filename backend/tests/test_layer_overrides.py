@@ -208,6 +208,58 @@ class LayerOverrideTests(unittest.TestCase):
         self.assertFalse(any((self.root / OVERRIDES_FOLDER).glob("*.md")))
         self.assertEqual(self.service.read_lore_entry("honor").metadata["rank"], "Commodore")
 
+    # --- clear-to-inherit: targeted single-field unset (#517) ----------
+
+    def test_clearing_a_field_reverts_it_while_other_overrides_stay(self) -> None:
+        self._write_lore_at(
+            self.series, "honor", "Honor Harrington", {"rank": "Commodore", "aliases": ["The Salamander"]}
+        )
+        # Override two fields at the book.
+        self._save_override("honor", {"rank": "Captain", "aliases": ["The Salamander", "Lady Harrington"]})
+        self.assertEqual(sorted(self.service.read_lore_entry("honor").overridden_fields), ["aliases", "rank"])
+
+        # Clear just `rank`. Its submitted value is still the override "Captain",
+        # but the clear signal drops the row regardless → it reverts to the
+        # ancestor's "Commodore"; the aliases override is untouched.
+        cleared = self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Honor Harrington", body="Body.", entry_type="lore:character",
+                metadata={"rank": "Captain", "aliases": ["The Salamander", "Lady Harrington"]},
+                authoring_layer_id=self._layer_id(self.root),
+                clear_override_fields=["rank"],
+            ),
+        )
+        self.assertEqual(cleared.metadata["rank"], "Commodore")
+        self.assertEqual(cleared.metadata["aliases"], ["The Salamander", "Lady Harrington"])
+        self.assertEqual(cleared.overridden_fields, ["aliases"])
+        # The delta file survives — it still carries the aliases row, not rank.
+        text = next((self.root / OVERRIDES_FOLDER).glob("*.md")).read_text(encoding="utf-8")
+        self.assertIn("aliases", text)
+        self.assertNotIn("rank", text)
+
+    def test_clearing_the_only_override_drops_the_delta_file(self) -> None:
+        self._write_lore_at(self.series, "honor", "Honor Harrington", {"rank": "Commodore"})
+        self._save_override("honor", {"rank": "Captain"})
+        self.assertTrue(any((self.root / OVERRIDES_FOLDER).glob("*.md")))
+
+        # Clearing the sole override reverts to canon and drops the file — exactly
+        # as a full revert does, but driven explicitly with the override value
+        # ("Captain") still in the payload, which distinguishes it from omitting
+        # the field (which would clear it to empty instead).
+        cleared = self.service.save_lore_entry(
+            "honor",
+            SaveLoreEntryRequest(
+                title="Honor Harrington", body="Body.", entry_type="lore:character",
+                metadata={"rank": "Captain"},
+                authoring_layer_id=self._layer_id(self.root),
+                clear_override_fields=["rank"],
+            ),
+        )
+        self.assertEqual(cleared.metadata["rank"], "Commodore")
+        self.assertEqual(cleared.overridden_fields, [])
+        self.assertFalse(any((self.root / OVERRIDES_FOLDER).glob("*.md")))
+
     # --- fork severs the override (review finding 1) -------------------
 
     def test_forking_an_overridden_entry_lets_later_edits_stick(self) -> None:

@@ -96,6 +96,9 @@
     // The rail layer picker chose a new authoring layer L (#314). Fires only
     // after the confirm-on-entry gate for a target beyond the open project.
     onAuthoringLayerChange?: ((layerId: string | null) => void) | undefined;
+    // Clear-to-inherit (#517): a field's override was reset to the inherited
+    // value from the rail. Lore-only — the host routes it to the store action.
+    onResetField?: ((fieldId: string) => void) | undefined;
     // Snapshots (#401). Autosave lags the buffer by up to 6 seconds, and both
     // capture and restore read the FILE — so the strip asks the host to write
     // pending edits first, and hands the restored document back for the host to
@@ -129,6 +132,7 @@
     onOpenChat = undefined,
     onViewSaveState = undefined,
     onAuthoringLayerChange = undefined,
+    onResetField = undefined,
     onFlushScene = undefined,
     onSceneRestored = undefined
   }: Props = $props();
@@ -943,6 +947,7 @@
       }}
       onCustomData={() => onCustomData?.({ entryType, kind: documentKind })}
       onNavigate={(payload) => onNavigate?.(payload)}
+      onResetField={documentKind === "lore" ? onResetField : undefined}
     />
     {#key scene?.id ?? ""}
       <BacklinksPanel

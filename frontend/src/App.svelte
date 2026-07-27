@@ -208,8 +208,40 @@
     createWizard.onError = (message) => { error = message; };
     createWizard.getStartPath = () => projectPath;
     createWizard.onSaveRootFolder = (folder) => projectSession.saveDefaultProjectsFolder(folder);
-    createWizard.onCreateProject = (path, title, inherits) =>
-      projectSession.createProjectAt(path, title, inherits);
+    createWizard.onCreateProject = (path, title, inherits, aiPolicy) =>
+      projectSession.createProjectAt(path, title, inherits, aiPolicy);
+    // AI-step substrate (#547). Provider credentials + assistants are
+    // machine-global, so every write forces the machine layer (layer_id "") and
+    // the new book inherits the result — the wizard has no project of its own
+    // yet. See the create-timing note on #547.
+    createWizard.getMachineSettings = () => projectSession.machineSettings;
+    createWizard.onSaveProviderCredential = (field, value) =>
+      projectSession.saveProviderCredential(field, value);
+    createWizard.onReorderAssistants = async (orderedIds) => {
+      await run(async () => {
+        setAssistantEntries((await api.reorderAssistants(orderedIds, "")).entries);
+      });
+    };
+    createWizard.onUnlistAssistant = async (entryId) => {
+      await run(async () => {
+        setAssistantEntries((await api.unlistAssistant(entryId, "")).entries);
+      });
+    };
+    createWizard.onHireAssistant = async (title, provider, tier, model) => {
+      await run(async () => {
+        const created = await api.createAssistantEntry(title, "");
+        await api.saveAssistantEntry({
+          ...created,
+          metadata: {
+            ...created.metadata,
+            ai_provider: provider,
+            ai_capability_tier: tier,
+            ai_model: model,
+          },
+        });
+        await storeRefreshAssistantEntries();
+      });
+    };
     // The projectSession controller owns machine settings + the open/create/
     // rehydrate flow; App injects status/run and the cross-subsystem workspace
     // wiring (openProjectWorkspace) + the post-load schema sync.

@@ -358,5 +358,52 @@ class TheProjectsRootIsValidatedOnSaveTests(unittest.TestCase):
         self.assertEqual(self._put(str(elsewhere)).status_code, 200)
 
 
+class DisplaySettingsTests(unittest.TestCase):
+    """Prose-presentation prefs (#127 / #575) — defaults, persistence, clamp."""
+
+    def setUp(self) -> None:
+        current_scope.clear()
+        self.client = TestClient(app)
+
+    def test_view_defaults_when_unset(self) -> None:
+        display = self.client.get("/api/settings/machine").json()["display"]
+        self.assertEqual(display, {"ui_scale": 1.0, "paragraph_align": "left", "paragraph_indent": False})
+
+    def test_put_persists_display(self) -> None:
+        body = {"display": {"ui_scale": 1.2, "paragraph_align": "justify", "paragraph_indent": True}}
+        returned = self.client.put("/api/settings/machine", json=body)
+        self.assertEqual(returned.status_code, 200, returned.text)
+        self.assertEqual(returned.json()["display"], body["display"])
+        # Survives a fresh load from disk.
+        self.assertEqual(ms.load_settings().display.model_dump(), body["display"])
+
+    def test_ui_scale_is_clamped_both_ends(self) -> None:
+        hi = self.client.put("/api/settings/machine", json={"display": {"ui_scale": 5.0}}).json()
+        self.assertEqual(hi["display"]["ui_scale"], 1.5)
+        lo = self.client.put("/api/settings/machine", json={"display": {"ui_scale": 0.1}}).json()
+        self.assertEqual(lo["display"]["ui_scale"], 0.85)
+
+    def test_display_patch_leaves_other_settings_untouched(self) -> None:
+        self.client.put("/api/settings/machine", json={"default_provider": "anthropic"})
+        self.client.put("/api/settings/machine", json={"display": {"paragraph_indent": True}})
+        settings = ms.load_settings()
+        self.assertEqual(settings.default_provider, "anthropic")
+        self.assertTrue(settings.display.paragraph_indent)
+
+    def test_partial_display_patch_preserves_unset_nondefault_fields(self) -> None:
+        # First store all-non-default display, then patch ONE field. The other
+        # two must survive rather than reset to their defaults — this exercises
+        # the exclude_unset recursion into the nested model, not just a no-op.
+        self.client.put(
+            "/api/settings/machine",
+            json={"display": {"ui_scale": 1.3, "paragraph_align": "justify", "paragraph_indent": True}},
+        )
+        self.client.put("/api/settings/machine", json={"display": {"ui_scale": 1.1}})
+        display = ms.load_settings().display
+        self.assertEqual(display.ui_scale, 1.1)
+        self.assertEqual(display.paragraph_align, "justify")  # not reset to "left"
+        self.assertTrue(display.paragraph_indent)  # not reset to False
+
+
 if __name__ == "__main__":
     unittest.main()

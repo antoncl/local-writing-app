@@ -2,13 +2,35 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.models.base import (
     AIPolicy,
 )
 
 # --- AI / machine settings ---
+
+# Bounds for the master type scaler (#127): wide enough to matter, tight enough
+# that pane chrome and prose stay laid out coherently.
+UI_SCALE_MIN = 0.85
+UI_SCALE_MAX = 1.5
+
+
+class DisplaySettings(BaseModel):
+    """Per-user prose-presentation preferences (#127 / #575): the master type
+    scaler plus paragraph formatting. Display-only — never touches prose content.
+    Applied as CSS custom properties on the document root by the frontend."""
+
+    ui_scale: float = 1.0
+    paragraph_align: Literal["left", "justify"] = "left"
+    paragraph_indent: bool = False
+
+    @field_validator("ui_scale")
+    @classmethod
+    def _clamp_ui_scale(cls, value: float) -> float:
+        # Clamp rather than reject: a hand-edited config out of bounds is coerced
+        # back into a sane layout instead of failing the whole settings load.
+        return max(UI_SCALE_MIN, min(UI_SCALE_MAX, round(value, 3)))
 
 
 class ProviderCredentialsView(BaseModel):
@@ -45,6 +67,7 @@ class MachineSettingsView(BaseModel):
     default_projects_folder: str = ""
     recent_projects: list[RecentProject] = Field(default_factory=list)
     palette: list[Swatch] = Field(default_factory=list)
+    display: DisplaySettings = Field(default_factory=DisplaySettings)
     config_path: str
 
 
@@ -65,6 +88,9 @@ class MachineSettingsUpdate(BaseModel):
     recent_projects: list[RecentProject] | None = None
     # Replace the whole palette list. None = leave untouched.
     palette: list[Swatch] | None = None
+    # Prose-presentation prefs (#127 / #575). None = leave untouched; a value
+    # replaces the whole block (all three fields travel together from the UI).
+    display: DisplaySettings | None = None
 
 
 class AIHealthRequest(BaseModel):

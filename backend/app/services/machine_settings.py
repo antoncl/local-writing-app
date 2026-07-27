@@ -10,7 +10,7 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field
 
-from app.models import AssistantTag, RecentProject, Swatch
+from app.models import AssistantTag, DisplaySettings, RecentProject, Swatch
 from app.services.project.errors import ProjectServiceError
 
 APP_NAME = "local-writing-app"
@@ -111,6 +111,7 @@ class MachineSettings(BaseModel):
     default_projects_folder: str = ""
     recent_projects: list[RecentProject] = Field(default_factory=list)
     palette: list[Swatch] = Field(default_factory=_seed_palette)
+    display: DisplaySettings = Field(default_factory=DisplaySettings)
 
 
 def config_dir() -> Path:
@@ -391,6 +392,14 @@ def merge_update(current: MachineSettings, patch: dict[str, Any]) -> MachineSett
             if value == MASK:
                 continue  # keep current
             providers[key] = value
+    display_patch = patch.get("display")
+    if isinstance(display_patch, dict):
+        # The three prose-presentation fields travel together from the UI; the
+        # ui_scale clamp runs in DisplaySettings on the final model_validate.
+        display = base.setdefault("display", {})
+        for key in ("ui_scale", "paragraph_align", "paragraph_indent"):
+            if key in display_patch and display_patch[key] is not None:
+                display[key] = display_patch[key]
     return MachineSettings.model_validate(base)
 
 

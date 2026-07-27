@@ -1044,6 +1044,9 @@ export type Swatch = {
   hex: string;
 };
 
+// Per-user prose-presentation prefs (#127 / #575), applied as CSS vars on :root.
+export type DisplaySettings = { ui_scale: number; paragraph_align: "left" | "justify"; paragraph_indent: boolean };
+
 export type MachineSettingsView = {
   version: number;
   providers: ProviderCredentialsView;
@@ -1052,6 +1055,7 @@ export type MachineSettingsView = {
   default_projects_folder: string;
   recent_projects: RecentProject[];
   palette: Swatch[];
+  display: DisplaySettings;
   config_path: string;
 };
 
@@ -1062,6 +1066,7 @@ export type MachineSettingsUpdate = {
   default_projects_folder?: string;
   recent_projects?: RecentProject[];
   palette?: Swatch[];
+  display?: DisplaySettings;
 };
 
 // Editor-side draft for MachineSettingsDialog. Flat (provider keys hoisted
@@ -1076,6 +1081,7 @@ export type MachineSettingsDraft = {
   default_models: Record<string, string>;
   default_projects_folder: string;
   palette: Swatch[];
+  display: DisplaySettings;
 };
 
 export type AIHealthResponse = {

@@ -6,11 +6,15 @@ from pathlib import Path
 from fastapi import APIRouter, Query
 
 from app.models import (
+    CreateDirectoryRequest,
     CreateProjectRequest,
     CreateStructureNodeRequest,
+    DirectoryEntry,
     DirectoryListing,
+    DirectoryRoot,
     MoveStructureNodeRequest,
     OpenProjectRequest,
+    PathProbe,
     ProjectInfo,
     ProjectNode,
     ProjectValidation,
@@ -94,6 +98,27 @@ def update_project_settings(project: CurrentProject, request: UpdateProjectSetti
 def list_directories(project: CurrentProject, path: str | None = Query(default=None)) -> DirectoryListing:
     with translate_errors():
         return project.list_directories(Path(path) if path else None)
+
+
+# Pure-filesystem picker helpers (#530): jump-off roots, a non-throwing probe
+# for the typed-path field, and inline folder creation. Distinct paths from the
+# listing above, so declaration order is immaterial.
+@router.get("/api/directories/roots", response_model=list[DirectoryRoot])
+def list_directory_roots(project: CurrentProject) -> list[DirectoryRoot]:
+    with translate_errors():
+        return project.list_directory_roots()
+
+
+@router.get("/api/directories/probe", response_model=PathProbe)
+def probe_directory(project: CurrentProject, path: str = Query(default="")) -> PathProbe:
+    with translate_errors():
+        return project.probe_path(path)
+
+
+@router.post("/api/directories", response_model=DirectoryEntry)
+def create_directory(project: CurrentProject, request: CreateDirectoryRequest) -> DirectoryEntry:
+    with translate_errors():
+        return project.create_directory(Path(request.parent), request.name)
 
 
 @router.post("/api/project/validate", response_model=ProjectValidation)

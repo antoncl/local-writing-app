@@ -158,12 +158,45 @@ class ProjectValidation(BaseModel):
 class DirectoryEntry(BaseModel):
     name: str
     path: str
+    # Picker hints (#530): `is_project` marks a folder that already holds a
+    # project (`project.yaml`); `is_empty` marks a safe create target.
+    is_project: bool = False
+    is_empty: bool = False
 
 
 class DirectoryListing(BaseModel):
     path: str
     parent_path: str | None = None
     directories: list[DirectoryEntry] = Field(default_factory=list)
+    # Whether the folder being *shown* already holds a project (drives the
+    # "Already a project" note above "Select this folder").
+    is_project: bool = False
+
+
+class DirectoryRoot(BaseModel):
+    """A jump-off point for the picker: a drive letter, the home folder, or
+    the Documents folder (#530)."""
+
+    label: str
+    path: str
+    kind: str  # "drive" | "home" | "documents"
+
+
+class PathProbe(BaseModel):
+    """Non-throwing validation of a typed path, for the picker's path field
+    (#530). Unlike `list_directories`, a missing or bad path yields
+    `is_dir=False` rather than a 404, so the field can validate on every
+    keystroke. `input` echoes the query so the client can ignore results that
+    a later keystroke has superseded."""
+
+    input: str
+    is_dir: bool = False
+    is_project: bool = False
+
+
+class CreateDirectoryRequest(BaseModel):
+    parent: str
+    name: str
 
 
 # The project node's file name is the same word at every layer — which is why the

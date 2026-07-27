@@ -22,7 +22,9 @@ import type {
   ChatSession,
   ChatSessionList,
   CreateChatSessionRequest,
+  DirectoryEntry,
   DirectoryListing,
+  DirectoryRoot,
   EffectiveStateResponse,
   EmbeddedTodoList,
   MutationMarkerList,
@@ -41,6 +43,7 @@ import type {
   MetadataSchema,
   MetadataSchemaLayers,
   MetadataSchemaOverview,
+  PathProbe,
   ProjectInfo,
   ProjectNode,
   ProjectValidation,
@@ -527,6 +530,18 @@ export const api = {
   listDirectories(path?: string) {
     const query = path ? `?path=${encodeURIComponent(path)}` : "";
     return request<DirectoryListing>(`/directories${query}`);
+  },
+  listDirectoryRoots() {
+    return request<DirectoryRoot[]>("/directories/roots");
+  },
+  probeDirectory(path: string) {
+    return request<PathProbe>(`/directories/probe?path=${encodeURIComponent(path)}`);
+  },
+  createDirectory(parent: string, name: string) {
+    return request<DirectoryEntry>("/directories", {
+      method: "POST",
+      body: JSON.stringify({ parent, name }),
+    });
   },
   validateProject() {
     return request<ProjectValidation>("/project/validate", {

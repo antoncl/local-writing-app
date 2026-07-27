@@ -488,7 +488,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "parent": "plot:base",
             "fields": [],
             "has_body": True,
-            "body_shape": "code",
+            "body_shape": "prose",
             "body_language": "markdown",
         },
         "plot:template_instance": {
@@ -497,7 +497,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "parent": "plot:base",
             "fields": [],
             "has_body": True,
-            "body_shape": "code",
+            "body_shape": "prose",
             "body_language": "markdown",
         },
         "plot:board": {

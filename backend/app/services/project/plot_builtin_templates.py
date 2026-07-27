@@ -5,6 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from app.models_plot import PlotTemplateSpec
+from app.services.project.plot_template_guides import (
+    template_description,
+    template_guide,
+)
 
 
 def builtin_plot_templates() -> list[dict[str, Any]]:
@@ -38,7 +42,7 @@ def builtin_plot_templates() -> list[dict[str, Any]]:
         filename: str,
         node_id: str,
         title: str,
-        body: str,
+        guide_key: str,
         *,
         slug: str,
         family: str,
@@ -48,6 +52,7 @@ def builtin_plot_templates() -> list[dict[str, Any]]:
         source_note: str = "Generic structure guidance authored for the app, not imported from a protected beat sheet.",
         source_url: str | None = None,
     ) -> dict[str, Any]:
+        body = template_guide(guide_key)
         return {
             "filename": filename,
             "node_id": node_id,
@@ -57,7 +62,7 @@ def builtin_plot_templates() -> list[dict[str, Any]]:
                 slug=slug,
                 display_name=title,
                 family=family,
-                description=body,
+                description=template_description(guide_key),
                 cultural_context=cultural_context,
                 prescriptiveness="diagnostic",
                 ai_use_guidance=(
@@ -90,7 +95,7 @@ def builtin_plot_templates() -> list[dict[str, Any]]:
             "Three Act Structure.md",
             "plot_template_three_act",
             "Three-Act Story Arc",
-            "A generic three-part structure template. Duplicate into the book plot folder before editing.",
+            "three_act",
             slug="three-act-story-arc",
             family="act",
             points=[
@@ -163,7 +168,7 @@ def builtin_plot_templates() -> list[dict[str, Any]]:
             "Fifteen-Beat Transformation Arc.md",
             "plot_template_fifteen_beat_transformation",
             "Fifteen-Beat Transformation Arc",
-            "A generic fifteen-beat transformation lens with original labels and wording.",
+            "fifteen_beat_transformation",
             slug="fifteen-beat-transformation-arc",
             family="act",
             ip_risk="medium",
@@ -310,7 +315,7 @@ def builtin_plot_templates() -> list[dict[str, Any]]:
             "Mythic Quest Arc.md",
             "plot_template_mythic_quest",
             "Mythic Quest Arc",
-            "A generic mythic journey lens for departure, ordeal, return, and integration.",
+            "mythic_quest",
             slug="mythic-quest-arc",
             family="journey",
             source_url="https://www.jcf.org/learn/joseph-campbell-heros-journey",
@@ -393,7 +398,7 @@ def builtin_plot_templates() -> list[dict[str, Any]]:
             "Twelve-Step Quest Arc.md",
             "plot_template_twelve_step_quest",
             "Twelve-Step Quest Arc",
-            "A generic twelve-step quest structure with rephrased labels and elastic placement.",
+            "twelve_step_quest",
             slug="twelve-step-quest-arc",
             family="journey",
             ip_risk="medium",
@@ -513,12 +518,12 @@ def builtin_plot_templates() -> list[dict[str, Any]]:
             "Heroine Journey.md",
             "plot_template_heroine_journey",
             "Integration Journey",
-            "A generic internal-integration journey template. Duplicate into the book plot folder before editing.",
+            "integration_journey",
             slug="integration-journey",
             family="journey",
             ip_risk="medium",
-            source_url="https://maureenmurdock.com/the-heroines-journey/",
-            source_note="Safe generic integration journey; exact third-party stage names and explanatory text are not bundled.",
+            source_url="https://heroinejourneys.com/heroine-journey-ii/",
+            source_note="Safe generic integration and connection journey informed by broad heroine-journey craft discussion; exact third-party stage names and explanatory text are not bundled.",
             points=[
                 point(
                     "identity_pressure",
@@ -580,7 +585,7 @@ def builtin_plot_templates() -> list[dict[str, Any]]:
             "Circular Change Arc.md",
             "plot_template_circular_change",
             "Circular Change Arc",
-            "A generic eight-part change cycle usable at scene, episode, subplot, or book scale.",
+            "circular_change",
             slug="circular-change-arc",
             family="cycle",
             source_url="https://reedsy.com/blog/guide/story-structure/dan-harmon-story-circle/",
@@ -663,7 +668,7 @@ def builtin_plot_templates() -> list[dict[str, Any]]:
             "Seven-Point Plot Arc.md",
             "plot_template_seven_point",
             "Seven-Point Plot Arc",
-            "A generic seven-point plot lens organized around ending contrast, turns, pressure points, and resolution.",
+            "seven_point",
             slug="seven-point-plot-arc",
             family="act",
             source_url="https://writingexcuses.com/writing-excuses-7-41-seven-point-story-structure/",
@@ -737,7 +742,7 @@ def builtin_plot_templates() -> list[dict[str, Any]]:
             "Kishotenketsu Four-Part Arc.md",
             "plot_template_kishotenketsu",
             "Kishotenketsu Four-Part Arc",
-            "A four-part structure where development, contrast, and reconciliation can matter more than direct conflict.",
+            "kishotenketsu",
             slug="kishotenketsu-four-part-arc",
             family="act",
             cultural_context="Use without forcing Western antagonist escalation; the turn may be juxtaposition or recontextualization rather than combat.",
@@ -787,7 +792,7 @@ def builtin_plot_templates() -> list[dict[str, Any]]:
             "Romance Relationship Arc.md",
             "plot_template_romance_relationship",
             "Romance Relationship Arc",
-            "A generic relationship arc for attraction, vulnerability, rupture, repair, and emotionally satisfying closure.",
+            "romance_relationship",
             slug="romance-relationship-arc",
             family="relationship",
             source_url="https://www.rwa.org/about-romance-fiction",
@@ -864,7 +869,7 @@ def builtin_plot_templates() -> list[dict[str, Any]]:
             "Mystery Spine.md",
             "plot_template_mystery_spine",
             "Mystery Investigation Arc",
-            "A generic fair-play mystery spine. Duplicate into the book plot folder before editing.",
+            "mystery_spine",
             slug="mystery-investigation-arc",
             family="puzzle",
             points=[
@@ -940,7 +945,7 @@ def builtin_plot_templates() -> list[dict[str, Any]]:
             "Thriller Escalation Arc.md",
             "plot_template_thriller_escalation",
             "Thriller Escalation Arc",
-            "A generic thriller lens for threat, time pressure, reversal, exposure, and confrontation.",
+            "thriller_escalation",
             slug="thriller-escalation-arc",
             family="genre",
             points=[
@@ -1013,7 +1018,7 @@ def builtin_plot_templates() -> list[dict[str, Any]]:
             "Positive Character Change Arc.md",
             "plot_template_positive_character_change",
             "Positive Character Change Arc",
-            "A generic arc for a character moving from a limiting belief toward a harder truth.",
+            "positive_character_change",
             slug="positive-character-change-arc",
             family="character_arc",
             points=[
@@ -1077,7 +1082,7 @@ def builtin_plot_templates() -> list[dict[str, Any]]:
             "Negative Character Change Arc.md",
             "plot_template_negative_character_change",
             "Negative Character Change Arc",
-            "A generic arc for a character rejecting truth, deepening a lie, or choosing corruption.",
+            "negative_character_change",
             slug="negative-character-change-arc",
             family="character_arc",
             points=[
@@ -1132,7 +1137,7 @@ def builtin_plot_templates() -> list[dict[str, Any]]:
             "Steadfast Character Arc.md",
             "plot_template_steadfast_character",
             "Steadfast Character Arc",
-            "A generic arc for a character whose stable truth changes the surrounding world.",
+            "steadfast_character",
             slug="steadfast-character-arc",
             family="character_arc",
             points=[

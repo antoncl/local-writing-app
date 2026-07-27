@@ -193,15 +193,18 @@ lists untagged cards. The model is asked to judge whether the claimed cards
 collectively earn each beat and to identify weak, missing, duplicated, or
 overloaded story work. It also asks for an optional `<plot_suggestions>` block
 with target card, claim, template-instance, and plot-beat ids so suggestions can
-be copied manually today and turned into explicit apply actions later. The
-prompt tells the model to omit placeholder suggestions and only return concrete
-draft changes.
+be copied manually or, for existing claims, applied as explicit evidence notes.
+The prompt tells the model to omit placeholder suggestions and only return
+concrete draft changes.
 
 When an assistant response contains a `<plot_suggestions>` block, the chat
 transcript hides the raw XML from the normal prose rendering and shows each
 concrete suggestion in a compact read-only list. The author can copy proposed
-changes or evidence notes from that list, but accepting, editing, or applying
-suggestions to the plot board remains a later explicit workflow.
+changes or evidence notes from that list. If a suggestion includes both
+`target_claim_id` and `evidence_to_add`, the transcript also offers an explicit
+apply action that appends the evidence to that claim on the owning plot board.
+Other suggestion kinds remain read-only until they have similarly narrow,
+reviewable destination fields.
 
 ## File layout
 

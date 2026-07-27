@@ -510,5 +510,82 @@
         "stacked": false
       }
     ]
+  },
+  {
+    "name": "edit-inside-a-fenced-code-block",
+    "why": "code is the one place a wrapper cannot go — is_code_block is true, so the block stacks whole",
+    "was": "```\nlet tide = 1;\nreturn tide;\n```",
+    "now": "```\nlet tide = 2;\nreturn tide;\n```",
+    "runs": [
+      {
+        "kind": "was",
+        "text": "```\nlet tide = 1;\nreturn tide;\n```",
+        "stacked": true
+      },
+      {
+        "kind": "now",
+        "text": "```\nlet tide = 2;\nreturn tide;\n```",
+        "stacked": true
+      }
+    ]
+  },
+  {
+    "name": "edit-beside-an-autolink",
+    "why": "an autolink <...> is a protected span the word diff must not enter",
+    "was": "She noted <https://harbour.example/log> and read it twice.",
+    "now": "She noted <https://harbour.example/log> and read it once.",
+    "runs": [
+      {
+        "kind": "equal",
+        "text": "She noted <https://harbour.example/log> and read it ",
+        "stacked": false
+      },
+      {
+        "kind": "was",
+        "text": "twice.",
+        "stacked": false
+      },
+      {
+        "kind": "now",
+        "text": "once.",
+        "stacked": false
+      }
+    ]
+  },
+  {
+    "name": "edit-in-a-block-with-an-unterminated-code-span",
+    "why": "an unclosed backtick cannot be bounded — the scanner returns None and the block stacks",
+    "was": "The reading was `off and nobody could say why.",
+    "now": "The reading was `wrong and nobody could say why.",
+    "runs": [
+      {
+        "kind": "was",
+        "text": "The reading was `off and nobody could say why.",
+        "stacked": true
+      },
+      {
+        "kind": "now",
+        "text": "The reading was `wrong and nobody could say why.",
+        "stacked": true
+      }
+    ]
+  },
+  {
+    "name": "edit-in-a-block-with-unpaired-emphasis",
+    "why": "an unpaired * cannot be safely bounded — pair_delimiters returns None and the block stacks",
+    "was": "She was *very tired and cross by the end of it.",
+    "now": "She was *very weary and cross by the end of it.",
+    "runs": [
+      {
+        "kind": "was",
+        "text": "She was *very tired and cross by the end of it.",
+        "stacked": true
+      },
+      {
+        "kind": "now",
+        "text": "She was *very weary and cross by the end of it.",
+        "stacked": true
+      }
+    ]
   }
 ]

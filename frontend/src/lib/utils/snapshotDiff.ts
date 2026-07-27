@@ -20,6 +20,13 @@
  * whole fixture corpus) never contains. If astral-exact parity is ever needed,
  * this is the seam to make code-point-aware.
  *
+ * **Whitespace classification follows JS, not Python `re`.** A few rare characters
+ * are classed oppositely by the two — BOM (U+FEFF) is whitespace to JS but not
+ * Python; NEL (U+0085) and FS–US (U+001C–U+001F) the reverse — so a body carrying
+ * one of them would tokenise, and thus diff, slightly differently from the
+ * backend. None occur in fiction prose, and once the client is the diff authority
+ * (#573) the JS classification is simply the standard.
+ *
  * This module only computes `runs` (the prose diff). Field diffs (`FieldDiff`) and
  * drift stay where their inputs live; see `PORT-SCOPE.md` in the #573 spike.
  */

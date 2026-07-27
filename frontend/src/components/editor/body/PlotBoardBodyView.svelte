@@ -980,8 +980,7 @@
     void updateSelectedCard({ title: value });
   }
 
-  function commitCardSynopsis(event: Event): void {
-    const value = (event.currentTarget as HTMLTextAreaElement).value;
+  function commitCardSynopsis(value: string): void {
     if (!selectedCard || value === selectedCard.synopsis) return;
     void updateSelectedCard({ synopsis: value });
   }
@@ -1026,8 +1025,8 @@
     void updateSelectedClaim({ plotline_id: plotlineId });
   }
 
-  function commitClaimTextField(field: "evidence" | "rationale" | "ai_notes", event: Event): void {
-    const value = optionalText((event.currentTarget as HTMLTextAreaElement).value);
+  function commitClaimTextField(field: "evidence" | "rationale" | "ai_notes", rawValue: string): void {
+    const value = optionalText(rawValue);
     if (!selectedClaim || (selectedClaim[field] ?? null) === value) return;
     void updateSelectedClaim({ [field]: value });
   }
@@ -1055,13 +1054,13 @@
 
   function commitPalettePointTextField(
     field: "title" | "notes" | "author_intent" | "expected_role",
-    event: Event,
+    rawValue: string,
   ): void {
     const row = selectedPaletteRow;
     if (!row) return;
     const value = field === "title"
-      ? (event.currentTarget as HTMLInputElement).value.trim()
-      : (event.currentTarget as HTMLTextAreaElement).value;
+      ? rawValue.trim()
+      : rawValue;
     const current = field === "title"
       ? (row.point.local_label || row.point.title)
       : (row.point[field] ?? "");
@@ -1081,12 +1080,13 @@
     void updateSelectedPalettePoint({ status: value });
   }
 
-  function commitPalettePointOpenQuestions(event: Event): void {
+  function commitPalettePointOpenQuestions(rawValue: string): void {
     const row = selectedPaletteRow;
     if (!row) return;
-    const questions = (event.currentTarget as HTMLTextAreaElement).value
+    const questions = rawValue
       .split(/\r?\n/)
       .map((question) => question.trim())
+      .map((question) => question.replace(/^[-*]\s+/, "").replace(/^\d+[.)]\s+/, "").trim())
       .filter(Boolean);
     const current = row.point.open_questions ?? [];
     if (JSON.stringify(current) === JSON.stringify(questions)) return;

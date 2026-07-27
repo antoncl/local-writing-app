@@ -1063,6 +1063,12 @@
   text-transform: none;
 }
 
+.context-preview-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
 .context-preview input[type="checkbox"] {
   width: 14px;
   height: 14px;

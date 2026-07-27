@@ -50,6 +50,7 @@
     plotNode: PlotNode | null;
     deleteCard: (card: PlotBoardCard, event: MouseEvent) => void;
     promoteCard: (card: PlotBoardCard, event: MouseEvent) => void;
+    startPlotClaimAudit: () => void;
     savingMessage: string;
     selectedCard: PlotBoardCard | null;
     selectedClaim: PlotPointClaim | null;
@@ -92,6 +93,7 @@
     plotNode,
     deleteCard,
     promoteCard,
+    startPlotClaimAudit,
     savingMessage,
     selectedCard,
     selectedClaim,
@@ -589,10 +591,22 @@
     <section class="context-preview" aria-label="AI plot context">
       <header>
         <span>AI context</span>
-        <label>
-          <input type="checkbox" bind:checked={includeFutureContext} />
-          Future
-        </label>
+        <div class="context-preview-actions">
+          <label>
+            <input type="checkbox" bind:checked={includeFutureContext} />
+            Future
+          </label>
+          <button
+            type="button"
+            class="tool-button icon-only"
+            title="Open claim audit chat"
+            aria-label="Open claim audit chat"
+            disabled={Boolean(savingMessage)}
+            onclick={startPlotClaimAudit}
+          >
+            <i class="ti ti-sparkles" aria-hidden="true"></i>
+          </button>
+        </div>
       </header>
       {#if plotContextLoading}
         <p class="muted-line">Loading...</p>

@@ -1,9 +1,9 @@
 # ADR-0046: AI-assisted lore editing is a reviewable per-field patch, not prose revision
 
-- Status: **Proposed** — 2026-07-27 (Anton's framing, then his review decisions folded in the same day:
-  references are **not** AI-generated, the **client-side diff is a precondition**, field definitions are
-  treated uniformly whatever their origin, and **generating a new entry is a create, not a diff**).
-  Awaiting his approval before any slice starts.
+- Status: **Accepted** — 2026-07-27 (Anton, PR #576). Framed by him, then his review decisions folded in
+  the same day: references are **not** AI-generated, the **client-side diff is a precondition** (#573),
+  field definitions are treated uniformly whatever their origin, and **generating a new entry is a create,
+  not a diff**. Implementation issues to be filed per slice (§6).
 - Feature: unfiled — issues to be filed per slice on approval (see §6). This ADR is the architecture
   those issues share.
 - Follows: ADR-0043 (scene snapshots — the witness), ADR-0044 (the compare view — the **flip-diff**

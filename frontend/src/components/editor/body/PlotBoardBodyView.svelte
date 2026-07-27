@@ -4,7 +4,6 @@
   import { SvelteFlow, Controls, MiniMap, type Connection, type Edge, type Node as FlowNode, type NodeTargetEventWithPointer, type OnMoveEnd, type Viewport } from "@xyflow/svelte";
   import { untrack } from "svelte";
   import { api } from "@/lib/api";
-  import { chatSessions } from "@/lib/stores/chatSessions.svelte";
   import { refreshPlotEntries } from "@/lib/stores/plots";
   import { setStructure } from "@/lib/stores/structure";
   import PlotBoardFlowCard from "./PlotBoardFlowCard.svelte";
@@ -12,6 +11,7 @@
   import PlotBoardInspector from "./PlotBoardInspector.svelte";
   import PlotBoardPalette from "./PlotBoardPalette.svelte";
   import PlotBoardToolbar from "./PlotBoardToolbar.svelte";
+  import { openPlotClaimAuditChat } from "./plotBoardClaimAudit";
   import { setPlotBoardContext } from "./plotBoardContext";
   import { saveTemplateInstancePoint } from "./plotBoardTemplateInstances";
   import {
@@ -45,7 +45,6 @@
     PlotRelationship,
     PlotTemplateInstancePoint,
     StructureDocument,
-    NodePickerRef,
   } from "@/lib/types";
 
   interface Props {
@@ -78,7 +77,6 @@
   type NodeDragStopPayload = Parameters<NodeTargetEventWithPointer<MouseEvent | TouchEvent, FlowNode<PlotFlowData>>>[0];
 
   const PLOT_DND_TYPE = "application/x-local-writing-plot";
-  const PLOT_CLAIM_AUDIT_PROMPT_ID = "prompt_builtin_plot_claim_audit";
   const nodeTypes = { plotCard: PlotBoardFlowCard, plotGroup: PlotBoardFlowGroup };
   const EMPTY_BOARD = {
     version: 1,
@@ -710,53 +708,8 @@
     onNavigate?.({ id: card.node_ref, kind: "scene" });
   }
 
-  function plotBoardRef(): NodePickerRef | null {
-    if (!plotNode) return null;
-    return {
-      id: plotNode.id,
-      kind: "plot",
-      title: plotNode.title || "Plot board",
-      entry_type: plotNode.entry_type,
-    };
-  }
-
-  function selectedAuditFocus(): string {
-    const boardTitle = plotNode?.title || "this plot board";
-    if (selectedClaim) {
-      const card = cardById(selectedClaim.card_id);
-      const beatTitle = selectedPointLabel || selectedClaim.plot_point_id;
-      const assignment = selectedClaim.claim_type.replace(/_/g, " ");
-      return `Audit the "${beatTitle}" function badge on card "${card?.title ?? selectedClaim.card_id}" in "${boardTitle}". Check whether the card's ${assignment} claim is supported by its rationale, evidence, synopsis, and surrounding plot context.`;
-    }
-    if (selectedCard) {
-      return `Audit the function badges on card "${selectedCard.title}" in "${boardTitle}". Check whether the card advances the story, whether any badges are weak or unsupported, and whether the card is overloaded.`;
-    }
-    if (selectedPaletteRow) {
-      const beatTitle = selectedPaletteRow.point.title || selectedPaletteRow.point.plot_point_id;
-      return `Audit the plot beat "${beatTitle}" in "${selectedPaletteRow.instance.title}" on "${boardTitle}". Check whether the claiming cards combine to satisfy the beat, what evidence is missing, and whether untagged or nearby cards should participate.`;
-    }
-    return "Find weak, unsupported, duplicated, or missing plot-beat claims across the selected plot board.";
-  }
-
   async function startPlotClaimAudit(): Promise<void> {
-    const ref = plotBoardRef();
-    if (!ref) return;
-    try {
-      const prompt = (await api.listPromptEntries()).entries.find(
-        (entry) => entry.id === PLOT_CLAIM_AUDIT_PROMPT_ID,
-      );
-      if (!prompt) throw new Error("Could not find the Plot Claim Audit prompt.");
-      await chatSessions.openChatFromPromptEntry(
-        prompt,
-        {
-          plot: [ref],
-          focus: selectedAuditFocus(),
-        },
-        null,
-      );
-    } catch (caught) {
-      chatSessions.setError(`Couldn't open claim audit: ${(caught as Error).message}`);
-    }
+    await openPlotClaimAuditChat({ plotNode, selectedClaim, selectedCard, selectedPaletteRow, selectedPointLabel, cardById });
   }
 
   function cloneBoardSpec(source: PlotBoardSpec): PlotBoardSpec {

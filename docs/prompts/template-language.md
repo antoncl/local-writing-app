@@ -92,7 +92,7 @@ The dispatch pipeline populates the context. Common variables (the actual set wi
 | Variable | Meaning |
 | --- | --- |
 | `scene` | The currently active scene node (`scene.title`, `scene.summary`, `scene.body`, …) |
-| `project` | The current project's settings node (`project.tense`, `project.language`, `project.style_voice`) |
+| `project` | The current project — `project.title`, `project.ai_policy`, and the authored project-node fields under `project.metadata` (`project.metadata.measurement_system`, `project.metadata.tense`, `project.metadata.spelling`, `project.metadata.language`, `project.metadata.pov_mode`). Each `metadata` field is resolved nearest-explicit-wins over the project's inheritance chain, so a value set on the universe reaches every book under it; a field no layer sets is simply absent, so guard with `{% if 'tense' in project.metadata %}` (a bare `{{ project.metadata.tense }}` raises `UndefinedError` when unset). |
 | `effective` | Resolved effective AI settings (`effective.model_class`, `effective.provider_policy`) |
 | `input` | User-supplied inputs declared by the prompt entry (e.g., `input.words`) |
 
@@ -124,7 +124,9 @@ These propagate up to the dispatch / preview layer and are reported to the user.
 ```jinja
 {% role "system" %}
 You are an expert fiction writer.
-Always write in {{ project.tense }} tense using {{ project.language }} spelling.
+{% if 'tense' in project.metadata %}Always write in {{ project.metadata.tense }} tense.{% endif %}
+{% if 'spelling' in project.metadata %}Use {{ project.metadata.spelling }} spelling.{% endif %}
+{% if 'measurement_system' in project.metadata %}Measurements are {{ project.metadata.measurement_system }}.{% endif %}
 {% include "snippet_house_voice" %}
 {% cache_break %}
 {% endrole %}

@@ -128,6 +128,16 @@ class ProjectInfo(BaseModel):
     # different questions and both have a consumer.
     chain: list[ProjectChainLayer] = Field(default_factory=list)
     children: list[ProjectChild] = Field(default_factory=list)
+    # The project node's authored fields (project.md), resolved nearest-explicit-
+    # wins over the layer chain (#317) — the same fold as `ai_policy`, applied to
+    # the node's metadata rather than the manifest's policy. This is the *channel
+    # to the model*: it is what makes `{{ project.metadata.measurement_system }}`
+    # resolve in a prompt template, with a value set on an ancestor (measurement
+    # is world canon) reaching every book beneath it. A key no layer authors is
+    # simply absent — templates guard with `{% if %}`. Provenance (which layer
+    # supplied each value) is deliberately not carried here; the editor's
+    # inherited/override display is the wizard's review pane (#318, slice 4).
+    metadata: dict[str, MetadataValue] = Field(default_factory=dict)
 
 
 class UpdateProjectSettingsRequest(BaseModel):

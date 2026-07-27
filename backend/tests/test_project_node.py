@@ -123,9 +123,9 @@ class ProjectNodeServiceTests(unittest.TestCase):
                 base_revision=node.revision,
                 metadata={
                     "author": "David Weber",
-                    "genre": "military sci-fi",
-                    "language": "English",
-                    "narrative_pov": "limited third",
+                    "language": "en",
+                    "pov_mode": "third_limited",
+                    "measurement_system": "metric",
                     "target_word_count": 120000,
                     "series_number": 1,
                 },
@@ -136,7 +136,7 @@ class ProjectNodeServiceTests(unittest.TestCase):
         self.assertEqual(updated.body.strip(), "A treecat-bonded young lieutenant takes her first independent command.")
         # Reload to confirm persistence
         reloaded = self.service.read_project_node()
-        self.assertEqual(reloaded.metadata["genre"], "military sci-fi")
+        self.assertEqual(reloaded.metadata["pov_mode"], "third_limited")
 
     def test_save_project_node_updates_title_in_project_yaml(self) -> None:
         node = self.service.read_project_node()

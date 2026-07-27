@@ -92,6 +92,18 @@ class ProspectiveProjectNodeTests(unittest.TestCase):
         # The schema is still the built-in default — the project kind is present.
         self.assertIn("project:project", result.metadata_schema.entry_types)
 
+    def test_color_leads_the_authored_project_fields_so_it_clears_the_review_fold(self) -> None:
+        """#560: the review pane renders project fields in schema order inside a
+        fixed 560px frame, skipping intrinsic fields (id/title/entry_type). `color`
+        is the level/inheritance cue, so it must lead the AUTHORED fields to stay
+        above the fold instead of trailing off the bottom. Asserted on the
+        resolved/served schema the pane actually consumes — where the intrinsics
+        are prepended, so the check filters them exactly as the pane does."""
+        schema = self._resolve([]).metadata_schema
+        fields = schema.entry_types["project:project"].fields
+        authored = [f for f in fields if not schema.fields[f].intrinsic]
+        self.assertEqual(authored[0], "color")
+
     def test_a_non_ancestor_tick_is_dropped(self) -> None:
         """A ticked path that is not on the book's parent chain contributes
         nothing — the declaration can only select from real ancestors, never

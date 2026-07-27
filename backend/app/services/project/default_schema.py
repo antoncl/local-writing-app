@@ -322,7 +322,14 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         "project:project": {
             "name": "Project",
             "kind": "project",
+            # `color` leads: it is the level/inheritance cue the app reads
+            # elsewhere (the `--star` axis, level pills), and field order is the
+            # display order everywhere — including the create-wizard review step,
+            # whose fixed 560px frame pushed a trailing `color` below the fold
+            # (#560). Placed at the top as if a user had dragged it up, rather
+            # than special-casing the review pane's presentation order.
             "fields": [
+                "color",
                 "author",
                 "language",
                 "spelling",
@@ -331,7 +338,6 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "measurement_system",
                 "target_word_count",
                 "series_number",
-                "color",
                 "project_cost",
             ],
             "has_body": True,

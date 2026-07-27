@@ -29,6 +29,7 @@ import type {
   MachineSettingsDraft,
   MachineSettingsUpdate,
   MachineSettingsView,
+  MetadataValue,
   ProjectInfo,
   ProviderCredentialsView,
   RecentProject,
@@ -225,12 +226,20 @@ class ProjectSession {
     title: string,
     inherits: string[] = [],
     aiPolicy?: AIPolicy,
+    nodeMetadata: Record<string, MetadataValue> = {},
+    description = "",
   ): Promise<void> {
     await this.run(async () => {
       let openedProject = await api.createProject(path, title, inherits);
       if (aiPolicy) {
         openedProject = await api.updateProjectSettings({ ai_policy: aiPolicy });
       }
+      // The review pane's overrides + blurb (#318 slice 4), written into the new
+      // book's `project.md` before the workspace loads so the first render sees
+      // them. Both target the just-created project (create recorded the scope,
+      // like the aiPolicy PATCH above). Only fields the author set are sent —
+      // everything else stays absent and inherits.
+      await this.#applyProjectNodeDraft(nodeMetadata, description);
       this.rememberLastProject(openedProject.root_path);
       this.onOpenWorkspace(openedProject);
       await loadProjectData();
@@ -242,6 +251,25 @@ class ProjectSession {
       await this.refreshRecents();
       this.setStatus(`Created ${openedProject.title}`);
     });
+  }
+
+  // Write the wizard's review overrides + description into the just-created
+  // project node (#318 slice 4). A no-op when the author accepted every default
+  // and skipped the blurb — a fresh node already carries `metadata: {}` and an
+  // empty body. `saveProjectNode` needs the node's revision, so read it first;
+  // the overrides layer onto its (empty) metadata, absence meaning inherit.
+  async #applyProjectNodeDraft(
+    metadata: Record<string, MetadataValue>,
+    description: string,
+  ): Promise<void> {
+    const hasMetadata = Object.keys(metadata).length > 0;
+    const hasDescription = description.trim().length > 0;
+    if (!hasMetadata && !hasDescription) return;
+    const node = await api.getProjectNode();
+    await api.saveProjectNode(
+      { ...node, metadata: { ...node.metadata, ...metadata } },
+      hasDescription ? description : node.body,
+    );
   }
 
   // Returns false when the open failed (App's run() swallows the error), so

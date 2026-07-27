@@ -991,6 +991,27 @@ class MetadataSchemaMixin:
         layer = self.layer_by_id(root, layer_id)
         return None if layer is None else layer.folder / SCHEMA_FILENAME
 
+    def build_prospective_metadata_schema(self, layers: list[IndexLayer]) -> MetadataSchema:
+        """The merged schema for an explicit, not-yet-created chain (#318 slice 4).
+
+        `read_metadata_schema` derives its layers by walking the open project's
+        declaration; the wizard's review pane has only the ticked ancestors and a
+        root folder that does not exist yet (`prospective_layers`). The merge is a
+        pure function of the ordered layer folders, so it reuses the exact fold
+        `_build_metadata_schema` uses — default base, nearer-wins per layer,
+        inheritance resolved last. The root layer contributes nothing (its
+        `metadata.schema.yaml` is not written until create), which the
+        `path.exists()` guard handles: a prospective leaf simply adds no schema,
+        the correct answer.
+        """
+        data = deepcopy(DEFAULT_METADATA_SCHEMA)
+        for layer in layers:
+            path = layer.folder / SCHEMA_FILENAME
+            if path.exists():
+                self._merge_metadata_schema_layer(data, self._read_metadata_schema_layer(path))
+        data = self._resolve_metadata_schema_inheritance(data)
+        return MetadataSchema.model_validate(data)
+
     def _read_metadata_schema_through_path(self, root: Path, target_path: Path) -> MetadataSchema:
         data = deepcopy(DEFAULT_METADATA_SCHEMA)
         for path in self._metadata_schema_layer_paths(root):

@@ -42,6 +42,7 @@ from app.models import (
     ProjectInfo,
     ProjectNode,
     ProjectValidation,
+    ProspectiveProjectNode,
     Scene,
     TodoItem,
     UpdateProjectSettingsRequest,
@@ -129,9 +130,18 @@ class _ProjectNodeMetadataResolver(LayerVisitor):
     def __init__(self, stated: Callable[[Path], dict[str, MetadataValue]]) -> None:
         self._stated = stated
         self.metadata: dict[str, MetadataValue] = {}
+        # Per resolved key, the label of the nearest layer that stated it — the
+        # provenance the value fold otherwise discards. `_resolved_project_node_
+        # metadata` (the template channel) reads `metadata` only and ignores
+        # this; the wizard's review pane reads it to name the inherited source
+        # (#318 slice 4 — "Reset to <source>").
+        self.sources: dict[str, str] = {}
 
     def visit_layer(self, layer: IndexLayer) -> None:
-        self.metadata.update(self._stated(layer.folder))
+        stated = self._stated(layer.folder)
+        self.metadata.update(stated)
+        for key in stated:
+            self.sources[key] = layer.label
 
 
 class ProjectLifecycleMixin:
@@ -384,6 +394,42 @@ class ProjectLifecycleMixin:
         comes back `inherited=False` — a fresh project has declared nothing yet.
         """
         return self._ancestor_candidates_for_api(root.expanduser().resolve())
+
+    def prospective_project_node(
+        self, root: Path, inherits: list[str]
+    ) -> ProspectiveProjectNode:
+        """The review pane's inputs for a *not-yet-created* project at `root`
+        that would declare `inherits` (#318 slice 4 — design-doc §5 step 4).
+
+        The wizard shows the project node's authored fields filled-in *before*
+        the project exists, so nothing here can ride `current_project()`. It is
+        the prospective twin of `ProjectInfo`'s `metadata` (#317) plus the
+        provenance that field deliberately omits: over the same chain fold, keyed
+        off the wizard's ticked ancestors instead of an open project's
+        declaration, it returns
+
+        - `metadata_schema` — the merged schema, so a `select` shows the real
+          vocabulary (a book under a universe that added an option sees it);
+        - `metadata` — the inherited values, nearest-explicit-wins over the
+          ticked ancestors (a key no ancestor states is simply absent, and the
+          review pane falls to the schema default for it);
+        - `field_sources` — per resolved key, the ancestor layer that supplied
+          it, so the pane can name the source it would reset to (§8).
+
+        `prospective_layers` bounds the chain by the same machine root as a real
+        project, so a ticked path that is not a real ancestor contributes
+        nothing. Read-only: it writes no files and needs no scope, like
+        `prospective_ancestor_candidates`.
+        """
+        layers = self.prospective_layers(root.expanduser().resolve(), inherits)
+        resolver = _ProjectNodeMetadataResolver(self._stated_project_node_metadata)
+        for layer in layers:
+            resolver.visit_layer(layer)
+        return ProspectiveProjectNode(
+            metadata_schema=self.build_prospective_metadata_schema(layers),
+            metadata=resolver.metadata,
+            field_sources=resolver.sources,
+        )
 
     def _ancestor_candidates_for_api(self, root: Path) -> list[AncestorCandidate]:
         """The enumeration, outermost first — every ancestor folder, flagged.

@@ -3,11 +3,11 @@
 // the frontend has no component-test infra, so the wizard's control flow lives
 // here rather than inside the Svelte view.
 //
-// Steps 1–2 shipped in slice 2; slice 3 (#547) inserts "ai" between "location"
-// and the final Create action. Later slices insert "review" | "describe" after
-// it, moving Create onto the last of them.
+// Steps 1–2 shipped in slice 2; slice 3 (#547) inserted "ai" between "location"
+// and the final Create action. Slice 4 (#552) appends "review" | "describe"
+// after it, moving Create onto the last step ("describe").
 
-export type WizardStepId = "root" | "location" | "ai";
+export type WizardStepId = "root" | "location" | "ai" | "review" | "describe";
 
 export type StepDef = { id: WizardStepId; label: string };
 
@@ -15,6 +15,8 @@ const ALL_STEPS: StepDef[] = [
   { id: "root", label: "Root folder" },
   { id: "location", label: "Location" },
   { id: "ai", label: "AI" },
+  { id: "review", label: "Book settings" },
+  { id: "describe", label: "Description" },
 ];
 
 // The root-folder step is machine substrate (#429): it exists only on first
@@ -49,6 +51,13 @@ export function stepComplete(id: WizardStepId, snapshot: WizardSnapshot): boolea
     case "ai":
       // The policy slider always holds a value (Off is a legal terminal state),
       // so the AI step is never inconsistent — like inheritance, it has no gate.
+      return true;
+    case "review":
+      // The review pane shows the resolved field picture; every field either
+      // inherits or carries a default, so there is nothing to leave invalid.
+      return true;
+    case "describe":
+      // The description is skippable (§5) — an empty blurb is a legal project.
       return true;
   }
 }

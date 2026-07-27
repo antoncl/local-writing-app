@@ -19,6 +19,8 @@ from app.models import (
     ProjectInfo,
     ProjectNode,
     ProjectValidation,
+    ProspectiveProjectNode,
+    ProspectiveProjectNodeRequest,
     RenameStructureNodeRequest,
     ResearchNote,
     SaveProjectNodeRequest,
@@ -133,6 +135,19 @@ def project_ancestor_candidates(
 ) -> list[AncestorCandidate]:
     with translate_errors():
         return project.prospective_ancestor_candidates(Path(path))
+
+
+# The wizard's review step (#318 slice 4) resolves the project node's authored
+# fields — merged schema, inherited values, and per-field source — over the
+# ticked ancestors *before* the project exists. POST because it carries the
+# declaration list. Like the candidates route it is a path-based read touching
+# no project state, so an absent scope (first run) is fine.
+@router.post("/api/project/prospective-node", response_model=ProspectiveProjectNode)
+def prospective_project_node(
+    project: CurrentProject, request: ProspectiveProjectNodeRequest
+) -> ProspectiveProjectNode:
+    with translate_errors():
+        return project.prospective_project_node(Path(request.root_path), request.inherits)
 
 
 @router.post("/api/project/validate", response_model=ProjectValidation)

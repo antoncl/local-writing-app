@@ -14,9 +14,12 @@
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import AiPolicySlider from "@/components/widgets/AiPolicySlider.svelte";
   import ProviderTierPicker from "@/components/widgets/ProviderTierPicker.svelte";
+  import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
+  import MetadataLongTextEditor from "@/components/widgets/MetadataLongTextEditor.svelte";
   import { createWizard as wizard } from "@/lib/stores/createWizard.svelte";
   import { assistantEntriesStore, isAssistantListed } from "@/lib/stores/assistants";
   import { cloudKeyPlaceholder } from "@/lib/utils/aiProviders";
+  import { resetTargetLabel } from "@/lib/utils/projectReview";
   import { moveBefore } from "@/lib/utils/listOrder";
   import { get } from "svelte/store";
 
@@ -324,6 +327,79 @@
           {:else if wizard.aiSliderValue === "off"}
             <p class="muted">AI is off — no provider or assistants. Nothing more to set.</p>
           {/if}
+        {:else if wizard.currentStep.id === "review"}
+          <!--
+            The review pane (design-doc §5 step 4 / §6): the project node's
+            authored fields, resolved over the ticked chain before the project
+            exists. Everything is shown filled-in; a value inherited from an
+            ancestor reads muted and names its source, and setting one authors it
+            here (a live override with a Reset-to-source control). Row logic is
+            the pure, tested projectReviewRows; the widgets are the same
+            FieldValueEditor the rail uses.
+          -->
+          <p class="muted">
+            Review this project's settings. Values inherited from the projects above are shown
+            filled-in — change any to set it for this project.
+          </p>
+          {#if wizard.reviewLoading}
+            <p class="muted">Resolving settings…</p>
+          {:else if wizard.reviewSchema}
+            <div class="review-fields">
+              {#each wizard.reviewRows as row (row.fieldId)}
+                <div class="review-field" class:is-local={row.provenance === "local"}>
+                  <div class="review-field-head">
+                    <span class="review-label">{row.label}</span>
+                    {#if row.provenance === "inherited"}
+                      <span class="review-source" title={`Inherited from ${row.sourceLabel}`}
+                        >Inherited from {row.sourceLabel}</span
+                      >
+                    {:else if row.clearable}
+                      <!-- The interactive ti-versions mark (§8), naming the
+                           source it would defer to rather than the word
+                           "inherit". -->
+                      <button
+                        type="button"
+                        class="review-reset"
+                        title={`Reset to ${resetTargetLabel(row)}`}
+                        on:click={() => wizard.resetNodeField(row.fieldId)}
+                      >
+                        <i class="ti ti-versions" aria-hidden="true"></i>
+                        Reset to {resetTargetLabel(row)}
+                      </button>
+                    {/if}
+                  </div>
+                  <FieldValueEditor
+                    field={row.field}
+                    value={row.value}
+                    ariaLabel={row.label}
+                    documentKind="project"
+                    entryType="project:project"
+                    onChange={(value) => wizard.setNodeField(row.fieldId, value)}
+                  />
+                </div>
+              {/each}
+            </div>
+          {:else}
+            <div class="wizard-error" role="alert">
+              Couldn't resolve this project's settings — go back and check the location.
+            </div>
+          {/if}
+        {:else if wizard.currentStep.id === "describe"}
+          <!--
+            Description (design-doc §5 step 5): a blurb into the project node
+            body, edited with the app's long_text editor so it matches every
+            other long-text surface. Skippable — Create is enabled regardless.
+          -->
+          <p class="muted">
+            Add a short description for this project. You can skip this and add it later.
+          </p>
+          <div class="describe-editor">
+            <MetadataLongTextEditor
+              ariaLabel="Description"
+              value={wizard.description}
+              on:change={(event) => wizard.setDescription(event.detail.value)}
+            />
+          </div>
         {/if}
       </div>
     </div>
@@ -455,6 +531,69 @@
     margin: 0;
     color: var(--danger);
     font-size: var(--fs-sm);
+  }
+
+  /* ---- Review step (book settings / overrides) ---- */
+  .review-fields {
+    display: grid;
+    gap: 12px;
+  }
+
+  .review-field {
+    display: grid;
+    gap: 4px;
+    padding-left: 10px;
+    /* A quiet left rail: transparent by default, the star axis when the author
+       has overridden the row (the "live" treatment of §8). */
+    border-left: 2px solid transparent;
+  }
+
+  .review-field.is-local {
+    border-left-color: var(--star);
+  }
+
+  .review-field-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .review-label {
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+  }
+
+  /* Inherited rows name their source quietly — the wizard's job is to make the
+     inheritance legible, so this is inline rather than tooltip-only. */
+  .review-source {
+    margin-left: auto;
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+  }
+
+  /* The interactive ti-versions mark + "Reset to <source>" (§8), on the star
+     axis, zero-chrome until hovered. */
+  .review-reset {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--star);
+    font-size: var(--fs-xs);
+    padding: 2px 6px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .review-reset:hover {
+    border-color: var(--border);
+    background: var(--surface);
+  }
+
+  /* Give the long-text description room to breathe within the fixed frame. */
+  .describe-editor {
+    min-height: 180px;
   }
 
   /* ---- AI step ---- */

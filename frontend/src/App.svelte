@@ -208,8 +208,8 @@
     createWizard.onError = (message) => { error = message; };
     createWizard.getStartPath = () => projectPath;
     createWizard.onSaveRootFolder = (folder) => projectSession.saveDefaultProjectsFolder(folder);
-    createWizard.onCreateProject = (path, title, inherits, aiPolicy) =>
-      projectSession.createProjectAt(path, title, inherits, aiPolicy);
+    createWizard.onCreateProject = (path, title, inherits, aiPolicy, nodeMetadata, description) =>
+      projectSession.createProjectAt(path, title, inherits, aiPolicy, nodeMetadata, description);
     // AI-step substrate (#547). Provider credentials + assistants are
     // machine-global, so every write forces the machine layer (layer_id "") and
     // the new book inherits the result — the wizard has no project of its own

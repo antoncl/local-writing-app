@@ -540,7 +540,8 @@
                   {:else if isIntrinsic}
                     <span class="sfr-inherited-label">built-in</span>
                   {:else}
-                    <span class="sfr-inherited-label">inherited from {inheritedFromLabel(selectedSchemaTypeId!, fieldId, metadataSchema)}</span>
+                    {@const inheritedFrom = inheritedFromLabel(selectedSchemaTypeId!, fieldId, metadataSchema)}
+                    <span class="sfr-inherited-label" title={`inherited from ${inheritedFrom}`}>inherited from {inheritedFrom}</span>
                   {/if}
                   <!-- Inherited rows are a plain <div>, so the override buttons sit
                        inline in the meta cluster. Group-generated fields are exempt
@@ -674,6 +675,13 @@
     white-space: nowrap;
   }
   .sfr-inherited-label {
+    /* Truncate rather than wrap so a long-type row stays single height (#523);
+       shrinks first (the icons beside it are flex:none), full text on hover. */
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-size: var(--fs-xs);
     font-style: italic;
     color: var(--text-3, var(--text-3));

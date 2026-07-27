@@ -198,11 +198,14 @@
 
   .swatch-picker-popover {
     /* Anchored at viewport coords by the component — `position: fixed`
-       so pane overflow can never clip the popover. Stays a DOM child of
-       its invoker, so inside a dialog it stacks within the dialog's own
-       stacking context. */
+       so pane overflow can never clip the popover. Portaled to <body>
+       (`use:portalToBody`), so it escapes its invoker's stacking context and
+       must clear the modal layer itself (Modal 2000, DirectoryPicker 2200) or
+       it opens BEHIND a dialog that embeds this picker — e.g. the create-project
+       wizard's review step (#556). Matches TagPicker's portaled-popover z-index;
+       NOT `--z-dropdown` (100), which also drives non-portaled nodes. */
     position: fixed;
-    z-index: var(--z-dropdown);
+    z-index: 10000;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 8px;

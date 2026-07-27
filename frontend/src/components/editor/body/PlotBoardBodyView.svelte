@@ -11,7 +11,7 @@
   import PlotBoardInspector from "./PlotBoardInspector.svelte";
   import PlotBoardPalette from "./PlotBoardPalette.svelte";
   import PlotBoardToolbar from "./PlotBoardToolbar.svelte";
-  import { openPlotClaimAuditChat } from "./plotBoardClaimAudit";
+  import { openPlotCardAssistChat, openPlotClaimAuditChat } from "./plotBoardClaimAudit";
   import { buildPlotDiagnostics } from "./plotBoardDiagnostics";
   import { setPlotBoardContext } from "./plotBoardContext";
   import { saveTemplateInstancePoint } from "./plotBoardTemplateInstances";
@@ -1465,6 +1465,7 @@
     diagnostics={plotDiagnostics}
     {deleteCard}
     {promoteCard}
+    startCardAssist={() => openPlotCardAssistChat({ plotNode, selectedClaim, selectedCard, selectedPaletteRow, selectedPointLabel, cardById, diagnostics: plotDiagnostics })}
     startPlotClaimAudit={() => openPlotClaimAuditChat({ plotNode, selectedClaim, selectedCard, selectedPaletteRow, selectedPointLabel, cardById })}
     {savingMessage}
     {selectedCard}

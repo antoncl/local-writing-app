@@ -7,6 +7,7 @@ import type {
   PlotPointClaim,
   PlotTemplateInstancePoint,
 } from "@/lib/types";
+import type { PlotDiagnostics } from "./plotBoardDiagnostics";
 
 const PLOT_CLAIM_AUDIT_PROMPT_ID = "prompt_builtin_plot_claim_audit";
 
@@ -22,6 +23,7 @@ type PlotClaimAuditContext = {
   selectedPaletteRow: TemplatePointRowLike | null;
   selectedPointLabel: string;
   cardById: (cardId: string) => PlotBoardCard | null;
+  diagnostics?: PlotDiagnostics;
 };
 
 function plotBoardRef(plotNode: PlotNode | null): NodePickerRef | null {
@@ -53,7 +55,15 @@ function selectedAuditFocus(context: PlotClaimAuditContext): string {
   return "Find weak, unsupported, duplicated, or missing plot-beat claims across the selected plot board.";
 }
 
-export async function openPlotClaimAuditChat(context: PlotClaimAuditContext): Promise<void> {
+export function cardAssistFocus(context: PlotClaimAuditContext): string {
+  const card = context.selectedCard;
+  if (!card) return selectedAuditFocus(context);
+  const boardTitle = context.plotNode?.title || "this plot board";
+  const cardClaims = (context.plotNode?.board?.claims ?? []).filter((claim) => claim.card_id === card.id);
+  return `Help make card "${card.title}" stronger in "${boardTitle}". Treat diagnostics as signals, not verdicts. Current issues: ${cardAssistIssues(context, cardClaims)} Current function badges: ${cardAssistClaims(cardClaims)} Card synopsis: ${card.synopsis || "No synopsis yet."} Give concrete story repair options: narrative actions, obstacles, choices, reveals, consequences, claim changes, or whether this should become a scene. Do not draft prose; offer specific options the author can choose from.`;
+}
+
+async function openPlotClaimChat(context: PlotClaimAuditContext, focus: string): Promise<void> {
   const ref = plotBoardRef(context.plotNode);
   if (!ref) return;
   try {
@@ -65,11 +75,30 @@ export async function openPlotClaimAuditChat(context: PlotClaimAuditContext): Pr
       prompt,
       {
         plot: [ref],
-        focus: selectedAuditFocus(context),
+        focus,
       },
       null,
     );
   } catch (caught) {
     chatSessions.setError(`Couldn't open claim audit: ${(caught as Error).message}`);
   }
+}
+
+function cardAssistIssues(context: PlotClaimAuditContext, cardClaims: PlotPointClaim[]): string {
+  const cardDiagnostics = context.selectedCard ? context.diagnostics?.cards.get(context.selectedCard.id) ?? [] : [];
+  const claimDiagnostics = cardClaims.flatMap((claim) => context.diagnostics?.claims.get(claim.id) ?? []);
+  return [...cardDiagnostics, ...claimDiagnostics].map((item) => item.label).join("; ") || "No explicit diagnostics are marked, but the card can still be strengthened.";
+}
+
+function cardAssistClaims(cardClaims: PlotPointClaim[]): string {
+  if (cardClaims.length === 0) return "The card has no function badges yet.";
+  return cardClaims.map((claim) => `${claim.claim_label || claim.plot_point_id} (${claim.claim_type}${claim.strength ? `, ${claim.strength}` : ""})`).join("; ");
+}
+
+export async function openPlotClaimAuditChat(context: PlotClaimAuditContext): Promise<void> {
+  await openPlotClaimChat(context, selectedAuditFocus(context));
+}
+
+export async function openPlotCardAssistChat(context: PlotClaimAuditContext): Promise<void> {
+  await openPlotClaimChat(context, cardAssistFocus(context));
 }

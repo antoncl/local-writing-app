@@ -666,6 +666,7 @@
           void projectSession.setDeclaration(toggledDeclaration(project?.ancestors, path))}
         inheritSaving={projectSession.declarationSaving}
         bind:aiPolicy={aiSettings.policy}
+        effectiveAiPolicy={project?.ai_policy ?? "off"}
         bind:projectCostExpanded
         onValidate={validateProject}
         onOpenChats={openChatsPane}

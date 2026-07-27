@@ -973,6 +973,13 @@ export type ProjectInfo = {
   root_path: string;
   projects_base_folder?: string | null;
   ai_policy: AIPolicy;
+  /**
+   * Whether `ai_policy` is inherited from an ancestor (this project states
+   * none of its own) rather than set here (#471). Lets the Project pane show
+   * the "Inherit" option as selected; *which* ancestor supplied the value is
+   * provenance (#313), not carried here.
+   */
+  ai_policy_inherited: boolean;
   /** The whole enumeration, outermost first, matching layer rank. */
   ancestors?: AncestorCandidate[];
   /** The declared subset of the same walk, resolved and labelled server-side. */

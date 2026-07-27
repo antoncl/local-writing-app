@@ -39,10 +39,25 @@
 
   $: inheritRows = declarationRows(ancestors);
 
+  // The access the Health Check would actually exercise: the draft when it
+  // names a real policy, the resolved value when the draft defers ("inherit").
+  // Gating on the draft alone would enable a ping for an inherited-`off`
+  // project, whose effective access is off (#471).
+  $: healthCheckPolicy = aiPolicy === "inherit" ? effectiveAiPolicy : aiPolicy;
+
   // Two-way bound: App is the source of truth. aiPolicy is set on project load
   // and read back when saving AI settings; projectCostExpanded is bound because
   // App resets it on project switch. Both stay there and bind down.
-  export let aiPolicy: AIPolicy;
+  //
+  // "inherit" is the draft-only value the pane can hold that the stored policy
+  // cannot (#471): the project states no policy of its own and defers to its
+  // parent. Saving it clears the key; it is never a resolved value.
+  export let aiPolicy: AIPolicy | "inherit";
+  // The policy actually in force — the chain-resolved value (#312). When the
+  // radio is on "inherit" the draft is not a usable policy, so the effective
+  // one is passed in for the one place that needs it: the Health Check gate,
+  // which pings whatever access is really resolved, not the draft.
+  export let effectiveAiPolicy: AIPolicy;
   export let projectCostExpanded: boolean;
 
   // Actions — App owns the side effects (API calls, opening other panes).
@@ -200,13 +215,16 @@
   {#if isProjectOpen}
     <fieldset class="ai-policy">
       <legend>AI access</legend>
+      <label title="Set no policy of your own — inherit it from an ancestor project, or default to Off (#471)">
+        <input type="radio" bind:group={aiPolicy} value="inherit" /> Inherit
+      </label>
       <label><input type="radio" bind:group={aiPolicy} value="off" /> Off</label>
       <label><input type="radio" bind:group={aiPolicy} value="local-only" /> Local only</label>
       <label><input type="radio" bind:group={aiPolicy} value="cloud-allowed" /> Cloud allowed</label>
     </fieldset>
     <div class="button-row">
       <button type="button" on:click={onSaveAISettings}>Save AI Settings</button>
-      <button type="button" disabled={aiHealthChecking || aiPolicy === "off"} on:click={onHealthCheck}>
+      <button type="button" disabled={aiHealthChecking || healthCheckPolicy === "off"} on:click={onHealthCheck}>
         {aiHealthChecking ? "Pinging…" : "Health Check"}
       </button>
     </div>
@@ -387,6 +405,14 @@
     align-items: center;
     gap: 4px;
     font-size: var(--fs-md);
+  }
+
+  /* The global `input, select { width: 100% }` (styles.css) stretches a radio
+     to fill its flex label, distorting these controls (#426 noted it here,
+     unfiled). Resetting the width is what fixes it — `flex: none` does not, as
+     the basis just reads the width property back. */
+  .ai-policy label input[type="radio"] {
+    width: auto;
   }
 
   .ai-health-result {

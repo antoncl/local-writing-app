@@ -33,6 +33,9 @@
   // Event hooks. The parent owns all side effects; this component is
   // purely presentational + dropdown state.
   export let onSelectRecent: (path: string) => void = () => {};
+  // Forget a stale recents entry (#423). The switcher stays open so several can
+  // be cleared in one visit.
+  export let onRemoveRecent: (path: string) => void = () => {};
   export let onOpenFolder: () => void = () => {};
   export let onNewProject: () => void = () => {};
   // Assistants (like Detail Types / Project) is project-scoped — its editor
@@ -136,6 +139,12 @@
   function handleSelectRecent(path: string) {
     closeSwitcher();
     onSelectRecent(path);
+  }
+
+  function handleRemoveRecent(path: string) {
+    // Deliberately does NOT close the switcher — clearing dead rows is a
+    // housekeeping pass, not a navigation (#423).
+    onRemoveRecent(path);
   }
 
   function handleOpenProjectPath(path: string) {
@@ -255,18 +264,27 @@
         {#if recentProjects.length > 0}
           <div class="switcher-section-label">Recent</div>
           {#each recentProjects as recent (recent.path)}
-            <button
-              type="button"
-              class="switcher-item recent-item"
-              role="menuitem"
-              on:click={() => handleSelectRecent(recent.path)}
-            >
-              <span class="recent-title">{recent.title}</span>
-              <span class="recent-meta">
-                <span class="recent-path" title={recent.path}>{shortenPath(recent.path)}</span>
-                <span class="recent-time">{formatRelativeTime(recent.opened_at)}</span>
-              </span>
-            </button>
+            <div class="recent-row">
+              <button
+                type="button"
+                class="switcher-item recent-item"
+                role="menuitem"
+                on:click={() => handleSelectRecent(recent.path)}
+              >
+                <span class="recent-title">{recent.title}</span>
+                <span class="recent-meta">
+                  <span class="recent-path" title={recent.path}>{shortenPath(recent.path)}</span>
+                  <span class="recent-time">{formatRelativeTime(recent.opened_at)}</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                class="recent-remove"
+                title="Remove from recent projects"
+                aria-label={`Remove ${recent.title} from recent projects`}
+                on:click|stopPropagation={() => handleRemoveRecent(recent.path)}
+              >×</button>
+            </div>
           {/each}
           <div class="switcher-divider" role="separator"></div>
         {/if}
@@ -532,10 +550,45 @@
     background: var(--panel);
   }
 
+  /* The row wraps the selectable item and its remove affordance as siblings
+     (#423) — a button cannot nest inside the item's own <button>. */
+  .top-bar .recent-row {
+    display: flex;
+    align-items: stretch;
+  }
+
   .top-bar .recent-item {
+    flex: 1;
+    min-width: 0; /* let .recent-path ellipsize inside the flex row */
     flex-direction: column;
     align-items: stretch;
     gap: 2px;
+  }
+
+  .top-bar .recent-remove {
+    flex: none;
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    border: none;
+    background: none;
+    color: var(--text-3);
+    font-size: var(--fs-lg);
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.12s ease, color 0.12s ease;
+  }
+
+  /* Reveal on hover/focus (widget taxonomy: affordances are right-aligned and
+     reveal on hover), danger tint on the button itself. */
+  .top-bar .recent-row:hover .recent-remove,
+  .top-bar .recent-remove:focus-visible {
+    opacity: 1;
+  }
+
+  .top-bar .recent-remove:hover {
+    color: var(--danger);
   }
 
   .top-bar .recent-title {

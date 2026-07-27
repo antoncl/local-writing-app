@@ -23,14 +23,16 @@
     // select / multi_select. Ignored for other types.
     options?: OptionDraft[];
     ariaLabel?: string;
+    readOnly?: boolean;
     // Emitted on edit; "" means unset → surfaced as undefined (#24). (#14 runes:
     // callback prop replaces the old `change` event dispatcher.)
     onChange?: (value: string | undefined) => void;
   }
 
-  let { type, value, options = [], ariaLabel = "Default value", onChange = () => {} }: Props = $props();
+  let { type, value, options = [], ariaLabel = "Default value", readOnly = false, onChange = () => {} }: Props = $props();
 
   function emit(raw: string) {
+    if (readOnly) return;
     onChange(raw === "" ? undefined : raw);
   }
 </script>
@@ -41,6 +43,7 @@
   <select
     value={value ?? ""}
     aria-label={ariaLabel}
+    disabled={readOnly}
     onchange={(e) => emit((e.currentTarget as HTMLSelectElement).value)}
   >
     <option value="">Unset</option>
@@ -57,9 +60,10 @@
       value={value ?? ""}
       placeholder="Unset"
       aria-label={ariaLabel}
+      disabled={readOnly}
       oninput={(e) => emit((e.currentTarget as HTMLInputElement).value)}
     />
-    {#if value !== undefined && value !== ""}
+    {#if !readOnly && value !== undefined && value !== ""}
       <button
         type="button"
         class="dve-clear"
@@ -73,6 +77,7 @@
   <select
     value={value ?? ""}
     aria-label={ariaLabel}
+    disabled={readOnly}
     onchange={(e) => emit((e.currentTarget as HTMLSelectElement).value)}
   >
     <option value="">Unset</option>
@@ -90,9 +95,10 @@
       value={value ?? ""}
       placeholder="Unset"
       aria-label={ariaLabel}
+      disabled={readOnly}
       oninput={(e) => emit((e.currentTarget as HTMLInputElement).value)}
     />
-    {#if value !== undefined && value !== ""}
+    {#if !readOnly && value !== undefined && value !== ""}
       <button
         type="button"
         class="dve-clear"

@@ -25,6 +25,7 @@
     // reseed path, so clientIds don't collide and names slugify consistently.
     nextInputDraftId: () => string;
     entrySlugify: (value: string) => string;
+    readOnly?: boolean;
     // Outbound: declared-inputs changed (#14 — replaces inputsChange dispatch).
     onInputsChange?: () => void;
   }
@@ -33,6 +34,7 @@
     entryInputDrafts = $bindable([]),
     nextInputDraftId,
     entrySlugify,
+    readOnly = false,
     onInputsChange,
   }: Props = $props();
 
@@ -69,6 +71,7 @@
   }
 
   function addEntryInput(): void {
+    if (readOnly) return;
     const draft: EntryInputDraft = {
       clientId: nextInputDraftId(),
       name: "",
@@ -88,6 +91,7 @@
   }
 
   function removeEntryInput(index: number): void {
+    if (readOnly) return;
     const removed = entryInputDrafts[index];
     entryInputDrafts = entryInputDrafts.filter((_, i) => i !== index);
     if (removed && expandedInputClientId === removed.clientId) {
@@ -97,6 +101,7 @@
   }
 
   function updateEntryInputLabel(index: number, label: string): void {
+    if (readOnly) return;
     entryInputDrafts = entryInputDrafts.map((draft, i) => {
       if (i !== index) return draft;
       const next = { ...draft, label };
@@ -107,6 +112,7 @@
   }
 
   function updateEntryInputName(index: number, name: string): void {
+    if (readOnly) return;
     entryInputDrafts = entryInputDrafts.map((draft, i) =>
       i !== index ? draft : { ...draft, name: entrySlugify(name), nameDerived: false },
     );
@@ -117,6 +123,7 @@
     index: number,
     patch: Partial<EntryInputDraft>,
   ): void {
+    if (readOnly) return;
     entryInputDrafts = entryInputDrafts.map((draft, i) =>
       i !== index ? draft : { ...draft, ...patch },
     );
@@ -137,6 +144,7 @@
   }
 
   function moveEntryInput(from: number, to: number): void {
+    if (readOnly) return;
     if (from === to || from < 0 || to < 0) return;
     if (from >= entryInputDrafts.length || to >= entryInputDrafts.length) return;
     const next = entryInputDrafts.slice();
@@ -153,6 +161,7 @@
   let inputDragOverPosition: "before" | "after" | null = $state(null);
 
   function handleInputDragStart(event: DragEvent, index: number) {
+    if (readOnly) return;
     inputDragFromIndex = index;
     if (event.dataTransfer) {
       event.dataTransfer.effectAllowed = "move";
@@ -167,6 +176,7 @@
   }
 
   function handleInputDragOver(event: DragEvent, index: number) {
+    if (readOnly) return;
     if (inputDragFromIndex === null || inputDragFromIndex === index) return;
     event.preventDefault();
     if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
@@ -181,6 +191,7 @@
   }
 
   function handleInputDrop(event: DragEvent, index: number) {
+    if (readOnly) return;
     event.preventDefault();
     const from = inputDragFromIndex;
     const position = inputDragOverPosition;
@@ -198,7 +209,7 @@
     <small class="entry-inputs-hint">declared on this prompt · use as <code>&lbrace;&lbrace; input.&lt;id&gt; &rbrace;&rbrace;</code></small>
   </summary>
   {#if entryInputDrafts.length === 0}
-    <p class="muted entry-inputs-empty">No inputs yet. Click + to declare one.</p>
+    <p class="muted entry-inputs-empty">{readOnly ? "No inputs declared." : "No inputs yet. Click + to declare one."}</p>
   {/if}
   {#each entryInputDrafts as draft, index (draft.clientId)}
     {#if draft.type === "context_pick"}
@@ -216,7 +227,7 @@
       >
         <span
           class="tree-handle prompt-input-handle"
-          draggable="true"
+          draggable={!readOnly}
           role="button"
           tabindex="-1"
           aria-label="Drag to reorder"
@@ -234,6 +245,7 @@
           onRequiredChange={(value) => updateEntryInput(index, { required: value })}
           onTypeChange={(value) => updateEntryInput(index, { type: value })}
           onRemove={() => removeEntryInput(index)}
+          readonly={readOnly}
         />
       </div>
     {:else}
@@ -250,7 +262,7 @@
         name={draft.label || draft.name || "(unnamed input)"}
         typeLabel={INPUT_TYPE_LABEL[draft.type] ?? draft.type}
         expanded={isExpanded}
-        draggable={entryInputDrafts.length > 1}
+        draggable={!readOnly && entryInputDrafts.length > 1}
         dragging={inputDragFromIndex === index}
         dropBefore={inputDragOverIndex === index && inputDragOverPosition === "before"}
         dropAfter={inputDragOverIndex === index && inputDragOverPosition === "after"}
@@ -273,15 +285,15 @@
           <div class="prompt-input-grid">
             <label>
               Label
-              <input value={draft.label} placeholder="Topic to brainstorm" oninput={(e) => updateEntryInputLabel(index, (e.currentTarget as HTMLInputElement).value)} />
+              <input value={draft.label} placeholder="Topic to brainstorm" disabled={readOnly} oninput={(e) => updateEntryInputLabel(index, (e.currentTarget as HTMLInputElement).value)} />
             </label>
             <label>
               ID
-              <input value={draft.name} placeholder="topic_to_brainstorm" oninput={(e) => updateEntryInputName(index, (e.currentTarget as HTMLInputElement).value)} />
+              <input value={draft.name} placeholder="topic_to_brainstorm" disabled={readOnly} oninput={(e) => updateEntryInputName(index, (e.currentTarget as HTMLInputElement).value)} />
             </label>
             <label>
               Type
-              <select value={draft.type} onchange={(e) => updateEntryInput(index, { type: (e.currentTarget as HTMLSelectElement).value as PromptInputType, defaultValue: undefined })}>
+              <select value={draft.type} disabled={readOnly} onchange={(e) => updateEntryInput(index, { type: (e.currentTarget as HTMLSelectElement).value as PromptInputType, defaultValue: undefined })}>
                 <option value="text">Text</option>
                 <option value="long_text">Long Text</option>
                 <option value="number">Number</option>
@@ -299,14 +311,17 @@
                 type={draft.type}
                 value={draft.defaultValue}
                 options={draft.options}
+                {readOnly}
                 onChange={(next) => setEntryInputDefault(index, next ?? "")}
               />
             </label>
             <label class="prompt-input-required">
-              <input type="checkbox" checked={draft.required} onchange={(e) => updateEntryInput(index, { required: (e.currentTarget as HTMLInputElement).checked })} />
+              <input type="checkbox" checked={draft.required} disabled={readOnly} onchange={(e) => updateEntryInput(index, { required: (e.currentTarget as HTMLInputElement).checked })} />
               Required
             </label>
-            <button type="button" class="prompt-input-remove" title="Remove input" onclick={() => removeEntryInput(index)}>×</button>
+            {#if !readOnly}
+              <button type="button" class="prompt-input-remove" title="Remove input" onclick={() => removeEntryInput(index)}>×</button>
+            {/if}
           </div>
           {#if draft.type === "select"}
             <!-- Row-per-option editor — same SelectOptionsEditor the
@@ -316,6 +331,7 @@
             <div class="prompt-input-options-editor">
               <SelectOptionsEditor
                 options={draft.options}
+                readonly={readOnly}
                 showMigrationHint={false}
                 onChange={(next) => updateEntryInput(index, { options: next })}
               />
@@ -332,6 +348,7 @@
               <NodePickerConfigEditor
                 mode="field"
                 config={draft.nodePickerConfig}
+                readonly={readOnly}
                 onChange={(config) => updateEntryInputNodePickerConfig(index, config)}
               />
             </div>
@@ -340,9 +357,11 @@
       {/if}
     {/if}
   {/each}
-  <div class="entry-inputs-add">
-    <button type="button" title="Add input" aria-label="Add input" onclick={addEntryInput}>+</button>
-  </div>
+  {#if !readOnly}
+    <div class="entry-inputs-add">
+      <button type="button" title="Add input" aria-label="Add input" onclick={addEntryInput}>+</button>
+    </div>
+  {/if}
 </details>
 
 <style>

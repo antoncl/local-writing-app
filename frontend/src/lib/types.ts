@@ -284,6 +284,7 @@ export type PromptEntrySummary = {
   title: string;
   body: string;
   entry_type: string;
+  system?: boolean;
   metadata: EntryMetadata;
   inputs: PromptInputDefinition[];
   source_layer_id?: string;
@@ -296,6 +297,7 @@ export type PromptEntry = {
   body: string;
   revision: string;
   entry_type: string;
+  system?: boolean;
   metadata: EntryMetadata;
   inputs: PromptInputDefinition[];
   computed_metadata: EntryMetadata;

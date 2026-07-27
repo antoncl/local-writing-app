@@ -10,7 +10,6 @@ from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import (
-    CreatePromptEntryRequest,
     CreateSceneRequest,
     DeleteMetadataFieldRequest,
     EntryTypeDefinition,
@@ -1143,12 +1142,7 @@ CLAIM {{ claim.plot_point_id }} [{{ claim.plotline.title }}]: {{ claim.rationale
                 },
             )
         )
-        prompt = self.service.create_prompt_entry(
-            CreatePromptEntryRequest(
-                title="Brainstorm from plot board",
-                entry_type="prompt:plot_brainstorm",
-            )
-        )
+        prompt = self.service.read_prompt_entry("prompt_builtin_plot_brainstorm")
         picked_board = json.dumps(
             [
                 {
@@ -1184,6 +1178,114 @@ CLAIM {{ claim.plot_point_id }} [{{ claim.plotline.title }}]: {{ claim.rationale
         self.assertIn("Visible setup.", user_text)
         self.assertNotIn("<ai_rubric", user_text)
         self.assertNotIn("<criterion>", user_text)
+        self.assertNotIn('{"', user_text)
+
+    def test_plot_claim_audit_default_prompt_renders_claim_context(self) -> None:
+        template = self.service.create_plot_node(
+            CreatePlotNodeRequest(
+                title="Three Act Template",
+                entry_type="plot:template",
+                body="Template notes.",
+                template=PlotTemplateSpec(
+                    slug="three-act",
+                    display_name="Three Act",
+                    family="act",
+                    plot_points=[
+                        {
+                            "id": "first_turn",
+                            "title": "First turn",
+                            "function_claim": "Makes the old path unavailable.",
+                        }
+                    ],
+                ),
+            )
+        )
+        instance = self.service.create_plot_node(
+            CreatePlotNodeRequest(
+                title="Main plot",
+                entry_type="plot:template_instance",
+                template_instance={
+                    "template_id": template.id,
+                    "title": "Main plot",
+                    "plot_points": [
+                        {
+                            "plot_point_id": "first_turn",
+                            "title": "First turn",
+                            "function_claim": "Makes the old path unavailable.",
+                            "notes": "Mara can no longer stay loyal to the archive.",
+                        }
+                    ],
+                },
+            )
+        )
+        board = self.service.create_plot_node(
+            CreatePlotNodeRequest(
+                title="Book plot board",
+                entry_type="plot:board",
+                board={
+                    "template_instance_ids": [instance.id],
+                    "cards": [
+                        {
+                            "id": "card_archive",
+                            "title": "Archive Break-in",
+                            "synopsis": "Mara steals the ledger.",
+                        },
+                        {
+                            "id": "card_friend",
+                            "title": "Friend Warning",
+                            "synopsis": "Jon warns Mara that the guild is watching.",
+                        },
+                    ],
+                    "claims": [
+                        {
+                            "id": "claim_first_turn",
+                            "card_id": "card_archive",
+                            "template_instance_id": instance.id,
+                            "plot_point_id": "first_turn",
+                            "claim_type": "satisfies",
+                            "rationale": "The theft closes her old path.",
+                            "evidence": "Mara steals the ledger.",
+                        }
+                    ],
+                },
+            )
+        )
+        prompt = self.service.read_prompt_entry("prompt_builtin_plot_claim_audit")
+        picked_board = json.dumps(
+            [
+                {
+                    "id": board.id,
+                    "kind": "plot",
+                    "title": board.title,
+                    "entry_type": "plot:board",
+                }
+            ]
+        )
+
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            prompt.body,
+            context={
+                "input": {
+                    "plot": picked_board,
+                    "focus": "Find weak claims.",
+                }
+            },
+            env=env,
+        )
+
+        self.assertEqual([message.role for message in out.messages], ["system", "user"])
+        system_text = out.messages[0].blocks[0].text
+        user_text = out.messages[1].blocks[0].text
+        self.assertIn("function badge", system_text)
+        self.assertIn("Find weak claims.", user_text)
+        self.assertIn("<plot_claim_audit", user_text)
+        self.assertIn("First turn", user_text)
+        self.assertIn("claim_first_turn", user_text)
+        self.assertIn("Archive Break-in", user_text)
+        self.assertIn("The theft closes her old path.", user_text)
+        self.assertIn("<untagged_cards>", user_text)
+        self.assertIn("Friend Warning", user_text)
         self.assertNotIn('{"', user_text)
 
     def test_plot_node_is_available_via_unified_node_read(self) -> None:

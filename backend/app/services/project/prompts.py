@@ -51,6 +51,7 @@ class PromptEntriesMixin:
                     title=str(front_matter.get("title") or entry.id),
                     body=body,
                     entry_type=entry_type,
+                    system=entry.system,
                     metadata=self._normalise_metadata(front_matter.get("metadata"), entry.path),
                     inputs=self._parse_prompt_inputs(front_matter.get("inputs")),
                     source_layer_id=entry.source_layer_id,
@@ -126,6 +127,7 @@ class PromptEntriesMixin:
             body=body,
             revision=self._revision(path),
             entry_type=raw_entry_type,
+            system=self._prompt_system(front_matter),
             metadata=metadata,
             inputs=self._parse_prompt_inputs(front_matter.get("inputs")),
             computed_metadata={},
@@ -137,6 +139,8 @@ class PromptEntriesMixin:
         path = self._path_for_node_id(entry_id, "prompt")
         front_matter = self._read_front_matter_only(path, strict=True)
         node_id = self._node_id_for_path(path, front_matter)
+        if self._prompt_system(front_matter):
+            raise ProjectServiceError("A system prompt cannot be edited; duplicate it first.", 403)
         current_revision = self._revision(path)
         if request.base_revision and request.base_revision != current_revision:
             raise ProjectServiceError("Prompt changed on disk after it was opened.", 409)
@@ -183,5 +187,95 @@ class PromptEntriesMixin:
 
     def delete_prompt_entry(self, entry_id: str) -> PromptEntryList:
         path = self._path_for_node_id(entry_id, "prompt")
+        front_matter = self._read_front_matter_only(path, strict=True)
+        if self._prompt_system(front_matter):
+            raise ProjectServiceError("A system prompt cannot be deleted; duplicate it first.", 403)
         self._delete_node_file(path)  # unlink + un-shadow the memo (#392)
         return self.list_prompt_entries()
+
+    def _seed_builtin_prompt_entries(self, root: Any) -> None:
+        prompt_dir = root / "prompts"
+        prompt_dir.mkdir(parents=True, exist_ok=True)
+        inherited_ids = self._inherited_prompt_node_ids(root)
+        for builtin in self._builtin_prompt_entries():
+            filename = builtin["filename"]
+            node_id = builtin["node_id"]
+            path = prompt_dir / filename
+            if node_id in inherited_ids:
+                continue
+            if path.exists():
+                try:
+                    front_matter = self._read_front_matter_only(path, strict=False)
+                except ProjectServiceError:
+                    continue
+                if front_matter.get("id") != node_id or not self._prompt_system(front_matter):
+                    continue
+            inputs = [
+                PromptInputDefinition.model_validate(item)
+                for item in builtin.get("inputs", [])
+                if isinstance(item, dict)
+            ]
+            self._write_prompt_entry_file(
+                path,
+                node_id,
+                builtin["title"],
+                builtin["entry_type"],
+                builtin["body"],
+                inputs=inputs,
+                system=True,
+            )
+
+    def _inherited_prompt_node_ids(self, root: Any) -> set[str]:
+        root_path = root.resolve()
+        ids: set[str] = set()
+        for layer in self.collect_layers(root_path):
+            if layer.folder == root_path:
+                continue
+            for path in sorted((layer.folder / "prompts").glob("*.md")):
+                try:
+                    front_matter = self._read_front_matter_only(path, strict=False)
+                except ProjectServiceError:
+                    continue
+                raw_id = front_matter.get("id")
+                if isinstance(raw_id, str) and raw_id.strip():
+                    ids.add(raw_id.strip())
+        return ids
+
+    def _write_prompt_entry_file(
+        self,
+        path: Any,
+        node_id: str,
+        title: str,
+        entry_type: str,
+        body: str,
+        *,
+        inputs: list[PromptInputDefinition] | None = None,
+        metadata: dict[str, MetadataValue] | None = None,
+        system: bool = False,
+    ) -> None:
+        extra: dict[str, Any] = {}
+        inputs_payload = [i.model_dump(exclude_none=True) for i in inputs or []]
+        if inputs_payload:
+            extra["inputs"] = inputs_payload
+        if system:
+            extra["system"] = True
+        self._write_node_entry_file(
+            path,
+            node_id,
+            title,
+            entry_type,
+            metadata or {},
+            body,
+            extra=extra or None,
+            omit_empty_metadata=True,
+        )
+
+    @staticmethod
+    def _prompt_system(front_matter: dict[str, Any]) -> bool:
+        return front_matter.get("system") is True
+
+    @staticmethod
+    def _builtin_prompt_entries() -> list[dict[str, Any]]:
+        from app.services.project.prompt_builtin_entries import builtin_prompt_entries
+
+        return builtin_prompt_entries()

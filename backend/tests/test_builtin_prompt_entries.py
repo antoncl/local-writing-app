@@ -4,6 +4,8 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from layer_fixtures import declare_full_chain
+
 from app.models import SavePromptEntryRequest
 from app.services.project.errors import ProjectServiceError
 from app.services.project_service import ProjectService
@@ -55,6 +57,46 @@ class BuiltinPromptEntriesTests(unittest.TestCase):
         self.assertEqual([item.name for item in prompt.inputs], ["plot", "focus"])
         self.assertIn("context_xml(plot_context(input.plot))", prompt.body)
         self.assertNotEqual(prompt.body, "old body")
+
+    def test_layered_builtin_prompt_shadows_are_silent(self) -> None:
+        base = Path(self.temp_dir.name).resolve() / "writing"
+        universe = base / "honorverse"
+        book = universe / "book01"
+        service = ProjectService.created_at(book, "Book 1")
+        declare_full_chain(service, book, base)
+
+        ProjectService.created_at(universe, "Honorverse")
+        reopened = ProjectService.opened_at(book)
+        index = reopened._build_node_index(book)
+
+        for node_id in ("prompt_builtin_plot_brainstorm", "prompt_builtin_plot_claim_audit"):
+            self.assertEqual(len(index.candidates[node_id]), 2)
+        self.assertEqual([warning for warning in index.warnings if "prompt_builtin" in warning], [])
+
+    def test_local_system_builtin_refreshes_even_when_ancestor_has_same_prompt(self) -> None:
+        base = Path(self.temp_dir.name).resolve() / "writing"
+        universe = base / "honorverse"
+        book = universe / "book01"
+        service = ProjectService.created_at(book, "Book 1")
+        declare_full_chain(service, book, base)
+        service._write_node_entry_file(
+            book / "prompts" / "Plot Brainstorm.md",
+            "prompt_builtin_plot_brainstorm",
+            "Plot Brainstorm",
+            "prompt:general",
+            {},
+            "old child body",
+            extra={"system": True},
+            omit_empty_metadata=True,
+        )
+
+        ProjectService.created_at(universe, "Honorverse")
+        reopened = ProjectService.opened_at(book)
+        prompt = reopened.read_prompt_entry("prompt_builtin_plot_brainstorm")
+
+        self.assertEqual(prompt.source_layer_label, "Book 1")
+        self.assertIn("context_xml(plot_context(input.plot))", prompt.body)
+        self.assertNotEqual(prompt.body, "old child body")
 
     def test_system_prompt_rejects_save_and_delete(self) -> None:
         prompt = self.service.read_prompt_entry("prompt_builtin_plot_claim_audit")

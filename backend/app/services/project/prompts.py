@@ -201,8 +201,7 @@ class PromptEntriesMixin:
             filename = builtin["filename"]
             node_id = builtin["node_id"]
             path = prompt_dir / filename
-            if node_id in inherited_ids:
-                continue
+            local_system_builtin = False
             if path.exists():
                 try:
                     front_matter = self._read_front_matter_only(path, strict=False)
@@ -210,6 +209,9 @@ class PromptEntriesMixin:
                     continue
                 if front_matter.get("id") != node_id or not self._prompt_system(front_matter):
                     continue
+                local_system_builtin = True
+            if not local_system_builtin and node_id in inherited_ids:
+                continue
             inputs = [
                 PromptInputDefinition.model_validate(item)
                 for item in builtin.get("inputs", [])

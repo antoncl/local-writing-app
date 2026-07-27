@@ -34,6 +34,7 @@ from app.models import (
     DirectoryEntry,
     DirectoryListing,
     DirectoryRoot,
+    LooseScene,
     MetadataSchema,
     MetadataValue,
     PathProbe,
@@ -51,6 +52,7 @@ from app.services.migrations import CURRENT_VERSION as PROJECT_SCHEMA_VERSION
 from app.services.project.errors import ProjectServiceError
 from app.services.project.layers import INHERITS_KEY, MANIFEST_FILENAME, LayerVisitor
 from app.services.project.node_index import IndexLayer
+from app.services.project.node_index_gate import node_index_gate
 from app.services.project.tree_configs import (
     MANUSCRIPT_TREE_CONFIG,
     RESEARCH_TREE_CONFIG,
@@ -877,6 +879,12 @@ class ProjectLifecycleMixin:
 
     def validate_project(self) -> ProjectValidation:
         root = self._require_project()
+        # Drop the memo so this rebuild scans disk truth. Validate reconciles the
+        # project against the files on disk, and its warm memo does no disk work
+        # (ADR-0040) — so files dropped into scenes/ while the app stayed open
+        # (the import flow, #4) are invisible to a warm hit. Forcing a cold
+        # rebuild is what turns "requires a reopen" into "click Verify".
+        node_index_gate.invalidate()
         warnings: list[str] = []
         errors: list[str] = []
         metadata_schema: MetadataSchema | None = None
@@ -912,8 +920,20 @@ class ProjectLifecycleMixin:
 
         for scene_id in sorted(referenced - scene_ids):
             errors.append(f"Structure references missing scene {scene_id}.")
+        # Scene files on disk that no manuscript node references. Not an error —
+        # a pending-import offer (#4) the Project pane turns into "Add to
+        # manuscript". The title falls back to the filename stem for a raw
+        # dropped file with no front-matter title.
+        loose_scenes: list[LooseScene] = []
         for scene_id in sorted(scene_ids - referenced):
-            warnings.append(f"Scene {scene_id} is not in the manuscript structure.")
+            entry = node_index.by_id[scene_id]
+            loose_scenes.append(
+                LooseScene(
+                    id=scene_id,
+                    title=entry.title or entry.path.stem,
+                    filename=entry.path.name,
+                )
+            )
         for entry in sorted((entry for entry in node_index.by_id.values() if entry.kind == "scene"), key=lambda item: item.id):
             scene_id = entry.id
             path = entry.path
@@ -981,6 +1001,7 @@ class ProjectLifecycleMixin:
             warnings=warnings,
             errors=errors,
             migrations_applied=list(self.last_migrations),
+            loose_scenes=loose_scenes,
         )
 
     def _new_project_node(self, title: str) -> ProjectNode:

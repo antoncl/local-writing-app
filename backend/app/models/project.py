@@ -185,11 +185,31 @@ class ProspectiveProjectNode(BaseModel):
     field_sources: dict[str, str] = Field(default_factory=dict)
 
 
+class LooseScene(BaseModel):
+    """A scene file present on disk under `scenes/` but not referenced by the
+    manuscript structure — a candidate for import (#4). Surfaced by
+    `validate_project`; imported (appended at the manuscript root) by
+    `import_loose_scenes`."""
+
+    id: str
+    title: str
+    filename: str
+
+
 class ProjectValidation(BaseModel):
     valid: bool
     warnings: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
     migrations_applied: list[str] = Field(default_factory=list)
+    # Scene files on disk that no manuscript node references yet. Not an error
+    # or a warning — a pending-import offer the Project pane turns into an
+    # "Add to manuscript" action (#4).
+    loose_scenes: list[LooseScene] = Field(default_factory=list)
+
+
+class ImportLooseScenesRequest(BaseModel):
+    # The loose-scene ids to import. Empty/omitted means "all loose scenes".
+    scene_ids: list[str] = Field(default_factory=list)
 
 
 class DirectoryEntry(BaseModel):

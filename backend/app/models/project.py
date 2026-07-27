@@ -8,6 +8,7 @@ from app.models.base import (
     AIPolicy,
     MetadataValue,
 )
+from app.models.schema import MetadataSchema
 
 
 class CreateProjectRequest(BaseModel):
@@ -156,6 +157,32 @@ class UpdateProjectSettingsRequest(BaseModel):
     # project; they are stored relative so a renamed shelf does not invalidate
     # every book beneath it.
     inherits: list[str] | None = None
+
+
+class ProspectiveProjectNodeRequest(BaseModel):
+    """The wizard's review-pane query for a not-yet-created project (#318 slice
+    4). `inherits` is the ticked candidates from the location step — absolute
+    ancestor folder paths (`AncestorCandidate.path`), not the project-relative
+    form the manifest stores, because the project has no manifest yet."""
+
+    root_path: str = Field(min_length=1)
+    inherits: list[str] = Field(default_factory=list)
+
+
+class ProspectiveProjectNode(BaseModel):
+    """What the review pane renders for a not-yet-created project (#318 slice 4).
+
+    The prospective twin of `ProjectInfo.metadata` (#317) plus the provenance
+    that field omits. `metadata_schema` is the merged schema over the ticked
+    chain (so a `select` shows the real vocabulary); `metadata` is the inherited
+    values, nearest-explicit-wins (a key no ancestor states is absent, and the
+    pane falls to the schema default); `field_sources` names, per resolved key,
+    the ancestor layer that supplied it — the "Reset to <source>" label (§8).
+    """
+
+    metadata_schema: MetadataSchema
+    metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+    field_sources: dict[str, str] = Field(default_factory=dict)
 
 
 class ProjectValidation(BaseModel):

@@ -168,21 +168,67 @@ class LayerWalkMixin:
             machine_layer = self.machine_layer(rank=len(layers))
             if machine_layer is not None:
                 layers.append(machine_layer)
-        # `chain_index` is the position within the *project* chain, which is what
-        # the label rule keys on ("Base Folder" is the outermost project layer).
-        # It is deliberately not the same number as `rank`, which spans the whole
-        # yielded sequence including the machine layer.
-        for chain_index, folder in enumerate(self._project_layer_folders(root)):
-            layers.append(
-                IndexLayer(
-                    folder=folder,
-                    id=self._metadata_schema_layer_id(folder),
-                    label=self._layer_label_for_folder(root, folder, chain_index),
-                    rank=len(layers),
-                    is_root=folder == root,
-                )
+        layers.extend(
+            self._stamp_project_layers(
+                root, self._project_layer_folders(root), start_rank=len(layers)
             )
+        )
         return layers
+
+    def _stamp_project_layers(
+        self, root: Path, folders: list[Path], *, start_rank: int = 0
+    ) -> list[IndexLayer]:
+        """Stamp an ordered folder list into `IndexLayer`s — the one place a
+        project layer's id, label, rank and `is_root` are assigned.
+
+        `_layer_sequence` derives `folders` from the open project's declaration;
+        `prospective_layers` supplies an explicit chain for a project that does
+        not exist yet (#318 slice 4). Both go through here so the two cannot
+        drift on how a layer is named or ranked
+        (`decisions_walker_visitor_uniformity`).
+
+        `chain_index` is the position within the *project* chain, which is what
+        the label rule keys on ("Base Folder" is the outermost project layer).
+        It is deliberately not `rank`: `start_rank` offsets past any machine
+        layer counted into the yielded sequence, while the label always sees the
+        project-chain position.
+        """
+        return [
+            IndexLayer(
+                folder=folder,
+                id=self._metadata_schema_layer_id(folder),
+                label=self._layer_label_for_folder(root, folder, chain_index),
+                rank=start_rank + chain_index,
+                is_root=folder == root,
+            )
+            for chain_index, folder in enumerate(folders)
+        ]
+
+    def prospective_layers(self, root: Path, inherits: list[str]) -> list[IndexLayer]:
+        """The layer chain for a *not-yet-created* project at `root` that would
+        declare `inherits` (#318 slice 4 — the wizard's review pane).
+
+        `_layer_sequence` reads the chain from `root`'s own `project.yaml`, but a
+        project being created has no manifest — the declaration lives only in the
+        wizard's ticks. So the chain is built from `inherits` directly: the
+        ticked ancestors, kept in the walk's outermost-first order and filtered
+        to real ancestor projects, then `root` itself last (a project is always
+        in its own chain). A ticked path that is not an ancestor project is
+        silently dropped, exactly as `_project_layer_folders` drops an undeclared
+        candidate — the declaration selects from the walk, it never extends it.
+        Reusing `ancestor_projects` means a prospective chain is bounded by the
+        same machine root as a real one and cannot name its way outside it.
+
+        Entries are the absolute candidate paths the location step produced
+        (`AncestorCandidate.path`); they are resolved before comparison so a
+        differently-spelled but equivalent path still matches.
+        """
+        root = root.expanduser().resolve()
+        ticked = {Path(entry).expanduser().resolve() for entry in inherits}
+        folders = [
+            folder for folder in self.ancestor_projects(root) if folder in ticked
+        ] + [root]
+        return self._stamp_project_layers(root, folders)
 
     def collect_layers(self, root: Path, *, include_machine: bool = False) -> list[IndexLayer]:
         """The whole sequence, via `LayerCollector`. For callers that really do

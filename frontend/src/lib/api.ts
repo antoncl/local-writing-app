@@ -47,6 +47,7 @@ import type {
   PathProbe,
   ProjectInfo,
   ProjectNode,
+  ProspectiveProjectNode,
   ProjectValidation,
   SaveProjectNodeRequest,
   PromptEntry,
@@ -246,6 +247,16 @@ export const api = {
     return request<AncestorCandidate[]>(
       `/project/ancestor-candidates?path=${encodeURIComponent(rootPath)}`,
     );
+  },
+  // The wizard's review step (#318 slice 4): the project node's authored fields
+  // resolved over the ticked ancestors before the project exists — merged
+  // schema, inherited values, and the per-field source. `inherits` is the same
+  // absolute candidate paths the location step produced.
+  prospectiveProjectNode(rootPath: string, inherits: string[]) {
+    return request<ProspectiveProjectNode>("/project/prospective-node", {
+      method: "POST",
+      body: JSON.stringify({ root_path: rootPath, inherits }),
+    });
   },
   openProject(rootPath: string) {
     return request<ProjectInfo>("/project/open", {

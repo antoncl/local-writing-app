@@ -824,6 +824,19 @@ export type MetadataSchemaOverview = {
   field_sources: Record<string, MetadataDefinitionSource>;
 };
 
+// The wizard review pane's inputs for a *not-yet-created* project (#318 slice
+// 4). The prospective twin of `ProjectInfo.metadata` (#317) plus the provenance
+// that field omits: the merged schema over the ticked chain (so a select shows
+// an ancestor's added vocabulary), the inherited values (nearest-explicit-wins;
+// a key no ancestor states is absent and the pane falls to the schema default),
+// and the ancestor layer that supplied each resolved key — the "Reset to
+// <source>" label (§8).
+export type ProspectiveProjectNode = {
+  metadata_schema: MetadataSchema;
+  metadata: Record<string, MetadataValue>;
+  field_sources: Record<string, string>;
+};
+
 export type TodoItem = {
   id: string;
   text: string;

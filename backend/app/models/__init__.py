@@ -138,6 +138,8 @@ from app.models.project import (
     ProjectInfo,
     ProjectNode,
     ProjectValidation,
+    ProspectiveProjectNode,
+    ProspectiveProjectNodeRequest,
     SaveProjectNodeRequest,
     UpdateProjectSettingsRequest,
 )
@@ -295,6 +297,8 @@ __all__ = [
     "PROJECT_NODE_FILENAME",
     "ProjectNode",
     "ProjectValidation",
+    "ProspectiveProjectNode",
+    "ProspectiveProjectNodeRequest",
     "PromptContextStrategy",
     "PromptEntry",
     "PromptEntryList",

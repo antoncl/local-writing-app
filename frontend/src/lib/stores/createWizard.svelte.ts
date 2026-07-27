@@ -17,10 +17,13 @@ import type {
   AIPolicy,
   AncestorCandidate,
   MachineSettingsView,
+  MetadataSchema,
+  MetadataValue,
   ProviderCredentialsView,
 } from "@/lib/types";
 import { joinPath, slugifyProjectName } from "@/lib/utils/projectPath";
 import { declarationRows, toggledDeclaration } from "@/lib/utils/projectChain";
+import { projectReviewRows } from "@/lib/utils/projectReview";
 import {
   addableCloudProviders,
   cloudKeyField,
@@ -77,6 +80,22 @@ class CreateWizard {
   // Guards the async provider-save / hire / curation buttons.
   aiBusy = $state(false);
 
+  // ---- Step 4: review — book settings / overrides (design-doc §5 step 4) ----
+  // The project node's authored fields, resolved over the ticked chain *before*
+  // the project exists (`prospective_project_node`). The pane shows the full
+  // filled-in picture; `nodeOverrides` holds only the fields the author sets
+  // here, which is exactly what gets written to the new book's `project.md` —
+  // everything else stays absent and inherits (§7's pop-key model).
+  reviewLoading = $state(false);
+  reviewSchema = $state<MetadataSchema | null>(null);
+  reviewInherited = $state<Record<string, MetadataValue>>({});
+  reviewSources = $state<Record<string, string>>({});
+  nodeOverrides = $state<Record<string, MetadataValue>>({});
+
+  // ---- Step 5: describe (design-doc §5 step 5) ----
+  // A short blurb into the project node body. Skippable.
+  description = $state("");
+
   // ---- Wizard-owned directory picker (its own instance, layered over Modal) ----
   pickerOpen = $state(false);
   #pickerMode = $state<"root" | "location" | null>(null);
@@ -89,11 +108,17 @@ class CreateWizard {
   onSaveRootFolder: (folder: string) => Promise<void> = async () => {};
   // aiPolicy is applied to the freshly-created (now open) project by the host,
   // right after create; undefined leaves no stated policy (inherit).
+  // `nodeMetadata` is the review pane's overrides (only the fields the author
+  // set here) and `description` the blurb — both written into the new book's
+  // `project.md` post-create, mirroring the aiPolicy timing (§7's pop-key model:
+  // an unset field is simply absent and inherits).
   onCreateProject: (
     root: string,
     title: string,
     inherits: string[],
     aiPolicy: AIPolicy | undefined,
+    nodeMetadata: Record<string, MetadataValue>,
+    description: string,
   ) => Promise<void> = async () => {};
   getStartPath: () => string = () => "";
   // Reads the live machine settings (the provider chooser's source of truth).
@@ -179,6 +204,20 @@ class CreateWizard {
     }),
   );
 
+  // ---- Review-step derived ----
+  // One row per authored project field, resolved over the ticked chain. Pure
+  // and tested in projectReview.ts; empty until the prospective resolve lands.
+  reviewRows = $derived(
+    this.reviewSchema
+      ? projectReviewRows(
+          this.reviewSchema,
+          this.reviewInherited,
+          this.reviewSources,
+          this.nodeOverrides,
+        )
+      : [],
+  );
+
   // ---- Picker labels (per mode), read by the mounted DirectoryPickerModal ----
   get pickerInitialPath(): string {
     if (this.#pickerMode === "location") {
@@ -213,6 +252,12 @@ class CreateWizard {
     this.cancelAddProvider();
     this.cancelHire();
     this.aiBusy = false;
+    this.reviewLoading = false;
+    this.reviewSchema = null;
+    this.reviewInherited = {};
+    this.reviewSources = {};
+    this.nodeOverrides = {};
+    this.description = "";
     this.#stepIndex = 0;
     this.pickerOpen = false;
     this.#pickerMode = null;
@@ -254,7 +299,31 @@ class CreateWizard {
         return;
       }
     }
-    if (!this.isFinalStep) this.#stepIndex += 1;
+    if (!this.isFinalStep) {
+      this.#stepIndex += 1;
+      // The review step resolves the project node against the chain declared at
+      // the location step; fetch it on entry (the AI step between them cannot
+      // change the ancestry). Re-entering after a Back re-fetches — cheap, and
+      // it keeps the inherited picture honest if the declaration changed.
+      if (this.currentStep.id === "review") void this.#loadReview();
+    }
+  }
+
+  async #loadReview() {
+    this.reviewLoading = true;
+    try {
+      const node = await api.prospectiveProjectNode(this.resolvedRoot, this.inherits);
+      this.reviewSchema = node.metadata_schema;
+      this.reviewInherited = node.metadata;
+      this.reviewSources = node.field_sources;
+    } catch (error) {
+      this.reviewSchema = null;
+      this.onError(
+        error instanceof Error ? error.message : "Could not resolve the project's settings.",
+      );
+    } finally {
+      this.reviewLoading = false;
+    }
   }
 
   // ---- Directory picker ----
@@ -291,8 +360,10 @@ class CreateWizard {
 
   async #loadCandidates(folder: string) {
     // A new location means a new ancestry; previously-ticked paths may not even
-    // exist under it, so start the declaration clean.
+    // exist under it, so start the declaration clean — and drop any field
+    // overrides, whose inherited baseline is about to change.
     this.inherits = [];
+    this.nodeOverrides = {};
     this.candidatesLoading = true;
     try {
       // The candidates depend only on the parent folder (the walk excludes the
@@ -400,6 +471,24 @@ class CreateWizard {
     await this.#withBusy(() => this.onUnlistAssistant(entryId));
   }
 
+  // ---- Review step (book settings / overrides) ----
+  // Setting a field authors it here (a live override); resetting pops it back to
+  // inherit/default. Presence — not equality with the inherited value — is the
+  // signal, matching the pop-key model the backend write uses.
+  setNodeField(fieldId: string, value: MetadataValue) {
+    this.nodeOverrides = { ...this.nodeOverrides, [fieldId]: value };
+  }
+
+  resetNodeField(fieldId: string) {
+    const next = { ...this.nodeOverrides };
+    delete next[fieldId];
+    this.nodeOverrides = next;
+  }
+
+  setDescription(value: string) {
+    this.description = value;
+  }
+
   // ---- Final action ----
   async submit() {
     if (!this.isFinalStep || !this.canAdvance) return;
@@ -408,6 +497,8 @@ class CreateWizard {
       this.title.trim(),
       this.inherits,
       this.#aiPolicyToPersist,
+      this.nodeOverrides,
+      this.description.trim(),
     );
     this.close();
   }

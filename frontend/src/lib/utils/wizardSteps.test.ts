@@ -11,16 +11,28 @@ const EMPTY: WizardSnapshot = { rootFolderDraft: "", title: "", pickedFolder: ""
 
 describe("activeSteps", () => {
   it("includes the root-folder step only on first run", () => {
-    expect(activeSteps(true).map((s) => s.id)).toEqual(["root", "location", "ai"]);
+    expect(activeSteps(true).map((s) => s.id)).toEqual([
+      "root",
+      "location",
+      "ai",
+      "review",
+      "describe",
+    ]);
   });
 
   it("drops the root-folder step once a default folder is configured", () => {
-    expect(activeSteps(false).map((s) => s.id)).toEqual(["location", "ai"]);
+    expect(activeSteps(false).map((s) => s.id)).toEqual(["location", "ai", "review", "describe"]);
   });
 
   it("places the ai step immediately after location", () => {
     const ids = activeSteps(false).map((s) => s.id);
     expect(ids.indexOf("ai")).toBe(ids.indexOf("location") + 1);
+  });
+
+  it("ends on describe, with review just before it — Create is the last action", () => {
+    const ids = activeSteps(false).map((s) => s.id);
+    expect(ids[ids.length - 1]).toBe("describe");
+    expect(ids.indexOf("review")).toBe(ids.indexOf("describe") - 1);
   });
 });
 
@@ -61,5 +73,12 @@ describe("stepComplete", () => {
   it("never gates the ai step (Off is a legal terminal policy)", () => {
     // The policy slider always holds a value, so the step is always consistent.
     expect(stepComplete("ai", EMPTY)).toBe(true);
+  });
+
+  it("never gates the review or describe steps (defaulted-and-shown / skippable)", () => {
+    // Every review field inherits or defaults, and the description is optional,
+    // so neither step can be internally inconsistent.
+    expect(stepComplete("review", EMPTY)).toBe(true);
+    expect(stepComplete("describe", EMPTY)).toBe(true);
   });
 });

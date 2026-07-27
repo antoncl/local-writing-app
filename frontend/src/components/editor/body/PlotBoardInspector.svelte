@@ -24,6 +24,17 @@
     claims: PlotPointClaim[];
   };
 
+  type ClaimTextFields = {
+    rationale?: string | null;
+    evidence?: string | null;
+    ai_notes?: string | null;
+  };
+
+  type ClaimDetailRow = {
+    label: string;
+    value: string;
+  };
+
   interface Props {
     board: PlotBoardSpec;
     claimsByCard: Map<string, PlotPointClaim[]>;
@@ -197,8 +208,28 @@
     return board.plotlines.find((line) => line.id === claim.plotline_id)?.title ?? claim.plotline_id;
   }
 
-  function claimSummary(claim: PlotPointClaim): string {
+  function claimPlotBeatTitle(claim: PlotPointClaim): string {
+    return paletteRows.find(
+      (row) =>
+        row.instance.id === claim.template_instance_id &&
+        row.point.plot_point_id === claim.plot_point_id,
+    )?.point.title ?? claim.plot_point_id;
+  }
+
+  function claimSummary(claim: ClaimTextFields): string {
     return claim.rationale || claim.evidence || claim.ai_notes || "";
+  }
+
+  function hasClaimDetails(claim: ClaimTextFields): boolean {
+    return Boolean(claim.rationale || claim.evidence || claim.ai_notes);
+  }
+
+  function claimDetailRows(claim: ClaimTextFields): ClaimDetailRow[] {
+    return [
+      claim.rationale ? { label: "Rationale", value: claim.rationale } : null,
+      claim.evidence ? { label: "Evidence", value: claim.evidence } : null,
+      claim.ai_notes ? { label: "AI notes", value: claim.ai_notes } : null,
+    ].filter((row): row is ClaimDetailRow => Boolean(row));
   }
 
   function addSelectedClaim(): void {
@@ -211,11 +242,40 @@
 
 <aside class="plot-inspector" aria-label="Plot selection">
   {#if selectedClaim}
+    {@const selectedClaimCard = cardForClaim(selectedClaim)}
     <header class="inspector-head">
       <span>Function badge</span>
       <strong>{selectedPointLabel}</strong>
     </header>
     <div class="inspector-form">
+      <section class="claim-detail-overview" aria-label="Selected function badge summary">
+        <div>
+          <span>Card</span>
+          <strong>{selectedClaimCard?.title ?? selectedClaim.card_id}</strong>
+        </div>
+        <div>
+          <span>Beat</span>
+          <strong>{claimPlotBeatTitle(selectedClaim)}</strong>
+        </div>
+        <div>
+          <span>Assignment</span>
+          <strong>{claimTypeLabel(selectedClaim.claim_type)}</strong>
+        </div>
+        <div>
+          <span>Strength</span>
+          <strong>{selectedClaim.strength ?? "Not set"}</strong>
+        </div>
+        {#if hasClaimDetails(selectedClaim)}
+          <dl>
+            {#each claimDetailRows(selectedClaim) as row (row.label)}
+              <dt>{row.label}</dt>
+              <dd>{row.value}</dd>
+            {/each}
+          </dl>
+        {:else}
+          <p class="muted-line">No rationale or evidence yet.</p>
+        {/if}
+      </section>
       <label>
         Badge label
         <input
@@ -227,7 +287,7 @@
       </label>
       <label>
         Card
-        <input value={selectedCard?.title ?? selectedClaim.card_id} disabled />
+        <input value={selectedClaimCard?.title ?? selectedClaim.card_id} disabled />
       </label>
       {#if selectedPaletteRow?.point.function_claim}
         <label>
@@ -565,8 +625,21 @@
                   <ul>
                     {#each contextClaimsForCard(contextCard.id) as contextClaim (contextClaim.id)}
                       <li>
-                        <span>{contextPointLabel(contextClaim)}</span>
-                        <small>{claimTypeLabel(contextClaim.claim_type)}</small>
+                        <div class="context-claim-row">
+                          <span>{contextPointLabel(contextClaim)}</span>
+                          <small>{claimTypeLabel(contextClaim.claim_type)}</small>
+                          {#if contextClaim.strength}
+                            <small>{contextClaim.strength}</small>
+                          {/if}
+                          {#if hasClaimDetails(contextClaim)}
+                            <dl>
+                              {#each claimDetailRows(contextClaim) as row (row.label)}
+                                <dt>{row.label}</dt>
+                                <dd>{row.value}</dd>
+                              {/each}
+                            </dl>
+                          {/if}
+                        </div>
                       </li>
                     {/each}
                   </ul>

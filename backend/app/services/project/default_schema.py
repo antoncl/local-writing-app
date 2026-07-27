@@ -221,6 +221,19 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "voice, in motive, in the moment. Write that character's NEXT "
                 "beat — action, dialogue, or both — and stop. One beat, not a "
                 "paragraph of them.\n"
+                # World canon (#317): the project node's authored fields reach
+                # the model here. Each is guarded, so the clause is silent until
+                # the project (or an ancestor) states the field — a `select`
+                # value like `past`/`metric`/`en_GB` reads fine as instruction.
+                "{% if 'tense' in project.metadata %}\n"
+                "\nWrite the beat in {{ project.metadata.tense }} tense.\n"
+                "{% endif %}\n"
+                "{% if 'measurement_system' in project.metadata %}\n"
+                "Use {{ project.metadata.measurement_system }} units.\n"
+                "{% endif %}\n"
+                "{% if 'spelling' in project.metadata %}\n"
+                "Use {{ project.metadata.spelling }} spelling.\n"
+                "{% endif %}\n"
                 "{% if char %}\n"
                 "\nYou are playing **{{ char.title }}**.\n"
                 "{% if char.body %}\n"
@@ -312,8 +325,10 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "fields": [
                 "author",
                 "language",
-                "genre",
-                "narrative_pov",
+                "spelling",
+                "pov_mode",
+                "tense",
+                "measurement_system",
                 "target_word_count",
                 "series_number",
                 "color",
@@ -550,9 +565,79 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         # kind:assistant, expressed with the existing tags widget/infra.
         "assistant_tags": {"name": "Preferred assistant tags", "type": "tags"},
         "author": {"name": "Author", "type": "text"},
-        "language": {"name": "Language", "type": "text"},
-        "genre": {"name": "Genre", "type": "text"},
-        "narrative_pov": {"name": "Narrative POV", "type": "text"},
+        # #317: the built-in project-node vocabulary. These are `select`s rather
+        # than free text so the model gets a constrained, resolvable value (a
+        # world's units/tense/spelling instead of a US default the author had no
+        # way to state), and — because `project` is a kind — every roster below
+        # is user-extensible through a schema layer, so the built-ins only have to
+        # be a sensible, opinionated start. `narrative_pov`/`genre` were text;
+        # `genre` is dropped (a keyword can't carry it — a future Lore treatment),
+        # `narrative_pov` becomes the richer `pov_mode` roster. All friendly-
+        # labelled: a select never shows a raw key.
+        "language": {
+            "name": "Language",
+            "type": "select",
+            "options": [
+                {"value": "en", "label": "English"},
+                {"value": "es", "label": "Spanish"},
+                {"value": "fr", "label": "French"},
+                {"value": "de", "label": "German"},
+                {"value": "it", "label": "Italian"},
+                {"value": "pt", "label": "Portuguese"},
+                {"value": "nl", "label": "Dutch"},
+                {"value": "sv", "label": "Swedish"},
+                {"value": "da", "label": "Danish"},
+                {"value": "ja", "label": "Japanese"},
+                {"value": "zh", "label": "Chinese"},
+            ],
+        },
+        # A sub-choice of `language` (§6): the wizard filters these by the chosen
+        # language, but the schema field itself carries the full roster — the
+        # dependent narrowing is a UI concern, not a storage one.
+        "spelling": {
+            "name": "Spelling",
+            "type": "select",
+            "options": [
+                {"value": "en_GB", "label": "British English"},
+                {"value": "en_US", "label": "American English"},
+                {"value": "en_AU", "label": "Australian English"},
+                {"value": "en_CA", "label": "Canadian English"},
+            ],
+        },
+        "pov_mode": {
+            "name": "Narrative POV",
+            "type": "select",
+            "options": [
+                {"value": "first", "label": "First person"},
+                {"value": "second", "label": "Second person"},
+                {"value": "third_limited", "label": "Third person — limited"},
+                {"value": "third_close", "label": "Third person — close"},
+                {"value": "third_omniscient", "label": "Third person — omniscient"},
+                {"value": "third_objective", "label": "Third person — objective"},
+                {"value": "multiple_alternating", "label": "Multiple / alternating"},
+            ],
+        },
+        "tense": {
+            "name": "Tense",
+            "type": "select",
+            "options": [
+                {"value": "past", "label": "Past"},
+                {"value": "present", "label": "Present"},
+            ],
+        },
+        # Imperial and US customary agree on length (a foot is a foot) but differ
+        # on volume and weight, so they are distinct options; `in_world` is for a
+        # secondary-world setting that should name no Earth system at all (#317).
+        "measurement_system": {
+            "name": "Measurement system",
+            "type": "select",
+            "options": [
+                {"value": "metric", "label": "Metric"},
+                {"value": "us_customary", "label": "US customary"},
+                {"value": "imperial", "label": "Imperial"},
+                {"value": "in_world", "label": "In-world"},
+            ],
+        },
         "target_word_count": {"name": "Target word count", "type": "number"},
         "series_number": {"name": "Series number", "type": "number"},
     },

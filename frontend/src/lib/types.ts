@@ -985,6 +985,13 @@ export type ProjectInfo = {
   /** The declared subset of the same walk, resolved and labelled server-side. */
   chain?: ProjectChainLayer[];
   children?: ProjectChild[];
+  /**
+   * The project node's authored fields (project.md), resolved nearest-explicit-
+   * wins over the inheritance chain (#317) — the same fold as `ai_policy`. This
+   * is the value the AI templates read as `project.metadata.*`; a field no layer
+   * sets is simply absent.
+   */
+  metadata?: Record<string, unknown>;
 };
 
 export type ProviderCredentialsView = {

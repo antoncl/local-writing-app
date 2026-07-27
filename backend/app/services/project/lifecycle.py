@@ -20,6 +20,7 @@ Method bodies moved verbatim. Shared tooling resolves through the MRO:
 
 from __future__ import annotations
 
+import datetime
 import os
 import string
 from collections.abc import Callable
@@ -27,12 +28,14 @@ from pathlib import Path
 from typing import Any, get_args
 
 from app.models import (
+    PROJECT_NODE_FILENAME,
     AIPolicy,
     AncestorCandidate,
     DirectoryEntry,
     DirectoryListing,
     DirectoryRoot,
     MetadataSchema,
+    MetadataValue,
     PathProbe,
     ProjectChainLayer,
     ProjectChild,
@@ -78,6 +81,57 @@ class _AIPolicyResolver(LayerVisitor):
         stated = self._stated(layer.folder)
         if stated is not None:
             self.policy = stated
+
+
+def _channel_safe_metadata_value(value: Any) -> MetadataValue:
+    """Coerce a raw YAML value into the `MetadataValue` union (#317).
+
+    `project.md` is hand-editable and `yaml.safe_load` turns an unquoted ISO
+    date into a `datetime.date` — a type *outside* `MetadataValue`, so putting
+    it straight onto `ProjectInfo.metadata` would raise a Pydantic
+    `ValidationError` and 500 `GET /api/project` and `POST /api/project/open`.
+    That is the failure class `_stated_ai_policy` already guards for the
+    manifest: one hand-edited value must never make a project unopenable.
+
+    A date/datetime stringifies to its ISO text — exactly what the file says and
+    what a prompt template wants — and any other exotic scalar falls back to its
+    string form, so the template channel can never carry a value it cannot
+    represent. Lists and dicts are coerced element-wise (a date can hide inside
+    one). Normalisation against the schema stays on the editor read
+    (`read_project_node`); this is only the make-it-representable floor.
+    """
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, datetime.date):  # covers datetime.datetime too
+        return value.isoformat()
+    if isinstance(value, list):
+        return [_channel_safe_metadata_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _channel_safe_metadata_value(item) for key, item in value.items()}
+    return str(value)
+
+
+class _ProjectNodeMetadataResolver(LayerVisitor):
+    """Folds each layer's `project.md` metadata, nearest-explicit-wins (#317).
+
+    The authored-fields twin of `_AIPolicyResolver`: same outermost-first walk,
+    same rule — a value stated at a nearer layer overwrites a farther one, a key
+    no layer states never appears, so "inherit" is simply *absence*. Per key
+    rather than per whole node: a book that authors only `pov_mode` still
+    inherits `measurement_system` from its universe, which is the point (units
+    are world canon, POV is per-book).
+
+    The reader is injected so the visitor stays a pure fold and the file access
+    stays on the service. The machine layer carries no `project.md`, so it
+    contributes nothing (`_stated` returns `{}` for a folder without one).
+    """
+
+    def __init__(self, stated: Callable[[Path], dict[str, MetadataValue]]) -> None:
+        self._stated = stated
+        self.metadata: dict[str, MetadataValue] = {}
+
+    def visit_layer(self, layer: IndexLayer) -> None:
+        self.metadata.update(self._stated(layer.folder))
 
 
 class ProjectLifecycleMixin:
@@ -250,6 +304,7 @@ class ProjectLifecycleMixin:
             ancestors=self._ancestor_candidates_for_api(root),
             chain=self._project_chain_for_api(root),
             children=self._project_children(root),
+            metadata=self._resolved_project_node_metadata(root),
         )
 
     def _project_chain_for_api(self, root: Path) -> list[ProjectChainLayer]:
@@ -572,6 +627,53 @@ class ProjectLifecycleMixin:
             return None
         policy = ai["policy"]
         return policy if policy in get_args(AIPolicy) else "off"
+
+    def _resolved_project_node_metadata(self, root: Path) -> dict[str, MetadataValue]:
+        """The project node's authored fields, folded over the chain (#317).
+
+        The authored-fields analogue of `_resolved_ai_policy`: nearest-explicit-
+        wins, per key, so a universe that states `measurement_system: metric`
+        reaches a book that leaves the key absent, while a book that states its
+        own `pov_mode` keeps it. This is what the prompt envelope reads as
+        `project.metadata` (`current_project()`), giving the model the channel
+        #317 is about — a world's units, tense and spelling instead of a US
+        default the author had no way to override.
+
+        Through `visit_layers`, not a private walk, for the same reason the
+        policy resolves that way: one notion of the chain
+        (`decisions_walker_visitor_uniformity`). Same per-call walk cost noted on
+        `_resolved_ai_policy`; the memo that fixes it (#466) fixes both.
+        """
+        resolver = _ProjectNodeMetadataResolver(self._stated_project_node_metadata)
+        self.visit_layers(resolver, root)
+        return resolver.metadata
+
+    def _stated_project_node_metadata(self, folder: Path) -> dict[str, MetadataValue]:
+        """One layer's `project.md` metadata, or `{}` when it states nothing.
+
+        Absence — no file, no `metadata` block, or an unreadable one — is *no
+        opinion*, so the fold defers to an ancestor (`_resolved_project_node_
+        metadata`). A malformed `project.md` returns `{}` rather than raising,
+        matching `_stated_ai_policy`: this reader runs on every AI route's walk,
+        and a broken ancestor must not 500 the request. The raw stored values are
+        returned as-authored (the templates want `"metric"`, not a coerced
+        object); type-aware normalisation belongs to the editor read, not this
+        template channel.
+        """
+        path = folder / PROJECT_NODE_FILENAME
+        if not path.exists():
+            return {}
+        try:
+            front_matter = self._read_front_matter_only(path)
+        except Exception:
+            return {}
+        metadata = front_matter.get("metadata")
+        if not isinstance(metadata, dict):
+            return {}
+        # Keys and values are made `MetadataValue`-safe (a hand-edited YAML date
+        # would otherwise 500 the route) and copied, so nothing shares a mutable
+        # object with the on-disk parse.
+        return {str(key): _channel_safe_metadata_value(value) for key, value in metadata.items()}
 
     def list_directories(self, path: Path | None = None) -> DirectoryListing:
         target = (path or self._default_directory_picker_path()).expanduser().resolve()

@@ -86,7 +86,7 @@ Sessions live in process memory only. Restarting the backend clears them.
 ```jinja
 {% role "system" %}
 You are an expert fiction writer.
-Always write in {{ project.tense }} tense.
+{% if 'tense' in project.metadata %}Always write in {{ project.metadata.tense }} tense.{% endif %}
 {% cache_break %}
 {% endrole %}
 

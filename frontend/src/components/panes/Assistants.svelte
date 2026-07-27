@@ -8,6 +8,7 @@
   import RowCaret from "@/components/widgets/RowCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
   import { assistantTagsStore, assistantTagColorHexes } from "@/lib/stores/assistantTags";
+  import { isAssistantListed } from "@/lib/stores/assistants";
   import { assistantTagsOf } from "@/lib/chat/assistantScope";
   // `isBareDescendantsOf` / `kindUniverseExpr` went with the whole-roster guard
   // (#333): drag no longer inspects the expr's shape at all.
@@ -76,11 +77,7 @@
   // The listed sequence, in the order the roster presents it. `onSetOrder`
   // replaces a layer's whole opinion, so every drop sends the full sequence —
   // an id absent from it is demoted, which is exactly what un-listing means.
-  $: listedIds = entries.filter(isListed).map((entry) => entry.id);
-
-  function isListed(entry: AssistantEntrySummary): boolean {
-    return entry.computed_metadata?.listed === "listed";
-  }
+  $: listedIds = entries.filter(isAssistantListed).map((entry) => entry.id);
 
   // A drop on another ROW. Landing among the listed sequence sets priority
   // relative to that row; landing among the unlisted means "not in my roster",
@@ -91,8 +88,8 @@
     target: AssistantEntrySummary,
     position: "before" | "after" | "into",
   ): Promise<void> {
-    if (!isListed(target)) {
-      if (isListed(moved)) await onUnlist(moved.id);
+    if (!isAssistantListed(target)) {
+      if (isAssistantListed(moved)) await onUnlist(moved.id);
       return;
     }
     const without = listedIds.filter((id) => id !== moved.id);
@@ -109,10 +106,10 @@
   // this at the top", not "append somewhere below".
   async function groupDrop(moved: AssistantEntrySummary, groupKey: string): Promise<void> {
     if (groupKey === "listed") {
-      if (isListed(moved) && listedIds[0] === moved.id) return;
+      if (isAssistantListed(moved) && listedIds[0] === moved.id) return;
       await onSetOrder([moved.id, ...listedIds.filter((id) => id !== moved.id)]);
     } else if (groupKey === "unlisted") {
-      if (isListed(moved)) await onUnlist(moved.id);
+      if (isAssistantListed(moved)) await onUnlist(moved.id);
     }
   }
 
@@ -127,7 +124,7 @@
   // you already arranged would be. Creating an assistant prepends, because that
   // IS a statement of intent about the one you just made (#332).
   async function toggleListed(entry: AssistantEntrySummary): Promise<void> {
-    if (isListed(entry)) await onUnlist(entry.id);
+    if (isAssistantListed(entry)) await onUnlist(entry.id);
     else await onSetOrder([...listedIds.filter((id) => id !== entry.id), entry.id]);
   }
 
@@ -212,8 +209,8 @@
         <button
           class="assistant-curate"
           type="button"
-          title={isListed(entry) ? "Remove from this project's roster" : "Add to this project's roster"}
-          aria-label={isListed(entry)
+          title={isAssistantListed(entry) ? "Remove from this project's roster" : "Add to this project's roster"}
+          aria-label={isAssistantListed(entry)
             ? `Remove ${entry.title} from this project's roster`
             : `Add ${entry.title} to this project's roster`}
           onmousedown={(event) => event.stopPropagation()}
@@ -222,7 +219,7 @@
             event.stopPropagation();
             void toggleListed(entry);
           }}
-        >{isListed(entry) ? "Un-list" : "List"}</button>
+        >{isAssistantListed(entry) ? "Un-list" : "List"}</button>
       {/if}
     {/snippet}
   </NodeRow>

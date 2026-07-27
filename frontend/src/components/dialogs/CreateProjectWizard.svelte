@@ -15,30 +15,24 @@
   import AiPolicySlider from "@/components/widgets/AiPolicySlider.svelte";
   import ProviderTierPicker from "@/components/widgets/ProviderTierPicker.svelte";
   import { createWizard as wizard } from "@/lib/stores/createWizard.svelte";
-  import { assistantEntriesStore } from "@/lib/stores/assistants";
+  import { assistantEntriesStore, isAssistantListed } from "@/lib/stores/assistants";
   import { cloudKeyPlaceholder } from "@/lib/utils/aiProviders";
   import { moveBefore } from "@/lib/utils/listOrder";
   import { get } from "svelte/store";
-  import type { AssistantEntrySummary } from "@/lib/types";
 
   // This component stays in LEGACY mode (on:/bind: directives). The wizard's
   // open/step state lives on the imported `createWizard` rune controller, and a
   // legacy `$:` reactive statement silently stops the template from tracking
   // reads of that external rune — `{#if wizard.open}` then never re-renders and
   // the dialog stays invisible (the documented Svelte-5 `$:` trap). So the
-  // assistant roster is derived inline in the template from the store
-  // subscription (reactive via `$assistantEntriesStore`) rather than via `$:`.
-  //
-  // During creation these are the machine-level default assistants the new book
-  // inherits (#547).
-  function listedAssistantsOf(entries: AssistantEntrySummary[]): AssistantEntrySummary[] {
-    return entries.filter((entry) => entry.computed_metadata?.listed === "listed");
-  }
+  // assistant roster is derived inline in the template ({@const} over the store
+  // subscription) rather than via `$:`. During creation these are the
+  // machine-level default assistants the new book inherits (#547).
 
   // Ephemeral drag-to-reorder state; the ordering maths is the pure moveBefore.
   let draggingId: string | null = null;
   function dropOnAssistant(targetId: string) {
-    const ids = listedAssistantsOf(get(assistantEntriesStore)).map((entry) => entry.id);
+    const ids = get(assistantEntriesStore).filter(isAssistantListed).map((entry) => entry.id);
     if (draggingId && draggingId !== targetId) {
       void wizard.reorderAssistants(moveBefore(ids, draggingId, targetId));
     }
@@ -198,6 +192,7 @@
           />
 
           {#if wizard.showProviderSurface}
+            {@const listedAssistants = $assistantEntriesStore.filter(isAssistantListed)}
             <section class="ai-section" aria-label="Provider">
               {#if wizard.providerModeCloud}
                 <h3>Your subscriptions</h3>
@@ -261,14 +256,19 @@
 
             <section class="ai-section" aria-label="Assistants">
               <h3>Assistants for this book</h3>
-              {#if listedAssistantsOf($assistantEntriesStore).length > 0}
+              {#if listedAssistants.length > 0}
                 <ul class="assistant-rows">
-                  {#each listedAssistantsOf($assistantEntriesStore) as entry, index (entry.id)}
+                  {#each listedAssistants as entry, index (entry.id)}
                     <li
                       class="assistant-row"
                       class:dragging={draggingId === entry.id}
                       draggable="true"
-                      on:dragstart={() => (draggingId = entry.id)}
+                      on:dragstart={(event) => {
+                        draggingId = entry.id;
+                        // Firefox only starts a native drag once dataTransfer is
+                        // set; without this the whole reorder is a no-op there.
+                        event.dataTransfer?.setData("text/plain", entry.id);
+                      }}
                       on:dragover={(event) => event.preventDefault()}
                       on:drop={(event) => {
                         event.preventDefault();
@@ -305,10 +305,12 @@
                   />
                   <div class="ai-actions">
                     <button type="button" on:click={() => wizard.cancelHire()}>Cancel</button>
+                    <!-- Gate on a chosen provider so a stray Hire can't create an
+                         assistant pointed at a provider you never configured. -->
                     <button
                       type="button"
                       class="primary"
-                      disabled={wizard.aiBusy}
+                      disabled={wizard.aiBusy || !wizard.hireProvider}
                       on:click={() => wizard.submitHire()}>Hire</button
                     >
                   </div>

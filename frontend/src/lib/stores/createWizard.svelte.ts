@@ -210,14 +210,8 @@ class CreateWizard {
     this.candidatesLoading = false;
     this.inherits = [];
     this.aiPolicy = "inherit";
-    this.addingProvider = false;
-    this.providerDraftId = "";
-    this.providerDraftSecret = "";
-    this.hiring = false;
-    this.hireTitle = "";
-    this.hireProvider = "";
-    this.hireTier = "";
-    this.hireModel = "";
+    this.cancelAddProvider();
+    this.cancelHire();
     this.aiBusy = false;
     this.#stepIndex = 0;
     this.pickerOpen = false;
@@ -318,6 +312,26 @@ class CreateWizard {
   }
 
   // ---- AI step ----
+  // Runs an async curation gesture under the shared busy guard: re-entrant calls
+  // are dropped, and aiBusy is always cleared. Every provider/assistant write
+  // goes through here so the guarding rule lives in one place.
+  async #withBusy(fn: () => Promise<void>) {
+    if (this.aiBusy) return;
+    this.aiBusy = true;
+    try {
+      await fn();
+    } finally {
+      this.aiBusy = false;
+    }
+  }
+
+  #resetHireDraft() {
+    this.hireTitle = "";
+    this.hireProvider = "";
+    this.hireTier = "";
+    this.hireModel = "";
+  }
+
   setAiPolicy(next: AiPolicyDraft) {
     this.aiPolicy = next;
     // Leaving an on-policy collapses the provider surface, so drop any half-typed
@@ -343,30 +357,21 @@ class CreateWizard {
   async saveProvider() {
     const field = cloudKeyField(this.providerDraftId);
     const value = this.providerDraftSecret.trim();
-    if (!field || !value || this.aiBusy) return;
-    this.aiBusy = true;
-    try {
+    if (!field || !value) return;
+    await this.#withBusy(async () => {
       await this.onSaveProviderCredential(field, value);
       this.cancelAddProvider();
-    } finally {
-      this.aiBusy = false;
-    }
+    });
   }
 
   beginHire() {
     this.hiring = true;
-    this.hireTitle = "";
-    this.hireProvider = "";
-    this.hireTier = "";
-    this.hireModel = "";
+    this.#resetHireDraft();
   }
 
   cancelHire() {
     this.hiring = false;
-    this.hireTitle = "";
-    this.hireProvider = "";
-    this.hireTier = "";
-    this.hireModel = "";
+    this.#resetHireDraft();
   }
 
   setHireProvider(provider: string, tier: AICapabilityTier | "", model: string) {
@@ -376,9 +381,7 @@ class CreateWizard {
   }
 
   async submitHire() {
-    if (this.aiBusy) return;
-    this.aiBusy = true;
-    try {
+    await this.#withBusy(async () => {
       await this.onHireAssistant(
         this.hireTitle.trim() || "New assistant",
         this.hireProvider,
@@ -386,29 +389,15 @@ class CreateWizard {
         this.hireModel,
       );
       this.cancelHire();
-    } finally {
-      this.aiBusy = false;
-    }
+    });
   }
 
   async reorderAssistants(orderedIds: string[]) {
-    if (this.aiBusy) return;
-    this.aiBusy = true;
-    try {
-      await this.onReorderAssistants(orderedIds);
-    } finally {
-      this.aiBusy = false;
-    }
+    await this.#withBusy(() => this.onReorderAssistants(orderedIds));
   }
 
   async unlistAssistant(entryId: string) {
-    if (this.aiBusy) return;
-    this.aiBusy = true;
-    try {
-      await this.onUnlistAssistant(entryId);
-    } finally {
-      this.aiBusy = false;
-    }
+    await this.#withBusy(() => this.onUnlistAssistant(entryId));
   }
 
   // ---- Final action ----

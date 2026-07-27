@@ -13,6 +13,7 @@ from app.models import (
     DirectoryEntry,
     DirectoryListing,
     DirectoryRoot,
+    ImportLooseScenesRequest,
     MoveStructureNodeRequest,
     OpenProjectRequest,
     PathProbe,
@@ -172,6 +173,12 @@ def get_structure(project: CurrentProject) -> StructureDocument:
 def create_structure_node(project: CurrentProject, request: CreateStructureNodeRequest) -> StructureDocument:
     with translate_errors():
         return project.create_structure_node(request)
+
+
+@router.post("/api/structure/import-loose", response_model=StructureDocument)
+def import_loose_scenes(project: CurrentProject, request: ImportLooseScenesRequest) -> StructureDocument:
+    with translate_errors():
+        return project.import_loose_scenes(request.scene_ids)
 
 
 @router.patch("/api/structure/nodes/{node_id}", response_model=StructureDocument)

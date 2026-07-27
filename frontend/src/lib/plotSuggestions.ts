@@ -73,15 +73,19 @@ export function plotSuggestionClipboardText(
 }
 
 export function appendPlotSuggestionEvidence(existing: string | null | undefined, addition: string): string {
-  const evidenceToAdd = addition.trim();
-  if (!evidenceToAdd) return existing ?? "";
+  return appendPlotSuggestionText(existing, addition);
+}
+
+export function appendPlotSuggestionText(existing: string | null | undefined, addition: string): string {
+  const textToAdd = addition.trim();
+  if (!textToAdd) return existing ?? "";
 
   const current = existing ?? "";
-  const comparableAddition = normalizeComparableText(evidenceToAdd);
-  const existingEvidenceItems = current.split(/\n{2,}/).map(normalizeComparableText);
-  if (existingEvidenceItems.includes(comparableAddition)) return current;
-  if (!current.trim()) return evidenceToAdd;
-  return `${current.trimEnd()}\n\n${evidenceToAdd}`;
+  const comparableAddition = normalizeComparableText(textToAdd);
+  const existingItems = current.split(/\n{2,}/).map(normalizeComparableText);
+  if (existingItems.includes(comparableAddition)) return current;
+  if (!current.trim()) return textToAdd;
+  return `${current.trimEnd()}\n\n${textToAdd}`;
 }
 
 function parseAttributes(text: string): Record<string, string> {

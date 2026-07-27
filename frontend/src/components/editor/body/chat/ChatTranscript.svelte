@@ -21,9 +21,16 @@
     chatRunning: boolean;
     scrollEl?: HTMLDivElement | null;
     onApplyEvidence?: (suggestion: PlotSuggestion) => void | Promise<void>;
+    onApplyNote?: (suggestion: PlotSuggestion) => void | Promise<void>;
   }
 
-  let { chatHistory, chatRunning, scrollEl = $bindable(null), onApplyEvidence }: Props = $props();
+  let {
+    chatHistory,
+    chatRunning,
+    scrollEl = $bindable(null),
+    onApplyEvidence,
+    onApplyNote,
+  }: Props = $props();
 
   let copiedKey = $state("");
   let applyingKey = $state("");
@@ -41,7 +48,7 @@
     suggestion: PlotSuggestion,
     messageIndex: number,
     index: number,
-    action: "proposed_change" | "evidence_to_add" | "apply_evidence",
+    action: "proposed_change" | "evidence_to_add" | "apply_evidence" | "apply_note",
   ): string {
     return `${messageIndex}-${suggestion.kind}-${suggestion.target_card_id}-${suggestion.target_claim_id}-${index}-${action}`;
   }
@@ -68,10 +75,23 @@
 
   async function applyEvidenceSuggestion(suggestion: PlotSuggestion, key: string): Promise<void> {
     if (!onApplyEvidence || !suggestion.target_claim_id || !suggestion.evidence_to_add.trim()) return;
+    await applySuggestion(suggestion, key, onApplyEvidence);
+  }
+
+  async function applyNoteSuggestion(suggestion: PlotSuggestion, key: string): Promise<void> {
+    if (!onApplyNote || !suggestion.target_claim_id || !suggestion.proposed_change.trim()) return;
+    await applySuggestion(suggestion, key, onApplyNote);
+  }
+
+  async function applySuggestion(
+    suggestion: PlotSuggestion,
+    key: string,
+    handler: (suggestion: PlotSuggestion) => void | Promise<void>,
+  ): Promise<void> {
     applyingKey = key;
     applyErrorKey = "";
     try {
-      await onApplyEvidence(suggestion);
+      await handler(suggestion);
       appliedKey = key;
       if (applyResetTimer) clearTimeout(applyResetTimer);
       applyResetTimer = setTimeout(() => {
@@ -145,6 +165,21 @@
                         <i class="ti ti-copy" aria-hidden="true"></i>
                         {copiedKey === changeKey ? "Copied" : "Copy change"}
                       </button>
+                    {/if}
+                    {#if suggestion.proposed_change && suggestion.target_claim_id && onApplyNote}
+                      {@const applyNoteKey = suggestionKey(suggestion, i, j, "apply_note")}
+                      <button
+                        type="button"
+                        title="Append this proposed change to the target claim's AI notes"
+                        disabled={Boolean(applyingKey)}
+                        onclick={() => void applyNoteSuggestion(suggestion, applyNoteKey)}
+                      >
+                        <i class="ti ti-check" aria-hidden="true"></i>
+                        {applyingKey === applyNoteKey ? "Applying" : appliedKey === applyNoteKey ? "Applied" : "Apply note"}
+                      </button>
+                      {#if applyErrorKey === applyNoteKey}
+                        <small class="cbv-plot-suggestion-action-error">Could not apply note.</small>
+                      {/if}
                     {/if}
                     {#if suggestion.evidence_to_add}
                       {@const evidenceKey = suggestionKey(suggestion, i, j, "evidence_to_add")}

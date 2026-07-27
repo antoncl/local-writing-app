@@ -8,13 +8,13 @@
     "build": "vite build --configLoader runner",
     "preview": "vite preview --host 127.0.0.1 --configLoader runner",
     "check": "svelte-check --tsconfig ./tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "icons:build": "node scripts/build-tabler-subset.mjs"
   },
   "dependencies": {
     "@codemirror/lang-json": "^6.0.1",
     "@codemirror/language": "^6.10.3",
     "@codemirror/legacy-modes": "^6.4.1",
-    "@tabler/icons-webfont": "^3.44.0",
     "@tiptap/core": "^2.10.4",
     "@tiptap/extension-table": "^2.10.4",
     "@tiptap/extension-table-cell": "^2.10.4",
@@ -32,6 +32,9 @@
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "@tabler/icons": "^3.45.0",
+    "@tabler/icons-webfont": "^3.45.0",
+    "subset-font": "^2.5.0",
     "svelte-check": "^4.7.1",
     "typescript": "^5.7.2",
     "vite": "^6.0.7",

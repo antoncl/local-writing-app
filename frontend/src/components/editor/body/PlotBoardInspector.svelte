@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PlotBoardLongTextField from "@/components/editor/body/PlotBoardLongTextField.svelte";
   import type {
     PlotBoardCard,
     PlotBoardSpec,
@@ -51,14 +52,14 @@
     changeClaimStrength: (event: Event) => void;
     changeClaimType: (event: Event) => void;
     changePalettePointStatus: (event: Event) => void;
-    commitCardSynopsis: (event: Event) => void;
+    commitCardSynopsis: (value: string) => void;
     commitCardTitle: (event: Event) => void;
     commitClaimLabel: (event: Event) => void;
-    commitClaimTextField: (field: "evidence" | "rationale" | "ai_notes", event: Event) => void;
-    commitPalettePointOpenQuestions: (event: Event) => void;
+    commitClaimTextField: (field: "evidence" | "rationale" | "ai_notes", value: string) => void;
+    commitPalettePointOpenQuestions: (value: string) => void;
     commitPalettePointTextField: (
       field: "title" | "notes" | "author_intent" | "expected_role",
-      event: Event,
+      value: string,
     ) => void;
   }
 
@@ -190,30 +191,30 @@
       {/if}
       <label>
         Rationale
-        <textarea
-          rows="4"
+        <PlotBoardLongTextField
+          ariaLabel="Rationale"
           value={selectedClaim.rationale ?? ""}
           disabled={Boolean(savingMessage)}
-          onblur={(event) => commitClaimTextField("rationale", event)}
-        ></textarea>
+          on:commit={(event) => commitClaimTextField("rationale", event.detail.value)}
+        />
       </label>
       <label>
         Evidence
-        <textarea
-          rows="3"
+        <PlotBoardLongTextField
+          ariaLabel="Evidence"
           value={selectedClaim.evidence ?? ""}
           disabled={Boolean(savingMessage)}
-          onblur={(event) => commitClaimTextField("evidence", event)}
-        ></textarea>
+          on:commit={(event) => commitClaimTextField("evidence", event.detail.value)}
+        />
       </label>
       <label>
         AI notes
-        <textarea
-          rows="3"
+        <PlotBoardLongTextField
+          ariaLabel="AI notes"
           value={selectedClaim.ai_notes ?? ""}
           disabled={Boolean(savingMessage)}
-          onblur={(event) => commitClaimTextField("ai_notes", event)}
-        ></textarea>
+          on:commit={(event) => commitClaimTextField("ai_notes", event.detail.value)}
+        />
       </label>
     </div>
   {:else if selectedCard}
@@ -228,12 +229,12 @@
       </label>
       <label>
         Synopsis
-        <textarea
-          rows="5"
+        <PlotBoardLongTextField
+          ariaLabel="Synopsis"
           value={selectedCard.synopsis}
           disabled={Boolean(savingMessage)}
-          onblur={commitCardSynopsis}
-        ></textarea>
+          on:commit={(event) => commitCardSynopsis(event.detail.value)}
+        />
       </label>
       <label>
         Manuscript position
@@ -303,7 +304,7 @@
         <input
           value={selectedPaletteRow.point.local_label || selectedPaletteRow.point.title}
           disabled={Boolean(savingMessage)}
-          onblur={(event) => commitPalettePointTextField("title", event)}
+          onblur={(event) => commitPalettePointTextField("title", (event.currentTarget as HTMLInputElement).value)}
         />
       </label>
       <label>
@@ -330,39 +331,39 @@
       {/if}
       <label>
         Story specifics
-        <textarea
-          rows="5"
+        <PlotBoardLongTextField
+          ariaLabel="Story specifics"
           value={selectedPaletteRow.point.notes}
           disabled={Boolean(savingMessage)}
-          onblur={(event) => commitPalettePointTextField("notes", event)}
-        ></textarea>
+          on:commit={(event) => commitPalettePointTextField("notes", event.detail.value)}
+        />
       </label>
       <label>
         Author intent
-        <textarea
-          rows="3"
+        <PlotBoardLongTextField
+          ariaLabel="Author intent"
           value={selectedPaletteRow.point.author_intent ?? ""}
           disabled={Boolean(savingMessage)}
-          onblur={(event) => commitPalettePointTextField("author_intent", event)}
-        ></textarea>
+          on:commit={(event) => commitPalettePointTextField("author_intent", event.detail.value)}
+        />
       </label>
       <label>
         Expected role
-        <textarea
-          rows="3"
+        <PlotBoardLongTextField
+          ariaLabel="Expected role"
           value={selectedPaletteRow.point.expected_role ?? ""}
           disabled={Boolean(savingMessage)}
-          onblur={(event) => commitPalettePointTextField("expected_role", event)}
-        ></textarea>
+          on:commit={(event) => commitPalettePointTextField("expected_role", event.detail.value)}
+        />
       </label>
       <label>
         Open questions
-        <textarea
-          rows="4"
+        <PlotBoardLongTextField
+          ariaLabel="Open questions"
           value={questionText(selectedPaletteRow.point)}
           disabled={Boolean(savingMessage)}
-          onblur={commitPalettePointOpenQuestions}
-        ></textarea>
+          on:commit={(event) => commitPalettePointOpenQuestions(event.detail.value)}
+        />
       </label>
       <div class="inspector-stat">
         <span>Function badges</span>

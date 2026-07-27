@@ -11,6 +11,7 @@
   import PlotBoardInspector from "./PlotBoardInspector.svelte";
   import PlotBoardPalette from "./PlotBoardPalette.svelte";
   import PlotBoardToolbar from "./PlotBoardToolbar.svelte";
+  import { openPlotClaimAuditChat } from "./plotBoardClaimAudit";
   import { setPlotBoardContext } from "./plotBoardContext";
   import { saveTemplateInstancePoint } from "./plotBoardTemplateInstances";
   import {
@@ -705,6 +706,10 @@
     event.stopPropagation();
     if (!card.node_ref) return;
     onNavigate?.({ id: card.node_ref, kind: "scene" });
+  }
+
+  async function startPlotClaimAudit(): Promise<void> {
+    await openPlotClaimAuditChat({ plotNode, selectedClaim, selectedCard, selectedPaletteRow, selectedPointLabel, cardById });
   }
 
   function cloneBoardSpec(source: PlotBoardSpec): PlotBoardSpec {
@@ -1462,6 +1467,7 @@
     {plotNode}
     {deleteCard}
     {promoteCard}
+    {startPlotClaimAudit}
     {savingMessage}
     {selectedCard}
     {selectedClaim}

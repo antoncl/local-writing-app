@@ -1,7 +1,8 @@
 """Generate the snapshot-diff regression fixtures (#409, from spike #396).
 
-The eighteen cases are the regression surface for ADR-0044 Amendment 1: each one
-is a rendering the diff must **not** produce. They are generated, never
+The cases below are the regression surface for ADR-0044 Amendment 1 and the
+client-side parity gate (#573): each one is a rendering the diff must **not**
+produce, and a scanner/stacking branch the ported `diffRuns` must agree with. They are generated, never
 hand-authored — regenerate rather than editing the JSON, or the fixtures stop
 describing what the code does and start describing what someone hoped it did.
 
@@ -179,6 +180,31 @@ CASES: list[dict[str, str]] = [
         "why": "the case the mockup already proves — must stay clean, or the harness is wrong",
         "was": "Somewhere behind her a shutter began to bang. Nobody came to close it.",
         "now": "Somewhere behind her, up in the town, a shutter began to bang. Nobody closed it.",
+    },
+    # --- scanner / stacking branches, added for the #573 client-parity gate ---
+    {
+        "name": "edit-inside-a-fenced-code-block",
+        "why": "code is the one place a wrapper cannot go — is_code_block is true, so the block stacks whole",
+        "was": "```\nlet tide = 1;\nreturn tide;\n```",
+        "now": "```\nlet tide = 2;\nreturn tide;\n```",
+    },
+    {
+        "name": "edit-beside-an-autolink",
+        "why": "an autolink <...> is a protected span the word diff must not enter",
+        "was": "She noted <https://harbour.example/log> and read it twice.",
+        "now": "She noted <https://harbour.example/log> and read it once.",
+    },
+    {
+        "name": "edit-in-a-block-with-an-unterminated-code-span",
+        "why": "an unclosed backtick cannot be bounded — the scanner returns None and the block stacks",
+        "was": "The reading was `off and nobody could say why.",
+        "now": "The reading was `wrong and nobody could say why.",
+    },
+    {
+        "name": "edit-in-a-block-with-unpaired-emphasis",
+        "why": "an unpaired * cannot be safely bounded — pair_delimiters returns None and the block stacks",
+        "was": "She was *very tired and cross by the end of it.",
+        "now": "She was *very weary and cross by the end of it.",
     },
 ]
 

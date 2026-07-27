@@ -176,7 +176,7 @@ async function problemsFor(runs: DiffRun[], was: string, now: string): Promise<s
   return problems;
 }
 
-describe("diff runs render safely — the eighteen fixtures", () => {
+describe("diff runs render safely — the committed fixtures", () => {
   for (const testCase of CASES) {
     it(`${testCase.name} — ${testCase.why}`, async () => {
       // The runs must still BE the two documents, or the diff has lost words —

@@ -272,9 +272,22 @@ class PlotBoardSpec(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class PlotContextClaimCard(BaseModel):
+    id: str
+    title: str
+    synopsis: str = ""
+    scene_id: str | None = None
+    structure_node_id: str | None = None
+    structure_title: str | None = None
+    manuscript_index: int | None = None
+    primary_plotline_id: str | None = None
+    primary_plotline: PlotLine | None = None
+
+
 class PlotContextClaim(BaseModel):
     id: str
     card_id: str
+    card: PlotContextClaimCard | None = None
     template_instance_id: str
     plot_point_id: str
     plotline_id: str | None = None
@@ -311,6 +324,7 @@ class PlotContextPoint(BaseModel):
     expected_role: str = ""
     open_questions: list[str] = Field(default_factory=list)
     status: PlotPointNoteStatus = "unplanned"
+    claims: list[PlotContextClaim] = Field(default_factory=list)
 
 
 class PlotContextTemplateInstance(BaseModel):

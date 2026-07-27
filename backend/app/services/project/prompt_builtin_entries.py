@@ -128,18 +128,15 @@ You are an experienced fiction editor auditing a plot board. A plot beat is a st
       <expected_role>{{ point.expected_role | e }}</expected_role>
 {% endif %}
       <claiming_cards>
-{% for claim in plot.claims %}
-{% if claim.template_instance_id == instance.id and claim.plot_point_id == point.plot_point_id %}
+{% for claim in point.claims %}
         <claim id="{{ claim.id | e }}" type="{{ claim.claim_type | e }}" strength="{{ claim.strength | default('', true) | e }}">
-{% for card in plot.cards %}
-{% if card.id == claim.card_id %}
-          <card title="{{ card.title | e }}">
-{% if card.synopsis %}
-            <synopsis>{{ card.synopsis | e }}</synopsis>
+{% if claim.card %}
+          <card title="{{ claim.card.title | e }}">
+{% if claim.card.synopsis %}
+            <synopsis>{{ claim.card.synopsis | e }}</synopsis>
 {% endif %}
           </card>
 {% endif %}
-{% endfor %}
 {% if claim.claim_label %}
           <claim_label>{{ claim.claim_label | e }}</claim_label>
 {% endif %}
@@ -153,7 +150,6 @@ You are an experienced fiction editor auditing a plot board. A plot beat is a st
           <ai_notes>{{ claim.ai_notes | e }}</ai_notes>
 {% endif %}
         </claim>
-{% endif %}
 {% endfor %}
       </claiming_cards>
     </plot_beat>

@@ -18,6 +18,7 @@ from app.models_plot import (
     PlotBoardSpec,
     PlotContextCard,
     PlotContextClaim,
+    PlotContextClaimCard,
     PlotContextPacket,
     PlotContextPoint,
     PlotContextRelationship,
@@ -321,6 +322,10 @@ class PlotEntriesMixin:
             for claim in board_node.board.claims
             if claim.card_id in visible_card_ids
         ]
+        visible_claims = self._plot_context_claims_with_cards(
+            visible_claims,
+            visible_cards,
+        )
         visible_cards = self._plot_context_cards_with_claims(
             visible_cards,
             visible_claims,
@@ -347,6 +352,7 @@ class PlotEntriesMixin:
         template_instances = self._plot_context_template_instances(
             instance_ids,
             detail_point_ids_by_instance=detail_point_ids_by_instance,
+            claims_by_point=self._plot_context_claims_by_point(visible_claims),
         )
         plotlines = list(board_node.board.plotlines)
         return PlotContextPacket(
@@ -485,6 +491,7 @@ class PlotEntriesMixin:
             instance = self._plot_context_template_instance(
                 template_instance_id,
                 detail_point_ids=None,
+                claims_by_point=self._plot_context_claims_by_point(claims),
             )
             if instance is not None:
                 template_instances = [instance]
@@ -521,6 +528,40 @@ class PlotEntriesMixin:
             card.model_copy(update={"claims": claims_by_card.get(card.id, [])})
             for card in cards
         ]
+
+    @staticmethod
+    def _plot_context_claims_with_cards(
+        claims: list[PlotContextClaim],
+        cards: list[PlotContextCard],
+    ) -> list[PlotContextClaim]:
+        cards_by_id = {
+            card.id: PlotContextClaimCard(
+                id=card.id,
+                title=card.title,
+                synopsis=card.synopsis,
+                scene_id=card.scene_id,
+                structure_node_id=card.structure_node_id,
+                structure_title=card.structure_title,
+                manuscript_index=card.manuscript_index,
+                primary_plotline_id=card.primary_plotline_id,
+                primary_plotline=card.primary_plotline,
+            )
+            for card in cards
+        }
+        return [
+            claim.model_copy(update={"card": cards_by_id.get(claim.card_id)})
+            for claim in claims
+        ]
+
+    @staticmethod
+    def _plot_context_claims_by_point(
+        claims: list[PlotContextClaim],
+    ) -> dict[tuple[str, str], list[PlotContextClaim]]:
+        claims_by_point: dict[tuple[str, str], list[PlotContextClaim]] = {}
+        for claim in claims:
+            key = (claim.template_instance_id, claim.plot_point_id)
+            claims_by_point.setdefault(key, []).append(claim)
+        return claims_by_point
 
     def _seed_builtin_plot_templates(self, root: Any) -> None:
         plot_dir = root / "plot"
@@ -743,6 +784,7 @@ class PlotEntriesMixin:
         instance_ids: list[str],
         *,
         detail_point_ids_by_instance: dict[str, set[str]] | None,
+        claims_by_point: dict[tuple[str, str], list[PlotContextClaim]],
     ) -> list[PlotContextTemplateInstance]:
         out: list[PlotContextTemplateInstance] = []
         for instance_id in instance_ids:
@@ -754,6 +796,7 @@ class PlotEntriesMixin:
             instance = self._plot_context_template_instance(
                 instance_id,
                 detail_point_ids=detail_point_ids,
+                claims_by_point=claims_by_point,
             )
             if instance is not None:
                 out.append(instance)
@@ -764,6 +807,7 @@ class PlotEntriesMixin:
         instance_id: str,
         *,
         detail_point_ids: set[str] | None,
+        claims_by_point: dict[tuple[str, str], list[PlotContextClaim]],
     ) -> PlotContextTemplateInstance | None:
         try:
             instance_node = self.read_plot_node(instance_id)
@@ -858,6 +902,7 @@ class PlotEntriesMixin:
                         if note is not None
                         else getattr(local, "status", "unplanned")
                     ),
+                    claims=claims_by_point.get((instance_id, point_id), []),
                 )
             )
 

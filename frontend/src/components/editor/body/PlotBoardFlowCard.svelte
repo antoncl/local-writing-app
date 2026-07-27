@@ -9,6 +9,7 @@
   let card = $derived(ctx.cardById(data.cardId));
   let columnTitle = $derived(ctx.cardColumnTitle(data.cardId));
   let cardClaims = $derived(ctx.claimsForCard(data.cardId));
+  let cardDiagnostics = $derived(ctx.diagnosticsForCard(data.cardId));
 
   function claimTypeShort(claimType: string): string {
     switch (claimType) {
@@ -35,6 +36,7 @@
     class:selected={ctx.selectedCardId === card.id && !ctx.selectedClaimId}
     class:drag-over={ctx.dragOverCardId === card.id}
     class:untagged={cardClaims.length === 0}
+    class:has-diagnostics={cardDiagnostics.length > 0}
     ondragenter={(event) => ctx.allowCardDrop(card.id, event)}
     ondragover={(event) => ctx.allowCardDrop(card.id, event)}
     ondragleave={(event) => ctx.leaveCardDrop(card.id, event)}
@@ -69,6 +71,13 @@
     </header>
     {#if card.synopsis}
       <p>{card.synopsis}</p>
+    {/if}
+    {#if cardDiagnostics.length > 0}
+      <div class="diagnostic-chips" aria-label="Card diagnostics">
+        {#each cardDiagnostics as diagnostic (diagnostic.key)}
+          <span class:warning={diagnostic.severity === "warning"}>{diagnostic.label}</span>
+        {/each}
+      </div>
     {/if}
     <div class="claim-chips">
       {#if cardClaims.length === 0}

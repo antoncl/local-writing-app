@@ -12,6 +12,7 @@
   import PlotBoardPalette from "./PlotBoardPalette.svelte";
   import PlotBoardToolbar from "./PlotBoardToolbar.svelte";
   import { openPlotClaimAuditChat } from "./plotBoardClaimAudit";
+  import { buildPlotDiagnostics } from "./plotBoardDiagnostics";
   import { setPlotBoardContext } from "./plotBoardContext";
   import { saveTemplateInstancePoint } from "./plotBoardTemplateInstances";
   import {
@@ -174,11 +175,8 @@
   let structureColumnOptions = $derived(flattenStructure(structure?.root));
   let selectedPointLabel = $derived(selectedClaim ? pointLabel(selectedClaim) : "");
   let selectedContextSceneId = $derived(selectedCard?.node_ref ?? null);
-  let selectedPaletteRow = $derived(
-    selectedPalettePoint
-      ? paletteRows.find((row) => selectedPalettePoint === pointKey(row.instance.id, row.point.plot_point_id)) ?? null
-      : null,
-  );
+  let selectedPaletteRow = $derived(selectedPalettePoint ? paletteRows.find((row) => selectedPalettePoint === pointKey(row.instance.id, row.point.plot_point_id)) ?? null : null);
+  let plotDiagnostics = $derived(buildPlotDiagnostics(cards, claims, paletteRows));
 
   setPlotBoardContext(() => ({
     saving: Boolean(savingMessage),
@@ -189,6 +187,7 @@
     cardById,
     cardColumnTitle,
     claimsForCard,
+    diagnosticsForCard: (cardId) => plotDiagnostics.cards.get(cardId) ?? [],
     selectColumn,
     addCardToColumn,
     pointLabel,
@@ -706,10 +705,6 @@
     event.stopPropagation();
     if (!card.node_ref) return;
     onNavigate?.({ id: card.node_ref, kind: "scene" });
-  }
-
-  async function startPlotClaimAudit(): Promise<void> {
-    await openPlotClaimAuditChat({ plotNode, selectedClaim, selectedCard, selectedPaletteRow, selectedPointLabel, cardById });
   }
 
   function cloneBoardSpec(source: PlotBoardSpec): PlotBoardSpec {
@@ -1404,6 +1399,7 @@
     {instanceDisplayTitle}
     {onNavigate}
     {paletteRows}
+    pointDiagnostics={plotDiagnostics.points}
     {pointKey}
     {rawInstanceTitle}
     bind:renamingTemplateInstanceId
@@ -1423,6 +1419,7 @@
     <PlotBoardToolbar
       cardCount={cards.length}
       claimCount={claims.length}
+      diagnostics={plotDiagnostics.summary}
       relationshipCount={board.relationships.length}
       {savingMessage}
       {saveError}
@@ -1465,9 +1462,10 @@
     {plotContextError}
     {plotContextLoading}
     {plotNode}
+    diagnostics={plotDiagnostics}
     {deleteCard}
     {promoteCard}
-    {startPlotClaimAudit}
+    startPlotClaimAudit={() => openPlotClaimAuditChat({ plotNode, selectedClaim, selectedCard, selectedPaletteRow, selectedPointLabel, cardById })}
     {savingMessage}
     {selectedCard}
     {selectedClaim}

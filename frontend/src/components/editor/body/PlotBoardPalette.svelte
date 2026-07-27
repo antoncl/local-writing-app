@@ -5,6 +5,7 @@
     PlotPointClaim,
     PlotTemplateInstancePoint,
   } from "@/lib/types";
+  import type { PlotDiagnostic } from "./plotBoardDiagnostics";
 
   type TemplatePointRow = {
     instance: PlotNode;
@@ -28,6 +29,7 @@
     instanceDisplayTitle: (instance: PlotNode) => string;
     onNavigate?: (payload: { id: string; kind: string }) => void;
     paletteRows: TemplatePointRow[];
+    pointDiagnostics: Map<string, PlotDiagnostic[]>;
     pointKey: (instanceId: string, pointId: string) => string;
     rawInstanceTitle: (instance: Pick<PlotNode, "id" | "title" | "template_instance">) => string;
     renamingTemplateInstanceId: string | null;
@@ -56,6 +58,7 @@
     instanceDisplayTitle,
     onNavigate,
     paletteRows,
+    pointDiagnostics,
     pointKey,
     rawInstanceTitle,
     renamingTemplateInstanceId = $bindable(null),
@@ -76,6 +79,10 @@
     const templateId = instance.template_instance?.template_id;
     if (!templateId) return;
     onNavigate?.({ id: templateId, kind: "plot" });
+  }
+
+  function diagnosticsForPoint(row: TemplatePointRow): PlotDiagnostic[] {
+    return pointDiagnostics.get(pointKey(row.instance.id, row.point.plot_point_id)) ?? [];
   }
 </script>
 
@@ -207,6 +214,13 @@
               ondragend={clearDragOver}
             >
               <span class="point-title">{row.point.title || row.point.plot_point_id}</span>
+              {#if diagnosticsForPoint(row).length > 0}
+                <span class="point-diagnostics">
+                  {#each diagnosticsForPoint(row) as diagnostic (diagnostic.key)}
+                    <small class:warning={diagnostic.severity === "warning"}>{diagnostic.label}</small>
+                  {/each}
+                </span>
+              {/if}
               <span class="point-status" class:used={row.status === "used"} class:partial={row.status === "partial"} class:missing={row.status === "missing"}>
                 {row.status}
               </span>

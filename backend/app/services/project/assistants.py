@@ -253,6 +253,15 @@ class AssistantEntriesMixin:
             seen.add(entry_id)
             dedup.append(entry_id)
         order = self._read_assistants_order(folder)
+        # #375: this replaces the layer's `ids` WHOLESALE, and since #333 the pane
+        # sends the entire merged *listed* sequence — so one drag makes this layer
+        # name every assistant it currently sees, inherited ones included. Omission
+        # ("no opinion") is thereby converted into a local opinion in one gesture,
+        # and the layer silently stops inheriting later ancestor ordering changes.
+        # Accepted + documented for pre-1.0 (single-user app, deliberate); the real
+        # fix — sparse per-decision statements ("X before Y") that the fold
+        # composes, so a partial opinion stays partial — is tracked in #375 for
+        # post-1.0.
         order.ids = dedup
         # A dragged id is a positive listing, so it outranks a stale exclusion
         # at this same layer — otherwise the drop would silently do nothing.

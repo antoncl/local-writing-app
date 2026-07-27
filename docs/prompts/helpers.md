@@ -382,6 +382,25 @@ snippets must be able to access the same value through Jinja on the structured
 object. Do not add serializer-only XML conveniences without adding the
 corresponding context field or object property.
 
+Repeated XML elements map to plural list fields in Jinja. The XML element name
+is singular because each rendered element is one item; the structured field is
+plural because snippets iterate over the collection.
+
+| XML path | Jinja access |
+| --- | --- |
+| `<plot_context ...>` | `plot` |
+| `<plotline ...>` | `plot.plotlines[]` |
+| `<template_instance ...>` | `plot.template_instances[]` |
+| `<plot_point ...>` inside a template instance | `instance.plot_points[]` |
+| `<card ...>` | `plot.cards[]` |
+| `<claim ...>` inside a card | `card.claims[]` |
+| top-level claims | `plot.claims[]` |
+| `<relationship ...>` | `plot.relationships[]` |
+| `primary_plotline_id` on card XML | `card.primary_plotline_id` |
+| `primary_plotline_title` on card XML | `card.primary_plotline.title` |
+| `plotline_id` on claim XML | `claim.plotline_id` |
+| `plotline_title` on claim XML | `claim.plotline.title` |
+
 **Accepted `selection` shapes**:
 
 - a plot board id string

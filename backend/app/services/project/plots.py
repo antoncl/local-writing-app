@@ -262,6 +262,7 @@ class PlotEntriesMixin:
         visible_card_ids: set[str] = set()
         omitted_future_cards = 0
         omitted_unordered_cards = 0
+        plotline_by_id = {plotline.id: plotline for plotline in board_node.board.plotlines}
 
         for card in board_node.board.cards:
             card_scene_id, structure_node = self._plot_card_scene(
@@ -290,6 +291,11 @@ class PlotEntriesMixin:
                     structure_title=getattr(structure_node, "title", None),
                     manuscript_index=manuscript_index,
                     primary_plotline_id=card.primary_plotline_id,
+                    primary_plotline=(
+                        plotline_by_id.get(card.primary_plotline_id)
+                        if card.primary_plotline_id
+                        else None
+                    ),
                 )
             )
 
@@ -300,6 +306,11 @@ class PlotEntriesMixin:
                 template_instance_id=claim.template_instance_id,
                 plot_point_id=claim.plot_point_id,
                 plotline_id=claim.plotline_id,
+                plotline=(
+                    plotline_by_id.get(claim.plotline_id)
+                    if claim.plotline_id
+                    else None
+                ),
                 claim_type=claim.claim_type,
                 claim_label=claim.claim_label,
                 strength=claim.strength,
@@ -327,20 +338,17 @@ class PlotEntriesMixin:
             if relationship.from_card_id in visible_card_ids
             and relationship.to_card_id in visible_card_ids
         ]
-        template_instances = self._plot_context_template_instances(visible_claims)
-        referenced_plotlines = {
-            value
-            for value in (
-                [card.primary_plotline_id for card in visible_cards]
-                + [claim.plotline_id for claim in visible_claims]
-            )
-            if value
-        }
-        plotlines = [
-            plotline
-            for plotline in board_node.board.plotlines
-            if plotline.id in referenced_plotlines
-        ]
+        instance_ids = self._plot_context_instance_ids(board_node.board)
+        detail_point_ids_by_instance = (
+            None
+            if include_future or not scene_id
+            else self._plot_context_claim_point_ids(visible_claims)
+        )
+        template_instances = self._plot_context_template_instances(
+            instance_ids,
+            detail_point_ids_by_instance=detail_point_ids_by_instance,
+        )
+        plotlines = list(board_node.board.plotlines)
         return PlotContextPacket(
             board_id=board_node.id,
             board_title=board_node.title,
@@ -359,6 +367,35 @@ class PlotEntriesMixin:
                 - len(visible_relationships),
             },
         )
+
+    @staticmethod
+    def _plot_context_instance_ids(board: PlotBoardSpec) -> list[str]:
+        ids: list[str] = []
+        seen: set[str] = set()
+
+        def add(value: str | None) -> None:
+            if value and value not in seen:
+                ids.append(value)
+                seen.add(value)
+
+        for instance_id in board.template_instance_ids:
+            add(instance_id)
+        for plotline in board.plotlines:
+            add(plotline.template_instance_id)
+        for claim in board.claims:
+            add(claim.template_instance_id)
+        return ids
+
+    @staticmethod
+    def _plot_context_claim_point_ids(
+        claims: list[PlotContextClaim],
+    ) -> dict[str, set[str]]:
+        point_ids_by_instance: dict[str, set[str]] = {}
+        for claim in claims:
+            point_ids_by_instance.setdefault(claim.template_instance_id, set()).add(
+                claim.plot_point_id
+            )
+        return point_ids_by_instance
 
     def read_plot_context_for_selection(
         self,
@@ -445,7 +482,10 @@ class PlotEntriesMixin:
             if instance.id == template_instance_id
         ]
         if not template_instances:
-            instance = self._plot_context_template_instance(template_instance_id, None)
+            instance = self._plot_context_template_instance(
+                template_instance_id,
+                detail_point_ids=None,
+            )
             if instance is not None:
                 template_instances = [instance]
 
@@ -699,17 +739,22 @@ class PlotEntriesMixin:
         )
 
     def _plot_context_template_instances(
-        self, claims: list[PlotContextClaim]
+        self,
+        instance_ids: list[str],
+        *,
+        detail_point_ids_by_instance: dict[str, set[str]] | None,
     ) -> list[PlotContextTemplateInstance]:
-        point_ids_by_instance: dict[str, set[str]] = {}
-        for claim in claims:
-            point_ids_by_instance.setdefault(claim.template_instance_id, set()).add(
-                claim.plot_point_id
-            )
-
         out: list[PlotContextTemplateInstance] = []
-        for instance_id, used_point_ids in sorted(point_ids_by_instance.items()):
-            instance = self._plot_context_template_instance(instance_id, used_point_ids)
+        for instance_id in instance_ids:
+            detail_point_ids = (
+                None
+                if detail_point_ids_by_instance is None
+                else detail_point_ids_by_instance.get(instance_id, set())
+            )
+            instance = self._plot_context_template_instance(
+                instance_id,
+                detail_point_ids=detail_point_ids,
+            )
             if instance is not None:
                 out.append(instance)
         return out
@@ -717,7 +762,8 @@ class PlotEntriesMixin:
     def _plot_context_template_instance(
         self,
         instance_id: str,
-        used_point_ids: set[str] | None,
+        *,
+        detail_point_ids: set[str] | None,
     ) -> PlotContextTemplateInstance | None:
         try:
             instance_node = self.read_plot_node(instance_id)
@@ -746,10 +792,7 @@ class PlotEntriesMixin:
         }
         enabled = set(instance_node.template_instance.enabled_point_ids)
         point_note_ids = set(instance_node.template_instance.point_notes)
-        if used_point_ids is None:
-            point_ids = enabled or set(template_points) | set(instance_points) | point_note_ids
-        else:
-            point_ids = used_point_ids
+        point_ids = enabled or set(template_points) | set(instance_points) | point_note_ids
 
         points: list[PlotContextPoint] = []
         for point_id in self._ordered_plot_point_ids(
@@ -760,8 +803,13 @@ class PlotEntriesMixin:
             if enabled and point_id not in enabled:
                 continue
             base = template_points.get(point_id)
-            local = instance_points.get(point_id)
-            note = instance_node.template_instance.point_notes.get(point_id)
+            include_details = detail_point_ids is None or point_id in detail_point_ids
+            local = instance_points.get(point_id) if include_details else None
+            note = (
+                instance_node.template_instance.point_notes.get(point_id)
+                if include_details
+                else None
+            )
             points.append(
                 PlotContextPoint(
                     plot_point_id=point_id,

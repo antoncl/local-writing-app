@@ -171,6 +171,7 @@ export type PlotContextCard = {
   structure_title?: string | null;
   manuscript_index?: number | null;
   primary_plotline_id?: string | null;
+  primary_plotline?: PlotLine | null;
   claims: PlotContextClaim[];
 };
 
@@ -180,6 +181,7 @@ export type PlotContextClaim = {
   template_instance_id: string;
   plot_point_id: string;
   plotline_id?: string | null;
+  plotline?: PlotLine | null;
   claim_type: PlotClaimType;
   claim_label?: string | null;
   strength?: "weak" | "medium" | "strong" | null;

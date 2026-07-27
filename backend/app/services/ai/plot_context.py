@@ -288,6 +288,11 @@ def _format_plot_context_block(packet: Any) -> str:
             attrs.append(f"structure_title={quoteattr(card.structure_title)}")
         if card.manuscript_index is not None:
             attrs.append(f"manuscript_index={quoteattr(str(card.manuscript_index))}")
+        if getattr(card, "primary_plotline", None):
+            attrs.append(f"primary_plotline_id={quoteattr(card.primary_plotline.id)}")
+            attrs.append(f"primary_plotline_title={quoteattr(card.primary_plotline.title)}")
+        elif getattr(card, "primary_plotline_id", None):
+            attrs.append(f"primary_plotline_id={quoteattr(card.primary_plotline_id)}")
         lines.append(f"  <card {' '.join(attrs)}>")
         if card.synopsis:
             lines.append(f"    <synopsis>{xml_escape(card.synopsis.strip())}</synopsis>")
@@ -317,6 +322,8 @@ def _render_plot_claim_xml(claim: Any) -> list[str]:
     ]
     if claim.plotline_id:
         attrs.append(f"plotline_id={quoteattr(claim.plotline_id)}")
+    if getattr(claim, "plotline", None):
+        attrs.append(f"plotline_title={quoteattr(claim.plotline.title)}")
     if claim.claim_label:
         attrs.append(f"label={quoteattr(claim.claim_label)}")
     if claim.strength:

@@ -21,7 +21,7 @@ import { get } from "svelte/store";
 import { structureStore } from "@/lib/stores/structure";
 import { isLeafNode } from "@/lib/utils/treeHelpers";
 import { refreshAssistantEntries } from "@/lib/stores/assistants";
-import { projectChooser } from "@/lib/stores/projectChooser.svelte";
+import { createWizard } from "@/lib/stores/createWizard.svelte";
 import { editorPanes } from "@/lib/stores/editorPanes.svelte";
 import { loadProjectData } from "@/lib/stores/index";
 import type {
@@ -114,7 +114,7 @@ class ProjectSession {
     try {
       this.machineSettings = await api.getMachineSettings();
       this.recentProjects = this.machineSettings.recent_projects ?? [];
-      projectChooser.defaultProjectsFolder = this.machineSettings.default_projects_folder ?? "";
+      createWizard.defaultProjectsFolder = this.machineSettings.default_projects_folder ?? "";
       setPalette(this.machineSettings.palette ?? []);
     } catch {
       // Backend may be offline — leave machineSettings as null; pickers will
@@ -133,7 +133,7 @@ class ProjectSession {
       const view = await api.getMachineSettings();
       this.machineSettings = view;
       this.recentProjects = view.recent_projects ?? [];
-      projectChooser.defaultProjectsFolder = view.default_projects_folder ?? "";
+      createWizard.defaultProjectsFolder = view.default_projects_folder ?? "";
       setPalette(view.palette ?? []);
     } catch {
       // Non-fatal — recents stays stale until next reload.
@@ -176,19 +176,32 @@ class ProjectSession {
       };
       this.machineSettings = await api.updateMachineSettings(update);
       this.recentProjects = this.machineSettings.recent_projects ?? [];
-      projectChooser.defaultProjectsFolder = this.machineSettings.default_projects_folder ?? "";
+      createWizard.defaultProjectsFolder = this.machineSettings.default_projects_folder ?? "";
       setPalette(this.machineSettings.palette ?? []);
       this.machineSettingsOpen = false;
       this.setStatus("Saved machine settings");
     });
   }
 
+  // Set only the machine root, from the wizard's first-run step (#318). A
+  // partial update: the server reads it with `exclude_unset`, so the other
+  // machine settings are left untouched. Re-syncs `machineSettings` so the
+  // wizard's `needsRootFolder` flips and step 1 gives way to step 2.
+  async saveDefaultProjectsFolder(folder: string): Promise<void> {
+    await this.run(async () => {
+      this.machineSettings = await api.updateMachineSettings({ default_projects_folder: folder });
+      createWizard.defaultProjectsFolder = this.machineSettings.default_projects_folder ?? "";
+    });
+  }
+
   // ---- Project lifecycle entry points ----
   // Create a project at the given path with the given title. The layer walk's
   // bound is the machine root (#429), so creation neither takes nor sends one.
-  async createProjectAt(path: string, title: string): Promise<void> {
+  // `inherits` is the wizard's declaration (#318); omitted defaults to a flat
+  // project (its call sites all pass an explicit list).
+  async createProjectAt(path: string, title: string, inherits: string[] = []): Promise<void> {
     await this.run(async () => {
-      const openedProject = await api.createProject(path, title);
+      const openedProject = await api.createProject(path, title, inherits);
       this.rememberLastProject(openedProject.root_path);
       this.onOpenWorkspace(openedProject);
       await loadProjectData();

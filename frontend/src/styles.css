@@ -946,8 +946,6 @@ button.row-action-add.active {
 
 /* .project-empty-hint / .project-identity* / .disabled-section co-located into Project.svelte (#14). */
 
-/* .inline-link co-located into NewProjectModal.svelte (#14). */
-
 .preview-result-error {
   margin: 0;
   padding: 8px 10px;

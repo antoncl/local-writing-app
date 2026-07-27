@@ -16,7 +16,7 @@
   import Todo from "@/components/panes/Todo.svelte";
   import Workspace from "@/components/workspace/Workspace.svelte";
   import { isLeafNode } from "@/lib/utils/treeHelpers";
-  import NewProjectModal from "@/components/dialogs/NewProjectModal.svelte";
+  import CreateProjectWizard from "@/components/dialogs/CreateProjectWizard.svelte";
   import MachineSettingsDialog from "@/components/dialogs/MachineSettingsDialog.svelte";
   import ConfirmModal from "@/components/dialogs/ConfirmModal.svelte";
   import PlainTextEditor from "@/components/widgets/PlainTextEditor.svelte";
@@ -81,6 +81,7 @@
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
   import { projectChooser } from "@/lib/stores/projectChooser.svelte";
+  import { createWizard } from "@/lib/stores/createWizard.svelte";
   import { projectSession } from "@/lib/stores/projectSession.svelte";
   import { aiSettings } from "@/lib/stores/aiSettings.svelte";
   import { todoActions } from "@/lib/stores/todoActions.svelte";
@@ -195,13 +196,20 @@
     chatSessions.setError = (message) => { error = message; };
     // Confirm actions flow through App's run() so errors surface in `error`.
     confirmService.onRun = run;
-    // Project chooser drives only its modals; the projectSession controller
-    // owns the open/create lifecycle. App feeds the picker its start dir +
-    // error sink and routes its chosen path/title into projectSession.
+    // Project chooser drives only the open-project picker; the projectSession
+    // controller owns the open/create lifecycle. App feeds the picker its start
+    // dir + error sink and routes its chosen path into projectSession.
     projectChooser.onError = (message) => { error = message; };
     projectChooser.onOpenProject = (path) => void projectSession.openProjectAt(path);
-    projectChooser.onCreateProject = (path, title) => projectSession.createProjectAt(path, title);
     projectChooser.getStartPath = () => projectPath;
+    // The create-project wizard (#318) owns new-project creation now. It writes
+    // the machine root itself (step 1, first run) and hands projectSession the
+    // resolved path/title/declaration on Create.
+    createWizard.onError = (message) => { error = message; };
+    createWizard.getStartPath = () => projectPath;
+    createWizard.onSaveRootFolder = (folder) => projectSession.saveDefaultProjectsFolder(folder);
+    createWizard.onCreateProject = (path, title, inherits) =>
+      projectSession.createProjectAt(path, title, inherits);
     // The projectSession controller owns machine settings + the open/create/
     // rehydrate flow; App injects status/run and the cross-subsystem workspace
     // wiring (openProjectWorkspace) + the post-load schema sync.
@@ -589,7 +597,7 @@
   onCycleTheme={() => themePreference.update((p) => nextPreference(p))}
   onSelectRecent={(path) => void projectSession.openProjectAt(path)}
   onOpenFolder={() => projectChooser.openForOpenProject()}
-  onNewProject={() => projectChooser.openNewProject()}
+  onNewProject={() => createWizard.start()}
   onOpenAssistants={openAssistantsPane}
   onOpenSettings={() => void projectSession.openMachineSettings()}
   onOpenDetailTypes={() => schemaPanes?.openDetailTypes()}
@@ -950,19 +958,7 @@
     onSecondary={() => confirmService.resolveSecondary()}
   />
 
-  <NewProjectModal
-    open={projectChooser.newProjectOpen}
-    bind:name={projectChooser.newProjectName}
-    bind:overrideFolder={projectChooser.overrideFolder}
-    bind:overridePath={projectChooser.overridePath}
-    resolvedPath={projectChooser.resolvedNewProjectPath}
-    defaultProjectsFolder={projectChooser.defaultProjectsFolder}
-    onClose={() => projectChooser.closeNewProject()}
-    onSubmit={() => projectChooser.confirmNewProject()}
-    onOpenOverrideFolderPicker={() => projectChooser.openForNewProjectOverride()}
-    onOpenSettings={() => void projectSession.openMachineSettings()}
-    onClearOverride={() => projectChooser.clearOverride()}
-  />
+  <CreateProjectWizard />
 
   <MachineSettingsDialog
     open={projectSession.machineSettingsOpen}

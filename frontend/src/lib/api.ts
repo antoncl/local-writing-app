@@ -7,6 +7,7 @@ import type {
   AIProviderList,
   AIProviderModelList,
   AITierResolution,
+  AncestorCandidate,
   AssistantEntry,
   AssistantEntryList,
   AIPolicy,
@@ -229,11 +230,22 @@ export const api = {
   // Sending it per project is what made every chain one hop long — the chooser
   // passed the folder it had just built the project inside, so every project
   // recorded its own parent as the bound.
-  createProject(rootPath: string, title: string) {
+  // `inherits` is the wizard's declaration (#318): the ancestor paths ticked in
+  // the location step. Omitted (undefined) means "take the default" — every
+  // ancestor project — while `[]` is a deliberate flat project (#425/#426).
+  createProject(rootPath: string, title: string, inherits?: string[]) {
     return request<ProjectInfo>("/project/create", {
       method: "POST",
-      body: JSON.stringify({ root_path: rootPath, title }),
+      body: JSON.stringify({ root_path: rootPath, title, inherits }),
     });
+  },
+  // The inheritable ancestors of a *prospective* project path — the wizard's
+  // location step, which enumerates before the project (or its folder) exists.
+  // Every row comes back `inherited=false`; the author ticks to build the list.
+  prospectiveAncestorCandidates(rootPath: string) {
+    return request<AncestorCandidate[]>(
+      `/project/ancestor-candidates?path=${encodeURIComponent(rootPath)}`,
+    );
   },
   openProject(rootPath: string) {
     return request<ProjectInfo>("/project/open", {

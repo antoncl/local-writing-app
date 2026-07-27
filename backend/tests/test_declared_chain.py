@@ -796,5 +796,83 @@ class ANewProjectDeclaresItsAncestorsTests(unittest.TestCase):
         )
 
 
+class AProspectiveProjectEnumeratesItsAncestorsTests(unittest.TestCase):
+    """#318 slice 2 — the wizard's location step lists a *not-yet-created*
+    project's inheritable ancestors. So the enumeration must run for a path with
+    no folder, no manifest, and (first run) no open project behind it, and every
+    row must come back undeclared — nothing is inherited until the author ticks
+    it in the wizard.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = TemporaryDirectory()
+        self.shelf = Path(self.tmp.name).resolve() / "writing"
+        self.universe = self.shelf / "honorverse"
+        self.series = self.universe / "honor-harrington"
+        self.book = self.series / "on-basilisk-station"
+        self.shelf.mkdir(parents=True)
+        set_projects_root(self.shelf)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _create_chain(self) -> None:
+        ProjectService.created_at(self.universe, "The Honorverse")
+        ProjectService.created_at(self.series, "Honor Harrington")
+        ProjectService.created_at(self.book, "On Basilisk Station")
+
+    def test_the_candidates_are_the_ancestors_each_with_its_title_and_undeclared(self) -> None:
+        """The rows carry the readable title (so the wizard shows "The
+        Honorverse", not a bare path) and `is_project`, and every `inherited`
+        is False for a project that has declared nothing yet."""
+        self._create_chain()
+        prospective = self.book / "part-two"  # never created
+
+        rows = ProjectService.opened_at(self.book).prospective_ancestor_candidates(prospective)
+
+        self.assertEqual(
+            [(r.name, r.is_project, r.inherited, r.title) for r in rows],
+            [
+                ("writing", False, False, None),
+                ("honorverse", True, False, "The Honorverse"),
+                ("honor-harrington", True, False, "Honor Harrington"),
+                ("on-basilisk-station", True, False, "On Basilisk Station"),
+            ],
+        )
+
+    def test_a_prospective_path_outside_the_machine_root_has_no_candidates(self) -> None:
+        """Same boundary as create (#429/#441): out there the walk finds the
+        bound absent from the parent chain, so there is nothing to offer."""
+        self._create_chain()
+        stray = Path(self.tmp.name).resolve() / "elsewhere" / "orphan"
+
+        rows = ProjectService.opened_at(self.book).prospective_ancestor_candidates(stray)
+
+        self.assertEqual(rows, [])
+
+    def test_the_endpoint_enumerates_regardless_of_the_open_scope(self) -> None:
+        """The route resolves off the `path` alone — like the directory picker,
+        it touches no project state, so first run (nothing open) is fine. The
+        response is re-validated against `list[AncestorCandidate]`."""
+        self._create_chain()
+        prospective = self.book / "part-two"
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/project/ancestor-candidates", params={"path": str(prospective)}
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [(row["name"], row["is_project"], row["inherited"], row["title"]) for row in response.json()],
+            [
+                ("writing", False, False, None),
+                ("honorverse", True, False, "The Honorverse"),
+                ("honor-harrington", True, False, "Honor Harrington"),
+                ("on-basilisk-station", True, False, "On Basilisk Station"),
+            ],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

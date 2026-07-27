@@ -2,7 +2,7 @@
   // Shared modal chrome — the backdrop, the centered frame, the title header,
   // and the right-aligned action footer. Svelte has no component inheritance,
   // so this is the composition stand-in for a "base dialog class": the dialogs
-  // (ConfirmModal, NewProjectModal, MachineSettingsDialog) compose this Modal
+  // (ConfirmModal, CreateProjectWizard, MachineSettingsDialog) compose this Modal
   // instead of re-declaring the chrome, and the chrome's CSS lives here in one
   // scoped style block rather than as global classes everyone shares.
   //

@@ -278,6 +278,12 @@ def _format_plot_context_block(packet: Any) -> str:
                 for question in questions:
                     lines.append(f"        <question>{xml_escape(str(question).strip())}</question>")
                 lines.append("      </open_questions>")
+            point_claims = getattr(point, "claims", None) or []
+            if point_claims:
+                lines.append("      <claims>")
+                for claim in point_claims:
+                    lines.extend(_render_plot_claim_xml(claim, depth=4, include_card=True))
+                lines.append("      </claims>")
             lines.append("    </plot_point>")
         lines.append("  </template_instance>")
     for card in getattr(packet, "cards", None) or []:
@@ -313,7 +319,14 @@ def _format_plot_context_block(packet: Any) -> str:
     return "\n".join(lines)
 
 
-def _render_plot_claim_xml(claim: Any) -> list[str]:
+def _render_plot_claim_xml(
+    claim: Any,
+    *,
+    depth: int = 2,
+    include_card: bool = False,
+) -> list[str]:
+    claim_indent = "  " * depth
+    child_indent = "  " * (depth + 1)
     attrs = [
         f"id={quoteattr(claim.id)}",
         f"template_instance_id={quoteattr(claim.template_instance_id)}",
@@ -324,19 +337,23 @@ def _render_plot_claim_xml(claim: Any) -> list[str]:
         attrs.append(f"plotline_id={quoteattr(claim.plotline_id)}")
     if getattr(claim, "plotline", None):
         attrs.append(f"plotline_title={quoteattr(claim.plotline.title)}")
+    if include_card:
+        attrs.append(f"card_id={quoteattr(claim.card_id)}")
+        if getattr(claim, "card", None):
+            attrs.append(f"card_title={quoteattr(claim.card.title)}")
     if claim.claim_label:
         attrs.append(f"label={quoteattr(claim.claim_label)}")
     if claim.strength:
         attrs.append(f"strength={quoteattr(claim.strength)}")
-    lines = [f"    <claim {' '.join(attrs)}>"]
+    lines = [f"{claim_indent}<claim {' '.join(attrs)}>"]
     for tag, value in (
         ("evidence", claim.evidence),
         ("rationale", claim.rationale),
         ("ai_notes", claim.ai_notes),
     ):
         if value:
-            lines.append(f"      <{tag}>{xml_escape(str(value).strip())}</{tag}>")
-    lines.append("    </claim>")
+            lines.append(f"{child_indent}<{tag}>{xml_escape(str(value).strip())}</{tag}>")
+    lines.append(f"{claim_indent}</claim>")
     return lines
 
 

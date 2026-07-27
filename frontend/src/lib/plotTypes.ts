@@ -178,6 +178,7 @@ export type PlotContextCard = {
 export type PlotContextClaim = {
   id: string;
   card_id: string;
+  card?: PlotContextClaimCard | null;
   template_instance_id: string;
   plot_point_id: string;
   plotline_id?: string | null;
@@ -188,6 +189,18 @@ export type PlotContextClaim = {
   evidence?: string | null;
   rationale?: string | null;
   ai_notes?: string | null;
+};
+
+export type PlotContextClaimCard = {
+  id: string;
+  title: string;
+  synopsis: string;
+  scene_id?: string | null;
+  structure_node_id?: string | null;
+  structure_title?: string | null;
+  manuscript_index?: number | null;
+  primary_plotline_id?: string | null;
+  primary_plotline?: PlotLine | null;
 };
 
 export type PlotContextPoint = {
@@ -201,6 +214,7 @@ export type PlotContextPoint = {
   expected_role?: string;
   open_questions?: string[];
   status?: PlotPointNoteStatus;
+  claims: PlotContextClaim[];
 };
 
 export type PlotContextTemplateInstance = {

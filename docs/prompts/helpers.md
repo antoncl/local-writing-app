@@ -392,6 +392,7 @@ plural because snippets iterate over the collection.
 | `<plotline ...>` | `plot.plotlines[]` |
 | `<template_instance ...>` | `plot.template_instances[]` |
 | `<plot_point ...>` inside a template instance | `instance.plot_points[]` |
+| `<claim ...>` inside a plot point's `<claims>` block | `point.claims[]` |
 | `<card ...>` | `plot.cards[]` |
 | `<claim ...>` inside a card | `card.claims[]` |
 | top-level claims | `plot.claims[]` |
@@ -400,6 +401,8 @@ plural because snippets iterate over the collection.
 | `primary_plotline_title` on card XML | `card.primary_plotline.title` |
 | `plotline_id` on claim XML | `claim.plotline_id` |
 | `plotline_title` on claim XML | `claim.plotline.title` |
+| `card_id` on point-claim XML | `claim.card_id` |
+| `card_title` on point-claim XML | `claim.card.title` |
 
 **Accepted `selection` shapes**:
 
@@ -431,6 +434,11 @@ beat notes.
       <open_questions>
         <question>Who sees her leave?</question>
       </open_questions>
+      <claims>
+        <claim id="claim_first_turn" template_instance_id="plot_inst_main" plot_point_id="first_turn" card_id="card_archive" card_title="Archive Break-in" plotline_id="plotline_main" plotline_title="Main" claim_type="satisfies">
+          <rationale>The old path is unavailable.</rationale>
+        </claim>
+      </claims>
     </plot_point>
   </template_instance>
   <card id="card_archive" title="Archive Break-in" scene_id="scene_archive" primary_plotline_id="plotline_main" primary_plotline_title="Main">
@@ -498,6 +506,10 @@ Guidance: {{ point.guidance }}
 {% if point.notes %}
 Author notes: {{ point.notes }}
 {% endif %}
+{% for claim in point.claims %}
+- {{ claim.card.title }} claims this beat: {{ claim.claim_type }}
+{% if claim.rationale %}  Rationale: {{ claim.rationale }}{% endif %}
+{% endfor %}
 {% endfor %}
 {% endfor %}
 ```
@@ -539,6 +551,7 @@ In practice this means snippets can see:
 - template-level `ai_use_guidance`
 - plot-beat `function_claim` and `guidance`
 - instance-level point `notes`, `author_intent`, `expected_role`, and `open_questions`
+- `point.claims`, with lightweight `claim.card` objects for beat-first snippets
 - `plot.cards`, with each `card.claims` filtered to the same selection and `as_of` boundary
 - resolved plotline objects on cards and claims, e.g. `card.primary_plotline.title` and `claim.plotline.title`
 - board-level `plot.claims` for cross-card audits, including `evidence`, `rationale`, and `ai_notes`

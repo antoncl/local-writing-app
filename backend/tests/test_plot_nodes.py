@@ -125,6 +125,10 @@ Old sparse body.
 
         self.assertEqual(node.title, "Three-Act Story Arc")
         self.assertEqual(node.template.display_name, "Three-Act Story Arc")
+        self.assertIn("## How To Use It", node.body)
+        self.assertIn("## Beat Logic", node.body)
+        self.assertNotIn("Old sparse body.", node.body)
+        self.assertLess(len(node.template.description), 160)
         point_ids = {point.id for point in node.template.plot_points}
         self.assertIn("inciting_change", point_ids)
         first_point = node.template.plot_points[0]

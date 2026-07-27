@@ -363,6 +363,14 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertTrue(schema.entry_types["scene:scene"].has_body)
         self.assertTrue(schema.entry_types["lore:character"].has_body)
 
+    def test_plot_templates_use_prose_body_editor(self) -> None:
+        schema = self.service.read_metadata_schema()
+        self.assertEqual(schema.entry_types["plot:template"].body_shape, "prose")
+        self.assertEqual(
+            schema.entry_types["plot:template_instance"].body_shape, "prose"
+        )
+        self.assertEqual(schema.entry_types["plot:board"].body_shape, "plot")
+
     def test_status_field_seeds_with_colored_options(self) -> None:
         """The default `status` field ships with colored options. Verifies
         the SelectOption wire shape and the seed colors."""

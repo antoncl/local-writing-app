@@ -30,6 +30,13 @@ class ProjectNodeServiceTests(unittest.TestCase):
         self.assertIn("title: Honor's First Command", text)
         self.assertIn("entry_type: project:project", text)
 
+    def test_create_project_self_excludes_the_cache_folder(self) -> None:
+        # `.cache/` holds derived, machine-specific snapshots (absolute paths);
+        # a version-controlled project must not commit them (#378).
+        gitignore = self.root / ".cache" / ".gitignore"
+        self.assertTrue(gitignore.exists())
+        self.assertEqual(gitignore.read_text(encoding="utf-8"), "*\n")
+
     def test_project_node_id_is_minted_and_stable(self) -> None:
         # #343: the project node is *addressed* by path, but its identity is
         # minted like every other node — a constant id collides across layers.

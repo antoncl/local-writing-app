@@ -512,11 +512,32 @@
     if (pick) commit([...levels, { field: pick.key }]);
   }
   function setLevelFieldAt(levels: ViewGroupByLevel[], commit: LevelCommit, i: number, field: string) {
-    commit(levels.map((l, j) => (j === i ? { ...l, field } : l)));
+    // Drop `show_empty` on a field change: it declares THIS field's vocabulary
+    // should render in full, so it must not ride along to a different field and
+    // fill it with a bucket per registered value (#374). `order` is field-
+    // agnostic and rides along.
+    commit(
+      levels.map((l, j) => {
+        if (j !== i) return l;
+        const next = { ...l, field };
+        delete next.show_empty;
+        return next;
+      }),
+    );
   }
-  // first-seen (undefined) ⇄ alphabetical-by-label ("label").
+  // first-seen (undefined) ⇄ alphabetical-by-label ("label"). Preserve the level
+  // object (its `show_empty` especially) like the neighbours — only flip `order`
+  // (#374).
   function toggleLevelOrderAt(levels: ViewGroupByLevel[], commit: LevelCommit, i: number) {
-    commit(levels.map((l, j) => (j === i ? { field: l.field, ...(l.order === "label" ? {} : { order: "label" }) } : l)));
+    commit(
+      levels.map((l, j) => {
+        if (j !== i) return l;
+        const next = { ...l };
+        if (l.order === "label") delete next.order;
+        else next.order = "label";
+        return next;
+      }),
+    );
   }
   function removeLevelAt(levels: ViewGroupByLevel[], commit: LevelCommit, i: number) {
     commit(levels.filter((_, j) => j !== i));

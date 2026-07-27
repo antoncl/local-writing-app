@@ -409,6 +409,15 @@
           >⋮⋮</span>
         {/if}
       {/snippet}
+      {#snippet trailing()}
+        <!-- A scene is deletable like its container (#465), via the same
+             requestDelete + confirm path. No `+`: a leaf has no children. -->
+        <button
+          class="row-action-delete"
+          title={`Delete ${entryTypeName(node.entry_type, schema)}`}
+          onclick={(event) => { event.stopPropagation(); requestDelete(node); }}
+        >×</button>
+      {/snippet}
     </NodeRow>
   {:else}
     <!-- Container (real-node parent). Single click defers collapse to

@@ -1,5 +1,6 @@
 import { getContext, setContext } from "svelte";
 import type { PlotBoardCard, PlotPointClaim } from "@/lib/types";
+import type { PlotDiagnostic } from "./plotBoardDiagnostics";
 
 export type PlotBoardContext = {
   saving: boolean;
@@ -10,6 +11,7 @@ export type PlotBoardContext = {
   cardById: (cardId: string) => PlotBoardCard | null;
   cardColumnTitle: (cardId: string) => string;
   claimsForCard: (cardId: string) => PlotPointClaim[];
+  diagnosticsForCard: (cardId: string) => PlotDiagnostic[];
   selectColumn: (columnId: string) => void;
   addCardToColumn: (columnId: string) => void;
   pointLabel: (claim: PlotPointClaim) => string;

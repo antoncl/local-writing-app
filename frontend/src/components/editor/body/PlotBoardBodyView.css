@@ -216,6 +216,8 @@
 }
 
 .point-status {
+  grid-column: 2;
+  grid-row: 1;
   justify-self: end;
   min-width: 7ch;
   overflow: visible;
@@ -232,6 +234,32 @@
 }
 
 .point-row span.partial {
+  color: var(--warn);
+}
+
+.point-diagnostics {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.point-diagnostics small,
+.diagnostic-count,
+.diagnostic-chips span {
+  padding: 2px 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 1.2;
+}
+
+.point-diagnostics small.warning,
+.diagnostic-chips span.warning,
+.diagnostic-panel li.warning {
+  border-color: var(--warn);
   color: var(--warn);
 }
 
@@ -493,6 +521,10 @@
   border-left-color: var(--warn);
 }
 
+.plot-card.has-diagnostics {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--warn) 75%, transparent);
+}
+
 .plot-card > header {
   display: flex;
   align-items: start;
@@ -571,6 +603,12 @@
 .claim-chips {
   display: grid;
   justify-items: start;
+  gap: var(--sp-1);
+}
+
+.diagnostic-chips {
+  display: flex;
+  flex-wrap: wrap;
   gap: var(--sp-1);
 }
 
@@ -859,6 +897,29 @@
 .claim-detail-overview dd:last-child,
 .context-claim-row dd:last-child {
   margin-bottom: 0;
+}
+
+.diagnostic-panel {
+  display: grid;
+  gap: var(--sp-1);
+  padding: var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+}
+
+.diagnostic-panel ul {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.diagnostic-panel li {
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  line-height: 1.35;
 }
 
 .section-title-row {

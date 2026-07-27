@@ -1,5 +1,6 @@
 <script lang="ts">
   import PlotBoardLongTextField from "@/components/editor/body/PlotBoardLongTextField.svelte";
+  import { pointDiagnosticKey } from "./plotBoardDiagnostics";
   import type {
     PlotBoardCard,
     PlotBoardSpec,
@@ -10,6 +11,7 @@
     PlotPointNoteStatus,
     PlotTemplateInstancePoint,
   } from "@/lib/types";
+  import type { PlotDiagnostic, PlotDiagnostics } from "./plotBoardDiagnostics";
 
   type StructureColumnOption = {
     id: string;
@@ -40,6 +42,7 @@
     claimsByCard: Map<string, PlotPointClaim[]>;
     contextClaimsForCard: (cardId: string) => PlotContextClaim[];
     contextPointLabel: (claim: PlotContextClaim) => string;
+    diagnostics: PlotDiagnostics;
     includeFutureContext: boolean;
     omittedCount: (key: string) => number;
     openCardNode: (card: PlotBoardCard, event: MouseEvent) => void;
@@ -83,6 +86,7 @@
     claimsByCard,
     contextClaimsForCard,
     contextPointLabel,
+    diagnostics,
     includeFutureContext = $bindable(false),
     omittedCount,
     openCardNode,
@@ -168,6 +172,13 @@
         };
       });
   });
+  let selectedCardDiagnostics = $derived(selectedCard ? diagnostics.cards.get(selectedCard.id) ?? [] : []);
+  let selectedClaimDiagnostics = $derived(selectedClaim ? diagnostics.claims.get(selectedClaim.id) ?? [] : []);
+  let selectedPointDiagnostics = $derived(
+    selectedPaletteRow
+      ? diagnostics.points.get(pointDiagnosticKey(selectedPaletteRow.instance.id, selectedPaletteRow.point.plot_point_id)) ?? []
+      : [],
+  );
 
   $effect(() => {
     if (addClaimOptions.length === 0) {
@@ -242,6 +253,22 @@
   }
 </script>
 
+{#snippet diagnosticList(items: PlotDiagnostic[])}
+  {#if items.length > 0}
+    <section class="diagnostic-panel" aria-label="Diagnostics">
+      <div class="section-title-row">
+        <span>Diagnostics</span>
+        <strong>{items.length}</strong>
+      </div>
+      <ul>
+        {#each items as item (item.key)}
+          <li class:warning={item.severity === "warning"}>{item.label}</li>
+        {/each}
+      </ul>
+    </section>
+  {/if}
+{/snippet}
+
 <aside class="plot-inspector" aria-label="Plot selection">
   {#if selectedClaim}
     {@const selectedClaimCard = cardForClaim(selectedClaim)}
@@ -278,6 +305,7 @@
           <p class="muted-line">No rationale or evidence yet.</p>
         {/if}
       </section>
+      {@render diagnosticList(selectedClaimDiagnostics)}
       <label>
         Badge label
         <input
@@ -449,6 +477,7 @@
           </div>
         {/if}
       </section>
+      {@render diagnosticList(selectedCardDiagnostics)}
       {#if selectedCard.node_ref}
         <div class="inspector-stat">
           <span>Draft node</span>
@@ -558,6 +587,7 @@
         <span>Function badges</span>
         <strong>{selectedPaletteRow.claims.length}</strong>
       </div>
+      {@render diagnosticList(selectedPointDiagnostics)}
       <div class="beat-claim-panel">
         {#if selectedPaletteRow.claims.length === 0}
           <p class="muted-line">No cards claim this plot beat yet.</p>

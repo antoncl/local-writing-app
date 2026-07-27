@@ -1,7 +1,10 @@
 <script lang="ts">
+  import type { PlotDiagnosticSummary } from "./plotBoardDiagnostics";
+
   interface Props {
     cardCount: number;
     claimCount: number;
+    diagnostics: PlotDiagnosticSummary;
     relationshipCount: number;
     savingMessage: string;
     saveError: string;
@@ -13,6 +16,7 @@
   let {
     cardCount,
     claimCount,
+    diagnostics,
     relationshipCount,
     savingMessage,
     saveError,
@@ -25,6 +29,9 @@
 <div class="board-toolbar">
   <span>{cardCount} cards</span>
   <span>{claimCount} badges</span>
+  {#if diagnostics.total > 0}
+    <span class="diagnostic-count">{diagnostics.total} checks</span>
+  {/if}
   <span>{relationshipCount} relationships</span>
   {#if savingMessage}
     <span>{savingMessage}...</span>

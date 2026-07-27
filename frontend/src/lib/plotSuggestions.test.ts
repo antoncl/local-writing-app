@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { parsePlotSuggestions, plotSuggestionClipboardText, stripPlotSuggestions } from "./plotSuggestions";
+import {
+  appendPlotSuggestionEvidence,
+  parsePlotSuggestions,
+  plotSuggestionClipboardText,
+  stripPlotSuggestions,
+} from "./plotSuggestions";
 
 describe("parsePlotSuggestions", () => {
   it("extracts concrete suggestions with target ids", () => {
@@ -73,5 +78,25 @@ describe("plotSuggestionClipboardText", () => {
       "Template instance: plot_main",
       "Plot beat: first_turn",
     ].join("\n"));
+  });
+});
+
+describe("appendPlotSuggestionEvidence", () => {
+  it("appends new evidence without replacing existing claim evidence", () => {
+    expect(appendPlotSuggestionEvidence("Existing support.", "Show the consequence.")).toBe(
+      "Existing support.\n\nShow the consequence.",
+    );
+  });
+
+  it("is idempotent when the evidence is already present", () => {
+    expect(appendPlotSuggestionEvidence("Existing support.\n\nShow the consequence.", "Show the consequence.")).toBe(
+      "Existing support.\n\nShow the consequence.",
+    );
+  });
+
+  it("does not treat partial text matches as already applied", () => {
+    expect(appendPlotSuggestionEvidence("Show the consequence clearly.", "Show the consequence.")).toBe(
+      "Show the consequence clearly.\n\nShow the consequence.",
+    );
   });
 });

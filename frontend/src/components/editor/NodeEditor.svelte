@@ -1152,6 +1152,7 @@
       {implicitContextMatcher}
       onBodyChange={emitChange}
       onFocus={() => onFocus?.()}
+      onPlotSaved={(plot) => onPlotSaved?.(plot)}
     />
   {/if}
   {#if bodyShape === "view"}

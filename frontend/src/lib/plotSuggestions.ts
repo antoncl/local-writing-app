@@ -72,6 +72,18 @@ export function plotSuggestionClipboardText(
   return lines.filter(Boolean).join("\n");
 }
 
+export function appendPlotSuggestionEvidence(existing: string | null | undefined, addition: string): string {
+  const evidenceToAdd = addition.trim();
+  if (!evidenceToAdd) return existing ?? "";
+
+  const current = existing ?? "";
+  const comparableAddition = normalizeComparableText(evidenceToAdd);
+  const existingEvidenceItems = current.split(/\n{2,}/).map(normalizeComparableText);
+  if (existingEvidenceItems.includes(comparableAddition)) return current;
+  if (!current.trim()) return evidenceToAdd;
+  return `${current.trimEnd()}\n\n${evidenceToAdd}`;
+}
+
 function parseAttributes(text: string): Record<string, string> {
   const attrs: Record<string, string> = {};
   for (const match of matchAll(text, /([A-Za-z_][\w:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {
@@ -108,6 +120,10 @@ function cleanTarget(value: string | undefined): string {
 
 function normalizeText(value: string): string {
   return decodeXml(value).replace(/\s+/g, " ").trim();
+}
+
+function normalizeComparableText(value: string): string {
+  return value.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
 function decodeXml(value: string): string {

@@ -20,24 +20,30 @@
     chatHistory: ChatMessage[];
     chatRunning: boolean;
     scrollEl?: HTMLDivElement | null;
+    onApplyEvidence?: (suggestion: PlotSuggestion) => void | Promise<void>;
   }
 
-  let { chatHistory, chatRunning, scrollEl = $bindable(null) }: Props = $props();
+  let { chatHistory, chatRunning, scrollEl = $bindable(null), onApplyEvidence }: Props = $props();
 
   let copiedKey = $state("");
+  let applyingKey = $state("");
+  let appliedKey = $state("");
+  let applyErrorKey = $state("");
   let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
+  let applyResetTimer: ReturnType<typeof setTimeout> | null = null;
 
   onDestroy(() => {
     if (copyResetTimer) clearTimeout(copyResetTimer);
+    if (applyResetTimer) clearTimeout(applyResetTimer);
   });
 
   function suggestionKey(
     suggestion: PlotSuggestion,
     messageIndex: number,
     index: number,
-    field: "proposed_change" | "evidence_to_add",
+    action: "proposed_change" | "evidence_to_add" | "apply_evidence",
   ): string {
-    return `${messageIndex}-${suggestion.kind}-${suggestion.target_card_id}-${suggestion.target_claim_id}-${index}-${field}`;
+    return `${messageIndex}-${suggestion.kind}-${suggestion.target_card_id}-${suggestion.target_claim_id}-${index}-${action}`;
   }
 
   async function copySuggestion(
@@ -57,6 +63,25 @@
       }, 1600);
     } catch {
       copiedKey = "";
+    }
+  }
+
+  async function applyEvidenceSuggestion(suggestion: PlotSuggestion, key: string): Promise<void> {
+    if (!onApplyEvidence || !suggestion.target_claim_id || !suggestion.evidence_to_add.trim()) return;
+    applyingKey = key;
+    applyErrorKey = "";
+    try {
+      await onApplyEvidence(suggestion);
+      appliedKey = key;
+      if (applyResetTimer) clearTimeout(applyResetTimer);
+      applyResetTimer = setTimeout(() => {
+        appliedKey = "";
+        applyResetTimer = null;
+      }, 1800);
+    } catch {
+      applyErrorKey = key;
+    } finally {
+      applyingKey = "";
     }
   }
 </script>
@@ -131,6 +156,21 @@
                         <i class="ti ti-copy" aria-hidden="true"></i>
                         {copiedKey === evidenceKey ? "Copied" : "Copy evidence"}
                       </button>
+                    {/if}
+                    {#if suggestion.evidence_to_add && suggestion.target_claim_id && onApplyEvidence}
+                      {@const applyKey = suggestionKey(suggestion, i, j, "apply_evidence")}
+                      <button
+                        type="button"
+                        title="Append this evidence to the target claim"
+                        disabled={Boolean(applyingKey)}
+                        onclick={() => void applyEvidenceSuggestion(suggestion, applyKey)}
+                      >
+                        <i class="ti ti-check" aria-hidden="true"></i>
+                        {applyingKey === applyKey ? "Applying" : appliedKey === applyKey ? "Applied" : "Apply evidence"}
+                      </button>
+                      {#if applyErrorKey === applyKey}
+                        <small class="cbv-plot-suggestion-action-error">Could not apply evidence.</small>
+                      {/if}
                     {/if}
                   </div>
                 </article>
@@ -319,5 +359,13 @@
   }
   .cbv-plot-suggestion-actions button:hover {
     background: var(--inset);
+  }
+  .cbv-plot-suggestion-actions button:disabled {
+    cursor: wait;
+    opacity: 0.65;
+  }
+  .cbv-plot-suggestion-action-error {
+    align-self: center;
+    color: var(--danger);
   }
 </style>

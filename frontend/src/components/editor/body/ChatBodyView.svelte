@@ -19,12 +19,13 @@
 -->
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { api } from "@/lib/api";
+  import { HttpError, api } from "@/lib/api";
   import { resolutionSceneIdFromInputs } from "@/lib/editor-core/promptResolution";
   import PlainTextEditor from "@/components/widgets/PlainTextEditor.svelte";
   import ChatTranscript from "@/components/editor/body/chat/ChatTranscript.svelte";
   import ChatInputsStrip from "@/components/editor/body/chat/ChatInputsStrip.svelte";
   import ChatJournalScope from "@/components/editor/body/chat/ChatJournalScope.svelte";
+  import { appendPlotSuggestionEvidence, type PlotSuggestion } from "@/lib/plotSuggestions";
   import { formatCostEur, formatTokens } from "@/lib/utils/money";
   import type {
     AssistantEntrySummary,
@@ -34,6 +35,8 @@
     ChatSessionMessage,
     EditableDocument,
     LoreEntrySummary,
+    NodePickerRef,
+    PlotNode,
     PlotNodeSummary,
     PromptEntrySummary,
     SaveChatSessionRequest,
@@ -74,6 +77,7 @@
     // so it's intentionally dropped here.
     onBodyChange?: () => void;
     onFocus?: () => void;
+    onPlotSaved?: (plot: PlotNode) => void | Promise<void>;
   }
 
   let {
@@ -88,6 +92,7 @@
     implicitContextMatcher = null,
     onBodyChange,
     onFocus,
+    onPlotSaved,
   }: Props = $props();
 
 
@@ -223,6 +228,85 @@
     pendingTurnCacheWriteSlots = [];
     chatInputDrafts = {};
     chatInputsHidden = false;
+  }
+
+  function decodeContextPickRefs(raw: string | undefined): NodePickerRef[] {
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter(
+        (item): item is NodePickerRef =>
+          item && typeof item === "object" && typeof item.id === "string" && item.kind === "plot",
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  async function plotBoardCandidateIds(): Promise<string[]> {
+    const selectedIds = Object.values(chatInputDrafts).flatMap((value) =>
+      decodeContextPickRefs(value).map((ref) => ref.id),
+    );
+    const roster = plotEntries.length > 0 ? plotEntries : (await api.listPlotNodes()).entries;
+    const boardIds = roster.filter((entry) => entry.entry_type === "plot:board").map((entry) => entry.id);
+    return Array.from(new Set([...selectedIds, ...boardIds]));
+  }
+
+  async function applyPlotSuggestionEvidence(suggestion: PlotSuggestion): Promise<void> {
+    const targetClaimId = suggestion.target_claim_id.trim();
+    const evidenceToAdd = suggestion.evidence_to_add.trim();
+    if (!targetClaimId || !evidenceToAdd) {
+      chatError = "This suggestion does not identify both a target claim and evidence to add.";
+      throw new Error(chatError);
+    }
+
+    for (const plotId of await plotBoardCandidateIds()) {
+      let plot: PlotNode | null = null;
+      try {
+        plot = await api.getPlotNode(plotId);
+      } catch (error) {
+        if (error instanceof HttpError && error.status === 404) continue;
+        chatError = error instanceof Error ? error.message : "Could not load plot board.";
+        throw error;
+      }
+      const board = plot?.board;
+      if (!plot || !board) continue;
+
+      let matched = false;
+      let changed = false;
+      const nextClaims = (board.claims ?? []).map((claim) => {
+        if (claim.id !== targetClaimId) return claim;
+        matched = true;
+        const nextEvidence = appendPlotSuggestionEvidence(claim.evidence, evidenceToAdd);
+        if (nextEvidence === (claim.evidence ?? "")) return claim;
+        changed = true;
+        return { ...claim, evidence: nextEvidence };
+      });
+      if (!matched) continue;
+      if (!changed) {
+        chatError = null;
+        return;
+      }
+
+      const saved = await api.savePlotNode(plot.id, {
+        title: plot.title,
+        entry_type: plot.entry_type,
+        body: plot.body ?? "",
+        metadata: plot.metadata ?? {},
+        template: plot.template ?? null,
+        template_instance: plot.template_instance ?? null,
+        board: { ...board, claims: nextClaims },
+        layout: plot.layout ?? null,
+        base_revision: plot.revision,
+      });
+      chatError = null;
+      await onPlotSaved?.(saved);
+      return;
+    }
+
+    chatError = `Could not find claim ${targetClaimId} on a plot board.`;
+    throw new Error(chatError);
   }
 
   // Mirrors App.svelte's applyChatSession (the source of truth for the
@@ -941,7 +1025,12 @@
       </div>
     </div>
 
-    <ChatTranscript {chatHistory} {chatRunning} bind:scrollEl={chatScrollEl} />
+    <ChatTranscript
+      {chatHistory}
+      {chatRunning}
+      bind:scrollEl={chatScrollEl}
+      onApplyEvidence={applyPlotSuggestionEvidence}
+    />
 
     {#if declaredInputs.length > 0}
       <ChatInputsStrip

@@ -21,6 +21,7 @@ Method bodies moved verbatim. Shared tooling resolves through the MRO:
 from __future__ import annotations
 
 import os
+import string
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, get_args
@@ -30,7 +31,9 @@ from app.models import (
     AncestorCandidate,
     DirectoryEntry,
     DirectoryListing,
+    DirectoryRoot,
     MetadataSchema,
+    PathProbe,
     ProjectChainLayer,
     ProjectChild,
     ProjectInfo,
@@ -577,7 +580,6 @@ class ProjectLifecycleMixin:
         if not target.is_dir():
             raise ProjectServiceError("That path is not a folder.", 400)
 
-        directories: list[DirectoryEntry] = []
         try:
             children = sorted(
                 (child for child in target.iterdir() if child.is_dir()),
@@ -586,21 +588,104 @@ class ProjectLifecycleMixin:
         except PermissionError as exc:
             raise ProjectServiceError("This folder cannot be opened.", 403) from exc
 
-        for child in children:
-            directories.append(DirectoryEntry(name=child.name, path=str(child)))
+        directories = [self._directory_entry(child) for child in children]
 
         parent = target.parent if target.parent != target else None
         return DirectoryListing(
             path=str(target),
             parent_path=str(parent) if parent else None,
             directories=directories,
+            is_project=self._is_project_dir(target),
         )
 
-    def _default_directory_picker_path(self) -> Path:
+    def list_directory_roots(self) -> list[DirectoryRoot]:
+        """Jump-off points for the picker: Documents, Home, and every mounted
+        drive (Windows drive letters, or `/` on POSIX) (#530)."""
+        roots: list[DirectoryRoot] = []
+        documents = self._documents_dir()
+        if documents is not None:
+            roots.append(DirectoryRoot(label="Documents", path=str(documents), kind="documents"))
+        roots.append(DirectoryRoot(label="Home", path=str(Path.home()), kind="home"))
+        for drive in self._available_drives():
+            roots.append(DirectoryRoot(label=drive, path=drive, kind="drive"))
+        return roots
+
+    def probe_path(self, raw: str) -> PathProbe:
+        """Validate a typed path without raising, so the picker's path field can
+        check on every keystroke (#530). Reports only what the field consumes:
+        is it a navigable folder, and is it already a project."""
+        text = (raw or "").strip()
+        if not text:
+            return PathProbe(input=raw or "")
+        try:
+            resolved = Path(text).expanduser().resolve()
+        except (OSError, ValueError, RuntimeError):
+            return PathProbe(input=raw or "")
+
+        is_dir = resolved.is_dir()
+        return PathProbe(
+            input=raw or "",
+            is_dir=is_dir,
+            is_project=self._is_project_dir(resolved) if is_dir else False,
+        )
+
+    def create_directory(self, parent: Path, name: str) -> DirectoryEntry:
+        """Make one folder under `parent` and return its enriched entry (#530)."""
+        base = parent.expanduser().resolve()
+        if not base.exists():
+            raise ProjectServiceError("That parent folder does not exist.", 404)
+        if not base.is_dir():
+            raise ProjectServiceError("That path is not a folder.", 400)
+
+        clean = name.strip()
+        if not clean or clean in (".", "..") or any(sep in clean for sep in ("/", "\\")):
+            raise ProjectServiceError("That folder name is not valid.", 400)
+
+        target = base / clean
+        if target.exists():
+            raise ProjectServiceError("A folder with that name already exists.", 409)
+        try:
+            target.mkdir(parents=False)
+        except PermissionError as exc:
+            raise ProjectServiceError("This folder cannot be created here.", 403) from exc
+        except OSError as exc:
+            raise ProjectServiceError("That folder could not be created.", 400) from exc
+        return self._directory_entry(target)
+
+    def _directory_entry(self, folder: Path) -> DirectoryEntry:
+        return DirectoryEntry(
+            name=folder.name,
+            path=str(folder),
+            is_project=self._is_project_dir(folder),
+            is_empty=self._dir_is_empty(folder),
+        )
+
+    def _is_project_dir(self, folder: Path) -> bool:
+        return (folder / MANIFEST_FILENAME).is_file()
+
+    def _dir_is_empty(self, folder: Path) -> bool:
+        # One shallow read (scandir stops at the first entry) with the handle
+        # closed deterministically, rather than abandoning an iterdir generator.
+        try:
+            with os.scandir(folder) as entries:
+                next(entries)
+        except StopIteration:
+            return True
+        except OSError:
+            return False
+        return False
+
+    def _available_drives(self) -> list[str]:
+        if os.name == "nt":
+            return [f"{letter}:\\" for letter in string.ascii_uppercase if Path(f"{letter}:\\").exists()]
+        return ["/"]
+
+    def _documents_dir(self) -> Path | None:
         documents = Path.home() / "Documents"
-        if documents.exists() and documents.is_dir():
-            return documents
-        return Path.home()
+        return documents if documents.is_dir() else None
+
+    def _default_directory_picker_path(self) -> Path:
+        return self._documents_dir() or Path.home()
 
     def validate_project(self) -> ProjectValidation:
         root = self._require_project()

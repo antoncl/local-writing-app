@@ -12,9 +12,6 @@
 // machine-settings `defaultProjectsFolder` in (reactive) and supplies the
 // picker's start directory + an error sink.
 
-import { api } from "@/lib/api";
-import type { DirectoryListing } from "@/lib/types";
-
 // Slugify mirrors the Python slugifyFieldId convention used elsewhere —
 // lowercase, [a-z0-9-]+, no consecutive separators, no leading/trailing dashes.
 // Used to derive the project folder name from the title.
@@ -33,13 +30,14 @@ function joinPath(base: string, child: string): string {
 
 class ProjectChooser {
   // ---- Directory picker ----
+  // The picker component (DirectoryPickerModal) now owns its own browse state
+  // (listing, roots, typed path) and fetches itself; this controller only says
+  // WHEN it is open, WHERE it starts, and what to do with the chosen path.
   pickerOpen = $state(false);
-  listing = $state<DirectoryListing | null>(null);
-  pickerLoading = $state(false);
   // Why the picker was opened, so a selection does the right thing on confirm.
   // Null = picker not open. "openProject" → open the picked folder immediately;
   // "newProjectOverride" → stash it as the new-project base folder.
-  #mode: "openProject" | "newProjectOverride" | null = null;
+  #mode = $state<"openProject" | "newProjectOverride" | null>(null);
 
   // ---- New Project modal ----
   newProjectOpen = $state(false);
@@ -51,11 +49,6 @@ class ProjectChooser {
   defaultProjectsFolder = $state("");
 
   // ---- Injected host hooks (set in App.onMount) ----
-  // Wraps an action in App's run() so errors surface in App's `error`.
-  onRun: (action: () => Promise<void>) => Promise<boolean> = async (action) => {
-    await action();
-    return true;
-  };
   // Report a validation error to the host (App's `error`).
   onError: (message: string) => void = () => {};
   // Open an existing project at the chosen path (App lifecycle).
@@ -72,24 +65,26 @@ class ProjectChooser {
       : joinPath(this.defaultProjectsFolder, slugifyProjectName(this.newProjectName)),
   );
 
-  async #openPicker() {
-    this.pickerOpen = true;
-    await this.loadDirectory(this.getStartPath().trim() || undefined);
+  // Where the picker should start browsing, and its labels, per mode. Read by
+  // App when it mounts the shared picker.
+  get pickerInitialPath(): string {
+    if (this.#mode === "newProjectOverride") {
+      return (this.overridePath || this.defaultProjectsFolder || "").trim();
+    }
+    return this.getStartPath().trim();
   }
 
-  async loadDirectory(path?: string | null) {
-    await this.onRun(async () => {
-      this.pickerLoading = true;
-      try {
-        this.listing = await api.listDirectories(path ?? undefined);
-      } finally {
-        this.pickerLoading = false;
-      }
-    });
+  get pickerTitle(): string {
+    return this.#mode === "newProjectOverride" ? "Choose Parent Folder" : "Open Project Folder";
+  }
+
+  get pickerSelectLabel(): string {
+    return this.#mode === "newProjectOverride" ? "Use This Folder" : "Open This Folder";
   }
 
   closePicker() {
     this.pickerOpen = false;
+    this.#mode = null;
   }
 
   useDirectory(path: string) {
@@ -106,12 +101,12 @@ class ProjectChooser {
 
   openForOpenProject() {
     this.#mode = "openProject";
-    void this.#openPicker();
+    this.pickerOpen = true;
   }
 
   openForNewProjectOverride() {
     this.#mode = "newProjectOverride";
-    void this.#openPicker();
+    this.pickerOpen = true;
   }
 
   openNewProject() {

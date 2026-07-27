@@ -198,7 +198,6 @@
     // Project chooser drives only its modals; the projectSession controller
     // owns the open/create lifecycle. App feeds the picker its start dir +
     // error sink and routes its chosen path/title into projectSession.
-    projectChooser.onRun = run;
     projectChooser.onError = (message) => { error = message; };
     projectChooser.onOpenProject = (path) => void projectSession.openProjectAt(path);
     projectChooser.onCreateProject = (path, title) => projectSession.createProjectAt(path, title);
@@ -937,10 +936,10 @@
 
   <DirectoryPickerModal
     open={projectChooser.pickerOpen}
-    listing={projectChooser.listing}
-    loading={projectChooser.pickerLoading}
+    initialPath={projectChooser.pickerInitialPath}
+    title={projectChooser.pickerTitle}
+    selectLabel={projectChooser.pickerSelectLabel}
     onClose={() => projectChooser.closePicker()}
-    onNavigate={(path) => projectChooser.loadDirectory(path)}
     onSelect={(path) => projectChooser.useDirectory(path)}
   />
 

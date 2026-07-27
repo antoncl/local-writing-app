@@ -66,6 +66,44 @@ def test_listing_marks_a_project_folder_it_is_shown_from(service: ProjectService
     assert service.list_directories(tmp_path).is_project is True
 
 
+def test_listing_hides_internal_folders_inside_a_project(service: ProjectService, tmp_path: Path) -> None:
+    # Browsing *inside* a project, its structural guts are clutter and never a
+    # place to open or create a project (#559).
+    _make_project(tmp_path)
+    for name in ("scenes", "lore", "prompts", "research", "overrides", ".cache"):
+        (tmp_path / name).mkdir()
+    (tmp_path / "Book Two").mkdir()  # an ordinary sub-folder is still shown
+
+    names = {entry.name for entry in service.list_directories(tmp_path).directories}
+
+    assert names == {"Book Two"}
+
+
+def test_listing_shows_internal_named_folders_outside_a_project(service: ProjectService, tmp_path: Path) -> None:
+    # tmp_path is NOT a project, so a top-level folder merely named "lore" is a
+    # real navigation target and must not be hidden (#559).
+    (tmp_path / "lore").mkdir()
+    (tmp_path / "scenes").mkdir()
+
+    names = {entry.name for entry in service.list_directories(tmp_path).directories}
+
+    assert names == {"lore", "scenes"}
+
+
+def test_listing_keeps_a_child_project_sharing_an_internal_name(service: ProjectService, tmp_path: Path) -> None:
+    # A child project that happens to be named like a structural folder is still
+    # a project, so it survives the filter while the parent's real guts do not
+    # (#559).
+    _make_project(tmp_path)
+    _make_project(tmp_path / "research")  # a nested project literally named "research"
+    (tmp_path / "scenes").mkdir()  # the parent's actual guts — hidden
+
+    by_name = {entry.name: entry for entry in service.list_directories(tmp_path).directories}
+
+    assert by_name["research"].is_project is True
+    assert "scenes" not in by_name
+
+
 def test_listing_rejects_missing_and_non_folder(service: ProjectService, tmp_path: Path) -> None:
     with pytest.raises(ProjectServiceError) as missing:
         service.list_directories(tmp_path / "nope")

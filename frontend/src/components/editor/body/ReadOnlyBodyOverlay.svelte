@@ -113,8 +113,20 @@
     line-height: 1.65;
     color: var(--text);
   }
-  .effective-body-content :global(p) {
-    margin: 0 0 0.9em;
+  /* Mirror the editor's prose-presentation prefs (#127 / #575) so the scrub /
+     snapshot overlay never diverges from the live surface. Scoped to direct
+     children (like `.editor-body > p`) so table-cell and blockquote paragraphs
+     are excluded, with the same table-cell reset the editor applies. */
+  .effective-body-content > :global(p) {
+    margin: 0 0 var(--prose-para-gap, 0.9em);
+    text-align: var(--prose-align, left);
+    text-indent: var(--prose-indent, 0);
+  }
+  .effective-body-content :global(td p),
+  .effective-body-content :global(th p) {
+    margin: 0;
+    text-align: left;
+    text-indent: 0;
   }
 
   /* ---- The diff tint (ADR-0044 §F/§H, #409) --------------------------------

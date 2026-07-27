@@ -8,18 +8,18 @@
    are defects. Kept in styles.css :root so Svelte-scoped component
    CSS and plain CSS rules both reach them via var(). */
 :root {
-  /* — type scale — seven sizes, nothing else. Authored values are
-     integer px; --ui-scale is the future user master-scaler (#127 — a
-     settings write, no code change) — computed fractions are fine,
-     authored fractional px are not. — */
+  /* — type scale — seven sizes, nothing else. Authored values are integer px;
+     the user master-scaler (#127) multiplies through --ui-scale and round(…, 1px)
+     snaps every result back to a whole pixel, so scaled type never lands on a
+     fractional px. Authored fractional px are still not allowed. — */
   --ui-scale: 1;
-  --fs-xs: calc(11px * var(--ui-scale)); /* caps-labels, keycaps, fine meta */
-  --fs-sm: calc(12px * var(--ui-scale)); /* secondary UI: detail lines, chips, hints */
-  --fs-md: calc(13px * var(--ui-scale)); /* DEFAULT UI: buttons, rows, inputs, menus */
-  --fs-lg: calc(15px * var(--ui-scale)); /* emphasized UI: pane titles, dialog headings */
-  --fs-xl: calc(16px * var(--ui-scale)); /* serif display: group headers, rail sections */
-  --fs-2xl: calc(20px * var(--ui-scale)); /* serif display: document title in the editor */
-  --fs-prose: calc(16px * var(--ui-scale)); /* the reading/writing surface (prose bodies) */
+  --fs-xs: round(11px * var(--ui-scale), 1px); /* caps-labels, keycaps, fine meta */
+  --fs-sm: round(12px * var(--ui-scale), 1px); /* secondary UI: detail lines, chips, hints */
+  --fs-md: round(13px * var(--ui-scale), 1px); /* DEFAULT UI: buttons, rows, inputs, menus */
+  --fs-lg: round(15px * var(--ui-scale), 1px); /* emphasized UI: pane titles, dialog headings */
+  --fs-xl: round(16px * var(--ui-scale), 1px); /* serif display: group headers, rail sections */
+  --fs-2xl: round(20px * var(--ui-scale), 1px); /* serif display: document title in the editor */
+  --fs-prose: round(16px * var(--ui-scale), 1px); /* the reading/writing surface (prose bodies) */
   /* The document title stands out through VOICE (serif), weight, and
      isolation (whitespace + caps-label) — never through sheer size. */
 
@@ -701,8 +701,15 @@ button.row-action-add.active {
   line-height: 1.65;
 }
 
-.editor-body > p:first-child {
-  margin-top: 0;
+/* Prose paragraph presentation (#127 / #575). Scoped to direct children so
+   headings and table-cell paragraphs are untouched. The three custom props are
+   written to :root by applyProsePresentation; the fallbacks are the flush,
+   left-aligned, block-spaced default. --prose-para-gap is set to 0 (collapsing
+   the blank line between paragraphs) only when first-line indent is on. */
+.editor-body > p {
+  text-align: var(--prose-align, left);
+  text-indent: var(--prose-indent, 0);
+  margin-block: 0 var(--prose-para-gap, 1em);
 }
 
 .editor-body h1,

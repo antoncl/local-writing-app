@@ -17,6 +17,7 @@
 
 import { api } from "@/lib/api";
 import { setPalette } from "@/lib/utils/colors";
+import { applyProsePresentation } from "@/lib/utils/prose-presentation";
 import { get } from "svelte/store";
 import { structureStore } from "@/lib/stores/structure";
 import { isLeafNode } from "@/lib/utils/treeHelpers";
@@ -119,6 +120,7 @@ class ProjectSession {
       this.recentProjects = this.machineSettings.recent_projects ?? [];
       createWizard.defaultProjectsFolder = this.machineSettings.default_projects_folder ?? "";
       setPalette(this.machineSettings.palette ?? []);
+      applyProsePresentation(this.machineSettings.display);
     } catch {
       // Backend may be offline — leave machineSettings as null; pickers will
       // hide and the request falls back to the backend's default assistant.
@@ -156,9 +158,17 @@ class ProjectSession {
         default_models: { ...settings.default_models },
         default_projects_folder: settings.default_projects_folder ?? "",
         palette: (settings.palette ?? []).map((s) => ({ ...s })),
+        display: { ...settings.display },
       };
       this.machineSettingsOpen = true;
     });
+  }
+
+  // The dialog live-previews display prefs by applying the draft as the user
+  // edits; cancel must put the saved values back on the document root.
+  cancelMachineSettings(): void {
+    if (this.machineSettings) applyProsePresentation(this.machineSettings.display);
+    this.machineSettingsOpen = false;
   }
 
   async saveMachineSettings(): Promise<void> {
@@ -176,11 +186,14 @@ class ProjectSession {
         default_models: draft.default_models,
         default_projects_folder: draft.default_projects_folder,
         palette: draft.palette,
+        display: draft.display,
       };
       this.machineSettings = await api.updateMachineSettings(update);
       this.recentProjects = this.machineSettings.recent_projects ?? [];
       createWizard.defaultProjectsFolder = this.machineSettings.default_projects_folder ?? "";
       setPalette(this.machineSettings.palette ?? []);
+      // Re-apply the saved (clamped) values — the backend may have coerced scale.
+      applyProsePresentation(this.machineSettings.display);
       this.machineSettingsOpen = false;
       this.setStatus("Saved machine settings");
     });

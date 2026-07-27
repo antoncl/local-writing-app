@@ -1014,7 +1014,7 @@
     open={projectSession.machineSettingsOpen}
     settings={projectSession.machineSettings}
     bind:draft={projectSession.machineSettingsDraft}
-    onCancel={() => (projectSession.machineSettingsOpen = false)}
+    onCancel={() => projectSession.cancelMachineSettings()}
     onSave={() => void projectSession.saveMachineSettings()}
   />
 

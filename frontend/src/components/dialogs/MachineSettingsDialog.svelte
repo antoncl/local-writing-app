@@ -7,6 +7,14 @@
   import type { MachineSettingsDraft, MachineSettingsView, Swatch } from "@/lib/types";
   import Modal from "@/components/dialogs/Modal.svelte";
   import DirectoryPickerModal from "@/components/dialogs/DirectoryPickerModal.svelte";
+  import { applyProsePresentation } from "@/lib/utils/prose-presentation";
+
+  // Live-preview the display prefs as the user edits — the master text scaler is
+  // visible immediately (it scales the whole UI, this dialog included). The
+  // parent reverts to the saved values on Cancel (cancelMachineSettings).
+  function previewDisplay() {
+    if (draft) applyProsePresentation(draft.display);
+  }
 
   export let open: boolean = false;
 
@@ -120,6 +128,41 @@
         Assistants moved to the <strong>Assistants</strong> pane (open from the AI section of the Project pane). Each lives as its own file under the machine config dir and can be overridden by ancestor projects.
       </p>
 
+      <section class="writing-surface">
+        <h3>Writing surface</h3>
+        <p class="muted">How prose looks while you write. Display only — it never changes the saved text.</p>
+
+        <label class="range-label">
+          Text size — {Math.round(draft.display.ui_scale * 100)}%
+          <input
+            type="range"
+            min="0.85"
+            max="1.5"
+            step="0.05"
+            bind:value={draft.display.ui_scale}
+            on:input={previewDisplay}
+          />
+          <small class="muted">Scales the whole interface. Sizes snap to whole pixels.</small>
+        </label>
+
+        <fieldset class="prose-align">
+          <legend>Paragraph alignment</legend>
+          <label class="choice-row">
+            <input type="radio" value="left" bind:group={draft.display.paragraph_align} on:change={previewDisplay} />
+            Left (ragged right)
+          </label>
+          <label class="choice-row">
+            <input type="radio" value="justify" bind:group={draft.display.paragraph_align} on:change={previewDisplay} />
+            Justified (both edges)
+          </label>
+        </fieldset>
+
+        <label class="choice-row">
+          <input type="checkbox" bind:checked={draft.display.paragraph_indent} on:change={previewDisplay} />
+          Indent the first line of each paragraph
+        </label>
+      </section>
+
       <section class="palette-editor">
         <h3>Color palette</h3>
         <p class="muted">
@@ -211,7 +254,8 @@
     grid-template-columns: minmax(0, 1fr) auto auto;
   }
 
-  .palette-editor {
+  .palette-editor,
+  .writing-surface {
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -222,10 +266,44 @@
     background: var(--surface);
   }
 
-  .palette-editor h3 {
+  .palette-editor h3,
+  .writing-surface h3 {
     margin: 0;
     font-size: var(--fs-md);
     font-weight: 600;
+  }
+
+  .writing-surface p.muted {
+    margin: 0 0 8px;
+    font-size: var(--fs-sm);
+  }
+
+  .range-label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: var(--fs-sm);
+  }
+
+  .writing-surface .prose-align {
+    margin: 8px 0 0;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+
+  .writing-surface legend {
+    padding: 0 4px;
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+  }
+
+  .choice-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--fs-sm);
   }
 
   .palette-editor p.muted {

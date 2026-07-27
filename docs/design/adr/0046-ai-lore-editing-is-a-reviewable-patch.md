@@ -70,15 +70,22 @@ EntryPatch = {
 }
 ```
 
-The patch is **reviewed as a diff against the entry's current state**, one accept/adopt decision per
-unit — never an all-or-nothing blob. **Per-field revise is a patch of size one; enriching an existing
-entry is a patch that covers many of its fields.** Same primitive at N=1 and N=all, so there is one
-review surface, one adopt path, one write-back — not a per-field path and a separate enrichment path.
+The patch is **reviewed as a diff against the entry's current state**, and adopted **per unit** — accept
+or decline each region and field individually, exactly as the current revision UI does (ADR-0044's
+adopt-a-run, #419) — with an **"accept everything" (adopt-all)** gesture to take a whole enrichment at
+once. The diff always exposes the individual edits; adopt-all is a shortcut over them, not an opaque
+blob. **Per-field revise is a patch of size one; enriching an existing entry is a patch that covers many
+of its fields.** Same primitive at N=1 and N=all, so there is one review surface, one adopt path, one
+write-back — not a per-field path and a separate enrichment path.
 
 Adopting the accepted units merges them into the entry's current `metadata` (and `body`) and saves via
-the existing whole-document `PUT /api/lore/{id}` — the same shape as the snapshot compare's adopt,
-which re-projects locally and writes the result rather than calling a server "apply the diff" endpoint.
-No new mutation endpoint: the patch is assembled client-side and written through the door that exists.
+the existing whole-document `PUT /api/lore/{id}` — the same shape as the snapshot compare's adopt, which
+re-projects locally and writes rather than calling a server "apply the diff" endpoint. **The write obeys
+inheritance**: for a field whose value is inherited from an ancestor layer, adopting writes an **override
+delta** at the active authoring layer L, exactly as manually editing an inherited field does today
+(ADR-0042 — the existing layered save via `authoring_layer_id` / `clear_override_fields`). No new
+mutation endpoint and no new write path: the patch is assembled client-side and written through the door
+that exists.
 
 **A brand-new entry is a create, not a diff.** It has no current state to compare against, so nothing
 flips: the generated entry is reviewed as a whole proposed entry — accept or discard, then edit normally
@@ -98,10 +105,11 @@ renders**:
   to run-diff on a `select`, which is exactly why `FieldDiff` is atomic — the same reason it is atomic for
   snapshots. (`entity_ref` / `entity_ref_list` are not AI-proposed at all — §4.)
 
-A `long_text` field can hold substantial prose (a multi-paragraph description), which is exactly why it
-takes the run-diff and not an atomic flip. **Fields dispatch by type alone**: a field from the built-in
-schema and one a user added to their `metadata.schema.yaml` are indistinguishable here, as they are
-everywhere else — the layered schema merges both uniformly.
+A `long_text` field can hold substantial prose (a multi-paragraph description), so **there is no material
+difference between a `long_text` field and the body**: both take the full `DiffRun` run-diff with
+region-level accept/decline, not a whole-field replace. **Fields dispatch by type alone**: a field from
+the built-in schema and one a user added to their `metadata.schema.yaml` are indistinguishable here, as
+they are everywhere else — the layered schema merges both uniformly.
 
 So AI lore editing invents **no new renderer**. It reuses `DiffRun` for prose and `FieldDiff` for
 structured fields — the two shapes and the flip review already shipped for snapshot compare. The one
@@ -195,8 +203,10 @@ The commitment that must hold from slice 1: the patch shape (§1) and the reuse 
 - AI lore editing reuses the snapshot compare's `DiffRun`/`FieldDiff` shapes and flip review — **no new
   diff renderer**. The one new review piece is diffing *proposed-vs-current entry* (vs *snapshot-vs-live*)
   and extending the field diff to authored lore metadata.
-- The producer of the diff (server or client, per #573) gains a second caller — the proposed-vs-current
-  case — so it should be factored so "what are the two sides" is a parameter, not snapshot-specific.
+- The client-side diff util (§3) gains a second caller — the proposed-vs-current case — so it should be
+  factored so "what are the two sides" is a parameter, not snapshot-specific.
+- Adopting an edit to an **inherited** field writes an override delta at the active layer (ADR-0042's
+  layered save), so AI edits obey the hierarchy exactly as manual edits do — no new write path.
 - The backend gains a validate-a-structured-AI-result role, built from the existing entry validators.
 - Every AI lore edit — one field or a whole generated character — flows through **one** review-and-write
   path. New field types get AI-editability once the diff dispatch knows their `FieldDiff` render.
@@ -218,14 +228,10 @@ The commitment that must hold from slice 1: the patch shape (§1) and the reuse 
 
 ## Open — to settle at implementation
 
-- The exact review surface for a **patch that spans body + fields at once** — the body run-diff and the
-  field flips must sit under one adopt/adopt-all affordance when enriching an entry.
-- For a lore field whose current value is **inherited from an ancestor layer**, whether the diff's
-  "current" side is the effective (resolved) value the author sees or the value authored at the active
-  layer L. (Field *definitions* are uniform whatever their origin — built-in or user-authored — per §2;
-  this is only about which *value* the "current" side shows.)
-- Whether a single `long_text` revise offers in-field region adopt (like ADR-0044's run adopt) or
-  whole-field replace only, in slice 2.
+- The **visual layout** of a full-entry review — the body run-diff in the editor, the field flips in the
+  rail, under one "accept everything" — is deferred to implementation (0005's lesson). The gesture set is
+  decided (§1): per-unit accept/decline plus adopt-all. The diff's "current" side shows the **effective**
+  value the author sees, and adopting an inherited field writes an override delta at L (§1).
 
 ## Test surface
 
@@ -237,3 +243,5 @@ The commitment that must hold from slice 1: the patch shape (§1) and the reuse 
   the second as an atomic `FieldDiff` flip.
 - New entry: a generated new entry is presented whole (no flip) and, on accept, created through the
   existing create path.
+- Inheritance: adopting an edit to a field inherited from an ancestor layer writes an override delta at
+  the active layer L (not a flat value), and clear-to-inherit still works afterward (ADR-0042).

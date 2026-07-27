@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
   import { EditorView, basicSetup } from "codemirror";
-  import { Compartment } from "@codemirror/state";
+  import { Compartment, EditorState } from "@codemirror/state";
   import { StreamLanguage } from "@codemirror/language";
   import { jinja2 } from "@codemirror/legacy-modes/mode/jinja2";
   import { json as jsonLang } from "@codemirror/lang-json";
@@ -15,6 +15,7 @@
   /** Soft-wrap long lines instead of horizontal scrolling. Live-reconfigured
    * via a Compartment so callers can toggle it without rebuilding the view. */
   export let lineWrapping = false;
+  export let readOnly = false;
   /** Diagnostics to pin in the gutter. Line is 1-based (matches Jinja's
    * `lineno`); col is optional and 1-based when present. Callers update this
    * prop after a render; CodeEditor reactively pushes them into CodeMirror. */
@@ -24,6 +25,8 @@
   let editor: EditorView | null = null;
   let lastEmitted = value;
   const wrapCompartment = new Compartment();
+  const editableCompartment = new Compartment();
+  const readOnlyCompartment = new Compartment();
 
   onMount(() => {
     const extensions = [basicSetup, lintGutter()];
@@ -33,6 +36,8 @@
       extensions.push(jsonLang());
     }
     extensions.push(wrapCompartment.of(lineWrapping ? EditorView.lineWrapping : []));
+    extensions.push(editableCompartment.of(EditorView.editable.of(!readOnly)));
+    extensions.push(readOnlyCompartment.of(EditorState.readOnly.of(readOnly)));
     extensions.push(
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
@@ -66,6 +71,16 @@
   $: if (editor) {
     editor.dispatch({
       effects: wrapCompartment.reconfigure(lineWrapping ? EditorView.lineWrapping : []),
+    });
+  }
+
+  // System prompts are previewable/invokable but their shipped body is read-only.
+  $: if (editor) {
+    editor.dispatch({
+      effects: [
+        editableCompartment.reconfigure(EditorView.editable.of(!readOnly)),
+        readOnlyCompartment.reconfigure(EditorState.readOnly.of(readOnly)),
+      ],
     });
   }
 

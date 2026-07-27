@@ -197,6 +197,7 @@ class PromptEntrySummary(BaseModel):
     title: str
     body: str = ""
     entry_type: str = "prompt:base"
+    system: bool = False
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     # Per-entry input declarations. Each prompt declares the parameters its
     # template body references via `{{ input.<name> }}`. Used to be on the
@@ -214,6 +215,7 @@ class PromptEntry(BaseModel):
     body: str
     revision: str
     entry_type: str = "prompt:base"
+    system: bool = False
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     inputs: list[PromptInputDefinition] = Field(default_factory=list)
     computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)

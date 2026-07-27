@@ -222,6 +222,10 @@ class NodeIndex:
             # them from before an ancestor was promoted into a project, so keep
             # the real entry collision warning without surfacing those defaults.
             and not _is_builtin_plot_template_shadow(shadower, shadowed)
+            # Same lifecycle as built-in plot templates: a book can already
+            # carry seeded prompt defaults when an ancestor later becomes a
+            # project and seeds the same read-only defaults.
+            and not _is_builtin_prompt_shadow(shadower, shadowed)
         ]
         self.warnings.extend(self._shadow_warnings)
         self.rebuild_reverse_edges()
@@ -255,6 +259,25 @@ def _is_builtin_plot_template_shadow(shadower: NodeIndexEntry, shadowed: NodeInd
         and shadowed.kind == "plot"
         and shadower.entry_type == "plot:template"
         and shadowed.entry_type == "plot:template"
+        and shadower.system
+        and shadowed.system
+    )
+
+
+BUILTIN_SYSTEM_PROMPT_IDS = {
+    "prompt_builtin_plot_brainstorm",
+    "prompt_builtin_plot_claim_audit",
+}
+
+
+def _is_builtin_prompt_shadow(shadower: NodeIndexEntry, shadowed: NodeIndexEntry) -> bool:
+    return (
+        shadower.id in BUILTIN_SYSTEM_PROMPT_IDS
+        and shadower.id == shadowed.id
+        and shadower.kind == "prompt"
+        and shadowed.kind == "prompt"
+        and shadower.entry_type == "prompt:general"
+        and shadowed.entry_type == "prompt:general"
         and shadower.system
         and shadowed.system
     )

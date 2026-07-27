@@ -44,6 +44,7 @@
     availableScenes?: { id: string; title: string }[];
     rawBodyLanguage?: EntryBodyLanguage;
     loadedSceneId?: string | null;
+    readOnly?: boolean;
     // Shared id factory + slug helper — same counters/rules as NodeEditor's
     // reseed path use, so clientIds don't collide and name slugification is
     // consistent across the two creation sites.
@@ -66,6 +67,7 @@
     availableScenes = [],
     rawBodyLanguage = "markdown",
     loadedSceneId = null,
+    readOnly = false,
     nextInputDraftId,
     entrySlugify,
     onInputsChange,
@@ -87,7 +89,7 @@
       : "",
   );
   const canRestoreDefaultBody = $derived(
-    entryTypeDefaultBody.length > 0 && rawBody !== entryTypeDefaultBody,
+    !readOnly && entryTypeDefaultBody.length > 0 && rawBody !== entryTypeDefaultBody,
   );
 
   function restoreDefaultBody(): void {
@@ -169,7 +171,7 @@
 
 <div class="editor-wrap raw-body-wrap">
   <div class="raw-body-editor">
-    <CodeEditor bind:value={rawBody} language={rawBodyLanguage} lineWrapping={lineWrapEnabled} diagnostics={isPrompt() ? promptPreviewDiagnostics : []} />
+    <CodeEditor bind:value={rawBody} language={rawBodyLanguage} lineWrapping={lineWrapEnabled} {readOnly} diagnostics={isPrompt() ? promptPreviewDiagnostics : []} />
   </div>
 
   {#if isPrompt()}
@@ -263,6 +265,7 @@
     {nextInputDraftId}
     {entrySlugify}
     {onInputsChange}
+    {readOnly}
   />
 
   <PromptPreviewPane

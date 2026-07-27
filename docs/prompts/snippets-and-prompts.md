@@ -47,20 +47,22 @@ A prompt is everything required to invoke the AI for one specific task. It pairs
 `prompt` is an **abstract** entry type. Concrete bases under it ship seeded:
 `continuation`, `revise`, `general`, and `snippet`. Users may instantiate the
 bases directly, or sub-type one to declare the behavior for a specific task.
-Some task-specific seeded prompt types also ship with starter inputs and bodies:
-`roleplay` and `plot_brainstorm`.
+Roleplay remains a concrete subtype because it changes continuation invocation
+behavior. Plot prompts ship as system-provided `general` prompt entries because
+they still output to the chat panel.
 
 | Planned sub-type | What it does |
 | --- | --- |
 | `prompt.continue_scene` | Generate prose from cursor + beat instructions (output: insert at cursor, visual diff) |
 | `prompt.revise_selection` | Rewrite a marked selection (output: replace selection, visual diff) |
 | `prompt.freeform` | Sparring / brainstorming / research (output: chat panel) |
-| `prompt.plot_brainstorm` | Brainstorm from a picked plot board and its template guidance (output: chat panel) |
 | `prompt.summarize` | Body → summary field (output: replace field, auto-apply + undo) |
 | `prompt.lore_query` | Research over lore canon (output: chat panel) |
 | `prompt.character_query` | Roleplay as a character at the current scene's effective state — used to verify mutable-metadata timelines (output: chat panel) |
 
-These sub-types ship seeded with the system schema. Users can fork them or add their own via the schema editor (M5).
+These sub-types ship seeded with the system schema. Users can fork them or add
+their own via the schema editor (M5). System-provided prompt entries can be
+duplicated when the user wants a custom editable copy.
 
 ### Properties
 
@@ -69,18 +71,21 @@ These sub-types ship seeded with the system schema. Users can fork them or add t
 - **Stored at:** `<project>/prompts/<title>.md`
 - **Front matter:** `id`, `title`, `entry_type`, `model_class`, `provider_policy`, `inputs`, `context_strategy`
 
-### Properties on the entry-type definition (not on the node)
+### Entry-type behavior vs. entry inputs
 
 These belong on the sub-type (`prompt.continue_scene`, etc.), not on individual prompt nodes:
 
 - `context_strategy` — declares the target, scan surface, and output handler
-- `inputs` — typed input declarations the dispatch UI renders as a form
 
-A user authoring a custom prompt picks (or forks) a sub-type, then writes the body template.
+Prompt inputs live on the prompt entry itself. The input declarations and the
+Jinja body that reads `input.<name>` are edited together, so duplicating a
+system prompt gives the user a local copy of both the inputs and the template.
+A user authoring a custom prompt picks (or forks) a sub-type, declares the
+inputs, then writes the body template.
 
 ### Input types
 
-The `inputs` list on a sub-type declares the dispatch form. Each entry is:
+The `inputs` list on a prompt entry declares the dispatch form. Each entry is:
 
 ```yaml
 - name: words
@@ -159,10 +164,14 @@ Scene:
 
 `context_pick` values are serialized picked refs, not prose. Helpers decide what to materialize. For plot boards, `plot_context(input.plot)` expands the selected board into cards, claims, template guidance, beat notes, and relationships. For plot template instances, it resolves the board that uses the instance and filters the context down to that template line. Supplying `as_of=scene` filters future manuscript-positioned cards and claims. Template-instance plot beats are returned in template order, so snippets can iterate `plot.template_instances` and `instance.plot_points` directly.
 
-### Seeded Plot Brainstorm prompt
+### Seeded plot prompts
 
-New projects include a `Plot Brainstorm` prompt subtype. Creating a prompt of
-that type seeds:
+New projects include read-only system prompt entries for using a plot board as
+AI context without asking the model to write the book. They use
+`entry_type: prompt:general`, so they appear with other chat-panel prompts.
+Duplicate one to customize its inputs or Jinja body.
+
+`Plot Brainstorm` declares:
 
 - `plot`: a required `context_pick` constrained to plot boards and template instances
 - `focus`: a long-text note for the current brainstorming question
@@ -171,6 +180,18 @@ The starter body calls `context_xml(plot_context(input.plot))` and frames the
 model as a brainstorming partner. It asks for options, tradeoffs, weak claims,
 and next questions; it explicitly tells the model not to draft the novel or
 treat templates as mandatory rules.
+
+`Plot Claim Audit` declares:
+
+- `plot`: a required `context_pick` constrained to plot boards and template instances
+- `focus`: a long-text note for the audit question
+
+The starter body renders an audit-oriented XML-like structure from
+`plot_context(input.plot)`. It groups card-local function badges under their
+plot beats, includes each claim's rationale/evidence/AI notes when present, and
+lists untagged cards. The model is asked to judge whether the claimed cards
+collectively earn each beat and to identify weak, missing, duplicated, or
+overloaded story work.
 
 ## File layout
 

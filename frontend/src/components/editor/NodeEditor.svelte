@@ -181,6 +181,9 @@
   // to settle.
   const snapshots = new SnapshotStripController();
   let snapshotParked = $derived(documentKind === "scene" && snapshots.parked !== null);
+  let systemReadOnly = $derived(
+    documentKind === "prompt" && Boolean((scene as PromptEntrySummary | null)?.system),
+  );
 
   $effect(() => {
     snapshots.flushScene = onFlushScene ?? null;
@@ -445,6 +448,7 @@
 
   function emitInputsChange(): void {
     if (!scene) return;
+    if (systemReadOnly) return;
     const canonical = entryInputDraftsToCanonical(entryInputDrafts);
     onChange?.({
       title,
@@ -488,6 +492,7 @@
   // which owns the chat's title state and persists it (saveEditorPane is a
   // no-op for chats). Other kinds persist via the pane draft → saveEditorPane.
   function handleTitleInput() {
+    if (systemReadOnly) return;
     emitChange();
     if (documentKind === "chat") chatBodyView?.setTitleFromPane(title);
     if (documentKind === "view") viewBodyView?.setTitleFromPane(title);
@@ -495,6 +500,7 @@
 
   function emitChange() {
     if (!scene) return;
+    if (systemReadOnly) return;
     onChange?.({
       title,
       body: rawBodyMode ? rawBody : (proseBodyView?.getBody() ?? ""),
@@ -514,11 +520,13 @@
   }
 
   function updateStatus(value: string) {
+    if (systemReadOnly) return;
     status = value;
     emitChange();
   }
 
   function updateEntryType(value: string) {
+    if (systemReadOnly) return;
     entryType = value;
     emitChange();
   }
@@ -817,7 +825,7 @@
   let rawBodyMode = $derived(bodyShape === "code");
   let rawBodyLanguage = $derived((entryTypeDef?.body_language ?? "markdown") satisfies EntryBodyLanguage);
   $effect.pre(() => {
-    if (rawBodyMode && rawBody !== lastEmittedRawBody) {
+    if (rawBodyMode && !systemReadOnly && rawBody !== lastEmittedRawBody) {
       lastEmittedRawBody = rawBody;
       emitChange();
     }
@@ -941,10 +949,11 @@
       computedFieldString={computedFieldString}
       effectiveOverrides={scrubbed ? scrub.overrides : null}
       compare={snapshotCompare}
-      readOnly={scrubbed || snapshotParked}
+      readOnly={scrubbed || snapshotParked || systemReadOnly}
       onEntryTypeChange={(next) => updateEntryType(next)}
       onStatusChange={(next) => updateStatus(next)}
       onMetadataChange={(next) => {
+        if (systemReadOnly) return;
         metadata = next;
         emitChange();
       }}
@@ -1001,7 +1010,7 @@
               value={snapshots.titleForView}
             />
           {:else}
-            <input class="title-input" aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()}`} placeholder={documentNameLabel} bind:value={title} oninput={handleTitleInput} />
+            <input class="title-input" aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()}`} placeholder={documentNameLabel} bind:value={title} readonly={systemReadOnly} oninput={handleTitleInput} />
           {/if}
         </label>
       </div>
@@ -1083,6 +1092,7 @@
       {loadedSceneId}
       {nextInputDraftId}
       {entrySlugify}
+      readOnly={systemReadOnly}
       onInputsChange={emitInputsChange}
     />
   {/if}

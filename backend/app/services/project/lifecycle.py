@@ -113,6 +113,7 @@ class ProjectLifecycleMixin:
         self._write_yaml(root / "metadata.schema.yaml", self._empty_metadata_schema())
         self._write_yaml(root / "tags.yaml", {"tags": []})
         self._seed_builtin_plot_templates(root)
+        self._seed_builtin_prompt_entries(root)
         initial_scene = Scene(
             id=self._new_id("scene"),
             title="Untitled Scene",

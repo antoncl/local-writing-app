@@ -186,6 +186,23 @@ class ProjectSession {
     });
   }
 
+  // Open the create-project wizard, reading fresh machine settings first (#556).
+  //
+  // The wizard's `needsRootFolder` is derived from `createWizard
+  // .defaultProjectsFolder`, which is otherwise only refreshed at app load /
+  // save. If that value was cached empty (e.g. settings loaded before the
+  // backend was ready) while the machine actually has a root configured, the
+  // wizard would open showing the first-run root step and let the author
+  // OVERWRITE their real root. Re-reading on open makes `needsRootFolder`
+  // reflect the current backend state, so the root step appears only when the
+  // root is genuinely unset. `loadMachineSettings` swallows a failed fetch
+  // (backend offline) and leaves the last-known value, so the wizard still
+  // opens — no worse than before.
+  async startCreateWizard(): Promise<void> {
+    await this.loadMachineSettings();
+    createWizard.start();
+  }
+
   // Set only the machine root, from the wizard's first-run step (#318). A
   // partial update: the server reads it with `exclude_unset`, so the other
   // machine settings are left untouched. Re-syncs `machineSettings` so the

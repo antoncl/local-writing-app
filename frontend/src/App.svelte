@@ -629,7 +629,7 @@
   onCycleTheme={() => themePreference.update((p) => nextPreference(p))}
   onSelectRecent={(path) => void projectSession.openProjectAt(path)}
   onOpenFolder={() => projectChooser.openForOpenProject()}
-  onNewProject={() => createWizard.start()}
+  onNewProject={() => void projectSession.startCreateWizard()}
   onOpenAssistants={openAssistantsPane}
   onOpenSettings={() => void projectSession.openMachineSettings()}
   onOpenDetailTypes={() => schemaPanes?.openDetailTypes()}

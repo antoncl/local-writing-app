@@ -233,7 +233,13 @@
 
   .colored-select-popover {
     position: fixed;
-    z-index: var(--z-dropdown);
+    /* Portaled to <body>, so this must clear the modal layer (Modal is 2000,
+       DirectoryPicker 2200) or the menu opens BEHIND a dialog that embeds this
+       select — e.g. the create-project wizard's review step (#556). Matches the
+       portaled-popover convention TagPicker already uses (z-index 10000).
+       Deliberately NOT `--z-dropdown`: that token (100) also drives non-portaled
+       nodes (WorkspaceNode), which must stay in the normal stack. */
+    z-index: 10000;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 8px;

@@ -191,7 +191,11 @@ The starter body renders an audit-oriented XML-like structure from
 plot beats, includes each claim's rationale/evidence/AI notes when present, and
 lists untagged cards. The model is asked to judge whether the claimed cards
 collectively earn each beat and to identify weak, missing, duplicated, or
-overloaded story work.
+overloaded story work. It also asks for an optional `<plot_suggestions>` block
+with target card, claim, template-instance, and plot-beat ids so suggestions can
+be copied manually today and turned into explicit apply actions later. The
+prompt tells the model to omit placeholder suggestions and only return concrete
+draft changes.
 
 ## File layout
 

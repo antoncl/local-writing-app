@@ -60,7 +60,7 @@ export function cardAssistFocus(context: PlotClaimAuditContext): string {
   if (!card) return selectedAuditFocus(context);
   const boardTitle = context.plotNode?.title || "this plot board";
   const cardClaims = (context.plotNode?.board?.claims ?? []).filter((claim) => claim.card_id === card.id);
-  return `Help make card "${card.title}" stronger in "${boardTitle}". Treat diagnostics as signals, not verdicts. Current issues: ${cardAssistIssues(context, cardClaims)} Current function badges: ${cardAssistClaims(cardClaims)} Card synopsis: ${card.synopsis || "No synopsis yet."} Give concrete story repair options: narrative actions, obstacles, choices, reveals, consequences, claim changes, or whether this should become a scene. Do not draft prose; offer specific options the author can choose from.`;
+  return `Help make card "${card.title}" (id: ${card.id}) stronger in "${boardTitle}". Treat diagnostics as signals, not verdicts. Current issues: ${cardAssistIssues(context, cardClaims)} Current function badges: ${cardAssistClaims(cardClaims)} Card synopsis: ${card.synopsis || "No synopsis yet."} Give concrete story repair options as draft suggestions with target ids: narrative actions, obstacles, choices, reveals, consequences, claim changes, relationship changes, or whether this should become a scene. Do not draft prose or mutate the board; offer specific options the author can choose from and later apply manually.`;
 }
 
 async function openPlotClaimChat(context: PlotClaimAuditContext, focus: string): Promise<void> {
@@ -92,7 +92,7 @@ function cardAssistIssues(context: PlotClaimAuditContext, cardClaims: PlotPointC
 
 function cardAssistClaims(cardClaims: PlotPointClaim[]): string {
   if (cardClaims.length === 0) return "The card has no function badges yet.";
-  return cardClaims.map((claim) => `${claim.claim_label || claim.plot_point_id} (${claim.claim_type}${claim.strength ? `, ${claim.strength}` : ""})`).join("; ");
+  return cardClaims.map((claim) => `${claim.claim_label || claim.plot_point_id} [${claim.id}] (${claim.claim_type}${claim.strength ? `, ${claim.strength}` : ""})`).join("; ");
 }
 
 export async function openPlotClaimAuditChat(context: PlotClaimAuditContext): Promise<void> {

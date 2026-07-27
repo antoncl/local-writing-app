@@ -679,12 +679,18 @@ CLAIM {{ claim.plot_point_id }} [{{ claim.plotline.title }}]: {{ claim.rationale
         self.assertIn("function badge", system_text)
         self.assertIn("Find weak claims.", user_text)
         self.assertIn("<plot_claim_audit", user_text)
+        self.assertIn(f'<template_instance id="{instance.id}"', user_text)
+        self.assertIn('<plot_beat id="first_turn"', user_text)
         self.assertIn("First turn", user_text)
         self.assertIn("claim_first_turn", user_text)
+        self.assertIn('<card id="card_archive" title="Archive Break-in">', user_text)
         self.assertIn("Archive Break-in", user_text)
         self.assertIn("The theft closes her old path.", user_text)
         self.assertIn("<untagged_cards>", user_text)
+        self.assertIn('<card id="card_friend" title="Friend Warning">', user_text)
         self.assertIn("Friend Warning", user_text)
+        self.assertIn("<plot_suggestions>", user_text)
+        self.assertIn("Do not emit placeholder suggestions", user_text)
         self.assertNotIn('{"', user_text)
 
     def test_jinja_iteration_exposes_point_claims(self) -> None:

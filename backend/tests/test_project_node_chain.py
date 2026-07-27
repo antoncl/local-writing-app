@@ -20,10 +20,18 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 import yaml
-from layer_fixtures import declare_full_chain, make_project_folder
+from layer_fixtures import declare, declare_full_chain, make_project_folder
 from project_fixtures import open_test_project
 
+from app.services.ai.preview import build_preview
 from app.services.ai.templates import create_environment, render_template
+
+
+def _seeded_scene_id(root: Path) -> str:
+    """The id of the scene `_scaffold_new_project` seeds, read off disk."""
+    scene_file = next((root / "scenes").glob("*.md"))
+    front_matter = scene_file.read_text(encoding="utf-8").split("---")[1]
+    return str(yaml.safe_load(front_matter)["id"])
 
 
 def _set_project_metadata(folder: Path, metadata: dict[str, Any]) -> None:
@@ -103,6 +111,58 @@ class ProjectNodeChainTests(unittest.TestCase):
         )
         self.assertIn("Measurements are metric.", rendered.messages[0].text)
 
+    def test_build_preview_resolves_an_inherited_field(self) -> None:
+        """Through the REAL builder: `preview.py` binds `project = current_project()`,
+        so an ancestor's field reaches a rendered prompt — the actual AI channel,
+        not a hand-built context."""
+        _set_project_metadata(self.universe, {"measurement_system": "metric"})
+        rendered, _ = build_preview(
+            project_service=self.service,
+            template_source=(
+                '{% role "system" %}{% if "measurement_system" in project.metadata %}'
+                "Use {{ project.metadata.measurement_system }} units.{% endif %}{% endrole %}"
+            ),
+            target_scene_id=_seeded_scene_id(self.book),
+            session_id=None,
+            inputs={},
+            text_before="",
+            text_after="",
+            commit=False,
+        )
+        self.assertIn("Use metric units.", rendered.messages[0].text)
+
+    def test_the_in_guard_skips_an_unset_field(self) -> None:
+        """The doc's guard pattern: an unset field renders nothing, no error."""
+        # Nothing sets `tense` anywhere in the chain.
+        rendered, _ = build_preview(
+            project_service=self.service,
+            template_source=(
+                '{% role "system" %}A{% if "tense" in project.metadata %}'
+                " {{ project.metadata.tense }}{% endif %}B{% endrole %}"
+            ),
+            target_scene_id=_seeded_scene_id(self.book),
+            session_id=None,
+            inputs={},
+            text_before="",
+            text_after="",
+            commit=False,
+        )
+        self.assertIn("AB", rendered.messages[0].text)
+
+    def test_a_bare_access_to_an_unset_field_raises(self) -> None:
+        """The other half of the doc's promise: under StrictUndefined an
+        unguarded `{{ project.metadata.tense }}` raises, so the guard is not
+        optional. Pins the guidance `template-language.md` now gives."""
+        from jinja2 import UndefinedError
+
+        context = {"project": self.service.current_project()}
+        with self.assertRaises(UndefinedError):
+            render_template(
+                '{% role "system" %}{{ project.metadata.tense }}{% endrole %}',
+                context,
+                env=create_environment(),
+            )
+
 
 class ProjectNodeFlatTests(unittest.TestCase):
     """A standalone project — a chain of length one — sees only its own fields."""
@@ -118,4 +178,61 @@ class ProjectNodeFlatTests(unittest.TestCase):
         self.assertEqual(
             self.service._resolved_project_node_metadata(self.root)["tense"],
             "present",
+        )
+
+    def test_the_roleplay_builtin_template_wires_the_field_triple(self) -> None:
+        """Part 3 is only met if a *shipped* template references the fields, not
+        just the docs. The roleplay `default_body` is the one bundled template
+        body (copied into a real node by `create_prompt_entry`); it must read the
+        units/tense/spelling triple, or #317's symptom survives out of the box."""
+        body = self.service.read_metadata_schema().entry_types["prompt:roleplay"].default_body
+        self.assertIn("project.metadata.tense", body)
+        self.assertIn("project.metadata.measurement_system", body)
+        self.assertIn("project.metadata.spelling", body)
+
+    def test_a_hand_edited_yaml_date_does_not_break_the_route(self) -> None:
+        """A YAML date scalar in project.md is outside `MetadataValue`; unguarded
+        it would 500 `current_project()`. It must survive as its ISO string —
+        `project.md` is hand-editable and one bad value cannot make a project
+        unopenable (the `_stated_ai_policy` guarantee, extended to the node)."""
+        # An unquoted ISO date round-trips through yaml.safe_load as datetime.date.
+        (self.root / "project.md").write_text(
+            "---\nid: project_solo\ntitle: Solo\nentry_type: project:project\n"
+            "metadata:\n  published: 2020-01-01\n  history:\n    - 1999-12-31\n---\n\n",
+            encoding="utf-8",
+        )
+        info = self.service.current_project()
+        self.assertEqual(info.metadata["published"], "2020-01-01")
+        self.assertEqual(info.metadata["history"], ["1999-12-31"])
+
+
+class ProjectNodeThreeLevelTests(unittest.TestCase):
+    """universe › series › book — the design's actual depth (§3). A middle
+    layer's override must reach the book, and the book must still override it."""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.base = Path(self._tmp.name).resolve()
+        self.universe = self.base / "universe"
+        self.series = self.universe / "series"
+        self.book = self.series / "book"
+        self.service = open_test_project(self.book, "Book")
+        make_project_folder(self.service, self.universe, "Universe")
+        make_project_folder(self.service, self.series, "Series")
+        declare(self.service, self.book, [self.universe, self.series], base=self.base)
+
+    def test_a_middle_layer_override_reaches_the_book(self) -> None:
+        _set_project_metadata(self.universe, {"measurement_system": "metric", "tense": "past"})
+        _set_project_metadata(self.series, {"tense": "present"})  # series overrides universe
+        resolved = self.service._resolved_project_node_metadata(self.book)
+        self.assertEqual(resolved["measurement_system"], "metric")  # from the universe
+        self.assertEqual(resolved["tense"], "present")  # the nearer series wins
+
+    def test_the_book_still_overrides_a_middle_layer(self) -> None:
+        _set_project_metadata(self.series, {"tense": "present"})
+        _set_project_metadata(self.book, {"tense": "past"})
+        self.assertEqual(
+            self.service._resolved_project_node_metadata(self.book)["tense"],
+            "past",  # the book is nearest of all
         )

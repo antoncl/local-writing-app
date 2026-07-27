@@ -20,6 +20,7 @@ Method bodies moved verbatim. Shared tooling resolves through the MRO:
 
 from __future__ import annotations
 
+import datetime
 import os
 import string
 from collections.abc import Callable
@@ -80,6 +81,34 @@ class _AIPolicyResolver(LayerVisitor):
         stated = self._stated(layer.folder)
         if stated is not None:
             self.policy = stated
+
+
+def _channel_safe_metadata_value(value: Any) -> MetadataValue:
+    """Coerce a raw YAML value into the `MetadataValue` union (#317).
+
+    `project.md` is hand-editable and `yaml.safe_load` turns an unquoted ISO
+    date into a `datetime.date` — a type *outside* `MetadataValue`, so putting
+    it straight onto `ProjectInfo.metadata` would raise a Pydantic
+    `ValidationError` and 500 `GET /api/project` and `POST /api/project/open`.
+    That is the failure class `_stated_ai_policy` already guards for the
+    manifest: one hand-edited value must never make a project unopenable.
+
+    A date/datetime stringifies to its ISO text — exactly what the file says and
+    what a prompt template wants — and any other exotic scalar falls back to its
+    string form, so the template channel can never carry a value it cannot
+    represent. Lists and dicts are coerced element-wise (a date can hide inside
+    one). Normalisation against the schema stays on the editor read
+    (`read_project_node`); this is only the make-it-representable floor.
+    """
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, datetime.date):  # covers datetime.datetime too
+        return value.isoformat()
+    if isinstance(value, list):
+        return [_channel_safe_metadata_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _channel_safe_metadata_value(item) for key, item in value.items()}
+    return str(value)
 
 
 class _ProjectNodeMetadataResolver(LayerVisitor):
@@ -639,7 +668,12 @@ class ProjectLifecycleMixin:
         except Exception:
             return {}
         metadata = front_matter.get("metadata")
-        return dict(metadata) if isinstance(metadata, dict) else {}
+        if not isinstance(metadata, dict):
+            return {}
+        # Keys and values are made `MetadataValue`-safe (a hand-edited YAML date
+        # would otherwise 500 the route) and copied, so nothing shares a mutable
+        # object with the on-disk parse.
+        return {str(key): _channel_safe_metadata_value(value) for key, value in metadata.items()}
 
     def list_directories(self, path: Path | None = None) -> DirectoryListing:
         target = (path or self._default_directory_picker_path()).expanduser().resolve()

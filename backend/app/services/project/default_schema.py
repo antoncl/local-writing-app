@@ -221,6 +221,19 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "voice, in motive, in the moment. Write that character's NEXT "
                 "beat — action, dialogue, or both — and stop. One beat, not a "
                 "paragraph of them.\n"
+                # World canon (#317): the project node's authored fields reach
+                # the model here. Each is guarded, so the clause is silent until
+                # the project (or an ancestor) states the field — a `select`
+                # value like `past`/`metric`/`en_GB` reads fine as instruction.
+                "{% if 'tense' in project.metadata %}\n"
+                "\nWrite the beat in {{ project.metadata.tense }} tense.\n"
+                "{% endif %}\n"
+                "{% if 'measurement_system' in project.metadata %}\n"
+                "Use {{ project.metadata.measurement_system }} units.\n"
+                "{% endif %}\n"
+                "{% if 'spelling' in project.metadata %}\n"
+                "Use {{ project.metadata.spelling }} spelling.\n"
+                "{% endif %}\n"
                 "{% if char %}\n"
                 "\nYou are playing **{{ char.title }}**.\n"
                 "{% if char.body %}\n"

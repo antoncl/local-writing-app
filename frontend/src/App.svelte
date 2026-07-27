@@ -628,6 +628,7 @@
   themePref={$themePreference}
   onCycleTheme={() => themePreference.update((p) => nextPreference(p))}
   onSelectRecent={(path) => void projectSession.openProjectAt(path)}
+  onRemoveRecent={(path) => void projectSession.removeRecentProject(path)}
   onOpenFolder={() => projectChooser.openForOpenProject()}
   onNewProject={() => void projectSession.startCreateWizard()}
   onOpenAssistants={openAssistantsPane}

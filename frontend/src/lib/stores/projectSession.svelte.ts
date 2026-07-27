@@ -186,6 +186,21 @@ class ProjectSession {
     });
   }
 
+  // Forget one recents entry (#423). Recents is a machine-global MRU that can
+  // outlive the projects it points at (moved, renamed, deleted, unmounted), and
+  // a dead row is otherwise permanent — it fails every time it is clicked with
+  // no way to clear it. This is an explicit user gesture, so we never guess at
+  // liveness (that would mis-drop a project on a disconnected drive): send the
+  // list minus this path and take the server's rewritten list as canonical.
+  async removeRecentProject(path: string): Promise<void> {
+    await this.run(async () => {
+      const next = this.recentProjects.filter((r) => r.path !== path);
+      const view = await api.updateMachineSettings({ recent_projects: next });
+      this.machineSettings = view;
+      this.recentProjects = view.recent_projects ?? [];
+    });
+  }
+
   // Open the create-project wizard, reading fresh machine settings first (#556).
   //
   // The wizard's `needsRootFolder` is derived from `createWizard

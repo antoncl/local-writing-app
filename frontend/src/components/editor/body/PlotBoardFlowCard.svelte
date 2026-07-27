@@ -9,6 +9,23 @@
   let card = $derived(ctx.cardById(data.cardId));
   let columnTitle = $derived(ctx.cardColumnTitle(data.cardId));
   let cardClaims = $derived(ctx.claimsForCard(data.cardId));
+
+  function claimTypeShort(claimType: string): string {
+    switch (claimType) {
+      case "partially_satisfies":
+        return "partial";
+      case "raises_question":
+        return "question";
+      case "pays_off":
+        return "payoff";
+      default:
+        return claimType.replace(/_/g, " ");
+    }
+  }
+
+  function hasClaimDetails(claim: { rationale?: string | null; evidence?: string | null; ai_notes?: string | null }): boolean {
+    return Boolean(claim.rationale || claim.evidence || claim.ai_notes);
+  }
 </script>
 
 {#if card}
@@ -78,7 +95,16 @@
               ctx.selectClaim(claim);
             }}
           >
-            <span>{ctx.pointLabel(claim)}</span>
+            <span class="claim-chip-title">{ctx.pointLabel(claim)}</span>
+            <span class="claim-chip-meta">
+              <small>{claimTypeShort(claim.claim_type)}</small>
+              {#if claim.strength}
+                <small>{claim.strength}</small>
+              {/if}
+              {#if hasClaimDetails(claim)}
+                <small>details</small>
+              {/if}
+            </span>
           </button>
           <button
             type="button"

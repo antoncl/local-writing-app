@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { inheritedLayerLabel, isInherited } from "@/lib/utils/provenance";
+import { fieldProvenance, inheritedLayerLabel, isInherited } from "@/lib/utils/provenance";
 
 describe("inheritedLayerLabel", () => {
   it("returns the ancestor label when the node is owned by another layer", () => {
@@ -34,5 +34,20 @@ describe("isInherited", () => {
   it("is true for an ancestor-owned node and false for a local one", () => {
     expect(isInherited({ source_layer_id: "series" }, "book")).toBe(true);
     expect(isInherited({ source_layer_id: "book" }, "book")).toBe(false);
+  });
+});
+
+describe("fieldProvenance", () => {
+  it("marks an override field 'overridden' regardless of the inherited flag", () => {
+    expect(fieldProvenance("rank", true, ["rank"])).toBe("overridden");
+    expect(fieldProvenance("rank", false, ["rank"])).toBe("overridden");
+  });
+
+  it("marks a non-overridden field 'layer-inherited' on an inherited entry", () => {
+    expect(fieldProvenance("spelling", true, ["rank"])).toBe("layer-inherited");
+  });
+
+  it("marks a field 'local' on an entry authored in the open project", () => {
+    expect(fieldProvenance("spelling", false, [])).toBe("local");
   });
 });

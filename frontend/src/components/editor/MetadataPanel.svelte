@@ -17,7 +17,7 @@
     StructureDocument,
   } from "@/lib/types";
   import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
-  import { inheritedLayerLabel } from "@/lib/utils/provenance";
+  import { inheritedLayerLabel, fieldProvenance } from "@/lib/utils/provenance";
 
   interface Props {
     entryType: string;
@@ -73,6 +73,10 @@
     onMetadataChange?: (metadata: EntryMetadata) => void;
     onCustomData?: () => void;
     onNavigate?: (payload: { id: string; kind: string }) => void;
+    // Clear-to-inherit (#517): drop a field's layer override so it reverts to the
+    // inherited value. Only the lore host wires it; absent → the override mark
+    // stays a static marker (nothing to reset), e.g. scrubbed/parked panes.
+    onResetField?: (fieldId: string) => void;
   }
 
   let {
@@ -102,6 +106,7 @@
     onMetadataChange,
     onCustomData,
     onNavigate,
+    onResetField,
   }: Props = $props();
 
   // metadataSchema is global per-project — read from the store, not a prop (#14
@@ -195,6 +200,18 @@
     return overriddenFields.includes(fieldId);
   }
 
+  // Provenance tint (#517 / §8): whether the entry itself is inherited from an
+  // ancestor layer. A non-overridden field on such an entry reads *muted* (its
+  // value flows from the owner); an overridden field reads *live* with the reset
+  // gesture. On a locally-authored entry there is no layer treatment at all.
+  const entryIsInherited = $derived(inheritedFromLabel !== null);
+  function isLayerInherited(fieldId: string): boolean {
+    return fieldProvenance(fieldId, entryIsInherited, overriddenFields) === "layer-inherited";
+  }
+  // The reset gesture is live only when a handler is wired and the rail is
+  // editable — a scrubbed / snapshot-parked pane shows the mark inertly.
+  const canResetOverride = $derived(onResetField != null && !readOnly);
+
   function displayValue(fieldId: string): MetadataValue {
     if (isMutated(fieldId)) return effectiveOverrides?.[fieldId] ?? "";
     const flipped = compare?.fields[fieldId];
@@ -270,11 +287,29 @@
       {#if metadataSchema.fields[fieldId] && !metadataSchema.fields[fieldId].intrinsic && !effectiveFieldHidden(metadataSchema, entryType, fieldId)}
         {@const field = metadataSchema.fields[fieldId]}
         {@const fieldLabel = effectiveFieldLabel(metadataSchema, entryType, fieldId)}
-        <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field)} class:inherited={isInherited(fieldId)} class:mutated={isMutated(fieldId)} class:overridden={isOverridden(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && compare?.side === "was"}>
+        <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field)} class:inherited={isInherited(fieldId)} class:layer-inherited={isLayerInherited(fieldId)} class:mutated={isMutated(fieldId)} class:overridden={isOverridden(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && compare?.side === "was"}>
           <span class="fr-icon"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
           <span class="fr-name">{fieldLabel}{#if isMutated(fieldId)}<span class="fr-mutated-marker" title="Changed by here">⤳</span>{/if}</span>
-          <div class="fr-val">
-            {#if isOverridden(fieldId)}<i class="ti ti-versions fr-override-marker" title={`Overridden here — this value comes from a layer override in this project, not from ${sourceLayerLabel ?? "inherited canon"}`}></i>{/if}
+          <div class="fr-val" title={isLayerInherited(fieldId) && inheritedFromLabel ? `Inherited from ${inheritedFromLabel}` : undefined}>
+            {#if isOverridden(fieldId)}
+              {#if canResetOverride}
+                <!-- The `ti-versions` mark PR 2 ships, made interactive (#517):
+                     the primary provenance signal AND the reset control. Its
+                     hover/focus reveals a "Reset to <source>" chip above it. -->
+                <button
+                  type="button"
+                  class="fr-override-marker fr-reset"
+                  title={`Overridden here — reset this value to ${sourceLayerLabel ?? "inherited canon"}`}
+                  aria-label={`Reset ${fieldLabel} to ${sourceLayerLabel ?? "the inherited value"}`}
+                  onclick={() => onResetField?.(fieldId)}
+                >
+                  <i class="ti ti-versions" aria-hidden="true"></i>
+                  <span class="fr-reset-chip"><i class="ti ti-arrow-back-up" aria-hidden="true"></i>Reset to {sourceLayerLabel ?? "inherited"}</span>
+                </button>
+              {:else}
+                <i class="ti ti-versions fr-override-marker" title={`Overridden here — this value comes from a layer override in this project, not from ${sourceLayerLabel ?? "inherited canon"}`}></i>
+              {/if}
+            {/if}
             {#if fieldId === "status"}
               <!-- status is stored off `metadata` and edited via onStatusChange. -->
               <ColoredSelect
@@ -507,8 +542,67 @@
     font-size: var(--fs-md);
     line-height: 1;
   }
+  /* Clear-to-inherit (#517 / §8): the mark doubles as the reset control. As a
+     button it sheds the browser chrome and anchors the "Reset to <source>" chip;
+     the chip floats above the mark on hover/focus (keyboard-reachable — the
+     button itself is the tab stop, so the reset is never hover-only). */
+  button.fr-override-marker {
+    display: inline-flex;
+    align-items: center;
+    position: relative;
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: pointer;
+  }
+  button.fr-override-marker:focus-visible {
+    outline: 2px solid var(--star);
+    outline-offset: 2px;
+    border-radius: var(--r-sm);
+  }
+  .fr-reset-chip {
+    display: none;
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    margin-bottom: 3px;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 8px;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    box-shadow: var(--elev-2);
+    border-radius: var(--r-md);
+    font-size: var(--fs-xs);
+    color: var(--star);
+    white-space: nowrap;
+    z-index: 6;
+  }
+  button.fr-override-marker:hover .fr-reset-chip,
+  button.fr-override-marker:focus-visible .fr-reset-chip {
+    display: inline-flex;
+  }
   .field-row.wide .fr-val > .fr-override-marker {
     flex: 0 0 auto;
+  }
+
+  /* Layer-inherited fields (#517 / §8): the value flows from an ancestor, so it
+     reads gently muted — a text dim only (no box, so dark mode isn't overpowered)
+     with the source in the row tooltip. Overridden rows keep the default full
+     strength ("live"), so the two read as one visual language against each other.
+     Distinct from `.field-row.inherited` above, which marks *schema* field
+     membership, not layer provenance — the two may co-occur. */
+  .field-row.layer-inherited .fr-name {
+    color: var(--text-3);
+  }
+  .field-row.layer-inherited .fr-val {
+    cursor: help;
+  }
+  .field-row.layer-inherited .fr-val :global(input),
+  .field-row.layer-inherited .fr-val :global(select),
+  .field-row.layer-inherited .fr-val :global(.fv-static),
+  .field-row.layer-inherited .fr-val :global(.fv-static-longtext) {
+    color: var(--text-2);
   }
   .field-row.mutated .fr-name {
     color: var(--mutation-color);

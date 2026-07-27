@@ -668,7 +668,17 @@ export const api = {
   // entry; for an *inherited* entry the backend then 409s rather than silently
   // rewriting ancestor canon. When set, `L == owning layer` edits the owning
   // file, `L < owning` writes a sparse override delta at L.
-  saveLoreEntry(entry: LoreEntry, body: string, authoringLayerId: string | null = null) {
+  // `clearOverrideFields` (#517 / create-project-wizard.md §8) names the fields
+  // whose override row(s) to DROP at L, reverting them to the inherited value —
+  // the explicit "unset ⇒ inherit" signal. The submitted `metadata` still carries
+  // their overridden value; the backend drops the row regardless, which is what
+  // distinguishes a reset from omitting the field (read as clear-to-empty).
+  saveLoreEntry(
+    entry: LoreEntry,
+    body: string,
+    authoringLayerId: string | null = null,
+    clearOverrideFields: string[] = [],
+  ) {
     return request<LoreEntry>(`/lore/${entry.id}`, {
       method: "PUT",
       body: JSON.stringify({
@@ -678,6 +688,7 @@ export const api = {
         entry_type: entry.entry_type,
         metadata: entry.metadata,
         authoring_layer_id: authoringLayerId,
+        clear_override_fields: clearOverrideFields,
       }),
     });
   },

@@ -190,6 +190,13 @@ class SaveLoreEntryRequest(BaseModel):
     # writes a sparse override delta at L. The frontend rail picker (PR 2) sends
     # it, defaulting to the open project (the rest-position override).
     authoring_layer_id: str | None = None
+    # Clear-to-inherit (#517 / create-project-wizard.md §8): the fields whose
+    # override row(s) this save should DROP at L, reverting them to the inherited
+    # value. This is the explicit "unset ⇒ inherit" signal — needed because
+    # omitting a field is read as a deliberate clear-to-empty override, not a
+    # revert, and the client has no way to name the above-L value to echo back.
+    # Only meaningful on the override path (`L < owning`); a no-op otherwise.
+    clear_override_fields: list[str] = Field(default_factory=list)
 
 
 class PromptEntrySummary(BaseModel):

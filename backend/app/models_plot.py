@@ -278,6 +278,7 @@ class PlotContextClaim(BaseModel):
     template_instance_id: str
     plot_point_id: str
     plotline_id: str | None = None
+    plotline: PlotLine | None = None
     claim_type: PlotClaimType = "satisfies"
     claim_label: str | None = None
     strength: Literal["weak", "medium", "strong"] | None = None
@@ -295,6 +296,7 @@ class PlotContextCard(BaseModel):
     structure_title: str | None = None
     manuscript_index: int | None = None
     primary_plotline_id: str | None = None
+    primary_plotline: PlotLine | None = None
     claims: list[PlotContextClaim] = Field(default_factory=list)
 
 

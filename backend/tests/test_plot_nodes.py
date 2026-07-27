@@ -487,6 +487,17 @@ board:
         self.assertEqual(
             [claim["id"] for claim in context["claims"]], ["claim_first_turn"]
         )
+        self.assertEqual(context["cards"][0]["primary_plotline"]["title"], "Main")
+        self.assertEqual(context["claims"][0]["plotline"]["title"], "Main")
+        context_points = context["template_instances"][0]["plot_points"]
+        context_point_ids = [point["plot_point_id"] for point in context_points]
+        self.assertIn("inciting_change", context_point_ids)
+        self.assertIn("first_turn", context_point_ids)
+        self.assertIn("resolution", context_point_ids)
+        resolution_point = next(
+            point for point in context_points if point["plot_point_id"] == "resolution"
+        )
+        self.assertEqual(resolution_point["notes"], "")
         self.assertEqual(context["omitted_counts"]["future_cards"], 1)
         self.assertNotIn("Butler Reveal", str(context))
         self.assertNotIn("butler did it", str(context))
@@ -1025,11 +1036,24 @@ board:
                 entry_type="plot:board",
                 board={
                     "template_instance_ids": [main_instance.id, subplot_instance.id],
+                    "plotlines": [
+                        {
+                            "id": "plotline_main",
+                            "title": "Main plot",
+                            "template_instance_id": main_instance.id,
+                        },
+                        {
+                            "id": "plotline_sub",
+                            "title": "Subplot",
+                            "template_instance_id": subplot_instance.id,
+                        },
+                    ],
                     "cards": [
                         {
                             "id": "card_archive",
                             "title": "Archive Break-in",
                             "synopsis": "Mara steals the ledger.",
+                            "primary_plotline_id": "plotline_main",
                         }
                     ],
                     "claims": [
@@ -1038,6 +1062,7 @@ board:
                             "card_id": "card_archive",
                             "template_instance_id": main_instance.id,
                             "plot_point_id": "first_turn",
+                            "plotline_id": "plotline_main",
                             "rationale": "The old path is unavailable.",
                         },
                         {
@@ -1045,6 +1070,7 @@ board:
                             "card_id": "card_archive",
                             "template_instance_id": subplot_instance.id,
                             "plot_point_id": "resolution",
+                            "plotline_id": "plotline_sub",
                             "rationale": "This belongs to the subplot.",
                         },
                     ],
@@ -1057,9 +1083,9 @@ board:
             """{% role "user" %}
 {% set plot = plot_context(input.plot) %}
 {% for card in plot.cards %}
-CARD {{ card.title }}: {{ card.synopsis }}
+CARD {{ card.title }} [{{ card.primary_plotline.title }}]: {{ card.synopsis }}
 {% for claim in card.claims %}
-CLAIM {{ claim.plot_point_id }}: {{ claim.rationale }}
+CLAIM {{ claim.plot_point_id }} [{{ claim.plotline.title }}]: {{ claim.rationale }}
 {% endfor %}
 {% endfor %}
 {% endrole %}""",
@@ -1068,8 +1094,11 @@ CLAIM {{ claim.plot_point_id }}: {{ claim.rationale }}
         )
 
         text = out.messages[0].blocks[0].text
-        self.assertIn("CARD Archive Break-in: Mara steals the ledger.", text)
-        self.assertIn("CLAIM first_turn: The old path is unavailable.", text)
+        self.assertIn("CARD Archive Break-in [Main plot]: Mara steals the ledger.", text)
+        self.assertIn(
+            "CLAIM first_turn [Main plot]: The old path is unavailable.",
+            text,
+        )
         self.assertNotIn("resolution", text)
         self.assertNotIn("This belongs to the subplot.", text)
 

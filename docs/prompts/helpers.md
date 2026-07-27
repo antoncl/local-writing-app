@@ -374,6 +374,14 @@ plot_context(selection, as_of=None) -> PlotContext
 context_xml(value) -> str
 ```
 
+**Structured/XML contract**
+
+`context_xml(plot_context(...))` is only a rendering of the structured
+`PlotContext` object. If the XML dump emits a field or relationship, prompt
+snippets must be able to access the same value through Jinja on the structured
+object. Do not add serializer-only XML conveniences without adding the
+corresponding context field or object property.
+
 **Accepted `selection` shapes**:
 
 - a plot board id string
@@ -387,7 +395,9 @@ If `as_of` is omitted, the selected plot context is materialized fully. If
 moment are omitted. In practice `as_of=scene` lets a scene-scoped prompt avoid
 future spoilers. Selecting a template instance filters the owning board down to
 that instance's template guidance, claims, contributing cards, and card-to-card
-relationships.
+relationships. Template instances expose the complete enabled/template beat
+sequence; `as_of` only limits cards, claims, relationships, and future-specific
+beat notes.
 
 **Default XML shape**:
 ```xml
@@ -404,9 +414,9 @@ relationships.
       </open_questions>
     </plot_point>
   </template_instance>
-  <card id="card_archive" title="Archive Break-in" scene_id="scene_archive">
+  <card id="card_archive" title="Archive Break-in" scene_id="scene_archive" primary_plotline_id="plotline_main" primary_plotline_title="Main">
     <synopsis>Mara steals the ledger.</synopsis>
-    <claim id="claim_first_turn" template_instance_id="plot_inst_main" plot_point_id="first_turn" claim_type="satisfies">
+    <claim id="claim_first_turn" template_instance_id="plot_inst_main" plot_point_id="first_turn" plotline_id="plotline_main" plotline_title="Main" claim_type="satisfies">
       <rationale>The old path is unavailable.</rationale>
     </claim>
   </card>
@@ -479,11 +489,17 @@ Author notes: {{ point.notes }}
 
 {% for card in plot.cards %}
 <plot_card id="{{ card.id }}" title="{{ card.title }}">
+{% if card.primary_plotline %}
+  <plotline>{{ card.primary_plotline.title }}</plotline>
+{% endif %}
 {% if card.synopsis %}
   <synopsis>{{ card.synopsis }}</synopsis>
 {% endif %}
 {% for claim in card.claims %}
   <function_badge plot_point_id="{{ claim.plot_point_id }}" claim_type="{{ claim.claim_type }}">
+{% if claim.plotline %}
+    <plotline>{{ claim.plotline.title }}</plotline>
+{% endif %}
 {% if claim.rationale %}
     <rationale>{{ claim.rationale }}</rationale>
 {% endif %}
@@ -505,6 +521,7 @@ In practice this means snippets can see:
 - plot-beat `function_claim` and `guidance`
 - instance-level point `notes`, `author_intent`, `expected_role`, and `open_questions`
 - `plot.cards`, with each `card.claims` filtered to the same selection and `as_of` boundary
+- resolved plotline objects on cards and claims, e.g. `card.primary_plotline.title` and `claim.plotline.title`
 - board-level `plot.claims` for cross-card audits, including `evidence`, `rationale`, and `ai_notes`
 
 **Caveats**:

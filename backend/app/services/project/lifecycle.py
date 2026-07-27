@@ -372,6 +372,19 @@ class ProjectLifecycleMixin:
         """
         return self._resolved_ai_policy(self._require_project())
 
+    def prospective_ancestor_candidates(self, root: Path) -> list[AncestorCandidate]:
+        """Inheritable-ancestor rows for a *not-yet-created* project at `root`
+        (#318 — the wizard's location step).
+
+        The switcher's candidates ride `current_project()`, which needs an open
+        project; the wizard asks *before* the project — or even its folder —
+        exists. `_ancestor_candidates_for_api` needs only the path: the walk
+        stops one hop short of `root` (`ancestor_candidates` drops it) and reads
+        no file inside it, so an absent folder enumerates cleanly. Every row
+        comes back `inherited=False` — a fresh project has declared nothing yet.
+        """
+        return self._ancestor_candidates_for_api(root.expanduser().resolve())
+
     def _ancestor_candidates_for_api(self, root: Path) -> list[AncestorCandidate]:
         """The enumeration, outermost first — every ancestor folder, flagged.
 

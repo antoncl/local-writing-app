@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi import APIRouter, Query
 
 from app.models import (
+    AncestorCandidate,
     CreateDirectoryRequest,
     CreateProjectRequest,
     CreateStructureNodeRequest,
@@ -119,6 +120,19 @@ def probe_directory(project: CurrentProject, path: str = Query(default="")) -> P
 def create_directory(project: CurrentProject, request: CreateDirectoryRequest) -> DirectoryEntry:
     with translate_errors():
         return project.create_directory(Path(request.parent), request.name)
+
+
+# The wizard's location step (#318) asks which ancestors a project *would*
+# inherit from before it exists. Like the picker helpers above it is a
+# path-based read that touches no project state — `prospective_ancestor_candidates`
+# uses only the passed path, so an absent scope (first run, nothing open) is
+# fine and no scope is produced. Every row returns `inherited=False`.
+@router.get("/api/project/ancestor-candidates", response_model=list[AncestorCandidate])
+def project_ancestor_candidates(
+    project: CurrentProject, path: str = Query(min_length=1)
+) -> list[AncestorCandidate]:
+    with translate_errors():
+        return project.prospective_ancestor_candidates(Path(path))
 
 
 @router.post("/api/project/validate", response_model=ProjectValidation)

@@ -118,5 +118,12 @@ jobs:
       - name: svelte-check
         run: npm run check --prefix frontend
 
+      # svelte-check never runs the minifier, so a whole class of CSS/JS build
+      # warnings (e.g. a comment closed early by a stray `*/`, #538) is invisible
+      # to it. vite.config.js fails the build on any non-excused warning (#540),
+      # so this step is the gate that catches them.
+      - name: build (warning-free)
+        run: npm run build --prefix frontend
+
       - name: vitest
         run: npm test --prefix frontend

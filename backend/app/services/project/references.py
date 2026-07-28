@@ -355,7 +355,19 @@ class ReferencesMixin:
         # or unreadable file as OSError.
         except (ProjectServiceError, ValueError, OSError) as exc:
             schema = None
-            index.errors.append(f"Invalid metadata schema; no reference edges were indexed: {exc}")
+            # Chain-level, not a node file: the merged schema failed to load, so
+            # this attributes the error to the open project's own schema file.
+            # It never coexists with a live patch — a failed read leaves
+            # `schema is None`, which skips the patch below entirely — and a
+            # fixed schema moves `metadata.schema.yaml`, which fans out to a full
+            # rebuild, so the diagnostic is re-derived rather than stranded.
+            root_layer = next(layer for layer in layers if layer.is_root)
+            index.add_diagnostic(
+                layer_id=root_layer.id,
+                path=root / SCHEMA_FILENAME,
+                message=f"Invalid metadata schema; no reference edges were indexed: {exc}",
+                is_error=True,
+            )
             # An unreadable schema costs the *whole project* its reference
             # edges, so persisting that result would freeze an empty reference
             # graph and backlinks panel in place — the schema file is unchanged,
@@ -648,8 +660,13 @@ class ReferencesMixin:
         clone.overrides_by_target = {
             target: list(records) for target, records in index.overrides_by_target.items()
         }
-        clone.warnings = list(index.warnings)
-        clone.errors = list(index.errors)
+        # Copied like the other droppable structures: the patch gate reads the
+        # clone's diagnostics before any drop, and `_drop_diagnostics_under`
+        # mutates this map in place (#382). `warnings` / `errors` are derived
+        # views over it, so there is nothing else to carry.
+        clone.diagnostics_by_source = {
+            key: list(diags) for key, diags in index.diagnostics_by_source.items()
+        }
         clone.degraded = index.degraded
         clone.has_unparsed_nodes = index.has_unparsed_nodes
         clone._shadow_warnings = list(index._shadow_warnings)
@@ -711,7 +728,12 @@ class ReferencesMixin:
         try:
             data = self._read_yaml(path)
         except Exception as exc:
-            index.errors.append(f"Failed to read chat session {path.name}: {exc}")
+            index.add_diagnostic(
+                layer_id=layer.id,
+                path=path,
+                message=f"Failed to read chat session {path.name}: {exc}",
+                is_error=True,
+            )
             index.has_unparsed_nodes = True
             # Same rule as the schema read: a chat we could not open is
             # missing from the index entirely, and its file is unchanged, so
@@ -741,8 +763,16 @@ class ReferencesMixin:
             # ever does, surface it rather than silently shadowing: `kind`
             # partitions identity, so a chat and a lore entry sharing an id
             # are two things colliding, not one shadowing the other.
-            index.errors.append(
-                f"Chat id {chat_id} collides with an existing entry."
+            #
+            # `blocks_patch`: this chat contributes no entry, so a per-file patch
+            # that later dropped the colliding entry could not promote it — the
+            # same rejection shape as a same-layer duplicate id.
+            index.add_diagnostic(
+                layer_id=layer.id,
+                path=path,
+                message=f"Chat id {chat_id} collides with an existing entry.",
+                is_error=True,
+                blocks_patch=True,
             )
             return
         index.add(entry)
@@ -773,7 +803,7 @@ class ReferencesMixin:
             front_matter = self._read_front_matter_only(path, strict=True)
             node_id = self._require_node_id(path, front_matter)
         except ProjectServiceError as exc:
-            index.errors.append(exc.message)
+            index.add_diagnostic(layer_id=layer.id, path=path, message=exc.message, is_error=True)
             # The file is here; its identity is not. See `has_unparsed_nodes`.
             index.has_unparsed_nodes = True
             return
@@ -782,10 +812,20 @@ class ReferencesMixin:
             # The same guard every other collector applies. Without it the
             # `(layer, id)` edge key stops being a key, and two files at one
             # layer fight over one edge list.
-            index.errors.append(
-                f"Duplicate front matter id {node_id} in "
-                f"{self._safe_relative(duplicate.path, layer.folder)} and "
-                f"{self._safe_relative(path, layer.folder)}."
+            #
+            # `blocks_patch`: only the first claimant is in `candidates`, so a
+            # per-file patch that dropped the winner would leave nothing to
+            # promote — retracting this needs a rebuild (#382).
+            index.add_diagnostic(
+                layer_id=layer.id,
+                path=path,
+                message=(
+                    f"Duplicate front matter id {node_id} in "
+                    f"{self._safe_relative(duplicate.path, layer.folder)} and "
+                    f"{self._safe_relative(path, layer.folder)}."
+                ),
+                is_error=True,
+                blocks_patch=True,
             )
             return
         raw_entry_type = front_matter.get("entry_type") or "project:project"
@@ -805,7 +845,12 @@ class ReferencesMixin:
         try:
             edges = self._reference_edges_for_entry(entry, schema, front_matter=front_matter)
         except ProjectServiceError as exc:
-            index.errors.append(f"{self._safe_relative(path, layer.folder)}: {exc.message} Its references were not indexed.")
+            index.add_diagnostic(
+                layer_id=layer.id,
+                path=path,
+                message=f"{self._safe_relative(path, layer.folder)}: {exc.message} Its references were not indexed.",
+                is_error=True,
+            )
             edges = []
         if edges:
             index.edges_by_layer_src[(layer.id, node_id)] = edges
@@ -889,7 +934,7 @@ class ReferencesMixin:
         try:
             front_matter = self._read_front_matter_only(path, strict=True)
         except ProjectServiceError as exc:
-            index.errors.append(exc.message)
+            index.add_diagnostic(layer_id=layer.id, path=path, message=exc.message, is_error=True)
             # A file on disk whose id we could not read — so `by_id` stops
             # being a complete answer to "does this id exist" (#379).
             index.has_unparsed_nodes = True
@@ -898,15 +943,27 @@ class ReferencesMixin:
         raw_node_id = front_matter.get("id")
         if raw_node_id is None:
             node_id = path.stem
-            index.warnings.append(
-                f"{family.kind.title()} file {self._safe_relative(path, folder)} is missing front matter id; using filename stem as legacy id."
+            index.add_diagnostic(
+                layer_id=layer.id,
+                path=path,
+                message=(
+                    f"{family.kind.title()} file {self._safe_relative(path, folder)} is missing "
+                    f"front matter id; using filename stem as legacy id."
+                ),
+                is_error=False,
             )
         elif isinstance(raw_node_id, str) and raw_node_id.strip():
             node_id = raw_node_id.strip()
         else:
             node_id = path.stem
-            index.errors.append(
-                f"{family.kind.title()} file {self._safe_relative(path, folder)} has invalid front matter id; it must be text."
+            index.add_diagnostic(
+                layer_id=layer.id,
+                path=path,
+                message=(
+                    f"{family.kind.title()} file {self._safe_relative(path, folder)} has invalid "
+                    f"front matter id; it must be text."
+                ),
+                is_error=True,
             )
 
         raw_entry_type = front_matter.get("entry_type") or family.default_entry_type
@@ -928,10 +985,21 @@ class ReferencesMixin:
             # Two files claiming one id *at the same layer* — an error, not a
             # shadow. Shadowing is a relationship between layers; within one
             # layer there is no order to resolve by.
-            index.errors.append(
-                f"Duplicate front matter id {node_id} in "
-                f"{self._safe_relative(duplicate.path, duplicate_relative_to)} and "
-                f"{self._safe_relative(path, duplicate_relative_to)}."
+            #
+            # `blocks_patch`: this file is rejected and never enters
+            # `candidates`, so a per-file patch that dropped the winner would
+            # leave nothing to promote where a cold build promotes this sibling.
+            # Retracting it needs a rebuild (#382).
+            index.add_diagnostic(
+                layer_id=layer.id,
+                path=path,
+                message=(
+                    f"Duplicate front matter id {node_id} in "
+                    f"{self._safe_relative(duplicate.path, duplicate_relative_to)} and "
+                    f"{self._safe_relative(path, duplicate_relative_to)}."
+                ),
+                is_error=True,
+                blocks_patch=True,
             )
             return
         # A descendant claiming an ancestor's id joins the candidate list;
@@ -950,9 +1018,14 @@ class ReferencesMixin:
             # just contributes no edges — but that has to be *said*, or its
             # references vanish from the graph and the backlinks panel with
             # no signal anywhere.
-            index.errors.append(
-                f"{self._safe_relative(path, duplicate_relative_to)}: {exc.message} "
-                f"Its references were not indexed."
+            index.add_diagnostic(
+                layer_id=layer.id,
+                path=path,
+                message=(
+                    f"{self._safe_relative(path, duplicate_relative_to)}: {exc.message} "
+                    f"Its references were not indexed."
+                ),
+                is_error=True,
             )
             edges = []
         if edges:

@@ -296,12 +296,31 @@ class SnapshotIntegrityTests(SnapshotTestCase):
         self._write_payload(payload)
         self.assertTrue(self._rebuilds())
 
-    def test_warnings_of_the_wrong_shape_rebuild(self) -> None:
-        """`list("boom")` is four warnings, one per character — and
-        `validate_project` shows warnings to the user verbatim."""
+    def test_diagnostics_of_the_wrong_shape_rebuild(self) -> None:
+        """`validate_project` shows the diagnostics' derived messages to the user
+        verbatim (#382), so a payload whose `diagnostics` is not even a list must
+        rebuild rather than be displayed."""
         self._open_index()
         payload = self._snapshot_payload()
-        payload["warnings"] = "boom"
+        payload["diagnostics"] = "boom"
+        self._write_payload(payload)
+        self.assertTrue(self._rebuilds())
+
+    def test_malformed_diagnostic_record_rebuilds(self) -> None:
+        """A diagnostic whose message is not a string, or whose severity flags
+        are not booleans, is corruption — rebuild, don't surface it."""
+        # A lore file with no front-matter id earns a real collection warning, so
+        # the snapshot carries a diagnostic record to corrupt.
+        (self.root / "lore").mkdir(parents=True, exist_ok=True)
+        self.service._write_markdown_with_front_matter(
+            self.root / "lore" / "legacy.md",
+            {"title": "Legacy", "entry_type": "lore:character"},
+            "Body.",
+        )
+        self._open_index()
+        payload = self._snapshot_payload()
+        self.assertTrue(payload["diagnostics"], "expected a persisted diagnostic to corrupt")
+        payload["diagnostics"][0]["message"] = ["not", "a", "string"]
         self._write_payload(payload)
         self.assertTrue(self._rebuilds())
 

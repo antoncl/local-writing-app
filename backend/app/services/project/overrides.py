@@ -152,8 +152,17 @@ class LayerOverridesMixin:
         for target_id, records in index.overrides_by_target.items():
             candidates = index.candidates.get(target_id)
             if not candidates:
-                index.warnings.append(
-                    f"Layer override targets a missing entry {target_id}; it was ignored."
+                # Attributed to the override file that names the missing target
+                # (#382). An override-bearing chain always rebuilds cold and is
+                # never snapshotted or patched, so this diagnostic never has to
+                # survive a drop — but it still carries provenance so the derived
+                # `warnings` view is uniform with every other diagnostic.
+                orphan = records[0]
+                index.add_diagnostic(
+                    layer_id=orphan.layer_id,
+                    path=orphan.path,
+                    message=f"Layer override targets a missing entry {target_id}; it was ignored.",
+                    is_error=False,
                 )
                 continue
             # Candidates are innermost-first as built (`NodeIndex.add`), so [0] is

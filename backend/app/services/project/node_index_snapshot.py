@@ -50,7 +50,7 @@ from app.services.project.node_index import (
 # stale because the code that produced it changed, with the payload's shape and
 # every project file untouched, and no human-maintained version number catches
 # that reliably.
-SNAPSHOT_FORMAT_VERSION = 1
+SNAPSHOT_FORMAT_VERSION = 2
 
 # Source trees whose contents determine what a build *produces*: the walk, the
 # collectors, the edge extraction, the built-in schema, the models they parse
@@ -214,8 +214,25 @@ def serialize(
             if layer_id in layer_index_by_id
             for edge in edges
         ],
-        "warnings": index.collected_warnings(),
-        "errors": list(index.errors),
+        # Diagnostics keyed by layer + path, the same droppable shape as entries
+        # and edges (#382), so a warm load can retract one when its file is
+        # re-collected. The derived shadow warnings are *not* here — they live in
+        # `_shadow_warnings`, which `resolve()` rebuilds on load, so persisting
+        # them would double them.
+        "diagnostics": [
+            {
+                "layer": layer_index_by_id[layer_id],
+                "path": str(path),
+                "message": diagnostic.message,
+                "is_error": diagnostic.is_error,
+                "blocks_patch": diagnostic.blocks_patch,
+            }
+            for (layer_id, path), diagnostics in index.diagnostics_by_source.items()
+            # A diagnostic from a layer outside this walk cannot be re-stamped on
+            # load, exactly as entries are skipped above.
+            if layer_id in layer_index_by_id
+            for diagnostic in diagnostics
+        ],
         # Persisted, unlike `degraded`: it is a property of the *files*, and a
         # warm load that lost it would let `_purge_references_to` rewrite the
         # user's files on the second open exactly as it did before #379.
@@ -334,6 +351,34 @@ def diff_manifests(stored: Manifest, current: Manifest) -> list[str]:
     )
 
 
+def _rehydrate_diagnostics(index: NodeIndex, diagnostics: object, layers: list[IndexLayer]) -> None:
+    """Restore the collection diagnostics (#382) into `index`.
+
+    Typed, not just coerced: `validate_project` shows the derived `warnings` /
+    `errors` to the user verbatim, so a malformed record must rebuild rather
+    than be displayed. A bad layer position would silently re-stamp the
+    diagnostic onto the innermost layer (see the entry loop in `_rehydrate`).
+    """
+    if not isinstance(diagnostics, list):
+        raise ValueError("diagnostics is not a list")
+    for record in diagnostics:
+        position = record["layer"]
+        if not isinstance(position, int) or not 0 <= position < len(layers):
+            raise ValueError(f"diagnostic names layer {position!r}")
+        message = record["message"]
+        is_error = record["is_error"]
+        blocks_patch = record["blocks_patch"]
+        if not isinstance(message, str) or not isinstance(is_error, bool) or not isinstance(blocks_patch, bool):
+            raise ValueError("diagnostic record is malformed")
+        index.add_diagnostic(
+            layer_id=layers[position].id,
+            path=Path(record["path"]),
+            message=message,
+            is_error=is_error,
+            blocks_patch=blocks_patch,
+        )
+
+
 def _rehydrate(payload: dict, layers: list[IndexLayer]) -> NodeIndex:
     index = NodeIndex()
     # Freshly derived, never read off disk — see `serialize`.
@@ -380,14 +425,7 @@ def _rehydrate(payload: dict, layers: list[IndexLayer]) -> NodeIndex:
         index.edges_by_layer_src.setdefault(key, []).append(
             ReferenceEdge(src=edge["src"], dst=edge["dst"], field_id=edge["field_id"])
         )
-    # Typed, not just coerced: `list("boom")` is four warnings, one per
-    # character, and `validate_project` shows `index.warnings` to the user
-    # verbatim. A payload that is wrong here must rebuild, not be displayed.
-    for key in ("warnings", "errors"):
-        if not isinstance(payload[key], list) or not all(isinstance(item, str) for item in payload[key]):
-            raise ValueError(f"{key} is not a list of strings")
-    index.warnings = list(payload["warnings"])
-    index.errors = list(payload["errors"])
+    _rehydrate_diagnostics(index, payload["diagnostics"], layers)
     if not isinstance(payload["has_unparsed_nodes"], bool):
         raise ValueError("has_unparsed_nodes is not a bool")
     index.has_unparsed_nodes = payload["has_unparsed_nodes"]

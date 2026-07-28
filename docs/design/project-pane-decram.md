@@ -17,9 +17,10 @@ different things wearing one coat:
 - **A pile of action buttons** — verbs that landed here for lack of a home:
   `Validate`, `Chats…`, `Prompts…`, `Mutations…`, `Health Check`,
   `Save AI Settings`, plus two hidden *inside* a result panel
-  (`Repair TODO Links`, `Add to Manuscript`). The Project region is in fact the
-  only pane with **no header-actions cluster** — every other pane has one; this
-  one pushed its verbs into the body instead.
+  (`Repair TODO Links`, `Add to Manuscript`). The panes that carry verbs —
+  Lore, Prompts, Mutations, Assistants, Chats, TODO — do so through a
+  **header-actions cluster**; the Project region has none, and pushed its verbs
+  into the body instead.
 
 **"Validate" is itself two-headed.** One button does two unrelated jobs:
 

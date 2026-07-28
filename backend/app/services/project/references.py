@@ -279,7 +279,7 @@ class ReferencesMixin:
         resolution scope with **no disk work at all**: no manifest sweep, no
         snapshot read. A miss builds it cold (`_resolve_index_cold`, below) and
         publishes it; the gate collapses a concurrent stampede to one build. The
-        memo is dropped on every scope change (`CurrentScope.set` → `invalidate`)
+        memo is dropped on every project open (`/api/project/open` → `invalidate`)
         and maintained in place by the write funnel (`_apply_index_write`), so
         two consecutive consumers in one request build the index once and a
         prose-only save leaves it untouched.

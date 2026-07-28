@@ -24,7 +24,6 @@ from tempfile import TemporaryDirectory
 
 from layer_fixtures import declare_full_chain
 
-from app.runtime import current_scope
 from app.services.project_service import ProjectService
 
 
@@ -536,10 +535,11 @@ class PurgeStaysInTheCallersProjectTests(unittest.TestCase):
     the caller's `unlink` and the purge used to redirect the whole rewrite loop
     at **another project's** files — reproduced against master as data loss.
 
-    Since #399 a concurrent open changes `current_scope`, which is what the
-    *next* request resolves; the unit in flight holds a service bound to an
-    immutable scope. These tests race the open that way, so what they pin is the
-    property rather than the two call sites that were patched first.
+    Since #399 the unit in flight holds a service bound to an immutable scope,
+    and since #413 there is no process-wide "current project" for a concurrent
+    open to change at all — the scope rides each request. These tests race the
+    open anyway and pin the property (the purge stays in the caller's project)
+    rather than the two call sites that were patched first.
 
     #379's guard does not cover this: it skips ids that still resolve, and the
     interesting case is an id that resolves in neither project.
@@ -553,16 +553,15 @@ class PurgeStaysInTheCallersProjectTests(unittest.TestCase):
         for path, title in ((self.book1, "Book 1"), (self.book2, "Book 2")):
             declare_full_chain(ProjectService.created_at(path, title), path, self.base)
         self.service = ProjectService.opened_at(self.book1)
-        current_scope.set(self.service.scope)
 
     def tearDown(self) -> None:
-        current_scope.clear()
         self.temp_dir.cleanup()
 
     def _open_book2_concurrently(self) -> None:
-        """Exactly what a concurrent `/api/project/open` does, and no more: it
-        changes what the *next* request resolves, never a unit in flight."""
-        current_scope.set(ProjectService.opened_at(self.book2).scope)
+        """Exactly what a concurrent `/api/project/open` does, and no more: since
+        #413 that builds a throwaway handle and touches nothing process-wide,
+        never a unit in flight."""
+        ProjectService.opened_at(self.book2)
 
     def _write_lore(self, folder: Path, node_id: str, title: str, *, refs: list[str] | None = None) -> None:
         (folder / "lore").mkdir(parents=True, exist_ok=True)

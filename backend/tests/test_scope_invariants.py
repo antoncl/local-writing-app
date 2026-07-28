@@ -102,9 +102,11 @@ class ScopeIsBoundOnceTests(unittest.TestCase):
 
 class TheServiceLayerNeverReadsTheRegistryTests(unittest.TestCase):
     def test_no_service_module_imports_app_runtime(self) -> None:
-        """`current_scope` answers "what did the client last open", which is a
-        question only the route boundary may ask. A service module asking it is
-        the whole #399 defect re-introduced, whatever the surrounding care."""
+        """`app.runtime` owns the scope choke point — the one place a request's
+        project is read (its header, #413). That is a question only the route
+        boundary may ask; a service module reaching for it, rather than using the
+        handle it was called on, is the whole #399 defect re-introduced,
+        whatever the surrounding care."""
         offenders = _modules_importing_the_registry()
 
         self.assertEqual(

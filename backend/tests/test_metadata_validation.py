@@ -28,7 +28,6 @@ from app.models import (
     UpsertMetadataEntryTypeRequest,
     UpsertMetadataFieldRequest,
 )
-from app.runtime import current_scope
 from app.services.project.errors import ProjectServiceError
 from app.services.project.node_index_gate import node_index_gate
 from app.services.project_service import ProjectService
@@ -2783,14 +2782,15 @@ class ReferenceResolutionTests(unittest.TestCase):
     def test_http_reference_routes(self) -> None:
         from fastapi.testclient import TestClient
 
+        # The routes resolve their project from the wire scope (#413), so point
+        # the test client's header at THIS test's project and clear it
+        # afterwards (the conftest fixture injects it). The handle the test holds
+        # is bound to the same root and never moves.
+        from project_fixtures import clear_test_scope, set_test_scope
+
         from app.main import app
 
-        # The routes resolve their project from `current_scope` (#399), so point
-        # that at THIS test's project and clear it afterwards. The handle the
-        # test itself holds is bound to the same root and never moves — the
-        # swap-and-restore of a shared service's fields that used to be needed
-        # here is precisely what the request-scoped handle removed.
-        current_scope.set(ProjectService.opened_at(self.root).scope)
+        set_test_scope(ProjectService.opened_at(self.root).scope)
         try:
             client = TestClient(app)
             seren = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="lore:character"))
@@ -2807,7 +2807,7 @@ class ReferenceResolutionTests(unittest.TestCase):
             titles = {candidate["title"] for candidate in candidates_response.json()["candidates"]}
             self.assertIn("Seren", titles)
         finally:
-            current_scope.clear()
+            clear_test_scope()
 
 
 class LayeredEntryIndexTests(unittest.TestCase):

@@ -30,7 +30,8 @@ from app.models import (
     StructureNodeDeletePreview,
     UpdateProjectSettingsRequest,
 )
-from app.runtime import CurrentProject, current_scope, translate_errors
+from app.runtime import CurrentProject, translate_errors
+from app.services.project.node_index_gate import node_index_gate
 from app.services.project_service import ProjectService
 
 router = APIRouter()
@@ -42,11 +43,16 @@ def health() -> dict[str, str]:
 
 
 # The two routes below are the only ones that do NOT take `CurrentProject`:
-# they are where a scope comes *from*. Each resolves its own project from the
-# request, does its work against that handle, and only then records the scope
-# for subsequent requests to resolve (#399). Recording last means a create or
-# open that throws leaves the previous project open rather than half-switching
-# the process onto a folder that was never made.
+# they are where a scope comes *from* — the client passes an explicit
+# `root_path`, does not yet know it as a project, and this is what makes it one.
+# Since #413 the wire carries the open project's root on every *subsequent*
+# request, so these no longer record what is open; they keep their real jobs
+# (migrate, validate, touch recents) and drop the node-index memo, which is the
+# open event ADR-0040/#392 hang the memo's lifetime on. Dropping it here (not in
+# the per-request resolver, which builds a throwaway service every call) is what
+# makes a re-open after an external backup-restore rebuild from disk rather than
+# serve the pre-restore index — the browser's F5 re-runs `/open`, no server
+# restart needed.
 
 @router.post("/api/project/create", response_model=ProjectInfo)
 def create_project(request: CreateProjectRequest) -> ProjectInfo:
@@ -57,7 +63,7 @@ def create_project(request: CreateProjectRequest) -> ProjectInfo:
             Path(request.root_path), request.title, request.inherits
         )
         info = created.current_project()
-        current_scope.set(created.scope)
+        node_index_gate.invalidate()
         ms_service.touch_recent_project(Path(info.root_path), info.title)
         return info
 
@@ -69,7 +75,7 @@ def open_project(request: OpenProjectRequest) -> ProjectInfo:
     with translate_errors():
         opened = ProjectService.opened_at(Path(request.root_path))
         info = opened.current_project()
-        current_scope.set(opened.scope)
+        node_index_gate.invalidate()
         ms_service.touch_recent_project(Path(info.root_path), info.title)
         return info
 

@@ -8,9 +8,9 @@ from unittest.mock import patch
 
 import yaml
 from fastapi.testclient import TestClient
+from project_fixtures import clear_test_scope
 
 from app.main import app
-from app.runtime import current_scope
 from app.services import machine_settings as ms
 
 
@@ -95,7 +95,7 @@ class RecentProjectsEndpointTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = TemporaryDirectory()
         self.root = Path(self.tmp.name).resolve()
-        current_scope.clear()
+        clear_test_scope()
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
@@ -389,7 +389,7 @@ class DisplaySettingsTests(unittest.TestCase):
     """Prose-presentation prefs (#127 / #575) — defaults, persistence, clamp."""
 
     def setUp(self) -> None:
-        current_scope.clear()
+        clear_test_scope()
         self.client = TestClient(app)
 
     def test_view_defaults_when_unset(self) -> None:

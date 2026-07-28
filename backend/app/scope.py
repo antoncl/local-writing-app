@@ -1,26 +1,24 @@
-"""The scope of one unit of work, and the process's record of what is open (#399).
+"""The scope of one unit of work (#399, #413, ADR-0045).
 
 ADR-0045: *scope belongs to the unit of work, not the process*, and *a unit
-resolves its scope once and never re-resolves it*. Before this, the scope lived
-in a mutable field on a process-wide `ProjectService` that `open_project` swapped
-in place, so any helper re-reading it mid-request could straddle a scope change —
-the shape behind #379's and #381's data-loss paths.
+resolves its scope once and never re-resolves it*. Before #399 the scope lived
+in a mutable field on a process-wide `ProjectService` that `open_project`
+swapped in place, so any helper re-reading it mid-request could straddle a scope
+change — the shape behind #379's and #381's data-loss paths.
 
-Two objects, deliberately separate:
+`WorkScope` is **immutable** and belongs to the unit. A `ProjectService` is
+bound to one at construction and cannot be re-pointed, so re-reading it is not
+merely discouraged — there is nothing to re-read.
 
-- `WorkScope` is **immutable** and belongs to the unit. A `ProjectService` is
-  bound to one at construction and cannot be re-pointed, so re-reading it is
-  not merely discouraged — there is nothing to re-read.
-- `CurrentScope` is the process's memory of *what the client last opened*. It
-  exists only because the wire carries no project identifier yet; it is read at
-  exactly one choke point (`app.runtime.resolve_current_project`) and never
-  again inside a unit. When scope reaches the wire, the choke point reads the
-  request instead and this registry goes away without touching a route.
+Where the scope *comes from* is the wire: #413 put the resolution scope on the
+request (the `X-Project-Root` header), and `app.runtime.resolve_current_project`
+is the one choke point that reads it. There is no process-wide record of "what
+the client last opened" any more — a stale write carries its own project on the
+request and lands there or fails, never in whatever some other request opened.
 """
 
 from __future__ import annotations
 
-import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -37,82 +35,11 @@ class WorkScope:
 
     `migrations_applied` is a property of the *open event*, not of the project:
     it is what `migrate_project` did when this scope was resolved, and
-    `validate_project` reports it.
+    `validate_project` reports it. A scope resolved straight from the wire (a
+    request that never went through `/open`) carries none, which is correct —
+    nothing migrated on that path.
     """
 
     root: Path
     authoring_layer: Path | None = None
     migrations_applied: tuple[str, ...] = field(default=())
-
-
-class CurrentScope:
-    """The project the client last opened.
-
-    Guarded by a lock because mutation routes run on FastAPI's threadpool, so a
-    read and a concurrent `open_project` genuinely interleave. The lock makes the
-    *handoff* atomic; it is not what makes a unit coherent — that is the handle
-    being immutable once resolved.
-    """
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._scope: WorkScope | None = None
-
-    def get(self) -> WorkScope | None:
-        with self._lock:
-            return self._scope
-
-    def set(self, scope: WorkScope) -> None:
-        # Flush any deferred snapshot **before** taking the lock (#476): the
-        # flush is a disk serialize + atomic write, and `get()` shares this lock
-        # on the request hot path, so holding it across the flush would stall
-        # every concurrent scope read for the duration of a project switch. The
-        # under-lock `invalidate()` still flushes-if-dirty as a backstop, but the
-        # common case is already clean here.
-        self._flush_index_memo()
-        with self._lock:
-            self._scope = scope
-            self._drop_index_memo()
-
-    def clear(self) -> None:
-        self._flush_index_memo()
-        with self._lock:
-            self._scope = None
-            self._drop_index_memo()
-
-    @staticmethod
-    def _flush_index_memo() -> None:
-        """Write any pending node-index snapshot, off `self._lock` (#476).
-
-        Runs before the scope lock is taken so a project switch never holds the
-        lock across the flush's disk I/O. Best-effort and idempotent — a no-op
-        when nothing is pending, so calling it before every `_drop_index_memo` is
-        free in the common (clean) case."""
-        from app.services.project.node_index_gate import node_index_gate
-
-        node_index_gate.flush()
-
-    @staticmethod
-    def _drop_index_memo() -> None:
-        """Invalidate the process-global node-index memo on every scope change.
-
-        Unconditional — it must fire even when the new scope has the **same
-        root** as the old one (#392). The memo is keyed by root, so a re-open of
-        the same project would otherwise serve the index built before it: exactly
-        the bug when a user reverts files from a backup while the server keeps
-        running and then reopens the project. Clearing on the open event makes
-        the next resolve rebuild from disk.
-
-        Held **under `self._lock`**, so the new scope and the dropped memo become
-        visible together: a concurrent request that resolves the just-set scope
-        cannot slip in between and read the pre-restore index for the same root.
-        The lock order is scope→gate and never the reverse (nothing holding the
-        gate lock reaches for `current_scope`), so this cannot deadlock. Imported
-        lazily to keep `scope.py` free of a service-layer import at module load.
-        `invalidate()` still flushes-if-dirty before clearing (a backstop for a
-        write that raced in after `_flush_index_memo` above); that flush is the
-        rare case now, not the common one.
-        """
-        from app.services.project.node_index_gate import node_index_gate
-
-        node_index_gate.invalidate()

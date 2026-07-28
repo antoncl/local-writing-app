@@ -80,6 +80,20 @@ import type {
 // with `vite --mode claude` loading `.env.claude`.
 const baseUrl = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8787/api";
 
+// The open project's root, carried on every request so the backend resolves the
+// request's scope from the request itself (#413 / ADR-0045) rather than from a
+// process-wide record of what was last opened. Set on a successful open/create
+// and overwritten on a switch (which is just another open); null before any
+// project is open, so the machine-level surfaces run unbound. URL-encoded into
+// the header so a non-ASCII folder name survives a latin-1 HTTP header.
+let projectScopeRoot: string | null = null;
+
+function scopeHeaders(): Record<string, string> {
+  return projectScopeRoot === null
+    ? {}
+    : { "X-Project-Root": encodeURIComponent(projectScopeRoot) };
+}
+
 /** Error subclass that carries the raw response detail so structured callers
  * can extract fields (e.g. PreviewError's line/col). `.message` still reads as
  * a human-readable string via formatErrorDetail. */
@@ -99,6 +113,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     ...options,
     headers: {
       "Content-Type": "application/json",
+      ...scopeHeaders(),
       ...(options.headers ?? {}),
     },
   });
@@ -176,7 +191,7 @@ async function* streamNdjson(
 ): AsyncIterableIterator<AIStreamEvent> {
   const response = await fetch(`${baseUrl}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...scopeHeaders() },
     body: JSON.stringify(body),
     signal,
   });
@@ -234,11 +249,14 @@ export const api = {
   // `inherits` is the wizard's declaration (#318): the ancestor paths ticked in
   // the location step. Omitted (undefined) means "take the default" — every
   // ancestor project — while `[]` is a deliberate flat project (#425/#426).
-  createProject(rootPath: string, title: string, inherits?: string[]) {
-    return request<ProjectInfo>("/project/create", {
+  async createProject(rootPath: string, title: string, inherits?: string[]) {
+    const info = await request<ProjectInfo>("/project/create", {
       method: "POST",
       body: JSON.stringify({ root_path: rootPath, title, inherits }),
     });
+    // The wire scope for every subsequent request is this project's root (#413).
+    projectScopeRoot = info.root_path;
+    return info;
   },
   // The inheritable ancestors of a *prospective* project path — the wizard's
   // location step, which enumerates before the project (or its folder) exists.
@@ -258,11 +276,14 @@ export const api = {
       body: JSON.stringify({ root_path: rootPath, inherits }),
     });
   },
-  openProject(rootPath: string) {
-    return request<ProjectInfo>("/project/open", {
+  async openProject(rootPath: string) {
+    const info = await request<ProjectInfo>("/project/open", {
       method: "POST",
       body: JSON.stringify({ root_path: rootPath }),
     });
+    // Switching projects is just another open; overwrite the wire scope (#413).
+    projectScopeRoot = info.root_path;
+    return info;
   },
   // Partial update, per field: an omitted key leaves that setting alone.
   // `inherits: []` is therefore a deliberate flat project, not "no opinion" —

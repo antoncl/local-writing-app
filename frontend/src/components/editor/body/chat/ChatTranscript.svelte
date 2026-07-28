@@ -12,6 +12,7 @@
     canApplyPlotSuggestionBeatFields,
     canApplyPlotSuggestionCardSynopsis,
     canApplyPlotSuggestionClaimNote,
+    canCreatePlotSuggestionCard,
     canCreatePlotSuggestionBadge,
     parsePlotSuggestions,
     plotSuggestionBeatClipboardText,
@@ -28,6 +29,7 @@
     onApplyEvidence?: (suggestion: PlotSuggestion) => void | Promise<void>;
     onApplyNote?: (suggestion: PlotSuggestion) => void | Promise<void>;
     onCreateBadge?: (suggestion: PlotSuggestion) => void | Promise<void>;
+    onCreateCard?: (suggestion: PlotSuggestion) => void | Promise<void>;
     onApplyBeatFields?: (suggestion: PlotSuggestion) => void | Promise<void>;
     onApplyCardSynopsis?: (suggestion: PlotSuggestion) => void | Promise<void>;
   }
@@ -39,6 +41,7 @@
     onApplyEvidence,
     onApplyNote,
     onCreateBadge,
+    onCreateCard,
     onApplyBeatFields,
     onApplyCardSynopsis,
   }: Props = $props();
@@ -59,7 +62,7 @@
     suggestion: PlotSuggestion,
     messageIndex: number,
     index: number,
-    action: "proposed_change" | "evidence_to_add" | "beat_fields" | "apply_evidence" | "apply_note" | "create_badge" | "apply_beat_fields" | "apply_card_synopsis",
+    action: "proposed_change" | "evidence_to_add" | "beat_fields" | "apply_evidence" | "apply_note" | "create_badge" | "create_card" | "apply_beat_fields" | "apply_card_synopsis",
   ): string {
     return `${messageIndex}-${suggestion.kind}-${suggestion.target_card_id}-${suggestion.target_claim_id}-${suggestion.template_instance_id}-${suggestion.plot_point_id}-${index}-${action}`;
   }
@@ -113,6 +116,11 @@
   async function createBadgeSuggestion(suggestion: PlotSuggestion, key: string): Promise<void> {
     if (!onCreateBadge || !canCreatePlotSuggestionBadge(suggestion)) return;
     await applySuggestion(suggestion, key, onCreateBadge);
+  }
+
+  async function createCardSuggestion(suggestion: PlotSuggestion, key: string): Promise<void> {
+    if (!onCreateCard || !canCreatePlotSuggestionCard(suggestion)) return;
+    await applySuggestion(suggestion, key, onCreateCard);
   }
 
   async function applyBeatFieldsSuggestion(suggestion: PlotSuggestion, key: string): Promise<void> {
@@ -303,6 +311,21 @@
                       </button>
                       {#if applyErrorKey === applyBeatFieldsKey}
                         <small class="cbv-plot-suggestion-action-error">Could not apply beat fields.</small>
+                      {/if}
+                    {/if}
+                    {#if onCreateCard && canCreatePlotSuggestionCard(suggestion)}
+                      {@const createCardKey = suggestionKey(suggestion, i, j, "create_card")}
+                      <button
+                        type="button"
+                        title="Create this suggested plot card"
+                        disabled={Boolean(applyingKey)}
+                        onclick={() => void createCardSuggestion(suggestion, createCardKey)}
+                      >
+                        <i class="ti ti-plus" aria-hidden="true"></i>
+                        {applyingKey === createCardKey ? "Creating" : appliedKey === createCardKey ? "Created" : "Create card"}
+                      </button>
+                      {#if applyErrorKey === createCardKey}
+                        <small class="cbv-plot-suggestion-action-error">Could not create card.</small>
                       {/if}
                     {/if}
                     {#if onCreateBadge && canCreatePlotSuggestionBadge(suggestion)}

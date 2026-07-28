@@ -3,6 +3,7 @@ import { appendPlotSuggestionText, type PlotSuggestion } from "@/lib/plotSuggest
 import type {
   NodePickerRef,
   PlotBoardSpec,
+  PlotBoardCard,
   PlotNode,
   PlotNodeList,
   PlotNodeSummary,
@@ -22,6 +23,7 @@ export type PlotSuggestionActions = {
   applyPlotSuggestionEvidence: (suggestion: PlotSuggestion) => Promise<void>;
   applyPlotSuggestionNote: (suggestion: PlotSuggestion) => Promise<void>;
   createPlotSuggestionBadge: (suggestion: PlotSuggestion) => Promise<void>;
+  createPlotSuggestionCard: (suggestion: PlotSuggestion) => Promise<void>;
   applyPlotSuggestionBeatFields: (suggestion: PlotSuggestion) => Promise<void>;
   applyPlotSuggestionCardSynopsis: (suggestion: PlotSuggestion) => Promise<void>;
 };
@@ -202,6 +204,65 @@ export function createPlotSuggestionActions(options: CreatePlotSuggestionActions
     fail("Could not find the target card and template instance on a plot board.");
   }
 
+  async function createPlotSuggestionCard(suggestion: PlotSuggestion): Promise<void> {
+    const title = suggestion.title.trim();
+    const synopsis = suggestion.proposed_change.trim();
+    const templateInstanceId = suggestion.template_instance_id.trim();
+    const plotPointId = suggestion.plot_point_id.trim();
+    if (suggestion.target_card_id.trim() || !title || !synopsis) {
+      fail("This suggestion does not identify a new card title and synopsis.");
+    }
+    if (Boolean(templateInstanceId) !== Boolean(plotPointId)) {
+      fail("A new card badge needs both a template instance and plot beat.");
+    }
+
+    for (const plotId of await plotBoardCandidateIds()) {
+      const plot = await loadPlotNode(plotId, "Could not load plot board.");
+      const board = plot?.board;
+      if (!plot || !board) continue;
+      if (templateInstanceId) {
+        if (!(board.template_instance_ids ?? []).includes(templateInstanceId)) continue;
+        if (!(await templateInstanceHasPlotPoint(templateInstanceId, plotPointId))) {
+          fail("Could not find that plot beat on the target template instance.");
+        }
+      }
+
+      const nextCardId = newLocalId("card");
+      const nextCard: PlotBoardCard = {
+        id: nextCardId,
+        title,
+        synopsis,
+        structure_column_id: null,
+        node_ref: null,
+        primary_plotline_id: plotlineIdForInstance(board, templateInstanceId) ?? null,
+        metadata: {},
+      };
+      const nextClaims = [...(board.claims ?? [])];
+      if (templateInstanceId) {
+        nextClaims.push({
+          id: newLocalId("claim"),
+          card_id: nextCardId,
+          template_instance_id: templateInstanceId,
+          plot_point_id: plotPointId,
+          plotline_id: plotlineIdForInstance(board, templateInstanceId),
+          claim_type: "satisfies",
+          claim_label: null,
+          strength: null,
+          confidence: null,
+          evidence: suggestion.evidence_to_add.trim() || null,
+          rationale: null,
+          ai_notes: suggestion.reason.trim() || null,
+          metadata: {},
+        });
+      }
+
+      await savePlotBoard(plot, { ...board, cards: [...(board.cards ?? []), nextCard], claims: nextClaims });
+      return;
+    }
+
+    fail("Could not find a plot board for the new card suggestion.");
+  }
+
   async function applyPlotSuggestionBeatFields(suggestion: PlotSuggestion): Promise<void> {
     const templateInstanceId = suggestion.template_instance_id.trim();
     const plotPointId = suggestion.plot_point_id.trim();
@@ -267,6 +328,7 @@ export function createPlotSuggestionActions(options: CreatePlotSuggestionActions
     applyPlotSuggestionEvidence: (suggestion) => appendPlotSuggestionClaimField(suggestion, "evidence", suggestion.evidence_to_add),
     applyPlotSuggestionNote: (suggestion) => appendPlotSuggestionClaimField(suggestion, "ai_notes", suggestion.proposed_change),
     createPlotSuggestionBadge,
+    createPlotSuggestionCard,
     applyPlotSuggestionBeatFields,
     applyPlotSuggestionCardSynopsis,
   };

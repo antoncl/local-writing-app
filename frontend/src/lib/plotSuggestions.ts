@@ -2,6 +2,7 @@ export type PlotSuggestionKind =
   | "card_revision"
   | "beat_revision"
   | "claim_change"
+  | "new_card"
   | "new_claim"
   | "relationship_change"
   | "scene_promotion"
@@ -162,6 +163,18 @@ export function canApplyPlotSuggestionClaimNote(suggestion: PlotSuggestion): boo
   );
 }
 
+export function canCreatePlotSuggestionCard(suggestion: PlotSuggestion): boolean {
+  const hasTemplateInstance = Boolean(suggestion.template_instance_id.trim());
+  const hasPlotPoint = Boolean(suggestion.plot_point_id.trim());
+  return (
+    suggestion.kind === "new_card" &&
+    !suggestion.target_card_id.trim() &&
+    Boolean(suggestion.title.trim()) &&
+    Boolean(suggestion.proposed_change.trim()) &&
+    hasTemplateInstance === hasPlotPoint
+  );
+}
+
 function parseAttributes(text: string): Record<string, string> {
   const attrs: Record<string, string> = {};
   for (const match of matchAll(text, /([A-Za-z_][\w:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {
@@ -187,6 +200,7 @@ function normalizeKind(kind: string | undefined): PlotSuggestionKind {
     case "card_revision":
     case "beat_revision":
     case "claim_change":
+    case "new_card":
     case "new_claim":
     case "relationship_change":
     case "scene_promotion":

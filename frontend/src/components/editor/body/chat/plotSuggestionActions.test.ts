@@ -140,6 +140,94 @@ describe("createPlotSuggestionActions", () => {
     expect(env.onPlotSaved).toHaveBeenCalledTimes(1);
   });
 
+  it("creates a new unplaced card from a suggestion", async () => {
+    const env = harness({
+      plot_board: makePlotNode("plot_board", { board: makeBoard([]) }),
+    });
+
+    await env.actions.createPlotSuggestionCard({
+      ...baseSuggestion,
+      kind: "new_card",
+      target_card_id: "",
+      template_instance_id: "",
+      plot_point_id: "",
+      title: "Ledger theft",
+      proposed_change: "Mara steals the ledger and loses her only way back.",
+    });
+
+    expect(env.nodes.plot_board.board?.cards.find((card) => card.id === "card_fixed")).toEqual(
+      expect.objectContaining({
+        title: "Ledger theft",
+        synopsis: "Mara steals the ledger and loses her only way back.",
+        structure_column_id: null,
+        node_ref: null,
+        primary_plotline_id: null,
+      }),
+    );
+    expect(env.nodes.plot_board.board?.claims).toEqual([]);
+    expect(env.onPlotSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it("creates a new card with an initial plot beat badge", async () => {
+    const env = harness({
+      plot_board: makePlotNode("plot_board", { board: makeBoard([]) }),
+      plot_main: makePlotNode("plot_main", {
+        template_instance: {
+          template_id: "three_act",
+          plot_points: [{ plot_point_id: "first_turn", title: "First turn", function_claim: "", notes: "", metadata: {} }],
+          metadata: {},
+        },
+      }),
+    });
+
+    await env.actions.createPlotSuggestionCard({
+      ...baseSuggestion,
+      kind: "new_card",
+      target_card_id: "",
+      title: "Ledger theft",
+      proposed_change: "Mara steals the ledger and loses her only way back.",
+      evidence_to_add: "The archive doors lock behind her.",
+      reason: "This makes the first turn concrete.",
+    });
+
+    expect(env.nodes.plot_board.board?.cards.find((card) => card.id === "card_fixed")).toEqual(
+      expect.objectContaining({
+        title: "Ledger theft",
+        primary_plotline_id: "line_main",
+      }),
+    );
+    expect(env.nodes.plot_board.board?.claims).toEqual([
+      expect.objectContaining({
+        id: "claim_fixed",
+        card_id: "card_fixed",
+        template_instance_id: "plot_main",
+        plot_point_id: "first_turn",
+        plotline_id: "line_main",
+        evidence: "The archive doors lock behind her.",
+        ai_notes: "This makes the first turn concrete.",
+      }),
+    ]);
+  });
+
+  it("refuses new card suggestions with half-specified initial badge targets", async () => {
+    const env = harness({
+      plot_board: makePlotNode("plot_board", { board: makeBoard([]) }),
+    });
+
+    await expect(
+      env.actions.createPlotSuggestionCard({
+        ...baseSuggestion,
+        kind: "new_card",
+        target_card_id: "",
+        template_instance_id: "plot_main",
+        plot_point_id: "",
+        title: "Ledger theft",
+        proposed_change: "Mara steals the ledger.",
+      }),
+    ).rejects.toThrow("A new card badge needs both a template instance and plot beat.");
+    expect(env.api.savePlotNode).not.toHaveBeenCalled();
+  });
+
   it("refuses card synopsis updates when the target card is missing", async () => {
     const env = harness({
       plot_board: makePlotNode("plot_board", { board: makeBoard([]) }),

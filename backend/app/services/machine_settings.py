@@ -217,6 +217,41 @@ def projects_root() -> Path | None:
         return None
 
 
+def is_within_root(path: Path, root: Path | None) -> bool:
+    """Is `path` inside an already-resolved projects `root` — the #441
+    availability test. Pure: no I/O, so a caller checking many paths (the
+    settings view checks every recent) resolves the root once and reuses it.
+
+    A project outside the root is treated as **unavailable**: the same as a
+    folder that has been deleted. The equivalence is deliberate, and safe in a
+    way a "does it still exist?" stat is not — it is a pure path comparison, so
+    unlike a filesystem probe it never mis-flags a project that is merely on an
+    unmounted drive (the case #423's recents design refuses to guess at).
+
+    Permissive (`True`) when `root` is None: the create wizard establishes one
+    before the app is usable, and the rare truly-unset state should not make
+    *every* project look unavailable at once. So this only ever marks something
+    out-of-root against a root the user actually set.
+    """
+    if root is None:
+        return True
+    try:
+        path.expanduser().resolve().relative_to(root)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def is_within_projects_root(path: Path) -> bool:
+    """`is_within_root` against the configured machine root, read once (#441).
+
+    For a single path (e.g. the folder picker's shown folder). A caller testing
+    many paths should read `projects_root()` itself and call `is_within_root`,
+    rather than re-reading config.yaml per path.
+    """
+    return is_within_root(path, projects_root())
+
+
 def assistants_dir() -> Path:
     """Folder holding assistant entry files. Derived from `config_path()` so
     test fixtures that patch the config path automatically isolate this too."""

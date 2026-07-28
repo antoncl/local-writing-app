@@ -919,6 +919,9 @@ export type RecentProject = {
   path: string;
   title: string;
   opened_at: string;
+  // False when this recent now points outside the machine projects root (#441):
+  // shown as unavailable — equivalent to a deleted folder — not offered to open.
+  within_root: boolean;
 };
 
 export type Swatch = {
@@ -1310,6 +1313,9 @@ export type DirectoryListing = {
   directories: DirectoryEntry[];
   // Whether the shown folder already holds a project (its "Select this folder" row).
   is_project: boolean;
+  // Whether the shown folder is inside the machine projects root (#441). The
+  // open-project picker refuses a folder outside it; other pickers ignore it.
+  within_root: boolean;
 };
 
 // A jump-off point for the picker: a drive letter, home, or Documents (#530).

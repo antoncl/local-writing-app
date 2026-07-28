@@ -130,6 +130,33 @@ class RecentProjectsEndpointTests(unittest.TestCase):
         recents = view["recent_projects"]
         self.assertEqual(len(recents), 1)
 
+    def test_settings_view_marks_out_of_root_recents_unavailable(self) -> None:
+        """A recent outside the machine root is unavailable — equivalent to a
+        deleted folder (#441). The view marks it (`within_root=False`) so the UI
+        dims it; the flag is computed, never stored."""
+        from layer_fixtures import set_projects_root
+
+        shelf = self.root / "shelf"
+        shelf.mkdir()
+        ms.touch_recent_project(shelf / "book", "In-root Book")
+        ms.touch_recent_project(self.root / "elsewhere" / "stray", "Stray Book")
+        set_projects_root(shelf)
+
+        recents = {r["title"]: r for r in self.client.get("/api/settings/machine").json()["recent_projects"]}
+        self.assertTrue(recents["In-root Book"]["within_root"])
+        self.assertFalse(recents["Stray Book"]["within_root"])
+
+        # Computed, not persisted: the stored config carries no within_root key.
+        stored = yaml.safe_load(Path(ms.config_path()).read_text(encoding="utf-8"))
+        self.assertTrue(all("within_root" not in r for r in stored["recent_projects"]))
+
+    def test_settings_view_recents_are_available_when_no_root_is_set(self) -> None:
+        """Unset root is permissive: every recent stays openable so first-run
+        isn't bricked (#441)."""
+        ms.touch_recent_project(self.root / "anywhere", "Anywhere")
+        recents = self.client.get("/api/settings/machine").json()["recent_projects"]
+        self.assertTrue(all(r["within_root"] for r in recents))
+
     def test_create_ignores_a_projects_base_folder_it_no_longer_accepts(self) -> None:
         """#429 removed the field; a client still sending it must not break.
 

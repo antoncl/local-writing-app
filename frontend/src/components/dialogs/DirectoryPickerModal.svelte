@@ -1,6 +1,6 @@
 <script lang="ts">
-  // The one folder picker (#530, slice P). Used by the open-project and
-  // new-project-override flows (via projectChooser, mounted in App) and by
+  // The one folder picker (#530, slice P). Shared by the open-project flow (via
+  // projectChooser, mounted in App), the create wizard (its own instance), and
   // Machine Settings' projects-root field. Unlike the old click-walker, it is
   // self-contained: it owns its transient *browse* state (the listing, the
   // drive/home roots, the typed path) and talks to the backend itself, then
@@ -19,6 +19,11 @@
   export let selectLabel: string = "Select This Folder";
   export let onClose: () => void = () => {};
   export let onSelect: (path: string) => void = () => {};
+  // Open-project only (#441): refuse a folder outside the machine projects
+  // root — books must live under it. Left false by the create and choose-root
+  // pickers, which legitimately browse anywhere. The backend decides
+  // membership (`listing.within_root`); this just governs the gesture.
+  export let enforceWithinRoot: boolean = false;
 
   let listing: DirectoryListing | null = null;
   let roots: DirectoryRoot[] = [];
@@ -115,8 +120,12 @@
     }
   }
 
+  // Outside the machine projects root, in a picker that enforces it: the shown
+  // folder can't be opened (#441). Drives the message + the dimmed Select.
+  $: outOfRoot = enforceWithinRoot && listing !== null && !listing.within_root;
+
   function select() {
-    if (listing) onSelect(listing.path);
+    if (listing && !outOfRoot) onSelect(listing.path);
   }
 
   // Split an absolute path into clickable breadcrumb segments, handling
@@ -263,11 +272,13 @@
         <button type="button" disabled={!listing?.parent_path || loading} on:click={() => navigate(listing?.parent_path ?? undefined)}>
           Up
         </button>
-        {#if listing?.is_project}
+        {#if outOfRoot}
+          <span class="directory-hint inline danger">Outside your projects folder — books must live inside it.</span>
+        {:else if listing?.is_project}
           <span class="directory-hint inline">Already a project</span>
         {/if}
         <span class="directory-actions-spacer"></span>
-        <button class="primary" type="button" disabled={!listing || loading} on:click={select}>
+        <button class="primary" type="button" disabled={!listing || loading || outOfRoot} on:click={select}>
           {selectLabel}
         </button>
       </footer>

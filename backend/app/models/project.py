@@ -228,6 +228,11 @@ class DirectoryListing(BaseModel):
     # Whether the folder being *shown* already holds a project (drives the
     # "Already a project" note above "Select this folder").
     is_project: bool = False
+    # Whether the shown folder is inside the machine projects root (#441). The
+    # open-project picker refuses a folder outside it — books must live under
+    # the root — while the create / choose-root flows ignore this. Permissive
+    # (True) when no root is configured.
+    within_root: bool = True
 
 
 class DirectoryRoot(BaseModel):

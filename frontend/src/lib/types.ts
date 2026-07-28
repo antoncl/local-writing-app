@@ -263,6 +263,23 @@ export type MetadataValue = string | number | boolean | null | MetadataValue[] |
 
 export type EntryMetadata = Record<string, MetadataValue>;
 
+// ADR-0046 §1: a proposed entry state committed by a brainstorm — the entry's
+// revised body (optional) plus proposed field values. The cross-pane store
+// carries this; the review dispatches by field type (body + long_text as
+// run-diff flips in slice 3a, structured fields as atomic flips in 3b).
+export type EntryPatch = {
+  body: string | null;
+  fields: Record<string, MetadataValue>;
+};
+
+// The validated patch returned by POST /api/lore/{id}/ai-patch. `dropped` names
+// fields the model proposed that were rejected (unknown / illegal / non-
+// proposable); `garbled` is true when the reply wasn't a JSON object at all.
+export type AIEntryPatch = EntryPatch & {
+  dropped: string[];
+  garbled: boolean;
+};
+
 export type MetadataFieldType =
   | "text"
   | "long_text"

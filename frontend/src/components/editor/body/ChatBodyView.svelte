@@ -98,6 +98,10 @@
   let chatHistory: ChatMessage[] = $state([]);
   let chatRunning = $state(false);
   let chatError: string | null = $state(null);
+  // A non-error status from a commit — "no changes proposed", "ignored N
+  // fields" — surfaced so a hidden out-of-band commit is never a silent no-op.
+  let chatNotice: string | null = $state(null);
+  let committing = $state(false);
   let chatLastMeta: { provider: string; model: string; latency_ms: number } | null = $state(null);
   let chatInput = $state("");
   let chatScrollEl: HTMLDivElement | null = $state(null);
@@ -206,6 +210,7 @@
     chatHistory = [];
     chatRunning = false;
     chatError = null;
+    chatNotice = null;
     chatLastMeta = null;
     chatInput = "";
     chatSystemPrompt = "";
@@ -555,6 +560,7 @@
     if (!text && !isFirstTurnFromPrompt) return;
     const isFirstSubmission = chatHistory.length === 0;
     chatError = null;
+    chatNotice = null;
     // First-send template render: defer to renderAndLockPromptTemplate
     // when the chat is bound to a prompt that hasn't been rendered yet
     // AND that prompt has declared inputs (the indication that the
@@ -599,34 +605,72 @@
   }
 
   // The finalize turn (ADR-0046 §5): the brainstorm is a conversation, but the
-  // commit asks for a single final state — the whole revised body, nothing else.
+  // commit asks for a single final state. The JSON patch shape is described in
+  // the system prompt (the pre-rolled `revise:entry` template); this user turn
+  // only triggers it.
   const FINALIZE_INSTRUCTION =
-    "Finalize: reply with ONLY the complete revised markdown body of the entry — " +
+    "Finalize now: reply with ONLY the JSON patch, exactly as instructed — " +
     "no preamble, no commentary, no code fences.";
 
-  // Commit the brainstorm to its target entry (ADR-0046 slice 2). Sends the
-  // finalize turn through the normal send path (so the render gate, persistence
-  // and cost accounting all apply), then hands the assistant's full reply to the
-  // entry's pane as a proposed body — reviewed there as a proposed-vs-current
-  // flip, never written from here. NOT a streamed mark: a final state, diffed.
+  // Commit the brainstorm to its target entry (ADR-0046 slice 3). The finalize
+  // turn runs OUT OF BAND — a non-streamed chat that is NOT appended to the
+  // visible conversation — so the raw JSON never shows in the pane (the author
+  // asked for it hidden). The reply is validated server-side into an EntryPatch
+  // and handed to the entry's pane for the proposed-vs-current review; nothing
+  // is written from here. A reply that can't be read as a patch (garbled) or one
+  // that proposes nothing is surfaced, never a silent no-op.
   async function commitToEntry(): Promise<void> {
-    if (chatRunning || !isEntryPatchChat) return;
+    if (chatRunning || committing || !isEntryPatchChat) return;
     const entryId = commitTargetEntryId;
     if (!entryId) {
       chatError = "This brainstorm has no target entry to commit to.";
       return;
     }
-    // A finalize send that errors or returns empty rewinds its own turns, so
-    // chatHistory would end in an EARLIER brainstorm reply. Only propose when a
-    // new assistant turn was actually appended (the count grew) — never the
-    // conversation's prior message.
-    const turnsBefore = chatHistory.length;
-    chatInput = FINALIZE_INSTRUCTION;
-    await sendChat();
-    if (chatHistory.length <= turnsBefore) return;
-    const last = chatHistory[chatHistory.length - 1];
-    if (last?.role === "assistant" && last.content.trim()) {
-      loreBrainstorm.propose(entryId, last.content.trim());
+    chatError = null;
+    chatNotice = null;
+    committing = true;
+    try {
+      const reply = await api.aiChat({
+        assistant_id: chatAssistantId || null,
+        system_prompt: chatSystemPrompt,
+        messages: [
+          ...chatHistory.map(({ role, content }) => ({ role, content })),
+          { role: "user", content: FINALIZE_INSTRUCTION },
+        ],
+        chat_id: null,
+      });
+      // The finalize call billed regardless of the patch outcome. Attribute its
+      // cost to the session the same way a streamed turn does (persist adds only
+      // the delta — the hidden finalize turn isn't in chatHistory, so it stays
+      // out of the persisted messages).
+      if (typeof reply.cost_usd === "number") {
+        pendingTurnCost = (pendingTurnCost ?? 0) + reply.cost_usd;
+        await persistActiveChat();
+      }
+      if (!reply.ok || !reply.content?.trim()) {
+        chatError = reply.error || "The model returned nothing to commit.";
+        return;
+      }
+      const patch = await api.validateAiEntryPatch(entryId, reply.content);
+      if (patch.garbled) {
+        chatError =
+          "Couldn't read the model's response as a patch — ask it to finalize again.";
+        return;
+      }
+      const hasBody = patch.body != null;
+      const hasFields = Object.keys(patch.fields).length > 0;
+      if (!hasBody && !hasFields) {
+        chatNotice = "The model proposed no changes to commit.";
+        return;
+      }
+      if (patch.dropped.length > 0) {
+        chatNotice = `Ignored ${patch.dropped.length} field(s) the model couldn't set legally: ${patch.dropped.join(", ")}.`;
+      }
+      loreBrainstorm.propose(entryId, { body: patch.body, fields: patch.fields });
+    } catch (e) {
+      chatError = (e as Error).message;
+    } finally {
+      committing = false;
     }
   }
 
@@ -1026,6 +1070,9 @@
     {#if chatError}
       <p class="cbv-error">{chatError}</p>
     {/if}
+    {#if chatNotice}
+      <p class="cbv-notice">{chatNotice}</p>
+    {/if}
 
     <PlainTextEditor
       class="cbv-input"
@@ -1041,26 +1088,27 @@
     />
 
     <div class="cbv-action-row">
-      <button type="button" disabled={!chatHistory.length || chatRunning} onclick={clearChat}>Clear</button>
+      <button type="button" disabled={!chatHistory.length || chatRunning || committing} onclick={clearChat}>Clear</button>
       {#if isEntryPatchChat}
-        <!-- ADR-0046 slice 2: finalize the brainstorm into a revised body,
-             reviewed on the target entry's pane. -->
+        <!-- ADR-0046 slice 3: finalize the brainstorm into a validated patch
+             (out of band, hidden), reviewed on the target entry's pane. -->
         <button
           type="button"
           class="cbv-commit"
-          disabled={chatRunning || !commitTargetEntryId || chatHistory.length === 0}
+          disabled={chatRunning || committing || !commitTargetEntryId || chatHistory.length === 0}
           title={commitTargetEntryId
             ? "Finalize this brainstorm and review the revised entry"
             : "This brainstorm has no target entry"}
           onclick={() => void commitToEntry()}
         >
-          {chatRunning ? "Committing…" : "Commit to entry"}
+          {committing ? "Committing…" : "Commit to entry"}
         </button>
       {/if}
       <button
         type="button"
         class="primary"
         disabled={chatRunning
+          || committing
           || missingRequiredInputs.length > 0
           || (!chatInput.trim() && !(activePromptEntry && chatHistory.length === 0))}
         title={missingRequiredInputs.length > 0
@@ -1098,12 +1146,14 @@
 
   .cbv-empty,
   .cbv-error,
+  .cbv-notice,
   .cbv-meta {
     margin: 0;
     font-size: var(--fs-md);
     color: var(--text-3);
   }
   .cbv-error { color: var(--danger); }
+  .cbv-notice { color: var(--text-2); }
   .cbv-meta { font-size: var(--fs-sm); }
 
   /* ---- 1 · composer strip ---- */

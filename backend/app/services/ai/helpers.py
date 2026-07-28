@@ -28,6 +28,10 @@ from xml.sax.saxutils import quoteattr
 
 from jinja2.sandbox import SandboxedEnvironment
 
+from app.services.ai.entry_patch import (
+    NON_PROPOSABLE_FIELD_IDS,
+    NON_PROPOSABLE_FIELD_TYPES,
+)
 from app.services.ai.sessions import AISession
 
 if TYPE_CHECKING:
@@ -343,6 +347,43 @@ def _coerce_entry_ref(
     return None
 
 
+def _field_catalog(project: ProjectService, schema: Any, value: Any) -> list[dict[str, Any]]:
+    """Backing the `field_catalog()` Jinja global.
+
+    Returns the AI-proposable fields of the entry's resolved type as
+    `{id, label, type, options?}` descriptors, in the type's display order —
+    the catalog the `revise:entry` template hands the model so a committed
+    patch names real field ids with legal option values (ADR-0046 §4/§6.3).
+    References and computed fields are excluded (never proposed); the template
+    filters the rest by type (slice 3a shows `long_text`; 3b widens to all).
+    Empty when the entry or its type can't be resolved — the template degrades
+    to a body-only instruction.
+    """
+    ref = _coerce_entry_ref(project, schema, value)
+    if ref is None or schema is None:
+        return []
+    entry_type = ref.entry_type
+    definition = schema.entry_types.get(entry_type) if entry_type else None
+    if definition is None:
+        return []
+    catalog: list[dict[str, Any]] = []
+    for field_id in definition.fields:
+        if field_id in NON_PROPOSABLE_FIELD_IDS:
+            continue
+        field = schema.fields.get(field_id)
+        if field is None or field.type in NON_PROPOSABLE_FIELD_TYPES:
+            continue
+        descriptor: dict[str, Any] = {
+            "id": field_id,
+            "label": field.name,
+            "type": field.type,
+        }
+        if field.options:
+            descriptor["options"] = [opt.value for opt in field.options]
+        catalog.append(descriptor)
+    return catalog
+
+
 # ----- Project-bound helpers ----------------------------------------------
 
 
@@ -396,6 +437,7 @@ def register_helpers(
         )
     )
     env.globals["entry"] = lambda value: _coerce_entry_ref(project, schema, value)
+    env.globals["field_catalog"] = lambda value: _field_catalog(project, schema, value)
     env.globals["base"] = lambda entity, field: _base_field(project, schema, entity, field)
     env.globals["effective"] = (
         lambda entity, field, scene, position=None: _effective_field(

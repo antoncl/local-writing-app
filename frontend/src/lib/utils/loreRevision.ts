@@ -50,6 +50,16 @@ export type BodyRevision = {
   regions: DiffRegion[];
 };
 
+/** One text-bearing field a brainstorm patch proposes, reviewed as its own
+ *  run-diff flip (ADR-0046 §6.3 slice 3a): the field's current value vs the
+ *  proposed one, plus the label the flip renders under. */
+export type FieldFlip = {
+  fieldId: string;
+  label: string;
+  currentValue: string;
+  proposedValue: string;
+};
+
 /**
  * Diff a proposed body against the current one into the flip's `DiffRun` shape.
  *

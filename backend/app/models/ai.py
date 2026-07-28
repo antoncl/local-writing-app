@@ -545,6 +545,31 @@ class AIInvocationList(BaseModel):
     invocations: list[AIInvocation] = Field(default_factory=list)
 
 
+class ValidateEntryPatchRequest(BaseModel):
+    """POST /api/lore/{entry_id}/ai-patch body — the model's raw finalize
+    reply (ADR-0046 §6.3). Validated server-side into an `AIEntryPatch`; the
+    raw text is never shown to the user unless it turns out garbled."""
+
+    raw: str = ""
+
+
+class AIEntryPatch(BaseModel):
+    """A validated, review-ready patch parsed from a brainstorm commit
+    (ADR-0046 §4/§6.3).
+
+    `fields` holds only schema-legal, proposable field values (references and
+    computed excluded, §4); `dropped` names field ids that were present in the
+    reply but rejected — unknown, illegal for the type, non-proposable, or an
+    invalid value — so the review can note what the model tried and missed.
+    `garbled` is true when the reply could not be read as a JSON object at all,
+    the condition surfaced to the author instead of a silent no-op."""
+
+    body: str | None = None
+    fields: dict[str, Any] = Field(default_factory=dict)
+    dropped: list[str] = Field(default_factory=list)
+    garbled: bool = False
+
+
 class CreateAIInvocationRequest(BaseModel):
     """POST /api/ai/invocations body. Server assigns id + ts; everything
     else flows from the prior generate response and the accept context.

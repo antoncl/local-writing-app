@@ -5,8 +5,9 @@
 // A `revise:entry` brainstorm (launched from LoreBrainstormBar) commits an
 // `EntryPatch` into the `loreBrainstorm` cross-pane store. This controller
 // derives the proposed-vs-current flips for the open lore entry — the body plus
-// each changed `long_text` field (slice 3a; slice 3b grows `fields` to the
-// structured field types) — and **owns the review as a transaction** (#634).
+// each changed `long_text` field as prose run-diffs (`fields`), and each changed
+// structured field as an atomic rail flip (`structuredFlips`, slice 3b) — and
+// **owns the review as a transaction** (#634).
 //
 // **The review is a frozen, save-on-Done transaction.** While a proposal is up
 // the host freezes the entry (autosave off, rail/title read-only), so the diff's
@@ -22,9 +23,33 @@
 // callbacks are: the controller decides only WHAT the patch touches and WHEN to
 // write, never how. The host merges the fields into its own metadata state,
 // adopts the body through its prose buffer, and issues the explicit flush.
-import type { DocumentKind, EntryMetadata, MetadataSchema } from "@/lib/types";
+import type { DocumentKind, EntryMetadata, MetadataFieldType, MetadataSchema, MetadataValue } from "@/lib/types";
 import type { FieldFlip } from "@/lib/utils/loreRevision";
 import { loreBrainstorm } from "@/lib/stores/loreBrainstorm.svelte";
+
+/** One structured (non-prose) field the patch proposes, reviewed as an atomic
+ *  `{was, now}` flip in the frozen rail (ADR-0046 §2 / slice 3b): the value is
+ *  swapped whole, never run-diffed. `was` is the proposed candidate (the cool
+ *  side), `now` the entry's current value (the warm side). */
+export type StructuredFlip = {
+  fieldId: string;
+  was: MetadataValue;
+  now: MetadataValue;
+};
+
+// Field types that are NOT an atomic structured flip. `long_text` (and the body)
+// take the prose run-diff instead (§2, handled by `fields` below); `computed` and
+// the two `entity_ref` shapes are never AI-proposed (§4) — the backend drops them
+// from a patch, and this mirrors that so a stray one can't render as a flip. Every
+// other proposable type — `text`/`number`/`boolean`/`date`/`select`/
+// `multi_select`/`tags`/`color` — flips atomically. Dispatch by type alone, so a
+// user-added field is indistinguishable from a built-in one (§2).
+const NON_STRUCTURED_TYPES: ReadonlySet<MetadataFieldType> = new Set<MetadataFieldType>([
+  "long_text",
+  "computed",
+  "entity_ref",
+  "entity_ref_list",
+]);
 
 export class LoreProposalController {
   // Fed by the host each render — the derivations below track these.
@@ -34,7 +59,7 @@ export class LoreProposalController {
   metadata = $state<EntryMetadata>({});
 
   // Wired by the host — the write side of a commit (see the module note).
-  onAdoptFields: ((fields: Record<string, string>) => void) | null = null;
+  onAdoptFields: ((fields: Record<string, MetadataValue>) => void) | null = null;
   onAdoptBody: ((body: string) => void | Promise<void>) | null = null;
   onEmitChange: (() => void) | null = null;
   // Wired by the host — the ONE explicit post that ends the transaction: cancel
@@ -56,8 +81,8 @@ export class LoreProposalController {
   );
 
   /** The `long_text` fields the patch proposes, paired with their current value —
-   *  each reviewed as its own run-diff flip. Structured fields in the patch are
-   *  ignored here (slice 3b renders those); the body is handled separately. */
+   *  each reviewed as its own run-diff flip. Structured fields go to
+   *  `structuredFlips` (atomic, rail-rendered); the body is handled separately. */
   fields = $derived.by((): FieldFlip[] => {
     const proposal = this.proposal;
     const schema = this.schema;
@@ -77,11 +102,40 @@ export class LoreProposalController {
     return flips;
   });
 
-  /** Something to review only when the patch touches the body or a `long_text`
-   *  field. (An all-structured patch reaches here empty in slice 3a; ChatBodyView
-   *  already told the author nothing renders yet.) */
+  /** The structured (non-prose) fields the patch proposes, each an atomic flip
+   *  reviewed in the frozen rail (slice 3b). `long_text` (run-diff, above), the
+   *  body (separate), and the non-proposable types are excluded; intrinsic
+   *  identity fields (`id`/`title`/`entry_type`) never flip — they are stored off
+   *  `metadata` and the rail skips them anyway, so a stray one would be
+   *  unadoptable. `now` reads the frozen `metadata`, so the diff cannot drift. */
+  structuredFlips = $derived.by((): StructuredFlip[] => {
+    const proposal = this.proposal;
+    const schema = this.schema;
+    if (!proposal || !schema) return [];
+    const flips: StructuredFlip[] = [];
+    for (const [fieldId, proposedValue] of Object.entries(proposal.fields)) {
+      const field = schema.fields[fieldId];
+      if (!field || field.intrinsic || NON_STRUCTURED_TYPES.has(field.type)) continue;
+      flips.push({ fieldId, was: proposedValue, now: this.metadata[fieldId] ?? null });
+    }
+    return flips;
+  });
+
+  /** The structured flips as MetadataPanel's `compare.fields` map — the same
+   *  `{was, now}` shape its snapshot-compare lens renders, so the rail reuses the
+   *  existing `.flipped` tint (ADR-0046 §2). */
+  structuredCompareFields = $derived.by((): Record<string, { was: MetadataValue; now: MetadataValue }> => {
+    const out: Record<string, { was: MetadataValue; now: MetadataValue }> = {};
+    for (const flip of this.structuredFlips) out[flip.fieldId] = { was: flip.was, now: flip.now };
+    return out;
+  });
+
+  /** Something to review only when the patch touches the body, a `long_text`
+   *  field, or a structured field. (A patch that proposes only non-proposable
+   *  fields reaches here empty; ChatBodyView already told the author so.) */
   hasReview = $derived(
-    !!this.proposal && (this.proposal.body != null || this.fields.length > 0),
+    !!this.proposal &&
+      (this.proposal.body != null || this.fields.length > 0 || this.structuredFlips.length > 0),
   );
 
   // ---- review-local resolution (the accumulation, never a write) -------------
@@ -92,6 +146,11 @@ export class LoreProposalController {
   // never touch `metadata`, so the frozen diff cannot drift as the author works.
   resolvedBody = $state<string | null>(null);
   resolvedText = $state<Record<string, string | null>>({});
+  // A structured field flip is adopted whole (§2): the boolean is "take the
+  // proposed value", and the value itself comes from `structuredCompareFields`.
+  // A boolean, not the value, so a proposal that clears a field to `null` is
+  // still distinguishable from "declined" (both would be null-valued otherwise).
+  adoptedStructured = $state<Record<string, boolean>>({});
 
   /** A body flip reports its running resolution (null while unchanged). */
   setBodyResolution(value: string | null): void {
@@ -104,10 +163,26 @@ export class LoreProposalController {
     this.resolvedText = { ...this.resolvedText, [fieldId]: value };
   }
 
+  /** Whether a structured field flip is adopted (take the proposed value). */
+  isStructuredAdopted(fieldId: string): boolean {
+    return this.adoptedStructured[fieldId] === true;
+  }
+
+  /** Toggle a structured field flip between adopted and declined — the rail's
+   *  click-to-adopt gesture (the atomic twin of accepting a prose region). */
+  toggleStructured(fieldId: string): void {
+    this.adoptedStructured = {
+      ...this.adoptedStructured,
+      [fieldId]: !this.adoptedStructured[fieldId],
+    };
+  }
+
   /** Whether the author has adopted anything — the "you have changes" signal the
    *  close guard reads to decide between a silent discard and the Save prompt. */
   hasPendingChanges = $derived(
-    this.resolvedBody !== null || Object.values(this.resolvedText).some((v) => v !== null),
+    this.resolvedBody !== null ||
+      Object.values(this.resolvedText).some((v) => v !== null) ||
+      Object.values(this.adoptedStructured).some((v) => v),
   );
 
   /** Drop the accumulated resolution. Called on commit/abandon and by the host
@@ -116,6 +191,7 @@ export class LoreProposalController {
   resetResolution(): void {
     this.resolvedBody = null;
     this.resolvedText = {};
+    this.adoptedStructured = {};
   }
 
   /** The body the author currently sees (live buffer, not the saved file) — the
@@ -131,9 +207,16 @@ export class LoreProposalController {
    *  body + metadata land in a single lore PUT (ADR-0046 §1). A commit with
    *  nothing adopted is a plain dismiss (no write), exactly like "Close". */
   async commit(): Promise<boolean> {
-    const fields: Record<string, string> = {};
+    const fields: Record<string, MetadataValue> = {};
     for (const [fieldId, value] of Object.entries(this.resolvedText)) {
       if (value !== null) fields[fieldId] = value;
+    }
+    // Adopted structured flips take the proposed value whole (§2). Read it from
+    // the compare map so the boolean-only resolution stays the single source of
+    // "adopted", and a proposal that clears a field to `null` still writes.
+    const proposedById = this.structuredCompareFields;
+    for (const [fieldId, adopted] of Object.entries(this.adoptedStructured)) {
+      if (adopted && fieldId in proposedById) fields[fieldId] = proposedById[fieldId].was;
     }
     const body = this.resolvedBody;
     const hasFields = Object.keys(fields).length > 0;

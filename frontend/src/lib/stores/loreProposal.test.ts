@@ -8,18 +8,26 @@ import type { EntryPatch, MetadataSchema } from "@/lib/types";
 // flips a committed patch produces off the LIVE buffer the host feeds it, and
 // owns the review as a frozen transaction — accepting a unit only accumulates
 // resolution (never a write), and `commit()` issues ONE explicit post (#634).
-// These tests pin what a refactor could silently break: the long_text-only
-// derivation (a structured field must not leak into the body-flip list until
-// slice 3b), and the transaction (accumulate → single flush on commit, no write
-// on abandon, reset on a superseded proposal).
+// These tests pin what a refactor could silently break: the split derivation
+// (long_text → prose run-diff `fields`; structured → atomic `structuredFlips`,
+// slice 3b), the exclusions (body/computed/refs/intrinsic never flip as
+// structured), and the transaction (accumulate → single flush on commit, no
+// write on abandon, reset on a superseded proposal).
 
-// Minimal schema: one long_text field, one structured, so the derivation has
-// both to discriminate. Cast — the controller only reads `.fields[id].type/name`.
+// Minimal schema spanning the dispatch: a long_text (prose run-diff), several
+// structured types (atomic flip), and each exclusion (computed / entity_ref /
+// intrinsic). Cast — the controller only reads `.fields[id].type/name/intrinsic`.
 const schema = {
   entry_types: {},
   fields: {
     bio: { name: "Biography", type: "long_text", options: [] },
     allegiance: { name: "Allegiance", type: "select", options: [] },
+    active: { name: "Active", type: "boolean", options: [] },
+    aliases: { name: "Aliases", type: "tags", options: [] },
+    status: { name: "Status", type: "select", options: [] },
+    title: { name: "Title", type: "text", intrinsic: true, options: [] },
+    mentor: { name: "Mentor", type: "entity_ref", options: [] },
+    score: { name: "Score", type: "computed", options: [] },
   },
 } as unknown as MetadataSchema;
 
@@ -58,21 +66,24 @@ describe("LoreProposalController", () => {
     ]);
   });
 
-  it("ignores structured and unknown fields in the flip list (slice 3b renders those)", () => {
+  it("keeps structured and unknown fields out of the long_text flip list", () => {
     const c = loreController("e1");
     loreBrainstorm.propose("e1", patch(null, { allegiance: "Crown", nonesuch: "x", bio: "b" }));
     expect(c.fields.map((f) => f.fieldId)).toEqual(["bio"]);
   });
 
-  it("hasReview is true for a body-only patch and false for an all-structured one", () => {
+  it("hasReview is true for a body-only patch AND for an all-structured one (3b)", () => {
     const bodyOnly = loreController("e1");
     loreBrainstorm.propose("e1", patch("revised", {}));
     expect(bodyOnly.hasReview).toBe(true);
 
+    // A structured-only patch has no long_text flip, but it IS reviewable now:
+    // its structured flip renders in the rail (slice 3b), so hasReview holds.
     const structuredOnly = loreController("e2");
     loreBrainstorm.propose("e2", patch(null, { allegiance: "Crown" }));
     expect(structuredOnly.fields).toEqual([]);
-    expect(structuredOnly.hasReview).toBe(false);
+    expect(structuredOnly.structuredFlips.map((f) => f.fieldId)).toEqual(["allegiance"]);
+    expect(structuredOnly.hasReview).toBe(true);
   });
 
   it("reacts to the live-metadata feed — the flip's current value tracks the buffer", () => {
@@ -211,5 +222,118 @@ describe("LoreProposalController", () => {
     c.clear();
     expect(c.proposal).toBeNull();
     expect(c.hasReview).toBe(false);
+  });
+});
+
+describe("LoreProposalController — structured field flips (slice 3b)", () => {
+  beforeEach(() => {
+    for (const id of ["e1", "e2"]) loreBrainstorm.clear(id);
+  });
+
+  it("derives one atomic flip per structured field, was=proposed / now=current", () => {
+    const c = loreController("e1");
+    c.metadata = { allegiance: "Rebels", active: false };
+    loreBrainstorm.propose("e1", patch(null, { allegiance: "Crown", active: true, aliases: ["A"] }));
+    expect(c.structuredFlips).toEqual([
+      { fieldId: "allegiance", was: "Crown", now: "Rebels" },
+      { fieldId: "active", was: true, now: false },
+      // A field absent from current metadata reads `now: null`, not undefined.
+      { fieldId: "aliases", was: ["A"], now: null },
+    ]);
+  });
+
+  it("excludes body/long_text, computed, entity_ref, intrinsic, and unknown fields", () => {
+    const c = loreController("e1");
+    loreBrainstorm.propose(
+      "e1",
+      patch("a body", { bio: "prose", score: 9, mentor: "id-1", title: "T", nonesuch: "x", allegiance: "Crown" }),
+    );
+    // Only the one real structured field survives; long_text stays in `fields`.
+    expect(c.structuredFlips.map((f) => f.fieldId)).toEqual(["allegiance"]);
+    expect(c.fields.map((f) => f.fieldId)).toEqual(["bio"]);
+  });
+
+  it("structuredCompareFields mirrors the flips as MetadataPanel's {was,now} map", () => {
+    const c = loreController("e1");
+    c.metadata = { allegiance: "Rebels" };
+    loreBrainstorm.propose("e1", patch(null, { allegiance: "Crown" }));
+    expect(c.structuredCompareFields).toEqual({ allegiance: { was: "Crown", now: "Rebels" } });
+  });
+
+  it("toggleStructured flips adoption and hasPendingChanges tracks it", () => {
+    const c = loreController("e1");
+    loreBrainstorm.propose("e1", patch(null, { allegiance: "Crown" }));
+    expect(c.isStructuredAdopted("allegiance")).toBe(false);
+    expect(c.hasPendingChanges).toBe(false);
+
+    c.toggleStructured("allegiance");
+    expect(c.isStructuredAdopted("allegiance")).toBe(true);
+    expect(c.hasPendingChanges).toBe(true);
+
+    c.toggleStructured("allegiance"); // declined back
+    expect(c.isStructuredAdopted("allegiance")).toBe(false);
+    expect(c.hasPendingChanges).toBe(false);
+  });
+
+  it("commit folds only ADOPTED structured values into the one fields patch", async () => {
+    const c = loreController("e1");
+    const onAdoptFields = vi.fn();
+    const onFlush = vi.fn();
+    c.onAdoptFields = onAdoptFields;
+    c.onEmitChange = vi.fn();
+    c.onFlush = onFlush;
+    loreBrainstorm.propose("e1", patch(null, { allegiance: "Crown", active: true }));
+
+    c.toggleStructured("allegiance"); // adopt one, leave `active` declined
+    await c.commit();
+
+    expect(onAdoptFields).toHaveBeenCalledWith({ allegiance: "Crown" });
+    expect(onFlush).toHaveBeenCalledTimes(1);
+    expect(c.proposal).toBeNull();
+  });
+
+  it("adopting a proposal that CLEARS a field writes the null (boolean resolution)", async () => {
+    const c = loreController("e1");
+    const onAdoptFields = vi.fn();
+    c.onAdoptFields = onAdoptFields;
+    c.onEmitChange = vi.fn();
+    c.onFlush = vi.fn();
+    c.metadata = { allegiance: "Rebels" };
+    loreBrainstorm.propose("e1", patch(null, { allegiance: null }));
+
+    c.toggleStructured("allegiance");
+    await c.commit();
+    // The adoption is a boolean, so a proposed `null` still writes — it is not
+    // mistaken for "declined" the way a null-valued resolution would be.
+    expect(onAdoptFields).toHaveBeenCalledWith({ allegiance: null });
+  });
+
+  it("commit coalesces long_text + structured into ONE onAdoptFields call", async () => {
+    const c = loreController("e1");
+    const onAdoptFields = vi.fn();
+    const onFlush = vi.fn();
+    c.onAdoptFields = onAdoptFields;
+    c.onAdoptBody = vi.fn();
+    c.onEmitChange = vi.fn();
+    c.onFlush = onFlush;
+    loreBrainstorm.propose("e1", patch("new body", { bio: "new bio", allegiance: "Crown" }));
+
+    c.setBodyResolution("new body");
+    c.setFieldResolution("bio", "new bio");
+    c.toggleStructured("allegiance");
+    await c.commit();
+
+    expect(onAdoptFields).toHaveBeenCalledTimes(1);
+    expect(onAdoptFields).toHaveBeenCalledWith({ bio: "new bio", allegiance: "Crown" });
+    expect(onFlush).toHaveBeenCalledTimes(1);
+  });
+
+  it("resetResolution clears structured adoptions so a superseded proposal is clean", () => {
+    const c = loreController("e1");
+    loreBrainstorm.propose("e1", patch(null, { allegiance: "Crown" }));
+    c.toggleStructured("allegiance");
+    c.resetResolution();
+    expect(c.isStructuredAdopted("allegiance")).toBe(false);
+    expect(c.hasPendingChanges).toBe(false);
   });
 });

@@ -414,7 +414,16 @@
     loreReview.metadata = metadata;
   });
   loreReview.onAdoptFields = (fields) => {
-    metadata = { ...metadata, ...fields };
+    // `status` is a proposable select but stored off `metadata` (edited via
+    // `onStatusChange`), so route an adopted status flip to the status state and
+    // keep it out of the metadata merge — else the merge would set a phantom
+    // `metadata.status` the save path ignores. emitChange (below) packages both.
+    const next = { ...fields };
+    if ("status" in next) {
+      status = String(next.status ?? "");
+      delete next.status;
+    }
+    metadata = { ...metadata, ...next };
   };
   loreReview.onAdoptBody = (body) => proseBodyView?.adoptBody(body);
   loreReview.onEmitChange = emitChange;
@@ -429,6 +438,25 @@
   // the rail/title go read-only and the host suppresses autosave, so the diff's
   // "current" side cannot move under the review.
   const reviewing = $derived(documentKind === "lore" && loreReview.hasReview);
+  // The interactive flip lens the rail renders during a lore review (slice 3b):
+  // the proposed structured fields as click-to-adopt flips, wired to the
+  // controller's per-field resolution. Same `compare` shape snapshot compare
+  // feeds MetadataPanel, plus the `resolve` callbacks that make it interactive.
+  // Mutually exclusive with `snapshotCompare` (scenes park; lore reviews) —
+  // hence the `??` at the call site. `side: "was"` is nominal; `resolve` present
+  // makes the panel show the proposed side per-field regardless.
+  const loreCompare = $derived(
+    reviewing && loreReview.structuredFlips.length > 0
+      ? {
+          fields: loreReview.structuredCompareFields,
+          side: "was" as const,
+          resolve: {
+            adopted: (fieldId: string) => loreReview.isStructuredAdopted(fieldId),
+            onToggle: (fieldId: string) => loreReview.toggleStructured(fieldId),
+          },
+        }
+      : null,
+  );
   // The hooks the pane's close path uses to commit or discard the review.
   const reviewCommitter = {
     hasChanges: () => loreReview.hasPendingChanges,
@@ -631,7 +659,7 @@
       overriddenFields={overriddenFieldsForPanel}
       computedFieldString={computedFieldString}
       effectiveOverrides={scrubbed ? scrub.overrides : null}
-      compare={snapshotCompare}
+      compare={snapshotCompare ?? loreCompare}
       readOnly={scrubbed || snapshotParked || reviewing}
       onEntryTypeChange={(next) => updateEntryType(next)}
       onStatusChange={(next) => updateStatus(next)}

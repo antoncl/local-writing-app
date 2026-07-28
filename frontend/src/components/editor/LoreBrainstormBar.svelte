@@ -1,0 +1,75 @@
+<script lang="ts">
+  // The lore-entry brainstorm launcher (ADR-0046 slice 2). Extracted from
+  // NodeEditor so the shell stays under the size guard and the launch concern
+  // is one cohesive unit. Renders a quiet header verb that opens the first
+  // available `revise:entry` prompt (output.kind `entry_patch`) as a chat bound
+  // to this entry — seeded as its `entry` input, which the template loads via
+  // entry(input.entry). Hidden when no such prompt instance exists yet (issue
+  // #606 — pre-rolled prompts still need a materialized instance).
+  //
+  // A temporary home: ADR-0047's node contextual-actions are the eventual
+  // surface, but that is unbuilt, so this follows roleplay's invocation shape.
+
+  import { chatSessions } from "@/lib/stores/chatSessions.svelte";
+  import {
+    promptEntriesForSurface,
+    type PromptResolutionContext,
+  } from "@/lib/editor-core/promptResolution";
+  import type { MetadataSchema, PromptEntrySummary } from "@/lib/types";
+
+  let {
+    entryId,
+    promptEntries,
+    metadataSchema,
+  }: {
+    entryId: string;
+    promptEntries: PromptEntrySummary[];
+    metadataSchema: MetadataSchema | null;
+  } = $props();
+
+  let ctx = $derived<PromptResolutionContext>({
+    metadataSchema,
+    promptEntries,
+    loreEntries: [],
+    availableScenes: [],
+  });
+  let brainstormPrompts = $derived(promptEntriesForSurface(ctx, "entry_patch"));
+
+  async function launch(): Promise<void> {
+    const prompt = brainstormPrompts[0];
+    if (!prompt || !entryId) return;
+    await chatSessions.openChatFromPromptEntry(prompt, { entry: entryId }, null);
+  }
+</script>
+
+{#if brainstormPrompts.length > 0}
+  <button
+    type="button"
+    class="brainstorm-launch"
+    title="Brainstorm a revision with AI, then review it against this entry"
+    onclick={() => void launch()}
+  >
+    Brainstorm
+  </button>
+{/if}
+
+<style>
+  /* A quiet header verb next to the title (design language — a text button, no
+     glyph). */
+  .brainstorm-launch {
+    justify-self: end;
+    font: inherit;
+    font-size: var(--fs-sm);
+    padding: 3px 12px;
+    border-radius: var(--r-sm);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-2);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .brainstorm-launch:hover {
+    color: var(--text);
+    border-color: var(--accent);
+  }
+</style>

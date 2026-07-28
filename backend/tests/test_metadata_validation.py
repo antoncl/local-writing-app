@@ -234,7 +234,7 @@ class MetadataValidationTests(unittest.TestCase):
 
     def test_prompt_subtypes_inherit_code_and_jinja2(self) -> None:
         schema = self.service.read_metadata_schema()
-        for type_id in ("prompt:base", "prompt:continuation", "prompt:revise", "prompt:general", "prompt:snippet"):
+        for type_id in ("prompt:base", "prompt:continuation", "prompt:revise", "prompt:revise:scene", "prompt:revise:entry", "prompt:general", "prompt:snippet"):
             definition = schema.entry_types[type_id]
             self.assertEqual(definition.body_editor, "code", msg=type_id)
             self.assertEqual(definition.body_language, "jinja2", msg=type_id)
@@ -2274,12 +2274,14 @@ class MetadataValidationTests(unittest.TestCase):
         )
 
     def test_default_schema_seeds_four_prompt_bases(self) -> None:
-        """continuation/revise/general/snippet are concrete bases with preset
-        output kinds; users instantiate them directly or sub-type them to add
-        personality. Inputs live on the instance (not the type) so the bases
-        no longer need to be abstract."""
+        """continuation/general/snippet are concrete bases with preset output
+        kinds; users instantiate them directly or sub-type them to add
+        personality. `revise` is abstract (ADR-0046 §5) and splits symmetrically
+        into `revise:scene` (today's scene revise) + `revise:entry` (the lore
+        brainstorm commit) — the two output kinds differ, so nothing is hoisted
+        onto the base. Inputs live on the instance (not the type)."""
         schema = self.service.read_metadata_schema()
-        for type_id in ("prompt:continuation", "prompt:revise", "prompt:general", "prompt:snippet"):
+        for type_id in ("prompt:continuation", "prompt:general", "prompt:snippet"):
             self.assertIn(type_id, schema.entry_types)
             self.assertEqual(schema.entry_types[type_id].kind, "prompt")
             self.assertEqual(schema.entry_types[type_id].parent, "prompt:base")
@@ -2290,10 +2292,34 @@ class MetadataValidationTests(unittest.TestCase):
         assert continuation_prompt.context_strategy is not None
         self.assertEqual(continuation_prompt.context_strategy.output, {"kind": "append_to_body", "review": "visual_diff"})
 
-        revise_prompt = schema.entry_types["prompt:revise"].prompt
-        assert revise_prompt is not None
-        assert revise_prompt.context_strategy is not None
-        self.assertEqual(revise_prompt.context_strategy.output, {"kind": "replace_selection", "review": "visual_diff"})
+        # `revise` is now the abstract parent of the two concrete flavours.
+        revise = schema.entry_types["prompt:revise"]
+        self.assertTrue(revise.abstract)
+        self.assertEqual(revise.parent, "prompt:base")
+        self.assertIsNone(revise.prompt)
+
+        revise_scene = schema.entry_types["prompt:revise:scene"]
+        self.assertFalse(revise_scene.abstract)
+        self.assertEqual(revise_scene.parent, "prompt:revise")
+        assert revise_scene.prompt is not None and revise_scene.prompt.context_strategy is not None
+        self.assertEqual(revise_scene.prompt.context_strategy.output, {"kind": "replace_selection", "review": "visual_diff"})
+        self.assertEqual(revise_scene.prompt.context_strategy.target, {"required": True, "kind": "scene"})
+
+        revise_entry = schema.entry_types["prompt:revise:entry"]
+        self.assertFalse(revise_entry.abstract)
+        self.assertEqual(revise_entry.parent, "prompt:revise")
+        assert revise_entry.prompt is not None and revise_entry.prompt.context_strategy is not None
+        self.assertEqual(revise_entry.prompt.context_strategy.output, {"kind": "entry_patch", "review": "visual_diff"})
+        # The entry rides in as an `entry` input (loaded via entry(input.entry)),
+        # NOT as context_strategy.target — a lore id there would drive a scene
+        # resolution (read_scene) and 404. Pre-rolled like roleplay: default_body +
+        # default_inputs materialize onto an instance via create_prompt_entry.
+        self.assertIsNone(revise_entry.prompt.context_strategy.target)
+        self.assertTrue(revise_entry.default_body)
+        self.assertEqual([i.name for i in revise_entry.default_inputs], ["entry"])
+        entry_input = revise_entry.default_inputs[0]
+        self.assertEqual(entry_input.type, "context_pick")
+        self.assertTrue(entry_input.required)
 
         general_prompt = schema.entry_types["prompt:general"].prompt
         assert general_prompt is not None

@@ -6,6 +6,8 @@
   import SnapshotStrip from "@/components/editor/SnapshotStrip.svelte";
   import EditorRail from "@/components/editor/EditorRail.svelte";
   import ReadOnlyBodyOverlay from "@/components/editor/body/ReadOnlyBodyOverlay.svelte";
+  import LoreRevisionReview from "@/components/editor/body/LoreRevisionReview.svelte";
+  import LoreBrainstormBar from "@/components/editor/LoreBrainstormBar.svelte";
   import { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
   import { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
   import { implicitContextFor } from "@/lib/stores/implicitContext.svelte";
@@ -26,6 +28,7 @@
   import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataFieldDefinition, MetadataSchema, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
   import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
   import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { loreBrainstorm } from "@/lib/stores/loreBrainstorm.svelte";
   import LayerAuthoringBar from "@/components/editor/LayerAuthoringBar.svelte";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { backlinksFor } from "@/lib/views/backlinks";
@@ -552,7 +555,7 @@
     return output.kind;
   }
 
-  function promptEntriesForSurface(surface: "append_to_body" | "replace_selection" | "chat_panel"): PromptEntrySummary[] {
+  function promptEntriesForSurface(surface: "append_to_body" | "replace_selection" | "chat_panel" | "entry_patch"): PromptEntrySummary[] {
     if (!metadataSchema) return [];
     return promptEntries
       .filter((entry) => effectiveOutputKind(entry) === surface)
@@ -568,6 +571,22 @@
     // Inputs now live on the entry itself (not the entry-type) — the
     // declaration and the template that uses it are coupled.
     return entry.inputs ?? [];
+  }
+
+  // ADR-0046 slice 2 — the lore brainstorm review. A `revise:entry` chat
+  // commits a whole revised body (launched via LoreBrainstormBar); it is
+  // reviewed here as a proposed-vs-current flip. Gated on documentKind === lore.
+  let loreProposal = $derived(
+    documentKind === "lore" && scene?.id ? loreBrainstorm.proposalFor(scene.id) : null,
+  );
+
+  // The body the author currently sees (live buffer, not the saved file) — the
+  // side the proposal flips against, buffer-safe like the snapshot compare.
+  function currentLoreBody(): string {
+    return proseBodyView?.getBody() ?? scene?.body ?? "";
+  }
+  function closeLoreProposal(): void {
+    if (scene?.id) loreBrainstorm.clear(scene.id);
   }
 
   function openInputsDialog(entry: PromptEntrySummary) {
@@ -1002,6 +1021,9 @@
             <input class="title-input" aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()}`} placeholder={documentNameLabel} bind:value={title} oninput={handleTitleInput} />
           {/if}
         </label>
+        {#if documentKind === "lore" && scene?.id}
+          <LoreBrainstormBar entryId={scene.id} {promptEntries} {metadataSchema} />
+        {/if}
       </div>
       <!-- Layer override authoring (#314 / ADR-0042): choose which level this
            inherited entry's edits write to. Renders only for an inherited lore
@@ -1102,8 +1124,23 @@
         tone="snapshot"
         onRunClick={(regionId, kind) => snapshots.adopt(regionId, kind)}
       />
+    {:else if documentKind === "lore" && loreProposal}
+      <!-- ADR-0046 slice 2: the brainstorm commit reviewed as a flip. Like the
+           snapshot overlay, the live buffer stays mounted and hidden beneath;
+           adopting a region writes through it (adoptBody → autosave). -->
+      {#key loreProposal}
+        <LoreRevisionReview
+          currentBody={currentLoreBody()}
+          proposedBody={loreProposal}
+          onAdoptBody={(body) => void proseBodyView?.adoptBody(body)}
+          onClose={closeLoreProposal}
+        />
+      {/key}
     {/if}
-    <div class="prose-body-host" class:hidden={scrubbed || snapshotParked}>
+    <div
+      class="prose-body-host"
+      class:hidden={scrubbed || snapshotParked || (documentKind === "lore" && !!loreProposal)}
+    >
       <ProseBodyView
         bind:this={proseBodyView}
       bind:liveWordCount
@@ -1274,9 +1311,9 @@
 
   .scene-title-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 4px;
-    align-items: start;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px 8px;
+    align-items: center;
   }
 
   /* ---- Time-travel overlay chrome (#64) ---------------------------------- */

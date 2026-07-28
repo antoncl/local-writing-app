@@ -268,9 +268,26 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             ),
         },
         "prompt:revise": {
+            # Abstract base for the two revise flavours. Split symmetrically
+            # (ADR-0046 §5): sub-typing the lore case (`revise:entry`) while
+            # leaving the scene case bare would leave the taxonomy lopsided, and
+            # the TipTap editor filters its prompts by type — both flavours must
+            # sit at the same depth. The concrete children carry the disposition;
+            # the two `output.kind`s differ (replace_selection vs entry_patch),
+            # so there is nothing shared to hoist onto the base.
             "name": "Revise",
             "kind": "prompt",
             "parent": "prompt:base",
+            "abstract": True,
+            "fields": [],
+            "has_body": True,
+        },
+        "prompt:revise:scene": {
+            # Today's in-editor scene revise, unchanged — an author selects prose
+            # and the result replaces the selection behind the aiSuggestion mark.
+            "name": "Revise scene",
+            "kind": "prompt",
+            "parent": "prompt:revise",
             "fields": [],
             "has_body": True,
             "prompt": {
@@ -278,6 +295,63 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                     "target": {"required": True, "kind": "scene"},
                     "scan_surface": ["_text_before", "_selection", "_text_after"],
                     "output": {"kind": "replace_selection", "review": "visual_diff"},
+                },
+            },
+        },
+        "prompt:revise:entry": {
+            # The lore brainstorm (ADR-0046 §5/§6.2), a pre-rolled prompt like
+            # `roleplay`: an ideation *chat* that carries an existing entry in its
+            # context and, on a commit turn, returns the entry's full revised body.
+            # `output.kind = entry_patch` routes invocation to a chat and routes the
+            # committed body to the proposed-vs-current flip review (loreRevision),
+            # not the scene aiSuggestion streaming mark. The target entry rides in
+            # as an `entry` input loaded with `entry(input.entry)` — exactly how
+            # roleplay pulls its character — because `{{ scene }}` resolves scenes
+            # only (`read_scene`), never a lore entry. No `context_strategy.target`
+            # for the same reason: binding it would drive a scene resolution.
+            "name": "Revise entry",
+            "kind": "prompt",
+            "parent": "prompt:revise",
+            "fields": [],
+            "has_body": True,
+            "default_inputs": [
+                {
+                    "name": "entry",
+                    "type": "context_pick",
+                    "label": "Entry",
+                    "required": True,
+                    "target": {
+                        "sources": [{"kind": "lore", "expr": {"type": "lore:base"}}],
+                        "multiple": False,
+                        "presets": [],
+                    },
+                },
+            ],
+            "default_body": (
+                "{% set e = entry(input.entry) %}\n"
+                "{% role \"system\" %}\n"
+                "You are an ideation partner helping the author revise a lore "
+                "entry through conversation. Brainstorm: ask questions, suggest "
+                "directions, react to the author's ideas. Do NOT rewrite the whole "
+                "entry on every turn.\n"
+                "\n"
+                "When the author asks you to finalize (or says \"commit\"), stop "
+                "brainstorming and reply with ONLY the complete revised markdown "
+                "body of the entry — no preamble, no commentary, no code fences. "
+                "That final message is written back to the entry verbatim.\n"
+                "{% if e %}\n"
+                "\n## The entry under revision: {{ e.title }}\n"
+                "{% if e.body %}\n"
+                "{{ e.body }}\n"
+                "{% else %}\n"
+                "_(This entry has no body yet.)_\n"
+                "{% endif %}\n"
+                "{% endif %}\n"
+                "{% endrole %}\n"
+            ),
+            "prompt": {
+                "context_strategy": {
+                    "output": {"kind": "entry_patch", "review": "visual_diff"},
                 },
             },
         },

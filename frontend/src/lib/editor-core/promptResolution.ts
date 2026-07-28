@@ -14,7 +14,7 @@ import type {
   PromptInputDefinition,
 } from "@/lib/types";
 
-export type PromptSurface = "append_to_body" | "replace_selection" | "chat_panel";
+export type PromptSurface = "append_to_body" | "replace_selection" | "chat_panel" | "entry_patch";
 
 // A snapshot of the reactive data the resolvers read. ProseBodyView builds
 // this as a `$derived` and passes it (or a getter onto it) at each call.

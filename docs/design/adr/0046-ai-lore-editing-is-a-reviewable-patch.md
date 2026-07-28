@@ -152,10 +152,16 @@ whole-entry patch of §1. The target is always the **entry**, never a lone field
 still a patch over the entry (§1's N=1 case), so there is no field-scoped reviser here — the coverage of
 the patch varies (§6), the unit does not.
 
-The prompt that drives the commit is a **specialization of the existing `revise` kind** — a sub-type
-whose target is a lore entry and whose `output.kind` is the patch/diff above — **not a fifth prompt
-base**. The four-base taxonomy is deliberate, and a new thing earns its own base only when it cannot be
-expressed as a sub-type; this can (cf. `roleplay` as a sub-type of continuation).
+The prompt that drives the commit is a **specialization of the existing `revise` kind**, **not a fifth
+prompt base**. The four-base taxonomy is deliberate, and a new thing earns its own base only when it
+cannot be expressed as a sub-type; this can (cf. `roleplay` as a sub-type of continuation). Concretely,
+`prompt:revise` becomes **abstract** and splits **symmetrically** into two concrete sub-types:
+`prompt:revise:scene` — today's in-editor scene revise, unchanged (`output.kind: replace_selection`,
+target a scene) — and `prompt:revise:entry`, whose target is a lore entry and whose `output.kind` is the
+patch/diff above (`entry_patch`). The split is symmetric on purpose: sub-typing the lore case while
+leaving the scene case as the bare `revise` would leave the taxonomy lopsided, and the TipTap editor
+filters its available prompts by that type — both revise flavours must sit at the same depth for that
+filter to stay coherent.
 
 **What is not streamed is the commit, not the conversation.** The brainstorm streams like any chat; but
 the entry is never written by streamed tokens. When the conversation commits, the model returns a
@@ -181,21 +187,27 @@ journey + anti-goal are what pin it.
    surface every later slice reuses, proven on the shape we already ship.
    - *Not:* a step toward a field-scoped reviser, and no user-facing trigger — this slice is the tested
      seam only (its proposed body is a fixture standing in for a model).
-2. **The brainstorm, revising an existing entry's prose.** An ideation chat (§5) carrying an existing
-   entry as context converges on a patch over that entry's prose surfaces (the body and the text-bearing
-   fields); the commit is reviewed with slice 1's flip and written back via `PUT`. The first product
-   slice — the whole point at minimum coverage.
+2. **The brainstorm, revising an existing entry's body.** An ideation chat (§5) carrying an existing
+   entry as context converges on a patch over that entry's markdown **body**; the commit is reviewed with
+   slice 1's flip and written back via `PUT`. The first product slice — the whole vehicle (chat → commit →
+   flip → save) end-to-end at minimum coverage. The body alone, because slice 1's seam is body-level and a
+   text-bearing `long_text` field is that same run-diff generalized to a named field value — grouped with
+   the other fields in slice 3, not split across two slices.
    - *Done when:* the author opens a chat, brainstorms changes to an existing entry that rides in the
-     context, commits, sees the proposed-vs-current flip over that entry's prose, adopts what they want,
+     context, commits, sees the proposed-vs-current flip over that entry's body, adopts what they want,
      and the entry is saved.
    - *Not:* a "revise this field" button or menu on a field. The trigger is the brainstorm, not the
-     field; a patch that happens to touch one field is still a patch over the entry (§1's N=1 case).
-3. **Grow the patch to structured fields.** Extend the `FieldDiff` flip to authored lore metadata + the
-   constrained-JSON output path + schema validation (§4). The same brainstorm now covers
-   `select`/`tags`/`number`/`boolean`/`date`/`color` too.
-   - *Done when:* the same brainstorm-and-commit also proposes structured field values, each reviewed as
-     an atomic flip and validated; an illegal value is dropped per-field, not written, without failing
-     the whole patch.
+     field; a patch that happens to touch the body is still a patch over the entry (§1's N=1 case). Also
+     not the `long_text` or structured fields yet — those are slice 3.
+3. **Grow the patch to the remaining fields — `long_text` and structured.** Two extensions of the same
+   commit: (a) generalize slice 1's body run-diff to **`long_text` fields** — a named field value that
+   carries prose, reviewed as the same `DiffRun` flip, the body seam applied to a field; and (b) extend
+   the atomic `FieldDiff` flip to **structured** authored metadata via the constrained-JSON output path +
+   schema validation (§4). The same brainstorm now covers `long_text` plus
+   `select`/`tags`/`number`/`boolean`/`date`/`color`.
+   - *Done when:* the same brainstorm-and-commit also proposes `long_text` prose (reviewed as a run-diff
+     flip) and structured field values (each an atomic flip, validated); an illegal value is dropped
+     per-field, not written, without failing the whole patch.
    - *Not:* proposing `entity_ref`/`entity_ref_list` links or `computed` values (both stay out, §4), and
      not a second proposal path — it is the same commit with wider coverage.
 4. **The new-entry outcome — no prior state, so no diff.** The same brainstorm with **no** entry in its

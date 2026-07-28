@@ -18,6 +18,7 @@ import { api } from "@/lib/api";
 import { confirmService } from "@/lib/stores/confirmService.svelte";
 import type { DiffRun, DiffView, FieldDiff, Scene, Snapshot, SnapshotDrift } from "@/lib/types";
 import { adoptRegion, renderDiffRuns } from "@/lib/utils/diffRuns";
+import { diffRuns, fieldDiffs } from "@/lib/utils/snapshotDiff";
 import { inNotchOrder, notchWhen } from "@/lib/utils/snapshotTime";
 
 /** What the diff compares the snapshot against: the buffer, not the file.
@@ -40,6 +41,18 @@ const NO_LIVE: LiveState = { body: "", title: "", status: "", metadata: {} };
 const NO_DRIFT: SnapshotDrift = {
   available: false,
   comparable: true,
+  truncated: false,
+  entities: [],
+};
+
+/** The drift call itself failed, so the comparison could not be built. This is
+ *  **not** `NO_DRIFT`: a failed fetch is not evidence of an unchanged world
+ *  (ADR-0043 — "a live side that would not build is not evidence"), so it must
+ *  degrade to `comparable:false`, which the rail surfaces as "couldn't compare",
+ *  never swallow as the silent all-clear `available:false` would give. */
+const DRIFT_UNCOMPARABLE: SnapshotDrift = {
+  available: true,
+  comparable: false,
   truncated: false,
   entities: [],
 };
@@ -225,10 +238,13 @@ export class SnapshotStripController {
   /** Park on a snapshot (or return to Live with `null`). Reading never touches
    *  the live buffer — it stays mounted and hidden underneath (§G).
    *
-   *  **This is the one call.** §G puts the diff at the discrete moment the
-   *  author parks; diffing continuously against the buffer as they type would
-   *  put an HTTP round-trip back in the typing loop. The runs carry all the
-   *  text, so every later flip is a re-render of this payload. */
+   *  **The content diff is computed here in the browser** (#573): `readSnapshot`
+   *  hands over the frozen "was" side, the live buffer is the "now" side, and
+   *  `diffRuns` / `fieldDiffs` produce the runs and the flip locally — no server
+   *  round-trip for the prose. Drift is the one half that stays server-side (the
+   *  "now" witness needs resolved entity state), so it rides a slim `.../drift`
+   *  call in parallel. §G still puts the diff at the discrete moment the author
+   *  parks; the runs carry all the text, so every later flip is a re-render. */
   async park(snapshotId: string | null): Promise<void> {
     const sceneId = this.#sceneId;
     if (!snapshotId || !sceneId) {
@@ -243,17 +259,29 @@ export class SnapshotStripController {
     this.pendingId = snapshotId;
     this.#watchForSlow();
     try {
-      const diff = await api.diffSnapshot(sceneId, snapshotId, this.readLive?.() ?? NO_LIVE);
+      const live = this.readLive?.() ?? NO_LIVE;
+      // The frozen side and the drift report in parallel. Drift is advisory
+      // (ADR-0043), so a drift failure must not drop the author out of a snapshot
+      // they can otherwise read — but it degrades to "couldn't compare", not to a
+      // silent all-clear (a failed fetch is not evidence of an unchanged world).
+      // A missing snapshot body cannot be rendered, so that one still throws.
+      const [snapshot, drift] = await Promise.all([
+        api.readSnapshot(sceneId, snapshotId),
+        api
+          .snapshotDrift(sceneId, snapshotId, live.dynamic_context ?? null)
+          .catch(() => DRIFT_UNCOMPARABLE),
+      ]);
       if (!fresh()) return;
+      const runs = diffRuns(snapshot.body, live.body);
       // Render before anything is shown, so the swap below is one step.
-      const html = await renderDiffRuns(diff.runs, this.view);
+      const html = await renderDiffRuns(runs, this.view);
       if (!fresh()) return;
       this.#render++;
-      this.runs = diff.runs;
-      this.fields = diff.fields;
-      this.titleWas = diff.title_was;
-      this.titleNow = diff.title_now;
-      this.drift = diff.drift ?? NO_DRIFT;
+      this.runs = runs;
+      this.fields = fieldDiffs(snapshot.metadata, snapshot.status, live.metadata, live.status);
+      this.titleWas = snapshot.title;
+      this.titleNow = live.title;
+      this.drift = drift ?? NO_DRIFT;
       this.bodyHtml = html;
       this.parked = snapshotId;
     } catch {

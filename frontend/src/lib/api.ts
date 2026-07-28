@@ -63,7 +63,7 @@ import type {
   SearchHit,
   Snapshot,
   SnapshotDetail,
-  SnapshotDiff,
+  SnapshotDrift,
   SnapshotList,
   StructureDocument,
   StructureNodeDeletePreview,
@@ -632,26 +632,16 @@ export const api = {
       `/scenes/${encodeURIComponent(sceneId)}/snapshots/${encodeURIComponent(snapshotId)}`,
     );
   },
-  /** The compare view's one call, made at the discrete moment the author parks.
-   *  The LIVE state travels in the request: autosave lags the buffer by up to
-   *  six seconds, and parking is a reading gesture that must not write. The runs
-   *  carry all the text, so Both/Now/Snapshot are filters over this one payload
-   *  rather than three requests (ADR-0044 §G). */
-  diffSnapshot(
-    sceneId: string,
-    snapshotId: string,
-    live: {
-      body: string;
-      title: string;
-      metadata: Record<string, unknown>;
-      /** The live dynamic context, so the *now* side of the drift comparison
-       *  sees the same implicit detections the capture did (#439). */
-      dynamic_context?: string[];
-    },
-  ) {
-    return request<SnapshotDiff>(
-      `/scenes/${encodeURIComponent(sceneId)}/snapshots/${encodeURIComponent(snapshotId)}/diff`,
-      { method: "POST", body: JSON.stringify(live) },
+  /** The drift report alone (#583). Once the content diff (runs + fields + title)
+   *  is computed client-side, this is the one half that stays on the server —
+   *  the "now" witness needs resolved entity state — so it gets a slim call
+   *  carrying only the dynamic context the editor observed; the backend resolves
+   *  the rest from the scene id. `null` dynamic context is "not observed", `[]`
+   *  is "observed and empty" — the distinction the service turns on (#439). */
+  snapshotDrift(sceneId: string, snapshotId: string, dynamicContext: string[] | null) {
+    return request<SnapshotDrift>(
+      `/scenes/${encodeURIComponent(sceneId)}/snapshots/${encodeURIComponent(snapshotId)}/drift`,
+      { method: "POST", body: JSON.stringify({ dynamic_context: dynamicContext }) },
     );
   },
   /** Captures the current state and restores, in ONE call. Never do this as a

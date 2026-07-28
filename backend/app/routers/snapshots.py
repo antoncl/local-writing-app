@@ -14,8 +14,8 @@ from app.models import (
     SetSnapshotDescriptionRequest,
     Snapshot,
     SnapshotDetail,
-    SnapshotDiff,
-    SnapshotDiffRequest,
+    SnapshotDrift,
+    SnapshotDriftRequest,
     SnapshotList,
 )
 from app.runtime import CurrentProject, translate_errors
@@ -68,21 +68,20 @@ def restore_snapshot(project: CurrentProject, scene_id: str, snapshot_id: str) -
 
 
 @router.post(
-    "/api/scenes/{scene_id}/snapshots/{snapshot_id}/diff", response_model=SnapshotDiff
+    "/api/scenes/{scene_id}/snapshots/{snapshot_id}/drift", response_model=SnapshotDrift
 )
-def diff_snapshot(
-    project: CurrentProject, scene_id: str, snapshot_id: str, live: SnapshotDiffRequest
-) -> SnapshotDiff:
-    """Provenance-tagged runs between the snapshot and the live state.
+def snapshot_drift(
+    project: CurrentProject, scene_id: str, snapshot_id: str, live: SnapshotDriftRequest
+) -> SnapshotDrift:
+    """The drift report alone — the frozen witness against the world now (#583).
 
-    POST, and the live state travels in the request: autosave lags the buffer by
-    up to six seconds, and parking on a notch is a *reading* gesture that must
-    not write. One call, at the discrete moment the author parks — the runs carry
-    all the text, so Both, Now and Snapshot are three filters over one payload
-    (ADR-0044 §G).
+    Once the content diff (runs + fields + title) is computed client-side, this
+    is the one half that stays on the server: building the "now" witness needs
+    resolved entity state the client does not have. It carries only the dynamic
+    context the editor observed; the backend resolves the rest from the scene id.
     """
     with translate_errors():
-        return project.diff_snapshot(scene_id, snapshot_id, live)
+        return project.snapshot_drift(scene_id, snapshot_id, live.dynamic_context)
 
 
 @router.post("/api/scenes/{scene_id}/snapshots/{snapshot_id}/pin", response_model=Snapshot)

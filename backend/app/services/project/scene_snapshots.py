@@ -229,18 +229,27 @@ class SceneSnapshotsMixin:
         return SnapshotList(snapshots=self._snapshot_records(root, node_id))
 
     def read_snapshot(self, scene_id: str, snapshot_id: str) -> SnapshotDetail:
-        """The stored body, parsed for display. Reading is not restoring — the
-        byte-copy is parsed here so a pane can render it, while restore stays a
-        file copy."""
+        """The stored body and normalised front-matter state, parsed for display.
+        Reading is not restoring — the byte-copy is parsed here so a pane can
+        render it, while restore stays a file copy.
+
+        `title`/`status`/`metadata` come off `_snapshot_state` — the *same*
+        normalisation the live side gets from `read_scene` — so the client field
+        flip (#583) diffs like against like. Reusing it rather than re-deriving
+        the title here keeps the was-side to one pipeline."""
         root = self._require_project()
         node_id = self._snapshot_source_id(scene_id)
         record = self._require_snapshot(root, node_id, snapshot_id)
+        snapshots_dir = self._snapshots_dir(root, node_id)
         front_matter, body = self._read_markdown_with_front_matter(
-            self._snapshots_dir(root, node_id) / f"{snapshot_id}.md"
+            snapshots_dir / f"{snapshot_id}.md"
         )
+        state = self._snapshot_state(front_matter, node_id, snapshots_dir)
         return SnapshotDetail(
             snapshot=record,
-            title=str(front_matter.get("title") or node_id),
+            title=state["title"],
+            status=state["status"],
+            metadata=state["metadata"],
             body=body,
         )
 

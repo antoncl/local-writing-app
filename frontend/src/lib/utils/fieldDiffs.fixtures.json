@@ -1,0 +1,256 @@
+[
+  {
+    "name": "scalar-field-changed",
+    "why": "the ordinary case: one text field's value flips",
+    "was_status": "draft",
+    "was_metadata": {
+      "rank": "Lieutenant"
+    },
+    "now_status": "draft",
+    "now_metadata": {
+      "rank": "Captain"
+    },
+    "fields": {
+      "rank": {
+        "was": "Lieutenant",
+        "now": "Captain"
+      }
+    }
+  },
+  {
+    "name": "status-flipped",
+    "why": "status rides beside the metadata and flips like any other row",
+    "was_status": "draft",
+    "was_metadata": {},
+    "now_status": "revised",
+    "now_metadata": {},
+    "fields": {
+      "status": {
+        "was": "draft",
+        "now": "revised"
+      }
+    }
+  },
+  {
+    "name": "field-added",
+    "why": "a field absent on the snapshot side, present now",
+    "was_status": "draft",
+    "was_metadata": {},
+    "now_status": "draft",
+    "now_metadata": {
+      "goal": "Reach the harbour"
+    },
+    "fields": {
+      "goal": {
+        "was": null,
+        "now": "Reach the harbour"
+      }
+    }
+  },
+  {
+    "name": "blank-key-vs-missing-key-do-not-flip",
+    "why": "an empty string and an absent key are the same absence — no row",
+    "was_status": "draft",
+    "was_metadata": {
+      "note": ""
+    },
+    "now_status": "draft",
+    "now_metadata": {},
+    "fields": {}
+  },
+  {
+    "name": "empty-list-vs-missing-do-not-flip",
+    "why": "[] and an absent key both read (none) — no row",
+    "was_status": "draft",
+    "was_metadata": {
+      "tags": []
+    },
+    "now_status": "draft",
+    "now_metadata": {},
+    "fields": {}
+  },
+  {
+    "name": "blank-to-value-flips",
+    "why": "an empty value becoming a real one is a genuine change",
+    "was_status": "draft",
+    "was_metadata": {
+      "note": ""
+    },
+    "now_status": "draft",
+    "now_metadata": {
+      "note": "check the tide tables"
+    },
+    "fields": {
+      "note": {
+        "was": "",
+        "now": "check the tide tables"
+      }
+    }
+  },
+  {
+    "name": "list-membership-changed",
+    "why": "a multi-valued field: one item swapped",
+    "was_status": "draft",
+    "was_metadata": {
+      "tags": [
+        "storm",
+        "night"
+      ]
+    },
+    "now_status": "draft",
+    "now_metadata": {
+      "tags": [
+        "storm",
+        "dawn"
+      ]
+    },
+    "fields": {
+      "tags": {
+        "was": [
+          "storm",
+          "night"
+        ],
+        "now": [
+          "storm",
+          "dawn"
+        ]
+      }
+    }
+  },
+  {
+    "name": "list-reordered-flips",
+    "why": "Python == on lists is order-sensitive, so a reorder is a change",
+    "was_status": "draft",
+    "was_metadata": {
+      "tags": [
+        "storm",
+        "night"
+      ]
+    },
+    "now_status": "draft",
+    "now_metadata": {
+      "tags": [
+        "night",
+        "storm"
+      ]
+    },
+    "fields": {
+      "tags": {
+        "was": [
+          "storm",
+          "night"
+        ],
+        "now": [
+          "night",
+          "storm"
+        ]
+      }
+    }
+  },
+  {
+    "name": "non-field-keys-never-flip",
+    "why": "id/title/schema_version differ but are bookkeeping, not authored fields",
+    "was_status": "draft",
+    "was_metadata": {
+      "id": "a",
+      "title": "Old",
+      "schema_version": 1,
+      "goal": "hold"
+    },
+    "now_status": "draft",
+    "now_metadata": {
+      "id": "b",
+      "title": "New",
+      "schema_version": 2,
+      "goal": "hold"
+    },
+    "fields": {}
+  },
+  {
+    "name": "number-field-changed",
+    "why": "a number field flips by ordinary inequality, not blank-equivalence",
+    "was_status": "draft",
+    "was_metadata": {
+      "count": 3
+    },
+    "now_status": "draft",
+    "now_metadata": {
+      "count": 5
+    },
+    "fields": {
+      "count": {
+        "was": 3,
+        "now": 5
+      }
+    }
+  },
+  {
+    "name": "boolean-field-flipped",
+    "why": "a boolean field flips false -> true",
+    "was_status": "draft",
+    "was_metadata": {
+      "done": false
+    },
+    "now_status": "draft",
+    "now_metadata": {
+      "done": true
+    },
+    "fields": {
+      "done": {
+        "was": false,
+        "now": true
+      }
+    }
+  },
+  {
+    "name": "zero-is-a-value-not-a-blank",
+    "why": "0 is a value, so 0 vs an absent key flips (falsy-zero trap)",
+    "was_status": "draft",
+    "was_metadata": {
+      "count": 0
+    },
+    "now_status": "draft",
+    "now_metadata": {},
+    "fields": {
+      "count": {
+        "was": 0,
+        "now": null
+      }
+    }
+  },
+  {
+    "name": "false-is-a-value-not-a-blank",
+    "why": "False is a value, so False vs an absent key flips",
+    "was_status": "draft",
+    "was_metadata": {
+      "done": false
+    },
+    "now_status": "draft",
+    "now_metadata": {},
+    "fields": {
+      "done": {
+        "was": false,
+        "now": null
+      }
+    }
+  },
+  {
+    "name": "nothing-changed",
+    "why": "identical sides produce an empty flip",
+    "was_status": "draft",
+    "was_metadata": {
+      "rank": "Captain",
+      "tags": [
+        "storm"
+      ]
+    },
+    "now_status": "draft",
+    "now_metadata": {
+      "rank": "Captain",
+      "tags": [
+        "storm"
+      ]
+    },
+    "fields": {}
+  }
+]

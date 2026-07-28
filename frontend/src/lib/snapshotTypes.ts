@@ -40,6 +40,10 @@ export type SnapshotList = {
 export type SnapshotDetail = {
   snapshot: Snapshot;
   title: string;
+  /** The frozen state, **normalised** the way `read_scene` normalises the live
+   *  side (#583) — so the client field flip diffs like against like. */
+  status: string;
+  metadata: Record<string, unknown>;
   body: string;
 };
 
@@ -130,14 +134,4 @@ export type SnapshotDrift = {
    *  as "nothing else changed". */
   truncated: boolean;
   entities: EntityDrift[];
-};
-
-export type SnapshotDiff = {
-  snapshot: Snapshot;
-  runs: DiffRun[];
-  /** Only fields whose value differs, keyed by field id. */
-  fields: Record<string, FieldDiff>;
-  title_was: string;
-  title_now: string;
-  drift: SnapshotDrift;
 };

@@ -5,11 +5,19 @@
  * same state and the author drives both at once by design — left hand on the
  * letters, right hand on the arrows (ADR-0044 §I) — so the interesting cases are
  * the ones where a keypress lands while a fetch is still in flight.
+ *
+ * The content diff is computed in the browser now (#573): `park` fetches the
+ * frozen snapshot (`readSnapshot`) and the drift report (`snapshotDrift`) in
+ * parallel, and `diffRuns` / `fieldDiffs` — the *real* functions — turn the
+ * frozen body/metadata plus the live buffer into runs and the field flip. So
+ * these tests feed the two document sides and assert on what the real diff
+ * makes of them, rather than injecting canned runs.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import type { SnapshotDiff } from "@/lib/types";
+import type { SnapshotDetail, SnapshotDrift } from "@/lib/types";
 
-const diffSnapshot = vi.fn();
+const readSnapshot = vi.fn();
+const snapshotDrift = vi.fn();
 const listSnapshots = vi.fn();
 const pinSnapshot = vi.fn();
 const setSnapshotDescription = vi.fn();
@@ -18,7 +26,8 @@ const restoreSnapshot = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   api: {
-    diffSnapshot: (...args: unknown[]) => diffSnapshot(...args),
+    readSnapshot: (...args: unknown[]) => readSnapshot(...args),
+    snapshotDrift: (...args: unknown[]) => snapshotDrift(...args),
     listSnapshots: (...args: unknown[]) => listSnapshots(...args),
     pinSnapshot: (...args: unknown[]) => pinSnapshot(...args),
     setSnapshotDescription: (...args: unknown[]) => setSnapshotDescription(...args),
@@ -42,68 +51,84 @@ const SNAPSHOT = {
   schema_version: 5,
 };
 
-function diff(): SnapshotDiff {
-  return {
-    snapshot: SNAPSHOT,
-    runs: [
-      { kind: "equal", text: "The tide went out " },
-      { kind: "was", text: "further" },
-      { kind: "now", text: "much further" },
-      { kind: "equal", text: " than she had seen." },
-    ],
-    fields: { status: { was: "draft", now: "revised" } },
-    title_was: "The Tide",
-    title_now: "The Tide",
-    drift: { available: true, comparable: true, truncated: false, entities: [] },
-  };
+// The two document sides. A single-word replace, so the real `diffRuns` yields
+// four runs — equal / was / now / equal — with both a `was` and a `now` tint,
+// and adopting the one changed region reproduces whichever side was clicked.
+const WAS_BODY = "The tide went out further than she had ever seen.";
+const NOW_BODY = "The tide went out farther than she had ever seen.";
+
+/** The live buffer the diff's "now" side comes from. `status` differs from the
+ *  frozen "draft", so the field flip has exactly one row to show. */
+const LIVE = {
+  body: NOW_BODY,
+  title: "The Tide",
+  status: "revised",
+  metadata: {} as Record<string, unknown>,
+  dynamic_context: [] as string[],
+};
+
+/** The frozen snapshot `readSnapshot` returns — the "was" side. */
+function detail(): SnapshotDetail {
+  return { snapshot: SNAPSHOT, title: "The Tide", status: "draft", metadata: {}, body: WAS_BODY };
 }
+
+const NO_CHANGE: SnapshotDrift = {
+  available: true,
+  comparable: true,
+  truncated: false,
+  entities: [],
+};
 
 /** A drift report naming one changed entity — the shape ADR-0043 requires:
  *  entity, field, value-then, value-now. */
-function driftedDiff(): SnapshotDiff {
+function drifted(): SnapshotDrift {
   return {
-    ...diff(),
-    drift: {
-      available: true,
-      comparable: true,
-      truncated: false,
-      entities: [
-        {
-          entity_id: "lore_tom",
-          title: "Tom",
-          membership: "present",
-          sources: ["entity_ref"],
-          entry_changed: "yes",
-          fields: [
-            {
-              field_id: "eye_colour",
-              label: "Eye colour",
-              was: "green",
-              now: "blue",
-              from_mutation: false,
-            },
-          ],
-          reinterpreted: [],
-          layer_was: "",
-          layer_now: "",
-        },
-      ],
-    },
+    available: true,
+    comparable: true,
+    truncated: false,
+    entities: [
+      {
+        entity_id: "lore_tom",
+        title: "Tom",
+        membership: "present",
+        sources: ["entity_ref"],
+        entry_changed: "yes",
+        fields: [
+          {
+            field_id: "eye_colour",
+            label: "Eye colour",
+            was: "green",
+            now: "blue",
+            from_mutation: false,
+          },
+        ],
+        reinterpreted: [],
+        layer_was: "",
+        layer_now: "",
+      },
+    ],
   };
 }
 
-/** A controller with one snapshot loaded and the diff call resolved by `resolve`. */
-async function parked(resolve: () => Promise<SnapshotDiff>) {
+/** A controller with one snapshot loaded, `readSnapshot` resolved by `read`, and
+ *  the drift call resolving to `drift`. `readLive` is wired to the live buffer. */
+async function parked(
+  read: () => Promise<SnapshotDetail>,
+  drift: SnapshotDrift = NO_CHANGE,
+) {
   listSnapshots.mockResolvedValue({ snapshots: [SNAPSHOT] });
-  diffSnapshot.mockImplementation(resolve);
+  readSnapshot.mockImplementation(read);
+  snapshotDrift.mockResolvedValue(drift);
   const strip = new SnapshotStripController();
+  strip.readLive = () => LIVE;
   strip.load("scene_1");
   await vi.waitFor(() => expect(strip.snapshots.length).toBe(1));
   return strip;
 }
 
 beforeEach(() => {
-  diffSnapshot.mockReset();
+  readSnapshot.mockReset();
+  snapshotDrift.mockReset();
   listSnapshots.mockReset();
   pinSnapshot.mockReset();
   setSnapshotDescription.mockReset();
@@ -133,8 +158,10 @@ describe("the order the strip holds", () => {
     const older = { ...SNAPSHOT, id: "older", captured_at: "2026-07-22T09:00:00.000000+00:00", content_written_at: "2026-07-22T08:00:00.000000+00:00" };
     const newer = { ...SNAPSHOT, id: "newer", captured_at: "2026-07-22T10:00:00.000000+00:00", content_written_at: "2026-07-01T08:00:00.000000+00:00" };
     listSnapshots.mockResolvedValue({ snapshots: [older, newer] });
-    diffSnapshot.mockImplementation(async () => diff());
+    readSnapshot.mockImplementation(async () => detail());
+    snapshotDrift.mockResolvedValue(NO_CHANGE);
     const strip = new SnapshotStripController();
+    strip.readLive = () => LIVE;
     strip.load("scene_1");
     await vi.waitFor(() => expect(strip.snapshots.length).toBe(2));
     strip.step(-1);
@@ -143,8 +170,8 @@ describe("the order the strip holds", () => {
 });
 
 describe("parking", () => {
-  it("keeps the runs and the field pairs from the one call", async () => {
-    const strip = await parked(async () => diff());
+  it("computes the runs and the field flip from the frozen side and the buffer", async () => {
+    const strip = await parked(async () => detail());
     await strip.park("snap_1");
     expect(strip.runs.length).toBe(4);
     expect(strip.fields.status).toEqual({ was: "draft", now: "revised" });
@@ -163,15 +190,15 @@ describe("parking", () => {
 });
 
 /**
- * The drift report rides on the diff payload (ADR-0043, #439). These pin the
- * controller's half of that: it carries what the backend said, and it decides
- * whether there is anything to show — never whether a restore may proceed.
+ * The drift report rides on its own slim call now (#583), but the controller's
+ * half is unchanged: it carries what the backend said, and it decides whether
+ * there is anything to show — never whether a restore may proceed.
  */
 describe("drift", () => {
-  it("carries the report from the same call as the runs", async () => {
-    const strip = await parked(async () => driftedDiff());
+  it("carries the report from its own call, in parallel with the content diff", async () => {
+    const strip = await parked(async () => detail(), drifted());
     await strip.park("snap_1");
-    expect(diffSnapshot.mock.calls.length).toBe(1);
+    expect(snapshotDrift.mock.calls.length).toBe(1);
     expect(strip.drift.entities[0].title).toBe("Tom");
     // Ordered, so swapping value-then with value-now turns this red.
     expect(strip.drift.entities[0].fields[0].was).toBe("green");
@@ -179,14 +206,31 @@ describe("drift", () => {
     expect(strip.hasDriftToReport).toBe(true);
   });
 
+  it("a failed drift call surfaces as 'couldn't compare', without dropping the snapshot", async () => {
+    // Drift is advisory (ADR-0043): a snapshot the author can read must not
+    // vanish because the world-comparison could not be built. But a failed fetch
+    // is NOT evidence of an unchanged world, so it degrades to comparable:false
+    // (surfaced) — never to a silent all-clear. The reject is set AFTER `parked`,
+    // which itself stubs `snapshotDrift` to resolve; setting it before would be
+    // overwritten and the `.catch` path would never run.
+    const strip = await parked(async () => detail());
+    snapshotDrift.mockReset();
+    snapshotDrift.mockRejectedValue(new Error("witness build failed"));
+    await strip.park("snap_1");
+    expect(strip.parked).toBe("snap_1");
+    expect(strip.bodyHtml).toContain("r-was");
+    expect(strip.drift.comparable).toBe(false);
+    expect(strip.hasDriftToReport).toBe(true);
+  });
+
   it("says nothing when nothing changed underneath", async () => {
-    const strip = await parked(async () => diff());
+    const strip = await parked(async () => detail());
     await strip.park("snap_1");
     expect(strip.hasDriftToReport).toBe(false);
   });
 
   it("says nothing at Live — drift is a claim about a snapshot", async () => {
-    const strip = await parked(async () => driftedDiff());
+    const strip = await parked(async () => detail(), drifted());
     await strip.park("snap_1");
     await strip.park(null);
     expect(strip.hasDriftToReport).toBe(false);
@@ -194,19 +238,23 @@ describe("drift", () => {
   });
 
   it("surfaces an uncomparable witness rather than reading it as unchanged", async () => {
-    const strip = await parked(async () => ({
-      ...diff(),
-      drift: { available: true, comparable: false, truncated: false, entities: [] },
-    }));
+    const strip = await parked(async () => detail(), {
+      available: true,
+      comparable: false,
+      truncated: false,
+      entities: [],
+    });
     await strip.park("snap_1");
     expect(strip.hasDriftToReport).toBe(true);
   });
 
   it("stays silent for a snapshot taken before witnesses existed", async () => {
-    const strip = await parked(async () => ({
-      ...diff(),
-      drift: { available: false, comparable: true, truncated: false, entities: [] },
-    }));
+    const strip = await parked(async () => detail(), {
+      available: false,
+      comparable: true,
+      truncated: false,
+      entities: [],
+    });
     await strip.park("snap_1");
     expect(strip.hasDriftToReport).toBe(false);
   });
@@ -215,10 +263,12 @@ describe("drift", () => {
     // Gating on `entities.length` alone made this state unrenderable, so the
     // author read silence as "nothing else changed" — the one inference a
     // truncated witness must never allow.
-    const strip = await parked(async () => ({
-      ...diff(),
-      drift: { available: true, comparable: true, truncated: true, entities: [] },
-    }));
+    const strip = await parked(async () => detail(), {
+      available: true,
+      comparable: true,
+      truncated: true,
+      entities: [],
+    });
     await strip.park("snap_1");
     expect(strip.hasDriftToReport).toBe(true);
   });
@@ -226,9 +276,9 @@ describe("drift", () => {
 
 describe("flipping", () => {
   it("filters the same payload instead of refetching", async () => {
-    const strip = await parked(async () => diff());
+    const strip = await parked(async () => detail());
     await strip.park("snap_1");
-    const calls = diffSnapshot.mock.calls.length;
+    const reads = readSnapshot.mock.calls.length;
 
     strip.setView("was");
     await vi.waitFor(() => expect(strip.bodyHtml).not.toContain("r-now"));
@@ -238,12 +288,12 @@ describe("flipping", () => {
     await vi.waitFor(() => expect(strip.bodyHtml).not.toContain("r-was"));
     expect(strip.bodyHtml).toContain("r-now");
 
-    // One payload serves all three states (§G).
-    expect(diffSnapshot.mock.calls.length).toBe(calls);
+    // One payload serves all three states (§G) — a flip never refetches.
+    expect(readSnapshot.mock.calls.length).toBe(reads);
   });
 
   it("A and S toggle against Both; B returns from either", async () => {
-    const strip = await parked(async () => diff());
+    const strip = await parked(async () => detail());
     await strip.park("snap_1");
     strip.toggleView("now");
     expect(strip.view).toBe("now");
@@ -256,7 +306,7 @@ describe("flipping", () => {
   });
 
   it("the compare state survives stepping between notches", async () => {
-    const strip = await parked(async () => diff());
+    const strip = await parked(async () => detail());
     await strip.park("snap_1");
     strip.setView("was");
     await strip.park(null);
@@ -271,9 +321,9 @@ describe("entering compare mode", () => {
   // stepping notch to notch, the PREVIOUS snapshot's body under the new one's
   // timestamp. The swap now happens once, with the payload in hand.
   it("stays where the author was until the payload is rendered", async () => {
-    let release: (value: SnapshotDiff) => void = () => {};
+    let release: (value: SnapshotDetail) => void = () => {};
     const strip = await parked(
-      () => new Promise<SnapshotDiff>((resolve) => (release = resolve)),
+      () => new Promise<SnapshotDetail>((resolve) => (release = resolve)),
     );
 
     const parking = strip.park("snap_1");
@@ -284,7 +334,7 @@ describe("entering compare mode", () => {
     // ...but the strip knows which notch is being fetched.
     expect(strip.pendingId).toBe("snap_1");
 
-    release(diff());
+    release(detail());
     await parking;
 
     expect(strip.parked).toBe("snap_1");
@@ -294,9 +344,9 @@ describe("entering compare mode", () => {
   });
 
   it("a failed park leaves the author where they were", async () => {
-    const strip = await parked(async () => diff());
+    const strip = await parked(async () => detail());
     await strip.park("snap_1");
-    diffSnapshot.mockImplementation(async () => {
+    readSnapshot.mockImplementation(async () => {
       throw new Error("gone");
     });
     await strip.park("snap_1");
@@ -310,9 +360,9 @@ describe("entering compare mode", () => {
   it("only admits it is working once the wait is worth mentioning", async () => {
     vi.useFakeTimers();
     try {
-      let release: (value: SnapshotDiff) => void = () => {};
+      let release: (value: SnapshotDetail) => void = () => {};
       const strip = await parked(
-        () => new Promise<SnapshotDiff>((resolve) => (release = resolve)),
+        () => new Promise<SnapshotDetail>((resolve) => (release = resolve)),
       );
       const parking = strip.park("snap_1");
       expect(strip.slow, "flagged a wait nobody would notice").toBe(false);
@@ -320,7 +370,7 @@ describe("entering compare mode", () => {
       expect(strip.slow).toBe(false);
       vi.advanceTimersByTime(200);
       expect(strip.slow, "never admitted to a long wait").toBe(true);
-      release(diff());
+      release(detail());
       await parking;
       expect(strip.slow, "left the cursor spinning after it finished").toBe(false);
     } finally {
@@ -336,14 +386,14 @@ describe("a keypress landing while the diff is still in flight", () => {
   // response came back, and was left on a notch with an empty overlay and no
   // runs to flip — recoverable only by parking again.
   it("does not discard the payload the flip is about to render", async () => {
-    let release: (value: SnapshotDiff) => void = () => {};
+    let release: (value: SnapshotDetail) => void = () => {};
     const strip = await parked(
-      () => new Promise<SnapshotDiff>((resolve) => (release = resolve)),
+      () => new Promise<SnapshotDetail>((resolve) => (release = resolve)),
     );
 
     const parking = strip.park("snap_1");
     strip.setView("was"); // the author is quicker than the network
-    release(diff());
+    release(detail());
     await parking;
 
     expect(strip.runs.length, "the runs were thrown away").toBe(4);
@@ -360,14 +410,14 @@ describe("a keypress landing while the diff is still in flight", () => {
     // response landed afterwards and put everything back while parked was
     // null. The next notch then rendered this snapshot's body and field pairs
     // under its own timestamp until its own fetch returned.
-    let release: (value: SnapshotDiff) => void = () => {};
+    let release: (value: SnapshotDetail) => void = () => {};
     const strip = await parked(
-      () => new Promise<SnapshotDiff>((resolve) => (release = resolve)),
+      () => new Promise<SnapshotDetail>((resolve) => (release = resolve)),
     );
 
     const parking = strip.park("snap_1");
-    await strip.park(null); // Esc, before the POST comes back
-    release(diff());
+    await strip.park(null); // Esc, before the read comes back
+    release(detail());
     await parking;
 
     expect(strip.parked).toBe(null);
@@ -380,7 +430,7 @@ describe("a keypress landing while the diff is still in flight", () => {
   it("returning to Live cancels a render that was still on its way", async () => {
     // The same hole on the other axis: `setView` starts an unawaited render,
     // and clearing without bumping let it paint the snapshot's body at Live.
-    const strip = await parked(async () => diff());
+    const strip = await parked(async () => detail());
     await strip.park("snap_1");
     strip.setView("was"); // render starts, unawaited
     await strip.park(null);
@@ -390,16 +440,17 @@ describe("a keypress landing while the diff is still in flight", () => {
   });
 
   it("a slow read for a notch already left cannot overwrite the current one", async () => {
-    const releases: ((value: SnapshotDiff) => void)[] = [];
+    const releases: ((value: SnapshotDetail) => void)[] = [];
     const strip = await parked(
-      () => new Promise<SnapshotDiff>((resolve) => releases.push(resolve)),
+      () => new Promise<SnapshotDetail>((resolve) => releases.push(resolve)),
     );
 
     const first = strip.park("snap_1");
     const second = strip.park("snap_1");
-    // The first read comes back last, and must lose.
-    releases[1]({ ...diff(), title_now: "second" });
-    releases[0]({ ...diff(), title_now: "first", runs: [{ kind: "equal", text: "STALE" }] });
+    // The first read comes back last, and must lose — even though its body
+    // carries the word STALE, the current render is the second read's.
+    releases[1](detail());
+    releases[0]({ ...detail(), body: "STALE and nothing else here." });
     await Promise.all([first, second]);
 
     expect(strip.bodyHtml).not.toContain("STALE");
@@ -413,7 +464,7 @@ describe("a keypress landing while the diff is still in flight", () => {
  */
 describe("author gestures", () => {
   it("pin promotes the parked snapshot and re-lists", async () => {
-    const strip = await parked(async () => diff());
+    const strip = await parked(async () => detail());
     await strip.park("snap_1");
     pinSnapshot.mockResolvedValue({ ...SNAPSHOT, retention: "kept" });
     listSnapshots.mockResolvedValue({ snapshots: [{ ...SNAPSHOT, retention: "kept" }] });
@@ -424,7 +475,7 @@ describe("author gestures", () => {
   });
 
   it("describe sends the trimmed text", async () => {
-    const strip = await parked(async () => diff());
+    const strip = await parked(async () => detail());
     await strip.park("snap_1");
     setSnapshotDescription.mockResolvedValue({ ...SNAPSHOT, description: "A note" });
     listSnapshots.mockResolvedValue({ snapshots: [{ ...SNAPSHOT, description: "A note" }] });
@@ -439,8 +490,10 @@ describe("author gestures", () => {
     // with the whole suite still green.
     const described = { ...SNAPSHOT, description: "A note" };
     listSnapshots.mockResolvedValue({ snapshots: [described] });
-    diffSnapshot.mockImplementation(async () => diff());
+    readSnapshot.mockImplementation(async () => detail());
+    snapshotDrift.mockResolvedValue(NO_CHANGE);
     const strip = new SnapshotStripController();
+    strip.readLive = () => LIVE;
     strip.load("scene_1");
     await vi.waitFor(() => expect(strip.snapshots.length).toBe(1));
     await strip.park("snap_1");
@@ -457,8 +510,10 @@ describe("author gestures", () => {
   it("clearing a description is a real change, not a no-op", async () => {
     const described = { ...SNAPSHOT, description: "A note" };
     listSnapshots.mockResolvedValue({ snapshots: [described] });
-    diffSnapshot.mockImplementation(async () => diff());
+    readSnapshot.mockImplementation(async () => detail());
+    snapshotDrift.mockResolvedValue(NO_CHANGE);
     const strip = new SnapshotStripController();
+    strip.readLive = () => LIVE;
     strip.load("scene_1");
     await vi.waitFor(() => expect(strip.snapshots.length).toBe(1));
     await strip.park("snap_1");
@@ -469,7 +524,7 @@ describe("author gestures", () => {
   });
 
   it("delete asks first — the modal opens and nothing is deleted until it resolves", async () => {
-    const strip = await parked(async () => diff());
+    const strip = await parked(async () => detail());
     await strip.park("snap_1");
     deleteSnapshot.mockResolvedValue({ snapshots: [] });
     listSnapshots.mockResolvedValue({ snapshots: [] });
@@ -487,7 +542,7 @@ describe("author gestures", () => {
   });
 
   it("restore does not ask — it captured first, so there is nothing to confirm", async () => {
-    const strip = await parked(async () => diff());
+    const strip = await parked(async () => detail());
     await strip.park("snap_1");
     restoreSnapshot.mockResolvedValue({ id: "scene_1", title: "The Tide", body: "back" });
     listSnapshots.mockResolvedValue({ snapshots: [SNAPSHOT] });
@@ -506,25 +561,25 @@ describe("author gestures", () => {
  */
 describe("adopting a region", () => {
   it("restores the snapshot side into the buffer, and does not re-diff", async () => {
-    const strip = await parked(async () => diff());
+    const strip = await parked(async () => detail());
     await strip.park("snap_1");
     const adopted: string[] = [];
     strip.onAdopt = (body) => {
       adopted.push(body);
     };
-    diffSnapshot.mockClear();
+    readSnapshot.mockClear();
 
     await strip.adopt(0, "was");
 
-    expect(adopted).toEqual(["The tide went out further than she had seen."]);
+    expect(adopted).toEqual([WAS_BODY]);
     // The region is resolved and the payload was re-projected in hand — no
     // round trip, so a region settled earlier cannot resurface.
     expect(strip.runs.every((run) => run.kind === "equal")).toBe(true);
-    expect(diffSnapshot).not.toHaveBeenCalled();
+    expect(readSnapshot).not.toHaveBeenCalled();
   });
 
   it("keeps the current wording without writing the document", async () => {
-    const strip = await parked(async () => diff());
+    const strip = await parked(async () => detail());
     await strip.park("snap_1");
     const adopted: string[] = [];
     strip.onAdopt = (body) => {
@@ -534,13 +589,11 @@ describe("adopting a region", () => {
     await strip.adopt(0, "now");
 
     expect(adopted).toEqual([]);
-    expect(strip.runs.map((run) => run.text).join("")).toBe(
-      "The tide went out much further than she had seen.",
-    );
+    expect(strip.runs.map((run) => run.text).join("")).toBe(NOW_BODY);
   });
 
   it("does nothing when not parked", async () => {
-    const strip = await parked(async () => diff());
+    const strip = await parked(async () => detail());
     const adopted: string[] = [];
     strip.onAdopt = (body) => {
       adopted.push(body);

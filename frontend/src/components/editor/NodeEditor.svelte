@@ -411,14 +411,23 @@
     loreReview.documentKind = documentKind;
     loreReview.sceneId = scene?.id ?? null;
     loreReview.schema = metadataSchema;
-    loreReview.metadata = metadata;
+    // `title`/`status` live off `metadata` in their own shell state, but a patch
+    // can flip them (a rename / a status change), so fold them into the metadata
+    // view the controller diffs against — else their flip's "current" side reads
+    // as unset. Adoption routes them back out (onAdoptFields below).
+    loreReview.metadata = { ...metadata, title, status };
   });
   loreReview.onAdoptFields = (fields) => {
-    // `status` is a proposable select but stored off `metadata` (edited via
-    // `onStatusChange`), so route an adopted status flip to the status state and
-    // keep it out of the metadata merge — else the merge would set a phantom
-    // `metadata.status` the save path ignores. emitChange (below) packages both.
+    // `title`/`status` are proposable but stored off `metadata` (saved via the
+    // top-level payload fields, and the backend applies a rename on post), so
+    // route an adopted flip to the matching shell state and keep it out of the
+    // metadata merge — else the merge would set a phantom key the save ignores.
+    // emitChange (below) packages title + status + metadata into the one PUT.
     const next = { ...fields };
+    if ("title" in next) {
+      title = String(next.title ?? "");
+      delete next.title;
+    }
     if ("status" in next) {
       status = String(next.status ?? "");
       delete next.status;

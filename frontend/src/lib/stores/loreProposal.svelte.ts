@@ -51,6 +51,13 @@ const NON_STRUCTURED_TYPES: ReadonlySet<MetadataFieldType> = new Set<MetadataFie
   "entity_ref_list",
 ]);
 
+// Structural identity fields that can never flip: `id` (opaque) and `entry_type`
+// (retyping is a different gesture). Mirrors the backend's non-proposable ids so
+// a stray one can't render. Note `title` is NOT here — an AI-proposed rename IS
+// adoptable; it rides the flip like any other field and the backend applies the
+// rename on save, so `title` flips and routes through the host's title state.
+const NON_FLIPPABLE_FIELD_IDS: ReadonlySet<string> = new Set(["id", "entry_type"]);
+
 export class LoreProposalController {
   // Fed by the host each render — the derivations below track these.
   documentKind = $state<DocumentKind>("scene");
@@ -103,11 +110,14 @@ export class LoreProposalController {
   });
 
   /** The structured (non-prose) fields the patch proposes, each an atomic flip
-   *  reviewed in the frozen rail (slice 3b). `long_text` (run-diff, above), the
-   *  body (separate), and the non-proposable types are excluded; intrinsic
-   *  identity fields (`id`/`title`/`entry_type`) never flip — they are stored off
-   *  `metadata` and the rail skips them anyway, so a stray one would be
-   *  unadoptable. `now` reads the frozen `metadata`, so the diff cannot drift. */
+   *  reviewed in the frozen rail (slice 3b). Excluded: `long_text` (run-diff,
+   *  above) and the body (separate); the non-proposable value types; the
+   *  structural `id`/`entry_type`; and `hidden` fields — the backend already
+   *  neither offers nor accepts a hidden field, and the rail can't render one, so
+   *  a stray proposal for one is simply ignored. `title` DOES flip — an adopted
+   *  rename rides through like any field (§host routes it to the title state).
+   *  `now` reads the frozen `metadata` (fed title/status too), so the diff can't
+   *  drift. */
   structuredFlips = $derived.by((): StructuredFlip[] => {
     const proposal = this.proposal;
     const schema = this.schema;
@@ -115,7 +125,8 @@ export class LoreProposalController {
     const flips: StructuredFlip[] = [];
     for (const [fieldId, proposedValue] of Object.entries(proposal.fields)) {
       const field = schema.fields[fieldId];
-      if (!field || field.intrinsic || NON_STRUCTURED_TYPES.has(field.type)) continue;
+      if (!field || field.hidden || NON_FLIPPABLE_FIELD_IDS.has(fieldId)) continue;
+      if (NON_STRUCTURED_TYPES.has(field.type)) continue;
       flips.push({ fieldId, was: proposedValue, now: this.metadata[fieldId] ?? null });
     }
     return flips;

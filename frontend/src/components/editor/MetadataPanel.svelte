@@ -351,7 +351,11 @@
            via dedicated rail controls (the type select above, the shell title
            header) and stored off `metadata`, so skip them in the generic
            value-editor loop — otherwise they'd render as empty rows. -->
-      {#if metadataSchema.fields[fieldId] && !metadataSchema.fields[fieldId].intrinsic && !effectiveFieldHidden(metadataSchema, entryType, fieldId)}
+      <!-- Intrinsic identity fields (id/title/entry_type) get dedicated controls
+           and are normally skipped here — EXCEPT when one is an active proposal
+           flip (a `title` rename, ADR-0046 3b): then it renders as a rail flip so
+           the author can adopt it, and adoption routes back to the shell state. -->
+      {#if metadataSchema.fields[fieldId] && (!metadataSchema.fields[fieldId].intrinsic || isFlipResolve(fieldId)) && !effectiveFieldHidden(metadataSchema, entryType, fieldId)}
         {@const field = metadataSchema.fields[fieldId]}
         {@const fieldLabel = effectiveFieldLabel(metadataSchema, entryType, fieldId)}
         <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field)} class:inherited={isInherited(fieldId)} class:layer-inherited={isLayerInherited(fieldId)} class:mutated={isMutated(fieldId)} class:overridden={isOverridden(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && (compare?.resolve ? !isFlipAdopted(fieldId) : compare?.side === "was")}>

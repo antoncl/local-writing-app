@@ -15,8 +15,9 @@ import type { EntryPatch, MetadataSchema } from "@/lib/types";
 // write on abandon, reset on a superseded proposal).
 
 // Minimal schema spanning the dispatch: a long_text (prose run-diff), several
-// structured types (atomic flip), and each exclusion (computed / entity_ref /
-// intrinsic). Cast — the controller only reads `.fields[id].type/name/intrinsic`.
+// structured types (atomic flip), the adoptable intrinsic `title`, and each
+// exclusion (computed / entity_ref / hidden / structural id+entry_type). Cast —
+// the controller only reads `.fields[id].type/name/hidden`.
 const schema = {
   entry_types: {},
   fields: {
@@ -26,6 +27,9 @@ const schema = {
     aliases: { name: "Aliases", type: "tags", options: [] },
     status: { name: "Status", type: "select", options: [] },
     title: { name: "Title", type: "text", intrinsic: true, options: [] },
+    secret: { name: "Secret", type: "text", hidden: true, options: [] },
+    entry_type: { name: "Type", type: "text", intrinsic: true, options: [] },
+    id: { name: "ID", type: "text", intrinsic: true, hidden: true, options: [] },
     mentor: { name: "Mentor", type: "entity_ref", options: [] },
     score: { name: "Score", type: "computed", options: [] },
   },
@@ -242,15 +246,34 @@ describe("LoreProposalController — structured field flips (slice 3b)", () => {
     ]);
   });
 
-  it("excludes body/long_text, computed, entity_ref, intrinsic, and unknown fields", () => {
+  it("excludes body/long_text, computed, entity_ref, hidden, id/entry_type, and unknown", () => {
     const c = loreController("e1");
     loreBrainstorm.propose(
       "e1",
-      patch("a body", { bio: "prose", score: 9, mentor: "id-1", title: "T", nonesuch: "x", allegiance: "Crown" }),
+      patch("a body", {
+        bio: "prose",
+        score: 9,
+        mentor: "id-1",
+        secret: "leak",
+        id: "x1",
+        entry_type: "villain",
+        nonesuch: "x",
+        allegiance: "Crown",
+      }),
     );
-    // Only the one real structured field survives; long_text stays in `fields`.
+    // Only the real structured field survives; long_text stays in `fields`.
     expect(c.structuredFlips.map((f) => f.fieldId)).toEqual(["allegiance"]);
     expect(c.fields.map((f) => f.fieldId)).toEqual(["bio"]);
+  });
+
+  it("flips an AI-proposed title rename (intrinsic but adoptable), now=current", () => {
+    const c = loreController("e1");
+    // The host folds title/status into the metadata view, so the flip's `now`
+    // reads the entry's real title even though title lives off `metadata`.
+    c.metadata = { title: "Old Name" };
+    loreBrainstorm.propose("e1", patch(null, { title: "New Name" }));
+    expect(c.structuredFlips).toEqual([{ fieldId: "title", was: "New Name", now: "Old Name" }]);
+    expect(c.hasReview).toBe(true);
   });
 
   it("structuredCompareFields mirrors the flips as MetadataPanel's {was,now} map", () => {
@@ -326,6 +349,32 @@ describe("LoreProposalController — structured field flips (slice 3b)", () => {
     expect(onAdoptFields).toHaveBeenCalledTimes(1);
     expect(onAdoptFields).toHaveBeenCalledWith({ bio: "new bio", allegiance: "Crown" });
     expect(onFlush).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads the current side of off-metadata fields (status) from the fed view", () => {
+    const c = loreController("e1");
+    // NodeEditor feeds `{ ...metadata, title, status }`; a status flip's `now`
+    // must reflect that, not read as unset (the bug the review caught).
+    c.metadata = { status: "draft" };
+    loreBrainstorm.propose("e1", patch(null, { status: "published" }));
+    expect(c.structuredFlips).toEqual([{ fieldId: "status", was: "published", now: "draft" }]);
+  });
+
+  it("commit folds an adopted title/status into the fields patch (host routes them out)", async () => {
+    const c = loreController("e1");
+    const onAdoptFields = vi.fn();
+    c.onAdoptFields = onAdoptFields;
+    c.onEmitChange = vi.fn();
+    c.onFlush = vi.fn();
+    c.metadata = { title: "Old", status: "draft" };
+    loreBrainstorm.propose("e1", patch(null, { title: "New", status: "published" }));
+
+    c.toggleStructured("title");
+    c.toggleStructured("status");
+    await c.commit();
+    // The controller just passes them through; NodeEditor's onAdoptFields routes
+    // title/status to their shell state so the save's rename/status apply.
+    expect(onAdoptFields).toHaveBeenCalledWith({ title: "New", status: "published" });
   });
 
   it("resetResolution clears structured adoptions so a superseded proposal is clean", () => {

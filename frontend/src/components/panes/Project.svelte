@@ -111,8 +111,9 @@
   <section class="project-inheritance" aria-label="Inheritance and AI access">
     <h3>Inheritance</h3>
     {#if inheritRows.length > 0}
-      <span class="field-label">Inherits from</span>
-      <NodeList isEmpty={false}>
+      <div class="inherit-block" role="group" aria-labelledby="project-inherits-label">
+        <span class="field-label" id="project-inherits-label">Inherits from</span>
+        <NodeList isEmpty={false}>
         {#each inheritRows as row (row.path)}
           <!--
             `clickable={false}`: the checkbox IS the gesture, so the title must
@@ -155,7 +156,8 @@
             {/snippet}
           </NodeRow>
         {/each}
-      </NodeList>
+        </NodeList>
+      </div>
     {/if}
 
     <fieldset class="ai-policy">
@@ -347,6 +349,11 @@
     color: var(--text);
     letter-spacing: 0.04em;
     text-transform: uppercase;
+  }
+
+  .inherit-block {
+    display: grid;
+    gap: 6px;
   }
 
   /* Sub-label for the ancestor declarations inside the Inheritance block. */

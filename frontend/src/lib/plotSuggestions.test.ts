@@ -7,10 +7,13 @@ import {
   canApplyPlotSuggestionClaimNote,
   canCreatePlotSuggestionCard,
   canCreatePlotSuggestionBadge,
+  canCopyPlotSuggestionQuestion,
   parsePlotSuggestions,
   plotSuggestionBeatClipboardText,
   plotSuggestionClipboardText,
   plotSuggestionKindLabel,
+  plotSuggestionQuestionClipboardText,
+  plotSuggestionTargets,
   stripPlotSuggestions,
 } from "./plotSuggestions";
 
@@ -193,12 +196,105 @@ describe("plotSuggestionBeatClipboardText", () => {
   });
 });
 
+describe("plotSuggestionQuestionClipboardText", () => {
+  it("formats a decision prompt with target context", () => {
+    expect(plotSuggestionQuestionClipboardText({
+      kind: "question",
+      target_card_id: "card_archive",
+      target_claim_id: "",
+      template_instance_id: "plot_main",
+      plot_point_id: "first_turn",
+      title: "Choose the cost",
+      reason: "The turn needs an immediate consequence.",
+      proposed_change: "Decide who notices the theft first.",
+      evidence_to_add: "",
+      story_specifics: "",
+      author_intent: "",
+      expected_role: "",
+      open_questions: ["Who witnesses Mara?", "What can she no longer undo?"],
+      status: "",
+    })).toBe([
+      "Choose the cost",
+      "Decision: Decide who notices the theft first.",
+      "Question: Who witnesses Mara?",
+      "Question: What can she no longer undo?",
+      "Why it matters: The turn needs an immediate consequence.",
+      "Card: card_archive",
+      "Template: plot_main",
+      "Beat: first_turn",
+    ].join("\n"));
+  });
+});
+
+describe("plotSuggestionTargets", () => {
+  it("labels target ids before presenting them", () => {
+    expect(plotSuggestionTargets({
+      kind: "claim_change",
+      target_card_id: "card_archive",
+      target_claim_id: "claim_first_turn",
+      template_instance_id: "plot_main",
+      plot_point_id: "first_turn",
+      title: "",
+      reason: "",
+      proposed_change: "",
+      evidence_to_add: "",
+      story_specifics: "",
+      author_intent: "",
+      expected_role: "",
+      open_questions: [],
+      status: "",
+    })).toEqual([
+      { label: "Card", value: "card_archive" },
+      { label: "Marker", value: "claim_first_turn" },
+      { label: "Template", value: "plot_main" },
+      { label: "Beat", value: "first_turn" },
+    ]);
+  });
+});
+
 describe("plotSuggestionKindLabel", () => {
   it("maps internal suggestion kinds to writer-facing labels", () => {
     expect(plotSuggestionKindLabel("claim_change")).toBe("Story marker change");
     expect(plotSuggestionKindLabel("new_claim")).toBe("New story marker");
     expect(plotSuggestionKindLabel("beat_revision")).toBe("Story beat change");
     expect(plotSuggestionKindLabel("unknown")).toBe("Suggestion");
+  });
+});
+
+describe("canCopyPlotSuggestionQuestion", () => {
+  it("only enables the dedicated copy action for concrete question suggestions", () => {
+    expect(canCopyPlotSuggestionQuestion({
+      kind: "question",
+      target_card_id: "",
+      target_claim_id: "",
+      template_instance_id: "",
+      plot_point_id: "",
+      title: "",
+      reason: "",
+      proposed_change: "",
+      evidence_to_add: "",
+      story_specifics: "",
+      author_intent: "",
+      expected_role: "",
+      open_questions: ["What has to be decided?"],
+      status: "",
+    })).toBe(true);
+    expect(canCopyPlotSuggestionQuestion({
+      kind: "card_revision",
+      target_card_id: "card_archive",
+      target_claim_id: "",
+      template_instance_id: "",
+      plot_point_id: "",
+      title: "Change the card",
+      reason: "",
+      proposed_change: "A replacement synopsis.",
+      evidence_to_add: "",
+      story_specifics: "",
+      author_intent: "",
+      expected_role: "",
+      open_questions: [],
+      status: "",
+    })).toBe(false);
   });
 });
 

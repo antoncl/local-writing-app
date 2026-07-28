@@ -33,6 +33,11 @@ export type PlotSuggestion = {
   status: PlotSuggestionBeatStatus | "";
 };
 
+export type PlotSuggestionTarget = {
+  label: string;
+  value: string;
+};
+
 const PLACEHOLDER_FRAGMENTS = [
   "short label",
   "why this concrete change",
@@ -104,6 +109,26 @@ export function plotSuggestionBeatClipboardText(suggestion: PlotSuggestion): str
     suggestion.plot_point_id ? `Story beat: ${suggestion.plot_point_id}` : "",
   ];
   return lines.filter(Boolean).join("\n");
+}
+
+export function plotSuggestionQuestionClipboardText(suggestion: PlotSuggestion): string {
+  const lines = [
+    suggestion.title,
+    suggestion.proposed_change ? `Decision: ${suggestion.proposed_change}` : "",
+    ...suggestion.open_questions.map((question) => `Question: ${question}`),
+    suggestion.reason ? `Why it matters: ${suggestion.reason}` : "",
+    ...plotSuggestionTargets(suggestion).map((target) => `${target.label}: ${target.value}`),
+  ];
+  return lines.filter(Boolean).join("\n");
+}
+
+export function plotSuggestionTargets(suggestion: PlotSuggestion): PlotSuggestionTarget[] {
+  return [
+    suggestion.target_card_id ? { label: "Card", value: suggestion.target_card_id } : null,
+    suggestion.target_claim_id ? { label: "Marker", value: suggestion.target_claim_id } : null,
+    suggestion.template_instance_id ? { label: "Template", value: suggestion.template_instance_id } : null,
+    suggestion.plot_point_id ? { label: "Beat", value: suggestion.plot_point_id } : null,
+  ].filter((target): target is PlotSuggestionTarget => Boolean(target));
 }
 
 export function plotSuggestionKindLabel(kind: PlotSuggestionKind): string {
@@ -195,6 +220,18 @@ export function canCreatePlotSuggestionCard(suggestion: PlotSuggestion): boolean
     Boolean(suggestion.title.trim()) &&
     Boolean(suggestion.proposed_change.trim()) &&
     hasTemplateInstance === hasPlotPoint
+  );
+}
+
+export function canCopyPlotSuggestionQuestion(suggestion: PlotSuggestion): boolean {
+  return (
+    suggestion.kind === "question" &&
+    Boolean(
+      suggestion.title.trim() ||
+        suggestion.reason.trim() ||
+        suggestion.proposed_change.trim() ||
+        suggestion.open_questions.length > 0,
+    )
   );
 }
 

@@ -35,6 +35,9 @@ class BuiltinPromptEntriesTests(unittest.TestCase):
         self.assertIn("<plot_suggestions>", brainstorm.body)
         self.assertIn("<plot_review", audit.body)
         self.assertIn("<plot_suggestions>", audit.body)
+        self.assertNotIn("relationship_change", brainstorm.body)
+        self.assertNotIn("scene_promotion", brainstorm.body)
+        self.assertIn("For beat_revision or question", brainstorm.body)
 
         read_back = self.service.read_prompt_entry("prompt_builtin_plot_brainstorm")
         self.assertTrue(read_back.system)

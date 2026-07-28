@@ -139,6 +139,38 @@ class MetadataValidationTests(unittest.TestCase):
             )
         self.assertIn("must match", str(ctx.exception))
 
+    def test_upsert_entry_type_accepts_nested_fqn(self) -> None:
+        # #600: the key may nest (`kind:seg:seg…`). The extra colon is a pure
+        # naming separator with no tie to the parent chain — so a nested id is
+        # legal even when its parent is not the id with the last segment removed.
+        layer_id = self.service._metadata_schema_layer_id(self.root)
+        schema = self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=layer_id,
+                entry_type_id="lore:character:villain",
+                entry_type=EntryTypeDefinition(name="Villain", kind="lore", parent="lore:base"),
+                allow_existing=False,
+            )
+        )
+        self.assertIn("lore:character:villain", schema.entry_types)
+        self.assertEqual(schema.entry_types["lore:character:villain"].kind, "lore")
+        self.assertEqual(schema.entry_types["lore:character:villain"].parent, "lore:base")
+
+    def test_upsert_entry_type_rejects_nested_fqn_with_wrong_kind(self) -> None:
+        # The kind is the FIRST segment, and it must still match the declared
+        # kind — a nested id does not weaken the cross-kind guard.
+        layer_id = self.service._metadata_schema_layer_id(self.root)
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.upsert_metadata_entry_type(
+                UpsertMetadataEntryTypeRequest(
+                    layer_id=layer_id,
+                    entry_type_id="prompt:revise:scene",
+                    entry_type=EntryTypeDefinition(name="Revise Scene", kind="lore", parent="lore:base"),
+                    allow_existing=False,
+                )
+            )
+        self.assertIn("must match", str(ctx.exception))
+
     def test_builtin_entry_type_keeps_built_in_source_after_field_add(self) -> None:
         custom_field = MetadataFieldDefinition(name="Weather", type="text", options=[])
         self.service.upsert_metadata_field(

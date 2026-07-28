@@ -976,6 +976,11 @@
           if (editorPane.scene) await editorPanes.flushSceneIfDirty(editorPane.scene.id);
         }}
         onSceneRestored={(restored) => editorPanes.reconcileSceneFromServer(restored)}
+        onReviewFreeze={(entryId, committer) =>
+          committer
+            ? void editorPanes.beginReviewLock(entryId, committer)
+            : editorPanes.endReviewLock(entryId)}
+        onFlushReviewCommit={(entryId) => editorPanes.flushReviewCommit(entryId)}
       />
     {/if}
   {/snippet}

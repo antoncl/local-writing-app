@@ -18,9 +18,48 @@ from tempfile import TemporaryDirectory
 
 from project_fixtures import open_test_project
 
-from app.models import CreateLoreEntryRequest, SaveLoreEntryRequest
+from app.models import (
+    CreateLoreEntryRequest,
+    CreatePromptEntryRequest,
+    SaveLoreEntryRequest,
+)
 from app.services.ai.entry_patch import parse_entry_patch_json
-from app.services.ai.helpers import _field_catalog, create_environment_for_project
+from app.services.ai.helpers import (
+    _entry_type_label,
+    _field_catalog,
+    create_environment_for_project,
+)
+
+
+def add_character_patch_fields(service, root: Path) -> None:
+    """Add a long_text, a select, a hidden text, and an entity_ref field to
+    lore:character — the built-in lore types carry none of the first three.
+    Shared by the revise and create (draft) validation suites so both exercise
+    the same field shapes."""
+    schema_path = root / "metadata.schema.yaml"
+    data = service._read_yaml(schema_path)
+    fields = data.setdefault("fields", {})
+    fields["bio"] = {"name": "Biography", "type": "long_text"}
+    fields["allegiance"] = {
+        "name": "Allegiance",
+        "type": "select",
+        "options": ["order", "chaos"],
+    }
+    # A hidden field: never offered to the AI, dropped if proposed (#2).
+    fields["secret_note"] = {"name": "Secret", "type": "text", "hidden": True}
+    fields["patron"] = {
+        "name": "Patron",
+        "type": "entity_ref",
+        "target": {"entry_type": "lore:character"},
+    }
+    character = data["entry_types"].get("lore:character") or {}
+    own = list(character.get("fields") or [])
+    for field_id in ("bio", "allegiance", "patron", "secret_note"):
+        if field_id not in own:
+            own.insert(0, field_id)
+    character["fields"] = own
+    data["entry_types"]["lore:character"] = character
+    service._write_yaml(schema_path, data)
 
 
 class ParseEntryPatchJsonTests(unittest.TestCase):
@@ -86,32 +125,7 @@ class ValidateAiEntryPatchTests(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def _add_patch_fields_to_character(self) -> None:
-        """Add a long_text, a select, and an entity_ref field to
-        lore:character — the built-in lore types carry none of the first two."""
-        schema_path = self.root / "metadata.schema.yaml"
-        data = self.service._read_yaml(schema_path)
-        fields = data.setdefault("fields", {})
-        fields["bio"] = {"name": "Biography", "type": "long_text"}
-        fields["allegiance"] = {
-            "name": "Allegiance",
-            "type": "select",
-            "options": ["order", "chaos"],
-        }
-        # A hidden field: never offered to the AI, dropped if proposed (#2).
-        fields["secret_note"] = {"name": "Secret", "type": "text", "hidden": True}
-        fields["patron"] = {
-            "name": "Patron",
-            "type": "entity_ref",
-            "target": {"entry_type": "lore:character"},
-        }
-        character = data["entry_types"].get("lore:character") or {}
-        own = list(character.get("fields") or [])
-        for field_id in ("bio", "allegiance", "patron", "secret_note"):
-            if field_id not in own:
-                own.insert(0, field_id)
-        character["fields"] = own
-        data["entry_types"]["lore:character"] = character
-        self.service._write_yaml(schema_path, data)
+        add_character_patch_fields(self.service, self.root)
 
     def test_body_and_long_text_field_kept(self) -> None:
         raw = '{"body": "A knight of renown.", "fields": {"bio": "New bio."}}'
@@ -213,6 +227,127 @@ class ValidateAiEntryPatchTests(unittest.TestCase):
             "{{ f.id }},{% endfor %}"
         ).render(input={"entry": self.hero.id})
         self.assertIn("bio", rendered)
+
+
+class ValidateAiEntryDraftTests(unittest.TestCase):
+    """ADR-0046 §6.4 — the create-mode sibling. `validate_ai_entry_draft`
+    scopes validation to a target entry_type with NO entry to read; same
+    per-field drop rules as the revise path."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.service = open_test_project(self.root, "AI Draft Tests")
+        add_character_patch_fields(self.service, self.root)
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_title_body_and_fields_kept(self) -> None:
+        raw = (
+            '{"body": "A wandering knight.", '
+            '"fields": {"title": "Seren", "bio": "Old bio.", "allegiance": "order"}}'
+        )
+        patch = self.service.validate_ai_entry_draft("lore:character", raw)
+        self.assertFalse(patch.garbled)
+        self.assertEqual(patch.body, "A wandering knight.")
+        self.assertEqual(
+            patch.fields, {"title": "Seren", "bio": "Old bio.", "allegiance": "order"}
+        )
+        self.assertEqual(patch.dropped, [])
+
+    def test_illegal_and_hidden_dropped_not_fatal(self) -> None:
+        raw = (
+            '{"fields": {"title": "Seren", "allegiance": "moon", '
+            '"secret_note": "leaked", "bio": "kept"}}'
+        )
+        patch = self.service.validate_ai_entry_draft("lore:character", raw)
+        self.assertFalse(patch.garbled)
+        self.assertEqual(patch.fields, {"title": "Seren", "bio": "kept"})
+        self.assertIn("allegiance", patch.dropped)
+        self.assertIn("secret_note", patch.dropped)
+
+    def test_reference_excluded(self) -> None:
+        raw = '{"fields": {"patron": "lore_whoever"}}'
+        patch = self.service.validate_ai_entry_draft("lore:character", raw)
+        self.assertEqual(patch.fields, {})
+        self.assertIn("patron", patch.dropped)
+
+    def test_garbled_flagged(self) -> None:
+        patch = self.service.validate_ai_entry_draft("lore:character", "no json here")
+        self.assertTrue(patch.garbled)
+
+    def test_unknown_entry_type_drops_all_but_keeps_body(self) -> None:
+        # No such type → no allowed fields, so every field drops, but the reply
+        # is well-formed (not garbled) and the body still comes through.
+        raw = '{"body": "text", "fields": {"bio": "x"}}'
+        patch = self.service.validate_ai_entry_draft("lore:nonesuch", raw)
+        self.assertFalse(patch.garbled)
+        self.assertEqual(patch.body, "text")
+        self.assertEqual(patch.fields, {})
+        self.assertIn("bio", patch.dropped)
+
+
+class FieldCatalogFromTypeTests(unittest.TestCase):
+    """The catalog / label helpers used by the create-mode template, which names
+    a target entry_type rather than an entry (ADR-0046 §6.4)."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.service = open_test_project(self.root, "Catalog Tests")
+        add_character_patch_fields(self.service, self.root)
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_field_catalog_accepts_an_entry_type_string(self) -> None:
+        schema = self.service.read_metadata_schema()
+        catalog = _field_catalog(self.service, schema, "lore:character")
+        by_id = {f["id"]: f for f in catalog}
+        self.assertEqual(by_id["allegiance"]["type"], "select")
+        self.assertEqual(by_id["allegiance"]["options"], ["order", "chaos"])
+        self.assertIn("title", by_id)  # proposable in create mode too
+        self.assertNotIn("patron", by_id)
+        self.assertNotIn("secret_note", by_id)
+
+    def test_field_catalog_unknown_type_is_empty(self) -> None:
+        schema = self.service.read_metadata_schema()
+        self.assertEqual(_field_catalog(self.service, schema, "lore:nonesuch"), [])
+
+    def test_entry_type_label_uses_definition_name(self) -> None:
+        schema = self.service.read_metadata_schema()
+        expected = schema.entry_types["lore:character"].name
+        self.assertEqual(_entry_type_label(schema, "lore:character"), expected)
+
+    def test_entry_type_label_falls_back_to_last_segment(self) -> None:
+        schema = self.service.read_metadata_schema()
+        self.assertEqual(_entry_type_label(schema, "lore:nonesuch"), "nonesuch")
+
+    def test_revise_entry_template_renders_both_modes(self) -> None:
+        # The materialized prompt body branches on `input.entry`: present ⇒
+        # revise, absent ⇒ create. Render both and assert each takes its branch
+        # without a StrictUndefined error.
+        prompt = self.service.create_prompt_entry(
+            CreatePromptEntryRequest(title="Draft", entry_type="prompt:revise:entry")
+        )
+        env = create_environment_for_project(self.service)
+        template = env.from_string(prompt.body)
+        label = self.service.read_metadata_schema().entry_types["lore:character"].name
+
+        create_mode = template.render(input={"entry": "", "entry_type": "lore:character"})
+        self.assertIn("create a new", create_mode)
+        self.assertIn(label, create_mode)
+        self.assertIn("allegiance", create_mode)  # full catalog offered
+        self.assertIn("title", create_mode)  # title required in create mode
+        self.assertNotIn("entry under revision", create_mode)
+
+        hero = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Seren", entry_type="lore:character")
+        )
+        revise_mode = template.render(input={"entry": hero.id, "entry_type": ""})
+        self.assertIn("entry under revision", revise_mode)
+        self.assertNotIn("create a new", revise_mode)
 
 
 if __name__ == "__main__":

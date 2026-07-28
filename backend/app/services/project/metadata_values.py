@@ -275,6 +275,27 @@ class MetadataValuesMixin:
         """
 
         entry = self.read_lore_entry(entry_id)
+        return self._validate_ai_entry_patch_for_type(entry.entry_type, raw)
+
+    def validate_ai_entry_draft(self, entry_type: str, raw: str) -> AIEntryPatch:
+        """Create-mode sibling of `validate_ai_entry_patch` (ADR-0046 §6.4).
+
+        A from-scratch brainstorm has no entry to read, so validation is scoped
+        to the *target entry_type* directly rather than an existing entry's
+        schema. The per-field drop rules, the parse, and the garbled condition
+        are identical — the only difference is where the allowed field set comes
+        from. The adopted draft is written through the existing create path
+        (`POST /api/lore` + `PUT /api/lore/{id}`), not a diff, so this too only
+        produces the review-ready patch.
+        """
+
+        return self._validate_ai_entry_patch_for_type(entry_type, raw)
+
+    def _validate_ai_entry_patch_for_type(self, entry_type: str, raw: str) -> AIEntryPatch:
+        """Validate a brainstorm-commit reply against ``entry_type``'s resolved
+        schema. Shared by the revise (existing entry) and create (from-scratch)
+        paths so the two never diverge on what is proposable or legal."""
+
         schema = self.read_metadata_schema()
 
         parsed = parse_entry_patch_json(raw)
@@ -284,7 +305,7 @@ class MetadataValuesMixin:
         proposed_body = parsed.get("body")
         body_value = proposed_body if isinstance(proposed_body, str) else None
 
-        definition = schema.entry_types.get(entry.entry_type)
+        definition = schema.entry_types.get(entry_type)
         allowed_field_ids = set(definition.fields) if definition else set()
 
         fields: dict[str, Any] = {}

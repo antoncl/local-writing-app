@@ -349,19 +349,27 @@ def _coerce_entry_ref(
 def _field_catalog(project: ProjectService, schema: Any, value: Any) -> list[dict[str, Any]]:
     """Backing the `field_catalog()` Jinja global.
 
-    Returns the AI-proposable fields of the entry's resolved type as
-    `{id, label, type, options?}` descriptors, in the type's display order —
-    the catalog the `revise:entry` template hands the model so a committed
-    patch names real field ids with legal option values (ADR-0046 §4/§6.3).
-    References and computed fields are excluded (never proposed); the template
-    filters the rest by type (slice 3a shows `long_text`; 3b widens to all).
-    Empty when the entry or its type can't be resolved — the template degrades
-    to a body-only instruction.
+    Returns the AI-proposable fields of a lore type as `{id, label, type,
+    options?}` descriptors, in the type's display order — the catalog the
+    `revise:entry` template hands the model so a committed patch names real
+    field ids with legal option values (ADR-0046 §4/§6.3). ``value`` may be an
+    *entry* (revise mode — its resolved type is used) or an *entry_type FQN
+    string* (create mode, §6.4 — no entry exists yet, so the type to draft is
+    named directly). References and computed fields are excluded (never
+    proposed); the template filters the rest by type. Empty when the type can't
+    be resolved — the template degrades to a body-only instruction.
     """
-    ref = _coerce_entry_ref(project, schema, value)
-    if ref is None or schema is None:
+    if schema is None:
         return []
-    entry_type = ref.entry_type
+    # A string may be an entry_type FQN (create mode) or an entry id (revise).
+    # They share no namespace — a type is a key of schema.entry_types, an id is
+    # not — so a string naming a known type is the type; anything else resolves
+    # as an entry.
+    if isinstance(value, str) and schema.entry_types.get(value) is not None:
+        entry_type: str | None = value
+    else:
+        ref = _coerce_entry_ref(project, schema, value)
+        entry_type = ref.entry_type if ref is not None else None
     definition = schema.entry_types.get(entry_type) if entry_type else None
     if definition is None:
         return []
@@ -370,15 +378,30 @@ def _field_catalog(project: ProjectService, schema: Any, value: Any) -> list[dic
         field = schema.fields.get(field_id)
         if not is_proposable_field(field_id, field):
             continue
-        descriptor: dict[str, Any] = {
-            "id": field_id,
-            "label": field.name,
-            "type": field.type,
-        }
-        if field.options:
-            descriptor["options"] = [opt.value for opt in field.options]
-        catalog.append(descriptor)
+        # `options` is always present (empty when the field has none) so the
+        # create template can test `f.options` without hitting StrictUndefined.
+        catalog.append(
+            {
+                "id": field_id,
+                "label": field.name,
+                "type": field.type,
+                "options": [opt.value for opt in field.options] if field.options else [],
+            }
+        )
     return catalog
+
+
+def _entry_type_label(schema: Any, entry_type: Any) -> str:
+    """The human name of an entry_type FQN for a prompt instruction (ADR-0046
+    §6.4 create mode: "draft a new {{ entry_type_label(input.entry_type) }}").
+    Falls back to the FQN's last segment, then the FQN itself, so a template
+    never renders an empty noun."""
+    fqn = entry_type if isinstance(entry_type, str) else ""
+    if schema is not None and fqn:
+        definition = schema.entry_types.get(fqn)
+        if definition is not None and getattr(definition, "name", ""):
+            return definition.name
+    return fqn.rsplit(":", 1)[-1] if fqn else "entry"
 
 
 # ----- Project-bound helpers ----------------------------------------------
@@ -435,6 +458,7 @@ def register_helpers(
     )
     env.globals["entry"] = lambda value: _coerce_entry_ref(project, schema, value)
     env.globals["field_catalog"] = lambda value: _field_catalog(project, schema, value)
+    env.globals["entry_type_label"] = lambda value: _entry_type_label(schema, value)
     env.globals["base"] = lambda entity, field: _base_field(project, schema, entity, field)
     env.globals["effective"] = (
         lambda entity, field, scene, position=None: _effective_field(

@@ -348,12 +348,26 @@ class LayerWalkMixin:
         need it: the layer chain (`_project_layer_folders`) and the wizard's
         row states (`_ancestor_candidates_for_api`). Everything else wants
         either the bare walk or `ancestor_projects`.
+
+        `current_project()` drives both consumers, so the join ran twice — the
+        root manifest re-parsed and the folder stat-sweep repeated per request.
+        Memoised for the request (#466); cleared by any write at the write choke.
+
+        The key is the *resolved* root, because the two consumers disagree on the
+        form they pass — `_project_layer_folders` resolves first, the ancestor
+        view does not — and an unresolved and a resolved spelling of one folder
+        must share one cache slot or the walk still runs twice.
         """
-        declared = self._declared_ancestors(root.resolve())
-        return [
+        resolved = root.resolve()
+        if resolved in self._declared_candidates_memo:
+            return self._declared_candidates_memo[resolved]
+        declared = self._declared_ancestors(resolved)
+        result = [
             (folder, is_project, folder in declared)
             for folder, is_project in self.ancestor_candidates(root)
         ]
+        self._declared_candidates_memo[resolved] = result
+        return result
 
     def ancestor_projects(self, root: Path) -> list[Path]:
         """The ancestor folders that are projects, outermost first (#460).

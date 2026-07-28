@@ -302,10 +302,20 @@ class ProjectLifecycleMixin:
         step with the scope (#399). `save_project_node` already syncs
         project.yaml, so reading it is both simpler and one fewer thing that can
         disagree with disk.
+
+        Reads are memoised for the request (#466): `current_project()` asks for
+        the same ancestor's title from both the ancestor view and the chain
+        label. The cache is cleared by any write (`_maintain_index_after_write`),
+        so it never disagrees with disk within a unit; a raise (a malformed
+        manifest → 422) is left uncached so the next read re-attempts it.
         """
+        if root in self._title_memo:
+            return self._title_memo[root]
         manifest = self._read_yaml(root / MANIFEST_FILENAME)
         title = manifest.get("title")
-        return title.strip() if isinstance(title, str) and title.strip() else None
+        result = title.strip() if isinstance(title, str) and title.strip() else None
+        self._title_memo[root] = result
+        return result
 
     def current_project(self) -> ProjectInfo:
         root = self._require_project()

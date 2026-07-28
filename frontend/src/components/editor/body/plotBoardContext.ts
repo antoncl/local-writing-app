@@ -22,6 +22,7 @@ export type PlotBoardContext = {
   allowCardDrop: (cardId: string, event: DragEvent) => void;
   leaveCardDrop: (cardId: string, event: DragEvent) => void;
   dropOnCard: (cardId: string, event: DragEvent) => void;
+  persistCanvas: () => void | Promise<void>;
   removeClaim: (claim: PlotPointClaim, event: MouseEvent) => void;
   openCardNode: (card: PlotBoardCard, event: MouseEvent) => void;
   promoteCard: (card: PlotBoardCard, event: MouseEvent) => void;

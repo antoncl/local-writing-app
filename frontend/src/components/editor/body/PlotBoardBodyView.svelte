@@ -26,6 +26,7 @@
     buildColumns,
     buildFlowEdges,
     buildFlowNodes,
+    buildLayoutNodes,
     flattenStructure,
     groupNodeId,
     type BoardColumn,
@@ -198,6 +199,7 @@
     allowCardDrop,
     leaveCardDrop,
     dropOnCard,
+    persistCanvas,
     removeClaim,
     openCardNode,
     promoteCard,
@@ -718,14 +720,7 @@
 
   function toLayout(viewport: Viewport = flowViewport): PlotBoardLayout {
     return {
-      nodes: flowNodes
-        .filter((node) => node.data.kind === "card")
-        .map((node) => ({
-          id: node.id,
-          kind: node.data.kind,
-          position: { x: node.position.x, y: node.position.y },
-          cfg: {},
-        })),
+      nodes: buildLayoutNodes(flowNodes),
       edges: flowEdges.map((edge) => ({
         id: edge.id,
         source: edge.source,

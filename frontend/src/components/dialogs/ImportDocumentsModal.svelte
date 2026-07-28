@@ -14,6 +14,8 @@
   export let onClose: () => void = () => {};
   export let onImport: (sceneIds: string[]) => void = () => {};
 
+  $: allLooseIds = looseScenes.map((doc) => doc.id);
+
   // Selection is local, everything ticked by default (the common case is "take
   // them all"). Seed only on the open TRANSITION — a legacy `$:` reruns on every
   // dependency change, so gating on `if (open)` alone would re-seed whenever
@@ -23,8 +25,17 @@
   let seededFor = false;
   $: if (!open) seededFor = false;
   $: if (open && !seededFor) {
-    selected = new Set(looseScenes.map((doc) => doc.id));
+    selected = new Set(allLooseIds);
     seededFor = true;
+  }
+
+  // Keep the selection scoped to what's still loose: after a partial import the
+  // imported ids leave `looseScenes`, so drop them. This only REMOVES ids, never
+  // adds, so it can't undo a deselection (unlike a reseed) — and it keeps
+  // `selected` authoritative, so the count and payload read straight off it.
+  $: if ([...selected].some((id) => !allLooseIds.includes(id))) {
+    const stillLoose = new Set(allLooseIds);
+    selected = new Set([...selected].filter((id) => stillLoose.has(id)));
   }
 
   function toggle(id: string) {
@@ -34,15 +45,10 @@
     selected = next;
   }
 
-  // The selected docs that are still loose. Driving the count and the import
-  // payload off this — not `selected` directly — keeps both correct across a
-  // partial import: imported ids leave `looseScenes` and drop out here, without
-  // reseeding (and clobbering) the user's remaining choices.
-  $: effectiveIds = looseScenes.filter((doc) => selected.has(doc.id)).map((doc) => doc.id);
-  $: allSelected = looseScenes.length > 0 && effectiveIds.length === looseScenes.length;
+  $: allSelected = looseScenes.length > 0 && selected.size === looseScenes.length;
 
   function toggleAll() {
-    selected = allSelected ? new Set() : new Set(looseScenes.map((doc) => doc.id));
+    selected = allSelected ? new Set() : new Set(allLooseIds);
   }
 </script>
 
@@ -88,9 +94,9 @@
         <button
           class="primary"
           type="button"
-          disabled={busy || effectiveIds.length === 0}
-          on:click={() => onImport(effectiveIds)}
-        >{busy ? "Importing…" : `Add ${effectiveIds.length} to manuscript`}</button>
+          disabled={busy || selected.size === 0}
+          on:click={() => onImport([...selected])}
+        >{busy ? "Importing…" : `Add ${selected.size} to manuscript`}</button>
       {/if}
     {/snippet}
   </Modal>

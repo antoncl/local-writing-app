@@ -26,6 +26,8 @@ export type PlotGroupFlowData = {
   count: number;
   columnType: string;
   parentColumnId: string | null;
+  minWidth: number;
+  minHeight: number;
 };
 export type PlotFlowData = PlotCardFlowData | PlotGroupFlowData;
 export type CanvasPoint = { x: number; y: number };
@@ -47,6 +49,7 @@ export const GROUP_INSET = 24;
 const GROUP_GAP = 30;
 export const GROUP_MIN_HEIGHT = 280;
 export const GROUP_MIN_WIDTH = 310;
+const ROOT_GROUP_ROW_WIDTH = 1180;
 export const DEFAULT_VIEWPORT: Viewport = { x: 24, y: 24, zoom: 1 };
 
 type FlatStructureColumn = {
@@ -132,6 +135,11 @@ function positionFromRecord(position: Record<string, number> | undefined): Canva
   return typeof x === "number" && Number.isFinite(x) && typeof y === "number" && Number.isFinite(y) ? { x, y } : null;
 }
 
+function numberFromConfig(cfg: Record<string, unknown> | undefined, key: string): number | null {
+  const value = cfg?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function defaultCardPosition(card: PlotBoardCard, column: BoardColumn): CanvasPoint {
   const rowIndex = Math.max(0, column.cards.findIndex((candidate) => candidate.id === card.id));
   return {
@@ -180,12 +188,39 @@ function nestedGroupHeight(column: BoardColumn, currentColumns: BoardColumn[]): 
   );
 }
 
-function buildGroupFrames(currentColumns: BoardColumn[]): Map<string, GroupFrame> {
+function groupDimensions(column: BoardColumn, currentColumns: BoardColumn[], layoutById: Map<string, PlotBoardLayout["nodes"][number]>): {
+  width: number;
+  height: number;
+  minWidth: number;
+  minHeight: number;
+} {
+  const id = groupNodeId(column.id);
+  const minWidth = groupWidth(column, currentColumns);
+  const minHeight = nestedGroupHeight(column, currentColumns);
+  const persisted = layoutById.get(id);
+  const width = column.type === "scene:act" ? Math.max(minWidth, numberFromConfig(persisted?.cfg, "width") ?? minWidth) : minWidth;
+  const height = column.type === "scene:act" ? Math.max(minHeight, numberFromConfig(persisted?.cfg, "height") ?? minHeight) : minHeight;
+  return { width, height, minWidth, minHeight };
+}
+
+function rootAutoPosition(width: number, height: number, cursor: { x: number; y: number; rowHeight: number }): CanvasPoint {
+  if (cursor.x > 0 && cursor.x + width > ROOT_GROUP_ROW_WIDTH) {
+    cursor.x = 0;
+    cursor.y += cursor.rowHeight + GROUP_GAP;
+    cursor.rowHeight = 0;
+  }
+  const position = { x: cursor.x, y: cursor.y };
+  cursor.x += width + GROUP_GAP;
+  cursor.rowHeight = Math.max(cursor.rowHeight, height);
+  return position;
+}
+
+function buildGroupFrames(currentColumns: BoardColumn[], layout: PlotBoardLayout | null): Map<string, GroupFrame> {
   const frames = new Map<string, GroupFrame>();
+  const layoutById = new Map((layout?.nodes ?? []).map((node) => [node.id, node]));
   const addFrame = (column: BoardColumn, parentFrame: GroupFrame | null, position: CanvasPoint) => {
     const id = groupNodeId(column.id);
-    const width = groupWidth(column, currentColumns);
-    const height = nestedGroupHeight(column, currentColumns);
+    const { width, height } = groupDimensions(column, currentColumns, layoutById);
     const absolute = parentFrame
       ? { x: parentFrame.absolute.x + position.x, y: parentFrame.absolute.y + position.y }
       : { ...position };
@@ -202,15 +237,17 @@ function buildGroupFrames(currentColumns: BoardColumn[]): Map<string, GroupFrame
     let childX = GROUP_INSET + (column.cards.length > 0 ? CARD_COLUMN_WIDTH + GROUP_GAP : 0);
     for (const child of groupChildren(column, currentColumns)) {
       addFrame(child, frame, { x: childX, y: GROUP_HEADER_HEIGHT });
-      childX += groupWidth(child, currentColumns) + GROUP_GAP;
+      childX += groupDimensions(child, currentColumns, layoutById).width + GROUP_GAP;
     }
   };
 
-  let rootX = 0;
+  const rootCursor = { x: 0, y: 0, rowHeight: 0 };
   for (const column of rootGroups(currentColumns)) {
-    const width = groupWidth(column, currentColumns);
-    addFrame(column, null, { x: rootX, y: 0 });
-    rootX += width + GROUP_GAP;
+    const id = groupNodeId(column.id);
+    const { width, height } = groupDimensions(column, currentColumns, layoutById);
+    const persistedPosition = positionFromRecord(layoutById.get(id)?.position);
+    const autoPosition = rootAutoPosition(width, height, rootCursor);
+    addFrame(column, null, persistedPosition ?? autoPosition);
   }
   return frames;
 }
@@ -250,9 +287,10 @@ export function buildFlowNodes(
 ): FlowNode<PlotFlowData>[] {
   const layoutById = new Map((layout?.nodes ?? []).map((node) => [node.id, node]));
   const currentById = new Map(currentNodes.map((node) => [node.id, node]));
-  const frames = buildGroupFrames(currentColumns);
+  const frames = buildGroupFrames(currentColumns, layout);
   const groupNodes = currentColumns.map((column): FlowNode<PlotFlowData> => {
     const id = groupNodeId(column.id);
+    const { minWidth, minHeight } = groupDimensions(column, currentColumns, layoutById);
     const frame = frames.get(column.id) ?? {
       id,
       parentId: null,
@@ -273,6 +311,8 @@ export function buildFlowNodes(
         count: column.cards.length,
         columnType: column.type,
         parentColumnId: column.parentId,
+        minWidth,
+        minHeight,
       },
       width: frame.width,
       height: frame.height,
@@ -297,6 +337,22 @@ export function buildFlowNodes(
     };
   });
   return [...groupNodes, ...cardNodes];
+}
+
+export function buildLayoutNodes(nodes: FlowNode<PlotFlowData>[]): PlotBoardLayout["nodes"] {
+  return nodes
+    .filter((node) => node.data.kind === "card" || (node.data.kind === "group" && node.data.columnType === "scene:act"))
+    .map((node) => ({
+      id: node.id,
+      kind: node.data.kind,
+      position: { x: node.position.x, y: node.position.y },
+      cfg: node.data.kind === "group"
+        ? {
+            width: node.width ?? GROUP_MIN_WIDTH,
+            height: node.height ?? GROUP_MIN_HEIGHT,
+          }
+        : {},
+    }));
 }
 
 function relationshipLabel(relationship: PlotRelationship): string {

@@ -353,28 +353,33 @@
 }
 
 .plot-flow-group {
+  position: relative;
   width: 100%;
   height: 100%;
-  border: 1px solid var(--border);
-  border-left: 4px solid var(--accent);
+  border: 0;
+  border-right: 2px dotted var(--border-strong);
+  border-bottom: 2px dotted var(--border-strong);
+  border-left: 2px dotted var(--border-strong);
   border-radius: var(--r-md);
   background: color-mix(in srgb, var(--panel) 84%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--surface) 60%, transparent);
 }
 
 .plot-flow-group.act-group {
+  border-right-width: 4px;
+  border-bottom-width: 4px;
+  border-left-width: 4px;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border-strong));
   background: color-mix(in srgb, var(--panel) 70%, transparent);
 }
 
 .plot-flow-group.chapter-group {
+  border-color: var(--border);
   background: color-mix(in srgb, var(--surface) 90%, transparent);
 }
 
 .plot-flow-group.active {
   border-color: var(--accent);
-  box-shadow:
-    0 0 0 1px var(--accent-soft2),
-    inset 0 0 0 1px color-mix(in srgb, var(--surface) 60%, transparent);
+  box-shadow: 0 0 0 1px var(--accent-soft2);
 }
 
 .plot-flow-group > header {
@@ -382,8 +387,15 @@
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: stretch;
   height: 48px;
-  border-bottom: 1px solid var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
   background: var(--inset);
+  overflow: hidden;
+}
+
+.plot-flow-group.act-group > header {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .group-title,

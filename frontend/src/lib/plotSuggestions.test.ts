@@ -3,6 +3,7 @@ import {
   appendPlotSuggestionEvidence,
   appendPlotSuggestionText,
   canApplyPlotSuggestionBeatFields,
+  canApplyPlotSuggestionBeatQuestion,
   canApplyPlotSuggestionCardSynopsis,
   canApplyPlotSuggestionClaimNote,
   canCreatePlotSuggestionCard,
@@ -457,6 +458,46 @@ describe("canApplyPlotSuggestionClaimNote", () => {
       title: "Sharpen opening",
       reason: "",
       proposed_change: "Mara steals the ledger and loses her only way back.",
+      evidence_to_add: "",
+      story_specifics: "",
+      author_intent: "",
+      expected_role: "",
+      open_questions: [],
+      status: "",
+    })).toBe(false);
+  });
+});
+
+describe("canApplyPlotSuggestionBeatQuestion", () => {
+  it("accepts targeted question suggestions for a plot beat", () => {
+    expect(canApplyPlotSuggestionBeatQuestion({
+      kind: "question",
+      target_card_id: "",
+      target_claim_id: "",
+      template_instance_id: "plot_main",
+      plot_point_id: "first_turn",
+      title: "Choose the cost",
+      reason: "",
+      proposed_change: "Decide who sees Mara steal the ledger.",
+      evidence_to_add: "",
+      story_specifics: "",
+      author_intent: "",
+      expected_role: "",
+      open_questions: [],
+      status: "",
+    })).toBe(true);
+  });
+
+  it("rejects untargeted question suggestions", () => {
+    expect(canApplyPlotSuggestionBeatQuestion({
+      kind: "question",
+      target_card_id: "",
+      target_claim_id: "",
+      template_instance_id: "",
+      plot_point_id: "",
+      title: "Choose the cost",
+      reason: "",
+      proposed_change: "Decide who sees Mara steal the ledger.",
       evidence_to_add: "",
       story_specifics: "",
       author_intent: "",

@@ -966,6 +966,7 @@
       onCreateCard={plotSuggestionActions.createPlotSuggestionCard}
       onApplyBeatFields={plotSuggestionActions.applyPlotSuggestionBeatFields}
       onApplyCardSynopsis={plotSuggestionActions.applyPlotSuggestionCardSynopsis}
+      onAppendCardSynopsis={plotSuggestionActions.appendPlotSuggestionCardSynopsis}
     />
 
     {#if declaredInputs.length > 0}

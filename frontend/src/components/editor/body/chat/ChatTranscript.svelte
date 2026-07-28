@@ -38,6 +38,7 @@
     onCreateCard?: (suggestion: PlotSuggestion) => void | Promise<void>;
     onApplyBeatFields?: (suggestion: PlotSuggestion) => void | Promise<void>;
     onApplyCardSynopsis?: (suggestion: PlotSuggestion) => void | Promise<void>;
+    onAppendCardSynopsis?: (suggestion: PlotSuggestion) => void | Promise<void>;
   }
 
   let {
@@ -51,6 +52,7 @@
     onCreateCard,
     onApplyBeatFields,
     onApplyCardSynopsis,
+    onAppendCardSynopsis,
   }: Props = $props();
 
   let copiedKey = $state("");
@@ -69,7 +71,7 @@
     suggestion: PlotSuggestion,
     messageIndex: number,
     index: number,
-    action: "proposed_change" | "evidence_to_add" | "beat_fields" | "question" | "apply_evidence" | "apply_note" | "apply_beat_question" | "create_badge" | "create_card" | "apply_beat_fields" | "apply_card_synopsis",
+    action: "proposed_change" | "evidence_to_add" | "beat_fields" | "question" | "apply_evidence" | "apply_note" | "apply_beat_question" | "create_badge" | "create_card" | "apply_beat_fields" | "apply_card_synopsis" | "append_card_synopsis",
   ): string {
     return `${messageIndex}-${suggestion.kind}-${suggestion.target_card_id}-${suggestion.target_claim_id}-${suggestion.template_instance_id}-${suggestion.plot_point_id}-${index}-${action}`;
   }
@@ -159,6 +161,11 @@
   async function applyCardSynopsisSuggestion(suggestion: PlotSuggestion, key: string): Promise<void> {
     if (!onApplyCardSynopsis || !canApplyPlotSuggestionCardSynopsis(suggestion)) return;
     await applySuggestion(suggestion, key, onApplyCardSynopsis);
+  }
+
+  async function appendCardSynopsisSuggestion(suggestion: PlotSuggestion, key: string): Promise<void> {
+    if (!onAppendCardSynopsis || !canApplyPlotSuggestionCardSynopsis(suggestion)) return;
+    await applySuggestion(suggestion, key, onAppendCardSynopsis);
   }
 
   async function applySuggestion(
@@ -311,10 +318,25 @@
                         onclick={() => void applyCardSynopsisSuggestion(suggestion, applySynopsisKey)}
                       >
                         <i class="ti ti-check" aria-hidden="true"></i>
-                        {applyingKey === applySynopsisKey ? "Applying" : appliedKey === applySynopsisKey ? "Applied" : "Apply synopsis"}
+                        {applyingKey === applySynopsisKey ? "Replacing" : appliedKey === applySynopsisKey ? "Replaced" : "Replace synopsis"}
                       </button>
                       {#if applyErrorKey === applySynopsisKey}
                         <small class="cbv-plot-suggestion-action-error">Could not apply synopsis.</small>
+                      {/if}
+                    {/if}
+                    {#if onAppendCardSynopsis && canApplyPlotSuggestionCardSynopsis(suggestion)}
+                      {@const appendSynopsisKey = suggestionKey(suggestion, i, j, "append_card_synopsis")}
+                      <button
+                        type="button"
+                        title="Append this proposed change to the target card synopsis"
+                        disabled={Boolean(applyingKey)}
+                        onclick={() => void appendCardSynopsisSuggestion(suggestion, appendSynopsisKey)}
+                      >
+                        <i class="ti ti-plus" aria-hidden="true"></i>
+                        {applyingKey === appendSynopsisKey ? "Appending" : appliedKey === appendSynopsisKey ? "Appended" : "Append synopsis"}
+                      </button>
+                      {#if applyErrorKey === appendSynopsisKey}
+                        <small class="cbv-plot-suggestion-action-error">Could not append synopsis.</small>
                       {/if}
                     {/if}
                     {#if suggestion.evidence_to_add}

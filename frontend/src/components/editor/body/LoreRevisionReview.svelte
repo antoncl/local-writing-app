@@ -50,7 +50,11 @@
 <div class="lore-revision-review">
   <div class="review-bar">
     <span class="review-hint">
-      Proposed revision — click the <span class="was-swatch">dotted</span> wording to adopt it.
+      {#if proposedBody !== null || fields.length > 0}
+        Proposed revision — click the <span class="was-swatch">dotted</span> wording to adopt it.
+      {:else}
+        Proposed revision — adopt the field changes in the details panel.
+      {/if}
     </span>
     <div class="review-actions">
       <button type="button" class="review-discard" onclick={onDiscard}>Discard</button>

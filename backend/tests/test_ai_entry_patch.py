@@ -97,6 +97,8 @@ class ValidateAiEntryPatchTests(unittest.TestCase):
             "type": "select",
             "options": ["order", "chaos"],
         }
+        # A hidden field: never offered to the AI, dropped if proposed (#2).
+        fields["secret_note"] = {"name": "Secret", "type": "text", "hidden": True}
         fields["patron"] = {
             "name": "Patron",
             "type": "entity_ref",
@@ -104,7 +106,7 @@ class ValidateAiEntryPatchTests(unittest.TestCase):
         }
         character = data["entry_types"].get("lore:character") or {}
         own = list(character.get("fields") or [])
-        for field_id in ("bio", "allegiance", "patron"):
+        for field_id in ("bio", "allegiance", "patron", "secret_note"):
             if field_id not in own:
                 own.insert(0, field_id)
         character["fields"] = own
@@ -155,6 +157,22 @@ class ValidateAiEntryPatchTests(unittest.TestCase):
         self.assertEqual(patch.fields, {})
         self.assertIn("status", patch.dropped)
 
+    def test_hidden_field_dropped_even_if_on_type(self) -> None:
+        # A hidden field is never proposable (#2): dropped by hiddenness, not by
+        # value or type — a stray proposal for it is ignored, never written.
+        raw = '{"fields": {"secret_note": "leaked", "bio": "kept"}}'
+        patch = self.service.validate_ai_entry_patch(self.hero.id, raw)
+        self.assertEqual(patch.fields, {"bio": "kept"})
+        self.assertIn("secret_note", patch.dropped)
+
+    def test_title_rename_kept(self) -> None:
+        # An AI-proposed rename IS proposable and adoptable (title is not in the
+        # non-proposable set) — validated like any text field and kept.
+        raw = '{"fields": {"title": "Dame Seren"}}'
+        patch = self.service.validate_ai_entry_patch(self.hero.id, raw)
+        self.assertEqual(patch.fields, {"title": "Dame Seren"})
+        self.assertEqual(patch.dropped, [])
+
     def test_garbled_reply_flagged(self) -> None:
         patch = self.service.validate_ai_entry_patch(
             self.hero.id, "Sorry, I didn't catch that."
@@ -178,10 +196,14 @@ class ValidateAiEntryPatchTests(unittest.TestCase):
         self.assertEqual(by_id["bio"]["type"], "long_text")
         self.assertEqual(by_id["allegiance"]["type"], "select")
         self.assertEqual(by_id["allegiance"]["options"], ["order", "chaos"])
-        # References, computed, and the identity triple are never proposable.
+        # `title` IS proposable — an AI rename is adoptable (#4).
+        self.assertIn("title", by_id)
+        # References, computed, the structural id/entry_type, and hidden fields
+        # are never offered.
         self.assertNotIn("patron", by_id)
         self.assertNotIn("id", by_id)
         self.assertNotIn("entry_type", by_id)
+        self.assertNotIn("secret_note", by_id)
 
     def test_field_catalog_usable_from_jinja(self) -> None:
         # The helper is registered and the for-if filter the template uses works.

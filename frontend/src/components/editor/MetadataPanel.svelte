@@ -64,7 +64,18 @@
     // `fields` holds only what differs, both sides carried; `side` is which one
     // to show. Fields FLIP and never interleave — a value is atomic, it resolves
     // in one blink, so interleaving would only make a cramped row cramped.
-    compare?: { fields: Record<string, { was: unknown; now: unknown }>; side: "now" | "was" } | null;
+    //
+    // `resolve` turns the lens interactive for an AI lore-proposal review
+    // (ADR-0046 slice 3b): each flipped field becomes click-to-adopt (the atomic
+    // twin of accepting a prose region), and the rail shows the PROPOSED value
+    // (`was`) regardless of `side` — the tint alone says adopted (warm) vs pending
+    // (cool). Absent for snapshot compare, which stays a passive uniform-`side`
+    // lens with no per-field adopt.
+    compare?: {
+      fields: Record<string, { was: unknown; now: unknown }>;
+      side: "now" | "was";
+      resolve?: { adopted: (fieldId: string) => boolean; onToggle: (fieldId: string) => void };
+    } | null;
     readOnly?: boolean;
     // Outbound events as callback props (#14: MetadataPanel is runes — replaces
     // its createEventDispatcher). NodeEditor (legacy parent) passes these.
@@ -251,13 +262,33 @@
   function displayValue(fieldId: string): MetadataValue {
     if (isMutated(fieldId)) return effectiveOverrides?.[fieldId] ?? "";
     const flipped = compare?.fields[fieldId];
-    if (flipped) return (flipped[compare.side] ?? "") as MetadataValue;
+    // A lore-proposal review (`resolve`) always shows the proposed `was` — the
+    // candidate you click to adopt; snapshot compare shows the uniform `side`.
+    if (flipped) return (flipped[compare.resolve ? "was" : compare.side] ?? "") as MetadataValue;
     return metadata[fieldId];
   }
 
-  /** Whether this field differs from the parked snapshot. Colour only. */
+  /** Whether this field differs from the parked snapshot / proposal. Colour only. */
   function isFlipped(fieldId: string): boolean {
     return compare != null && fieldId in compare.fields;
+  }
+
+  /** A flipped field under the interactive lore-proposal lens — rendered as a
+   *  click-to-adopt candidate rather than a passive one-sided value. */
+  function isFlipResolve(fieldId: string): boolean {
+    return compare?.resolve != null && isFlipped(fieldId);
+  }
+
+  /** Whether an interactive flip has been adopted (take the proposed value). */
+  function isFlipAdopted(fieldId: string): boolean {
+    return compare?.resolve?.adopted(fieldId) ?? false;
+  }
+
+  /** The entry's current value of a flipped field, for the "Current: …" hint —
+   *  the row shows the proposed candidate, so the author needs to see what it
+   *  would replace. */
+  function flipCurrentHint(fieldId: string): string {
+    return metadataValueString(compare?.fields[fieldId]?.now as MetadataValue);
   }
 
   function updateAssistantProvider(provider: string, tier: string, model: string) {
@@ -320,10 +351,14 @@
            via dedicated rail controls (the type select above, the shell title
            header) and stored off `metadata`, so skip them in the generic
            value-editor loop — otherwise they'd render as empty rows. -->
-      {#if metadataSchema.fields[fieldId] && !metadataSchema.fields[fieldId].intrinsic && !effectiveFieldHidden(metadataSchema, entryType, fieldId)}
+      <!-- Intrinsic identity fields (id/title/entry_type) get dedicated controls
+           and are normally skipped here — EXCEPT when one is an active proposal
+           flip (a `title` rename, ADR-0046 3b): then it renders as a rail flip so
+           the author can adopt it, and adoption routes back to the shell state. -->
+      {#if metadataSchema.fields[fieldId] && (!metadataSchema.fields[fieldId].intrinsic || isFlipResolve(fieldId)) && !effectiveFieldHidden(metadataSchema, entryType, fieldId)}
         {@const field = metadataSchema.fields[fieldId]}
         {@const fieldLabel = effectiveFieldLabel(metadataSchema, entryType, fieldId)}
-        <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field)} class:inherited={isInherited(fieldId)} class:layer-inherited={isLayerInherited(fieldId)} class:mutated={isMutated(fieldId)} class:overridden={isOverridden(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && compare?.side === "was"}>
+        <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field)} class:inherited={isInherited(fieldId)} class:layer-inherited={isLayerInherited(fieldId)} class:mutated={isMutated(fieldId)} class:overridden={isOverridden(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && (compare?.resolve ? !isFlipAdopted(fieldId) : compare?.side === "was")}>
           {#if canClearOwn && isOwnClearable(fieldId)}
             <!-- Clear-to-default (#522): the intra-project twin of #517's reset.
                  #517 hangs its "Reset to <source>" gesture off the `ti-versions`
@@ -369,7 +404,52 @@
                 <i class="ti ti-versions fr-override-marker" title={`Overridden here — this value comes from a layer override in this project, not from ${sourceLayerLabel ?? "inherited canon"}`}></i>
               {/if}
             {/if}
-            {#if fieldId === "status"}
+            {#if isFlipResolve(fieldId)}
+              <!-- AI lore-proposal review (ADR-0046 slice 3b): an atomic
+                   structured flip. The proposed value renders read-only (inert,
+                   so its own widgets never steal the click or focus), the whole
+                   value is one click-to-adopt hit target — the rail twin of
+                   "click the dotted wording to adopt it" — and a muted line shows
+                   the current value the adopt would replace. The `.flipped` /
+                   `.flip-was` row tint (cool pending, warm adopted) is reused
+                   as-is; nothing new-coloured here. -->
+              <div class="fr-flip">
+                <div class="fr-flip-candidate">
+                  <div class="fr-flip-value" inert>
+                    <FieldValueEditor
+                      {field}
+                      readOnly={true}
+                      allowUnset={true}
+                      value={displayValue(fieldId)}
+                      ariaLabel={fieldLabel}
+                      loreEntries={loreEntries}
+                      promptEntries={promptEntries}
+                      structure={structure}
+                      researchStructure={researchStructure}
+                      implicitContextMatcher={implicitContextMatcher}
+                      excludeId={excludeId}
+                      knownTags={knownTags}
+                      documentKind={documentKind}
+                      entryType={entryType}
+                      onChange={() => {}}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    class="fr-flip-hit"
+                    aria-pressed={isFlipAdopted(fieldId)}
+                    title={isFlipAdopted(fieldId)
+                      ? `Adopted — click to keep the current ${fieldLabel}`
+                      : `Adopt this proposed ${fieldLabel}`}
+                    aria-label={isFlipAdopted(fieldId)
+                      ? `Adopted proposed ${fieldLabel}; click to keep the current value`
+                      : `Adopt proposed ${fieldLabel}`}
+                    onclick={() => compare?.resolve?.onToggle(fieldId)}
+                  ></button>
+                </div>
+                <small class="fr-flip-from">Current: {flipCurrentHint(fieldId) || "unset"}</small>
+              </div>
+            {:else if fieldId === "status"}
               <!-- status is stored off `metadata` and edited via onStatusChange. -->
               <ColoredSelect
                 value={isMutated("status")
@@ -750,6 +830,44 @@
     background-position: 0 100%;
     background-size: 100% 2px;
     box-shadow: none;
+  }
+
+  /* Interactive lore-proposal flip (ADR-0046 slice 3b). The `.fr-val` tint above
+     already carries adopted (warm) vs pending (cool dotted); this only lays out
+     the click-to-adopt candidate + the current-value hint. */
+  .fr-flip {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: 100%;
+  }
+  /* The hit target overlays the read-only value so the *value* is what you click
+     (the atomic twin of the body flip's "click the wording"). The candidate's
+     own widgets are `inert`, so this button is the row's only interactive part. */
+  .fr-flip-candidate {
+    position: relative;
+  }
+  .fr-flip-value {
+    pointer-events: none;
+  }
+  .fr-flip-hit {
+    position: absolute;
+    inset: -1px -4px;
+    width: calc(100% + 8px);
+    background: transparent;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+  }
+  .fr-flip-hit:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  .fr-flip-from {
+    font-size: var(--fs-sm);
+    color: var(--text-3);
   }
 
   .fr-computed {

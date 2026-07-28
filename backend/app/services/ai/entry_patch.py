@@ -19,17 +19,38 @@ from typing import Any
 __all__ = [
     "NON_PROPOSABLE_FIELD_IDS",
     "NON_PROPOSABLE_FIELD_TYPES",
+    "is_proposable_field",
     "parse_entry_patch_json",
 ]
 
 # The fields the AI is never asked to propose, and never allowed to write, even
 # if a value validates (ADR-0046 §4): references (no reliable way to name the
 # right node id — a wrong ref is a silent mis-link) and computed values
-# (derived, not stored). The identity `id`/`entry_type` are structural. This is
-# the single source both the prompt's field catalog and the validate-on-return
-# path consult, so the two never disagree about what is proposable.
+# (derived, not stored). The identity `id`/`entry_type` are structural. `title`
+# is deliberately NOT here — an AI-proposed rename is a legitimate, adoptable
+# change (the review flips it and the save applies the rename).
 NON_PROPOSABLE_FIELD_TYPES = frozenset({"computed", "entity_ref", "entity_ref_list"})
 NON_PROPOSABLE_FIELD_IDS = frozenset({"id", "entry_type"})
+
+
+def is_proposable_field(field_id: str, field: Any) -> bool:
+    """Whether the AI may propose a value for ``field_id``.
+
+    The single predicate both the prompt's field catalog and the
+    validate-on-return path consult, so the two never disagree about what is
+    proposable (ADR-0046 §4). Excludes references / computed values, the
+    structural ``id`` / ``entry_type``, and ``hidden`` fields — a field hidden
+    from the author should not be shown to the model, and a stray proposal for
+    one is dropped rather than written. ``field`` is the resolved
+    ``MetadataFieldDefinition`` (or ``None`` when the id is unknown).
+    """
+    if field is None:
+        return False
+    if field_id in NON_PROPOSABLE_FIELD_IDS:
+        return False
+    if field.type in NON_PROPOSABLE_FIELD_TYPES:
+        return False
+    return not getattr(field, "hidden", False)
 
 
 def _strip_code_fence(text: str) -> str:

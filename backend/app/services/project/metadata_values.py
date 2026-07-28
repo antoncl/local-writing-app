@@ -28,8 +28,7 @@ from app.models import (
     ScopedTag,
 )
 from app.services.ai.entry_patch import (
-    NON_PROPOSABLE_FIELD_IDS,
-    NON_PROPOSABLE_FIELD_TYPES,
+    is_proposable_field,
     parse_entry_patch_json,
 )
 from app.services.project.errors import ProjectServiceError
@@ -296,9 +295,8 @@ class MetadataValuesMixin:
                 field = schema.fields.get(field_id)
                 if (
                     field is None
-                    or field_id in NON_PROPOSABLE_FIELD_IDS
                     or field_id not in allowed_field_ids
-                    or field.type in NON_PROPOSABLE_FIELD_TYPES
+                    or not is_proposable_field(field_id, field)
                 ):
                     dropped.append(field_id)
                     continue

@@ -29,8 +29,7 @@ from xml.sax.saxutils import quoteattr
 from jinja2.sandbox import SandboxedEnvironment
 
 from app.services.ai.entry_patch import (
-    NON_PROPOSABLE_FIELD_IDS,
-    NON_PROPOSABLE_FIELD_TYPES,
+    is_proposable_field,
 )
 from app.services.ai.sessions import AISession
 
@@ -368,10 +367,8 @@ def _field_catalog(project: ProjectService, schema: Any, value: Any) -> list[dic
         return []
     catalog: list[dict[str, Any]] = []
     for field_id in definition.fields:
-        if field_id in NON_PROPOSABLE_FIELD_IDS:
-            continue
         field = schema.fields.get(field_id)
-        if field is None or field.type in NON_PROPOSABLE_FIELD_TYPES:
+        if not is_proposable_field(field_id, field):
             continue
         descriptor: dict[str, Any] = {
             "id": field_id,

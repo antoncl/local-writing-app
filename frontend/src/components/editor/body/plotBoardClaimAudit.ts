@@ -15,6 +15,8 @@ const PLOT_CLAIM_AUDIT_PROMPT_ID = "prompt_builtin_plot_claim_audit";
 type TemplatePointRowLike = {
   instance: PlotNode;
   point: PlotTemplateInstancePoint;
+  status?: "missing" | "partial" | "used";
+  claims?: PlotPointClaim[];
 };
 
 type PlotClaimAuditContext = {
@@ -72,6 +74,28 @@ export function boardIdeationFocus(context: PlotClaimAuditContext): string {
   return `Brainstorm ways to simplify and strengthen "${boardTitle}". Current board shape: ${countLabel(cardCount, "card")}, ${countLabel(markerCount, "story marker")}, ${countLabel(issueCount, "diagnostic check")}. Offer a few concrete structure options the author can choose from: cards to add, split, merge, move, or clarify; story markers to add, remove, or strengthen; act/chapter placement ideas; and questions that unlock the next writing decision. Favor practical next steps over terminology or critique.`;
 }
 
+export function beatAssistFocus(context: PlotClaimAuditContext): string {
+  const row = context.selectedPaletteRow;
+  if (!row) return boardIdeationFocus(context);
+  const boardTitle = context.plotNode?.title || "this plot board";
+  const beatTitle = row.point.title || row.point.plot_point_id;
+  const markerClaims = row.claims ?? (context.plotNode?.board?.claims ?? []).filter(
+    (claim) =>
+      claim.template_instance_id === row.instance.id &&
+      claim.plot_point_id === row.point.plot_point_id,
+  );
+  const markerSummary = markerClaims.length === 0
+    ? "No cards currently claim to support this beat."
+    : markerClaims
+        .map((claim) => {
+          const card = context.cardById(claim.card_id);
+          return `${claim.claim_label || card?.title || claim.card_id} [${claim.id}] on "${card?.title ?? claim.card_id}" (${claim.claim_type}${claim.strength ? `, ${claim.strength}` : ""})`;
+        })
+        .join("; ");
+  const diagnostics = context.diagnostics?.points.get(`${row.instance.id}:${row.point.plot_point_id}`)?.map((item) => item.label).join("; ") || "No explicit diagnostics are marked.";
+  return `Help the author make the plot beat "${beatTitle}" feel earned in "${boardTitle}". Template instance: "${row.instance.title}" (id: ${row.instance.id}). Plot beat id: ${row.point.plot_point_id}. Beat purpose: ${row.point.function_claim || "No template purpose is recorded."} Story specifics: ${row.point.notes || "No story-specific version has been written yet."} Author intent: ${row.point.author_intent || "No author intent is recorded yet."} Current board use: ${row.status ?? "unknown"}. Current story markers: ${markerSummary} Diagnostics: ${diagnostics} Offer concrete options the author can choose from: existing cards that could support this beat, missing pressure or consequence, a possible new card if needed, marker changes to add/move/strengthen, and one or two author decisions that would unlock the beat. Do not draft prose or declare final canon; give practical structure moves and draft suggestions with target ids.`;
+}
+
 function countLabel(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
@@ -119,6 +143,10 @@ export async function openPlotClaimAuditChat(context: PlotClaimAuditContext): Pr
 
 export async function openPlotCardAssistChat(context: PlotClaimAuditContext): Promise<void> {
   await openPlotPromptChat(context, PLOT_CLAIM_AUDIT_PROMPT_ID, cardAssistFocus(context), "Plot Review");
+}
+
+export async function openPlotBeatAssistChat(context: PlotClaimAuditContext): Promise<void> {
+  await openPlotPromptChat(context, PLOT_BRAINSTORM_PROMPT_ID, beatAssistFocus(context), "Plot Brainstorm");
 }
 
 export async function openPlotBrainstormChat(context: PlotClaimAuditContext): Promise<void> {

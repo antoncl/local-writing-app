@@ -4,9 +4,15 @@
   // and the color palette editor. The parent loads / persists the
   // draft; this component owns only the local mutations on the draft
   // it's been handed.
-  import type { MachineSettingsDraft, MachineSettingsView, Swatch } from "@/lib/types";
+  import type {
+    MachineSettingsDraft,
+    MachineSettingsView,
+    ProviderCredentialsView,
+    Swatch,
+  } from "@/lib/types";
   import Modal from "@/components/dialogs/Modal.svelte";
   import DirectoryPickerModal from "@/components/dialogs/DirectoryPickerModal.svelte";
+  import ProviderSubscriptions from "@/components/widgets/ProviderSubscriptions.svelte";
   import { applyProsePresentation } from "@/lib/utils/prose-presentation";
 
   // Live-preview the display prefs as the user edits — the master text scaler is
@@ -78,6 +84,17 @@
   let activeTab: SettingsTab = "ai";
   // Land on the first tab whenever the dialog reopens, never a stale one.
   $: if (!open) activeTab = "ai";
+
+  // The AI tab presents providers via the shared ProviderSubscriptions surface,
+  // which edits the flat credential fields on the draft; Save persists the whole
+  // draft (batched), so these just mutate it. A member assignment is reactive
+  // here the same way the palette mutations are.
+  function setProviderKey(field: keyof ProviderCredentialsView, value: string) {
+    if (draft) draft[field] = value;
+  }
+  function clearProviderKey(field: keyof ProviderCredentialsView) {
+    if (draft) draft[field] = "";
+  }
 </script>
 
 {#if open && draft}
@@ -109,28 +126,25 @@
         aria-labelledby={`settings-tab-${activeTab}`}
       >
         {#if activeTab === "ai"}
-          <p class="muted">Provider accounts and keys. Keys are masked on read — leaving a masked field unchanged keeps the existing value.</p>
+          <p class="muted">Your cloud subscriptions. Keys are masked on read — a provider stays configured until you remove it, and rotating a key replaces it.</p>
 
-          <label>
-            Anthropic API key
-            <input type="password" autocomplete="off" bind:value={draft.anthropic_api_key} placeholder="sk-ant-…" />
-          </label>
-          <label>
-            OpenAI API key
-            <input type="password" autocomplete="off" bind:value={draft.openai_api_key} placeholder="sk-…" />
-          </label>
-          <label>
-            OpenRouter API key
-            <input type="password" autocomplete="off" bind:value={draft.openrouter_api_key} placeholder="sk-or-…" />
-          </label>
+          <ProviderSubscriptions
+            providers={{
+              anthropic_api_key: draft.anthropic_api_key,
+              openai_api_key: draft.openai_api_key,
+              openrouter_api_key: draft.openrouter_api_key,
+              ollama_host: draft.ollama_host,
+            }}
+            defaultProviderId={draft.default_provider}
+            editable
+            onSaveKey={setProviderKey}
+            onClearKey={clearProviderKey}
+          />
+
           <label>
             Ollama host
             <input type="text" bind:value={draft.ollama_host} placeholder="http://127.0.0.1:11434" />
           </label>
-
-          <p class="muted">
-            Assistants moved to the <strong>Assistants</strong> pane (open from the AI section of the Project pane). Each lives as its own file under the machine config dir and can be overridden by ancestor projects.
-          </p>
         {:else if activeTab === "appearance"}
           <section class="writing-surface">
             <h3>Writing surface</h3>

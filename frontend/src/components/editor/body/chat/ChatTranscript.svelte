@@ -14,10 +14,13 @@
     canApplyPlotSuggestionClaimNote,
     canCreatePlotSuggestionCard,
     canCreatePlotSuggestionBadge,
+    canCopyPlotSuggestionQuestion,
     parsePlotSuggestions,
     plotSuggestionKindLabel,
     plotSuggestionBeatClipboardText,
     plotSuggestionClipboardText,
+    plotSuggestionQuestionClipboardText,
+    plotSuggestionTargets,
     stripPlotSuggestions,
     type PlotSuggestion,
   } from "@/lib/plotSuggestions";
@@ -63,7 +66,7 @@
     suggestion: PlotSuggestion,
     messageIndex: number,
     index: number,
-    action: "proposed_change" | "evidence_to_add" | "beat_fields" | "apply_evidence" | "apply_note" | "create_badge" | "create_card" | "apply_beat_fields" | "apply_card_synopsis",
+    action: "proposed_change" | "evidence_to_add" | "beat_fields" | "question" | "apply_evidence" | "apply_note" | "create_badge" | "create_card" | "apply_beat_fields" | "apply_card_synopsis",
   ): string {
     return `${messageIndex}-${suggestion.kind}-${suggestion.target_card_id}-${suggestion.target_claim_id}-${suggestion.template_instance_id}-${suggestion.plot_point_id}-${index}-${action}`;
   }
@@ -90,6 +93,22 @@
 
   async function copyBeatFieldsSuggestion(suggestion: PlotSuggestion, key: string): Promise<void> {
     const text = plotSuggestionBeatClipboardText(suggestion);
+    if (!text.trim()) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      copiedKey = key;
+      if (copyResetTimer) clearTimeout(copyResetTimer);
+      copyResetTimer = setTimeout(() => {
+        copiedKey = "";
+        copyResetTimer = null;
+      }, 1600);
+    } catch {
+      copiedKey = "";
+    }
+  }
+
+  async function copyQuestionSuggestion(suggestion: PlotSuggestion, key: string): Promise<void> {
+    const text = plotSuggestionQuestionClipboardText(suggestion);
     if (!text.trim()) return;
     try {
       await navigator.clipboard.writeText(text);
@@ -185,6 +204,7 @@
             <div class="cbv-plot-suggestions" aria-label="Plot suggestions">
               <header>Plot suggestions</header>
               {#each suggestions as suggestion, j (`${suggestion.kind}-${suggestion.target_card_id}-${suggestion.target_claim_id}-${suggestion.template_instance_id}-${suggestion.plot_point_id}-${j}`)}
+                {@const targets = plotSuggestionTargets(suggestion)}
                 <article class="cbv-plot-suggestion">
                   <div class="cbv-plot-suggestion-head">
                     <strong>{suggestion.title || "Untitled suggestion"}</strong>
@@ -214,14 +234,26 @@
                   {#if suggestion.status}
                     <small>Status: {suggestion.status.replace(/_/g, " ")}</small>
                   {/if}
-                  <div class="cbv-plot-suggestion-targets">
-                    {#if suggestion.target_card_id}<code>{suggestion.target_card_id}</code>{/if}
-                    {#if suggestion.target_claim_id}<code>{suggestion.target_claim_id}</code>{/if}
-                    {#if suggestion.template_instance_id}<code>{suggestion.template_instance_id}</code>{/if}
-                    {#if suggestion.plot_point_id}<code>{suggestion.plot_point_id}</code>{/if}
-                  </div>
+                  {#if targets.length > 0}
+                    <div class="cbv-plot-suggestion-targets">
+                      {#each targets as target (`${target.label}-${target.value}`)}
+                        <code><span>{target.label}</span>{target.value}</code>
+                      {/each}
+                    </div>
+                  {/if}
                   <div class="cbv-plot-suggestion-actions">
-                    {#if suggestion.proposed_change}
+                    {#if canCopyPlotSuggestionQuestion(suggestion)}
+                      {@const questionKey = suggestionKey(suggestion, i, j, "question")}
+                      <button
+                        type="button"
+                        title="Copy this decision prompt"
+                        onclick={() => void copyQuestionSuggestion(suggestion, questionKey)}
+                      >
+                        <i class="ti ti-copy" aria-hidden="true"></i>
+                        {copiedKey === questionKey ? "Copied" : "Copy question"}
+                      </button>
+                    {/if}
+                    {#if suggestion.proposed_change && suggestion.kind !== "question"}
                       {@const changeKey = suggestionKey(suggestion, i, j, "proposed_change")}
                       <button
                         type="button"
@@ -503,12 +535,20 @@
     gap: 5px;
   }
   .cbv-plot-suggestion-targets code {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
     padding: 2px 6px;
     border-radius: 5px;
     background: var(--inset);
     font-family: var(--mono);
     font-size: var(--fs-xs);
     color: var(--text-2);
+  }
+  .cbv-plot-suggestion-targets code span {
+    font-family: var(--sans);
+    font-weight: 800;
+    color: var(--text-3);
   }
   .cbv-plot-suggestion-actions {
     display: flex;

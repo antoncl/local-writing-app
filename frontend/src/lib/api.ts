@@ -2,6 +2,7 @@ import type {
   AIChatRequest,
   AIChatResponse,
   AIContextPresetResponse,
+  AIEntryPatch,
   AIGenerateRequest,
   AIHealthResponse,
   AIProviderList,
@@ -750,6 +751,16 @@ export const api = {
   deleteLoreEntry(entryId: string) {
     return request<LoreEntryList>(`/lore/${entryId}`, {
       method: "DELETE",
+    });
+  },
+  // ADR-0046 §4/§6.3: validate a brainstorm-commit reply into a review-ready
+  // patch. The raw model text is sent server-side (never shown), parsed, and
+  // validated per-field against the entry's schema; illegal fields are dropped
+  // and a garbled reply is flagged.
+  validateAiEntryPatch(entryId: string, raw: string) {
+    return request<AIEntryPatch>(`/lore/${encodeURIComponent(entryId)}/ai-patch`, {
+      method: "POST",
+      body: JSON.stringify({ raw }),
     });
   },
   // Migrate a lore_note to a research/note (slice 5). Drops aliases /

@@ -1,82 +1,55 @@
 <script lang="ts">
   // The proposed-vs-current review for a lore brainstorm commit (ADR-0046
-  // slice 2). A `revise:entry` chat finalises and hands its full revised body
-  // here; the author reviews it against the entry's current body as the same
-  // flip the snapshot compare uses, and adopts region by region.
+  // slice 2/3). A `revise:entry` chat finalises and the server validates its
+  // reply into an EntryPatch; the author reviews it against the entry's current
+  // state as the same flip the snapshot compare uses, and adopts region by
+  // region — across the body AND each changed long_text field (slice 3a).
   //
-  // Deliberately the snapshot-adopt shape, not a second write path: adopting a
-  // region writes the reprojected body into the live TipTap buffer through
-  // `adoptBody` — which marks the pane dirty and autosaves — so the entry is
-  // persisted through the door that already exists (ADR-0046 §1; the write is a
-  // PUT via the normal lore autosave, not a bespoke endpoint). The orientation
-  // (proposal = cool `was`, current = warm `now`) comes from `reviewBodyProposal`
-  // and must not be re-diffed the other way (memo #590 / loreRevision.ts).
+  // Deliberately the snapshot-adopt shape, not a second write path: on Done the
+  // resolved body and field values are handed back through `onAdopt`, which the
+  // entry pane writes via the SAME emitChange autosave a manual body/field edit
+  // uses — body and metadata coalesce into one PUT (ADR-0046 §1; no bespoke
+  // endpoint). Nothing is written during review; Discard is a true no-op.
 
-  import { untrack } from "svelte";
-  import ReadOnlyBodyOverlay from "@/components/editor/body/ReadOnlyBodyOverlay.svelte";
-  import { reviewBodyProposal } from "@/lib/utils/loreRevision";
-  import { adoptRegion, renderDiffRuns, type DiffRegion } from "@/lib/utils/diffRuns";
-  import type { DiffRun } from "@/lib/types";
+  import RevisionFlip from "@/components/editor/body/RevisionFlip.svelte";
+  import type { FieldFlip } from "@/lib/utils/loreRevision";
 
   let {
     currentBody,
     proposedBody,
-    onAdoptBody,
+    fields,
+    onAdopt,
     onClose,
   }: {
     /** The entry's body as the author currently sees it (the live buffer). */
     currentBody: string;
-    /** The full revised body the brainstorm committed. */
-    proposedBody: string;
-    /** Write the resolved body into the live buffer once, on Done
-     *  (proseBodyView.adoptBody, which autosaves). */
-    onAdoptBody: (body: string) => void;
+    /** The committed revised body, or null when the patch changes no body. */
+    proposedBody: string | null;
+    /** The long_text fields the patch proposes, each reviewed as its own flip. */
+    fields: FieldFlip[];
+    /** Write the resolved body + field values once, on Done. `body` is null
+     *  when the body was not part of the patch or was left unchanged. */
+    onAdopt: (body: string | null, fields: Record<string, string>) => void;
     /** Dismiss the review (clear the pending proposal). */
     onClose: () => void;
   } = $props();
 
-  // Snapshot the starting body once, to skip a no-op write on Done. `untrack`
-  // states the capture-once intent — this component is remounted per proposal
-  // via {#key}, so a new proposal is a fresh mount, never an update.
-  const originalBody = untrack(() => currentBody);
+  // Each flip reports its running resolution here (null while unchanged). The
+  // body key is separate from field ids so a field literally named "body" can't
+  // collide.
+  let resolvedBody = $state<string | null>(null);
+  let resolvedFields = $state<Record<string, string | null>>({});
 
-  // The run titles reworded for a proposal — "Restore this" is snapshot wording
-  // (memo #590). A cool run is the proposal; a warm run is the current wording.
-  function loreTitle(kind: DiffRun["kind"], region: DiffRegion): string {
-    if (kind === "was") return region.nowText ? "Use this wording" : "Add this";
-    return region.wasText ? "Keep this" : "Remove this";
-  }
-
-  let runs = $state<DiffRun[]>(untrack(() => reviewBodyProposal(currentBody, proposedBody).runs));
-  let changesRemain = $derived(runs.some((run) => run.kind !== "equal"));
-
-  let html = $state("");
-  $effect(() => {
-    const snapshot = runs;
-    let cancelled = false;
-    void renderDiffRuns(snapshot, "both", loreTitle).then((rendered) => {
-      if (!cancelled) html = rendered;
-    });
-    return () => {
-      cancelled = true;
-    };
-  });
-
-  // The resolved body accumulates as regions are adopted, but nothing is written
-  // to the buffer until Done: a K-region adopt is ONE save (adoptBody autosaves
-  // per call), and Discard is a true no-op — the buffer is never touched during
-  // review. `adoptRegion` returns the running resolution (the clicked region
-  // resolved, the rest still current) as its non-null `body`.
-  let pendingBody: string | null = null;
-
-  function handleRunClick(regionId: number, kind: "now" | "was"): void {
-    const result = adoptRegion(runs, regionId, kind);
-    if (result.body != null) pendingBody = result.body;
-    runs = result.runs;
-  }
+  let changesRemain = $derived(
+    resolvedBody !== null || Object.values(resolvedFields).some((v) => v !== null),
+  );
 
   function done(): void {
-    if (pendingBody != null && pendingBody !== originalBody) onAdoptBody(pendingBody);
+    const adoptedFields: Record<string, string> = {};
+    for (const [fieldId, value] of Object.entries(resolvedFields)) {
+      if (value !== null) adoptedFields[fieldId] = value;
+    }
+    onAdopt(resolvedBody, adoptedFields);
     onClose();
   }
 
@@ -98,12 +71,24 @@
       </button>
     </div>
   </div>
-  <ReadOnlyBodyOverlay
-    {html}
-    label="Proposed revision (review)"
-    tone="snapshot"
-    onRunClick={handleRunClick}
-  />
+  <div class="review-flips">
+    {#if proposedBody !== null}
+      <RevisionFlip
+        currentText={currentBody}
+        proposedText={proposedBody}
+        label="Body"
+        onResolved={(v) => (resolvedBody = v)}
+      />
+    {/if}
+    {#each fields as field (field.fieldId)}
+      <RevisionFlip
+        currentText={field.currentValue}
+        proposedText={field.proposedValue}
+        label={field.label}
+        onResolved={(v) => (resolvedFields = { ...resolvedFields, [field.fieldId]: v })}
+      />
+    {/each}
+  </div>
 </div>
 
 <style>
@@ -150,5 +135,12 @@
   .review-done {
     border-color: var(--accent) !important;
     color: var(--accent) !important;
+  }
+  .review-flips {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    flex: 1;
+    overflow-y: auto;
   }
 </style>

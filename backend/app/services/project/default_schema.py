@@ -299,16 +299,22 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             },
         },
         "prompt:revise:entry": {
-            # The lore brainstorm (ADR-0046 §5/§6.2), a pre-rolled prompt like
+            # The lore brainstorm (ADR-0046 §5/§6.3), a pre-rolled prompt like
             # `roleplay`: an ideation *chat* that carries an existing entry in its
-            # context and, on a commit turn, returns the entry's full revised body.
-            # `output.kind = entry_patch` routes invocation to a chat and routes the
-            # committed body to the proposed-vs-current flip review (loreRevision),
-            # not the scene aiSuggestion streaming mark. The target entry rides in
-            # as an `entry` input loaded with `entry(input.entry)` — exactly how
+            # context and, on a commit turn, returns a JSON `entry_patch` — the
+            # entry's revised body plus any changed long-text fields (slice 3a;
+            # structured fields follow in 3b). `output.kind = entry_patch` routes
+            # invocation to a chat and routes the committed patch to the
+            # proposed-vs-current flip review (loreRevision), not the scene
+            # aiSuggestion streaming mark. The patch is validated server-side
+            # (`validate_ai_entry_patch`) before review — the safety guarantee is
+            # validate-on-return, not constrained decoding. The target entry rides
+            # in as an `entry` input loaded with `entry(input.entry)` — exactly how
             # roleplay pulls its character — because `{{ scene }}` resolves scenes
             # only (`read_scene`), never a lore entry. No `context_strategy.target`
-            # for the same reason: binding it would drive a scene resolution.
+            # for the same reason: binding it would drive a scene resolution. The
+            # `field_catalog(e)` helper lists the entry's proposable fields so the
+            # instruction can name real field ids.
             "name": "Revise entry",
             "kind": "prompt",
             "parent": "prompt:revise",
@@ -336,9 +342,27 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "entry on every turn.\n"
                 "\n"
                 "When the author asks you to finalize (or says \"commit\"), stop "
-                "brainstorming and reply with ONLY the complete revised markdown "
-                "body of the entry — no preamble, no commentary, no code fences. "
-                "That final message is written back to the entry verbatim.\n"
+                "brainstorming and reply with ONLY a JSON object, with no preamble, "
+                "no commentary, and no code fences, of exactly this shape:\n"
+                "\n"
+                "{\"body\": \"<the entry's complete revised markdown body>\", "
+                "\"fields\": {\"<field id>\": \"<that field's complete new text>\"}}\n"
+                "\n"
+                "- \"body\": the entry's full revised markdown body.\n"
+                "- \"fields\": include an entry ONLY for a long-text field you are "
+                "changing, keyed by its field id, with that field's complete new "
+                "text as the value. Use {} if you are changing no fields.\n"
+                "\n"
+                "The long-text fields you may set:\n"
+                "{% for f in field_catalog(e) if f.type == \"long_text\" %}\n"
+                "- {{ f.id }} ({{ f.label }})\n"
+                "{% else %}\n"
+                "- (none: this entry has no long-text fields, so use {} for \"fields\")\n"
+                "{% endfor %}\n"
+                "\n"
+                "Output only that JSON object. It is parsed, validated against the "
+                "entry's schema, and reviewed against the current entry before "
+                "anything is saved.\n"
                 "{% if e %}\n"
                 "\n## The entry under revision: {{ e.title }}\n"
                 "{% if e.body %}\n"
@@ -346,6 +370,10 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "{% else %}\n"
                 "_(This entry has no body yet.)_\n"
                 "{% endif %}\n"
+                "{% for f in field_catalog(e) if f.type == \"long_text\" %}\n"
+                "\n### {{ f.label }} ({{ f.id }})\n"
+                "{{ e.metadata.get(f.id) or \"_(empty)_\" }}\n"
+                "{% endfor %}\n"
                 "{% endif %}\n"
                 "{% endrole %}\n"
             ),

@@ -1,0 +1,197 @@
+"""ADR-0046 slice 3a — the brainstorm commit's structured patch.
+
+Covers the three new backend pieces:
+- `parse_entry_patch_json` — turning a (possibly fenced / prose-wrapped) model
+  reply into a patch dict, or flagging it garbled;
+- `validate_ai_entry_patch` — validate-on-return: per-field validation against
+  the entry_type's schema, dropping the illegal ones without failing the whole
+  patch, references / computed always excluded (§4);
+- `field_catalog` — the Jinja helper that lists an entry's proposable fields so
+  the prompt names real field ids.
+"""
+
+from __future__ import annotations
+
+import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from project_fixtures import open_test_project
+
+from app.models import CreateLoreEntryRequest, SaveLoreEntryRequest
+from app.services.ai.entry_patch import parse_entry_patch_json
+from app.services.ai.helpers import _field_catalog, create_environment_for_project
+
+
+class ParseEntryPatchJsonTests(unittest.TestCase):
+    """The pure, provider-agnostic parse — tolerant of the ways a model wraps
+    JSON, garbled only when there is no JSON object to be found."""
+
+    def test_parses_a_plain_object(self) -> None:
+        self.assertEqual(
+            parse_entry_patch_json('{"body": "Hi", "fields": {}}'),
+            {"body": "Hi", "fields": {}},
+        )
+
+    def test_peels_a_json_code_fence(self) -> None:
+        raw = '```json\n{"body": "Hi", "fields": {"bio": "x"}}\n```'
+        self.assertEqual(
+            parse_entry_patch_json(raw), {"body": "Hi", "fields": {"bio": "x"}}
+        )
+
+    def test_peels_a_bare_code_fence(self) -> None:
+        raw = '```\n{"body": "Hi"}\n```'
+        self.assertEqual(parse_entry_patch_json(raw), {"body": "Hi"})
+
+    def test_slices_object_out_of_surrounding_prose(self) -> None:
+        raw = 'Sure! Here is the patch:\n{"body": "Hi", "fields": {}}\nHope that helps.'
+        self.assertEqual(
+            parse_entry_patch_json(raw), {"body": "Hi", "fields": {}}
+        )
+
+    def test_garbled_non_json_is_none(self) -> None:
+        self.assertIsNone(parse_entry_patch_json("I'm not sure what you mean."))
+
+    def test_a_json_array_is_not_a_patch(self) -> None:
+        # Valid JSON, but not an object → not a patch.
+        self.assertIsNone(parse_entry_patch_json('["body", "fields"]'))
+
+    def test_empty_reply_is_none(self) -> None:
+        self.assertIsNone(parse_entry_patch_json(""))
+        self.assertIsNone(parse_entry_patch_json("   \n  "))
+
+
+class ValidateAiEntryPatchTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.service = open_test_project(self.root, "AI Patch Tests")
+        self._add_patch_fields_to_character()
+        self.hero = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Seren", entry_type="lore:character")
+        )
+        # Give bio a starting value so a proposal is a genuine revision.
+        self.hero = self.service.save_lore_entry(
+            self.hero.id,
+            SaveLoreEntryRequest(
+                title="Seren",
+                body="A wandering knight.",
+                base_revision=self.hero.revision,
+                entry_type="lore:character",
+                metadata={"bio": "Old bio.", "allegiance": "order"},
+            ),
+        )
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _add_patch_fields_to_character(self) -> None:
+        """Add a long_text, a select, and an entity_ref field to
+        lore:character — the built-in lore types carry none of the first two."""
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        fields = data.setdefault("fields", {})
+        fields["bio"] = {"name": "Biography", "type": "long_text"}
+        fields["allegiance"] = {
+            "name": "Allegiance",
+            "type": "select",
+            "options": ["order", "chaos"],
+        }
+        fields["patron"] = {
+            "name": "Patron",
+            "type": "entity_ref",
+            "target": {"entry_type": "lore:character"},
+        }
+        character = data["entry_types"].get("lore:character") or {}
+        own = list(character.get("fields") or [])
+        for field_id in ("bio", "allegiance", "patron"):
+            if field_id not in own:
+                own.insert(0, field_id)
+        character["fields"] = own
+        data["entry_types"]["lore:character"] = character
+        self.service._write_yaml(schema_path, data)
+
+    def test_body_and_long_text_field_kept(self) -> None:
+        raw = '{"body": "A knight of renown.", "fields": {"bio": "New bio."}}'
+        patch = self.service.validate_ai_entry_patch(self.hero.id, raw)
+        self.assertFalse(patch.garbled)
+        self.assertEqual(patch.body, "A knight of renown.")
+        self.assertEqual(patch.fields, {"bio": "New bio."})
+        self.assertEqual(patch.dropped, [])
+
+    def test_valid_select_kept(self) -> None:
+        raw = '{"fields": {"allegiance": "chaos"}}'
+        patch = self.service.validate_ai_entry_patch(self.hero.id, raw)
+        self.assertEqual(patch.fields, {"allegiance": "chaos"})
+        self.assertIsNone(patch.body)
+
+    def test_illegal_select_value_dropped_not_fatal(self) -> None:
+        # An out-of-range select is dropped per-field; the valid bio survives,
+        # and the whole patch does not fail (ADR §4 / Test surface).
+        raw = '{"body": "b", "fields": {"allegiance": "moon", "bio": "kept"}}'
+        patch = self.service.validate_ai_entry_patch(self.hero.id, raw)
+        self.assertFalse(patch.garbled)
+        self.assertEqual(patch.body, "b")
+        self.assertEqual(patch.fields, {"bio": "kept"})
+        self.assertIn("allegiance", patch.dropped)
+
+    def test_reference_field_excluded_even_if_valid(self) -> None:
+        # entity_ref is never proposed (§4) — dropped by type, not value.
+        raw = f'{{"fields": {{"patron": "{self.hero.id}"}}}}'
+        patch = self.service.validate_ai_entry_patch(self.hero.id, raw)
+        self.assertEqual(patch.fields, {})
+        self.assertIn("patron", patch.dropped)
+
+    def test_unknown_field_dropped(self) -> None:
+        raw = '{"fields": {"nonesuch": "x"}}'
+        patch = self.service.validate_ai_entry_patch(self.hero.id, raw)
+        self.assertEqual(patch.fields, {})
+        self.assertIn("nonesuch", patch.dropped)
+
+    def test_field_not_allowed_for_type_dropped(self) -> None:
+        # `status` is a defined field, but a scene field — not on lore:character.
+        raw = '{"fields": {"status": "married"}}'
+        patch = self.service.validate_ai_entry_patch(self.hero.id, raw)
+        self.assertEqual(patch.fields, {})
+        self.assertIn("status", patch.dropped)
+
+    def test_garbled_reply_flagged(self) -> None:
+        patch = self.service.validate_ai_entry_patch(
+            self.hero.id, "Sorry, I didn't catch that."
+        )
+        self.assertTrue(patch.garbled)
+        self.assertIsNone(patch.body)
+        self.assertEqual(patch.fields, {})
+
+    def test_empty_but_valid_patch_is_not_garbled(self) -> None:
+        # A parseable object proposing nothing is "no changes", not garble.
+        patch = self.service.validate_ai_entry_patch(self.hero.id, '{"fields": {}}')
+        self.assertFalse(patch.garbled)
+        self.assertIsNone(patch.body)
+        self.assertEqual(patch.fields, {})
+
+    def test_field_catalog_lists_proposable_fields_only(self) -> None:
+        schema = self.service.read_metadata_schema()
+        catalog = _field_catalog(self.service, schema, self.hero.id)
+        by_id = {f["id"]: f for f in catalog}
+        # long_text + select are proposable and carry their type / options.
+        self.assertEqual(by_id["bio"]["type"], "long_text")
+        self.assertEqual(by_id["allegiance"]["type"], "select")
+        self.assertEqual(by_id["allegiance"]["options"], ["order", "chaos"])
+        # References, computed, and the identity triple are never proposable.
+        self.assertNotIn("patron", by_id)
+        self.assertNotIn("id", by_id)
+        self.assertNotIn("entry_type", by_id)
+
+    def test_field_catalog_usable_from_jinja(self) -> None:
+        # The helper is registered and the for-if filter the template uses works.
+        env = create_environment_for_project(self.service)
+        rendered = env.from_string(
+            "{% for f in field_catalog(input.entry) if f.type == 'long_text' %}"
+            "{{ f.id }},{% endfor %}"
+        ).render(input={"entry": self.hero.id})
+        self.assertIn("bio", rendered)
+
+
+if __name__ == "__main__":
+    unittest.main()

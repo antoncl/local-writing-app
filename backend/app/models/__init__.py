@@ -11,6 +11,7 @@ from app.models.ai import (
     AIChatRequest,
     AIChatResponse,
     AIContextPresetResponse,
+    AIEntryPatch,
     AIGenerateRequest,
     AIGenerateResponse,
     AIHealthRequest,
@@ -48,6 +49,7 @@ from app.models.ai import (
     RecentProject,
     SaveChatSessionRequest,
     Swatch,
+    ValidateEntryPatchRequest,
 )
 from app.models.annotations import (
     AssistantTag,
@@ -203,6 +205,7 @@ __all__ = [
     "AIChatRequest",
     "AIChatResponse",
     "AIContextPresetResponse",
+    "AIEntryPatch",
     "AIGenerateRequest",
     "AIGenerateResponse",
     "AIHealthRequest",
@@ -364,6 +367,7 @@ __all__ = [
     "UpdateTagScopeRequest",
     "UpdateTodoRequest",
     "UpsertMetadataEntryTypeRequest",
+    "ValidateEntryPatchRequest",
     "UpsertMetadataFieldRequest",
     "UpsertMetadataGroupRequest",
     "REVISION_KIND",

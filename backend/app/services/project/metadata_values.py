@@ -22,9 +22,15 @@ from pathlib import Path
 from typing import Any
 
 from app.models import (
+    AIEntryPatch,
     MetadataFieldDefinition,
     MetadataSchema,
     ScopedTag,
+)
+from app.services.ai.entry_patch import (
+    NON_PROPOSABLE_FIELD_IDS,
+    NON_PROPOSABLE_FIELD_TYPES,
+    parse_entry_patch_json,
 )
 from app.services.project.errors import ProjectServiceError
 from app.services.project.node_index import NodeIndex
@@ -247,6 +253,65 @@ class MetadataValuesMixin:
                 errors.extend(self._validate_reference_target(label, field_id, item, field, node_index))
             return errors
         return []
+
+    def validate_ai_entry_patch(self, entry_id: str, raw: str) -> AIEntryPatch:
+        """Turn a brainstorm-commit reply into a validated, review-ready patch.
+
+        ADR-0046 §4/§6.3: the reply is expected to be a JSON object
+        ``{"body": <str>, "fields": {<field_id>: <value>}}``. We parse it
+        tolerantly (`parse_entry_patch_json`), then validate each proposed
+        field against the entry_type's resolved schema with the **same**
+        `_validate_metadata_field_value` the save path uses — dropping, per
+        field, any that is unknown, not allowed for the type, non-proposable
+        (references / computed, §4), or carries an illegal value, *without*
+        failing the whole patch. The safety guarantee is this validate-on-
+        return, so an instruction-shaped JSON reply is as safe as constrained
+        decoding would be. A reply that is not a JSON object at all is reported
+        `garbled` — the author is told, rather than the commit silently doing
+        nothing.
+
+        This only produces the patch for review; the actual write still goes
+        through the normal layered `save_lore_entry` (canonicalisation,
+        override deltas), so nothing here needs to re-implement the save path.
+        """
+
+        entry = self.read_lore_entry(entry_id)
+        schema = self.read_metadata_schema()
+
+        parsed = parse_entry_patch_json(raw)
+        if parsed is None:
+            return AIEntryPatch(garbled=True)
+
+        proposed_body = parsed.get("body")
+        body_value = proposed_body if isinstance(proposed_body, str) else None
+
+        definition = schema.entry_types.get(entry.entry_type)
+        allowed_field_ids = set(definition.fields) if definition else set()
+
+        fields: dict[str, Any] = {}
+        dropped: list[str] = []
+        proposed_fields = parsed.get("fields")
+        if isinstance(proposed_fields, dict):
+            for field_id, value in proposed_fields.items():
+                field = schema.fields.get(field_id)
+                if (
+                    field is None
+                    or field_id in NON_PROPOSABLE_FIELD_IDS
+                    or field_id not in allowed_field_ids
+                    or field.type in NON_PROPOSABLE_FIELD_TYPES
+                ):
+                    dropped.append(field_id)
+                    continue
+                # References are excluded above, so no node index is needed.
+                errors = self._validate_metadata_field_value(
+                    "AI patch", field_id, value, field, node_index=None
+                )
+                if errors:
+                    dropped.append(field_id)
+                    continue
+                fields[field_id] = value
+
+        return AIEntryPatch(body=body_value, fields=fields, dropped=dropped)
 
     def _strip_unknown_metadata_fields(
         self,

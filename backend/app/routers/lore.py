@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.models import (
+    AIEntryPatch,
     CreateLoreEntryRequest,
     CreateMutationSetEntryRequest,
     CreatePromptEntryRequest,
@@ -19,6 +20,7 @@ from app.models import (
     SaveLoreEntryRequest,
     SaveMutationSetEntryRequest,
     SavePromptEntryRequest,
+    ValidateEntryPatchRequest,
 )
 from app.runtime import CurrentProject, translate_errors
 
@@ -82,6 +84,18 @@ def get_entity_effective_state(
 def save_lore_entry(project: CurrentProject, entry_id: str, request: SaveLoreEntryRequest) -> LoreEntry:
     with translate_errors():
         return project.save_lore_entry(entry_id, request)
+
+
+@router.post("/api/lore/{entry_id}/ai-patch", response_model=AIEntryPatch)
+def validate_ai_entry_patch(
+    project: CurrentProject, entry_id: str, request: ValidateEntryPatchRequest
+) -> AIEntryPatch:
+    """Validate a brainstorm-commit reply into a review-ready patch (ADR-0046
+    §4/§6.3). Parses the model's JSON, validates each proposed field against
+    the entry's schema, drops the illegal ones per-field, and flags a garbled
+    reply. Read-only — the adopted patch is written through `PUT /api/lore`."""
+    with translate_errors():
+        return project.validate_ai_entry_patch(entry_id, request.raw)
 
 
 @router.post("/api/lore/{entry_id}/fork", response_model=LoreEntry)

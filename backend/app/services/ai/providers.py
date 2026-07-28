@@ -185,7 +185,7 @@ def _ensure_provider_key(provider_name: str, api_key: str) -> None:
     }.get(provider_name, "the provider's key")
     raise _ProviderError(
         f"{display_name} API key appears to contain a {hinted_name} key. "
-        f"Check Machine Settings and put a {expected} key in the {display_name} field."
+        f"Check the AI tab in Settings and put a {expected} key in the {display_name} field."
     )
 
 

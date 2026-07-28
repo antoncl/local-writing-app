@@ -605,10 +605,15 @@
     return await run(async () => {
       const previousTypeId = selectedSchemaTypeId && !schemaTypeReadonly ? selectedSchemaTypeId : null;
       // Entry-type identity is the kind-qualified FQN `kind:key` (#77). A new
-      // type's id is entered bare (the local key); qualify it with the kind so
-      // the stored id — and everything keyed off it downstream — is the FQN.
+      // type's id is the local key, which may itself nest (`revise:scene`, #600).
+      // Always prepend the kind — stripping a leading `kind:` the author may have
+      // typed — so the first segment is the kind and the stored id is a valid FQN
+      // (the backend treats any colon-bearing id as a full FQN whose prefix must
+      // equal the kind, so a bare nested key would otherwise be rejected).
       const rawTypeId = payload.typeId.trim();
-      const nextTypeId = rawTypeId.includes(":") ? rawTypeId : `${schemaTypeKind}:${rawTypeId}`;
+      const kindPrefix = `${schemaTypeKind}:`;
+      const localKey = rawTypeId.startsWith(kindPrefix) ? rawTypeId.slice(kindPrefix.length) : rawTypeId;
+      const nextTypeId = `${schemaTypeKind}:${localKey}`;
       const existing = previousTypeId ? metadataSchema?.entry_types[previousTypeId] : null;
       const nextType: EntryTypeDefinition = {
         name: payload.name.trim() || nextTypeId,

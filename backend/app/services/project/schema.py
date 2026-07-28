@@ -54,6 +54,12 @@ from app.services.project.errors import ProjectServiceError
 from app.services.project.layers import SCHEMA_FILENAME
 from app.services.project.node_index import IndexLayer
 
+# Entry-type identity is the kind-qualified FQN `kind:key` (#77). The key may nest
+# (`kind:seg:seg…`, e.g. `prompt:revise:scene`) — the extra colons are a pure naming
+# separator with no tie to the `parent:` chain (#600). The kind is always the first
+# segment (group 1); each segment starts with a letter, then letters/digits/underscores.
+_ENTRY_TYPE_FQN_RE = re.compile(r"([a-z][a-z0-9_]*):([A-Za-z][A-Za-z0-9_]*(?::[A-Za-z][A-Za-z0-9_]*)*)")
+
 
 def _entry_type_ancestry(
     entry_types: dict[str, EntryTypeDefinition], entry_type_id: str
@@ -265,10 +271,11 @@ class MetadataSchemaMixin:
         # bare local key (qualified here with the declared kind) so callers may
         # send either; the local part is the stable machine handle.
         fqn = entry_type_id if ":" in entry_type_id else f"{request.entry_type.kind}:{entry_type_id}"
-        match = re.fullmatch(r"([a-z][a-z0-9_]*):([A-Za-z][A-Za-z0-9_]*)", fqn)
+        match = _ENTRY_TYPE_FQN_RE.fullmatch(fqn)
         if not match:
             raise ProjectServiceError(
-                "Node type ID must be `kind:key`, where key starts with a letter and contains only letters, numbers, and underscores.",
+                "Node type ID must be `kind:key` (the key may nest as `kind:key:subkey`), where each "
+                "segment starts with a letter and contains only letters, numbers, and underscores.",
                 422,
             )
         if match.group(1) != request.entry_type.kind:
@@ -1340,7 +1347,7 @@ class MetadataSchemaMixin:
             # `kind`. This is the backstop that keeps a hand-edited layer from
             # reintroducing a bare (ambiguous) key or crossing a key into the
             # wrong kind.
-            fqn_match = re.fullmatch(r"([a-z][a-z0-9_]*):([A-Za-z][A-Za-z0-9_]*)", entry_type_id)
+            fqn_match = _ENTRY_TYPE_FQN_RE.fullmatch(entry_type_id)
             if not fqn_match:
                 errors.append(f"Metadata entry_type key {entry_type_id!r} must be kind-qualified as `kind:key`.")
             elif fqn_match.group(1) != entry_type.kind:

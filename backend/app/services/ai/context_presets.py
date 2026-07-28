@@ -50,7 +50,9 @@ def _render_outline_node(node: dict, *, indent: int) -> str:
     # The outline XML tag uses the bare local key (`scene`, `act`), not the
     # kind-qualified FQN (`scene:scene`) — the colon isn't XML-tag-legal and a
     # `<scene>` tag reads better for the model than `<scene_scene>`.
-    tag = _xml_safe_tag(entry_type.rsplit(":", 1)[-1])
+    # `split(":", 1)[-1]` strips only the kind, so a nested key keeps its
+    # remaining segments (`scene:act:prologue` → `act:prologue` → `act_prologue`).
+    tag = _xml_safe_tag(entry_type.split(":", 1)[-1])
     summary = (node.get("summary") or "").strip()
     children = node.get("children") or []
     attrs = [f"title={title}"]

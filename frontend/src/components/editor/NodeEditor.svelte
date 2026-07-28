@@ -7,9 +7,9 @@
   import EditorRail from "@/components/editor/EditorRail.svelte";
   import ReadOnlyBodyOverlay from "@/components/editor/body/ReadOnlyBodyOverlay.svelte";
   import LoreRevisionReview from "@/components/editor/body/LoreRevisionReview.svelte";
-  import type { FieldFlip } from "@/lib/utils/loreRevision";
   import LoreBrainstormBar from "@/components/editor/LoreBrainstormBar.svelte";
   import { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
+  import { LoreProposalController } from "@/lib/stores/loreProposal.svelte";
   import { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
   import { implicitContextFor } from "@/lib/stores/implicitContext.svelte";
   import { notchWhen } from "@/lib/utils/snapshotTime";
@@ -29,7 +29,6 @@
   import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataFieldDefinition, MetadataSchema, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
   import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
   import { metadataSchemaStore } from "@/lib/stores/schema";
-  import { loreBrainstorm } from "@/lib/stores/loreBrainstorm.svelte";
   import LayerAuthoringBar from "@/components/editor/LayerAuthoringBar.svelte";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { backlinksFor } from "@/lib/views/backlinks";
@@ -561,66 +560,24 @@
   }
 
   // ADR-0046 slice 2/3 — the lore brainstorm review. A `revise:entry` chat
-  // commits an EntryPatch (launched via LoreBrainstormBar); it is reviewed here
-  // as proposed-vs-current flips — the body plus each changed long_text field
-  // (slice 3a). Gated on documentKind === lore.
-  let loreProposal = $derived(
-    documentKind === "lore" && scene?.id ? loreBrainstorm.proposalFor(scene.id) : null,
-  );
-
-  // The long_text fields the patch proposes, paired with their current value —
-  // each reviewed as its own run-diff flip. Structured fields in the patch are
-  // ignored here (slice 3b renders those); the body is handled separately.
-  let loreProposalFields = $derived.by((): FieldFlip[] => {
-    if (!loreProposal || !metadataSchema) return [];
-    const flips: FieldFlip[] = [];
-    for (const [fieldId, proposedValue] of Object.entries(loreProposal.fields)) {
-      const field = metadataSchema.fields[fieldId];
-      if (!field || field.type !== "long_text") continue;
-      const current = metadata[fieldId];
-      flips.push({
-        fieldId,
-        label: field.name ?? fieldId,
-        currentValue: typeof current === "string" ? current : "",
-        proposedValue: typeof proposedValue === "string" ? proposedValue : "",
-      });
-    }
-    return flips;
+  // commits an EntryPatch (launched via LoreBrainstormBar); the controller
+  // derives the proposed-vs-current flips (body + each changed long_text field,
+  // slice 3a) off the live buffer state fed below. The write side of an adopt
+  // stays here — it owns `metadata` and the prose buffer — so body + metadata
+  // coalesce into one lore PUT (ADR-0046 §1).
+  const loreReview = new LoreProposalController();
+  $effect.pre(() => {
+    loreReview.documentKind = documentKind;
+    loreReview.sceneId = scene?.id ?? null;
+    loreReview.schema = metadataSchema;
+    loreReview.metadata = metadata;
   });
-
-  // Something to review only when the patch touches the body or a long_text
-  // field. (An all-structured patch reaches here empty in slice 3a; ChatBodyView
-  // already told the author nothing renders yet.)
-  let loreProposalHasReview = $derived(
-    !!loreProposal && (loreProposal.body != null || loreProposalFields.length > 0),
-  );
-
-  // The body the author currently sees (live buffer, not the saved file) — the
-  // side the proposal flips against, buffer-safe like the snapshot compare.
-  function currentLoreBody(): string {
-    return proseBodyView?.getBody() ?? scene?.body ?? "";
-  }
-
-  // Adopt the reviewed patch in ONE save: merge adopted field values into the
-  // metadata state, then adopt the body through the buffer — both feed the same
-  // emitChange autosave, so body + metadata coalesce into a single lore PUT (no
-  // bespoke endpoint, ADR-0046 §1). A body-less patch still flushes the fields.
-  async function adoptLorePatch(
-    body: string | null,
-    fields: Record<string, string>,
-  ): Promise<void> {
-    const hasFields = Object.keys(fields).length > 0;
-    if (hasFields) metadata = { ...metadata, ...fields };
-    if (body != null) {
-      await proseBodyView?.adoptBody(body);
-    } else if (hasFields) {
-      emitChange();
-    }
-  }
-
-  function closeLoreProposal(): void {
-    if (scene?.id) loreBrainstorm.clear(scene.id);
-  }
+  loreReview.onAdoptFields = (fields) => {
+    metadata = { ...metadata, ...fields };
+  };
+  loreReview.onAdoptBody = (body) => proseBodyView?.adoptBody(body);
+  loreReview.onEmitChange = emitChange;
+  loreReview.readCurrentBody = () => proseBodyView?.getBody() ?? scene?.body ?? "";
 
   function openInputsDialog(entry: PromptEntrySummary) {
     const declared = effectivePromptInputs(entry);
@@ -1157,24 +1114,24 @@
         tone="snapshot"
         onRunClick={(regionId, kind) => snapshots.adopt(regionId, kind)}
       />
-    {:else if documentKind === "lore" && loreProposalHasReview && loreProposal}
+    {:else if documentKind === "lore" && loreReview.hasReview && loreReview.proposal}
       <!-- ADR-0046 slice 3: the brainstorm commit reviewed as flips (body + each
            long_text field). Like the snapshot overlay, the live buffer stays
            mounted and hidden beneath; adopting writes through the same
            emitChange autosave (body + metadata in one PUT). -->
-      {#key loreProposal}
+      {#key loreReview.proposal}
         <LoreRevisionReview
-          currentBody={currentLoreBody()}
-          proposedBody={loreProposal.body}
-          fields={loreProposalFields}
-          onAdopt={adoptLorePatch}
-          onClose={closeLoreProposal}
+          currentBody={loreReview.currentBody()}
+          proposedBody={loreReview.proposal.body}
+          fields={loreReview.fields}
+          onAdopt={(body, fields) => loreReview.adopt(body, fields)}
+          onClose={() => loreReview.clear()}
         />
       {/key}
     {/if}
     <div
       class="prose-body-host"
-      class:hidden={scrubbed || snapshotParked || (documentKind === "lore" && loreProposalHasReview)}
+      class:hidden={scrubbed || snapshotParked || (documentKind === "lore" && loreReview.hasReview)}
     >
       <ProseBodyView
         bind:this={proseBodyView}

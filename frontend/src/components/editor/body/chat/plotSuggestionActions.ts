@@ -6,7 +6,9 @@ import type {
   PlotNode,
   PlotNodeList,
   PlotNodeSummary,
+  PlotPointNoteStatus,
   PlotPointClaim,
+  PlotTemplateInstancePoint,
   SavePlotNodeRequest,
 } from "@/lib/types";
 
@@ -20,6 +22,7 @@ export type PlotSuggestionActions = {
   applyPlotSuggestionEvidence: (suggestion: PlotSuggestion) => Promise<void>;
   applyPlotSuggestionNote: (suggestion: PlotSuggestion) => Promise<void>;
   createPlotSuggestionBadge: (suggestion: PlotSuggestion) => Promise<void>;
+  applyPlotSuggestionBeatFields: (suggestion: PlotSuggestion) => Promise<void>;
 };
 
 type CreatePlotSuggestionActionsOptions = {
@@ -164,6 +167,62 @@ export function createPlotSuggestionActions(options: CreatePlotSuggestionActions
     fail("Could not find the target card and template instance on a plot board.");
   }
 
+  async function applyPlotSuggestionBeatFields(suggestion: PlotSuggestion): Promise<void> {
+    const templateInstanceId = suggestion.template_instance_id.trim();
+    const plotPointId = suggestion.plot_point_id.trim();
+    const patch = plotBeatPatch(suggestion);
+    if (!templateInstanceId || !plotPointId || Object.keys(patch).length === 0) {
+      fail("This suggestion does not identify a plot beat field update.");
+    }
+
+    const instance = await loadPlotNode(templateInstanceId, "Could not load plot template instance.");
+    const templateInstance = instance?.template_instance;
+    if (!instance || !templateInstance) {
+      fail("Could not load the target plot template instance.");
+    }
+
+    const nextPoints = (templateInstance.plot_points ?? []).map((point) =>
+      point.plot_point_id === plotPointId
+        ? { ...point, ...patch, metadata: point.metadata ?? {} }
+        : point,
+    );
+    const nextPoint = nextPoints.find((point) => point.plot_point_id === plotPointId);
+    if (!nextPoint) {
+      fail("Could not find that plot beat on the target template instance.");
+    }
+
+    const saved = await options.api.savePlotNode(instance.id, {
+      title: instance.title,
+      entry_type: instance.entry_type,
+      body: instance.body ?? "",
+      metadata: instance.metadata ?? {},
+      template: instance.template ?? null,
+      template_instance: {
+        ...templateInstance,
+        plot_points: nextPoints,
+        point_notes: {
+          ...(templateInstance.point_notes ?? {}),
+          [plotPointId]: {
+            ...(templateInstance.point_notes?.[plotPointId] ?? {}),
+            local_label: nextPoint.local_label || nextPoint.title || "",
+            notes: nextPoint.notes ?? "",
+            author_intent: nextPoint.author_intent ?? "",
+            expected_role: nextPoint.expected_role ?? "",
+            open_questions: nextPoint.open_questions ?? [],
+            status: nextPoint.status ?? "unplanned",
+            metadata: nextPoint.metadata ?? {},
+          },
+        },
+        metadata: templateInstance.metadata ?? {},
+      },
+      board: instance.board ?? null,
+      layout: instance.layout ?? null,
+      base_revision: instance.revision,
+    });
+    options.setChatError(null);
+    await options.onPlotSaved?.(saved);
+  }
+
   function fail(message: string): never {
     options.setChatError(message);
     throw new Error(message);
@@ -173,7 +232,31 @@ export function createPlotSuggestionActions(options: CreatePlotSuggestionActions
     applyPlotSuggestionEvidence: (suggestion) => appendPlotSuggestionClaimField(suggestion, "evidence", suggestion.evidence_to_add),
     applyPlotSuggestionNote: (suggestion) => appendPlotSuggestionClaimField(suggestion, "ai_notes", suggestion.proposed_change),
     createPlotSuggestionBadge,
+    applyPlotSuggestionBeatFields,
   };
+}
+
+function plotBeatPatch(suggestion: PlotSuggestion): Partial<PlotTemplateInstancePoint> {
+  const patch: Partial<PlotTemplateInstancePoint> = {};
+  if (suggestion.story_specifics.trim()) patch.notes = suggestion.story_specifics.trim();
+  if (suggestion.author_intent.trim()) patch.author_intent = suggestion.author_intent.trim();
+  if (suggestion.expected_role.trim()) patch.expected_role = suggestion.expected_role.trim();
+  if (suggestion.open_questions.length > 0) patch.open_questions = suggestion.open_questions;
+  if (isPlotPointNoteStatus(suggestion.status)) patch.status = suggestion.status;
+  return patch;
+}
+
+function isPlotPointNoteStatus(value: string): value is PlotPointNoteStatus {
+  switch (value) {
+    case "unplanned":
+    case "planned":
+    case "drafted":
+    case "satisfied":
+    case "intentionally_omitted":
+      return true;
+    default:
+      return false;
+  }
 }
 
 function decodeContextPickRefs(raw: string | undefined): NodePickerRef[] {

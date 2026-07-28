@@ -962,6 +962,7 @@
       onApplyEvidence={plotSuggestionActions.applyPlotSuggestionEvidence}
       onApplyNote={plotSuggestionActions.applyPlotSuggestionNote}
       onCreateBadge={plotSuggestionActions.createPlotSuggestionBadge}
+      onApplyBeatFields={plotSuggestionActions.applyPlotSuggestionBeatFields}
     />
 
     {#if declaredInputs.length > 0}

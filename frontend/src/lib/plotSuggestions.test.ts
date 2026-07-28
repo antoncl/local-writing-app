@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   appendPlotSuggestionEvidence,
   appendPlotSuggestionText,
+  canApplyPlotSuggestionBeatFields,
   canCreatePlotSuggestionBadge,
   parsePlotSuggestions,
+  plotSuggestionBeatClipboardText,
   plotSuggestionClipboardText,
   stripPlotSuggestions,
 } from "./plotSuggestions";
@@ -33,6 +35,47 @@ Intro text.
         reason: "Mara can still walk away too easily.",
         proposed_change: "Add a consequence that makes returning the ledger dangerous.",
         evidence_to_add: "Show who would expose her if she tries to undo the theft.",
+        story_specifics: "",
+        author_intent: "",
+        expected_role: "",
+        open_questions: [],
+        status: "",
+      },
+    ]);
+  });
+
+  it("extracts plot beat field suggestions", () => {
+    const suggestions = parsePlotSuggestions(`
+<plot_suggestions>
+  <suggestion kind="beat_revision" template_instance_id="plot_main" plot_point_id="first_turn">
+    <title>Specify the lock-in</title>
+    <reason>The generic beat needs this story's irreversible turn.</reason>
+    <story_specifics>Mara burns her bridge back to the archive.</story_specifics>
+    <author_intent>Commit her to theft over loyalty.</author_intent>
+    <expected_role>Make retreat emotionally impossible.</expected_role>
+    <open_question>Who witnesses the break?</open_question>
+    <open_question>What does it cost immediately?</open_question>
+    <status>planned</status>
+  </suggestion>
+</plot_suggestions>
+`);
+
+    expect(suggestions).toEqual([
+      {
+        kind: "beat_revision",
+        target_card_id: "",
+        target_claim_id: "",
+        template_instance_id: "plot_main",
+        plot_point_id: "first_turn",
+        title: "Specify the lock-in",
+        reason: "The generic beat needs this story's irreversible turn.",
+        proposed_change: "",
+        evidence_to_add: "",
+        story_specifics: "Mara burns her bridge back to the archive.",
+        author_intent: "Commit her to theft over loyalty.",
+        expected_role: "Make retreat emotionally impossible.",
+        open_questions: ["Who witnesses the break?", "What does it cost immediately?"],
+        status: "planned",
       },
     ]);
   });
@@ -71,12 +114,48 @@ describe("plotSuggestionClipboardText", () => {
       reason: "Mara can still walk away too easily.",
       proposed_change: "Add a consequence.",
       evidence_to_add: "Show who would expose her.",
+      story_specifics: "",
+      author_intent: "",
+      expected_role: "",
+      open_questions: [],
+      status: "",
     }, "proposed_change")).toBe([
       "Strengthen lock-in",
       "Proposed change: Add a consequence.",
       "Reason: Mara can still walk away too easily.",
       "Card: card_archive",
       "Claim: claim_first_turn",
+      "Template instance: plot_main",
+      "Plot beat: first_turn",
+    ].join("\n"));
+  });
+});
+
+describe("plotSuggestionBeatClipboardText", () => {
+  it("formats suggested plot beat fields", () => {
+    expect(plotSuggestionBeatClipboardText({
+      kind: "beat_revision",
+      target_card_id: "",
+      target_claim_id: "",
+      template_instance_id: "plot_main",
+      plot_point_id: "first_turn",
+      title: "Specify the lock-in",
+      reason: "The generic beat needs this story's irreversible turn.",
+      proposed_change: "",
+      evidence_to_add: "",
+      story_specifics: "Mara burns her bridge back to the archive.",
+      author_intent: "Commit her to theft over loyalty.",
+      expected_role: "Make retreat emotionally impossible.",
+      open_questions: ["Who witnesses the break?"],
+      status: "planned",
+    })).toBe([
+      "Specify the lock-in",
+      "Story specifics: Mara burns her bridge back to the archive.",
+      "Author intent: Commit her to theft over loyalty.",
+      "Expected role: Make retreat emotionally impossible.",
+      "Open question: Who witnesses the break?",
+      "Status: planned",
+      "Reason: The generic beat needs this story's irreversible turn.",
       "Template instance: plot_main",
       "Plot beat: first_turn",
     ].join("\n"));
@@ -123,6 +202,11 @@ describe("canCreatePlotSuggestionBadge", () => {
       reason: "",
       proposed_change: "",
       evidence_to_add: "",
+      story_specifics: "",
+      author_intent: "",
+      expected_role: "",
+      open_questions: [],
+      status: "",
     })).toBe(true);
   });
 
@@ -137,6 +221,32 @@ describe("canCreatePlotSuggestionBadge", () => {
       reason: "",
       proposed_change: "",
       evidence_to_add: "",
+      story_specifics: "",
+      author_intent: "",
+      expected_role: "",
+      open_questions: [],
+      status: "",
     })).toBe(false);
+  });
+});
+
+describe("canApplyPlotSuggestionBeatFields", () => {
+  it("accepts beat suggestions with a target and story-specific field", () => {
+    expect(canApplyPlotSuggestionBeatFields({
+      kind: "beat_revision",
+      target_card_id: "",
+      target_claim_id: "",
+      template_instance_id: "plot_main",
+      plot_point_id: "first_turn",
+      title: "Specify the beat",
+      reason: "",
+      proposed_change: "",
+      evidence_to_add: "",
+      story_specifics: "A concrete story version.",
+      author_intent: "",
+      expected_role: "",
+      open_questions: [],
+      status: "",
+    })).toBe(true);
   });
 });

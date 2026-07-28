@@ -1,11 +1,19 @@
 export type PlotSuggestionKind =
   | "card_revision"
+  | "beat_revision"
   | "claim_change"
   | "new_claim"
   | "relationship_change"
   | "scene_promotion"
   | "question"
   | "unknown";
+
+export type PlotSuggestionBeatStatus =
+  | "unplanned"
+  | "planned"
+  | "drafted"
+  | "satisfied"
+  | "intentionally_omitted";
 
 export type PlotSuggestion = {
   kind: PlotSuggestionKind;
@@ -17,6 +25,11 @@ export type PlotSuggestion = {
   reason: string;
   proposed_change: string;
   evidence_to_add: string;
+  story_specifics: string;
+  author_intent: string;
+  expected_role: string;
+  open_questions: string[];
+  status: PlotSuggestionBeatStatus | "";
 };
 
 const PLACEHOLDER_FRAGMENTS = [
@@ -48,6 +61,11 @@ export function parsePlotSuggestions(text: string): PlotSuggestion[] {
         reason: extractTag(suggestion[2] ?? "", "reason"),
         proposed_change: extractTag(suggestion[2] ?? "", "proposed_change"),
         evidence_to_add: extractTag(suggestion[2] ?? "", "evidence_to_add"),
+        story_specifics: extractTag(suggestion[2] ?? "", "story_specifics"),
+        author_intent: extractTag(suggestion[2] ?? "", "author_intent"),
+        expected_role: extractTag(suggestion[2] ?? "", "expected_role"),
+        open_questions: extractTags(suggestion[2] ?? "", "open_question"),
+        status: normalizeStatus(extractTag(suggestion[2] ?? "", "status")),
       };
       if (isConcreteSuggestion(parsed)) out.push(parsed);
     }
@@ -66,6 +84,21 @@ export function plotSuggestionClipboardText(
     suggestion.reason ? `Reason: ${suggestion.reason}` : "",
     suggestion.target_card_id ? `Card: ${suggestion.target_card_id}` : "",
     suggestion.target_claim_id ? `Claim: ${suggestion.target_claim_id}` : "",
+    suggestion.template_instance_id ? `Template instance: ${suggestion.template_instance_id}` : "",
+    suggestion.plot_point_id ? `Plot beat: ${suggestion.plot_point_id}` : "",
+  ];
+  return lines.filter(Boolean).join("\n");
+}
+
+export function plotSuggestionBeatClipboardText(suggestion: PlotSuggestion): string {
+  const lines = [
+    suggestion.title,
+    suggestion.story_specifics ? `Story specifics: ${suggestion.story_specifics}` : "",
+    suggestion.author_intent ? `Author intent: ${suggestion.author_intent}` : "",
+    suggestion.expected_role ? `Expected role: ${suggestion.expected_role}` : "",
+    ...suggestion.open_questions.map((question) => `Open question: ${question}`),
+    suggestion.status ? `Status: ${suggestion.status}` : "",
+    suggestion.reason ? `Reason: ${suggestion.reason}` : "",
     suggestion.template_instance_id ? `Template instance: ${suggestion.template_instance_id}` : "",
     suggestion.plot_point_id ? `Plot beat: ${suggestion.plot_point_id}` : "",
   ];
@@ -98,6 +131,21 @@ export function canCreatePlotSuggestionBadge(suggestion: PlotSuggestion): boolea
   );
 }
 
+export function canApplyPlotSuggestionBeatFields(suggestion: PlotSuggestion): boolean {
+  return (
+    suggestion.kind === "beat_revision" &&
+    Boolean(suggestion.template_instance_id.trim()) &&
+    Boolean(suggestion.plot_point_id.trim()) &&
+    Boolean(
+      suggestion.story_specifics.trim() ||
+        suggestion.author_intent.trim() ||
+        suggestion.expected_role.trim() ||
+        suggestion.open_questions.length > 0 ||
+        suggestion.status,
+    )
+  );
+}
+
 function parseAttributes(text: string): Record<string, string> {
   const attrs: Record<string, string> = {};
   for (const match of matchAll(text, /([A-Za-z_][\w:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {
@@ -112,10 +160,16 @@ function extractTag(text: string, tag: string): string {
   return normalizeText(match?.[1] ?? "");
 }
 
+function extractTags(text: string, tag: string): string[] {
+  const pattern = new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`, "gi");
+  return matchAll(text, pattern).map((match) => normalizeText(match?.[1] ?? "")).filter(Boolean);
+}
+
 function normalizeKind(kind: string | undefined): PlotSuggestionKind {
   const normalized = (kind ?? "").trim();
   switch (normalized) {
     case "card_revision":
+    case "beat_revision":
     case "claim_change":
     case "new_claim":
     case "relationship_change":
@@ -124,6 +178,19 @@ function normalizeKind(kind: string | undefined): PlotSuggestionKind {
       return normalized;
     default:
       return "unknown";
+  }
+}
+
+function normalizeStatus(status: string): PlotSuggestionBeatStatus | "" {
+  switch (status.trim()) {
+    case "unplanned":
+    case "planned":
+    case "drafted":
+    case "satisfied":
+    case "intentionally_omitted":
+      return status.trim() as PlotSuggestionBeatStatus;
+    default:
+      return "";
   }
 }
 
@@ -155,6 +222,11 @@ function isConcreteSuggestion(suggestion: PlotSuggestion): boolean {
     suggestion.reason,
     suggestion.proposed_change,
     suggestion.evidence_to_add,
+    suggestion.story_specifics,
+    suggestion.author_intent,
+    suggestion.expected_role,
+    ...suggestion.open_questions,
+    suggestion.status,
   ].join(" ").toLowerCase();
   if (!content.trim()) return false;
   return !PLACEHOLDER_FRAGMENTS.some((fragment) => content.includes(fragment));

@@ -26,6 +26,7 @@ export type PlotSuggestion = {
   reason: string;
   proposed_change: string;
   evidence_to_add: string;
+  rationale_to_add: string;
   story_specifics: string;
   author_intent: string;
   expected_role: string;
@@ -44,6 +45,7 @@ const PLACEHOLDER_FRAGMENTS = [
   "why this would strengthen",
   "specific board-level edit",
   "concrete evidence the card",
+  "for claim_change",
   "_if_known",
 ];
 
@@ -67,6 +69,7 @@ export function parsePlotSuggestions(text: string): PlotSuggestion[] {
         reason: extractTag(suggestion[2] ?? "", "reason"),
         proposed_change: extractTag(suggestion[2] ?? "", "proposed_change"),
         evidence_to_add: extractTag(suggestion[2] ?? "", "evidence_to_add"),
+        rationale_to_add: extractTag(suggestion[2] ?? "", "rationale_to_add"),
         story_specifics: extractTag(suggestion[2] ?? "", "story_specifics"),
         author_intent: extractTag(suggestion[2] ?? "", "author_intent"),
         expected_role: extractTag(suggestion[2] ?? "", "expected_role"),
@@ -88,6 +91,7 @@ export function plotSuggestionClipboardText(
     suggestion.title,
     `${label}: ${suggestion[field]}`,
     suggestion.reason ? `Reason: ${suggestion.reason}` : "",
+    suggestion.rationale_to_add ? `Rationale to add: ${suggestion.rationale_to_add}` : "",
     suggestion.target_card_id ? `Card: ${suggestion.target_card_id}` : "",
     suggestion.target_claim_id ? `Story marker: ${suggestion.target_claim_id}` : "",
     suggestion.template_instance_id ? `Template: ${suggestion.template_instance_id}` : "",
@@ -211,6 +215,22 @@ export function canApplyPlotSuggestionClaimNote(suggestion: PlotSuggestion): boo
   );
 }
 
+export function canApplyPlotSuggestionClaimRationale(suggestion: PlotSuggestion): boolean {
+  return (
+    suggestion.kind === "claim_change" &&
+    Boolean(suggestion.target_claim_id.trim()) &&
+    Boolean(suggestion.rationale_to_add.trim())
+  );
+}
+
+export function canApplyPlotSuggestionClaimEvidence(suggestion: PlotSuggestion): boolean {
+  return (
+    suggestion.kind === "claim_change" &&
+    Boolean(suggestion.target_claim_id.trim()) &&
+    Boolean(suggestion.evidence_to_add.trim())
+  );
+}
+
 export function canApplyPlotSuggestionBeatQuestion(suggestion: PlotSuggestion): boolean {
   return (
     suggestion.kind === "question" &&
@@ -321,6 +341,7 @@ function isConcreteSuggestion(suggestion: PlotSuggestion): boolean {
     suggestion.reason,
     suggestion.proposed_change,
     suggestion.evidence_to_add,
+    suggestion.rationale_to_add,
     suggestion.story_specifics,
     suggestion.author_intent,
     suggestion.expected_role,

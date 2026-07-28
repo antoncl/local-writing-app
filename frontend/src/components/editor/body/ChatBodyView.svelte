@@ -961,6 +961,7 @@
       bind:scrollEl={chatScrollEl}
       onApplyEvidence={plotSuggestionActions.applyPlotSuggestionEvidence}
       onApplyNote={plotSuggestionActions.applyPlotSuggestionNote}
+      onApplyRationale={plotSuggestionActions.applyPlotSuggestionRationale}
       onApplyBeatQuestion={plotSuggestionActions.applyPlotSuggestionBeatQuestion}
       onCreateBadge={plotSuggestionActions.createPlotSuggestionBadge}
       onCreateCard={plotSuggestionActions.createPlotSuggestionCard}

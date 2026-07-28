@@ -13,6 +13,7 @@ const baseSuggestion: PlotSuggestion = {
   reason: "",
   proposed_change: "Make the consequence unavoidable.",
   evidence_to_add: "Show the door closing behind her.",
+  rationale_to_add: "",
   story_specifics: "",
   author_intent: "",
   expected_role: "",
@@ -111,12 +112,40 @@ describe("createPlotSuggestionActions", () => {
     const suggestion = { ...baseSuggestion, kind: "claim_change", target_claim_id: "claim_target" } as PlotSuggestion;
 
     await env.actions.applyPlotSuggestionEvidence(suggestion);
+    await env.actions.applyPlotSuggestionRationale({
+      ...suggestion,
+      rationale_to_add: "This card makes the old path unsafe.",
+    });
     await env.actions.applyPlotSuggestionNote(suggestion);
 
     const claim = env.nodes.plot_board.board?.claims[0];
     expect(claim?.evidence).toBe("Show the door closing behind her.");
+    expect(claim?.rationale).toBe("This card makes the old path unsafe.");
     expect(claim?.ai_notes).toBe("Make the consequence unavoidable.");
-    expect(env.onPlotSaved).toHaveBeenCalledTimes(2);
+    expect(env.onPlotSaved).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not duplicate appended claim rationale", async () => {
+    const env = harness({
+      plot_board: makePlotNode("plot_board", {
+        board: makeBoard([makeClaim({
+          id: "claim_target",
+          rationale: "This card makes the old path unsafe.",
+        })]),
+      }),
+    });
+
+    await env.actions.applyPlotSuggestionRationale({
+      ...baseSuggestion,
+      kind: "claim_change",
+      target_claim_id: "claim_target",
+      rationale_to_add: "This card makes the old path unsafe.",
+    });
+
+    const claim = env.nodes.plot_board.board?.claims[0];
+    expect(claim?.rationale).toBe("This card makes the old path unsafe.");
+    expect(env.onPlotSaved).not.toHaveBeenCalled();
+    expect(env.chatError).toBeNull();
   });
 
   it("applies a card revision as replacement synopsis", async () => {
@@ -246,6 +275,7 @@ describe("createPlotSuggestionActions", () => {
       title: "Ledger theft",
       proposed_change: "Mara steals the ledger and loses her only way back.",
       evidence_to_add: "The archive doors lock behind her.",
+      rationale_to_add: "The theft makes retreat impossible.",
       reason: "This makes the first turn concrete.",
     });
 
@@ -263,6 +293,7 @@ describe("createPlotSuggestionActions", () => {
         plot_point_id: "first_turn",
         plotline_id: "line_main",
         evidence: "The archive doors lock behind her.",
+        rationale: "The theft makes retreat impossible.",
         ai_notes: "This makes the first turn concrete.",
       }),
     ]);
@@ -326,6 +357,7 @@ describe("createPlotSuggestionActions", () => {
         plotline_id: "line_main",
         claim_type: "satisfies",
         evidence: "Show the door closing behind her.",
+        rationale: null,
         ai_notes: "Make the consequence unavoidable.",
       }),
     ]);

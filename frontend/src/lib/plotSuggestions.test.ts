@@ -5,7 +5,9 @@ import {
   canApplyPlotSuggestionBeatFields,
   canApplyPlotSuggestionBeatQuestion,
   canApplyPlotSuggestionCardSynopsis,
+  canApplyPlotSuggestionClaimEvidence,
   canApplyPlotSuggestionClaimNote,
+  canApplyPlotSuggestionClaimRationale,
   canCreatePlotSuggestionCard,
   canCreatePlotSuggestionBadge,
   canCopyPlotSuggestionQuestion,
@@ -28,6 +30,7 @@ Intro text.
     <reason>Mara can still walk away too easily.</reason>
     <proposed_change>Add a consequence that makes returning the ledger dangerous.</proposed_change>
     <evidence_to_add>Show who would expose her if she tries to undo the theft.</evidence_to_add>
+    <rationale_to_add>The card shows the old path becoming dangerous.</rationale_to_add>
   </suggestion>
 </plot_suggestions>
 `);
@@ -43,6 +46,7 @@ Intro text.
         reason: "Mara can still walk away too easily.",
         proposed_change: "Add a consequence that makes returning the ledger dangerous.",
         evidence_to_add: "Show who would expose her if she tries to undo the theft.",
+        rationale_to_add: "The card shows the old path becoming dangerous.",
         story_specifics: "",
         author_intent: "",
         expected_role: "",
@@ -79,6 +83,7 @@ Intro text.
         reason: "The generic beat needs this story's irreversible turn.",
         proposed_change: "",
         evidence_to_add: "",
+        rationale_to_add: "",
         story_specifics: "Mara burns her bridge back to the archive.",
         author_intent: "Commit her to theft over loyalty.",
         expected_role: "Make retreat emotionally impossible.",
@@ -111,6 +116,7 @@ Intro text.
         reason: "This gives the turn a concrete irreversible action.",
         proposed_change: "Mara steals the ledger and loses her only way back.",
         evidence_to_add: "The archive doors lock behind her.",
+        rationale_to_add: "",
       }),
     ]);
   });
@@ -149,6 +155,7 @@ describe("plotSuggestionClipboardText", () => {
       reason: "Mara can still walk away too easily.",
       proposed_change: "Add a consequence.",
       evidence_to_add: "Show who would expose her.",
+      rationale_to_add: "This connects the card to the first turn.",
       story_specifics: "",
       author_intent: "",
       expected_role: "",
@@ -158,6 +165,7 @@ describe("plotSuggestionClipboardText", () => {
       "Strengthen lock-in",
       "Proposed change: Add a consequence.",
       "Reason: Mara can still walk away too easily.",
+      "Rationale to add: This connects the card to the first turn.",
       "Card: card_archive",
       "Story marker: claim_first_turn",
       "Template: plot_main",
@@ -178,6 +186,7 @@ describe("plotSuggestionBeatClipboardText", () => {
       reason: "The generic beat needs this story's irreversible turn.",
       proposed_change: "",
       evidence_to_add: "",
+      rationale_to_add: "",
       story_specifics: "Mara burns her bridge back to the archive.",
       author_intent: "Commit her to theft over loyalty.",
       expected_role: "Make retreat emotionally impossible.",
@@ -209,6 +218,7 @@ describe("plotSuggestionQuestionClipboardText", () => {
       reason: "The turn needs an immediate consequence.",
       proposed_change: "Decide who notices the theft first.",
       evidence_to_add: "",
+      rationale_to_add: "",
       story_specifics: "",
       author_intent: "",
       expected_role: "",
@@ -239,6 +249,7 @@ describe("plotSuggestionTargets", () => {
       reason: "",
       proposed_change: "",
       evidence_to_add: "",
+      rationale_to_add: "",
       story_specifics: "",
       author_intent: "",
       expected_role: "",
@@ -274,6 +285,7 @@ describe("canCopyPlotSuggestionQuestion", () => {
       reason: "",
       proposed_change: "",
       evidence_to_add: "",
+      rationale_to_add: "",
       story_specifics: "",
       author_intent: "",
       expected_role: "",
@@ -290,6 +302,7 @@ describe("canCopyPlotSuggestionQuestion", () => {
       reason: "",
       proposed_change: "A replacement synopsis.",
       evidence_to_add: "",
+      rationale_to_add: "",
       story_specifics: "",
       author_intent: "",
       expected_role: "",
@@ -339,6 +352,7 @@ describe("canCreatePlotSuggestionBadge", () => {
       reason: "",
       proposed_change: "",
       evidence_to_add: "",
+      rationale_to_add: "",
       story_specifics: "",
       author_intent: "",
       expected_role: "",
@@ -358,6 +372,7 @@ describe("canCreatePlotSuggestionBadge", () => {
       reason: "",
       proposed_change: "",
       evidence_to_add: "",
+      rationale_to_add: "",
       story_specifics: "",
       author_intent: "",
       expected_role: "",
@@ -379,6 +394,7 @@ describe("canApplyPlotSuggestionBeatFields", () => {
       reason: "",
       proposed_change: "",
       evidence_to_add: "",
+      rationale_to_add: "",
       story_specifics: "A concrete story version.",
       author_intent: "",
       expected_role: "",
@@ -400,6 +416,7 @@ describe("canApplyPlotSuggestionCardSynopsis", () => {
       reason: "",
       proposed_change: "Mara steals the ledger and loses her only way back.",
       evidence_to_add: "",
+      rationale_to_add: "",
       story_specifics: "",
       author_intent: "",
       expected_role: "",
@@ -419,6 +436,7 @@ describe("canApplyPlotSuggestionCardSynopsis", () => {
       reason: "",
       proposed_change: "",
       evidence_to_add: "",
+      rationale_to_add: "",
       story_specifics: "",
       author_intent: "",
       expected_role: "",
@@ -440,6 +458,7 @@ describe("canApplyPlotSuggestionClaimNote", () => {
       reason: "",
       proposed_change: "Make the consequence harder to evade.",
       evidence_to_add: "",
+      rationale_to_add: "",
       story_specifics: "",
       author_intent: "",
       expected_role: "",
@@ -459,12 +478,57 @@ describe("canApplyPlotSuggestionClaimNote", () => {
       reason: "",
       proposed_change: "Mara steals the ledger and loses her only way back.",
       evidence_to_add: "",
+      rationale_to_add: "",
       story_specifics: "",
       author_intent: "",
       expected_role: "",
       open_questions: [],
       status: "",
     })).toBe(false);
+  });
+});
+
+describe("canApplyPlotSuggestionClaimRationale", () => {
+  it("accepts claim change suggestions with a target claim and rationale", () => {
+    expect(canApplyPlotSuggestionClaimRationale({
+      kind: "claim_change",
+      target_card_id: "card_archive",
+      target_claim_id: "claim_first_turn",
+      template_instance_id: "plot_main",
+      plot_point_id: "first_turn",
+      title: "Clarify why this earns the turn",
+      reason: "",
+      proposed_change: "",
+      evidence_to_add: "",
+      rationale_to_add: "The card makes returning the ledger unsafe.",
+      story_specifics: "",
+      author_intent: "",
+      expected_role: "",
+      open_questions: [],
+      status: "",
+    })).toBe(true);
+  });
+});
+
+describe("canApplyPlotSuggestionClaimEvidence", () => {
+  it("accepts claim change suggestions with a target claim and evidence", () => {
+    expect(canApplyPlotSuggestionClaimEvidence({
+      kind: "claim_change",
+      target_card_id: "card_archive",
+      target_claim_id: "claim_first_turn",
+      template_instance_id: "plot_main",
+      plot_point_id: "first_turn",
+      title: "Ground the turn",
+      reason: "",
+      proposed_change: "",
+      evidence_to_add: "The archive doors lock behind her.",
+      rationale_to_add: "",
+      story_specifics: "",
+      author_intent: "",
+      expected_role: "",
+      open_questions: [],
+      status: "",
+    })).toBe(true);
   });
 });
 
@@ -480,6 +544,7 @@ describe("canApplyPlotSuggestionBeatQuestion", () => {
       reason: "",
       proposed_change: "Decide who sees Mara steal the ledger.",
       evidence_to_add: "",
+      rationale_to_add: "",
       story_specifics: "",
       author_intent: "",
       expected_role: "",
@@ -499,6 +564,7 @@ describe("canApplyPlotSuggestionBeatQuestion", () => {
       reason: "",
       proposed_change: "Decide who sees Mara steal the ledger.",
       evidence_to_add: "",
+      rationale_to_add: "",
       story_specifics: "",
       author_intent: "",
       expected_role: "",
@@ -520,6 +586,7 @@ describe("canCreatePlotSuggestionCard", () => {
       reason: "",
       proposed_change: "Mara steals the ledger and loses her only way back.",
       evidence_to_add: "",
+      rationale_to_add: "",
       story_specifics: "",
       author_intent: "",
       expected_role: "",
@@ -539,6 +606,7 @@ describe("canCreatePlotSuggestionCard", () => {
       reason: "",
       proposed_change: "",
       evidence_to_add: "",
+      rationale_to_add: "",
       story_specifics: "",
       author_intent: "",
       expected_role: "",
@@ -558,6 +626,7 @@ describe("canCreatePlotSuggestionCard", () => {
       reason: "",
       proposed_change: "Mara steals the ledger.",
       evidence_to_add: "",
+      rationale_to_add: "",
       story_specifics: "",
       author_intent: "",
       expected_role: "",
@@ -577,6 +646,7 @@ describe("canCreatePlotSuggestionCard", () => {
       reason: "",
       proposed_change: "Mara steals the ledger.",
       evidence_to_add: "",
+      rationale_to_add: "",
       story_specifics: "",
       author_intent: "",
       expected_role: "",

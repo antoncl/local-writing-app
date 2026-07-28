@@ -132,7 +132,7 @@
               {#if renamingTemplateInstanceId === instance.id}
                 <input
                   class="template-title-input"
-                  aria-label="Template instance name"
+                  aria-label="Template name"
                   bind:value={renamingTemplateInstanceTitle}
                   disabled={Boolean(savingMessage)}
                   use:focusRenameInput

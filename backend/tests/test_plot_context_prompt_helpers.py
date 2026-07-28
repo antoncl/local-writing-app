@@ -676,9 +676,9 @@ CLAIM {{ claim.plot_point_id }} [{{ claim.plotline.title }}]: {{ claim.rationale
         self.assertEqual([message.role for message in out.messages], ["system", "user"])
         system_text = out.messages[0].blocks[0].text
         user_text = out.messages[1].blocks[0].text
-        self.assertIn("function badge", system_text)
+        self.assertIn("story marker", system_text)
         self.assertIn("Find weak claims.", user_text)
-        self.assertIn("<plot_claim_audit", user_text)
+        self.assertIn("<plot_review", user_text)
         self.assertIn(f'<template_instance id="{instance.id}"', user_text)
         self.assertIn('<plot_beat id="first_turn"', user_text)
         self.assertIn("First turn", user_text)

@@ -428,7 +428,7 @@
     if (renamingTemplateInstanceId !== instance.id || savingMessage) return;
     const title = renamingTemplateInstanceTitle.trim();
     if (!title) {
-      saveError = "Template instance name is required.";
+      saveError = "Template name is required.";
       return;
     }
     if (title === rawInstanceTitle(instance)) {
@@ -495,7 +495,7 @@
   async function deleteTemplateInstance(instance: PlotNode): Promise<void> {
     if (savingMessage || !plotNode) return;
     const title = rawInstanceTitle(instance);
-    const confirmed = window.confirm(`Delete "${title}" from this plot board? Its plot beat claims on this board will also be removed.`);
+    const confirmed = window.confirm(`Delete "${title}" from this plot board? Its story markers on this board will also be removed.`);
     if (!confirmed) return;
 
     savingMessage = "Deleting template instance";
@@ -931,7 +931,7 @@
       (relationship) => relationship.from_card_id === card.id || relationship.to_card_id === card.id,
     ).length;
     const removedParts = [
-      claimCount > 0 ? `${claimCount} function ${claimCount === 1 ? "badge" : "badges"}` : "",
+      claimCount > 0 ? `${claimCount} story ${claimCount === 1 ? "marker" : "markers"}` : "",
       relationshipCount > 0 ? `${relationshipCount} ${relationshipCount === 1 ? "relationship" : "relationships"}` : "",
     ].filter(Boolean);
     const details = [
@@ -965,7 +965,7 @@
     }
   }
 
-  async function updateSelectedClaim(patch: Partial<PlotPointClaim>, message = "Saving badge"): Promise<void> {
+  async function updateSelectedClaim(patch: Partial<PlotPointClaim>, message = "Saving marker"): Promise<void> {
     const claim = selectedClaim;
     if (!claim || savingMessage) return;
     const nextBoard = cloneBoardSpec(board);
@@ -1180,7 +1180,7 @@
     };
     const nextBoard = cloneBoardSpec(board);
     nextBoard.claims = [...(nextBoard.claims ?? []), nextClaim];
-    const saved = await persistBoard(nextBoard, "Attaching badge");
+    const saved = await persistBoard(nextBoard, "Adding marker");
     if (saved) {
       selectedCardId = cardId;
       selectedClaimId = nextClaim.id;
@@ -1200,7 +1200,7 @@
     nextBoard.claims = (nextBoard.claims ?? []).map((candidate) =>
       candidate.id === claimId ? { ...candidate, card_id: cardId } : candidate,
     );
-    const saved = await persistBoard(nextBoard, "Moving badge");
+    const saved = await persistBoard(nextBoard, "Moving marker");
     if (saved) {
       selectedCardId = cardId;
       selectedClaimId = claimId;
@@ -1213,7 +1213,7 @@
     if (savingMessage) return;
     const nextBoard = cloneBoardSpec(board);
     nextBoard.claims = (nextBoard.claims ?? []).filter((candidate) => candidate.id !== claim.id);
-    const saved = await persistBoard(nextBoard, "Removing badge");
+    const saved = await persistBoard(nextBoard, "Removing marker");
     if (saved) {
       selectedClaimId = null;
       selectedPalettePoint = pointKey(claim.template_instance_id, claim.plot_point_id);

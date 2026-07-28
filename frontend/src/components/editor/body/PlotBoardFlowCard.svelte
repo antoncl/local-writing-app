@@ -82,15 +82,15 @@
     {/if}
     <div class="claim-chips">
       {#if cardClaims.length === 0 && !hasUntaggedDiagnostic}
-        <span class="function-gap">No function markers</span>
+        <span class="function-gap">No story markers</span>
       {/if}
       {#each cardClaims as claim (claim.id)}
         <span
           class="claim-chip nodrag"
           class:selected={claim.id === ctx.selectedClaimId}
           role="group"
-          aria-label={`Function badge ${ctx.pointLabel(claim)}. Drag to move to another card.`}
-          title={`Drag ${ctx.pointLabel(claim)} badge to another card`}
+          aria-label={`Story marker ${ctx.pointLabel(claim)}. Drag to move to another card.`}
+          title={`Drag ${ctx.pointLabel(claim)} marker to another card`}
           draggable={true}
           ondragstart={(event) => ctx.dragClaim(claim, event)}
           ondragend={() => ctx.clearDragOver()}
@@ -119,8 +119,8 @@
           <button
             type="button"
             class="claim-remove"
-            title={`Remove ${ctx.pointLabel(claim)} badge`}
-            aria-label={`Remove ${ctx.pointLabel(claim)} badge`}
+            title={`Remove ${ctx.pointLabel(claim)} marker`}
+            aria-label={`Remove ${ctx.pointLabel(claim)} marker`}
             disabled={ctx.saving}
             onclick={(event) => ctx.removeClaim(claim, event)}
           >

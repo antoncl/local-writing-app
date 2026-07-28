@@ -10,6 +10,7 @@ import {
   parsePlotSuggestions,
   plotSuggestionBeatClipboardText,
   plotSuggestionClipboardText,
+  plotSuggestionKindLabel,
   stripPlotSuggestions,
 } from "./plotSuggestions";
 
@@ -154,9 +155,9 @@ describe("plotSuggestionClipboardText", () => {
       "Proposed change: Add a consequence.",
       "Reason: Mara can still walk away too easily.",
       "Card: card_archive",
-      "Claim: claim_first_turn",
-      "Template instance: plot_main",
-      "Plot beat: first_turn",
+      "Story marker: claim_first_turn",
+      "Template: plot_main",
+      "Story beat: first_turn",
     ].join("\n"));
   });
 });
@@ -186,9 +187,18 @@ describe("plotSuggestionBeatClipboardText", () => {
       "Open question: Who witnesses the break?",
       "Status: planned",
       "Reason: The generic beat needs this story's irreversible turn.",
-      "Template instance: plot_main",
-      "Plot beat: first_turn",
+      "Template: plot_main",
+      "Story beat: first_turn",
     ].join("\n"));
+  });
+});
+
+describe("plotSuggestionKindLabel", () => {
+  it("maps internal suggestion kinds to writer-facing labels", () => {
+    expect(plotSuggestionKindLabel("claim_change")).toBe("Story marker change");
+    expect(plotSuggestionKindLabel("new_claim")).toBe("New story marker");
+    expect(plotSuggestionKindLabel("beat_revision")).toBe("Story beat change");
+    expect(plotSuggestionKindLabel("unknown")).toBe("Suggestion");
   });
 });
 

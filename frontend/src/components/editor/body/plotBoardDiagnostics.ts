@@ -84,21 +84,21 @@ export function buildPlotDiagnostics(
     const cardClaims = claimsByCard.get(card.id) ?? [];
     if (cardClaims.length === 0) {
       diagnostics.summary.untaggedCards += 1;
-      add(diagnostics.cards, card.id, { key: "untagged", label: "No function badges", severity: "warning" });
+      add(diagnostics.cards, card.id, { key: "untagged", label: "No story markers", severity: "warning" });
     }
     if (cardClaims.length >= OVERLOADED_CLAIM_COUNT) {
       diagnostics.summary.overloadedCards += 1;
-      add(diagnostics.cards, card.id, { key: "overloaded", label: `${cardClaims.length} function badges`, severity: "info" });
+      add(diagnostics.cards, card.id, { key: "overloaded", label: `${cardClaims.length} story markers`, severity: "info" });
     }
   }
   for (const row of paletteRows) {
     const key = pointDiagnosticKey(row.instance.id, row.point.plot_point_id);
     if (row.claims.length === 0) {
       diagnostics.summary.unclaimedBeats += 1;
-      add(diagnostics.points, key, { key: "unclaimed", label: "No claiming cards", severity: "warning" });
+      add(diagnostics.points, key, { key: "unclaimed", label: "No supporting cards", severity: "warning" });
     } else if (!row.claims.some((claim) => claim.claim_type === "satisfies")) {
       diagnostics.summary.unsatisfiedBeats += 1;
-      add(diagnostics.points, key, { key: "unsatisfied", label: "No satisfying claim", severity: "warning" });
+      add(diagnostics.points, key, { key: "unsatisfied", label: "No card clearly earns this", severity: "warning" });
     }
   }
   diagnostics.summary.total =

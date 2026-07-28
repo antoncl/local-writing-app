@@ -1,18 +1,18 @@
 <script lang="ts">
   // Machine-settings dialog. Holds the editing UI for the user's
   // machine config: default folder, provider API keys, Ollama host,
-  // and the color palette editor. The parent loads / persists the
-  // draft; this component owns only the local mutations on the draft
-  // it's been handed.
+  // and the color palette. The parent loads / persists the draft; this
+  // component owns only the local mutations on the draft it's been handed
+  // (the palette surface is delegated to PaletteEditor).
   import type {
     MachineSettingsDraft,
     MachineSettingsView,
     ProviderCredentialsView,
-    Swatch,
   } from "@/lib/types";
   import Modal from "@/components/dialogs/Modal.svelte";
   import DirectoryPickerModal from "@/components/dialogs/DirectoryPickerModal.svelte";
   import ProviderSubscriptions from "@/components/widgets/ProviderSubscriptions.svelte";
+  import PaletteEditor from "@/components/widgets/PaletteEditor.svelte";
   import { applyProsePresentation } from "@/lib/utils/prose-presentation";
 
   // Live-preview the display prefs as the user edits — the master text scaler is
@@ -39,37 +39,11 @@
   export let onCancel: () => void = () => {};
   export let onSave: () => void = () => {};
 
-  function paletteAddSwatch() {
-    if (!draft) return;
-    const baseId = "new-color";
-    const existing = new Set(draft.palette.map((s) => s.id));
-    let id = baseId;
-    let n = 2;
-    while (existing.has(id)) id = `${baseId}-${n++}`;
-    draft.palette = [
-      ...draft.palette,
-      { id, label: "New color", hex: "#888888" },
-    ];
-  }
-
-  function paletteRemoveSwatch(index: number) {
-    if (!draft) return;
-    draft.palette = draft.palette.filter((_, i) => i !== index);
-  }
-
-  function paletteMoveSwatch(from: number, to: number) {
-    if (!draft) return;
-    const list = draft.palette.slice();
-    const [moved] = list.splice(from, 1);
-    list.splice(to, 0, moved);
-    draft.palette = list;
-  }
-
-  function paletteSetSwatch(index: number, patch: Partial<Swatch>) {
-    if (!draft) return;
-    draft.palette = draft.palette.map((s, i) =>
-      i === index ? { ...s, ...patch } : s,
-    );
+  // PaletteEditor is controlled — it hands back a whole new ordered list, which
+  // we assign onto the draft. A member assignment is reactive here the same way
+  // the provider-key mutations below are.
+  function setPalette(next: MachineSettingsDraft["palette"]) {
+    if (draft) draft.palette = next;
   }
 
   // The scroll became three tabs by concern (ADR-0047 §3): AI credentials,
@@ -181,70 +155,7 @@
             </label>
           </section>
 
-          <section class="palette-editor">
-            <h3>Color palette</h3>
-            <p class="muted">
-              Colors picked here are reusable across types, entries, and select options. The first four (Forest, Slate Blue, Warm Brown, Graphite) seed the context picker's built-in chip colors.
-            </p>
-            <div class="palette-row palette-header">
-              <span></span>
-              <span>Id</span>
-              <span>Label</span>
-              <span>Hex</span>
-              <span></span>
-            </div>
-            {#each draft.palette as swatch, i (swatch.id + ":" + i)}
-              <div class="palette-row">
-                <span class="palette-swatch-dot" style="background: {swatch.hex}"></span>
-                <input
-                  type="text"
-                  class="palette-id-input"
-                  value={swatch.id}
-                  pattern="^[a-z0-9][a-z0-9-]*$"
-                  title="Lowercase letters, digits, dashes"
-                  on:input={(e) => paletteSetSwatch(i, { id: (e.currentTarget as HTMLInputElement).value })}
-                />
-                <input
-                  type="text"
-                  class="palette-label-input"
-                  value={swatch.label}
-                  on:input={(e) => paletteSetSwatch(i, { label: (e.currentTarget as HTMLInputElement).value })}
-                />
-                <input
-                  type="color"
-                  class="palette-color-input"
-                  value={swatch.hex}
-                  on:input={(e) => paletteSetSwatch(i, { hex: (e.currentTarget as HTMLInputElement).value })}
-                />
-                <span class="palette-row-actions">
-                  <button
-                    type="button"
-                    class="palette-row-btn"
-                    title="Move up"
-                    disabled={i === 0}
-                    on:click={() => paletteMoveSwatch(i, i - 1)}
-                  >▲</button>
-                  <button
-                    type="button"
-                    class="palette-row-btn"
-                    title="Move down"
-                    disabled={i === draft.palette.length - 1}
-                    on:click={() => paletteMoveSwatch(i, i + 1)}
-                  >▼</button>
-                  <button
-                    type="button"
-                    class="palette-row-btn palette-row-delete"
-                    title="Delete swatch"
-                    aria-label="Delete swatch"
-                    on:click={() => paletteRemoveSwatch(i)}
-                  >×</button>
-                </span>
-              </div>
-            {/each}
-            <div class="palette-add-row">
-              <button type="button" title="Add color" aria-label="Add color" on:click={paletteAddSwatch}>+</button>
-            </div>
-          </section>
+          <PaletteEditor swatches={draft.palette} onChange={setPalette} />
         {:else if activeTab === "storage"}
           <label>
             Projects folder
@@ -345,7 +256,6 @@
     font-size: var(--fs-sm);
   }
 
-  .palette-editor,
   .writing-surface {
     display: flex;
     flex-direction: column;
@@ -357,7 +267,6 @@
     background: var(--surface);
   }
 
-  .palette-editor h3,
   .writing-surface h3 {
     margin: 0;
     font-size: var(--fs-md);
@@ -395,112 +304,6 @@
     align-items: center;
     gap: 8px;
     font-size: var(--fs-sm);
-  }
-
-  .palette-editor p.muted {
-    margin: 0 0 8px;
-    font-size: var(--fs-sm);
-  }
-
-  .palette-row {
-    display: grid;
-    grid-template-columns: 22px 1fr 1.5fr 44px auto;
-    gap: 8px;
-    align-items: center;
-    font-size: var(--fs-sm);
-  }
-
-  .palette-row.palette-header {
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    padding: 0 2px 4px;
-    border-bottom: 1px solid var(--divider);
-    margin-bottom: 4px;
-  }
-
-  .palette-swatch-dot {
-    display: inline-block;
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    border: 1px solid rgba(0, 0, 0, 0.18);
-  }
-
-  .palette-id-input,
-  .palette-label-input {
-    font-size: var(--fs-sm);
-    padding: 3px 6px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    min-width: 0;
-  }
-
-  .palette-id-input {
-    font-family: var(--mono);
-  }
-
-  .palette-color-input {
-    width: 44px;
-    height: 26px;
-    padding: 0;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: transparent;
-    cursor: pointer;
-  }
-
-  .palette-row-actions {
-    display: inline-flex;
-    gap: 2px;
-  }
-
-  .palette-row-btn {
-    appearance: none;
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: 4px;
-    padding: 2px 6px;
-    font-size: var(--fs-xs);
-    color: var(--text-2);
-    cursor: pointer;
-    line-height: 1;
-  }
-
-  .palette-row-btn:hover:not(:disabled) {
-    background: var(--panel);
-    border-color: var(--border);
-  }
-
-  .palette-row-btn:disabled {
-    opacity: 0.35;
-    cursor: default;
-  }
-
-  .palette-row-delete:hover:not(:disabled) {
-    color: var(--danger);
-    background: var(--danger-soft);
-    border-color: var(--danger-border);
-  }
-
-  .palette-add-row {
-    margin-top: 8px;
-  }
-
-  .palette-add-row button {
-    font-size: var(--fs-sm);
-    padding: 4px 10px;
-    border: 1px dashed var(--border-strong);
-    border-radius: 4px;
-    background: transparent;
-    cursor: pointer;
-    color: var(--text-2);
-  }
-
-  .palette-add-row button:hover {
-    border-style: solid;
-    background: var(--panel);
   }
 
   /* The frame's `.machine-settings-modal` class lives on Modal's own <div>

@@ -68,15 +68,27 @@ relationship wants exactly one home:
 
 The child roster is removed from the switcher; the Project pane becomes its sole
 home. This honours the ADR's most explicit line — *"the Project pane … keeps
-identity, cost, and the child roster"* — and leaves the switcher exactly what its
-neighbours make it: the jump-to-a-recent-project dropdown. To descend into a
-child you focus the Project pane (a persistent workspace pane, always a glance
-away) rather than the transient dropdown.
+identity, cost, and the child roster"* — and treats the roster as what it is: a
+project dashboard reads out "what is inside this project", and descending into a
+child is the click that follows.
+
+**The #417 tradeoff, named.** The switcher's "Contains" was not accidental
+duplication — `TopBar.svelte` documents it as a deliberate resilience choice:
+*"the Project pane that also lists the children is not guaranteed to be on screen
+(#417). Ascent is chrome, so descent has to be too."* #417 (the Project pane can
+vanish per-project with no *targeted* way back) is still open, so removing the
+chrome copy does cost something: while the pane is hidden, descending into a child
+first means bringing the pane back (via the app menu / a layout preset) rather
+than one click in the dropdown. We accept that cost deliberately — children are
+dashboard content, the roster is pure navigation the pane already owns, and the
+real fix for a vanishing pane is #417 itself, not a second roster kept alive in
+the chrome. When #417 lands this needs no revisiting; if it is deferred long and
+the extra step bites, the switcher section is cheap to restore.
 
 *Considered and rejected:* keep "Contains" in the switcher and drop the pane's
-roster. Defensible — it keeps all cross-project *jumping* in one dropdown — but it
-fights the ADR's assignment of the roster to the pane, and a project dashboard is
-the natural place to read "what is inside this project."
+roster. It preserves the #417 resilience and the ascent/descent symmetry, but it
+fights the ADR's assignment of the roster to the pane and empties the dashboard of
+the one thing a parent project most wants to show — its contents.
 
 ### 3b. "Inherits from" → one shared declaration editor
 

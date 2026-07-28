@@ -311,7 +311,7 @@ class EditorPanesController {
     // dirty-flush below.
     const committer = this.#reviewLocks.get(id);
     if (committer) {
-      this.#closeReviewingPane(id, committer);
+      await this.#closeReviewingPane(id, committer);
       return;
     }
     if (!pane.dirty) {
@@ -376,12 +376,18 @@ class EditorPanesController {
   // host's job — this store owns the document lifecycle), so the review registers
   // its commit hooks here rather than saving from inside the component.
 
+  /** The open pane holding lore entry `entryId`, if any. One predicate for the
+   *  review-lock methods (and the fork/reset-override paths) to share. */
+  #lorePaneFor(entryId: string): EditorPaneState | undefined {
+    return this.panes.find((p) => p.document?.type === "lore" && p.document.id === entryId);
+  }
+
   /** Freeze the lore pane holding `entryId` for review. Flushes any pending
    *  autosave first (frozen == disk, closing the #614 race), then locks.
    *  Idempotent: re-registration while already frozen just refreshes the hooks —
    *  the flush is a one-time entry gesture, not something to repeat each render. */
   async beginReviewLock(entryId: string, committer: ReviewCommitter): Promise<void> {
-    const pane = this.panes.find((p) => p.document?.type === "lore" && p.document.id === entryId);
+    const pane = this.#lorePaneFor(entryId);
     if (!pane) return;
     const firstLock = !this.#reviewLocks.has(pane.id);
     this.#reviewLocks.set(pane.id, committer);
@@ -394,7 +400,7 @@ class EditorPanesController {
   /** Thaw the pane holding `entryId` — on commit, discard, or a superseded
    *  proposal. Autosave resumes for its normal edits again. */
   endReviewLock(entryId: string): void {
-    const pane = this.panes.find((p) => p.document?.type === "lore" && p.document.id === entryId);
+    const pane = this.#lorePaneFor(entryId);
     if (pane) this.#reviewLocks.delete(pane.id);
   }
 
@@ -402,7 +408,7 @@ class EditorPanesController {
    *  and PUT the pane once, so the adopted body + fields land in a single write.
    *  Called by the review controller after it has applied the patch to the buffer. */
   async flushReviewCommit(entryId: string): Promise<boolean> {
-    const pane = this.panes.find((p) => p.document?.type === "lore" && p.document.id === entryId);
+    const pane = this.#lorePaneFor(entryId);
     if (!pane) return true;
     this.#autosave.cancel(pane.id);
     // `run` returns false when the save threw (a changed-on-disk 409 surfaces to
@@ -414,10 +420,9 @@ class EditorPanesController {
   // discard silently; otherwise raise the three-way Save-changes guard. "Save"
   // commits the accumulated patch (one PUT) then closes; "Don't save" drops the
   // proposal and closes; Cancel/backdrop keeps the pane open.
-  #closeReviewingPane(id: string, committer: ReviewCommitter): void {
+  async #closeReviewingPane(id: string, committer: ReviewCommitter): Promise<void> {
     if (!committer.hasChanges()) {
-      committer.discard();
-      this.tearDown(id);
+      await this.#discardReviewAndClose(id, committer);
       return;
     }
     const pane = this.panes.find((candidate) => candidate.id === id);
@@ -430,16 +435,24 @@ class EditorPanesController {
       confirmLabel: "Save",
       destructive: false,
       secondaryLabel: "Don't save",
-      onSecondary: () => {
-        committer.discard();
-        this.tearDown(id);
-      },
+      onSecondary: () => void this.#discardReviewAndClose(id, committer),
       onConfirm: async () => {
         // Only close once the post lands — a failed commit keeps the pane open
         // with its adoptions, rather than tearing down and losing the patch.
         if ((await committer.commit()) !== false) this.tearDown(id);
       },
     });
+  }
+
+  // Discard the review proposal, then close the pane through the NORMAL path so
+  // the author's OWN unsaved edits are still flushed (and a changed-on-disk 409
+  // still offers recovery). "Don't save" means don't save the *proposal*, not
+  // silently drop pre-review work — a bare tearDown here would lose it if the
+  // flush-on-enter had failed and left the pane dirty (#634 review).
+  async #discardReviewAndClose(id: string, committer: ReviewCommitter): Promise<void> {
+    committer.discard();
+    this.#reviewLocks.delete(id);
+    await this.close(id);
   }
 
   tearDown(id: string): void {

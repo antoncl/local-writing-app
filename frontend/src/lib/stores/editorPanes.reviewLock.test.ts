@@ -128,6 +128,37 @@ describe("editorPanes review freeze (#634)", () => {
     expect(editorPanes.panes.find((p) => p.id === "editor_1")).toBeUndefined();
   });
 
+  it("keeps the pane open when the Save commit fails — no dropped patch", async () => {
+    const request = vi.spyOn(confirmService, "request");
+    lorePane("editor_1", "e1");
+    const hooks = committer(true);
+    hooks.commit.mockResolvedValue(false); // the single post 409'd
+    await editorPanes.beginReviewLock("e1", hooks);
+
+    await editorPanes.close("editor_1");
+    await request.mock.calls[0][0].onConfirm();
+
+    expect(hooks.commit).toHaveBeenCalledTimes(1);
+    // Post failed → the pane stays open with its adoptions so the author can retry.
+    expect(editorPanes.panes.find((p) => p.id === "editor_1")).toBeDefined();
+  });
+
+  it("discarding a review still flushes the author's own pre-review edits", async () => {
+    lorePane("editor_1", "e1");
+    await editorPanes.beginReviewLock("e1", committer(false)); // clean at lock → no flush
+    expect(saveSpy).not.toHaveBeenCalled();
+    // The pane goes dirty during the frozen review (e.g. a flush-on-enter that
+    // 409'd left it dirty). Autosave is suppressed, so only close can persist it.
+    editorPanes.updateEditorPaneDraft("editor_1", "Author's own edit", "Baseline body", "draft", "lore:character", {});
+
+    await editorPanes.close("editor_1");
+
+    // Discard the *proposal* must not tear down blind — the author's own edits are
+    // flushed through the normal close path, not silently dropped.
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(editorPanes.panes.find((p) => p.id === "editor_1")).toBeUndefined();
+  });
+
   it("tearDown clears the lock so a reopened pane closes normally", async () => {
     const request = vi.spyOn(confirmService, "request");
     lorePane("editor_1", "e1");

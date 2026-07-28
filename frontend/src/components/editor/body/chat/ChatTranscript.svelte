@@ -12,7 +12,9 @@
     canApplyPlotSuggestionBeatFields,
     canApplyPlotSuggestionBeatQuestion,
     canApplyPlotSuggestionCardSynopsis,
+    canApplyPlotSuggestionClaimEvidence,
     canApplyPlotSuggestionClaimNote,
+    canApplyPlotSuggestionClaimRationale,
     canCreatePlotSuggestionCard,
     canCreatePlotSuggestionBadge,
     canCopyPlotSuggestionQuestion,
@@ -33,6 +35,7 @@
     scrollEl?: HTMLDivElement | null;
     onApplyEvidence?: (suggestion: PlotSuggestion) => void | Promise<void>;
     onApplyNote?: (suggestion: PlotSuggestion) => void | Promise<void>;
+    onApplyRationale?: (suggestion: PlotSuggestion) => void | Promise<void>;
     onApplyBeatQuestion?: (suggestion: PlotSuggestion) => void | Promise<void>;
     onCreateBadge?: (suggestion: PlotSuggestion) => void | Promise<void>;
     onCreateCard?: (suggestion: PlotSuggestion) => void | Promise<void>;
@@ -47,6 +50,7 @@
     scrollEl = $bindable(null),
     onApplyEvidence,
     onApplyNote,
+    onApplyRationale,
     onApplyBeatQuestion,
     onCreateBadge,
     onCreateCard,
@@ -71,7 +75,7 @@
     suggestion: PlotSuggestion,
     messageIndex: number,
     index: number,
-    action: "proposed_change" | "evidence_to_add" | "beat_fields" | "question" | "apply_evidence" | "apply_note" | "apply_beat_question" | "create_badge" | "create_card" | "apply_beat_fields" | "apply_card_synopsis" | "append_card_synopsis",
+    action: "proposed_change" | "evidence_to_add" | "beat_fields" | "question" | "apply_evidence" | "apply_note" | "apply_rationale" | "apply_beat_question" | "create_badge" | "create_card" | "apply_beat_fields" | "apply_card_synopsis" | "append_card_synopsis",
   ): string {
     return `${messageIndex}-${suggestion.kind}-${suggestion.target_card_id}-${suggestion.target_claim_id}-${suggestion.template_instance_id}-${suggestion.plot_point_id}-${index}-${action}`;
   }
@@ -129,13 +133,18 @@
   }
 
   async function applyEvidenceSuggestion(suggestion: PlotSuggestion, key: string): Promise<void> {
-    if (!onApplyEvidence || !suggestion.target_claim_id || !suggestion.evidence_to_add.trim()) return;
+    if (!onApplyEvidence || !canApplyPlotSuggestionClaimEvidence(suggestion)) return;
     await applySuggestion(suggestion, key, onApplyEvidence);
   }
 
   async function applyNoteSuggestion(suggestion: PlotSuggestion, key: string): Promise<void> {
     if (!onApplyNote || !canApplyPlotSuggestionClaimNote(suggestion)) return;
     await applySuggestion(suggestion, key, onApplyNote);
+  }
+
+  async function applyRationaleSuggestion(suggestion: PlotSuggestion, key: string): Promise<void> {
+    if (!onApplyRationale || !canApplyPlotSuggestionClaimRationale(suggestion)) return;
+    await applySuggestion(suggestion, key, onApplyRationale);
   }
 
   async function applyBeatQuestionSuggestion(suggestion: PlotSuggestion, key: string): Promise<void> {
@@ -234,6 +243,9 @@
                   {#if suggestion.evidence_to_add}
                     <small>Evidence to add: {suggestion.evidence_to_add}</small>
                   {/if}
+                  {#if suggestion.rationale_to_add}
+                    <small>Rationale to add: {suggestion.rationale_to_add}</small>
+                  {/if}
                   {#if suggestion.story_specifics}
                     <small>Story specifics: {suggestion.story_specifics}</small>
                   {/if}
@@ -298,15 +310,30 @@
                       {@const applyNoteKey = suggestionKey(suggestion, i, j, "apply_note")}
                       <button
                         type="button"
-                        title="Add this note to the target story marker"
+                        title="Add this assistant note to the target story marker"
                         disabled={Boolean(applyingKey)}
                         onclick={() => void applyNoteSuggestion(suggestion, applyNoteKey)}
                       >
                         <i class="ti ti-check" aria-hidden="true"></i>
-                        {applyingKey === applyNoteKey ? "Adding" : appliedKey === applyNoteKey ? "Added" : "Add marker note"}
+                        {applyingKey === applyNoteKey ? "Adding" : appliedKey === applyNoteKey ? "Added" : "Add note"}
                       </button>
                       {#if applyErrorKey === applyNoteKey}
                         <small class="cbv-plot-suggestion-action-error">Could not apply note.</small>
+                      {/if}
+                    {/if}
+                    {#if onApplyRationale && canApplyPlotSuggestionClaimRationale(suggestion)}
+                      {@const applyRationaleKey = suggestionKey(suggestion, i, j, "apply_rationale")}
+                      <button
+                        type="button"
+                        title="Add this rationale to the target story marker"
+                        disabled={Boolean(applyingKey)}
+                        onclick={() => void applyRationaleSuggestion(suggestion, applyRationaleKey)}
+                      >
+                        <i class="ti ti-check" aria-hidden="true"></i>
+                        {applyingKey === applyRationaleKey ? "Adding" : appliedKey === applyRationaleKey ? "Added" : "Add rationale"}
+                      </button>
+                      {#if applyErrorKey === applyRationaleKey}
+                        <small class="cbv-plot-suggestion-action-error">Could not apply rationale.</small>
                       {/if}
                     {/if}
                     {#if onApplyCardSynopsis && canApplyPlotSuggestionCardSynopsis(suggestion)}
@@ -350,7 +377,7 @@
                         {copiedKey === evidenceKey ? "Copied" : "Copy evidence"}
                       </button>
                     {/if}
-                    {#if suggestion.evidence_to_add && suggestion.target_claim_id && onApplyEvidence}
+                    {#if onApplyEvidence && canApplyPlotSuggestionClaimEvidence(suggestion)}
                       {@const applyKey = suggestionKey(suggestion, i, j, "apply_evidence")}
                       <button
                         type="button"

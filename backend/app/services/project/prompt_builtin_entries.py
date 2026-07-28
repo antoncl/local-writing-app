@@ -35,6 +35,7 @@ Then include an optional machine-readable suggestion block when you have concret
     <reason>Why this concrete change would strengthen the story or structure.</reason>
     <proposed_change>Specific board-level edit or author decision, not drafted prose. For card_revision, write the replacement card synopsis. For new_card, write the new card synopsis.</proposed_change>
     <evidence_to_add>Concrete evidence the card or linked scene would need. For new_card with a target plot beat, this becomes initial marker evidence.</evidence_to_add>
+    <rationale_to_add>For claim_change, new_claim, or new_card with a target plot beat: why this card supports the target story beat.</rationale_to_add>
     <story_specifics>For beat_revision only: the story-specific version of this generic plot beat.</story_specifics>
     <author_intent>For beat_revision only: what the author wants this beat to accomplish.</author_intent>
     <expected_role>For beat_revision only: the role this beat should play in this story.</expected_role>

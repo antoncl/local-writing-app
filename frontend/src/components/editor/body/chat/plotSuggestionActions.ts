@@ -22,6 +22,7 @@ export type PlotSuggestionActionApi = {
 export type PlotSuggestionActions = {
   applyPlotSuggestionEvidence: (suggestion: PlotSuggestion) => Promise<void>;
   applyPlotSuggestionNote: (suggestion: PlotSuggestion) => Promise<void>;
+  applyPlotSuggestionRationale: (suggestion: PlotSuggestion) => Promise<void>;
   applyPlotSuggestionBeatQuestion: (suggestion: PlotSuggestion) => Promise<void>;
   createPlotSuggestionBadge: (suggestion: PlotSuggestion) => Promise<void>;
   createPlotSuggestionCard: (suggestion: PlotSuggestion) => Promise<void>;
@@ -85,7 +86,7 @@ export function createPlotSuggestionActions(options: CreatePlotSuggestionActions
 
   async function appendPlotSuggestionClaimField(
     suggestion: PlotSuggestion,
-    field: "evidence" | "ai_notes",
+    field: "rationale" | "evidence" | "ai_notes",
     value: string,
   ): Promise<void> {
     const targetClaimId = suggestion.target_claim_id.trim();
@@ -209,7 +210,7 @@ export function createPlotSuggestionActions(options: CreatePlotSuggestionActions
         strength: null,
         confidence: null,
         evidence: suggestion.evidence_to_add.trim() || null,
-        rationale: null,
+        rationale: suggestion.rationale_to_add.trim() || null,
         ai_notes: suggestion.proposed_change.trim() || null,
         metadata: {},
       };
@@ -266,7 +267,7 @@ export function createPlotSuggestionActions(options: CreatePlotSuggestionActions
           strength: null,
           confidence: null,
           evidence: suggestion.evidence_to_add.trim() || null,
-          rationale: null,
+          rationale: suggestion.rationale_to_add.trim() || null,
           ai_notes: suggestion.reason.trim() || null,
           metadata: {},
         });
@@ -408,6 +409,7 @@ export function createPlotSuggestionActions(options: CreatePlotSuggestionActions
   return {
     applyPlotSuggestionEvidence: (suggestion) => appendPlotSuggestionClaimField(suggestion, "evidence", suggestion.evidence_to_add),
     applyPlotSuggestionNote: (suggestion) => appendPlotSuggestionClaimField(suggestion, "ai_notes", suggestion.proposed_change),
+    applyPlotSuggestionRationale: (suggestion) => appendPlotSuggestionClaimField(suggestion, "rationale", suggestion.rationale_to_add),
     applyPlotSuggestionBeatQuestion,
     createPlotSuggestionBadge,
     createPlotSuggestionCard,

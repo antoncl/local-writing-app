@@ -72,8 +72,11 @@
     { key: "research", label: "Research" },
   ];
 
-  let layoutOpen = false;
-  let layoutButton: HTMLButtonElement | null = null;
+  // The app menu (≡) is the single invocation surface (ADR-0047): the
+  // this-project actions, the layout presets, and Settings all live in one
+  // panel now, rather than as a loose button cluster on the right.
+  let appMenuOpen = false;
+  let appMenuButton: HTMLButtonElement | null = null;
   let showSaveField = false;
   let saveName = "";
 
@@ -82,28 +85,35 @@
     saveName = "";
   }
 
-  function toggleLayout() {
-    layoutOpen = !layoutOpen;
-    if (!layoutOpen) resetSaveField();
+  function toggleAppMenu() {
+    appMenuOpen = !appMenuOpen;
+    if (!appMenuOpen) resetSaveField();
   }
 
-  function closeLayout() {
-    layoutOpen = false;
+  function closeAppMenu() {
+    appMenuOpen = false;
     resetSaveField();
   }
 
+  // A one-shot action closes the menu before firing, so the panel never
+  // lingers over the surface it just acted on.
+  function runAction(fn: () => void) {
+    closeAppMenu();
+    fn();
+  }
+
   function applyBuiltIn(key: string) {
-    closeLayout();
+    closeAppMenu();
     onApplyPreset(key);
   }
 
   function applyUser(name: string) {
-    closeLayout();
+    closeAppMenu();
     onApplyUserPreset(name);
   }
 
   function resetLayout() {
-    closeLayout();
+    closeAppMenu();
     onResetLayout();
   }
 
@@ -111,7 +121,7 @@
     const name = saveName.trim();
     if (!name) return;
     onSavePreset(name);
-    closeLayout();
+    closeAppMenu();
   }
 
   const THEME_GLYPH: Record<ThemePreference, string> = {
@@ -187,9 +197,9 @@
       switcherOpen = false;
       switcherButton?.focus();
     }
-    if (layoutOpen) {
-      closeLayout();
-      layoutButton?.focus();
+    if (appMenuOpen) {
+      closeAppMenu();
+      appMenuButton?.focus();
     }
   }
 
@@ -221,6 +231,99 @@
 <svelte:window on:keydown={handleKeydown} />
 
 <header class="top-bar">
+  <div class="app-menu-wrap">
+    <button
+      bind:this={appMenuButton}
+      type="button"
+      class="app-menu-button"
+      class:active={appMenuOpen}
+      aria-haspopup="menu"
+      aria-expanded={appMenuOpen}
+      aria-label="Application menu"
+      title="Menu"
+      on:click={toggleAppMenu}
+    >
+      <span aria-hidden="true">≡</span>
+    </button>
+
+    {#if appMenuOpen}
+      <!-- click-outside dismiss -->
+      <div class="switcher-overlay" role="presentation" on:click={closeAppMenu}></div>
+
+      <div class="switcher-menu app-menu-panel" role="menu" aria-label="Application menu">
+        <div class="switcher-section-label">This project</div>
+        <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} on:click={() => runAction(onOpenProjectNode)}>Project</button>
+        <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} on:click={() => runAction(onOpenDetailTypes)}>Detail Types</button>
+        <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} on:click={() => runAction(onOpenAssistants)}>Assistants</button>
+
+        <div class="switcher-divider" role="separator"></div>
+        <div class="switcher-section-label">Layout</div>
+        {#each BUILT_IN_PRESETS as preset (preset.key)}
+          <button
+            type="button"
+            class="switcher-item preset-item"
+            role="menuitemradio"
+            aria-checked={activePreset === preset.key}
+            disabled={!projectOpen}
+            on:click={() => applyBuiltIn(preset.key)}
+          >
+            <span class="preset-check" aria-hidden="true">{activePreset === preset.key ? "✓" : ""}</span>
+            {preset.label}
+          </button>
+        {/each}
+
+        {#if userPresets.length > 0}
+          <div class="switcher-section-label">Saved</div>
+          {#each userPresets as name (name)}
+            <div class="preset-user-row">
+              <button type="button" class="switcher-item preset-item preset-user" role="menuitem" disabled={!projectOpen} on:click={() => applyUser(name)}>
+                <span class="preset-check" aria-hidden="true"></span>
+                <span class="preset-user-name">{name}</span>
+              </button>
+              <button
+                type="button"
+                class="preset-delete"
+                title="Delete {name}"
+                aria-label="Delete preset {name}"
+                disabled={!projectOpen}
+                on:click={() => onDeleteUserPreset(name)}
+              >×</button>
+            </div>
+          {/each}
+        {/if}
+
+        {#if showSaveField}
+          <form class="preset-save" on:submit|preventDefault={commitSave}>
+            <!-- svelte-ignore a11y_autofocus -->
+            <input
+              type="text"
+              bind:value={saveName}
+              placeholder="Preset name"
+              aria-label="New preset name"
+              autofocus
+            />
+            <button type="submit" disabled={!saveName.trim()}>Save</button>
+          </form>
+        {:else}
+          <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} on:click={() => (showSaveField = true)}>
+            <span class="switcher-icon" aria-hidden="true">+</span>
+            Save current as…
+          </button>
+        {/if}
+        <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} on:click={resetLayout}>
+          Reset layout to default
+        </button>
+
+        <div class="switcher-divider" role="separator"></div>
+        <div class="switcher-section-label">App</div>
+        <button type="button" class="switcher-item" role="menuitem" on:click={() => runAction(onOpenSettings)}>
+          <span class="switcher-icon" aria-hidden="true">⚙</span>
+          Settings…
+        </button>
+      </div>
+    {/if}
+  </div>
+
   <span class="wordmark">Local Writer</span>
 
   <ProjectBreadcrumb
@@ -320,87 +423,6 @@
   </div>
 
   <div class="actions">
-    <button type="button" class="action-button" disabled={!projectOpen} on:click={onOpenProjectNode}>Project</button>
-    <button type="button" class="action-button" disabled={!projectOpen} on:click={onOpenDetailTypes}>Detail Types</button>
-    <button type="button" class="action-button" disabled={!projectOpen} on:click={onOpenAssistants}>Assistants</button>
-
-    <div class="layout-wrap">
-      <button
-        bind:this={layoutButton}
-        type="button"
-        class="action-button"
-        class:active={layoutOpen}
-        disabled={!projectOpen}
-        aria-haspopup="menu"
-        aria-expanded={layoutOpen}
-        on:click={toggleLayout}
-      >Layout <span class="chevron" aria-hidden="true">▾</span></button>
-
-      {#if layoutOpen}
-        <!-- click-outside dismiss -->
-        <div class="switcher-overlay" role="presentation" on:click={closeLayout}></div>
-
-        <div class="layout-menu" role="menu" aria-label="Layout presets">
-          <div class="switcher-section-label">Presets</div>
-          {#each BUILT_IN_PRESETS as preset (preset.key)}
-            <button
-              type="button"
-              class="switcher-item preset-item"
-              role="menuitemradio"
-              aria-checked={activePreset === preset.key}
-              on:click={() => applyBuiltIn(preset.key)}
-            >
-              <span class="preset-check" aria-hidden="true">{activePreset === preset.key ? "✓" : ""}</span>
-              {preset.label}
-            </button>
-          {/each}
-
-          {#if userPresets.length > 0}
-            <div class="switcher-divider" role="separator"></div>
-            <div class="switcher-section-label">Saved</div>
-            {#each userPresets as name (name)}
-              <div class="preset-user-row">
-                <button type="button" class="switcher-item preset-item preset-user" role="menuitem" on:click={() => applyUser(name)}>
-                  <span class="preset-check" aria-hidden="true"></span>
-                  <span class="preset-user-name">{name}</span>
-                </button>
-                <button
-                  type="button"
-                  class="preset-delete"
-                  title="Delete {name}"
-                  aria-label="Delete preset {name}"
-                  on:click={() => onDeleteUserPreset(name)}
-                >×</button>
-              </div>
-            {/each}
-          {/if}
-
-          <div class="switcher-divider" role="separator"></div>
-          {#if showSaveField}
-            <form class="preset-save" on:submit|preventDefault={commitSave}>
-              <!-- svelte-ignore a11y_autofocus -->
-              <input
-                type="text"
-                bind:value={saveName}
-                placeholder="Preset name"
-                aria-label="New preset name"
-                autofocus
-              />
-              <button type="submit" disabled={!saveName.trim()}>Save</button>
-            </form>
-          {:else}
-            <button type="button" class="switcher-item" role="menuitem" on:click={() => (showSaveField = true)}>
-              <span class="switcher-icon" aria-hidden="true">+</span>
-              Save current as…
-            </button>
-          {/if}
-          <button type="button" class="switcher-item" role="menuitem" on:click={resetLayout}>
-            Reset to default
-          </button>
-        </div>
-      {/if}
-    </div>
-
     <button
       type="button"
       class="action-button icon-button"
@@ -409,9 +431,6 @@
       on:click={onCycleTheme}
     >
       <span aria-hidden="true">{themeGlyph}</span>
-    </button>
-    <button type="button" class="action-button icon-button" aria-label="Settings" title="Settings" on:click={onOpenSettings}>
-      <span aria-hidden="true">⚙</span>
     </button>
   </div>
 </header>
@@ -565,8 +584,13 @@
     width: 100%;
   }
 
-  .top-bar .switcher-item:hover {
+  .top-bar .switcher-item:hover:not(:disabled) {
     background: var(--panel);
+  }
+
+  .top-bar .switcher-item:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   /* The row wraps the selectable item and its remove affordance as siblings
@@ -716,33 +740,39 @@
     line-height: 1;
   }
 
-  .top-bar .layout-wrap {
+  /* The app menu (≡) anchors the far-left of the bar. It is the one deliberate
+     exception to the app's quiet glyph treatment (ADR-0047 §2): a filled,
+     bordered affordance that reads as *the* way in, not another faint icon. */
+  .top-bar .app-menu-wrap {
     position: relative;
+    flex: none;
   }
 
-  .top-bar .action-button.active {
-    background: var(--panel);
-    border-color: var(--border);
-  }
-
-  .top-bar .action-button .chevron {
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-  }
-
-  .top-bar .layout-menu {
-    position: absolute;
-    top: calc(100% + 4px);
-    right: 0;
-    z-index: 101;
-    min-width: 220px;
-    background: var(--surface);
+  .top-bar .app-menu-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 11px;
+    font-size: var(--fs-xl);
+    line-height: 1;
     border: 1px solid var(--border);
-    border-radius: 8px;
-    box-shadow: var(--elev-2);
-    padding: 6px;
-    display: grid;
-    gap: 1px;
+    background: var(--inset);
+    color: var(--text);
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  .top-bar .app-menu-button:hover,
+  .top-bar .app-menu-button.active {
+    background: var(--panel);
+    border-color: var(--accent-emphasis);
+    color: var(--accent-emphasis);
+  }
+
+  /* Anchored under the ≡ at the left edge (switcher-menu defaults to left: 0),
+     a touch narrower than the project switcher since the labels are short. */
+  .top-bar .switcher-menu.app-menu-panel {
+    min-width: 240px;
   }
 
   .top-bar .preset-item {
@@ -786,9 +816,14 @@
     cursor: pointer;
   }
 
-  .top-bar .preset-delete:hover {
+  .top-bar .preset-delete:hover:not(:disabled) {
     background: var(--danger-soft);
     color: var(--danger);
+  }
+
+  .top-bar .preset-delete:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .top-bar .preset-save {

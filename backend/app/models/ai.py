@@ -46,6 +46,19 @@ class RecentProject(BaseModel):
     opened_at: str   # ISO 8601
 
 
+class RecentProjectView(RecentProject):
+    """A recent-projects row as the settings view exposes it.
+
+    Adds `within_root`, computed at view time and never stored: a recent that
+    now points outside the machine projects root is shown as unavailable —
+    equivalent to a deleted folder (#441) — rather than offered as a normal
+    open. `within_root` is decided by a pure path comparison, so it never
+    mis-flags a project on an unmounted drive the way a liveness stat would.
+    """
+
+    within_root: bool = True
+
+
 class Swatch(BaseModel):
     """A named entry in the machine-level color palette.
 
@@ -65,7 +78,7 @@ class MachineSettingsView(BaseModel):
     default_provider: str
     default_models: dict[str, str]
     default_projects_folder: str = ""
-    recent_projects: list[RecentProject] = Field(default_factory=list)
+    recent_projects: list[RecentProjectView] = Field(default_factory=list)
     palette: list[Swatch] = Field(default_factory=list)
     display: DisplaySettings = Field(default_factory=DisplaySettings)
     config_path: str

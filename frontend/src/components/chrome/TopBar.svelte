@@ -280,13 +280,20 @@
               <button
                 type="button"
                 class="switcher-item recent-item"
+                class:unavailable={!recent.within_root}
                 role="menuitem"
+                disabled={!recent.within_root}
+                title={recent.within_root ? recent.path : `${recent.path} — outside your projects folder`}
                 on:click={() => handleSelectRecent(recent.path)}
               >
                 <span class="recent-title">{recent.title}</span>
                 <span class="recent-meta">
                   <span class="recent-path" title={recent.path}>{shortenPath(recent.path)}</span>
-                  <span class="recent-time">{formatRelativeTime(recent.opened_at)}</span>
+                  {#if recent.within_root}
+                    <span class="recent-time">{formatRelativeTime(recent.opened_at)}</span>
+                  {:else}
+                    <span class="recent-time recent-unavailable">outside projects folder</span>
+                  {/if}
                 </span>
               </button>
               <button
@@ -575,6 +582,21 @@
     flex-direction: column;
     align-items: stretch;
     gap: 2px;
+  }
+
+  /* An out-of-root recent is unavailable — equivalent to a deleted folder
+     (#441). Dimmed and not openable; the × still clears it. */
+  .top-bar .recent-item.unavailable {
+    cursor: default;
+    opacity: 0.5;
+  }
+
+  .top-bar .recent-item.unavailable .recent-title {
+    color: var(--text-3);
+  }
+
+  .top-bar .recent-unavailable {
+    color: var(--danger);
   }
 
   .top-bar .recent-remove {

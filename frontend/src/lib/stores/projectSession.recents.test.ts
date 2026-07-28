@@ -16,6 +16,7 @@ const recent = (path: string, title: string): RecentProject => ({
   path,
   title,
   opened_at: "2026-01-01T00:00:00Z",
+  within_root: true,
 });
 
 const view = (recents: RecentProject[]): MachineSettingsView =>

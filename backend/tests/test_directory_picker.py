@@ -61,6 +61,30 @@ def test_listing_flags_mark_projects_and_empties(service: ProjectService, tmp_pa
     assert listing.parent_path == str(tmp_path.parent)
 
 
+def test_listing_within_root_reflects_the_machine_root(service: ProjectService, tmp_path: Path) -> None:
+    """The open-project picker refuses a folder outside the machine root (#441);
+    the backend decides membership and the frontend dims Select on it.
+
+    Unset root is permissive — the wizard sets one before the app is usable, and
+    flagging *everything* on the rare unset state would be worse."""
+    from layer_fixtures import set_projects_root
+
+    root = tmp_path / "shelf"
+    inside = root / "book"
+    outside = tmp_path / "elsewhere"
+    for folder in (inside, outside):
+        folder.mkdir(parents=True)
+
+    set_projects_root(None)
+    assert service.list_directories(inside).within_root is True
+    assert service.list_directories(outside).within_root is True
+
+    set_projects_root(root)
+    assert service.list_directories(root).within_root is True
+    assert service.list_directories(inside).within_root is True
+    assert service.list_directories(outside).within_root is False
+
+
 def test_listing_marks_a_project_folder_it_is_shown_from(service: ProjectService, tmp_path: Path) -> None:
     _make_project(tmp_path)
     assert service.list_directories(tmp_path).is_project is True

@@ -997,6 +997,7 @@
     initialPath={projectChooser.pickerInitialPath}
     title={projectChooser.pickerTitle}
     selectLabel={projectChooser.pickerSelectLabel}
+    enforceWithinRoot={true}
     onClose={() => projectChooser.closePicker()}
     onSelect={(path) => projectChooser.useDirectory(path)}
   />

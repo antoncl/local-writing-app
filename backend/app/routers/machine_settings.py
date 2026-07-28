@@ -1,6 +1,7 @@
 """Machine-settings and assistant-tag routes (#170 main.py split)."""
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter
@@ -18,13 +19,22 @@ router = APIRouter()
 
 
 def _build_settings_view(masked: dict[str, Any]) -> MachineSettingsView:
+    # A recent that now points outside the machine projects root is marked
+    # unavailable — equivalent to a deleted folder (#441). Computed here, never
+    # stored; a pure path test, so it never mis-flags an unmounted drive. Read
+    # the root once and reuse it across every recent (one traversal, not N).
+    root = machine_settings_service.projects_root()
+    recents = [
+        {**r, "within_root": machine_settings_service.is_within_root(Path(r["path"]), root)}
+        for r in masked.get("recent_projects", [])
+    ]
     return MachineSettingsView(
         version=masked["version"],
         providers=masked["providers"],
         default_provider=masked["default_provider"],
         default_models=masked["default_models"],
         default_projects_folder=masked.get("default_projects_folder", ""),
-        recent_projects=masked.get("recent_projects", []),
+        recent_projects=recents,
         palette=masked.get("palette", []),
         display=masked.get("display", {}),
         config_path=str(machine_settings_service.config_path()),

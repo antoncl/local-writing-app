@@ -790,12 +790,15 @@ class ProjectLifecycleMixin:
                 if entry.is_project or entry.name not in PROJECT_INTERNAL_FOLDER_NAMES
             ]
 
+        from app.services import machine_settings as ms_service
+
         parent = target.parent if target.parent != target else None
         return DirectoryListing(
             path=str(target),
             parent_path=str(parent) if parent else None,
             directories=directories,
             is_project=target_is_project,
+            within_root=ms_service.is_within_projects_root(target),
         )
 
     def list_directory_roots(self) -> list[DirectoryRoot]:

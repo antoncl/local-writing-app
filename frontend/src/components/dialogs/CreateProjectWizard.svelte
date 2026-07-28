@@ -10,8 +10,7 @@
   // consistency, and a fixed-size frame that does not resize between steps.
   import Modal from "@/components/dialogs/Modal.svelte";
   import DirectoryPickerModal from "@/components/dialogs/DirectoryPickerModal.svelte";
-  import NodeList from "@/components/widgets/NodeList.svelte";
-  import NodeRow from "@/components/widgets/NodeRow.svelte";
+  import InheritsFromList from "@/components/widgets/InheritsFromList.svelte";
   import AiPolicySlider from "@/components/widgets/AiPolicySlider.svelte";
   import ProviderTierPicker from "@/components/widgets/ProviderTierPicker.svelte";
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
@@ -139,31 +138,10 @@
               {#if wizard.candidatesLoading}
                 <p class="muted">Reading ancestor folders…</p>
               {:else if wizard.inheritRows.length > 0}
-                <NodeList isEmpty={false}>
-                  {#each wizard.inheritRows as row (row.path)}
-                    <!--
-                      Mirrors the post-hoc declaration editor (Project.svelte):
-                      the checkbox IS the gesture, so `clickable={false}`; a
-                      disabled (non-toggleable) row is the organisational folder
-                      the walk crossed, shown so the list has no unexplained gap.
-                      Unlike that editor there is no save round-trip — the toggle
-                      updates local state and the derived rows re-render
-                      synchronously — so no revert dance and no in-flight disable.
-                    -->
-                    <NodeRow title={row.label} detail={row.detail} clickable={false}>
-                      {#snippet leading()}
-                        <input
-                          type="checkbox"
-                          class="wizard-inherit-check"
-                          checked={row.checked}
-                          disabled={!row.toggleable}
-                          aria-label={`Inherit from ${row.label}`}
-                          on:change={() => wizard.toggleInherit(row.path)}
-                        />
-                      {/snippet}
-                    </NodeRow>
-                  {/each}
-                </NodeList>
+                <InheritsFromList
+                  rows={wizard.inheritRows}
+                  onToggle={(path) => wizard.toggleInherit(path)}
+                />
               {:else}
                 <p class="muted">
                   Nothing to inherit from here — this project stands alone.
@@ -517,12 +495,6 @@
     margin: 0;
     font-size: var(--fs-md);
     color: var(--text-2);
-  }
-
-  /* Small control in a flex row — styles.css sets `input { width: 100% }`, which
-     would otherwise make the checkbox eat the row (the #426/#311 trap). */
-  .wizard-inherit-check {
-    width: auto;
   }
 
   /* Root-save failure feedback, shown in-step because App's error toast sits

@@ -9,6 +9,7 @@
   import { renderChatContent } from "@/lib/utils/chatMessageRender";
   import { formatCostEur } from "@/lib/utils/money";
   import {
+    canCreatePlotSuggestionBadge,
     parsePlotSuggestions,
     plotSuggestionClipboardText,
     stripPlotSuggestions,
@@ -22,6 +23,7 @@
     scrollEl?: HTMLDivElement | null;
     onApplyEvidence?: (suggestion: PlotSuggestion) => void | Promise<void>;
     onApplyNote?: (suggestion: PlotSuggestion) => void | Promise<void>;
+    onCreateBadge?: (suggestion: PlotSuggestion) => void | Promise<void>;
   }
 
   let {
@@ -30,6 +32,7 @@
     scrollEl = $bindable(null),
     onApplyEvidence,
     onApplyNote,
+    onCreateBadge,
   }: Props = $props();
 
   let copiedKey = $state("");
@@ -48,7 +51,7 @@
     suggestion: PlotSuggestion,
     messageIndex: number,
     index: number,
-    action: "proposed_change" | "evidence_to_add" | "apply_evidence" | "apply_note",
+    action: "proposed_change" | "evidence_to_add" | "apply_evidence" | "apply_note" | "create_badge",
   ): string {
     return `${messageIndex}-${suggestion.kind}-${suggestion.target_card_id}-${suggestion.target_claim_id}-${index}-${action}`;
   }
@@ -81,6 +84,11 @@
   async function applyNoteSuggestion(suggestion: PlotSuggestion, key: string): Promise<void> {
     if (!onApplyNote || !suggestion.target_claim_id || !suggestion.proposed_change.trim()) return;
     await applySuggestion(suggestion, key, onApplyNote);
+  }
+
+  async function createBadgeSuggestion(suggestion: PlotSuggestion, key: string): Promise<void> {
+    if (!onCreateBadge || !canCreatePlotSuggestionBadge(suggestion)) return;
+    await applySuggestion(suggestion, key, onCreateBadge);
   }
 
   async function applySuggestion(
@@ -205,6 +213,21 @@
                       </button>
                       {#if applyErrorKey === applyKey}
                         <small class="cbv-plot-suggestion-action-error">Could not apply evidence.</small>
+                      {/if}
+                    {/if}
+                    {#if onCreateBadge && canCreatePlotSuggestionBadge(suggestion)}
+                      {@const createBadgeKey = suggestionKey(suggestion, i, j, "create_badge")}
+                      <button
+                        type="button"
+                        title="Create this plot beat badge on the target card"
+                        disabled={Boolean(applyingKey)}
+                        onclick={() => void createBadgeSuggestion(suggestion, createBadgeKey)}
+                      >
+                        <i class="ti ti-plus" aria-hidden="true"></i>
+                        {applyingKey === createBadgeKey ? "Creating" : appliedKey === createBadgeKey ? "Created" : "Create badge"}
+                      </button>
+                      {#if applyErrorKey === createBadgeKey}
+                        <small class="cbv-plot-suggestion-action-error">Could not create badge.</small>
                       {/if}
                     {/if}
                   </div>

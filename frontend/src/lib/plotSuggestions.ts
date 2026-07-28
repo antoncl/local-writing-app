@@ -88,6 +88,16 @@ export function appendPlotSuggestionText(existing: string | null | undefined, ad
   return `${current.trimEnd()}\n\n${textToAdd}`;
 }
 
+export function canCreatePlotSuggestionBadge(suggestion: PlotSuggestion): boolean {
+  return (
+    suggestion.kind === "new_claim" &&
+    !suggestion.target_claim_id.trim() &&
+    Boolean(suggestion.target_card_id.trim()) &&
+    Boolean(suggestion.template_instance_id.trim()) &&
+    Boolean(suggestion.plot_point_id.trim())
+  );
+}
+
 function parseAttributes(text: string): Record<string, string> {
   const attrs: Record<string, string> = {};
   for (const match of matchAll(text, /([A-Za-z_][\w:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {

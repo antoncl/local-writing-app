@@ -10,6 +10,8 @@
   import { formatCostEur } from "@/lib/utils/money";
   import {
     canApplyPlotSuggestionBeatFields,
+    canApplyPlotSuggestionCardSynopsis,
+    canApplyPlotSuggestionClaimNote,
     canCreatePlotSuggestionBadge,
     parsePlotSuggestions,
     plotSuggestionBeatClipboardText,
@@ -27,6 +29,7 @@
     onApplyNote?: (suggestion: PlotSuggestion) => void | Promise<void>;
     onCreateBadge?: (suggestion: PlotSuggestion) => void | Promise<void>;
     onApplyBeatFields?: (suggestion: PlotSuggestion) => void | Promise<void>;
+    onApplyCardSynopsis?: (suggestion: PlotSuggestion) => void | Promise<void>;
   }
 
   let {
@@ -37,6 +40,7 @@
     onApplyNote,
     onCreateBadge,
     onApplyBeatFields,
+    onApplyCardSynopsis,
   }: Props = $props();
 
   let copiedKey = $state("");
@@ -55,7 +59,7 @@
     suggestion: PlotSuggestion,
     messageIndex: number,
     index: number,
-    action: "proposed_change" | "evidence_to_add" | "beat_fields" | "apply_evidence" | "apply_note" | "create_badge" | "apply_beat_fields",
+    action: "proposed_change" | "evidence_to_add" | "beat_fields" | "apply_evidence" | "apply_note" | "create_badge" | "apply_beat_fields" | "apply_card_synopsis",
   ): string {
     return `${messageIndex}-${suggestion.kind}-${suggestion.target_card_id}-${suggestion.target_claim_id}-${suggestion.template_instance_id}-${suggestion.plot_point_id}-${index}-${action}`;
   }
@@ -102,7 +106,7 @@
   }
 
   async function applyNoteSuggestion(suggestion: PlotSuggestion, key: string): Promise<void> {
-    if (!onApplyNote || !suggestion.target_claim_id || !suggestion.proposed_change.trim()) return;
+    if (!onApplyNote || !canApplyPlotSuggestionClaimNote(suggestion)) return;
     await applySuggestion(suggestion, key, onApplyNote);
   }
 
@@ -114,6 +118,11 @@
   async function applyBeatFieldsSuggestion(suggestion: PlotSuggestion, key: string): Promise<void> {
     if (!onApplyBeatFields || !canApplyPlotSuggestionBeatFields(suggestion)) return;
     await applySuggestion(suggestion, key, onApplyBeatFields);
+  }
+
+  async function applyCardSynopsisSuggestion(suggestion: PlotSuggestion, key: string): Promise<void> {
+    if (!onApplyCardSynopsis || !canApplyPlotSuggestionCardSynopsis(suggestion)) return;
+    await applySuggestion(suggestion, key, onApplyCardSynopsis);
   }
 
   async function applySuggestion(
@@ -214,7 +223,7 @@
                         {copiedKey === changeKey ? "Copied" : "Copy change"}
                       </button>
                     {/if}
-                    {#if suggestion.proposed_change && suggestion.target_claim_id && onApplyNote}
+                    {#if onApplyNote && canApplyPlotSuggestionClaimNote(suggestion)}
                       {@const applyNoteKey = suggestionKey(suggestion, i, j, "apply_note")}
                       <button
                         type="button"
@@ -227,6 +236,21 @@
                       </button>
                       {#if applyErrorKey === applyNoteKey}
                         <small class="cbv-plot-suggestion-action-error">Could not apply note.</small>
+                      {/if}
+                    {/if}
+                    {#if onApplyCardSynopsis && canApplyPlotSuggestionCardSynopsis(suggestion)}
+                      {@const applySynopsisKey = suggestionKey(suggestion, i, j, "apply_card_synopsis")}
+                      <button
+                        type="button"
+                        title="Replace the target card synopsis with this proposed change"
+                        disabled={Boolean(applyingKey)}
+                        onclick={() => void applyCardSynopsisSuggestion(suggestion, applySynopsisKey)}
+                      >
+                        <i class="ti ti-check" aria-hidden="true"></i>
+                        {applyingKey === applySynopsisKey ? "Applying" : appliedKey === applySynopsisKey ? "Applied" : "Apply synopsis"}
+                      </button>
+                      {#if applyErrorKey === applySynopsisKey}
+                        <small class="cbv-plot-suggestion-action-error">Could not apply synopsis.</small>
                       {/if}
                     {/if}
                     {#if suggestion.evidence_to_add}

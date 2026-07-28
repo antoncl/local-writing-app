@@ -3,6 +3,8 @@ import {
   appendPlotSuggestionEvidence,
   appendPlotSuggestionText,
   canApplyPlotSuggestionBeatFields,
+  canApplyPlotSuggestionCardSynopsis,
+  canApplyPlotSuggestionClaimNote,
   canCreatePlotSuggestionBadge,
   parsePlotSuggestions,
   plotSuggestionBeatClipboardText,
@@ -248,5 +250,85 @@ describe("canApplyPlotSuggestionBeatFields", () => {
       open_questions: [],
       status: "",
     })).toBe(true);
+  });
+});
+
+describe("canApplyPlotSuggestionCardSynopsis", () => {
+  it("accepts card revision suggestions with a target card and proposed synopsis", () => {
+    expect(canApplyPlotSuggestionCardSynopsis({
+      kind: "card_revision",
+      target_card_id: "card_archive",
+      target_claim_id: "",
+      template_instance_id: "",
+      plot_point_id: "",
+      title: "Sharpen opening",
+      reason: "",
+      proposed_change: "Mara steals the ledger and loses her only way back.",
+      evidence_to_add: "",
+      story_specifics: "",
+      author_intent: "",
+      expected_role: "",
+      open_questions: [],
+      status: "",
+    })).toBe(true);
+  });
+
+  it("rejects card revision suggestions without concrete replacement text", () => {
+    expect(canApplyPlotSuggestionCardSynopsis({
+      kind: "card_revision",
+      target_card_id: "card_archive",
+      target_claim_id: "",
+      template_instance_id: "",
+      plot_point_id: "",
+      title: "Sharpen opening",
+      reason: "",
+      proposed_change: "",
+      evidence_to_add: "",
+      story_specifics: "",
+      author_intent: "",
+      expected_role: "",
+      open_questions: [],
+      status: "",
+    })).toBe(false);
+  });
+});
+
+describe("canApplyPlotSuggestionClaimNote", () => {
+  it("accepts claim change suggestions with a target claim and proposed note", () => {
+    expect(canApplyPlotSuggestionClaimNote({
+      kind: "claim_change",
+      target_card_id: "card_archive",
+      target_claim_id: "claim_first_turn",
+      template_instance_id: "plot_main",
+      plot_point_id: "first_turn",
+      title: "Strengthen lock-in",
+      reason: "",
+      proposed_change: "Make the consequence harder to evade.",
+      evidence_to_add: "",
+      story_specifics: "",
+      author_intent: "",
+      expected_role: "",
+      open_questions: [],
+      status: "",
+    })).toBe(true);
+  });
+
+  it("rejects card revisions even when they mention a related claim", () => {
+    expect(canApplyPlotSuggestionClaimNote({
+      kind: "card_revision",
+      target_card_id: "card_archive",
+      target_claim_id: "claim_first_turn",
+      template_instance_id: "plot_main",
+      plot_point_id: "first_turn",
+      title: "Sharpen opening",
+      reason: "",
+      proposed_change: "Mara steals the ledger and loses her only way back.",
+      evidence_to_add: "",
+      story_specifics: "",
+      author_intent: "",
+      expected_role: "",
+      open_questions: [],
+      status: "",
+    })).toBe(false);
   });
 });

@@ -119,6 +119,43 @@ describe("createPlotSuggestionActions", () => {
     expect(env.onPlotSaved).toHaveBeenCalledTimes(2);
   });
 
+  it("applies a card revision as replacement synopsis", async () => {
+    const env = harness({
+      plot_board: makePlotNode("plot_board", { board: makeBoard([]) }),
+    });
+
+    await env.actions.applyPlotSuggestionCardSynopsis({
+      ...baseSuggestion,
+      kind: "card_revision",
+      target_card_id: "card_opening",
+      proposed_change: "Mara steals the ledger and loses her only way back.",
+    });
+
+    expect(env.nodes.plot_board.board?.cards[0]).toEqual(
+      expect.objectContaining({
+        id: "card_opening",
+        synopsis: "Mara steals the ledger and loses her only way back.",
+      }),
+    );
+    expect(env.onPlotSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses card synopsis updates when the target card is missing", async () => {
+    const env = harness({
+      plot_board: makePlotNode("plot_board", { board: makeBoard([]) }),
+    });
+
+    await expect(
+      env.actions.applyPlotSuggestionCardSynopsis({
+        ...baseSuggestion,
+        kind: "card_revision",
+        target_card_id: "card_missing",
+        proposed_change: "A concrete replacement synopsis.",
+      }),
+    ).rejects.toThrow("Could not find card card_missing on a plot board.");
+    expect(env.api.savePlotNode).not.toHaveBeenCalled();
+  });
+
   it("creates a satisfies badge with evidence and AI notes", async () => {
     const env = harness({
       plot_board: makePlotNode("plot_board", { board: makeBoard([]) }),

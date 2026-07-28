@@ -180,7 +180,7 @@ Then include an optional machine-readable suggestion block. Use target ids from 
   <suggestion kind="card_revision|beat_revision|claim_change|new_claim|relationship_change|scene_promotion|question" target_card_id="card_id_if_known" target_claim_id="claim_id_if_known" template_instance_id="template_instance_id_if_known" plot_point_id="plot_point_id_if_known">
     <title>Short label for a real suggestion</title>
     <reason>Why this concrete change would strengthen the story function.</reason>
-    <proposed_change>Specific board-level edit or author decision, not drafted prose.</proposed_change>
+    <proposed_change>Specific board-level edit or author decision, not drafted prose. For card_revision, write the replacement card synopsis.</proposed_change>
     <evidence_to_add>Concrete evidence the card or linked scene would need.</evidence_to_add>
     <story_specifics>For beat_revision only: the story-specific version of this generic plot beat.</story_specifics>
     <author_intent>For beat_revision only: what the author wants this beat to accomplish.</author_intent>

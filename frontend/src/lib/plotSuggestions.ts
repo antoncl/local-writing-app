@@ -146,6 +146,22 @@ export function canApplyPlotSuggestionBeatFields(suggestion: PlotSuggestion): bo
   );
 }
 
+export function canApplyPlotSuggestionCardSynopsis(suggestion: PlotSuggestion): boolean {
+  return (
+    suggestion.kind === "card_revision" &&
+    Boolean(suggestion.target_card_id.trim()) &&
+    Boolean(suggestion.proposed_change.trim())
+  );
+}
+
+export function canApplyPlotSuggestionClaimNote(suggestion: PlotSuggestion): boolean {
+  return (
+    suggestion.kind === "claim_change" &&
+    Boolean(suggestion.target_claim_id.trim()) &&
+    Boolean(suggestion.proposed_change.trim())
+  );
+}
+
 function parseAttributes(text: string): Record<string, string> {
   const attrs: Record<string, string> = {};
   for (const match of matchAll(text, /([A-Za-z_][\w:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {

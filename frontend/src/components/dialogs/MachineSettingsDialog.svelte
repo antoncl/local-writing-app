@@ -314,10 +314,12 @@
     color: var(--text);
   }
 
+  /* Active state is color + the accent underline only — deliberately no
+     font-weight change, which would widen the label and reflow the strip on
+     every switch. */
   .settings-tab.active {
     color: var(--text);
     border-bottom-color: var(--accent-emphasis);
-    font-weight: 600;
   }
 
   .settings-panel {

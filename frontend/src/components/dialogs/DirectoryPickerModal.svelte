@@ -1,14 +1,14 @@
 <script lang="ts">
   // The one folder picker (#530, slice P). Shared by the open-project flow (via
   // projectChooser, mounted in App), the create wizard (its own instance), and
-  // Machine Settings' projects-root field. Unlike the old click-walker, it is
+  // the Settings dialog's Storage-tab projects-root field. Unlike the old click-walker, it is
   // self-contained: it owns its transient *browse* state (the listing, the
   // drive/home roots, the typed path) and talks to the backend itself, then
   // hands the host a chosen path via `onSelect`. Domain state — what to DO with
   // that path — stays with the caller.
   //
   // It keeps its own high-z backdrop rather than the shared Modal, because it
-  // opens FROM other modals (New Project, Machine Settings) and must sit above
+  // opens FROM other modals (New Project, Settings) and must sit above
   // them.
   import { api } from "@/lib/api";
   import type { DirectoryListing, DirectoryRoot, PathProbe } from "@/lib/types";

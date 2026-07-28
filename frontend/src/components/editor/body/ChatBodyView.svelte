@@ -639,6 +639,14 @@
         ],
         chat_id: null,
       });
+      // The finalize call billed regardless of the patch outcome. Attribute its
+      // cost to the session the same way a streamed turn does (persist adds only
+      // the delta — the hidden finalize turn isn't in chatHistory, so it stays
+      // out of the persisted messages).
+      if (typeof reply.cost_usd === "number") {
+        pendingTurnCost = (pendingTurnCost ?? 0) + reply.cost_usd;
+        await persistActiveChat();
+      }
       if (!reply.ok || !reply.content?.trim()) {
         chatError = reply.error || "The model returned nothing to commit.";
         return;
@@ -1080,7 +1088,7 @@
     />
 
     <div class="cbv-action-row">
-      <button type="button" disabled={!chatHistory.length || chatRunning} onclick={clearChat}>Clear</button>
+      <button type="button" disabled={!chatHistory.length || chatRunning || committing} onclick={clearChat}>Clear</button>
       {#if isEntryPatchChat}
         <!-- ADR-0046 slice 3: finalize the brainstorm into a validated patch
              (out of band, hidden), reviewed on the target entry's pane. -->
@@ -1100,6 +1108,7 @@
         type="button"
         class="primary"
         disabled={chatRunning
+          || committing
           || missingRequiredInputs.length > 0
           || (!chatInput.trim() && !(activePromptEntry && chatHistory.length === 0))}
         title={missingRequiredInputs.length > 0

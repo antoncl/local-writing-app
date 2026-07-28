@@ -15,15 +15,20 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { reviewBodyProposal, resolveBody, saveAcceptedBody } from "./loreRevision";
 import { adoptRegion, renderDiffRuns } from "./diffRuns";
+import type { DiffRegion } from "./diffRuns";
 import { api } from "@/lib/api";
 import type { DiffRun, DiffView, LoreEntry } from "@/lib/types";
 
-// A simulated character entry and a "model" revision that touches it three ways:
-// a word swap (modification), an added clause (the proposal inserts — a lone
-// `was` region), and a dropped word (the proposal deletes — a lone `now`
-// region). One fixture exercises every change shape adopt has to handle.
-const CURRENT = "Maren is a calm fisher who counts her nets twice, as taught.";
-const PROPOSED = "Maren is a wary harbour fisher who counts her nets twice.";
+// A simulated character entry and a "model" revision that touches it three
+// distinct ways, so the fixture exercises every region shape adopt must handle:
+//   - proposal DROPS "cold "  → a now-only region (empty proposed side — the
+//                               path where accepting collapses to nothing)
+//   - proposal ADDS  "worn "  → a was-only region (empty current side)
+//   - "dawn" → "first light"  → a modification (both sides present)
+// The shape test below asserts all three are actually present, so a change in
+// diff coalescing can't silently narrow the coverage the binding test rides on.
+const CURRENT = "Maren fishes the cold bay. She mends her nets. She sails at dawn.";
+const PROPOSED = "Maren fishes the bay. She mends her worn nets. She sails at first light.";
 
 const ENTRY: LoreEntry = {
   id: "lore_maren",
@@ -76,9 +81,14 @@ describe("reviewBodyProposal — the proposal feeds the snapshot flip unchanged"
     }
   });
 
-  it("has at least one changed region — the fixture actually differs", () => {
+  it("exercises all three change shapes — remove, add, modify", () => {
+    // The adoptRegion-binding and mixed-selection tests below are only as strong
+    // as the shapes actually present. Pin them so diff coalescing that merged an
+    // add or a remove into a modification would fail loudly here, not silently
+    // narrow coverage while every other test stays green.
+    const shape = (r: DiffRegion) => (r.wasText && r.nowText ? "modify" : r.wasText ? "add" : "remove");
     const { regions } = reviewBodyProposal(CURRENT, PROPOSED);
-    expect(regions.length).toBeGreaterThan(0);
+    expect(regions.map(shape).sort()).toEqual(["add", "modify", "remove"]);
   });
 
   it("an identical proposal is one equal run with no regions", () => {
@@ -112,11 +122,21 @@ describe("resolveBody — accept none / all / some", () => {
     }
   });
 
-  it("a mixed selection composes independently of order", () => {
+  it("a partial selection takes the proposal for accepted regions only", () => {
+    // Region ids are ordinal in document order (pinned by the shape test):
+    //   0 = drop "cold "   1 = add "worn "   2 = "dawn" → "first light"
+    // Expected bodies are written by hand — an oracle independent of resolveBody,
+    // not derived from it — so a mis-combined multi-region selection fails here.
     const revision = reviewBodyProposal(CURRENT, PROPOSED);
-    if (revision.regions.length < 2) return; // fixture guarantees ≥2; guard anyway
-    const [a, b] = revision.regions;
-    expect(resolveBody(revision, [a.id, b.id])).toBe(resolveBody(revision, [b.id, a.id]));
+    expect(resolveBody(revision, [1])).toBe(
+      "Maren fishes the cold bay. She mends her worn nets. She sails at dawn.",
+    );
+    expect(resolveBody(revision, [0, 2])).toBe(
+      "Maren fishes the bay. She mends her nets. She sails at first light.",
+    );
+    // Genuinely partial: neither endpoint of the accept-none/accept-all range.
+    expect(resolveBody(revision, [0, 2])).not.toBe(CURRENT);
+    expect(resolveBody(revision, [0, 2])).not.toBe(PROPOSED);
   });
 
   it("an identical proposal resolves to the current body whatever is accepted", () => {
@@ -141,12 +161,16 @@ describe("saveAcceptedBody — write-back through the existing lore save", () =>
     expect(save).toHaveBeenCalledWith(ENTRY, PROPOSED, "layer_book");
   });
 
-  it("accept-none writes the current body back (a no-op edit), same save path", async () => {
+  it("accept-none is a no-op — no save fires, no revision minted", async () => {
     const save = vi.spyOn(api, "saveLoreEntry").mockResolvedValue(ENTRY);
     const revision = reviewBodyProposal(CURRENT, PROPOSED);
 
-    await saveAcceptedBody(ENTRY, revision, []);
+    // Declining every region resolves to the unchanged body, so the seam must
+    // NOT write — a redundant PUT would bump the revision and can 409 a
+    // concurrent editor. It returns the entry untouched instead.
+    const result = await saveAcceptedBody(ENTRY, revision, []);
 
-    expect(save).toHaveBeenCalledWith(ENTRY, CURRENT, null);
+    expect(save).not.toHaveBeenCalled();
+    expect(result).toBe(ENTRY);
   });
 });

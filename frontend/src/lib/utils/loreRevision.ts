@@ -98,5 +98,12 @@ export function saveAcceptedBody(
   acceptedRegionIds: Iterable<number>,
   authoringLayerId: string | null = null,
 ): Promise<LoreEntry> {
-  return api.saveLoreEntry(entry, resolveBody(revision, acceptedRegionIds), authoringLayerId);
+  const body = resolveBody(revision, acceptedRegionIds);
+  // A selection that resolves to the unchanged body is a no-op — declining every
+  // region, most obviously. Writing it anyway would mint a pointless revision
+  // and can 409 a concurrent editor's optimistic-concurrency check. Mirror
+  // `adoptRegion`'s null-body contract ("no write when the body did not change")
+  // and skip the save, returning the entry untouched.
+  if (body === entry.body) return Promise.resolve(entry);
+  return api.saveLoreEntry(entry, body, authoringLayerId);
 }

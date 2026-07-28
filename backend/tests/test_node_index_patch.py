@@ -422,11 +422,25 @@ class CandidateOrderTests(PatchTestCase):
         self.assertEqual([e.src for e in patched.edges_by_dst["nimitz"]], ["aaa", "bbb"])
 
 
-class PatchRequiresACleanIndexTests(PatchTestCase):
-    """Collection diagnostics are free-form strings with no record of which file
-    produced them, so a drop cannot retract one. Patching an index that carries
-    any would leave stale messages behind and duplicate them on every later
-    edit — monotonic, persisted, and shown verbatim by `validate_project`."""
+class PatchRetractsDiagnosticsTests(PatchTestCase):
+    """Collection diagnostics carry `(layer_id, path)` provenance now (#382), so
+    the per-file drop retracts one exactly as it retracts a file's entries and
+    edges. An ordinary diagnostic — a legacy file with no id, an unindexable
+    edge — therefore no longer disables patching, and fixing the file heals the
+    message instead of stranding or duplicating it.
+
+    The carve-out is a diagnostic about a *rejected* file (a same-layer
+    duplicate id): only the first claimant is in `candidates`, so promoting the
+    sibling needs a re-collect the per-file drop never performs. Those still
+    force a rebuild (`blocks_patch`)."""
+
+    def _write_noid(self, title: str) -> Path:
+        path = self.root / "lore" / "noid.md"
+        (self.root / "lore").mkdir(parents=True, exist_ok=True)
+        self.service._write_markdown_with_front_matter(
+            path, {"title": title, "entry_type": "lore:character"}, "Body."
+        )
+        return path
 
     def _write_duplicate_id(self) -> None:
         for name in ("aaa", "bbb"):
@@ -437,30 +451,52 @@ class PatchRequiresACleanIndexTests(PatchTestCase):
                 "Body.",
             )
 
-    def test_a_fixed_warning_does_not_survive(self) -> None:
-        path = self.root / "lore" / "noid.md"
-        (self.root / "lore").mkdir(parents=True, exist_ok=True)
-        self.service._write_markdown_with_front_matter(
-            path, {"title": "No id", "entry_type": "lore:character"}, "Body."
-        )
+    def test_an_ordinary_diagnostic_no_longer_forces_a_rebuild(self) -> None:
+        """The point of #382: a permanent legacy warning used to disable patching
+        for the whole project. An unrelated edit now patches at open, and the
+        warning rides along untouched. The edit is external so the open-time
+        patch/rebuild decision — where the gate lives — actually runs."""
+        self._write_noid("No id")
+        self._write_lore(self.root, "seren", "Seren")
         self.assertTrue(self._open_index().warnings)
 
-        self.service._write_markdown_with_front_matter(
-            path, {"id": "noid", "title": "Now has one", "entry_type": "lore:character"}, "Body."
-        )
+        self._write_lore_externally(self.root, "seren", "Seren, edited")
 
+        self.assertTrue(self._patched_without_full_walk())
+        patched = self._assert_patch_matches_cold_build()
+        self.assertEqual(patched.by_id["seren"].title, "Seren, edited")
+        self.assertEqual(len(patched.warnings), 1)
+
+    def test_a_fixed_warning_does_not_survive(self) -> None:
+        self._write_noid("No id")
+        self.assertTrue(self._open_index().warnings)
+
+        # External so the fix lands on the next open as a stale-snapshot patch,
+        # not a write-time one that would leave nothing for the open to decide.
+        self._write_lore_externally(self.root, "noid", "Now has one")
+
+        self.assertTrue(self._patched_without_full_walk())
         self.assertEqual(self._assert_patch_matches_cold_build().warnings, [])
 
     def test_diagnostics_do_not_accumulate_across_repeated_edits(self) -> None:
-        path = self.root / "lore" / "noid.md"
-        (self.root / "lore").mkdir(parents=True, exist_ok=True)
         for i in range(4):
-            self.service._write_markdown_with_front_matter(
-                path, {"title": f"No id {i}", "entry_type": "lore:character"}, "Body."
-            )
+            self._write_noid(f"No id {i}")
             self._open_index()
 
         self.assertEqual(len(self._assert_patch_matches_cold_build().warnings), 1)
+
+    def test_a_duplicate_id_still_forces_a_rebuild(self) -> None:
+        """A rejected-file diagnostic keeps `blocks_patch`, so any later edit
+        rebuilds rather than patching — the sibling promotion below depends on
+        it."""
+        self._write_duplicate_id()
+        self._write_lore(self.root, "seren", "Seren")
+        self._open_index()
+
+        self._write_lore_externally(self.root, "seren", "Seren, edited")
+
+        self.assertFalse(self._patched_without_full_walk())
+        self._assert_patch_matches_cold_build()
 
     def test_a_duplicate_id_sibling_is_promoted_when_the_winner_goes(self) -> None:
         """The sibling was rejected by the duplicate guard, so it is not in

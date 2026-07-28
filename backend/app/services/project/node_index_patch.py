@@ -82,25 +82,21 @@ class NodeIndexPatchMixin:
             # nothing about the ones that failed and did not change. Rebuilding
             # is what lets it become false again once the user fixes the typo.
             raise PatchNotApplicable("the snapshot recorded unparsed node files")
-        if index.errors or index.collected_warnings():
-            # **A patch requires a clean index.** Collection diagnostics are
-            # free-form strings with no record of which file produced them, so
-            # dropping a file cannot retract its message: fix a malformed id and
-            # the warning survives; edit the file again and it is emitted twice.
-            # `validate_project` shows these verbatim, and the snapshot persists
-            # them, so the wrong output would be monotonic — it never heals.
+        if index.has_unpatchable_diagnostic():
+            # #382 gave collection diagnostics `(layer_id, path)` provenance, so
+            # `_drop_diagnostics_under` retracts an ordinary one as its file is
+            # re-collected — fixing a malformed id no longer strands the warning.
+            # A patch is therefore fine for a project carrying ordinary
+            # diagnostics, which the pre-#382 gate refused wholesale.
             #
-            # It also covers a subtler one. A same-layer duplicate id records an
-            # *error* and indexes only the first claimant, so the sibling is not
-            # in `candidates`; deleting the winner would leave nothing to
-            # promote and the id would vanish, while a cold build promotes the
-            # sibling. Both are the same underlying gap — diagnostics carry no
-            # provenance — so both wait on the same fix (#382).
-            #
-            # Derived shadow warnings are excluded: `resolve()` retracts and
-            # re-emits those itself, and they are common enough that including
-            # them would disable patching for any project with an override.
-            raise PatchNotApplicable("the index carries diagnostics that a patch cannot retract")
+            # What still forces a rebuild is a diagnostic about a *rejected*
+            # file: a same-layer duplicate id (or a cross-kind collision) indexes
+            # only the first claimant, so the sibling is not in `candidates`.
+            # Dropping the winner would leave nothing to promote and the id would
+            # vanish, while a cold build promotes the sibling. Re-collecting the
+            # sibling instead of rebuilding is a further slice the issue defers;
+            # until then these diagnostics carry `blocks_patch` and rebuild.
+            raise PatchNotApplicable("the index carries a diagnostic about a rejected file that a patch cannot retract")
 
         # One unit per changed **path** — `_collect_entry_file` collects a
         # single file, so re-parsing a folder's other few hundred entries buys
@@ -134,6 +130,11 @@ class NodeIndexPatchMixin:
                 entries_by_path.setdefault(str(entry.path), []).append(entry)
         for unit in units.values():
             self._drop_entries_under(index, unit, entries_by_path=entries_by_path)
+            # Retract the unit's old diagnostics before it re-collects, so a file
+            # that fixed its front matter does not keep its stale warning and a
+            # file that still errors is not counted twice (#382). Runs in the
+            # drop phase with the entry drop, keyed on the same (layer, path).
+            self._drop_diagnostics_under(index, unit)
         for unit in units.values():
             self._collect_patch_unit(index, unit, root=root, schema=schema)
         self._restore_candidate_order(index, layers)
@@ -266,6 +267,29 @@ class NodeIndexPatchMixin:
             # otherwise a rename would strip the surviving entry's edges.
             if not any(candidate.source_layer_id == entry.source_layer_id for candidate in remaining):
                 index.edges_by_layer_src.pop((entry.source_layer_id, entry.id), None)
+
+    def _drop_diagnostics_under(self, index: NodeIndex, unit: _PatchUnit) -> None:
+        """Retract the collection diagnostics the unit's files produced (#382).
+
+        Keyed on `(layer id, path)` like the entry and edge drops, so a
+        re-collected file starts from a clean slate — a diagnostic it no longer
+        earns is gone, one it still earns is re-added by the collect, never
+        doubled. Targets exactly the files each collector re-reads, so it never
+        touches the chain-level schema diagnostic that shares the root folder.
+        """
+        if unit.kind == "chat":
+            doomed = [
+                key
+                for key in index.diagnostics_by_source
+                if key[0] == unit.layer.id and key[1].parent == unit.folder and key[1].suffix == ".yaml"
+            ]
+        elif unit.kind == "project_node":
+            doomed = [(unit.layer.id, unit.layer.folder / PROJECT_NODE_FILENAME)]
+        else:  # family — one file
+            assert unit.path is not None
+            doomed = [(unit.layer.id, unit.path)]
+        for key in doomed:
+            index.diagnostics_by_source.pop(key, None)
 
 
 class _PatchUnit:

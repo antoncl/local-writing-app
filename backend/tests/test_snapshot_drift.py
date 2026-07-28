@@ -386,11 +386,12 @@ class DegradationTests(unittest.TestCase):
         self.assertEqual([e.membership for e in report.entities], ["removed"])
 
 
-class DriftOverTheDiffRouteTests(WitnessTestCase):
-    """The wiring: a real capture records a real witness, and the diff endpoint
-    carries the real report — on one synchronous request, which is what makes
-    "restore reports drift" free (a restore is only reachable from a parked
-    notch, and parking is what fetches this)."""
+class DriftOverTheDriftRouteTests(WitnessTestCase):
+    """The wiring: a real capture records a real witness, and the `.../drift`
+    route carries the real report. It is reachable only from a parked notch, and
+    parking is what fetches it, which is what makes "restore reports drift" free.
+    The content diff moved to the client (#583); drift is the one half the server
+    keeps, on its own slim call carrying only the dynamic context."""
 
     def _capture(self) -> str:
         response = self.client.post(
@@ -400,12 +401,16 @@ class DriftOverTheDiffRouteTests(WitnessTestCase):
         return response.json()["id"]
 
     def _diff(self, snapshot_id: str, body: str = "") -> dict:
+        # Named `_diff` for continuity with the call sites below; `body` is no
+        # longer part of the drift request (the now-witness reads the scene by
+        # id), so it is ignored. The payload keeps the `{"drift": …}` shape the
+        # call sites read, back when drift rode the diff response.
         response = self.client.post(
-            f"/api/scenes/{self.scene_id}/snapshots/{snapshot_id}/diff",
-            json={"body": body, "title": "The Tide", "dynamic_context": []},
+            f"/api/scenes/{self.scene_id}/snapshots/{snapshot_id}/drift",
+            json={"dynamic_context": []},
         )
         self.assertEqual(response.status_code, 200, response.text)
-        return response.json()
+        return {"drift": response.json()}
 
     def test_the_diff_reports_a_lore_edit_made_after_the_capture(self) -> None:
         self._save_scene(cast=[self.tom])
@@ -549,6 +554,20 @@ class DriftOverTheDiffRouteTests(WitnessTestCase):
         )
         self.assertEqual(response.status_code, 200, response.text)
         self.assertIn("Before.", response.json()["body"])
+
+
+class SlimDriftRouteEdgeTests(WitnessTestCase):
+    """The `.../drift` route's own edges (#583). Its report *content* is covered
+    by `DriftOverTheDriftRouteTests`, which now drives this route; this holds the
+    404 the removed `.../diff` route used to carry."""
+
+    def test_a_missing_snapshot_is_a_404(self) -> None:
+        self._save_scene(cast=[self.tom])
+        response = self.client.post(
+            f"/api/scenes/{self.scene_id}/snapshots/snap-nope/drift",
+            json={"dynamic_context": []},
+        )
+        self.assertEqual(response.status_code, 404, response.text)
 
 
 class DriftIsNotDescribedGenericallyTests(unittest.TestCase):

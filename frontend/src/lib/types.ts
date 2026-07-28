@@ -76,7 +76,6 @@ export type {
   FieldReinterpretation,
   EntityDrift,
   SnapshotDrift,
-  SnapshotDiff,
 } from "./snapshotTypes";
 
 export type LoreEntrySummary = {

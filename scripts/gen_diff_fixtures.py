@@ -36,7 +36,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "backend"))
 sys.path.insert(0, str(REPO / "backend" / "tests"))
 
-from app.services.project.snapshot_diff import diff_runs  # noqa: E402
+from app.services.project.snapshot_diff import _field_diffs, diff_runs  # noqa: E402
 
 MUTATE = "<!-- mutate:entity=char-maren;field=mood;value=stricken;id=m1 -->"
 TODO_OPEN = "<!-- embedded-todo:id=t1;status=open;note=check%20the%20tide -->"
@@ -209,6 +209,143 @@ CASES: list[dict[str, str]] = [
 ]
 
 
+# The field flip (ADR-0044 §F, #583). Each case probes one rule of
+# `_field_diffs` / `same_rendered_value`: the atomic scalar/list flip, the
+# status row, the blank-equivalence (a missing key and an empty value read the
+# same and must not flip), order-sensitivity of a list, and the non-field keys
+# that are never flipped. The client `fieldDiffs` must reproduce these exactly.
+FIELD_CASES: list[dict[str, object]] = [
+    {
+        "name": "scalar-field-changed",
+        "why": "the ordinary case: one text field's value flips",
+        "was_status": "draft",
+        "was_metadata": {"rank": "Lieutenant"},
+        "now_status": "draft",
+        "now_metadata": {"rank": "Captain"},
+    },
+    {
+        "name": "status-flipped",
+        "why": "status rides beside the metadata and flips like any other row",
+        "was_status": "draft",
+        "was_metadata": {},
+        "now_status": "revised",
+        "now_metadata": {},
+    },
+    {
+        "name": "field-added",
+        "why": "a field absent on the snapshot side, present now",
+        "was_status": "draft",
+        "was_metadata": {},
+        "now_status": "draft",
+        "now_metadata": {"goal": "Reach the harbour"},
+    },
+    {
+        "name": "blank-key-vs-missing-key-do-not-flip",
+        "why": "an empty string and an absent key are the same absence — no row",
+        "was_status": "draft",
+        "was_metadata": {"note": ""},
+        "now_status": "draft",
+        "now_metadata": {},
+    },
+    {
+        "name": "empty-list-vs-missing-do-not-flip",
+        "why": "[] and an absent key both read (none) — no row",
+        "was_status": "draft",
+        "was_metadata": {"tags": []},
+        "now_status": "draft",
+        "now_metadata": {},
+    },
+    {
+        "name": "blank-to-value-flips",
+        "why": "an empty value becoming a real one is a genuine change",
+        "was_status": "draft",
+        "was_metadata": {"note": ""},
+        "now_status": "draft",
+        "now_metadata": {"note": "check the tide tables"},
+    },
+    {
+        "name": "list-membership-changed",
+        "why": "a multi-valued field: one item swapped",
+        "was_status": "draft",
+        "was_metadata": {"tags": ["storm", "night"]},
+        "now_status": "draft",
+        "now_metadata": {"tags": ["storm", "dawn"]},
+    },
+    {
+        "name": "list-reordered-flips",
+        "why": "Python == on lists is order-sensitive, so a reorder is a change",
+        "was_status": "draft",
+        "was_metadata": {"tags": ["storm", "night"]},
+        "now_status": "draft",
+        "now_metadata": {"tags": ["night", "storm"]},
+    },
+    {
+        "name": "non-field-keys-never-flip",
+        "why": "id/title/schema_version differ but are bookkeeping, not authored fields",
+        "was_status": "draft",
+        "was_metadata": {"id": "a", "title": "Old", "schema_version": 1, "goal": "hold"},
+        "now_status": "draft",
+        "now_metadata": {"id": "b", "title": "New", "schema_version": 2, "goal": "hold"},
+    },
+    {
+        "name": "number-field-changed",
+        "why": "a number field flips by ordinary inequality, not blank-equivalence",
+        "was_status": "draft",
+        "was_metadata": {"count": 3},
+        "now_status": "draft",
+        "now_metadata": {"count": 5},
+    },
+    {
+        "name": "boolean-field-flipped",
+        "why": "a boolean field flips false -> true",
+        "was_status": "draft",
+        "was_metadata": {"done": False},
+        "now_status": "draft",
+        "now_metadata": {"done": True},
+    },
+    {
+        "name": "zero-is-a-value-not-a-blank",
+        "why": "0 is a value, so 0 vs an absent key flips (falsy-zero trap)",
+        "was_status": "draft",
+        "was_metadata": {"count": 0},
+        "now_status": "draft",
+        "now_metadata": {},
+    },
+    {
+        "name": "false-is-a-value-not-a-blank",
+        "why": "False is a value, so False vs an absent key flips",
+        "was_status": "draft",
+        "was_metadata": {"done": False},
+        "now_status": "draft",
+        "now_metadata": {},
+    },
+    {
+        "name": "nothing-changed",
+        "why": "identical sides produce an empty flip",
+        "was_status": "draft",
+        "was_metadata": {"rank": "Captain", "tags": ["storm"]},
+        "now_status": "draft",
+        "now_metadata": {"rank": "Captain", "tags": ["storm"]},
+    },
+]
+
+
+def _with_field_diffs(cases: list[dict[str, object]]) -> list[dict[str, object]]:
+    out: list[dict[str, object]] = []
+    for case in cases:
+        fields = {
+            key: diff.model_dump()
+            for key, diff in _field_diffs(
+                case["was_metadata"],  # type: ignore[arg-type]
+                case["was_status"],  # type: ignore[arg-type]
+                case["now_metadata"],  # type: ignore[arg-type]
+                case["now_status"],  # type: ignore[arg-type]
+            ).items()
+        }
+        out.append({**case, "fields": fields})
+    return out
+
+
 def _with_runs(cases: list[dict[str, str]]) -> list[dict[str, object]]:
     out = [
         {**case, "runs": [run.model_dump() for run in diff_runs(case["was"], case["now"])]}
@@ -230,35 +367,51 @@ TARGET_DIR = REPO / "frontend" / "src" / "lib" / "utils"
 # for it to drift from, and generating four hundred cases to compare against
 # nothing would just be wall clock.
 FIXTURES = TARGET_DIR / "diffRuns.fixtures.json"
+FIELD_FIXTURES = TARGET_DIR / "fieldDiffs.fixtures.json"
 FUZZ = TARGET_DIR / "diffRuns.fuzz.json"
 
 
+def _dump(rows: list[dict[str, object]]) -> str:
+    return json.dumps(rows, indent=2, ensure_ascii=False) + chr(10)
+
+
 def _payload(cases: list[dict[str, str]]) -> str:
-    return json.dumps(_with_runs(cases), indent=2, ensure_ascii=False) + chr(10)
+    return _dump(_with_runs(cases))
 
 
-def _write(target: Path, cases: list[dict[str, str]]) -> None:
+def _field_payload(cases: list[dict[str, object]]) -> str:
+    return _dump(_with_field_diffs(cases))
+
+
+def _write(target: Path, payload: str, count: int) -> None:
     # `newline=""` because `.gitattributes` pins this repo to LF, and the default
     # translation writes CRLF on Windows — so a run on the dev machine would put
     # a file in the working tree that does not match what is checked out.
     # (`--check` would not catch it: `read_text` translates newlines back on the
     # way in, so it compares blind to them. This is the write side's job.)
-    target.write_text(_payload(cases), encoding="utf-8", newline="")
-    print(f"wrote {len(cases)} cases to {target}")
+    target.write_text(payload, encoding="utf-8", newline="")
+    print(f"wrote {count} cases to {target}")
 
 
-def _check() -> int:
-    expected = _payload(CASES)
-    actual = FIXTURES.read_text(encoding="utf-8") if FIXTURES.exists() else ""
+def _check_one(target: Path, expected: str, produces: str) -> bool:
+    actual = target.read_text(encoding="utf-8") if target.exists() else ""
     if actual == expected:
-        print(f"{FIXTURES.name} is up to date ({len(CASES)} cases)")
-        return 0
+        return True
     print(
-        f"{FIXTURES} is stale: it no longer matches what diff_runs produces.\n"
+        f"{target} is stale: it no longer matches what {produces} produces.\n"
         "Run `python scripts/gen_diff_fixtures.py` and commit the result. If the "
         "change is deliberate, the diff is the thing to review.",
         file=sys.stderr,
     )
+    return False
+
+
+def _check() -> int:
+    runs_ok = _check_one(FIXTURES, _payload(CASES), "diff_runs")
+    fields_ok = _check_one(FIELD_FIXTURES, _field_payload(FIELD_CASES), "_field_diffs")
+    if runs_ok and fields_ok:
+        print(f"fixtures up to date ({len(CASES)} run cases, {len(FIELD_CASES)} field cases)")
+        return 0
     return 1
 
 
@@ -280,12 +433,14 @@ def main(argv: list[str]) -> int:
     if argv:
         print(f"{USAGE}\nunrecognised arguments: {' '.join(argv)}", file=sys.stderr)
         return 2
-    _write(FIXTURES, CASES)
+    _write(FIXTURES, _payload(CASES), len(CASES))
+    _write(FIELD_FIXTURES, _field_payload(FIELD_CASES), len(FIELD_CASES))
     # Imported here rather than at module scope: `--check` never generates the
     # fuzz corpus, and a gate should not depend on a test module it does not use.
     from diff_fuzz import fuzz_cases
 
-    _write(FUZZ, fuzz_cases())
+    fuzz = fuzz_cases()
+    _write(FUZZ, _payload(fuzz), len(fuzz))
     return 0
 
 

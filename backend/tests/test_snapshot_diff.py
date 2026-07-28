@@ -39,6 +39,7 @@ from app.services.project.field_values import same_rendered_value
 from app.services.project.snapshot_diff import (
     MAX_WORD_DIFF_TOKENS,
     TOKEN,
+    _field_diffs,
     _is_a_rewrite_of,
     diff_runs,
 )
@@ -692,13 +693,19 @@ def test_the_restructured_document_pairs_as_reviewed() -> None:
 
 
 
-class DiffRouteTests(unittest.TestCase):
+class ContentDiffAssemblyTests(unittest.TestCase):
 
-    """Same shape as `test_scene_snapshots.SnapshotTestCase` — a real project on
+    """The content diff (runs + field flip + title) the client assembles at a
 
-    disk, driven through the HTTP surface, because the route's job is reaching
+    park (#583). A real project on disk, read back through the `read_snapshot`
 
-    the store and the store is the filesystem."""
+    HTTP surface — the normalised was-side the client depends on — with the diff
+
+    then computed through the same `diff_runs` / `_field_diffs` oracles the port
+
+    is gated against. The `.../diff` endpoint these once drove is gone; the
+
+    guarantees it carried are these pieces, assembled the way the client does."""
 
 
 
@@ -759,32 +766,45 @@ class DiffRouteTests(unittest.TestCase):
 
 
     def _diff(self, **live) -> dict:
-
+        # The `.../diff` endpoint is gone (#583): the client now assembles the
+        # content diff at a park from the frozen side (`read_snapshot`) and the
+        # live buffer. These tests still pin the pieces it depends on — the
+        # normalised was-side `SnapshotDetail`, and the `diff_runs` / `_field_diffs`
+        # oracles the port is gated against — assembled the same way, so a payload
+        # shaped like the old response keeps the assertions below intact.
         snapshot_id = live.pop("snapshot_id")
+        detail = self.client.get(f"/api/scenes/{self.scene_id}/snapshots/{snapshot_id}")
+        self.assertEqual(detail.status_code, 200, detail.text)
+        was = detail.json()
+        # The client always holds a status; an omitted one here means "unchanged".
+        now_status = live.get("status", was["status"])
+        fields = {
+            key: diff.model_dump()
+            for key, diff in _field_diffs(
+                was["metadata"], was["status"], live.get("metadata", {}), now_status
+            ).items()
+        }
+        return {
+            "snapshot": was["snapshot"],
+            "runs": [run.model_dump() for run in diff_runs(was["body"], live.get("body", ""))],
+            "fields": fields,
+            "title_was": was["title"],
+            "title_now": live.get("title", was["title"]),
+        }
 
-        response = self.client.post(
-
-            f"/api/scenes/{self.scene_id}/snapshots/{snapshot_id}/diff", json=live
-
-        )
-
-        self.assertEqual(response.status_code, 200, response.text)
-
-        return response.json()
 
 
-
-    def test_runs_and_fields_come_back_in_one_call(self) -> None:
+    def test_runs_and_fields_from_the_frozen_side_and_the_buffer(self) -> None:
 
         self._save("The tide went out further than she had ever seen it.", {"summary": "Low water."})
 
         snapshot_id = self._capture()
 
-        # The LIVE state travels in the request rather than being read from
+        # The live buffer is the "now" side and never touches disk: autosave lags
 
-        # disk: autosave lags the buffer by up to six seconds, and parking on a
+        # it by up to six seconds, and parking on a notch is a reading gesture
 
-        # notch is a reading gesture that must not write.
+        # that must not write. Here `_diff` stands in for the client's assembly.
 
         payload = self._diff(
 
@@ -898,13 +918,13 @@ class DiffRouteTests(unittest.TestCase):
 
 
 
-    def test_an_omitted_status_is_not_reported_as_a_cleared_one(self) -> None:
+    def test_an_unchanged_status_is_not_reported_as_a_flip(self) -> None:
 
-        """Silence is not a claim. A caller that does not send `status` is not
+        """An unchanged status does not flip. The client always holds the
 
-        saying the author cleared it — and the compare view would have shown
+        buffer's status (#583); when it equals the snapshot's, `_field_diffs`
 
-        that as a real change, tinted, beside the genuine ones."""
+        must not surface a status row tinted beside the genuine changes."""
 
         self._save("Body.", {"summary": "Low water."})
 
@@ -1067,19 +1087,6 @@ class DiffRouteTests(unittest.TestCase):
             metadata={"summary": "Low water."},
         )
         self.assertEqual(payload["fields"], {})
-
-    def test_an_unknown_snapshot_is_a_404(self) -> None:
-
-        response = self.client.post(
-
-            f"/api/scenes/{self.scene_id}/snapshots/snap-nope/diff",
-
-            json={"body": "", "title": "", "metadata": {}},
-
-        )
-
-        self.assertEqual(response.status_code, 404)
-
 
 
 # ----- the shapes the max-effort review found ---------------------------------

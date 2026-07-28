@@ -339,6 +339,26 @@ class ViewTests(SnapshotTestCase):
         self.assertEqual(detail.body.strip(), "The tide went out.")
         self.assertEqual(self.service.read_scene(self.scene_id).body.strip(), "The tide came back in.")
 
+    def test_reading_a_snapshot_carries_its_normalised_status_and_metadata(self) -> None:
+        """#583: the field flip moved client-side, so the frozen 'was' side must
+        arrive already normalised the way `read_scene` normalises the live side —
+        one pipeline, or the comparison lies. `read_snapshot` reuses
+        `_snapshot_state` for exactly that; this asserts the two fields are now
+        plumbed onto `SnapshotDetail` (the normalisation itself is exercised by
+        the drift suite)."""
+        self.service.save_scene(
+            self.scene_id,
+            SaveSceneRequest(
+                title="The Tide", body="Out.", status="revised", entry_type="scene:scene"
+            ),
+        )
+        record = self.service.capture_snapshot(self.scene_id)
+        self._save("In.")  # move the live side on so the read is of the frozen state
+
+        detail = self.service.read_snapshot(self.scene_id, record.id)
+        self.assertEqual(detail.status, "revised")
+        self.assertIsInstance(detail.metadata, dict)
+
     def test_reading_an_unknown_snapshot_is_a_404(self) -> None:
         response = self.client.get(f"/api/scenes/{self.scene_id}/snapshots/snap_nope")
         self.assertEqual(response.status_code, 404, response.text)

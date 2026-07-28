@@ -175,9 +175,9 @@ class Snapshot(BaseModel):
     schema_version: int
 
     # **The witness is deliberately NOT a field here.** `Snapshot` is the element
-    # type of `SnapshotList`, of `SnapshotDetail.snapshot` and of
-    # `SnapshotDiff.snapshot`, and the strip refetches the list on every scene
-    # open and after every capture and restore. Carrying the witness on that
+    # type of `SnapshotList` and of `SnapshotDetail.snapshot`, and the strip
+    # refetches the list on every scene open and after every capture and restore.
+    # Carrying the witness on that
     # model shipped up to 200 entities of resolved lore state per notch to a
     # client with no field to read it into — measured at 1.5 MB and ~1.2 s for a
     # scene with ten kept snapshots, all of it discarded.
@@ -220,10 +220,17 @@ class SetSnapshotDescriptionRequest(BaseModel):
 
 class SnapshotDetail(BaseModel):
     """A snapshot parsed for reading. The live buffer is untouched underneath;
-    this is what the read-only overlay renders (ADR-0044 §G)."""
+    this is what the read-only overlay renders (ADR-0044 §G).
+
+    `title`, `status` and `metadata` are the **normalised** frozen state — the
+    same `_snapshot_state` pipeline the live side comes off — so the client can
+    compute the field flip against them without a healed reference painting a
+    phantom change (#583). `body` is the raw markdown the run-diff consumes."""
 
     snapshot: Snapshot
     title: str
+    status: str
+    metadata: dict[str, Any]
     body: str
 
 
@@ -340,59 +347,24 @@ class SnapshotDrift(BaseModel):
     entities: list[EntityDrift] = Field(default_factory=list)
 
 
-class SnapshotDiffRequest(BaseModel):
-    """The live state, sent rather than read from disk.
+class SnapshotDriftRequest(BaseModel):
+    """The live inputs the "now" witness needs that only the prose editor knows.
 
-    Autosave lags the buffer by up to six seconds, so the file is not reliably
-    what the author is looking at; and parking on a notch is a *reading*
-    gesture, which must not write. §G's "the endpoint takes two node states",
-    read literally.
+    Once the content diff (runs + fields + title) is computed client-side (#583),
+    the only thing the drift call still has to send up is the **dynamic context**
+    — the entities the editor detected in the prose. The backend cannot rescan
+    them without a second matcher (there must be exactly one implementation of
+    alias matching, the one whose results the author sees underlined), so the
+    frontend owns it. Everything else the now-witness needs (explicit
+    `entity_ref`s, mutations) the backend resolves from the scene id itself.
+
+    **`None` is "not observed", `[]` is "observed and empty"** — the service's
+    behaviour turns on the distinction (axis 4): defaulting to `[]` would read a
+    caller with no prose editor behind it as one that looked and found nothing,
+    reporting every implicitly-detected entity as *removed* on an untouched scene.
+    #581 will widen this to the buffer's `entity_ref` fields + body so drift stops
+    resolving *disk* state and disagreeing with the field flip on an unsaved edit;
+    today it matches the shipped semantics, which read those two sources from disk.
     """
 
-    body: str = ""
-    title: str = ""
-    # `status` travels beside `metadata` because that is how the scene file
-    # stores it — top-level in front matter, not inside the field map — while
-    # the rail renders it as one field row among the others. The flip has to
-    # cover what the rail shows.
-    #
-    # `None` is "not sent", which is NOT the same as "no status". Defaulting to
-    # `""` made an omitted field indistinguishable from a cleared one, so a
-    # caller that simply did not send it was told the author had cleared the
-    # status — a claim the compare view then displayed.
-    status: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    # The lore entries the editor detected in the prose — the *dynamic context*.
-    # It travels from the frontend because the frontend owns the matcher: there
-    # must be exactly one implementation of alias matching, and it should be the
-    # one whose results the author can see underlined. A backend rescan would
-    # mean two matchers that must agree, and every disagreement between them
-    # would surface as drift on a scene nobody touched.
-    #
-    # Always the **full set**, never a delta: a delta cannot express *Chicago is
-    # gone*, which is precisely the absence-is-not-a-claim trap axis 4 exists to
-    # avoid. Capped at the service, not trusted to be small.
-    #
-    # **`None` is "not observed", `[]` is "observed and empty"**, and the type
-    # carries the distinction because the service's behaviour turns on it.
-    # Defaulting to `[]` collapsed the two: `JSON.stringify` drops an omitted
-    # key, so a caller with no prose editor behind it was read as one that had
-    # looked and found nothing — and every implicitly-detected entity in the
-    # stored witness was then reported as *removed* on a scene nobody touched.
     dynamic_context: list[str] | None = None
-
-
-class SnapshotDiff(BaseModel):
-    """One response serving all three view states — Both, Now and Snapshot are
-    three filters over this payload, not three requests (§G)."""
-
-    snapshot: Snapshot
-    runs: list[DiffRun]
-    fields: dict[str, FieldDiff]
-    title_was: str
-    title_now: str
-    # Drift rides on the diff rather than on a route of its own. A restore is
-    # only reachable from a parked notch, and parking is what fetches this — so
-    # ADR-0043's "restore reports drift" is satisfied by one synchronous request
-    # instead of two, and the report is already on screen when the author decides.
-    drift: SnapshotDrift = Field(default_factory=SnapshotDrift)

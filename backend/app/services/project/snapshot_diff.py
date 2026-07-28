@@ -46,8 +46,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from app.models import DiffRun, FieldDiff, SnapshotDiff, SnapshotDrift
-from app.models.snapshots import SnapshotDiffRequest
+from app.models import DiffRun, FieldDiff, SnapshotDrift
 from app.services.markdown_scan import (
     escapes_container,
     first_line_is_structural,
@@ -141,39 +140,24 @@ class SnapshotDiffMixin:
     `_path_for_node_id`, `_node_id_for_path`, `_read_markdown_with_front_matter`,
     `_snapshots_dir`, `_require_snapshot` and `_snapshot_source_id` via MRO."""
 
-    def diff_snapshot(
-        self, scene_id: str, snapshot_id: str, live: SnapshotDiffRequest
-    ) -> SnapshotDiff:
-        """The runs and the field flip, in one call.
+    def snapshot_drift(
+        self, scene_id: str, snapshot_id: str, dynamic_context: list[str] | None
+    ) -> SnapshotDrift:
+        """The drift report alone, for the `.../drift` route (#583).
 
-        The live state arrives in the request rather than being read from disk.
-        Autosave lags the buffer by up to six seconds, so the file is not
-        reliably what the author is looking at — and parking is a *reading*
-        gesture, which must not write. `read_scene` would give a state the
-        author might never have seen.
+        Once the content diff (runs + fields + title) is computed client-side,
+        drift is the one half that cannot move — the "now" witness needs resolved
+        entity state — so it gets its own slim call carrying only the dynamic
+        context the editor observed. `_require_snapshot` gives the 404 the diff
+        route used to.
         """
         root = self._require_project()
         node_id = self._snapshot_source_id(scene_id)
-        record = self._require_snapshot(root, node_id, snapshot_id)
-        front_matter, body = self._read_markdown_with_front_matter(
-            self._snapshots_dir(root, node_id) / f"{snapshot_id}.md"
-        )
-        was = self._snapshot_state(front_matter, node_id, self._snapshots_dir(root, node_id))
-        return SnapshotDiff(
-            snapshot=record,
-            runs=diff_runs(body, live.body),
-            fields=_field_diffs(was, live),
-            title_was=was["title"],
-            title_now=live.title,
-            # Drift rides here rather than on a route of its own: a restore is
-            # only reachable from a parked notch, and parking is what fetches
-            # this — so ADR-0043's "restore reports drift" costs one request, and
-            # the report is already on screen when the author decides.
-            drift=self._snapshot_drift(root, node_id, snapshot_id, live),
-        )
+        self._require_snapshot(root, node_id, snapshot_id)
+        return self._snapshot_drift(root, node_id, snapshot_id, dynamic_context)
 
     def _snapshot_drift(
-        self, root: Path, node_id: str, snapshot_id: str, live: SnapshotDiffRequest
+        self, root: Path, node_id: str, snapshot_id: str, dynamic_context: list[str] | None
     ) -> SnapshotDrift:
         """The stored witness against the world as it is now.
 
@@ -188,7 +172,7 @@ class SnapshotDiffMixin:
         stored = self.read_snapshot_witness(root, node_id, snapshot_id)
         live_witness = self.build_witness(
             node_id,
-            live.dynamic_context,
+            dynamic_context,
             also_resolve=[entity.id for entity in stored.entities] if stored else (),
         )
         return compare_witnesses(stored, live_witness)
@@ -628,7 +612,12 @@ def _coalesce(runs: list[DiffRun]) -> list[DiffRun]:
 NON_FIELD_KEYS = frozenset({"id", "title", "schema_version"})
 
 
-def _field_diffs(was_state: dict[str, Any], live: SnapshotDiffRequest) -> dict[str, FieldDiff]:
+def _field_diffs(
+    was_metadata: dict[str, Any],
+    was_status: str,
+    now_metadata: dict[str, Any],
+    now_status: str,
+) -> dict[str, FieldDiff]:
     """Every field whose value differs, both sides carried.
 
     **No diff is computed on a value.** A field value is atomic — it resolves in
@@ -640,14 +629,14 @@ def _field_diffs(was_state: dict[str, Any], live: SnapshotDiffRequest) -> dict[s
     is only the comparison. `status` is carried beside the field map because
     that is where the scene file keeps it, while the rail renders it as one
     field row among the others.
+
+    The client now computes the flip (#583); this stays as the parity oracle the
+    port is gated against, and its signature is deliberately the same as the TS
+    `fieldDiffs` — four positional sides, status always compared (the client
+    always holds one, so the old "status not sent" case is gone).
     """
-    was: dict[str, Any] = {**was_state["metadata"]}
-    now: dict[str, Any] = {**live.metadata}
-    # Only compare status when the caller actually sent one. Otherwise silence
-    # is read as "the author cleared it".
-    if live.status is not None:
-        was["status"] = was_state["status"]
-        now["status"] = live.status
+    was: dict[str, Any] = {**was_metadata, "status": was_status}
+    now: dict[str, Any] = {**now_metadata, "status": now_status}
     keys = (set(was) | set(now)) - NON_FIELD_KEYS
     return {
         key: FieldDiff(was=was.get(key), now=now.get(key))

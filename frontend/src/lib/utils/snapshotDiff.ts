@@ -27,10 +27,13 @@
  * backend. None occur in fiction prose, and once the client is the diff authority
  * (#573) the JS classification is simply the standard.
  *
- * This module only computes `runs` (the prose diff). Field diffs (`FieldDiff`) and
- * drift stay where their inputs live; see `PORT-SCOPE.md` in the #573 spike.
+ * This module computes the two client-side halves of the compare view: `runs`
+ * (the prose diff, above) and `fieldDiffs` (the atomic field flip, below). Drift
+ * is the third half and stays on the server — building the "now" witness needs
+ * resolved entity state the client does not have (#583); see `PORT-SCOPE.md` in
+ * the #573 spike.
  */
-import type { DiffRun } from "@/lib/types";
+import type { DiffRun, FieldDiff } from "@/lib/types";
 
 type Interval = [number, number];
 type Region = [number, number, number, number]; // was_start, was_end, now_start, now_end
@@ -710,4 +713,92 @@ function coalesce(runs: DiffRun[]): DiffRun[] {
     else out.push({ ...r });
   }
   return out;
+}
+
+// ===========================================================================
+// _field_diffs + same_rendered_value  (the field flip — ADR-0044 §F, #583)
+// ===========================================================================
+//
+// The atomic side of the compare view. A field value resolves in one blink, so
+// §F flips it rather than interleaving — the client needs only the pair. This is
+// a faithful port of the backend `_field_diffs` (`snapshot_diff.py`) and
+// `same_rendered_value` (`field_values.py`), gated at parity against the Python
+// golden by `fieldDiffs.test.ts` / `fieldDiffs.fixtures.json`.
+//
+// **Value equality follows JS**, where the backend leans on Python `==`: `===`
+// for scalars, a structural walk for arrays/objects. The two agree on every
+// JSON-shaped field value — the only equality Python has and JS lacks is
+// `True == 1` / `False == 0`, and a field carries one type, so a boolean is
+// never compared against a number.
+
+// `id` is identity and never flips; `title` and `schema_version` are the file's
+// own bookkeeping, not authored fields. Mirrors `NON_FIELD_KEYS`.
+const NON_FIELD_KEYS = new Set(["id", "title", "schema_version"]);
+
+function isBlank(value: unknown): boolean {
+  if (value === null || value === undefined || value === "") return true;
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value === "object") return Object.keys(value as object).length === 0;
+  return false;
+}
+
+function valuesEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((item, index) => valuesEqual(item, b[index]));
+  }
+  if (a && b && typeof a === "object" && typeof b === "object") {
+    const aKeys = Object.keys(a as object);
+    const bKeys = Object.keys(b as object);
+    return (
+      aKeys.length === bKeys.length &&
+      aKeys.every((key) =>
+        valuesEqual((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]),
+      )
+    );
+  }
+  return false;
+}
+
+/** Whether two field values are the same *as the rail renders them*. A missing
+ *  key and an empty one are the same absence to a reader — the row reads
+ *  "(none)" either way — so they must not flip (`same_rendered_value`). */
+export function sameRenderedValue(was: unknown, now: unknown): boolean {
+  const wasBlank = isBlank(was);
+  const nowBlank = isBlank(now);
+  if (wasBlank || nowBlank) return wasBlank && nowBlank;
+  return valuesEqual(was, now);
+}
+
+/** Every field whose value differs between the frozen snapshot and the live
+ *  buffer, both sides carried — the atomic flip (§F).
+ *
+ *  `status` travels beside the metadata because that is where the scene file
+ *  keeps it (top-level, not in the field map) while the rail renders it as one
+ *  row among the fields. The frontend always holds both statuses, so unlike the
+ *  backend request (where `status: None` meant "not sent") it is always compared. */
+export function fieldDiffs(
+  wasMetadata: Record<string, unknown>,
+  wasStatus: string,
+  nowMetadata: Record<string, unknown>,
+  nowStatus: string,
+): Record<string, FieldDiff> {
+  const was: Record<string, unknown> = { ...wasMetadata, status: wasStatus };
+  const now: Record<string, unknown> = { ...nowMetadata, status: nowStatus };
+  const keys = new Set<string>();
+  for (const key of [...Object.keys(was), ...Object.keys(now)]) {
+    if (!NON_FIELD_KEYS.has(key)) keys.add(key);
+  }
+  const diffs: Record<string, FieldDiff> = {};
+  for (const key of [...keys].sort()) {
+    const wasValue = was[key];
+    const nowValue = now[key];
+    if (!sameRenderedValue(wasValue, nowValue)) {
+      diffs[key] = {
+        was: wasValue === undefined ? null : wasValue,
+        now: nowValue === undefined ? null : nowValue,
+      };
+    }
+  }
+  return diffs;
 }

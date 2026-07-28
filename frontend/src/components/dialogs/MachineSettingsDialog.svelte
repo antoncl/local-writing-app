@@ -5,6 +5,7 @@
   // component owns only the local mutations on the draft it's been handed
   // (the palette surface is delegated to PaletteEditor).
   import type {
+    AIHealthResponse,
     MachineSettingsDraft,
     MachineSettingsView,
     ProviderCredentialsView,
@@ -38,6 +39,17 @@
   export let draft: MachineSettingsDraft | null = null;
   export let onCancel: () => void = () => {};
   export let onSave: () => void = () => {};
+
+  // The AI-connection test, re-homed from the Project pane (#629): it pings the
+  // default assistant's provider, so it belongs beside the providers it tests.
+  // The host owns the gate — the ping needs an open project with AI access, so
+  // `disabledReason` is non-null (and shown) when it can't run.
+  export let health: {
+    onCheck: () => void;
+    result: AIHealthResponse | null;
+    checking: boolean;
+    disabledReason: string | null;
+  } | null = null;
 
   // PaletteEditor is controlled — it hands back a whole new ordered list, which
   // we assign onto the draft. A member assignment is reactive here the same way
@@ -121,6 +133,33 @@
             Ollama host
             <input type="text" bind:value={draft.ollama_host} placeholder="http://127.0.0.1:11434" />
           </label>
+
+          {#if health}
+            <section class="health-check">
+              <h3>Connection</h3>
+              <p class="muted">Pings the current project's default assistant to confirm its provider answers.</p>
+              <div class="button-row">
+                <button
+                  type="button"
+                  disabled={health.checking || !!health.disabledReason}
+                  title={health.disabledReason ?? "Ping the default assistant's provider"}
+                  on:click={() => health?.onCheck()}
+                >{health.checking ? "Testing…" : "Test connection"}</button>
+              </div>
+              {#if health.disabledReason}
+                <small class="muted">{health.disabledReason}</small>
+              {/if}
+              {#if health.result}
+                <p class="ai-health-result" class:ok={health.result.ok} class:fail={!health.result.ok}>
+                  {#if health.result.ok}
+                    ✓ {health.result.provider} · {health.result.model} · {health.result.latency_ms} ms
+                  {:else}
+                    ✗ {health.result.provider || "(no provider)"} — {health.result.error}
+                  {/if}
+                </p>
+              {/if}
+            </section>
+          {/if}
         {:else if activeTab === "writing"}
           <section class="writing-surface">
             <h3>Writing surface</h3>
@@ -256,6 +295,43 @@
 
   .stored-at {
     font-size: var(--fs-sm);
+  }
+
+  .health-check {
+    display: grid;
+    gap: 6px;
+  }
+
+  .health-check h3 {
+    margin: 0;
+    font-size: var(--fs-md);
+    font-weight: 600;
+  }
+
+  .health-check p.muted {
+    margin: 0;
+    font-size: var(--fs-sm);
+  }
+
+  /* Mirrors the health readout that used to live in the Project pane. */
+  .ai-health-result {
+    margin: 4px 0 0;
+    padding: 8px 10px;
+    border-radius: 4px;
+    font-size: var(--fs-md);
+    line-height: 1.4;
+  }
+
+  .ai-health-result.ok {
+    background: var(--accent-soft);
+    color: var(--accent-deep);
+    border: 1px solid var(--accent-soft2);
+  }
+
+  .ai-health-result.fail {
+    background: var(--danger-soft);
+    color: var(--danger);
+    border: 1px solid var(--danger-border);
   }
 
   .writing-surface {

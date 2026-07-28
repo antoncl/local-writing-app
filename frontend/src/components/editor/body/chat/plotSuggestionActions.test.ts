@@ -1,0 +1,184 @@
+import { describe, expect, it, vi } from "vitest";
+import { createPlotSuggestionActions, type PlotSuggestionActionApi } from "./plotSuggestionActions";
+import type { PlotSuggestion } from "@/lib/plotSuggestions";
+import type { PlotBoardSpec, PlotNode, PlotPointClaim } from "@/lib/types";
+
+const baseSuggestion: PlotSuggestion = {
+  kind: "new_claim",
+  target_card_id: "card_opening",
+  target_claim_id: "",
+  template_instance_id: "plot_main",
+  plot_point_id: "first_turn",
+  title: "Add lock-in badge",
+  reason: "",
+  proposed_change: "Make the consequence unavoidable.",
+  evidence_to_add: "Show the door closing behind her.",
+};
+
+function makeClaim(patch: Partial<PlotPointClaim> = {}): PlotPointClaim {
+  return {
+    id: "claim_setup",
+    card_id: "card_opening",
+    template_instance_id: "plot_main",
+    plot_point_id: "setup_pressure",
+    plotline_id: "line_main",
+    claim_type: "satisfies",
+    claim_label: null,
+    strength: null,
+    confidence: null,
+    evidence: null,
+    rationale: null,
+    ai_notes: null,
+    metadata: {},
+    ...patch,
+  };
+}
+
+function makeBoard(claims: PlotPointClaim[] = [makeClaim()]): PlotBoardSpec {
+  return {
+    version: 1,
+    template_instance_ids: ["plot_main"],
+    plotlines: [{ id: "line_main", title: "Main plot", template_instance_id: "plot_main", metadata: {} }],
+    cards: [{ id: "card_opening", title: "Opening", synopsis: "", metadata: {} }],
+    claims,
+    relationships: [],
+    metadata: {},
+  };
+}
+
+function makePlotNode(id: string, patch: Partial<PlotNode> = {}): PlotNode {
+  return {
+    id,
+    title: id,
+    revision: "rev1",
+    entry_type: id === "plot_board" ? "plot:board" : "plot:template_instance",
+    body: "",
+    template: null,
+    template_instance: null,
+    board: null,
+    layout: null,
+    system: false,
+    metadata: {},
+    computed_metadata: {},
+    ...patch,
+  } as PlotNode;
+}
+
+function harness(nodes: Record<string, PlotNode>) {
+  let chatError: string | null = null;
+  const onPlotSaved = vi.fn();
+  const api: PlotSuggestionActionApi = {
+    listPlotNodes: vi.fn(async () => ({
+      entries: [{ id: "plot_board", title: "Board", entry_type: "plot:board", system: false }],
+    })),
+    getPlotNode: vi.fn(async (nodeId: string) => nodes[nodeId]),
+    savePlotNode: vi.fn(async (nodeId: string, payload) => {
+      const saved = {
+        ...nodes[nodeId],
+        ...payload,
+        id: nodeId,
+        revision: "rev2",
+        system: nodes[nodeId].system,
+        computed_metadata: nodes[nodeId].computed_metadata,
+      } as PlotNode;
+      nodes[nodeId] = saved;
+      return saved;
+    }),
+  };
+  const actions = createPlotSuggestionActions({
+    api,
+    getChatInputDrafts: () => ({}),
+    getPlotEntries: () => [{ id: "plot_board", title: "Board", entry_type: "plot:board", system: false }],
+    setChatError: (message) => {
+      chatError = message;
+    },
+    onPlotSaved,
+    newId: (prefix) => `${prefix}_fixed`,
+  });
+  return { actions, api, get chatError() { return chatError; }, nodes, onPlotSaved };
+}
+
+describe("createPlotSuggestionActions", () => {
+  it("appends evidence and notes to an existing claim", async () => {
+    const env = harness({
+      plot_board: makePlotNode("plot_board", { board: makeBoard([makeClaim({ id: "claim_target" })]) }),
+    });
+    const suggestion = { ...baseSuggestion, kind: "claim_change", target_claim_id: "claim_target" } as PlotSuggestion;
+
+    await env.actions.applyPlotSuggestionEvidence(suggestion);
+    await env.actions.applyPlotSuggestionNote(suggestion);
+
+    const claim = env.nodes.plot_board.board?.claims[0];
+    expect(claim?.evidence).toBe("Show the door closing behind her.");
+    expect(claim?.ai_notes).toBe("Make the consequence unavoidable.");
+    expect(env.onPlotSaved).toHaveBeenCalledTimes(2);
+  });
+
+  it("creates a satisfies badge with evidence and AI notes", async () => {
+    const env = harness({
+      plot_board: makePlotNode("plot_board", { board: makeBoard([]) }),
+      plot_main: makePlotNode("plot_main", {
+        template_instance: {
+          template_id: "three_act",
+          plot_points: [{ plot_point_id: "first_turn", title: "First turn", function_claim: "", notes: "", metadata: {} }],
+          metadata: {},
+        },
+      }),
+    });
+
+    await env.actions.createPlotSuggestionBadge(baseSuggestion);
+
+    expect(env.nodes.plot_board.board?.claims).toEqual([
+      expect.objectContaining({
+        id: "claim_fixed",
+        card_id: "card_opening",
+        template_instance_id: "plot_main",
+        plot_point_id: "first_turn",
+        plotline_id: "line_main",
+        claim_type: "satisfies",
+        evidence: "Show the door closing behind her.",
+        ai_notes: "Make the consequence unavoidable.",
+      }),
+    ]);
+  });
+
+  it("refuses duplicate badges", async () => {
+    const env = harness({
+      plot_board: makePlotNode("plot_board", {
+        board: makeBoard([makeClaim({ plot_point_id: "first_turn" })]),
+      }),
+      plot_main: makePlotNode("plot_main", {
+        template_instance: {
+          template_id: "three_act",
+          plot_points: [{ plot_point_id: "first_turn", title: "First turn", function_claim: "", notes: "", metadata: {} }],
+          metadata: {},
+        },
+      }),
+    });
+
+    await expect(env.actions.createPlotSuggestionBadge(baseSuggestion)).rejects.toThrow(
+      "That card already has this plot beat badge.",
+    );
+    expect(env.chatError).toBe("That card already has this plot beat badge.");
+    expect(env.api.savePlotNode).not.toHaveBeenCalled();
+  });
+
+  it("refuses badge creation when the plot beat is not on the template instance", async () => {
+    const env = harness({
+      plot_board: makePlotNode("plot_board", { board: makeBoard([]) }),
+      plot_main: makePlotNode("plot_main", {
+        template_instance: {
+          template_id: "three_act",
+          plot_points: [{ plot_point_id: "setup_pressure", title: "Setup", function_claim: "", notes: "", metadata: {} }],
+          metadata: {},
+        },
+      }),
+    });
+
+    await expect(env.actions.createPlotSuggestionBadge(baseSuggestion)).rejects.toThrow(
+      "Could not find that plot beat on the target template instance.",
+    );
+    expect(env.chatError).toBe("Could not find that plot beat on the target template instance.");
+    expect(env.api.savePlotNode).not.toHaveBeenCalled();
+  });
+});

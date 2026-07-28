@@ -9,8 +9,10 @@
   import { renderChatContent } from "@/lib/utils/chatMessageRender";
   import { formatCostEur } from "@/lib/utils/money";
   import {
+    canApplyPlotSuggestionBeatFields,
     canCreatePlotSuggestionBadge,
     parsePlotSuggestions,
+    plotSuggestionBeatClipboardText,
     plotSuggestionClipboardText,
     stripPlotSuggestions,
     type PlotSuggestion,
@@ -24,6 +26,7 @@
     onApplyEvidence?: (suggestion: PlotSuggestion) => void | Promise<void>;
     onApplyNote?: (suggestion: PlotSuggestion) => void | Promise<void>;
     onCreateBadge?: (suggestion: PlotSuggestion) => void | Promise<void>;
+    onApplyBeatFields?: (suggestion: PlotSuggestion) => void | Promise<void>;
   }
 
   let {
@@ -33,6 +36,7 @@
     onApplyEvidence,
     onApplyNote,
     onCreateBadge,
+    onApplyBeatFields,
   }: Props = $props();
 
   let copiedKey = $state("");
@@ -51,9 +55,9 @@
     suggestion: PlotSuggestion,
     messageIndex: number,
     index: number,
-    action: "proposed_change" | "evidence_to_add" | "apply_evidence" | "apply_note" | "create_badge",
+    action: "proposed_change" | "evidence_to_add" | "beat_fields" | "apply_evidence" | "apply_note" | "create_badge" | "apply_beat_fields",
   ): string {
-    return `${messageIndex}-${suggestion.kind}-${suggestion.target_card_id}-${suggestion.target_claim_id}-${index}-${action}`;
+    return `${messageIndex}-${suggestion.kind}-${suggestion.target_card_id}-${suggestion.target_claim_id}-${suggestion.template_instance_id}-${suggestion.plot_point_id}-${index}-${action}`;
   }
 
   async function copySuggestion(
@@ -62,6 +66,22 @@
     field: "proposed_change" | "evidence_to_add",
   ): Promise<void> {
     const text = plotSuggestionClipboardText(suggestion, field);
+    if (!text.trim()) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      copiedKey = key;
+      if (copyResetTimer) clearTimeout(copyResetTimer);
+      copyResetTimer = setTimeout(() => {
+        copiedKey = "";
+        copyResetTimer = null;
+      }, 1600);
+    } catch {
+      copiedKey = "";
+    }
+  }
+
+  async function copyBeatFieldsSuggestion(suggestion: PlotSuggestion, key: string): Promise<void> {
+    const text = plotSuggestionBeatClipboardText(suggestion);
     if (!text.trim()) return;
     try {
       await navigator.clipboard.writeText(text);
@@ -89,6 +109,11 @@
   async function createBadgeSuggestion(suggestion: PlotSuggestion, key: string): Promise<void> {
     if (!onCreateBadge || !canCreatePlotSuggestionBadge(suggestion)) return;
     await applySuggestion(suggestion, key, onCreateBadge);
+  }
+
+  async function applyBeatFieldsSuggestion(suggestion: PlotSuggestion, key: string): Promise<void> {
+    if (!onApplyBeatFields || !canApplyPlotSuggestionBeatFields(suggestion)) return;
+    await applySuggestion(suggestion, key, onApplyBeatFields);
   }
 
   async function applySuggestion(
@@ -141,7 +166,7 @@
           {#if suggestions.length > 0}
             <div class="cbv-plot-suggestions" aria-label="Plot suggestions">
               <header>Plot suggestions</header>
-              {#each suggestions as suggestion, j (`${suggestion.kind}-${suggestion.target_card_id}-${suggestion.target_claim_id}-${j}`)}
+              {#each suggestions as suggestion, j (`${suggestion.kind}-${suggestion.target_card_id}-${suggestion.target_claim_id}-${suggestion.template_instance_id}-${suggestion.plot_point_id}-${j}`)}
                 <article class="cbv-plot-suggestion">
                   <div class="cbv-plot-suggestion-head">
                     <strong>{suggestion.title || "Untitled suggestion"}</strong>
@@ -155,6 +180,21 @@
                   {/if}
                   {#if suggestion.evidence_to_add}
                     <small>Evidence to add: {suggestion.evidence_to_add}</small>
+                  {/if}
+                  {#if suggestion.story_specifics}
+                    <small>Story specifics: {suggestion.story_specifics}</small>
+                  {/if}
+                  {#if suggestion.author_intent}
+                    <small>Author intent: {suggestion.author_intent}</small>
+                  {/if}
+                  {#if suggestion.expected_role}
+                    <small>Expected role: {suggestion.expected_role}</small>
+                  {/if}
+                  {#if suggestion.open_questions.length > 0}
+                    <small>Open questions: {suggestion.open_questions.join("; ")}</small>
+                  {/if}
+                  {#if suggestion.status}
+                    <small>Status: {suggestion.status.replace(/_/g, " ")}</small>
                   {/if}
                   <div class="cbv-plot-suggestion-targets">
                     {#if suggestion.target_card_id}<code>{suggestion.target_card_id}</code>{/if}
@@ -213,6 +253,32 @@
                       </button>
                       {#if applyErrorKey === applyKey}
                         <small class="cbv-plot-suggestion-action-error">Could not apply evidence.</small>
+                      {/if}
+                    {/if}
+                    {#if canApplyPlotSuggestionBeatFields(suggestion)}
+                      {@const beatFieldsKey = suggestionKey(suggestion, i, j, "beat_fields")}
+                      <button
+                        type="button"
+                        title="Copy suggested plot beat fields"
+                        onclick={() => void copyBeatFieldsSuggestion(suggestion, beatFieldsKey)}
+                      >
+                        <i class="ti ti-copy" aria-hidden="true"></i>
+                        {copiedKey === beatFieldsKey ? "Copied" : "Copy beat fields"}
+                      </button>
+                    {/if}
+                    {#if onApplyBeatFields && canApplyPlotSuggestionBeatFields(suggestion)}
+                      {@const applyBeatFieldsKey = suggestionKey(suggestion, i, j, "apply_beat_fields")}
+                      <button
+                        type="button"
+                        title="Apply these story-specific fields to the target plot beat"
+                        disabled={Boolean(applyingKey)}
+                        onclick={() => void applyBeatFieldsSuggestion(suggestion, applyBeatFieldsKey)}
+                      >
+                        <i class="ti ti-check" aria-hidden="true"></i>
+                        {applyingKey === applyBeatFieldsKey ? "Applying" : appliedKey === applyBeatFieldsKey ? "Applied" : "Apply beat fields"}
+                      </button>
+                      {#if applyErrorKey === applyBeatFieldsKey}
+                        <small class="cbv-plot-suggestion-action-error">Could not apply beat fields.</small>
                       {/if}
                     {/if}
                     {#if onCreateBadge && canCreatePlotSuggestionBadge(suggestion)}

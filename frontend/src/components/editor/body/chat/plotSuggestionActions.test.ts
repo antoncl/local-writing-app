@@ -13,6 +13,11 @@ const baseSuggestion: PlotSuggestion = {
   reason: "",
   proposed_change: "Make the consequence unavoidable.",
   evidence_to_add: "Show the door closing behind her.",
+  story_specifics: "",
+  author_intent: "",
+  expected_role: "",
+  open_questions: [],
+  status: "",
 };
 
 function makeClaim(patch: Partial<PlotPointClaim> = {}): PlotPointClaim {
@@ -179,6 +184,84 @@ describe("createPlotSuggestionActions", () => {
       "Could not find that plot beat on the target template instance.",
     );
     expect(env.chatError).toBe("Could not find that plot beat on the target template instance.");
+    expect(env.api.savePlotNode).not.toHaveBeenCalled();
+  });
+
+  it("applies story-specific fields to a target plot beat", async () => {
+    const env = harness({
+      plot_main: makePlotNode("plot_main", {
+        template_instance: {
+          template_id: "three_act",
+          plot_points: [
+            {
+              plot_point_id: "first_turn",
+              title: "First turn",
+              function_claim: "Makes the old path unavailable.",
+              notes: "",
+              author_intent: "",
+              expected_role: "",
+              open_questions: [],
+              status: "unplanned",
+              metadata: {},
+            },
+          ],
+          point_notes: {},
+          metadata: {},
+        },
+      }),
+    });
+
+    await env.actions.applyPlotSuggestionBeatFields({
+      ...baseSuggestion,
+      kind: "beat_revision",
+      target_card_id: "",
+      story_specifics: "Mara burns the bridge back to the archive.",
+      author_intent: "Commit her to theft over loyalty.",
+      expected_role: "Make retreat emotionally impossible.",
+      open_questions: ["Who witnesses the break?"],
+      status: "planned",
+    });
+
+    const point = env.nodes.plot_main.template_instance?.plot_points?.[0];
+    expect(point).toEqual(
+      expect.objectContaining({
+        notes: "Mara burns the bridge back to the archive.",
+        author_intent: "Commit her to theft over loyalty.",
+        expected_role: "Make retreat emotionally impossible.",
+        open_questions: ["Who witnesses the break?"],
+        status: "planned",
+      }),
+    );
+    expect(env.nodes.plot_main.template_instance?.point_notes?.first_turn).toEqual(
+      expect.objectContaining({
+        notes: "Mara burns the bridge back to the archive.",
+        author_intent: "Commit her to theft over loyalty.",
+        expected_role: "Make retreat emotionally impossible.",
+        open_questions: ["Who witnesses the break?"],
+        status: "planned",
+      }),
+    );
+    expect(env.onPlotSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses beat field updates when the target plot beat is missing", async () => {
+    const env = harness({
+      plot_main: makePlotNode("plot_main", {
+        template_instance: {
+          template_id: "three_act",
+          plot_points: [{ plot_point_id: "setup_pressure", title: "Setup", function_claim: "", notes: "", metadata: {} }],
+          metadata: {},
+        },
+      }),
+    });
+
+    await expect(
+      env.actions.applyPlotSuggestionBeatFields({
+        ...baseSuggestion,
+        kind: "beat_revision",
+        story_specifics: "A concrete story version.",
+      }),
+    ).rejects.toThrow("Could not find that plot beat on the target template instance.");
     expect(env.api.savePlotNode).not.toHaveBeenCalled();
   });
 });

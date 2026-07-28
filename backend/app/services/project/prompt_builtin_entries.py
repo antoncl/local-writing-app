@@ -177,11 +177,16 @@ Respond with:
 Then include an optional machine-readable suggestion block. Use target ids from the context whenever possible. Keep every suggestion as a draft the author can accept, edit, or ignore. Do not emit placeholder suggestions. Omit the block entirely if there is no concrete proposed change.
 
 <plot_suggestions>
-  <suggestion kind="card_revision|claim_change|new_claim|relationship_change|scene_promotion|question" target_card_id="card_id_if_known" target_claim_id="claim_id_if_known" template_instance_id="template_instance_id_if_known" plot_point_id="plot_point_id_if_known">
+  <suggestion kind="card_revision|beat_revision|claim_change|new_claim|relationship_change|scene_promotion|question" target_card_id="card_id_if_known" target_claim_id="claim_id_if_known" template_instance_id="template_instance_id_if_known" plot_point_id="plot_point_id_if_known">
     <title>Short label for a real suggestion</title>
     <reason>Why this concrete change would strengthen the story function.</reason>
     <proposed_change>Specific board-level edit or author decision, not drafted prose.</proposed_change>
     <evidence_to_add>Concrete evidence the card or linked scene would need.</evidence_to_add>
+    <story_specifics>For beat_revision only: the story-specific version of this generic plot beat.</story_specifics>
+    <author_intent>For beat_revision only: what the author wants this beat to accomplish.</author_intent>
+    <expected_role>For beat_revision only: the role this beat should play in this story.</expected_role>
+    <open_question>For beat_revision only: one concrete unresolved author decision.</open_question>
+    <status>unplanned|planned|drafted|satisfied|intentionally_omitted</status>
   </suggestion>
 </plot_suggestions>
 {% endrole %}

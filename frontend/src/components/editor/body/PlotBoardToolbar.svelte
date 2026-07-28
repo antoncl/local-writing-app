@@ -28,7 +28,7 @@
 
 <div class="board-toolbar">
   <span>{cardCount} cards</span>
-  <span>{claimCount} badges</span>
+  <span>{claimCount} markers</span>
   {#if diagnostics.total > 0}
     <span class="diagnostic-count">{diagnostics.total} checks</span>
   {/if}

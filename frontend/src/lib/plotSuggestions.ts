@@ -84,9 +84,9 @@ export function plotSuggestionClipboardText(
     `${label}: ${suggestion[field]}`,
     suggestion.reason ? `Reason: ${suggestion.reason}` : "",
     suggestion.target_card_id ? `Card: ${suggestion.target_card_id}` : "",
-    suggestion.target_claim_id ? `Claim: ${suggestion.target_claim_id}` : "",
-    suggestion.template_instance_id ? `Template instance: ${suggestion.template_instance_id}` : "",
-    suggestion.plot_point_id ? `Plot beat: ${suggestion.plot_point_id}` : "",
+    suggestion.target_claim_id ? `Story marker: ${suggestion.target_claim_id}` : "",
+    suggestion.template_instance_id ? `Template: ${suggestion.template_instance_id}` : "",
+    suggestion.plot_point_id ? `Story beat: ${suggestion.plot_point_id}` : "",
   ];
   return lines.filter(Boolean).join("\n");
 }
@@ -100,10 +100,33 @@ export function plotSuggestionBeatClipboardText(suggestion: PlotSuggestion): str
     ...suggestion.open_questions.map((question) => `Open question: ${question}`),
     suggestion.status ? `Status: ${suggestion.status}` : "",
     suggestion.reason ? `Reason: ${suggestion.reason}` : "",
-    suggestion.template_instance_id ? `Template instance: ${suggestion.template_instance_id}` : "",
-    suggestion.plot_point_id ? `Plot beat: ${suggestion.plot_point_id}` : "",
+    suggestion.template_instance_id ? `Template: ${suggestion.template_instance_id}` : "",
+    suggestion.plot_point_id ? `Story beat: ${suggestion.plot_point_id}` : "",
   ];
   return lines.filter(Boolean).join("\n");
+}
+
+export function plotSuggestionKindLabel(kind: PlotSuggestionKind): string {
+  switch (kind) {
+    case "card_revision":
+      return "Card change";
+    case "beat_revision":
+      return "Story beat change";
+    case "claim_change":
+      return "Story marker change";
+    case "new_card":
+      return "New card";
+    case "new_claim":
+      return "New story marker";
+    case "relationship_change":
+      return "Relationship change";
+    case "scene_promotion":
+      return "Scene suggestion";
+    case "question":
+      return "Question";
+    default:
+      return "Suggestion";
+  }
 }
 
 export function appendPlotSuggestionEvidence(existing: string | null | undefined, addition: string): string {

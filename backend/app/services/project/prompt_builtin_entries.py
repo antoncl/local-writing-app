@@ -47,15 +47,15 @@ def builtin_prompt_entries() -> list[dict[str, Any]]:
         {
             "filename": "Plot Claim Audit.md",
             "node_id": "prompt_builtin_plot_claim_audit",
-            "title": "Plot Claim Audit",
+            "title": "Plot Review",
             "entry_type": "prompt:general",
             "inputs": [
                 PLOT_CONTEXT_INPUT,
                 {
                     "name": "focus",
                     "type": "long_text",
-                    "label": "Audit focus",
-                    "default": "Find weak, unsupported, duplicated, or missing plot-beat claims.",
+                    "label": "Review focus",
+                    "default": "Find weak, unsupported, duplicated, or missing story markers.",
                 },
             ],
             "body": PLOT_CLAIM_AUDIT_BODY,
@@ -91,7 +91,7 @@ Summary: {{ scene_summary }}
 Respond with:
 1. The strongest available story direction.
 2. Two or three alternate directions worth considering.
-3. Weak or unsupported plot-beat claims to investigate.
+3. Weak or unsupported story markers to investigate.
 4. Specific questions the author should answer next.
 {% endrole %}
 """
@@ -100,16 +100,16 @@ Respond with:
 PLOT_CLAIM_AUDIT_BODY = """{% set selected_scene = scene if scene is defined else none %}
 {% set plot = plot_context(input.plot, as_of=selected_scene) if selected_scene else plot_context(input.plot) %}
 {% role "system" %}
-You are an experienced fiction editor helping a novelist strengthen a plot board. A plot beat is a story milestone or required story function. A function badge is a card-local claim that the card helps satisfy that beat. Treat diagnostics as signals, not verdicts. Diagnose gaps, then offer concrete repair options the author can choose from. Do not draft prose, invent final canon, mutate the board, or treat the template as a rigid formula.
+You are an experienced fiction editor helping a novelist strengthen a plot board. A story beat is a milestone the story may need to earn. A story marker says a specific card helps support or earn that beat. Treat diagnostics as signals, not verdicts. Diagnose gaps, then offer concrete repair options the author can choose from. Do not draft prose, invent final canon, mutate the board, or treat the template as a rigid formula.
 {% endrole %}
 
 {% role "user" %}
 {% if input.focus is defined and input.focus %}
-## Audit focus
+## Review focus
 {{ input.focus }}
 
 {% endif %}
-<plot_claim_audit board_title="{{ plot.board_title | e }}">
+<plot_review board_title="{{ plot.board_title | e }}">
 {% for instance in plot.template_instances %}
   <template_instance id="{{ instance.id | e }}" title="{{ instance.title | e }}">
 {% if instance.ai_use_guidance %}
@@ -127,9 +127,9 @@ You are an experienced fiction editor helping a novelist strengthen a plot board
 {% if point.expected_role %}
       <expected_role>{{ point.expected_role | e }}</expected_role>
 {% endif %}
-      <claiming_cards>
+      <supporting_cards>
 {% for claim in point.claims %}
-        <claim id="{{ claim.id | e }}" type="{{ claim.claim_type | e }}" strength="{{ claim.strength | default('', true) | e }}">
+        <story_marker id="{{ claim.id | e }}" type="{{ claim.claim_type | e }}" strength="{{ claim.strength | default('', true) | e }}">
 {% if claim.card %}
           <card id="{{ claim.card.id | e }}" title="{{ claim.card.title | e }}">
 {% if claim.card.synopsis %}
@@ -138,7 +138,7 @@ You are an experienced fiction editor helping a novelist strengthen a plot board
           </card>
 {% endif %}
 {% if claim.claim_label %}
-          <claim_label>{{ claim.claim_label | e }}</claim_label>
+          <marker_label>{{ claim.claim_label | e }}</marker_label>
 {% endif %}
 {% if claim.rationale %}
           <rationale>{{ claim.rationale | e }}</rationale>
@@ -147,11 +147,11 @@ You are an experienced fiction editor helping a novelist strengthen a plot board
           <evidence>{{ claim.evidence | e }}</evidence>
 {% endif %}
 {% if claim.ai_notes %}
-          <ai_notes>{{ claim.ai_notes | e }}</ai_notes>
+          <assistant_notes>{{ claim.ai_notes | e }}</assistant_notes>
 {% endif %}
-        </claim>
+        </story_marker>
 {% endfor %}
-      </claiming_cards>
+      </supporting_cards>
     </plot_beat>
 {% endfor %}
   </template_instance>
@@ -165,13 +165,13 @@ You are an experienced fiction editor helping a novelist strengthen a plot board
 {% endif %}
 {% endfor %}
   </untagged_cards>
-</plot_claim_audit>
+</plot_review>
 
 Respond with:
 1. A brief diagnosis of the selected focus: what is strong, weak, unsupported, missing, duplicated, or overloaded.
 2. Specific repair options: narrative actions, obstacles, choices, reveals, consequences, or relationship/status changes that would make the beat or card stronger.
-3. Claim changes to consider: add, remove, move, split, downgrade, or strengthen function badges.
-4. Evidence the author could add to the card or scene to make the claim feel earned.
+3. Story marker changes to consider: add, remove, move, split, downgrade, or strengthen markers.
+4. Evidence the author could add to the card or scene to make the marker feel earned.
 5. Questions only where an author decision is genuinely needed.
 
 Then include an optional machine-readable suggestion block. Use target ids from the context whenever possible. Keep every suggestion as a draft the author can accept, edit, or ignore. Do not emit placeholder suggestions. Omit the block entirely if there is no concrete proposed change.
@@ -181,7 +181,7 @@ Then include an optional machine-readable suggestion block. Use target ids from 
     <title>Short label for a real suggestion. For new_card, use the new card title.</title>
     <reason>Why this concrete change would strengthen the story function.</reason>
     <proposed_change>Specific board-level edit or author decision, not drafted prose. For card_revision, write the replacement card synopsis. For new_card, write the new card synopsis.</proposed_change>
-    <evidence_to_add>Concrete evidence the card or linked scene would need. For new_card with a target plot beat, this becomes initial badge evidence.</evidence_to_add>
+    <evidence_to_add>Concrete evidence the card or linked scene would need. For new_card with a target plot beat, this becomes initial marker evidence.</evidence_to_add>
     <story_specifics>For beat_revision only: the story-specific version of this generic plot beat.</story_specifics>
     <author_intent>For beat_revision only: what the author wants this beat to accomplish.</author_intent>
     <expected_role>For beat_revision only: the role this beat should play in this story.</expected_role>

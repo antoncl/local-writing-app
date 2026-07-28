@@ -243,7 +243,7 @@
     return [
       claim.rationale ? { label: "Rationale", value: claim.rationale } : null,
       claim.evidence ? { label: "Evidence", value: claim.evidence } : null,
-      claim.ai_notes ? { label: "AI notes", value: claim.ai_notes } : null,
+      claim.ai_notes ? { label: "Assistant notes", value: claim.ai_notes } : null,
     ].filter((row): row is ClaimDetailRow => Boolean(row));
   }
 
@@ -275,11 +275,11 @@
   {#if selectedClaim}
     {@const selectedClaimCard = cardForClaim(selectedClaim)}
     <header class="inspector-head">
-      <span>Function badge</span>
+      <span>Story marker</span>
       <strong>{selectedPointLabel}</strong>
     </header>
     <div class="inspector-form">
-      <section class="claim-detail-overview" aria-label="Selected function badge summary">
+      <section class="claim-detail-overview" aria-label="Selected story marker summary">
         <div>
           <span>Card</span>
           <strong>{selectedClaimCard?.title ?? selectedClaim.card_id}</strong>
@@ -309,7 +309,7 @@
       </section>
       {@render diagnosticList(selectedClaimDiagnostics)}
       <label>
-        Badge label
+        Marker label
         <input
           value={selectedClaim.claim_label ?? ""}
           placeholder={selectedPointLabel}
@@ -323,7 +323,7 @@
       </label>
       {#if selectedPaletteRow?.point.function_claim}
         <label>
-          Story function
+          Beat purpose
           <textarea rows="3" value={selectedPaletteRow.point.function_claim} disabled></textarea>
         </label>
       {/if}
@@ -373,9 +373,9 @@
         />
       </div>
       <div class="inspector-field">
-        <span>AI notes</span>
+        <span>Assistant notes</span>
         <PlotBoardLongTextField
-          ariaLabel="AI notes"
+          ariaLabel="Assistant notes"
           value={selectedClaim.ai_notes ?? ""}
           disabled={Boolean(savingMessage)}
           on:commit={(event) => commitClaimTextField("ai_notes", event.detail.value)}
@@ -421,9 +421,9 @@
           </select>
         </label>
       {/if}
-      <section class="claim-section" aria-label="Card function badges">
+      <section class="claim-section" aria-label="Card story markers">
         <div class="section-title-row">
-          <span>Function badges</span>
+          <span>Story markers</span>
           <strong>{selectedCardClaims.length}</strong>
         </div>
         {#if addClaimOptions.length > 0}
@@ -440,8 +440,8 @@
             <button
               type="button"
               class="tool-button icon-only"
-              title="Add function badge"
-              aria-label="Add function badge"
+              title="Add story marker"
+              aria-label="Add story marker"
               disabled={!claimToAddKey || Boolean(savingMessage)}
               onclick={addSelectedClaim}
             >
@@ -554,7 +554,7 @@
       </label>
       {#if selectedPaletteRow.point.function_claim}
         <label>
-          Template function
+          Template beat purpose
           <textarea rows="3" value={selectedPaletteRow.point.function_claim} disabled></textarea>
         </label>
       {/if}
@@ -595,13 +595,13 @@
         />
       </div>
       <div class="inspector-stat">
-        <span>Function badges</span>
+        <span>Story markers</span>
         <strong>{selectedPaletteRow.claims.length}</strong>
       </div>
       {@render diagnosticList(selectedPointDiagnostics)}
       <div class="beat-claim-panel">
         {#if selectedPaletteRow.claims.length === 0}
-          <p class="muted-line">No cards claim this plot beat yet.</p>
+          <p class="muted-line">No cards support this story beat yet.</p>
         {:else}
           <div class="beat-claim-list">
             {#each selectedPaletteRow.claims as claim (claim.id)}
@@ -658,7 +658,7 @@
       {:else if plotContext}
         <div class="context-stats">
           <span>{plotContext.cards.length} cards</span>
-          <span>{plotContext.claims.length} badges</span>
+          <span>{plotContext.claims.length} markers</span>
           <span>{omittedCount("future_cards")} future</span>
         </div>
         {#if plotContext.cards.length === 0}

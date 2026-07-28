@@ -15,6 +15,7 @@
     canCreatePlotSuggestionCard,
     canCreatePlotSuggestionBadge,
     parsePlotSuggestions,
+    plotSuggestionKindLabel,
     plotSuggestionBeatClipboardText,
     plotSuggestionClipboardText,
     stripPlotSuggestions,
@@ -187,7 +188,7 @@
                 <article class="cbv-plot-suggestion">
                   <div class="cbv-plot-suggestion-head">
                     <strong>{suggestion.title || "Untitled suggestion"}</strong>
-                    <span>{suggestion.kind.replace(/_/g, " ")}</span>
+                    <span>{plotSuggestionKindLabel(suggestion.kind)}</span>
                   </div>
                   {#if suggestion.proposed_change}
                     <p>{suggestion.proposed_change}</p>
@@ -235,12 +236,12 @@
                       {@const applyNoteKey = suggestionKey(suggestion, i, j, "apply_note")}
                       <button
                         type="button"
-                        title="Append this proposed change to the target claim's AI notes"
+                        title="Add this note to the target story marker"
                         disabled={Boolean(applyingKey)}
                         onclick={() => void applyNoteSuggestion(suggestion, applyNoteKey)}
                       >
                         <i class="ti ti-check" aria-hidden="true"></i>
-                        {applyingKey === applyNoteKey ? "Applying" : appliedKey === applyNoteKey ? "Applied" : "Apply note"}
+                        {applyingKey === applyNoteKey ? "Adding" : appliedKey === applyNoteKey ? "Added" : "Add marker note"}
                       </button>
                       {#if applyErrorKey === applyNoteKey}
                         <small class="cbv-plot-suggestion-action-error">Could not apply note.</small>
@@ -276,12 +277,12 @@
                       {@const applyKey = suggestionKey(suggestion, i, j, "apply_evidence")}
                       <button
                         type="button"
-                        title="Append this evidence to the target claim"
+                        title="Add this evidence to the target story marker"
                         disabled={Boolean(applyingKey)}
                         onclick={() => void applyEvidenceSuggestion(suggestion, applyKey)}
                       >
                         <i class="ti ti-check" aria-hidden="true"></i>
-                        {applyingKey === applyKey ? "Applying" : appliedKey === applyKey ? "Applied" : "Apply evidence"}
+                        {applyingKey === applyKey ? "Adding" : appliedKey === applyKey ? "Added" : "Add evidence"}
                       </button>
                       {#if applyErrorKey === applyKey}
                         <small class="cbv-plot-suggestion-action-error">Could not apply evidence.</small>
@@ -291,23 +292,23 @@
                       {@const beatFieldsKey = suggestionKey(suggestion, i, j, "beat_fields")}
                       <button
                         type="button"
-                        title="Copy suggested plot beat fields"
+                        title="Copy suggested story beat details"
                         onclick={() => void copyBeatFieldsSuggestion(suggestion, beatFieldsKey)}
                       >
                         <i class="ti ti-copy" aria-hidden="true"></i>
-                        {copiedKey === beatFieldsKey ? "Copied" : "Copy beat fields"}
+                        {copiedKey === beatFieldsKey ? "Copied" : "Copy beat details"}
                       </button>
                     {/if}
                     {#if onApplyBeatFields && canApplyPlotSuggestionBeatFields(suggestion)}
                       {@const applyBeatFieldsKey = suggestionKey(suggestion, i, j, "apply_beat_fields")}
                       <button
                         type="button"
-                        title="Apply these story-specific fields to the target plot beat"
+                        title="Update the target story beat with these details"
                         disabled={Boolean(applyingKey)}
                         onclick={() => void applyBeatFieldsSuggestion(suggestion, applyBeatFieldsKey)}
                       >
                         <i class="ti ti-check" aria-hidden="true"></i>
-                        {applyingKey === applyBeatFieldsKey ? "Applying" : appliedKey === applyBeatFieldsKey ? "Applied" : "Apply beat fields"}
+                        {applyingKey === applyBeatFieldsKey ? "Updating" : appliedKey === applyBeatFieldsKey ? "Updated" : "Update beat"}
                       </button>
                       {#if applyErrorKey === applyBeatFieldsKey}
                         <small class="cbv-plot-suggestion-action-error">Could not apply beat fields.</small>
@@ -332,15 +333,15 @@
                       {@const createBadgeKey = suggestionKey(suggestion, i, j, "create_badge")}
                       <button
                         type="button"
-                        title="Create this plot beat badge on the target card"
+                        title="Add this story marker to the target card"
                         disabled={Boolean(applyingKey)}
                         onclick={() => void createBadgeSuggestion(suggestion, createBadgeKey)}
                       >
                         <i class="ti ti-plus" aria-hidden="true"></i>
-                        {applyingKey === createBadgeKey ? "Creating" : appliedKey === createBadgeKey ? "Created" : "Create badge"}
+                        {applyingKey === createBadgeKey ? "Adding" : appliedKey === createBadgeKey ? "Added" : "Add marker"}
                       </button>
                       {#if applyErrorKey === createBadgeKey}
-                        <small class="cbv-plot-suggestion-action-error">Could not create badge.</small>
+                        <small class="cbv-plot-suggestion-action-error">Could not add marker.</small>
                       {/if}
                     {/if}
                   </div>

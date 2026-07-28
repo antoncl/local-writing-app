@@ -43,16 +43,16 @@ function selectedAuditFocus(context: PlotClaimAuditContext): string {
     const card = cardById(selectedClaim.card_id);
     const beatTitle = selectedPointLabel || selectedClaim.plot_point_id;
     const assignment = selectedClaim.claim_type.replace(/_/g, " ");
-    return `Audit the "${beatTitle}" function badge on card "${card?.title ?? selectedClaim.card_id}" in "${boardTitle}". Check whether the card's ${assignment} claim is supported by its rationale, evidence, synopsis, and surrounding plot context.`;
+    return `Review the "${beatTitle}" story marker on card "${card?.title ?? selectedClaim.card_id}" in "${boardTitle}". Check whether the card's ${assignment} marker is supported by its rationale, evidence, synopsis, and surrounding plot context.`;
   }
   if (selectedCard) {
-    return `Audit the function badges on card "${selectedCard.title}" in "${boardTitle}". Check whether the card advances the story, whether any badges are weak or unsupported, and whether the card is overloaded.`;
+    return `Review the story markers on card "${selectedCard.title}" in "${boardTitle}". Check whether the card advances the story, whether any markers are weak or unsupported, and whether the card is overloaded.`;
   }
   if (selectedPaletteRow) {
     const beatTitle = selectedPaletteRow.point.title || selectedPaletteRow.point.plot_point_id;
-    return `Audit the plot beat "${beatTitle}" in "${selectedPaletteRow.instance.title}" on "${boardTitle}". Check whether the claiming cards combine to satisfy the beat, what evidence is missing, and whether untagged or nearby cards should participate.`;
+    return `Review the story beat "${beatTitle}" in "${selectedPaletteRow.instance.title}" on "${boardTitle}". Check whether the supporting cards combine to satisfy the beat, what evidence is missing, and whether untagged or nearby cards should participate.`;
   }
-  return "Find weak, unsupported, duplicated, or missing plot-beat claims across the selected plot board.";
+  return "Find weak, unsupported, duplicated, or missing story markers across the selected plot board.";
 }
 
 export function cardAssistFocus(context: PlotClaimAuditContext): string {
@@ -60,7 +60,7 @@ export function cardAssistFocus(context: PlotClaimAuditContext): string {
   if (!card) return selectedAuditFocus(context);
   const boardTitle = context.plotNode?.title || "this plot board";
   const cardClaims = (context.plotNode?.board?.claims ?? []).filter((claim) => claim.card_id === card.id);
-  return `Help make card "${card.title}" (id: ${card.id}) stronger in "${boardTitle}". Treat diagnostics as signals, not verdicts. Current issues: ${cardAssistIssues(context, cardClaims)} Current function badges: ${cardAssistClaims(cardClaims)} Card synopsis: ${card.synopsis || "No synopsis yet."} Give concrete story repair options as draft suggestions with target ids: narrative actions, obstacles, choices, reveals, consequences, claim changes, relationship changes, or whether this should become a scene. Do not draft prose or mutate the board; offer specific options the author can choose from and later apply manually.`;
+  return `Help make card "${card.title}" (id: ${card.id}) stronger in "${boardTitle}". Treat diagnostics as signals, not verdicts. Current issues: ${cardAssistIssues(context, cardClaims)} Current story markers: ${cardAssistClaims(cardClaims)} Card synopsis: ${card.synopsis || "No synopsis yet."} Give concrete story repair options as draft suggestions with target ids: narrative actions, obstacles, choices, reveals, consequences, story marker changes, relationship changes, or whether this should become a scene. Do not draft prose or mutate the board; offer specific options the author can choose from and later apply manually.`;
 }
 
 async function openPlotClaimChat(context: PlotClaimAuditContext, focus: string): Promise<void> {
@@ -70,7 +70,7 @@ async function openPlotClaimChat(context: PlotClaimAuditContext, focus: string):
     const prompt = (await api.listPromptEntries()).entries.find(
       (entry) => entry.id === PLOT_CLAIM_AUDIT_PROMPT_ID,
     );
-    if (!prompt) throw new Error("Could not find the Plot Claim Audit prompt.");
+    if (!prompt) throw new Error("Could not find the Plot Review prompt.");
     await chatSessions.openChatFromPromptEntry(
       prompt,
       {
@@ -91,7 +91,7 @@ function cardAssistIssues(context: PlotClaimAuditContext, cardClaims: PlotPointC
 }
 
 function cardAssistClaims(cardClaims: PlotPointClaim[]): string {
-  if (cardClaims.length === 0) return "The card has no function badges yet.";
+  if (cardClaims.length === 0) return "The card has no story markers yet.";
   return cardClaims.map((claim) => `${claim.claim_label || claim.plot_point_id} [${claim.id}] (${claim.claim_type}${claim.strength ? `, ${claim.strength}` : ""})`).join("; ");
 }
 

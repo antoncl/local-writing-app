@@ -15,15 +15,24 @@
  * *source* of the proposed string changes, and `reviewBodyProposal` /
  * `resolveBody` / `saveAcceptedBody` below are what it inherits.
  *
- * **Which side is `now`.** `adoptRegion` and the run reassembly ride one
- * invariant: the *live* document is the `now` side, so the baseline (adopt
- * nothing) is `now`. A lore entry's live body is `currentBody`, so `currentBody`
- * is `now` and the proposal is `was` — forced, not a preference. Accepting a
- * proposed region therefore takes its `was` text; declining keeps `now`. (The
- * warm/cool tint and the run `title`s were written for snapshot-vs-live and read
- * oddly against a proposal — "Restore this" on the AI's text. That is a review
- * *surface* question the ADR defers to the UI slice; this module commits only to
- * the body arithmetic, which the tint does not affect.)
+ * **Which side is which — and why the proposal is cool.** `diffRuns(was, now)`
+ * is called with the proposal as `was` and the current body as `now`, so the
+ * live entry is the warm `now` side and the AI's proposal is the cool `was`
+ * side. That tint is a deliberate decision (#590), not an accident of reuse:
+ * warm reads as "what is in the entry now", cool as "a candidate that is not in
+ * the entry yet" — the same reading as snapshot compare (warm = the live scene,
+ * cool = the stored alternative). It also keeps two reused invariants intact —
+ * the run reassembly and `adoptRegion` treat `now` as the live baseline, so
+ * declining every region is a no-op on the live body, and `resolveBody`'s
+ * "accept = take the proposal" is "take the `was` text". Only the run *titles*
+ * baked into `renderDiffRuns` ("Restore this") are snapshot wording the UI slice
+ * will reword for a proposal; the *tint* is correct as-is and needs no override.
+ *
+ * **One diff owns the runs.** `diffRuns` is not guaranteed boundary-symmetric
+ * across orientation — its block alignment has direction-dependent tie-breaks —
+ * so a consumer must render and adopt the runs THIS module returns and never
+ * re-diff current-vs-proposal the other way round to recolour: the region ids
+ * would not be guaranteed to line up, and adopt would corrupt against them.
  */
 import { api } from "@/lib/api";
 import { groupRuns } from "@/lib/utils/diffRuns";

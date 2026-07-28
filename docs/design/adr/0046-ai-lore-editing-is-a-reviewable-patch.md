@@ -4,6 +4,10 @@
   the same day: references are **not** AI-generated, the **client-side diff is a precondition** (#573),
   field definitions are treated uniformly whatever their origin, and **generating a new entry is a create,
   not a diff**. Implementation issues to be filed per slice (§6).
+- Amended: **2026-07-28** — §5 now names the proposal's **vehicle** (an ideation *chat* that commits a
+  whole-entry patch, with an existing entry optionally in its context) and §6 is re-sliced as increments
+  of *patch coverage*, not a per-field ladder. The model in §1–§4 is unchanged; the amendment closes a
+  gap where §5–§6 read cold as a one-shot, field-scoped reviser.
 - Feature: unfiled — issues to be filed per slice on approval (see §6). This ADR is the architecture
   those issues share.
 - Follows: ADR-0043 (scene snapshots — the witness), ADR-0044 (the compare view — the **flip-diff**
@@ -46,8 +50,8 @@ values are validated by `_validate_entry_metadata` / `_validate_metadata_field_v
 
 Two asks are on the table:
 
-1. **Per-field revise** of an existing entry — over the text-bearing surfaces (the body and `long_text`
-   fields, which can hold substantial prose) and over structured fields.
+1. **Revise an existing entry** — a patch over its fields (the body and `long_text` text-bearing
+   surfaces, which can hold substantial prose, and its structured fields), reviewed as a diff.
 2. **Generate** a character or location from a brief.
 
 They share one mechanism wherever there is a *prior* state to compare — editing an existing entry is a
@@ -138,38 +142,69 @@ field the model cannot fill legally is simply absent from the patch, not a bad w
 excluded**: the model does not propose `entity_ref` / `entity_ref_list` values — there is no realistic
 way for it to pick the right existing node id, so linking entries stays a manual author gesture.
 
-### 5. A specialization of `revise`, producing a final state — the scene-revise mark is not extended
+### 5. The proposal comes from an ideation **chat**; the commit is a final patch, not a streamed mark
 
-The lore-edit prompt is a **specialization of the existing `revise` kind** — a revise sub-type whose
-target is a lore entry (or one of its fields) and whose `output.kind` is the patch/diff above — **not a
-fifth prompt base**. The four-base taxonomy is deliberate, and a new thing earns its own base only when
-it cannot be expressed as a sub-type; this can (cf. `roleplay` as a sub-type of continuation).
+The proposal is the product of an **ideation chat** — the app's core use of AI as a tool for
+brainstorming, a back-and-forth that develops an idea, *not* a one-shot generate. It runs in the chat
+vehicle the app already has (chat is a Node kind — no new conversation subsystem), and an existing entry
+is optionally carried in its context. What the conversation converges on and **commits** is the
+whole-entry patch of §1. The target is always the **entry**, never a lone field: a patch of size one is
+still a patch over the entry (§1's N=1 case), so there is no field-scoped reviser here — the coverage of
+the patch varies (§6), the unit does not.
 
-Because the review is a diff of proposed-vs-current, the model returns a **final** proposed state and the
-diff is computed over it; there is no token streaming into the entry. The scene `aiSuggestion` streaming
-mark is a **different** path — a marked token replacement with no computed diff and no field renderer —
-and it is **not** extended to lore. The flip-diff already gives us both halves (prose runs and field
-flips) that the mark lacks. Token streaming is a single-focused-surface luxury the scene editor keeps;
-a generate filling eight fields does not benefit from streaming one of them.
+The prompt that drives the commit is a **specialization of the existing `revise` kind** — a sub-type
+whose target is a lore entry and whose `output.kind` is the patch/diff above — **not a fifth prompt
+base**. The four-base taxonomy is deliberate, and a new thing earns its own base only when it cannot be
+expressed as a sub-type; this can (cf. `roleplay` as a sub-type of continuation).
 
-### 6. Slicing — the client diff util first, then reuse it everywhere
+**What is not streamed is the commit, not the conversation.** The brainstorm streams like any chat; but
+the entry is never written by streamed tokens. When the conversation commits, the model returns a
+**final** proposed state and the diff is computed over it. The scene `aiSuggestion` streaming mark — a
+marked token replacement with no computed diff and no field renderer — is a **different** path and is
+**not** extended to lore. The flip-diff already gives us both halves (prose runs and field flips) that
+the mark lacks; writing an entry is adopting a reviewed patch, not accepting streamed tokens in place.
 
-0. **The client-side diff util (#573).** The shared `DiffRun` / `FieldDiff` compute lands client-side —
-   the faithful port is most of it — the precondition every slice below builds on.
-1. **Proposed-vs-current diff for one prose surface.** Produce a `DiffRun` diff of a proposed body (or
-   `long_text` field) against the current value and review it with the existing flip renderer + adopt.
-   Proves the reuse on the shape we already ship.
-2. **`long_text` per-field revise** end-to-end: a `prompt`-driven proposal for one field → diff →
-   flip → adopt → `PUT`.
-3. **Enrich an existing entry, text-bearing fields + body only.** One model call proposes the
-   prose-bearing fields of an existing entry; reviewed field-by-field with the run-diff from slices 1–2.
-   No structured work yet.
-4. **Structured fields.** Extend the `FieldDiff` flip to authored lore metadata + the constrained-JSON
-   output path + schema validation (§4). Enrichment now fills `select`/`tags`/… too (references stay
-   manual, §4).
-5. **New-entry generation** *(separate — no diff)*. The same constrained field proposal, but reviewed as
-   a whole proposed entry (§1) and created through the existing create path. This is the "brainstorm a
-   character" ask; it reuses §4's proposal machinery, not the diff-review.
+### 6. Slicing — the diff util first, then grow what one brainstorm-committed patch covers
+
+Every slice below delivers the **same** vehicle: an ideation chat (§5) that commits a whole-entry patch,
+reviewed and written through the one path (§1). The slices are **not a per-field ladder** — they grow
+*what the patch covers* and whether there is a prior state to diff against. The unit is always the entry.
+Each slice states the **user journey that is its definition of done** and the **adjacent wrong path it is
+not**. This is deliberate anti-drift scaffolding: a cold reader who cannot produce the journey, or who
+finds themselves building the "*Not*", has veered — the labels alone underdetermine the intent, and the
+journey + anti-goal are what pin it.
+
+0. **The client-side diff util (#573).** *(shipped.)* The shared `DiffRun` / `FieldDiff` compute lands
+   client-side — the faithful port is most of it — the precondition every slice below builds on.
+1. **The review surface — proposed-vs-current on one prose surface.** *(shipped.)* Diff a proposed body
+   against the current value and review it with the existing flip renderer + adopt — the review-and-write
+   surface every later slice reuses, proven on the shape we already ship.
+   - *Not:* a step toward a field-scoped reviser, and no user-facing trigger — this slice is the tested
+     seam only (its proposed body is a fixture standing in for a model).
+2. **The brainstorm, revising an existing entry's prose.** An ideation chat (§5) carrying an existing
+   entry as context converges on a patch over that entry's prose surfaces (the body and the text-bearing
+   fields); the commit is reviewed with slice 1's flip and written back via `PUT`. The first product
+   slice — the whole point at minimum coverage.
+   - *Done when:* the author opens a chat, brainstorms changes to an existing entry that rides in the
+     context, commits, sees the proposed-vs-current flip over that entry's prose, adopts what they want,
+     and the entry is saved.
+   - *Not:* a "revise this field" button or menu on a field. The trigger is the brainstorm, not the
+     field; a patch that happens to touch one field is still a patch over the entry (§1's N=1 case).
+3. **Grow the patch to structured fields.** Extend the `FieldDiff` flip to authored lore metadata + the
+   constrained-JSON output path + schema validation (§4). The same brainstorm now covers
+   `select`/`tags`/`number`/`boolean`/`date`/`color` too.
+   - *Done when:* the same brainstorm-and-commit also proposes structured field values, each reviewed as
+     an atomic flip and validated; an illegal value is dropped per-field, not written, without failing
+     the whole patch.
+   - *Not:* proposing `entity_ref`/`entity_ref_list` links or `computed` values (both stay out, §4), and
+     not a second proposal path — it is the same commit with wider coverage.
+4. **The new-entry outcome — no prior state, so no diff.** The same brainstorm with **no** entry in its
+   context commits a whole new entry, reviewed whole (§1) and created through the existing create path.
+   The "brainstorm a character" ask.
+   - *Done when:* the author brainstorms a character from scratch, commits, reviews the whole proposed
+     entry (no flip — nothing to diff against), and it is created.
+   - *Not:* a diff/flip review (there is no prior state), and not a separate generator mechanism — same
+     vehicle, the create branch of the same patch.
 
 The commitment that must hold from slice 1: the patch shape (§1) and the reuse of `DiffRun`/`FieldDiff`
 (§2), both resting on the client-side diff util from slice 0.

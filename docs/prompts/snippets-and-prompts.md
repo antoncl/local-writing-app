@@ -193,23 +193,31 @@ lists untagged cards. The model is asked to judge whether the claimed cards
 collectively earn each beat and to identify weak, missing, duplicated, or
 overloaded story work. It also asks for an optional `<plot_suggestions>` block
 with target card, claim, template-instance, and plot-beat ids so suggestions can
-be copied manually or, for existing claims, applied as explicit claim notes. The
-prompt tells the model to omit placeholder suggestions and only return concrete
-draft changes.
+be copied manually or applied through narrow, explicit board actions. The prompt
+tells the model to omit placeholder suggestions and only return concrete draft
+changes.
+
+When a selected card has no story markers, the plot board inspector opens the
+same review prompt with an untagged-card focus. That focus asks the model what
+story function the card might serve and, when an existing plot beat is a clear
+fit, to return a `new_claim` suggestion with the selected card id plus exact
+template-instance and plot-beat ids. The transcript can turn that suggestion
+into a new story marker while keeping the rationale and evidence as editable
+draft fields.
 
 When an assistant response contains a `<plot_suggestions>` block, the chat
 transcript hides the raw XML from the normal prose rendering and shows each
 concrete suggestion in a compact read-only list. The author can copy proposed
-changes or evidence notes from that list. If a suggestion includes both
-`target_claim_id` and `proposed_change`, the transcript offers an explicit apply
-action that appends the change to the claim's AI notes. If it includes both
-`target_claim_id` and `evidence_to_add`, a second apply action appends that
-evidence to the claim evidence field. For `new_claim` suggestions that identify
-a target card, template instance, and plot beat but no existing claim, the
-transcript can create a new `satisfies` badge on that card and carry proposed
-change/evidence text into the new claim's AI notes and evidence fields. Other
-suggestion kinds remain read-only until they have similarly narrow, reviewable
-destination fields.
+changes, rationale, or evidence notes from that list. If a suggestion includes
+both `target_claim_id` and `proposed_change`, the transcript offers an explicit
+apply action that appends the change to the claim's AI notes. If it includes
+both `target_claim_id` and `rationale_to_add` or `evidence_to_add`, sibling
+apply actions append those drafts to the claim rationale or evidence field. For
+`new_claim` suggestions that identify a target card, template instance, and plot
+beat but no existing claim, the transcript can create a new `satisfies` badge on
+that card and carry proposed change, rationale, and evidence text into the new
+claim's editable fields. Other suggestion kinds remain read-only until they have
+similarly narrow, reviewable destination fields.
 
 ## File layout
 

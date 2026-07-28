@@ -54,6 +54,7 @@
     deleteCard: (card: PlotBoardCard, event: MouseEvent) => void;
     promoteCard: (card: PlotBoardCard, event: MouseEvent) => void;
     startCardAssist: () => void;
+    startUntaggedCardAssist: () => void;
     startBeatAssist: () => void;
     startPlotClaimAudit: () => void;
     savingMessage: string;
@@ -100,6 +101,7 @@
     deleteCard,
     promoteCard,
     startCardAssist,
+    startUntaggedCardAssist,
     startBeatAssist,
     startPlotClaimAudit,
     savingMessage,
@@ -177,6 +179,7 @@
       });
   });
   let selectedCardDiagnostics = $derived(selectedCard ? diagnostics.cards.get(selectedCard.id) ?? [] : []);
+  let selectedCardIsUntagged = $derived(Boolean(selectedCard && selectedCardClaims.length === 0));
   let selectedClaimDiagnostics = $derived(selectedClaim ? diagnostics.claims.get(selectedClaim.id) ?? [] : []);
   let selectedPointDiagnostics = $derived(
     selectedPaletteRow
@@ -486,10 +489,10 @@
         type="button"
         class="tool-button inspector-action"
         disabled={Boolean(savingMessage)}
-        onclick={startCardAssist}
+        onclick={selectedCardIsUntagged ? startUntaggedCardAssist : startCardAssist}
       >
         <i class="ti ti-sparkles" aria-hidden="true"></i>
-        Help make this stronger
+        {selectedCardIsUntagged ? "Find story function" : "Help make this stronger"}
       </button>
       {#if selectedCard.node_ref}
         <div class="inspector-stat">

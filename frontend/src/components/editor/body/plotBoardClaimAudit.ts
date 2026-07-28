@@ -24,6 +24,7 @@ type PlotClaimAuditContext = {
   selectedClaim: PlotPointClaim | null;
   selectedCard: PlotBoardCard | null;
   selectedPaletteRow: TemplatePointRowLike | null;
+  paletteRows?: TemplatePointRowLike[];
   selectedPointLabel: string;
   cardById: (cardId: string) => PlotBoardCard | null;
   diagnostics?: PlotDiagnostics;
@@ -66,6 +67,13 @@ export function cardAssistFocus(context: PlotClaimAuditContext): string {
   return `Help make card "${card.title}" (id: ${card.id}) stronger in "${boardTitle}". Treat diagnostics as signals, not verdicts. Current issues: ${cardAssistIssues(context, cardClaims)} Current story markers: ${cardAssistClaims(cardClaims)} Card synopsis: ${card.synopsis || "No synopsis yet."} Give concrete story repair options as draft suggestions with target ids: narrative actions, obstacles, choices, reveals, consequences, story marker changes, relationship changes, or whether this should become a scene. Do not draft prose or mutate the board; offer specific options the author can choose from and later apply manually.`;
 }
 
+export function untaggedCardAssistFocus(context: PlotClaimAuditContext): string {
+  const card = context.selectedCard;
+  if (!card) return selectedAuditFocus(context);
+  const boardTitle = context.plotNode?.title || "this plot board";
+  return `Help decide what story function card "${card.title}" (id: ${card.id}) could serve in "${boardTitle}". The card currently has no story markers. Treat that as a useful question, not a verdict. Card synopsis: ${card.synopsis || "No synopsis yet."} Candidate plot beats: ${candidateBeatSummary(context)} Offer concrete options the author can choose from: existing plot beats this card could support, a better card synopsis if the current one is too vague, or a reason this card may be connective tissue rather than a plot beat carrier. When suggesting a marker, emit a new_claim draft suggestion with target_card_id="${card.id}", target_claim_id="", and the exact template_instance_id and plot_point_id from the candidate beat. Put why the card supports the beat in rationale_to_add and what evidence would make it convincing in evidence_to_add. Do not invent template ids or mutate the board.`;
+}
+
 export function boardIdeationFocus(context: PlotClaimAuditContext): string {
   const boardTitle = context.plotNode?.title || "this plot board";
   const cardCount = context.plotNode?.board?.cards?.length ?? 0;
@@ -94,6 +102,21 @@ export function beatAssistFocus(context: PlotClaimAuditContext): string {
         .join("; ");
   const diagnostics = context.diagnostics?.points.get(`${row.instance.id}:${row.point.plot_point_id}`)?.map((item) => item.label).join("; ") || "No explicit diagnostics are marked.";
   return `Help the author make the plot beat "${beatTitle}" feel earned in "${boardTitle}". Template instance: "${row.instance.title}" (id: ${row.instance.id}). Plot beat id: ${row.point.plot_point_id}. Beat purpose: ${row.point.function_claim || "No template purpose is recorded."} Story specifics: ${row.point.notes || "No story-specific version has been written yet."} Author intent: ${row.point.author_intent || "No author intent is recorded yet."} Current board use: ${row.status ?? "unknown"}. Current story markers: ${markerSummary} Diagnostics: ${diagnostics} Offer concrete options the author can choose from: existing cards that could support this beat, missing pressure or consequence, a possible new card if needed, marker changes to add/move/strengthen, and one or two author decisions that would unlock the beat. Do not draft prose or declare final canon; give practical structure moves and draft suggestions with target ids.`;
+}
+
+function candidateBeatSummary(context: PlotClaimAuditContext): string {
+  const paletteRows = context.paletteRows ?? (context.selectedPaletteRow ? [context.selectedPaletteRow] : []);
+  return paletteRows.length > 0 ? beatRowsSummary(paletteRows) : "Use the plot board context to choose from available template instances and plot beats.";
+}
+
+function beatRowsSummary(rows: TemplatePointRowLike[]): string {
+  return rows
+    .map((row) => {
+      const title = row.point.title || row.point.plot_point_id;
+      const purpose = row.point.function_claim ? ` - ${row.point.function_claim}` : "";
+      return `${title} [${row.instance.id}:${row.point.plot_point_id}] in "${row.instance.title}"${purpose}`;
+    })
+    .join("; ");
 }
 
 function countLabel(count: number, noun: string): string {
@@ -143,6 +166,10 @@ export async function openPlotClaimAuditChat(context: PlotClaimAuditContext): Pr
 
 export async function openPlotCardAssistChat(context: PlotClaimAuditContext): Promise<void> {
   await openPlotPromptChat(context, PLOT_CLAIM_AUDIT_PROMPT_ID, cardAssistFocus(context), "Plot Review");
+}
+
+export async function openPlotUntaggedCardAssistChat(context: PlotClaimAuditContext): Promise<void> {
+  await openPlotPromptChat(context, PLOT_CLAIM_AUDIT_PROMPT_ID, untaggedCardAssistFocus(context), "Plot Review");
 }
 
 export async function openPlotBeatAssistChat(context: PlotClaimAuditContext): Promise<void> {

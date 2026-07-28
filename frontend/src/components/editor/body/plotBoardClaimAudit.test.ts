@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { beatAssistFocus, boardIdeationFocus, cardAssistFocus } from "./plotBoardClaimAudit";
+import { beatAssistFocus, boardIdeationFocus, cardAssistFocus, untaggedCardAssistFocus } from "./plotBoardClaimAudit";
 import { buildPlotDiagnostics } from "./plotBoardDiagnostics";
 import type { PlotBoardCard, PlotNode, PlotPointClaim } from "@/lib/types";
 
@@ -31,7 +31,7 @@ describe("cardAssistFocus", () => {
         cards: [card],
         claims: [weakClaim],
       },
-    } as PlotNode;
+    } as unknown as PlotNode;
     const diagnostics = buildPlotDiagnostics([card], [weakClaim], [
       {
         instance: { id: "template" },
@@ -59,6 +59,55 @@ describe("cardAssistFocus", () => {
     expect(focus).toContain("draft suggestions with target ids");
     expect(focus).toContain("Do not draft prose");
     expect(focus).toContain("later apply manually");
+  });
+});
+
+describe("untaggedCardAssistFocus", () => {
+  it("asks for applyable story marker options for an untagged card", () => {
+    const plotNode = {
+      id: "plot",
+      title: "Book plot board",
+      entry_type: "plot:board",
+      board: {
+        cards: [card],
+        claims: [],
+      },
+    } as unknown as PlotNode;
+    const paletteRows = [
+      {
+        instance: { id: "template", title: "Main plot" } as PlotNode,
+        point: {
+          plot_point_id: "first_turn",
+          title: "First turn",
+          function_claim: "Makes the old path unavailable.",
+          notes: "",
+          metadata: {},
+        },
+        status: "missing" as const,
+        claims: [],
+      },
+    ];
+
+    const focus = untaggedCardAssistFocus({
+      plotNode,
+      selectedCard: card,
+      selectedClaim: null,
+      selectedPaletteRow: null,
+      paletteRows,
+      selectedPointLabel: "",
+      cardById: () => card,
+      diagnostics: buildPlotDiagnostics([card], [], paletteRows),
+    });
+
+    expect(focus).toContain('what story function card "Opening"');
+    expect(focus).toContain("currently has no story markers");
+    expect(focus).toContain("First turn [template:first_turn]");
+    expect(focus).toContain('target_card_id="card_opening"');
+    expect(focus).toContain('target_claim_id=""');
+    expect(focus).toContain("exact template_instance_id and plot_point_id");
+    expect(focus).toContain("rationale_to_add");
+    expect(focus).toContain("evidence_to_add");
+    expect(focus).toContain("Do not invent template ids");
   });
 });
 

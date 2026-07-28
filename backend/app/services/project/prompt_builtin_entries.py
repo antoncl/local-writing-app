@@ -194,7 +194,8 @@ Respond with:
 2. Specific repair options: narrative actions, obstacles, choices, reveals, consequences, or relationship/status changes that would make the beat or card stronger.
 3. Story marker changes to consider: add, remove, move, split, downgrade, or strengthen markers.
 4. Evidence the author could add to the card or scene to make the marker feel earned.
-5. Questions only where an author decision is genuinely needed.
+5. For untagged cards, suggest possible existing plot beats the card could serve and use `new_claim` suggestions when the target card, template instance, and plot beat ids are clear.
+6. Questions only where an author decision is genuinely needed.
 
 """ + PLOT_SUGGESTIONS_BLOCK + """
 {% endrole %}

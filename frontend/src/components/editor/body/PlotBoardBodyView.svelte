@@ -11,7 +11,7 @@
   import PlotBoardInspector from "./PlotBoardInspector.svelte";
   import PlotBoardPalette from "./PlotBoardPalette.svelte";
   import PlotBoardToolbar from "./PlotBoardToolbar.svelte";
-  import { openPlotBeatAssistChat, openPlotBrainstormChat, openPlotCardAssistChat, openPlotClaimAuditChat } from "./plotBoardClaimAudit";
+  import { openPlotBeatAssistChat, openPlotBrainstormChat, openPlotCardAssistChat, openPlotClaimAuditChat, openPlotUntaggedCardAssistChat } from "./plotBoardClaimAudit";
   import { buildPlotDiagnostics } from "./plotBoardDiagnostics";
   import { setPlotBoardContext } from "./plotBoardContext";
   import { saveTemplateInstancePoint } from "./plotBoardTemplateInstances";
@@ -1461,7 +1461,8 @@
     diagnostics={plotDiagnostics}
     {deleteCard}
     {promoteCard}
-    startCardAssist={() => openPlotCardAssistChat({ plotNode, selectedClaim, selectedCard, selectedPaletteRow, selectedPointLabel, cardById, diagnostics: plotDiagnostics })}
+    startCardAssist={() => openPlotCardAssistChat({ plotNode, selectedClaim, selectedCard, selectedPaletteRow, paletteRows, selectedPointLabel, cardById, diagnostics: plotDiagnostics })}
+    startUntaggedCardAssist={() => openPlotUntaggedCardAssistChat({ plotNode, selectedClaim, selectedCard, selectedPaletteRow, paletteRows, selectedPointLabel, cardById, diagnostics: plotDiagnostics })}
     startBeatAssist={() => openPlotBeatAssistChat({ plotNode, selectedClaim, selectedCard, selectedPaletteRow, selectedPointLabel, cardById, diagnostics: plotDiagnostics })}
     startPlotClaimAudit={() => openPlotClaimAuditChat({ plotNode, selectedClaim, selectedCard, selectedPaletteRow, selectedPointLabel, cardById })}
     {savingMessage}

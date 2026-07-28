@@ -120,6 +120,23 @@ describe("LoreProposalController", () => {
     expect(c.hasPendingChanges).toBe(false);
   });
 
+  it("keeps the review open when the post fails — no dropped patch", async () => {
+    const c = loreController("e1");
+    c.onAdoptBody = vi.fn();
+    c.onEmitChange = vi.fn();
+    c.onFlush = vi.fn().mockResolvedValue(false); // e.g. a changed-on-disk 409
+    loreBrainstorm.propose("e1", patch("new body"));
+
+    c.setBodyResolution("new body");
+    const ok = await c.commit();
+
+    expect(ok).toBe(false);
+    // The transaction isn't "done" until the write lands — the proposal and its
+    // adoption stay so the author can retry, instead of losing the patch.
+    expect(c.proposal).not.toBeNull();
+    expect(c.hasPendingChanges).toBe(true);
+  });
+
   it("commit with fields but no body still posts once", async () => {
     const c = loreController("e1");
     const onAdoptBody = vi.fn();

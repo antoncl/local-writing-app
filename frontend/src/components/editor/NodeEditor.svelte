@@ -114,7 +114,7 @@
     // (null), and to issue the ONE explicit post on commit. The pane store owns
     // the document lifecycle; the card does not (as with onFlushScene).
     onReviewFreeze?: ((entryId: string, committer: import("@/lib/stores/editorPanes.svelte").ReviewCommitter | null) => void) | undefined;
-    onFlushReviewCommit?: ((entryId: string) => Promise<void>) | undefined;
+    onFlushReviewCommit?: ((entryId: string) => Promise<boolean>) | undefined;
   }
 
   let {

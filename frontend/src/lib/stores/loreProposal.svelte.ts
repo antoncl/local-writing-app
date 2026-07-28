@@ -40,7 +40,9 @@ export class LoreProposalController {
   // Wired by the host — the ONE explicit post that ends the transaction: cancel
   // the (frozen) autosave timer and PUT the pane once. Runs after the patch has
   // been applied to the buffer, so it captures body + metadata in a single write.
-  onFlush: (() => void | Promise<void>) | null = null;
+  // Returns whether the post landed — `false` (e.g. a changed-on-disk 409) keeps
+  // the review open with its adoptions intact rather than dropping the patch.
+  onFlush: (() => Promise<boolean> | void) | null = null;
   // Wired by the host — reads the LIVE buffer (not the saved file), the side the
   // body flip compares against. A callback, not fed state, because the host owns
   // the prose buffer (mirrors `SnapshotStripController.readLive`).
@@ -128,7 +130,7 @@ export class LoreProposalController {
    *  metadata, adopt the body through its buffer, then flush the pane once so
    *  body + metadata land in a single lore PUT (ADR-0046 §1). A commit with
    *  nothing adopted is a plain dismiss (no write), exactly like "Close". */
-  async commit(): Promise<void> {
+  async commit(): Promise<boolean> {
     const fields: Record<string, string> = {};
     for (const [fieldId, value] of Object.entries(this.resolvedText)) {
       if (value !== null) fields[fieldId] = value;
@@ -141,10 +143,14 @@ export class LoreProposalController {
       // Package body + metadata into the pane draft, then the single explicit
       // post. Unconditional so the fields-only path (no body) still writes.
       this.onEmitChange?.();
-      await this.onFlush?.();
+      // If the post fails, keep the review open with its adoptions intact — the
+      // transaction is only "done" once the write lands, so don't clear the
+      // proposal and lose the patch.
+      if ((await this.onFlush?.()) === false) return false;
     }
     this.resetResolution();
     this.clear();
+    return true;
   }
 
   /** Discard the review — "Don't save" / Discard. Nothing was written during the

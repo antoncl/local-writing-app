@@ -120,7 +120,9 @@ export const FOREIGN_PROJECT_NODE =
  *  `commit` applies + posts the accumulated patch; `discard` drops it. */
 export type ReviewCommitter = {
   hasChanges: () => boolean;
-  commit: () => Promise<void>;
+  // Resolves `false` when the single explicit post failed (e.g. a changed-on-disk
+  // 409), so the close guard can keep the pane open instead of dropping the patch.
+  commit: () => Promise<boolean>;
   discard: () => void;
 };
 
@@ -399,11 +401,13 @@ class EditorPanesController {
   /** The one explicit post that ends a review commit: cancel the (frozen) timer
    *  and PUT the pane once, so the adopted body + fields land in a single write.
    *  Called by the review controller after it has applied the patch to the buffer. */
-  async flushReviewCommit(entryId: string): Promise<void> {
+  async flushReviewCommit(entryId: string): Promise<boolean> {
     const pane = this.panes.find((p) => p.document?.type === "lore" && p.document.id === entryId);
-    if (!pane) return;
+    if (!pane) return true;
     this.#autosave.cancel(pane.id);
-    await this.run(() => this.saveEditorPane(pane.id));
+    // `run` returns false when the save threw (a changed-on-disk 409 surfaces to
+    // App's error sink) — propagate it so the commit keeps the review open.
+    return this.run(() => this.saveEditorPane(pane.id));
   }
 
   // Closing a pane mid-review. With nothing adopted there is nothing to save, so
@@ -431,8 +435,9 @@ class EditorPanesController {
         this.tearDown(id);
       },
       onConfirm: async () => {
-        await committer.commit();
-        this.tearDown(id);
+        // Only close once the post lands — a failed commit keeps the pane open
+        // with its adoptions, rather than tearing down and losing the patch.
+        if ((await committer.commit()) !== false) this.tearDown(id);
       },
     });
   }

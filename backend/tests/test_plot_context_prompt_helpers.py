@@ -575,6 +575,8 @@ CLAIM {{ claim.plot_point_id }} [{{ claim.plotline.title }}]: {{ claim.rationale
         self.assertIn("Book plot board", user_text)
         self.assertIn("Archive Break-in", user_text)
         self.assertIn("Visible setup.", user_text)
+        self.assertIn("<plot_suggestions>", user_text)
+        self.assertIn("card_revision|beat_revision|claim_change|new_card|new_claim", user_text)
         self.assertNotIn("<ai_rubric", user_text)
         self.assertNotIn("<criterion>", user_text)
         self.assertNotIn('{"', user_text)

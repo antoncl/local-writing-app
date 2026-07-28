@@ -9,6 +9,7 @@ import type {
 } from "@/lib/types";
 import type { PlotDiagnostics } from "./plotBoardDiagnostics";
 
+const PLOT_BRAINSTORM_PROMPT_ID = "prompt_builtin_plot_brainstorm";
 const PLOT_CLAIM_AUDIT_PROMPT_ID = "prompt_builtin_plot_claim_audit";
 
 type TemplatePointRowLike = {
@@ -63,14 +64,31 @@ export function cardAssistFocus(context: PlotClaimAuditContext): string {
   return `Help make card "${card.title}" (id: ${card.id}) stronger in "${boardTitle}". Treat diagnostics as signals, not verdicts. Current issues: ${cardAssistIssues(context, cardClaims)} Current story markers: ${cardAssistClaims(cardClaims)} Card synopsis: ${card.synopsis || "No synopsis yet."} Give concrete story repair options as draft suggestions with target ids: narrative actions, obstacles, choices, reveals, consequences, story marker changes, relationship changes, or whether this should become a scene. Do not draft prose or mutate the board; offer specific options the author can choose from and later apply manually.`;
 }
 
-async function openPlotClaimChat(context: PlotClaimAuditContext, focus: string): Promise<void> {
+export function boardIdeationFocus(context: PlotClaimAuditContext): string {
+  const boardTitle = context.plotNode?.title || "this plot board";
+  const cardCount = context.plotNode?.board?.cards?.length ?? 0;
+  const markerCount = context.plotNode?.board?.claims?.length ?? 0;
+  const issueCount = context.diagnostics?.summary.total ?? 0;
+  return `Brainstorm ways to simplify and strengthen "${boardTitle}". Current board shape: ${countLabel(cardCount, "card")}, ${countLabel(markerCount, "story marker")}, ${countLabel(issueCount, "diagnostic check")}. Offer a few concrete structure options the author can choose from: cards to add, split, merge, move, or clarify; story markers to add, remove, or strengthen; act/chapter placement ideas; and questions that unlock the next writing decision. Favor practical next steps over terminology or critique.`;
+}
+
+function countLabel(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+async function openPlotPromptChat(
+  context: PlotClaimAuditContext,
+  promptId: string,
+  focus: string,
+  failureLabel: string,
+): Promise<void> {
   const ref = plotBoardRef(context.plotNode);
   if (!ref) return;
   try {
     const prompt = (await api.listPromptEntries()).entries.find(
-      (entry) => entry.id === PLOT_CLAIM_AUDIT_PROMPT_ID,
+      (entry) => entry.id === promptId,
     );
-    if (!prompt) throw new Error("Could not find the Plot Review prompt.");
+    if (!prompt) throw new Error(`Could not find the ${failureLabel} prompt.`);
     await chatSessions.openChatFromPromptEntry(
       prompt,
       {
@@ -80,7 +98,7 @@ async function openPlotClaimChat(context: PlotClaimAuditContext, focus: string):
       null,
     );
   } catch (caught) {
-    chatSessions.setError(`Couldn't open claim audit: ${(caught as Error).message}`);
+    chatSessions.setError(`Couldn't open ${failureLabel.toLowerCase()}: ${(caught as Error).message}`);
   }
 }
 
@@ -96,9 +114,13 @@ function cardAssistClaims(cardClaims: PlotPointClaim[]): string {
 }
 
 export async function openPlotClaimAuditChat(context: PlotClaimAuditContext): Promise<void> {
-  await openPlotClaimChat(context, selectedAuditFocus(context));
+  await openPlotPromptChat(context, PLOT_CLAIM_AUDIT_PROMPT_ID, selectedAuditFocus(context), "Plot Review");
 }
 
 export async function openPlotCardAssistChat(context: PlotClaimAuditContext): Promise<void> {
-  await openPlotClaimChat(context, cardAssistFocus(context));
+  await openPlotPromptChat(context, PLOT_CLAIM_AUDIT_PROMPT_ID, cardAssistFocus(context), "Plot Review");
+}
+
+export async function openPlotBrainstormChat(context: PlotClaimAuditContext): Promise<void> {
+  await openPlotPromptChat(context, PLOT_BRAINSTORM_PROMPT_ID, boardIdeationFocus(context), "Plot Brainstorm");
 }

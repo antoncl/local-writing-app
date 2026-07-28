@@ -11,7 +11,7 @@
   import PlotBoardInspector from "./PlotBoardInspector.svelte";
   import PlotBoardPalette from "./PlotBoardPalette.svelte";
   import PlotBoardToolbar from "./PlotBoardToolbar.svelte";
-  import { openPlotCardAssistChat, openPlotClaimAuditChat } from "./plotBoardClaimAudit";
+  import { openPlotBrainstormChat, openPlotCardAssistChat, openPlotClaimAuditChat } from "./plotBoardClaimAudit";
   import { buildPlotDiagnostics } from "./plotBoardDiagnostics";
   import { setPlotBoardContext } from "./plotBoardContext";
   import { saveTemplateInstancePoint } from "./plotBoardTemplateInstances";
@@ -1423,6 +1423,7 @@
       relationshipCount={board.relationships.length}
       {savingMessage}
       {saveError}
+      startBrainstorm={() => openPlotBrainstormChat({ plotNode, selectedClaim, selectedCard, selectedPaletteRow, selectedPointLabel, cardById, diagnostics: plotDiagnostics })}
       addCard={() => addPlaceholderCard(null)}
       addAct={() => addAct()}
       addChapter={() => addChapter()}

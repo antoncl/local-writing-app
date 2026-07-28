@@ -32,7 +32,9 @@ class BuiltinPromptEntriesTests(unittest.TestCase):
         self.assertEqual([item.name for item in brainstorm.inputs], ["plot", "focus"])
         self.assertEqual([item.name for item in audit.inputs], ["plot", "focus"])
         self.assertIn("context_xml(plot_context(input.plot))", brainstorm.body)
+        self.assertIn("<plot_suggestions>", brainstorm.body)
         self.assertIn("<plot_review", audit.body)
+        self.assertIn("<plot_suggestions>", audit.body)
 
         read_back = self.service.read_prompt_entry("prompt_builtin_plot_brainstorm")
         self.assertTrue(read_back.system)

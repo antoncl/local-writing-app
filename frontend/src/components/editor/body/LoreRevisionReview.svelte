@@ -28,16 +28,16 @@
     currentBody: string;
     /** The full revised body the brainstorm committed. */
     proposedBody: string;
-    /** Write an adopted body into the live buffer (proseBodyView.adoptBody). */
+    /** Write the resolved body into the live buffer once, on Done
+     *  (proseBodyView.adoptBody, which autosaves). */
     onAdoptBody: (body: string) => void;
-    /** Dismiss the review (the buffer keeps whatever was adopted). */
+    /** Dismiss the review (clear the pending proposal). */
     onClose: () => void;
   } = $props();
 
-  // Snapshot the starting body once: `Discard` restores it, and adopting writes
-  // to the buffer live (so the `currentBody` prop drifts out from under us as it
-  // does). `untrack` states the capture-once intent — this component is remounted
-  // per proposal via {#key}, so a new proposal is a fresh mount, never an update.
+  // Snapshot the starting body once, to skip a no-op write on Done. `untrack`
+  // states the capture-once intent — this component is remounted per proposal
+  // via {#key}, so a new proposal is a fresh mount, never an update.
   const originalBody = untrack(() => currentBody);
 
   // The run titles reworded for a proposal — "Restore this" is snapshot wording
@@ -62,17 +62,26 @@
     };
   });
 
+  // The resolved body accumulates as regions are adopted, but nothing is written
+  // to the buffer until Done: a K-region adopt is ONE save (adoptBody autosaves
+  // per call), and Discard is a true no-op — the buffer is never touched during
+  // review. `adoptRegion` returns the running resolution (the clicked region
+  // resolved, the rest still current) as its non-null `body`.
+  let pendingBody: string | null = null;
+
   function handleRunClick(regionId: number, kind: "now" | "was"): void {
     const result = adoptRegion(runs, regionId, kind);
-    // A non-null body means the document actually changed — push it to the live
-    // buffer, which autosaves. `null` is a no-op adoption (keeping the current
-    // wording) that only settles the region in the overlay.
-    if (result.body != null) onAdoptBody(result.body);
+    if (result.body != null) pendingBody = result.body;
     runs = result.runs;
   }
 
+  function done(): void {
+    if (pendingBody != null && pendingBody !== originalBody) onAdoptBody(pendingBody);
+    onClose();
+  }
+
   function discard(): void {
-    onAdoptBody(originalBody);
+    // Nothing was written during review, so discarding is just dismissal.
     onClose();
   }
 </script>
@@ -84,7 +93,7 @@
     </span>
     <div class="review-actions">
       <button type="button" class="review-discard" onclick={discard}>Discard</button>
-      <button type="button" class="review-done" onclick={onClose}>
+      <button type="button" class="review-done" onclick={done}>
         {changesRemain ? "Done" : "Close"}
       </button>
     </div>

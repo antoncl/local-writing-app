@@ -616,8 +616,14 @@
       chatError = "This brainstorm has no target entry to commit to.";
       return;
     }
+    // A finalize send that errors or returns empty rewinds its own turns, so
+    // chatHistory would end in an EARLIER brainstorm reply. Only propose when a
+    // new assistant turn was actually appended (the count grew) — never the
+    // conversation's prior message.
+    const turnsBefore = chatHistory.length;
     chatInput = FINALIZE_INSTRUCTION;
     await sendChat();
+    if (chatHistory.length <= turnsBefore) return;
     const last = chatHistory[chatHistory.length - 1];
     if (last?.role === "assistant" && last.content.trim()) {
       loreBrainstorm.propose(entryId, last.content.trim());

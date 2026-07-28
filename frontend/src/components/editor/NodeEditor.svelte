@@ -548,20 +548,6 @@
     return String(value);
   }
 
-  function effectiveOutputKind(entry: PromptEntrySummary): string | null {
-    const definition = metadataSchema?.entry_types[entry.entry_type];
-    const output = definition?.prompt?.context_strategy?.output;
-    if (!output || typeof output.kind !== "string") return null;
-    return output.kind;
-  }
-
-  function promptEntriesForSurface(surface: "append_to_body" | "replace_selection" | "chat_panel" | "entry_patch"): PromptEntrySummary[] {
-    if (!metadataSchema) return [];
-    return promptEntries
-      .filter((entry) => effectiveOutputKind(entry) === surface)
-      .sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }));
-  }
-
   function promptEntryDescription(entry: PromptEntrySummary): string {
     const typeName = metadataSchema?.entry_types[entry.entry_type]?.name ?? entry.entry_type;
     return typeName;

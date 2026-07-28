@@ -145,10 +145,6 @@
             Ollama host
             <input type="text" bind:value={draft.ollama_host} placeholder="http://127.0.0.1:11434" />
           </label>
-
-          <p class="muted">
-            Assistants moved to the <strong>Assistants</strong> pane (open from the AI section of the Project pane). Each lives as its own file under the machine config dir and can be overridden by ancestor projects.
-          </p>
         {:else if activeTab === "appearance"}
           <section class="writing-surface">
             <h3>Writing surface</h3>

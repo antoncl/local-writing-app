@@ -80,23 +80,24 @@
     <div class="provider-chips">
       {#each configured as prov (prov.id)}
         <span class="provider-chip" class:is-default={prov.id === defaultProviderId}>
+          <span class="chip-label">{prov.label}</span>
           {#if editable}
             <button
               type="button"
-              class="chip-label"
+              class="chip-action"
               title={`Change ${prov.label} key`}
-              on:click={() => beginRotate(prov.id)}>{prov.label}</button
-            >
+              aria-label={`Change ${prov.label} key`}
+              disabled={busy}
+              on:click={() => beginRotate(prov.id)}
+            ><i class="ti ti-pencil" aria-hidden="true"></i></button>
             <button
               type="button"
-              class="chip-remove"
+              class="chip-action chip-remove"
               title={`Remove ${prov.label}`}
               aria-label={`Remove ${prov.label}`}
               disabled={busy}
-              on:click={() => remove(prov.id)}>×</button
-            >
-          {:else}
-            <span class="chip-label-static">{prov.label}</span>
+              on:click={() => remove(prov.id)}
+            ><i class="ti ti-x" aria-hidden="true"></i></button>
           {/if}
         </span>
       {/each}
@@ -178,22 +179,16 @@
     font-weight: 600;
   }
 
-  .chip-label-static {
-    padding: 0 2px;
-  }
-
-  /* The label as a button (rotate) — styled to read as the chip text, not a button. */
   .chip-label {
-    appearance: none;
-    background: transparent;
-    border: none;
     padding: 0 2px;
-    color: inherit;
-    font: inherit;
-    cursor: pointer;
   }
 
-  .chip-remove {
+  /* Explicit per-chip affordances: a pencil (rotate the key) and an × (remove),
+     each with its own aria-label — the provider name is plain text, so the
+     actions are visible controls, not a hidden "click the label" gesture. */
+  .chip-action {
+    display: inline-flex;
+    align-items: center;
     appearance: none;
     background: transparent;
     border: none;
@@ -204,11 +199,15 @@
     cursor: pointer;
   }
 
+  .chip-action:hover:not(:disabled) {
+    color: var(--text);
+  }
+
   .chip-remove:hover:not(:disabled) {
     color: var(--danger);
   }
 
-  .chip-remove:disabled {
+  .chip-action:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }

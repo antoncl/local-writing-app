@@ -14,19 +14,17 @@
   import { implicitContextFor } from "@/lib/stores/implicitContext.svelte";
   import { notchWhen } from "@/lib/utils/snapshotTime";
   import MetadataPanel from "@/components/editor/MetadataPanel.svelte";
-  import InputsDialog from "@/components/editor/InputsDialog.svelte";
+  import PromptInvocationDialog from "@/components/editor/PromptInvocationDialog.svelte";
   import FieldsOnlyView from "@/components/editor/body/FieldsOnlyView.svelte";
   import CodeBodyView from "@/components/editor/body/CodeBodyView.svelte";
   import ProseBodyView from "@/components/editor/body/ProseBodyView.svelte";
   import ChatBodyView from "@/components/editor/body/ChatBodyView.svelte";
   import ViewBodyView from "@/components/editor/body/ViewBodyView.svelte";
-  import { coerceInputValue, type EntryInputDraft } from "@/lib/utils/promptInputs";
-  import { resolutionSceneIdFromInputs } from "@/lib/editor-core/promptResolution";
-  import { api } from "@/lib/api";
+  import { PromptInputDraftsController } from "@/lib/stores/promptInputDrafts.svelte";
   import { formatCostEur } from "@/lib/utils/money";
   import { sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import { resolveColor } from "@/lib/utils/colors";
-  import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataFieldDefinition, MetadataSchema, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
+  import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataSchema, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
   import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import LayerAuthoringBar from "@/components/editor/LayerAuthoringBar.svelte";
@@ -303,172 +301,17 @@
   let lastTitleReloadToken = $state(0);
   let backlinks: Backlink[] = $state([]);
   let lastBacklinksSceneId: string | null = $state(null);
-  let inputsDialogEntry: PromptEntrySummary | null = $state(null);
-  // Inline error inside the inputs dialog — populated when a positional
-  // arg (e.g. from `/roleplay Irene`) failed to resolve so the user can
-  // see WHY the dialog opened instead of firing directly.
-  let inputsDialogError: string | null = $state(null);
-  let inputsDialogDrafts: Record<string, string> = $state({});
-  // "" means: use the user's default assistant (resolved server-side).
-  let inputsDialogAssistantId: string = $state("");
-  // Tracked so the inputs-dialog "previously used" path can pre-fill drafts.
-  let lastInvokedEntryId: string | null = null;
-  let lastInvokedInputs: Record<string, unknown> = {};
-  // V2: token + cost estimate for the about-to-fire continuation. Mirrors
-  // App.svelte's `chatEstimate`. Recomputed when the dialog's prompt /
-  // drafts / assistant change. Null when the dialog is closed.
-  let inputsDialogEstimate: {
-    tokens: number;
-    cost_usd: number | null;
-    caching_style: "none" | "auto" | "explicit" | null;
-    cache_blocks: { label: string; tokens: number; cache_break_after: boolean }[];
-  } | null = $state(null);
-  // Monotonic token guarding async preview races — bumps on every fetch;
-  // late responses with a stale token drop their result.
-  let inputsDialogEstimateToken = 0;
+  // The prompt-invocation modal ("fill inputs, then fire") is a self-contained
+  // subsystem (#631): its draft/assistant/estimate state + the InputsDialog
+  // render branch live in PromptInvocationDialog, opened imperatively below.
+  let promptDialog: PromptInvocationDialog | null = $state(null);
 
-  // --- Per-entry prompt inputs (declaration side) ---
-  // Inputs live on the entry now, not the entry-type. The drafts here are
-  // the editor-side form state; on every edit we rebuild the canonical
-  // PromptInputDefinition[] and emit it as part of the change event.
-  // App.svelte stores it on the pane and persists on save. The actual
-  // editor UI lives in CodeBodyView; this file owns the drafts state +
-  // reseed-on-scene-change + canonical serialization for save.
-  let entryInputDrafts: EntryInputDraft[] = $state([]);
-  let entryInputDraftCounter = 0;
-  function nextInputDraftId(): string {
-    entryInputDraftCounter += 1;
-    return `__input_${entryInputDraftCounter}`;
-  }
-  // Seed drafts from the scene prop. scene only changes when a different entry
-  // is opened or after a save; the user's typing updates entryInputDrafts
-  // locally without touching scene, so this won't fight in-flight edits.
-  // Reactive identity key: when scene reference changes (different entry),
-  // re-seed. We compare via scene id rather than reference because Svelte may
-  // pass the same object reference between renders.
-  let lastSeededSceneId: string | null = null;
-
-  function maybeReseedInputs(currentScene: typeof scene, currentKind: typeof documentKind): void {
-    if (currentKind !== "prompt" || !currentScene) {
-      lastSeededSceneId = null;
-      return;
-    }
-    if (currentScene.id === lastSeededSceneId) return;
-    const sceneInputs = ((currentScene as unknown as PromptEntrySummary).inputs ?? []);
-    entryInputDrafts = sceneInputs.map(inputDefinitionToDraft);
-    lastSeededSceneId = currentScene.id;
-  }
-
-  function inputDefinitionToDraft(input: PromptInputDefinition): EntryInputDraft {
-    // entity_ref / entity_ref_list / context_pick all carry their picker
-    // constraint as a NodePickerConfig under `target` (post-#40). For other
-    // types, target is unused — start with an empty config.
-    const usesPicker =
-      input.type === "context_pick" || input.type === "entity_ref" || input.type === "entity_ref_list";
-    const nodePickerConfig =
-      usesPicker && input.target && typeof input.target === "object"
-        ? (input.target as unknown as import("@/lib/types").NodePickerConfig)
-        : ({ kinds: [], presets: [] } as import("@/lib/types").NodePickerConfig);
-    return {
-      clientId: nextInputDraftId(),
-      name: input.name,
-      type: input.type,
-      label: input.label ?? "",
-      defaultValue: input.default === undefined || input.default === null ? undefined : String(input.default),
-      // Structured option drafts (value / label / color). Mirrors the field-side
-      // editor — see SelectOptionsEditor + decisions-inputs-fields-uniformity.
-      options: (input.options ?? []).map((o) => ({
-        value: o.value,
-        label: o.label ?? "",
-        color: o.color ?? null,
-        originalValue: o.value,
-      })),
-      required: Boolean(input.required),
-      nodePickerConfig,
-      nameDerived: false,
-    };
-  }
-
-  function entrySlugify(value: string): string {
-    return value
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "_")
-      .replace(/^_+|_+$/g, "")
-      .replace(/^[0-9]/, "input_$&");
-  }
-
-  // Map an editor-side default string onto its stored, type-matched value.
-  // boolean → real bool, number → real number (falls back to the raw string
-  // if unparseable), everything else (text / long_text / select / refs) →
-  // string. Callers only invoke this for a defined, non-empty default (#24).
-  function defaultValueForStorage(raw: string, type: EntryInputDraft["type"]): import("@/lib/types").MetadataValue {
-    if (type === "boolean") return raw === "true";
-    if (type === "number") {
-      const n = Number(raw);
-      return Number.isFinite(n) ? n : raw;
-    }
-    return raw;
-  }
-
-  function entryInputDraftsToCanonical(drafts: EntryInputDraft[]): PromptInputDefinition[] {
-    return drafts
-      .filter((d) => d.name)
-      .map((d) => {
-        const out: PromptInputDefinition = {
-          name: d.name,
-          type: d.type,
-        };
-        if (d.label) out.label = d.label;
-        if (d.required) out.required = true;
-        if (d.type === "context_pick" || d.type === "entity_ref" || d.type === "entity_ref_list") {
-          // All three ref-shaped types serialize their picker constraint as
-          // a NodePickerConfig under `target` (per #40 — same wire shape on
-          // both surfaces). `multiple` is derived from the type literal at
-          // runtime (entity_ref → false, entity_ref_list → true), so any
-          // value the editor wrote is non-load-bearing for entity_ref types.
-          // Skip default / options for these types — they don't apply.
-          out.target = d.nodePickerConfig as unknown as Record<string, import("@/lib/types").MetadataValue>;
-          return out;
-        }
-        // Persist a type-matched default so the stored YAML carries a real
-        // boolean / number rather than a stringly value. `undefined` (and a
-        // stray "") means unset → omit `default` entirely (#24).
-        if (d.defaultValue !== undefined && d.defaultValue !== "") {
-          out.default = defaultValueForStorage(d.defaultValue, d.type);
-        }
-        if (d.type === "select") {
-          // Emit SelectOption objects from the draft list, preserving the
-          // author's label + color picks (used to round-trip-lose them via
-          // the comma-string shape — see decisions-inputs-fields-uniformity).
-          out.options = d.options
-            .filter((o) => o.value.trim() !== "")
-            .map((o) => {
-              const item: import("@/lib/types").SelectOption = { value: o.value.trim() };
-              if (o.label) item.label = o.label;
-              if (o.color) item.color = o.color;
-              return item;
-            });
-        }
-        return out;
-      });
-  }
-
-  function emitInputsChange(): void {
-    if (!scene) return;
-    const canonical = entryInputDraftsToCanonical(entryInputDrafts);
-    onChange?.({
-      title,
-      body: rawBodyMode ? rawBody : (proseBodyView?.getBody() ?? ""),
-      status,
-      entryType,
-      metadata: cloneMetadata(metadata),
-      inputs: canonical,
-    });
-  }
-
-
-
+  // Per-entry prompt inputs (declaration side). Inputs live on the entry, not
+  // the entry-type. The controller owns the editor-side draft state (bound into
+  // CodeBodyView), the reseed-on-scene-change, and the canonical serialization
+  // for save; the shell rebuilds the canonical PromptInputDefinition[] via
+  // `toCanonical()` inside `emitChange` (#631).
+  const promptDrafts = new PromptInputDraftsController();
 
 
   let backlinksReq = 0;
@@ -512,7 +355,7 @@
       status,
       entryType,
       metadata: cloneMetadata(metadata),
-      inputs: documentKind === "prompt" ? entryInputDraftsToCanonical(entryInputDrafts) : undefined,
+      inputs: documentKind === "prompt" ? promptDrafts.toCanonical() : undefined,
     });
   }
 
@@ -555,17 +398,6 @@
     if (value === null || value === undefined) return "";
     if (typeof value === "object") return JSON.stringify(value);
     return String(value);
-  }
-
-  function promptEntryDescription(entry: PromptEntrySummary): string {
-    const typeName = metadataSchema?.entry_types[entry.entry_type]?.name ?? entry.entry_type;
-    return typeName;
-  }
-
-  function effectivePromptInputs(entry: PromptEntrySummary) {
-    // Inputs now live on the entry itself (not the entry-type) — the
-    // declaration and the template that uses it are coupled.
-    return entry.inputs ?? [];
   }
 
   // ADR-0046 slice 2/3 — the lore brainstorm review. A `revise:entry` chat
@@ -618,163 +450,6 @@
     loreReview.resetResolution();
   });
 
-  function openInputsDialog(entry: PromptEntrySummary) {
-    const declared = effectivePromptInputs(entry);
-    const prior = lastInvokedEntryId === entry.id ? lastInvokedInputs : {};
-    const drafts: Record<string, string> = {};
-    for (const input of declared) {
-      const previous = prior[input.name];
-      if (previous !== undefined && previous !== null) {
-        drafts[input.name] = String(previous);
-      } else if (input.default !== undefined && input.default !== null) {
-        drafts[input.name] = String(input.default);
-      } else {
-        // Seed everything to "" — the runtime's unset state, consistent
-        // with the preview (#42). Previously boolean was special-cased to
-        // "false", which silently sent the model `false` for an
-        // untouched checkbox while the preview surfaced an unset/undefined
-        // error. The runtime is now tri-state (Unset/True/False) so the
-        // user explicitly picks True or False or leaves it unset.
-        drafts[input.name] = "";
-      }
-    }
-    inputsDialogDrafts = drafts;
-    // Seed with the user's default; the picker shows it as "Default (Name)".
-    inputsDialogAssistantId = "";
-    inputsDialogError = null;
-    inputsDialogEntry = entry;
-  }
-
-  function cancelInputsDialog() {
-    inputsDialogEntry = null;
-    inputsDialogDrafts = {};
-    inputsDialogAssistantId = "";
-    inputsDialogError = null;
-  }
-
-  function updateInputsDialogDraft(name: string, value: string) {
-    inputsDialogDrafts = { ...inputsDialogDrafts, [name]: value };
-  }
-
-  async function fetchInputsDialogEstimate(): Promise<void> {
-    const entry = inputsDialogEntry;
-    if (!entry) {
-      inputsDialogEstimate = null;
-      return;
-    }
-    const ourToken = ++inputsDialogEstimateToken;
-    const declared = effectivePromptInputs(entry);
-    const inputs: Record<string, unknown> = {};
-    for (const input of declared) {
-      const raw = inputsDialogDrafts[input.name] ?? "";
-      const coerced = coerceInputValue(raw, input.type);
-      if (coerced !== null && coerced !== "") inputs[input.name] = coerced;
-    }
-    try {
-      const preview = await api.aiPreview({
-        template_source: entry.body,
-        target_scene_id: scene?.id ?? "",
-        inputs,
-        resolution_scene_id: resolutionSceneIdFromInputs(entry, inputs),
-        commit: false,
-        assistant_id: inputsDialogAssistantId || null,
-      });
-      if (ourToken !== inputsDialogEstimateToken) return;
-      // Render errors come back as 200 + preview.error (the endpoint is
-      // exploratory). Errors surface when the user runs, so keep the
-      // estimate strip quiet — null out instead of flickering a stale value.
-      if (preview.error) {
-        inputsDialogEstimate = null;
-        return;
-      }
-      inputsDialogEstimate = {
-        tokens: preview.estimated_tokens ?? 0,
-        cost_usd: preview.estimated_cost_usd ?? null,
-        caching_style: preview.caching_style ?? null,
-        cache_blocks: (preview.cache_blocks ?? []).map((b) => ({
-          label: b.label,
-          tokens: b.tokens,
-          cache_break_after: b.cache_break_after,
-        })),
-      };
-    } catch {
-      // Non-render failure (project closed, 5xx, etc.) — same UX.
-    }
-  }
-
-
-  function refInputDraftValue(input: PromptInputDefinition, raw: string | undefined): string | string[] {
-    if (input.type === "entity_ref_list") {
-      if (!raw) return [];
-      try {
-        const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? parsed : [];
-      } catch {
-        return [];
-      }
-    }
-    return raw ?? "";
-  }
-
-  function encodeRefInputDraft(value: string | string[]): string {
-    return Array.isArray(value) ? JSON.stringify(value) : value;
-  }
-
-  function assistantDisplayName(assistantId: string): string {
-    if (!assistantId) return "";
-    return assistantEntries.find((a) => a.id === assistantId)?.title ?? "";
-  }
-
-  function refInputStubField(input: PromptInputDefinition): MetadataFieldDefinition {
-    // entity_ref / entity_ref_list inputs persist their picker config as a
-    // NodePickerConfig under `target` (post-#40). Surface it as
-    // `picker_config` for ReferencePicker, which is the same shape the field
-    // side uses.
-    const picker =
-      input.target && typeof input.target === "object"
-        ? (input.target as unknown as import("@/lib/types").NodePickerConfig)
-        : null;
-    return {
-      name: input.label || input.name,
-      type: input.type === "entity_ref_list" ? "entity_ref_list" : "entity_ref",
-      options: [],
-      picker_config: picker,
-    };
-  }
-
-  async function submitInputsDialog() {
-    const entry = inputsDialogEntry;
-    if (!entry) return;
-    const declared = effectivePromptInputs(entry);
-    const missing = declared.filter((input) => {
-      if (!input.required) return false;
-      const raw = inputsDialogDrafts[input.name];
-      if (input.type === "entity_ref_list") {
-        const list = refInputDraftValue(input, raw);
-        return !Array.isArray(list) || list.length === 0;
-      }
-      return !raw?.trim();
-    });
-    if (missing.length > 0) {
-      inputsDialogError = `Missing required: ${missing.map((i) => i.label || i.name).join(", ")}.`;
-      return;
-    }
-    const values: Record<string, unknown> = {};
-    for (const input of declared) {
-      const raw = inputsDialogDrafts[input.name] ?? "";
-      const coerced = coerceInputValue(raw, input.type);
-      if (coerced !== null && coerced !== "") values[input.name] = coerced;
-    }
-    const pickedAssistantId = inputsDialogAssistantId;
-    lastInvokedEntryId = entry.id;
-    lastInvokedInputs = values;
-    inputsDialogEntry = null;
-    inputsDialogDrafts = {};
-    inputsDialogAssistantId = "";
-    // Forward to ProseBodyView, which owns the AI streaming machinery.
-    await proseBodyView?.runPromptEntryWithInputsExternal(entry, values, pickedAssistantId);
-  }
-
   // Editor-pane handle exports — forwarded to ProseBodyView and called by the
   // editorPanes controller via `editorPaneComponents[pane.id].xxx(...)`.
   // reloadScene re-seeds the TipTap doc from a server scene (the controller
@@ -786,26 +461,6 @@
 
   export function highlightEmbeddedTodo(todoId: string) {
     proseBodyView?.highlightEmbeddedTodo(todoId);
-  }
-
-  // Handler for ProseBodyView's `request-inputs-dialog` event.
-  function handleRequestInputsDialog(payload: {
-    entry: PromptEntrySummary;
-    prefilledDrafts?: Record<string, string>;
-    unresolved?: Array<{ name: string; label: string; token: string }>;
-  }) {
-    const { entry, prefilledDrafts, unresolved } = payload;
-    openInputsDialog(entry);
-    if (prefilledDrafts) {
-      for (const [name, value] of Object.entries(prefilledDrafts)) {
-        updateInputsDialogDraft(name, value);
-      }
-    }
-    if (unresolved && unresolved.length > 0) {
-      inputsDialogError = unresolved
-        .map((u) => `Couldn't find "${u.token}" for ${u.label}`)
-        .join(" · ");
-    }
   }
 
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
@@ -887,7 +542,7 @@
     return null;
   })());
   $effect.pre(() => {
-    maybeReseedInputs(scene, documentKind);
+    promptDrafts.reseed(scene, documentKind);
   });
   let documentLabel = $derived(documentKind === "lore" ? "Entry" : documentKind === "structure_node" ? "Node" : documentKind === "chat" ? "Chat" : "Scene");
 
@@ -948,15 +603,6 @@
       lastBacklinksSceneId = null;
       backlinks = [];
     }
-  });
-  // Reactive trigger: refetch when the dialog's prompt / drafts / assistant
-  // change. Per [[feedback-svelte5-reactivity-traps]], read each dep on its
-  // own line so Svelte tracks them — a function call alone wouldn't.
-  $effect.pre(() => {
-    void inputsDialogEntry;
-    void inputsDialogDrafts;
-    void inputsDialogAssistantId;
-    void fetchInputsDialogEstimate();
   });
 </script>
 
@@ -1124,7 +770,7 @@
   {#if bodyShape === "code"}
     <CodeBodyView
       bind:rawBody
-      bind:entryInputDrafts
+      bind:entryInputDrafts={promptDrafts.drafts}
       {scene}
       {documentKind}
       {structure}
@@ -1134,9 +780,9 @@
       {availableScenes}
       {rawBodyLanguage}
       {loadedSceneId}
-      {nextInputDraftId}
-      {entrySlugify}
-      onInputsChange={emitInputsChange}
+      nextInputDraftId={promptDrafts.nextDraftId}
+      entrySlugify={promptDrafts.slugify}
+      onInputsChange={emitChange}
     />
   {/if}
   {#if bodyShape === "prose"}
@@ -1197,7 +843,7 @@
       onBodyChange={emitChange}
       onFocus={() => onFocus?.()}
       onOpenChat={(payload) => onOpenChat?.(payload)}
-      onRequestInputsDialog={handleRequestInputsDialog}
+      onRequestInputsDialog={(payload) => promptDialog?.open(payload)}
       />
     </div>
   {/if}
@@ -1254,29 +900,24 @@
   </footer>
 </div>
 
-{#if inputsDialogEntry}
-  <InputsDialog
-    entry={inputsDialogEntry}
-    description={promptEntryDescription(inputsDialogEntry)}
-    declaredInputs={effectivePromptInputs(inputsDialogEntry)}
-    drafts={inputsDialogDrafts}
-    assistantId={inputsDialogAssistantId}
-    defaultAssistantLabel={assistantDisplayName(defaultAssistantId) || "use machine default"}
-    assistantEntries={assistantEntries}
-    error={inputsDialogError}
-    estimate={inputsDialogEstimate}
-    structure={structure}
-    researchStructure={researchStructure}
-    loreEntries={loreEntries}
-    promptEntries={promptEntries}
-    excludeId={scene?.id ?? null}
-    implicitContextMatcher={implicitContextMatcher}
-    on:updateDraft={(event) => updateInputsDialogDraft(event.detail.name, event.detail.value)}
-    on:updateAssistant={(event) => (inputsDialogAssistantId = event.detail.assistantId)}
-    on:cancel={cancelInputsDialog}
-    on:submit={() => void submitInputsDialog()}
-  />
-{/if}
+<!-- The prompt-invocation modal (#631). Rendered unconditionally: it shows
+     nothing until the host opens it via `promptDialog.open(...)` (routed from
+     ProseBodyView's request-inputs-dialog). Submit forwards to ProseBodyView,
+     which owns the AI streaming machinery. -->
+<PromptInvocationDialog
+  bind:this={promptDialog}
+  {scene}
+  {assistantEntries}
+  {defaultAssistantId}
+  {structure}
+  {researchStructure}
+  {loreEntries}
+  {promptEntries}
+  {implicitContextMatcher}
+  onRun={async (entry, values, assistantId) => {
+    await proseBodyView?.runPromptEntryWithInputsExternal(entry, values, assistantId);
+  }}
+/>
 
 <style>
   /* NodeEditor shell UI (metadata RAIL, editor header/title, cost-chip hint

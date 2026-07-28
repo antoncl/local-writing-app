@@ -14,10 +14,29 @@
   export let onClose: () => void = () => {};
   export let onImport: (sceneIds: string[]) => void = () => {};
 
+  $: allLooseIds = looseScenes.map((doc) => doc.id);
+
   // Selection is local, everything ticked by default (the common case is "take
-  // them all"). Re-seed each time the dialog opens so a prior run never leaks in.
+  // them all"). Seed only on the open TRANSITION — a legacy `$:` reruns on every
+  // dependency change, so gating on `if (open)` alone would re-seed whenever
+  // `looseScenes` is reassigned (the post-import refresh), silently re-selecting
+  // what the user deselected (#639). `seededFor` makes it fire once per open.
   let selected: Set<string> = new Set();
-  $: if (open) selected = new Set(looseScenes.map((doc) => doc.id));
+  let seededFor = false;
+  $: if (!open) seededFor = false;
+  $: if (open && !seededFor) {
+    selected = new Set(allLooseIds);
+    seededFor = true;
+  }
+
+  // Keep the selection scoped to what's still loose: after a partial import the
+  // imported ids leave `looseScenes`, so drop them. This only REMOVES ids, never
+  // adds, so it can't undo a deselection (unlike a reseed) — and it keeps
+  // `selected` authoritative, so the count and payload read straight off it.
+  $: if ([...selected].some((id) => !allLooseIds.includes(id))) {
+    const stillLoose = new Set(allLooseIds);
+    selected = new Set([...selected].filter((id) => stillLoose.has(id)));
+  }
 
   function toggle(id: string) {
     const next = new Set(selected);
@@ -29,7 +48,7 @@
   $: allSelected = looseScenes.length > 0 && selected.size === looseScenes.length;
 
   function toggleAll() {
-    selected = allSelected ? new Set() : new Set(looseScenes.map((doc) => doc.id));
+    selected = allSelected ? new Set() : new Set(allLooseIds);
   }
 </script>
 
@@ -70,13 +89,15 @@
     {/if}
 
     {#snippet actions()}
-      <button type="button" on:click={onClose}>Cancel</button>
-      <button
-        class="primary"
-        type="button"
-        disabled={busy || selected.size === 0}
-        on:click={() => onImport([...selected])}
-      >{busy ? "Importing…" : `Add ${selected.size} to manuscript`}</button>
+      <button type="button" on:click={onClose}>{looseScenes.length === 0 ? "Close" : "Cancel"}</button>
+      {#if looseScenes.length > 0}
+        <button
+          class="primary"
+          type="button"
+          disabled={busy || selected.size === 0}
+          on:click={() => onImport([...selected])}
+        >{busy ? "Importing…" : `Add ${selected.size} to manuscript`}</button>
+      {/if}
     {/snippet}
   </Modal>
 {/if}

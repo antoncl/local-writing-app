@@ -34,7 +34,6 @@ from app.models import (
     DirectoryEntry,
     DirectoryListing,
     DirectoryRoot,
-    LooseScene,
     MetadataSchema,
     MetadataValue,
     PathProbe,
@@ -934,20 +933,9 @@ class ProjectLifecycleMixin:
 
         for scene_id in sorted(referenced - scene_ids):
             errors.append(f"Structure references missing scene {scene_id}.")
-        # Scene files on disk that no manuscript node references. Not an error —
-        # a pending-import offer (#4) the Project pane turns into "Add to
-        # manuscript". The title falls back to the filename stem for a raw
-        # dropped file with no front-matter title.
-        loose_scenes: list[LooseScene] = []
-        for scene_id in sorted(scene_ids - referenced):
-            entry = node_index.by_id[scene_id]
-            loose_scenes.append(
-                LooseScene(
-                    id=scene_id,
-                    title=entry.title or entry.path.stem,
-                    filename=entry.path.name,
-                )
-            )
+        # Loose scenes (files on disk no node references) are NOT reported here
+        # anymore (#635) — they are an import offer, not an integrity problem.
+        # `list_loose_scenes` enumerates them for the Import documents surface.
         for entry in sorted((entry for entry in node_index.by_id.values() if entry.kind == "scene"), key=lambda item: item.id):
             scene_id = entry.id
             path = entry.path
@@ -1015,7 +1003,6 @@ class ProjectLifecycleMixin:
             warnings=warnings,
             errors=errors,
             migrations_applied=list(self.last_migrations),
-            loose_scenes=loose_scenes,
         )
 
     def _new_project_node(self, title: str) -> ProjectNode:

@@ -37,6 +37,7 @@ import type {
   TagsOverview,
   LoreEntry,
   LoreEntryList,
+  LooseScene,
   MoveLoreNoteToResearchResponse,
   MachineSettingsUpdate,
   MachineSettingsView,
@@ -389,6 +390,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ title, entry_type: entryType, parent_id: parentId ?? null }),
     });
+  },
+  getLooseScenes() {
+    // Scene files on disk no manuscript node references — the import offer,
+    // read on its own now (#635) rather than off the validation report.
+    return request<LooseScene[]>("/structure/loose-scenes");
   },
   importLooseScenes(sceneIds: string[]) {
     return request<StructureDocument>("/structure/import-loose", {

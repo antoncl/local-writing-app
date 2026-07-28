@@ -27,6 +27,7 @@ from typing import Any
 from app.models import (
     CreateSceneRequest,
     CreateStructureNodeRequest,
+    LooseScene,
     MetadataSchema,
     SaveSceneRequest,
     Scene,
@@ -340,6 +341,41 @@ class ManuscriptMixin:
         self._manuscript_tree(root).write(structure)
         return self._read_structure(root)
 
+    def _collect_loose_scene_entries(self, root):
+        """Scene files on disk that no manuscript node references (#4), keyed by
+        id, together with the structure they were reconciled against.
+
+        Forces a cold node-index rebuild so files dropped into `scenes/` while
+        the app stayed open are seen (ADR-0040 — a warm memo does no disk work).
+        Shared by `list_loose_scenes` (the read surface) and `import_loose_scenes`
+        so both derive "loose" one way.
+        """
+        node_index_gate.invalidate()
+        node_index = self._build_node_index(root)
+        structure = self._read_structure(root)
+        referenced = TreeStructureService.collect_leaf_ids(structure.root)
+        loose = {
+            entry.id: entry
+            for entry in node_index.by_id.values()
+            if entry.kind == "scene" and entry.id not in referenced
+        }
+        return loose, structure
+
+    def list_loose_scenes(self) -> list[LooseScene]:
+        """Enumerate loose scenes for the Import documents surface (#635). The
+        title falls back to the filename stem for a raw dropped file with no
+        front-matter title."""
+        root = self._require_project()
+        loose, _ = self._collect_loose_scene_entries(root)
+        return [
+            LooseScene(
+                id=entry.id,
+                title=entry.title or entry.path.stem,
+                filename=entry.path.name,
+            )
+            for entry in (loose[scene_id] for scene_id in sorted(loose))
+        ]
+
     def import_loose_scenes(self, scene_ids: list[str] | None = None) -> StructureDocument:
         """Register scene files present under `scenes/` that no manuscript node
         references, appending them at the manuscript root (#4).
@@ -356,19 +392,10 @@ class ManuscriptMixin:
         abort the whole batch.
         """
         root = self._require_project()
-        # Scan disk truth, for the same reason validate does (#4): a file dropped
-        # into scenes/ while the app stayed open is invisible to a warm memo.
-        node_index_gate.invalidate()
         schema = self.read_metadata_schema()
-        structure = self._read_structure(root)
-        node_index = self._build_node_index(root)
-        referenced = TreeStructureService.collect_leaf_ids(structure.root)
-
-        loose = {
-            entry.id: entry
-            for entry in node_index.by_id.values()
-            if entry.kind == "scene" and entry.id not in referenced
-        }
+        # Same "loose" derivation the read surface uses, incl. the cold rebuild
+        # that lets a file dropped into scenes/ while the app stayed open be seen.
+        loose, structure = self._collect_loose_scene_entries(root)
         wanted = set(scene_ids) if scene_ids else set(loose)
         targets = [loose[scene_id] for scene_id in sorted(loose) if scene_id in wanted]
 

@@ -187,9 +187,12 @@ class ProspectiveProjectNode(BaseModel):
 
 class LooseScene(BaseModel):
     """A scene file present on disk under `scenes/` but not referenced by the
-    manuscript structure — a candidate for import (#4). Surfaced by
-    `validate_project`; imported (appended at the manuscript root) by
-    `import_loose_scenes`."""
+    manuscript structure — a candidate for import (#4). Enumerated by
+    `list_loose_scenes` (the `/api/structure/loose-scenes` read); imported
+    (appended at the manuscript root) by `import_loose_scenes`.
+
+    Deliberately NOT part of `ProjectValidation` (#635): validation reports
+    integrity, import is its own surface, and the two used to ride one field."""
 
     id: str
     title: str
@@ -201,10 +204,6 @@ class ProjectValidation(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
     migrations_applied: list[str] = Field(default_factory=list)
-    # Scene files on disk that no manuscript node references yet. Not an error
-    # or a warning — a pending-import offer the Project pane turns into an
-    # "Add to manuscript" action (#4).
-    loose_scenes: list[LooseScene] = Field(default_factory=list)
 
 
 class ImportLooseScenesRequest(BaseModel):

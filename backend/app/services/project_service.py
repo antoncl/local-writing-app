@@ -101,16 +101,27 @@ class ProjectService(
     def __init__(self, scope: WorkScope | None = None) -> None:
         """Bind this service to one unit of work's scope, for good (#399).
 
-        The scope is the *only* instance state, and it is immutable: `root_path`
-        is a read-only property, so no helper can re-point a service mid-unit
-        and nothing later in the unit can observe a different project than the
-        one it started in (ADR-0045). `None` means no project is open — a real
-        state the machine-level assistant surfaces run in — and every caller
-        that needs a root asks through `_require_project()`.
+        The scope is the only *authoritative* instance state, and it is
+        immutable: `root_path` is a read-only property, so no helper can
+        re-point a service mid-unit and nothing later in the unit can observe a
+        different project than the one it started in (ADR-0045). `None` means no
+        project is open — a real state the machine-level assistant surfaces run
+        in — and every caller that needs a root asks through `_require_project()`.
 
         Use `opened_at` / `created_at` to get a bound service from a path.
+
+        The two dicts below are a request-scoped read memo (#466), not authority.
+        A service is a throwaway resolved fresh per request
+        (`resolve_current_project`), so they are safe per-request caches with no
+        cross-request staleness, and any write clears them at the write choke
+        (`_maintain_index_after_write`) so a read → write → read inside one
+        request cannot see a stale title or chain. They exist because
+        `current_project()` served the ancestor walk twice and every ancestor's
+        title twice — two thirds of the call — before this.
         """
         self._scope = scope
+        self._title_memo: dict[Path, str | None] = {}
+        self._declared_candidates_memo: dict[Path, list[tuple[Path, bool, bool]]] = {}
 
     @property
     def scope(self) -> WorkScope | None:
@@ -348,7 +359,15 @@ class ProjectService(
         - **`project.yaml` / `metadata.schema.yaml`** fan out across the chain
           (the walk itself, and every node's edges), so there is no cheap patch:
           drop the whole memo and let the next resolve rebuild.
+
+        It is also where the per-request title/chain memo (#466) is dropped: any
+        write may change a manifest or move a folder, so a read taken before it
+        must not be served after it. Clearing here — unconditionally, ahead of
+        the index work below, which itself walks layers — keeps the memo from
+        outliving the disk state it summarised within a single request.
         """
+        self._title_memo.clear()
+        self._declared_candidates_memo.clear()
         if path.name == NODE_INDEX_SNAPSHOT_FILENAME:
             return
         if path.name in (INDEX_MANIFEST_FILENAME, INDEX_SCHEMA_FILENAME):

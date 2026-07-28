@@ -5,6 +5,7 @@ import {
   canApplyPlotSuggestionBeatFields,
   canApplyPlotSuggestionCardSynopsis,
   canApplyPlotSuggestionClaimNote,
+  canCreatePlotSuggestionCard,
   canCreatePlotSuggestionBadge,
   parsePlotSuggestions,
   plotSuggestionBeatClipboardText,
@@ -79,6 +80,33 @@ Intro text.
         open_questions: ["Who witnesses the break?", "What does it cost immediately?"],
         status: "planned",
       },
+    ]);
+  });
+
+  it("extracts new card suggestions", () => {
+    const suggestions = parsePlotSuggestions(`
+<plot_suggestions>
+  <suggestion kind="new_card" template_instance_id="plot_main" plot_point_id="first_turn">
+    <title>Ledger theft</title>
+    <reason>This gives the turn a concrete irreversible action.</reason>
+    <proposed_change>Mara steals the ledger and loses her only way back.</proposed_change>
+    <evidence_to_add>The archive doors lock behind her.</evidence_to_add>
+  </suggestion>
+</plot_suggestions>
+`);
+
+    expect(suggestions).toEqual([
+      expect.objectContaining({
+        kind: "new_card",
+        target_card_id: "",
+        target_claim_id: "",
+        template_instance_id: "plot_main",
+        plot_point_id: "first_turn",
+        title: "Ledger theft",
+        reason: "This gives the turn a concrete irreversible action.",
+        proposed_change: "Mara steals the ledger and loses her only way back.",
+        evidence_to_add: "The archive doors lock behind her.",
+      }),
     ]);
   });
 
@@ -323,6 +351,84 @@ describe("canApplyPlotSuggestionClaimNote", () => {
       title: "Sharpen opening",
       reason: "",
       proposed_change: "Mara steals the ledger and loses her only way back.",
+      evidence_to_add: "",
+      story_specifics: "",
+      author_intent: "",
+      expected_role: "",
+      open_questions: [],
+      status: "",
+    })).toBe(false);
+  });
+});
+
+describe("canCreatePlotSuggestionCard", () => {
+  it("accepts new card suggestions with a title and synopsis", () => {
+    expect(canCreatePlotSuggestionCard({
+      kind: "new_card",
+      target_card_id: "",
+      target_claim_id: "",
+      template_instance_id: "",
+      plot_point_id: "",
+      title: "Ledger theft",
+      reason: "",
+      proposed_change: "Mara steals the ledger and loses her only way back.",
+      evidence_to_add: "",
+      story_specifics: "",
+      author_intent: "",
+      expected_role: "",
+      open_questions: [],
+      status: "",
+    })).toBe(true);
+  });
+
+  it("rejects new card suggestions without a concrete synopsis", () => {
+    expect(canCreatePlotSuggestionCard({
+      kind: "new_card",
+      target_card_id: "",
+      target_claim_id: "",
+      template_instance_id: "",
+      plot_point_id: "",
+      title: "Ledger theft",
+      reason: "",
+      proposed_change: "",
+      evidence_to_add: "",
+      story_specifics: "",
+      author_intent: "",
+      expected_role: "",
+      open_questions: [],
+      status: "",
+    })).toBe(false);
+  });
+
+  it("rejects new card suggestions that still target an existing card", () => {
+    expect(canCreatePlotSuggestionCard({
+      kind: "new_card",
+      target_card_id: "card_archive",
+      target_claim_id: "",
+      template_instance_id: "",
+      plot_point_id: "",
+      title: "Ledger theft",
+      reason: "",
+      proposed_change: "Mara steals the ledger.",
+      evidence_to_add: "",
+      story_specifics: "",
+      author_intent: "",
+      expected_role: "",
+      open_questions: [],
+      status: "",
+    })).toBe(false);
+  });
+
+  it("rejects new card suggestions with only one optional badge target id", () => {
+    expect(canCreatePlotSuggestionCard({
+      kind: "new_card",
+      target_card_id: "",
+      target_claim_id: "",
+      template_instance_id: "plot_main",
+      plot_point_id: "",
+      title: "Ledger theft",
+      reason: "",
+      proposed_change: "Mara steals the ledger.",
       evidence_to_add: "",
       story_specifics: "",
       author_intent: "",

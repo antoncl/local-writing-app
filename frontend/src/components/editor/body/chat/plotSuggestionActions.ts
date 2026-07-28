@@ -23,6 +23,7 @@ export type PlotSuggestionActions = {
   applyPlotSuggestionNote: (suggestion: PlotSuggestion) => Promise<void>;
   createPlotSuggestionBadge: (suggestion: PlotSuggestion) => Promise<void>;
   applyPlotSuggestionBeatFields: (suggestion: PlotSuggestion) => Promise<void>;
+  applyPlotSuggestionCardSynopsis: (suggestion: PlotSuggestion) => Promise<void>;
 };
 
 type CreatePlotSuggestionActionsOptions = {
@@ -115,6 +116,40 @@ export function createPlotSuggestionActions(options: CreatePlotSuggestionActions
     }
 
     fail(`Could not find claim ${targetClaimId} on a plot board.`);
+  }
+
+  async function applyPlotSuggestionCardSynopsis(suggestion: PlotSuggestion): Promise<void> {
+    const targetCardId = suggestion.target_card_id.trim();
+    const synopsis = suggestion.proposed_change.trim();
+    if (!targetCardId || !synopsis) {
+      fail("This suggestion does not identify both a target card and synopsis text.");
+    }
+
+    for (const plotId of await plotBoardCandidateIds()) {
+      const plot = await loadPlotNode(plotId, "Could not load plot board.");
+      const board = plot?.board;
+      if (!plot || !board) continue;
+
+      let matched = false;
+      let changed = false;
+      const nextCards = (board.cards ?? []).map((card) => {
+        if (card.id !== targetCardId) return card;
+        matched = true;
+        if (card.synopsis === synopsis) return card;
+        changed = true;
+        return { ...card, synopsis };
+      });
+      if (!matched) continue;
+      if (!changed) {
+        options.setChatError(null);
+        return;
+      }
+
+      await savePlotBoard(plot, { ...board, cards: nextCards });
+      return;
+    }
+
+    fail(`Could not find card ${targetCardId} on a plot board.`);
   }
 
   async function createPlotSuggestionBadge(suggestion: PlotSuggestion): Promise<void> {
@@ -233,6 +268,7 @@ export function createPlotSuggestionActions(options: CreatePlotSuggestionActions
     applyPlotSuggestionNote: (suggestion) => appendPlotSuggestionClaimField(suggestion, "ai_notes", suggestion.proposed_change),
     createPlotSuggestionBadge,
     applyPlotSuggestionBeatFields,
+    applyPlotSuggestionCardSynopsis,
   };
 }
 

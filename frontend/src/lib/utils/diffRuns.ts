@@ -89,7 +89,14 @@ function titleFor(kind: DiffRun["kind"], region: DiffRegion): string {
  * clickable so the author can adopt one region while parked (Amendment 4). The
  * title is the affordance — no glyph is added, so §J holds as written.
  */
-export async function renderDiffRuns(runs: DiffRun[], view: DiffView): Promise<string> {
+export async function renderDiffRuns(
+  runs: DiffRun[],
+  view: DiffView,
+  // The run's affordance label (ADR-0044 Amendment 4). Defaults to the snapshot
+  // wording ("Restore this"); the AI-lore proposal review passes its own so a
+  // cool run reads "Use this", not "Restore this" (ADR-0046 §5, memo #590).
+  titleForRun: (kind: DiffRun["kind"], region: DiffRegion) => string = titleFor,
+): Promise<string> {
   const parts: string[] = [];
   let buffer = "";
   const { regionIdByRun, regions } = groupRuns(runs);
@@ -110,7 +117,7 @@ export async function renderDiffRuns(runs: DiffRun[], view: DiffView): Promise<s
       continue;
     }
     const id = regionIdByRun[i];
-    const attrs = `data-region="${id}" title="${titleFor(run.kind, regions[id as number])}"`;
+    const attrs = `data-region="${id}" title="${titleForRun(run.kind, regions[id as number])}"`;
     if (run.stacked) {
       // A stacked run carrying only a block separator would render as an empty
       // tinted box — a mark with nothing under it, which reads as a change the

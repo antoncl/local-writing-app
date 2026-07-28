@@ -39,6 +39,7 @@
     StructureDocument,
   } from "@/lib/types";
   import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { loreBrainstorm } from "@/lib/stores/loreBrainstorm.svelte";
   import { refreshChatSessions, refreshProjectCost } from "@/lib/stores/chats";
   import {
     assistantScopeTags,
@@ -597,6 +598,38 @@
     }
   }
 
+  // The finalize turn (ADR-0046 §5): the brainstorm is a conversation, but the
+  // commit asks for a single final state — the whole revised body, nothing else.
+  const FINALIZE_INSTRUCTION =
+    "Finalize: reply with ONLY the complete revised markdown body of the entry — " +
+    "no preamble, no commentary, no code fences.";
+
+  // Commit the brainstorm to its target entry (ADR-0046 slice 2). Sends the
+  // finalize turn through the normal send path (so the render gate, persistence
+  // and cost accounting all apply), then hands the assistant's full reply to the
+  // entry's pane as a proposed body — reviewed there as a proposed-vs-current
+  // flip, never written from here. NOT a streamed mark: a final state, diffed.
+  async function commitToEntry(): Promise<void> {
+    if (chatRunning || !isEntryPatchChat) return;
+    const entryId = commitTargetEntryId;
+    if (!entryId) {
+      chatError = "This brainstorm has no target entry to commit to.";
+      return;
+    }
+    // A finalize send that errors or returns empty rewinds its own turns, so
+    // chatHistory would end in an EARLIER brainstorm reply. Only propose when a
+    // new assistant turn was actually appended (the count grew) — never the
+    // conversation's prior message.
+    const turnsBefore = chatHistory.length;
+    chatInput = FINALIZE_INSTRUCTION;
+    await sendChat();
+    if (chatHistory.length <= turnsBefore) return;
+    const last = chatHistory[chatHistory.length - 1];
+    if (last?.role === "assistant" && last.content.trim()) {
+      loreBrainstorm.propose(entryId, last.content.trim());
+    }
+  }
+
   // First-send template render. Mirrors App.svelte's
   // renderAndLockPromptTemplate (the source of truth). Called from
   // sendChat right before the first user turn ships, when the chat is
@@ -747,6 +780,15 @@
     : null);
   // The active prompt's assistant scope + the dynamic default it implies:
   // topmost assistant matching the scope, else topmost overall (ADR-0024).
+  // ADR-0046 slice 2: a `revise:entry` chat (output.kind `entry_patch`) commits
+  // its conversation to the target entry. The target is the `entry` input seeded
+  // at launch; the commit button surfaces only for such a chat.
+  let isEntryPatchChat = $derived(
+    activePromptEntry != null &&
+      metadataSchema?.entry_types[activePromptEntry.entry_type]?.prompt?.context_strategy?.output
+        ?.kind === "entry_patch",
+  );
+  let commitTargetEntryId = $derived((chatInputDrafts["entry"] ?? "").trim());
   let assistantScope = $derived(assistantScopeTags(activePromptEntry));
   let scopedDefaultId = $derived(scopedDefaultAssistantId(assistantEntries, assistantScope, defaultAssistantId));
   let assistantParts = $derived(partitionAssistants(assistantEntries, assistantPickerSearch, assistantScope));
@@ -1000,6 +1042,21 @@
 
     <div class="cbv-action-row">
       <button type="button" disabled={!chatHistory.length || chatRunning} onclick={clearChat}>Clear</button>
+      {#if isEntryPatchChat}
+        <!-- ADR-0046 slice 2: finalize the brainstorm into a revised body,
+             reviewed on the target entry's pane. -->
+        <button
+          type="button"
+          class="cbv-commit"
+          disabled={chatRunning || !commitTargetEntryId || chatHistory.length === 0}
+          title={commitTargetEntryId
+            ? "Finalize this brainstorm and review the revised entry"
+            : "This brainstorm has no target entry"}
+          onclick={() => void commitToEntry()}
+        >
+          {chatRunning ? "Committing…" : "Commit to entry"}
+        </button>
+      {/if}
       <button
         type="button"
         class="primary"
@@ -1228,6 +1285,12 @@
     box-shadow: 0 2px 6px var(--shadow2);
   }
   .cbv-action-row button.primary:hover { background: var(--accent-strong); }
+  /* Commit is an accent-outline verb — distinct from the filled primary Send,
+     but clearly the consequential action on a brainstorm (ADR-0046 slice 2). */
+  .cbv-action-row button.cbv-commit { border-color: var(--accent); color: var(--accent); }
+  .cbv-action-row button.cbv-commit:hover {
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+  }
 
   .cbv-foot {
     margin: 0; font-size: var(--fs-sm); color: var(--text-3);

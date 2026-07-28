@@ -5,11 +5,13 @@
   // state as the same flip the snapshot compare uses, and adopts region by
   // region — across the body AND each changed long_text field (slice 3a).
   //
-  // Deliberately the snapshot-adopt shape, not a second write path: on Done the
-  // resolved body and field values are handed back through `onAdopt`, which the
-  // entry pane writes via the SAME emitChange autosave a manual body/field edit
-  // uses — body and metadata coalesce into one PUT (ADR-0046 §1; no bespoke
-  // endpoint). Nothing is written during review; Discard is a true no-op.
+  // This is a pure render + gesture surface. The review is a frozen transaction
+  // whose state lives in `LoreProposalController` (#634): each flip PUSHES its
+  // running resolution to the controller via `onBodyResolved`/`onFieldResolved`
+  // (never a local write), Done fires `onDone` (the controller's single explicit
+  // PUT — body + metadata in one write, ADR-0046 §1), and Discard fires
+  // `onDiscard`. The controller owns the accumulation so the pane's close guard
+  // can commit the same pending changes. Nothing is written during review.
 
   import RevisionFlip from "@/components/editor/body/RevisionFlip.svelte";
   import type { FieldFlip } from "@/lib/utils/loreRevision";
@@ -18,8 +20,11 @@
     currentBody,
     proposedBody,
     fields,
-    onAdopt,
-    onClose,
+    hasChanges,
+    onBodyResolved,
+    onFieldResolved,
+    onDone,
+    onDiscard,
   }: {
     /** The entry's body as the author currently sees it (the live buffer). */
     currentBody: string;
@@ -27,36 +32,19 @@
     proposedBody: string | null;
     /** The long_text fields the patch proposes, each reviewed as its own flip. */
     fields: FieldFlip[];
-    /** Write the resolved body + field values once, on Done. `body` is null
-     *  when the body was not part of the patch or was left unchanged. */
-    onAdopt: (body: string | null, fields: Record<string, string>) => void;
-    /** Dismiss the review (clear the pending proposal). */
-    onClose: () => void;
+    /** Whether the author has adopted anything yet — drives the Done/Close label.
+     *  Owned by the controller (the close guard reads the same signal). */
+    hasChanges: boolean;
+    /** Push the body flip's running resolution to the controller (null while
+     *  unchanged from current). The controller accumulates; nothing writes here. */
+    onBodyResolved: (value: string | null) => void;
+    /** Push a long_text field flip's running resolution to the controller. */
+    onFieldResolved: (fieldId: string, value: string | null) => void;
+    /** The save gesture: commit the accumulated patch as one PUT. */
+    onDone: () => void;
+    /** Discard the proposal without writing (the entry was frozen). */
+    onDiscard: () => void;
   } = $props();
-
-  // Each flip reports its running resolution here (null while unchanged). The
-  // body key is separate from field ids so a field literally named "body" can't
-  // collide.
-  let resolvedBody = $state<string | null>(null);
-  let resolvedFields = $state<Record<string, string | null>>({});
-
-  let changesRemain = $derived(
-    resolvedBody !== null || Object.values(resolvedFields).some((v) => v !== null),
-  );
-
-  function done(): void {
-    const adoptedFields: Record<string, string> = {};
-    for (const [fieldId, value] of Object.entries(resolvedFields)) {
-      if (value !== null) adoptedFields[fieldId] = value;
-    }
-    onAdopt(resolvedBody, adoptedFields);
-    onClose();
-  }
-
-  function discard(): void {
-    // Nothing was written during review, so discarding is just dismissal.
-    onClose();
-  }
 </script>
 
 <div class="lore-revision-review">
@@ -65,9 +53,9 @@
       Proposed revision — click the <span class="was-swatch">dotted</span> wording to adopt it.
     </span>
     <div class="review-actions">
-      <button type="button" class="review-discard" onclick={discard}>Discard</button>
-      <button type="button" class="review-done" onclick={done}>
-        {changesRemain ? "Done" : "Close"}
+      <button type="button" class="review-discard" onclick={onDiscard}>Discard</button>
+      <button type="button" class="review-done" onclick={onDone}>
+        {hasChanges ? "Done" : "Close"}
       </button>
     </div>
   </div>
@@ -77,7 +65,7 @@
         currentText={currentBody}
         proposedText={proposedBody}
         label="Body"
-        onResolved={(v) => (resolvedBody = v)}
+        onResolved={(v) => onBodyResolved(v)}
       />
     {/if}
     {#each fields as field (field.fieldId)}
@@ -85,7 +73,7 @@
         currentText={field.currentValue}
         proposedText={field.proposedValue}
         label={field.label}
-        onResolved={(v) => (resolvedFields = { ...resolvedFields, [field.fieldId]: v })}
+        onResolved={(v) => onFieldResolved(field.fieldId, v)}
       />
     {/each}
   </div>

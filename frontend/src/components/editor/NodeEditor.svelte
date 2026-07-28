@@ -108,6 +108,13 @@
     // reload. The pane store owns the document lifecycle; the card does not.
     onFlushScene?: (() => Promise<void>) | undefined;
     onSceneRestored?: ((restored: import("@/lib/types").Scene) => void | Promise<void>) | undefined;
+    // AI-review freeze (#634 / ADR-0046). A lore brainstorm proposal makes the
+    // entry a frozen save-on-Done transaction: the host asks the pane controller
+    // to suppress autosave for the review's life (committer non-null) or resume it
+    // (null), and to issue the ONE explicit post on commit. The pane store owns
+    // the document lifecycle; the card does not (as with onFlushScene).
+    onReviewFreeze?: ((entryId: string, committer: import("@/lib/stores/editorPanes.svelte").ReviewCommitter | null) => void) | undefined;
+    onFlushReviewCommit?: ((entryId: string) => Promise<void>) | undefined;
   }
 
   let {
@@ -137,7 +144,9 @@
     onAuthoringLayerChange = undefined,
     onResetField = undefined,
     onFlushScene = undefined,
-    onSceneRestored = undefined
+    onSceneRestored = undefined,
+    onReviewFreeze = undefined,
+    onFlushReviewCommit = undefined
   }: Props = $props();
 
 
@@ -578,6 +587,36 @@
   loreReview.onAdoptBody = (body) => proseBodyView?.adoptBody(body);
   loreReview.onEmitChange = emitChange;
   loreReview.readCurrentBody = () => proseBodyView?.getBody() ?? scene?.body ?? "";
+  // The one explicit post that ends a commit — the pane controller cancels the
+  // (frozen) timer and PUTs once (body + metadata together).
+  loreReview.onFlush = () => {
+    if (scene?.id) return onFlushReviewCommit?.(scene.id);
+  };
+
+  // A lore entry under an open brainstorm review is a frozen transaction (#634):
+  // the rail/title go read-only and the host suppresses autosave, so the diff's
+  // "current" side cannot move under the review.
+  const reviewing = $derived(documentKind === "lore" && loreReview.hasReview);
+  // The hooks the pane's close path uses to commit or discard the review.
+  const reviewCommitter = {
+    hasChanges: () => loreReview.hasPendingChanges,
+    commit: () => loreReview.commit(),
+    discard: () => loreReview.abandon(),
+  };
+  // Freeze while reviewing, thaw (null) the instant the review ends or the pane
+  // unmounts. Idempotent on the host side; the flush-on-enter runs once.
+  $effect(() => {
+    const entryId = scene?.id;
+    if (!entryId) return;
+    onReviewFreeze?.(entryId, reviewing ? reviewCommitter : null);
+    return () => onReviewFreeze?.(entryId, null);
+  });
+  // Reset accumulated review resolution whenever the proposal identity changes,
+  // so a superseding commit starts clean instead of inheriting prior adoptions.
+  $effect(() => {
+    loreReview.proposal;
+    loreReview.resetResolution();
+  });
 
   function openInputsDialog(entry: PromptEntrySummary) {
     const declared = effectivePromptInputs(entry);
@@ -947,7 +986,7 @@
       computedFieldString={computedFieldString}
       effectiveOverrides={scrubbed ? scrub.overrides : null}
       compare={snapshotCompare}
-      readOnly={scrubbed || snapshotParked}
+      readOnly={scrubbed || snapshotParked || reviewing}
       onEntryTypeChange={(next) => updateEntryType(next)}
       onStatusChange={(next) => updateStatus(next)}
       onMetadataChange={(next) => {
@@ -1007,6 +1046,11 @@
               aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (snapshot, read-only)`}
               value={snapshots.titleForView}
             />
+          {:else if reviewing}
+            <!-- Frozen for AI review (#634): read-only like the parked/scrubbed
+                 title, so the author can't edit an entry mid-review — the review
+                 is a transaction that writes once, not a co-editing surface. -->
+            <input class="title-input" readonly aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (under review, read-only)`} value={title} />
           {:else}
             <input class="title-input" aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()}`} placeholder={documentNameLabel} bind:value={title} oninput={handleTitleInput} />
           {/if}
@@ -1124,14 +1168,17 @@
           currentBody={loreReview.currentBody()}
           proposedBody={loreReview.proposal.body}
           fields={loreReview.fields}
-          onAdopt={(body, fields) => loreReview.adopt(body, fields)}
-          onClose={() => loreReview.clear()}
+          hasChanges={loreReview.hasPendingChanges}
+          onBodyResolved={(v) => loreReview.setBodyResolution(v)}
+          onFieldResolved={(id, v) => loreReview.setFieldResolution(id, v)}
+          onDone={() => loreReview.commit()}
+          onDiscard={() => loreReview.abandon()}
         />
       {/key}
     {/if}
     <div
       class="prose-body-host"
-      class:hidden={scrubbed || snapshotParked || (documentKind === "lore" && loreReview.hasReview)}
+      class:hidden={scrubbed || snapshotParked || reviewing}
     >
       <ProseBodyView
         bind:this={proseBodyView}

@@ -113,6 +113,17 @@ function defaultAuthoringLayerId(entry: LoreEntry): string | null {
 export const FOREIGN_PROJECT_NODE =
   "That reference is on a parent project's node, which cannot be opened from here.";
 
+/** The review-transaction hooks a lore pane registers while an AI brainstorm
+ *  proposal is open on it (#634 / ADR-0046). The pane is frozen (autosave off)
+ *  for the review's life; these let the pane lifecycle drive the one explicit
+ *  write. `hasChanges` decides whether closing needs a Save prompt at all;
+ *  `commit` applies + posts the accumulated patch; `discard` drops it. */
+export type ReviewCommitter = {
+  hasChanges: () => boolean;
+  commit: () => Promise<void>;
+  discard: () => void;
+};
+
 class EditorPanesController {
   // The open editor panes. Reassigned (not deep-mutated) to trigger reactivity —
   // the drafts ARE the pending buffer, no separate queue.
@@ -132,6 +143,12 @@ class EditorPanesController {
 
   // Monotonic id source for editor panes (editor_N ids); reset on project switch.
   #nextEditorPaneIndex = 1;
+
+  // Panes frozen for an AI-review transaction (#634): pane id -> its commit hooks.
+  // While present, the pane's autosave is suppressed (updateEditorPaneDraft skips
+  // scheduling) and closing it routes through the Save-changes guard. A plain map
+  // — nothing renders off it; the freeze is a save-timing concern, not UI state.
+  #reviewLocks = new Map<string, ReviewCommitter>();
 
   // Injected by App (set in onMount): the app-level error/status sinks and the
   // run() wrapper that funnels errors into App's `error`. These keep the
@@ -176,6 +193,7 @@ class EditorPanesController {
     this.metadataReloadsByPane = {};
     this.titleReloadsByPane = {};
     this.activeChatId = null;
+    this.#reviewLocks.clear();
     this.#nextEditorPaneIndex = 1;
   }
 
@@ -225,8 +243,10 @@ class EditorPanesController {
       };
     });
     // The generic autosave is a no-op for views (saveEditorPane returns early), so
-    // don't arm it for them — their own debounce handles persistence.
-    if (!isView) this.#autosave.schedule(id);
+    // don't arm it for them — their own debounce handles persistence. A pane
+    // frozen for AI review (#634) also suppresses autosave: the review is a
+    // transaction that writes once on commit, never on a debounce.
+    if (!isView && !this.#reviewLocks.has(id)) this.#autosave.schedule(id);
   }
 
   async refreshOpenEditorPaneBaselines(transformDraftMetadata?: (metadata: EntryMetadata) => EntryMetadata): Promise<void> {
@@ -284,6 +304,14 @@ class EditorPanesController {
   async close(id: string): Promise<void> {
     const pane = this.panes.find((candidate) => candidate.id === id);
     if (!pane) return;
+    // A pane frozen for AI review is a transaction, not a normal dirty buffer —
+    // route its close through the Save-changes guard (#634) before the generic
+    // dirty-flush below.
+    const committer = this.#reviewLocks.get(id);
+    if (committer) {
+      this.#closeReviewingPane(id, committer);
+      return;
+    }
     if (!pane.dirty) {
       this.tearDown(id);
       return;
@@ -337,8 +365,81 @@ class EditorPanesController {
     });
   }
 
+  // ---- AI-review freeze (#634 / ADR-0046 slice 3b) --------------------------
+  //
+  // A lore pane with an open brainstorm proposal is a frozen transaction: the
+  // diff's "current" side must not move under the review, so autosave is
+  // suppressed and the entry is read-only until the author commits or discards.
+  // The pane lifecycle owns the writes (the same reason snapshot flush is the
+  // host's job — this store owns the document lifecycle), so the review registers
+  // its commit hooks here rather than saving from inside the component.
+
+  /** Freeze the lore pane holding `entryId` for review. Flushes any pending
+   *  autosave first (frozen == disk, closing the #614 race), then locks.
+   *  Idempotent: re-registration while already frozen just refreshes the hooks —
+   *  the flush is a one-time entry gesture, not something to repeat each render. */
+  async beginReviewLock(entryId: string, committer: ReviewCommitter): Promise<void> {
+    const pane = this.panes.find((p) => p.document?.type === "lore" && p.document.id === entryId);
+    if (!pane) return;
+    const firstLock = !this.#reviewLocks.has(pane.id);
+    this.#reviewLocks.set(pane.id, committer);
+    if (firstLock && pane.dirty) {
+      this.#autosave.cancel(pane.id);
+      await this.run(() => this.saveEditorPane(pane.id));
+    }
+  }
+
+  /** Thaw the pane holding `entryId` — on commit, discard, or a superseded
+   *  proposal. Autosave resumes for its normal edits again. */
+  endReviewLock(entryId: string): void {
+    const pane = this.panes.find((p) => p.document?.type === "lore" && p.document.id === entryId);
+    if (pane) this.#reviewLocks.delete(pane.id);
+  }
+
+  /** The one explicit post that ends a review commit: cancel the (frozen) timer
+   *  and PUT the pane once, so the adopted body + fields land in a single write.
+   *  Called by the review controller after it has applied the patch to the buffer. */
+  async flushReviewCommit(entryId: string): Promise<void> {
+    const pane = this.panes.find((p) => p.document?.type === "lore" && p.document.id === entryId);
+    if (!pane) return;
+    this.#autosave.cancel(pane.id);
+    await this.run(() => this.saveEditorPane(pane.id));
+  }
+
+  // Closing a pane mid-review. With nothing adopted there is nothing to save, so
+  // discard silently; otherwise raise the three-way Save-changes guard. "Save"
+  // commits the accumulated patch (one PUT) then closes; "Don't save" drops the
+  // proposal and closes; Cancel/backdrop keeps the pane open.
+  #closeReviewingPane(id: string, committer: ReviewCommitter): void {
+    if (!committer.hasChanges()) {
+      committer.discard();
+      this.tearDown(id);
+      return;
+    }
+    const pane = this.panes.find((candidate) => candidate.id === id);
+    const title = pane?.draftTitle || pane?.scene?.title || "This entry";
+    confirmService.request({
+      title: "Save changes?",
+      message:
+        `You've adopted changes from the AI proposal for "${title}" but haven't saved them. ` +
+        "Save them to the entry, or discard the proposal?",
+      confirmLabel: "Save",
+      destructive: false,
+      secondaryLabel: "Don't save",
+      onSecondary: () => {
+        committer.discard();
+        this.tearDown(id);
+      },
+      onConfirm: async () => {
+        await committer.commit();
+        this.tearDown(id);
+      },
+    });
+  }
+
   tearDown(id: string): void {
     this.#autosave.cancel(id);
+    this.#reviewLocks.delete(id);
     this.#autosave.cancelSavedIndicator(id);
     const closing = this.panes.find((candidate) => candidate.id === id);
     // The detected set is per open document; drop it so the registry does not

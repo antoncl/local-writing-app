@@ -41,6 +41,7 @@
     effectiveFieldLabel,
     groupOriginLabel,
     inheritedFromLabel,
+    nestingLocalPrefix,
     nodeTypeDisplayName,
     slugifyFieldId,
     sourceBadgeLabel,
@@ -186,7 +187,13 @@
 
   function handleNameInput(value: string) {
     draftName = value;
-    if (!schemaTypeReadonly) draftTypeId = slugifyFieldId(value);
+    if (schemaTypeReadonly) return;
+    // Roll the id from the friendly name like a field id, then nest it under the
+    // parent's local key so a sub-type reads as `prompt:revise:scene` (#600). The
+    // parent qualifies it with the kind on save (SchemaPanes.saveSchemaType).
+    const leaf = slugifyFieldId(value);
+    const prefix = nestingLocalPrefix(metadataSchema, schemaTypeKind, schemaTypeParent);
+    draftTypeId = prefix && leaf ? `${prefix}:${leaf}` : leaf;
   }
 
   // --- Reusable-groups apply form (transient scoped state — #14 Step 4). The

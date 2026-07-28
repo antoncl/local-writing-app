@@ -85,6 +85,23 @@ export function kindRootEntryTypeId(
   return null;
 }
 
+// The local-key prefix a NEW sub-type nests its name-slug under (#600): the
+// parent's local path (the FQN minus the `kind:` prefix), or "" when there is no
+// parent or the parent is the kind's abstract root. So a top-level type stays
+// flat (`lore:faction`, never `lore:base:faction`) while a sub-type of a
+// concrete parent nests (`prompt:revise` → `prompt:revise:scene`). The colon is a
+// pure naming separator — this drives the id it *rolls to*, not a validation
+// invariant, so the author is free to reparent later without the id changing.
+export function nestingLocalPrefix(
+  schema: MetadataSchema | null,
+  kind: string,
+  parentFqn: string | null,
+): string {
+  if (!parentFqn || parentFqn === kindRootEntryTypeId(schema, kind)) return "";
+  const prefix = `${kind}:`;
+  return parentFqn.startsWith(prefix) ? parentFqn.slice(prefix.length) : "";
+}
+
 // --- entry_type-set field intersection (ADR-0031 §F) --------------------------
 // The field roster a view node's picker offers is the fields present on EVERY
 // member of its input set — a set-intersection over the concrete entry_types the

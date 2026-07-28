@@ -13,6 +13,7 @@ from app.models import (
     DeleteMetadataFieldRequest,
     EntryTypeDefinition,
     MetadataFieldDefinition,
+    MetadataSchema,
     MoveMetadataFieldRequest,
     PromptContextStrategy,
     PromptEntryTypeExtras,
@@ -170,6 +171,35 @@ class MetadataValidationTests(unittest.TestCase):
                 )
             )
         self.assertIn("must match", str(ctx.exception))
+
+    def test_backstop_validator_handles_nested_fqn(self) -> None:
+        # #600: the load-path backstop (`_validate_metadata_schema_definition`)
+        # is what validates seed data and hand-edited layer schemas — the path
+        # slice-2's nested seed types rely on. Assert it DIRECTLY (the upsert API
+        # only exercises it transitively): a well-formed nested key is clean, a
+        # malformed one is flagged, and a nested key whose first segment != kind
+        # is flagged.
+        clean = MetadataSchema(
+            entry_types={
+                "lore:base": EntryTypeDefinition(name="Base", kind="lore", abstract=True),
+                "lore:character:villain": EntryTypeDefinition(name="Villain", kind="lore", parent="lore:base"),
+            }
+        )
+        self.assertEqual(self.service._validate_metadata_schema_definition(clean), [])
+
+        malformed = MetadataSchema(
+            entry_types={"lore:bad:": EntryTypeDefinition(name="Bad", kind="lore")},
+        )
+        self.assertTrue(
+            any("must be kind-qualified" in e for e in self.service._validate_metadata_schema_definition(malformed))
+        )
+
+        wrong_kind = MetadataSchema(
+            entry_types={"prompt:revise:scene": EntryTypeDefinition(name="Revise Scene", kind="lore")},
+        )
+        self.assertTrue(
+            any("declares kind" in e for e in self.service._validate_metadata_schema_definition(wrong_kind))
+        )
 
     def test_builtin_entry_type_keeps_built_in_source_after_field_add(self) -> None:
         custom_field = MetadataFieldDefinition(name="Weather", type="text", options=[])

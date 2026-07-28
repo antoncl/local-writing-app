@@ -4,6 +4,7 @@ import {
   isMetadataValuePresent,
   kindEntryTypeFqns,
   kindEntryTypeOptions,
+  nestingLocalPrefix,
 } from "@/lib/utils/schemaTypeHelpers";
 
 // The entry_type roster shared by the view designer (ViewFlowNode pickers) and the
@@ -39,6 +40,36 @@ describe("kindEntryTypeOptions", () => {
   it("is empty for an absent schema or a kind with no types", () => {
     expect(kindEntryTypeOptions(null, "lore")).toEqual([]);
     expect(kindEntryTypeOptions(SCHEMA, "prompt")).toEqual([]);
+  });
+});
+
+describe("nestingLocalPrefix (#600 — roll a sub-type id nested under its parent)", () => {
+  const PROMPT_SCHEMA = {
+    version: 1,
+    entry_types: {
+      "prompt:base": { name: "Prompt", kind: "prompt", abstract: true },
+      "prompt:revise": { name: "Revise", kind: "prompt", parent: "prompt:base", abstract: true },
+      "prompt:revise:scene": { name: "Revise Scene", kind: "prompt", parent: "prompt:revise" },
+    },
+    fields: {},
+  } as unknown as MetadataSchema;
+
+  it("nests under a concrete parent's local key", () => {
+    expect(nestingLocalPrefix(PROMPT_SCHEMA, "prompt", "prompt:revise")).toBe("revise");
+  });
+
+  it("keeps the parent's full nested local path for a grandchild", () => {
+    expect(nestingLocalPrefix(PROMPT_SCHEMA, "prompt", "prompt:revise:scene")).toBe("revise:scene");
+  });
+
+  it("stays flat under the kind's abstract root or no parent", () => {
+    expect(nestingLocalPrefix(PROMPT_SCHEMA, "prompt", "prompt:base")).toBe("");
+    expect(nestingLocalPrefix(PROMPT_SCHEMA, "prompt", null)).toBe("");
+    expect(nestingLocalPrefix(PROMPT_SCHEMA, "prompt", "")).toBe("");
+  });
+
+  it("does not nest under a parent of a different kind", () => {
+    expect(nestingLocalPrefix(PROMPT_SCHEMA, "prompt", "lore:character")).toBe("");
   });
 });
 

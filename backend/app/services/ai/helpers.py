@@ -945,10 +945,13 @@ def _format_lore_block(
             except Exception:
                 overrides = {}
         entry_type = _attr_or_item(entry, "entry_type") or "lore:base"
-        # Tag from the bare local key, not the kind-qualified FQN — a
-        # `<character>` tag reads cleaner to the model than `<lore_character>`,
-        # and the `:` isn't XML-tag-legal (mirrors context_presets.py).
-        tag = _xml_safe_tag(str(entry_type).rsplit(":", 1)[-1])
+        # Tag from the bare local key (the whole key after the kind), not the
+        # kind-qualified FQN — a `<character>` tag reads cleaner to the model than
+        # `<lore_character>`. `split(":", 1)[-1]` strips only the kind, so a nested
+        # key keeps its remaining segments (`lore:character:villain` →
+        # `character:villain` → `character_villain`); the `:` isn't XML-tag-legal,
+        # so `_xml_safe_tag` maps it to `_` (mirrors context_presets.py).
+        tag = _xml_safe_tag(str(entry_type).split(":", 1)[-1])
         title = str(
             overrides["title"]
             if "title" in overrides

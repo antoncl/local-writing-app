@@ -10,6 +10,7 @@
   import { formatCostEur } from "@/lib/utils/money";
   import {
     canApplyPlotSuggestionBeatFields,
+    canApplyPlotSuggestionBeatQuestion,
     canApplyPlotSuggestionCardSynopsis,
     canApplyPlotSuggestionClaimNote,
     canCreatePlotSuggestionCard,
@@ -32,6 +33,7 @@
     scrollEl?: HTMLDivElement | null;
     onApplyEvidence?: (suggestion: PlotSuggestion) => void | Promise<void>;
     onApplyNote?: (suggestion: PlotSuggestion) => void | Promise<void>;
+    onApplyBeatQuestion?: (suggestion: PlotSuggestion) => void | Promise<void>;
     onCreateBadge?: (suggestion: PlotSuggestion) => void | Promise<void>;
     onCreateCard?: (suggestion: PlotSuggestion) => void | Promise<void>;
     onApplyBeatFields?: (suggestion: PlotSuggestion) => void | Promise<void>;
@@ -44,6 +46,7 @@
     scrollEl = $bindable(null),
     onApplyEvidence,
     onApplyNote,
+    onApplyBeatQuestion,
     onCreateBadge,
     onCreateCard,
     onApplyBeatFields,
@@ -66,7 +69,7 @@
     suggestion: PlotSuggestion,
     messageIndex: number,
     index: number,
-    action: "proposed_change" | "evidence_to_add" | "beat_fields" | "question" | "apply_evidence" | "apply_note" | "create_badge" | "create_card" | "apply_beat_fields" | "apply_card_synopsis",
+    action: "proposed_change" | "evidence_to_add" | "beat_fields" | "question" | "apply_evidence" | "apply_note" | "apply_beat_question" | "create_badge" | "create_card" | "apply_beat_fields" | "apply_card_synopsis",
   ): string {
     return `${messageIndex}-${suggestion.kind}-${suggestion.target_card_id}-${suggestion.target_claim_id}-${suggestion.template_instance_id}-${suggestion.plot_point_id}-${index}-${action}`;
   }
@@ -131,6 +134,11 @@
   async function applyNoteSuggestion(suggestion: PlotSuggestion, key: string): Promise<void> {
     if (!onApplyNote || !canApplyPlotSuggestionClaimNote(suggestion)) return;
     await applySuggestion(suggestion, key, onApplyNote);
+  }
+
+  async function applyBeatQuestionSuggestion(suggestion: PlotSuggestion, key: string): Promise<void> {
+    if (!onApplyBeatQuestion || !canApplyPlotSuggestionBeatQuestion(suggestion)) return;
+    await applySuggestion(suggestion, key, onApplyBeatQuestion);
   }
 
   async function createBadgeSuggestion(suggestion: PlotSuggestion, key: string): Promise<void> {
@@ -252,6 +260,21 @@
                         <i class="ti ti-copy" aria-hidden="true"></i>
                         {copiedKey === questionKey ? "Copied" : "Copy question"}
                       </button>
+                    {/if}
+                    {#if onApplyBeatQuestion && canApplyPlotSuggestionBeatQuestion(suggestion)}
+                      {@const applyQuestionKey = suggestionKey(suggestion, i, j, "apply_beat_question")}
+                      <button
+                        type="button"
+                        title="Add this question to the target story beat"
+                        disabled={Boolean(applyingKey)}
+                        onclick={() => void applyBeatQuestionSuggestion(suggestion, applyQuestionKey)}
+                      >
+                        <i class="ti ti-check" aria-hidden="true"></i>
+                        {applyingKey === applyQuestionKey ? "Adding" : appliedKey === applyQuestionKey ? "Added" : "Add question"}
+                      </button>
+                      {#if applyErrorKey === applyQuestionKey}
+                        <small class="cbv-plot-suggestion-action-error">Could not add question.</small>
+                      {/if}
                     {/if}
                     {#if suggestion.proposed_change && suggestion.kind !== "question"}
                       {@const changeKey = suggestionKey(suggestion, i, j, "proposed_change")}

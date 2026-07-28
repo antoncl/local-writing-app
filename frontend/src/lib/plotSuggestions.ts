@@ -211,6 +211,15 @@ export function canApplyPlotSuggestionClaimNote(suggestion: PlotSuggestion): boo
   );
 }
 
+export function canApplyPlotSuggestionBeatQuestion(suggestion: PlotSuggestion): boolean {
+  return (
+    suggestion.kind === "question" &&
+    Boolean(suggestion.template_instance_id.trim()) &&
+    Boolean(suggestion.plot_point_id.trim()) &&
+    Boolean(suggestion.proposed_change.trim() || suggestion.open_questions.length > 0)
+  );
+}
+
 export function canCreatePlotSuggestionCard(suggestion: PlotSuggestion): boolean {
   const hasTemplateInstance = Boolean(suggestion.template_instance_id.trim());
   const hasPlotPoint = Boolean(suggestion.plot_point_id.trim());

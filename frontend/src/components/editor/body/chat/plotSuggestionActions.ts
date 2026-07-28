@@ -22,6 +22,7 @@ export type PlotSuggestionActionApi = {
 export type PlotSuggestionActions = {
   applyPlotSuggestionEvidence: (suggestion: PlotSuggestion) => Promise<void>;
   applyPlotSuggestionNote: (suggestion: PlotSuggestion) => Promise<void>;
+  applyPlotSuggestionBeatQuestion: (suggestion: PlotSuggestion) => Promise<void>;
   createPlotSuggestionBadge: (suggestion: PlotSuggestion) => Promise<void>;
   createPlotSuggestionCard: (suggestion: PlotSuggestion) => Promise<void>;
   applyPlotSuggestionBeatFields: (suggestion: PlotSuggestion) => Promise<void>;
@@ -319,6 +320,71 @@ export function createPlotSuggestionActions(options: CreatePlotSuggestionActions
     await options.onPlotSaved?.(saved);
   }
 
+  async function applyPlotSuggestionBeatQuestion(suggestion: PlotSuggestion): Promise<void> {
+    const templateInstanceId = suggestion.template_instance_id.trim();
+    const plotPointId = suggestion.plot_point_id.trim();
+    const questions = suggestionQuestions(suggestion);
+    if (!templateInstanceId || !plotPointId || questions.length === 0) {
+      fail("This suggestion does not identify a plot beat question to add.");
+    }
+
+    const instance = await loadPlotNode(templateInstanceId, "Could not load plot template instance.");
+    const templateInstance = instance?.template_instance;
+    if (!instance || !templateInstance) {
+      fail("Could not load the target plot template instance.");
+    }
+
+    let matched = false;
+    let changed = false;
+    const nextPoints = (templateInstance.plot_points ?? []).map((point) => {
+      if (point.plot_point_id !== plotPointId) return point;
+      matched = true;
+      const nextQuestions = appendQuestions(point.open_questions ?? [], questions);
+      if (sameQuestions(nextQuestions, point.open_questions ?? [])) return point;
+      changed = true;
+      return { ...point, open_questions: nextQuestions, metadata: point.metadata ?? {} };
+    });
+    const nextPoint = nextPoints.find((point) => point.plot_point_id === plotPointId);
+    if (!matched || !nextPoint) {
+      fail("Could not find that plot beat on the target template instance.");
+    }
+    if (!changed) {
+      options.setChatError(null);
+      return;
+    }
+
+    const saved = await options.api.savePlotNode(instance.id, {
+      title: instance.title,
+      entry_type: instance.entry_type,
+      body: instance.body ?? "",
+      metadata: instance.metadata ?? {},
+      template: instance.template ?? null,
+      template_instance: {
+        ...templateInstance,
+        plot_points: nextPoints,
+        point_notes: {
+          ...(templateInstance.point_notes ?? {}),
+          [plotPointId]: {
+            ...(templateInstance.point_notes?.[plotPointId] ?? {}),
+            local_label: nextPoint.local_label || nextPoint.title || "",
+            notes: nextPoint.notes ?? "",
+            author_intent: nextPoint.author_intent ?? "",
+            expected_role: nextPoint.expected_role ?? "",
+            open_questions: nextPoint.open_questions ?? [],
+            status: nextPoint.status ?? "unplanned",
+            metadata: nextPoint.metadata ?? {},
+          },
+        },
+        metadata: templateInstance.metadata ?? {},
+      },
+      board: instance.board ?? null,
+      layout: instance.layout ?? null,
+      base_revision: instance.revision,
+    });
+    options.setChatError(null);
+    await options.onPlotSaved?.(saved);
+  }
+
   function fail(message: string): never {
     options.setChatError(message);
     throw new Error(message);
@@ -327,6 +393,7 @@ export function createPlotSuggestionActions(options: CreatePlotSuggestionActions
   return {
     applyPlotSuggestionEvidence: (suggestion) => appendPlotSuggestionClaimField(suggestion, "evidence", suggestion.evidence_to_add),
     applyPlotSuggestionNote: (suggestion) => appendPlotSuggestionClaimField(suggestion, "ai_notes", suggestion.proposed_change),
+    applyPlotSuggestionBeatQuestion,
     createPlotSuggestionBadge,
     createPlotSuggestionCard,
     applyPlotSuggestionBeatFields,
@@ -355,6 +422,32 @@ function isPlotPointNoteStatus(value: string): value is PlotPointNoteStatus {
     default:
       return false;
   }
+}
+
+function suggestionQuestions(suggestion: PlotSuggestion): string[] {
+  const questions = [...suggestion.open_questions];
+  if (suggestion.proposed_change.trim()) questions.unshift(suggestion.proposed_change.trim());
+  return questions.map((question) => question.trim()).filter(Boolean);
+}
+
+function appendQuestions(existing: string[], additions: string[]): string[] {
+  const seen = new Set(existing.map(normalizeComparableQuestion));
+  const next = [...existing];
+  for (const addition of additions) {
+    const comparable = normalizeComparableQuestion(addition);
+    if (!comparable || seen.has(comparable)) continue;
+    seen.add(comparable);
+    next.push(addition);
+  }
+  return next;
+}
+
+function sameQuestions(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function normalizeComparableQuestion(value: string): string {
+  return value.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
 function decodeContextPickRefs(raw: string | undefined): NodePickerRef[] {

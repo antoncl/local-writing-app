@@ -369,6 +369,67 @@ describe("createPlotSuggestionActions", () => {
     expect(env.onPlotSaved).toHaveBeenCalledTimes(1);
   });
 
+  it("adds question suggestions to a target plot beat without replacing existing questions", async () => {
+    const env = harness({
+      plot_main: makePlotNode("plot_main", {
+        template_instance: {
+          template_id: "three_act",
+          plot_points: [
+            {
+              plot_point_id: "first_turn",
+              title: "First turn",
+              function_claim: "Makes the old path unavailable.",
+              notes: "Mara burns the bridge back to the archive.",
+              author_intent: "",
+              expected_role: "",
+              open_questions: ["Who witnesses the break?"],
+              status: "planned",
+              metadata: {},
+            },
+          ],
+          point_notes: {
+            first_turn: {
+              notes: "Mara burns the bridge back to the archive.",
+              open_questions: ["Who witnesses the break?"],
+            },
+          },
+          metadata: {},
+        },
+      }),
+    });
+
+    await env.actions.applyPlotSuggestionBeatQuestion({
+      ...baseSuggestion,
+      kind: "question",
+      target_card_id: "",
+      proposed_change: "What does it cost immediately?",
+      open_questions: ["Who witnesses the break?", "What can Mara no longer undo?"],
+    });
+
+    const point = env.nodes.plot_main.template_instance?.plot_points?.[0];
+    expect(point).toEqual(
+      expect.objectContaining({
+        notes: "Mara burns the bridge back to the archive.",
+        open_questions: [
+          "Who witnesses the break?",
+          "What does it cost immediately?",
+          "What can Mara no longer undo?",
+        ],
+      }),
+    );
+    expect(env.nodes.plot_main.template_instance?.point_notes?.first_turn).toEqual(
+      expect.objectContaining({
+        notes: "Mara burns the bridge back to the archive.",
+        open_questions: [
+          "Who witnesses the break?",
+          "What does it cost immediately?",
+          "What can Mara no longer undo?",
+        ],
+      }),
+    );
+    expect(env.onPlotSaved).toHaveBeenCalledTimes(1);
+  });
+
   it("refuses beat field updates when the target plot beat is missing", async () => {
     const env = harness({
       plot_main: makePlotNode("plot_main", {

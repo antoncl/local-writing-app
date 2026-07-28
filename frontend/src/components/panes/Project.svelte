@@ -46,10 +46,10 @@
   export let aiPolicy: AIPolicy | "inherit";
   export let projectCostExpanded: boolean;
 
-  // Actions — App owns the side effects (API calls). Validate and the
-  // pane-openers moved out (#629): Validate to the pane header, Chats/Prompts/
-  // Mutations to the app menu, Health Check to the Settings AI tab.
-  export let onImportScenes: (sceneIds: string[]) => void;
+  // Actions — App owns the side effects (API calls). Several moved out: Validate
+  // to the pane header, Chats/Prompts/Mutations to the app menu, Health Check to
+  // the Settings AI tab (#629); loose-scene import to its own "Import documents…"
+  // surface (#635). This pane keeps only the AI-policy apply and TODO repair.
   export let onSaveAISettings: () => void;
   export let onRepair: () => void;
   // Opening a child is a resolution-scope change, i.e. a unit boundary
@@ -229,30 +229,12 @@
         <p>{validationWarning}</p>
       {/each}
     {/if}
-    {#if validation.errors.length === 0 && validation.warnings.length === 0 && validation.loose_scenes.length === 0}
+    {#if validation.errors.length === 0 && validation.warnings.length === 0}
       <p>No structure, scene, or TODO synchronization issues found.</p>
     {/if}
     {#if validation.errors.length > 0 || validation.warnings.length > 0}
       <div class="validation-actions">
         <button type="button" on:click={onRepair}>Repair TODO Links</button>
-      </div>
-    {/if}
-    {#if validation.loose_scenes.length > 0}
-      <strong>Loose Scenes</strong>
-      <p>
-        {validation.loose_scenes.length === 1
-          ? "1 scene file is in the project but not in the manuscript."
-          : `${validation.loose_scenes.length} scene files are in the project but not in the manuscript.`}
-      </p>
-      <ul class="loose-scenes">
-        {#each validation.loose_scenes as loose (loose.id)}
-          <li><span class="loose-title">{loose.title}</span> <span class="loose-file">{loose.filename}</span></li>
-        {/each}
-      </ul>
-      <div class="validation-actions">
-        <button type="button" on:click={() => onImportScenes(validation.loose_scenes.map((loose) => loose.id))}>
-          Add to Manuscript
-        </button>
       </div>
     {/if}
   </section>
@@ -447,27 +429,5 @@
     display: flex;
     justify-content: flex-end;
     margin-top: 6px;
-  }
-
-  .loose-scenes {
-    margin: 0;
-    padding-left: 18px;
-    display: grid;
-    gap: 2px;
-  }
-
-  .loose-scenes li {
-    color: var(--text-2);
-    font-size: var(--fs-sm);
-    line-height: 1.35;
-  }
-
-  .loose-title {
-    color: var(--text);
-  }
-
-  .loose-file {
-    color: var(--text-3);
-    font-family: var(--mono);
   }
 </style>

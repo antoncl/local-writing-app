@@ -18,6 +18,7 @@
   import { isLeafNode } from "@/lib/utils/treeHelpers";
   import CreateProjectWizard from "@/components/dialogs/CreateProjectWizard.svelte";
   import MachineSettingsDialog from "@/components/dialogs/MachineSettingsDialog.svelte";
+  import ImportDocumentsModal from "@/components/dialogs/ImportDocumentsModal.svelte";
   import ConfirmModal from "@/components/dialogs/ConfirmModal.svelte";
   import PlainTextEditor from "@/components/widgets/PlainTextEditor.svelte";
   import PromptInputField from "@/components/widgets/PromptInputField.svelte";
@@ -92,6 +93,7 @@
   import type {
     AssistantEntrySummary,
     Scene,
+    LooseScene,
     NodePickerConfig,
     ProjectInfo,
     ProjectValidation,
@@ -131,6 +133,11 @@
   let appState = $state<AppState>({ name: "needsProject" });
   let tagsManagerOpen = $state(false);
   let assistantTagManagerOpen = $state(false);
+  // "Import documents" (#635) — the loose-scene adoption surface, opened from the
+  // app menu. Its list comes from its own read, not the validation report.
+  let importDocsOpen = $state(false);
+  let looseScenes = $state<LooseScene[]>([]);
+  let importBusy = $state(false);
   // The Lore pane owns its own add-menu (a ViewNodeList feature, #112 4c-iv); this
   // ref lets the pane-header "+ Entry" button drive it.
   let loreRef = $state<{ toggleAddMenu: (event?: MouseEvent) => void; isAddMenuOpen: () => boolean }>();
@@ -550,19 +557,28 @@
     });
   }
 
+  async function openImportDocs() {
+    await run(async () => {
+      looseScenes = await api.getLooseScenes();
+      importDocsOpen = true;
+    });
+  }
+
   async function importLooseScenes(sceneIds: string[]) {
     await run(async () => {
-      await api.importLooseScenes(sceneIds);
-      await refreshStructure();
-      // Re-validate so the panel's loose-scene offer clears (and re-surfaces any
-      // that couldn't be imported).
-      const result = await api.validateProject();
-      setValidation(result);
-      // Count what actually landed: a requested id no longer loose was imported.
-      // A malformed file the backend skipped stays loose, so it isn't counted.
-      const stillLoose = new Set(result.loose_scenes.map((loose) => loose.id));
-      const added = sceneIds.filter((id) => !stillLoose.has(id)).length;
-      status = added === 1 ? "Added 1 scene to the manuscript" : `Added ${added} scenes to the manuscript`;
+      importBusy = true;
+      try {
+        await api.importLooseScenes(sceneIds);
+        await refreshStructure();
+        // Refresh the offer from its own read (#635): imported files drop off the
+        // list; a malformed file the backend skipped stays, so it's still shown.
+        looseScenes = await api.getLooseScenes();
+        const stillLoose = new Set(looseScenes.map((loose) => loose.id));
+        const added = sceneIds.filter((id) => !stillLoose.has(id)).length;
+        status = added === 1 ? "Added 1 document to the manuscript" : `Added ${added} documents to the manuscript`;
+      } finally {
+        importBusy = false;
+      }
     });
   }
 
@@ -654,6 +670,7 @@
   onOpenChats={openChatsPane}
   onOpenPrompts={openPromptsPane}
   onOpenMutations={openMutationsPane}
+  onOpenImport={openImportDocs}
   onOpenInheritance={() => workspaceLayout.ensureVisible("project")}
   canDeclareInheritance={canDeclareInheritance(project?.ancestors)}
   activePreset={workspaceLayout.activePreset}
@@ -724,7 +741,6 @@
         inheritSaving={projectSession.declarationSaving}
         bind:aiPolicy={aiSettings.policy}
         bind:projectCostExpanded
-        onImportScenes={importLooseScenes}
         onSaveAISettings={() => aiSettings.save()}
         onRepair={repairProject}
       />
@@ -1037,6 +1053,14 @@
           ? "This project's AI access is off, so there is nothing to reach."
           : null,
     }}
+  />
+
+  <ImportDocumentsModal
+    open={importDocsOpen}
+    {looseScenes}
+    busy={importBusy}
+    onClose={() => (importDocsOpen = false)}
+    onImport={importLooseScenes}
   />
 
   {#if tagsManagerOpen}

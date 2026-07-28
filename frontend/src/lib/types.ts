@@ -825,7 +825,7 @@ export type EffectiveStateResponse = {
 };
 
 // A scene file on disk that no manuscript node references — a pending import
-// offer (#4), not an error.
+// offer (#4), not an error. Its own read now (#635), not a validation field.
 export type LooseScene = { id: string; title: string; filename: string };
 
 export type ProjectValidation = {
@@ -833,7 +833,6 @@ export type ProjectValidation = {
   warnings: string[];
   errors: string[];
   migrations_applied: string[];
-  loose_scenes: LooseScene[];
 };
 
 export type AIPolicy = "off" | "local-only" | "cloud-allowed";

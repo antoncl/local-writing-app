@@ -1,13 +1,14 @@
 """Markdown import (#4).
 
-A user drops `.md` files into a project's `scenes/` folder and clicks Verify;
-`validate_project` surfaces them as *loose scenes*, and `import_loose_scenes`
-appends them at the manuscript root, normalising a raw front-matter-less file
-into a canonical scene along the way.
+A user drops `.md` files into a project's `scenes/` folder and opens Import
+documents; `list_loose_scenes` surfaces them, and `import_loose_scenes` appends
+them at the manuscript root, normalising a raw front-matter-less file into a
+canonical scene along the way. Loose scenes are their own read (#635), no longer
+a field on the validation report.
 
 These are pinning tests for the invariants the feature rests on:
-- a file dropped while the app stayed open is *seen* (validate scans disk truth,
-  not the warm node-index memo);
+- a file dropped while the app stayed open is *seen* (the loose-scenes read
+  scans disk truth, not the warm node-index memo);
 - a raw file gains a canonical id / heading-derived title / default entry type;
 - a file that already carries valid front matter keeps its id and title;
 - selective import touches only the requested files.
@@ -60,19 +61,20 @@ class MarkdownImportTestCase(unittest.TestCase):
                 return child
         raise AssertionError(f"no root child titled {title!r} in {self._root_titles()}")
 
-    # ----- validate: discovery ----------------------------------------------
+    # ----- discovery ---------------------------------------------------------
 
     def test_dropped_file_surfaces_as_loose_scene(self) -> None:
         self._drop("chapter-one.md", "# Chapter One\n\nThe tide came in.\n")
-        result = self.service.validate_project()
-        self.assertTrue(result.valid, result.errors)
-        self.assertEqual([s.id for s in result.loose_scenes], ["chapter-one"])
-        self.assertEqual(result.loose_scenes[0].filename, "chapter-one.md")
+        # A loose scene is NOT an integrity problem — validate stays clean.
+        self.assertTrue(self.service.validate_project().valid)
+        loose = self.service.list_loose_scenes()
+        self.assertEqual([s.id for s in loose], ["chapter-one"])
+        self.assertEqual(loose[0].filename, "chapter-one.md")
 
     def test_a_registered_scene_is_not_loose(self) -> None:
         response = self.client.post("/api/scenes", json={"title": "Opening"})
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(self.service.validate_project().loose_scenes, [])
+        self.assertEqual(self.service.list_loose_scenes(), [])
 
     # ----- import: normalise + register --------------------------------------
 
@@ -93,7 +95,7 @@ class MarkdownImportTestCase(unittest.TestCase):
         self.assertIn("They met at dawn.", body)
 
         # Nothing loose remains after import.
-        self.assertEqual(self.service.validate_project().loose_scenes, [])
+        self.assertEqual(self.service.list_loose_scenes(), [])
 
     def test_import_titles_a_headingless_file_from_its_filename(self) -> None:
         self._drop("prologue.md", "Just prose, no heading.\n")
@@ -124,7 +126,7 @@ class MarkdownImportTestCase(unittest.TestCase):
         titles = self._root_titles()
         self.assertIn("A", titles)
         self.assertNotIn("B", titles)
-        self.assertEqual([s.id for s in self.service.validate_project().loose_scenes], ["b"])
+        self.assertEqual([s.id for s in self.service.list_loose_scenes()], ["b"])
 
     def test_import_skips_a_malformed_file_and_lands_the_rest(self) -> None:
         # A single unimportable file must not abort the batch — the good files in
@@ -134,7 +136,7 @@ class MarkdownImportTestCase(unittest.TestCase):
         self.service.import_loose_scenes()
 
         self.assertIn("Good One", self._root_titles())
-        loose_files = [s.filename for s in self.service.validate_project().loose_scenes]
+        loose_files = [s.filename for s in self.service.list_loose_scenes()]
         self.assertIn("bad.md", loose_files)
         self.assertNotIn("good.md", loose_files)
         # The skipped file was not rewritten.
@@ -144,6 +146,14 @@ class MarkdownImportTestCase(unittest.TestCase):
         )
 
     # ----- HTTP surface ------------------------------------------------------
+
+    def test_loose_scenes_read_endpoint_lists_dropped_files(self) -> None:
+        self._drop("via-read.md", "# Read Scene\n\nseen by the read.\n")
+        response = self.client.get("/api/structure/loose-scenes")
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual([s["id"] for s in payload], ["via-read"])
+        self.assertEqual(payload[0]["filename"], "via-read.md")
 
     def test_import_endpoint_appends_at_root(self) -> None:
         self._drop("via-route.md", "# Http Scene\n\nvia route.\n")

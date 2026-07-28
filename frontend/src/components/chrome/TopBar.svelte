@@ -52,6 +52,8 @@
   export let onOpenChats: () => void = () => {};
   export let onOpenPrompts: () => void = () => {};
   export let onOpenMutations: () => void = () => {};
+  // Loose-scene import — its own home now (#635), a rare project action.
+  export let onOpenImport: () => void = () => {};
   export let projectOpen: boolean = false;
   // Theme toggle. Current preference + a callback that cycles to the
   // next one. The button shows an icon for the current state and a
@@ -274,6 +276,7 @@
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} on:click={() => runAction(onOpenChats)}>Chats</button>
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} on:click={() => runAction(onOpenPrompts)}>Prompts</button>
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} on:click={() => runAction(onOpenMutations)}>Mutations</button>
+        <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} on:click={() => runAction(onOpenImport)}>Import documents…</button>
 
         <div class="switcher-divider" role="separator"></div>
         <div class="switcher-section-label">Layout</div>

@@ -651,6 +651,9 @@
   onOpenSettings={() => void projectSession.openMachineSettings()}
   onOpenDetailTypes={() => schemaPanes?.openDetailTypes()}
   onOpenProjectNode={() => void editorPanes.openProjectNode()}
+  onOpenChats={openChatsPane}
+  onOpenPrompts={openPromptsPane}
+  onOpenMutations={openMutationsPane}
   onOpenInheritance={() => workspaceLayout.ensureVisible("project")}
   canDeclareInheritance={canDeclareInheritance(project?.ancestors)}
   activePreset={workspaceLayout.activePreset}
@@ -691,7 +694,7 @@
 
   <RegionRegistrar
     regions={{
-      project: { title: "Project", body: projectBody },
+      project: { title: "Project", body: projectBody, actions: projectActions },
       outline: { title: "Draft", body: outlineBody, view: { kind: "scene", switcher: true } },
       lore: { title: "Lore", body: loreBody, actions: loreActions, view: { kind: "lore", switcher: true } },
       research: { title: "Research", body: researchBody, view: { kind: "research" } },
@@ -712,8 +715,6 @@
         {projectPath}
         {projectCostTotal}
         {projectCostBreakdown}
-        aiHealthResult={aiSettings.healthResult}
-        aiHealthChecking={aiSettings.healthChecking}
         {validation}
         projectChildren={project?.children ?? []}
         ancestors={project?.ancestors ?? []}
@@ -722,18 +723,27 @@
           void projectSession.setDeclaration(toggledDeclaration(project?.ancestors, path))}
         inheritSaving={projectSession.declarationSaving}
         bind:aiPolicy={aiSettings.policy}
-        effectiveAiPolicy={project?.ai_policy ?? "off"}
         bind:projectCostExpanded
-        onValidate={validateProject}
         onImportScenes={importLooseScenes}
-        onOpenChats={openChatsPane}
         onSaveAISettings={() => aiSettings.save()}
-        onHealthCheck={() => aiSettings.runHealthCheck()}
-        onOpenPrompts={openPromptsPane}
-        onOpenMutations={openMutationsPane}
         onRepair={repairProject}
       />
     </div>
+  {/snippet}
+
+  {#snippet projectActions()}
+    <!-- Project maintenance verbs, re-homed from the pane body to the header
+         (#629). The result renders in the dashboard body via the `validation`
+         prop, so trigger and result stay together. -->
+    <button
+      class="pin-button"
+      type="button"
+      title="Check this project's files for problems"
+      aria-label="Validate project"
+      disabled={!isProjectOpen}
+      onmousedown={(event) => event.stopPropagation()}
+      onclick={() => void validateProject()}
+    >Validate</button>
   {/snippet}
 
   {#snippet outlineBody(viewSpec: ViewSpec | undefined)}
@@ -1017,6 +1027,16 @@
     bind:draft={projectSession.machineSettingsDraft}
     onCancel={() => projectSession.cancelMachineSettings()}
     onSave={() => void projectSession.saveMachineSettings()}
+    health={{
+      onCheck: () => void aiSettings.runHealthCheck(),
+      result: aiSettings.healthResult,
+      checking: aiSettings.healthChecking,
+      disabledReason: !isProjectOpen
+        ? "Open a project to test the AI connection."
+        : (project?.ai_policy ?? "off") === "off"
+          ? "This project's AI access is off, so there is nothing to reach."
+          : null,
+    }}
   />
 
   {#if tagsManagerOpen}

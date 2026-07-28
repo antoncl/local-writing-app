@@ -1,6 +1,5 @@
 <script lang="ts">
   import type {
-    AIHealthResponse,
     AIPolicy,
     AncestorCandidate,
     ProjectChild,
@@ -16,8 +15,6 @@
   export let projectPath: string;
   export let projectCostTotal: number | null;
   export let projectCostBreakdown: { id: string; title: string; cost_usd: number }[];
-  export let aiHealthResult: AIHealthResponse | null;
-  export let aiHealthChecking: boolean;
   export let validation: ProjectValidation | null;
   // Project folders directly inside this one (#310). Direct children only —
   // a level offers the places you can open *from here*, not the whole shelf.
@@ -39,12 +36,6 @@
 
   $: inheritRows = declarationRows(ancestors);
 
-  // The access the Health Check would actually exercise: the draft when it
-  // names a real policy, the resolved value when the draft defers ("inherit").
-  // Gating on the draft alone would enable a ping for an inherited-`off`
-  // project, whose effective access is off (#471).
-  $: healthCheckPolicy = aiPolicy === "inherit" ? effectiveAiPolicy : aiPolicy;
-
   // Two-way bound: App is the source of truth. aiPolicy is set on project load
   // and read back when saving AI settings; projectCostExpanded is bound because
   // App resets it on project switch. Both stay there and bind down.
@@ -53,21 +44,13 @@
   // cannot (#471): the project states no policy of its own and defers to its
   // parent. Saving it clears the key; it is never a resolved value.
   export let aiPolicy: AIPolicy | "inherit";
-  // The policy actually in force — the chain-resolved value (#312). When the
-  // radio is on "inherit" the draft is not a usable policy, so the effective
-  // one is passed in for the one place that needs it: the Health Check gate,
-  // which pings whatever access is really resolved, not the draft.
-  export let effectiveAiPolicy: AIPolicy;
   export let projectCostExpanded: boolean;
 
-  // Actions — App owns the side effects (API calls, opening other panes).
-  export let onValidate: () => void;
+  // Actions — App owns the side effects (API calls). Validate and the
+  // pane-openers moved out (#629): Validate to the pane header, Chats/Prompts/
+  // Mutations to the app menu, Health Check to the Settings AI tab.
   export let onImportScenes: (sceneIds: string[]) => void;
-  export let onOpenChats: () => void;
   export let onSaveAISettings: () => void;
-  export let onHealthCheck: () => void;
-  export let onOpenPrompts: () => void;
-  export let onOpenMutations: () => void;
   export let onRepair: () => void;
   // Opening a child is a resolution-scope change, i.e. a unit boundary
   // (ADR-0045) — App routes it through the same open path as the switcher
@@ -107,9 +90,6 @@
         </ul>
       {/if}
     {/if}
-    <div class="button-row">
-      <button type="button" on:click={onValidate}>Validate</button>
-    </div>
   </div>
 
   <!--
@@ -122,10 +102,18 @@
     Placed above "Contains" so the pane reads the way the chain does: what this
     project is built on, then what is built inside it.
   -->
-  {#if inheritRows.length > 0}
-    <section class="project-inherits" aria-label="Inherits from">
-      <h3>Inherits From</h3>
-      <NodeList isEmpty={false}>
+  <!--
+    Inheritance block (#629): the ancestor declarations and the AI access
+    policy sit together — both are per-project, inherit-flavoured settings (the
+    policy's headline option is literally "Inherit"). Rendered for any open
+    project; the declaration list only when the walk found ancestors to choose.
+  -->
+  <section class="project-inheritance" aria-label="Inheritance and AI access">
+    <h3>Inheritance</h3>
+    {#if inheritRows.length > 0}
+      <div class="inherit-block" role="group" aria-labelledby="project-inherits-label">
+        <span class="field-label" id="project-inherits-label">Inherits from</span>
+        <NodeList isEmpty={false}>
         {#each inheritRows as row (row.path)}
           <!--
             `clickable={false}`: the checkbox IS the gesture, so the title must
@@ -168,9 +156,23 @@
             {/snippet}
           </NodeRow>
         {/each}
-      </NodeList>
-    </section>
-  {/if}
+        </NodeList>
+      </div>
+    {/if}
+
+    <fieldset class="ai-policy">
+      <legend>AI access</legend>
+      <label title="Set no policy of your own — inherit it from an ancestor project, or default to Off (#471)">
+        <input type="radio" bind:group={aiPolicy} value="inherit" /> Inherit
+      </label>
+      <label><input type="radio" bind:group={aiPolicy} value="off" /> Off</label>
+      <label><input type="radio" bind:group={aiPolicy} value="local-only" /> Local only</label>
+      <label><input type="radio" bind:group={aiPolicy} value="cloud-allowed" /> Cloud allowed</label>
+    </fieldset>
+    <div class="button-row">
+      <button type="button" on:click={onSaveAISettings}>Save AI Settings</button>
+    </div>
+  </section>
 
   <!--
     The child roster (#310). Rendered only when there is something in it: a
@@ -206,44 +208,6 @@
   {/if}
 {/if}
 
-<section class="ai-settings" aria-label="AI settings" class:disabled-section={!isProjectOpen}>
-  <h3>AI</h3>
-  {#if isProjectOpen}
-  <div class="button-row">
-    <button type="button" on:click={onOpenChats}>Chats…</button>
-  </div>
-  {/if}
-  {#if isProjectOpen}
-    <fieldset class="ai-policy">
-      <legend>AI access</legend>
-      <label title="Set no policy of your own — inherit it from an ancestor project, or default to Off (#471)">
-        <input type="radio" bind:group={aiPolicy} value="inherit" /> Inherit
-      </label>
-      <label><input type="radio" bind:group={aiPolicy} value="off" /> Off</label>
-      <label><input type="radio" bind:group={aiPolicy} value="local-only" /> Local only</label>
-      <label><input type="radio" bind:group={aiPolicy} value="cloud-allowed" /> Cloud allowed</label>
-    </fieldset>
-    <div class="button-row">
-      <button type="button" on:click={onSaveAISettings}>Save AI Settings</button>
-      <button type="button" disabled={aiHealthChecking || healthCheckPolicy === "off"} on:click={onHealthCheck}>
-        {aiHealthChecking ? "Pinging…" : "Health Check"}
-      </button>
-    </div>
-    <div class="button-row">
-      <button type="button" on:click={onOpenPrompts}>Prompts…</button>
-      <button type="button" on:click={onOpenMutations}>Mutations…</button>
-    </div>
-    {#if aiHealthResult}
-      <p class="ai-health-result" class:ok={aiHealthResult.ok} class:fail={!aiHealthResult.ok}>
-        {#if aiHealthResult.ok}
-          ✓ {aiHealthResult.provider} · {aiHealthResult.model} · {aiHealthResult.latency_ms} ms
-        {:else}
-          ✗ {aiHealthResult.provider || "(no provider)"} — {aiHealthResult.error}
-        {/if}
-      </p>
-    {/if}
-  {/if}
-</section>
 {#if validation}
   <section class:invalid={!validation.valid} class="validation-panel" aria-label="Project validation result">
     <h3>{validation.valid ? "Project Looks Consistent" : "Project Issues Found"}</h3>
@@ -368,9 +332,8 @@
   /* Same section rhythm as the AI block below — a sibling section of the
      pane, not a nested treatment. The rows inside are plain NodeRows, so
      they carry the canonical card chrome and need nothing here. */
-  .project-inherits,
-  .project-children,
-  .ai-settings {
+  .project-inheritance,
+  .project-children {
     display: grid;
     gap: 10px;
     margin-top: 16px;
@@ -378,15 +341,27 @@
     border-top: 1px solid var(--border);
   }
 
-  .project-inherits h3,
-  .project-children h3,
-  .ai-settings h3 {
+  .project-inheritance h3,
+  .project-children h3 {
     margin: 0;
     font-size: var(--fs-md);
     font-weight: 600;
     color: var(--text);
     letter-spacing: 0.04em;
     text-transform: uppercase;
+  }
+
+  .inherit-block {
+    display: grid;
+    gap: 6px;
+  }
+
+  /* Sub-label for the ancestor declarations inside the Inheritance block. */
+  .field-label {
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
   }
 
   /* `width: auto` is load-bearing, not tidying: styles.css:401 sets
@@ -432,30 +407,6 @@
      the basis just reads the width property back. */
   .ai-policy label input[type="radio"] {
     width: auto;
-  }
-
-  .ai-health-result {
-    margin: 0;
-    padding: 8px 10px;
-    border-radius: 4px;
-    font-size: var(--fs-md);
-    line-height: 1.4;
-  }
-
-  .ai-health-result.ok {
-    background: var(--accent-soft);
-    color: var(--accent-deep);
-    border: 1px solid var(--accent-soft2);
-  }
-
-  .ai-health-result.fail {
-    background: var(--danger-soft);
-    color: var(--danger);
-    border: 1px solid var(--danger-border);
-  }
-
-  .disabled-section {
-    opacity: 0.6;
   }
 
   .migration-applied {

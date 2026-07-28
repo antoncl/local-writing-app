@@ -46,13 +46,15 @@
     if (draft) draft.palette = next;
   }
 
-  // The scroll became three tabs by concern (ADR-0047 §3): AI credentials,
-  // Appearance (writing surface + palette), Storage (the projects root). The
-  // controls themselves are unchanged here — this slice only re-homes them.
-  type SettingsTab = "ai" | "appearance" | "storage";
+  // The scroll became tabs by concern (ADR-0047 §3): AI credentials, Writing
+  // (prose display), Palette (reusable colours), Storage (the projects root).
+  // Writing and Palette are separate tabs so neither runs tall — the palette
+  // alone can be dozens of swatches.
+  type SettingsTab = "ai" | "writing" | "palette" | "storage";
   const TABS: { key: SettingsTab; label: string }[] = [
     { key: "ai", label: "AI" },
-    { key: "appearance", label: "Appearance" },
+    { key: "writing", label: "Writing" },
+    { key: "palette", label: "Palette" },
     { key: "storage", label: "Storage" },
   ];
   let activeTab: SettingsTab = "ai";
@@ -119,7 +121,7 @@
             Ollama host
             <input type="text" bind:value={draft.ollama_host} placeholder="http://127.0.0.1:11434" />
           </label>
-        {:else if activeTab === "appearance"}
+        {:else if activeTab === "writing"}
           <section class="writing-surface">
             <h3>Writing surface</h3>
             <p class="muted">How prose looks while you write. Display only — it never changes the saved text.</p>
@@ -154,7 +156,7 @@
               Indent the first line of each paragraph
             </label>
           </section>
-
+        {:else if activeTab === "palette"}
           <PaletteEditor swatches={draft.palette} onChange={setPalette} />
         {:else if activeTab === "storage"}
           <label>

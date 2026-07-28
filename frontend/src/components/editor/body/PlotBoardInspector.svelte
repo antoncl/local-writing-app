@@ -54,6 +54,7 @@
     deleteCard: (card: PlotBoardCard, event: MouseEvent) => void;
     promoteCard: (card: PlotBoardCard, event: MouseEvent) => void;
     startCardAssist: () => void;
+    startBeatAssist: () => void;
     startPlotClaimAudit: () => void;
     savingMessage: string;
     selectedCard: PlotBoardCard | null;
@@ -99,6 +100,7 @@
     deleteCard,
     promoteCard,
     startCardAssist,
+    startBeatAssist,
     startPlotClaimAudit,
     savingMessage,
     selectedCard,
@@ -599,6 +601,15 @@
         <strong>{selectedPaletteRow.claims.length}</strong>
       </div>
       {@render diagnosticList(selectedPointDiagnostics)}
+      <button
+        type="button"
+        class="tool-button inspector-action"
+        disabled={Boolean(savingMessage)}
+        onclick={startBeatAssist}
+      >
+        <i class="ti ti-sparkles" aria-hidden="true"></i>
+        Help earn this beat
+      </button>
       <div class="beat-claim-panel">
         {#if selectedPaletteRow.claims.length === 0}
           <p class="muted-line">No cards support this story beat yet.</p>

@@ -140,6 +140,65 @@ describe("createPlotSuggestionActions", () => {
     expect(env.onPlotSaved).toHaveBeenCalledTimes(1);
   });
 
+  it("appends a card revision to an existing synopsis", async () => {
+    const env = harness({
+      plot_board: makePlotNode("plot_board", {
+        board: {
+          ...makeBoard([]),
+          cards: [{ id: "card_opening", title: "Opening", synopsis: "Mara wants safety.", metadata: {} }],
+        },
+      }),
+    });
+
+    await env.actions.appendPlotSuggestionCardSynopsis({
+      ...baseSuggestion,
+      kind: "card_revision",
+      target_card_id: "card_opening",
+      proposed_change: "The archive forces her to choose between safety and loyalty.",
+    });
+
+    expect(env.nodes.plot_board.board?.cards[0]).toEqual(
+      expect.objectContaining({
+        id: "card_opening",
+        synopsis: [
+          "Mara wants safety.",
+          "",
+          "The archive forces her to choose between safety and loyalty.",
+        ].join("\n"),
+      }),
+    );
+    expect(env.onPlotSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not save when an appended card revision is already present", async () => {
+    const env = harness({
+      plot_board: makePlotNode("plot_board", {
+        board: {
+          ...makeBoard([]),
+          cards: [{
+            id: "card_opening",
+            title: "Opening",
+            synopsis: "Mara wants safety.\n\nThe archive forces her to choose between safety and loyalty.",
+            metadata: {},
+          }],
+        },
+      }),
+    });
+
+    await env.actions.appendPlotSuggestionCardSynopsis({
+      ...baseSuggestion,
+      kind: "card_revision",
+      target_card_id: "card_opening",
+      proposed_change: "The archive forces her to choose between safety and loyalty.",
+    });
+
+    expect(env.nodes.plot_board.board?.cards[0]?.synopsis).toBe(
+      "Mara wants safety.\n\nThe archive forces her to choose between safety and loyalty.",
+    );
+    expect(env.onPlotSaved).not.toHaveBeenCalled();
+    expect(env.chatError).toBeNull();
+  });
+
   it("creates a new unplaced card from a suggestion", async () => {
     const env = harness({
       plot_board: makePlotNode("plot_board", { board: makeBoard([]) }),

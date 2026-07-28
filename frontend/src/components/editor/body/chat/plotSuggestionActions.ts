@@ -27,6 +27,7 @@ export type PlotSuggestionActions = {
   createPlotSuggestionCard: (suggestion: PlotSuggestion) => Promise<void>;
   applyPlotSuggestionBeatFields: (suggestion: PlotSuggestion) => Promise<void>;
   applyPlotSuggestionCardSynopsis: (suggestion: PlotSuggestion) => Promise<void>;
+  appendPlotSuggestionCardSynopsis: (suggestion: PlotSuggestion) => Promise<void>;
 };
 
 type CreatePlotSuggestionActionsOptions = {
@@ -122,6 +123,17 @@ export function createPlotSuggestionActions(options: CreatePlotSuggestionActions
   }
 
   async function applyPlotSuggestionCardSynopsis(suggestion: PlotSuggestion): Promise<void> {
+    await savePlotSuggestionCardSynopsis(suggestion, "replace");
+  }
+
+  async function appendPlotSuggestionCardSynopsis(suggestion: PlotSuggestion): Promise<void> {
+    await savePlotSuggestionCardSynopsis(suggestion, "append");
+  }
+
+  async function savePlotSuggestionCardSynopsis(
+    suggestion: PlotSuggestion,
+    mode: "replace" | "append",
+  ): Promise<void> {
     const targetCardId = suggestion.target_card_id.trim();
     const synopsis = suggestion.proposed_change.trim();
     if (!targetCardId || !synopsis) {
@@ -138,9 +150,12 @@ export function createPlotSuggestionActions(options: CreatePlotSuggestionActions
       const nextCards = (board.cards ?? []).map((card) => {
         if (card.id !== targetCardId) return card;
         matched = true;
-        if (card.synopsis === synopsis) return card;
+        const nextSynopsis = mode === "append"
+          ? appendPlotSuggestionText(card.synopsis, synopsis)
+          : synopsis;
+        if (card.synopsis === nextSynopsis) return card;
         changed = true;
-        return { ...card, synopsis };
+        return { ...card, synopsis: nextSynopsis };
       });
       if (!matched) continue;
       if (!changed) {
@@ -398,6 +413,7 @@ export function createPlotSuggestionActions(options: CreatePlotSuggestionActions
     createPlotSuggestionCard,
     applyPlotSuggestionBeatFields,
     applyPlotSuggestionCardSynopsis,
+    appendPlotSuggestionCardSynopsis,
   };
 }
 

@@ -95,25 +95,36 @@
     resetSaveField();
   }
 
+  // Close the menu AND return focus to the ≡ trigger. The activated menu item
+  // unmounts with the panel, so without this focus falls to <body> and the next
+  // Tab restarts from the top of the document (the switcher restores focus on
+  // its actions for the same reason). Overlay-click and toggle-close
+  // deliberately do NOT refocus — a mouse user clicking away shouldn't have
+  // focus yanked back onto the button.
+  function closeAppMenuAndRefocus() {
+    closeAppMenu();
+    appMenuButton?.focus();
+  }
+
   // A one-shot action closes the menu before firing, so the panel never
   // lingers over the surface it just acted on.
   function runAction(fn: () => void) {
-    closeAppMenu();
+    closeAppMenuAndRefocus();
     fn();
   }
 
   function applyBuiltIn(key: string) {
-    closeAppMenu();
+    closeAppMenuAndRefocus();
     onApplyPreset(key);
   }
 
   function applyUser(name: string) {
-    closeAppMenu();
+    closeAppMenuAndRefocus();
     onApplyUserPreset(name);
   }
 
   function resetLayout() {
-    closeAppMenu();
+    closeAppMenuAndRefocus();
     onResetLayout();
   }
 
@@ -121,7 +132,7 @@
     const name = saveName.trim();
     if (!name) return;
     onSavePreset(name);
-    closeAppMenu();
+    closeAppMenuAndRefocus();
   }
 
   const THEME_GLYPH: Record<ThemePreference, string> = {
@@ -292,6 +303,7 @@
           {/each}
         {/if}
 
+        <div class="switcher-divider" role="separator"></div>
         {#if showSaveField}
           <form class="preset-save" on:submit|preventDefault={commitSave}>
             <!-- svelte-ignore a11y_autofocus -->

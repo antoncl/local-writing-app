@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ProjectChainLayer, ProjectChild, RecentProject } from "@/lib/types";
+  import type { ProjectChainLayer, RecentProject } from "@/lib/types";
   import type { ThemePreference } from "@/lib/utils/theme";
 
   import { tick } from "svelte";
@@ -12,14 +12,12 @@
   // project they're in at a glance (especially when nesting lands).
   export let currentProjectColor: string | null = null;
   export let recentProjects: RecentProject[] = [];
-  // The open project's place in the hierarchy (#311). Ancestors render as the
-  // breadcrumb to the left; children ride in the switcher menu, because both
-  // directions are the same gesture — open a different project — and because
-  // the Project pane that also lists the children is not guaranteed to be on
-  // screen (#417). Ascent is chrome, so descent has to be too.
-  // The resolved chain (#432), passed straight through to the breadcrumb.
+  // The resolved ancestor chain (#432), passed straight through to the
+  // breadcrumb. Children are not surfaced here: the child roster ("Contains")
+  // lives solely in the Project pane (ADR-0047 slice 4). Descent while the pane
+  // is hidden goes through re-opening it — the vanishing-pane case is #417's to
+  // fix, not a second roster's to paper over.
   export let chain: ProjectChainLayer[] = [];
-  export let childProjects: ProjectChild[] = [];
   export let onOpenProjectPath: (path: string) => void = () => {};
   // Reveal the inheritance declaration editor (#426) for the empty-chain note
   // (#427). Not the same gesture as the Project action button below: that one
@@ -382,23 +380,6 @@
       ></div>
 
       <div class="switcher-menu" role="menu" aria-label="Project switcher" bind:this={switcherMenuEl}>
-        {#if childProjects.length > 0}
-          <div class="switcher-section-label">Contains</div>
-          {#each childProjects as child (child.path)}
-            <button
-              type="button"
-              class="switcher-item child-item"
-              role="menuitem"
-              on:click={() => handleOpenProjectPath(child.path)}
-            >
-              <span class="child-title">{child.title}</span>
-              {#if child.name !== child.title}
-                <span class="child-folder">{child.name}</span>
-              {/if}
-            </button>
-          {/each}
-          <div class="switcher-divider" role="separator"></div>
-        {/if}
         {#if recentProjects.length > 0}
           <div class="switcher-section-label">Recent</div>
           {#each recentProjects as recent, i (recent.path)}
@@ -689,29 +670,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-family: var(--mono);
-  }
-
-  .top-bar .child-item {
-    justify-content: space-between;
-  }
-
-  .top-bar .child-title {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    /* Without these the ellipsis never fires: `min-width: auto` on a flex item
-       resolves to its intrinsic content width, so a long child title widens
-       the row instead of being clipped by it. Same pair `.switcher-label`
-       already uses a few rules up. */
-    flex: 1;
-    min-width: 0;
-  }
-
-  .top-bar .child-folder {
-    flex: none;
-    font-size: var(--fs-xs);
-    color: var(--text-3);
     font-family: var(--mono);
   }
 

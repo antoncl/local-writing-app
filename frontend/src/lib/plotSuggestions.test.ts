@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   appendPlotSuggestionEvidence,
   appendPlotSuggestionText,
+  canCreatePlotSuggestionBadge,
   parsePlotSuggestions,
   plotSuggestionClipboardText,
   stripPlotSuggestions,
@@ -107,5 +108,35 @@ describe("appendPlotSuggestionText", () => {
     expect(appendPlotSuggestionText("Existing note.", "Try a sharper consequence.")).toBe(
       "Existing note.\n\nTry a sharper consequence.",
     );
+  });
+});
+
+describe("canCreatePlotSuggestionBadge", () => {
+  it("accepts new-claim suggestions that identify a card and plot beat", () => {
+    expect(canCreatePlotSuggestionBadge({
+      kind: "new_claim",
+      target_card_id: "card_archive",
+      target_claim_id: "",
+      template_instance_id: "plot_main",
+      plot_point_id: "first_turn",
+      title: "Add lock-in badge",
+      reason: "",
+      proposed_change: "",
+      evidence_to_add: "",
+    })).toBe(true);
+  });
+
+  it("rejects suggestions that already target an existing claim", () => {
+    expect(canCreatePlotSuggestionBadge({
+      kind: "new_claim",
+      target_card_id: "card_archive",
+      target_claim_id: "claim_first_turn",
+      template_instance_id: "plot_main",
+      plot_point_id: "first_turn",
+      title: "Add lock-in badge",
+      reason: "",
+      proposed_change: "",
+      evidence_to_add: "",
+    })).toBe(false);
   });
 });

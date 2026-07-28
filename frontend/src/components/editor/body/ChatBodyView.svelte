@@ -36,8 +36,10 @@
     EditableDocument,
     LoreEntrySummary,
     NodePickerRef,
+    PlotBoardSpec,
     PlotNode,
     PlotNodeSummary,
+    PlotPointClaim,
     PromptEntrySummary,
     SaveChatSessionRequest,
     StructureDocument,
@@ -253,6 +255,42 @@
     return Array.from(new Set([...selectedIds, ...boardIds]));
   }
 
+  function newLocalId(prefix: string): string {
+    const raw = globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
+    return `${prefix}_${raw.replace(/-/g, "").slice(0, 12)}`;
+  }
+
+  function plotlineIdForInstance(board: PlotBoardSpec, templateInstanceId: string): string | null {
+    return board.plotlines.find((line) => line.template_instance_id === templateInstanceId)?.id ?? null;
+  }
+
+  async function templateInstanceHasPlotPoint(templateInstanceId: string, plotPointId: string): Promise<boolean> {
+    try {
+      const instance = await api.getPlotNode(templateInstanceId);
+      return Boolean(instance.template_instance?.plot_points?.some((point) => point.plot_point_id === plotPointId));
+    } catch (error) {
+      if (error instanceof HttpError && error.status === 404) return false;
+      chatError = error instanceof Error ? error.message : "Could not load plot template instance.";
+      throw error;
+    }
+  }
+
+  async function savePlotBoard(plot: PlotNode, board: PlotBoardSpec): Promise<void> {
+    const saved = await api.savePlotNode(plot.id, {
+      title: plot.title,
+      entry_type: plot.entry_type,
+      body: plot.body ?? "",
+      metadata: plot.metadata ?? {},
+      template: plot.template ?? null,
+      template_instance: plot.template_instance ?? null,
+      board,
+      layout: plot.layout ?? null,
+      base_revision: plot.revision,
+    });
+    chatError = null;
+    await onPlotSaved?.(saved);
+  }
+
   async function appendPlotSuggestionClaimField(
     suggestion: PlotSuggestion,
     field: "evidence" | "ai_notes",
@@ -293,19 +331,7 @@
         return;
       }
 
-      const saved = await api.savePlotNode(plot.id, {
-        title: plot.title,
-        entry_type: plot.entry_type,
-        body: plot.body ?? "",
-        metadata: plot.metadata ?? {},
-        template: plot.template ?? null,
-        template_instance: plot.template_instance ?? null,
-        board: { ...board, claims: nextClaims },
-        layout: plot.layout ?? null,
-        base_revision: plot.revision,
-      });
-      chatError = null;
-      await onPlotSaved?.(saved);
+      await savePlotBoard(plot, { ...board, claims: nextClaims });
       return;
     }
 
@@ -319,6 +345,67 @@
 
   async function applyPlotSuggestionNote(suggestion: PlotSuggestion): Promise<void> {
     await appendPlotSuggestionClaimField(suggestion, "ai_notes", suggestion.proposed_change);
+  }
+
+  async function createPlotSuggestionBadge(suggestion: PlotSuggestion): Promise<void> {
+    const targetCardId = suggestion.target_card_id.trim();
+    const templateInstanceId = suggestion.template_instance_id.trim();
+    const plotPointId = suggestion.plot_point_id.trim();
+    if (suggestion.target_claim_id.trim() || !targetCardId || !templateInstanceId || !plotPointId) {
+      chatError = "This suggestion does not identify a new badge target.";
+      throw new Error(chatError);
+    }
+
+    for (const plotId of await plotBoardCandidateIds()) {
+      let plot: PlotNode | null = null;
+      try {
+        plot = await api.getPlotNode(plotId);
+      } catch (error) {
+        if (error instanceof HttpError && error.status === 404) continue;
+        chatError = error instanceof Error ? error.message : "Could not load plot board.";
+        throw error;
+      }
+      const board = plot?.board;
+      if (!plot || !board) continue;
+      if (!(board.cards ?? []).some((card) => card.id === targetCardId)) continue;
+      if (!(board.template_instance_ids ?? []).includes(templateInstanceId)) continue;
+      if (!(await templateInstanceHasPlotPoint(templateInstanceId, plotPointId))) {
+        chatError = "Could not find that plot beat on the target template instance.";
+        throw new Error(chatError);
+      }
+
+      const existing = (board.claims ?? []).find(
+        (claim) =>
+          claim.card_id === targetCardId &&
+          claim.template_instance_id === templateInstanceId &&
+          claim.plot_point_id === plotPointId,
+      );
+      if (existing) {
+        chatError = "That card already has this plot beat badge.";
+        throw new Error(chatError);
+      }
+
+      const nextClaim: PlotPointClaim = {
+        id: newLocalId("claim"),
+        card_id: targetCardId,
+        template_instance_id: templateInstanceId,
+        plot_point_id: plotPointId,
+        plotline_id: plotlineIdForInstance(board, templateInstanceId),
+        claim_type: "satisfies",
+        claim_label: null,
+        strength: null,
+        confidence: null,
+        evidence: suggestion.evidence_to_add.trim() || null,
+        rationale: null,
+        ai_notes: suggestion.proposed_change.trim() || null,
+        metadata: {},
+      };
+      await savePlotBoard(plot, { ...board, claims: [...(board.claims ?? []), nextClaim] });
+      return;
+    }
+
+    chatError = "Could not find the target card and template instance on a plot board.";
+    throw new Error(chatError);
   }
 
   // Mirrors App.svelte's applyChatSession (the source of truth for the
@@ -1043,6 +1130,7 @@
       bind:scrollEl={chatScrollEl}
       onApplyEvidence={applyPlotSuggestionEvidence}
       onApplyNote={applyPlotSuggestionNote}
+      onCreateBadge={createPlotSuggestionBadge}
     />
 
     {#if declaredInputs.length > 0}

@@ -204,8 +204,12 @@ changes or evidence notes from that list. If a suggestion includes both
 `target_claim_id` and `proposed_change`, the transcript offers an explicit apply
 action that appends the change to the claim's AI notes. If it includes both
 `target_claim_id` and `evidence_to_add`, a second apply action appends that
-evidence to the claim evidence field. Other suggestion kinds remain read-only
-until they have similarly narrow, reviewable destination fields.
+evidence to the claim evidence field. For `new_claim` suggestions that identify
+a target card, template instance, and plot beat but no existing claim, the
+transcript can create a new `satisfies` badge on that card and carry proposed
+change/evidence text into the new claim's AI notes and evidence fields. Other
+suggestion kinds remain read-only until they have similarly narrow, reviewable
+destination fields.
 
 ## File layout
 

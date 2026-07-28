@@ -26,6 +26,25 @@ PLOT_CONTEXT_INPUT: dict[str, Any] = {
 }
 
 
+PLOT_SUGGESTIONS_BLOCK = """
+Then include an optional machine-readable suggestion block when you have concrete board changes. Use target ids from the context whenever possible. Keep suggestions as drafts the author can accept, edit, or ignore. Do not emit placeholder suggestions. Omit the block if there is no concrete proposed change.
+
+<plot_suggestions>
+  <suggestion kind="card_revision|beat_revision|claim_change|new_card|new_claim|relationship_change|scene_promotion|question" target_card_id="card_id_if_known" target_claim_id="claim_id_if_known" template_instance_id="template_instance_id_if_known" plot_point_id="plot_point_id_if_known">
+    <title>Short label for a real suggestion. For new_card, use the new card title.</title>
+    <reason>Why this concrete change would strengthen the story or structure.</reason>
+    <proposed_change>Specific board-level edit or author decision, not drafted prose. For card_revision, write the replacement card synopsis. For new_card, write the new card synopsis.</proposed_change>
+    <evidence_to_add>Concrete evidence the card or linked scene would need. For new_card with a target plot beat, this becomes initial marker evidence.</evidence_to_add>
+    <story_specifics>For beat_revision only: the story-specific version of this generic plot beat.</story_specifics>
+    <author_intent>For beat_revision only: what the author wants this beat to accomplish.</author_intent>
+    <expected_role>For beat_revision only: the role this beat should play in this story.</expected_role>
+    <open_question>For beat_revision only: one concrete unresolved author decision.</open_question>
+    <status>unplanned|planned|drafted|satisfied|intentionally_omitted</status>
+  </suggestion>
+</plot_suggestions>
+"""
+
+
 def builtin_prompt_entries() -> list[dict[str, Any]]:
     return [
         {
@@ -65,7 +84,7 @@ def builtin_prompt_entries() -> list[dict[str, Any]]:
 
 PLOT_BRAINSTORM_BODY = """{% set selected_scene = scene if scene is defined else none %}
 {% role "system" %}
-You are an AI-assisted fiction-writing brainstorming partner for a novelist. Use the author's plot board and selected plot templates as a scaffold for thinking. Do not draft the novel for the author, invent final canon, or treat templates as mandatory rules. Offer concrete options, tradeoffs, questions, and pressure tests that help the author decide what to write.
+You are an AI-assisted fiction-writing brainstorming partner for a novelist. Use the author's plot board and selected plot templates as a scaffold for thinking. Do not draft the novel for the author, invent final canon, mutate the board, or treat templates as mandatory rules. Offer concrete options, tradeoffs, questions, and pressure tests that help the author decide what to write next.
 {% endrole %}
 
 {% role "user" %}
@@ -89,10 +108,12 @@ Summary: {{ scene_summary }}
 {% endif %}
 
 Respond with:
-1. The strongest available story direction.
-2. Two or three alternate directions worth considering.
-3. Weak or unsupported story markers to investigate.
-4. Specific questions the author should answer next.
+1. Two or three useful structure directions the author could choose between.
+2. Concrete card-level moves: add, split, merge, move, clarify, or promote to scene.
+3. Story markers to add, remove, or strengthen.
+4. Specific questions that unlock the next writing decision.
+
+""" + PLOT_SUGGESTIONS_BLOCK + """
 {% endrole %}
 """
 
@@ -174,20 +195,6 @@ Respond with:
 4. Evidence the author could add to the card or scene to make the marker feel earned.
 5. Questions only where an author decision is genuinely needed.
 
-Then include an optional machine-readable suggestion block. Use target ids from the context whenever possible. Keep every suggestion as a draft the author can accept, edit, or ignore. Do not emit placeholder suggestions. Omit the block entirely if there is no concrete proposed change.
-
-<plot_suggestions>
-  <suggestion kind="card_revision|beat_revision|claim_change|new_card|new_claim|relationship_change|scene_promotion|question" target_card_id="card_id_if_known" target_claim_id="claim_id_if_known" template_instance_id="template_instance_id_if_known" plot_point_id="plot_point_id_if_known">
-    <title>Short label for a real suggestion. For new_card, use the new card title.</title>
-    <reason>Why this concrete change would strengthen the story function.</reason>
-    <proposed_change>Specific board-level edit or author decision, not drafted prose. For card_revision, write the replacement card synopsis. For new_card, write the new card synopsis.</proposed_change>
-    <evidence_to_add>Concrete evidence the card or linked scene would need. For new_card with a target plot beat, this becomes initial marker evidence.</evidence_to_add>
-    <story_specifics>For beat_revision only: the story-specific version of this generic plot beat.</story_specifics>
-    <author_intent>For beat_revision only: what the author wants this beat to accomplish.</author_intent>
-    <expected_role>For beat_revision only: the role this beat should play in this story.</expected_role>
-    <open_question>For beat_revision only: one concrete unresolved author decision.</open_question>
-    <status>unplanned|planned|drafted|satisfied|intentionally_omitted</status>
-  </suggestion>
-</plot_suggestions>
+""" + PLOT_SUGGESTIONS_BLOCK + """
 {% endrole %}
 """

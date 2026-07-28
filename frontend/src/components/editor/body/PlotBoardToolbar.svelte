@@ -8,6 +8,7 @@
     relationshipCount: number;
     savingMessage: string;
     saveError: string;
+    startBrainstorm: () => void;
     addCard: () => void;
     addAct: () => void;
     addChapter: () => void;
@@ -20,6 +21,7 @@
     relationshipCount,
     savingMessage,
     saveError,
+    startBrainstorm,
     addCard,
     addAct,
     addChapter,
@@ -39,6 +41,10 @@
   {#if saveError}
     <span class="toolbar-error">{saveError}</span>
   {/if}
+  <button type="button" class="tool-button" disabled={Boolean(savingMessage)} onclick={startBrainstorm}>
+    <i class="ti ti-sparkles" aria-hidden="true"></i>
+    Ideas
+  </button>
   <button type="button" class="tool-button" disabled={Boolean(savingMessage)} onclick={addCard}>
     <i class="ti ti-note" aria-hidden="true"></i>
     Card

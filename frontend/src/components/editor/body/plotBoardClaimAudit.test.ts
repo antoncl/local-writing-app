@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cardAssistFocus } from "./plotBoardClaimAudit";
+import { boardIdeationFocus, cardAssistFocus } from "./plotBoardClaimAudit";
 import { buildPlotDiagnostics } from "./plotBoardDiagnostics";
 import type { PlotBoardCard, PlotNode, PlotPointClaim } from "@/lib/types";
 
@@ -59,5 +59,46 @@ describe("cardAssistFocus", () => {
     expect(focus).toContain("draft suggestions with target ids");
     expect(focus).toContain("Do not draft prose");
     expect(focus).toContain("later apply manually");
+  });
+});
+
+describe("boardIdeationFocus", () => {
+  it("asks for practical structure options without adding terminology", () => {
+    const plotNode = {
+      id: "plot",
+      title: "Book plot board",
+      entry_type: "plot:board",
+      board: {
+        cards: [card],
+        claims: [weakClaim],
+      },
+    } as PlotNode;
+    const diagnostics = buildPlotDiagnostics([card], [weakClaim], [
+      {
+        instance: { id: "template" },
+        point: { plot_point_id: "setup_pressure" },
+        claims: [weakClaim],
+      },
+      {
+        instance: { id: "template" },
+        point: { plot_point_id: "missing" },
+        claims: [],
+      },
+    ]);
+
+    const focus = boardIdeationFocus({
+      plotNode,
+      selectedCard: null,
+      selectedClaim: null,
+      selectedPaletteRow: null,
+      selectedPointLabel: "",
+      cardById: () => null,
+      diagnostics,
+    });
+
+    expect(focus).toContain('Brainstorm ways to simplify and strengthen "Book plot board"');
+    expect(focus).toContain("1 card, 1 story marker");
+    expect(focus).toContain("cards to add, split, merge, move, or clarify");
+    expect(focus).toContain("Favor practical next steps over terminology or critique");
   });
 });

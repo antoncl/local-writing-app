@@ -16,9 +16,9 @@ returns the held index with no disk work at all.
 
 The memo is process-global: each request resolves a throwaway `ProjectService`
 (`resolve_current_project`), so the cache cannot live on the instance. Sync
-routes run on FastAPI's threadpool, so two requests genuinely interleave — the
-same reason `CurrentScope` carries a lock. Rather than guard every read with a
-lock, a **published `ResolvedIndex` is immutable and never mutated in place**:
+routes run on FastAPI's threadpool, so two requests genuinely interleave, so
+this slot carries a lock. Rather than guard every read with a lock, a
+**published `ResolvedIndex` is immutable and never mutated in place**:
 
 - **reads are lock-free** — reading the one `_current` slot is atomic under the
   GIL, and what it points at is frozen after publication;
@@ -54,16 +54,17 @@ boundary instead of one per file.
 
 ## Invalidation is keyed to the *open event*, not the root path
 
-`CurrentScope.set` clears the memo on every scope change (`invalidate`). That is
-deliberately unconditional — it must fire even when the new scope has the **same
-root** as the old one. The scenario it protects (a real one under a
-server-style deployment where the browser and the server have separate
-lifetimes): a user reverts files from a backup while the app's server keeps
-running, then reopens the browser, which re-opens the same project. A memo keyed
-by root alone would serve the pre-restore index; clearing on the open event makes
-the next resolve rebuild from the restored files. The remaining exposure — an
-external edit under a *continuously open* session with no reopen — is ADR-0040's
-named, accepted trade, mitigated by a reload.
+The `/api/project/open` route calls `invalidate` on every open (#413 moved it
+there from the deleted `CurrentScope.set`). That is deliberately unconditional —
+it must fire even when the re-opened project has the **same root** as the last.
+The scenario it protects (a real one under a server-style deployment where the
+browser and the server have separate lifetimes): a user reverts files from a
+backup while the app's server keeps running, then reopens the browser, which
+re-opens the same project (a plain F5 re-runs `/open`, no server restart). A memo
+keyed by root alone would serve the pre-restore index; clearing on the open event
+makes the next resolve rebuild from the restored files. The remaining exposure —
+an external edit under a *continuously open* session with no reopen — is
+ADR-0040's named, accepted trade, mitigated by a reload.
 """
 
 from __future__ import annotations
@@ -204,10 +205,11 @@ class NodeIndexGate:
             pending()
 
     def invalidate(self) -> None:
-        """Drop the memo. Called on every scope change (`CurrentScope.set`), so a
-        re-open of the same project rebuilds rather than serving a stale index.
+        """Drop the memo. Called on every project open (`/api/project/open`) and
+        on any mutation that fans out (a schema/settings edit), so a re-open of
+        the same project rebuilds rather than serving a stale index.
 
-        Flushes a pending snapshot **before** clearing (#476): a scope switch
+        Flushes a pending snapshot **before** clearing (#476): a project switch
         would otherwise strand the outgoing project's deferred write, and the
         incoming project's open does not rebuild it. The flush writes the
         outgoing root's index, which is exactly what the captured thunk holds."""

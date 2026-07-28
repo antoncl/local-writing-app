@@ -10,13 +10,14 @@ in place. A concurrent open in that window redirected the write, overwriting the
 irreversible, since the target file is replaced rather than appended to.
 
 Since #399 the scope is not a field anything can swap: a unit holds a
-`ProjectService` bound to an immutable `WorkScope`, and a concurrent open only
-changes `current_scope`, which is what the *next* request resolves. So the race
-below is expressed the way it actually happens — a second request opening
-book02 mid-unit — and these tests now pin the general property rather than two
-patched call sites. Reverting either fix alone no longer reproduces the failure;
-what would reproduce it is a helper reaching back to `current_scope` mid-unit,
-which is the thing this file exists to catch.
+`ProjectService` bound to an immutable `WorkScope`. Since #413 there is no
+process-wide "current project" at all — the resolution scope rides each
+request — so a concurrent open cannot redirect an in-flight unit even in
+principle: opening book02 builds a throwaway handle and touches nothing this
+unit holds. The tests below fire that open mid-unit and assert the write still
+lands in book01; what would reproduce the original failure is a helper resolving
+its project from something other than the handle it was called on, which is what
+this file exists to catch.
 
 ADR-0045 states the invariant: a unit of work resolves its scope once and never
 re-resolves it.
@@ -29,7 +30,6 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from app.models import CreateSceneRequest, CreateStructureNodeRequest
-from app.runtime import current_scope
 from app.services.project_service import ProjectService
 
 
@@ -42,19 +42,19 @@ class StructureWritesStayInTheCallersProjectTests(unittest.TestCase):
         for path, title in ((self.book1, "Book 1"), (self.book2, "Book 2")):
             ProjectService.created_at(path, title)
         self.service = ProjectService.opened_at(self.book1)
-        current_scope.set(self.service.scope)
 
     def tearDown(self) -> None:
-        current_scope.clear()
         self.temp_dir.cleanup()
 
     def _open_book2_concurrently(self) -> None:
         """Exactly what a concurrent `/api/project/open` does, and no more.
 
-        It changes what the *next* request resolves. `self.service` — the unit
-        already in flight — is untouched, because a handle cannot be re-pointed.
+        Since #413 that is: build a handle for book02 and touch nothing
+        process-wide. `self.service` — the unit already in flight — is untouched,
+        because a handle cannot be re-pointed and there is no shared scope to
+        swap. The bound handle is what proves it, not the (now inert) open.
         """
-        current_scope.set(ProjectService.opened_at(self.book2).scope)
+        ProjectService.opened_at(self.book2)
 
     def _race_after_reading_the_tree(self, reader_name: str) -> None:
         """Another request opens book02 between the read and the write.

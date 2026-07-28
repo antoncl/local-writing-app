@@ -119,8 +119,8 @@ class AiPolicyReadTests(unittest.TestCase):
         `AIPolicy` Literal. Un-normalised, a typo raised a Pydantic
         `ValidationError` — which `translate_errors` does not catch, so it
         escaped as a 500 from `GET /api/project` and from
-        `POST /api/project/open`, where the call precedes
-        `current_scope.set(...)`. One mistyped character made the project
+        `POST /api/project/open`, where `current_project()` runs before the
+        open event's memo drop. One mistyped character made the project
         permanently unopenable, with an error naming nothing.
 
         Both readers are asserted because guarding only the one that noticed is

@@ -696,8 +696,9 @@ class ProjectLifecycleMixin:
         into `ProjectInfo`'s `AIPolicy` Literal, raising a Pydantic
         `ValidationError` that `translate_errors` does not catch. That escaped
         as a 500 from `GET /api/project` **and** `POST /api/project/open`, where
-        it precedes `current_scope.set(...)` — so one mistyped character made
-        the project unopenable, with an error naming nothing.
+        `current_project()` runs before the open event's memo drop — so one
+        mistyped character made the project unopenable, with an error naming
+        nothing.
         """
         try:
             manifest = self._read_yaml(folder / MANIFEST_FILENAME)

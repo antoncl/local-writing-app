@@ -484,11 +484,10 @@ class ScopeInvalidationTests(MemoTestCase):
         # Mid-session, the memo has not seen it — the accepted exposure.
         self.assertEqual(self.service._build_node_index(self.root).by_id[scene_id].title, original.title)
 
-        # Re-open the project: a fresh scope, which drops the memo.
+        # Re-open the project: the `/api/project/open` route drops the memo
+        # (#413 moved that from `CurrentScope.set` to `node_index_gate.invalidate`).
         reopened = ProjectService.opened_at(self.root)
-        from app.runtime import current_scope
-
-        current_scope.set(reopened.scope)
+        node_index_gate.invalidate()
         self.assertEqual(
             reopened._build_node_index(self.root).by_id[scene_id].title, "Restored From Backup"
         )
@@ -500,11 +499,10 @@ class ScopeInvalidationTests(MemoTestCase):
         node_index_gate.invalidate()
 
         first = self.service._build_node_index(self.root)
-        # Switching scope invalidates the memo (CurrentScope.set), so the next
-        # build for the other root cannot be served the first's index.
-        from app.runtime import current_scope
-
-        current_scope.set(other.scope)
+        # Opening the other project invalidates the memo (the `/open` route calls
+        # `node_index_gate.invalidate`, #413), so the next build for the other
+        # root cannot be served the first's index.
+        node_index_gate.invalidate()
         second = other._build_node_index(other_root)
 
         self.assertNotEqual(

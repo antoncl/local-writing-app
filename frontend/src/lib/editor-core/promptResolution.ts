@@ -40,14 +40,29 @@ export function effectiveOutputKind(
   return output.kind;
 }
 
+// Drop the writer's hidden built-in Library prompts (ADR-0049 slice 3) from a
+// roster. This is the shared seam every prompt-DISCOVERY surface routes through:
+// the slash menu / toolbar / brainstorm bars via promptEntriesForSurface below,
+// and the chat "Pick a prompt" list + NodePicker's snippet picker directly (#682)
+// — so a hidden prompt leaves every surface a writer reaches for one from.
+// Resolution BY ID (findPromptEntry, a chat's stored prompt, a reference map)
+// deliberately does NOT call this: a hidden prompt already in use must still
+// resolve, so the full roster is kept for those paths.
+export function hidePromptEntries(
+  entries: PromptEntrySummary[],
+  hiddenPromptIds: Set<string> | undefined,
+): PromptEntrySummary[] {
+  if (!hiddenPromptIds || hiddenPromptIds.size === 0) return entries;
+  return entries.filter((entry) => !hiddenPromptIds.has(entry.id));
+}
+
 export function promptEntriesForSurface(
   ctx: PromptResolutionContext,
   surface: PromptSurface,
 ): PromptEntrySummary[] {
   if (!ctx.metadataSchema) return [];
-  const hidden = ctx.hiddenPromptIds;
-  return ctx.promptEntries
-    .filter((entry) => !hidden?.has(entry.id) && effectiveOutputKind(ctx, entry) === surface)
+  return hidePromptEntries(ctx.promptEntries, ctx.hiddenPromptIds)
+    .filter((entry) => effectiveOutputKind(ctx, entry) === surface)
     .sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }));
 }
 

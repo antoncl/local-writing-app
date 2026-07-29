@@ -15,6 +15,8 @@
 
   import { createEventDispatcher, tick } from "svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
+  import { hidePromptEntries } from "@/lib/editor-core/promptResolution";
   import type {
     AssistantEntrySummary,
     NodePickerConfig,
@@ -300,8 +302,10 @@
   // and (loosely) snippet-shaped. App.svelte's snippetEntriesFor() filter
   // is more involved; for v1 we just expose all non-abstract prompt
   // entries that match the search.
+  // Hidden Library prompts (ADR-0049 #682) drop out of the snippet picker too —
+  // it is a prompt-discovery surface, so it routes through the shared seam.
   $: snippetEntries = filterByTitle(
-    promptEntries.filter((p) => {
+    hidePromptEntries(promptEntries, $hiddenLibraryStore).filter((p) => {
       const allowed = new Set(membership.entryTypes.snippet ?? []);
       return allowed.size === 0 || allowed.has(p.entry_type);
     }),

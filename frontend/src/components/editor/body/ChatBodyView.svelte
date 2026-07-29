@@ -20,7 +20,11 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import { api } from "@/lib/api";
-  import { resolutionSceneIdFromInputs } from "@/lib/editor-core/promptResolution";
+  import {
+    promptEntriesForSurface,
+    resolutionSceneIdFromInputs,
+    type PromptResolutionContext,
+  } from "@/lib/editor-core/promptResolution";
   import PlainTextEditor from "@/components/widgets/PlainTextEditor.svelte";
   import ChatTranscript from "@/components/editor/body/chat/ChatTranscript.svelte";
   import ChatInputsStrip from "@/components/editor/body/chat/ChatInputsStrip.svelte";
@@ -41,6 +45,7 @@
     StructureDocument,
   } from "@/lib/types";
   import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
   import { loreBrainstorm } from "@/lib/stores/loreBrainstorm.svelte";
   import { treeActions } from "@/lib/stores/treeActions.svelte";
   import { refreshChatSessions, refreshProjectCost } from "@/lib/stores/chats";
@@ -289,11 +294,7 @@
   }
 
   function chatRoutedPromptEntries(): PromptEntrySummary[] {
-    if (!metadataSchema) return [];
-    return promptEntries.filter((entry) => {
-      const def = metadataSchema?.entry_types[entry.entry_type];
-      return def?.prompt?.context_strategy?.output?.kind === "chat_panel";
-    });
+    return promptEntriesForSurface(promptDiscoveryCtx, "chat_panel");
   }
 
   function filteredChatPromptEntries(): PromptEntrySummary[] {
@@ -895,6 +896,16 @@
   }
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
   let metadataSchema = $derived($metadataSchemaStore);
+  // Discovery context for the chat "Pick a prompt" list. Routing through the
+  // shared promptEntriesForSurface seam (#682) drops this project's hidden
+  // Library prompts and retires the duplicated inline output.kind filter.
+  let promptDiscoveryCtx = $derived<PromptResolutionContext>({
+    metadataSchema,
+    promptEntries,
+    loreEntries: [],
+    availableScenes: [],
+    hiddenPromptIds: $hiddenLibraryStore,
+  });
   // Suppress unused-prop warnings for props Phase 4c+ wires in (preview
   // popover, inputs strip, future journal-scope rendering).
   $effect.pre(() => {

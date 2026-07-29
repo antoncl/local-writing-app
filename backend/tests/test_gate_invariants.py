@@ -498,8 +498,9 @@ def test_findings_survive_a_cp1252_console(tmp_path):
 # --- the guards see .css (#687, ADR-0048 S1) ----------------------------------
 #
 # Plot-board work arrives as standalone .css; before it lands, both guards must
-# actually receive such files. Each test here failed against the pre-#687
-# filters (EXTENSIONS without ".css"; is_checked admitting only styles.css).
+# actually receive such files. The first two tests failed against the pre-#687
+# filters (EXTENSIONS without ".css"; is_checked admitting only styles.css);
+# the last two pin what the widening must NOT sweep in.
 
 
 size_guard = _load_script("check_file_size")

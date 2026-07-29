@@ -3,8 +3,10 @@
   // `<section class="pane schema-pane">`: the kind tabs (Scene / Lore /
   // …), the context heading, and the entry-type tree (a NodeList of the
   // recursive renderNodeTypeCard snippet). The pane chrome (header with
-  // + Type / Groups… / Tags… / Close, drag, resize) stays in App.svelte
-  // because it's part of its pane-layout system.
+  // + Type / Tags… / Close, drag, resize) stays in App.svelte
+  // because it's part of its pane-layout system. (Groups is now managed
+  // from the per-type editor's Reusable-groups section, not a header
+  // button — #607.)
   //
   // Extracted from App.svelte (#14, third slice). The component owns no
   // long-lived state — the tree is built in the parent's `$:` (so its

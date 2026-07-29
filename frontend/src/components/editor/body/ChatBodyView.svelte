@@ -54,6 +54,8 @@
   } from "@/lib/chat/assistantScope";
   import {
     coerceChatInputValue,
+    decodeChatInputDrafts,
+    encodeChatInputDrafts,
     isInputMissing,
     seedInputDraftsFromEntry,
     ttlChipsFor,
@@ -267,15 +269,13 @@
     pendingTurnCost = null;
     pendingTurnCacheWriteSlots = [];
     resetDraftReview();
-    // Restore per-prompt input drafts. session.inputs is Record<string, unknown>;
-    // PromptInputField stores list-shaped values JSON-encoded, so coerce
-    // back to that representation on hydrate.
-    chatInputDrafts = {};
-    const raw = (session as unknown as { inputs?: Record<string, unknown> }).inputs ?? {};
-    for (const [name, value] of Object.entries(raw)) {
-      if (typeof value === "string") chatInputDrafts[name] = value;
-      else chatInputDrafts[name] = JSON.stringify(value);
-    }
+    // Restore per-prompt input drafts (#654) — the exact inverse of the
+    // encodeChatInputDrafts persist in currentChatSessionPayload. A non-string
+    // value (a typed seed the launch path wrote before the first persist) is
+    // JSON-encoded back into the widget's string form.
+    chatInputDrafts = decodeChatInputDrafts(
+      (session as unknown as { inputs?: Record<string, unknown> }).inputs,
+    );
     // Collapse the inputs strip by default once the chat is locked (has
     // turns) — the conversation owns the height; the user can re-expand to
     // inspect what was sent. Open it for fresh/unlocked chats still being set up.
@@ -435,7 +435,12 @@
         usage: m.usage ?? null,
         cost_usd: m.cost_usd ?? null,
       })),
-      inputs: {},
+      // Persist the per-input drafts so a chat round-trips its inputs across a
+      // reload (#654) — previously hardcoded `{}`, which the first post-send
+      // persist wrote over `session.inputs`, dropping the launch-seeded values
+      // (a revise brainstorm's `entry`, a create brainstorm's `entry_type`) to
+      // component state only. `applyChatSession` decodes these back into drafts.
+      inputs: encodeChatInputDrafts(chatInputDrafts),
       cost_delta_usd,
       cache_write_slots,
     };

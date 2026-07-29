@@ -22,6 +22,7 @@ export const UI_GLYPHS: string[] = [
   "alert-triangle",
   "arrow-back-up",
   "arrow-bar-to-right",
+  "arrow-forward-up",
   "arrow-merge",
   "arrow-up",
   "check",

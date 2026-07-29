@@ -13,6 +13,11 @@
 <script lang="ts">
   import "@xyflow/svelte/dist/style.css";
   import { SvelteFlow, Controls, type ColorMode, type Node, type Edge } from "@xyflow/svelte";
+  import { DesignerUndoController } from "./view/designerUndo.svelte";
+  import { DND_MIME, centrePos, toFlowPos } from "./view/insertionPlacement";
+  import { hydrateGraph, repairGraphCycles, tagEdge, toFlowNode, type FlowData } from "./view/hydrateView";
+  import { PALETTE, defaultCfg } from "./view/paletteData";
+  import type { DesignerGraphPort } from "@/lib/views/designerCommands";
   import { untrack } from "svelte";
   import { themePreference } from "@/lib/utils/theme";
   import ViewFlowNode from "./view/ViewFlowNode.svelte";
@@ -42,9 +47,7 @@
   } from "@/lib/utils/schemaTypeHelpers";
   import { pickerMembership } from "@/lib/utils/pickerSources";
   import { structureToEvalNodes } from "@/lib/views/structureNodes";
-  import { repairGraphCycles as repairGraphCycles_ } from "@/lib/views/cycleCheck";
   import {
-    specToGraph,
     graphToSpec,
     collectParamBindings,
     isEmptyValue,
@@ -58,7 +61,6 @@
     inputKinds,
     tagAppliesToInput,
     anchorSet,
-    defaultFilterKind,
     FILTER_VALUE_HANDLE,
     OUTPUT_NODE_ID,
     type GraphNodeKind,
@@ -178,7 +180,6 @@
   // Svelte Flow graph — the source of truth for the expression, bound to the
   // canvas. Custom nodes all use the single "viewNode" type; data carries the
   // graph kind + its config.
-  type FlowData = { kind: GraphNodeKind; cfg: ViewNodeData };
   let flowNodes = $state<Node<FlowData>[]>([]);
   let flowEdges = $state<Edge[]>([]);
   // `${nodeId}:${handleId}` for every wired endpoint — built once per edge change
@@ -202,6 +203,19 @@
   let addCounter = 0;
   let hydrating = false;
 
+  // ---- undo/redo (ADR-0050 slice 1, #681) ----
+  // The controller owns the per-view caretaker, the gesture recorders the
+  // committers call, the chord handler and the §7 announcement; commands
+  // replay through `graphPort` — raw array swaps, never back through a
+  // recording committer. See `view/designerUndo.svelte.ts`.
+  const graphPort: DesignerGraphPort<Node<FlowData>, Edge> = {
+    getNodes: () => flowNodes,
+    setNodes: (n) => (flowNodes = n),
+    getEdges: () => flowEdges,
+    setEdges: (e) => (flowEdges = e),
+  };
+  const undoCtl = new DesignerUndoController(graphPort);
+
   // ---- hydrate from the opened view node ----
   $effect(() => {
     const node = scene as ViewNode | null;
@@ -217,6 +231,7 @@
     hydrating = true;
     loadedViewId = id;
     expandedId = null; // a freshly-opened view starts fully collapsed
+    undoCtl.reset(); // history never crosses documents (§3)
     revision = node.revision ?? "";
     title = node.title ?? "";
     kind = node.spec?.kind ?? "lore";
@@ -226,7 +241,7 @@
     // Handle ids are explicit so Svelte Flow renders these edges once the new
     // nodes' handle bounds are measured (its layout pass is a derived that
     // recomputes after measurement — no manual defer needed).
-    const graph = repairGraphCycles(hydrateGraph(node));
+    const graph = repairGraphCycles(hydrateGraph(node, schema));
     flowNodes = graph.nodes;
     flowEdges = graph.edges;
     // Seed the add-node counter past any `a<N>` id already in the loaded graph.
@@ -237,80 +252,6 @@
     // Let the derived spec settle before re-enabling persistence.
     queueMicrotask(() => (hydrating = false));
   });
-
-  function toFlowNode(id: string, k: GraphNodeKind, cfg: ViewNodeData, position: { x: number; y: number }): Node<FlowData> {
-    return { id, type: "viewNode", position, data: { kind: k, cfg }, deletable: k !== "output" };
-  }
-
-  // The two wire types (ADR-0031 §D): a node-set pipe (solid, the default) vs a
-  // value-set pipe (a scalar `field_of` — dashed, tinted the value colour). The
-  // class is derived from the source's `outputPayload`, so it survives a layout
-  // round-trip (never persisted) — recomputed on hydrate, connect, and whenever a
-  // field_of's projected field changes its payload.
-  function edgeClass(sourceId: string, nodes: Node<FlowData>[]): string | undefined {
-    const s = nodes.find((n) => n.id === sourceId);
-    if (!s) return undefined;
-    const gn: ViewGraphNode = { id: s.id, kind: s.data.kind, position: s.position, data: s.data.cfg ?? {} };
-    const fieldDef = (key: string) => schema?.fields?.[key] ?? null;
-    return outputPayload(gn, fieldDef) === "value-set" ? "value-wire" : undefined;
-  }
-  function tagEdge(e: Edge, nodes: Node<FlowData>[]): Edge {
-    const cls = edgeClass(e.source, nodes);
-    return (e.class ?? undefined) === cls ? e : { ...e, class: cls };
-  }
-
-  // Build the canvas graph for a view: from its persisted designer `layout`
-  // (author's exact positions + wiring) when present, else auto-laid-out from
-  // the semantic `expr` (designer-less / legacy / backend-authored views).
-  function hydrateGraph(node: ViewNode): { nodes: Node<FlowData>[]; edges: Edge[] } {
-    const layout = node.layout;
-    if (layout && layout.nodes.length > 0) {
-      const rawNodes = layout.nodes.map((n) =>
-        toFlowNode(n.id, n.kind as GraphNodeKind, (n.cfg ?? {}) as ViewNodeData, n.position),
-      );
-      const rawEdges = layout.edges.map((e) => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        sourceHandle: e.source_handle ?? undefined,
-        targetHandle: e.target_handle ?? undefined,
-        type: e.source === e.target ? "selfloop" : undefined,
-      }));
-      // A persisted layout is authored in the first-class idiom (#271 retired the
-      // bare-predicate-leaf → `All → Filter` canonicalization), so it hydrates as-is.
-      return { nodes: rawNodes, edges: rawEdges.map((e) => ({ ...e, class: edgeClass(e.source, rawNodes) })) };
-    }
-    const g = specToGraph(node.spec, schema);
-    const nodes = g.nodes.map((n) => toFlowNode(n.id, n.kind, n.data, n.position));
-    return {
-      nodes,
-      edges: g.edges.map((e) => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        sourceHandle: e.sourceHandle ?? undefined,
-        targetHandle: e.targetHandle ?? undefined,
-        type: e.source === e.target ? "selfloop" : undefined,
-        class: edgeClass(e.source, nodes),
-      })),
-    };
-  }
-
-  // Load-time DAG-invariant repair (#275, ADR-0028 §D): silently drop any illegal
-  // back-edge in the hydrated graph (a hand-edited file / a previously-buggy
-  // designer's output) so the view still opens; the repair persists on the next
-  // debounced save. The invariant + the one legal exception live in cycleCheck.
-  function repairGraphCycles(graph: { nodes: Node<FlowData>[]; edges: Edge[] }): {
-    nodes: Node<FlowData>[];
-    edges: Edge[];
-  } {
-    const kindById = new Map(graph.nodes.map((n) => [n.id, n.data.kind]));
-    const { edges, dropped } = repairGraphCycles_(kindById, graph.edges);
-    if (dropped.length > 0 && import.meta.env.DEV) {
-      console.warn(`[views] load-time repair: dropped ${dropped.length} cyclic edge(s)`, dropped);
-    }
-    return { nodes: graph.nodes, edges };
-  }
 
 
   // Serialize the live canvas (positions + wiring) for persistence. Parallel to
@@ -583,6 +524,8 @@
   );
 
   function updateNodeData(id: string, patch: Partial<ViewNodeData>): void {
+    const beforeCfg = flowNodes.find((n) => n.id === id)?.data.cfg;
+    if (beforeCfg === undefined) return;
     flowNodes = flowNodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, cfg: { ...n.data.cfg, ...patch } } } : n));
     // A config edit can invalidate the edges this node touches, in both
     // directions: a payload FLIP (node-set ⇄ value-set — a field_of switched
@@ -601,93 +544,57 @@
         )
         .map((e) => e.id),
     );
+    const dropped = stale.size ? flowEdges.filter((e) => stale.has(e.id)) : [];
     if (stale.size) flowEdges = flowEdges.filter((e) => !stale.has(e.id));
     // Re-tag the remaining edges: a field_of payload change recolours its wire.
     // Only reassigns when a class actually changed (no churn on edits that don't
     // affect payload, e.g. typing a filter value).
-    const retagged = flowEdges.map((e) => tagEdge(e, flowNodes));
+    const retagged = flowEdges.map((e) => tagEdge(e, flowNodes, schema));
     if (retagged.some((e, i) => e !== flowEdges[i])) flowEdges = retagged;
+    // Self-report (ADR-0050 §1): the edit plus the edges its validity sweep took
+    // — one undo step (per-commit granularity; no keystroke coalescing for now,
+    // the ADR's stated default). Skip when the patch changed nothing, so a
+    // re-picked identical option doesn't cost the author an empty undo step.
+    const afterCfg = flowNodes.find((n) => n.id === id)?.data.cfg;
+    const changed = Object.keys(patch).some((k) => beforeCfg[k as keyof ViewNodeData] !== patch[k as keyof ViewNodeData]);
+    if (afterCfg !== undefined && (changed || dropped.length > 0)) {
+      undoCtl.recordConfig(id, beforeCfg, afterCfg, dropped);
+    }
   }
   function removeNode(id: string): void {
     if (id === OUTPUT_NODE_ID) return;
     if (expandedId === id) expandedId = null;
+    const doomed = flowNodes.find((n) => n.id === id);
+    const incident = flowEdges.filter((e) => e.source === id || e.target === id);
     flowNodes = flowNodes.filter((n) => n.id !== id);
     flowEdges = flowEdges.filter((e) => e.source !== id && e.target !== id);
+    // Self-report the cascade at the instant of death (§1): edge deletions +
+    // the node, one transaction — one Ctrl+Z brings it all back, same id (§6).
+    if (doomed) undoCtl.recordDelete([doomed], incident);
+  }
+  // The delete key's counterpart: SvelteFlow removed the selection internally
+  // and hands over exactly what died — record it the same way. (The output
+  // node is `deletable: false`, so it can never arrive here.)
+  function onDeleted({ nodes, edges }: { nodes: Node<FlowData>[]; edges: Edge[] }): void {
+    if (nodes.some((n) => n.id === expandedId)) expandedId = null;
+    undoCtl.recordDelete(nodes, edges);
   }
 
   // ---- palette (sources vs operations — ADR-0038 §B) ----
-  // The algebra has two roles: a SOURCE injects a node set, an OPERATION
-  // transforms one. The bare predicate leaves (`type / descendants_of / tagged /
-  // field`) are fully retired (#271/#284) — `All → Filter` composes the identical
-  // lowering through one UI path, and post-ADR-0036 `All` is a real kind universe,
-  // so nothing is lost. A predicate now lives ONLY inside a first-class `{filter}`;
-  // `specToGraph` drops any bare predicate leaf on open (there is no node for it),
-  // and no default or user view carries one. Each chip carries the kind's ViewGlyph
-  // (the same mark as the node header, §240), so it needs no per-item colour cue.
+  // Groups + per-kind default config live in `view/paletteData.ts` (size cap).
   let hasTypeChoice = $derived(entryTypeOptions.length > 1);
-  type PalItem = { kind: GraphNodeKind; label: string };
-  const PALETTE: { label: string; items: PalItem[] }[] = [
-    {
-      label: "Sources",
-      items: [
-        { kind: "all", label: "All" },
-        { kind: "hand_picked", label: "Hand-picked" },
-      ],
-    },
-    {
-      label: "Operations",
-      items: [
-        { kind: "filter", label: "Filter" },
-        { kind: "field_of", label: "Field of" },
-        { kind: "union", label: "Union" },
-        { kind: "intersect", label: "Intersect" },
-        { kind: "difference", label: "Difference" },
-        { kind: "complement", label: "Complement" },
-        { kind: "nest", label: "Nest" },
-        { kind: "sorter", label: "Sort" },
-        { kind: "highlight", label: "Highlight" },
-      ],
-    },
-  ];
-
-  function defaultCfg(k: GraphNodeKind): ViewNodeData {
-    if (k === "filter") return { filter_mode: "keep", filter_kind: defaultFilterKind(hasTypeChoice) };
-    if (k === "sorter") return { sort: { by: "field", field_key: "title", dir: "asc" } };
-    if (k === "nest") return { match: { field: "", direction: "child_to_parent", by: "ref" } };
-    return {};
-  }
   function addNode(k: GraphNodeKind, position?: { x: number; y: number }): void {
     const id = `a${addCounter++}`;
-    flowNodes = [...flowNodes, toFlowNode(id, k, defaultCfg(k), position ?? centrePos())];
+    const node = toFlowNode(id, k, defaultCfg(k, hasTypeChoice), position ?? centrePos(canvasEl, flowNodes.length));
+    flowNodes = [...flowNodes, node];
+    // Self-report the birth (§1). `addCounter` never rewinds on undo — a redo
+    // recreates THIS id from the memento, and the next fresh add must not
+    // collide with it (same reason `seedAddCounter` exists).
+    undoCtl.recordAdd(node);
   }
   // ---- insertion placement (ADR-0038 §E) ----
-  // The equivalent of SvelteFlow's `screenToFlowPosition`, hand-rolled (not the
-  // real call — the drop target is the wrapper div, outside the flow provider
-  // context `useSvelteFlow()` needs): invert the live viewport transform (read off
-  // the DOM) against the canvas rect. Drop lands under the pointer; click lands at
-  // the viewport centre (killing the old top-left staircase).
-  const DND_MIME = "application/x-view-node-kind";
-  function readViewport(): { x: number; y: number; zoom: number } | null {
-    const t = canvasEl?.querySelector<HTMLElement>(".svelte-flow__viewport")?.style.transform;
-    const m = t ? /translate\(\s*(-?[\d.]+)px,\s*(-?[\d.]+)px\)\s*scale\(\s*([\d.]+)\s*\)/.exec(t) : null;
-    return m ? { x: parseFloat(m[1]), y: parseFloat(m[2]), zoom: parseFloat(m[3]) } : null;
-  }
-  function staircaseFallback(): { x: number; y: number } {
-    return { x: 60, y: 60 + (flowNodes.length % 8) * 46 };
-  }
-  function toFlowPos(clientX: number, clientY: number): { x: number; y: number } {
-    const rect = canvasEl?.getBoundingClientRect();
-    const vp = readViewport();
-    if (!rect || !vp) return staircaseFallback();
-    return { x: (clientX - rect.left - vp.x) / vp.zoom, y: (clientY - rect.top - vp.y) / vp.zoom };
-  }
-  function centrePos(): { x: number; y: number } {
-    const rect = canvasEl?.getBoundingClientRect();
-    const vp = readViewport();
-    if (!rect || !vp) return staircaseFallback();
-    // Nudge by roughly half a compact node so it reads as centred, not corner-hung.
-    return { x: (rect.width / 2 - vp.x) / vp.zoom - 55, y: (rect.height / 2 - vp.y) / vp.zoom - 20 };
-  }
+  // Coordinate math lives in `view/insertionPlacement.ts` (size cap): drop
+  // lands under the pointer, click at the viewport centre.
   function onPaletteDragStart(e: DragEvent, kind: GraphNodeKind): void {
     if (!e.dataTransfer) return;
     e.dataTransfer.setData(DND_MIME, kind);
@@ -704,7 +611,7 @@
     const kind = e.dataTransfer?.getData(DND_MIME);
     if (!kind) return;
     e.preventDefault();
-    addNode(kind as GraphNodeKind, toFlowPos(e.clientX, e.clientY));
+    addNode(kind as GraphNodeKind, toFlowPos(canvasEl, flowNodes.length, e.clientX, e.clientY));
   }
   // Advance addCounter past the highest `a<N>` id present in `nodes`, so a
   // reopened graph never re-mints an id that's already on the canvas.
@@ -795,10 +702,10 @@
       // the node instead of cutting back behind it. Tag every kept edge with its
       // wire-type class (node-set vs value-set) so a freshly-wired pipe paints.
       if (e.source === e.target && e.type !== "selfloop") {
-        kept.push(tagEdge({ ...e, type: "selfloop" }, flowNodes));
+        kept.push(tagEdge({ ...e, type: "selfloop" }, flowNodes, schema));
         changed = true;
       } else {
-        const tagged = tagEdge(e, flowNodes);
+        const tagged = tagEdge(e, flowNodes, schema);
         if (tagged !== e) changed = true;
         kept.push(tagged);
       }
@@ -909,13 +816,30 @@
     if (lastKind && lastKind !== k) {
       flowNodes = flowNodes.filter((n) => n.data.kind === "output");
       flowEdges = [];
+      // A re-anchor is a document reset, not an edit — old-kind history would
+      // restore nodes whose types/fields no longer exist. Start clean.
+      undoCtl.reset();
     }
     lastKind = k;
   });
 
 </script>
 
-<section class="view-designer" onfocusin={() => onFocus?.()}>
+<!-- The keydown is designer-scoped (ADR-0050 §3): it rides BUBBLING from
+     whatever focusable element inside the surface has focus (canvas, nodes,
+     buttons), so a chord in another pane can never reach this caretaker. The
+     a11y rule below flags keyboard handlers on non-interactive elements
+     because they're unreachable without focus — a delegation listener is the
+     sanctioned exception (the focusable descendants are the reachers), and
+     making the section itself a tab stop would add a landmark-sized ghost
+     stop for keyboard users. The labelled section is an implicit region. -->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<section
+  class="view-designer"
+  aria-label="View designer"
+  onfocusin={() => onFocus?.()}
+  onkeydown={undoCtl.handleKeydown}
+>
   <div class="designer-toolbar">
     <!--
       The anchor kind is fixed by the pane the view was opened from (Lore / Draft
@@ -959,6 +883,29 @@
         </div>
       {/each}
     </div>
+    <!-- Undo/redo (ADR-0050 §7): the canvas doesn't telegraph Ctrl+Z the way a
+         text field does, so the affordance is visible — and it is the a11y
+         story: named, disabled when idle, a non-chord target. -->
+    <div class="undo-cluster" role="group" aria-label="History">
+      <button
+        type="button"
+        class="undo-btn"
+        disabled={!undoCtl.canUndo}
+        aria-label="Undo"
+        title={undoCtl.undoTitle}
+        onclick={() => undoCtl.undo()}
+      ><i class="ti ti-arrow-back-up" aria-hidden="true"></i></button>
+      <button
+        type="button"
+        class="undo-btn"
+        disabled={!undoCtl.canRedo}
+        aria-label="Redo"
+        title={undoCtl.redoTitle}
+        onclick={() => undoCtl.redo()}
+      ><i class="ti ti-arrow-forward-up" aria-hidden="true"></i></button>
+    </div>
+    <!-- What just reversed, for screen readers (§7): "Undid delete node". -->
+    <span class="sr-only" aria-live="polite">{undoCtl.announcement}</span>
   </div>
 
   <!-- Shared collapse toggle for the rail-like panes (§240): the same Tabler
@@ -1036,9 +983,16 @@
         {edgeTypes}
         {colorMode}
         {isValidConnection}
-        onconnect={normalizeEdges}
-        onnodedragstart={() => (dragging = true)}
-        onnodedragstop={() => (dragging = false)}
+        onconnect={(conn) => undoCtl.onConnect(conn, normalizeEdges)}
+        ondelete={onDeleted}
+        onnodedragstart={({ nodes }) => {
+          dragging = true;
+          undoCtl.dragStart(nodes);
+        }}
+        onnodedragstop={({ nodes }) => {
+          dragging = false;
+          undoCtl.dragStop(nodes);
+        }}
         onpaneclick={() => (expandedId = null)}
         deleteKey={["Backspace", "Delete"]}
         fitView
@@ -1325,6 +1279,41 @@
   }
   .rail-toggle:hover {
     color: var(--text);
+  }
+  /* Undo/redo (ADR-0050 §7). Sits at the toolbar's far end, apart from the
+     palette tray; the same quiet ghost icon-button voice as .rail-toggle,
+     plus the disabled state the caretaker's canUndo/canRedo drives. */
+  .undo-cluster {
+    margin-left: auto;
+    display: flex;
+    gap: var(--sp-1);
+  }
+  .undo-btn {
+    border: none;
+    background: transparent;
+    color: var(--text-3);
+    font-size: var(--fs-md);
+    line-height: 1;
+    cursor: pointer;
+    padding: var(--sp-1);
+    border-radius: var(--r-sm);
+  }
+  .undo-btn:hover:not(:disabled) {
+    color: var(--text);
+    background: var(--inset);
+  }
+  .undo-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+  /* Visually hidden, still read by assistive tech — the aria-live region. */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
   }
   .params-empty {
     margin: 0;

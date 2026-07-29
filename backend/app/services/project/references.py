@@ -85,6 +85,14 @@ NODE_FAMILIES = [
 # than re-spelled as a literal — a second copy of the triple would drift.
 MACHINE_LAYER_FAMILIES = [family for family in NODE_FAMILIES if family.kind == "assistant"]
 
+# The families the built-in Library ships (ADR-0049). Prompts are the first and
+# only tenant; the model is kind-agnostic, so a later kind joins by adding its
+# family here and a folder in `builtin_library/` — no new mechanism. Deliberately
+# a subset, not "everything a project layer carries": the Library is not a
+# project, and scoping it to what actually ships keeps the walk from globbing
+# folders that will never exist (the vertical-slice discipline in §4).
+LIBRARY_LAYER_FAMILIES = [family for family in NODE_FAMILIES if family.kind == "prompt"]
+
 # Every kind whose files the index extracts reference edges from: the node
 # families above, plus the per-layer project node (#334), which lives at the
 # layer root rather than in a kind folder and so is collected separately.
@@ -138,7 +146,7 @@ class _NodeIndexBuilder(LayerVisitor):
         # truth (Phase 3b-i / decisions-node-editor-modularization).
         if layer.is_root:
             self._service._collect_chat_entries(layer=layer, index=self._index)
-        if not layer.is_machine:
+        if not layer.is_machine and not layer.is_library:
             self._service._collect_project_node_entry(
                 layer=layer, index=self._index, schema=self._schema
             )
@@ -175,7 +183,7 @@ class _ManifestBuilder(LayerVisitor):
         if layer.is_root:
             for path in sorted((layer.folder / "chats").glob("*.yaml")):
                 self.record(path)
-        if not layer.is_machine:
+        if not layer.is_machine and not layer.is_library:
             # Recorded even when absent — `project.md` is required to exist
             # (#343) so its disappearance is a change, and a layer *gaining* a
             # `metadata.schema.yaml` or `project.yaml` changes how every node in
@@ -316,8 +324,12 @@ class ReferencesMixin:
         re-walking or re-globbing.
         """
         # `root` is already resolved by the caller (`_build_node_index`), the one
-        # place canonicalisation happens.
-        layers = self.collect_layers(root, include_machine=True)
+        # place canonicalisation happens. `include_library` and the walk below
+        # MUST stay in lock-step: this list feeds the manifest and snapshot, and
+        # the walk builds the index — if one carries the Library layer and the
+        # other does not, the manifest either misses the Library's files (stale
+        # snapshot) or vouches for files the index never read.
+        layers = self.collect_layers(root, include_machine=True, include_library=True)
         # Fingerprinted **before** the build, not after. A file written while
         # the build runs is then either missed by both (consistent) or indexed
         # but unrecorded — which reads as an addition next time and rebuilds.
@@ -397,14 +409,17 @@ class ReferencesMixin:
             else:
                 self._write_index_snapshot(root, patched, layers=layers, manifest=manifest)
                 return ResolvedIndex(root, patched, tuple(layers), manifest, schema)
-        # One walk, machine layer included (#329). It comes first and carries
-        # assistants only — it lives outside the project tree and holds the
-        # user's roster. Project layers follow outermost-ancestor first, so a
-        # descendant entry overwrites an ancestor's on collision.
+        # One walk, machine and Library layers included (#329, ADR-0049). The
+        # Library floor comes first (app-owned shipped nodes, read-only), then
+        # the machine layer (assistants only, out-of-tree), then the project
+        # layers outermost-ancestor first — so a descendant entry overwrites an
+        # ancestor's, and any real layer overwrites a shipped Library node, on
+        # collision.
         self.visit_layers(
             _NodeIndexBuilder(self, index=index, root=root, schema=schema),
             root,
             include_machine=True,
+            include_library=True,
         )
         if has_overrides:
             # Collect the deltas (a parallel pass, not nodes), then fold effective
@@ -859,11 +874,14 @@ class ReferencesMixin:
         """Which node families this layer contributes — the per-layer logic the
         index walk used to inline (#329).
 
-        The machine layer is out-of-tree: assistants only. Scenes stay
-        book-scoped, so they come from the open project alone.
+        The machine layer is out-of-tree: assistants only. The Library is
+        out-of-tree too and ships only its tenant kinds (prompts, ADR-0049).
+        Scenes stay book-scoped, so they come from the open project alone.
         """
         if layer.is_machine:
             return MACHINE_LAYER_FAMILIES
+        if layer.is_library:
+            return LIBRARY_LAYER_FAMILIES
         return [family for family in NODE_FAMILIES if family.kind != "scene" or layer.is_root]
 
     def _collect_machine_layer_assistants(

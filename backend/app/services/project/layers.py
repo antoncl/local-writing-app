@@ -25,8 +25,11 @@ necessarily agrees about where the chain stops. See that method's docstring.
 
 Ordering contract, relied on by consumers:
 
-* The machine layer, when present, comes **first** (rank 0) — i.e. it is the
-  outermost layer, the one every project inherits from.
+* The built-in Library, when included, comes **first** (rank 0) — the app-owned
+  read-only floor of shipped nodes every project inherits from (ADR-0049).
+* The machine layer, when present, comes next — the out-of-tree assistants
+  roster. (Either app-owned floor is absent unless its `include_*` flag is set;
+  schema layering sees neither.)
 * Project layers follow, **outermost ancestor → open project**, so a descendant
   entry overwrites an ancestor's on an id collision.
 * `rank` is dense over the yielded sequence and only ever compared, never used
@@ -44,12 +47,15 @@ consumer should read "first in the walk" as "first in a user-facing list" again.
 from __future__ import annotations
 
 import hashlib
+import logging
 from functools import lru_cache
 from pathlib import Path
 from typing import Protocol
 
 from app.services.project.errors import ProjectServiceError
 from app.services.project.node_index import IndexLayer
+
+log = logging.getLogger(__name__)
 
 # The metadata-schema file each project layer may carry. Not applicable to the
 # machine layer, which is out-of-tree and contributes assistants only.
@@ -140,19 +146,27 @@ class LayerWalkMixin:
         root: Path,
         *,
         include_machine: bool = False,
+        include_library: bool = False,
     ) -> None:
         """Drive `visitor` over the layer chain, outermost first, root last.
 
         **The** entry point. `include_machine` prepends the machine config dir
         as an ordinary out-of-tree layer (`is_machine=True`) when it actually
         holds an `assistants/` folder — the condition the old
-        `_collect_machine_layer_assistants` early-returned on. Schema layering
-        must not see it, so it is opt-in rather than default.
+        `_collect_machine_layer_assistants` early-returned on. `include_library`
+        prepends the app-owned built-in Library (`is_library=True`, ADR-0049) as
+        the outermost — deepest, lowest-priority — layer. Both are out-of-tree
+        app layers the node index wants but schema layering must not see, so
+        both are opt-in rather than default.
         """
-        for layer in self._layer_sequence(root, include_machine=include_machine):
+        for layer in self._layer_sequence(
+            root, include_machine=include_machine, include_library=include_library
+        ):
             visitor.visit_layer(layer)
 
-    def _layer_sequence(self, root: Path, *, include_machine: bool) -> list[IndexLayer]:
+    def _layer_sequence(
+        self, root: Path, *, include_machine: bool, include_library: bool = False
+    ) -> list[IndexLayer]:
         """Build the chain. Private: consumers visit, they do not iterate.
 
         `root` is canonicalised **once, here**, because everything below
@@ -164,6 +178,13 @@ class LayerWalkMixin:
         """
         root = root.resolve()
         layers: list[IndexLayer] = []
+        # The Library is the app-owned floor, so it goes first — outermost in the
+        # walk is lowest priority, and a descendant (any real project layer, or
+        # the machine layer) shadowing a Library node is exactly the intent.
+        if include_library:
+            library_layer = self.library_layer(rank=len(layers))
+            if library_layer is not None:
+                layers.append(library_layer)
         if include_machine:
             machine_layer = self.machine_layer(rank=len(layers))
             if machine_layer is not None:
@@ -230,11 +251,15 @@ class LayerWalkMixin:
         ] + [root]
         return self._stamp_project_layers(root, folders)
 
-    def collect_layers(self, root: Path, *, include_machine: bool = False) -> list[IndexLayer]:
+    def collect_layers(
+        self, root: Path, *, include_machine: bool = False, include_library: bool = False
+    ) -> list[IndexLayer]:
         """The whole sequence, via `LayerCollector`. For callers that really do
         want every layer at once."""
         collector = LayerCollector()
-        self.visit_layers(collector, root, include_machine=include_machine)
+        self.visit_layers(
+            collector, root, include_machine=include_machine, include_library=include_library
+        )
         return collector.layers
 
     def layer_by_id(self, root: Path, layer_id: str, *, include_machine: bool = False) -> IndexLayer | None:
@@ -267,6 +292,54 @@ class LayerWalkMixin:
             rank=rank,
             is_machine=True,
         )
+
+    def library_layer(self, *, rank: int = 0) -> IndexLayer | None:
+        """The built-in Library as an `IndexLayer`, or None when it is absent.
+
+        The app-owned floor of shipped nodes (ADR-0049): read-only, out-of-tree,
+        beneath every project. Modelled exactly like `machine_layer` — one
+        constructor so the walk and any future consumer cannot drift on its id,
+        label or flags — but it carries node families (prompts first), not
+        assistants, and it is *never* a write target (`is_library`). Its id is
+        the path hash like every other layer's; nothing persists it (see
+        `_layer_id_for_folder`), and slice 1 detects "shipped" from the layer
+        label, not the id.
+        """
+        folder = self._builtin_library_folder()
+        if folder is None:
+            return None
+        return IndexLayer(
+            folder=folder,
+            id=self._metadata_schema_layer_id(folder),
+            label="Library",
+            rank=rank,
+            is_library=True,
+        )
+
+    def _builtin_library_folder(self) -> Path | None:
+        """The bundled Library folder shipped inside the app package, when it
+        exists.
+
+        It lives at `app/builtin_library/` — beside the code, never under the
+        machine root or a user's projects folder — so it is app-owned content on
+        the same footing as `default_schema.py`, not a file in anyone's project.
+        Resolved like every other layer folder (#356) so the change-gate's
+        resolved-path comparison matches.
+        """
+        # `layers.py` is `app/services/project/layers.py`; parents[2] is `app/`.
+        folder = Path(__file__).resolve().parents[2] / "builtin_library"
+        if not folder.exists():
+            # The Library ships with the app, so absence is always an anomaly —
+            # a partial checkout, or a package build that dropped the bundled
+            # `.md` data files — not a valid empty state. Surface it once per
+            # open rather than silently serving every project without its
+            # shipped prompts (which reads as "there are none").
+            log.warning(
+                "Built-in Library folder not found at %s; shipped nodes will be unavailable.",
+                folder,
+            )
+            return None
+        return folder.resolve()
 
     def _machine_layer_folder(self) -> Path | None:
         """The machine config dir, when it carries an `assistants/` folder.

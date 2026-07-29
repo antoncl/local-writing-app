@@ -133,7 +133,30 @@ class PromptEntriesMixin:
             source_layer_label=index_entry.source_layer_label if index_entry else "",
         )
 
+    def _reject_inherited_prompt_write(self, entry_id: str) -> None:
+        """Refuse a write to a prompt this project does not own.
+
+        A prompt whose index winner is an ancestor's — or a built-in Library
+        node (ADR-0049 §3) — is read-only in place. For the Library this is the
+        structural "never a write target" guarantee at the actual boundary: the
+        save/delete is refused here, not merely hidden in the UI, so overwriting
+        or deleting a shipped app file is unconstructable rather than validated.
+        (Prompts have no per-layer override or authoring-L path the way lore
+        does — the only path to a change is to clone the prompt into this
+        project, which slice 2 adds.)
+        """
+        root = self._require_project()
+        winner = self._build_node_index().by_id.get(entry_id)
+        if winner is None or winner.kind != "prompt":
+            return
+        if winner.source_layer_id != self._metadata_schema_layer_id(root):
+            label = winner.source_layer_label or "an ancestor"
+            raise ProjectServiceError(
+                f"This prompt is inherited from {label} and is read-only here.", 409
+            )
+
     def save_prompt_entry(self, entry_id: str, request: SavePromptEntryRequest) -> PromptEntry:
+        self._reject_inherited_prompt_write(entry_id)
         path = self._path_for_node_id(entry_id, "prompt")
         front_matter = self._read_front_matter_only(path, strict=True)
         node_id = self._node_id_for_path(path, front_matter)
@@ -182,6 +205,7 @@ class PromptEntriesMixin:
         return parsed
 
     def delete_prompt_entry(self, entry_id: str) -> PromptEntryList:
+        self._reject_inherited_prompt_write(entry_id)
         path = self._path_for_node_id(entry_id, "prompt")
         self._delete_node_file(path)  # unlink + un-shadow the memo (#392)
         return self.list_prompt_entries()

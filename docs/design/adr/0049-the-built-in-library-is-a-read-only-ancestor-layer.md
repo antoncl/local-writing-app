@@ -134,7 +134,21 @@ competing with it. Two consequences fall out:
   is **out of scope here** and noted below — this ADR decides the built-in floor, not a general
   "publish a read-only layer" authoring feature.
 
-### 7. The one rule
+### 7. The Library supersedes the `default_body` stopgap
+
+Carrying a shipped prompt as a `default_body` on its *type* was a workaround for the absence of
+exactly this store: with nowhere to put a ready-made node, the ready body was parked on the type
+and copied into a fresh instance on create. **The Library is that store.** So the shipped bodies
+become Library nodes, and `default_body` stops being their home — the "create a new prompt of this
+type" path that copied it collapses into **clone from the Library**, which is the same act done
+properly: a real node lifted into your project, not a type-field stamped into a new file.
+
+Whether the `default_body` field survives for any *other* purpose is not asserted here. Both bodies
+it carries today are shipped material, so nothing else currently depends on it; if a genuine
+"skeleton for a brand-new prompt of this type" need ever appears, it is its own small decision, not
+something to keep the field alive for on spec.
+
+### 8. The one rule
 
 > **The Library is an ancestor you cannot author into. You use its nodes where they sit, you
 > clone one to own it, and you hide the ones you don't want — and nothing the app ships is ever
@@ -170,18 +184,15 @@ half-editable — uniform to the eye, writable only in some places — which is 
 the rule "any change means clone" makes *uneditable* legible: the writer always knows whether
 they are looking at shipped material or their own.
 
-**Keep `default_body` on the type as the home for shipped ready material.** The `default_body`
-stays useful — it is the starting content when a writer authors a **brand-new** prompt of that
-type from scratch (the "blank of this type" template). But it is **not the shelf**: the ready-to-
-run shipped artifacts live on the Library as nodes. The two do not collide — one is a template
-for authoring a new instance, the other is a shipped instance you use or clone.
-
 ## Anti-goals
 
 - **Not prompt-specific.** The Library is a general shelf of shipped nodes; prompts are the first
   tenant, not the definition.
-- **Never a file in the writer's project.** No bulk seed, no lazy seed, no copy-on-run. Shipped
-  material enters a writer's folders only by an explicit clone.
+- **No shipped material is ever seeded into a writer's folders.** No bulk seed, no lazy seed, no
+  copy-on-run for *Library* material — it enters a project only by an explicit clone. This does
+  **not** touch the project's own starting content: the single empty scene a new project is created
+  with is the writer's blank canvas, not shipped material, and stays exactly as it is. The anti-goal
+  is against seeding *app-owned reusable material*, not against a project having somewhere to start.
 - **No in-place editing of shipped material.** The answer to "I want it different" is always
   *clone*, never *unlock* and never *override one field*.
 - **No new invocation model.** Discovery and running reuse ADR-0047's surfaces; the Library only
@@ -211,8 +222,9 @@ ask for.
 - **A per-project hide needs a home.** A small, writer-owned, reversible suppression list, scoped
   to the project and to presentation. Its exact storage is deferred (it is a view concern, not
   canon).
-- **`default_body` on the type keeps its narrower job** — the starting content for authoring a
-  brand-new prompt of that type — and stops being the de-facto home of shipped ready material.
+- **`default_body` is superseded as the carrier of shipped material** (§7) — it was a stopgap for
+  the missing store, and the shipped bodies move to the Library. The "create a new prompt of this
+  type" add-menu path collapses into clone-from-Library.
 - **The built-in Library is app-owned content with a pre-1.0 shape.** Like `default_schema.py`,
   it ships with the app and is not a user artifact; its on-disk form and update story are
   implementation, decided when the first slice is built, under the single constraint that it is

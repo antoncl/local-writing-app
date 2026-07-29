@@ -107,6 +107,12 @@ export function deleteCommands<N extends Positioned, E extends Identified>(
  * must bring them back with the old config or the graph "restores" into a
  * shape the author never saw. Cfg mementos are the whole before/after objects
  * (the committers replace cfg wholesale, so references are stable snapshots).
+ *
+ * Returns `[]` for a no-op edit (nothing dropped, cfg deep-equal) — the
+ * committers rebuild object-valued patch payloads on every commit, so a
+ * re-picked identical option must not cost the author an empty undo step.
+ * The decision lives HERE, not in the canvas component, so a test can reach
+ * it.
  */
 export function configCommands<C, N extends Identified & { data: { cfg: C } }, E extends Identified>(
   port: DesignerGraphPort<N, E>,
@@ -115,6 +121,7 @@ export function configCommands<C, N extends Identified & { data: { cfg: C } }, E
   after: C,
   removedEdges: E[] = [],
 ): Command[] {
+  if (removedEdges.length === 0 && JSON.stringify(before) === JSON.stringify(after)) return [];
   const setCfg = (cfg: C) =>
     port.setNodes(port.getNodes().map((n) => (n.id === id ? { ...n, data: { ...n.data, cfg } } : n)));
   const edit: Command = {

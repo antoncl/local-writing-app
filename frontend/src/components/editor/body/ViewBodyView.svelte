@@ -553,13 +553,10 @@
     if (retagged.some((e, i) => e !== flowEdges[i])) flowEdges = retagged;
     // Self-report (ADR-0050 §1): the edit plus the edges its validity sweep took
     // — one undo step (per-commit granularity; no keystroke coalescing for now,
-    // the ADR's stated default). Skip when the patch changed nothing, so a
-    // re-picked identical option doesn't cost the author an empty undo step.
+    // the ADR's stated default). `configCommands` skips a no-op edit itself, so
+    // a re-picked identical option doesn't cost the author an empty undo step.
     const afterCfg = flowNodes.find((n) => n.id === id)?.data.cfg;
-    const changed = Object.keys(patch).some((k) => beforeCfg[k as keyof ViewNodeData] !== patch[k as keyof ViewNodeData]);
-    if (afterCfg !== undefined && (changed || dropped.length > 0)) {
-      undoCtl.recordConfig(id, beforeCfg, afterCfg, dropped);
-    }
+    if (afterCfg !== undefined) undoCtl.recordConfig(id, beforeCfg, afterCfg, dropped);
   }
   function removeNode(id: string): void {
     if (id === OUTPUT_NODE_ID) return;
@@ -983,6 +980,10 @@
         {edgeTypes}
         {colorMode}
         {isValidConnection}
+        onbeforeconnect={(conn) => {
+          undoCtl.beforeConnect();
+          return conn;
+        }}
         onconnect={(conn) => undoCtl.onConnect(conn, normalizeEdges)}
         ondelete={onDeleted}
         onnodedragstart={({ nodes }) => {

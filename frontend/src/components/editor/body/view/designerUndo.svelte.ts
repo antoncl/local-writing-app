@@ -38,6 +38,12 @@ export class DesignerUndoController<N extends NodeLike, E extends EdgeLike> {
   /** Pre-drag positions of the dragged set, captured on dragstart so the
    *  whole gesture records as ONE command on release (#187). */
   #dragStart: Map<string, XY> | null = null;
+  /** Edge ids as of `onbeforeconnect` — BEFORE SvelteFlow appends. The
+   *  appended edge is then the one whose id is novel; endpoint matching
+   *  can't tell it apart from a pre-existing duplicate (xyflow dedupes the
+   *  append but still fires `onconnect`, and recording that phantom would
+   *  make undo delete a live wire). */
+  #preConnectIds: Set<string> | null = null;
 
   /** What the `aria-live` region reads out (§7). */
   announcement = $state("");
@@ -64,9 +70,11 @@ export class DesignerUndoController<N extends NodeLike, E extends EdgeLike> {
 
   /** Drop the history — a new document hydrated, or a kind re-anchor reset
    *  the graph (old-kind history would restore nodes whose types/fields no
-   *  longer exist). */
+   *  longer exist). In-flight gesture captures die with it. */
   reset(): void {
     this.#caretaker = new UndoCaretaker();
+    this.#dragStart = null;
+    this.#preConnectIds = null;
   }
 
   /** The palette created a node (record AFTER appending — §1 self-report). */
@@ -87,24 +95,28 @@ export class DesignerUndoController<N extends NodeLike, E extends EdgeLike> {
     for (const c of configCommands(port, id, before, after, droppedEdges)) this.#caretaker.record(c);
   }
 
+  /** `onbeforeconnect` hook: snapshot the edge ids before SvelteFlow appends,
+   *  so `onConnect` can identify the new edge by id novelty. */
+  beforeConnect(): void {
+    this.#preConnectIds = new Set(this.#port.getEdges().map((e) => e.id));
+  }
+
   /**
    * The connect gesture. SvelteFlow has already appended the new edge to the
-   * bound array when `onconnect` fires, so the "before" is the current array
-   * minus that edge; `normalize` then settles it (selfloop typing, superseded
-   * edges dropped) and the diff becomes one command.
+   * bound array when `onconnect` fires; the `beforeConnect` snapshot names it
+   * by novelty, `normalize` then settles the array (selfloop typing,
+   * superseded edges dropped), and the diff becomes one command. When xyflow
+   * deduped the gesture (re-drawing an existing wire), no id is novel and
+   * nothing records — the canvas didn't change, so undo must not either.
    */
-  onConnect(conn: ConnectionLike, normalize: () => void): void {
-    const edges = this.#port.getEdges() as (E & ConnectionLike)[];
-    const appended = edges.find(
-      (e) =>
-        e.source === conn.source &&
-        e.target === conn.target &&
-        (e.sourceHandle ?? null) === (conn.sourceHandle ?? null) &&
-        (e.targetHandle ?? null) === (conn.targetHandle ?? null),
-    );
+  onConnect(_conn: ConnectionLike, normalize: () => void): void {
+    const seen = this.#preConnectIds;
+    this.#preConnectIds = null;
+    const edges = this.#port.getEdges();
+    const appended = seen ? edges.find((e) => !seen.has(e.id)) : undefined;
     const before = appended ? edges.filter((e) => e.id !== appended.id) : [...edges];
     normalize();
-    if (!appended) return; // nothing identifiable landed — nothing to reverse
+    if (!appended) return; // dedupe, or no snapshot — nothing changed, nothing to reverse
     const after = this.#port.getEdges();
     const afterIds = new Set(after.map((e) => e.id));
     const added = after.filter((e) => e.id === appended.id);
@@ -168,11 +180,13 @@ export class DesignerUndoController<N extends NodeLike, E extends EdgeLike> {
   };
 }
 
+// Deliberately NOT `<select>`: a select has no native undo, so swallowing the
+// chord there would dead-zone Ctrl+Z at the exact moment an author wants to
+// revert the option they just picked.
 function isEditableTarget(t: EventTarget | null): boolean {
   return (
     t instanceof HTMLInputElement ||
     t instanceof HTMLTextAreaElement ||
-    t instanceof HTMLSelectElement ||
     (t instanceof HTMLElement && t.isContentEditable)
   );
 }

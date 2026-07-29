@@ -157,6 +157,56 @@ describe("designerCommands", () => {
     void graph;
   });
 
+  it("returns no commands for a deep-equal no-op edit", () => {
+    // Committers rebuild object-valued patches every commit; a re-picked
+    // identical option must not cost the author an empty undo step.
+    const { port } = makeGraph([node("a1")], []);
+    const before: Record<string, unknown> = { match: { by: "ref" } };
+    const after: Record<string, unknown> = { match: { by: "ref" } };
+    expect(configCommands(port, "a1", before, after)).toEqual([]);
+  });
+
+  it("preserves everything else on the node's data when swapping cfg", () => {
+    type KindedNode = TestNode & { data: { kind: string; cfg: Record<string, unknown> } };
+    const target: KindedNode = { id: "a1", position: { x: 0, y: 0 }, data: { kind: "filter", cfg: { mode: "keep" } } };
+    const graph = { nodes: [target] as KindedNode[], edges: [] as TestEdge[] };
+    const port: DesignerGraphPort<KindedNode, TestEdge> = {
+      getNodes: () => graph.nodes,
+      setNodes: (n) => (graph.nodes = n),
+      getEdges: () => graph.edges,
+      setEdges: (e) => (graph.edges = e),
+    };
+    const [cmd] = configCommands(port, "a1", target.data.cfg, { mode: "drop" });
+    cmd.undo();
+    // The canvas keys everything off data.kind — a cfg swap must not eat it.
+    expect(graph.nodes[0].data.kind).toBe("filter");
+    cmd.redo();
+    expect(graph.nodes[0].data.kind).toBe("filter");
+    expect(graph.nodes[0].data.cfg).toEqual({ mode: "drop" });
+  });
+
+  it("mints a fresh transaction per config gesture so two edge-dropping edits stay two steps", () => {
+    const target = node("a1", 0, 0, { field: "tags" });
+    const { graph, port } = makeGraph([target], [edge("e1", "a1", "out"), edge("e2", "src", "a1")]);
+    const caretaker = new UndoCaretaker();
+    for (const [after, droppedId] of [
+      [{ field: "status" }, "e1"],
+      [{ field: "color" }, "e2"],
+    ] as const) {
+      const before = graph.nodes[0].data.cfg;
+      const dropped = graph.edges.filter((e) => e.id === droppedId);
+      graph.nodes = graph.nodes.map((n) => (n.id === "a1" ? { ...n, data: { cfg: after } } : n));
+      graph.edges = graph.edges.filter((e) => e.id !== droppedId);
+      for (const c of configCommands(port, "a1", before, after, dropped)) caretaker.record(c);
+    }
+    caretaker.undo();
+    expect(graph.edges.map((e) => e.id)).toEqual(["e2"]); // only the second gesture reversed
+    expect(graph.nodes[0].data.cfg).toEqual({ field: "status" });
+    caretaker.undo();
+    expect(graph.edges.map((e) => e.id).sort()).toEqual(["e1", "e2"]);
+    expect(graph.nodes[0].data.cfg).toEqual({ field: "tags" });
+  });
+
   it("round-trips a connect that displaced a superseded edge", () => {
     const { graph, port } = makeGraph(
       [node("out"), node("a1"), node("a2")],

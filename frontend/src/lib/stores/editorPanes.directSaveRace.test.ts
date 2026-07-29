@@ -131,4 +131,52 @@ describe("editorPanes direct-save serialization (#666)", () => {
     expect(editorPanes.panes[0].dirty).toBe(false);
     expect(editorPanes.panes[0].saving).toBe(false);
   });
+
+  it("a failed in-flight save doesn't abort the queued one, yet each caller still sees its own rejection", async () => {
+    seedDirtyLorePane();
+    stubRefreshes();
+
+    // The chain's error contract, in one test: the close-conflict recovery
+    // (closeEditorPane) depends on BOTH halves — a predecessor's rejection must
+    // not sink the queued save (it re-attempts against a still-dirty pane), and
+    // the queued save's own rejection must still reach its caller so the
+    // overwrite/discard dialog is offered. A refactor that swallows the caller's
+    // error, or lets a predecessor failure abort the chain, breaks close on a 409.
+    let rejectFirst!: (err: Error) => void;
+    let call = 0;
+    vi.spyOn(api, "saveLoreEntry").mockImplementation(() => {
+      call += 1;
+      if (call === 1) {
+        return new Promise<LoreEntry>((_resolve, reject) => {
+          rejectFirst = reject;
+        });
+      }
+      // The queued save also 409s — the realistic "changed on disk" case where the
+      // pane stays dirty and the conflict is still live for the second attempt.
+      return Promise.reject(new Error("changed on disk"));
+    });
+
+    const first = editorPanes.saveEditorPane("pane_1"); // in flight, will fail
+    const second = editorPanes.saveEditorPane("pane_1"); // queued behind it
+
+    // The first caller sees its own rejection...
+    const firstErr = first.then(
+      () => "resolved",
+      (e: Error) => e.message,
+    );
+    rejectFirst(new Error("changed on disk"));
+    expect(await firstErr).toBe("changed on disk");
+
+    // ...and the predecessor's failure did NOT abort the chain: the queued save
+    // ran (a second write was attempted against the still-dirty pane)...
+    const secondErr = second.then(
+      () => "resolved",
+      (e: Error) => e.message,
+    );
+    expect(await secondErr).toBe("changed on disk");
+    expect(api.saveLoreEntry).toHaveBeenCalledTimes(2);
+    // ...and the still-dirty pane is left recoverable, not silently dropped.
+    expect(editorPanes.panes[0].dirty).toBe(true);
+    expect(editorPanes.panes[0].saving).toBe(false);
+  });
 });

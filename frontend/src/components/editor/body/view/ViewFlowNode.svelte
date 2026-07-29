@@ -19,7 +19,7 @@
   import { toMultiValued } from "@/lib/views/viewParams";
   import { effectiveFieldType, isSortableField } from "@/lib/views/fieldAccess";
   import { setLevelField, toggleLevelOrder } from "@/lib/views/groupLevelEdits";
-  import { moveAt, removeAt, updateAt } from "@/lib/listEdits";
+  import { moveAt, removeAt, updateAt } from "@/lib/utils/listEdits";
   import { useDesignerContext } from "./designerContext";
   import type { MetadataFieldType, MetadataValue, NodePickerRef, ViewGroupByLevel, ViewLeafValue, ViewSort } from "@/lib/types";
   import type { Snippet } from "svelte";

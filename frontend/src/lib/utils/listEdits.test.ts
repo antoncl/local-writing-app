@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { moveAt, removeAt, updateAt } from "@/lib/listEdits";
+import { moveAt, removeAt, updateAt } from "@/lib/utils/listEdits";
 
 describe("updateAt", () => {
   it("merges the patch into item i, leaving siblings untouched", () => {

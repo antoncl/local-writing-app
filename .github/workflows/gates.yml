@@ -58,10 +58,12 @@ jobs:
       # Repo-wide, unlike the commit hook's staged-files view: a file can drift
       # past the cap in a commit that doesn't touch it (a rename, a revert).
       - name: file-size guard
-        run: git ls-files '*.py' '*.svelte' '*.ts' '*.tsx' | xargs -r python scripts/check_file_size.py
+        run: git ls-files '*.py' '*.svelte' '*.ts' '*.tsx' '*.css' | xargs -r python scripts/check_file_size.py
 
+      # Single-star pathspecs on purpose: git's `*` crosses `/`, while
+      # `frontend/src/**/*.svelte` missed top-level files (App.svelte).
       - name: style-token guard
-        run: git ls-files 'frontend/src/**/*.svelte' 'frontend/src/styles.css' | xargs -r python scripts/check_style_tokens.py
+        run: git ls-files 'frontend/src/*.svelte' 'frontend/src/*.css' | xargs -r python scripts/check_style_tokens.py
 
       # Escape hatches may shrink, never grow. PR-only: it is a diff-against-base
       # question, and master has no base to compare with.

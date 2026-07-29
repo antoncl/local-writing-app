@@ -495,6 +495,46 @@ def test_findings_survive_a_cp1252_console(tmp_path):
     assert "non-pointer" in result.stdout, "the finding itself never made it out"
 
 
+# --- the guards see .css (#687, ADR-0048 S1) ----------------------------------
+#
+# Plot-board work arrives as standalone .css; before it lands, both guards must
+# actually receive such files. Each test here failed against the pre-#687
+# filters (EXTENSIONS without ".css"; is_checked admitting only styles.css).
+
+
+size_guard = _load_script("check_file_size")
+style_guard = _load_script("check_style_tokens")
+
+
+def test_an_oversized_css_file_fails_the_size_guard(tmp_path):
+    big = tmp_path / "board.css"
+    big.write_text(".card {}\n" * size_guard.HARD_FAIL, encoding="utf-8")
+    assert size_guard.main([str(big)]) == 1
+
+
+def test_a_hex_literal_in_any_frontend_css_fails_the_style_guard(tmp_path):
+    css = tmp_path / "frontend" / "src" / "components" / "board" / "board.css"
+    css.parent.mkdir(parents=True)
+    css.write_text(".card { color: #ff0000; }\n", encoding="utf-8")
+    assert style_guard.main([str(css)]) == 1
+
+
+def test_generated_css_is_not_style_checked(tmp_path):
+    """Build outputs (the icon-font subset) legitimately declare the icon face."""
+    css = tmp_path / "frontend" / "src" / "lib" / "icons" / "generated" / "subset.css"
+    css.parent.mkdir(parents=True)
+    css.write_text('.ti { font-family: "tabler-icons"; }\n', encoding="utf-8")
+    assert style_guard.main([str(css)]) == 0
+
+
+def test_token_definition_blocks_in_css_stay_exempt(tmp_path):
+    """The token layer itself is where color literals are *supposed* to live."""
+    css = tmp_path / "frontend" / "src" / "tokens.css"
+    css.parent.mkdir(parents=True)
+    css.write_text(":root {\n  --accent: #4466aa;\n}\n", encoding="utf-8")
+    assert style_guard.main([str(css)]) == 0
+
+
 # --- the SessionEnd dev-server cleanup (#452) ---------------------------------
 #
 # A session's Vite server outlived it by twenty hours, holding port 5173 and —

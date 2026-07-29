@@ -9,8 +9,10 @@ are drift. Checks, per file:
   * `font-family` declarations whose value is not var(--sans|--serif|--mono)
     (the three system-font faces, #143) — the value may span lines
 
-inside `<style>` blocks of frontend .svelte files and in styles.css outside
-the :root / theme token-definition blocks.
+inside `<style>` blocks of frontend .svelte files and in frontend .css files
+outside the :root / theme token-definition blocks. Paths under a `generated/`
+directory are build outputs (the icon-font subset), not authored style code,
+and are skipped.
 
 Colors/sizes and font-family carry SEPARATE grandfather sets: a file can be
 clean on one axis while still owing debt on the other (e.g. the editor-shell
@@ -153,7 +155,9 @@ def is_checked(path: Path) -> bool:
     posix = path.as_posix()
     if "/frontend/src/" not in f"/{posix}":
         return False
-    return path.suffix == ".svelte" or posix.endswith("frontend/src/styles.css")
+    if "/generated/" in posix:
+        return False
+    return path.suffix in {".svelte", ".css"}
 
 
 def is_grandfathered(posix_path: str, grandfathered: set[str]) -> bool:

@@ -918,13 +918,15 @@
     {@const editorPane = editorPaneById(id)}
     {#if editorPane}
       {#if paneEntryFromAncestor(editorPane)}
+        {@const isPrompt = editorPane.document?.type === "prompt"}
         {@const isLibraryPrompt =
-          editorPane.document?.type === "prompt" &&
-          !!(editorPane.scene as { is_library?: boolean } | undefined)?.is_library}
+          isPrompt && !!(editorPane.scene as { is_library?: boolean } | undefined)?.is_library}
         <div
           class="ancestor-banner"
-          title={isLibraryPrompt
-            ? "This prompt ships with the app and is read-only here. Clone it for an editable copy in this project."
+          title={isPrompt
+            ? isLibraryPrompt
+              ? "This prompt ships with the app and is read-only here. Clone it for an editable copy in this project."
+              : "This prompt is inherited from an ancestor project and is read-only here. Clone it for an editable copy in this project."
             : "This entry lives in an ancestor project. Edits write back to the original file."}
         >
           <span>{isLibraryPrompt ? "Shipped with the app" : `from ${editorPane.scene?.source_layer_label ?? "ancestor"}`}</span>
@@ -938,11 +940,14 @@
             >
               <span aria-hidden="true">⧉</span> Fork here
             </button>
-          {:else if isLibraryPrompt && editorPane.scene}
+          {:else if isPrompt && editorPane.scene}
+            <!-- Any inherited prompt (Library or an ancestor project, #676)
+                 clones to a new local id — the "duplicate the default view"
+                 gesture, not lore's in-place fork. -->
             <button
               class="fork-button"
               type="button"
-              title="Clone this shipped prompt into an editable copy in this project"
+              title="Clone this inherited prompt into an editable copy in this project"
               aria-label="Clone into this project"
               onclick={() => run(() => editorPanes.forkPrompt(editorPane.scene!.id))}
             >

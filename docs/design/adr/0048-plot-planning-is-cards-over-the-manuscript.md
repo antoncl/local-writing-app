@@ -1,8 +1,11 @@
 # ADR-0048: Plot planning is a board of card nodes over the manuscript, written through reviewable patches
 
-- Status: **Draft** — 2026-07-29. Prepared from the evaluation of the `plotting` branch and the
-  architecture comparison against ADR-0046, both reviewed by Anton in session; the card↔scene
-  cardinality decision (§1) is his correction and is settled. Everything else awaits his approval.
+- Status: **Draft — plan approved in session** (Anton, 2026-07-29); formal acceptance via the PR.
+  Prepared from the evaluation of the `plotting` branch and the architecture comparison against
+  ADR-0046, both reviewed by Anton in session. Three of his review decisions are folded in as
+  settled: the card↔scene cardinality (§1), the **board is a singleton in v1** (§3), and the
+  ordered-list field type **holds groups** and is **gated on UX mockups** when its phase starts
+  (§6, S2).
 - Feature: unfiled — issues to be filed per slice on approval (§8). This ADR is the architecture and
   the plan of record those issues share.
 - Follows: **ADR-0046** (the propose → review → adopt → commit loop this ADR generalizes; its
@@ -119,7 +122,9 @@ subplot for the sister" is the same flow as brainstorming a new character.
 ### 3. The board itself holds presentation only
 
 `plot:board` is a layout document: card positions, per-column ordering, collapsed groups, viewport.
-It owns **no story data**. Columns are projected from the manuscript structure (acts/chapters);
+It owns **no story data**. **In v1 the board is a singleton** — one board per book, opened (or
+created on first open) by the single board action; no board management UI. The node model tolerates
+more than one, but surfacing that is a future decision, not a v1 obligation. Columns are projected from the manuscript structure (acts/chapters);
 dragging a chapter on the board performs a real structure move via the existing mutations; cards
 land in columns via their scene's slot, or directly (planned, unwritten), or in a backstory lane
 (unattached, unplaced). Templates (`plot:template`) and their per-book instances
@@ -161,13 +166,20 @@ the shared traversal instead of adding another derivation.
 
 ### 6. Prerequisite: an ordered-list field type
 
-The metadata catalog gains one type: an **ordered list whose items are small records of existing
-scalar types**, the item shape declared in the field definition. It gets the full uniform treatment
-— layered schema merge, validation reusing the per-scalar validators, one row-based
-add/remove/reorder widget used identically across default/options/value surfaces, and AI
-proposability defined as per-item validation with per-item drops so it slots into the patch loop
-with no special casing. Claims are the driving consumer; open-questions lists and aliases justify it
-independently of plot. It lands first because everything downstream leans on it.
+The metadata catalog gains one type: an **ordered list whose items are records of existing scalar
+types** — and an item shape must be able to be a **group**: the schema's existing named field
+groups serve as item shapes, so a shape is defined once and reused, not re-declared inline per
+list. It gets the full uniform treatment — layered schema merge, validation reusing the per-scalar
+validators, one row-based add/remove/reorder widget used identically across default/options/value
+surfaces, and AI proposability defined as per-item validation with per-item drops so it slots into
+the patch loop with no special casing. Claims are the driving consumer; open-questions lists and
+aliases justify it independently of plot.
+
+It lands first because everything downstream leans on it — and **its slice starts with UX
+mockups**: the editing widget for an ordered list of records is the least precedented surface in
+this plan, so the design is iterated as mockups (per the ADR-0044 precedent) and agreed before the
+widget is built. The mockups also settle exactly how groups serve as item shapes. That work waits
+until the slice is reached; nothing upstream depends on its answers.
 
 ### 7. What is deliberately dropped from the branch
 
@@ -191,8 +203,10 @@ Purpose and "done means" are binding; internal ordering may flex (see *How this 
 **Phase 1 — foundations (each useful on its own).**
 - **S1. Gates see `.css`.** The file-size and style-token guards cover `.css` files. Done means: the
   demonstrated blind spot is closed on master before any plot code arrives.
-- **S2. Ordered-list field type** (§6). Done means: a schema author can define one, a writer can
-  edit one, validation and AI proposability work per item, and no existing field behaviour changed.
+- **S2. Ordered-list field type** (§6). Opens with the UX mockup pass; the widget is built to the
+  agreed mockup. Done means: a schema author can define one (including a group as the item shape),
+  a writer can edit one, validation and AI proposability work per item, and no existing field
+  behaviour changed.
 - **S3. The patch loop generalizes** (§5, first half). Done means: lore behaves byte-for-byte as
   before, but the loop's seams take a node kind as a parameter; no plot code yet.
 
@@ -286,7 +300,7 @@ A plan this long **will** meet surprises. The rule for absorbing them:
 
 ## Open — to settle at implementation
 
-- Whether v1 surfaces multiple boards per book (the model allows it; the branch shipped one).
+- The S2 mockup pass settles the list-editing UX and the exact mechanics of groups as item shapes.
 - The final claim-type roster for S4/S11 (start minimal; widen on demand).
 - Where seed-from-manuscript and "open plot board" live in the ADR-0047 invocation model (app menu
   vs contextual action) — decided when S5/S7 are filed.

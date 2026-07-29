@@ -299,9 +299,8 @@
   })();
 
   // Snippets are prompts of sub-types where kind=prompt and not abstract
-  // and (loosely) snippet-shaped. App.svelte's snippetEntriesFor() filter
-  // is more involved; for v1 we just expose all non-abstract prompt
-  // entries that match the search.
+  // and (loosely) snippet-shaped; for v1 we expose all such prompt entries
+  // that match the search.
   // Hidden Library prompts (ADR-0049 #682) drop out of the snippet picker too —
   // it is a prompt-discovery surface, so it routes through the shared seam.
   $: snippetEntries = filterByTitle(

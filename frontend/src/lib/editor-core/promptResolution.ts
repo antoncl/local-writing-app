@@ -48,6 +48,10 @@ export function effectiveOutputKind(
 // Resolution BY ID (findPromptEntry, a chat's stored prompt, a reference map)
 // deliberately does NOT call this: a hidden prompt already in use must still
 // resolve, so the full roster is kept for those paths.
+//
+// Returns the input array UNCHANGED (same reference, no copy) when nothing is
+// hidden, so callers must treat the result as read-only — filter/map it, never
+// mutate in place. Every caller today does.
 export function hidePromptEntries(
   entries: PromptEntrySummary[],
   hiddenPromptIds: Set<string> | undefined,

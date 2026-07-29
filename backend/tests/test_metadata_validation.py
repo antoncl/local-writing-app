@@ -2312,28 +2312,19 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual(revise_entry.prompt.context_strategy.output, {"kind": "entry_patch", "review": "visual_diff"})
         # The entry rides in as an `entry` input (loaded via entry(input.entry)),
         # NOT as context_strategy.target — a lore id there would drive a scene
-        # resolution (read_scene) and 404. Pre-rolled like roleplay: default_body +
-        # default_inputs materialize onto an instance via create_prompt_entry.
+        # resolution (read_scene) and 404. The shipped body itself lives in the
+        # built-in Library now (ADR-0049 §7), so the body-wiring assertions moved
+        # to test_builtin_library; here we pin the type's shape and default_inputs.
         self.assertIsNone(revise_entry.prompt.context_strategy.target)
-        self.assertTrue(revise_entry.default_body)
-        # Slice 3a / #653: the commit turn asks for a JSON entry_patch (body +
-        # fields) and enumerates the entry's full proposable field catalog —
-        # long-text and structured alike — via the field_catalog helper, so the
-        # instruction names real field ids with legal option values.
-        self.assertIn("field_catalog(e)", revise_entry.default_body)
-        self.assertIn('"fields"', revise_entry.default_body)
-        self.assertIn('"body"', revise_entry.default_body)
-        # Slice 4 (§6.4): the same prompt has a create mode. `entry` is now
-        # OPTIONAL (present ⇒ revise, absent ⇒ create) and a hidden `entry_type`
-        # names the kind to draft; the body branches on `input.entry`.
+        # Slice 4 (§6.4): the prompt has both a revise and a create mode. `entry`
+        # is OPTIONAL (present ⇒ revise, absent ⇒ create) and a hidden `entry_type`
+        # names the kind to draft; the shipped body branches on `input.entry`.
         inputs = {i.name: i for i in revise_entry.default_inputs}
         self.assertEqual(list(inputs), ["entry", "entry_type"])
         self.assertEqual(inputs["entry"].type, "context_pick")
         self.assertFalse(inputs["entry"].required)
         self.assertEqual(inputs["entry_type"].type, "text")
         self.assertTrue(inputs["entry_type"].hidden)
-        self.assertIn("field_catalog(draft_type)", revise_entry.default_body)
-        self.assertIn("entry_type_label(draft_type)", revise_entry.default_body)
 
         general_prompt = schema.entry_types["prompt:general"].prompt
         assert general_prompt is not None

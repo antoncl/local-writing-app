@@ -844,6 +844,7 @@
         {viewSpec}
         onOpenEntry={(id) => editorPanes.openPrompt(id)}
         onNewEntry={(entryType) => treeActions.newPromptEntry(entryType)}
+        onCloneEntry={(id) => run(() => editorPanes.forkPrompt(id))}
       />
     </div>
   {/snippet}
@@ -915,8 +916,16 @@
     {@const editorPane = editorPaneById(id)}
     {#if editorPane}
       {#if paneEntryFromAncestor(editorPane)}
-        <div class="ancestor-banner" title="This entry lives in an ancestor project. Edits write back to the original file.">
-          <span>from {editorPane.scene?.source_layer_label ?? "ancestor"}</span>
+        {@const isLibraryPrompt =
+          editorPane.document?.type === "prompt" &&
+          !!(editorPane.scene as { is_library?: boolean } | undefined)?.is_library}
+        <div
+          class="ancestor-banner"
+          title={isLibraryPrompt
+            ? "This prompt ships with the app and is read-only here. Clone it for an editable copy in this project."
+            : "This entry lives in an ancestor project. Edits write back to the original file."}
+        >
+          <span>{isLibraryPrompt ? "Shipped with the app" : `from ${editorPane.scene?.source_layer_label ?? "ancestor"}`}</span>
           {#if editorPane.document?.type === "lore" && editorPane.scene}
             <button
               class="fork-button"
@@ -926,6 +935,16 @@
               onclick={() => run(() => editorPanes.forkLore(editorPane.scene!.id))}
             >
               <span aria-hidden="true">⧉</span> Fork here
+            </button>
+          {:else if isLibraryPrompt && editorPane.scene}
+            <button
+              class="fork-button"
+              type="button"
+              title="Clone this shipped prompt into an editable copy in this project"
+              aria-label="Clone into this project"
+              onclick={() => run(() => editorPanes.forkPrompt(editorPane.scene!.id))}
+            >
+              <span aria-hidden="true">⧉</span> Clone to edit
             </button>
           {/if}
         </div>

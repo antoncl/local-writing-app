@@ -29,6 +29,9 @@
   export let onOpenEntry: (entryId: string) => void;
   // Create a new prompt entry of the given concrete sub-type.
   export let onNewEntry: (entryType: string) => void;
+  // Clone a built-in Library prompt into the project as an editable copy
+  // (ADR-0049 §5). Offered only on Library rows via a trailing action.
+  export let onCloneEntry: (entryId: string) => void;
 
   // The add-menu popover lives inside this pane's ViewNodeList (mode-agnostic); the
   // pane-header "+" button drives its imperative handles (mirrors Lore). One add
@@ -99,5 +102,24 @@
     active={ctx.active}
     onClick={ctx.onClick}
     onmousedown={(event) => event.stopPropagation()}
-  />
+  >
+    {#snippet trailing()}
+      <!-- ADR-0049 §5: a shipped Library prompt offers "clone" from the home —
+           lift it into the project as an editable copy. Keyed on `is_library`,
+           not the label. Own prompts have nothing to clone. -->
+      {#if entry.is_library}
+        <button
+          class="reveal-on-hover"
+          type="button"
+          title="Clone this shipped prompt into an editable copy in this project"
+          aria-label={`Clone ${entry.title} into this project`}
+          onmousedown={(event) => event.stopPropagation()}
+          onclick={(event) => {
+            event.stopPropagation();
+            onCloneEntry(entry.id);
+          }}
+        >⧉</button>
+      {/if}
+    {/snippet}
+  </NodeRow>
 {/snippet}

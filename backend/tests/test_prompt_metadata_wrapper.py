@@ -76,20 +76,20 @@ class PromptMetadataWrapperTests(unittest.TestCase):
             {"author_note": "keep me"},
         )
 
-    def test_prerolled_revise_entry_materializes_body_and_inputs(self) -> None:
-        """ADR-0046 §5/§6.4: `prompt:revise:entry` is a pre-rolled prompt like
-        roleplay — creating an instance copies the type's `default_body` and
-        `default_inputs` onto the node, ready to run. Its two inputs are the
-        optional `entry` context_pick (revise mode) and a hidden `entry_type`
-        text input (create mode). Same create_prompt_entry copy path roleplay
-        relies on."""
+    def test_creating_a_revise_entry_seeds_its_inputs(self) -> None:
+        """`create_prompt_entry` seeds a type's `default_inputs` onto the new
+        node. The shipped *body* is no longer seeded — it lives in the built-in
+        Library and is obtained by cloning (ADR-0049 §7) — so a fresh instance
+        starts with an empty body but its two declared inputs: the optional
+        `entry` context_pick (revise mode) and a hidden `entry_type` text input
+        (create mode)."""
         created = self.service.create_prompt_entry(
             type("R", (), {"title": "Revise entry", "entry_type": "prompt:revise:entry"})()
         )
         entry = self.service.read_prompt_entry(created.id)
-        # default_body landed on the instance body.
-        self.assertIn("ideation partner", entry.body)
-        self.assertIn("entry(input.entry)", entry.body)
+        # The shipped body is not copied on create anymore (§7); it comes from
+        # cloning the Library node instead.
+        self.assertEqual(entry.body.strip(), "")
         # default_inputs landed: the optional `entry` pick + the hidden
         # `entry_type` that drives create mode.
         inputs = {i.name: i for i in entry.inputs}

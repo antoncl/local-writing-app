@@ -49,6 +49,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from functools import lru_cache
+from importlib import resources
 from pathlib import Path
 from typing import Protocol
 
@@ -302,8 +303,9 @@ class LayerWalkMixin:
         label or flags — but it carries node families (prompts first), not
         assistants, and it is *never* a write target (`is_library`). Its id is
         the path hash like every other layer's; nothing persists it (see
-        `_layer_id_for_folder`), and slice 1 detects "shipped" from the layer
-        label, not the id.
+        `_layer_id_for_folder`). "Shipped" is detected from the `is_library`
+        flag, threaded onto every entry it collects and up to the read model
+        (#674) — never from the layer's display label.
         """
         folder = self._builtin_library_folder()
         if folder is None:
@@ -325,10 +327,17 @@ class LayerWalkMixin:
         the same footing as `default_schema.py`, not a file in anyone's project.
         Resolved like every other layer folder (#356) so the change-gate's
         resolved-path comparison matches.
+
+        Anchored to the `app` package via `importlib.resources` rather than a
+        positional `__file__.parents[N]` walk, so moving this module can't
+        silently drop the Library (#674). The bundled `.md` files resolve to a
+        real directory for a source / editable install (how the app runs); a
+        future built wheel must declare them as package data for `files()` to
+        find them, otherwise the `is_dir()` guard below fires the warning.
         """
-        # `layers.py` is `app/services/project/layers.py`; parents[2] is `app/`.
-        folder = Path(__file__).resolve().parents[2] / "builtin_library"
-        if not folder.exists():
+        resource = resources.files("app").joinpath("builtin_library")
+        folder = Path(str(resource))
+        if not resource.is_dir():
             # The Library ships with the app, so absence is always an anomaly —
             # a partial checkout, or a package build that dropped the bundled
             # `.md` data files — not a valid empty state. Surface it once per

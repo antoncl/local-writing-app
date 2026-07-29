@@ -996,6 +996,7 @@ class ReferencesMixin:
             title=title,
             source_layer_id=layer.id,
             source_layer_label=layer.label,
+            is_library=layer.is_library,
             forked_from_layer_id=self._forked_from_layer_id(front_matter.get("forked_from")),
         )
         duplicate = index.entry_for_layer(node_id, layer.id)

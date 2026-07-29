@@ -47,6 +47,11 @@
     // consistent across the two creation sites.
     nextInputDraftId: () => string;
     entrySlugify: (value: string) => string;
+    // Lock the whole body for a built-in Library prompt (ADR-0049): the buffer
+    // goes read-only and the declared-inputs editor is made `inert`, so the
+    // author cannot type into a shipped node that the backend would 409 on
+    // save. Clone it to edit instead.
+    readOnly?: boolean;
     // Outbound: declared-inputs changed (#14 — replaces inputsChange dispatch).
     onInputsChange?: () => void;
   }
@@ -65,6 +70,7 @@
     loadedSceneId = null,
     nextInputDraftId,
     entrySlugify,
+    readOnly = false,
     onInputsChange,
   }: Props = $props();
 
@@ -166,7 +172,7 @@
 
 <div class="editor-wrap raw-body-wrap">
   <div class="raw-body-editor">
-    <CodeEditor bind:value={rawBody} language={rawBodyLanguage} lineWrapping={lineWrapEnabled} diagnostics={isPrompt() ? promptPreviewDiagnostics : []} />
+    <CodeEditor bind:value={rawBody} language={rawBodyLanguage} lineWrapping={lineWrapEnabled} {readOnly} diagnostics={isPrompt() ? promptPreviewDiagnostics : []} />
   </div>
 
   {#if isPrompt()}
@@ -181,7 +187,7 @@
         aria-label="Toggle line wrapping"
         onclick={toggleLineWrap}
       >Wrap</button>
-      {#if canRestoreDefaultBody}
+      {#if canRestoreDefaultBody && !readOnly}
         <button
           type="button"
           class="prompt-restore-default-button"
@@ -255,12 +261,17 @@
     </div>
   {/if}
 
-  <EntryInputsEditor
-    bind:entryInputDrafts
-    {nextInputDraftId}
-    {entrySlugify}
-    {onInputsChange}
-  />
+  <!-- A Library prompt's declared inputs are shown but locked: `inert` blocks
+       every control and drops the subtree from the tab order, so there is no
+       edit that could 409 on save. Clone to edit. -->
+  <div class="entry-inputs-host" class:read-only={readOnly} inert={readOnly || undefined}>
+    <EntryInputsEditor
+      bind:entryInputDrafts
+      {nextInputDraftId}
+      {entrySlugify}
+      {onInputsChange}
+    />
+  </div>
 
   <PromptPreviewPane
     bind:diagnostics={promptPreviewDiagnostics}
@@ -442,6 +453,11 @@
     .prompt-cheatsheet-body {
       grid-template-columns: 1fr;
     }
+  }
+  /* A locked (Library) prompt's inputs are dimmed to read as non-editable;
+     `inert` on the element does the actual interaction blocking. */
+  .entry-inputs-host.read-only {
+    opacity: 0.6;
   }
   .raw-body-editor {
     display: grid;

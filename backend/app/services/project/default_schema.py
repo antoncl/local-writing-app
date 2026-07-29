@@ -46,16 +46,6 @@ BUILTIN_COMPUTED_FUNCTIONS: tuple[str, ...] = (
 )
 COMPUTED_FUNCTIONS: tuple[str, ...] = AUTHORABLE_COMPUTED_FUNCTIONS + BUILTIN_COMPUTED_FUNCTIONS
 
-# The one sentence both `prompt:revise:entry` modes (revise + create) share
-# verbatim — the finalize contract. Hoisted so the two branches of default_body
-# can't drift on it (ADR-0046 §6.4). The per-mode specifics (JSON shape example,
-# field list, epilogue) legitimately differ and stay inline in each branch.
-_REVISE_ENTRY_FINALIZE_INTRO = (
-    "When the author asks you to finalize (or says \"commit\"), stop "
-    "brainstorming and reply with ONLY a JSON object, with no preamble, "
-    "no commentary, and no code fences, of exactly this shape:\n"
-)
-
 DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
     "version": 1,
     "entry_types": {
@@ -201,10 +191,11 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         },
         "prompt:roleplay": {
             # Continuation sub-type for two-character roleplay in one scene.
-            # `default_body` provides a working starter template and
-            # `default_inputs` seeds the `character: context_pick` input
-            # the template assumes — together a fresh Roleplay prompt
-            # comes ready to invoke via `/roleplay <Name>`. The context
+            # The shipped prompt body lives in the built-in Library
+            # (`builtin-roleplay`), not a `default_body` here — the Library is
+            # its home now that a real node stores it (ADR-0049 §7). Clone that
+            # node to get an editable copy. `default_inputs` still declares the
+            # `character: context_pick` input the template assumes. The context
             # strategy is inherited from `continuation`.
             "name": "Roleplay",
             "kind": "prompt",
@@ -224,58 +215,6 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                     },
                 },
             ],
-            "default_body": (
-                "{% set char = entry(input.character) %}\n"
-                "{% role \"system\" %}\n"
-                "You roleplay one character within an ongoing scene. Stay in "
-                "voice, in motive, in the moment. Write that character's NEXT "
-                "beat — action, dialogue, or both — and stop. One beat, not a "
-                "paragraph of them.\n"
-                # World canon (#317): the project node's authored fields reach
-                # the model here. Each is guarded, so the clause is silent until
-                # the project (or an ancestor) states the field — a `select`
-                # value like `past`/`metric`/`en_GB` reads fine as instruction.
-                "{% if 'tense' in project.metadata %}\n"
-                "\nWrite the beat in {{ project.metadata.tense }} tense.\n"
-                "{% endif %}\n"
-                "{% if 'measurement_system' in project.metadata %}\n"
-                "Use {{ project.metadata.measurement_system }} units.\n"
-                "{% endif %}\n"
-                "{% if 'spelling' in project.metadata %}\n"
-                "Use {{ project.metadata.spelling }} spelling.\n"
-                "{% endif %}\n"
-                "{% if char %}\n"
-                "\nYou are playing **{{ char.title }}**.\n"
-                "{% if char.body %}\n"
-                "\n## Character\n"
-                "{{ char.body }}\n"
-                "{% endif %}\n"
-                "{% endif %}\n"
-                "{% endrole %}\n"
-                "\n"
-                "{% role \"user\" %}\n"
-                "{% if scene.metadata.dynamics %}\n"
-                "## Scene dynamics\n"
-                "{{ scene.metadata.dynamics }}\n"
-                "\n"
-                "{% endif %}\n"
-                "{{ relevant_lore(scene) }}\n"
-                "{% cache_break %}\n"
-                "{% if scenes_before(scene) %}\n"
-                "## The story so far\n"
-                "{{ scenes_before(scene) }}\n"
-                "\n"
-                "{% endif %}\n"
-                "{% endrole %}\n"
-                "\n"
-                "{# Per-character thread reconstruction. Spans tagged with the\n"
-                "   focus character become assistant turns; spans tagged with\n"
-                "   anyone else become user turns prefixed `[Name]:`; untagged\n"
-                "   narration is plain user text. First invocation (no markers\n"
-                "   yet) sends the whole scene body as one user-narration\n"
-                "   message. Must be used OUTSIDE any role block. #}\n"
-                "{{ character_thread(scene, input.character) }}\n"
-            ),
         },
         "prompt:revise": {
             # Abstract base for the two revise flavours. Split symmetrically
@@ -361,94 +300,6 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                     "hidden": True,
                 },
             ],
-            "default_body": (
-                "{% set e = entry(input.entry) %}\n"
-                "{% set draft_type = input.entry_type if input.entry_type is defined else \"\" %}\n"
-                "{% role \"system\" %}\n"
-                "{% if e %}\n"
-                "You are an ideation partner helping the author revise a lore "
-                "entry through conversation. Brainstorm: ask questions, suggest "
-                "directions, react to the author's ideas. Do NOT rewrite the whole "
-                "entry on every turn.\n"
-                "\n"
-                + _REVISE_ENTRY_FINALIZE_INTRO
-                + "\n"
-                "{\"body\": \"<the entry's complete revised markdown body>\", "
-                "\"fields\": {\"<field id>\": <value>}}\n"
-                "\n"
-                "- \"body\": the entry's full revised markdown body.\n"
-                "- \"fields\": include an entry ONLY for a field you are changing, "
-                "keyed by its field id. For a list field (tags, multi_select) give a "
-                "JSON array of strings; for a select field use one of its listed "
-                "options exactly; otherwise give the field's complete new value. You "
-                "may also propose a new \"title\". Use {} if you are changing no "
-                "fields.\n"
-                "\n"
-                "The fields you may set:\n"
-                "{% for f in field_catalog(e) %}\n"
-                "- {{ f.id }} ({{ f.label }}) — {{ f.type }}"
-                "{% if f.options %}; one of: {{ f.options | join(\", \") }}{% endif %}\n"
-                "{% else %}\n"
-                "- (none beyond title/body)\n"
-                "{% endfor %}\n"
-                "\n"
-                "Output only that JSON object. It is parsed, validated against the "
-                "entry's schema, and reviewed against the current entry before "
-                "anything is saved.\n"
-                "\n## The entry under revision: {{ e.title }}\n"
-                "{% if e.body %}\n"
-                "{{ e.body }}\n"
-                "{% else %}\n"
-                "_(This entry has no body yet.)_\n"
-                "{% endif %}\n"
-                "{% for f in field_catalog(e) if f.type == \"long_text\" %}\n"
-                "\n### {{ f.label }} ({{ f.id }})\n"
-                "{{ e.metadata.get(f.id) or \"_(empty)_\" }}\n"
-                "{% endfor %}\n"
-                "{% set current = field_catalog(e) "
-                "| rejectattr(\"type\", \"equalto\", \"long_text\") "
-                "| rejectattr(\"id\", \"equalto\", \"title\") | list %}\n"
-                "{% if current %}\n"
-                "\n### Current field values\n"
-                "{% for f in current %}\n"
-                "{% set val = e.metadata.get(f.id) %}\n"
-                "- {{ f.label }} ({{ f.id }}): "
-                "{% if val is sequence and val is not string %}{{ val | join(\", \") or \"_(empty)_\" }}"
-                "{% elif val is none or val == \"\" %}_(empty)_"
-                "{% else %}{{ val }}{% endif %}\n"
-                "{% endfor %}\n"
-                "{% endif %}\n"
-                "{% else %}\n"
-                "You are an ideation partner helping the author create a new "
-                "{{ entry_type_label(draft_type) }} from scratch through "
-                "conversation. Brainstorm: ask questions, propose directions, and "
-                "develop it together. Do NOT dump a finished entry on every turn.\n"
-                "\n"
-                + _REVISE_ENTRY_FINALIZE_INTRO
-                + "\n"
-                "{\"body\": \"<the new entry's complete markdown body>\", "
-                "\"fields\": {\"title\": \"<a title>\", \"<field id>\": <value>}}\n"
-                "\n"
-                "- \"body\": the new entry's full markdown body.\n"
-                "- \"fields\": ALWAYS include \"title\". Add any other field you "
-                "are setting, keyed by its field id. For a list field (tags, "
-                "multi_select) give a JSON array of strings; for a select field "
-                "use one of its listed options exactly.\n"
-                "\n"
-                "The fields you may set:\n"
-                "{% for f in field_catalog(draft_type) %}\n"
-                "- {{ f.id }} ({{ f.label }}) — {{ f.type }}"
-                "{% if f.options %}; one of: {{ f.options | join(\", \") }}{% endif %}\n"
-                "{% else %}\n"
-                "- (none beyond title/body)\n"
-                "{% endfor %}\n"
-                "\n"
-                "Output only that JSON object. It is parsed, validated against the "
-                "{{ entry_type_label(draft_type) }} type's schema, and reviewed as "
-                "a whole new entry before it is created.\n"
-                "{% endif %}\n"
-                "{% endrole %}\n"
-            ),
             "prompt": {
                 "context_strategy": {
                     "output": {"kind": "entry_patch", "review": "visual_diff"},

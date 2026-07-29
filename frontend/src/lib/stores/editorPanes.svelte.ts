@@ -1252,6 +1252,15 @@ class EditorPanesController {
     this.setStatus(`Forked ${entry.title} into this project`);
   }
 
+  // Clone a built-in Library prompt into this project (ADR-0049 §5): mint a NEW
+  // id (orthogonal to slice 3's hide), open the fresh copy. No dirty-flush (read-only).
+  async forkPrompt(entryId: string): Promise<void> {
+    const clone = await api.forkPromptEntry(entryId);
+    await refreshPromptEntries();
+    await this.openPrompt(clone.id);
+    this.setStatus(`Cloned ${clone.title} into this project`);
+  }
+
   // Clear-to-inherit (#517 / create-project-wizard.md §8): drop one field's
   // override at L so it reverts to the inherited value. The save carries the
   // current draft (so any pending edits persist) plus the explicit

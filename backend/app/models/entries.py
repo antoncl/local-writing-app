@@ -213,6 +213,11 @@ class PromptEntrySummary(BaseModel):
     inputs: list[PromptInputDefinition] = Field(default_factory=list)
     source_layer_id: str = ""
     source_layer_label: str = ""
+    # Whether this prompt is shipped by the app-owned built-in Library (#674 /
+    # ADR-0049 §5). The frontend branches clone (and, later, hide) on this rather
+    # than on `source_layer_label`, so a writer's ancestor project titled
+    # "Library" is never mistaken for shipped material.
+    is_library: bool = False
 
 
 class PromptEntry(BaseModel):
@@ -226,6 +231,7 @@ class PromptEntry(BaseModel):
     computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     source_layer_id: str = ""
     source_layer_label: str = ""
+    is_library: bool = False
 
 
 class PromptEntryList(BaseModel):

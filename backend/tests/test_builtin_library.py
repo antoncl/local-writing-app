@@ -5,9 +5,10 @@ The Library is an app-owned floor beneath every project — the node analogue of
 `default_schema.py` at the base of the schema merge. A fresh project sees the
 shipped prompts (so `/roleplay` runs out of the box) without a single file
 landing in its folders, and they are read-only in place: the only way to change
-one is to clone it (slice 2). These tests pin resolve / no-clutter / read-only,
-plus the temporary duplication lock (§7) between the bundled files and the
-`default_body` they still shadow until slice 2 removes it.
+one is to clone it. These tests pin resolve / no-clutter / read-only, the
+`is_library` read-model flag, and the clone gesture (§5) — plus that the shipped
+bodies carry their wiring, now that they live only in the Library and no longer
+shadow a type `default_body` (§7).
 """
 
 from __future__ import annotations
@@ -43,6 +44,9 @@ class BuiltinLibraryTests(unittest.TestCase):
         for lib_id in LIBRARY_IDS:
             self.assertIn(lib_id, entries, f"{lib_id} should resolve out of the box")
             self.assertEqual(entries[lib_id].source_layer_label, "Library")
+            # The read-model flag the frontend branches clone/hide on (#674) —
+            # not the display label, which a writer's own project could reuse.
+            self.assertTrue(entries[lib_id].is_library)
         # And they read as inherited, not owned by the open project.
         own_layer_id = self.service._metadata_schema_layer_id(self.root)
         for lib_id in LIBRARY_IDS:
@@ -104,23 +108,86 @@ class BuiltinLibraryTests(unittest.TestCase):
             ),
         )
 
-    def test_bundled_files_match_the_schema_defaults(self) -> None:
-        """Temporary-duplication lock (§7): until slice 2 removes `default_body`,
-        the bundled Library node and the type default it shadows must stay in
-        sync — otherwise 'create a new prompt of this type' and the Library would
-        ship divergent bodies."""
-        schema = self.service.read_metadata_schema()
-        entries = self._summaries()
-        pairs = [
-            ("builtin-roleplay", "prompt:roleplay"),
-            ("builtin-revise-entry", "prompt:revise:entry"),
-        ]
-        for lib_id, type_key in pairs:
-            type_def = schema.entry_types[type_key]
-            self.assertEqual(entries[lib_id].body.rstrip(), type_def.default_body.rstrip())
-            got = [i.model_dump(exclude_none=True) for i in entries[lib_id].inputs]
-            want = [i.model_dump(exclude_none=True) for i in type_def.default_inputs]
-            self.assertEqual(got, want)
+    def test_shipped_bodies_carry_their_wiring(self) -> None:
+        """The shipped bodies live only in the Library now (§7 retired their type
+        `default_body`), so the coverage that they wire the right helpers moves
+        here, onto the resolved Library node body.
+
+        Roleplay must still read the #317 project-metadata triple out of the box;
+        revise:entry must still carry both of its modes (revise via
+        `field_catalog(e)`, create via `field_catalog(draft_type)` /
+        `entry_type_label(draft_type)`) and ask for the JSON `body` + `fields`.
+        """
+        roleplay = self.service.read_prompt_entry("builtin-roleplay").body
+        for marker in (
+            "project.metadata.tense",
+            "project.metadata.measurement_system",
+            "project.metadata.spelling",
+            "character_thread",
+        ):
+            self.assertIn(marker, roleplay)
+        revise = self.service.read_prompt_entry("builtin-revise-entry").body
+        for marker in (
+            "ideation partner",
+            "entry(input.entry)",
+            "field_catalog(e)",
+            "field_catalog(draft_type)",
+            "entry_type_label(draft_type)",
+            '"fields"',
+            '"body"',
+        ):
+            self.assertIn(marker, revise)
+
+    def test_clone_a_library_prompt_into_the_project(self) -> None:
+        """Clone (§5): a shipped prompt is lifted into the project under a NEW id
+        as an editable copy. The Library original is untouched and still resolves
+        — clone is not hide."""
+        before = self._library_path("builtin-roleplay").read_bytes()
+        source = self.service.read_prompt_entry("builtin-roleplay")
+        clone = self.service.fork_prompt_entry("builtin-roleplay")
+        # New id, owned by the project (not the Library floor), and not shipped.
+        self.assertNotEqual(clone.id, "builtin-roleplay")
+        self.assertFalse(clone.is_library)
+        self.assertEqual(clone.source_layer_id, self.service._metadata_schema_layer_id(self.root))
+        # A faithful copy: title, body and inputs carried from the shipped node.
+        self.assertEqual(clone.title, source.title)
+        self.assertEqual(clone.body.rstrip(), source.body.rstrip())
+        self.assertEqual(
+            [i.model_dump(exclude_none=True) for i in clone.inputs],
+            [i.model_dump(exclude_none=True) for i in source.inputs],
+        )
+        # The copy lands as a real project file; the shipped original is byte-for-
+        # byte untouched and still resolves.
+        self.assertEqual(len(list((self.root / "prompts").glob("*.md"))), 1)
+        self.assertEqual(self._library_path("builtin-roleplay").read_bytes(), before)
+        self.assertIn("builtin-roleplay", self._summaries())
+        # And the owned copy is now saveable in place (the read-only guard is off).
+        saved = self.service.save_prompt_entry(
+            clone.id,
+            SavePromptEntryRequest(
+                title=clone.title,
+                body="edited",
+                base_revision=clone.revision,
+                entry_type=clone.entry_type,
+                metadata={},
+            ),
+        )
+        self.assertEqual(saved.body.rstrip(), "edited")
+
+    def test_cannot_clone_a_prompt_the_project_owns(self) -> None:
+        """Clone is for shipped material; an already-owned prompt has nothing to
+        lift."""
+        created = self.service.create_prompt_entry(
+            type("R", (), {"title": "Mine", "entry_type": "prompt:general"})()
+        )
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.fork_prompt_entry(created.id)
+        self.assertEqual(ctx.exception.status_code, 409)
+
+    def test_cannot_clone_a_missing_prompt(self) -> None:
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.fork_prompt_entry("no-such-prompt")
+        self.assertEqual(ctx.exception.status_code, 404)
 
     def test_library_survives_a_snapshot_reload(self) -> None:
         """The node index persists to a snapshot that a *second* open reads
@@ -139,6 +206,16 @@ class BuiltinLibraryTests(unittest.TestCase):
         self.assertTrue(set(entries) >= LIBRARY_IDS)
         for lib_id in LIBRARY_IDS:
             self.assertEqual(entries[lib_id].source_layer_label, "Library")
+            # `is_library` is re-stamped from the layer on rehydrate, NOT read
+            # from the serialized entry. If the warm load drops it, the pill
+            # (which reads the label) still renders but clone/read-only break
+            # (#674) — so assert the flag, not just the label.
+            self.assertTrue(entries[lib_id].is_library)
+        # The behaviour the flag gates: clone must still work after a warm load,
+        # not just resolve. With is_library lost, fork_prompt_entry would 409.
+        node_index_gate.invalidate()
+        clone = self.service.fork_prompt_entry("builtin-roleplay")
+        self.assertFalse(clone.is_library)
 
     def _library_path(self, entry_id: str) -> Path:
         return self.service._build_node_index().by_id[entry_id].path

@@ -829,6 +829,12 @@ export const api = {
       method: "DELETE",
     });
   },
+  // Clone a built-in Library prompt into the project as an editable copy
+  // (ADR-0049 §5). Unlike lore's fork, this mints a NEW id and leaves the
+  // shipped original in place; the returned entry is the local copy.
+  forkPromptEntry(entryId: string) {
+    return request<PromptEntry>(`/prompts/${entryId}/fork`, { method: "POST" });
+  },
   // Reusable mutation sets (#62).
   listMutationSetEntries() {
     return request<MutationSetEntryList>("/mutation-sets");

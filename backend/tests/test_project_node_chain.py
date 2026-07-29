@@ -180,16 +180,6 @@ class ProjectNodeFlatTests(unittest.TestCase):
             "present",
         )
 
-    def test_the_roleplay_builtin_template_wires_the_field_triple(self) -> None:
-        """Part 3 is only met if a *shipped* template references the fields, not
-        just the docs. The roleplay `default_body` is the one bundled template
-        body (copied into a real node by `create_prompt_entry`); it must read the
-        units/tense/spelling triple, or #317's symptom survives out of the box."""
-        body = self.service.read_metadata_schema().entry_types["prompt:roleplay"].default_body
-        self.assertIn("project.metadata.tense", body)
-        self.assertIn("project.metadata.measurement_system", body)
-        self.assertIn("project.metadata.spelling", body)
-
     def test_a_hand_edited_yaml_date_does_not_break_the_route(self) -> None:
         """A YAML date scalar in project.md is outside `MetadataValue`; unguarded
         it would 500 `current_project()`. It must survive as its ISO string —

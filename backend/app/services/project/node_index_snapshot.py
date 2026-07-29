@@ -408,6 +408,11 @@ def _rehydrate(payload: dict, layers: list[IndexLayer]) -> NodeIndex:
                 title=entry["title"],
                 source_layer_id=layer.id,
                 source_layer_label=layer.label,
+                # Re-stamped from the layer, like source_layer_id/label above —
+                # it is a property of the layer, not the serialized entry, so a
+                # warm load must restore it or a Library prompt comes back
+                # is_library=False and clone/read-only silently break (#674).
+                is_library=layer.is_library,
                 forked_from_layer_id=forked_from_layer_id,
             )
         )

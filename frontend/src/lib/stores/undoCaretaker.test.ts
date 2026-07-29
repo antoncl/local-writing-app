@@ -89,6 +89,13 @@ describe("UndoCaretaker", () => {
     caretaker.undo();
     expect(log).toEqual([]); // the whole tA run
     expect(caretaker.canUndo).toBe(false);
+
+    // And forward again from the bottom: the first redo must replay the whole
+    // tA run, not one command of it, and the second brings back b alone.
+    caretaker.redo();
+    expect(log).toEqual(["a1", "a2"]);
+    caretaker.redo();
+    expect(log).toEqual(["a1", "a2", "b"]);
   });
 
   it("treats non-adjacent reuse of a transaction id as separate steps", () => {
@@ -161,6 +168,25 @@ describe("UndoCaretaker", () => {
     caretaker.undo(); // b
     expect(caretaker.canUndo).toBe(false);
     expect(log).toEqual(["a1", "a2"]);
+  });
+
+  it("never drops the newest step, even when its cascade alone exceeds the cap", () => {
+    const caretaker = new UndoCaretaker(2);
+    const log = ["t1", "t2", "t3"];
+    // One gesture, three commands, cap two: the stack overshoots rather than
+    // eating the gesture just performed — it must stay undoable.
+    for (const tag of ["t1", "t2", "t3"]) caretaker.record(tagged(log, tag, { transaction: "t" }));
+    expect(caretaker.canUndo).toBe(true);
+    caretaker.undo();
+    expect(log).toEqual([]);
+
+    // Once a next step lands, the oversized run is history and droppable.
+    caretaker.redo();
+    log.push("d");
+    caretaker.record(tagged(log, "d"));
+    caretaker.undo(); // d
+    expect(caretaker.canUndo).toBe(false); // the t run was dropped by the cap
+    expect(log).toEqual(["t1", "t2", "t3"]);
   });
 
   it("keeps canUndo/canRedo correct at the stack ends", () => {

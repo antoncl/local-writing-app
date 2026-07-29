@@ -72,9 +72,14 @@ export class UndoCaretaker {
     kept.push(command);
     // Enforce the cap by dropping whole steps from the oldest end — never a
     // partial transaction, which would leave a half-reversible cascade at the
-    // bottom of the stack.
+    // bottom of the stack, and never the newest step: the cap is a backstop on
+    // *history*, and taking the gesture just performed would break the one
+    // promise the feature makes. A cascade longer than the whole cap simply
+    // overshoots until the next step arrives and it becomes droppable history.
     while (kept.length > this.#cap) {
-      kept.splice(0, this.#stepEnd(kept, 0) + 1);
+      const oldestStep = this.#stepEnd(kept, 0) + 1;
+      if (oldestStep >= kept.length) break;
+      kept.splice(0, oldestStep);
     }
     this.#commands = kept;
     this.#cursor = kept.length;

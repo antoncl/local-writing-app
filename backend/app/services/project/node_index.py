@@ -50,6 +50,11 @@ class IndexLayer:
     `is_root` marks the open project itself (scenes and chats are collected
     only there). `is_machine` marks the out-of-tree machine config dir, which
     contributes assistants only and carries no `metadata.schema.yaml`.
+    `is_library` marks the app-owned built-in Library — the read-only floor of
+    shipped nodes beneath every project (ADR-0049). Like the machine layer it
+    is out-of-tree and carries no project node or schema; unlike it, it
+    contributes ordinary node families (prompts first) and is never a write
+    target — a save routed at it is refused (`save_prompt_entry`).
     """
 
     folder: Path
@@ -58,6 +63,7 @@ class IndexLayer:
     rank: int
     is_root: bool = False
     is_machine: bool = False
+    is_library: bool = False
 
 
 @dataclass(frozen=True)

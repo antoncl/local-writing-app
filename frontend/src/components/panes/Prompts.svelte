@@ -8,7 +8,8 @@
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import { entryTypeChoicesByKind } from "@/lib/utils/treeHelpers";
   import { defaultView } from "@/lib/views/evaluateView";
-  import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
+  import { inheritedLayerLabel } from "@/lib/utils/provenance";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
   import type { ViewSpec } from "@/lib/types";
@@ -87,8 +88,13 @@
 {/snippet}
 
 {#snippet entryRow(entry: PromptEntrySummary, ctx: RowCtx<PromptEntrySummary>)}
+  <!-- A prompt whose source layer differs from the open project's is inherited
+       and gets the level pill. For a built-in Library prompt (ADR-0049) that
+       pill reads "Library", marking it as shipped read-only material, distinct
+       from the writer's own prompts — the same treatment Lore uses. -->
   <NodeRow
     title={entry.title}
+    layerLabel={inheritedLayerLabel(entry, $projectLayerIdStore)}
     depth={ctx.depth}
     active={ctx.active}
     onClick={ctx.onClick}

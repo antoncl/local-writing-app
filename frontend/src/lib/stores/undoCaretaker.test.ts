@@ -5,7 +5,7 @@
  * a consumer can: commands whose closures mutate a plain value, then asserting
  * the value — not the caretaker's internals — after each undo/redo. The
  * domain-agnosticism itself is asserted structurally at the bottom: the module
- * imports nothing, least of all a node, an edge, or SvelteFlow.
+ * imports nothing from the canvas or any node/edge module.
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -28,9 +28,9 @@ describe("UndoCaretaker", () => {
     const log = ["a"]; // the actor already performed the change (§1)
     caretaker.record(tagged(log, "a", { label: "add a" }));
 
-    expect(caretaker.undo()).toBe("add a");
+    expect(caretaker.undo()).toEqual({ label: "add a" });
     expect(log).toEqual([]);
-    expect(caretaker.redo()).toBe("add a");
+    expect(caretaker.redo()).toEqual({ label: "add a" });
     expect(log).toEqual(["a"]);
   });
 
@@ -49,14 +49,14 @@ describe("UndoCaretaker", () => {
     caretaker.record(tagged(log, "edge-b", { transaction: "t1", label: "delete edge" }));
     caretaker.record(tagged(log, "self", { transaction: "t1", label: "delete node" }));
 
-    // One undo reverses the whole run, LIFO (self, edge-b, edge-a), and the
-    // step announces as the gesture's concluding label.
-    expect(caretaker.undo()).toBe("delete node");
+    // One undo reverses the whole run (order proven by the LIFO test below),
+    // announcing the gesture's concluding label.
+    expect(caretaker.undo()).toEqual({ label: "delete node" });
     expect(log).toEqual([]);
     expect(caretaker.canUndo).toBe(false);
 
-    // One redo replays it forward, in record order.
-    expect(caretaker.redo()).toBe("delete node");
+    // One redo replays it forward.
+    expect(caretaker.redo()).toEqual({ label: "delete node" });
     expect(log).toEqual(["edge-a", "edge-b", "self"]);
     expect(caretaker.canRedo).toBe(false);
   });
@@ -123,6 +123,93 @@ describe("UndoCaretaker", () => {
     expect(log).toEqual(["a1", "a2"]);
     caretaker.undo();
     expect(log).toEqual([]);
+  });
+
+  it("never reopens a closed run — an undo-fork cannot rejoin same-id runs", () => {
+    const caretaker = new UndoCaretaker();
+    const log = ["a1", "b"];
+    caretaker.record(tagged(log, "a1", { transaction: "tA" }));
+    caretaker.record(tagged(log, "b")); // closes tA
+    caretaker.undo(); // discard b — tA's runs are now adjacent in the log
+    expect(log).toEqual(["a1"]);
+    log.push("c");
+    caretaker.record(tagged(log, "c", { transaction: "tA" }));
+
+    // Closure was recorded at record time, so the fork must not merge the two
+    // gestures into one step: the first undo reverses only c.
+    caretaker.undo();
+    expect(log).toEqual(["a1"]);
+    caretaker.undo();
+    expect(log).toEqual([]);
+  });
+
+  it("closes an open transaction on undo/redo, not only on an untagged record", () => {
+    const caretaker = new UndoCaretaker();
+    const log = ["a"];
+    caretaker.record(tagged(log, "a", { transaction: "tA" }));
+    caretaker.undo();
+    caretaker.redo(); // a round-trip through history is a user action — tA is over
+    log.push("b");
+    caretaker.record(tagged(log, "b", { transaction: "tA" }));
+
+    caretaker.undo();
+    expect(log).toEqual(["a"]); // b alone, not one merged tA step
+  });
+
+  it("treats an empty-string transaction id as no transaction", () => {
+    const caretaker = new UndoCaretaker();
+    const log = ["a", "b"];
+    // A consumer normalizing with `?? ""` must not accidentally group
+    // unrelated gestures (null from untyped JS folds the same way).
+    caretaker.record(tagged(log, "a", { transaction: "" }));
+    caretaker.record(tagged(log, "b", { transaction: "" }));
+
+    caretaker.undo();
+    expect(log).toEqual(["a"]); // two steps, not one "" run
+  });
+
+  it("throws on record() from inside a replaying closure, leaving state consistent", () => {
+    const caretaker = new UndoCaretaker();
+    const log = ["a"];
+    caretaker.record({
+      // The slice-1 mistake: an undo closure routed through a committer that
+      // records. The caretaker must fail loudly, not corrupt the log.
+      undo: () => caretaker.record(tagged(log, "x")),
+      redo: () => log.push("a"),
+    });
+
+    expect(() => caretaker.undo()).toThrow(/record\(\) during undo\/redo/);
+    expect(caretaker.canUndo).toBe(true); // the step did not complete
+    expect(caretaker.canRedo).toBe(false); // and nothing was recorded above it
+  });
+
+  it("keeps the cursor consistent when a closure throws mid-run", () => {
+    const caretaker = new UndoCaretaker();
+    const log = ["c1", "c2", "c3"];
+    let broken = true;
+    caretaker.record(tagged(log, "c1", { transaction: "t" }));
+    caretaker.record({
+      undo: () => {
+        if (broken) throw new Error("boom");
+        log.splice(log.lastIndexOf("c2"), 1);
+      },
+      redo: () => log.push("c2"),
+      transaction: "t",
+    });
+    caretaker.record(tagged(log, "c3", { transaction: "t" }));
+
+    // c3 undoes, c2 throws: the exception propagates but the cursor records
+    // the partial progress.
+    expect(() => caretaker.undo()).toThrow("boom");
+    expect(log).toEqual(["c1", "c2"]);
+    expect(caretaker.canUndo).toBe(true);
+
+    // A retry continues the step from where it broke — c3 must NOT undo (or
+    // its closure execute) a second time.
+    broken = false;
+    caretaker.undo();
+    expect(log).toEqual([]);
+    expect(caretaker.canUndo).toBe(false);
   });
 
   it("clears the redo stack when a new command is recorded after an undo", () => {
@@ -208,20 +295,23 @@ describe("UndoCaretaker", () => {
     expect(caretaker.canRedo).toBe(false);
   });
 
-  it("degrades an unlabelled step to an empty label, not null", () => {
+  it("distinguishes an unlabelled step from nothing-to-undo by shape, not truthiness", () => {
     const caretaker = new UndoCaretaker();
     const log = ["a"];
     caretaker.record(tagged(log, "a")); // no label
-    expect(caretaker.undo()).toBe(""); // undone, but nothing to announce
+    expect(caretaker.undo()).toEqual({ label: "" }); // undone, nothing to name
     expect(caretaker.undo()).toBe(null); // nothing left to undo
   });
 
-  it("imports nothing — no node, no edge, no SvelteFlow (§2)", () => {
+  it("imports nothing from the canvas or any node/edge module (§2)", () => {
     // The load-bearing acceptance of #678: the caretaker's ignorance is what
-    // lets a second surface reuse it. Asserted against the source itself so a
-    // future import shows up as a test failure, not a review catch.
+    // lets a second surface reuse it. Scoped to import statements so a future
+    // legitimate import — or a comment mentioning the canvas by name — cannot
+    // false-positive the guard into being weakened.
     const source = readFileSync(new URL("./undoCaretaker.svelte.ts", import.meta.url), "utf8");
-    expect(source).not.toMatch(/^\s*import\b/m);
-    expect(source).not.toMatch(/@xyflow|svelteflow|FlowNode|FlowEdge/i);
+    const imports = source.match(/^\s*import\b.*/gm) ?? [];
+    for (const line of imports) {
+      expect(line).not.toMatch(/@xyflow|svelteflow|flownode|flowedge|viewbody/i);
+    }
   });
 });

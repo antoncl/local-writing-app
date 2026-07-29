@@ -152,6 +152,14 @@ class EditorPanesController {
   // — nothing renders off it; the freeze is a save-timing concern, not UI state.
   #reviewLocks = new Map<string, ReviewCommitter>();
 
+  // Per-pane in-flight save tail (#666). A direct save — pane close, project
+  // switch, lore fork, todo-driven scene flush — can be requested while an
+  // autosave PUT is still on the wire. Chaining each save onto this tail
+  // serializes them so no two writes build on the same base_revision (the later
+  // one would 409). Holds a non-rejecting promise so a follow-on can chain
+  // without its own catch; the entry is deleted when the chain drains.
+  #saveChain = new Map<string, Promise<void>>();
+
   // Injected by App (set in onMount): the app-level error/status sinks and the
   // run() wrapper that funnels errors into App's `error`. These keep the
   // controller ignorant of App's UI chrome.
@@ -474,7 +482,34 @@ class EditorPanesController {
     }
   }
 
-  async saveEditorPane(id: string, options: { force?: boolean } = {}): Promise<void> {
+  /** Persist a pane, serialized against any save already in flight for it.
+   *
+   * The heavy lifting is `#performSave`; this wrapper only orders the calls
+   * (#666). A direct save (pane close, project switch, lore fork, todo-driven
+   * scene flush) can be requested while an autosave PUT is still on the wire —
+   * without ordering, both build on the same base_revision and the later one
+   * 409s. When nothing is in flight the save runs synchronously (so `saving`
+   * flips in this tick — the #614 gate that keeps the *scheduler* from arming a
+   * second write — and the common case adds no microtask hop); when a save is in
+   * flight this one chains after it and runs against the revision it reconciled.
+   */
+  saveEditorPane(id: string, options: { force?: boolean } = {}): Promise<void> {
+    const prior = this.#saveChain.get(id);
+    const run = prior
+      ? prior.then(() => this.#performSave(id, options))
+      : this.#performSave(id, options);
+    // A non-rejecting tail: the next caller chains onto it without its own catch,
+    // and a failed save leaves no unhandled rejection parked on the map.
+    const tail = run.catch(() => {});
+    this.#saveChain.set(id, tail);
+    // Drain only if no later caller has already extended the chain past us.
+    void tail.finally(() => {
+      if (this.#saveChain.get(id) === tail) this.#saveChain.delete(id);
+    });
+    return run;
+  }
+
+  async #performSave(id: string, options: { force?: boolean } = {}): Promise<void> {
     const pane = this.panes.find((candidate) => candidate.id === id);
     if (!pane?.scene) return;
     const documentKind = pane.document?.type ?? "scene";
@@ -486,6 +521,13 @@ class EditorPanesController {
     // designer owns the ViewSpec); the pane's draft-* fields aren't the source
     // of truth for view state. Same no-op precedent as chats.
     if (documentKind === "view") return;
+    // A predecessor in this pane's save chain (#666) may have already flushed
+    // these exact drafts — an autosave that completed while a close/switch waited
+    // its turn. With nothing dirty and no forced overwrite, another PUT is a
+    // no-op round-trip plus a post-save refresh storm; skip it. Every direct
+    // caller already gates on `dirty`, so this only bites the coalesced follow-on.
+    // `force` (409 recovery) must still write.
+    if (!pane.dirty && !options.force) return;
     this.#autosave.cancel(id);
     this.setEditorPaneSaving(id, true);
     // Snapshot the pre-save baseline body for the mutations-version check below

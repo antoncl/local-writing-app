@@ -12,6 +12,11 @@
   import { inheritedLayerLabel } from "@/lib/utils/provenance";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
+  import {
+    hiddenLibraryStore,
+    hideLibraryEntry,
+    unhideLibraryEntry,
+  } from "@/lib/stores/hiddenLibrary";
   import type { ViewSpec } from "@/lib/types";
 
   export let entries: PromptEntrySummary[];
@@ -25,6 +30,16 @@
   $: schema = $metadataSchemaStore;
   // Active-row highlight reads from the editor-focus store, not props (#14 Step 2).
   $: focusedDocument = $focusedDocumentStore;
+
+  // ADR-0049 slice 3: hidden built-in Library prompts (per-project, localStorage).
+  // The hidden set drops shipped prompts the writer curated off the shelf; "Show
+  // hidden" reveals them dimmed so they can be un-hidden. The node index stays
+  // complete — this is a presentation filter, so the same prompt still resolves
+  // and runs if referenced by id. Hide is offered only on Library rows.
+  let showHidden = false;
+  $: hiddenSet = $hiddenLibraryStore;
+  $: hiddenCount = entries.filter((entry) => hiddenSet.has(entry.id)).length;
+  $: visibleEntries = showHidden ? entries : entries.filter((entry) => !hiddenSet.has(entry.id));
   // Open a prompt entry in an editor pane (App owns the pane set).
   export let onOpenEntry: (entryId: string) => void;
   // Create a new prompt entry of the given concrete sub-type.
@@ -55,7 +70,7 @@
   // Grouping comes from the spec, never synthesized here.
   $: view = {
     spec: viewSpec,
-    universe: entries,
+    universe: visibleEntries,
     schema,
     referenceIndex: $referenceIndexStore,
   };
@@ -77,6 +92,22 @@
     {/if}
   {/snippet}
 </ViewNodeList>
+
+<!-- ADR-0049 slice 3: reveal/hide the curated-away Library prompts. Only shown
+     when this project has hidden at least one; it is the sole path back to
+     un-hiding them, so it must appear whenever the count is non-zero. -->
+{#if hiddenCount > 0}
+  <button
+    class="hidden-toggle"
+    type="button"
+    aria-pressed={showHidden}
+    onclick={() => (showHidden = !showHidden)}
+  >
+    <i class={showHidden ? "ti ti-eye" : "ti ti-eye-off"} aria-hidden="true"></i>
+    {showHidden ? "Hide" : "Show"}
+    {hiddenCount} hidden
+  </button>
+{/if}
 
 {#snippet addMenu({ close }: { parentId: string | null; close: () => void })}
   <span class="row-add-popover-heading">New prompt</span>
@@ -100,26 +131,78 @@
     layerLabel={inheritedLayerLabel(entry, $projectLayerIdStore)}
     depth={ctx.depth}
     active={ctx.active}
+    dimmed={hiddenSet.has(entry.id)}
     onClick={ctx.onClick}
     onmousedown={(event) => event.stopPropagation()}
   >
     {#snippet trailing()}
-      <!-- ADR-0049 §5: a shipped Library prompt offers "clone" from the home —
-           lift it into the project as an editable copy. Keyed on `is_library`,
-           not the label. Own prompts have nothing to clone. -->
+      <!-- ADR-0049: a shipped Library prompt is used in place, cloned to own, or
+           hidden (§2). All three affordances key on `is_library`, not the label —
+           the writer's own prompts have nothing to clone or hide. A revealed
+           hidden row (under "Show hidden") swaps clone+hide for a single un-hide. -->
       {#if entry.is_library}
-        <button
-          class="reveal-on-hover"
-          type="button"
-          title="Clone this shipped prompt into an editable copy in this project"
-          aria-label={`Clone ${entry.title} into this project`}
-          onmousedown={(event) => event.stopPropagation()}
-          onclick={(event) => {
-            event.stopPropagation();
-            onCloneEntry(entry.id);
-          }}
-        >⧉</button>
+        {#if hiddenSet.has(entry.id)}
+          <button
+            type="button"
+            title={`Show “${entry.title}” on this project's Library shelf again`}
+            aria-label={`Show ${entry.title} again`}
+            onmousedown={(event) => event.stopPropagation()}
+            onclick={(event) => {
+              event.stopPropagation();
+              unhideLibraryEntry(entry.id);
+            }}
+          ><i class="ti ti-eye-off" aria-hidden="true"></i></button>
+        {:else}
+          <button
+            class="reveal-on-hover"
+            type="button"
+            title="Clone this shipped prompt into an editable copy in this project"
+            aria-label={`Clone ${entry.title} into this project`}
+            onmousedown={(event) => event.stopPropagation()}
+            onclick={(event) => {
+              event.stopPropagation();
+              onCloneEntry(entry.id);
+            }}
+          >⧉</button>
+          <button
+            class="reveal-on-hover"
+            type="button"
+            title={`Hide “${entry.title}” from this project's Library shelf`}
+            aria-label={`Hide ${entry.title} from this project`}
+            onmousedown={(event) => event.stopPropagation()}
+            onclick={(event) => {
+              event.stopPropagation();
+              hideLibraryEntry(entry.id);
+            }}
+          ><i class="ti ti-eye" aria-hidden="true"></i></button>
+        {/if}
       {/if}
     {/snippet}
   </NodeRow>
 {/snippet}
+
+<style>
+  /* The "Show N hidden" reveal — a quiet, full-width footer affordance under the
+     shelf, in the muted register so it never competes with the prompt rows. */
+  .hidden-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    margin-top: 6px;
+    padding: 6px 8px;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-3);
+    font-size: var(--fs-sm);
+    text-align: left;
+    cursor: pointer;
+    transition: background 120ms ease, color 120ms ease;
+  }
+
+  .hidden-toggle:hover {
+    background: var(--inset);
+    color: var(--text-2);
+  }
+</style>

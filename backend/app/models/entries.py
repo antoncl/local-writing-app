@@ -225,8 +225,11 @@ class PromptEntrySummary(BaseModel):
     # read-model flag so the editor's read-only lock and the "Clone to edit"
     # banner read it instead of re-deriving ownership from the async schema
     # layers. That re-derivation drifting from this truth is what caused #676
-    # (#689). True unless the project provably does not own the winner.
-    editable: bool = True
+    # (#689). The two builders always set it from `_prompt_winner_is_owned`; the
+    # default is fail-CLOSED (locked) to match the read-only invariant — a path
+    # that ever forgot to set it would lock, never silently unlock an inherited
+    # prompt into the 409 dead-end.
+    editable: bool = False
 
 
 class PromptEntry(BaseModel):
@@ -243,7 +246,8 @@ class PromptEntry(BaseModel):
     is_library: bool = False
     # See PromptEntrySummary.editable (#689): the backend's own read-only-in-place
     # verdict, carried on the open document so NodeEditor keys its lock on it.
-    editable: bool = True
+    # Fail-closed default (see above).
+    editable: bool = False
 
 
 class PromptEntryList(BaseModel):

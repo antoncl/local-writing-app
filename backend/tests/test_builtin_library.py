@@ -135,6 +135,11 @@ class BuiltinLibraryTests(unittest.TestCase):
                 ),
             )
         self.assertEqual(ctx.exception.status_code, 409)
+        # The read-only guard covers DELETE too (delete_prompt_entry runs the same
+        # reject), so editable=False must mirror that as well, not just save.
+        with self.assertRaises(ProjectServiceError) as del_ctx:
+            self.service.delete_prompt_entry("builtin-revise-entry")
+        self.assertEqual(del_ctx.exception.status_code, 409)
         # An owned prompt reads editable=True on both read models, and the save
         # that value promises actually succeeds.
         created = self.service.create_prompt_entry(
@@ -259,6 +264,13 @@ class BuiltinLibraryTests(unittest.TestCase):
             # (which reads the label) still renders but clone/read-only break
             # (#674) — so assert the flag, not just the label.
             self.assertTrue(entries[lib_id].is_library)
+            # `editable` is a SEPARATE axis from is_library: it derives from the
+            # restored `source_layer_id`, not the re-stamped is_library flag. A
+            # warm load that mis-restored the source layer would flip an inherited
+            # prompt to editable=True on the next open (unlocking a read-only
+            # prompt) with is_library still correct — so pin editable too (#689).
+            self.assertFalse(entries[lib_id].editable)
+            self.assertFalse(self.service.read_prompt_entry(lib_id).editable)
         # The behaviour the flag gates: clone must still work after a warm load,
         # not just resolve. With is_library lost, fork_prompt_entry would 409.
         node_index_gate.invalidate()
@@ -350,6 +362,18 @@ class InheritedAncestorPromptCloneTests(unittest.TestCase):
                 ),
             )
         self.assertEqual(ctx.exception.status_code, 409)
+
+    def test_ancestor_prompt_delete_is_refused(self) -> None:
+        # The generalized read-only guard (#676) refuses DELETE of an inherited
+        # ancestor prompt too, not just save — the delete half was only covered
+        # for the Library. editable=False must mirror this refusal.
+        self.assertFalse(self.service.read_prompt_entry("universe-prompt").editable)
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.delete_prompt_entry("universe-prompt")
+        self.assertEqual(ctx.exception.status_code, 409)
+        # Still resolves after the refused delete (unchanged, not gone).
+        entries = {e.id: e for e in self.service.list_prompt_entries().entries}
+        self.assertIn("universe-prompt", entries)
 
     def test_clone_an_ancestor_prompt_into_the_project(self) -> None:
         source = self.service.read_prompt_entry("universe-prompt")

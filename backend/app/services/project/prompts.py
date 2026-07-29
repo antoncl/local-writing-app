@@ -141,9 +141,12 @@ class PromptEntriesMixin:
             source_layer_id=index_entry.source_layer_id if index_entry else "",
             source_layer_label=index_entry.source_layer_label if index_entry else "",
             is_library=index_entry.is_library if index_entry else False,
-            # Mirror `_reject_inherited_prompt_write` exactly: a winner the project
-            # does not own is read-only (409 on save); no index winner means the
-            # reject path returns (write allowed), so treat it as editable (#689).
+            # Mirror `_reject_inherited_prompt_write` for every reachable state: a
+            # winner the project does not own is read-only (409 on save); no index
+            # winner means the reject path returns (write allowed), so treat it as
+            # editable (#689). (The reject also allows a non-prompt winner, which
+            # this branch does not special-case — unreachable here, since a
+            # non-prompt winner is re-routed to the on-disk path before this.)
             editable=self._prompt_winner_is_owned(index_entry, root) if index_entry else True,
         )
 

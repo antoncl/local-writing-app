@@ -5,7 +5,6 @@ import {
   inheritedLayerLabel,
   isFieldOwnClearable,
   isInherited,
-  isOwnedHere,
   promptReadOnlyInPlace,
 } from "@/lib/utils/provenance";
 
@@ -41,21 +40,6 @@ describe("isInherited", () => {
   it("is true for an ancestor-owned node and false for a local one", () => {
     expect(isInherited({ source_layer_id: "series" }, "book")).toBe(true);
     expect(isInherited({ source_layer_id: "book" }, "book")).toBe(false);
-  });
-});
-
-describe("isOwnedHere (fail-closed write gate, #676)", () => {
-  it("is true only when the source layer is known AND equals the own layer", () => {
-    expect(isOwnedHere({ source_layer_id: "book" }, "book")).toBe(true);
-    expect(isOwnedHere({ source_layer_id: "series" }, "book")).toBe(false);
-  });
-
-  it("fails CLOSED (not owned) when either id is missing — unlike isInherited", () => {
-    // The load gap: own layer not yet known. isInherited would say "not inherited"
-    // (fail open); isOwnedHere says "not owned" (fail closed) so the write stays locked.
-    expect(isOwnedHere({ source_layer_id: "book" }, "")).toBe(false);
-    expect(isInherited({ source_layer_id: "book" }, "")).toBe(false);
-    expect(isOwnedHere({}, "book")).toBe(false);
   });
 });
 

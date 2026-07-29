@@ -400,6 +400,14 @@
     return String(value);
   }
 
+  // metadataSchema is global per-project — read from the store, not a prop (#14
+  // Step 2). Declared HERE, above the first pre-effect that reads it: a
+  // pre-effect's first run can execute synchronously at creation (a lazy mount
+  // into an already-running flush — every doc open), and a `$derived` declared
+  // below it is still in its temporal dead zone then (#684 — the editor body
+  // silently never mounted).
+  let metadataSchema = $derived($metadataSchemaStore);
+
   // ADR-0046 slice 2/3 — the lore brainstorm review. A `revise:entry` chat
   // commits an EntryPatch (launched via LoreBrainstormBar); the controller
   // derives the proposed-vs-current flips (body + each changed long_text field,
@@ -509,8 +517,6 @@
     proseBodyView?.highlightEmbeddedTodo(todoId);
   }
 
-  // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
-  let metadataSchema = $derived($metadataSchemaStore);
   $effect.pre(() => {
     if (metadataReload && metadataReload.token !== lastMetadataReloadToken) {
       lastMetadataReloadToken = metadataReload.token;

@@ -91,6 +91,21 @@ export class UndoCaretaker {
   canUndo = $derived(this.#cursor > 0);
   canRedo = $derived(this.#cursor < this.#log.length);
 
+  /** The label of the step `undo()` would reverse next, without consuming it —
+   *  for the affordance tooltip (§7: "Undo delete node"). `null` when there is
+   *  nothing to undo, `""` when the next step is unlabelled. */
+  undoLabel = $derived.by((): string | null => {
+    if (this.#cursor === 0) return null;
+    const end = this.#cursor - 1;
+    return this.#stepLabel(this.#stepBounds(this.#log, end).start, end);
+  });
+  /** `undoLabel`'s forward twin. */
+  redoLabel = $derived.by((): string | null => {
+    if (this.#cursor >= this.#log.length) return null;
+    const start = this.#cursor;
+    return this.#stepLabel(start, this.#stepBounds(this.#log, start).end);
+  });
+
   /** `cap` is overridable for tests; consumers take the default. */
   constructor(cap: number = DEFAULT_CAP) {
     this.#cap = cap;

@@ -295,6 +295,24 @@ describe("UndoCaretaker", () => {
     expect(caretaker.canRedo).toBe(false);
   });
 
+  it("peeks the next undo/redo step's label without consuming it", () => {
+    const caretaker = new UndoCaretaker();
+    expect(caretaker.undoLabel).toBe(null);
+    expect(caretaker.redoLabel).toBe(null);
+
+    const log = ["e", "n"];
+    caretaker.record(tagged(log, "e", { transaction: "t", label: "delete edge" }));
+    caretaker.record(tagged(log, "n", { transaction: "t", label: "delete node" }));
+    // The whole run is one step; the peek shows the same label undo() returns.
+    expect(caretaker.undoLabel).toBe("delete node");
+    expect(caretaker.redoLabel).toBe(null);
+    expect(log).toEqual(["e", "n"]); // peeking executed nothing
+
+    caretaker.undo();
+    expect(caretaker.undoLabel).toBe(null);
+    expect(caretaker.redoLabel).toBe("delete node");
+  });
+
   it("distinguishes an unlabelled step from nothing-to-undo by shape, not truthiness", () => {
     const caretaker = new UndoCaretaker();
     const log = ["a"];

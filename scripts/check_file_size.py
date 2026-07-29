@@ -22,7 +22,7 @@ from pathlib import Path
 
 WARN = 1200
 HARD_FAIL = 1500
-EXTENSIONS = {".py", ".svelte", ".ts", ".tsx"}
+EXTENSIONS = {".py", ".svelte", ".ts", ".tsx", ".css"}
 
 # Files knowingly over the cap, exempt from the hard FAIL until a dedicated
 # split. They still warn. Remove an entry once it is back under HARD_FAIL.

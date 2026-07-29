@@ -12,6 +12,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -20,6 +21,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import pytest
+import yaml
 
 import app
 
@@ -493,6 +495,133 @@ def test_findings_survive_a_cp1252_console(tmp_path):
     assert result.returncode == 1, "the oversized index should have been reported"
     assert "memory index:" in result.stdout
     assert "non-pointer" in result.stdout, "the finding itself never made it out"
+
+
+# --- the guards see .css (#687, ADR-0048 S1) ----------------------------------
+#
+# Plot-board work arrives as standalone .css; before it lands, both guards must
+# actually receive such files. The first two tests failed against the pre-#687
+# filters (EXTENSIONS without ".css"; is_checked admitting only styles.css);
+# the rest pin the widening's boundaries — what it must NOT sweep in, and the
+# escape hatches it must NOT open.
+
+
+size_guard = _load_script("check_file_size")
+style_guard = _load_script("check_style_tokens")
+
+
+def _frontend_file(tmp_path, rel: str, body: str) -> str:
+    """A file under a fake frontend/src — the prefix is_checked requires."""
+    path = tmp_path / "frontend" / "src" / Path(rel)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
+    return str(path)
+
+
+def test_an_oversized_css_file_fails_the_size_guard(tmp_path):
+    big = tmp_path / "board.css"
+    big.write_text(".card {}\n" * size_guard.HARD_FAIL, encoding="utf-8")
+    assert size_guard.main([str(big)]) == 1
+
+
+def test_a_hex_literal_in_any_frontend_css_fails_the_style_guard(tmp_path):
+    css = _frontend_file(tmp_path, "components/board/board.css", ".card { color: #ff0000; }\n")
+    assert style_guard.main([css]) == 1
+
+
+def test_generated_css_is_not_style_checked(tmp_path):
+    """Build outputs (the icon-font subset) legitimately declare the icon face."""
+    css = _frontend_file(
+        tmp_path, "lib/icons/generated/subset.css", '.ti { font-family: "tabler-icons"; }\n'
+    )
+    assert style_guard.main([css]) == 0
+
+
+def test_a_generated_named_dir_elsewhere_is_still_checked(tmp_path):
+    """The skip is a list of known build-output roots, not a naming convention —
+    authored code cannot dodge the guard by living in a folder called
+    `generated`."""
+    css = _frontend_file(tmp_path, "components/generated/board.css", ".x { color: #ff0000; }\n")
+    assert style_guard.main([css]) == 1
+
+
+def test_token_definition_blocks_are_exempt_only_in_the_token_layer(tmp_path):
+    """styles.css is where raw values are *supposed* to live; the identical
+    :root-wrapped literal in any other stylesheet is drift, same as in a
+    component's <style> block."""
+    body = ":root {\n  --accent: #4466aa;\n}\n"
+    assert style_guard.main([_frontend_file(tmp_path, "styles.css", body)]) == 0
+    assert style_guard.main([_frontend_file(tmp_path, "board.css", body)]) == 1
+
+
+def test_a_single_line_token_block_does_not_exempt_the_rest_of_the_file(tmp_path):
+    """`:root[...] { ... }` on one line closes on that line — before the brace
+    fix, depth never returned to zero and every later line went unscanned."""
+    body = ':root[data-theme="dark"] { --y: #123456; }\n.after { color: #cc0000; }\n'
+    assert style_guard.main([_frontend_file(tmp_path, "styles.css", body)]) == 1
+
+
+# --- gate layers must agree on what the scripts check (#687 review) -----------
+#
+# The selection rule lives in the scripts (EXTENSIONS / is_checked); the CI
+# pathspecs, pre-commit regexes, and PostToolUse hook are pre-filters that may
+# over-match but must never under-match. Both directions of that drift were
+# live before #687: CI's `frontend/src/**/*.svelte` silently dropped top-level
+# App.svelte, and the hook fed .css edits to a script that discarded them.
+# These tests pin every layer as a superset of the scripts' own filters.
+
+
+def _tracked_files(*pathspecs: str) -> set[str]:
+    proc = subprocess.run(
+        ["git", "-C", str(REPO), "ls-files", *pathspecs],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    assert proc.returncode == 0, proc.stderr
+    return {line for line in proc.stdout.splitlines() if line}
+
+
+def _ci_pathspecs(script_name: str) -> list[str]:
+    yml = (REPO / ".github" / "workflows" / "gates.yml").read_text(encoding="utf-8")
+    match = re.search(rf"git ls-files ([^|\n]+)\| xargs -r python scripts/{script_name}", yml)
+    assert match, f"gates.yml no longer pipes git ls-files into {script_name}"
+    return re.findall(r"'([^']+)'", match.group(1))
+
+
+def test_ci_pathspecs_cover_everything_the_scripts_check():
+    tracked = _tracked_files()
+    size_truth = {f for f in tracked if Path(f).suffix in size_guard.EXTENSIONS}
+    style_truth = {f for f in tracked if style_guard.is_checked(Path(f))}
+    size_selected = _tracked_files(*_ci_pathspecs("check_file_size.py"))
+    style_selected = _tracked_files(*_ci_pathspecs("check_style_tokens.py"))
+    assert size_truth <= size_selected, sorted(size_truth - size_selected)
+    assert style_truth <= style_selected, sorted(style_truth - style_selected)
+
+
+def test_precommit_filters_cover_everything_the_scripts_check():
+    config = yaml.safe_load((REPO / ".pre-commit-config.yaml").read_text(encoding="utf-8"))
+    patterns = {
+        hook["id"]: re.compile(hook["files"])
+        for repo in config["repos"]
+        for hook in repo["hooks"]
+        if "files" in hook
+    }
+    size_re, style_re = patterns["file-size-guard"], patterns["style-token-guard"]
+    for f in _tracked_files():
+        if Path(f).suffix in size_guard.EXTENSIONS:
+            assert size_re.search(f), f"pre-commit file-size filter misses {f}"
+        if style_guard.is_checked(Path(f)):
+            assert style_re.search(f), f"pre-commit style filter misses {f}"
+
+
+def test_the_hook_feeds_every_style_checked_file_to_the_style_guard():
+    hook = _load_hook("check_edited_file")
+    for f in _tracked_files():
+        if not style_guard.is_checked(Path(f)):
+            continue
+        commands = hook.applicable_guards(REPO / f)
+        assert any("check_style_tokens" in " ".join(cmd) for cmd in commands), f
 
 
 # --- the SessionEnd dev-server cleanup (#452) ---------------------------------

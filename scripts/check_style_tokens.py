@@ -9,10 +9,12 @@ are drift. Checks, per file:
   * `font-family` declarations whose value is not var(--sans|--serif|--mono)
     (the three system-font faces, #143) — the value may span lines
 
-inside `<style>` blocks of frontend .svelte files and in frontend .css files
-outside the :root / theme token-definition blocks. Paths under a `generated/`
-directory are build outputs (the icon-font subset), not authored style code,
-and are skipped.
+inside `<style>` blocks of frontend .svelte files and in frontend .css files.
+The :root / theme token-definition exemption applies only to styles.css — the
+token layer is where raw values are supposed to live; every other stylesheet
+is scanned in full, exactly like a component's `<style>` block. Known build
+outputs (GENERATED_ROOTS) are not authored style code and are skipped; that
+tuple is ratcheted by scripts/check_exemptions.py like the grandfather sets.
 
 Colors/sizes and font-family carry SEPARATE grandfather sets: a file can be
 clean on one axis while still owing debt on the other (e.g. the editor-shell
@@ -61,6 +63,13 @@ GRANDFATHERED: set[str] = set()
 # exempt a NEW pre-token file while it is being restyled.
 GRANDFATHERED_FONT_FAMILY: set[str] = set()
 
+# Build outputs the style guard never scans (the icon-font subset legitimately
+# declares the icon face itself). Tail-anchored to specific known roots — never
+# a bare directory-name convention, so authored code cannot dodge the guard by
+# living in a folder named "generated". Extend deliberately, one root per build
+# output; growth is ratcheted by scripts/check_exemptions.py.
+GENERATED_ROOTS = ("frontend/src/lib/icons/generated/",)
+
 HEX_RE = re.compile(r"#[0-9a-fA-F]{3,8}\b")
 RGB_RE = re.compile(r"\brgba?\([^)]*\)")
 FONT_SIZE_RE = re.compile(r"font-size\s*:\s*([^;}]+)")
@@ -90,8 +99,10 @@ def token_block_lines(css: str) -> set[int]:
     depth = 0
     for i, line in enumerate(lines):
         if depth == 0 and re.search(r"(?:^|[,\s]):root|\[data-theme", line) and "{" in line:
-            depth = 1
             inside.add(i)
+            # Count the opener's own braces: a single-line `:root { ... }`
+            # closes here, not never.
+            depth = line.count("{") - line.count("}")
             continue
         if depth > 0:
             inside.add(i)
@@ -143,7 +154,10 @@ def check_file(path: Path) -> list[tuple[int, str, str]]:
     text = path.read_text(encoding="utf-8", errors="replace")
     if path.suffix == ".css":
         css = strip_comments(text)
-        return check_css(css, 1, token_block_lines(css))
+        # Only the token layer itself may define raw values inside :root /
+        # [data-theme] blocks; any other .css gets no such exemption.
+        is_token_layer = path.as_posix().endswith("frontend/src/styles.css")
+        return check_css(css, 1, token_block_lines(css) if is_token_layer else set())
     violations: list[tuple[int, str, str]] = []
     for block in STYLE_BLOCK_RE.finditer(text):
         start_line = text.count("\n", 0, block.start(1)) + 1
@@ -155,7 +169,7 @@ def is_checked(path: Path) -> bool:
     posix = path.as_posix()
     if "/frontend/src/" not in f"/{posix}":
         return False
-    if "/generated/" in posix:
+    if any(f"/{root}" in f"/{posix}" for root in GENERATED_ROOTS):
         return False
     return path.suffix in {".svelte", ".css"}
 

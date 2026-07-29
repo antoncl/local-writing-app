@@ -12,7 +12,8 @@ So the exemption lists are treated as ratchets: compare this checkout against a
 base ref (default `origin/master`) and FAIL if any of them got weaker.
 
   * `scripts/check_file_size.py`      GRANDFATHERED
-  * `scripts/check_style_tokens.py`   GRANDFATHERED, GRANDFATHERED_FONT_FAMILY
+  * `scripts/check_style_tokens.py`   GRANDFATHERED, GRANDFATHERED_FONT_FAMILY,
+                                      GENERATED_ROOTS (build-output skip list)
   * `backend/pyproject.toml`          ruff lint `ignore` (must not grow),
                                       `select` (must not shrink),
                                       `per-file-ignores` (must not grow)
@@ -43,7 +44,11 @@ REPO = Path(__file__).resolve().parents[1]
 # file -> module-level set names to compare
 GUARD_SETS = {
     "scripts/check_file_size.py": ("GRANDFATHERED",),
-    "scripts/check_style_tokens.py": ("GRANDFATHERED", "GRANDFATHERED_FONT_FAMILY"),
+    "scripts/check_style_tokens.py": (
+        "GRANDFATHERED",
+        "GRANDFATHERED_FONT_FAMILY",
+        "GENERATED_ROOTS",
+    ),
 }
 PYPROJECT = "backend/pyproject.toml"
 
@@ -152,7 +157,12 @@ def guard_set_ratchets(base: str, shrank: list[str]) -> list[str]:
         base_sets = module_sets(base_src, names)
         now_sets = module_sets((REPO / path).read_text(encoding="utf-8"), names)
         for name in names:
-            base_set, now_set = base_sets.get(name, set()), now_sets.get(name, set())
+            if name not in base_sets:
+                # A newly watched set arms at the value it lands with — the
+                # base moves once it merges, and the ratchet compares from then
+                # on (same principle as a new file having nothing to ratchet).
+                continue
+            base_set, now_set = base_sets[name], now_sets.get(name, set())
             failures += compare(f"{path}:{name}", base_set, now_set, may_grow=False)
             if base_set - now_set:
                 shrank.append(f"{path}:{name} -{len(base_set - now_set)}")

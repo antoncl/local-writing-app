@@ -206,6 +206,16 @@ class BuiltinLibraryTests(unittest.TestCase):
         self.assertTrue(set(entries) >= LIBRARY_IDS)
         for lib_id in LIBRARY_IDS:
             self.assertEqual(entries[lib_id].source_layer_label, "Library")
+            # `is_library` is re-stamped from the layer on rehydrate, NOT read
+            # from the serialized entry. If the warm load drops it, the pill
+            # (which reads the label) still renders but clone/read-only break
+            # (#674) — so assert the flag, not just the label.
+            self.assertTrue(entries[lib_id].is_library)
+        # The behaviour the flag gates: clone must still work after a warm load,
+        # not just resolve. With is_library lost, fork_prompt_entry would 409.
+        node_index_gate.invalidate()
+        clone = self.service.fork_prompt_entry("builtin-roleplay")
+        self.assertFalse(clone.is_library)
 
     def _library_path(self, entry_id: str) -> Path:
         return self.service._build_node_index().by_id[entry_id].path

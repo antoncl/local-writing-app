@@ -104,6 +104,8 @@
     onCreateFieldDraft?: (layerId: string, entryTypeId?: string) => void;
     onApplyGroup?: (application: { group_id: string; label: string; key_prefix: string }) => Promise<boolean>;
     onRemoveGroupApplication?: (index: number) => void;
+    // Open the reusable-group definition manager (parent owns the modal).
+    onManageGroups?: () => void;
     onFieldDragStart?: (fieldId: string) => void;
     onFieldDragOver?: (event: DragEvent, fieldId: string) => void;
     onFieldDrop?: (targetFieldId: string) => void;
@@ -146,6 +148,7 @@
     onCreateFieldDraft = () => {},
     onApplyGroup = async () => false,
     onRemoveGroupApplication = () => {},
+    onManageGroups = () => {},
     onFieldDragStart = () => {},
     onFieldDragOver = () => {},
     onFieldDrop = () => {},
@@ -593,6 +596,7 @@
         <header class="schema-type-fields-header">
           <strong>Reusable groups</strong>
           <small>{typeGroupApplications.length}</small>
+          <button class="manage-groups-link" type="button" onclick={() => onManageGroups()}>Manage…</button>
         </header>
         {#if typeGroupApplications.length}
           <div class="applied-groups">
@@ -609,7 +613,7 @@
           </div>
         {/if}
         {#if availableGroupEntries.length === 0}
-          <p class="muted">No reusable groups defined yet — create one in the Groups manager.</p>
+          <p class="muted">No reusable groups defined yet — <button class="manage-groups-link inline" type="button" onclick={() => onManageGroups()}>create one</button>.</p>
         {:else if groupApplyOpen}
           <div class="group-apply-form">
             <label class="sfi-field">Group
@@ -868,6 +872,24 @@
   }
   .schema-type-fields-header small {
     color: var(--text-3);
+  }
+  /* Quiet accent link to the reusable-group definition manager — co-located
+     here (with the apply form) since #607 removed the pane-header launcher. */
+  .manage-groups-link {
+    margin-left: auto;
+    padding: 5px 4px;
+    border: 0;
+    background: transparent;
+    font-size: var(--fs-sm);
+    color: var(--accent);
+    cursor: pointer;
+  }
+  .manage-groups-link.inline {
+    margin-left: 0;
+    padding: 0;
+  }
+  .manage-groups-link:hover {
+    text-decoration: underline;
   }
   .schema-field-rows {
     display: flex;

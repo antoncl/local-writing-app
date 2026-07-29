@@ -1,12 +1,13 @@
 # ADR-0050: Undo/redo is a dumb caretaker over self-reporting reversible commands
 
-- Status: **Draft** — 2026-07-29. Framed with Anton in conversation: the whole-state-snapshot
-  first cut was rejected in favour of the command pattern once a **second** node-based surface
-  entered the picture; the caretaker is domain-agnostic; transactions are an implicit shared-id run;
-  commands carry reversal closures and history is in-session only. Awaiting his review of this
-  written form before Accepted.
+- Status: **Accepted** — 2026-07-29 (Anton). Framed with him in conversation: the whole-state-snapshot
+  first cut was rejected in favour of the command pattern once a **second** node-based surface entered the
+  picture; the caretaker is domain-agnostic; transactions are an implicit shared-id run; commands carry
+  reversal closures and history is in-session only. Approved with the affordance/a11y decision folded in
+  (§7): a visible, `canUndo`/`canRedo`-bound undo/redo control with an `aria-live` announcement, for
+  discoverability and accessibility on a canvas that does not telegraph Ctrl+Z the way a text field does.
 - Feature: **#187** (view designer has no undo/redo) is the first consumer and the reason this is
-  written now. Implementation issues to be filed per slice on approval (§7).
+  written now. Implementation issues to be filed per slice on approval (§8).
 - Follows: ADR-0038 (view-designer UX — the canvas this first lands on), the NodeEditor body-view
   model (each body view owns its own editing affordances), ADR-0030 (the editing surface should feel
   uniform across body views).
@@ -104,7 +105,8 @@ The designer's Ctrl+Z / Ctrl+Y handler is scoped to the `.view-designer` section
 marks focus entry), **not** `svelte:window`, so it cannot fire while a TipTap or CodeMirror surface in
 another pane is focused. Ctrl+Z → undo; **Ctrl+Y and Ctrl+Shift+Z** → redo (TipTap uses the latter, so
 matching both is what makes redo feel uniform). SvelteFlow already claims its delete key but not Z/Y, so
-there is no conflict on the canvas.
+there is no conflict on the canvas. The keybinding is not the *only* way in — a visible control
+complements it for discoverability and accessibility (§7).
 
 ### 4. Transactions are an **implicit shared-id run**, used only by the few cascading ops
 
@@ -130,10 +132,15 @@ so nothing can interleave into the middle of a transaction.
 
 ### 5. A command carries **reversal closures**; history is **in-session only**
 
-A command is `{ undo(), redo() }` (plus an optional transaction id). Closures are the simplest and most
-flexible form — the command captures exactly the state it needs to reverse itself, and the caretaker stays
-oblivious. The cost is that closures are **not serializable**, so the undo history **does not survive a
-reload**.
+A command is `{ undo(), redo(), label }` (plus an optional transaction id). Closures are the simplest and
+most flexible form — the command captures exactly the state it needs to reverse itself, and the caretaker
+stays oblivious. The cost is that closures are **not serializable**, so the undo history **does not survive
+a reload**.
+
+The `label` is a short human phrase for the change — "delete node", "move node", "add filter". It is not
+part of the reversal mechanism; it exists for the affordance (§7) — the button tooltip and the `aria-live`
+announcement of *what* was just undone — and it sharpens tests. A command that omits it degrades to a
+generic "Undo"/"Redo", so it is encouraged, not required.
 
 That is the right trade here: TipTap's and CodeMirror's histories are also in-session only, so an
 in-session designer history is **uniform with the rest of the app**, not a regression. The one thing this
@@ -148,7 +155,32 @@ the same transaction reconnect to it instead of dangling. The delete command's m
 **identity**, not just shape. This is the one correctness invariant the command authors must honour; the
 caretaker cannot enforce it (it never sees an id).
 
-### 7. Slicing — the caretaker first, then the designer's commands, then the second surface reuses it
+### 7. Undo/redo has a **visible affordance**, not only a keybinding
+
+A keybinding is invisible, and a node canvas does not *telegraph* that it is undoable the way a text field
+does — everyone expects Ctrl+Z in prose, nobody assumes it on a graph. So the designer carries a **visible
+undo/redo control** (the conventional curved arrows, Tabler `arrow-back-up` / `arrow-forward-up`). This is a
+principled departure from the prose/code body views, which show no button: the affordance appears exactly
+where the keyboard *convention* is weakest, not everywhere.
+
+The control is not decoration — it is the accessibility story a bare keybinding cannot tell:
+
+- Each button has an **accessible name** ("Undo" / "Redo") that assistive tech announces; a keystroke
+  announces nothing.
+- Each is **disabled when there is nothing to do**, bound to the caretaker's `canUndo` / `canRedo` — so the
+  *availability* of undo is perceivable, not hidden behind a keystroke that silently no-ops.
+- It is a **non-chord target** for anyone who cannot reliably press Ctrl+Z (motor impairment, one-handed,
+  touch).
+- Invoking undo — by key **or** button — writes the reversed command's `label` (§5) into an **`aria-live`
+  region** ("Undid delete node" / "Nothing to undo"), so a screen-reader user learns *what* changed. This is
+  the one a11y gain a button alone still would not give, and it is **in scope**, not deferred.
+
+The control is a **per-surface** affordance living in the designer's own chrome — undo/redo is each surface's
+own history, unlike zoom, which ADR-0038 §F made a **shell** control every editor inherits. Its exact
+placement (a small cluster by the canvas controls, or the editor header) is left to implementation (0005's
+lesson); the ADR commits to *a* visible, `canUndo`/`canRedo`-bound, labelled control, not to where it sits.
+
+### 8. Slicing — the caretaker first, then the designer's commands, then the second surface reuses it
 
 Each slice states the **user journey that is its definition of done**.
 
@@ -160,16 +192,19 @@ Each slice states the **user journey that is its definition of done**.
    all. *Done when:* unit tests drive lone commands and a multi-command transaction through
    record/undo/redo and assert one Ctrl+Z reverses a whole transaction.
    - *Not:* anything that imports a node, an edge, or SvelteFlow.
-1. **The view designer emits commands.** The committers (`updateNodeData`, `removeNode`, `addNode`,
-   `normalizeEdges`, and the drag boundary) each `record` a reversible command instead of only mutating the
-   rune arrays; delete opens a transaction over its edge removals + self-removal (§4); a drag records **one**
-   command on `onnodedragstop` using the pre-drag positions captured on `onnodedragstart`. A
-   designer-scoped keydown wires Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z (§3).
+1. **The view designer emits commands, with keybinding and visible control.** The committers
+   (`updateNodeData`, `removeNode`, `addNode`, `normalizeEdges`, and the drag boundary) each `record` a
+   labelled reversible command instead of only mutating the rune arrays; delete opens a transaction over its
+   edge removals + self-removal (§4); a drag records **one** command on `onnodedragstop` using the pre-drag
+   positions captured on `onnodedragstart`. A designer-scoped keydown wires Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z
+   (§3), **and** a visible undo/redo control (§7) binds its disabled state to `canUndo` / `canRedo` and its
+   invocation announces the reversed command's `label` via `aria-live`.
    - *Done when:* in the running app, the author deletes a wired node and Ctrl+Z restores it **with its
      edges**; drags a node and Ctrl+Z reverts the whole drag in **one** step; edits a config field and
-     Ctrl+Z reverts that edit; Ctrl+Y / Ctrl+Shift+Z redo each.
-   - *Not:* a whole-`{nodes,edges}` snapshot pushed per change (§Why); and not a shared window-level handler
-     (§3).
+     Ctrl+Z reverts that edit; Ctrl+Y / Ctrl+Shift+Z redo each. The undo/redo buttons disable when the stack
+     is empty, and invoking either announces what changed to a screen reader.
+   - *Not:* a whole-`{nodes,edges}` snapshot pushed per change (§Why); a shared window-level handler (§3); or
+     making the button a **shell** control (undo/redo is per-surface, unlike zoom — §7).
 2. **The second surface reuses the caretaker.** When the plot board (ADR-0048) is built, it mounts the same
    slice-0 caretaker and defines its own card/column commands. This slice is **named, not designed here** —
    it is the reason slice 0 is domain-agnostic, and its acceptance is that the board needed **zero** change
@@ -216,6 +251,11 @@ The commitment that must hold from slice 0: the caretaker never learns what a co
   restore itself, and the view `revision` advances normally (an undo is a real edit, persisted).
 - New command types (a new node op, or the plot board's card ops) get undo by `record`-ing their inverse;
   the caretaker needs no change to support them.
+- The designer gains a **visible undo/redo control** with `canUndo`/`canRedo`-bound disabled state and an
+  `aria-live` announcement of the reversed command's `label` (§7) — the first NodeEditor body view to carry
+  a visible history affordance, justified by the canvas convention gap. Commands therefore carry a human
+  `label` (§5). The undo/redo glyphs (`arrow-back-up` / `arrow-forward-up`) must be present in the #315
+  Tabler icon subset, or added to it in the icon-build step.
 
 ## Non-goals
 
@@ -226,7 +266,7 @@ The commitment that must hold from slice 0: the caretaker never learns what a co
   untouched.
 - **Cross-surface undo.** Undoing in the designer never reaches into a prose or code editor, or another pane.
 - **Designing the plot board's command vocabulary.** ADR-0048's surface defines its own commands when it is
-  built (§7 slice 2); this ADR only guarantees the caretaker will host them.
+  built (§8 slice 2); this ADR only guarantees the caretaker will host them.
 
 ## Open — to settle at implementation
 
@@ -240,6 +280,9 @@ The commitment that must hold from slice 0: the caretaker never learns what a co
   delete cascade.
 - **Bounded-stack depth** — a cap on retained commands (memory backstop); a concrete number is an
   implementation detail.
+- **The visible control's exact placement** — a cluster by the canvas controls, or the editor header. The
+  ADR commits to *a* labelled, `canUndo`/`canRedo`-bound control (§7); where it sits is design-time detail
+  (0005's lesson).
 
 ## Test surface
 
@@ -254,3 +297,8 @@ The commitment that must hold from slice 0: the caretaker never learns what a co
   vice versa.
 - **Autosave interplay:** an undo mutates the in-memory arrays and the existing persist effect saves the
   restored state (revision advances); no separate undo endpoint is called.
+- **Affordance (§7):** the undo/redo buttons are disabled when `canUndo`/`canRedo` are false and enabled
+  once a command is recorded; each carries its accessible name; invoking either (by key or click) writes the
+  reversed command's `label` into the `aria-live` region (asserted via the caretaker's exposed
+  state/label — the button wiring itself verified in the real browser, since SvelteFlow is not
+  headless-testable).

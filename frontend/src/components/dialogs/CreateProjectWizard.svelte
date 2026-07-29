@@ -241,7 +241,7 @@
               {/if}
 
               {#if wizard.hiring}
-                <div class="ai-add">
+                <div class="inline-form">
                   <label>
                     Name
                     <input type="text" bind:value={wizard.hireTitle} placeholder="Drafting assistant" />
@@ -250,7 +250,7 @@
                     on:change={(event) =>
                       wizard.setHireProvider(event.detail.provider, event.detail.tier, event.detail.model)}
                   />
-                  <div class="ai-actions">
+                  <div class="inline-form-actions">
                     <button type="button" on:click={() => wizard.cancelHire()}>Cancel</button>
                     <!-- Gate on a chosen provider so a stray Hire can't create an
                          assistant pointed at a provider you never configured. -->
@@ -263,7 +263,7 @@
                   </div>
                 </div>
               {:else}
-                <button type="button" class="ai-linkbtn" on:click={() => wizard.beginHire()}
+                <button type="button" class="inline-add-btn" on:click={() => wizard.beginHire()}
                   >+ Hire an assistant…</button
                 >
               {/if}
@@ -569,37 +569,8 @@
     font-size: var(--fs-xs);
   }
 
-  /* Inline hire draft (the provider surface is now the shared
-     ProviderSubscriptions widget, which carries its own chip + form CSS). */
-  .ai-add {
-    display: grid;
-    gap: 8px;
-    padding: 10px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--panel);
-  }
-
-  .ai-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-  }
-
-  /* Dashed link-style action, matching the mockup's "+ Add" / "+ Hire". */
-  .ai-linkbtn {
-    justify-self: start;
-    border: 1px dashed var(--border-strong);
-    background: transparent;
-    color: var(--accent-emphasis);
-    font-size: var(--fs-sm);
-    padding: 4px 12px;
-    border-radius: 6px;
-    cursor: pointer;
-  }
-  .ai-linkbtn:hover {
-    background: var(--surface);
-  }
+  /* The inline hire draft + "+ Hire" launcher use the shared .inline-form* /
+     .inline-add-btn primitives in styles.css (#619). */
 
   .assistant-rows {
     list-style: none;

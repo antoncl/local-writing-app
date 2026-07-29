@@ -1091,3 +1091,139 @@ button.row-action-add.active {
   display: none;
 }
 /* .inputs-dialog* + .chat-estimate-* co-located into InputsDialog.svelte (#14). */
+
+/* ── Shared tab-strip (#610 / ADR-0047) ──────────────────────────────────────
+   One tab-header look. Adopted by the Settings dialog (the reference), the
+   schema kind tabs, and the workspace pane tabs. Active = accent underline +
+   full-strength text, deliberately NO font-weight change (a weight bump widens
+   the label and reflows the strip on every switch — #609 review). Each surface
+   keeps its own layout/chrome (equal-width schema tabs; the pane tabs' drag,
+   badge and close controls) and borrows only this visual vocabulary. The wizard
+   step crumbs are a breadcrumb stepper, not a tab set — deliberately excluded. */
+.tab-strip {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  appearance: none;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  padding: 6px 12px;
+  font-size: var(--fs-md);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--text);
+}
+
+.tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent-emphasis);
+}
+
+/* ── Shared chip + inline-form primitive (#619 / ADR-0047) ───────────────────
+   A removable pill chip plus the inline add/edit form it fronts. Shared by the
+   provider-subscriptions surface, the palette editor, and the create wizard's
+   hire form. Each call site keeps only its genuinely specific bits (the
+   palette's colour dot + edit fields, the provider's rotate label). `.is-active`
+   carries the accent treatment for whichever chip a call site marks live — the
+   default provider, or the swatch being edited. NB: `.chip`/`.chip-label` are a
+   different (node-palette) idiom in ViewBodyView, hence the `chip-tag-` prefix. */
+.chip-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+/* The live one (default provider / swatch under edit). */
+.chip-tag.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-emphasis);
+  font-weight: 600;
+}
+
+.chip-tag-label {
+  padding: 0 2px;
+}
+
+/* Explicit per-chip affordances (pencil to edit, × to remove); each call site
+   supplies its own aria-labels. `.is-remove` turns the × hover red. */
+.chip-tag-btn {
+  display: inline-flex;
+  align-items: center;
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 0 2px;
+  color: var(--text-3);
+  font-size: var(--fs-md);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chip-tag-btn:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.chip-tag-btn.is-remove:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+.chip-tag-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Inline add/edit draft box, its footer row, and the dashed "+ Add…" launcher.
+   Both justify-self (grid parents: provider / wizard) and align-self (the
+   palette's flex-column parent) are set so the launcher aligns to the start in
+   either layout. */
+.inline-form {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.inline-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.inline-add-btn {
+  justify-self: start;
+  align-self: start;
+  border: 1px dashed var(--border-strong);
+  background: transparent;
+  color: var(--accent-emphasis);
+  font-size: var(--fs-sm);
+  padding: 4px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.inline-add-btn:hover {
+  background: var(--surface);
+}

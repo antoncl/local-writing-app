@@ -210,7 +210,7 @@
         {#each tabs as tab (tab)}
           {@const b = badgeOf(tab)}
           <div
-            class="ws-tab"
+            class="tab ws-tab"
             class:active={tab === active}
             role="tab"
             tabindex="0"
@@ -430,6 +430,11 @@
   /* The bar wraps: when a region is too narrow to fit tabs + actions on one
      row, the actions drop to a second row instead of crowding out / sliding
      over the tabs. Wide regions stay a single row. */
+  /* The pane tabs adopt the shared .tab primitive (#610) for their visual —
+     colour + accent underline. The tabbar keeps its own bespoke chrome: the
+     wrapping actions rail, the horizontal scroll, and the drag/badge/close each
+     tab carries. Converged here: dropped the --panel bar background and the
+     per-tab dividers, and the divider recoloured to --border to match. */
   .ws-tabbar {
     display: flex;
     flex-wrap: wrap;
@@ -437,8 +442,7 @@
     gap: var(--sp-2);
     min-height: var(--sp-5);
     padding-right: var(--sp-2);
-    border-bottom: 1px solid var(--divider);
-    background: var(--panel);
+    border-bottom: 1px solid var(--border);
   }
   /* Tabs take the first row and scroll within it when there are many; the
      actions keep their natural width, pinned right (or wrapped to row two). */
@@ -449,27 +453,16 @@
     min-width: 0;
     overflow-x: auto;
   }
+  /* Layout/chrome only — the pill visual (padding, colour, underline, cursor)
+     comes from the shared .tab. This carries the flex row that lines up the
+     label, badge and close, plus the no-wrap/no-select behaviour. */
   .ws-tab {
     display: flex;
     align-items: center;
     gap: var(--sp-1);
-    padding: var(--sp-1) var(--sp-3);
-    font-size: var(--fs-md);
-    color: var(--text-3);
-    border-right: 1px solid var(--divider);
-    border-bottom: 2px solid transparent;
-    cursor: pointer;
     white-space: nowrap;
     user-select: none;
     transition: color var(--t-fast), background var(--t-fast);
-  }
-  .ws-tab:hover {
-    background: var(--inset);
-    color: var(--text-2);
-  }
-  .ws-tab.active {
-    color: var(--text);
-    border-bottom-color: var(--accent);
   }
   .ws-tab-label {
     overflow: hidden;

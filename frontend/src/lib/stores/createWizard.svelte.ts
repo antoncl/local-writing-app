@@ -96,9 +96,10 @@ class CreateWizard {
   // A short blurb into the project node body. Skippable.
   description = $state("");
 
-  // ---- Wizard-owned directory picker (its own instance, layered over Modal) ----
+  // ---- Wizard-owned directory picker for the Location step (its own instance,
+  // layered over Modal). The root step has its own picker (ProjectsFolderPicker,
+  // ADR-0047 slice 4), so this one only ever targets the project location. ----
   pickerOpen = $state(false);
-  #pickerMode = $state<"root" | "location" | null>(null);
 
   // ---- Navigation ----
   #stepIndex = $state(0);
@@ -218,16 +219,13 @@ class CreateWizard {
       : [],
   );
 
-  // ---- Picker labels (per mode), read by the mounted DirectoryPickerModal ----
+  // ---- Location-picker labels, read by the mounted DirectoryPickerModal ----
   get pickerInitialPath(): string {
-    if (this.#pickerMode === "location") {
-      return (this.pickedFolder || this.defaultProjectsFolder || "").trim();
-    }
-    return (this.rootFolderDraft || this.getStartPath() || "").trim();
+    return (this.pickedFolder || this.defaultProjectsFolder || "").trim();
   }
 
   get pickerTitle(): string {
-    return this.#pickerMode === "root" ? "Choose Projects Folder" : "Choose Location";
+    return "Choose Location";
   }
 
   get pickerSelectLabel(): string {
@@ -260,7 +258,6 @@ class CreateWizard {
     this.description = "";
     this.#stepIndex = 0;
     this.pickerOpen = false;
-    this.#pickerMode = null;
   }
 
   close() {
@@ -327,28 +324,18 @@ class CreateWizard {
   }
 
   // ---- Directory picker ----
-  openPicker(mode: "root" | "location") {
-    this.#pickerMode = mode;
+  openPicker() {
     this.pickerOpen = true;
   }
 
   closePicker() {
     this.pickerOpen = false;
-    this.#pickerMode = null;
   }
 
   onPickFolder(path: string) {
-    const mode = this.#pickerMode;
     this.closePicker();
-    if (mode === "root") {
-      this.rootFolderDraft = path;
-      this.rootError = "";
-      return;
-    }
-    if (mode === "location") {
-      this.pickedFolder = path;
-      void this.#loadCandidates(path);
-    }
+    this.pickedFolder = path;
+    void this.#loadCandidates(path);
   }
 
   // The location can also be typed directly into the field; re-enumerate when it

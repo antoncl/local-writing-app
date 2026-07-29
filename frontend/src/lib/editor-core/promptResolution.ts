@@ -23,6 +23,11 @@ export interface PromptResolutionContext {
   promptEntries: PromptEntrySummary[];
   loreEntries: LoreEntrySummary[];
   availableScenes: { id: string; title: string }[];
+  // Built-in Library prompts the writer hid in this project (ADR-0049 slice 3).
+  // Filtered out of DISCOVERY (`promptEntriesForSurface`) only — the full
+  // `promptEntries` is kept intact so `findPromptEntry` can still resolve a
+  // prompt already referenced by id (e.g. a chat/mutation that uses a hidden one).
+  hiddenPromptIds?: Set<string>;
 }
 
 export function effectiveOutputKind(
@@ -40,8 +45,9 @@ export function promptEntriesForSurface(
   surface: PromptSurface,
 ): PromptEntrySummary[] {
   if (!ctx.metadataSchema) return [];
+  const hidden = ctx.hiddenPromptIds;
   return ctx.promptEntries
-    .filter((entry) => effectiveOutputKind(ctx, entry) === surface)
+    .filter((entry) => !hidden?.has(entry.id) && effectiveOutputKind(ctx, entry) === surface)
     .sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }));
 }
 

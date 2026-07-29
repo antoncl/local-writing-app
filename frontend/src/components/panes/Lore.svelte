@@ -20,6 +20,7 @@
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
   import { promptEntriesStore } from "@/lib/stores/prompts";
+  import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
   import { inheritedLayerLabel } from "@/lib/utils/provenance";
@@ -73,6 +74,7 @@
     promptEntries: $promptEntriesStore,
     loreEntries: [],
     availableScenes: [],
+    hiddenPromptIds: $hiddenLibraryStore,
   } satisfies PromptResolutionContext;
   $: brainstormPrompt = promptEntriesForSurface(brainstormCtx, "entry_patch")[0] ?? null;
 

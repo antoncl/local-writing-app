@@ -79,6 +79,10 @@
     // wrapper. Lets a group-header caller collapse the tier panel cleanly
     // without it leaving a thin tinted strip from padding alone.
     collapsed?: boolean;
+    // Dim the whole row (reduced opacity) without disabling it — used to show a
+    // suppressed-but-revealed state, e.g. a hidden built-in Library prompt shown
+    // under "Show hidden" so it can be un-hidden (ADR-0049 slice 3).
+    dimmed?: boolean;
     // Make the entire row a drag source. Set on the outer container; the
     // caller wires drag handlers via the on*-drag handler props below.
     // Lets a row support reorder without paying for a visible drag handle
@@ -138,6 +142,7 @@
     layerLabel = null,
     groupHeader = false,
     collapsed = false,
+    dimmed = false,
     draggable = false,
     onmousedown,
     onkeydown,
@@ -182,6 +187,7 @@
   class:group-header={groupHeader}
   class:active
   class:has-row-stripe={!!stripeColor}
+  class:dimmed
   class:dragging
   class:drop-before={dropPosition === "before"}
   class:drop-after={dropPosition === "after"}
@@ -518,6 +524,13 @@
 
   .node-row.dragging {
     opacity: 0.45;
+  }
+
+  /* Suppressed-but-revealed row (e.g. a hidden Library prompt shown under
+     "Show hidden" so it can be un-hidden). Quieter than the drag ghost, and
+     the row stays fully interactive. */
+  .node-row.dimmed {
+    opacity: 0.55;
   }
 
   /* Straight drop indicators — a 2px absolute-positioned bar that does

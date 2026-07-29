@@ -11,6 +11,7 @@
   // surface, but that is unbuilt, so this follows roleplay's invocation shape.
 
   import { chatSessions } from "@/lib/stores/chatSessions.svelte";
+  import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
   import {
     promptEntriesForSurface,
     type PromptResolutionContext,
@@ -32,6 +33,7 @@
     promptEntries,
     loreEntries: [],
     availableScenes: [],
+    hiddenPromptIds: $hiddenLibraryStore,
   });
   let brainstormPrompts = $derived(promptEntriesForSurface(ctx, "entry_patch"));
 

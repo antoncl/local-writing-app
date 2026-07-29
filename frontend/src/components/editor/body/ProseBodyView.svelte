@@ -76,6 +76,7 @@
   import ProseAIToolbar from "./ProseAIToolbar.svelte";
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
   import {
     type PromptResolutionContext,
     promptEntriesForSurface,
@@ -1352,6 +1353,7 @@
     promptEntries,
     loreEntries,
     availableScenes,
+    hiddenPromptIds: $hiddenLibraryStore,
   });
   // ---------- Reactives ----------
   let slashCommands = $derived(editor && documentKind === "scene" ? getSlashCommands() : []);

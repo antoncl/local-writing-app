@@ -57,6 +57,7 @@
     promptEntriesStore,
     setPromptEntries,
   } from "@/lib/stores/prompts";
+  import { openProjectHidden } from "@/lib/stores/hiddenLibrary";
   import {
     assistantEntriesStore,
     defaultAssistantIdStore,
@@ -284,6 +285,7 @@
   function openProjectWorkspace(nextProject: ProjectInfo) {
     resetEditorWorkspace();
     projectPath = nextProject.root_path;
+    openProjectHidden(projectPath);
     workspaceLayout.loadForProject(projectPath);
     layoutPresets.load();
     projectTitle = nextProject.title;

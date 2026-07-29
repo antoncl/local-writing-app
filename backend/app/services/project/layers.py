@@ -25,8 +25,11 @@ necessarily agrees about where the chain stops. See that method's docstring.
 
 Ordering contract, relied on by consumers:
 
-* The machine layer, when present, comes **first** (rank 0) — i.e. it is the
-  outermost layer, the one every project inherits from.
+* The built-in Library, when included, comes **first** (rank 0) — the app-owned
+  read-only floor of shipped nodes every project inherits from (ADR-0049).
+* The machine layer, when present, comes next — the out-of-tree assistants
+  roster. (Either app-owned floor is absent unless its `include_*` flag is set;
+  schema layering sees neither.)
 * Project layers follow, **outermost ancestor → open project**, so a descendant
   entry overwrites an ancestor's on an id collision.
 * `rank` is dense over the yielded sequence and only ever compared, never used
@@ -44,12 +47,15 @@ consumer should read "first in the walk" as "first in a user-facing list" again.
 from __future__ import annotations
 
 import hashlib
+import logging
 from functools import lru_cache
 from pathlib import Path
 from typing import Protocol
 
 from app.services.project.errors import ProjectServiceError
 from app.services.project.node_index import IndexLayer
+
+log = logging.getLogger(__name__)
 
 # The metadata-schema file each project layer may carry. Not applicable to the
 # machine layer, which is out-of-tree and contributes assistants only.
@@ -323,6 +329,15 @@ class LayerWalkMixin:
         # `layers.py` is `app/services/project/layers.py`; parents[2] is `app/`.
         folder = Path(__file__).resolve().parents[2] / "builtin_library"
         if not folder.exists():
+            # The Library ships with the app, so absence is always an anomaly —
+            # a partial checkout, or a package build that dropped the bundled
+            # `.md` data files — not a valid empty state. Surface it once per
+            # open rather than silently serving every project without its
+            # shipped prompts (which reads as "there are none").
+            log.warning(
+                "Built-in Library folder not found at %s; shipped nodes will be unavailable.",
+                folder,
+            )
             return None
         return folder.resolve()
 

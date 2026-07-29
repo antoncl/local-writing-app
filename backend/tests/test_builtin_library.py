@@ -19,7 +19,9 @@ from tempfile import TemporaryDirectory
 from project_fixtures import open_test_project
 
 from app.models import SavePromptEntryRequest
+from app.services.project import node_index_snapshot as snapshot
 from app.services.project.errors import ProjectServiceError
+from app.services.project.node_index_gate import node_index_gate
 
 LIBRARY_IDS = {"builtin-roleplay", "builtin-revise-entry"}
 
@@ -119,6 +121,24 @@ class BuiltinLibraryTests(unittest.TestCase):
             got = [i.model_dump(exclude_none=True) for i in entries[lib_id].inputs]
             want = [i.model_dump(exclude_none=True) for i in type_def.default_inputs]
             self.assertEqual(got, want)
+
+    def test_library_survives_a_snapshot_reload(self) -> None:
+        """The node index persists to a snapshot that a *second* open reads
+        instead of rebuilding. The Library must round-trip through it, or the
+        shipped prompts would resolve on the first open and silently vanish on
+        the next."""
+        # First build persists the snapshot; it must carry the Library entries.
+        self.service._build_node_index(self.root)
+        snapshot_text = snapshot.snapshot_path(self.root).read_text(encoding="utf-8")
+        for lib_id in LIBRARY_IDS:
+            self.assertIn(lib_id, snapshot_text)
+        # Drop the in-memory memo so the next build reloads from that snapshot —
+        # what a fresh open does — and the Library must still resolve, labelled.
+        node_index_gate.invalidate()
+        entries = self._summaries()
+        self.assertTrue(set(entries) >= LIBRARY_IDS)
+        for lib_id in LIBRARY_IDS:
+            self.assertEqual(entries[lib_id].source_layer_label, "Library")
 
     def _library_path(self, entry_id: str) -> Path:
         return self.service._build_node_index().by_id[entry_id].path

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { PromptInputDefinition } from "@/lib/types";
-import { coerceChatInputValue, isInputMissing, ttlChipsFor } from "./chatInputs";
+import {
+  coerceChatInputValue,
+  decodeChatInputDrafts,
+  encodeChatInputDrafts,
+  isInputMissing,
+  ttlChipsFor,
+} from "./chatInputs";
 
 // Minimal input factory — only the fields the helpers read.
 const input = (type: PromptInputDefinition["type"], extra: Partial<PromptInputDefinition> = {}): PromptInputDefinition =>
@@ -61,6 +67,51 @@ describe("isInputMissing", () => {
 
   it("list types: a non-array JSON value counts as missing", () => {
     expect(isInputMissing(input("context_pick"), '{"id":"a"}')).toBe(true);
+  });
+});
+
+describe("chat input drafts round-trip (#654)", () => {
+  it("encode is a verbatim copy of the draft strings", () => {
+    const drafts = { entry: "lore_abc", entry_type: "lore:character", note: "" };
+    expect(encodeChatInputDrafts(drafts)).toEqual(drafts);
+  });
+
+  it("decode(encode(x)) reproduces the drafts exactly, for every input shape", () => {
+    // A bare context_pick id (a revise brainstorm's commit target), a hidden
+    // launch-set entry_type, a JSON-array list draft, a number/boolean draft,
+    // and an empty field — the shapes coercion would mangle.
+    const drafts = {
+      entry: "lore_abc", // would coerce to [] and be lost if we coerced
+      entry_type: "lore:character",
+      aliases: '["The Grey","Wanderer"]',
+      age: "0",
+      deceased: "false",
+      blank: "",
+    };
+    expect(decodeChatInputDrafts(encodeChatInputDrafts(drafts))).toEqual(drafts);
+  });
+
+  it("decode tolerates a typed seed the launch path wrote (non-string values)", () => {
+    // openChatFromPromptEntry persists the natural typed object before the first
+    // ChatBodyView persist; decode JSON-encodes non-strings into draft form.
+    const seeded = decodeChatInputDrafts({
+      entry_type: "lore:character",
+      picks: ["a", "b"],
+      count: 3,
+      flag: true,
+    });
+    expect(seeded).toEqual({
+      entry_type: "lore:character",
+      picks: '["a","b"]',
+      count: "3",
+      flag: "true",
+    });
+  });
+
+  it("decode treats absent/null inputs as no drafts", () => {
+    expect(decodeChatInputDrafts(undefined)).toEqual({});
+    expect(decodeChatInputDrafts(null)).toEqual({});
+    expect(decodeChatInputDrafts({})).toEqual({});
   });
 });
 

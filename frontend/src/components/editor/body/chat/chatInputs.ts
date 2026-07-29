@@ -22,6 +22,30 @@ export function seedInputDraftsFromEntry(entry: PromptEntrySummary): Record<stri
   return drafts;
 }
 
+// Round-trip the per-input drafts through a persisted `ChatSession.inputs`
+// (#654). The draft strings are the widget's stored form and the source of
+// truth, so persistence stores them verbatim and decode reads them back
+// verbatim — an exact inverse. We deliberately do NOT coerce to typed values on
+// the way out: coercion is lossy for the shapes chats carry (a `context_pick`
+// holding a bare entry id JSON-parses to `[]`, silently dropping the commit
+// target a `revise:entry` brainstorm rides in), and it would need the declared
+// input types loaded at persist time. `decodeChatInputDrafts` still tolerates a
+// non-string value because the launch path (openChatFromPromptEntry) seeds
+// `inputs` with the natural typed object before the first ChatBodyView persist.
+export function encodeChatInputDrafts(drafts: Record<string, string>): Record<string, unknown> {
+  return { ...drafts };
+}
+
+export function decodeChatInputDrafts(
+  inputs: Record<string, unknown> | null | undefined,
+): Record<string, string> {
+  const drafts: Record<string, string> = {};
+  for (const [name, value] of Object.entries(inputs ?? {})) {
+    drafts[name] = typeof value === "string" ? value : JSON.stringify(value);
+  }
+  return drafts;
+}
+
 export function isInputMissing(input: PromptInputDefinition, raw: string | undefined): boolean {
   if (input.type === "entity_ref_list" || input.type === "context_pick") {
     try {

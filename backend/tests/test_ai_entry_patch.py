@@ -359,12 +359,18 @@ class FieldCatalogFromTypeTests(unittest.TestCase):
 
     def test_revise_appendix_shows_current_structured_values(self) -> None:
         # So a genuine revise is informed, the appendix now lists the entry's
-        # current non-long-text values (#653): a scalar as-is, a list joined.
+        # current non-long-text values (#653). Cover every render branch: a
+        # scalar string as-is, a list joined, a falsy-but-set number (0) and
+        # boolean (False) rendered rather than swallowed, and an unset field
+        # shown as empty — the exact distinctions a naive `val or "…"` loses.
         schema_path = self.root / "metadata.schema.yaml"
         data = self.service._read_yaml(schema_path)
         data["fields"]["aliases"] = {"name": "Aliases", "type": "multi_select"}
+        data["fields"]["age"] = {"name": "Age", "type": "number"}
+        data["fields"]["deceased"] = {"name": "Deceased", "type": "boolean"}
+        data["fields"]["epithet"] = {"name": "Epithet", "type": "text"}
         character = data["entry_types"]["lore:character"]
-        character["fields"] = ["aliases", *character["fields"]]
+        character["fields"] = ["aliases", "age", "deceased", "epithet", *character["fields"]]
         self.service._write_yaml(schema_path, data)
 
         hero = self.service.create_lore_entry(
@@ -376,7 +382,13 @@ class FieldCatalogFromTypeTests(unittest.TestCase):
                 title="Seren",
                 body="A knight.",
                 entry_type="lore:character",
-                metadata={"allegiance": "order", "aliases": ["The Grey", "Wanderer"]},
+                metadata={
+                    "allegiance": "order",
+                    "aliases": ["The Grey", "Wanderer"],
+                    "age": 0,
+                    "deceased": False,
+                    # `epithet` deliberately left unset.
+                },
             ),
         )
         prompt = self.service.create_prompt_entry(
@@ -388,6 +400,9 @@ class FieldCatalogFromTypeTests(unittest.TestCase):
         )
         self.assertIn("Allegiance (allegiance): order", rendered)
         self.assertIn("Aliases (aliases): The Grey, Wanderer", rendered)
+        self.assertIn("Age (age): 0", rendered)
+        self.assertIn("Deceased (deceased): False", rendered)
+        self.assertIn("Epithet (epithet): _(empty)_", rendered)
 
 
 if __name__ == "__main__":

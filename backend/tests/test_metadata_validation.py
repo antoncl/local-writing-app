@@ -2322,10 +2322,17 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertIn("field_catalog(e)", revise_entry.default_body)
         self.assertIn('"fields"', revise_entry.default_body)
         self.assertIn('"body"', revise_entry.default_body)
-        self.assertEqual([i.name for i in revise_entry.default_inputs], ["entry"])
-        entry_input = revise_entry.default_inputs[0]
-        self.assertEqual(entry_input.type, "context_pick")
-        self.assertTrue(entry_input.required)
+        # Slice 4 (§6.4): the same prompt has a create mode. `entry` is now
+        # OPTIONAL (present ⇒ revise, absent ⇒ create) and a hidden `entry_type`
+        # names the kind to draft; the body branches on `input.entry`.
+        inputs = {i.name: i for i in revise_entry.default_inputs}
+        self.assertEqual(list(inputs), ["entry", "entry_type"])
+        self.assertEqual(inputs["entry"].type, "context_pick")
+        self.assertFalse(inputs["entry"].required)
+        self.assertEqual(inputs["entry_type"].type, "text")
+        self.assertTrue(inputs["entry_type"].hidden)
+        self.assertIn("field_catalog(draft_type)", revise_entry.default_body)
+        self.assertIn("entry_type_label(draft_type)", revise_entry.default_body)
 
         general_prompt = schema.entry_types["prompt:general"].prompt
         assert general_prompt is not None

@@ -49,6 +49,7 @@ from app.models.ai import (
     RecentProject,
     SaveChatSessionRequest,
     Swatch,
+    ValidateEntryDraftRequest,
     ValidateEntryPatchRequest,
 )
 from app.models.annotations import (
@@ -367,6 +368,7 @@ __all__ = [
     "UpdateTagScopeRequest",
     "UpdateTodoRequest",
     "UpsertMetadataEntryTypeRequest",
+    "ValidateEntryDraftRequest",
     "ValidateEntryPatchRequest",
     "UpsertMetadataFieldRequest",
     "UpsertMetadataGroupRequest",

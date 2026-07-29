@@ -46,6 +46,16 @@ BUILTIN_COMPUTED_FUNCTIONS: tuple[str, ...] = (
 )
 COMPUTED_FUNCTIONS: tuple[str, ...] = AUTHORABLE_COMPUTED_FUNCTIONS + BUILTIN_COMPUTED_FUNCTIONS
 
+# The one sentence both `prompt:revise:entry` modes (revise + create) share
+# verbatim — the finalize contract. Hoisted so the two branches of default_body
+# can't drift on it (ADR-0046 §6.4). The per-mode specifics (JSON shape example,
+# field list, epilogue) legitimately differ and stay inline in each branch.
+_REVISE_ENTRY_FINALIZE_INTRO = (
+    "When the author asks you to finalize (or says \"commit\"), stop "
+    "brainstorming and reply with ONLY a JSON object, with no preamble, "
+    "no commentary, and no code fences, of exactly this shape:\n"
+)
+
 DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
     "version": 1,
     "entry_types": {
@@ -299,22 +309,28 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             },
         },
         "prompt:revise:entry": {
-            # The lore brainstorm (ADR-0046 §5/§6.3), a pre-rolled prompt like
-            # `roleplay`: an ideation *chat* that carries an existing entry in its
-            # context and, on a commit turn, returns a JSON `entry_patch` — the
-            # entry's revised body plus any changed long-text fields (slice 3a;
-            # structured fields follow in 3b). `output.kind = entry_patch` routes
-            # invocation to a chat and routes the committed patch to the
-            # proposed-vs-current flip review (loreRevision), not the scene
-            # aiSuggestion streaming mark. The patch is validated server-side
-            # (`validate_ai_entry_patch`) before review — the safety guarantee is
-            # validate-on-return, not constrained decoding. The target entry rides
-            # in as an `entry` input loaded with `entry(input.entry)` — exactly how
+            # The lore brainstorm (ADR-0046 §5/§6.3/§6.4), a pre-rolled prompt
+            # like `roleplay`: an ideation *chat* that, on a commit turn, returns
+            # a JSON `entry_patch`. It has TWO modes, chosen by how it was
+            # launched, not by a separate prompt (ADR-0046 §6.4 — one vehicle):
+            #   • REVISE — an existing entry rides in the `entry` input; the
+            #     commit is the entry's revised body plus any changed long-text
+            #     fields (slice 3a), reviewed as a proposed-vs-current flip.
+            #   • CREATE — no `entry`; a target `entry_type` (hidden, launch-set)
+            #     names the kind to draft from scratch; the commit is a whole new
+            #     entry (title + fields + body), reviewed whole (no flip) and
+            #     created via `POST /api/lore` + `PUT` (§6.4).
+            # `output.kind = entry_patch` routes invocation to a chat and the
+            # committed patch to review, not the scene aiSuggestion streaming
+            # mark. The patch is validated server-side (`validate_ai_entry_patch`
+            # / `validate_ai_entry_draft`) before review — the safety guarantee is
+            # validate-on-return, not constrained decoding. The entry rides in as
+            # an `entry` input loaded with `entry(input.entry)` — exactly how
             # roleplay pulls its character — because `{{ scene }}` resolves scenes
             # only (`read_scene`), never a lore entry. No `context_strategy.target`
-            # for the same reason: binding it would drive a scene resolution. The
-            # `field_catalog(e)` helper lists the entry's proposable fields so the
-            # instruction can name real field ids.
+            # for the same reason. `field_catalog(e)` (revise) / `field_catalog(
+            # input.entry_type)` (create) lists the proposable fields so the
+            # instruction names real field ids.
             "name": "Revise entry",
             "kind": "prompt",
             "parent": "prompt:revise",
@@ -322,29 +338,40 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "has_body": True,
             "default_inputs": [
                 {
+                    # Optional (§6.4): present ⇒ revise it, absent ⇒ create mode.
                     "name": "entry",
                     "type": "context_pick",
                     "label": "Entry",
-                    "required": True,
+                    "required": False,
                     "target": {
                         "sources": [{"kind": "lore", "expr": {"type": "lore:base"}}],
                         "multiple": False,
                         "presets": [],
                     },
                 },
+                {
+                    # The kind to draft in create mode — launch-set, not authored
+                    # in the strip (`hidden`), so it reaches `input.entry_type`
+                    # without cluttering the inputs strip.
+                    "name": "entry_type",
+                    "type": "text",
+                    "label": "Entry type",
+                    "required": False,
+                    "hidden": True,
+                },
             ],
             "default_body": (
                 "{% set e = entry(input.entry) %}\n"
+                "{% set draft_type = input.entry_type if input.entry_type is defined else \"\" %}\n"
                 "{% role \"system\" %}\n"
+                "{% if e %}\n"
                 "You are an ideation partner helping the author revise a lore "
                 "entry through conversation. Brainstorm: ask questions, suggest "
                 "directions, react to the author's ideas. Do NOT rewrite the whole "
                 "entry on every turn.\n"
                 "\n"
-                "When the author asks you to finalize (or says \"commit\"), stop "
-                "brainstorming and reply with ONLY a JSON object, with no preamble, "
-                "no commentary, and no code fences, of exactly this shape:\n"
-                "\n"
+                + _REVISE_ENTRY_FINALIZE_INTRO
+                + "\n"
                 "{\"body\": \"<the entry's complete revised markdown body>\", "
                 "\"fields\": {\"<field id>\": \"<that field's complete new text>\"}}\n"
                 "\n"
@@ -363,7 +390,6 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "Output only that JSON object. It is parsed, validated against the "
                 "entry's schema, and reviewed against the current entry before "
                 "anything is saved.\n"
-                "{% if e %}\n"
                 "\n## The entry under revision: {{ e.title }}\n"
                 "{% if e.body %}\n"
                 "{{ e.body }}\n"
@@ -374,6 +400,34 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "\n### {{ f.label }} ({{ f.id }})\n"
                 "{{ e.metadata.get(f.id) or \"_(empty)_\" }}\n"
                 "{% endfor %}\n"
+                "{% else %}\n"
+                "You are an ideation partner helping the author create a new "
+                "{{ entry_type_label(draft_type) }} from scratch through "
+                "conversation. Brainstorm: ask questions, propose directions, and "
+                "develop it together. Do NOT dump a finished entry on every turn.\n"
+                "\n"
+                + _REVISE_ENTRY_FINALIZE_INTRO
+                + "\n"
+                "{\"body\": \"<the new entry's complete markdown body>\", "
+                "\"fields\": {\"title\": \"<a title>\", \"<field id>\": <value>}}\n"
+                "\n"
+                "- \"body\": the new entry's full markdown body.\n"
+                "- \"fields\": ALWAYS include \"title\". Add any other field you "
+                "are setting, keyed by its field id. For a list field (tags, "
+                "multi_select) give a JSON array of strings; for a select field "
+                "use one of its listed options exactly.\n"
+                "\n"
+                "The fields you may set:\n"
+                "{% for f in field_catalog(draft_type) %}\n"
+                "- {{ f.id }} ({{ f.label }}) — {{ f.type }}"
+                "{% if f.options %}; one of: {{ f.options | join(\", \") }}{% endif %}\n"
+                "{% else %}\n"
+                "- (none beyond title/body)\n"
+                "{% endfor %}\n"
+                "\n"
+                "Output only that JSON object. It is parsed, validated against the "
+                "{{ entry_type_label(draft_type) }} type's schema, and reviewed as "
+                "a whole new entry before it is created.\n"
                 "{% endif %}\n"
                 "{% endrole %}\n"
             ),

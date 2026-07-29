@@ -20,6 +20,7 @@ from app.models import (
     SaveLoreEntryRequest,
     SaveMutationSetEntryRequest,
     SavePromptEntryRequest,
+    ValidateEntryDraftRequest,
     ValidateEntryPatchRequest,
 )
 from app.runtime import CurrentProject, translate_errors
@@ -37,6 +38,19 @@ def list_lore_entries(project: CurrentProject) -> LoreEntryList:
 def create_lore_entry(project: CurrentProject, request: CreateLoreEntryRequest) -> LoreEntry:
     with translate_errors():
         return project.create_lore_entry(request)
+
+
+@router.post("/api/lore/ai-draft", response_model=AIEntryPatch)
+def validate_ai_entry_draft(
+    project: CurrentProject, request: ValidateEntryDraftRequest
+) -> AIEntryPatch:
+    """Validate a from-scratch brainstorm-commit reply into a review-ready
+    patch scoped to a target entry_type (ADR-0046 §6.4). The create-mode
+    sibling of `/api/lore/{entry_id}/ai-patch`: no entry exists yet, so the
+    entry_type rides in the body. Read-only — the adopted draft is created via
+    `POST /api/lore` + `PUT /api/lore/{id}`."""
+    with translate_errors():
+        return project.validate_ai_entry_draft(request.entry_type, request.raw)
 
 
 @router.get("/api/lore/{entry_id}", response_model=LoreEntry)

@@ -25,6 +25,7 @@
   import ChatTranscript from "@/components/editor/body/chat/ChatTranscript.svelte";
   import ChatInputsStrip from "@/components/editor/body/chat/ChatInputsStrip.svelte";
   import ChatJournalScope from "@/components/editor/body/chat/ChatJournalScope.svelte";
+  import LoreDraftCard from "@/components/editor/body/chat/LoreDraftCard.svelte";
   import { formatCostEur, formatTokens } from "@/lib/utils/money";
   import type {
     AssistantEntrySummary,
@@ -33,6 +34,7 @@
     ChatSessionJournalEntry,
     ChatSessionMessage,
     EditableDocument,
+    EntryPatch,
     LoreEntrySummary,
     PromptEntrySummary,
     SaveChatSessionRequest,
@@ -40,6 +42,7 @@
   } from "@/lib/types";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { loreBrainstorm } from "@/lib/stores/loreBrainstorm.svelte";
+  import { treeActions } from "@/lib/stores/treeActions.svelte";
   import { refreshChatSessions, refreshProjectCost } from "@/lib/stores/chats";
   import {
     assistantScopeTags,
@@ -102,6 +105,13 @@
   // fields" — surfaced so a hidden out-of-band commit is never a silent no-op.
   let chatNotice: string | null = $state(null);
   let committing = $state(false);
+  // ADR-0046 §6.4 create mode: a from-scratch brainstorm has no entry to flip
+  // against, so its commit is held here as a whole proposed draft and reviewed
+  // in a card (Create / Discard) rather than routed to an entry pane. `null`
+  // when there is no pending draft.
+  let draftProposal = $state<EntryPatch | null>(null);
+  let draftDropped: string[] = $state([]);
+  let creatingDraft = $state(false);
   let chatLastMeta: { provider: string; model: string; latency_ms: number } | null = $state(null);
   let chatInput = $state("");
   let chatScrollEl: HTMLDivElement | null = $state(null);
@@ -226,6 +236,7 @@
     pendingTurnCacheWriteSlots = [];
     chatInputDrafts = {};
     chatInputsHidden = false;
+    resetDraftReview();
   }
 
   // Mirrors App.svelte's applyChatSession (the source of truth for the
@@ -255,6 +266,7 @@
     chatInput = "";
     pendingTurnCost = null;
     pendingTurnCacheWriteSlots = [];
+    resetDraftReview();
     // Restore per-prompt input drafts. session.inputs is Record<string, unknown>;
     // PromptInputField stores list-shaped values JSON-encoded, so coerce
     // back to that representation on hydrate.
@@ -619,6 +631,34 @@
   // and handed to the entry's pane for the proposed-vs-current review; nothing
   // is written from here. A reply that can't be read as a patch (garbled) or one
   // that proposes nothing is surfaced, never a silent no-op.
+  // Run the out-of-band finalize turn and return its raw text, or null (with
+  // chatError set) on failure. Shared by both commit modes so cost attribution
+  // and the "returned nothing" guard live in one place.
+  async function runFinalizeTurn(): Promise<string | null> {
+    const reply = await api.aiChat({
+      assistant_id: chatAssistantId || null,
+      system_prompt: chatSystemPrompt,
+      messages: [
+        ...chatHistory.map(({ role, content }) => ({ role, content })),
+        { role: "user", content: FINALIZE_INSTRUCTION },
+      ],
+      chat_id: null,
+    });
+    // The finalize call billed regardless of the patch outcome. Attribute its
+    // cost to the session the same way a streamed turn does (persist adds only
+    // the delta — the hidden finalize turn isn't in chatHistory, so it stays
+    // out of the persisted messages).
+    if (typeof reply.cost_usd === "number") {
+      pendingTurnCost = (pendingTurnCost ?? 0) + reply.cost_usd;
+      await persistActiveChat();
+    }
+    if (!reply.ok || !reply.content?.trim()) {
+      chatError = reply.error || "The model returned nothing to commit.";
+      return null;
+    }
+    return reply.content;
+  }
+
   async function commitToEntry(): Promise<void> {
     if (chatRunning || committing || !isEntryPatchChat) return;
     const entryId = commitTargetEntryId;
@@ -630,28 +670,9 @@
     chatNotice = null;
     committing = true;
     try {
-      const reply = await api.aiChat({
-        assistant_id: chatAssistantId || null,
-        system_prompt: chatSystemPrompt,
-        messages: [
-          ...chatHistory.map(({ role, content }) => ({ role, content })),
-          { role: "user", content: FINALIZE_INSTRUCTION },
-        ],
-        chat_id: null,
-      });
-      // The finalize call billed regardless of the patch outcome. Attribute its
-      // cost to the session the same way a streamed turn does (persist adds only
-      // the delta — the hidden finalize turn isn't in chatHistory, so it stays
-      // out of the persisted messages).
-      if (typeof reply.cost_usd === "number") {
-        pendingTurnCost = (pendingTurnCost ?? 0) + reply.cost_usd;
-        await persistActiveChat();
-      }
-      if (!reply.ok || !reply.content?.trim()) {
-        chatError = reply.error || "The model returned nothing to commit.";
-        return;
-      }
-      const patch = await api.validateAiEntryPatch(entryId, reply.content);
+      const content = await runFinalizeTurn();
+      if (content == null) return;
+      const patch = await api.validateAiEntryPatch(entryId, content);
       if (patch.garbled) {
         chatError =
           "Couldn't read the model's response as a patch — ask it to finalize again.";
@@ -672,6 +693,70 @@
     } finally {
       committing = false;
     }
+  }
+
+  // Create mode (ADR-0046 §6.4): finalize a from-scratch brainstorm, validate it
+  // against the target entry_type (no entry read), and hold it as a whole draft
+  // for the review card. Nothing is written until the author clicks Create.
+  async function commitDraft(): Promise<void> {
+    if (chatRunning || committing || !isCreateBrainstorm) return;
+    const entryType = draftEntryType;
+    chatError = null;
+    chatNotice = null;
+    committing = true;
+    try {
+      const content = await runFinalizeTurn();
+      if (content == null) return;
+      const patch = await api.validateAiEntryDraft(entryType, content);
+      if (patch.garbled) {
+        chatError =
+          "Couldn't read the model's response as an entry — ask it to finalize again.";
+        return;
+      }
+      const hasBody = patch.body != null;
+      const hasFields = Object.keys(patch.fields).length > 0;
+      if (!hasBody && !hasFields) {
+        chatNotice = "The model proposed no entry to create.";
+        return;
+      }
+      draftDropped = patch.dropped;
+      draftProposal = { body: patch.body, fields: patch.fields };
+    } catch (e) {
+      chatError = (e as Error).message;
+    } finally {
+      committing = false;
+    }
+  }
+
+  async function createDraft(): Promise<void> {
+    if (!draftProposal || creatingDraft) return;
+    creatingDraft = true;
+    try {
+      // Only clear the reviewed draft if the create actually succeeded — run()
+      // reports failure as `false` (it swallows the error), so clearing
+      // unconditionally would silently lose the draft on a 409 / offline / save
+      // rejection with nothing created.
+      const ok = await treeActions.createLoreEntryFromDraft(draftEntryType, draftProposal);
+      if (ok) resetDraftReview();
+    } catch (e) {
+      chatError = (e as Error).message;
+    } finally {
+      creatingDraft = false;
+    }
+  }
+
+  function discardDraft(): void {
+    resetDraftReview();
+  }
+
+  // ADR-0046 §6.4: the create-mode draft is component-local (not routed to an
+  // entry pane), so it must be cleared whenever the chat state resets — else a
+  // pending card leaks across a chat-session switch and Create would run against
+  // the new chat's entry_type.
+  function resetDraftReview(): void {
+    draftProposal = null;
+    draftDropped = [];
+    creatingDraft = false;
   }
 
   // First-send template render. Mirrors App.svelte's
@@ -833,12 +918,20 @@
         ?.kind === "entry_patch",
   );
   let commitTargetEntryId = $derived((chatInputDrafts["entry"] ?? "").trim());
+  // ADR-0046 §6.4: the target entry_type for a create-mode brainstorm (no entry
+  // seeded). Mutually exclusive with commitTargetEntryId by how the chat was
+  // launched — revise seeds `entry`, create seeds `entry_type`.
+  let draftEntryType = $derived((chatInputDrafts["entry_type"] ?? "").trim());
+  let isCreateBrainstorm = $derived(isEntryPatchChat && !commitTargetEntryId && !!draftEntryType);
   let assistantScope = $derived(assistantScopeTags(activePromptEntry));
   let scopedDefaultId = $derived(scopedDefaultAssistantId(assistantEntries, assistantScope, defaultAssistantId));
   let assistantParts = $derived(partitionAssistants(assistantEntries, assistantPickerSearch, assistantScope));
   let declaredInputs = $derived(activePromptEntry?.inputs ?? []);
+  // A hidden input is launch-set, not user-authored (ADR-0046 §6.4) and has no
+  // widget in the strip — so it must never gate Send, or an unset one would
+  // disable the button with nothing for the user to fill.
   let missingRequiredInputs = $derived(declaredInputs.filter(
-    (i) => i.required && isInputMissing(i, chatInputDrafts[i.name]),
+    (i) => i.required && !i.hidden && isInputMissing(i, chatInputDrafts[i.name]),
   ));
   let ttlChips = $derived(ttlChipsFor(activeChatCacheWriteTimes, ttlTick));
   // Re-fetch estimate when any input that drives it changes. Each dep
@@ -1089,7 +1182,21 @@
 
     <div class="cbv-action-row">
       <button type="button" disabled={!chatHistory.length || chatRunning || committing} onclick={clearChat}>Clear</button>
-      {#if isEntryPatchChat}
+      {#if isCreateBrainstorm}
+        <!-- ADR-0046 §6.4 create mode: finalize into a whole proposed entry
+             (out of band, hidden), reviewed in the card below — not a flip. -->
+        <button
+          type="button"
+          class="cbv-commit"
+          disabled={chatRunning || committing || chatHistory.length === 0 || draftProposal != null}
+          title={draftProposal != null
+            ? "Review the proposed entry below"
+            : "Finalize this brainstorm into a new entry to review"}
+          onclick={() => void commitDraft()}
+        >
+          {committing ? "Drafting…" : "Propose new entry"}
+        </button>
+      {:else if isEntryPatchChat}
         <!-- ADR-0046 slice 3: finalize the brainstorm into a validated patch
              (out of band, hidden), reviewed on the target entry's pane. -->
         <button
@@ -1121,6 +1228,20 @@
         {chatRunning ? "Sending…" : "Send"}
       </button>
     </div>
+
+    {#if draftProposal}
+      <!-- ADR-0046 §6.4: the whole proposed new entry, reviewed as a draft (no
+           flip — nothing to diff against). Create runs the existing create path;
+           Discard writes nothing. -->
+      <LoreDraftCard
+        draft={draftProposal}
+        dropped={draftDropped}
+        {metadataSchema}
+        creating={creatingDraft}
+        onCreate={() => void createDraft()}
+        onDiscard={discardDraft}
+      />
+    {/if}
 
     {#if chatSession.cost_usd_total != null}
       <footer class="cbv-foot">

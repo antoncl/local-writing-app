@@ -10,10 +10,16 @@
   import CountPill from "@/components/widgets/CountPill.svelte";
   import { entryTypeChoicesByKind } from "@/lib/utils/treeHelpers";
   import { treeActions } from "@/lib/stores/treeActions.svelte";
+  import { chatSessions } from "@/lib/stores/chatSessions.svelte";
+  import {
+    promptEntriesForSurface,
+    type PromptResolutionContext,
+  } from "@/lib/editor-core/promptResolution";
   import { getSwatch, resolveColorForType } from "@/lib/utils/colors";
   import { defaultView } from "@/lib/views/evaluateView";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
+  import { promptEntriesStore } from "@/lib/stores/prompts";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
   import { inheritedLayerLabel } from "@/lib/utils/provenance";
@@ -56,6 +62,24 @@
   // Pane-local search text — bound to ViewNodeList's search box. Per-group
   // collapse is ephemeral and owned by ViewNodeList (phase 1; not persisted).
   let searchQuery = "";
+
+  // ADR-0046 §6.4: "Brainstorm a new <type>…" — launch the entry_patch
+  // brainstorm with NO entry (create mode), seeding the target entry_type as a
+  // hidden input. The prompt is the same one the entry-pane revise launcher
+  // uses (output.kind `entry_patch`); hidden when no such instance exists yet
+  // (#606). A temporary home until ADR-0047 contextual actions land.
+  $: brainstormCtx = {
+    metadataSchema: schema,
+    promptEntries: $promptEntriesStore,
+    loreEntries: [],
+    availableScenes: [],
+  } satisfies PromptResolutionContext;
+  $: brainstormPrompt = promptEntriesForSurface(brainstormCtx, "entry_patch")[0] ?? null;
+
+  function launchBrainstorm(entryType: string): void {
+    if (!brainstormPrompt) return;
+    void chatSessions.openChatFromPromptEntry(brainstormPrompt, { entry_type: entryType }, null);
+  }
 
   // Every NodeList is backed by a view (ADR-0022), and the view is authoritative
   // for its own shape (ADR-0037 §3): grouping comes from the spec, never
@@ -157,6 +181,18 @@
       <p class="muted">No entry types defined.</p>
     {/snippet}
   </NodeList>
+  {#if brainstormPrompt}
+    <span class="row-add-popover-heading">Brainstorm new…</span>
+    <NodeList isEmpty={false}>
+      {#each entryTypeChoicesByKind($metadataSchemaStore, "lore") as choice (choice.id)}
+        <NodeRow
+          title={choice.name}
+          detail="Draft with AI"
+          onClick={() => { launchBrainstorm(choice.id); close(); }}
+        />
+      {/each}
+    </NodeList>
+  {/if}
 {/snippet}
 
 {#snippet entryRow(entry: LoreEntrySummary, ctx: RowCtx<LoreEntrySummary>)}

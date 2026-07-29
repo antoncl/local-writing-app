@@ -77,10 +77,12 @@ class PromptMetadataWrapperTests(unittest.TestCase):
         )
 
     def test_prerolled_revise_entry_materializes_body_and_inputs(self) -> None:
-        """ADR-0046 §5: `prompt:revise:entry` is a pre-rolled prompt like
+        """ADR-0046 §5/§6.4: `prompt:revise:entry` is a pre-rolled prompt like
         roleplay — creating an instance copies the type's `default_body` and
-        `default_inputs` (the `entry` context_pick) onto the node, ready to run.
-        This is the same create_prompt_entry copy path roleplay relies on."""
+        `default_inputs` onto the node, ready to run. Its two inputs are the
+        optional `entry` context_pick (revise mode) and a hidden `entry_type`
+        text input (create mode). Same create_prompt_entry copy path roleplay
+        relies on."""
         created = self.service.create_prompt_entry(
             type("R", (), {"title": "Revise entry", "entry_type": "prompt:revise:entry"})()
         )
@@ -88,10 +90,14 @@ class PromptMetadataWrapperTests(unittest.TestCase):
         # default_body landed on the instance body.
         self.assertIn("ideation partner", entry.body)
         self.assertIn("entry(input.entry)", entry.body)
-        # default_inputs landed: the single `entry` context_pick over lore.
-        self.assertEqual([i.name for i in entry.inputs], ["entry"])
-        self.assertEqual(entry.inputs[0].type, "context_pick")
-        self.assertTrue(entry.inputs[0].required)
+        # default_inputs landed: the optional `entry` pick + the hidden
+        # `entry_type` that drives create mode.
+        inputs = {i.name: i for i in entry.inputs}
+        self.assertEqual(list(inputs), ["entry", "entry_type"])
+        self.assertEqual(inputs["entry"].type, "context_pick")
+        self.assertFalse(inputs["entry"].required)
+        self.assertEqual(inputs["entry_type"].type, "text")
+        self.assertTrue(inputs["entry_type"].hidden)
 
 
 if __name__ == "__main__":

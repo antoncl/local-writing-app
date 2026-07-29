@@ -87,6 +87,11 @@ class PromptInputDefinition(BaseModel):
     default: Any | None = None
     options: list[SelectOption] = Field(default_factory=list)
     required: bool = False
+    # A launch-set input the strip should not author: its value is chosen by how
+    # the chat was opened (e.g. the entry_type an AI new-entry brainstorm drafts,
+    # ADR-0046 §6.4), not typed by the user. Still declared, so it is forwarded
+    # into the template's `input.*` namespace; only its strip widget is skipped.
+    hidden: bool = False
 
     @field_validator("options", mode="before")
     @classmethod

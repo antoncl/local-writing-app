@@ -553,6 +553,16 @@ class ValidateEntryPatchRequest(BaseModel):
     raw: str = ""
 
 
+class ValidateEntryDraftRequest(BaseModel):
+    """POST /api/lore/ai-draft body — the create-mode sibling (ADR-0046 §6.4).
+    A from-scratch brainstorm has no entry to key on, so the target
+    `entry_type` is carried in the body and validation is scoped to it. Same
+    `AIEntryPatch` result and garbled handling as the revise path."""
+
+    entry_type: str = Field(min_length=1)
+    raw: str = ""
+
+
 class AIEntryPatch(BaseModel):
     """A validated, review-ready patch parsed from a brainstorm commit
     (ADR-0046 §4/§6.3).

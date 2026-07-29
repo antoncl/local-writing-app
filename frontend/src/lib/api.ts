@@ -769,6 +769,16 @@ export const api = {
       body: JSON.stringify({ raw }),
     });
   },
+  // ADR-0046 §6.4: the create-mode sibling — validate a from-scratch brainstorm
+  // commit against a target entry_type (no entry exists yet). Same review-ready
+  // AIEntryPatch and garbled handling; the adopted draft is created via
+  // createLoreEntry + saveLoreEntry, not a diff.
+  validateAiEntryDraft(entryType: string, raw: string) {
+    return request<AIEntryPatch>("/lore/ai-draft", {
+      method: "POST",
+      body: JSON.stringify({ entry_type: entryType, raw }),
+    });
+  },
   // Migrate a lore_note to a research/note (slice 5). Drops aliases /
   // related_entries / context_policy (the v1 research note schema is
   // title + body + tags only); the response lists what was dropped.

@@ -39,10 +39,15 @@
     implicitContextMatcher,
     onDraftChange,
   }: Props = $props();
+
+  // A launch-set input (ADR-0046 §6.4) is declared so it reaches the template,
+  // but not authored here — skip its widget. If every input is hidden, the
+  // strip renders nothing.
+  let visibleInputs = $derived(declaredInputs.filter((i) => !i.hidden));
 </script>
 
 <div class="cbv-inputs-strip" class:cbv-inputs-locked={isLocked}>
-  {#if isLocked}
+  {#if isLocked && visibleInputs.length > 0}
     <button
       type="button"
       class="cbv-inputs-toggle"
@@ -50,9 +55,9 @@
       onclick={() => (hidden = !hidden)}
     >{hidden ? "▸ Show inputs" : "▾ Hide inputs"}</button>
   {/if}
-  {#if !isLocked || !hidden}
+  {#if (!isLocked || !hidden) && visibleInputs.length > 0}
     <div class="cbv-inputs-fields">
-      {#each declaredInputs as input (input.name)}
+      {#each visibleInputs as input (input.name)}
         {@const missing = input.required && isInputMissing(input, chatInputDrafts[input.name])}
         <label class="cbv-input-field" class:cbv-input-missing={missing} class:cbv-input-disabled={isLocked}>
           <span class="cbv-input-label">

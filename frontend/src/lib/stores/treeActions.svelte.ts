@@ -37,6 +37,8 @@ import {
 } from "@/lib/utils/treeHelpers";
 import type { TreeConfig } from "@/components/panes/StructureTree.svelte";
 import type {
+  EntryPatch,
+  LoreEntry,
   LoreEntrySummary,
   StructureNode,
   StructureNodeDeletePreview,
@@ -56,6 +58,36 @@ class TreeActions {
       const entry = await api.createLoreEntry("New Entry", entryType);
       await refreshLoreEntries();
       await editorPanes.openLore(entry.id);
+    });
+  }
+
+  // ADR-0046 §6.4: create a lore entry from an AI brainstorm draft. No prior
+  // state to diff, so this is the *create branch of the same patch* — mint the
+  // typed entry through the existing create path, merge the reviewed draft
+  // (title + structured/long-text fields + body) onto it, and PUT once, then
+  // open it for normal editing. `title` is the one proposed field the save
+  // treats top-level; everything else is metadata (references / computed are
+  // already excluded from the validated patch, §4).
+  // Returns whether the entry was created (run() reports false on API failure
+  // without throwing), so the caller can keep the reviewed draft on failure
+  // rather than dropping it.
+  async createLoreEntryFromDraft(entryType: string, patch: EntryPatch): Promise<boolean> {
+    return this.run(async () => {
+      const fields = { ...patch.fields };
+      const proposedTitle =
+        typeof fields.title === "string" && fields.title.trim() ? fields.title.trim() : "";
+      delete fields.title;
+      const finalTitle =
+        proposedTitle || `New ${entryTypeName(entryType, get(metadataSchemaStore))}`;
+      const created = await api.createLoreEntry(finalTitle, entryType);
+      const merged: LoreEntry = {
+        ...created,
+        metadata: { ...created.metadata, ...fields },
+      };
+      const saved = await api.saveLoreEntry(merged, patch.body ?? "");
+      await refreshLoreEntries();
+      await editorPanes.openLore(saved.id);
+      this.setStatus(`Created "${saved.title}"`);
     });
   }
 

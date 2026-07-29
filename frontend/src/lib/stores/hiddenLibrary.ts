@@ -59,8 +59,10 @@ function writeToStorage(path: string, ids: Set<string>): void {
   }
 }
 
-// App calls this whenever the open project changes (with null on close). Loads
-// that project's curated set into the reactive store.
+// App calls this whenever the open project changes, from openProjectWorkspace.
+// Loads that project's curated set into the reactive store. Accepts null (clears
+// the set) so a future close-to-no-project flow can reset it, though today the
+// app always switches straight from one open project to the next.
 export function openProjectHidden(path: string | null): void {
   currentPath = path;
   store.set(path ? readFromStorage(path) : new Set());

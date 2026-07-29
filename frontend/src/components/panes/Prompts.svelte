@@ -39,6 +39,10 @@
   let showHidden = false;
   $: hiddenSet = $hiddenLibraryStore;
   $: hiddenCount = entries.filter((entry) => hiddenSet.has(entry.id)).length;
+  // Once nothing is hidden the "Show hidden" reveal disappears, so drop the flag
+  // with it — otherwise it stays latched and the NEXT hide would dim the row in
+  // place instead of removing it from the shelf.
+  $: if (hiddenCount === 0) showHidden = false;
   $: visibleEntries = showHidden ? entries : entries.filter((entry) => !hiddenSet.has(entry.id));
   // Open a prompt entry in an editor pane (App owns the pane set).
   export let onOpenEntry: (entryId: string) => void;

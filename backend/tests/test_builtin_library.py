@@ -245,15 +245,32 @@ class InheritedAncestorPromptCloneTests(unittest.TestCase):
         self._patcher.start()
         # AFTER the patch — declare writes the machine root through config_path().
         declare_full_chain(self.service, self.root, self.base)
-        # The universe layer authors a prompt the book inherits.
+        # The universe layer defines a CUSTOM prompt sub-type and authors a prompt
+        # of it, with an input. So the clone must validate an entry_type that
+        # reaches the open project purely through the ancestor schema-layer merge
+        # (#676 review) — not a built-in every project already has — and must
+        # carry the inputs across.
+        self.service._write_yaml(
+            self.universe / "metadata.schema.yaml",
+            {
+                "entry_types": {
+                    "prompt:worldbuilding": {
+                        "name": "Worldbuilding",
+                        "kind": "prompt",
+                        "parent": "prompt:general",
+                    },
+                },
+            },
+        )
         (self.universe / "prompts").mkdir(parents=True, exist_ok=True)
         self.service._write_node_entry_file(
             self.universe / "prompts" / "universe-prompt.md",
             "universe-prompt",
             "Universe Prompt",
-            "prompt:general",
+            "prompt:worldbuilding",
             {},
             "ancestor body {{ scene }}",
+            extra={"inputs": [{"name": "topic", "type": "text", "label": "Topic", "required": False}]},
         )
         node_index_gate.invalidate()
 
@@ -279,7 +296,7 @@ class InheritedAncestorPromptCloneTests(unittest.TestCase):
                     title="Universe Prompt",
                     body="hijacked",
                     base_revision="",
-                    entry_type="prompt:general",
+                    entry_type="prompt:worldbuilding",
                     metadata={},
                 ),
             )
@@ -295,6 +312,14 @@ class InheritedAncestorPromptCloneTests(unittest.TestCase):
         # Faithful copy; the ancestor original still resolves (clone, not move).
         self.assertEqual(clone.title, source.title)
         self.assertEqual(clone.body.rstrip(), source.body.rstrip())
+        # The custom, ancestor-DEFINED entry_type survives the merge-validated
+        # create+save (the seam #676 relies on), and the inputs carry across.
+        self.assertEqual(clone.entry_type, source.entry_type)
+        self.assertEqual(clone.entry_type, "prompt:worldbuilding")
+        self.assertEqual(
+            [i.model_dump(exclude_none=True) for i in clone.inputs],
+            [i.model_dump(exclude_none=True) for i in source.inputs],
+        )
         self.assertEqual(len(list((self.root / "prompts").glob("*.md"))), 1)
         self.assertIn(
             "universe-prompt",

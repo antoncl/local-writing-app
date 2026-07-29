@@ -66,7 +66,7 @@
   } from "@/lib/stores/assistants";
   import {
     metadataSchemaStore,
-    projectSchemaLayerId,
+    projectLayerIdStore,
   } from "@/lib/stores/schema";
   import { isInherited } from "@/lib/utils/provenance";
   import { implicitContextMatcherStore } from "@/lib/stores/derived";
@@ -500,8 +500,12 @@
 
   function paneEntryFromAncestor(pane: EditorPaneState): boolean {
     // One definition of "is this node inherited" (#313), shared with the level
-    // pill and the rail treatment.
-    return isInherited({ source_layer_id: pane.scene?.source_layer_id }, projectSchemaLayerId());
+    // pill and the rail treatment. Reads the store REACTIVELY (not a get()) so the
+    // banner re-renders when the schema layers finish loading — otherwise it can
+    // stay hidden while NodeEditor (which tracks the store) already locked the
+    // prompt, leaving a read-only editor with no "Clone to edit" affordance (#676
+    // review).
+    return isInherited({ source_layer_id: pane.scene?.source_layer_id }, $projectLayerIdStore);
   }
 
   function openPromptsPane() {

@@ -43,6 +43,23 @@ export function isInherited(node: NodeProvenance, ownLayerId: string): boolean {
   return inheritedLayerLabel(node, ownLayerId) !== null;
 }
 
+/**
+ * Whether the open project positively OWNS this node — its source layer is known
+ * AND equals the project's own layer.
+ *
+ * Unlike `isInherited`, this FAILS CLOSED: it returns false whenever either id is
+ * missing. That difference is load-bearing for a WRITE gate (a read-only lock).
+ * `isInherited` fails OPEN — while `ownLayerId` is empty (schema still loading) it
+ * returns false, i.e. "not inherited", which is right for a display pill (don't
+ * flag every row until the schema lands) but wrong for editability: it would
+ * present an inherited node as editable in that gap and let a save reach the
+ * backend's 409. Gating editability on `!isOwnedHere(...)` locks until ownership
+ * is proven, so the load gap is safe (#676 review).
+ */
+export function isOwnedHere(node: NodeProvenance, ownLayerId: string): boolean {
+  return !!node.source_layer_id && !!ownLayerId && node.source_layer_id === ownLayerId;
+}
+
 /** How a metadata field's effective value is sourced, for the rail's tint (#517). */
 export type FieldProvenance = "local" | "layer-inherited" | "overridden";
 

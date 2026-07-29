@@ -27,7 +27,7 @@
   import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataSchema, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
   import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
   import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
-  import { isInherited } from "@/lib/utils/provenance";
+  import { isOwnedHere } from "@/lib/utils/provenance";
   import LayerAuthoringBar from "@/components/editor/LayerAuthoringBar.svelte";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { backlinksFor } from "@/lib/views/backlinks";
@@ -460,12 +460,17 @@
   // (409) whether it is a built-in Library node (ADR-0049) or an ancestor
   // project's prompt (#676). Lock the whole editor — title, fields and the code
   // body — and let the ancestor banner offer "Clone to edit" instead of letting
-  // the author type into a dead-end. Keyed on provenance (source layer ≠ the
-  // open project), the same signal the level pill uses — so this project's own
-  // prompts stay editable and lore, which forks in place, is untouched.
+  // the author type into a dead-end.
+  //
+  // Fail CLOSED: lock unless the project positively OWNS the prompt (source layer
+  // known AND equal to the open project's). `isOwnedHere` returns false while the
+  // schema layers are still loading ($projectLayerIdStore ""), so an inherited
+  // prompt opened in that gap stays locked rather than briefly editable — the old
+  // is_library flag was intrinsic to the document and had no such gap (#676
+  // review). Own prompts are editable, and lore (which forks in place) is untouched.
   const inheritedReadOnly = $derived(
     documentKind === "prompt" &&
-      isInherited({ source_layer_id: scene?.source_layer_id }, $projectLayerIdStore),
+      !isOwnedHere({ source_layer_id: scene?.source_layer_id }, $projectLayerIdStore),
   );
   // The interactive flip lens the rail renders during a lore review (slice 3b):
   // the proposed structured fields as click-to-adopt flips, wired to the

@@ -39,6 +39,7 @@ if TYPE_CHECKING:
 
 class PromptEntriesMixin:
     def list_prompt_entries(self) -> PromptEntryList:
+        root = self._require_project()
         index = self._build_node_index()
         entries: list[PromptEntrySummary] = []
         for entry in index.by_id.values():
@@ -61,6 +62,7 @@ class PromptEntriesMixin:
                     source_layer_id=entry.source_layer_id,
                     source_layer_label=entry.source_layer_label,
                     is_library=entry.is_library,
+                    editable=self._prompt_winner_is_owned(entry, root),
                 )
             )
         entries.sort(key=lambda entry: (entry.title.lower(), entry.id))
@@ -105,6 +107,7 @@ class PromptEntriesMixin:
         return self.read_prompt_entry(entry_id)
 
     def read_prompt_entry(self, entry_id: str) -> PromptEntry:
+        root = self._require_project()
         index = self._build_node_index()
         index_entry = index.by_id.get(entry_id)
         if index_entry is not None and index_entry.kind == "prompt":
@@ -138,6 +141,13 @@ class PromptEntriesMixin:
             source_layer_id=index_entry.source_layer_id if index_entry else "",
             source_layer_label=index_entry.source_layer_label if index_entry else "",
             is_library=index_entry.is_library if index_entry else False,
+            # Mirror `_reject_inherited_prompt_write` for every reachable state: a
+            # winner the project does not own is read-only (409 on save); no index
+            # winner means the reject path returns (write allowed), so treat it as
+            # editable (#689). (The reject also allows a non-prompt winner, which
+            # this branch does not special-case — unreachable here, since a
+            # non-prompt winner is re-routed to the on-disk path before this.)
+            editable=self._prompt_winner_is_owned(index_entry, root) if index_entry else True,
         )
 
     def _prompt_winner_is_owned(self, winner: NodeIndexEntry, root: Path) -> bool:

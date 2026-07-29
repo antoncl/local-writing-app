@@ -166,6 +166,10 @@ export type PromptEntrySummary = {
   // (ADR-0049). Clone (and later hide) branch on this, not on the display
   // label — a writer's own ancestor project titled "Library" is not shipped.
   is_library?: boolean;
+  // Backend's own read-only-in-place verdict (#689): false when the prompt is
+  // inherited (Library or ancestor project) and a save would 409. The read-only
+  // lock and "Clone to edit" banner key on this via `promptReadOnlyInPlace`.
+  editable?: boolean;
 };
 
 export type PromptEntry = {
@@ -180,6 +184,8 @@ export type PromptEntry = {
   source_layer_id?: string;
   source_layer_label?: string;
   is_library?: boolean;
+  // See PromptEntrySummary.editable (#689).
+  editable?: boolean;
 };
 
 export type PromptEntryList = {

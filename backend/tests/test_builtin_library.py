@@ -111,6 +111,54 @@ class BuiltinLibraryTests(unittest.TestCase):
             ),
         )
 
+    def test_editable_flag_mirrors_the_read_only_guard(self) -> None:
+        """The `editable` read-model flag is the frontend's single source for the
+        read-only lock (#689), so it must equal exactly what `save_prompt_entry`
+        enforces — proven here by pairing each flag value with the write it
+        promises. If the flag ever drifts from the 409, this fails.
+        """
+        summaries = self._summaries()
+        for lib_id in LIBRARY_IDS:
+            # Inherited Library prompts read as NOT editable on BOTH read models.
+            self.assertFalse(summaries[lib_id].editable, f"{lib_id} is inherited")
+            self.assertFalse(self.service.read_prompt_entry(lib_id).editable)
+        # editable=False is not decorative: the save it forbids really 409s.
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.save_prompt_entry(
+                "builtin-roleplay",
+                SavePromptEntryRequest(
+                    title="Roleplay",
+                    body="hijacked",
+                    base_revision="",
+                    entry_type="prompt:roleplay",
+                    metadata={},
+                ),
+            )
+        self.assertEqual(ctx.exception.status_code, 409)
+        # The read-only guard covers DELETE too (delete_prompt_entry runs the same
+        # reject), so editable=False must mirror that as well, not just save.
+        with self.assertRaises(ProjectServiceError) as del_ctx:
+            self.service.delete_prompt_entry("builtin-revise-entry")
+        self.assertEqual(del_ctx.exception.status_code, 409)
+        # An owned prompt reads editable=True on both read models, and the save
+        # that value promises actually succeeds.
+        created = self.service.create_prompt_entry(
+            type("R", (), {"title": "Mine", "entry_type": "prompt:general"})()
+        )
+        self.assertTrue(self.service.read_prompt_entry(created.id).editable)
+        self.assertTrue(self._summaries()[created.id].editable)
+        own = self.service.read_prompt_entry(created.id)
+        self.service.save_prompt_entry(
+            created.id,
+            SavePromptEntryRequest(
+                title="Mine",
+                body="my body",
+                base_revision=own.revision,
+                entry_type="prompt:general",
+                metadata={},
+            ),
+        )
+
     def test_shipped_bodies_carry_their_wiring(self) -> None:
         """The shipped bodies live only in the Library now (§7 retired their type
         `default_body`), so the coverage that they wire the right helpers moves
@@ -151,6 +199,8 @@ class BuiltinLibraryTests(unittest.TestCase):
         # New id, owned by the project (not the Library floor), and not shipped.
         self.assertNotEqual(clone.id, "builtin-roleplay")
         self.assertFalse(clone.is_library)
+        # The whole point of the clone: it is now editable in place (#689).
+        self.assertTrue(clone.editable)
         self.assertEqual(clone.source_layer_id, self.service._metadata_schema_layer_id(self.root))
         # A faithful copy: title, body and inputs carried from the shipped node.
         self.assertEqual(clone.title, source.title)
@@ -214,6 +264,13 @@ class BuiltinLibraryTests(unittest.TestCase):
             # (which reads the label) still renders but clone/read-only break
             # (#674) — so assert the flag, not just the label.
             self.assertTrue(entries[lib_id].is_library)
+            # `editable` is a SEPARATE axis from is_library: it derives from the
+            # restored `source_layer_id`, not the re-stamped is_library flag. A
+            # warm load that mis-restored the source layer would flip an inherited
+            # prompt to editable=True on the next open (unlocking a read-only
+            # prompt) with is_library still correct — so pin editable too (#689).
+            self.assertFalse(entries[lib_id].editable)
+            self.assertFalse(self.service.read_prompt_entry(lib_id).editable)
         # The behaviour the flag gates: clone must still work after a warm load,
         # not just resolve. With is_library lost, fork_prompt_entry would 409.
         node_index_gate.invalidate()
@@ -287,6 +344,10 @@ class InheritedAncestorPromptCloneTests(unittest.TestCase):
         # Inherited (source layer != own) and NOT shipped Library material.
         self.assertNotEqual(entries["universe-prompt"].source_layer_id, self._own_layer())
         self.assertFalse(entries["universe-prompt"].is_library)
+        # An inherited ancestor prompt (not just Library) reads read-only via the
+        # editable flag on both read models — the lock the frontend keys on (#689).
+        self.assertFalse(entries["universe-prompt"].editable)
+        self.assertFalse(self.service.read_prompt_entry("universe-prompt").editable)
 
     def test_ancestor_prompt_is_read_only_in_place(self) -> None:
         with self.assertRaises(ProjectServiceError) as ctx:
@@ -302,12 +363,25 @@ class InheritedAncestorPromptCloneTests(unittest.TestCase):
             )
         self.assertEqual(ctx.exception.status_code, 409)
 
+    def test_ancestor_prompt_delete_is_refused(self) -> None:
+        # The generalized read-only guard (#676) refuses DELETE of an inherited
+        # ancestor prompt too, not just save — the delete half was only covered
+        # for the Library. editable=False must mirror this refusal.
+        self.assertFalse(self.service.read_prompt_entry("universe-prompt").editable)
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.delete_prompt_entry("universe-prompt")
+        self.assertEqual(ctx.exception.status_code, 409)
+        # Still resolves after the refused delete (unchanged, not gone).
+        entries = {e.id: e for e in self.service.list_prompt_entries().entries}
+        self.assertIn("universe-prompt", entries)
+
     def test_clone_an_ancestor_prompt_into_the_project(self) -> None:
         source = self.service.read_prompt_entry("universe-prompt")
         clone = self.service.fork_prompt_entry("universe-prompt")
         # New id, owned by the open project, not shipped.
         self.assertNotEqual(clone.id, "universe-prompt")
         self.assertFalse(clone.is_library)
+        self.assertTrue(clone.editable)
         self.assertEqual(clone.source_layer_id, self._own_layer())
         # Faithful copy; the ancestor original still resolves (clone, not move).
         self.assertEqual(clone.title, source.title)

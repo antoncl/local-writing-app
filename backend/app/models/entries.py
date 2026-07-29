@@ -218,6 +218,18 @@ class PromptEntrySummary(BaseModel):
     # than on `source_layer_label`, so a writer's ancestor project titled
     # "Library" is never mistaken for shipped material.
     is_library: bool = False
+    # Whether this prompt may be edited in place here, vs being read-only because
+    # it is inherited (a built-in Library node or an ancestor project's prompt).
+    # This is the backend's OWN answer — the exact condition `save_prompt_entry`
+    # refuses with a 409 (`_reject_inherited_prompt_write`) — surfaced as a
+    # read-model flag so the editor's read-only lock and the "Clone to edit"
+    # banner read it instead of re-deriving ownership from the async schema
+    # layers. That re-derivation drifting from this truth is what caused #676
+    # (#689). The two builders always set it from `_prompt_winner_is_owned`; the
+    # default is fail-CLOSED (locked) to match the read-only invariant — a path
+    # that ever forgot to set it would lock, never silently unlock an inherited
+    # prompt into the 409 dead-end.
+    editable: bool = False
 
 
 class PromptEntry(BaseModel):
@@ -232,6 +244,10 @@ class PromptEntry(BaseModel):
     source_layer_id: str = ""
     source_layer_label: str = ""
     is_library: bool = False
+    # See PromptEntrySummary.editable (#689): the backend's own read-only-in-place
+    # verdict, carried on the open document so NodeEditor keys its lock on it.
+    # Fail-closed default (see above).
+    editable: bool = False
 
 
 class PromptEntryList(BaseModel):

@@ -26,8 +26,8 @@
   import { resolveColor } from "@/lib/utils/colors";
   import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataSchema, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
   import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
-  import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
-  import { isOwnedHere } from "@/lib/utils/provenance";
+  import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { promptReadOnlyInPlace } from "@/lib/utils/provenance";
   import LayerAuthoringBar from "@/components/editor/LayerAuthoringBar.svelte";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { backlinksFor } from "@/lib/views/backlinks";
@@ -462,16 +462,12 @@
   // body — and let the ancestor banner offer "Clone to edit" instead of letting
   // the author type into a dead-end.
   //
-  // Fail CLOSED: lock unless the project positively OWNS the prompt (source layer
-  // known AND equal to the open project's). `isOwnedHere` returns false while the
-  // schema layers are still loading ($projectLayerIdStore ""), so an inherited
-  // prompt opened in that gap stays locked rather than briefly editable — the old
-  // is_library flag was intrinsic to the document and had no such gap (#676
-  // review). Own prompts are editable, and lore (which forks in place) is untouched.
-  const inheritedReadOnly = $derived(
-    documentKind === "prompt" &&
-      !isOwnedHere({ source_layer_id: scene?.source_layer_id }, $projectLayerIdStore),
-  );
+  // Keyed on the backend's own `editable` verdict via `promptReadOnlyInPlace`
+  // (the same helper the banner uses), not re-derived from the async schema
+  // layers. The flag rides on the document, so there is no load gap and the lock
+  // cannot drift from the backend's 409 (#689). Fails closed. Own prompts are
+  // editable, and lore (which forks in place) is untouched.
+  const inheritedReadOnly = $derived(promptReadOnlyInPlace(documentKind, scene));
   // The interactive flip lens the rail renders during a lore review (slice 3b):
   // the proposed structured fields as click-to-adopt flips, wired to the
   // controller's per-field resolution. Same `compare` shape snapshot compare

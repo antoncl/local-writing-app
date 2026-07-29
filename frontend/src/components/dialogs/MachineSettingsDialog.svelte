@@ -11,7 +11,7 @@
     ProviderCredentialsView,
   } from "@/lib/types";
   import Modal from "@/components/dialogs/Modal.svelte";
-  import DirectoryPickerModal from "@/components/dialogs/DirectoryPickerModal.svelte";
+  import ProjectsFolderPicker from "@/components/widgets/ProjectsFolderPicker.svelte";
   import ProviderSubscriptions from "@/components/widgets/ProviderSubscriptions.svelte";
   import PaletteEditor from "@/components/widgets/PaletteEditor.svelte";
   import { applyProsePresentation } from "@/lib/utils/prose-presentation";
@@ -25,12 +25,6 @@
 
   export let open: boolean = false;
 
-  // The projects-root folder picker (#530). Machine Settings used to force a
-  // hand-typed absolute path; now it drives the same unified picker as the
-  // create flow. Closing the dialog also closes the picker, so it never
-  // reappears on top of a later reopen.
-  let projectsPickerOpen = false;
-  $: if (!open) projectsPickerOpen = false;
   // The persisted view (read-only here — used for `config_path` and
   // any context that shouldn't be edited inline).
   export let settings: MachineSettingsView | null = null;
@@ -200,15 +194,13 @@
         {:else if activeTab === "storage"}
           <label>
             Projects folder
-            <div class="path-picker-row projects-folder-row">
-              <input type="text" bind:value={draft.default_projects_folder} placeholder="C:\path\to\writing" />
-              <button type="button" on:click={() => (projectsPickerOpen = true)}>Browse…</button>
-              <button
-                type="button"
-                disabled={!draft.default_projects_folder}
-                on:click={() => draft && (draft.default_projects_folder = "")}
-              >Clear</button>
-            </div>
+            <ProjectsFolderPicker
+              value={draft.default_projects_folder}
+              onChange={(next) => {
+                if (draft) draft.default_projects_folder = next;
+              }}
+              showClear
+            />
             <!--
               The copy here used to describe this as a creation convenience only.
               Since #429 it is also the outer bound of every project's inheritance
@@ -235,27 +227,9 @@
         <button class="primary" type="button" on:click={onSave}>Save</button>
       {/snippet}
   </Modal>
-
-  <DirectoryPickerModal
-    open={projectsPickerOpen}
-    initialPath={draft.default_projects_folder}
-    title="Projects Folder"
-    selectLabel="Use This Folder"
-    onClose={() => (projectsPickerOpen = false)}
-    onSelect={(path) => {
-      if (draft) draft.default_projects_folder = path;
-      projectsPickerOpen = false;
-    }}
-  />
 {/if}
 
 <style>
-  /* Projects-root row: the shared `.path-picker-row` is a two-column grid
-     (input + one button); this variant adds the third column for Browse. */
-  .projects-folder-row {
-    grid-template-columns: minmax(0, 1fr) auto auto;
-  }
-
   /* Tab strip + panel. The panel restores the 14px grid gap the Modal gives its
      direct children (they're now nested inside this one wrapper). */
   .settings-tabs {

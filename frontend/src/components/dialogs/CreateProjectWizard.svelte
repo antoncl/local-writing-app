@@ -10,6 +10,7 @@
   // consistency, and a fixed-size frame that does not resize between steps.
   import Modal from "@/components/dialogs/Modal.svelte";
   import DirectoryPickerModal from "@/components/dialogs/DirectoryPickerModal.svelte";
+  import ProjectsFolderPicker from "@/components/widgets/ProjectsFolderPicker.svelte";
   import InheritsFromList from "@/components/widgets/InheritsFromList.svelte";
   import AiPolicySlider from "@/components/widgets/AiPolicySlider.svelte";
   import ProviderTierPicker from "@/components/widgets/ProviderTierPicker.svelte";
@@ -85,14 +86,15 @@
           </p>
           <label>
             Projects folder
-            <div class="path-picker-row">
-              <input
-                type="text"
-                bind:value={wizard.rootFolderDraft}
-                placeholder="C:\path\to\writing"
-              />
-              <button type="button" on:click={() => wizard.openPicker("root")}>Browse…</button>
-            </div>
+            <ProjectsFolderPicker
+              value={wizard.rootFolderDraft}
+              onChange={(next) => {
+                wizard.rootFolderDraft = next;
+                wizard.rootError = "";
+              }}
+              startPath={wizard.getStartPath()}
+              pickerTitle="Choose Projects Folder"
+            />
           </label>
           {#if wizard.rootError}
             <!-- A div, not a <p>: Modal's `:global(p)` color rule would otherwise
@@ -114,7 +116,7 @@
                 placeholder={wizard.defaultProjectsFolder || "C:\\path\\to\\writing"}
                 on:change={() => wizard.reloadCandidates()}
               />
-              <button type="button" on:click={() => wizard.openPicker("location")}>Browse…</button>
+              <button type="button" on:click={() => wizard.openPicker()}>Browse…</button>
             </div>
             <!--
               The location can be any folder — including one *inside* an existing

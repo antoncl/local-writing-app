@@ -101,6 +101,11 @@ export default defineConfig(({ command, mode }) => {
       alias: {
         "@": fileURLToPath(new URL("./src", import.meta.url)),
       },
+      // Component tests (#642) mount Svelte via @testing-library/svelte, which
+      // needs the *client* build (`mount`). Vitest otherwise resolves Svelte's
+      // server entry and fails with `mount(...) is not available on the
+      // server`. Gate on VITEST so the app's dev/build resolution is untouched.
+      ...(process.env.VITEST ? { conditions: ["browser"] } : {}),
     },
     server,
     define,

@@ -24,13 +24,17 @@ import type {
 import { joinPath, slugifyProjectName } from "@/lib/utils/projectPath";
 import { declarationRows, toggledDeclaration } from "@/lib/utils/projectChain";
 import { projectReviewRows } from "@/lib/utils/projectReview";
-import {
-  addableCloudProviders,
-  cloudKeyField,
-  configuredCloudProviders,
-  type ProviderOption,
-} from "@/lib/utils/aiProviders";
 import { activeSteps, indexOfStep, stepComplete, type WizardStepId } from "@/lib/utils/wizardSteps";
+
+// Zero-value credentials so `machineProviders` is always a concrete
+// ProviderCredentialsView (getMachineSettings() is null before settings load);
+// ProviderSubscriptions derives "configured"/"addable" from it either way.
+const EMPTY_PROVIDER_CREDENTIALS: ProviderCredentialsView = {
+  anthropic_api_key: "",
+  openai_api_key: "",
+  openrouter_api_key: "",
+  ollama_host: "",
+};
 
 // The AI-policy draft: the three concrete stops plus the wire-only "inherit"
 // (state no policy of your own — the chain resolves it, #471). Mirrors the
@@ -66,11 +70,6 @@ class CreateWizard {
   // ancestors, with none it resolves to the backend default (off). Picking a
   // concrete stop overrides here and unfolds the provider + assistant surface.
   aiPolicy = $state<AiPolicyDraft>("inherit");
-  // "+ Add provider" credential entry (cloud only; Ollama's host is edited
-  // inline under Local policy).
-  addingProvider = $state(false);
-  providerDraftId = $state("");
-  providerDraftSecret = $state("");
   // Inline "Hire an assistant" draft.
   hiring = $state(false);
   hireTitle = $state("");
@@ -168,13 +167,11 @@ class CreateWizard {
     this.aiPolicy === "local-only" || this.aiPolicy === "cloud-allowed",
   );
   providerModeCloud = $derived(this.aiPolicy === "cloud-allowed");
-  // The provider chooser's data, derived from the live machine settings so it
-  // updates the moment a credential is written.
-  configuredProviders = $derived<ProviderOption[]>(
-    configuredCloudProviders(this.getMachineSettings()?.providers),
-  );
-  addableProviders = $derived<ProviderOption[]>(
-    addableCloudProviders(this.getMachineSettings()?.providers),
+  // The raw machine credentials, fed to ProviderSubscriptions (it derives the
+  // configured/addable sets itself). Derived from the live machine settings so
+  // the chip list updates the moment a credential is written.
+  machineProviders = $derived<ProviderCredentialsView>(
+    this.getMachineSettings()?.providers ?? EMPTY_PROVIDER_CREDENTIALS,
   );
   defaultProviderId = $derived(this.getMachineSettings()?.default_provider ?? "");
   ollamaHost = $derived(this.getMachineSettings()?.providers.ollama_host ?? "");
@@ -247,7 +244,6 @@ class CreateWizard {
     this.candidatesLoading = false;
     this.inherits = [];
     this.aiPolicy = "inherit";
-    this.cancelAddProvider();
     this.cancelHire();
     this.aiBusy = false;
     this.reviewLoading = false;
@@ -393,33 +389,21 @@ class CreateWizard {
   setAiPolicy(next: AiPolicyDraft) {
     this.aiPolicy = next;
     // Leaving an on-policy collapses the provider surface, so drop any half-typed
-    // add-provider / hire drafts rather than carry them into a hidden section.
+    // hire draft rather than carry it into a hidden section. (The add-provider
+    // form now lives in ProviderSubscriptions, which unmounts with the surface.)
     if (next === "off" || next === "inherit") {
-      this.cancelAddProvider();
       this.cancelHire();
     }
   }
 
-  beginAddProvider(providerId: string) {
-    this.addingProvider = true;
-    this.providerDraftId = providerId;
-    this.providerDraftSecret = "";
-  }
-
-  cancelAddProvider() {
-    this.addingProvider = false;
-    this.providerDraftId = "";
-    this.providerDraftSecret = "";
-  }
-
-  async saveProvider() {
-    const field = cloudKeyField(this.providerDraftId);
-    const value = this.providerDraftSecret.trim();
-    if (!field || !value) return;
-    await this.#withBusy(async () => {
-      await this.onSaveProviderCredential(field, value);
-      this.cancelAddProvider();
-    });
+  // ProviderSubscriptions owns the add-form state and resolves the target field;
+  // it hands us a (field, value) to persist. The wizard writes each key
+  // immediately (machine layer — the new book inherits it), so wrap the write in
+  // the shared busy guard that disables the widget's Save while it's in flight.
+  async saveProviderKey(field: keyof ProviderCredentialsView, value: string) {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    await this.#withBusy(() => this.onSaveProviderCredential(field, trimmed));
   }
 
   beginHire() {

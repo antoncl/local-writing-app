@@ -49,8 +49,8 @@
   $: tagHexFor = (tag: string): string | null => assistantTagColors.get(tag) ?? null;
 
   // Every NodeList is backed by a view (ADR-0022), and the view is authoritative
-  // for its own shape (ADR-0037 §3): the per-layer buckets come from the spec's
-  // `group_by: source_layer` level, never synthesized here. Hand the whole view to
+  // for its own shape (ADR-0037 §3): any buckets come from the spec's own
+  // `group_by` levels, never synthesized here. Hand the whole view to
   // ViewNodeList, which owns evaluation + the parameter strip (ADR-0032 §D) — so a
   // parameterized assistant view now gets its strip here too, not only in Lore.
   $: view = {

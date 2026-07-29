@@ -83,24 +83,6 @@ function segmentForField<T extends EvalNode>(
 ): PathSegment[] {
   const { field, order } = level;
 
-  // `source_layer` (ADR-0037 §7 — the Assistants default): resolved off the
-  // node's summary-level projection (`source_layer_id`/`source_layer_label`),
-  // like `entry_type` routes to a top-level property — there is no schema field
-  // to consult. One synthetic bucket per layer, keyed by id, labelled by label.
-  if (field === "source_layer") {
-    const layerId = (node.source_layer_id ?? "").trim();
-    if (!layerId) return []; // missing → bare at this level
-    return [
-      {
-        key: layerId,
-        label: node.source_layer_label || layerId,
-        nodeId: null,
-        origin: "field",
-        ...(order ? { order } : {}),
-      },
-    ];
-  }
-
   const raw = fieldValue(node, field, ctx.schema);
   if (isEmpty(raw)) return [];
 

@@ -476,13 +476,11 @@
         (f.def.category !== "intrinsic" && GROUPABLE_TYPES.includes(effectiveFieldType(f.def) ?? "")),
     ),
   );
-  // A stored level may name a field the roster can't offer — the Assistants
-  // default's synthetic `source_layer` projection (groupBy.ts), or a field
-  // hidden since authoring. Show a readable label, never a blank <select>; the
-  // level is preserved exactly as stored (display-only fallback).
-  const SYNTHETIC_LEVEL_LABELS: Record<string, string> = { source_layer: "Source layer" };
+  // A stored level may name a field the roster can't currently offer — e.g. a
+  // field hidden since the level was authored. Show its raw key rather than a
+  // blank <select>; the level is preserved exactly as stored (display-only).
   function levelLabel(field: string): string {
-    return groupableFields.find((f) => f.key === field)?.name ?? SYNTHETIC_LEVEL_LABELS[field] ?? field;
+    return groupableFields.find((f) => f.key === field)?.name ?? field;
   }
   // Per-list helpers (each group organizes independently, so used-field sets and
   // add-availability are computed against *that* group's levels). The `used` set

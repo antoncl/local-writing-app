@@ -447,6 +447,15 @@
   // the rail/title go read-only and the host suppresses autosave, so the diff's
   // "current" side cannot move under the review.
   const reviewing = $derived(documentKind === "lore" && loreReview.hasReview);
+  // A built-in Library prompt (ADR-0049) is read-only in place: the backend
+  // refuses any save (409), so lock the whole editor — title, fields and the
+  // code body — and let the ancestor banner offer "Clone to edit" instead of
+  // letting the author type into a dead-end. Keyed on the `is_library` flag,
+  // not the layer label, so a writer's own ancestor titled "Library" stays
+  // editable-in-place.
+  const libraryReadOnly = $derived(
+    documentKind === "prompt" && !!(scene as { is_library?: boolean } | undefined)?.is_library,
+  );
   // The interactive flip lens the rail renders during a lore review (slice 3b):
   // the proposed structured fields as click-to-adopt flips, wired to the
   // controller's per-field resolution. Same `compare` shape snapshot compare
@@ -669,7 +678,7 @@
       computedFieldString={computedFieldString}
       effectiveOverrides={scrubbed ? scrub.overrides : null}
       compare={snapshotCompare ?? loreCompare}
-      readOnly={scrubbed || snapshotParked || reviewing}
+      readOnly={scrubbed || snapshotParked || reviewing || libraryReadOnly}
       onEntryTypeChange={(next) => updateEntryType(next)}
       onStatusChange={(next) => updateStatus(next)}
       onMetadataChange={(next) => {
@@ -734,6 +743,10 @@
                  title, so the author can't edit an entry mid-review — the review
                  is a transaction that writes once, not a co-editing surface. -->
             <input class="title-input" readonly aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (under review, read-only)`} value={title} />
+          {:else if libraryReadOnly}
+            <!-- Built-in Library prompt (ADR-0049): shipped read-only material.
+                 The title cannot be renamed in place; clone it to edit. -->
+            <input class="title-input" readonly aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (shipped, read-only)`} value={title} />
           {:else}
             <input class="title-input" aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()}`} placeholder={documentNameLabel} bind:value={title} oninput={handleTitleInput} />
           {/if}
@@ -819,6 +832,7 @@
       {loadedSceneId}
       nextInputDraftId={promptDrafts.nextDraftId}
       entrySlugify={promptDrafts.slugify}
+      readOnly={libraryReadOnly}
       onInputsChange={emitChange}
     />
   {/if}

@@ -162,6 +162,10 @@ export type PromptEntrySummary = {
   inputs: PromptInputDefinition[];
   source_layer_id?: string;
   source_layer_label?: string;
+  // True when this prompt is shipped by the app-owned built-in Library
+  // (ADR-0049). Clone (and later hide) branch on this, not on the display
+  // label — a writer's own ancestor project titled "Library" is not shipped.
+  is_library?: boolean;
 };
 
 export type PromptEntry = {
@@ -175,6 +179,7 @@ export type PromptEntry = {
   computed_metadata: EntryMetadata;
   source_layer_id?: string;
   source_layer_label?: string;
+  is_library?: boolean;
 };
 
 export type PromptEntryList = {

@@ -28,6 +28,12 @@ class NodeIndexEntry:
     title: str = ""
     source_layer_id: str = ""
     source_layer_label: str = ""
+    # Whether the entry's source layer is the app-owned built-in Library (#674 /
+    # ADR-0049 §5). Stamped from `IndexLayer.is_library` at collection time so
+    # clone/hide and the read model branch on *is-this-the-app-Library* rather
+    # than on the layer's display label — a writer whose ancestor project is
+    # titled "Library" must not be mistaken for shipped material.
+    is_library: bool = False
     # The layer id this entry was fork-to-here'd from (#313 / ADR-0039), resolved
     # from the front-matter `forked_from` relative path at collection time. When
     # it equals the id of the layer this entry shadows, `resolve()` treats the

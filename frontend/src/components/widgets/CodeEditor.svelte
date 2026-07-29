@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
   import { EditorView, basicSetup } from "codemirror";
-  import { Compartment } from "@codemirror/state";
+  import { Compartment, EditorState } from "@codemirror/state";
   import { StreamLanguage } from "@codemirror/language";
   import { jinja2 } from "@codemirror/legacy-modes/mode/jinja2";
   import { json as jsonLang } from "@codemirror/lang-json";
@@ -19,11 +19,20 @@
    * `lineno`); col is optional and 1-based when present. Callers update this
    * prop after a render; CodeEditor reactively pushes them into CodeMirror. */
   export let diagnostics: { line: number; col?: number; severity: "error" | "warning"; message: string }[] = [];
+  /** Lock the buffer against edits (ADR-0049: a built-in Library prompt is
+   * shipped read-only material — clone it to edit). Live-reconfigured via a
+   * Compartment. `EditorView.editable.of(false)` also drops the caret so the
+   * surface reads as a viewer, not a focusable-but-inert field. */
+  export let readOnly = false;
 
   let host: HTMLDivElement;
   let editor: EditorView | null = null;
   let lastEmitted = value;
   const wrapCompartment = new Compartment();
+  const readOnlyCompartment = new Compartment();
+
+  const readOnlyExtensions = (ro: boolean) =>
+    ro ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : [];
 
   onMount(() => {
     const extensions = [basicSetup, lintGutter()];
@@ -33,6 +42,7 @@
       extensions.push(jsonLang());
     }
     extensions.push(wrapCompartment.of(lineWrapping ? EditorView.lineWrapping : []));
+    extensions.push(readOnlyCompartment.of(readOnlyExtensions(readOnly)));
     extensions.push(
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
@@ -66,6 +76,13 @@
   $: if (editor) {
     editor.dispatch({
       effects: wrapCompartment.reconfigure(lineWrapping ? EditorView.lineWrapping : []),
+    });
+  }
+
+  // Live-toggle read-only when the prop changes.
+  $: if (editor) {
+    editor.dispatch({
+      effects: readOnlyCompartment.reconfigure(readOnlyExtensions(readOnly)),
     });
   }
 

@@ -20,7 +20,6 @@ from project_fixtures import open_test_project
 
 from app.models import (
     CreateLoreEntryRequest,
-    CreatePromptEntryRequest,
     SaveLoreEntryRequest,
 )
 from app.services.ai.entry_patch import parse_entry_patch_json
@@ -328,9 +327,9 @@ class FieldCatalogFromTypeTests(unittest.TestCase):
         # The materialized prompt body branches on `input.entry`: present ⇒
         # revise, absent ⇒ create. Render both and assert each takes its branch
         # without a StrictUndefined error.
-        prompt = self.service.create_prompt_entry(
-            CreatePromptEntryRequest(title="Draft", entry_type="prompt:revise:entry")
-        )
+        # The shipped revise:entry body lives in the built-in Library now
+        # (ADR-0049 §7), not a freshly-created instance's `default_body`.
+        prompt = self.service.read_prompt_entry("builtin-revise-entry")
         env = create_environment_for_project(self.service)
         template = env.from_string(prompt.body)
         label = self.service.read_metadata_schema().entry_types["lore:character"].name
@@ -391,9 +390,9 @@ class FieldCatalogFromTypeTests(unittest.TestCase):
                 },
             ),
         )
-        prompt = self.service.create_prompt_entry(
-            CreatePromptEntryRequest(title="Draft", entry_type="prompt:revise:entry")
-        )
+        # The shipped revise:entry body lives in the built-in Library now
+        # (ADR-0049 §7), not a freshly-created instance's `default_body`.
+        prompt = self.service.read_prompt_entry("builtin-revise-entry")
         env = create_environment_for_project(self.service)
         rendered = env.from_string(prompt.body).render(
             input={"entry": hero.id, "entry_type": ""}

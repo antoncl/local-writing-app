@@ -55,6 +55,7 @@ class PromptEntriesMixin:
                     inputs=self._parse_prompt_inputs(front_matter.get("inputs")),
                     source_layer_id=entry.source_layer_id,
                     source_layer_label=entry.source_layer_label,
+                    is_library=entry.is_library,
                 )
             )
         entries.sort(key=lambda entry: (entry.title.lower(), entry.id))
@@ -131,6 +132,50 @@ class PromptEntriesMixin:
             computed_metadata={},
             source_layer_id=index_entry.source_layer_id if index_entry else "",
             source_layer_label=index_entry.source_layer_label if index_entry else "",
+            is_library=index_entry.is_library if index_entry else False,
+        )
+
+    def fork_prompt_entry(self, entry_id: str) -> PromptEntry:
+        """Clone a built-in Library prompt into this project as an editable copy
+        (ADR-0049 §5, slice 2).
+
+        Unlike lore's fork-to-here (`fork_lore_entry`, which keeps the id and
+        shadows the source to sever an *inherited* entry), a Library clone mints
+        a **new id** and leaves the shipped original in place. Keeping the id
+        would make the copy shadow the Library node — which is exactly what a
+        per-project *hide* (slice 3) does — so clone and hide stay orthogonal.
+        The shipped material is a starting point lifted into the project, not an
+        override of the floor.
+
+        Scoped to Library winners: an ancestor *project's* prompt is inherited
+        but not shipped material, and severing that is a different (unshipped)
+        gesture, so it is refused here.
+        """
+        self._require_project()
+        winner = self._build_node_index().by_id.get(entry_id)
+        if winner is None or winner.kind != "prompt":
+            raise ProjectServiceError(f"Prompt {entry_id} not found.", 404)
+        if not winner.is_library:
+            raise ProjectServiceError(
+                f"Prompt {entry_id} is not a built-in Library prompt; there is nothing to clone.",
+                409,
+            )
+        source = self.read_prompt_entry(entry_id)
+        request = CreatePromptEntryRequest(title=source.title, entry_type=source.entry_type)
+        clone = self.create_prompt_entry(request)
+        # `create_prompt_entry` seeds from the entry type (an empty body now that
+        # the shipped bodies live only in the Library, §7); overwrite with the
+        # Library node's own body/metadata/inputs so the clone is a faithful copy.
+        return self.save_prompt_entry(
+            clone.id,
+            SavePromptEntryRequest(
+                title=source.title,
+                body=source.body,
+                entry_type=source.entry_type,
+                metadata=source.metadata,
+                inputs=source.inputs,
+                base_revision=clone.revision,
+            ),
         )
 
     def _reject_inherited_prompt_write(self, entry_id: str) -> None:

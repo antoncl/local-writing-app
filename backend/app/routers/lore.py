@@ -171,6 +171,15 @@ def delete_prompt_entry(project: CurrentProject, entry_id: str) -> PromptEntryLi
         return project.delete_prompt_entry(entry_id)
 
 
+@router.post("/api/prompts/{entry_id}/fork", response_model=PromptEntry)
+def fork_prompt_entry(project: CurrentProject, entry_id: str) -> PromptEntry:
+    """Clone a built-in Library prompt into the project as an editable copy
+    (ADR-0049 §5). Mirrors `/api/lore/{id}/fork`, but mints a new id rather than
+    forking-to-here (see `fork_prompt_entry` in the service)."""
+    with translate_errors():
+        return project.fork_prompt_entry(entry_id)
+
+
 @router.get("/api/mutation-sets", response_model=MutationSetEntryList)
 def list_mutation_set_entries(project: CurrentProject) -> MutationSetEntryList:
     """Reusable mutation sets (#62) — the Mutations pane list."""

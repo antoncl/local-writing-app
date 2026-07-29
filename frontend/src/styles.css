@@ -947,6 +947,20 @@ button.row-action-add.active {
 .link-danger:hover {
   text-decoration: underline;
 }
+/* Accent twin of .link-danger — a quiet, borderless text button (e.g. a
+   "Manage…" launcher). Positioning (margin/padding overrides) stays with the
+   consumer. */
+.link-accent {
+  padding: 5px 4px;
+  border: 0;
+  background: transparent;
+  font-size: var(--fs-sm);
+  color: var(--accent);
+  cursor: pointer;
+}
+.link-accent:hover {
+  text-decoration: underline;
+}
 
 /* .sfr-group-origin / .applied-group* / .ag-* / .group-apply-form (+ its
    .sfi-* descendant overrides) co-located into SchemaTypeEditor.svelte (#14). */

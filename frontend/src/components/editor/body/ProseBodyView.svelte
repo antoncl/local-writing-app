@@ -30,6 +30,7 @@
   import TableCell from "@tiptap/extension-table-cell";
   import TableHeader from "@tiptap/extension-table-header";
   import TableRow from "@tiptap/extension-table-row";
+  import { stateAtDocumentBoundary } from "@/lib/editor-core/documentBoundary";
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import { sanitizePastedHtml } from "@/lib/utils/sanitizePastedHtml";
   import {
@@ -310,6 +311,17 @@
     loadedSceneId = sceneId;
     enforceUniqueTodoAnchors();
     syncTodoAnchorDomState(true);
+    // A document load is a state boundary, not an edit: rebuild the state so
+    // undo history starts empty — Ctrl+Z must never walk this buffer back
+    // across what the load replaced (#368). The reachable trigger is the
+    // SAME-id server reconcile (snapshot restore, embedded-TODO write-backs
+    // via reconcileSceneFromServer), where an undoable reload would resurrect
+    // stale content and autosave it. Deliberate cost: a reconcile therefore
+    // also discards the scene's in-session undo trail — the alternatives are
+    // worse (an undoable reload IS the clobber; addToHistory:false leaves the
+    // prior steps as silent no-op undos). Sits after the anchor
+    // normalizations above so their transactions are not undoable either.
+    editor.view.updateState(stateAtDocumentBoundary(editor.state));
     updateLiveWordCount();
     syncEditorEmpty();
     updateSelectionMenu();

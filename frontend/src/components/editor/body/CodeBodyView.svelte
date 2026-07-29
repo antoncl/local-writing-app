@@ -172,7 +172,16 @@
 
 <div class="editor-wrap raw-body-wrap">
   <div class="raw-body-editor">
-    <CodeEditor bind:value={rawBody} language={rawBodyLanguage} lineWrapping={lineWrapEnabled} {readOnly} diagnostics={isPrompt() ? promptPreviewDiagnostics : []} />
+    <!-- Belt-and-braces (#368): keyed per document id so a CodeMirror
+         instance's undo history and mount-fixed language extension can never
+         span documents. No in-pane document switch exists today (one tab per
+         document; panes are torn down on close), so this only guards a future
+         pane-model change. It does NOT cover a same-id external reload (none
+         exists for code bodies today) — that would need a state reset, not a
+         remount, exactly like ProseBodyView's loadScene boundary. -->
+    {#key scene?.id}
+      <CodeEditor bind:value={rawBody} language={rawBodyLanguage} lineWrapping={lineWrapEnabled} {readOnly} diagnostics={isPrompt() ? promptPreviewDiagnostics : []} />
+    {/key}
   </div>
 
   {#if isPrompt()}

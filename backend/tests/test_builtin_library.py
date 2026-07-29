@@ -111,6 +111,49 @@ class BuiltinLibraryTests(unittest.TestCase):
             ),
         )
 
+    def test_editable_flag_mirrors_the_read_only_guard(self) -> None:
+        """The `editable` read-model flag is the frontend's single source for the
+        read-only lock (#689), so it must equal exactly what `save_prompt_entry`
+        enforces — proven here by pairing each flag value with the write it
+        promises. If the flag ever drifts from the 409, this fails.
+        """
+        summaries = self._summaries()
+        for lib_id in LIBRARY_IDS:
+            # Inherited Library prompts read as NOT editable on BOTH read models.
+            self.assertFalse(summaries[lib_id].editable, f"{lib_id} is inherited")
+            self.assertFalse(self.service.read_prompt_entry(lib_id).editable)
+        # editable=False is not decorative: the save it forbids really 409s.
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.save_prompt_entry(
+                "builtin-roleplay",
+                SavePromptEntryRequest(
+                    title="Roleplay",
+                    body="hijacked",
+                    base_revision="",
+                    entry_type="prompt:roleplay",
+                    metadata={},
+                ),
+            )
+        self.assertEqual(ctx.exception.status_code, 409)
+        # An owned prompt reads editable=True on both read models, and the save
+        # that value promises actually succeeds.
+        created = self.service.create_prompt_entry(
+            type("R", (), {"title": "Mine", "entry_type": "prompt:general"})()
+        )
+        self.assertTrue(self.service.read_prompt_entry(created.id).editable)
+        self.assertTrue(self._summaries()[created.id].editable)
+        own = self.service.read_prompt_entry(created.id)
+        self.service.save_prompt_entry(
+            created.id,
+            SavePromptEntryRequest(
+                title="Mine",
+                body="my body",
+                base_revision=own.revision,
+                entry_type="prompt:general",
+                metadata={},
+            ),
+        )
+
     def test_shipped_bodies_carry_their_wiring(self) -> None:
         """The shipped bodies live only in the Library now (§7 retired their type
         `default_body`), so the coverage that they wire the right helpers moves
@@ -151,6 +194,8 @@ class BuiltinLibraryTests(unittest.TestCase):
         # New id, owned by the project (not the Library floor), and not shipped.
         self.assertNotEqual(clone.id, "builtin-roleplay")
         self.assertFalse(clone.is_library)
+        # The whole point of the clone: it is now editable in place (#689).
+        self.assertTrue(clone.editable)
         self.assertEqual(clone.source_layer_id, self.service._metadata_schema_layer_id(self.root))
         # A faithful copy: title, body and inputs carried from the shipped node.
         self.assertEqual(clone.title, source.title)
@@ -287,6 +332,10 @@ class InheritedAncestorPromptCloneTests(unittest.TestCase):
         # Inherited (source layer != own) and NOT shipped Library material.
         self.assertNotEqual(entries["universe-prompt"].source_layer_id, self._own_layer())
         self.assertFalse(entries["universe-prompt"].is_library)
+        # An inherited ancestor prompt (not just Library) reads read-only via the
+        # editable flag on both read models — the lock the frontend keys on (#689).
+        self.assertFalse(entries["universe-prompt"].editable)
+        self.assertFalse(self.service.read_prompt_entry("universe-prompt").editable)
 
     def test_ancestor_prompt_is_read_only_in_place(self) -> None:
         with self.assertRaises(ProjectServiceError) as ctx:
@@ -308,6 +357,7 @@ class InheritedAncestorPromptCloneTests(unittest.TestCase):
         # New id, owned by the open project, not shipped.
         self.assertNotEqual(clone.id, "universe-prompt")
         self.assertFalse(clone.is_library)
+        self.assertTrue(clone.editable)
         self.assertEqual(clone.source_layer_id, self._own_layer())
         # Faithful copy; the ancestor original still resolves (clone, not move).
         self.assertEqual(clone.title, source.title)

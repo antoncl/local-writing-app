@@ -6,6 +6,7 @@ import {
   isFieldOwnClearable,
   isInherited,
   isOwnedHere,
+  promptReadOnlyInPlace,
 } from "@/lib/utils/provenance";
 
 describe("inheritedLayerLabel", () => {
@@ -55,6 +56,33 @@ describe("isOwnedHere (fail-closed write gate, #676)", () => {
     expect(isOwnedHere({ source_layer_id: "book" }, "")).toBe(false);
     expect(isInherited({ source_layer_id: "book" }, "")).toBe(false);
     expect(isOwnedHere({}, "book")).toBe(false);
+  });
+});
+
+describe("promptReadOnlyInPlace (single reader of the backend #689 verdict)", () => {
+  it("locks a prompt the backend marked not editable", () => {
+    expect(promptReadOnlyInPlace("prompt", { editable: false })).toBe(true);
+  });
+
+  it("unlocks a prompt the backend marked editable", () => {
+    expect(promptReadOnlyInPlace("prompt", { editable: true })).toBe(false);
+  });
+
+  it("fails CLOSED for a prompt whose flag is absent (stale/partial payload)", () => {
+    // A missing flag must lock rather than let a save reach the backend's 409.
+    expect(promptReadOnlyInPlace("prompt", {})).toBe(true);
+  });
+
+  it("does not lock when there is no document yet (nothing to edit)", () => {
+    expect(promptReadOnlyInPlace("prompt", null)).toBe(false);
+    expect(promptReadOnlyInPlace("prompt", undefined)).toBe(false);
+  });
+
+  it("never locks a non-prompt kind, even if it happens to carry the flag", () => {
+    // Lore forks in place and scenes are always owned — their editability is a
+    // different axis, so this gate must leave them alone.
+    expect(promptReadOnlyInPlace("lore", { editable: false })).toBe(false);
+    expect(promptReadOnlyInPlace("scene", {})).toBe(false);
   });
 });
 

@@ -68,7 +68,7 @@
     metadataSchemaStore,
     projectLayerIdStore,
   } from "@/lib/stores/schema";
-  import { isInherited } from "@/lib/utils/provenance";
+  import { isInherited, promptReadOnlyInPlace } from "@/lib/utils/provenance";
   import { implicitContextMatcherStore } from "@/lib/stores/derived";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
@@ -499,12 +499,19 @@
   }
 
   function paneEntryFromAncestor(pane: EditorPaneState): boolean {
-    // One definition of "is this node inherited" (#313), shared with the level
-    // pill and the rail treatment. Reads the store REACTIVELY (not a get()) so the
-    // banner re-renders when the schema layers finish loading — otherwise it can
-    // stay hidden while NodeEditor (which tracks the store) already locked the
-    // prompt, leaving a read-only editor with no "Clone to edit" affordance (#676
-    // review).
+    // For a prompt the banner's "inherited / read-only here" is the backend's own
+    // `editable` verdict, read through the SAME helper as NodeEditor's read-only
+    // lock (#689) — so the banner and the lock cannot disagree. This also drops
+    // the prompt path's dependence on the async schema store: the flag rides on
+    // the document, so the banner no longer lags the lock during schema load (the
+    // #676 review's concern, now removed rather than worked around).
+    if (pane.document?.type === "prompt") {
+      return promptReadOnlyInPlace("prompt", pane.scene);
+    }
+    // Lore and other inheritable kinds keep the display-only provenance read
+    // (#313), shared with the level pill and rail treatment. Reads the store
+    // REACTIVELY so the banner re-renders when the schema layers finish loading;
+    // fails open in the gap, which is fine for a non-gating affordance.
     return isInherited({ source_layer_id: pane.scene?.source_layer_id }, $projectLayerIdStore);
   }
 

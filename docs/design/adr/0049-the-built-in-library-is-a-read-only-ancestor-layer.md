@@ -1,6 +1,6 @@
 # ADR-0049: The built-in library is a read-only ancestor layer of nodes
 
-- Status: **Proposed** — 2026-07-29. Designed with Anton over #606.
+- Status: **Accepted** — 2026-07-29 (Anton, PR #669). Designed with him over #606.
 - Issue: #606 · Pre-1.0 (no release milestone)
 - Follows: ADR-0039 (the hierarchy model — inheritance is virtual membership, ancestor
   nodes materialized into the open project), ADR-0042 (the edit gesture on an inherited

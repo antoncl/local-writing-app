@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  hidePromptEntries,
   promptEntriesForSurface,
   type PromptResolutionContext,
 } from "@/lib/editor-core/promptResolution";
@@ -9,12 +10,13 @@ function prompt(id: string, entryType: string): PromptEntrySummary {
   return { id, title: id, body: "", entry_type: entryType, metadata: {}, inputs: [] };
 }
 
-// Both prompt sub-types emit to the "append_to_body" surface, so the surface
-// filter keeps both; the hidden filter is the only thing that removes one.
+// prompt:a / prompt:b emit to append_to_body; prompt:chat routes to the chat
+// panel, so the surface filter partitions them and the hidden filter removes one.
 const schema = {
   entry_types: {
     "prompt:a": { prompt: { context_strategy: { output: { kind: "append_to_body" } } } },
     "prompt:b": { prompt: { context_strategy: { output: { kind: "append_to_body" } } } },
+    "prompt:chat": { prompt: { context_strategy: { output: { kind: "chat_panel" } } } },
   },
 } as unknown as MetadataSchema;
 
@@ -50,5 +52,32 @@ describe("promptEntriesForSurface — hidden filter (ADR-0049 slice 3)", () => {
       "append_to_body",
     ).map((e) => e.id);
     expect(ids).toEqual(["p-a", "p-b"]);
+  });
+
+  // The chat "Pick a prompt" list (ChatBodyView) routes through this seam (#682),
+  // so a hidden chat_panel prompt must drop out of the chat surface too.
+  it("drops a hidden prompt from the chat_panel surface", () => {
+    const base = ctx({ promptEntries: [prompt("p-chat", "prompt:chat")] });
+    expect(promptEntriesForSurface(base, "chat_panel").map((e) => e.id)).toEqual(["p-chat"]);
+    const hidden = ctx({
+      promptEntries: [prompt("p-chat", "prompt:chat")],
+      hiddenPromptIds: new Set(["p-chat"]),
+    });
+    expect(promptEntriesForSurface(hidden, "chat_panel")).toEqual([]);
+  });
+});
+
+// The shared seam every prompt-discovery surface routes through (#682) —
+// promptEntriesForSurface above, plus NodePicker's snippet picker directly.
+describe("hidePromptEntries (ADR-0049 #682)", () => {
+  const entries = [prompt("keep", "prompt:a"), prompt("gone", "prompt:a")];
+
+  it("removes the hidden ids", () => {
+    expect(hidePromptEntries(entries, new Set(["gone"])).map((e) => e.id)).toEqual(["keep"]);
+  });
+
+  it("returns the roster unchanged for an undefined or empty set", () => {
+    expect(hidePromptEntries(entries, undefined)).toBe(entries);
+    expect(hidePromptEntries(entries, new Set())).toBe(entries);
   });
 });

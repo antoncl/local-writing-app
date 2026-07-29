@@ -16,13 +16,16 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
+from layer_fixtures import declare_full_chain
 from project_fixtures import open_test_project
 
 from app.models import SavePromptEntryRequest
 from app.services.project import node_index_snapshot as snapshot
 from app.services.project.errors import ProjectServiceError
 from app.services.project.node_index_gate import node_index_gate
+from app.services.project_service import ProjectService
 
 LIBRARY_IDS = {"builtin-roleplay", "builtin-revise-entry"}
 
@@ -219,6 +222,121 @@ class BuiltinLibraryTests(unittest.TestCase):
 
     def _library_path(self, entry_id: str) -> Path:
         return self.service._build_node_index().by_id[entry_id].path
+
+
+class InheritedAncestorPromptCloneTests(unittest.TestCase):
+    """#676: an ancestor *project's* prompt is inherited and read-only in place,
+    and clones into the open project exactly as a Library prompt does — a new id,
+    a faithful copy, the ancestor untouched. The escape hatch is clone, not lore's
+    in-place fork-to-here: a prompt is a tool you adapt, not canon you correct."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
+        self.universe = self.base / "universe"
+        self.root = self.universe / "book"
+        self.service = ProjectService.created_at(self.root, "Book")
+        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
+        self.config_dir.mkdir()
+        self._patcher = patch(
+            "app.services.machine_settings.config_path",
+            return_value=self.config_dir / "config.yaml",
+        )
+        self._patcher.start()
+        # AFTER the patch — declare writes the machine root through config_path().
+        declare_full_chain(self.service, self.root, self.base)
+        # The universe layer defines a CUSTOM prompt sub-type and authors a prompt
+        # of it, with an input. So the clone must validate an entry_type that
+        # reaches the open project purely through the ancestor schema-layer merge
+        # (#676 review) — not a built-in every project already has — and must
+        # carry the inputs across.
+        self.service._write_yaml(
+            self.universe / "metadata.schema.yaml",
+            {
+                "entry_types": {
+                    "prompt:worldbuilding": {
+                        "name": "Worldbuilding",
+                        "kind": "prompt",
+                        "parent": "prompt:general",
+                    },
+                },
+            },
+        )
+        (self.universe / "prompts").mkdir(parents=True, exist_ok=True)
+        self.service._write_node_entry_file(
+            self.universe / "prompts" / "universe-prompt.md",
+            "universe-prompt",
+            "Universe Prompt",
+            "prompt:worldbuilding",
+            {},
+            "ancestor body {{ scene }}",
+            extra={"inputs": [{"name": "topic", "type": "text", "label": "Topic", "required": False}]},
+        )
+        node_index_gate.invalidate()
+
+    def tearDown(self) -> None:
+        self._patcher.stop()
+        self.temp_dir.cleanup()
+
+    def _own_layer(self) -> str:
+        return self.service._metadata_schema_layer_id(self.root)
+
+    def test_ancestor_prompt_resolves_as_inherited(self) -> None:
+        entries = {e.id: e for e in self.service.list_prompt_entries().entries}
+        self.assertIn("universe-prompt", entries)
+        # Inherited (source layer != own) and NOT shipped Library material.
+        self.assertNotEqual(entries["universe-prompt"].source_layer_id, self._own_layer())
+        self.assertFalse(entries["universe-prompt"].is_library)
+
+    def test_ancestor_prompt_is_read_only_in_place(self) -> None:
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.save_prompt_entry(
+                "universe-prompt",
+                SavePromptEntryRequest(
+                    title="Universe Prompt",
+                    body="hijacked",
+                    base_revision="",
+                    entry_type="prompt:worldbuilding",
+                    metadata={},
+                ),
+            )
+        self.assertEqual(ctx.exception.status_code, 409)
+
+    def test_clone_an_ancestor_prompt_into_the_project(self) -> None:
+        source = self.service.read_prompt_entry("universe-prompt")
+        clone = self.service.fork_prompt_entry("universe-prompt")
+        # New id, owned by the open project, not shipped.
+        self.assertNotEqual(clone.id, "universe-prompt")
+        self.assertFalse(clone.is_library)
+        self.assertEqual(clone.source_layer_id, self._own_layer())
+        # Faithful copy; the ancestor original still resolves (clone, not move).
+        self.assertEqual(clone.title, source.title)
+        self.assertEqual(clone.body.rstrip(), source.body.rstrip())
+        # The custom, ancestor-DEFINED entry_type survives the merge-validated
+        # create+save (the seam #676 relies on), and the inputs carry across.
+        self.assertEqual(clone.entry_type, source.entry_type)
+        self.assertEqual(clone.entry_type, "prompt:worldbuilding")
+        self.assertEqual(
+            [i.model_dump(exclude_none=True) for i in clone.inputs],
+            [i.model_dump(exclude_none=True) for i in source.inputs],
+        )
+        self.assertEqual(len(list((self.root / "prompts").glob("*.md"))), 1)
+        self.assertIn(
+            "universe-prompt",
+            {e.id for e in self.service.list_prompt_entries().entries},
+        )
+        # The copy is saveable in place — the inherited read-only guard is off.
+        saved = self.service.save_prompt_entry(
+            clone.id,
+            SavePromptEntryRequest(
+                title=clone.title,
+                body="edited",
+                base_revision=clone.revision,
+                entry_type=clone.entry_type,
+                metadata={},
+            ),
+        )
+        self.assertEqual(saved.body.rstrip(), "edited")
 
 
 if __name__ == "__main__":

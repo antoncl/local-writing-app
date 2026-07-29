@@ -18,7 +18,7 @@ and lore slices too.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.models import (
     CreatePromptEntryRequest,
@@ -30,6 +30,11 @@ from app.models import (
     SavePromptEntryRequest,
 )
 from app.services.project.errors import ProjectServiceError
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from app.services.project.node_index import NodeIndexEntry
 
 
 class PromptEntriesMixin:
@@ -135,29 +140,43 @@ class PromptEntriesMixin:
             is_library=index_entry.is_library if index_entry else False,
         )
 
+    def _prompt_winner_is_owned(self, winner: NodeIndexEntry, root: Path) -> bool:
+        """Whether the open project OWNS this prompt winner, vs inheriting it from
+        the built-in Library or an ancestor project.
+
+        The single predicate for the owned/inherited split, so the two consumers
+        cannot drift to opposite polarity: `fork_prompt_entry` clones only what is
+        NOT owned, `_reject_inherited_prompt_write` refuses to write what is NOT
+        owned. (lore.py / overrides.py compute the same split for their kinds;
+        folding those onto one helper is out of scope here — #676 review.)
+        """
+        return winner.source_layer_id == self._metadata_schema_layer_id(root)
+
     def fork_prompt_entry(self, entry_id: str) -> PromptEntry:
-        """Clone a built-in Library prompt into this project as an editable copy
-        (ADR-0049 §5, slice 2).
+        """Clone an inherited prompt into this project as an editable copy
+        (ADR-0049 §5; generalized to ancestor-project prompts per #676).
 
         Unlike lore's fork-to-here (`fork_lore_entry`, which keeps the id and
-        shadows the source to sever an *inherited* entry), a Library clone mints
-        a **new id** and leaves the shipped original in place. Keeping the id
-        would make the copy shadow the Library node — which is exactly what a
+        shadows the source to sever an *inherited* entry), a prompt clone mints
+        a **new id** and leaves the inherited original in place. Keeping the id
+        would make the copy shadow the source — which is exactly what a
         per-project *hide* (slice 3) does — so clone and hide stay orthogonal.
-        The shipped material is a starting point lifted into the project, not an
-        override of the floor.
+        The inherited prompt is a starting point lifted into the project, not an
+        override of the layer below (the "duplicate the default view" gesture):
+        a writer clones a prompt to *adapt* it, they do not correct it in place.
 
-        Scoped to Library winners: an ancestor *project's* prompt is inherited
-        but not shipped material, and severing that is a different (unshipped)
-        gesture, so it is refused here.
+        Applies to any inherited winner — a built-in Library node **or** an
+        ancestor *project's* prompt (#676). A prompt this project already owns is
+        directly editable, so there is nothing to clone and it is refused.
         """
-        self._require_project()
+        root = self._require_project()
         winner = self._build_node_index().by_id.get(entry_id)
         if winner is None or winner.kind != "prompt":
             raise ProjectServiceError(f"Prompt {entry_id} not found.", 404)
-        if not winner.is_library:
+        if self._prompt_winner_is_owned(winner, root):
             raise ProjectServiceError(
-                f"Prompt {entry_id} is not a built-in Library prompt; there is nothing to clone.",
+                f"Prompt {entry_id} is owned by this project and is directly "
+                "editable; there is nothing to clone.",
                 409,
             )
         source = self.read_prompt_entry(entry_id)
@@ -194,7 +213,7 @@ class PromptEntriesMixin:
         winner = self._build_node_index().by_id.get(entry_id)
         if winner is None or winner.kind != "prompt":
             return
-        if winner.source_layer_id != self._metadata_schema_layer_id(root):
+        if not self._prompt_winner_is_owned(winner, root):
             label = winner.source_layer_label or "an ancestor"
             raise ProjectServiceError(
                 f"This prompt is inherited from {label} and is read-only here.", 409

@@ -46,6 +46,16 @@ BUILTIN_COMPUTED_FUNCTIONS: tuple[str, ...] = (
 )
 COMPUTED_FUNCTIONS: tuple[str, ...] = AUTHORABLE_COMPUTED_FUNCTIONS + BUILTIN_COMPUTED_FUNCTIONS
 
+# The one sentence both `prompt:revise:entry` modes (revise + create) share
+# verbatim — the finalize contract. Hoisted so the two branches of default_body
+# can't drift on it (ADR-0046 §6.4). The per-mode specifics (JSON shape example,
+# field list, epilogue) legitimately differ and stay inline in each branch.
+_REVISE_ENTRY_FINALIZE_INTRO = (
+    "When the author asks you to finalize (or says \"commit\"), stop "
+    "brainstorming and reply with ONLY a JSON object, with no preamble, "
+    "no commentary, and no code fences, of exactly this shape:\n"
+)
+
 DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
     "version": 1,
     "entry_types": {
@@ -360,10 +370,8 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "directions, react to the author's ideas. Do NOT rewrite the whole "
                 "entry on every turn.\n"
                 "\n"
-                "When the author asks you to finalize (or says \"commit\"), stop "
-                "brainstorming and reply with ONLY a JSON object, with no preamble, "
-                "no commentary, and no code fences, of exactly this shape:\n"
-                "\n"
+                + _REVISE_ENTRY_FINALIZE_INTRO
+                + "\n"
                 "{\"body\": \"<the entry's complete revised markdown body>\", "
                 "\"fields\": {\"<field id>\": \"<that field's complete new text>\"}}\n"
                 "\n"
@@ -398,10 +406,8 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "conversation. Brainstorm: ask questions, propose directions, and "
                 "develop it together. Do NOT dump a finished entry on every turn.\n"
                 "\n"
-                "When the author asks you to finalize (or says \"commit\"), stop "
-                "brainstorming and reply with ONLY a JSON object, with no preamble, "
-                "no commentary, and no code fences, of exactly this shape:\n"
-                "\n"
+                + _REVISE_ENTRY_FINALIZE_INTRO
+                + "\n"
                 "{\"body\": \"<the new entry's complete markdown body>\", "
                 "\"fields\": {\"title\": \"<a title>\", \"<field id>\": <value>}}\n"
                 "\n"

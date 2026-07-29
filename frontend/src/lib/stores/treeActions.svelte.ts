@@ -68,8 +68,11 @@ class TreeActions {
   // open it for normal editing. `title` is the one proposed field the save
   // treats top-level; everything else is metadata (references / computed are
   // already excluded from the validated patch, §4).
-  async createLoreEntryFromDraft(entryType: string, patch: EntryPatch): Promise<void> {
-    await this.run(async () => {
+  // Returns whether the entry was created (run() reports false on API failure
+  // without throwing), so the caller can keep the reviewed draft on failure
+  // rather than dropping it.
+  async createLoreEntryFromDraft(entryType: string, patch: EntryPatch): Promise<boolean> {
+    return this.run(async () => {
       const fields = { ...patch.fields };
       const proposedTitle =
         typeof fields.title === "string" && fields.title.trim() ? fields.title.trim() : "";

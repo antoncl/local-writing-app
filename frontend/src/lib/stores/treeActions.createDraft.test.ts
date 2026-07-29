@@ -33,6 +33,17 @@ describe("treeActions.createLoreEntryFromDraft (ADR-0046 §6.4)", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     metadataSchemaStore.set(SCHEMA);
+    // Mirror App's run(): it swallows a thrown API error and reports false
+    // rather than rethrowing — the reason createLoreEntryFromDraft must return
+    // the outcome so the caller can keep the draft on failure.
+    treeActions.run = async (action) => {
+      try {
+        await action();
+        return true;
+      } catch {
+        return false;
+      }
+    };
     vi.spyOn(api, "createLoreEntry").mockImplementation(async (title: string) =>
       mintedEntry(title),
     );
@@ -42,17 +53,30 @@ describe("treeActions.createLoreEntryFromDraft (ADR-0046 §6.4)", () => {
   });
 
   it("routes the proposed title top-level and keeps it out of metadata", async () => {
-    await treeActions.createLoreEntryFromDraft("lore:character", {
+    const ok = await treeActions.createLoreEntryFromDraft("lore:character", {
       body: "A wandering knight.",
       fields: { title: "Seren", allegiance: "order" },
     });
 
+    expect(ok).toBe(true);
     expect(api.createLoreEntry).toHaveBeenCalledWith("Seren", "lore:character");
     const [savedEntry, savedBody] = vi.mocked(api.saveLoreEntry).mock.calls[0];
     expect(savedEntry.metadata).toEqual({ allegiance: "order" });
     expect(savedEntry.metadata).not.toHaveProperty("title");
     expect(savedBody).toBe("A wandering knight.");
     expect(editorPanes.openLore).toHaveBeenCalledWith("lore_new");
+  });
+
+  it("returns false and does not open a pane when the save fails", async () => {
+    // run() swallows the rejection and reports false; the caller keeps the
+    // draft rather than dropping it silently (code-review finding).
+    vi.mocked(api.saveLoreEntry).mockRejectedValueOnce(new Error("409 conflict"));
+    const ok = await treeActions.createLoreEntryFromDraft("lore:character", {
+      body: "b",
+      fields: { title: "Seren" },
+    });
+    expect(ok).toBe(false);
+    expect(editorPanes.openLore).not.toHaveBeenCalled();
   });
 
   it("falls back to a typed default title when the draft names none", async () => {

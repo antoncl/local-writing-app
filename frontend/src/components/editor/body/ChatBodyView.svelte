@@ -236,6 +236,7 @@
     pendingTurnCacheWriteSlots = [];
     chatInputDrafts = {};
     chatInputsHidden = false;
+    resetDraftReview();
   }
 
   // Mirrors App.svelte's applyChatSession (the source of truth for the
@@ -265,6 +266,7 @@
     chatInput = "";
     pendingTurnCost = null;
     pendingTurnCacheWriteSlots = [];
+    resetDraftReview();
     // Restore per-prompt input drafts. session.inputs is Record<string, unknown>;
     // PromptInputField stores list-shaped values JSON-encoded, so coerce
     // back to that representation on hydrate.
@@ -730,9 +732,12 @@
     if (!draftProposal || creatingDraft) return;
     creatingDraft = true;
     try {
-      await treeActions.createLoreEntryFromDraft(draftEntryType, draftProposal);
-      draftProposal = null;
-      draftDropped = [];
+      // Only clear the reviewed draft if the create actually succeeded — run()
+      // reports failure as `false` (it swallows the error), so clearing
+      // unconditionally would silently lose the draft on a 409 / offline / save
+      // rejection with nothing created.
+      const ok = await treeActions.createLoreEntryFromDraft(draftEntryType, draftProposal);
+      if (ok) resetDraftReview();
     } catch (e) {
       chatError = (e as Error).message;
     } finally {
@@ -741,8 +746,17 @@
   }
 
   function discardDraft(): void {
+    resetDraftReview();
+  }
+
+  // ADR-0046 §6.4: the create-mode draft is component-local (not routed to an
+  // entry pane), so it must be cleared whenever the chat state resets — else a
+  // pending card leaks across a chat-session switch and Create would run against
+  // the new chat's entry_type.
+  function resetDraftReview(): void {
     draftProposal = null;
     draftDropped = [];
+    creatingDraft = false;
   }
 
   // First-send template render. Mirrors App.svelte's
@@ -913,8 +927,11 @@
   let scopedDefaultId = $derived(scopedDefaultAssistantId(assistantEntries, assistantScope, defaultAssistantId));
   let assistantParts = $derived(partitionAssistants(assistantEntries, assistantPickerSearch, assistantScope));
   let declaredInputs = $derived(activePromptEntry?.inputs ?? []);
+  // A hidden input is launch-set, not user-authored (ADR-0046 §6.4) and has no
+  // widget in the strip — so it must never gate Send, or an unset one would
+  // disable the button with nothing for the user to fill.
   let missingRequiredInputs = $derived(declaredInputs.filter(
-    (i) => i.required && isInputMissing(i, chatInputDrafts[i.name]),
+    (i) => i.required && !i.hidden && isInputMissing(i, chatInputDrafts[i.name]),
   ));
   let ttlChips = $derived(ttlChipsFor(activeChatCacheWriteTimes, ttlTick));
   // Re-fetch estimate when any input that drives it changes. Each dep

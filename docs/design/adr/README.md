@@ -31,9 +31,6 @@ Two things worth knowing:
 - **Re-pin when you amend.** A header naming an old commit says nothing about a section added later,
   and a citation added under a stale pin is verified against the wrong tree.
 
-`scripts/check_citations.py` (#397) does **not** honour these headers yet — it checks every citation
-against `HEAD`. Teaching it to read the pin is #412.
-
 ## 0.4.0 — Mid-scene lore mutations (#33)
 Design docs: [`../mid-scene-lore-mutations.md`](../mid-scene-lore-mutations.md) (v1.0 spine) ·
 [`../mid-scene-lore-mutations-v1.1.md`](../mid-scene-lore-mutations-v1.1.md) (v1.1)

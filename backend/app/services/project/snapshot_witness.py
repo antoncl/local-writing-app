@@ -120,6 +120,8 @@ class SnapshotWitnessMixin:
         *,
         index: MutationsIndex | None = None,
         also_resolve: Iterable[str] = (),
+        buffer_metadata: dict[str, Any] | None = None,
+        buffer_body: str | None = None,
     ) -> Witness | None:
         """The scene's immediate context, resolved as of that scene.
 
@@ -138,6 +140,16 @@ class SnapshotWitnessMixin:
         expensive part of this request (1.16 s at 600 scenes). Count the
         re-derivations of a shared traversal before adding a consumer.
 
+        `buffer_metadata` / `buffer_body` are the live editor's unsaved state for
+        *this* scene (#581). When given, the scene's two disk-read sources are
+        taken from the buffer instead: its `entity_ref` fields from
+        `buffer_metadata`, and its mutation markers from `buffer_body` (via a
+        one-scene override on `build_mutations_index`). This is what lets the
+        drift now-witness resolve the same "now" the field flip does — the buffer
+        — during the ~6 s an autosave lags. Absent (the capture path), every
+        source reads disk, unchanged. `buffer_body` is honoured only when no
+        `index` is threaded in (the drift path threads none).
+
         **Returns `None` when the witness could not be built**, and a capture
         then writes no witness at all. It used to return an empty `Witness()`,
         which is a different and much worse thing: the comparison accepted it as
@@ -153,7 +165,12 @@ class SnapshotWitnessMixin:
         """
         try:
             return self._build_witness(
-                scene_id, dynamic_context, index=index, also_resolve=also_resolve
+                scene_id,
+                dynamic_context,
+                index=index,
+                also_resolve=also_resolve,
+                buffer_metadata=buffer_metadata,
+                buffer_body=buffer_body,
             )
         except (ProjectServiceError, ValueError, OSError):
             return None
@@ -165,6 +182,8 @@ class SnapshotWitnessMixin:
         *,
         index: MutationsIndex | None,
         also_resolve: Iterable[str],
+        buffer_metadata: dict[str, Any] | None = None,
+        buffer_body: str | None = None,
     ) -> Witness:
         # One schema read, three derivations. `_mutation_field_types` reads it
         # again internally and the display maps would be a third — at ~10 ms a
@@ -173,17 +192,28 @@ class SnapshotWitnessMixin:
         # consumer.
         schema = self._witness_schema()
         labels, options = _field_display_from(schema)
+        if index is not None:
+            mutations = index
+        else:
+            mutations = self.build_mutations_index(
+                scene_body_overrides={scene_id: buffer_body} if buffer_body is not None else None
+            )
         scope = _WitnessScope(
             scene_id=scene_id,
             node_index=self._build_node_index(),
-            mutations=index if index is not None else self.build_mutations_index(),
+            mutations=mutations,
             field_types=_field_types_from(schema),
             labels=labels,
             options=options,
         )
 
+        scene_edges = (
+            self._buffer_scene_edges(scope, schema, buffer_metadata)
+            if buffer_metadata is not None
+            else None
+        )
         ordered, truncated = self._witness_membership(
-            scope, dynamic_context or [], also_resolve
+            scope, dynamic_context or [], also_resolve, scene_edges=scene_edges
         )
         recorded = [SOURCE_MUTATION, SOURCE_ENTITY_REF]
         if dynamic_context is not None:
@@ -204,6 +234,8 @@ class SnapshotWitnessMixin:
         scope: _WitnessScope,
         dynamic_context: list[str],
         also_resolve: Iterable[str],
+        *,
+        scene_edges: list[Any] | None = None,
     ) -> tuple[list[tuple[str, _Member]], bool]:
         """The witnessed ids with their provenance, and whether the cap fired.
 
@@ -239,7 +271,12 @@ class SnapshotWitnessMixin:
             overrides = self._resolve_overrides(scope, entity_id)
             if overrides:
                 add(entity_id, SOURCE_MUTATION, overrides)
-        for edge in scope.node_index.edges_by_src.get(scope.scene_id, []):
+        edges = (
+            scene_edges
+            if scene_edges is not None
+            else scope.node_index.edges_by_src.get(scope.scene_id, [])
+        )
+        for edge in edges:
             add(edge.dst, SOURCE_ENTITY_REF)
         for entity_id in dynamic_context[:MAX_DYNAMIC_CONTEXT_IDS]:
             add(entity_id, SOURCE_DYNAMIC)
@@ -254,6 +291,23 @@ class SnapshotWitnessMixin:
         ordered = sorted(members.items())
         truncated = len(ordered) > MAX_WITNESS_ENTITIES or len(dynamic_context) > MAX_DYNAMIC_CONTEXT_IDS
         return ordered[:MAX_WITNESS_ENTITIES], truncated
+
+    def _buffer_scene_edges(
+        self, scope: _WitnessScope, schema: Any, buffer_metadata: dict[str, Any]
+    ) -> list[Any]:
+        """The scene's `entity_ref` edges as its *buffer* declares them (#581).
+
+        Reuses `_reference_edges_for_entry` — the single point where an edge is
+        derived from a node — handing it the buffer metadata as front matter so
+        no disk read decides the edges. Empty when the scene is not indexed or
+        the schema will not load, matching the disk path's own degrade-to-empty.
+        """
+        entry = scope.node_index.by_id.get(scope.scene_id)
+        if entry is None or schema is None:
+            return []
+        return self._reference_edges_for_entry(
+            entry, schema, front_matter={"metadata": buffer_metadata}
+        )
 
     def _resolve_overrides(self, scope: _WitnessScope, entity_id: str) -> dict[str, Any]:
         return self.effective_state(

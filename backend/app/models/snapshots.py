@@ -351,20 +351,25 @@ class SnapshotDriftRequest(BaseModel):
     """The live inputs the "now" witness needs that only the prose editor knows.
 
     Once the content diff (runs + fields + title) is computed client-side (#583),
-    the only thing the drift call still has to send up is the **dynamic context**
-    — the entities the editor detected in the prose. The backend cannot rescan
-    them without a second matcher (there must be exactly one implementation of
-    alias matching, the one whose results the author sees underlined), so the
-    frontend owns it. Everything else the now-witness needs (explicit
-    `entity_ref`s, mutations) the backend resolves from the scene id itself.
+    the drift call sends up the **dynamic context** — the entities the editor
+    detected in the prose. The backend cannot rescan them without a second
+    matcher (there must be exactly one implementation of alias matching, the one
+    whose results the author sees underlined), so the frontend owns it.
 
     **`None` is "not observed", `[]` is "observed and empty"** — the service's
     behaviour turns on the distinction (axis 4): defaulting to `[]` would read a
     caller with no prose editor behind it as one that looked and found nothing,
     reporting every implicitly-detected entity as *removed* on an untouched scene.
-    #581 will widen this to the buffer's `entity_ref` fields + body so drift stops
-    resolving *disk* state and disagreeing with the field flip on an unsaved edit;
-    today it matches the shipped semantics, which read those two sources from disk.
+
+    `metadata` / `body` are the scene's **unsaved buffer** (#581) — the same two
+    the client-side field flip already reads. Sent so the now-witness resolves
+    the scene's `entity_ref` fields (from `metadata`) and mutation markers (from
+    `body`) off the buffer instead of the ~6 s-stale disk copy, which is what
+    made drift disagree with the field flip on an unsaved edit. Both optional and
+    default `None`: a caller that omits them (or a witness built at capture, when
+    disk *is* current) reads every source from disk, unchanged.
     """
 
     dynamic_context: list[str] | None = None
+    metadata: dict[str, Any] | None = None
+    body: str | None = None

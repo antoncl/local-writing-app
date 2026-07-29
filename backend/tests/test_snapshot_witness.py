@@ -217,6 +217,61 @@ class WitnessSourcesTests(WitnessTestCase):
         self.assertEqual(witness.entities, [])
 
 
+class WitnessBufferOverridesTests(WitnessTestCase):
+    """#581: the scene's own two disk-read sources — its `entity_ref` fields and
+    its mutation markers — are taken from the live buffer when one is supplied,
+    so the drift now-witness resolves the same "now" the field flip does during
+    the ~6 s an autosave lags. The dynamic set was already buffer-sourced."""
+
+    def test_a_buffer_entity_ref_witnesses_over_the_disk_one(self) -> None:
+        # Disk references Tom; the unsaved buffer points the cast at Chicago.
+        self._save_scene(cast=[self.tom])
+        witness = self.service.build_witness(
+            self.scene_id, None, buffer_metadata={"cast": [self.chicago]}
+        )
+        ids = {entity.id for entity in witness.entities}
+        self.assertIn(self.chicago, ids, "the buffer's reference must be witnessed")
+        self.assertNotIn(self.tom, ids, "the stale disk reference must not be")
+
+    def test_a_buffer_body_marker_witnesses_over_disk(self) -> None:
+        # Nothing on disk mutates Tom; the unsaved buffer just typed a marker.
+        self._save_scene("Tom said nothing at all.")
+        witness = self.service.build_witness(
+            self.scene_id,
+            None,
+            buffer_body=(
+                f"Tom blinked. <!-- mutate:entity={self.tom};"
+                "field=eye_colour;value=blue;id=m1 -->"
+            ),
+        )
+        tom = next((e for e in witness.entities if e.id == self.tom), None)
+        self.assertIsNotNone(tom)
+        assert tom is not None
+        self.assertIn(SOURCE_MUTATION, tom.sources)
+        self.assertEqual(tom.state["eye_colour"], "blue")
+
+    def test_a_marker_the_buffer_deleted_is_not_witnessed(self) -> None:
+        # Disk still carries the marker the author just deleted in the buffer.
+        self._save_scene(
+            f"<!-- mutate:entity={self.tom};field=eye_colour;value=blue;id=m1 -->"
+        )
+        witness = self.service.build_witness(
+            self.scene_id, None, buffer_body="Tom said nothing at all."
+        )
+        self.assertIsNone(
+            next((e for e in witness.entities if e.id == self.tom), None),
+            "a marker gone from the buffer must not still witness the entity",
+        )
+
+    def test_without_a_buffer_every_source_reads_disk(self) -> None:
+        # The capture path passes no buffer — behaviour is unchanged (parity).
+        self._save_scene(cast=[self.tom])
+        witness = self.service.build_witness(self.scene_id, None)
+        ids = {entity.id for entity in witness.entities}
+        self.assertIn(self.tom, ids)
+        self.assertNotIn(self.chicago, ids)
+
+
 class WitnessContentTests(WitnessTestCase):
     """What one entity's record carries — the raw material for the report."""
 

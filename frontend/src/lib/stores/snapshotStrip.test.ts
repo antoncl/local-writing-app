@@ -199,6 +199,9 @@ describe("drift", () => {
     const strip = await parked(async () => detail(), drifted());
     await strip.park("snap_1");
     expect(snapshotDrift.mock.calls.length).toBe(1);
+    // The buffer (metadata + body) rides along so the now-witness resolves the
+    // same "now" the flip does, not the stale disk copy (#581).
+    expect(snapshotDrift.mock.calls[0].slice(3)).toEqual([LIVE.metadata, LIVE.body]);
     expect(strip.drift.entities[0].title).toBe("Tom");
     // Ordered, so swapping value-then with value-now turns this red.
     expect(strip.drift.entities[0].fields[0].was).toBe("green");

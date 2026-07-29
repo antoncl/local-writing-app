@@ -400,17 +400,80 @@ class DriftOverTheDriftRouteTests(WitnessTestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()["id"]
 
-    def _diff(self, snapshot_id: str, body: str = "") -> dict:
-        # Named `_diff` for continuity with the call sites below; `body` is no
-        # longer part of the drift request (the now-witness reads the scene by
-        # id), so it is ignored. The payload keeps the `{"drift": …}` shape the
-        # call sites read, back when drift rode the diff response.
+    def _diff(
+        self,
+        snapshot_id: str,
+        body: str = "",
+        *,
+        buffer_metadata: dict | None = None,
+        buffer_body: str | None = None,
+    ) -> dict:
+        # Named `_diff` for continuity with the call sites below. `body` is the
+        # legacy positional arg and is ignored. `buffer_metadata` / `buffer_body`
+        # are the scene's unsaved buffer (#581) — sent so the now-witness reads
+        # the same "now" the field flip does instead of the stale disk copy. The
+        # payload keeps the `{"drift": …}` shape the call sites read.
+        payload: dict = {"dynamic_context": []}
+        if buffer_metadata is not None:
+            payload["metadata"] = buffer_metadata
+        if buffer_body is not None:
+            payload["body"] = buffer_body
         response = self.client.post(
             f"/api/scenes/{self.scene_id}/snapshots/{snapshot_id}/drift",
-            json={"dynamic_context": []},
+            json=payload,
         )
         self.assertEqual(response.status_code, 200, response.text)
         return {"drift": response.json()}
+
+    def test_drift_reads_a_buffer_body_marker_not_disk(self) -> None:
+        # A marker the author just typed, not yet autosaved (#581): the drift
+        # now-witness must see it, matching the field flip, not lag on disk.
+        self._save_scene(cast=[self.tom])
+        snapshot_id = self._capture()
+        drift = self._diff(
+            snapshot_id,
+            buffer_body=(
+                f"Tom blinked. <!-- mutate:entity={self.tom};"
+                "field=eye_colour;value=blue;id=m1 -->"
+            ),
+        )["drift"]
+        self.assertTrue(drift["available"])
+        drifted = next(e for e in drift["entities"] if e["title"] == "Tom")
+        self.assertEqual(
+            [(f["label"], f["was"], f["now"]) for f in drifted["fields"]],
+            [("Eye colour", "green", "blue")],
+        )
+
+    def test_drift_reads_a_buffer_entity_ref_not_disk(self) -> None:
+        # The cast the author just re-pointed in the buffer (#581): Tom leaves
+        # the scene's context and Chicago joins it, on the buffer, not disk.
+        self._save_scene(cast=[self.tom])
+        snapshot_id = self._capture()
+        drift = self._diff(snapshot_id, buffer_metadata={"cast": [self.chicago]})["drift"]
+        self.assertTrue(drift["available"])
+        by_title = {e["title"]: e["membership"] for e in drift["entities"]}
+        self.assertEqual(by_title.get("Tom"), "removed")
+        self.assertEqual(by_title.get("Chicago"), "added")
+
+    def test_drift_reads_buffer_metadata_and_body_together(self) -> None:
+        # The headline #581 scenario, both unsaved sources in one park: the
+        # author drops Tom from the cast (buffer metadata) AND types a marker
+        # bringing Chicago in (buffer body), before autosave lands. Drift must
+        # honour both — Tom leaves, Chicago joins — off the buffer, not disk.
+        self._save_scene(cast=[self.tom])
+        snapshot_id = self._capture()
+        drift = self._diff(
+            snapshot_id,
+            buffer_metadata={"cast": []},
+            buffer_body=(
+                f"<!-- mutate:entity={self.chicago};"
+                "field=eye_colour;value=blue;id=m1 -->"
+            ),
+        )["drift"]
+        self.assertTrue(drift["available"])
+        by_title = {e["title"]: e["membership"] for e in drift["entities"]}
+        self.assertEqual(by_title.get("Tom"), "removed")
+        self.assertEqual(by_title.get("Chicago"), "added")
 
     def test_the_diff_reports_a_lore_edit_made_after_the_capture(self) -> None:
         self._save_scene(cast=[self.tom])

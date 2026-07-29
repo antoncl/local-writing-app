@@ -493,19 +493,30 @@ class LoreMutationsMixin(MarkerMixin):
             return None
         return body
 
-    def build_mutations_index(self) -> MutationsIndex:
+    def build_mutations_index(
+        self, scene_body_overrides: dict[str, str] | None = None
+    ) -> MutationsIndex:
         """Walk every manuscript scene in order, scanning its markers into a
         per-entity list ordered by (manuscript position, prose offset).
         Rebuildable cache over scene files — mirrors `_build_node_index`
         (compute-on-demand); persist to `.cache/` only if it ever gets slow
-        (§3.3)."""
+        (§3.3).
+
+        `scene_body_overrides` substitutes the given body for a scene's on-disk
+        one — the buffer a caller already holds, for a scene whose autosave has
+        not landed (#581, the snapshot-drift now-witness). A scene mapped to an
+        override is scanned from that text; an empty override is a scene the
+        author just cleared of markers, not a scene to read from disk, so it is
+        honoured (not treated as "missing").
+        """
+        overrides = scene_body_overrides or {}
         scene_order = self._scene_order()
         scene_paths = self._scene_display_paths()
         index = self._build_node_index()
         by_entity: dict[str, list[MutationMarker]] = {}
         closes: list[MutationClose] = []
         for scene_id in scene_order:
-            body = self._scene_body_for_scan(index, scene_id)
+            body = overrides[scene_id] if scene_id in overrides else self._scene_body_for_scan(index, scene_id)
             if body is None:
                 continue
             for marker in self._iter_body_mutations(body, scene_id):

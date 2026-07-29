@@ -77,11 +77,18 @@ def snapshot_drift(
 
     Once the content diff (runs + fields + title) is computed client-side, this
     is the one half that stays on the server: building the "now" witness needs
-    resolved entity state the client does not have. It carries only the dynamic
-    context the editor observed; the backend resolves the rest from the scene id.
+    resolved entity state the client does not have. It carries the dynamic
+    context the editor observed plus the scene's unsaved buffer (#581), so the
+    now-witness resolves the same "now" the client-side field flip does.
     """
     with translate_errors():
-        return project.snapshot_drift(scene_id, snapshot_id, live.dynamic_context)
+        return project.snapshot_drift(
+            scene_id,
+            snapshot_id,
+            live.dynamic_context,
+            buffer_metadata=live.metadata,
+            buffer_body=live.body,
+        )
 
 
 @router.post("/api/scenes/{scene_id}/snapshots/{snapshot_id}/pin", response_model=Snapshot)

@@ -268,7 +268,9 @@ export class SnapshotStripController {
       const [snapshot, drift] = await Promise.all([
         api.readSnapshot(sceneId, snapshotId),
         api
-          .snapshotDrift(sceneId, snapshotId, live.dynamic_context ?? null)
+          // The buffer (metadata + body) rides along so the now-witness reads
+          // the same "now" the client-side flip below does, not stale disk (#581).
+          .snapshotDrift(sceneId, snapshotId, live.dynamic_context ?? null, live.metadata, live.body)
           .catch(() => DRIFT_UNCOMPARABLE),
       ]);
       if (!fresh()) return;

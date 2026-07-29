@@ -421,6 +421,7 @@
         selectedFieldId={selectedSchemaFieldId}
         readonly={schemaFieldReadonly}
         layerId={schemaFieldLayerId}
+        groups={metadataSchema?.groups ?? {}}
         onSave={onSaveField}
         onCancel={onCancelField}
         onRemove={onRemoveField}

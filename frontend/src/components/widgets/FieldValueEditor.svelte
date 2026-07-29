@@ -6,6 +6,7 @@
   // field definition + current value + onChange, it renders the right control
   // and emits a normalized value. Collection/computed handling stays generic so
   // callers can filter by type as they see fit.
+  import ListValueEditor from "@/components/widgets/ListValueEditor.svelte";
   import MetadataLongTextEditor from "@/components/widgets/MetadataLongTextEditor.svelte";
   import ReferencePicker from "@/components/widgets/ReferencePicker.svelte";
   import ColoredSelect from "@/components/widgets/ColoredSelect.svelte";
@@ -255,6 +256,10 @@
       on:change={(event) => emit(event.detail.value)}
     />
   {/if}
+{:else if field.type === "list"}
+  <!-- #698: the list value is already normalized (an array of scalars or
+       member-keyed records) — bypass normaliseFieldValue's string coercion. -->
+  <ListValueEditor {field} {value} {readOnly} onChange={(next) => onChange(next)} {implicitContextMatcher} />
 {:else if field.type === "color"}
   <SwatchPicker value={currentValue || null} {readOnly} onChange={(id) => emit(id ?? "")} />
 {:else if readOnly}

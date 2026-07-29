@@ -303,7 +303,14 @@ export type MetadataFieldType =
   | "entity_ref_list"
   | "tags"
   | "computed"
-  | "color";
+  | "color"
+  | "list";
+
+// The scalar item shapes a `list` field may declare via `item_type` (#698,
+// ADR-0048 §6). Deliberately narrower than MetadataFieldType: reference
+// types and tags are excluded in v1 (the read-side healers only walk
+// top-level values), and nesting a list in a list is not a thing.
+export type ListItemScalarType = "text" | "long_text" | "number" | "boolean" | "select" | "color";
 
 // One choice in a select / multi_select field, or a select prompt input.
 // Stored as `{value, label?, color?}`. Bare strings are accepted on the
@@ -352,6 +359,17 @@ export type MetadataFieldDefinition = {
   // The single signal every surface consults — never re-derive it from
   // `intrinsic` / `type === "computed"` / key membership on the frontend.
   category?: "stored" | "intrinsic" | "computed";
+  // `list` fields only (#698, ADR-0048 §6): exactly one of item_group (a
+  // MetadataGroupDefinition id — the item shape, kept nested) or item_type
+  // (single-scalar sugar; values store as a flat scalar list, and a select
+  // item reads its choices from this field's `options`).
+  item_group?: string | null;
+  item_type?: ListItemScalarType | null;
+  // DERIVED (resolver-stamped, like `category`): the resolved item shape —
+  // the group's members, or the item_type sugar normalized to a one-member
+  // shape (key "value"). The widget and validation read ONLY this; never
+  // send it back on save.
+  item_members?: GroupMember[] | null;
 };
 
 export type PromptInputType =

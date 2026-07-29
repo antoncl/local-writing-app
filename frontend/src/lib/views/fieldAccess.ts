@@ -65,7 +65,10 @@ export function isCollectionField(schema: MetadataSchema | null | undefined, key
 // Derived from COLLECTION_FIELD_TYPES (every set-of-tokens type is unsortable by
 // construction) plus the two scalar-but-orderless types, so a future collection
 // type is excluded automatically rather than drifting into the sort picker.
-const UNSORTABLE_FIELD_TYPES = new Set<string>([...COLLECTION_FIELD_TYPES, "entity_ref", "color"]);
+// `list` (#698) is unsortable but deliberately NOT a collection: its items
+// are records (or typed scalars), not a set of comparable tokens, so CSV
+// tokenization semantics don't apply.
+const UNSORTABLE_FIELD_TYPES = new Set<string>([...COLLECTION_FIELD_TYPES, "entity_ref", "color", "list"]);
 export function isSortableField(type: string | null | undefined): boolean {
   return type != null && !UNSORTABLE_FIELD_TYPES.has(type);
 }

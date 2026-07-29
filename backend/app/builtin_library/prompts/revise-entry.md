@@ -32,11 +32,11 @@ When the author asks you to finalize (or says "commit"), stop brainstorming and 
 {"body": "<the entry's complete revised markdown body>", "fields": {"<field id>": <value>}}
 
 - "body": the entry's full revised markdown body.
-- "fields": include an entry ONLY for a field you are changing, keyed by its field id. For a list field (tags, multi_select) give a JSON array of strings; for a select field use one of its listed options exactly; otherwise give the field's complete new value. You may also propose a new "title". Use {} if you are changing no fields.
+- "fields": include an entry ONLY for a field you are changing, keyed by its field id. For tags / multi_select give a JSON array of strings; for a select field use one of its listed options exactly; for an ordered-list field give the complete new list in its stated item shape (the whole list, in order — items you keep, changed, added); otherwise give the field's complete new value. You may also propose a new "title". Use {} if you are changing no fields.
 
 The fields you may set:
 {% for f in field_catalog(e) %}
-- {{ f.id }} ({{ f.label }}) — {{ f.type }}{% if f.options %}; one of: {{ f.options | join(", ") }}{% endif %}
+- {{ f.id }} ({{ f.label }}) — {{ f.type }}{% if f.options %}; one of: {{ f.options | join(", ") }}{% endif %}{% if f.get("items") %}{% if f.item_scalar %}; a JSON array of {{ f["items"][0].type }} values{% else %}; a JSON array of objects, each with keys: {% for m in f["items"] %}{{ m.key }} ({{ m.type }}{% if m.options %}; one of: {{ m.options | join(", ") }}{% endif %}){% if not loop.last %}, {% endif %}{% endfor %}{% endif %}{% endif %}
 {% else %}
 - (none beyond title/body)
 {% endfor %}
@@ -60,7 +60,7 @@ _(This entry has no body yet.)_
 ### Current field values
 {% for f in current %}
 {% set val = e.metadata.get(f.id) %}
-- {{ f.label }} ({{ f.id }}): {% if val is sequence and val is not string %}{{ val | join(", ") or "_(empty)_" }}{% elif val is none or val == "" %}_(empty)_{% else %}{{ val }}{% endif %}
+- {{ f.label }} ({{ f.id }}): {% if f.type == "list" %}{% if val %}{{ val | tojson }}{% else %}_(empty)_{% endif %}{% elif val is sequence and val is not string %}{{ val | join(", ") or "_(empty)_" }}{% elif val is none or val == "" %}_(empty)_{% else %}{{ val }}{% endif %}
 {% endfor %}
 {% endif %}
 {% else %}
@@ -71,11 +71,11 @@ When the author asks you to finalize (or says "commit"), stop brainstorming and 
 {"body": "<the new entry's complete markdown body>", "fields": {"title": "<a title>", "<field id>": <value>}}
 
 - "body": the new entry's full markdown body.
-- "fields": ALWAYS include "title". Add any other field you are setting, keyed by its field id. For a list field (tags, multi_select) give a JSON array of strings; for a select field use one of its listed options exactly.
+- "fields": ALWAYS include "title". Add any other field you are setting, keyed by its field id. For tags / multi_select give a JSON array of strings; for a select field use one of its listed options exactly; for an ordered-list field give a JSON array in its stated item shape.
 
 The fields you may set:
 {% for f in field_catalog(draft_type) %}
-- {{ f.id }} ({{ f.label }}) — {{ f.type }}{% if f.options %}; one of: {{ f.options | join(", ") }}{% endif %}
+- {{ f.id }} ({{ f.label }}) — {{ f.type }}{% if f.options %}; one of: {{ f.options | join(", ") }}{% endif %}{% if f.get("items") %}{% if f.item_scalar %}; a JSON array of {{ f["items"][0].type }} values{% else %}; a JSON array of objects, each with keys: {% for m in f["items"] %}{{ m.key }} ({{ m.type }}{% if m.options %}; one of: {{ m.options | join(", ") }}{% endif %}){% if not loop.last %}, {% endif %}{% endfor %}{% endif %}{% endif %}
 {% else %}
 - (none beyond title/body)
 {% endfor %}

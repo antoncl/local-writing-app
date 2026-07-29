@@ -483,7 +483,12 @@
     // rewrites stored entry data. Reorder-safe (keyed by originalValue, not
     // position); added rows have no originalValue so they never migrate.
     const optionMigration = buildOptionMigrationFromDrafts(payload.options);
-    const hasOptions = payload.type === "select" || payload.type === "multi_select";
+    // A list whose items are the `select` scalar reads its choices from the
+    // field's own options (#698) — same rows editor, same persistence.
+    const hasOptions =
+      payload.type === "select" ||
+      payload.type === "multi_select" ||
+      (payload.type === "list" && payload.itemType === "select");
     const hasPicker = payload.type === "entity_ref" || payload.type === "entity_ref_list";
     const computedSpec: Record<string, string> | null =
       payload.type === "computed"
@@ -496,13 +501,19 @@
     // key entirely so the field stays defaultless rather than seeding a falsy
     // value into new entries.
     const defaultValue =
-      payload.type === "computed" ? undefined : schemaFieldDefaultForStorage(payload.type, payload.defaultValue);
+      payload.type === "computed" || payload.type === "list"
+        ? undefined
+        : schemaFieldDefaultForStorage(payload.type, payload.defaultValue);
     const nextField: MetadataFieldDefinition = {
       name: payload.name.trim() || nextFieldId,
       type: payload.type,
       options: hasOptions ? options : [],
       ...(hasPicker ? { picker_config: payload.pickerConfig } : {}),
       ...(computedSpec ? { computed: computedSpec } : {}),
+      // List item shape (#698): exactly one of the two, enforced by the
+      // editor's single "Items are" control (and again by the backend model).
+      ...(payload.type === "list" && payload.itemGroup ? { item_group: payload.itemGroup } : {}),
+      ...(payload.type === "list" && payload.itemType ? { item_type: payload.itemType } : {}),
       ...(payload.group.trim() ? { group: payload.group.trim() } : {}),
       // Per-field icon override (chosen in the IconPicker). null/empty = fall
       // back to the field-type default glyph.

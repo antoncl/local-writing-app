@@ -1,5 +1,11 @@
 <script lang="ts" module>
-  import type { MetadataFieldType, MetadataFieldDefinition, NodePickerConfig } from "@/lib/types";
+  import type {
+    ListItemScalarType,
+    MetadataFieldType,
+    MetadataFieldDefinition,
+    MetadataGroupDefinition,
+    NodePickerConfig,
+  } from "@/lib/types";
   import type { OptionDraft } from "@/components/schema/SelectOptionsEditor.svelte";
 
   // The assembled field draft emitted on save. The parent (App.saveSchemaField)
@@ -16,7 +22,22 @@
     computedFunction: "word_count" | "counter";
     computedScope: "siblings" | "manuscript";
     pickerConfig: NodePickerConfig;
+    // `list` fields only (#698): exactly one is non-null — the item shape is
+    // a named group or a single scalar type. Both null for every other type.
+    itemGroup: string | null;
+    itemType: ListItemScalarType | null;
   };
+
+  // The scalar choices offered for "Items are → a single value…". Mirrors the
+  // backend's item_type Literal (references/tags are excluded in v1).
+  export const LIST_ITEM_SCALAR_CHOICES: ListItemScalarType[] = [
+    "text",
+    "long_text",
+    "number",
+    "boolean",
+    "select",
+    "color",
+  ];
 </script>
 
 <script lang="ts">
@@ -55,6 +76,9 @@
     selectedFieldId?: string | null;
     readonly?: boolean;
     layerId?: string;
+    // The schema's named group definitions — the item-shape choices a `list`
+    // field can reference (#698). Keyed by group id.
+    groups?: Record<string, MetadataGroupDefinition>;
     // --- Callback props (parent owns persistence) ---
     onSave?: (payload: FieldDraftPayload) => void;
     onCancel?: () => void;
@@ -66,6 +90,7 @@
     selectedFieldId = null,
     readonly = false,
     layerId = "",
+    groups = {},
     onSave = () => {},
     onCancel = () => {},
     onRemove = () => {},
@@ -107,6 +132,11 @@
             presets: [...(f.picker_config.presets ?? [])],
           }
         : { sources: [{ kind: "lore" }] }) as NodePickerConfig,
+      // `list` item shape (#698): "group:<id>" or "scalar:<type>"; a fresh
+      // draft starts on plain text items until the author picks a shape.
+      itemShape: f?.item_group
+        ? `group:${f.item_group}`
+        : `scalar:${f?.item_type ?? "text"}`,
     };
   });
   let type: MetadataFieldType = $state(seed.type);
@@ -119,6 +149,11 @@
   let computedFunction: "word_count" | "counter" = $state(seed.computedFunction);
   let computedScope: "siblings" | "manuscript" = $state(seed.computedScope);
   let pickerConfig: NodePickerConfig = $state(seed.pickerConfig);
+  let itemShape: string = $state(seed.itemShape);
+  const itemGroup = $derived(itemShape.startsWith("group:") ? itemShape.slice(6) : null);
+  const itemType = $derived(
+    itemShape.startsWith("scalar:") ? (itemShape.slice(7) as ListItemScalarType) : null,
+  );
   let typeMenuOpen = $state(false);
   let keyEditing = $state(false);
   let keyManual = $state(false);
@@ -157,10 +192,25 @@
   }
 
   function emitSave() {
-    onSave({ type, name, id, icon, group, defaultValue, options, computedFunction, computedScope, pickerConfig });
+    onSave({
+      type,
+      name,
+      id,
+      icon,
+      group,
+      defaultValue,
+      options,
+      computedFunction,
+      computedScope,
+      pickerConfig,
+      itemGroup: type === "list" ? itemGroup : null,
+      itemType: type === "list" ? itemType : null,
+    });
   }
 
-  const saveDisabled = $derived(!layerId || !id.trim() || !name.trim());
+  const saveDisabled = $derived(
+    !layerId || !id.trim() || !name.trim() || (type === "list" && !itemGroup && !itemType),
+  );
 </script>
 
 <svelte:window onmousedown={handleDocumentMousedown} />
@@ -289,17 +339,48 @@
       </p>
     </div>
   {/if}
-  {#if type === "select" || type === "multi_select"}
+  {#if type === "list"}
+    <!-- The list type's whole config is ONE question (#698, per the agreed
+         mockup): what is an item — a named group (defined once, in Groups,
+         never re-declared per list) or a single value. -->
+    <div class="sfi-computed">
+      <label class="sfi-field">Items are
+        <select bind:value={itemShape} aria-label="List item shape">
+          {#if Object.keys(groups).length > 0}
+            <optgroup label="A group…">
+              {#each Object.entries(groups) as [groupId, groupDef] (groupId)}
+                <option value={`group:${groupId}`}>
+                  {groupDef.name} ({groupDef.members.map((m) => m.name || m.key).join(" · ")})
+                </option>
+              {/each}
+            </optgroup>
+          {/if}
+          <optgroup label="A single value…">
+            {#each LIST_ITEM_SCALAR_CHOICES as scalarChoice (scalarChoice)}
+              <option value={`scalar:${scalarChoice}`}>{fieldTypeLabel(scalarChoice)}</option>
+            {/each}
+          </optgroup>
+        </select>
+      </label>
+      <p class="sfi-options-hint">
+        <i class="ti ti-info-circle" aria-hidden="true"></i>
+        a group shape is defined once, in Groups — reused here, never re-declared
+      </p>
+    </div>
+  {/if}
+  {#if type === "select" || type === "multi_select" || (type === "list" && itemType === "select")}
     <SelectOptionsEditor
       options={options}
       onChange={(next) => (options = next)}
     />
   {/if}
-  {#if type !== "computed"}
+  {#if type !== "computed" && type !== "list"}
     <!-- Default-value editor (#38). Shared with the prompt-inputs editor
          via DefaultValueEditor. Empty = no default (the historic
          behaviour). Computed fields omit this — their value is derived,
-         not authored. -->
+         not authored. `list` omits it too (v1, #698): the string-typed
+         default contract can't carry structured items, and list defaults
+         are rare enough to defer rather than half-support. -->
     <label class="sfi-field sfi-default-field">
       Default for new entries
       <DefaultValueEditor

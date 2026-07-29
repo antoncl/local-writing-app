@@ -42,8 +42,11 @@ export type StructuredFlip = {
 // the two `entity_ref` shapes are never AI-proposed (§4) — the backend drops them
 // from a patch, and this mirrors that so a stray one can't render as a flip. Every
 // other proposable type — `text`/`number`/`boolean`/`date`/`select`/
-// `multi_select`/`tags`/`color` — flips atomically. Dispatch by type alone, so a
-// user-added field is indistinguishable from a built-in one (§2).
+// `multi_select`/`tags`/`color`/`list` — flips atomically (a `list` flips as the
+// whole proposed list, rendered read-only by ListValueEditor; per-item flip
+// presentation is a #698 follow-up, the backend already salvages per item).
+// Dispatch by type alone, so a user-added field is indistinguishable from a
+// built-in one (§2).
 const NON_STRUCTURED_TYPES: ReadonlySet<MetadataFieldType> = new Set<MetadataFieldType>([
   "long_text",
   "computed",

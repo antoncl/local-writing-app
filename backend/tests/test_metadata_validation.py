@@ -2316,9 +2316,10 @@ class MetadataValidationTests(unittest.TestCase):
         # default_inputs materialize onto an instance via create_prompt_entry.
         self.assertIsNone(revise_entry.prompt.context_strategy.target)
         self.assertTrue(revise_entry.default_body)
-        # Slice 3a: the commit turn asks for a JSON entry_patch (body + fields)
-        # and enumerates the entry's proposable long-text fields via the
-        # field_catalog helper, so the instruction names real field ids.
+        # Slice 3a / #653: the commit turn asks for a JSON entry_patch (body +
+        # fields) and enumerates the entry's full proposable field catalog —
+        # long-text and structured alike — via the field_catalog helper, so the
+        # instruction names real field ids with legal option values.
         self.assertIn("field_catalog(e)", revise_entry.default_body)
         self.assertIn('"fields"', revise_entry.default_body)
         self.assertIn('"body"', revise_entry.default_body)

@@ -348,6 +348,46 @@ class FieldCatalogFromTypeTests(unittest.TestCase):
         revise_mode = template.render(input={"entry": hero.id, "entry_type": ""})
         self.assertIn("entry under revision", revise_mode)
         self.assertNotIn("create a new", revise_mode)
+        # The revise branch now offers the full proposable catalog, not just
+        # long-text fields (#653): a `select` is listed with its options and
+        # the instruction covers list/select shapes, so slice 3b's structured
+        # flips are actually reachable end-to-end.
+        self.assertIn("allegiance", revise_mode)
+        self.assertIn("one of: order, chaos", revise_mode)
+        self.assertIn("listed options exactly", revise_mode)
+        self.assertIn("Current field values", revise_mode)
+
+    def test_revise_appendix_shows_current_structured_values(self) -> None:
+        # So a genuine revise is informed, the appendix now lists the entry's
+        # current non-long-text values (#653): a scalar as-is, a list joined.
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data["fields"]["aliases"] = {"name": "Aliases", "type": "multi_select"}
+        character = data["entry_types"]["lore:character"]
+        character["fields"] = ["aliases", *character["fields"]]
+        self.service._write_yaml(schema_path, data)
+
+        hero = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Seren", entry_type="lore:character")
+        )
+        self.service.save_lore_entry(
+            hero.id,
+            SaveLoreEntryRequest(
+                title="Seren",
+                body="A knight.",
+                entry_type="lore:character",
+                metadata={"allegiance": "order", "aliases": ["The Grey", "Wanderer"]},
+            ),
+        )
+        prompt = self.service.create_prompt_entry(
+            CreatePromptEntryRequest(title="Draft", entry_type="prompt:revise:entry")
+        )
+        env = create_environment_for_project(self.service)
+        rendered = env.from_string(prompt.body).render(
+            input={"entry": hero.id, "entry_type": ""}
+        )
+        self.assertIn("Allegiance (allegiance): order", rendered)
+        self.assertIn("Aliases (aliases): The Grey, Wanderer", rendered)
 
 
 if __name__ == "__main__":

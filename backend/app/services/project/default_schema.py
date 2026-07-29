@@ -314,8 +314,9 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # a JSON `entry_patch`. It has TWO modes, chosen by how it was
             # launched, not by a separate prompt (ADR-0046 §6.4 — one vehicle):
             #   • REVISE — an existing entry rides in the `entry` input; the
-            #     commit is the entry's revised body plus any changed long-text
-            #     fields (slice 3a), reviewed as a proposed-vs-current flip.
+            #     commit is the entry's revised body plus any changed proposable
+            #     fields — long-text and structured alike (#653) — reviewed as a
+            #     proposed-vs-current flip (slices 3a/3b).
             #   • CREATE — no `entry`; a target `entry_type` (hidden, launch-set)
             #     names the kind to draft from scratch; the commit is a whole new
             #     entry (title + fields + body), reviewed whole (no flip) and
@@ -373,18 +374,22 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 + _REVISE_ENTRY_FINALIZE_INTRO
                 + "\n"
                 "{\"body\": \"<the entry's complete revised markdown body>\", "
-                "\"fields\": {\"<field id>\": \"<that field's complete new text>\"}}\n"
+                "\"fields\": {\"<field id>\": <value>}}\n"
                 "\n"
                 "- \"body\": the entry's full revised markdown body.\n"
-                "- \"fields\": include an entry ONLY for a long-text field you are "
-                "changing, keyed by its field id, with that field's complete new "
-                "text as the value. Use {} if you are changing no fields.\n"
+                "- \"fields\": include an entry ONLY for a field you are changing, "
+                "keyed by its field id. For a list field (tags, multi_select) give a "
+                "JSON array of strings; for a select field use one of its listed "
+                "options exactly; otherwise give the field's complete new value. You "
+                "may also propose a new \"title\". Use {} if you are changing no "
+                "fields.\n"
                 "\n"
-                "The long-text fields you may set:\n"
-                "{% for f in field_catalog(e) if f.type == \"long_text\" %}\n"
-                "- {{ f.id }} ({{ f.label }})\n"
+                "The fields you may set:\n"
+                "{% for f in field_catalog(e) %}\n"
+                "- {{ f.id }} ({{ f.label }}) — {{ f.type }}"
+                "{% if f.options %}; one of: {{ f.options | join(\", \") }}{% endif %}\n"
                 "{% else %}\n"
-                "- (none: this entry has no long-text fields, so use {} for \"fields\")\n"
+                "- (none beyond title/body)\n"
                 "{% endfor %}\n"
                 "\n"
                 "Output only that JSON object. It is parsed, validated against the "
@@ -400,6 +405,19 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "\n### {{ f.label }} ({{ f.id }})\n"
                 "{{ e.metadata.get(f.id) or \"_(empty)_\" }}\n"
                 "{% endfor %}\n"
+                "{% set current = field_catalog(e) "
+                "| rejectattr(\"type\", \"equalto\", \"long_text\") "
+                "| rejectattr(\"id\", \"equalto\", \"title\") | list %}\n"
+                "{% if current %}\n"
+                "\n### Current field values\n"
+                "{% for f in current %}\n"
+                "{% set val = e.metadata.get(f.id) %}\n"
+                "- {{ f.label }} ({{ f.id }}): "
+                "{% if val is sequence and val is not string %}{{ val | join(\", \") or \"_(empty)_\" }}"
+                "{% elif val is none or val == \"\" %}_(empty)_"
+                "{% else %}{{ val }}{% endif %}\n"
+                "{% endfor %}\n"
+                "{% endif %}\n"
                 "{% else %}\n"
                 "You are an ideation partner helping the author create a new "
                 "{{ entry_type_label(draft_type) }} from scratch through "

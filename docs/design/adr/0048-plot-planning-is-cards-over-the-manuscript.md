@@ -1,6 +1,6 @@
 # ADR-0048: Plot planning is a board of card nodes over the manuscript, written through reviewable patches
 
-- Status: **Draft — plan approved in session** (Anton, 2026-07-29); formal acceptance via the PR.
+- Status: **Accepted** — 2026-07-29 (Anton, PR #659).
   Prepared from the evaluation of the `plotting` branch and the architecture comparison against
   ADR-0046, both reviewed by Anton in session. Three of his review decisions are folded in as
   settled: the card↔scene cardinality (§1), the **board is a singleton in v1** (§3), and the

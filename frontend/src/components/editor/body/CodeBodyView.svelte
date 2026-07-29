@@ -172,7 +172,12 @@
 
 <div class="editor-wrap raw-body-wrap">
   <div class="raw-body-editor">
-    <CodeEditor bind:value={rawBody} language={rawBodyLanguage} lineWrapping={lineWrapEnabled} {readOnly} diagnostics={isPrompt() ? promptPreviewDiagnostics : []} />
+    <!-- Keyed per document: a switch must remount CodeMirror so its undo
+         history (and language extension, fixed at mount) belong to ONE
+         document — otherwise Ctrl+Z walks into the previous one (#368). -->
+    {#key scene?.id ?? ""}
+      <CodeEditor bind:value={rawBody} language={rawBodyLanguage} lineWrapping={lineWrapEnabled} {readOnly} diagnostics={isPrompt() ? promptPreviewDiagnostics : []} />
+    {/key}
   </div>
 
   {#if isPrompt()}

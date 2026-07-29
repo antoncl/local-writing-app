@@ -30,6 +30,7 @@
   import TableCell from "@tiptap/extension-table-cell";
   import TableHeader from "@tiptap/extension-table-header";
   import TableRow from "@tiptap/extension-table-row";
+  import { stateAtDocumentBoundary } from "@/lib/editor-core/documentBoundary";
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import { sanitizePastedHtml } from "@/lib/utils/sanitizePastedHtml";
   import {
@@ -310,6 +311,11 @@
     loadedSceneId = sceneId;
     enforceUniqueTodoAnchors();
     syncTodoAnchorDomState(true);
+    // A document switch is a state boundary, not an edit: rebuild the state so
+    // undo history starts empty — Ctrl+Z must never walk this buffer back into
+    // the previous document (#368). Sits after the anchor normalizations above
+    // so their transactions are not undoable either.
+    editor.view.updateState(stateAtDocumentBoundary(editor.state));
     updateLiveWordCount();
     syncEditorEmpty();
     updateSelectionMenu();

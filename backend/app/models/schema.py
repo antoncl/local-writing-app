@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.base import (
     AIPolicy,
@@ -29,10 +29,35 @@ class MetadataFieldDefinition(BaseModel):
         "tags",
         "computed",
         "color",
+        "list",
     ]
     options: list[SelectOption] = Field(default_factory=list)
     picker_config: NodePickerConfig | None = None
     computed: dict[str, str] | None = None
+    # `list` fields (#698 / ADR-0048 §6): an ordered list whose item shape is
+    # EITHER a named group (`item_group` = a MetadataGroupDefinition id — the
+    # group consumed nested, the second consumption mode beside application
+    # flattening) OR a single scalar (`item_type` — sugar, normalized to a
+    # one-member shape before validation/UI; values stored as a flat YAML
+    # scalar sequence, the way multi_select stores). Exactly one of the two
+    # must be set when type == "list"; both must be absent otherwise. A
+    # select-typed item_type reads its choices from this field's `options`.
+    # v1 keeps entity_ref / entity_ref_list / tags OUT of item shapes — the
+    # read-side healers only walk top-level values, and a half-healed nested
+    # ref would be a silent mis-link (enforced at schema-integrity time for
+    # item_group; by the Literal below for item_type).
+    item_group: str | None = None
+    item_type: (
+        Literal["text", "long_text", "number", "boolean", "select", "color"] | None
+    ) = None
+    # DERIVED, not authored (the `category` pattern): the resolved item shape
+    # for list fields — the named group's members, or the item_type sugar
+    # normalized to a one-member shape (key "value", options seeded from this
+    # field's `options`). Stamped by the schema resolver on read; None on
+    # authored input; never persisted. Validation and the UI read ONLY this,
+    # so both consume one internal model regardless of how the shape was
+    # declared.
+    item_members: list[GroupMember] | None = None
     # Optional Tabler icon name (without the `ti-` prefix), e.g. "shield-half".
     # Empty/None falls back to the default glyph for the field's type
     # (see the metadata revision design). Display-only; the macro contract
@@ -78,6 +103,17 @@ class MetadataFieldDefinition(BaseModel):
     @classmethod
     def _accept_bare_strings(cls, value: Any) -> Any:
         return _normalize_select_options(value)
+
+    @model_validator(mode="after")
+    def _list_shape_is_exactly_one(self) -> MetadataFieldDefinition:
+        if self.type == "list":
+            if (self.item_group is None) == (self.item_type is None):
+                raise ValueError(
+                    "a list field declares exactly one of item_group / item_type"
+                )
+        elif self.item_group is not None or self.item_type is not None:
+            raise ValueError("item_group / item_type only apply to list fields")
+        return self
 
 
 class PromptInputDefinition(BaseModel):

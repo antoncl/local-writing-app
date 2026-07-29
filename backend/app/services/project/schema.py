@@ -1257,7 +1257,39 @@ class MetadataSchemaMixin:
                     field_def["category"] = "computed"
                 else:
                     field_def["category"] = "stored"
+                if field_def.get("type") == "list":
+                    self._stamp_list_item_members(field_key, field_def, groups)
         return resolved_data
+
+    @staticmethod
+    def _stamp_list_item_members(
+        field_key: str, field_def: dict[str, Any], groups: dict[str, Any]
+    ) -> None:
+        """Stamp the resolved item shape on a list field (#698, ADR-0048 §6).
+
+        Derived like `category`, never persisted: the named group's members,
+        or the `item_type` sugar normalized to a one-member shape (key
+        "value", options seeded from the field's own `options`). Downstream —
+        validation and the UI — reads only `item_members`, one internal model
+        for both declarations. An unknown `item_group` leaves the stamp
+        absent; schema-integrity validation reports it."""
+
+        item_type = field_def.get("item_type")
+        if isinstance(item_type, str) and item_type:
+            field_def["item_members"] = [
+                {
+                    "key": "value",
+                    "name": field_def.get("name") or field_key,
+                    "type": item_type,
+                    "options": deepcopy(field_def.get("options", [])),
+                }
+            ]
+            return
+        group_id = field_def.get("item_group")
+        group = groups.get(group_id) if isinstance(group_id, str) else None
+        members = group.get("members") if isinstance(group, dict) else None
+        if isinstance(members, list):
+            field_def["item_members"] = deepcopy(members)
 
     def _merge_metadata_entry_types(self, base: Any, layer: Any) -> Any:
         if not isinstance(base, dict):
@@ -1403,4 +1435,24 @@ class MetadataSchemaMixin:
                 continue
             if field.computed:
                 errors.append(f"Metadata field {field_id} has computed settings but is not type computed.")
+            if field.type != "list":
+                continue
+            # List fields (#698, ADR-0048 §6). The exactly-one item_group /
+            # item_type rule is the model validator's; here we check what only
+            # the whole schema knows: the named group exists, and its members
+            # stay inside the v1 item-shape catalog — reference-typed members
+            # (entity_ref / entity_ref_list / tags) are excluded because the
+            # read-side healers only walk top-level values, and a nested ref
+            # they cannot heal or purge would be a silent mis-link.
+            if field.item_group is not None:
+                group = schema.groups.get(field.item_group)
+                if group is None:
+                    errors.append(f"List metadata field {field_id} references unknown group {field.item_group}.")
+                    continue
+                for member in group.members:
+                    if member.type in ("entity_ref", "entity_ref_list", "tags", "date"):
+                        errors.append(
+                            f"List metadata field {field_id} item shape {field.item_group} has "
+                            f"member {member.key} of type {member.type}, which list items do not support."
+                        )
         return errors

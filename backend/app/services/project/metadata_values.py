@@ -23,6 +23,7 @@ from typing import Any
 
 from app.models import (
     AIEntryPatch,
+    GroupMember,
     MetadataFieldDefinition,
     MetadataSchema,
     ScopedTag,
@@ -251,7 +252,81 @@ class MetadataValuesMixin:
             for item in value:
                 errors.extend(self._validate_reference_target(label, field_id, item, field, node_index))
             return errors
+        if field.type == "list":
+            return self._validate_list_field_value(label, field_id, value, field, node_index=node_index)
         return []
+
+    def _validate_list_field_value(
+        self,
+        label: str,
+        field_id: str,
+        value: Any,
+        field: MetadataFieldDefinition,
+        *,
+        node_index: NodeIndex | None = None,
+    ) -> list[str]:
+        """Per-item validation for list fields (#698, ADR-0048 §6).
+
+        Items recurse through `_validate_metadata_field_value` with each
+        member viewed as a plain field definition — the per-scalar validators
+        apply verbatim, nothing list-specific re-implements them. The shape
+        comes from the resolver-stamped `item_members` (one internal model:
+        `item_type` sugar arrives here already normalized to a one-member
+        shape and stores flat scalars; `item_group` lists store maps keyed by
+        member key)."""
+
+        if not isinstance(value, list):
+            return [f"{label} metadata field {field_id} must be a list."]
+        members = field.item_members or []
+        if not members:
+            return [
+                f"{label} metadata field {field_id} has no resolved item shape "
+                f"(unknown item_group {field.item_group}?)."
+            ]
+        errors: list[str] = []
+        if field.item_type is not None:
+            member_field = self._group_member_as_field(members[0])
+            for index, item in enumerate(value):
+                errors.extend(
+                    self._validate_metadata_field_value(
+                        label, f"{field_id}[{index}]", item, member_field, node_index=node_index
+                    )
+                )
+            return errors
+        member_defs = {member.key: member for member in members}
+        for index, item in enumerate(value):
+            if not isinstance(item, dict):
+                errors.append(f"{label} metadata field {field_id}[{index}] must be a map of member values.")
+                continue
+            for member_key, member_value in item.items():
+                member = member_defs.get(member_key)
+                if member is None:
+                    errors.append(
+                        f"{label} metadata field {field_id}[{index}] has unknown member {member_key}."
+                    )
+                    continue
+                errors.extend(
+                    self._validate_metadata_field_value(
+                        label,
+                        f"{field_id}[{index}].{member_key}",
+                        member_value,
+                        self._group_member_as_field(member),
+                        node_index=node_index,
+                    )
+                )
+        return errors
+
+    @staticmethod
+    def _group_member_as_field(member: GroupMember) -> MetadataFieldDefinition:
+        """A list item's member, viewed as a plain field definition, so the
+        per-scalar validators (and their reference checks) apply verbatim."""
+
+        return MetadataFieldDefinition(
+            name=member.name or member.key,
+            type=member.type,
+            options=member.options,
+            picker_config=member.picker_config,
+        )
 
     def validate_ai_entry_patch(self, entry_id: str, raw: str) -> AIEntryPatch:
         """Turn a brainstorm-commit reply into a validated, review-ready patch.
@@ -326,11 +401,39 @@ class MetadataValuesMixin:
                     "AI patch", field_id, value, field, node_index=None
                 )
                 if errors:
+                    # List fields degrade per ITEM (#698, ADR-0048 §6): keep
+                    # the valid items and name each dropped one as
+                    # field[index] — one bad item must not sink the rest.
+                    # Every other type drops whole, as before.
+                    if field.type == "list" and isinstance(value, list):
+                        kept, item_drops = self._salvage_list_items(field_id, value, field)
+                        dropped.extend(item_drops)
+                        if kept:
+                            fields[field_id] = kept
+                        continue
                     dropped.append(field_id)
                     continue
                 fields[field_id] = value
 
         return AIEntryPatch(body=body_value, fields=fields, dropped=dropped)
+
+    def _salvage_list_items(
+        self, field_id: str, value: list[Any], field: MetadataFieldDefinition
+    ) -> tuple[list[Any], list[str]]:
+        """Split a proposed list value into (valid items, dropped labels).
+
+        Items validate independently (list validation has no cross-item
+        rules), so each is checked as a one-item list; failures are reported
+        as ``field_id[index]`` in the patch's ``dropped``."""
+
+        kept: list[Any] = []
+        drops: list[str] = []
+        for index, item in enumerate(value):
+            if self._validate_list_field_value("AI patch", field_id, [item], field, node_index=None):
+                drops.append(f"{field_id}[{index}]")
+            else:
+                kept.append(item)
+        return kept, drops
 
     def _strip_unknown_metadata_fields(
         self,

@@ -380,14 +380,28 @@ def _field_catalog(project: ProjectService, schema: Any, value: Any) -> list[dic
             continue
         # `options` is always present (empty when the field has none) so the
         # create template can test `f.options` without hitting StrictUndefined.
-        catalog.append(
-            {
-                "id": field_id,
-                "label": field.name,
-                "type": field.type,
-                "options": [opt.value for opt in field.options] if field.options else [],
-            }
-        )
+        descriptor: dict[str, Any] = {
+            "id": field_id,
+            "label": field.name,
+            "type": field.type,
+            "options": [opt.value for opt in field.options] if field.options else [],
+        }
+        # List fields (#698): describe the item shape so the model emits
+        # legal items — flat scalars for item_type sugar, member-keyed maps
+        # for a group shape. `items` mirrors the top-level descriptor shape
+        # per member; templates test `f['items']` the way they test options.
+        if field.type == "list" and field.item_members:
+            descriptor["item_scalar"] = field.item_type is not None
+            descriptor["items"] = [
+                {
+                    "key": member.key,
+                    "label": member.name or member.key,
+                    "type": member.type,
+                    "options": [opt.value for opt in member.options] if member.options else [],
+                }
+                for member in field.item_members
+            ]
+        catalog.append(descriptor)
     return catalog
 
 

@@ -77,14 +77,14 @@
 
 <div class="provider-subs">
   {#if configured.length > 0}
-    <div class="provider-chips">
+    <div class="chip-tags">
       {#each configured as prov (prov.id)}
-        <span class="provider-chip" class:is-default={prov.id === defaultProviderId}>
-          <span class="chip-label">{prov.label}</span>
+        <span class="chip-tag" class:is-active={prov.id === defaultProviderId}>
+          <span class="chip-tag-label">{prov.label}</span>
           {#if editable}
             <button
               type="button"
-              class="chip-action"
+              class="chip-tag-btn"
               title={`Change ${prov.label} key`}
               aria-label={`Change ${prov.label} key`}
               disabled={busy}
@@ -92,7 +92,7 @@
             ><i class="ti ti-pencil" aria-hidden="true"></i></button>
             <button
               type="button"
-              class="chip-action chip-remove"
+              class="chip-tag-btn is-remove"
               title={`Remove ${prov.label}`}
               aria-label={`Remove ${prov.label}`}
               disabled={busy}
@@ -107,7 +107,7 @@
   {/if}
 
   {#if formMode !== "none"}
-    <div class="ai-add">
+    <div class="inline-form">
       {#if formMode === "add"}
         <label>
           Provider
@@ -131,7 +131,7 @@
           placeholder={cloudKeyPlaceholder(formProviderId)}
         />
       </label>
-      <div class="ai-actions">
+      <div class="inline-form-actions">
         <button type="button" on:click={resetForm}>Cancel</button>
         <button
           type="button"
@@ -142,110 +142,20 @@
       </div>
     </div>
   {:else if addable.length > 0}
-    <button type="button" class="ai-linkbtn" on:click={beginAdd}>+ Add provider</button>
+    <button type="button" class="inline-add-btn" on:click={beginAdd}>+ Add provider</button>
   {/if}
 </div>
 
 <style>
+  /* Chips + inline form use the shared .chip-tag* / .inline-form* primitives
+     in styles.css (#619). Only the rotate-mode label is specific here. */
   .provider-subs {
     display: grid;
     gap: 10px;
   }
 
-  .provider-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-
-  /* A chip is a pill; in editable mode it holds a label-button + a remove ×. */
-  .provider-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 2px 8px 2px 10px;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    background: var(--surface);
-    color: var(--text-2);
-    font-size: var(--fs-sm);
-  }
-
-  /* The machine default provider reads as the live one. */
-  .provider-chip.is-default {
-    border-color: var(--accent);
-    background: var(--accent-soft);
-    color: var(--accent-emphasis);
-    font-weight: 600;
-  }
-
-  .chip-label {
-    padding: 0 2px;
-  }
-
-  /* Explicit per-chip affordances: a pencil (rotate the key) and an × (remove),
-     each with its own aria-label — the provider name is plain text, so the
-     actions are visible controls, not a hidden "click the label" gesture. */
-  .chip-action {
-    display: inline-flex;
-    align-items: center;
-    appearance: none;
-    background: transparent;
-    border: none;
-    padding: 0 2px;
-    color: var(--text-3);
-    font-size: var(--fs-md);
-    line-height: 1;
-    cursor: pointer;
-  }
-
-  .chip-action:hover:not(:disabled) {
-    color: var(--text);
-  }
-
-  .chip-remove:hover:not(:disabled) {
-    color: var(--danger);
-  }
-
-  .chip-action:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  /* Inline add/rotate draft — mirrors the wizard's .ai-add treatment. */
-  .ai-add {
-    display: grid;
-    gap: 8px;
-    padding: 10px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--panel);
-  }
-
   .rotate-target {
     font-size: var(--fs-sm);
     color: var(--text-2);
-  }
-
-  .ai-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-  }
-
-  /* Dashed link-style action, matching the wizard's "+ Add provider". */
-  .ai-linkbtn {
-    justify-self: start;
-    border: 1px dashed var(--border-strong);
-    background: transparent;
-    color: var(--accent-emphasis);
-    font-size: var(--fs-sm);
-    padding: 4px 12px;
-    border-radius: 6px;
-    cursor: pointer;
-  }
-
-  .ai-linkbtn:hover {
-    background: var(--surface);
   }
 </style>

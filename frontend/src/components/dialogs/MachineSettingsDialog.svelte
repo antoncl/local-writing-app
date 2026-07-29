@@ -86,12 +86,12 @@
     frameClass="machine-settings-modal"
     frameStyle="--modal-width: min(640px, calc(100vw - 48px)); --modal-max-height: calc(100vh - 80px); --modal-overflow-y: auto;"
   >
-      <div class="settings-tabs" role="tablist" aria-label="Settings sections">
+      <div class="tab-strip" role="tablist" aria-label="Settings sections">
         {#each TABS as tab (tab.key)}
           <button
             id={`settings-tab-${tab.key}`}
             type="button"
-            class="settings-tab"
+            class="tab-strip-tab"
             class:active={activeTab === tab.key}
             role="tab"
             aria-selected={activeTab === tab.key}
@@ -230,41 +230,17 @@
 {/if}
 
 <style>
-  /* Tab strip + panel. The panel restores the 14px grid gap the Modal gives its
-     direct children (they're now nested inside this one wrapper). */
-  .settings-tabs {
-    display: flex;
-    gap: 4px;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .settings-tab {
-    appearance: none;
-    background: transparent;
-    border: none;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -1px;
-    padding: 6px 12px;
-    font-size: var(--fs-md);
-    color: var(--text-2);
-    cursor: pointer;
-  }
-
-  .settings-tab:hover {
-    color: var(--text);
-  }
-
-  /* Active state is color + the accent underline only — deliberately no
-     font-weight change, which would widen the label and reflow the strip on
-     every switch. */
-  .settings-tab.active {
-    color: var(--text);
-    border-bottom-color: var(--accent-emphasis);
-  }
-
+  /* The tab strip uses the shared .tab-strip / .tab primitives in styles.css
+     (#610). The panel restores the 14px grid gap the Modal gives its direct
+     children (they're now nested inside this one wrapper), and pins a
+     min-height so switching tabs doesn't resize the whole dialog (#613): the
+     shorter tabs (Writing, Storage) leave whitespace instead of shrinking the
+     frame, while a tall palette still grows into the Modal's own scroll. */
   .settings-panel {
     display: grid;
+    grid-auto-rows: min-content;
     gap: 14px;
+    min-height: 320px;
   }
 
   .stored-at {

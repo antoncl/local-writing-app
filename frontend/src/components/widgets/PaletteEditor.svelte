@@ -71,21 +71,21 @@
   </p>
 
   {#if swatches.length > 0}
-    <div class="palette-chips">
+    <div class="chip-tags">
       {#each swatches as sw, i (i)}
-        <span class="palette-chip" class:is-editing={i === editingIndex}>
+        <span class="chip-tag" class:is-active={i === editingIndex}>
           <span class="chip-dot" style="background: {sw.hex}"></span>
-          <span class="chip-label">{sw.label || sw.id}</span>
+          <span class="chip-tag-label">{sw.label || sw.id}</span>
           <button
             type="button"
-            class="chip-action"
+            class="chip-tag-btn"
             title={`Edit ${sw.label || sw.id}`}
             aria-label={`Edit ${sw.label || sw.id}`}
             on:click={() => (editingIndex = i === editingIndex ? null : i)}
           ><i class="ti ti-pencil" aria-hidden="true"></i></button>
           <button
             type="button"
-            class="chip-action chip-remove"
+            class="chip-tag-btn is-remove"
             title={`Remove ${sw.label || sw.id}`}
             aria-label={`Remove ${sw.label || sw.id}`}
             on:click={() => removeSwatch(i)}
@@ -98,7 +98,7 @@
   {/if}
 
   {#if editing}
-    <div class="ai-add">
+    <div class="inline-form">
       <div class="edit-target">Edit — <strong>{editing.label || editing.id}</strong></div>
       <div class="edit-fields">
         <input
@@ -141,7 +141,7 @@
     </div>
   {/if}
 
-  <button type="button" class="ai-linkbtn" on:click={addSwatch}>+ Add color</button>
+  <button type="button" class="inline-add-btn" on:click={addSwatch}>+ Add color</button>
 </section>
 
 <style>
@@ -172,34 +172,9 @@
     margin: 4px 0;
   }
 
-  /* Chips — a wrapping row of [dot · label · edit · remove] pills. Shared idiom
-     with ProviderSubscriptions (tracked for extraction, #619). */
-  .palette-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 4px;
-  }
-
-  .palette-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 2px 6px 2px 8px;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    background: var(--surface);
-    color: var(--text-2);
-    font-size: var(--fs-sm);
-  }
-
-  /* The swatch currently open in the form reads as the active one. */
-  .palette-chip.is-editing {
-    border-color: var(--accent);
-    background: var(--accent-soft);
-    color: var(--accent-emphasis);
-  }
-
+  /* Chips + inline form use the shared .chip-tags / .chip-tag* / .inline-form*
+     primitives in styles.css (#619). The leading colour dot is palette-specific;
+     the shared chip-tag sets the pill/flex so the dot just sits inside it. */
   .chip-dot {
     flex: none;
     width: 12px;
@@ -208,40 +183,18 @@
     border: 1px solid var(--border-strong);
   }
 
-  .chip-label {
-    padding: 0 2px;
+  /* This editor's flex-column parent uses a tight 4px gap, so it adds a little
+     separation above the chip row, the edit form and the Add button — spacing
+     the shared .chip-tags / .inline-form / .inline-add-btn primitives don't
+     (and shouldn't) carry for the provider/wizard surfaces. */
+  .chip-tags {
+    margin-top: 4px;
   }
-
-  .chip-action {
-    display: inline-flex;
-    align-items: center;
-    appearance: none;
-    background: transparent;
-    border: none;
-    padding: 0 2px;
-    color: var(--text-3);
-    font-size: var(--fs-md);
-    line-height: 1;
-    cursor: pointer;
-  }
-
-  .chip-action:hover {
-    color: var(--text);
-  }
-
-  .chip-remove:hover {
-    color: var(--danger);
-  }
-
-  /* Inline add/edit draft — mirrors the wizard's / provider's .ai-add box. */
-  .ai-add {
-    display: grid;
-    gap: 8px;
+  .inline-form {
     margin-top: 8px;
-    padding: 10px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--panel);
+  }
+  .inline-add-btn {
+    margin-top: 8px;
   }
 
   .edit-target {
@@ -301,22 +254,5 @@
 
   .edit-actions .spacer {
     flex: 1;
-  }
-
-  /* Dashed link-style action, matching "+ Add provider". */
-  .ai-linkbtn {
-    align-self: start;
-    margin-top: 8px;
-    border: 1px dashed var(--border-strong);
-    background: transparent;
-    color: var(--accent-emphasis);
-    font-size: var(--fs-sm);
-    padding: 4px 12px;
-    border-radius: 6px;
-    cursor: pointer;
-  }
-
-  .ai-linkbtn:hover {
-    background: var(--surface);
   }
 </style>

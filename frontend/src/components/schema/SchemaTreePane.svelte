@@ -81,10 +81,11 @@
 </script>
 
 <div class="pane-content schema-list">
-  <div class="schema-kind-tabs" role="tablist" aria-label="Type kind">
+  <div class="tab-strip schema-kind-tabs" role="tablist" aria-label="Type kind">
     {#each SCHEMA_KINDS as kind}
       <button
         type="button"
+        class="tab-strip-tab"
         role="tab"
         aria-selected={schemaFieldKind === kind.id}
         class:active={schemaFieldKind === kind.id}
@@ -210,34 +211,16 @@
 
   /* .migration-applied co-located into Project.svelte (#14). */
 
+  /* Uses the shared .tab-strip / .tab primitives (#610). Kept here: the
+     negative-margin bleed to the pane edges, the extra bottom padding, and
+     equal-width tabs (flex:1) — these tabs fill the row rather than sitting at
+     their natural width like the Settings tabs. */
   .schema-kind-tabs {
-    display: flex;
-    gap: 2px;
     margin: 0 -10px 8px;
     padding: 0 10px 6px;
-    border-bottom: 1px solid var(--divider);
   }
 
-  .schema-kind-tabs button {
+  .schema-kind-tabs button.tab-strip-tab {
     flex: 1;
-    padding: 6px 10px;
-    background: transparent;
-    border: 1px solid transparent;
-    border-bottom: 2px solid transparent;
-    border-radius: 4px 4px 0 0;
-    font-size: var(--fs-sm);
-    color: var(--text-3);
-    cursor: pointer;
-  }
-
-  .schema-kind-tabs button:hover {
-    color: var(--text);
-    background: var(--inset);
-  }
-
-  .schema-kind-tabs button.active {
-    color: var(--accent-deep);
-    border-bottom-color: var(--accent-deep);
-    font-weight: 600;
   }
 </style>

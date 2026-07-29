@@ -663,13 +663,24 @@ export const api = {
   /** The drift report alone (#583). Once the content diff (runs + fields + title)
    *  is computed client-side, this is the one half that stays on the server —
    *  the "now" witness needs resolved entity state — so it gets a slim call
-   *  carrying only the dynamic context the editor observed; the backend resolves
-   *  the rest from the scene id. `null` dynamic context is "not observed", `[]`
-   *  is "observed and empty" — the distinction the service turns on (#439). */
-  snapshotDrift(sceneId: string, snapshotId: string, dynamicContext: string[] | null) {
+   *  carrying the dynamic context the editor observed plus the scene's unsaved
+   *  buffer (`metadata` + `body`, #581), so the now-witness resolves the same
+   *  "now" the client-side field flip does instead of the ~6 s-stale disk copy.
+   *  `null` dynamic context is "not observed", `[]` is "observed and empty" —
+   *  the distinction the service turns on (#439). */
+  snapshotDrift(
+    sceneId: string,
+    snapshotId: string,
+    dynamicContext: string[] | null,
+    metadata: Record<string, unknown>,
+    body: string,
+  ) {
     return request<SnapshotDrift>(
       `/scenes/${encodeURIComponent(sceneId)}/snapshots/${encodeURIComponent(snapshotId)}/drift`,
-      { method: "POST", body: JSON.stringify({ dynamic_context: dynamicContext }) },
+      {
+        method: "POST",
+        body: JSON.stringify({ dynamic_context: dynamicContext, metadata, body }),
+      },
     );
   },
   /** Captures the current state and restores, in ONE call. Never do this as a

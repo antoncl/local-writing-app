@@ -141,23 +141,45 @@ class SnapshotDiffMixin:
     `_snapshots_dir`, `_require_snapshot` and `_snapshot_source_id` via MRO."""
 
     def snapshot_drift(
-        self, scene_id: str, snapshot_id: str, dynamic_context: list[str] | None
+        self,
+        scene_id: str,
+        snapshot_id: str,
+        dynamic_context: list[str] | None,
+        *,
+        buffer_metadata: dict[str, Any] | None = None,
+        buffer_body: str | None = None,
     ) -> SnapshotDrift:
         """The drift report alone, for the `.../drift` route (#583).
 
         Once the content diff (runs + fields + title) is computed client-side,
         drift is the one half that cannot move — the "now" witness needs resolved
-        entity state — so it gets its own slim call carrying only the dynamic
-        context the editor observed. `_require_snapshot` gives the 404 the diff
-        route used to.
+        entity state — so it gets its own slim call carrying the dynamic context
+        the editor observed plus the scene's unsaved buffer (#581:
+        `buffer_metadata` / `buffer_body`), so the now-witness resolves the same
+        "now" the client-side field flip does rather than lagging on disk.
+        `_require_snapshot` gives the 404 the diff route used to.
         """
         root = self._require_project()
         node_id = self._snapshot_source_id(scene_id)
         self._require_snapshot(root, node_id, snapshot_id)
-        return self._snapshot_drift(root, node_id, snapshot_id, dynamic_context)
+        return self._snapshot_drift(
+            root,
+            node_id,
+            snapshot_id,
+            dynamic_context,
+            buffer_metadata=buffer_metadata,
+            buffer_body=buffer_body,
+        )
 
     def _snapshot_drift(
-        self, root: Path, node_id: str, snapshot_id: str, dynamic_context: list[str] | None
+        self,
+        root: Path,
+        node_id: str,
+        snapshot_id: str,
+        dynamic_context: list[str] | None,
+        *,
+        buffer_metadata: dict[str, Any] | None = None,
+        buffer_body: str | None = None,
     ) -> SnapshotDrift:
         """The stored witness against the world as it is now.
 
@@ -174,6 +196,8 @@ class SnapshotDiffMixin:
             node_id,
             dynamic_context,
             also_resolve=[entity.id for entity in stored.entities] if stored else (),
+            buffer_metadata=buffer_metadata,
+            buffer_body=buffer_body,
         )
         return compare_witnesses(stored, live_witness)
 

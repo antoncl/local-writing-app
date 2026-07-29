@@ -1,13 +1,21 @@
-// The document-switch boundary for a reused ProseMirror editor (#368).
+// The document-load boundary for a reused ProseMirror editor (#368).
 //
-// ProseBodyView keeps ONE TipTap Editor across document switches and loads the
-// next document with `setContent`, which is an ordinary transaction: it lands
-// on the undo stack, and the previous document's steps stay under it. Ctrl+Z
-// could therefore walk a scene's buffer back into the previously open
-// document — and autosave would persist the damage.
+// ProseBodyView keeps ONE TipTap Editor and loads content with `setContent`,
+// which is an ordinary transaction: it lands on the undo stack, and the
+// replaced content's steps stay under it, so Ctrl+Z could walk the buffer
+// back into whatever the load replaced — and autosave would persist the
+// damage. Two axes share that shape:
 //
-// A document switch is a state boundary, not an edit. This rebuilds the
-// editor state from the just-loaded document with every plugin's STATE
+//   * same-id external replacement — the reachable one under the
+//     one-tab-per-doc pane model: a server reconcile re-seeds the OPEN
+//     document (snapshot restore, embedded-TODO write-backs, and for the
+//     metadata widgets an override reset). Undoing the reload resurrects the
+//     pre-reconcile content.
+//   * a cross-document switch on a reused editor instance — unreachable
+//     today (panes are per-document and torn down on close), guarded anyway.
+//
+// A document load is a state boundary, not an edit. This rebuilds the editor
+// state from the just-loaded document with every plugin's STATE
 // re-initialized (plugin instances and configuration are kept), which is
 // ProseMirror's own idiom for "new document": the history plugin starts
 // empty, so undo cannot reach across the boundary.

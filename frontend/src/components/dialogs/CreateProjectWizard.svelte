@@ -14,11 +14,11 @@
   import InheritsFromList from "@/components/widgets/InheritsFromList.svelte";
   import AiPolicySlider from "@/components/widgets/AiPolicySlider.svelte";
   import ProviderTierPicker from "@/components/widgets/ProviderTierPicker.svelte";
+  import ProviderSubscriptions from "@/components/widgets/ProviderSubscriptions.svelte";
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
   import MetadataLongTextEditor from "@/components/widgets/MetadataLongTextEditor.svelte";
   import { createWizard as wizard } from "@/lib/stores/createWizard.svelte";
   import { assistantEntriesStore, isAssistantListed } from "@/lib/stores/assistants";
-  import { cloudKeyPlaceholder } from "@/lib/utils/aiProviders";
   import { resetTargetLabel } from "@/lib/utils/projectReview";
   import { moveBefore } from "@/lib/utils/listOrder";
   import { get } from "svelte/store";
@@ -179,55 +179,19 @@
             <section class="ai-section" aria-label="Provider">
               {#if wizard.providerModeCloud}
                 <h3>Your subscriptions</h3>
-                {#if wizard.configuredProviders.length > 0}
-                  <div class="provider-chips">
-                    {#each wizard.configuredProviders as prov (prov.id)}
-                      <span class="provider-chip" class:is-default={prov.id === wizard.defaultProviderId}
-                        >{prov.label}</span
-                      >
-                    {/each}
-                  </div>
-                {:else}
-                  <p class="muted">No cloud provider configured yet — add one to use cloud AI.</p>
-                {/if}
-
-                {#if wizard.addingProvider}
-                  <div class="ai-add">
-                    <label>
-                      Provider
-                      <select bind:value={wizard.providerDraftId}>
-                        {#each wizard.addableProviders as prov (prov.id)}
-                          <option value={prov.id}>{prov.label}</option>
-                        {/each}
-                      </select>
-                    </label>
-                    <label>
-                      API key
-                      <input
-                        type="password"
-                        autocomplete="off"
-                        bind:value={wizard.providerDraftSecret}
-                        placeholder={cloudKeyPlaceholder(wizard.providerDraftId)}
-                      />
-                    </label>
-                    <div class="ai-actions">
-                      <button type="button" on:click={() => wizard.cancelAddProvider()}>Cancel</button>
-                      <button
-                        type="button"
-                        class="primary"
-                        disabled={wizard.aiBusy || !wizard.providerDraftSecret.trim()}
-                        on:click={() => wizard.saveProvider()}>Save</button
-                      >
-                    </div>
-                  </div>
-                {:else if wizard.addableProviders.length > 0}
-                  <button
-                    type="button"
-                    class="ai-linkbtn"
-                    on:click={() => wizard.beginAddProvider(wizard.addableProviders[0].id)}
-                    >+ Add provider</button
-                  >
-                {/if}
+                <!--
+                  The shared provider surface (ADR-0047 slice 2 / #616). Add-only
+                  here — `editable` is left false, so first-run setup gets chips +
+                  "+ Add provider" but no rotate/remove. It writes each key
+                  immediately (unlike Settings' batched draft), so onSaveKey goes
+                  through the busy-guarded controller path.
+                -->
+                <ProviderSubscriptions
+                  providers={wizard.machineProviders}
+                  defaultProviderId={wizard.defaultProviderId}
+                  busy={wizard.aiBusy}
+                  onSaveKey={(field, value) => wizard.saveProviderKey(field, value)}
+                />
               {:else}
                 <h3>Local model</h3>
                 <div class="arow">
@@ -605,30 +569,8 @@
     font-size: var(--fs-xs);
   }
 
-  .provider-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-
-  .provider-chip {
-    padding: 2px 10px;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    background: var(--surface);
-    color: var(--text-2);
-    font-size: var(--fs-sm);
-  }
-
-  /* The machine default provider reads as the live one. */
-  .provider-chip.is-default {
-    border-color: var(--accent);
-    background: var(--accent-soft);
-    color: var(--accent-emphasis);
-    font-weight: 600;
-  }
-
-  /* Inline add-provider / hire drafts. */
+  /* Inline hire draft (the provider surface is now the shared
+     ProviderSubscriptions widget, which carries its own chip + form CSS). */
   .ai-add {
     display: grid;
     gap: 8px;

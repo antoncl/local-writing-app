@@ -19,6 +19,7 @@
   import { toMultiValued } from "@/lib/views/viewParams";
   import { effectiveFieldType, isSortableField } from "@/lib/views/fieldAccess";
   import { setLevelField, toggleLevelOrder } from "@/lib/views/groupLevelEdits";
+  import { moveAt, removeAt, updateAt } from "@/lib/listEdits";
   import { useDesignerContext } from "./designerContext";
   import type { MetadataFieldType, MetadataValue, NodePickerRef, ViewGroupByLevel, ViewLeafValue, ViewSort } from "@/lib/types";
   import type { Snippet } from "svelte";
@@ -308,17 +309,14 @@
     commitSortKeys([...sortKeys, { field_key: sortableFields[0]?.key ?? "title", dir: "asc" }]);
   }
   function setSortKey(i: number, next: Partial<SortKey>) {
-    commitSortKeys(sortKeys.map((k, j) => (j === i ? { ...k, ...next } : k)));
+    commitSortKeys(updateAt(sortKeys, i, next));
   }
   function removeSortKey(i: number) {
-    commitSortKeys(sortKeys.filter((_, j) => j !== i));
+    commitSortKeys(removeAt(sortKeys, i));
   }
   function moveSortKey(i: number, delta: -1 | 1) {
-    const j = i + delta;
-    if (j < 0 || j >= sortKeys.length) return;
-    const next = [...sortKeys];
-    [next[i], next[j]] = [next[j], next[i]];
-    commitSortKeys(next);
+    const next = moveAt(sortKeys, i, delta);
+    if (next) commitSortKeys(next);
   }
 
   // --- nest (relational op) match-rule helpers ---
@@ -449,12 +447,8 @@
     commitHandles(handles.filter((h) => h.id !== hid));
   }
   function moveHandle(hid: string, delta: -1 | 1) {
-    const i = handles.findIndex((h) => h.id === hid);
-    const j = i + delta;
-    if (i < 0 || j < 0 || j >= handles.length) return;
-    const next = [...handles];
-    [next[i], next[j]] = [next[j], next[i]];
-    commitHandles(next);
+    const next = moveAt(handles, handles.findIndex((h) => h.id === hid), delta);
+    if (next) commitHandles(next);
   }
 
   // --- organize levels (ADR-0037 §2/§8 + Amendment 1: ν by attribute, owned per
@@ -491,19 +485,20 @@
     return groupableFields.find((f) => f.key === field)?.name ?? SYNTHETIC_LEVEL_LABELS[field] ?? field;
   }
   // Per-list helpers (each group organizes independently, so used-field sets and
-  // add-availability are computed against *that* group's levels).
+  // add-availability are computed against *that* group's levels). The `used` set
+  // is built ONCE per group by the `organizeSection` snippet and threaded through
+  // — `canAddLevel`/`levelOptions` are called per level row, so recomputing the
+  // Set inside each would be O(levels²) work every render.
   function usedFields(levels: ViewGroupByLevel[]): Set<string> {
     return new Set(levels.map((l) => l.field));
   }
-  function canAddLevel(levels: ViewGroupByLevel[]): boolean {
-    const used = usedFields(levels);
+  function canAddLevel(used: Set<string>): boolean {
     return groupableFields.some((f) => !used.has(f.key));
   }
   // A level's own <select> offers the unused groupable fields plus its own
   // current field — so the no-duplicate-levels contract can't be bypassed by
   // re-pointing a row at an already-used field.
-  function levelOptions(levels: ViewGroupByLevel[], current: string): typeof groupableFields {
-    const used = usedFields(levels);
+  function levelOptions(used: Set<string>, current: string): typeof groupableFields {
     return groupableFields.filter((f) => f.key === current || !used.has(f.key));
   }
   // Pure mutators over one owner's levels list; each calls that owner's commit.
@@ -522,14 +517,11 @@
     commit(toggleLevelOrder(levels, i));
   }
   function removeLevelAt(levels: ViewGroupByLevel[], commit: LevelCommit, i: number) {
-    commit(levels.filter((_, j) => j !== i));
+    commit(removeAt(levels, i));
   }
   function moveLevelAt(levels: ViewGroupByLevel[], commit: LevelCommit, i: number, delta: -1 | 1) {
-    const j = i + delta;
-    if (j < 0 || j >= levels.length) return;
-    const next = [...levels];
-    [next[i], next[j]] = [next[j], next[i]];
-    commit(next);
+    const next = moveAt(levels, i, delta);
+    if (next) commit(next);
   }
   // Organize is ALWAYS owned by a handle (ADR-0037 Amendment 1), including the
   // single/unnamed group (the synthetic `in` handle). One uniform binding — no
@@ -636,6 +628,7 @@
   <!-- Organize levels (ADR-0037 §8 + Amendment 1): ordered group-by dropdowns
        for ONE group (a named handle, or the single/unnamed group). Node config,
        not graph shape — so no canvas node competes with Nest. -->
+  {@const used = usedFields(levels)}
   <div class="organize">
     <div class="org-head">Organize</div>
     {#each levels as level, i (i)}
@@ -649,7 +642,7 @@
           {#if !groupableFields.some((f) => f.key === level.field)}
             <option value={level.field}>{levelLabel(level.field)}</option>
           {/if}
-          {#each levelOptions(levels, level.field) as f (f.key)}
+          {#each levelOptions(used, level.field) as f (f.key)}
             <option value={f.key}>{f.name}</option>
           {/each}
         </select>
@@ -668,7 +661,7 @@
       </div>
     {/each}
     {#if groupableFields.length > 0}
-      <button class="add-handle" type="button" title="Add organize level" aria-label="Add organize level" disabled={!canAddLevel(levels)} onclick={() => addLevelTo(levels, commit)}>
+      <button class="add-handle" type="button" title="Add organize level" aria-label="Add organize level" disabled={!canAddLevel(used)} onclick={() => addLevelTo(levels, commit)}>
         + Organize by…
       </button>
     {:else if levels.length === 0}

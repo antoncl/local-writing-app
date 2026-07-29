@@ -29,9 +29,12 @@ export function applyGroupBy<T extends EvalNode>(
 ): ViewRow<T>[] {
   let out = rows;
   for (const level of levels) {
+    // Build the option value→label lookup ONCE per level: segmentForField would
+    // otherwise run a linear `options.find` per row, O(rows×options) (#232).
+    const optionLabels = optionLabelMap(ctx.schema, level.field);
     const next: ViewRow<T>[] = [];
     for (const r of out) {
-      const segs = segmentForField(ctx, r.node, level);
+      const segs = segmentForField(ctx, r.node, level, optionLabels);
       if (segs.length === 0) {
         next.push(r); // missing value → bare at this level
         continue;
@@ -41,6 +44,22 @@ export function applyGroupBy<T extends EvalNode>(
     out = next;
   }
   return out;
+}
+
+// value→label lookup for a select/multi_select level's options, or null when the
+// field declares none — entry_type, reference, and free-text buckets label
+// themselves and never consult it.
+function optionLabelMap(
+  schema: MetadataSchema | null | undefined,
+  field: string,
+): Map<string, string> | null {
+  const options = schema?.fields?.[field]?.options;
+  if (!options || options.length === 0) return null;
+  const map = new Map<string, string>();
+  // Only labelled options enter the map; an option with no label falls back to
+  // its raw value at the call site (`?? value`), matching the prior `.find`.
+  for (const o of options) if (o.label != null) map.set(o.value, o.label);
+  return map;
 }
 
 // The buckets a node falls into for one `group_by` level (ADR-0037 §2 — the only
@@ -60,6 +79,7 @@ function segmentForField<T extends EvalNode>(
   ctx: GroupByContext<T>,
   node: T,
   level: ViewGroupByLevel,
+  optionLabels: Map<string, string> | null,
 ): PathSegment[] {
   const { field, order } = level;
 
@@ -106,8 +126,7 @@ function segmentForField<T extends EvalNode>(
     } else if (isRef) {
       out.push(seg(value, ctx.nodeById.get(value)?.title ?? value, value));
     } else {
-      const option = fieldDef?.options?.find((o) => o.value === value);
-      out.push(seg(value, option?.label ?? value, null));
+      out.push(seg(value, optionLabels?.get(value) ?? value, null));
     }
   }
   return out;

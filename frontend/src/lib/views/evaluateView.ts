@@ -65,12 +65,6 @@ export type EvalNode = {
   // can bridge the two id spaces. Omitted ⇒ `id` already IS the canonical id
   // (lore/assistant/prompt rosters, where the two coincide).
   ref_id?: string | null;
-  // ADR-0037 §7 (the Assistants default): a roster node's source layer, as the
-  // summary-level projection the backend stamps — not a schema/metadata field.
-  // Only the assistant roster sets these; the `source_layer` group_by level in
-  // `segmentForField` reads them. Other rosters omit them (rows stay bare).
-  source_layer_id?: string | null;
-  source_layer_label?: string | null;
   // Resolver-stamped values for the kind's `computed` fields (ADR-0029 §D) —
   // read by `fieldValue` for any field the schema declares computed, so a view
   // can group/filter/sort on one without a per-key special case. The assistants

@@ -91,6 +91,24 @@ describe("ListValueEditor — record shape (group items)", () => {
     expect(onChange).toHaveBeenLastCalledWith([{ question: "Where is the key?", status: "answered" }]);
   });
 
+  it("auto-opens the NEW row after add, not the one past it", async () => {
+    // Regression (live-verified): the parent applies onChange synchronously,
+    // so items has already grown when the open index is set — capturing
+    // items.length after onChange opened index N+1 (nothing) instead of N.
+    let value: MetadataValue = [...(recordItems as unknown[])] as MetadataValue;
+    const onChange = vi.fn((next: MetadataValue) => {
+      value = next;
+    });
+    const { rerender } = render(ListValueEditor, { field: recordField, value, onChange });
+    await fireEvent.click(screen.getByText("+ Add item"));
+    await rerender({ field: recordField, value, onChange });
+    // The new (third, empty) row is the expanded one: its member editors are
+    // present and empty, while the existing rows stay collapsed.
+    const questionInput = screen.getByLabelText("Question") as HTMLInputElement;
+    expect(questionInput.value).toBe("");
+    expect(screen.queryByDisplayValue("Who forged the letter?")).toBeNull();
+  });
+
   it("readOnly renders rows without grips, remove buttons, or the add row", () => {
     render(ListValueEditor, {
       field: recordField,

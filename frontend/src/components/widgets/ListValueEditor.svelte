@@ -76,8 +76,11 @@
   }
 
   function addItem() {
+    // Capture the new row's index BEFORE onChange: the parent applies the
+    // value synchronously, so `items` has already grown by the next line.
+    const nextIndex = items.length;
     onChange([...items, scalarItems ? "" : {}]);
-    if (density === "record") openIndex = items.length;
+    if (density === "record") openIndex = nextIndex;
   }
 
   function removeItem(index: number) {

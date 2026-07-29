@@ -91,7 +91,7 @@
           <button
             id={`settings-tab-${tab.key}`}
             type="button"
-            class="tab"
+            class="tab-strip-tab"
             class:active={activeTab === tab.key}
             role="tab"
             aria-selected={activeTab === tab.key}

@@ -85,7 +85,7 @@
     {#each SCHEMA_KINDS as kind}
       <button
         type="button"
-        class="tab"
+        class="tab-strip-tab"
         role="tab"
         aria-selected={schemaFieldKind === kind.id}
         class:active={schemaFieldKind === kind.id}
@@ -220,7 +220,7 @@
     padding: 0 10px 6px;
   }
 
-  .schema-kind-tabs button.tab {
+  .schema-kind-tabs button.tab-strip-tab {
     flex: 1;
   }
 </style>

@@ -1099,14 +1099,16 @@ button.row-action-add.active {
    the label and reflows the strip on every switch — #609 review). Each surface
    keeps its own layout/chrome (equal-width schema tabs; the pane tabs' drag,
    badge and close controls) and borrows only this visual vocabulary. The wizard
-   step crumbs are a breadcrumb stepper, not a tab set — deliberately excluded. */
+   step crumbs are a breadcrumb stepper, not a tab set — deliberately excluded.
+   The item class shares the `tab-strip` stem (not a bare `.tab`) so it can't
+   collide with an unrelated future `class="tab"`. */
 .tab-strip {
   display: flex;
   gap: 4px;
   border-bottom: 1px solid var(--border);
 }
 
-.tab {
+.tab-strip-tab {
   appearance: none;
   background: transparent;
   border: none;
@@ -1118,11 +1120,11 @@ button.row-action-add.active {
   cursor: pointer;
 }
 
-.tab:hover {
+.tab-strip-tab:hover {
   color: var(--text);
 }
 
-.tab.active {
+.tab-strip-tab.active {
   color: var(--text);
   border-bottom-color: var(--accent-emphasis);
 }

@@ -210,7 +210,7 @@
         {#each tabs as tab (tab)}
           {@const b = badgeOf(tab)}
           <div
-            class="tab ws-tab"
+            class="tab-strip-tab ws-tab"
             class:active={tab === active}
             role="tab"
             tabindex="0"
@@ -430,8 +430,8 @@
   /* The bar wraps: when a region is too narrow to fit tabs + actions on one
      row, the actions drop to a second row instead of crowding out / sliding
      over the tabs. Wide regions stay a single row. */
-  /* The pane tabs adopt the shared .tab primitive (#610) for their visual —
-     colour + accent underline. The tabbar keeps its own bespoke chrome: the
+  /* The pane tabs adopt the shared .tab-strip-tab primitive (#610) for their
+     visual — colour + accent underline. The tabbar keeps its bespoke chrome: the
      wrapping actions rail, the horizontal scroll, and the drag/badge/close each
      tab carries. Converged here: dropped the --panel bar background and the
      per-tab dividers, and the divider recoloured to --border to match. */
@@ -454,8 +454,8 @@
     overflow-x: auto;
   }
   /* Layout/chrome only — the pill visual (padding, colour, underline, cursor)
-     comes from the shared .tab. This carries the flex row that lines up the
-     label, badge and close, plus the no-wrap/no-select behaviour. */
+     comes from the shared .tab-strip-tab. This carries the flex row that lines
+     up the label, badge and close, plus the no-wrap/no-select behaviour. */
   .ws-tab {
     display: flex;
     align-items: center;

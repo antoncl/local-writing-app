@@ -183,6 +183,20 @@
     border: 1px solid var(--border-strong);
   }
 
+  /* This editor's flex-column parent uses a tight 4px gap, so it adds a little
+     separation above the chip row, the edit form and the Add button — spacing
+     the shared .chip-tags / .inline-form / .inline-add-btn primitives don't
+     (and shouldn't) carry for the provider/wizard surfaces. */
+  .chip-tags {
+    margin-top: 4px;
+  }
+  .inline-form {
+    margin-top: 8px;
+  }
+  .inline-add-btn {
+    margin-top: 8px;
+  }
+
   .edit-target {
     font-size: var(--fs-sm);
     color: var(--text-2);

@@ -108,8 +108,6 @@ setup, and the exemption ratchet: → `docs/development/quality-gates.md`
 - **`MEMORY.md` ratchets** — it is loaded on every request, so it may shrink and
   never grow. If a new memory doesn't fit, merge or retire an old one; keep the
   index to one pointer line per memo and the content in the memo.
-- The citation-rot checker is **advisory**, PR-scoped, and **flags but never
-  fixes** — repointing a stale line turns visible rot into invisible rot.
 
 **Where do I stop splitting? Match the target shapes, don't guess:**
 - a new **endpoint** = thin route in `main.py` → logic in a `services/<area>.py`

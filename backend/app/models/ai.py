@@ -546,16 +546,17 @@ class AIInvocationList(BaseModel):
 
 
 class ValidateEntryPatchRequest(BaseModel):
-    """POST /api/lore/{entry_id}/ai-patch body — the model's raw finalize
+    """POST /api/ai/entry-patch/{node_id} body — the model's raw finalize
     reply (ADR-0046 §6.3). Validated server-side into an `AIEntryPatch`; the
-    raw text is never shown to the user unless it turns out garbled."""
+    raw text is never shown to the user unless it turns out garbled. The path
+    is kind-neutral (ADR-0048 §5): the node's `entry_type` is resolved by id."""
 
     raw: str = ""
 
 
 class ValidateEntryDraftRequest(BaseModel):
-    """POST /api/lore/ai-draft body — the create-mode sibling (ADR-0046 §6.4).
-    A from-scratch brainstorm has no entry to key on, so the target
+    """POST /api/ai/entry-draft body — the create-mode sibling (ADR-0046 §6.4).
+    A from-scratch brainstorm has no node to key on, so the target
     `entry_type` is carried in the body and validation is scoped to it. Same
     `AIEntryPatch` result and garbled handling as the revise path."""
 

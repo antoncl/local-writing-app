@@ -1,5 +1,5 @@
 // The declaration-side of prompt inputs, as a per-instance rune controller —
-// the shape `LoreProposalController` / `SnapshotStripController` use, and
+// the shape `EntryProposalController` / `SnapshotStripController` use, and
 // NodeEditor already composes.
 //
 // Inputs live on the entry (not the entry-type). The `drafts` here are the

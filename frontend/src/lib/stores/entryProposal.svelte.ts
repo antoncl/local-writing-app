@@ -1,13 +1,18 @@
-// The entry-pane end of the lore brainstorm review (ADR-0046 slice 3), as a
-// per-instance rune controller — the shape `LoreScrubController` /
-// `SnapshotStripController` use, and NodeEditor already composes.
+// The entry-pane end of the entry-patch brainstorm review (ADR-0046 slice 3;
+// generalized to any schema-typed node, ADR-0048 §5), as a per-instance rune
+// controller — the shape `LoreScrubController` / `SnapshotStripController` use,
+// and NodeEditor already composes.
 //
-// A `revise:entry` brainstorm (launched from LoreBrainstormBar) commits an
-// `EntryPatch` into the `loreBrainstorm` cross-pane store. This controller
-// derives the proposed-vs-current flips for the open lore entry — the body plus
+// A `revise:entry` brainstorm (launched from EntryBrainstormBar) commits an
+// `EntryPatch` into the `entryBrainstorm` cross-pane store. This controller
+// derives the proposed-vs-current flips for the open node — the body plus
 // each changed `long_text` field as prose run-diffs (`fields`), and each changed
 // structured field as an atomic rail flip (`structuredFlips`, slice 3b) — and
 // **owns the review as a transaction** (#634).
+//
+// The controller is a pure, kind-agnostic mechanism: it keys off the fed node id
+// and schema, never the node's `kind`. Which kinds may launch a brainstorm is the
+// host's (NodeEditor's) policy — the controller reviews whatever proposal exists.
 //
 // **The review is a frozen, save-on-Done transaction.** While a proposal is up
 // the host freezes the entry (autosave off, rail/title read-only), so the diff's
@@ -23,9 +28,9 @@
 // callbacks are: the controller decides only WHAT the patch touches and WHEN to
 // write, never how. The host merges the fields into its own metadata state,
 // adopts the body through its prose buffer, and issues the explicit flush.
-import type { DocumentKind, EntryMetadata, MetadataFieldType, MetadataSchema, MetadataValue } from "@/lib/types";
+import type { EntryMetadata, MetadataFieldType, MetadataSchema, MetadataValue } from "@/lib/types";
 import type { FieldFlip } from "@/lib/utils/loreRevision";
-import { loreBrainstorm } from "@/lib/stores/loreBrainstorm.svelte";
+import { entryBrainstorm } from "@/lib/stores/entryBrainstorm.svelte";
 
 /** One structured (non-prose) field the patch proposes, reviewed as an atomic
  *  `{was, now}` flip in the frozen rail (ADR-0046 §2 / slice 3b): the value is
@@ -61,10 +66,10 @@ const NON_STRUCTURED_TYPES: ReadonlySet<MetadataFieldType> = new Set<MetadataFie
 // rename on save, so `title` flips and routes through the host's title state.
 const NON_FLIPPABLE_FIELD_IDS: ReadonlySet<string> = new Set(["id", "entry_type"]);
 
-export class LoreProposalController {
-  // Fed by the host each render — the derivations below track these.
-  documentKind = $state<DocumentKind>("scene");
-  sceneId = $state<string | null>(null);
+export class EntryProposalController {
+  // Fed by the host each render — the derivations below track these. `nodeId` is
+  // the open node's id (any kind); the review is keyed on it, never on the kind.
+  nodeId = $state<string | null>(null);
   schema = $state<MetadataSchema | null>(null);
   metadata = $state<EntryMetadata>({});
 
@@ -83,11 +88,10 @@ export class LoreProposalController {
   // the prose buffer (mirrors `SnapshotStripController.readLive`).
   readCurrentBody: (() => string) | null = null;
 
-  /** The patch committed for the open lore entry, or null. Gated on lore. */
+  /** The patch committed for the open node, or null. Purely proposal-driven —
+   *  a node reviews iff a brainstorm committed a patch for its id. */
   proposal = $derived(
-    this.documentKind === "lore" && this.sceneId
-      ? loreBrainstorm.proposalFor(this.sceneId)
-      : null,
+    this.nodeId ? entryBrainstorm.proposalFor(this.nodeId) : null,
   );
 
   /** The `long_text` fields the patch proposes, paired with their current value —
@@ -218,8 +222,9 @@ export class LoreProposalController {
   /** Commit the reviewed patch in ONE explicit write — the Done gesture, or
    *  "Save" from the close guard. Merge the adopted field values into the host's
    *  metadata, adopt the body through its buffer, then flush the pane once so
-   *  body + metadata land in a single lore PUT (ADR-0046 §1). A commit with
-   *  nothing adopted is a plain dismiss (no write), exactly like "Close". */
+   *  body + metadata land in a single PUT through the node's own save endpoint
+   *  (ADR-0046 §1). A commit with nothing adopted is a plain dismiss (no write),
+   *  exactly like "Close". */
   async commit(): Promise<boolean> {
     const fields: Record<string, MetadataValue> = {};
     for (const [fieldId, value] of Object.entries(this.resolvedText)) {
@@ -258,9 +263,9 @@ export class LoreProposalController {
     this.clear();
   }
 
-  /** Dismiss the proposal for the open entry. Low-level: prefer commit/abandon,
+  /** Dismiss the proposal for the open node. Low-level: prefer commit/abandon,
    *  which also clear the resolution. */
   clear(): void {
-    if (this.sceneId) loreBrainstorm.clear(this.sceneId);
+    if (this.nodeId) entryBrainstorm.clear(this.nodeId);
   }
 }

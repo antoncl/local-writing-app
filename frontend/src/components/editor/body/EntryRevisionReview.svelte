@@ -1,12 +1,13 @@
 <script lang="ts">
-  // The proposed-vs-current review for a lore brainstorm commit (ADR-0046
-  // slice 2/3). A `revise:entry` chat finalises and the server validates its
-  // reply into an EntryPatch; the author reviews it against the entry's current
-  // state as the same flip the snapshot compare uses, and adopts region by
-  // region — across the body AND each changed long_text field (slice 3a).
+  // The proposed-vs-current review for an entry-patch brainstorm commit
+  // (ADR-0046 slice 2/3; generalized to any schema-typed node, ADR-0048 §5). A
+  // `revise:entry` chat finalises and the server validates its reply into an
+  // EntryPatch; the author reviews it against the node's current state as the
+  // same flip the snapshot compare uses, and adopts region by region — across
+  // the body AND each changed long_text field (slice 3a).
   //
   // This is a pure render + gesture surface. The review is a frozen transaction
-  // whose state lives in `LoreProposalController` (#634): each flip PUSHES its
+  // whose state lives in `EntryProposalController` (#634): each flip PUSHES its
   // running resolution to the controller via `onBodyResolved`/`onFieldResolved`
   // (never a local write), Done fires `onDone` (the controller's single explicit
   // PUT — body + metadata in one write, ADR-0046 §1), and Discard fires
@@ -47,7 +48,7 @@
   } = $props();
 </script>
 
-<div class="lore-revision-review">
+<div class="entry-revision-review">
   <div class="review-bar">
     <span class="review-hint">
       {#if proposedBody !== null || fields.length > 0}
@@ -84,7 +85,7 @@
 </div>
 
 <style>
-  .lore-revision-review {
+  .entry-revision-review {
     display: flex;
     flex-direction: column;
     min-height: 0;

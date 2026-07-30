@@ -13,6 +13,7 @@ from app.models import (
     AIChatRequest,
     AIChatResponse,
     AIContextPresetResponse,
+    AIEntryPatch,
     AIGenerateRequest,
     AIGenerateResponse,
     AIHealthRequest,
@@ -35,6 +36,8 @@ from app.models import (
     ProjectCostChatRow,
     ProjectCostResponse,
     SaveChatSessionRequest,
+    ValidateEntryDraftRequest,
+    ValidateEntryPatchRequest,
 )
 from app.runtime import CurrentProject, translate_errors
 from app.services import machine_settings as machine_settings_service
@@ -1033,3 +1036,39 @@ def ai_context_preset(project: CurrentProject, kind: str = Query(...)) -> AICont
     with translate_errors():
         content = render_preset(project, kind)
     return AIContextPresetResponse(kind=kind, content=content)
+
+
+# --- The AI patch loop: one kind-neutral validate path (ADR-0048 §5) ---
+#
+# The propose → review → adopt → commit loop (ADR-0046) is node-shaped, not
+# lore-shaped: these two endpoints validate a brainstorm-commit reply against
+# ANY schema-typed node's `entry_type`. The target's kind rides in implicitly —
+# `entry-patch` resolves it from the node index by id, `entry-draft` takes the
+# entry_type FQN (`kind:key`) directly — so a later kind (e.g. `plot:card`)
+# reuses this exact review path rather than duplicating it (anti-goal 2). The
+# adopted result is written through each kind's own intentful save endpoint.
+
+
+@router.post("/api/ai/entry-patch/{node_id}", response_model=AIEntryPatch)
+def validate_ai_entry_patch(
+    project: CurrentProject, node_id: str, request: ValidateEntryPatchRequest
+) -> AIEntryPatch:
+    """Validate a brainstorm-commit reply into a review-ready patch for an
+    existing node (ADR-0046 §4/§6.3). Parses the model's JSON, validates each
+    proposed field against the node's resolved schema, drops the illegal ones
+    per-field, and flags a garbled reply. Read-only — the adopted patch is
+    written through the node's own save endpoint (`PUT /api/lore/{id}`, …)."""
+    with translate_errors():
+        return project.validate_ai_entry_patch(node_id, request.raw)
+
+
+@router.post("/api/ai/entry-draft", response_model=AIEntryPatch)
+def validate_ai_entry_draft(
+    project: CurrentProject, request: ValidateEntryDraftRequest
+) -> AIEntryPatch:
+    """Create-mode sibling of `/api/ai/entry-patch/{node_id}` (ADR-0046 §6.4):
+    no node exists yet, so the target `entry_type` rides in the body. Read-only
+    — the adopted draft is created through the kind's own create + save
+    endpoints (`POST /api/lore` + `PUT /api/lore/{id}`, …)."""
+    with translate_errors():
+        return project.validate_ai_entry_draft(request.entry_type, request.raw)

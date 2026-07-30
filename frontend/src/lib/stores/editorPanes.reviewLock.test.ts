@@ -10,7 +10,7 @@ import type { EditableDocument } from "@/lib/types";
 // brainstorm proposal is a frozen transaction: autosave is suppressed, the
 // pending edits are flushed on entry so the frozen diff == disk, and closing the
 // pane routes through the three-way Save-changes guard. The transaction's accept/
-// write logic is unit-tested at the controller (loreProposal.test); these pin the
+// write logic is unit-tested at the controller (entryProposal.test); these pin the
 // PANE-lifecycle half a browser can't cheaply exercise — that the freeze actually
 // suppresses the debounce, and that closing never silently drops adopted work.
 

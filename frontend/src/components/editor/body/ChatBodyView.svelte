@@ -29,7 +29,7 @@
   import ChatTranscript from "@/components/editor/body/chat/ChatTranscript.svelte";
   import ChatInputsStrip from "@/components/editor/body/chat/ChatInputsStrip.svelte";
   import ChatJournalScope from "@/components/editor/body/chat/ChatJournalScope.svelte";
-  import LoreDraftCard from "@/components/editor/body/chat/LoreDraftCard.svelte";
+  import EntryDraftCard from "@/components/editor/body/chat/EntryDraftCard.svelte";
   import { formatCostEur, formatTokens } from "@/lib/utils/money";
   import type {
     AssistantEntrySummary,
@@ -46,7 +46,7 @@
   } from "@/lib/types";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
-  import { loreBrainstorm } from "@/lib/stores/loreBrainstorm.svelte";
+  import { entryBrainstorm } from "@/lib/stores/entryBrainstorm.svelte";
   import { treeActions } from "@/lib/stores/treeActions.svelte";
   import { refreshChatSessions, refreshProjectCost } from "@/lib/stores/chats";
   import {
@@ -693,7 +693,7 @@
       if (patch.dropped.length > 0) {
         chatNotice = `Ignored ${patch.dropped.length} field(s) the model couldn't set legally: ${patch.dropped.join(", ")}.`;
       }
-      loreBrainstorm.propose(entryId, { body: patch.body, fields: patch.fields });
+      entryBrainstorm.propose(entryId, { body: patch.body, fields: patch.fields });
     } catch (e) {
       chatError = (e as Error).message;
     } finally {
@@ -1249,7 +1249,7 @@
       <!-- ADR-0046 §6.4: the whole proposed new entry, reviewed as a draft (no
            flip — nothing to diff against). Create runs the existing create path;
            Discard writes nothing. -->
-      <LoreDraftCard
+      <EntryDraftCard
         draft={draftProposal}
         dropped={draftDropped}
         {metadataSchema}

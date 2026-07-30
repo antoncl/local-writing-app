@@ -284,7 +284,10 @@ class MetadataValuesMixin:
                 f"(unknown item_group {field.item_group}?)."
             ]
         errors: list[str] = []
-        if field.item_type is not None:
+        # `item_scalar` is the resolver's tie-break verdict — never branch on
+        # the raw item_type here, which a cross-layer conflict can leave set
+        # while the stamped shape is the group's.
+        if field.item_scalar:
             member_field = self._group_member_as_field(members[0])
             for index, item in enumerate(value):
                 errors.extend(
@@ -293,14 +296,16 @@ class MetadataValuesMixin:
                     )
                 )
             return errors
-        member_defs = {member.key: member for member in members}
+        # Member field defs are built ONCE per call, not per item — validation
+        # runs on read too, so this is the hot loop of opening an entry.
+        member_fields = {member.key: self._group_member_as_field(member) for member in members}
         for index, item in enumerate(value):
             if not isinstance(item, dict):
                 errors.append(f"{label} metadata field {field_id}[{index}] must be a map of member values.")
                 continue
             for member_key, member_value in item.items():
-                member = member_defs.get(member_key)
-                if member is None:
+                member_field = member_fields.get(member_key)
+                if member_field is None:
                     errors.append(
                         f"{label} metadata field {field_id}[{index}] has unknown member {member_key}."
                     )
@@ -310,7 +315,7 @@ class MetadataValuesMixin:
                         label,
                         f"{field_id}[{index}].{member_key}",
                         member_value,
-                        self._group_member_as_field(member),
+                        member_field,
                         node_index=node_index,
                     )
                 )
@@ -462,7 +467,7 @@ class MetadataValuesMixin:
         yet fail every save. Same read-side contract as the field-level strip:
         the file keeps the stale key until the next save writes back clean."""
 
-        if field.type != "list" or field.item_type is not None or not isinstance(value, list):
+        if field.type != "list" or field.item_scalar or not isinstance(value, list):
             return value
         member_keys = {member.key for member in field.item_members or []}
         if not member_keys:

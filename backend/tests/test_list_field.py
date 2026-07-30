@@ -220,16 +220,28 @@ class ListFieldProjectTests(unittest.TestCase):
             "item_group": "open_question",
             "item_type": "text",
         }
+        character = data["entry_types"]["lore:character"]
+        character["fields"].append("conflicted")
         self.service._write_yaml(schema_path, data)
         # The schema stays READABLE (no raise) …
         schema = self.service.read_metadata_schema()
         # … the conflict is reported …
         errors = self.service._validate_metadata_schema_definition(schema)
         self.assertTrue(any("declares both item_group and item_type" in e for e in errors), errors)
-        # … and the resolver breaks the tie deterministically: item_group wins.
+        # … and the resolver breaks the tie deterministically: item_group wins,
+        # stamped as a NON-scalar shape.
         field = schema.fields["conflicted"]
         assert field.item_members is not None
         self.assertEqual([m.key for m in field.item_members], ["question", "status", "note"])
+        self.assertFalse(field.item_scalar)
+        # The tie-break must reach the SAVE path too — validation keys on
+        # item_scalar, not the raw item_type, so a record value validates as a
+        # record (not a flat scalar against members[0]) and the entry stays
+        # readable/saveable.
+        entry_id = self._create_character()
+        self._save_metadata(entry_id, {"conflicted": [{"question": "Who?", "status": "open"}]})
+        saved = self.service.read_lore_entry(entry_id)
+        self.assertEqual(saved.metadata["conflicted"], [{"question": "Who?", "status": "open"}])
 
     def test_neither_shape_key_is_a_soft_integrity_error(self) -> None:
         schema_path = self.root / "metadata.schema.yaml"
@@ -242,6 +254,78 @@ class ListFieldProjectTests(unittest.TestCase):
     def test_delete_group_refused_while_a_list_field_uses_it(self) -> None:
         with self.assertRaisesRegex(ProjectServiceError, "item shape of list field open_questions"):
             self.service.delete_metadata_group(DeleteMetadataGroupRequest(group_id="open_question"))
+
+    def test_unknown_group_with_sugar_falls_back_to_the_sugar(self) -> None:
+        # Tie-break edge: item_group set-but-unknown AND item_type present must
+        # fall back to the sugar (serviceable), not leave the field shapeless.
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data["fields"]["fallback"] = {
+            "name": "Fallback",
+            "type": "list",
+            "item_group": "nope",
+            "item_type": "text",
+        }
+        self.service._write_yaml(schema_path, data)
+        field = self.service.read_metadata_schema().fields["fallback"]
+        assert field.item_members is not None
+        self.assertTrue(field.item_scalar)
+        self.assertEqual(field.item_members[0].type, "text")
+
+    def test_multi_select_member_rejected_as_item_shape(self) -> None:
+        # The positive catalog check (LIST_ITEM_SCALAR_TYPES) closes the hole
+        # the old deny-tuple left: multi_select is a legal group member but not
+        # a legal list item shape.
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data["groups"]["ms"] = {"name": "MS", "members": [{"key": "tags", "name": "Tags", "type": "multi_select"}]}
+        data["fields"]["ms_list"] = {"name": "MS list", "type": "list", "item_group": "ms"}
+        self.service._write_yaml(schema_path, data)
+        errors = self.service._validate_metadata_schema_definition(self.service.read_metadata_schema())
+        self.assertTrue(any("member tags of type multi_select" in e for e in errors), errors)
+
+    def test_option_migration_preserves_duplicate_ordered_list_items(self) -> None:
+        # An ordered list legitimately repeats values — the migration must NOT
+        # de-duplicate the way multi_select does.
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data["fields"]["status_log"] = {
+            "name": "Status log", "type": "list", "item_type": "select", "options": ["open", "answered"],
+        }
+        data["entry_types"]["lore:character"]["fields"].append("status_log")
+        self.service._write_yaml(schema_path, data)
+        entry_id = self._create_character()
+        self._save_metadata(entry_id, {"status_log": ["open", "answered", "open"]})
+
+        from app.models import SelectOption
+
+        old_field = self.service.read_metadata_schema().fields["status_log"]
+        new_field = old_field.model_copy(
+            update={"options": [SelectOption(value="unresolved"), SelectOption(value="answered")]}
+        )
+        data = self.service._read_yaml(schema_path)
+        data["fields"]["status_log"]["options"] = ["unresolved", "answered"]
+        self.service._write_yaml(schema_path, data)
+        self.service._apply_option_value_changes(
+            self.root, "status_log", old_field, new_field, {"open": "unresolved"}
+        )
+        saved = self.service.read_lore_entry(entry_id)
+        self.assertEqual(saved.metadata["status_log"], ["unresolved", "answered", "unresolved"])
+
+    def test_move_field_refused_when_group_not_visible_at_target(self) -> None:
+        from app.models import MoveMetadataFieldRequest
+
+        layers = self.service.read_metadata_schema_layers().layers
+        series_layer = next(
+            layer for layer in layers
+            if Path(layer.folder_path).resolve() == (self.base / "universe" / "series").resolve()
+        )
+        with self.assertRaisesRegex(ProjectServiceError, "not defined at or above the target layer"):
+            self.service.move_metadata_field(
+                MoveMetadataFieldRequest(
+                    field_id="open_questions", target_layer_id=series_layer.id, entry_type="lore:character"
+                )
+            )
 
     def test_option_migration_rewrites_select_sugar_list_values(self) -> None:
         # list + item_type:select stores the same flat scalar sequence

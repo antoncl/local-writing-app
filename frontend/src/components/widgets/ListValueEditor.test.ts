@@ -13,6 +13,7 @@ const recordField: MetadataFieldDefinition = {
   type: "list",
   options: [],
   item_group: "open_question",
+  item_scalar: false,
   item_members: [
     { key: "question", name: "Question", type: "text" },
     {
@@ -29,6 +30,7 @@ const scalarField: MetadataFieldDefinition = {
   type: "list",
   options: [],
   item_type: "text",
+  item_scalar: true,
   item_members: [{ key: "value", name: "Aliases", type: "text" }],
 };
 

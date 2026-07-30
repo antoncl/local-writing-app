@@ -150,6 +150,7 @@ from app.models.project import (
     UpdateProjectSettingsRequest,
 )
 from app.models.schema import (
+    LIST_ITEM_SCALAR_TYPES,
     DeleteMetadataEntryTypeRequest,
     DeleteMetadataFieldRequest,
     DeleteMetadataGroupRequest,
@@ -157,6 +158,7 @@ from app.models.schema import (
     FieldOverride,
     GroupApplication,
     GroupMember,
+    ListItemScalarType,
     MetadataDefinitionSource,
     MetadataFieldDefinition,
     MetadataGroupDefinition,
@@ -267,6 +269,8 @@ __all__ = [
     "FieldReinterpretation",
     "GroupApplication",
     "GroupMember",
+    "LIST_ITEM_SCALAR_TYPES",
+    "ListItemScalarType",
     "KnownTags",
     "LoreEntry",
     "LoreEntryList",

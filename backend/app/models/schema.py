@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Final, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -12,6 +12,13 @@ from app.models.base import (
     _normalize_select_options,
 )
 from app.models_views import NodePickerConfig
+
+# The single catalog of scalar types a list item may be (#698) — the Literal
+# is the source, the frozenset its runtime mirror (via get_args, so the two
+# cannot drift). The schema-integrity member check is the POSITIVE form of
+# this same catalog: a group member type outside it cannot be an item shape.
+ListItemScalarType = Literal["text", "long_text", "number", "boolean", "select", "color"]
+LIST_ITEM_SCALAR_TYPES: Final[frozenset[str]] = frozenset(get_args(ListItemScalarType))
 
 
 class MetadataFieldDefinition(BaseModel):
@@ -47,9 +54,7 @@ class MetadataFieldDefinition(BaseModel):
     # ref would be a silent mis-link (enforced at schema-integrity time for
     # item_group; by the Literal below for item_type).
     item_group: str | None = None
-    item_type: (
-        Literal["text", "long_text", "number", "boolean", "select", "color"] | None
-    ) = None
+    item_type: ListItemScalarType | None = None
     # DERIVED, not authored (the `category` pattern): the resolved item shape
     # for list fields — the named group's members, or the item_type sugar
     # normalized to a one-member shape (key "value", options seeded from this
@@ -58,6 +63,13 @@ class MetadataFieldDefinition(BaseModel):
     # so both consume one internal model regardless of how the shape was
     # declared.
     item_members: list[GroupMember] | None = None
+    # DERIVED like `item_members`: True when the stamped shape is the
+    # item_type sugar (items store flat scalars), False when it is a group
+    # (items store member-keyed maps). This — never `item_type is not None` —
+    # is the shape discriminator every consumer must read: on a cross-layer
+    # both-keys conflict the resolver's tie-break decides, and a consumer
+    # keying on the raw declaration would take the losing side.
+    item_scalar: bool | None = None
     # Optional Tabler icon name (without the `ti-` prefix), e.g. "shield-half".
     # Empty/None falls back to the default glyph for the field's type
     # (see the metadata revision design). Display-only; the macro contract

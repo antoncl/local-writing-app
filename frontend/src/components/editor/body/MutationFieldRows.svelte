@@ -174,6 +174,12 @@
                 value: "",
               })}
           >
+            {#if row.field && !fieldOptions.some((f) => f.id === row.field)}
+              <!-- An existing row can target a field the roster now excludes
+                   (e.g. retyped to `list`, #698) — keep its target visible
+                   instead of a blank select the author can't interpret. -->
+              <option value={row.field} disabled>{labelFor(row.field)} — not mutable</option>
+            {/if}
             {#each fieldOptions as f (f.id)}
               <option value={f.id}>{f.label}</option>
             {/each}

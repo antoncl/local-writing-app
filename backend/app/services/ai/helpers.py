@@ -395,7 +395,10 @@ def _field_catalog(project: ProjectService, schema: Any, value: Any) -> list[dic
         # for a group shape. `items` mirrors the top-level descriptor shape
         # per member; templates test `f['items']` the way they test options.
         if field.type == "list" and field.item_members:
-            descriptor["item_scalar"] = field.item_type is not None
+            # The resolver's tie-break verdict, never the raw declaration —
+            # a cross-layer both-keys conflict would otherwise make this
+            # describe a record list as a flat scalar array.
+            descriptor["item_scalar"] = bool(field.item_scalar)
             descriptor["items"] = [
                 {
                     "key": member.key,

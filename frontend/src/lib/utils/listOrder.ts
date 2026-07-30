@@ -13,11 +13,13 @@ export function moveBefore<T>(ids: readonly T[], movedId: T, targetId: T): T[] {
 }
 
 // Index-based reorder for row widgets whose drop affordance distinguishes the
-// target row's top half ("before") from its bottom half ("after"). Lifted here
-// (#698) from the copies in SelectOptionsEditor / SchemaPanes /
-// GroupsManagerDialog so the removal-shift correction (`to > from ? to - 1`)
-// can't be forgotten by the next hand-rolled copy — omitting it makes every
-// downward drag land one row past the indicator.
+// target row's top half ("before") from its bottom half ("after"). The single
+// home for the removal-shift correction (`to > from ? to - 1`), which every
+// hand-rolled copy must get right or downward drags land one row past the
+// indicator. Callers: ListValueEditor, SelectOptionsEditor, SchemaPanes
+// (field order), GroupsManagerDialog (group members). (EntryInputsEditor
+// keeps its own final-index variant with an onInputsChange side effect —
+// a different contract, deliberately not folded in.)
 export function reorderByPosition<T>(
   list: readonly T[],
   from: number,

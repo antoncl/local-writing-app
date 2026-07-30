@@ -32,9 +32,12 @@
   let { field, value, onChange, readOnly = false, implicitContextMatcher = null }: Props = $props();
 
   const members = $derived(field.item_members ?? []);
-  /** item_type sugar → items are bare scalars (flat storage); group shape →
-   *  items are records keyed by member key. */
-  const scalarItems = $derived(field.item_type != null);
+  /** Scalar sugar → items are bare scalars (flat storage); group shape →
+   *  items are records keyed by member key. Reads the resolver's stamped
+   *  verdict, never `item_type`: a cross-layer both-keys conflict can leave
+   *  item_type set while the group won the tie, and branching on it here
+   *  would edit records through scalar inputs (destroying them). */
+  const scalarItems = $derived(field.item_scalar === true);
 
   const INLINE_MEMBER_TYPES = new Set(["text", "number", "select", "color", "boolean"]);
   const density = $derived(

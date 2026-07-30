@@ -55,6 +55,7 @@ from app.services.markdown_scan import (
 )
 from app.services.project.field_values import same_rendered_value
 from app.services.project.snapshot_drift import compare_witnesses
+from app.services.project.snapshot_witness import unwitnessed_field_ids
 
 # Blocks are separated by a blank line. The separator is kept as its own chunk
 # so the runs still reassemble to the source byte for byte.
@@ -199,6 +200,27 @@ class SnapshotDiffMixin:
             buffer_metadata=buffer_metadata,
             buffer_body=buffer_body,
         )
+        # A stored witness was written under the exclusion rules of ITS day.
+        # A field that has since become unwitnessed (e.g. a list whose group
+        # gained a long_text member, #698) is absent from the live side by
+        # rule, not by edit — prune it from the stored side too, or the
+        # report renders "value → (none)" for data that never changed.
+        excluded = unwitnessed_field_ids(self._witness_schema())
+        if stored is not None and excluded:
+            stored = stored.model_copy(
+                update={
+                    "entities": [
+                        entity.model_copy(
+                            update={
+                                "state": {k: v for k, v in entity.state.items() if k not in excluded},
+                                "field_types": {k: v for k, v in entity.field_types.items() if k not in excluded},
+                                "overrides": [k for k in entity.overrides if k not in excluded],
+                            }
+                        )
+                        for entity in stored.entities
+                    ]
+                }
+            )
         return compare_witnesses(stored, live_witness)
 
     def _snapshot_state(

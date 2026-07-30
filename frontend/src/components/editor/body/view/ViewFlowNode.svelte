@@ -684,7 +684,14 @@
       <!-- `list` is excluded (#698): the evaluator string-coerces operands,
            so a record item compares as "[object Object]" — a predicate that
            silently matches everything or nothing, and the literal slot would
-           persist raw records into the view spec. -->
+           persist raw records into the view spec. An EXISTING spec keyed on
+           one still shows its target (the organize-level fallback idiom)
+           instead of a blank, unreachable select. -->
+      {#if fieldKey && !nodeFields.some((f) => f.key === fieldKey && f.def.type !== "list")}
+        <option value={fieldKey} disabled>
+          {(nodeFields.find((f) => f.key === fieldKey)?.name ?? fieldKey) + " — not filterable"}
+        </option>
+      {/if}
       {#each nodeFields.filter((f) => f.def.type !== "list") as f (f.key)}
         <option value={f.key}>{f.name}</option>
       {/each}

@@ -13,6 +13,7 @@
   import SchemaTreePane from "@/components/schema/SchemaTreePane.svelte";
   import SchemaTypeEditor, { type TypeDraftPayload } from "@/components/schema/SchemaTypeEditor.svelte";
   import type { FieldDraftPayload } from "@/components/schema/SchemaFieldInlineEditor.svelte";
+  import { dropPositionFromEvent, reorderByPosition } from "@/lib/utils/listOrder";
   import type { OptionDraft } from "@/components/schema/SelectOptionsEditor.svelte";
   import GroupsManagerDialog from "@/components/dialogs/GroupsManagerDialog.svelte";
   import {
@@ -548,32 +549,47 @@
       payload.type === "list" &&
       ((previousField.item_group ?? null) !== (payload.itemGroup ?? null) ||
         (previousField.item_type ?? null) !== (payload.itemType ?? null));
-    if (shapeChanged) {
-      confirmService.request({
-        title: "Change this list's item shape?",
-        message:
-          "Existing items keep their current shape — they will show as unrecognized and " +
-          "entries that carry them cannot be saved until those items are re-entered or removed.",
-        confirmLabel: "Change shape & save",
-        destructive: true,
-        cannotBeUndone: true,
-        onConfirm: persist,
-      });
-      return;
-    }
 
+    // Confirms COMPOSE — a save can both change the item shape and remove
+    // option values, and each warning names a different loss, so neither may
+    // swallow the other. Chain from the last step back to persist. The shape
+    // confirm deliberately has NO dontShowAgainKey: suppressing it would
+    // rebuild the silent structural change the gesture exists to stop (the
+    // LayerAuthoringBar precedent).
+    let commit: () => Promise<void> = persist;
     if (removedValues.length > 0) {
-      confirmService.request({
-        title: removedValues.length > 1 ? "Remove these option values?" : "Remove this option value?",
-        message: `Removing ${removedValues.join(", ")} will clear ${removedValues.length > 1 ? "them" : "it"} from every document that currently uses ${removedValues.length > 1 ? "them" : "it"}.`,
-        confirmLabel: "Remove & save",
-        destructive: true,
-        cannotBeUndone: true,
-        dontShowAgainKey: "removeSelectOptions",
-        onConfirm: persist,
-      });
-    } else {
+      const next = commit;
+      commit = async () => {
+        confirmService.request({
+          title: removedValues.length > 1 ? "Remove these option values?" : "Remove this option value?",
+          message: `Removing ${removedValues.join(", ")} will clear ${removedValues.length > 1 ? "them" : "it"} from every document that currently uses ${removedValues.length > 1 ? "them" : "it"}.`,
+          confirmLabel: "Remove & save",
+          destructive: true,
+          cannotBeUndone: true,
+          dontShowAgainKey: "removeSelectOptions",
+          onConfirm: next,
+        });
+      };
+    }
+    if (shapeChanged) {
+      const next = commit;
+      commit = async () => {
+        confirmService.request({
+          title: "Change this list's item shape?",
+          message:
+            "Existing items keep their current shape — they will show as unrecognized and " +
+            "entries that carry them cannot be saved until those items are re-entered or removed.",
+          confirmLabel: "Change shape & save",
+          destructive: true,
+          cannotBeUndone: true,
+          onConfirm: next,
+        });
+      };
+    }
+    if (commit === persist) {
       await run(persist);
+    } else {
+      await commit();
     }
   }
 
@@ -752,24 +768,6 @@
       }
     }
     return Object.keys(migration).length > 0 ? migration : null;
-  }
-
-  // Shared drop-position helper: before/after based on cursor vs row midpoint.
-  // Mirrors the NodeRow tree-drag marker so every reorderable list reads the
-  // same way (a 2px accent insertion line; see .drop-before/.drop-after CSS).
-  function dropPositionFromEvent(event: DragEvent): "before" | "after" {
-    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    return event.clientY < rect.top + rect.height / 2 ? "before" : "after";
-  }
-  // Reorder helper: move `from` index to before/after `to` index.
-  function reorderByPosition<T>(list: T[], from: number, to: number, position: "before" | "after"): T[] {
-    if (from < 0 || to < 0) return list;
-    const next = [...list];
-    const [moved] = next.splice(from, 1);
-    let insertAt = to > from ? to - 1 : to;
-    if (position === "after") insertAt += 1;
-    next.splice(insertAt, 0, moved);
-    return next;
   }
 
   function onFieldDragStart(fieldId: string) {

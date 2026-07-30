@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from app.models import (
+    LIST_ITEM_SCALAR_TYPES,
     DeleteMetadataEntryTypeRequest,
     DeleteMetadataFieldRequest,
     EntryTypeDefinition,
@@ -587,7 +588,7 @@ class MetadataSchemaMixin:
         if not isinstance(fields, dict):
             fields = {}
         fields[field_id] = request.field.model_dump(
-            exclude_none=True, exclude={"category", "group_origin", "item_members"}
+            exclude_none=True, exclude={"category", "group_origin", "item_members", "item_scalar"}
         )
         layer_data["fields"] = fields
 
@@ -656,6 +657,18 @@ class MetadataSchemaMixin:
             raise ProjectServiceError("Unknown metadata schema layer.", 404)
         if source_path == target_path:
             return schema
+
+        if field.type == "list" and field.item_group:
+            # Same at-or-above rule as upsert (#698 × ADR-0045): the candidate
+            # validation below merges the WHOLE chain, so it cannot see that a
+            # move above the group's layer strands every sibling project.
+            visible_groups = self._read_metadata_schema_through_path(root, target_path).groups
+            if field.item_group not in visible_groups:
+                raise ProjectServiceError(
+                    f"Group {field.item_group} is not defined at or above the target layer; "
+                    "move the group first, or keep the field in the layer that can see it.",
+                    422,
+                )
 
         source_data = self._read_yaml(source_path) if source_path.exists() else self._empty_metadata_schema()
         target_data = self._read_yaml(target_path) if target_path.exists() else self._empty_metadata_schema()
@@ -776,7 +789,7 @@ class MetadataSchemaMixin:
         # `field` may come from the RESOLVED schema (move path), which carries
         # resolver-stamped derived keys — never persist those into a layer.
         fields[field_id] = field.model_dump(
-            exclude_none=True, exclude={"category", "group_origin", "item_members"}
+            exclude_none=True, exclude={"category", "group_origin", "item_members", "item_scalar"}
         )
         layer_data["fields"] = fields
 
@@ -893,8 +906,11 @@ class MetadataSchemaMixin:
         """
 
         def carries_options(field: MetadataFieldDefinition) -> bool:
+            # For a list field the sugar carries the options — but only when
+            # the sugar is actually the shape (a resolvable item_group wins a
+            # cross-layer tie, and then the options are dead weight).
             return field.type in ("select", "multi_select") or (
-                field.type == "list" and field.item_type == "select"
+                field.type == "list" and field.item_type == "select" and not field.item_group
             )
 
         if not carries_options(old_field) or not carries_options(new_field):
@@ -904,20 +920,26 @@ class MetadataSchemaMixin:
         if not rename and not valid and not old_field.options:
             return
 
+        # multi_select is a SET, so its migration de-duplicates; an ordered
+        # list legitimately repeats values (that is the point of an ordered
+        # log), so its items must survive the rewrite verbatim-in-order.
+        ordered = old_field.type == "list"
         for path in self._entry_markdown_paths(root):
             front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
             metadata = front_matter.get("metadata")
             if not isinstance(metadata, dict) or field_id not in metadata:
                 continue
             value = metadata[field_id]
-            next_value = self._clean_option_value(value, rename, valid)
+            next_value = self._clean_option_value(value, rename, valid, ordered=ordered)
             if next_value == value:
                 continue
             metadata[field_id] = next_value
             front_matter["metadata"] = metadata
             self._write_markdown_with_front_matter(path, front_matter, body)
 
-    def _clean_option_value(self, value: Any, rename: dict[str, str], valid: set[str]) -> Any:
+    def _clean_option_value(
+        self, value: Any, rename: dict[str, str], valid: set[str], *, ordered: bool = False
+    ) -> Any:
         if isinstance(value, list):
             out: list[Any] = []
             seen: set[str] = set()
@@ -926,7 +948,7 @@ class MetadataSchemaMixin:
                     out.append(item)
                     continue
                 mapped = rename.get(item, item)
-                if mapped not in valid or mapped in seen:
+                if mapped not in valid or (not ordered and mapped in seen):
                     continue
                 seen.add(mapped)
                 out.append(mapped)
@@ -1211,12 +1233,14 @@ class MetadataSchemaMixin:
                     field_def["category"] = "computed"
                 else:
                     field_def["category"] = "stored"
-                # item_members is DERIVED: purge any persisted/authored copy
-                # unconditionally, then re-stamp for list fields. A stale copy
-                # would otherwise survive group deletion/rename (validating
-                # values against a shape that no longer exists), and a
-                # hand-authored one would bypass the member-type ban.
+                # item_members / item_scalar are DERIVED: purge any persisted
+                # or authored copy unconditionally, then re-stamp for list
+                # fields. A stale copy would otherwise survive group
+                # deletion/rename (validating values against a shape that no
+                # longer exists), and a hand-authored one would bypass the
+                # member-type ban.
                 field_def.pop("item_members", None)
+                field_def.pop("item_scalar", None)
                 if field_def.get("type") == "list":
                     self._stamp_list_item_members(field_key, field_def, groups)
         return resolved_data
@@ -1227,17 +1251,25 @@ class MetadataSchemaMixin:
     ) -> None:
         """Stamp the resolved item shape on a list field (#698, ADR-0048 §6).
 
-        Derived like `category`, never persisted: the named group's members,
-        or the `item_type` sugar normalized to a one-member shape (key
-        "value", options seeded from the field's own `options`). Downstream —
-        validation and the UI — reads only `item_members`, one internal model
-        for both declarations. An unknown `item_group` leaves the stamp
-        absent; schema-integrity validation reports it. When a cross-layer
-        merge produced BOTH keys, item_group wins (the deterministic tie-break
-        the integrity error announces)."""
+        Derived like `category`, never persisted: `item_members` is the named
+        group's members, or the `item_type` sugar normalized to a one-member
+        shape (key "value", options seeded from the field's own `options`);
+        `item_scalar` records WHICH shape won, and is the only discriminator
+        downstream consumers may read — never the raw declaration keys, which
+        a cross-layer merge can leave in conflict. Tie-break: a RESOLVABLE
+        item_group wins; an unknown group falls back to the sugar so the
+        field stays serviceable (integrity reports the conflict either way).
+        A field with neither (or an unknown group and no sugar) stays
+        unstamped; integrity reports it."""
 
-        group_id_raw = field_def.get("item_group")
-        item_type = None if isinstance(group_id_raw, str) and group_id_raw else field_def.get("item_type")
+        group_id = field_def.get("item_group")
+        group = groups.get(group_id) if isinstance(group_id, str) and group_id else None
+        members = group.get("members") if isinstance(group, dict) else None
+        if isinstance(members, list):
+            field_def["item_members"] = deepcopy(members)
+            field_def["item_scalar"] = False
+            return
+        item_type = field_def.get("item_type")
         if isinstance(item_type, str) and item_type:
             field_def["item_members"] = [
                 {
@@ -1247,12 +1279,7 @@ class MetadataSchemaMixin:
                     "options": deepcopy(field_def.get("options", [])),
                 }
             ]
-            return
-        group_id = field_def.get("item_group")
-        group = groups.get(group_id) if isinstance(group_id, str) else None
-        members = group.get("members") if isinstance(group, dict) else None
-        if isinstance(members, list):
-            field_def["item_members"] = deepcopy(members)
+            field_def["item_scalar"] = True
 
     def _merge_metadata_entry_types(self, base: Any, layer: Any) -> Any:
         if not isinstance(base, dict):
@@ -1399,37 +1426,44 @@ class MetadataSchemaMixin:
             if field.computed:
                 errors.append(f"Metadata field {field_id} has computed settings but is not type computed.")
             if field.type == "list":
-                # List fields (#698, ADR-0048 §6). The shape rules are SOFT
-                # errors, not model validators: layers merge field defs by key
-                # union, so an ancestor's item_group and a child's item_type
-                # can legitimately meet in one merged def — a raising validator
-                # would make the merged schema unreadable (500 on every read).
-                # The resolver breaks a both-keys tie via item_group; these
-                # report the conflict so the author can resolve it.
-                if field.item_group is None and field.item_type is None:
-                    errors.append(f"List metadata field {field_id} declares neither item_group nor item_type.")
-                elif field.item_group is not None and field.item_type is not None:
-                    errors.append(
-                        f"List metadata field {field_id} declares both item_group and item_type "
-                        "(a cross-layer conflict?); item_group wins until one is removed."
-                    )
-                if field.item_group is not None:
-                    group = schema.groups.get(field.item_group)
-                    if group is None:
-                        errors.append(f"List metadata field {field_id} references unknown group {field.item_group}.")
-                    else:
-                        # Members stay inside the v1 item-shape catalog —
-                        # reference-typed members are excluded because the
-                        # read-side healers only walk top-level values, and a
-                        # nested ref they cannot heal or purge would be a
-                        # silent mis-link; `date` is excluded because it is a
-                        # deprecated type that gets no new affordances.
-                        for member in group.members:
-                            if member.type in ("entity_ref", "entity_ref_list", "tags", "date"):
-                                errors.append(
-                                    f"List metadata field {field_id} item shape {field.item_group} has "
-                                    f"member {member.key} of type {member.type}, which list items do not support."
-                                )
+                errors.extend(self._list_field_schema_errors(field_id, field, schema))
             elif field.item_group is not None or field.item_type is not None:
                 errors.append(f"Metadata field {field_id} has item shape settings but is not type list.")
+        return errors
+
+    @staticmethod
+    def _list_field_schema_errors(field_id: str, field: MetadataFieldDefinition, schema: MetadataSchema) -> list[str]:
+        """Shape rules for a list field (#698, ADR-0048 §6) — SOFT errors, not
+        model validators: layers merge field defs by key union, so an
+        ancestor's item_group and a child's item_type can legitimately meet in
+        one merged def, and a raising validator would make the merged schema
+        unreadable (500 on every read). The resolver's tie-break (a resolvable
+        item_group wins, else the item_type sugar) keeps reads serviceable;
+        these report the states the author should fix."""
+
+        errors: list[str] = []
+        if field.item_group is None and field.item_type is None:
+            errors.append(f"List metadata field {field_id} declares neither item_group nor item_type.")
+        elif field.item_group is not None and field.item_type is not None:
+            errors.append(
+                f"List metadata field {field_id} declares both item_group and item_type; "
+                "remove one of them from the layer that added it (the resolved schema uses the group while it exists)."
+            )
+        if field.item_group is not None:
+            group = schema.groups.get(field.item_group)
+            if group is None:
+                errors.append(f"List metadata field {field_id} references unknown group {field.item_group}.")
+            else:
+                # Members must stay inside the one scalar catalog
+                # (LIST_ITEM_SCALAR_TYPES) — the POSITIVE form of the item_type
+                # Literal, so the two cannot drift. Reference-typed members are
+                # out because the read-side healers only walk top-level values
+                # (a nested ref they cannot heal or purge is a silent
+                # mis-link); date and multi_select carry no item affordances.
+                for member in group.members:
+                    if member.type not in LIST_ITEM_SCALAR_TYPES:
+                        errors.append(
+                            f"List metadata field {field_id} item shape {field.item_group} has "
+                            f"member {member.key} of type {member.type}, which list items do not support."
+                        )
         return errors

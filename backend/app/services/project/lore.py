@@ -294,6 +294,15 @@ class LoreEntriesMixin:
             record for record in index.overrides_by_target.get(entry_id, []) if record.layer_rank < authoring_layer.rank
         ]
         base_above_layer, _ = self.materialize_override_metadata(base_metadata, records_above, field_types)
+        # Symmetry with the read (#698): `submitted` is the client's echo of
+        # `read_lore_entry`, whose list values were healed by
+        # `_strip_unknown_list_members` — heal the raw base the same way, or a
+        # retired group member makes every list look edited and trips the
+        # list-override refusal on saves that never touched it.
+        base_above_layer = {
+            key: self._strip_unknown_list_members(schema.fields[key], value) if key in schema.fields else value
+            for key, value in base_above_layer.items()
+        }
         # Diff raw-vs-raw: `base_above_layer` comes from the raw owning file, so
         # canonicalising `submitted` first would diff a canonical value against a
         # raw one and mint spurious tag rows (and defeat revert-to-canon). Tag

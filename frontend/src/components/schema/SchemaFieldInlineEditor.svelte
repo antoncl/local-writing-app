@@ -1,4 +1,5 @@
 <script lang="ts" module>
+  import { LIST_ITEM_SCALAR_TYPES } from "@/lib/types";
   import type {
     ListItemScalarType,
     MetadataFieldType,
@@ -28,16 +29,6 @@
     itemType: ListItemScalarType | null;
   };
 
-  // The scalar choices offered for "Items are → a single value…". Mirrors the
-  // backend's item_type Literal (references/tags are excluded in v1).
-  export const LIST_ITEM_SCALAR_CHOICES: ListItemScalarType[] = [
-    "text",
-    "long_text",
-    "number",
-    "boolean",
-    "select",
-    "color",
-  ];
 </script>
 
 <script lang="ts">
@@ -158,13 +149,21 @@
   const itemType = $derived(
     itemShape.startsWith("scalar:") ? (itemShape.slice(7) as ListItemScalarType) : null,
   );
-  // Groups offered as item shapes: reference/tags/date members are legal to
-  // APPLY (flattened) but not inside list items (v1) — offering such a group
-  // here would just 422 on save, so it is filtered out.
+  // Groups offered as item shapes: only members inside the one scalar
+  // catalog (LIST_ITEM_SCALAR_TYPES — same source as the backend's positive
+  // integrity check). A group with, e.g., an entity_ref member is legal to
+  // APPLY (flattened) but would 422 as an item shape, so it isn't offered.
   const shapeableGroups = $derived(
     Object.entries(groups).filter(([, groupDef]) =>
-      groupDef.members.every((m) => !["entity_ref", "entity_ref_list", "tags", "date"].includes(m.type)),
+      groupDef.members.every((m) => (LIST_ITEM_SCALAR_TYPES as readonly string[]).includes(m.type)),
     ),
+  );
+  // An EXISTING field can point at a group the filter above excludes (the
+  // group gained an unsupported member later) or that no longer exists — the
+  // select must still show the field's real shape rather than render blank
+  // and unreachable (the organize-level fallback idiom).
+  const currentShapeMissing = $derived(
+    itemGroup !== null && !shapeableGroups.some(([groupId]) => groupId === itemGroup),
   );
   let typeMenuOpen = $state(false);
   let keyEditing = $state(false);
@@ -361,6 +360,13 @@
           {#if !itemShape}
             <option value="" disabled>Choose an item shape…</option>
           {/if}
+          {#if currentShapeMissing}
+            <!-- The field's real shape stays representable even when the
+                 group is filtered out (unsupported members) or deleted. -->
+            <option value={`group:${itemGroup}`} disabled>
+              {groups[itemGroup ?? ""]?.name ?? itemGroup} (current shape — unsupported members)
+            </option>
+          {/if}
           {#if shapeableGroups.length > 0}
             <optgroup label="A group…">
               {#each shapeableGroups as [groupId, groupDef] (groupId)}
@@ -371,7 +377,7 @@
             </optgroup>
           {/if}
           <optgroup label="A single value…">
-            {#each LIST_ITEM_SCALAR_CHOICES as scalarChoice (scalarChoice)}
+            {#each LIST_ITEM_SCALAR_TYPES as scalarChoice (scalarChoice)}
               <option value={`scalar:${scalarChoice}`}>{fieldTypeLabel(scalarChoice)}</option>
             {/each}
           </optgroup>

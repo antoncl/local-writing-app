@@ -47,18 +47,10 @@ def display_value(value: Any) -> str:
     if value is None:
         return ""
     if isinstance(value, list):
-        return ", ".join(
-            rendered
-            for item in value
-            if item not in (None, "")
-            for rendered in (display_value(item),)
-            if rendered
-        )
+        return ", ".join(rendered for item in value if (rendered := display_value(item)))
     if isinstance(value, dict):
         # A list item's record (#698): name its member values, joined the way
         # the rail's collapsed row does — str(dict) is the Python-repr leak
         # this function's docstring exists to prevent.
-        return " · ".join(
-            rendered for member in value.values() for rendered in (display_value(member),) if rendered
-        )
+        return " · ".join(rendered for member in value.values() if (rendered := display_value(member)))
     return str(value)

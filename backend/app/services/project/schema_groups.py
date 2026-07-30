@@ -58,6 +58,11 @@ class MetadataSchemaGroupsMixin:
         # group. Deleting the shape out from under stored items would strand
         # them (every save 422s, including clearing the list), so refuse the
         # same way the applications guard does.
+        # KNOWN LIMIT (shared with the applications guard above): both scan
+        # only THIS project's merged chain, while the removal below rewrites
+        # every layer file — a sibling project's own-layer reference to a
+        # shared-layer group is invisible from here. Closing that needs a
+        # cross-project scan under the machine root (filed follow-up).
         for field_id, field in schema.fields.items():
             if field.type == "list" and field.item_group == group_id:
                 raise ProjectServiceError(

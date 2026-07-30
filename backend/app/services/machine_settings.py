@@ -264,6 +264,14 @@ def assistant_tags_path() -> Path:
     return config_path().parent / ASSISTANT_TAGS_FILENAME
 
 
+def error_log_dir() -> Path:
+    """Folder holding the machine-scope `errors.log` (#741) — the config dir, a
+    sibling of `config.yaml` — used when a failure has no project bound (a
+    project-open failure, a landing-screen error). Derived from config_path() so
+    test fixtures patching the config path isolate it too."""
+    return config_path().parent
+
+
 def load_assistant_tags() -> list[AssistantTag]:
     """Read the assistant-tag vocabulary; a missing/malformed file → empty."""
     path = assistant_tags_path()

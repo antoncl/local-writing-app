@@ -14,6 +14,7 @@
   import { api } from "@/lib/api";
   import { bumpTagVocabularyRevision } from "@/lib/stores/tags";
   import NodePickerConfigEditor from "@/components/schema/NodePickerConfigEditor.svelte";
+  import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import { pickerMembership } from "@/lib/utils/pickerSources";
   import type { NodePickerConfig, ScopedTag } from "@/lib/types";
 
@@ -156,6 +157,18 @@
     await loadCounts();
     // App reconciles roster + entry lists + open editors off this bump.
     bumpTagVocabularyRevision();
+  }
+
+  async function setColor(name: string, color: string | null) {
+    // Colour is a quiet, non-destructive governance choice (the swatch owns it —
+    // no ⋯ menu item), so no busy-lock or confirm; just persist and reconcile.
+    error = "";
+    try {
+      await api.setTagColor(name, color);
+      await afterOp();
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
   }
 
   async function saveScope(name: string) {
@@ -334,6 +347,9 @@
     <div class="trp-rows" role="list">
       {#each shown as tag (tag.name)}
         <div class="trp-row" role="listitem">
+          <span class="trp-swatch">
+            <SwatchPicker value={tag.color ?? null} onChange={(id) => setColor(tag.name, id)} />
+          </span>
           <button
             class="trp-add"
             class:active={selectedKeys.has(tag.name.toLowerCase())}
@@ -437,6 +453,11 @@
   }
   .trp-row:hover {
     background: var(--inset);
+  }
+  .trp-swatch {
+    flex: none;
+    display: inline-flex;
+    padding-left: 4px;
   }
   .trp-add {
     flex: 1 1 auto;

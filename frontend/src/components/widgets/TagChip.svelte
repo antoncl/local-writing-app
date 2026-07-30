@@ -6,20 +6,29 @@
   // the chip's measured width (the tip stays a fixed length; only the body grows),
   // which is also what lets it carry a stroke the CSS `clip-path` route can't.
   //
-  // Colour is deliberately NOT here yet: tags are neutral by default and colour is
-  // an opt-in governance choice (a following slice), so slice 1 renders neutral
-  // (known) and outlined (pending = a tag that will be created on save) only.
+  // Colour is neutral by default and an opt-in governance choice (#247, PR-2): a
+  // tag carries no colour until someone spends one on it, so most chips render
+  // neutral (var(--inset)) and recede; a coloured tag fills with its swatch hex so
+  // the few axes the writer scans by actually pop. The hex is applied inline (the
+  // value is per-tag, not a token), which the style-token guard leaves alone.
+  import { getSwatch } from "@/lib/utils/colors";
+
   interface Props {
     name: string;
     /** A tag not yet in the vocabulary — outlined, "will be created on save". */
     pending?: boolean;
+    /** The tag's colour: a palette swatch id, or null/undefined for neutral. */
+    color?: string | null;
     /** Show the × at the tip. Editable field only; read-only display omits it. */
     removable?: boolean;
     onRemove?: () => void;
     /** Context for the remove button's aria-label (e.g. the field name). */
     ariaContext?: string;
   }
-  let { name, pending = false, removable = false, onRemove, ariaContext }: Props = $props();
+  let { name, pending = false, color = null, removable = false, onRemove, ariaContext }: Props = $props();
+
+  // A pending tag has no committed colour, so its outline treatment always wins.
+  const hex = $derived(!pending && color ? (getSwatch(color)?.hex ?? null) : null);
 
   const TIP = 11; // fixed tip length in px; the body flexes with the label
   const R = 6; // corner radius on the (left) squared end
@@ -43,7 +52,9 @@
 <span class="tag-chip" class:pending class:removable bind:clientWidth={w}>
   {#if path}
     <svg class="tag-chip-shape" width={w} height={H} viewBox={`0 0 ${w} ${H}`} aria-hidden="true">
-      <path d={path} />
+      <!-- Per-tag hex fill (inline, so not a token) overrides the neutral CSS
+           fill; the stroke stays the neutral border for a quiet edge. -->
+      <path d={path} style={hex ? `fill: ${hex}` : undefined} />
     </svg>
   {/if}
   <span class="tag-chip-label">{name}</span>

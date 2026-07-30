@@ -29,6 +29,7 @@ from app.models import (
     TagLayerRef,
     TagsOverview,
     TagUsage,
+    UpdateTagColorRequest,
     UpdateTagScopeRequest,
 )
 from app.services.project.errors import ProjectServiceError
@@ -72,10 +73,17 @@ class _TagRegistryMerger(LayerVisitor):
                 # stable as descendants are added, and a book's typo cannot
                 # restyle the world's vocabulary. Deliberately the inverse of the
                 # schema merge's nearer-wins — tags union rather than shadow.
-                self.by_lower[key] = ScopedTag(name=tag.name, scope=tag.scope, source_layers=[ref])
+                self.by_lower[key] = ScopedTag(
+                    name=tag.name, scope=tag.scope, source_layers=[ref], color=tag.color
+                )
             else:
                 existing.scope = self._owner._union_node_picker_scope(existing.scope, tag.scope)
                 existing.source_layers.append(ref)
+                # Colour is a single value, not a union like scope: the nearest
+                # asserting layer wins. The walk is outermost → root, so a later
+                # (nearer) non-null colour overrides the ancestor's (#247).
+                if tag.color is not None:
+                    existing.color = tag.color
         if self._up_to_layer_id is not None and layer.id == self._up_to_layer_id:
             self.saw_target = True
             self._stopped = True
@@ -116,12 +124,14 @@ class TagsMixin:
             if isinstance(raw, str):
                 name = raw.strip()
                 scope = NodePickerConfig()
+                color = None
             elif isinstance(raw, dict):
                 name = str(raw.get("name", "")).strip()
                 try:
                     scope = NodePickerConfig.model_validate(raw.get("scope") or {})
                 except Exception:  # noqa: BLE001
                     scope = NodePickerConfig()
+                color = raw.get("color") or None
             else:
                 continue
             if not name:
@@ -129,8 +139,10 @@ class TagsMixin:
             key = name.lower()
             if key in by_lower:
                 by_lower[key].scope = self._union_node_picker_scope(by_lower[key].scope, scope)
+                if by_lower[key].color is None:
+                    by_lower[key].color = color
             else:
-                by_lower[key] = ScopedTag(name=name, scope=scope)
+                by_lower[key] = ScopedTag(name=name, scope=scope, color=color)
         return by_lower
 
     def _tag_scope_for_node(self, kind: str, entry_type: str) -> NodePickerConfig:
@@ -229,10 +241,14 @@ class TagsMixin:
         """
         target = folder if folder is not None else self._require_project()
         ordered = sorted(tags, key=lambda tag: tag.name.lower())
-        self._write_yaml(
-            target / "tags.yaml",
-            {"tags": [{"name": tag.name, "scope": tag.scope.model_dump(exclude_none=True)} for tag in ordered]},
-        )
+        records: list[dict[str, Any]] = []
+        for tag in ordered:
+            record: dict[str, Any] = {"name": tag.name, "scope": tag.scope.model_dump(exclude_none=True)}
+            # Omit colour when unset so a tag with no colour stays a two-key record.
+            if tag.color is not None:
+                record["color"] = tag.color
+            records.append(record)
+        self._write_yaml(target / "tags.yaml", {"tags": records})
 
     def _ancestor_document_tags(self, root: Path) -> set[str]:
         """Lowercased tag names carried by documents in layers *above* the open
@@ -291,6 +307,7 @@ class TagsMixin:
                     name=scoped.name if scoped else display.get(key, key),
                     scope=scoped.scope if scoped else NodePickerConfig(),
                     count=counts.get(key, 0),
+                    color=scoped.color if scoped else None,
                 )
             )
         usages.sort(key=lambda usage: usage.name.lower())
@@ -333,6 +350,40 @@ class TagsMixin:
                 local[key] = ScopedTag(name=existing.name if existing else name, scope=delta)
             else:
                 # Fully covered by inheritance — this layer asserts nothing.
+                local.pop(key, None)
+        self._write_scoped_tags(list(local.values()))
+        return self.read_known_tags()
+
+    def update_tag_color(self, request: UpdateTagColorRequest) -> KnownTags:
+        """Set (or clear) a tag's colour on this layer's own record.
+
+        Colour has none of scope's union/broaden concerns — it is a single value
+        the nearest layer wins (`_TagRegistryMerger`). So this just writes a local
+        assertion, creating a record for an inherited-only tag. That record
+        carries an empty scope, which contributes no sources to the merged scope
+        union (`_union_node_picker_scope` treats empty as "adds nothing"), so
+        colouring an inherited tag never widens it. Clearing colour drops a record
+        that would otherwise assert nothing, keeping `tags.yaml` minimal.
+        """
+        root = self._require_project()
+        name = request.name.strip()
+        if not name:
+            raise ProjectServiceError("Tag name is required.", 422)
+        key = name.lower()
+        merged = {tag.name.lower(): tag for tag in self.read_known_tags().tags}
+        local = self._read_layer_tags(root)
+        record = local.get(key)
+        if request.color:
+            if record is None:
+                canonical = merged.get(key)
+                record = ScopedTag(name=canonical.name if canonical else name)
+                local[key] = record
+            record.color = request.color
+        elif record is not None:
+            # Clearing: drop the colour, and the whole local record if it now
+            # asserts nothing (no local scope) — a bare `{name}` is noise.
+            record.color = None
+            if not record.scope.kinds and not record.scope.entry_types:
                 local.pop(key, None)
         self._write_scoped_tags(list(local.values()))
         return self.read_known_tags()
@@ -437,12 +488,15 @@ class TagsMixin:
         #    the whole story.
         local = self._read_layer_tags(root)
         union = local[target.lower()].scope if target.lower() in local else NodePickerConfig()
+        # The survivor keeps its OWN colour; the merged-away sources drop theirs
+        # with their records (they never fold in). A brand-new target has none.
+        survivor_color = local[target.lower()].color if target.lower() in local else None
         for source in sources:
             scoped = local.get(source.lower())
             if scoped:
                 union = self._union_node_picker_scope(union, scoped.scope)
         for source_lower in source_lowers:
             local.pop(source_lower, None)
-        local[target.lower()] = ScopedTag(name=target, scope=union)
+        local[target.lower()] = ScopedTag(name=target, scope=union, color=survivor_color)
         self._write_scoped_tags(list(local.values()))
         return self.read_known_tags()

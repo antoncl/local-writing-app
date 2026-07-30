@@ -82,6 +82,7 @@ from app.models.annotations import (
     TodoItem,
     UpdateEmbeddedTodoRequest,
     UpdateMutationRequest,
+    UpdateTagColorRequest,
     UpdateTagScopeRequest,
     UpdateTodoRequest,
 )
@@ -369,6 +370,7 @@ __all__ = [
     "UpdateEmbeddedTodoRequest",
     "UpdateMutationRequest",
     "UpdateProjectSettingsRequest",
+    "UpdateTagColorRequest",
     "UpdateTagScopeRequest",
     "UpdateTodoRequest",
     "UpsertMetadataEntryTypeRequest",

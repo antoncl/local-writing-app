@@ -18,6 +18,7 @@ from app.models import (
     SetFieldOverrideRequest,
     SetGroupApplicationsRequest,
     TagsOverview,
+    UpdateTagColorRequest,
     UpdateTagScopeRequest,
     UpsertMetadataEntryTypeRequest,
     UpsertMetadataFieldRequest,
@@ -65,6 +66,12 @@ def get_tags_overview(project: CurrentProject) -> TagsOverview:
 def update_tag_scope(project: CurrentProject, request: UpdateTagScopeRequest) -> KnownTags:
     with translate_errors():
         return project.update_tag_scope(request)
+
+
+@router.put("/api/tags/color", response_model=KnownTags)
+def update_tag_color(project: CurrentProject, request: UpdateTagColorRequest) -> KnownTags:
+    with translate_errors():
+        return project.update_tag_color(request)
 
 
 @router.post("/api/tags/merge", response_model=KnownTags)

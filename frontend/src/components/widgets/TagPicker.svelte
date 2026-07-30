@@ -5,7 +5,7 @@
   import { portalToBody } from "@/lib/actions/portal";
   import TagChip from "@/components/widgets/TagChip.svelte";
   import TagRosterPopover from "@/components/widgets/TagRosterPopover.svelte";
-  import { parseTagList } from "@/lib/utils/tags";
+  import { parseTagList, tagColorMap } from "@/lib/utils/tags";
 
   export let value: string = "";
   export let knownTags: ScopedTag[] = [];
@@ -38,6 +38,8 @@
   // "Known" means present in the vocabulary at all — a known-but-out-of-scope tag
   // is still known (not pending). Scope only governs what the + *suggests*.
   $: knownKeys = new Set(knownTags.map((t) => t.name.toLowerCase()));
+  // Lowercased-name → swatch id, so a committed chip renders its tag's colour.
+  $: colorMap = tagColorMap(knownTags);
   // Per-chip pending state, computed in ONE reactive statement that reads both
   // `chips` and `knownKeys` — so "will be created" re-evaluates when the roster
   // loads or a just-created tag is registered. A template `pending={!isKnown(tag)}`
@@ -173,6 +175,11 @@
     // click lands. Query the portaled node the same way its sibling pickers do.
     const menu = document.querySelector(".tag-picker");
     if (menu && target instanceof Node && menu.contains(target)) return;
+    // The governance rows' SwatchPicker portals its palette to <body> too, so a
+    // click on a swatch cell must not read as "outside" and close us before the
+    // colour is picked (#247).
+    const swatch = document.querySelector(".swatch-picker-popover");
+    if (swatch && target instanceof Node && swatch.contains(target)) return;
     close();
   }
 </script>
@@ -194,7 +201,7 @@
       on:blur={crystallize}
     />
     {#each chipStates as chip (chip.tag)}
-      <TagChip name={chip.tag} pending={chip.pending} removable ariaContext={ariaLabel} onRemove={() => removeTag(chip.tag)} />
+      <TagChip name={chip.tag} pending={chip.pending} color={colorMap.get(chip.tag.toLowerCase()) ?? null} removable ariaContext={ariaLabel} onRemove={() => removeTag(chip.tag)} />
     {/each}
     <!-- mousedown|preventDefault keeps the input focused, so clicking + to open the
          roster doesn't blur→crystallise the half-typed text into a stray chip. -->

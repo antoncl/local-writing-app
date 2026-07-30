@@ -34,6 +34,11 @@ class ScopedTag(BaseModel):
     name: str
     scope: NodePickerConfig = Field(default_factory=NodePickerConfig)
     source_layers: list[TagLayerRef] = Field(default_factory=list)
+    # A swatch id from the machine palette (same shape as AssistantTag.color,
+    # reused by SwatchPicker/getSwatch), or None when the tag has no colour.
+    # Unlike scope (which unions across layers), colour is a single value: the
+    # nearest asserting layer wins (#247).
+    color: str | None = None
 
 
 class KnownTags(BaseModel):
@@ -56,6 +61,7 @@ class TagUsage(BaseModel):
     name: str
     scope: NodePickerConfig = Field(default_factory=NodePickerConfig)
     count: int = 0
+    color: str | None = None
 
 
 class AssistantTag(BaseModel):
@@ -84,6 +90,14 @@ class TagsOverview(BaseModel):
 class UpdateTagScopeRequest(BaseModel):
     name: str = Field(min_length=1)
     scope: NodePickerConfig = Field(default_factory=NodePickerConfig)
+
+
+class UpdateTagColorRequest(BaseModel):
+    # Unlike SetAssistantTagColorRequest (assistant identity is in the URL), a
+    # project tag is named in the body, matching UpdateTagScopeRequest.
+    name: str = Field(min_length=1)
+    # A palette swatch id, or null to clear the colour.
+    color: str | None = None
 
 
 class MergeTagsRequest(BaseModel):

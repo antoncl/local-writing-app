@@ -242,6 +242,9 @@ export type ScopedTag = {
   scope: NodePickerConfig;
   // Empty on a single-layer read; populated by the merged /api/tags read.
   source_layers?: TagLayerRef[];
+  // A palette swatch id, or null/undefined when neutral. Unlike scope, colour
+  // does not union across layers — the nearest asserting layer wins (#247).
+  color?: string | null;
 };
 
 export type KnownTags = {
@@ -264,6 +267,7 @@ export type TagUsage = {
   name: string;
   scope: NodePickerConfig;
   count: number;
+  color?: string | null;
 };
 
 export type TagsOverview = {

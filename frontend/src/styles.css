@@ -296,6 +296,14 @@ body {
   width: 12px;
   height: 12px;
 }
+/* Customizing the scrollbar above makes Chromium re-introduce the native
+   increment/decrement arrow buttons unless they're explicitly suppressed; on a
+   short/non-overflowing pane they bunch up at the top-right as a faint, inert
+   up/down pair (#732). Firefox's `scrollbar-color` has no button concept, so
+   this only affects Blink/WebKit. */
+::-webkit-scrollbar-button {
+  display: none;
+}
 ::-webkit-scrollbar-track {
   background: transparent;
 }

@@ -13,18 +13,22 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from layer_fixtures import declare_full_chain
 from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import (
     CreatePlotlineRequest,
     EntryTypeDefinition,
+    SavePlotlineRequest,
     UpsertMetadataEntryTypeRequest,
 )
 from app.services.project.errors import ProjectServiceError
 from app.services.project.references import NODE_FAMILIES, REFERENCE_BEARING_KINDS
+from app.services.project_service import ProjectService
 
 
 class _PlotTestCase(unittest.TestCase):
@@ -87,6 +91,20 @@ class PlotlineHttpTests(_PlotTestCase):
 
     def test_missing_plotline_404s(self) -> None:
         self.assertEqual(self.client.get("/api/plot/plotlines/plot_nope").status_code, 404)
+
+    def test_create_rejects_plot_board_entry_type(self) -> None:
+        # plot:board is a singleton at plot-board.md — it must never be written
+        # into the plot/ folder via the plotline path (where it would be indexed).
+        response = self.client.post("/api/plot/plotlines", json={"title": "X", "entry_type": "plot:board"})
+        self.assertEqual(response.status_code, 422, response.text)
+
+    def test_save_rejects_plot_board_entry_type(self) -> None:
+        created = self._create()
+        response = self.client.put(
+            f"/api/plot/plotlines/{created['id']}",
+            json={"title": "X", "body": "", "entry_type": "plot:board"},
+        )
+        self.assertEqual(response.status_code, 422, response.text)
 
 
 class PlotBoardHttpTests(_PlotTestCase):
@@ -170,6 +188,63 @@ class PlotKindRegistrationTests(_PlotTestCase):
                 )
             )
         self.assertEqual(ctx.exception.status_code, 422)
+
+
+class PlotlineLayeredTests(unittest.TestCase):
+    """`plot` is a layered kind, so a plotline can be inherited from an ancestor.
+
+    S4a refuses to edit or delete an inherited plotline: without fork/override
+    routing, the write would resolve to the ancestor's own file and rewrite
+    (or delete) canon for every downstream book. Plot planning is per-book.
+    """
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
+        self.series = self.base / "series"
+        self.root = self.series / "book01"
+        self.service = ProjectService.created_at(self.root, "Book 1")
+        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
+        self.config_dir.mkdir()
+        self._patcher = patch(
+            "app.services.machine_settings.config_path",
+            return_value=self.config_dir / "config.yaml",
+        )
+        self._patcher.start()
+        declare_full_chain(self.service, self.root, self.base)
+
+    def tearDown(self) -> None:
+        self._patcher.stop()
+        self.temp_dir.cleanup()
+
+    def _write_ancestor_plotline(self, folder: Path, node_id: str, title: str) -> None:
+        (folder / "plot").mkdir(parents=True, exist_ok=True)
+        self.service._write_node_entry_file(
+            folder / "plot" / f"{node_id}.md", node_id, title, "plot:plotline", {}, ""
+        )
+
+    def test_inherited_plotline_is_readable(self) -> None:
+        self._write_ancestor_plotline(self.series, "plot_series", "Series Thread")
+        got = self.service.read_plotline("plot_series")
+        self.assertEqual(got.title, "Series Thread")
+        self.assertTrue(got.source_layer_id)  # provenance surfaced
+
+    def test_saving_an_inherited_plotline_is_refused_and_ancestor_untouched(self) -> None:
+        self._write_ancestor_plotline(self.series, "plot_series", "Series Thread")
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.save_plotline("plot_series", SavePlotlineRequest(title="Hijacked", body="new"))
+        self.assertEqual(ctx.exception.status_code, 409)
+        # The ancestor's file must be byte-untouched.
+        ancestor = (self.series / "plot" / "plot_series.md").read_text(encoding="utf-8")
+        self.assertIn("Series Thread", ancestor)
+        self.assertNotIn("Hijacked", ancestor)
+
+    def test_deleting_an_inherited_plotline_is_refused_and_ancestor_survives(self) -> None:
+        self._write_ancestor_plotline(self.series, "plot_series", "Series Thread")
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.delete_plotline("plot_series")
+        self.assertEqual(ctx.exception.status_code, 409)
+        self.assertTrue((self.series / "plot" / "plot_series.md").exists())
 
 
 if __name__ == "__main__":

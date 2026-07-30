@@ -84,6 +84,7 @@ class PlotMixin:
     def create_plotline(self, request: CreatePlotlineRequest) -> PlotlineEntry:
         root = self._require_project()
         entry_type = request.entry_type or "plot:plotline"
+        self._reject_non_plotline_type(entry_type)
         schema = self.read_metadata_schema()
         initial_metadata = self._initial_metadata_from_defaults(entry_type, schema)
         metadata_errors = self._validate_entry_metadata(
@@ -104,7 +105,14 @@ class PlotMixin:
             entry_type=entry_type,
             metadata=initial_metadata,
         )
-        self._write_plotline_file(self._filepath_for_new_node(root / "plot", request.title), entry)
+        self._write_node_entry_file(
+            self._filepath_for_new_node(root / "plot", request.title),
+            entry.id,
+            entry.title,
+            entry.entry_type,
+            entry.metadata,
+            entry.body,
+        )
         return self.read_plotline(entry.id)
 
     def read_plotline(self, entry_id: str) -> PlotlineEntry:
@@ -151,12 +159,14 @@ class PlotMixin:
         )
 
     def save_plotline(self, entry_id: str, request: SavePlotlineRequest) -> PlotlineEntry:
+        root = self._require_project()
+        self._reject_non_plotline_type(request.entry_type)
         index = self._build_node_index()
         winner = index.by_id.get(entry_id)
-        # S4a writes book-local. An inherited winner (an ancestor's plotline) is
-        # out of scope — its fork/override routing is deferred (see module note).
-        # Saving one here writes a book-local copy carrying the same id, which is
-        # acceptable for the per-book planning surface plotlines serve.
+        # S4a writes book-local, and refuses to touch an inherited winner: without
+        # fork/override routing (deferred), writing to `winner.path` would rewrite
+        # ancestor canon for every downstream book. Plot planning is per-book.
+        self._reject_inherited_plotline(entry_id, winner, root)
         path = winner.path if (winner is not None and winner.kind == "plot") else self._path_for_node_id(entry_id, "plot")
         front_matter = self._read_front_matter_only(path, strict=True)
         node_id = self._node_id_for_path(path, front_matter)
@@ -186,7 +196,7 @@ class PlotMixin:
             entry_type=request.entry_type,
             metadata=metadata,
         )
-        self._write_plotline_file(path, entry)
+        self._write_node_entry_file(path, entry.id, entry.title, entry.entry_type, entry.metadata, entry.body)
         self._maybe_rename_node_file(path, request.title)
         return self.read_plotline(node_id)
 
@@ -194,24 +204,37 @@ class PlotMixin:
         # Root captured before the unlink so the purge rewrites the project this
         # delete belongs to even if another request opens a different one (#381).
         root = self._require_project()
+        winner = self._build_node_index().by_id.get(entry_id)
+        # Same guard as save: deleting an inherited plotline resolves to the
+        # ancestor's file — refuse rather than destroy canon for other books.
+        self._reject_inherited_plotline(entry_id, winner, root)
         path = self._path_for_node_id(entry_id, "plot")
         self._delete_node_file(path)  # unlink + un-shadow the memo (#392)
         self._purge_references_to({entry_id}, root)
         return self.list_plotlines()
 
-    def _write_plotline_file(self, path: Path, entry: PlotlineEntry) -> None:
-        front_matter = yaml.safe_dump(
-            {
-                "id": entry.id,
-                "title": entry.title,
-                "entry_type": entry.entry_type,
-                "metadata": entry.metadata,
-            },
-            sort_keys=False,
-            allow_unicode=True,
-        ).strip()
-        body = entry.body.rstrip() + "\n" if entry.body.strip() else ""
-        self._atomic_write(path, f"---\n{front_matter}\n---\n\n{body}")
+    def _reject_non_plotline_type(self, entry_type: str) -> None:
+        # The board is a per-project singleton at plot-board.md, never a folder
+        # node — refuse to write one into plot/, where it would be folder-globbed
+        # into the node index (the board-is-not-indexed invariant, ADR-0048 §3).
+        # `entry_type` is a free str on the request models, so this is reachable.
+        # Templates (S4b) get their own Library write path; other plotline
+        # sub-types are fine.
+        if entry_type == "plot:board":
+            raise ProjectServiceError(
+                "plot:board is a per-project singleton (plot-board.md), not a plotline; "
+                "it cannot be created or saved through the plotline path.",
+                422,
+            )
+
+    def _reject_inherited_plotline(self, entry_id: str, winner, root: Path) -> None:
+        if winner is not None and winner.kind == "plot" and winner.source_layer_id != self._metadata_schema_layer_id(root):
+            raise ProjectServiceError(
+                f"Plotline {entry_id} is inherited from {winner.source_layer_label or 'an ancestor'}; "
+                "editing or deleting an inherited plotline is not supported yet (fork / override "
+                "deferred). Plot planning is per-book — work with a plotline created in this project.",
+                409,
+            )
 
     # ----- The board (plot:board) — a per-project layout singleton --------
 

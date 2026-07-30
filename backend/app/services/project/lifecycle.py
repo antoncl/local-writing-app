@@ -64,7 +64,7 @@ from app.services.tree_structure import TreeStructureService
 # `create_project`'s create-time list, which is a subset: `overrides/` is written
 # lazily on the first layer override, and `research/` holds `notes/`.
 PROJECT_INTERNAL_FOLDER_NAMES = frozenset(
-    {"scenes", "lore", "prompts", "research", "overrides", ".cache"}
+    {"scenes", "lore", "prompts", "research", "overrides", ".cache", "plot"}
 )
 
 
@@ -176,7 +176,7 @@ class ProjectLifecycleMixin:
         declaration = self._declaration_for_new_project(root, inherits)
         root.parent.mkdir(parents=True, exist_ok=True)
         root.mkdir(parents=True, exist_ok=True)
-        for folder in ["scenes", "lore", "prompts", ".cache"]:
+        for folder in ["scenes", "lore", "prompts", "plot", ".cache"]:
             (root / folder).mkdir(exist_ok=True)
         (root / "research" / "notes").mkdir(parents=True, exist_ok=True)
         # `.cache/` holds derived indexes carrying absolute paths (node-index.json

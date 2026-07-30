@@ -23,24 +23,26 @@
 
   const TIP = 11; // fixed tip length in px; the body flexes with the label
   const R = 6; // corner radius on the (left) squared end
+  const H = 22; // must match the .tag-chip height below (fixed, so not measured)
 
-  let w = $state(0);
-  let h = $state(0);
-
-  // Right-pointing tag: rounded left corners, a single smooth quadratic to the
-  // tip at the vertical centre (control point past the right edge so the point
+  // Only the WIDTH is measured — the height is a CSS constant, so binding it too
+  // would add a layout read and make the shape wait for a height pass before first
+  // paint. Right-pointing tag: rounded left corners, a single smooth quadratic to
+  // the tip at the vertical centre (control point past the right edge so the point
   // reaches ~w-1 without a hard apex). 1px inset keeps a pending stroke visible.
+  let w = $state(0);
+
   const path = $derived(
-    w > 0 && h > 0
-      ? `M ${1 + R} 1 L ${w - TIP} 1 Q ${w + 7} ${h / 2} ${w - TIP} ${h - 1}` +
-          ` L ${1 + R} ${h - 1} Q 1 ${h - 1} 1 ${h - 1 - R} L 1 ${1 + R} Q 1 1 ${1 + R} 1 Z`
+    w > 0
+      ? `M ${1 + R} 1 L ${w - TIP} 1 Q ${w + 7} ${H / 2} ${w - TIP} ${H - 1}` +
+          ` L ${1 + R} ${H - 1} Q 1 ${H - 1} 1 ${H - 1 - R} L 1 ${1 + R} Q 1 1 ${1 + R} 1 Z`
       : "",
   );
 </script>
 
-<span class="tag-chip" class:pending class:removable bind:clientWidth={w} bind:clientHeight={h}>
+<span class="tag-chip" class:pending class:removable bind:clientWidth={w}>
   {#if path}
-    <svg class="tag-chip-shape" width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true">
+    <svg class="tag-chip-shape" width={w} height={H} viewBox={`0 0 ${w} ${H}`} aria-hidden="true">
       <path d={path} />
     </svg>
   {/if}
@@ -50,6 +52,7 @@
       class="tag-chip-remove"
       type="button"
       aria-label={ariaContext ? `Remove ${name} from ${ariaContext}` : `Remove ${name}`}
+      onmousedown={(e) => e.preventDefault()}
       onclick={onRemove}
     >×</button>
   {/if}

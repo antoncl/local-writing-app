@@ -58,11 +58,27 @@ describe("TagPicker", () => {
     expect(onChange).toHaveBeenLastCalledWith("alpha, feral");
   });
 
-  it("de-dupes case-insensitively rather than adding a second chip", async () => {
+  it("does not re-emit when every typed token is already present (case-insensitive)", async () => {
     const { onChange, input } = setup({ value: "alpha" });
     await fireEvent.input(input, { target: { value: "Alpha" } });
     await fireEvent.keyDown(input, { key: "Enter" });
-    expect(onChange).toHaveBeenLastCalledWith("alpha");
+    // A pure duplicate is a no-op: no chip added, no redundant autosave.
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("renders a duplicated stored value as a single chip without crashing", () => {
+    // Exact dups can arrive from hand-edited YAML / an importer; a keyed {#each}
+    // would throw each_key_duplicate if they reached it.
+    const { container } = setup({ value: "a, a", knownTags: [] });
+    expect(container.querySelectorAll(".tag-chip")).toHaveLength(1);
+  });
+
+  it("clears the pending style when the roster later includes the tag (reactive)", async () => {
+    const props = { value: "feral", ariaLabel: "Tags", onChange: () => {} };
+    const { container, rerender } = render(TagPicker, { props: { ...props, knownTags: [] } });
+    expect(container.querySelector(".tag-chip.pending")).not.toBeNull();
+    await rerender({ ...props, knownTags: [{ name: "feral", scope: { sources: [] } }] });
+    expect(container.querySelector(".tag-chip.pending")).toBeNull();
   });
 
   it("removes a tag from its tip ×", async () => {

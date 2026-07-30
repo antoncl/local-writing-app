@@ -13,6 +13,7 @@
   import TagChip from "@/components/widgets/TagChip.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import { isMetadataValuePresent } from "@/lib/utils/schemaTypeHelpers";
+  import { parseTagList } from "@/lib/utils/tags";
   import type {
     LoreEntrySummary,
     MetadataFieldDefinition,
@@ -240,7 +241,7 @@
 {:else if field.type === "tags"}
   {#if readOnly}
     <div class="multi-select-chips" aria-label={label}>
-      {#each metadataValueList(value) as tag (tag)}
+      {#each parseTagList(currentValue) as tag (tag)}
         <TagChip name={tag} />
       {:else}
         <span class="fv-empty">—</span>

@@ -4,6 +4,7 @@
   import { pickerMembership } from "@/lib/utils/pickerSources";
   import { portalToBody } from "@/lib/actions/portal";
   import TagChip from "@/components/widgets/TagChip.svelte";
+  import { parseTagList } from "@/lib/utils/tags";
 
   export let value: string = "";
   export let knownTags: ScopedTag[] = [];
@@ -18,13 +19,6 @@
   // with the runes-based FieldValueEditor and is directly testable.
   export let onChange: (value: string) => void = () => {};
 
-  function parseTags(raw: string): string[] {
-    return raw
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
-  }
-
   // The committed tags come from `value` (the parent is the source of truth);
   // `entryText` is the in-progress, uncommitted input. Typing stays free-form and
   // only *crystallises* into chips on a comma, Enter, or when the field loses
@@ -32,13 +26,16 @@
   let entryText = "";
   let inputEl: HTMLInputElement | null = null;
 
-  $: chips = parseTags(value);
+  $: chips = parseTagList(value);
   // "Known" means present in the vocabulary at all — a known-but-out-of-scope tag
   // is still known (not pending). Scope only governs what the + *suggests*.
   $: knownKeys = new Set(knownTags.map((t) => t.name.toLowerCase()));
-  function isKnown(tag: string): boolean {
-    return knownKeys.has(tag.toLowerCase());
-  }
+  // Per-chip pending state, computed in ONE reactive statement that reads both
+  // `chips` and `knownKeys` — so "will be created" re-evaluates when the roster
+  // loads or a just-created tag is registered. A template `pending={!isKnown(tag)}`
+  // would NOT: Svelte can't see `knownKeys` through the `isKnown()` call, so a
+  // chip would stay outlined after the roster arrives (feedback_svelte5_reactivity_traps).
+  $: chipStates = chips.map((tag) => ({ tag, pending: !knownKeys.has(tag.toLowerCase()) }));
 
   function commit(next: string[]) {
     onChange(next.join(", "));
@@ -58,22 +55,23 @@
   }
 
   function crystallize() {
-    const tokens = parseTags(entryText);
-    if (tokens.length === 0) {
-      entryText = "";
-      return;
-    }
+    const tokens = parseTagList(entryText);
+    entryText = "";
+    if (tokens.length === 0) return;
     const next = [...chips];
     const seen = new Set(next.map((t) => t.toLowerCase()));
+    let changed = false;
     for (const token of tokens) {
       const key = token.toLowerCase();
       if (!seen.has(key)) {
         next.push(token);
         seen.add(key);
+        changed = true;
       }
     }
-    entryText = "";
-    commit(next);
+    // Don't fire onChange (and a redundant autosave) when every token was already
+    // present — e.g. typing an existing tag's name and pressing Enter.
+    if (changed) commit(next);
   }
 
   function onKeydown(event: KeyboardEvent) {
@@ -95,17 +93,20 @@
   }
 
   // ---- the + suggestion popover (pick from the scoped roster) ----------------
-  function inScope(tag: ScopedTag): boolean {
+  function inScope(tag: ScopedTag, kind: string, entryType: string): boolean {
     // Tag scopes stay the degenerate type-leaf subset (ADR-0023) — read the
     // legacy {kinds, entryTypes} view of the scope's `sources`.
     const { kinds, entryTypes } = pickerMembership(tag.scope);
     if (kinds.length === 0 && Object.keys(entryTypes).length === 0) return true;
-    if (kinds.length && !kinds.includes(scopeKind)) return false;
-    const subs = entryTypes[scopeKind];
-    if (subs && subs.length && !subs.includes(scopeEntryType)) return false;
+    if (kinds.length && !kinds.includes(kind)) return false;
+    const subs = entryTypes[kind];
+    if (subs && subs.length && !subs.includes(entryType)) return false;
     return true;
   }
-  $: suggestions = knownTags.filter(inScope);
+  // scopeKind/scopeEntryType are referenced IN the reactive statement so `$:`
+  // tracks them — filtering through a closure that merely reads them would not
+  // re-run when the node's type changes (feedback_svelte5_reactivity_traps).
+  $: suggestions = knownTags.filter((tag) => inScope(tag, scopeKind, scopeEntryType));
   $: selectedKeys = new Set(chips.map((t) => t.toLowerCase()));
 
   let open = false;
@@ -184,10 +185,18 @@
       on:keydown={onKeydown}
       on:blur={crystallize}
     />
-    {#each chips as tag (tag)}
-      <TagChip name={tag} pending={!isKnown(tag)} removable ariaContext={ariaLabel} onRemove={() => removeTag(tag)} />
+    {#each chipStates as chip (chip.tag)}
+      <TagChip name={chip.tag} pending={chip.pending} removable ariaContext={ariaLabel} onRemove={() => removeTag(chip.tag)} />
     {/each}
-    <button class="tag-picker-toggle" type="button" title="Add known tags" on:click|stopPropagation={toggle}>+</button>
+    <!-- mousedown|preventDefault keeps the input focused, so clicking + to open the
+         roster doesn't blur→crystallise the half-typed text into a stray chip. -->
+    <button
+      class="tag-picker-toggle"
+      type="button"
+      title="Add known tags"
+      on:mousedown|preventDefault
+      on:click|stopPropagation={toggle}
+    >+</button>
   </div>
   {#if open && position}
     <div

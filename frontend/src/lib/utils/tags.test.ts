@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseTagList, tagColorMap, colorForTag } from "@/lib/utils/tags";
+import { parseTagList, tagColorMap } from "@/lib/utils/tags";
 import type { ScopedTag } from "@/lib/types";
 
 describe("parseTagList", () => {
@@ -31,13 +31,5 @@ describe("tagColorMap", () => {
     // A null or absent colour is not a map entry (neutral).
     expect(map.has("beta")).toBe(false);
     expect(map.has("gamma")).toBe(false);
-  });
-});
-
-describe("colorForTag", () => {
-  it("finds a tag's colour case-insensitively, null when neutral or unknown", () => {
-    expect(colorForTag(roster, "ALPHA")).toBe("forest");
-    expect(colorForTag(roster, "beta")).toBeNull();
-    expect(colorForTag(roster, "missing")).toBeNull();
   });
 });

@@ -8,9 +8,10 @@
   //
   // Colour is neutral by default and an opt-in governance choice (#247, PR-2): a
   // tag carries no colour until someone spends one on it, so most chips render
-  // neutral (var(--inset)) and recede; a coloured tag fills with its swatch hex so
-  // the few axes the writer scans by actually pop. The hex is applied inline (the
-  // value is per-tag, not a token), which the style-token guard leaves alone.
+  // neutral (var(--inset)) and recede; a coloured tag gets a soft wash of its
+  // swatch colour so the few axes the writer scans by pop while the label stays
+  // legible. The colour is applied inline (per-tag, not a token) via color-mix,
+  // which the style-token guard leaves alone.
   import { getSwatch } from "@/lib/utils/colors";
 
   interface Props {
@@ -52,9 +53,16 @@
 <span class="tag-chip" class:pending class:removable bind:clientWidth={w}>
   {#if path}
     <svg class="tag-chip-shape" width={w} height={H} viewBox={`0 0 ${w} ${H}`} aria-hidden="true">
-      <!-- Per-tag hex fill (inline, so not a token) overrides the neutral CSS
-           fill; the stroke stays the neutral border for a quiet edge. -->
-      <path d={path} style={hex ? `fill: ${hex}` : undefined} />
+      <!-- Per-tag colour as a SOFT WASH, not the raw saturated hex: a full-strength
+           fill fails contrast under the neutral var(--text-2) label. color-mix with
+           transparent is theme-adaptive and inline (so not a style-token). Stroke is
+           a stronger mix for a quiet edge. -->
+      <path
+        d={path}
+        style={hex
+          ? `fill: color-mix(in srgb, ${hex} 22%, transparent); stroke: color-mix(in srgb, ${hex} 55%, transparent)`
+          : undefined}
+      />
     </svg>
   {/if}
   <span class="tag-chip-label">{name}</span>

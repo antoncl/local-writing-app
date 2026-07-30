@@ -114,6 +114,10 @@ class MetadataValuesMixin:
                             scope=self._union_node_picker_scope(held.scope, node_scope)
                             if held
                             else node_scope.model_copy(deep=True),
+                            # Carry the local colour through the rebuild — a routine
+                            # save that auto-broadens a coloured tag must not wipe
+                            # its colour (#247; same threading as merge_tags).
+                            color=held.color if held else None,
                         )
                         changed = True
                 if key in seen_values:

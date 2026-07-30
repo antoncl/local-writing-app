@@ -24,20 +24,11 @@ export function parseTagList(raw: string | null | undefined): string[] {
 // The one home for "what colour is this tag?" — a lowercased-name → swatch-id
 // map built from the known-tags roster (#247). Every chip render site holds
 // `knownTags`, so they map through this rather than re-deriving a `.find()` each.
+// A one-off lookup is `tagColorMap(tags).get(name.toLowerCase()) ?? null`.
 export function tagColorMap(knownTags: ScopedTag[]): Map<string, string> {
   const map = new Map<string, string>();
   for (const tag of knownTags) {
     if (tag.color) map.set(tag.name.toLowerCase(), tag.color);
   }
   return map;
-}
-
-// The colour of a single tag by name, or null when neutral/unknown. Thin sugar
-// over `tagColorMap` for a one-off lookup where building the map is overkill.
-export function colorForTag(knownTags: ScopedTag[], name: string): string | null {
-  const key = name.toLowerCase();
-  for (const tag of knownTags) {
-    if (tag.name.toLowerCase() === key) return tag.color ?? null;
-  }
-  return null;
 }

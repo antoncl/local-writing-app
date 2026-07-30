@@ -131,7 +131,13 @@ class TagsMixin:
                     scope = NodePickerConfig.model_validate(raw.get("scope") or {})
                 except Exception:  # noqa: BLE001
                     scope = NodePickerConfig()
-                color = raw.get("color") or None
+                # Defensive, like `scope` above: a hand-edited/imported record may
+                # carry a non-string colour (a number, bool, list). Accept only a
+                # non-empty string swatch id — anything else reads as neutral,
+                # never a ValidationError that would break every tags read and the
+                # scene-save path that walks this reader (#247).
+                raw_color = raw.get("color")
+                color = raw_color if isinstance(raw_color, str) and raw_color else None
             else:
                 continue
             if not name:
@@ -335,8 +341,13 @@ class TagsMixin:
             )
 
         existing = merged.get(key) or local.get(key)
+        # A scope edit must not clobber a colour set on THIS layer's record — carry
+        # the local colour through every rebuild, exactly as merge_tags threads the
+        # survivor's colour (#247). Only the local colour (not an inherited one) is
+        # preserved, so this never flattens an ancestor's colour down.
+        held_color = local[key].color if key in local else None
         if inherited is None:
-            local[key] = ScopedTag(name=existing.name if existing else name, scope=request.scope)
+            local[key] = ScopedTag(name=existing.name if existing else name, scope=request.scope, color=held_color)
         else:
             # The request carries the RESOLVED scope (the dialog seeds its draft
             # from the merged overview), but only the part this layer adds may be
@@ -347,9 +358,13 @@ class TagsMixin:
             # exactly the widening the author asked for.
             delta = self._subtract_node_picker_scope(request.scope, inherited)
             if delta.kinds:
-                local[key] = ScopedTag(name=existing.name if existing else name, scope=delta)
+                local[key] = ScopedTag(name=existing.name if existing else name, scope=delta, color=held_color)
+            elif held_color is not None:
+                # Scope adds nothing over inheritance, but a local colour is still
+                # an assertion this layer owns — keep a colour-only record.
+                local[key] = ScopedTag(name=existing.name if existing else name, color=held_color)
             else:
-                # Fully covered by inheritance — this layer asserts nothing.
+                # Fully covered by inheritance and no local colour — assert nothing.
                 local.pop(key, None)
         self._write_scoped_tags(list(local.values()))
         return self.read_known_tags()
@@ -370,12 +385,14 @@ class TagsMixin:
         if not name:
             raise ProjectServiceError("Tag name is required.", 422)
         key = name.lower()
-        merged = {tag.name.lower(): tag for tag in self.read_known_tags().tags}
         local = self._read_layer_tags(root)
         record = local.get(key)
         if request.color:
             if record is None:
-                canonical = merged.get(key)
+                # Only an inherited-only tag needs the merged read (for canonical
+                # casing when minting a local record) — skip the full layer walk
+                # on the common re-colour path.
+                canonical = {tag.name.lower(): tag for tag in self.read_known_tags().tags}.get(key)
                 record = ScopedTag(name=canonical.name if canonical else name)
                 local[key] = record
             record.color = request.color
@@ -383,7 +400,7 @@ class TagsMixin:
             # Clearing: drop the colour, and the whole local record if it now
             # asserts nothing (no local scope) — a bare `{name}` is noise.
             record.color = None
-            if not record.scope.kinds and not record.scope.entry_types:
+            if not record.scope.sources:
                 local.pop(key, None)
         self._write_scoped_tags(list(local.values()))
         return self.read_known_tags()

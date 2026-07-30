@@ -159,15 +159,23 @@
     bumpTagVocabularyRevision();
   }
 
+  // Bumped to remount a row's SwatchPicker after a FAILED colour write, so its
+  // optimistic self-mutation reverts to the persisted (unchanged) colour — its
+  // `value` prop is one-way, so a same-value prop wouldn't reset it (#247).
+  let swatchResetNonce = $state(0);
+
   async function setColor(name: string, color: string | null) {
     // Colour is a quiet, non-destructive governance choice (the swatch owns it —
-    // no ⋯ menu item), so no busy-lock or confirm; just persist and reconcile.
+    // no ⋯ menu item), so no busy-lock or confirm.
     error = "";
     try {
       await api.setTagColor(name, color);
-      await afterOp();
+      // A colour change can't move any use-count, so skip afterOp's full-corpus
+      // count rescan; just reconcile so committed chips elsewhere recolour.
+      bumpTagVocabularyRevision();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
+      swatchResetNonce += 1;
     }
   }
 
@@ -348,7 +356,9 @@
       {#each shown as tag (tag.name)}
         <div class="trp-row" role="listitem">
           <span class="trp-swatch">
-            <SwatchPicker value={tag.color ?? null} onChange={(id) => setColor(tag.name, id)} />
+            {#key `${tag.color ?? ""}#${swatchResetNonce}`}
+              <SwatchPicker value={tag.color ?? null} onChange={(id) => setColor(tag.name, id)} />
+            {/key}
           </span>
           <button
             class="trp-add"

@@ -220,7 +220,15 @@
   }
 
   const saveDisabled = $derived(
-    !layerId || !id.trim() || !name.trim() || (type === "list" && !itemGroup && !itemType),
+    !layerId ||
+      !id.trim() ||
+      !name.trim() ||
+      (type === "list" && !itemGroup && !itemType) ||
+      // An unresolvable current shape can't be persisted (the backend
+      // integrity check 422s it), so block Done and say why inline rather
+      // than let the author hit a server error — they must pick a supported
+      // shape (or Cancel) to proceed.
+      (type === "list" && currentShapeMissing),
   );
 </script>
 
@@ -362,9 +370,12 @@
           {/if}
           {#if currentShapeMissing}
             <!-- The field's real shape stays representable even when the
-                 group is filtered out (unsupported members) or deleted. -->
+                 group is filtered out (unsupported members) or deleted —
+                 with the reason that actually applies. -->
             <option value={`group:${itemGroup}`} disabled>
-              {groups[itemGroup ?? ""]?.name ?? itemGroup} (current shape — unsupported members)
+              {groups[itemGroup ?? ""]
+                ? `${groups[itemGroup ?? ""].name} (current shape — unsupported members)`
+                : `${itemGroup} (current shape — group not found)`}
             </option>
           {/if}
           {#if shapeableGroups.length > 0}
@@ -383,10 +394,17 @@
           </optgroup>
         </select>
       </label>
-      <p class="sfi-options-hint">
-        <i class="ti ti-info-circle" aria-hidden="true"></i>
-        a group shape is defined once, in Groups — reused here, never re-declared
-      </p>
+      {#if currentShapeMissing}
+        <p class="sfi-options-hint">
+          <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+          this field's item shape is no longer valid — pick a supported shape to save (existing items keep their shape until then)
+        </p>
+      {:else}
+        <p class="sfi-options-hint">
+          <i class="ti ti-info-circle" aria-hidden="true"></i>
+          a group shape is defined once, in Groups — reused here, never re-declared
+        </p>
+      {/if}
     </div>
   {/if}
   {#if type === "select" || type === "multi_select" || (type === "list" && itemType === "select")}

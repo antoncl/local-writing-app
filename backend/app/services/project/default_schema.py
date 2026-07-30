@@ -165,6 +165,31 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "fields": [],
             "has_body": False,
         },
+        "plot:plotline": {
+            # A story thread the writer creates at will (ADR-0048 §2). The
+            # intrinsic title is its name; `color` tints its chips and card
+            # tints on the board; the prose body is its description. Cards
+            # reference one as their primary plotline (S5). An ordinary flat
+            # Node under `plot/`, layered like lore.
+            "name": "Plotline",
+            "kind": "plot",
+            "fields": ["color"],
+            "has_body": True,
+            "color": "plum",
+        },
+        "plot:board": {
+            # The plot board — a per-project layout singleton (ADR-0048 §3).
+            # Presentation only (card positions, per-column ordering, collapsed
+            # groups, viewport); it owns no story data. Addressed by path like
+            # the project node (file `plot-board.md`), never listed or created
+            # as an ordinary instance. Declared here so its entry_type resolves;
+            # it carries no schema metadata fields — the layout is an opaque
+            # payload on the node, not user metadata.
+            "name": "Board",
+            "kind": "plot",
+            "fields": [],
+            "has_body": False,
+        },
         "prompt:base": {
             "name": "Prompt",
             "kind": "prompt",

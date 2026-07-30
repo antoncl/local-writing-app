@@ -21,6 +21,7 @@ from app.routers import (
     lore,
     machine_settings,
     metadata,
+    plot,
     project,
     scenes,
     snapshots,
@@ -64,6 +65,7 @@ app.include_router(metadata.router)
 app.include_router(scenes.router)
 app.include_router(snapshots.router)
 app.include_router(lore.router)
+app.include_router(plot.router)
 app.include_router(entries.router)
 app.include_router(machine_settings.router)
 app.include_router(ai.router)

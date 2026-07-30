@@ -44,6 +44,7 @@ const KIND_DEFAULT_SWATCH: Record<string, string> = {
   research: "teal",
   prompt: "indigo",
   mutation_set: "violet",
+  plot: "plum",
 };
 
 export function resolveColorForKind(kind: string | null | undefined): Swatch | null {

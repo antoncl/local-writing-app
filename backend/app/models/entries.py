@@ -96,6 +96,75 @@ class SaveResearchNoteRequest(BaseModel):
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
 
 
+class PlotlineSummary(BaseModel):
+    id: str
+    title: str
+    body: str = ""
+    entry_type: str = "plot:plotline"
+    metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+    source_layer_id: str = ""
+    source_layer_label: str = ""
+
+
+class PlotlineEntry(BaseModel):
+    """A plotline (ADR-0048 §2): a story thread the writer creates at will.
+
+    A name (the intrinsic title), a color (per-entry tint, for the board's
+    chips and card tints), and a description (the prose body). Cards reference
+    one as their primary plotline (S5). An ordinary flat Node under `plot/`,
+    so identity, index, references, and layered schema all apply for free.
+    """
+
+    id: str
+    title: str
+    body: str = ""
+    revision: str = ""
+    entry_type: str = "plot:plotline"
+    metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+    computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+    source_layer_id: str = ""
+    source_layer_label: str = ""
+
+
+class PlotlineList(BaseModel):
+    entries: list[PlotlineSummary] = Field(default_factory=list)
+
+
+class CreatePlotlineRequest(BaseModel):
+    title: str = Field(min_length=1)
+    entry_type: str = "plot:plotline"
+
+
+class SavePlotlineRequest(BaseModel):
+    title: str = Field(min_length=1)
+    body: str = ""
+    base_revision: str | None = None
+    entry_type: str = "plot:plotline"
+    metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+
+
+class PlotBoard(BaseModel):
+    """The plot board (ADR-0048 §3): a per-project layout singleton.
+
+    File `plot-board.md`. Presentation only — card positions, per-column
+    ordering, collapsed groups, viewport; it owns no story data. One per open
+    book in v1, addressed by path (not id, like the project node) and created
+    on first open. The `layout` payload is an opaque dict the board canvas (S7)
+    populates; S4a establishes the singleton, get-or-create, and round-trip.
+    """
+
+    id: str
+    title: str = "Board"
+    revision: str = ""
+    entry_type: str = "plot:board"
+    layout: dict[str, Any] = Field(default_factory=dict)
+
+
+class SavePlotBoardRequest(BaseModel):
+    base_revision: str | None = None
+    layout: dict[str, Any] = Field(default_factory=dict)
+
+
 class MoveLoreNoteToResearchResponse(BaseModel):
     """Result of POST /api/lore/{id}/move-to-research.
 

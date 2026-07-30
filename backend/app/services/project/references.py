@@ -79,6 +79,14 @@ NODE_FAMILIES = [
     # carrying a ViewSpec in front matter. Layered like mutation sets — a view
     # can live at any project level.
     NodeFamily("view", "views", "view:view"),
+    # Plot planning (ADR-0048): plotlines (and, from S4b, templates + their
+    # instances) as flat Node files under `plot/`. Layered — NOT book-scoped
+    # like scenes — because S4b ships the diagnostic templates through the
+    # ADR-0049 Library, an ancestor layer; book-scoping would exclude them.
+    # The plot *board* is a separate per-project singleton (`plot-board.md`),
+    # deliberately NOT in this family so an ancestor's board never leaks into
+    # the resolved set (one board per open book, ADR-0048 §3).
+    NodeFamily("plot", "plot", "plot:plotline"),
 ]
 
 # The one family the out-of-tree machine layer contributes. Looked up rather
@@ -1114,6 +1122,7 @@ class ReferencesMixin:
             "research": "research/notes",
             "mutation_set": "mutation-sets",
             "view": "views",
+            "plot": "plot",
         }
         label_by_kind = {
             "scene": "Scene",
@@ -1122,6 +1131,7 @@ class ReferencesMixin:
             "research": "Research Note",
             "mutation_set": "Mutation set",
             "view": "View",
+            "plot": "Plotline",
         }
         fallback_folder = folder_by_kind.get(kind, "lore")
         fallback_path = root / fallback_folder / f"{node_id}.md"

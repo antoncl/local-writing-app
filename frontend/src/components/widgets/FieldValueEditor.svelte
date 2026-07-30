@@ -13,8 +13,12 @@
   import TagPicker from "@/components/widgets/TagPicker.svelte";
   import TagChip from "@/components/widgets/TagChip.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
-  import { isMetadataValuePresent } from "@/lib/utils/schemaTypeHelpers";
-  import { dedupeTags, parseTagList, splitCommaList, tagColorMap } from "@/lib/utils/tags";
+  import {
+    coerceStringList,
+    isMetadataValuePresent,
+    normalizeListFieldValue,
+  } from "@/lib/utils/schemaTypeHelpers";
+  import { parseTagList, tagColorMap } from "@/lib/utils/tags";
   import type {
     LoreEntrySummary,
     MetadataFieldDefinition,
@@ -108,9 +112,7 @@
   }
 
   function metadataValueList(v: MetadataValue | undefined): string[] {
-    if (Array.isArray(v)) return v.map((item) => String(item).trim()).filter(Boolean);
-    if (v === null || v === undefined || v === "") return [];
-    return splitCommaList(String(v));
+    return coerceStringList(v);
   }
 
   function metadataReferenceValue(f: MetadataFieldDefinition, v: MetadataValue | undefined): string | string[] {
@@ -122,13 +124,9 @@
 
   function normaliseFieldValue(f: MetadataFieldDefinition, v: MetadataValue): MetadataValue {
     if (f.type === "multi_select" || f.type === "tags" || f.type === "entity_ref_list") {
-      const items = Array.isArray(v)
-        ? v.map((item) => String(item).trim()).filter(Boolean)
-        : splitCommaList(String(v ?? ""));
-      // `tags` is a set — normalise duplicates OUT of the value written to disk,
-      // not only out of the render (#704). multi_select/entity_ref_list keep
-      // their existing pass-through; their own render guards handle display dupes.
-      return f.type === "tags" ? dedupeTags(items) : items;
+      // Shared list normaliser: `tags` de-dupes on the way to disk (#704), the
+      // other set-typed lists pass through (generalising that is #725).
+      return normalizeListFieldValue(f.type, v);
     }
     if (f.type === "number") {
       if (v === "" || v === null) return null;

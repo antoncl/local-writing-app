@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { MetadataSchema } from "@/lib/types";
 import {
+  coerceStringList,
   isMetadataValuePresent,
   kindEntryTypeFqns,
   kindEntryTypeOptions,
   nestingLocalPrefix,
+  normalizeListFieldValue,
 } from "@/lib/utils/schemaTypeHelpers";
 
 // The entry_type roster shared by the view designer (ViewFlowNode pickers) and the
@@ -20,6 +22,41 @@ const SCHEMA = {
   },
   fields: {},
 } as unknown as MetadataSchema;
+
+describe("coerceStringList", () => {
+  it("splits a comma string into trimmed, non-empty tokens (no de-dupe)", () => {
+    expect(coerceStringList(" a , b ,, A ")).toEqual(["a", "b", "A"]);
+  });
+
+  it("coerces an array of items to trimmed strings, dropping empties", () => {
+    expect(coerceStringList([" x ", "", 3, "  "])).toEqual(["x", "3"]);
+  });
+
+  it("returns an empty list for null / undefined / empty string", () => {
+    expect(coerceStringList(null)).toEqual([]);
+    expect(coerceStringList(undefined)).toEqual([]);
+    expect(coerceStringList("")).toEqual([]);
+  });
+});
+
+describe("normalizeListFieldValue", () => {
+  // #704: the tags SAVE path — not just the render — must de-dupe, so a case
+  // duplicate from an importer / hand-edited YAML can't be persisted.
+  it("de-dupes a tags value case-insensitively (first spelling wins)", () => {
+    expect(normalizeListFieldValue("tags", "Alpha, alpha, beta, BETA")).toEqual(["Alpha", "beta"]);
+  });
+
+  it("de-dupes tags whether the value arrives as a string or an array", () => {
+    expect(normalizeListFieldValue("tags", ["a", "A", "b"])).toEqual(["a", "b"]);
+  });
+
+  // #725 boundary: the other set-typed lists deliberately DON'T de-dupe yet —
+  // pin the current behaviour so a future generalisation is a conscious change.
+  it("does NOT de-dupe multi_select or entity_ref_list (tracked in #725)", () => {
+    expect(normalizeListFieldValue("multi_select", "a, a, b")).toEqual(["a", "a", "b"]);
+    expect(normalizeListFieldValue("entity_ref_list", ["x", "x"])).toEqual(["x", "x"]);
+  });
+});
 
 describe("kindEntryTypeOptions", () => {
   it("excludes abstract types by default and filters to the kind", () => {

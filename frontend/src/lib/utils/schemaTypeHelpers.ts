@@ -9,6 +9,7 @@
 // they're invoked from the component (where schema lives on props) or from
 // App.svelte (where it lives on its own `let` bindings).
 
+import { dedupeTags, splitCommaList } from "@/lib/utils/tags";
 import type {
   EntryTypeDefinition,
   MetadataFieldDefinition,
@@ -48,6 +49,28 @@ export function metadataValueDisplayString(value: MetadataValue | undefined): st
       .join(" · ");
   }
   return String(value);
+}
+
+// Coerce a metadata value into a clean string list: an array maps each item to a
+// trimmed string (empties dropped); a scalar or comma-joined string tokenises
+// through the canonical splitCommaList. The ONE home for "value → list" so the
+// string and array coercions don't drift across call sites (#704/#722). No
+// de-dupe here — that is a per-field-type policy layered on top by
+// normalizeListFieldValue. Pure, so both are unit-tested without a component.
+export function coerceStringList(value: MetadataValue | undefined): string[] {
+  return Array.isArray(value)
+    ? value.map((item) => String(item).trim()).filter(Boolean)
+    : splitCommaList(String(value ?? ""));
+}
+
+// The SAVE-path normaliser for a list-shaped field value. `tags` is a set, so its
+// persisted value de-dupes case-insensitively (#704) — a duplicate from an
+// importer or hand-edited YAML must not reach disk, not only the render. The
+// other list types (multi_select, entity_ref_list) pass through un-deduped for
+// now; generalising that needs a per-type case policy and is tracked in #725.
+export function normalizeListFieldValue(fieldType: string, value: MetadataValue): string[] {
+  const items = coerceStringList(value);
+  return fieldType === "tags" ? dedupeTags(items) : items;
 }
 
 // The schema's kind universe (a Node's "class"). Narrower than the wider

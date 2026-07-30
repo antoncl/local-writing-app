@@ -186,7 +186,9 @@
     <!-- Only the selected options — the read-only question is "what IS the
          value", not "what could it be". -->
     <div class="multi-select-chips" aria-label={label}>
-      {#each metadataValueList(value) as selected (selected)}
+      <!-- Set() drops exact duplicates so the keyed each can't throw
+           each_key_duplicate on malformed data (same guard as tags, #247). -->
+      {#each [...new Set(metadataValueList(value))] as selected (selected)}
         <span class="multi-select-chip active static">{optionLabel(selected)}</span>
       {:else}
         <span class="fv-empty">—</span>

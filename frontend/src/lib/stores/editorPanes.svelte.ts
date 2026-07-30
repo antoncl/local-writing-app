@@ -661,9 +661,9 @@ class EditorPanesController {
           }
         }
       }
-      // Any saved node can register tag vocabulary, so refresh the roster once for
-      // every kind — else a just-typed tag stays styled pending until reload (#247).
-      await refreshKnownTags();
+      // Fire-and-forget (like refreshAssistantTags above): any saved node can register
+      // tag vocabulary, but a roster-fetch blip must not fail an already-saved node (#247).
+      void refreshKnownTags();
       this.setStatus(`Saved ${savedDocument.title}`);
     } catch (caught) {
       this.setEditorPaneSaving(id, false);

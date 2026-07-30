@@ -92,4 +92,11 @@ describe("TagPicker", () => {
     await fireEvent.keyDown(input, { key: "Backspace" });
     expect(onChange).toHaveBeenLastCalledWith("alpha");
   });
+
+  it("adds a tag picked from the + suggestion popover", async () => {
+    const { onChange } = setup({ value: "" });
+    await fireEvent.click(screen.getByTitle("Add known tags"));
+    await fireEvent.click(screen.getByRole("button", { name: "shifter" }));
+    expect(onChange).toHaveBeenLastCalledWith("shifter");
+  });
 });

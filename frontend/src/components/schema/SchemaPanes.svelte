@@ -18,11 +18,10 @@
   import GroupsManagerDialog from "@/components/dialogs/GroupsManagerDialog.svelte";
   import {
     asSchemaKind,
-    buildNodeTypeTree,
     buildSchemaFieldSections,
+    resolveSchemaScope,
     schemaKindForDocumentKind,
     SCHEMA_KIND_META,
-    type NodeTypeTreeNode,
     type SchemaKind,
   } from "@/lib/utils/schemaTypeHelpers";
   import {
@@ -72,7 +71,6 @@
   const metadataSchemaLayers = $derived($metadataSchemaLayersStore);
 
   // --- Authoring state --------------------------------------------------------
-  let schemaFieldKind = $state<SchemaKind>("scene");
   let schemaFieldLayerId = $state("");
   let schemaFieldEntryType = $state("scene");
   // The field-editing DRAFT (type / name / key / options / default / picker /
@@ -103,8 +101,6 @@
   let schemaTypeReadonly = $state(false);
   let selectedSchemaTypeId: string | null = $state(null);
   let draggedSchemaTypeId: string | null = $state(null);
-  let schemaSelectedEntryType: EntryTypeDefinition | null = $state(null);
-  let schemaNodeTypeTree: NodeTypeTreeNode[] = $state([]);
   // Seed values for a freshly (re)mounted SchemaTypeEditor draft. The token
   // bumps on every create/open so the keyed component re-initialises cleanly.
   let schemaTypeInitName = $state("");
@@ -118,18 +114,19 @@
   let fieldDropTarget: { id: string; position: "before" | "after" } | null = $state(null);
 
   // --- Derived: the entry-type → kind → tree cascade --------------------------
-  $effect.pre(() => {
-    schemaSelectedEntryType = metadataSchema?.entry_types[schemaFieldEntryType] ?? metadataSchema?.entry_types["scene:scene"] ?? null;
-  });
-  $effect.pre(() => {
-    // The selected type's `kind` IS a schema kind; validate-or-default rather
-    // than enumerate (the old ternax silently mapped plot → scene, breaking the
-    // Plot tab — #729).
-    schemaFieldKind = asSchemaKind(schemaSelectedEntryType?.kind) ?? "scene";
-  });
-  $effect.pre(() => {
-    schemaNodeTypeTree = buildNodeTypeTree(metadataSchema, schemaFieldKind);
-  });
+  // One pure step (resolveSchemaScope): the selected entry type's kind drives
+  // BOTH the tree roster and the heading. Pull-`$derived`, not imperative
+  // effects, and unit-tested end-to-end — SchemaPanes registers render snippets
+  // with the layout host rather than mounting its own tree, so it can't be
+  // mounted to assert the rendered tree; the extracted resolver IS the guard for
+  // the Plot-tab-scopes-to-Scene bug (#729). The old per-kind ternary silently
+  // mapped plot → scene; asSchemaKind (inside the resolver) validate-or-defaults.
+  const schemaSelectedEntryType = $derived(
+    metadataSchema?.entry_types[schemaFieldEntryType] ?? metadataSchema?.entry_types["scene:scene"] ?? null,
+  );
+  const schemaScope = $derived(resolveSchemaScope(metadataSchema, schemaFieldEntryType));
+  const schemaFieldKind = $derived(schemaScope.kind);
+  const schemaNodeTypeTree = $derived(schemaScope.tree);
   // The type-editor field rows. Explicitly reference metadataSchema so these
   // recompute when the schema is refreshed after a save — fieldEntriesFor…
   // reads it *inside* the function, which the template wouldn't track on its
@@ -154,7 +151,7 @@
       ? metadataSchema.entry_types[selectedSchemaTypeId]?.group_applications
       : null) ?? []);
   let availableGroupEntries = $derived(Object.entries(metadataSchema?.groups ?? {}));
-  let schemaContextHeading = $derived(SCHEMA_KIND_META[schemaFieldKind].heading);
+  let schemaContextHeading = $derived(schemaScope.heading);
 
   // --- Entry points App still drives (via bind:this) --------------------------
   export function syncSelection() {
@@ -281,7 +278,7 @@
     if (!entryType) return;
     const source = schemaTypeSource(typeId);
     selectedSchemaTypeId = typeId;
-    // The type's own kind — validate-or-default. The old ternax listed only
+    // The type's own kind — validate-or-default. The old ternary listed only
     // scene/prompt/assistant and defaulted the rest to "lore", so opening a
     // plot / research / project type mislabeled the kind pill (#729).
     schemaTypeKind = asSchemaKind(entryType.kind) ?? "lore";

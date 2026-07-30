@@ -109,7 +109,9 @@ export const SCHEMA_KINDS = Object.keys(SCHEMA_KIND_META) as SchemaKind[];
 // this wherever a value already meant to be a schema kind is read back off a
 // definition — never a fall-through ternary that guesses a default.
 export function asSchemaKind(kind: string | null | undefined): SchemaKind | null {
-  return kind != null && kind in SCHEMA_KIND_META ? (kind as SchemaKind) : null;
+  // Object.hasOwn, NOT `in` — `in` walks the prototype chain, so a `kind` of
+  // "constructor" / "toString" / "__proto__" would otherwise be accepted.
+  return kind != null && Object.hasOwn(SCHEMA_KIND_META, kind) ? (kind as SchemaKind) : null;
 }
 
 // Map an editor DocumentKind to the SchemaKind whose type tree governs it.
@@ -442,4 +444,24 @@ export function buildNodeTypeTree(
     };
   };
   return rootIds.map((typeId) => buildNode(typeId, 0)).filter((node): node is NodeTypeTreeNode => Boolean(node));
+}
+
+// The Detail Types cascade as ONE pure step: the selected entry type resolves to
+// its schema kind, and that single kind drives BOTH the tree roster AND the
+// context heading. Extracted from SchemaPanes so this wiring is unit-testable —
+// SchemaPanes is a headless RegionRegistrar controller (it registers render
+// snippets with the workspace layout, it doesn't mount its own tree), so it
+// can't be mounted to assert the rendered tree. Feeding a plot entry type here
+// and asserting {kind:"plot", heading:"Plot Types", tree:[plot types]} is the
+// guard for the exact path that shipped the Plot tab scoped to the Scene tree
+// (#729). `entryTypeId` unknown → falls back to scene:scene → scene scope.
+export interface SchemaScope {
+  kind: SchemaKind;
+  heading: string;
+  tree: NodeTypeTreeNode[];
+}
+export function resolveSchemaScope(schema: MetadataSchema | null, entryTypeId: string): SchemaScope {
+  const selected = schema?.entry_types[entryTypeId] ?? schema?.entry_types["scene:scene"];
+  const kind = asSchemaKind(selected?.kind) ?? "scene";
+  return { kind, heading: SCHEMA_KIND_META[kind].heading, tree: buildNodeTypeTree(schema, kind) };
 }

@@ -8,9 +8,11 @@ import {
   kindEntryTypeOptions,
   nestingLocalPrefix,
   normalizeListFieldValue,
+  resolveSchemaScope,
   schemaKindForDocumentKind,
   SCHEMA_KIND_META,
   SCHEMA_KINDS,
+  type NodeTypeTreeNode,
   type SchemaKind,
 } from "@/lib/utils/schemaTypeHelpers";
 
@@ -42,7 +44,7 @@ describe("SCHEMA_KIND_META / SCHEMA_KINDS / asSchemaKind (the kind cascade — #
 
   it("round-trips every kind through asSchemaKind — the derivation the Plot tab relies on", () => {
     // SchemaPanes derives schemaFieldKind as `asSchemaKind(type.kind) ?? \"scene\"`.
-    // The shipped bug was plot NOT round-tripping (a ternax dropped it to scene),
+    // The shipped bug was plot NOT round-tripping (a ternary dropped it to scene),
     // which silently scoped the Plot tab to the Scene tree. Pin every kind.
     for (const kind of SCHEMA_KINDS) {
       expect(asSchemaKind(kind)).toBe(kind);
@@ -56,6 +58,57 @@ describe("SCHEMA_KIND_META / SCHEMA_KINDS / asSchemaKind (the kind cascade — #
     }
     expect(asSchemaKind(null)).toBeNull();
     expect(asSchemaKind(undefined)).toBeNull();
+  });
+
+  it("asSchemaKind rejects Object.prototype keys — Object.hasOwn, not `in`", () => {
+    // `in` would walk the prototype chain and wrongly accept these as kinds.
+    for (const protoKey of ["constructor", "toString", "hasOwnProperty", "valueOf", "__proto__", "isPrototypeOf"] as unknown as SchemaKind[]) {
+      expect(asSchemaKind(protoKey)).toBeNull();
+    }
+  });
+});
+
+describe("resolveSchemaScope — the Detail Types cascade end-to-end (#729)", () => {
+  // A schema that roots plot under an abstract plot:base (the #724 shape), plus a
+  // scene:scene so the scene fallback is exercisable.
+  const CASCADE_SCHEMA = {
+    version: 1,
+    entry_types: {
+      "scene:scene": { name: "Scene", kind: "scene" },
+      "plot:base": { name: "Plot", kind: "plot", abstract: true },
+      "plot:template": { name: "Plot template", kind: "plot", parent: "plot:base" },
+      "plot:plotline": { name: "Plotline", kind: "plot", parent: "plot:base" },
+    },
+    fields: {},
+  } as unknown as MetadataSchema;
+
+  const treeIds = (nodes: NodeTypeTreeNode[]): string[] =>
+    nodes.flatMap((node) => [node.id, ...treeIds(node.children)]);
+
+  it("resolves a plot entry type to {kind:plot, heading:'Plot Types', tree of plot types}", () => {
+    // This is the whole path that shipped broken: a plot type must yield the plot
+    // kind (not scene), the plot heading, AND a tree of plot types — the three
+    // coupled together, which SchemaPanes can't be mounted to assert.
+    const scope = resolveSchemaScope(CASCADE_SCHEMA, "plot:template");
+    expect(scope.kind).toBe("plot");
+    expect(scope.heading).toBe("Plot Types");
+    expect(treeIds(scope.tree)).toEqual(expect.arrayContaining(["plot:base", "plot:template", "plot:plotline"]));
+    // And NOT the scene tree — the exact collapse the old ternary caused.
+    expect(treeIds(scope.tree)).not.toContain("scene:scene");
+  });
+
+  it("resolves a scene entry type to the scene scope", () => {
+    const scope = resolveSchemaScope(CASCADE_SCHEMA, "scene:scene");
+    expect(scope.kind).toBe("scene");
+    expect(scope.heading).toBe("Scene Types");
+  });
+
+  it("falls back to scene when the entry type is unknown or the schema is null", () => {
+    expect(resolveSchemaScope(CASCADE_SCHEMA, "nope:nope").kind).toBe("scene");
+    const nullScope = resolveSchemaScope(null, "plot:template");
+    expect(nullScope.kind).toBe("scene");
+    expect(nullScope.heading).toBe("Scene Types");
+    expect(nullScope.tree).toEqual([]);
   });
 });
 

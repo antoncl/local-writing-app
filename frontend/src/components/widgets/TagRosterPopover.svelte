@@ -12,7 +12,7 @@
   // lists + open-editor baselines) — and reload our own use-counts.
   import { onMount } from "svelte";
   import { api } from "@/lib/api";
-  import { bumpTagVocabularyRevision } from "@/lib/stores/tags";
+  import { bumpTagVocabularyRevision, refreshKnownTags } from "@/lib/stores/tags";
   import NodePickerConfigEditor from "@/components/schema/NodePickerConfigEditor.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import { pickerMembership } from "@/lib/utils/pickerSources";
@@ -159,23 +159,28 @@
     bumpTagVocabularyRevision();
   }
 
-  // Bumped to remount a row's SwatchPicker after a FAILED colour write, so its
-  // optimistic self-mutation reverts to the persisted (unchanged) colour — its
-  // `value` prop is one-way, so a same-value prop wouldn't reset it (#247).
-  let swatchResetNonce = $state(0);
+  // Per-tag remount counter (lowercased name → bump count). Incremented for the
+  // ONE row whose colour write FAILED, so its SwatchPicker remounts and its
+  // optimistic self-mutation reverts to the persisted colour — the `value` prop
+  // is one-way, so a same-value prop wouldn't reset it. Keyed per tag so a
+  // failure doesn't remount every other row's swatch (#247).
+  let swatchResets = $state<Record<string, number>>({});
 
   async function setColor(name: string, color: string | null) {
     // Colour is a quiet, non-destructive governance choice (the swatch owns it —
     // no ⋯ menu item), so no busy-lock or confirm.
+    const key = name.toLowerCase();
     error = "";
     try {
       await api.setTagColor(name, color);
-      // A colour change can't move any use-count, so skip afterOp's full-corpus
-      // count rescan; just reconcile so committed chips elsewhere recolour.
-      bumpTagVocabularyRevision();
+      // Colour changes only the vocabulary's colour — not tag NAMES, use-counts,
+      // or any node's content — so refresh just the roster (every chip recolours
+      // from knownTagsStore). The full refreshAfterTagChange (entry-list reloads +
+      // open-editor baseline refetch) is for renames/merges that rewrite docs.
+      await refreshKnownTags();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
-      swatchResetNonce += 1;
+      swatchResets = { ...swatchResets, [key]: (swatchResets[key] ?? 0) + 1 };
     }
   }
 
@@ -356,7 +361,7 @@
       {#each shown as tag (tag.name)}
         <div class="trp-row" role="listitem">
           <span class="trp-swatch">
-            {#key `${tag.color ?? ""}#${swatchResetNonce}`}
+            {#key `${tag.color ?? ""}#${swatchResets[tag.name.toLowerCase()] ?? 0}`}
               <SwatchPicker value={tag.color ?? null} onChange={(id) => setColor(tag.name, id)} />
             {/key}
           </span>

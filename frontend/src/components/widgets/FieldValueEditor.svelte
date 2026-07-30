@@ -124,8 +124,9 @@
 
   function normaliseFieldValue(f: MetadataFieldDefinition, v: MetadataValue): MetadataValue {
     if (f.type === "multi_select" || f.type === "tags" || f.type === "entity_ref_list") {
-      // Shared list normaliser: `tags` de-dupes on the way to disk (#704), the
-      // other set-typed lists pass through (generalising that is #725).
+      // Shared list normaliser: every set-typed list de-dupes on the way to disk
+      // (#704/#725) under its own case policy — tags/multi_select fold case,
+      // entity_ref_list is case-sensitive. See normalizeListFieldValue.
       return normalizeListFieldValue(f.type, v);
     }
     if (f.type === "number") {

@@ -7,7 +7,7 @@
 // resolution stay byte-identical to ADR-0009 — this module is authoring-layer
 // arithmetic only. Membership only: effective collections render
 // base-order-then-adds, reorder is not representable and the diff ignores it.
-import { splitCommaList } from "@/lib/utils/tags";
+import { dedupeList, splitCommaList } from "@/lib/utils/tags";
 import type { MutationRowDraft } from "./mutationNodes";
 
 /** One existing add/remove/replace record of the unit being re-edited. */
@@ -17,21 +17,12 @@ export interface CollectionRecord {
   value: string;
 }
 
-// Collection membership is CASE-SENSITIVE (its items are entity/reference
-// identifiers — `Alpha` and `alpha` are two distinct members), so this keeps a
-// distinct policy from the case-insensitive tag de-dupe. Only the tokenisation
-// is shared with tags, via splitCommaList (#704).
-function dedupe(items: string[]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const item of items) {
-    const text = item.trim();
-    if (!text || seen.has(text)) continue;
-    seen.add(text);
-    out.push(text);
-  }
-  return out;
-}
+// Collection membership is CASE-SENSITIVE — its items are entity/reference
+// identifiers (`Alpha` and `alpha` are two distinct members), so it de-dupes on
+// the shared dedupeList's default (case-sensitive) identity, NOT the tag
+// case-fold. Both the tokenisation (splitCommaList) and the de-dupe (dedupeList)
+// are the canonical shared helpers (#704/#725).
+const dedupe = (items: string[]): string[] => dedupeList(items);
 
 /** Coerce an effective/base field value (list, or a comma-joined marker
  *  string) to a clean membership list. */

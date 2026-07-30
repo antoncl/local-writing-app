@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { dedupeTags, parseTagList, splitCommaList, tagColorMap } from "@/lib/utils/tags";
+import {
+  dedupeList,
+  dedupeTags,
+  foldCaseInsensitive,
+  parseTagList,
+  splitCommaList,
+  tagColorMap,
+} from "@/lib/utils/tags";
 import type { ScopedTag } from "@/lib/types";
 
 describe("splitCommaList", () => {
@@ -12,6 +19,21 @@ describe("splitCommaList", () => {
     expect(splitCommaList(null)).toEqual([]);
     expect(splitCommaList(undefined)).toEqual([]);
     expect(splitCommaList("")).toEqual([]);
+  });
+});
+
+describe("dedupeList", () => {
+  it("defaults to a CASE-SENSITIVE identity (reference-like lists keep Alpha/alpha)", () => {
+    expect(dedupeList(["Alpha", "alpha", "Alpha", "beta"])).toEqual(["Alpha", "alpha", "beta"]);
+  });
+
+  it("folds case when given the case-insensitive identity, first spelling wins", () => {
+    expect(dedupeList(["Alpha", "alpha", "ALPHA", "beta"], foldCaseInsensitive)).toEqual(["Alpha", "beta"]);
+  });
+
+  it("trims and drops empty entries under either identity", () => {
+    expect(dedupeList([" a ", "", "  ", "a"])).toEqual(["a"]);
+    expect(dedupeList([" a ", "", "  ", "A"], foldCaseInsensitive)).toEqual(["a"]);
   });
 });
 

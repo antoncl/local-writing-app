@@ -229,8 +229,6 @@
       <TagRosterPopover
         tags={suggestions}
         selectedKeys={selectedKeys}
-        scopeKind={scopeKind}
-        scopeEntryType={scopeEntryType}
         adapter={governanceAdapter}
         ariaLabel={ariaLabel}
         onAdd={(name) => addTag(name)}

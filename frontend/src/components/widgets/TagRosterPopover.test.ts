@@ -35,14 +35,21 @@ function setup(adapterOverrides: Partial<TagGovernanceAdapter> = {}) {
     props: {
       tags,
       selectedKeys: new Set<string>(),
-      scopeKind: "lore",
-      scopeEntryType: "character",
       ariaLabel: "Tags",
       adapter,
       onAdd,
     },
   });
   return { ...r, onAdd, adapter };
+}
+
+// The manager embeds the same roster with NO add-target (onAdd omitted).
+function setupManager(adapterOverrides: Partial<TagGovernanceAdapter> = {}) {
+  const adapter = makeAdapter(adapterOverrides);
+  const r = render(TagRosterPopover, {
+    props: { tags, selectedKeys: new Set<string>(), ariaLabel: "Tags", adapter },
+  });
+  return { ...r, adapter };
 }
 
 beforeEach(() => {
@@ -175,5 +182,24 @@ describe("TagRosterPopover", () => {
     await fireEvent.input(screen.getByLabelText("Rename alpha"), { target: { value: "Editor" } });
     await fireEvent.click(screen.getByRole("button", { name: "Rename" }));
     expect(adapter.merge).toHaveBeenCalledWith(["alpha"], "Editor");
+  });
+
+  // ---- manager mode (no add-target: onAdd omitted) ----------------------
+  it("renders row names as static labels, not add-buttons, without an add-target", () => {
+    setupManager();
+    // No "Add …" button — the name is a plain label in the manager.
+    expect(screen.queryByTitle("Add alpha")).toBeNull();
+    expect(screen.getByText("alpha")).toBeInTheDocument();
+    // Governance stays fully available.
+    expect(screen.getByRole("button", { name: "Govern alpha" })).toBeInTheDocument();
+  });
+
+  it("suppresses the Create affordance and uses manager copy for an empty filter", async () => {
+    setupManager();
+    await fireEvent.input(screen.getByLabelText("Filter Tags"), { target: { value: "gamma" } });
+    expect(screen.queryByText(/Create/)).toBeNull();
+    // No add-target: the empty state drops the "suggested" (add-context) wording.
+    expect(screen.getByText("No matching tags.")).toBeInTheDocument();
+    expect(screen.queryByText(/suggested/)).toBeNull();
   });
 });

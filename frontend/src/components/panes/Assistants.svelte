@@ -7,7 +7,9 @@
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import RowCaret from "@/components/widgets/RowCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
-  import { assistantTagsStore, assistantTagColorHexes } from "@/lib/stores/assistantTags";
+  import { assistantTagsStore, assistantTagsAsScoped } from "@/lib/stores/assistantTags";
+  import { tagColorMap } from "@/lib/utils/tags";
+  import { getSwatch } from "@/lib/utils/colors";
   import { isAssistantListed } from "@/lib/stores/assistants";
   import { assistantTagsOf } from "@/lib/chat/assistantScope";
   // `isBareDescendantsOf` / `kindUniverseExpr` went with the whole-roster guard
@@ -42,11 +44,15 @@
   // persisted, same as the Lore pane).
 
   // Colored tag chips: name → hex from the machine-global assistant-tag
-  // vocabulary (#88). Uncolored tags fall back to the neutral chip.
-  $: assistantTagColors = assistantTagColorHexes($assistantTagsStore);
+  // vocabulary (#88), via the shared `tagColorMap` (lowercase name → swatch id)
+  // resolved to a hex here. Uncolored tags fall back to the neutral chip.
+  $: assistantSwatchIds = tagColorMap(assistantTagsAsScoped($assistantTagsStore));
   // Reactive (not const) so the function reference changes when colors update,
   // re-rendering the rows' chips.
-  $: tagHexFor = (tag: string): string | null => assistantTagColors.get(tag) ?? null;
+  $: tagHexFor = (tag: string): string | null => {
+    const id = assistantSwatchIds.get(tag.toLowerCase());
+    return id ? getSwatch(id)?.hex ?? null : null;
+  };
 
   // Every NodeList is backed by a view (ADR-0022), and the view is authoritative
   // for its own shape (ADR-0037 §3): any buckets come from the spec's own

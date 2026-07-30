@@ -90,7 +90,6 @@
   import { treeActions } from "@/lib/stores/treeActions.svelte";
   import { chatSessions } from "@/lib/stores/chatSessions.svelte";
   import TagManagerDialog from "@/components/dialogs/TagManagerDialog.svelte";
-  import AssistantTagManager from "@/components/dialogs/AssistantTagManager.svelte";
   import type {
     AssistantEntrySummary,
     Scene,
@@ -132,8 +131,8 @@
   // chatSessions controller (lib/stores/chatSessions).
   let projectCostExpanded = $state(false);
   let appState = $state<AppState>({ name: "needsProject" });
+  // One "Manage tags" home governs both vocabularies (#247 PR-3b).
   let tagsManagerOpen = $state(false);
-  let assistantTagManagerOpen = $state(false);
   // "Import documents" (#635) — the loose-scene adoption surface, opened from the
   // app menu. Its list comes from its own read, not the validation report.
   let importDocsOpen = $state(false);
@@ -698,6 +697,7 @@
   onOpenPrompts={openPromptsPane}
   onOpenMutations={openMutationsPane}
   onOpenImport={openImportDocs}
+  onManageAllTags={() => (tagsManagerOpen = true)}
   onOpenInheritance={() => workspaceLayout.ensureVisible("project")}
   canDeclareInheritance={canDeclareInheritance(project?.ancestors)}
   activePreset={workspaceLayout.activePreset}
@@ -733,7 +733,6 @@
     {run}
     setStatus={(message) => (status = message)}
     refreshOpenEditorPaneBaselines={(transform) => editorPanes.refreshOpenEditorPaneBaselines(transform)}
-    onOpenTagsManager={() => (tagsManagerOpen = true)}
   />
 
   <RegionRegistrar
@@ -895,7 +894,6 @@
 
   {#snippet assistantsActions()}
       <button class="pin-button" type="button" title="Add assistant" aria-label="Add assistant" onmousedown={(event) => event.stopPropagation()} onclick={() => treeActions.newAssistantEntry()}>+</button>
-      <button class="pin-button" type="button" title="Assistant tag colors" onmousedown={(event) => event.stopPropagation()} onclick={() => (assistantTagManagerOpen = true)}>Tags…</button>
   {/snippet}
   {#snippet assistantsBody(viewSpec: ViewSpec | undefined)}
     <div class="pane-content schema-list">
@@ -1123,14 +1121,7 @@
   />
 
   {#if tagsManagerOpen}
-    <TagManagerDialog
-      onChanged={() => void refreshAfterTagChange()}
-      onClose={() => (tagsManagerOpen = false)}
-    />
-  {/if}
-
-  {#if assistantTagManagerOpen}
-    <AssistantTagManager onClose={() => (assistantTagManagerOpen = false)} />
+    <TagManagerDialog onClose={() => (tagsManagerOpen = false)} />
   {/if}
 
   {#if error}

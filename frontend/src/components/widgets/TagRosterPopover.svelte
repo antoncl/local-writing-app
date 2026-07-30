@@ -26,16 +26,18 @@
     tags: ScopedTag[];
     /** Tags already on the entity — drives the "already added" affordance. */
     selectedKeys: Set<string>;
-    scopeKind: string;
-    scopeEntryType: string;
     ariaLabel: string;
     /** The governance operations for this vocabulary (project vs assistant). */
     adapter: TagGovernanceAdapter;
-    /** Add a tag to the entity (the primary, most-frequent action). */
-    onAdd: (name: string) => void;
+    /**
+     * Add a tag to the entity (the primary action in the "+" popover). Absent
+     * in the pure-governance manager, where there is no entity to add to — the
+     * row name then reads as a static label and "Create …" is suppressed.
+     */
+    onAdd?: (name: string) => void;
   }
 
-  let { tags, selectedKeys, scopeKind, scopeEntryType, ariaLabel, adapter, onAdd }: Props = $props();
+  let { tags, selectedKeys, ariaLabel, adapter, onAdd }: Props = $props();
 
   // Per-tag document use-counts, keyed lowercase. Loaded lazily on open (a doc
   // scan) so the fast add-path isn't blocked; counts fill in when it resolves.
@@ -65,9 +67,12 @@
   const shown = $derived(
     trimmedFilter ? tags.filter((t) => t.name.toLowerCase().includes(trimmedFilter)) : tags,
   );
-  // Offer "Create 'x'" only when the typed filter matches no existing tag exactly.
+  // Offer "Create 'x'" only when there is an entity to add to (onAdd present)
+  // and the typed filter matches no existing tag exactly.
   const createCandidate = $derived(
-    filter.trim() && !tags.some((t) => t.name.toLowerCase() === trimmedFilter) ? filter.trim() : "",
+    onAdd && filter.trim() && !tags.some((t) => t.name.toLowerCase() === trimmedFilter)
+      ? filter.trim()
+      : "",
   );
 
   function count(name: string): number {
@@ -368,19 +373,28 @@
               <SwatchPicker value={tag.color ?? null} onChange={(id) => setColor(tag.name, id)} />
             {/key}
           </span>
-          <button
-            class="trp-add"
-            class:active={selectedKeys.has(tag.name.toLowerCase())}
-            type="button"
-            title={selectedKeys.has(tag.name.toLowerCase()) ? `${tag.name} (already added)` : `Add ${tag.name}`}
-            onmousedown={(e) => e.preventDefault()}
-            onclick={() => onAdd(tag.name)}
-          >
-            <span class="trp-name">{tag.name}</span>
-            {#if adapter.supportsScope}
-              <span class="trp-scope">{scopeChips(tag.scope).join(" · ")}</span>
-            {/if}
-          </button>
+          {#if onAdd}
+            <button
+              class="trp-add"
+              class:active={selectedKeys.has(tag.name.toLowerCase())}
+              type="button"
+              title={selectedKeys.has(tag.name.toLowerCase()) ? `${tag.name} (already added)` : `Add ${tag.name}`}
+              onmousedown={(e) => e.preventDefault()}
+              onclick={() => onAdd(tag.name)}
+            >
+              <span class="trp-name">{tag.name}</span>
+              {#if adapter.supportsScope}
+                <span class="trp-scope">{scopeChips(tag.scope).join(" · ")}</span>
+              {/if}
+            </button>
+          {:else}
+            <span class="trp-add trp-add-static">
+              <span class="trp-name">{tag.name}</span>
+              {#if adapter.supportsScope}
+                <span class="trp-scope">{scopeChips(tag.scope).join(" · ")}</span>
+              {/if}
+            </span>
+          {/if}
           <span class="trp-uses" title="uses">{count(tag.name)}</span>
           <button
             class="trp-cog"
@@ -390,10 +404,10 @@
           >⋯</button>
         </div>
       {:else}
-        {#if !createCandidate}<span class="trp-empty">No tags suggested here yet.</span>{/if}
+        {#if !createCandidate}<span class="trp-empty">{onAdd ? "No tags suggested here yet." : "No matching tags."}</span>{/if}
       {/each}
       {#if createCandidate}
-        <button class="trp-create" type="button" onmousedown={(e) => e.preventDefault()} onclick={() => onAdd(createCandidate)}>
+        <button class="trp-create" type="button" onmousedown={(e) => e.preventDefault()} onclick={() => onAdd?.(createCandidate)}>
           <span class="trp-create-plus" aria-hidden="true">+</span> Create “{createCandidate}”
         </button>
       {/if}
@@ -493,6 +507,9 @@
     color: var(--text);
     text-align: left;
     cursor: pointer;
+  }
+  .trp-add-static {
+    cursor: default;
   }
   .trp-add.active .trp-name {
     color: var(--accent-deep);

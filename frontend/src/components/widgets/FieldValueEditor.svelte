@@ -11,8 +11,10 @@
   import ReferencePicker from "@/components/widgets/ReferencePicker.svelte";
   import ColoredSelect from "@/components/widgets/ColoredSelect.svelte";
   import TagPicker from "@/components/widgets/TagPicker.svelte";
+  import TagChip from "@/components/widgets/TagChip.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import { isMetadataValuePresent } from "@/lib/utils/schemaTypeHelpers";
+  import { parseTagList } from "@/lib/utils/tags";
   import type {
     LoreEntrySummary,
     MetadataFieldDefinition,
@@ -185,7 +187,9 @@
     <!-- Only the selected options — the read-only question is "what IS the
          value", not "what could it be". -->
     <div class="multi-select-chips" aria-label={label}>
-      {#each metadataValueList(value) as selected (selected)}
+      <!-- Set() drops exact duplicates so the keyed each can't throw
+           each_key_duplicate on malformed data (same guard as tags, #247). -->
+      {#each [...new Set(metadataValueList(value))] as selected (selected)}
         <span class="multi-select-chip active static">{optionLabel(selected)}</span>
       {:else}
         <span class="fv-empty">—</span>
@@ -240,8 +244,8 @@
 {:else if field.type === "tags"}
   {#if readOnly}
     <div class="multi-select-chips" aria-label={label}>
-      {#each metadataValueList(value) as tag (tag)}
-        <span class="multi-select-chip active static">{tag}</span>
+      {#each parseTagList(currentValue) as tag (tag)}
+        <TagChip name={tag} />
       {:else}
         <span class="fv-empty">—</span>
       {/each}
@@ -253,7 +257,7 @@
       scopeKind={documentKind}
       scopeEntryType={entryType}
       ariaLabel={label}
-      on:change={(event) => emit(event.detail.value)}
+      onChange={(v) => emit(v)}
     />
   {/if}
 {:else if field.type === "list"}

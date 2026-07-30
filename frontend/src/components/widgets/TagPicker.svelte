@@ -1,8 +1,10 @@
 <script lang="ts">
-  import { createEventDispatcher, onDestroy } from "svelte";
+  import { onDestroy } from "svelte";
   import type { ScopedTag } from "@/lib/types";
   import { pickerMembership } from "@/lib/utils/pickerSources";
   import { portalToBody } from "@/lib/actions/portal";
+  import TagChip from "@/components/widgets/TagChip.svelte";
+  import { parseTagList } from "@/lib/utils/tags";
 
   export let value: string = "";
   export let knownTags: ScopedTag[] = [];
@@ -11,35 +13,106 @@
   export let scopeKind: string = "";
   export let scopeEntryType: string = "";
   export let ariaLabel: string;
-  export let placeholder: string = "Comma-separated values";
+  export let placeholder: string = "Add tags…";
+  // Emits the committed tags as a comma-joined string (the wire contract the
+  // parent round-trips). A callback prop, not a `change` event, so it composes
+  // with the runes-based FieldValueEditor and is directly testable.
+  export let onChange: (value: string) => void = () => {};
 
-  const dispatch = createEventDispatcher<{ change: { value: string } }>();
+  // The committed tags come from `value` (the parent is the source of truth);
+  // `entryText` is the in-progress, uncommitted input. Typing stays free-form and
+  // only *crystallises* into chips on a comma, Enter, or when the field loses
+  // focus (#247) — so the fast "just type them" habit keeps working, tidily.
+  let entryText = "";
+  let inputEl: HTMLInputElement | null = null;
 
-  function inScope(tag: ScopedTag): boolean {
+  $: chips = parseTagList(value);
+  // "Known" means present in the vocabulary at all — a known-but-out-of-scope tag
+  // is still known (not pending). Scope only governs what the + *suggests*.
+  $: knownKeys = new Set(knownTags.map((t) => t.name.toLowerCase()));
+  // Per-chip pending state, computed in ONE reactive statement that reads both
+  // `chips` and `knownKeys` — so "will be created" re-evaluates when the roster
+  // loads or a just-created tag is registered. A template `pending={!isKnown(tag)}`
+  // would NOT: Svelte can't see `knownKeys` through the `isKnown()` call, so a
+  // chip would stay outlined after the roster arrives (feedback_svelte5_reactivity_traps).
+  $: chipStates = chips.map((tag) => ({ tag, pending: !knownKeys.has(tag.toLowerCase()) }));
+
+  function commit(next: string[]) {
+    onChange(next.join(", "));
+  }
+
+  function addTag(tag: string) {
+    const clean = tag.trim();
+    if (!clean) return;
+    const key = clean.toLowerCase();
+    if (chips.some((t) => t.toLowerCase() === key)) return;
+    commit([...chips, clean]);
+  }
+
+  function removeTag(tag: string) {
+    const key = tag.toLowerCase();
+    commit(chips.filter((t) => t.toLowerCase() !== key));
+  }
+
+  function crystallize() {
+    const tokens = parseTagList(entryText);
+    entryText = "";
+    if (tokens.length === 0) return;
+    const next = [...chips];
+    const seen = new Set(next.map((t) => t.toLowerCase()));
+    let changed = false;
+    for (const token of tokens) {
+      const key = token.toLowerCase();
+      if (!seen.has(key)) {
+        next.push(token);
+        seen.add(key);
+        changed = true;
+      }
+    }
+    // Don't fire onChange (and a redundant autosave) when every token was already
+    // present — e.g. typing an existing tag's name and pressing Enter.
+    if (changed) commit(next);
+  }
+
+  function onKeydown(event: KeyboardEvent) {
+    if (event.key === "Enter" || event.key === ",") {
+      event.preventDefault();
+      crystallize();
+    } else if (event.key === "Backspace" && entryText === "" && chips.length > 0) {
+      // Empty-input backspace removes the last chip — the token-field convention.
+      event.preventDefault();
+      removeTag(chips[chips.length - 1]);
+    }
+  }
+
+  function focusField(event: MouseEvent) {
+    // Clicking bare field space focuses the input; clicks on a chip's × or the +
+    // button handle themselves.
+    if ((event.target as HTMLElement).closest("button")) return;
+    inputEl?.focus();
+  }
+
+  // ---- the + suggestion popover (pick from the scoped roster) ----------------
+  function inScope(tag: ScopedTag, kind: string, entryType: string): boolean {
     // Tag scopes stay the degenerate type-leaf subset (ADR-0023) — read the
     // legacy {kinds, entryTypes} view of the scope's `sources`.
     const { kinds, entryTypes } = pickerMembership(tag.scope);
     if (kinds.length === 0 && Object.keys(entryTypes).length === 0) return true;
-    if (kinds.length && !kinds.includes(scopeKind)) return false;
-    const subs = entryTypes[scopeKind];
-    if (subs && subs.length && !subs.includes(scopeEntryType)) return false;
+    if (kinds.length && !kinds.includes(kind)) return false;
+    const subs = entryTypes[kind];
+    if (subs && subs.length && !subs.includes(entryType)) return false;
     return true;
   }
-  $: suggestions = knownTags.filter(inScope);
+  // scopeKind/scopeEntryType are referenced IN the reactive statement so `$:`
+  // tracks them — filtering through a closure that merely reads them would not
+  // re-run when the node's type changes (feedback_svelte5_reactivity_traps).
+  $: suggestions = knownTags.filter((tag) => inScope(tag, scopeKind, scopeEntryType));
+  $: selectedKeys = new Set(chips.map((t) => t.toLowerCase()));
 
   let open = false;
   let position: { x: number; y: number; width: number } | null = null;
   let anchorEl: HTMLDivElement | null = null;
   let rafId = 0;
-
-  function parseTags(raw: string): string[] {
-    return raw
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
-  }
-
-  $: selectedKeys = new Set(parseTags(value).map((t) => t.toLowerCase()));
 
   // Position the (body-portaled) popover from the anchor's viewport rect. Only
   // reassign when the on-screen anchor actually moved, so the per-frame tracking
@@ -94,30 +167,35 @@
     if (menu && target instanceof Node && menu.contains(target)) return;
     close();
   }
-
-  function applyTag(tag: string) {
-    const key = tag.toLowerCase();
-    const nextTags = parseTags(value).filter((item) => item.toLowerCase() !== key);
-    nextTags.push(tag);
-    dispatch("change", { value: nextTags.join(", ") });
-  }
 </script>
 
 <svelte:window on:pointerdown={handleOutsidePointerdown} />
 
 <div class="tag-picker-anchor" bind:this={anchorEl}>
-  <div class="tag-field-control">
+  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+  <!-- Clicking bare field space just focuses the input, which is already in the
+       tab order; the real controls are the input, chips, and + button. -->
+  <div class="tag-field" on:click={focusField}>
     <input
-      {value}
-      {placeholder}
+      class="tag-entry"
+      bind:this={inputEl}
+      bind:value={entryText}
+      placeholder={chips.length ? "" : placeholder}
       aria-label={ariaLabel}
-      on:input={(event) => dispatch("change", { value: event.currentTarget.value })}
+      on:keydown={onKeydown}
+      on:blur={crystallize}
     />
+    {#each chipStates as chip (chip.tag)}
+      <TagChip name={chip.tag} pending={chip.pending} removable ariaContext={ariaLabel} onRemove={() => removeTag(chip.tag)} />
+    {/each}
+    <!-- mousedown|preventDefault keeps the input focused, so clicking + to open the
+         roster doesn't blur→crystallise the half-typed text into a stray chip. -->
     <button
       class="tag-picker-toggle"
       type="button"
       title="Add known tags"
-      on:click={toggle}
+      on:mousedown|preventDefault
+      on:click|stopPropagation={toggle}
     >+</button>
   </div>
   {#if open && position}
@@ -133,7 +211,7 @@
             class:active={selectedKeys.has(tag.name.toLowerCase())}
             type="button"
             on:mousedown|preventDefault
-            on:click={() => applyTag(tag.name)}
+            on:click={() => addTag(tag.name)}
           >{tag.name}</button>
         {/each}
       {:else}
@@ -148,25 +226,46 @@
     position: relative;
   }
 
-  .tag-field-control {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 6px;
-    align-items: end;
+  .tag-field {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    align-items: center;
+    min-height: 34px;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    cursor: text;
+  }
+  .tag-field:focus-within {
+    border-color: var(--accent);
+  }
+
+  .tag-entry {
+    flex: 0 1 150px;
+    min-width: 90px;
+    height: 24px;
+    padding: 0;
+    border: none;
+    outline: none;
+    background: transparent;
+    font-size: var(--fs-md);
+    color: var(--text);
   }
 
   .tag-picker-toggle {
-    min-width: 32px;
-    padding-left: 0;
-    padding-right: 0;
-    border: 1px dashed var(--border-strong, var(--border-strong));
+    margin-left: auto;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 1px dashed var(--border-strong);
     border-radius: 8px;
     background: var(--inset);
-    color: var(--text-2, var(--text-2));
+    color: var(--text-2);
     font-size: var(--fs-lg);
     line-height: 1;
   }
-
   .tag-picker-toggle:hover {
     border-color: var(--accent);
     color: var(--accent-strong);

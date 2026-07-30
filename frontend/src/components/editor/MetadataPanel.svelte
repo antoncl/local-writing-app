@@ -788,6 +788,16 @@
     border-color: color-mix(in srgb, var(--mutation-color) 42%, transparent);
     color: var(--mutation-color);
   }
+  /* Tag chips carry the same tint, but the fill/border live on the luggage-tag
+     SVG path, not the element's background (#247) — so reach the path. `:not(.pending)`
+     leaves an uncreated tag's dashed "will be created" outline alone. */
+  .field-row.mutated .fr-val :global(.tag-chip:not(.pending)) {
+    color: var(--mutation-color);
+  }
+  .field-row.mutated .fr-val :global(.tag-chip:not(.pending) .tag-chip-shape path) {
+    fill: color-mix(in srgb, var(--mutation-color) 14%, transparent);
+    stroke: color-mix(in srgb, var(--mutation-color) 42%, transparent);
+  }
 
   /* Snapshot-compare rows (#409): the SAME two colours as the body, because the
      colour means temporal provenance everywhere and location carries the

@@ -634,12 +634,10 @@ class EditorPanesController {
       if (!refsUnchanged) refreshReferenceIndexInBackground();
       if (documentKind === "lore") {
         await refreshLoreEntries();
-        await refreshKnownTags();
       } else if (documentKind === "research") {
         // save_research_note already syncs the title into the research tree
         // server-side; refresh so the pane reflects it.
         await refreshResearchStructure();
-        await refreshKnownTags();
       } else if (documentKind === "prompt") {
         await refreshPromptEntries();
       } else if (documentKind === "assistant") {
@@ -662,8 +660,10 @@ class EditorPanesController {
             mutationsVersion.bump();
           }
         }
-        await refreshKnownTags();
       }
+      // Fire-and-forget (like refreshAssistantTags above): any saved node can register
+      // tag vocabulary, but a roster-fetch blip must not fail an already-saved node (#247).
+      void refreshKnownTags();
       this.setStatus(`Saved ${savedDocument.title}`);
     } catch (caught) {
       this.setEditorPaneSaving(id, false);

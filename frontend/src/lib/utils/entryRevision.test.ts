@@ -22,7 +22,8 @@ import type { DiffRun, DiffView } from "@/lib/types";
 //   - proposal ADDS  "worn "  → a was-only region (empty current side)
 //   - "dawn" → "first light"  → a modification (both sides present)
 // The shape test below asserts all three are actually present, so a change in
-// diff coalescing can't silently narrow the coverage the binding test rides on.
+// diff coalescing can't silently narrow the shapes RevisionFlip's per-region
+// adopt path (via adoptRegion) has to handle downstream.
 const CURRENT = "Maren fishes the cold bay. She mends her nets. She sails at dawn.";
 const PROPOSED = "Maren fishes the bay. She mends her worn nets. She sails at first light.";
 
@@ -68,10 +69,11 @@ describe("reviewBodyProposal — the proposal feeds the snapshot flip unchanged"
   });
 
   it("exercises all three change shapes — remove, add, modify", () => {
-    // The downstream adopt-binding tests are only as strong as the shapes
-    // actually present. Pin them so diff coalescing that merged an add or a
-    // remove into a modification would fail loudly here, not silently narrow
-    // coverage while every other test stays green.
+    // RevisionFlip's per-region adopt (RevisionFlip.svelte, via adoptRegion) is
+    // only exercised across every shape if reviewBodyProposal actually emits all
+    // three. Pin them so diff coalescing that merged an add or a remove into a
+    // modification would fail loudly here, not silently narrow coverage while
+    // every other test stays green.
     const shape = (r: DiffRegion) => (r.wasText && r.nowText ? "modify" : r.wasText ? "add" : "remove");
     const { regions } = reviewBodyProposal(CURRENT, PROPOSED);
     expect(regions.map(shape).sort()).toEqual(["add", "modify", "remove"]);

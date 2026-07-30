@@ -75,6 +75,7 @@
     { id: "prompt", label: "Prompt" },
     { id: "assistant", label: "Assistant" },
     { id: "project", label: "Project" },
+    { id: "plot", label: "Plot" },
   ];
 
   function typeSourceFor(typeId: string) {

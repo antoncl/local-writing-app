@@ -76,7 +76,19 @@ export function normalizeListFieldValue(fieldType: string, value: MetadataValue)
 // The schema's kind universe (a Node's "class"). Narrower than the wider
 // DocumentKind, which also covers chat / snippet / structure_node — none
 // of which have their own schema-type tree.
-export type SchemaKind = "scene" | "lore" | "research" | "prompt" | "assistant" | "project";
+export type SchemaKind = "scene" | "lore" | "research" | "prompt" | "assistant" | "project" | "plot";
+
+// Map an editor DocumentKind to the SchemaKind whose type tree governs it.
+// The editor opens plot via per-type documentKinds (`plot_template`, …) and
+// scenes as `structure_node`, neither of which is a schema kind — so any
+// schema-kind logic (Detail Types, "Edit type…") must resolve through here.
+// Returns null for DocumentKinds with no schema tree (chat / snippet / view).
+export function schemaKindForDocumentKind(documentKind: string): SchemaKind | null {
+  if (documentKind === "structure_node") return "scene";
+  if (documentKind.startsWith("plot")) return "plot";
+  const schemaKinds: SchemaKind[] = ["scene", "lore", "research", "prompt", "assistant", "project"];
+  return schemaKinds.includes(documentKind as SchemaKind) ? (documentKind as SchemaKind) : null;
+}
 
 // A field's effective display label, resolved against an ANCHOR entry type
 // (#116, ADR-0029 §F). A per-type `field_overrides[key].label` on the anchor

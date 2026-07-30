@@ -48,6 +48,7 @@
     sourceLayerIndex,
     suggestPrefixFromLabel,
     type SchemaFieldSection,
+    type SchemaKind,
   } from "@/lib/utils/schemaTypeHelpers";
   import type {
     AIPolicy,
@@ -76,7 +77,7 @@
     // Unsaved-changes flag the host reads to guard closing the pane (#68).
     dirty?: boolean;
     // Read-only type context (parent computes in create/open + re-supplies on save):
-    schemaTypeKind?: "scene" | "lore" | "research" | "prompt" | "assistant" | "project";
+    schemaTypeKind?: SchemaKind;
     schemaTypeParent?: string;
     schemaTypeReadonly?: boolean;
     selectedSchemaTypeId?: string | null;

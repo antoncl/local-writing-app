@@ -7,6 +7,7 @@ import {
   kindEntryTypeOptions,
   nestingLocalPrefix,
   normalizeListFieldValue,
+  schemaKindForDocumentKind,
 } from "@/lib/utils/schemaTypeHelpers";
 
 // The entry_type roster shared by the view designer (ViewFlowNode pickers) and the
@@ -22,6 +23,35 @@ const SCHEMA = {
   },
   fields: {},
 } as unknown as MetadataSchema;
+
+describe("schemaKindForDocumentKind", () => {
+  it("resolves plot's per-type documentKinds to the plot schema kind (#729)", () => {
+    // The editor opens plot via per-type documentKinds (`plot_template` today;
+    // `plot_plotline` / `plot_board` follow in later slices). All are governed by
+    // the single `plot` schema tree, so "Edit type…" / Detail Types must map every
+    // `plot*` documentKind to "plot" — the prefix match is deliberate so future
+    // per-type kinds need no change here.
+    expect(schemaKindForDocumentKind("plot_template")).toBe("plot");
+    expect(schemaKindForDocumentKind("plot_plotline")).toBe("plot");
+    expect(schemaKindForDocumentKind("plot_board")).toBe("plot");
+  });
+
+  it("maps structure_node (a scene in the manuscript tree) to scene", () => {
+    expect(schemaKindForDocumentKind("structure_node")).toBe("scene");
+  });
+
+  it("passes the plain schema kinds through unchanged", () => {
+    for (const kind of ["scene", "lore", "research", "prompt", "assistant", "project"] as const) {
+      expect(schemaKindForDocumentKind(kind)).toBe(kind);
+    }
+  });
+
+  it("returns null for DocumentKinds with no schema tree", () => {
+    expect(schemaKindForDocumentKind("chat")).toBeNull();
+    expect(schemaKindForDocumentKind("snippet")).toBeNull();
+    expect(schemaKindForDocumentKind("view")).toBeNull();
+  });
+});
 
 describe("coerceStringList", () => {
   it("splits a comma string into trimmed, non-empty tokens (no de-dupe)", () => {

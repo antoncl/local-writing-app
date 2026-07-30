@@ -19,6 +19,7 @@
   import {
     buildNodeTypeTree,
     buildSchemaFieldSections,
+    schemaKindForDocumentKind,
     type NodeTypeTreeNode,
     type SchemaKind,
   } from "@/lib/utils/schemaTypeHelpers";
@@ -331,17 +332,19 @@
     if (kind === "lore" && metadataSchema?.entry_types["lore:base"]) return "lore:base";
     if (kind === "prompt" && metadataSchema?.entry_types["prompt:base"]) return "prompt:base";
     if (kind === "research" && metadataSchema?.entry_types["research:base"]) return "research:base";
+    if (kind === "plot" && metadataSchema?.entry_types["plot:base"]) return "plot:base";
     return "";
   }
 
-  function openSchemaForCustomData(entryType: string, kind: DocumentKind) {
+  function openSchemaForCustomData(entryType: string, documentKind: DocumentKind) {
     // Phase B: the entry editor's "Edit type…" button opens ONLY the per-type
     // editor (schema_type pane) — not the schema/tree hierarchy view. Tree
     // access is the top bar's "Detail Types" button.
-    // The dispatched DocumentKind is wider than the schema's kind universe (it
-    // includes chat / snippet / structure_node — none of which have their own
-    // schema-type tree); narrow before consulting the schema.
-    if (kind !== "scene" && kind !== "lore" && kind !== "research" && kind !== "prompt" && kind !== "assistant" && kind !== "project") return;
+    // The dispatched DocumentKind is wider than the schema's kind universe and
+    // uses per-type documentKinds for plot (plot_template, …); resolve it to the
+    // governing SchemaKind before consulting the schema. Null = no schema tree.
+    const kind = schemaKindForDocumentKind(documentKind);
+    if (!kind) return;
     const candidate = metadataSchema?.entry_types[entryType];
     const resolvedTypeId = candidate?.kind === kind ? entryType : defaultSchemaEntryType(kind);
     schemaFieldEntryType = resolvedTypeId;
@@ -371,7 +374,7 @@
   }
 
   function defaultSchemaEntryType(kind: SchemaKind) {
-    const fallback = kind === "lore" ? "lore:lore_note" : kind === "research" ? "research:note" : kind === "prompt" ? "prompt:base" : kind === "assistant" ? "assistant:assistant" : kind === "project" ? "project:project" : "scene:scene";
+    const fallback = kind === "lore" ? "lore:lore_note" : kind === "research" ? "research:note" : kind === "prompt" ? "prompt:base" : kind === "assistant" ? "assistant:assistant" : kind === "project" ? "project:project" : kind === "plot" ? "plot:plotline" : "scene:scene";
     return Object.entries(metadataSchema?.entry_types ?? {}).find(([, definition]) => definition.kind === kind)?.[0] ?? fallback;
   }
 

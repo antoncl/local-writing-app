@@ -78,6 +78,40 @@ export function normalizeListFieldValue(fieldType: string, value: MetadataValue)
 // of which have their own schema-type tree.
 export type SchemaKind = "scene" | "lore" | "research" | "prompt" | "assistant" | "project" | "plot";
 
+// The UI metadata each kind-keyed surface needs: the Detail Types tab label,
+// the tree's context heading, and the entry-type id to seed when a project has
+// no type of that kind yet. `Record<SchemaKind, …>` makes this EXHAUSTIVE — a
+// new SchemaKind fails to compile until it has a row here, which is the whole
+// point: the per-kind ternaries this replaced (schemaFieldKind / heading /
+// schemaTypeKind derivations in SchemaPanes) each silently defaulted an
+// unlisted kind to "scene" or "lore", and adding `plot` missed three of them
+// (#729). One table, one source of truth, one place to extend.
+export interface SchemaKindMeta {
+  label: string;
+  heading: string;
+  defaultType: string;
+}
+export const SCHEMA_KIND_META: Record<SchemaKind, SchemaKindMeta> = {
+  scene: { label: "Scene", heading: "Scene Types", defaultType: "scene:scene" },
+  lore: { label: "Lore", heading: "Lore Entry Types", defaultType: "lore:lore_note" },
+  research: { label: "Research", heading: "Research Types", defaultType: "research:note" },
+  prompt: { label: "Prompt", heading: "Prompt Types", defaultType: "prompt:base" },
+  assistant: { label: "Assistant", heading: "Assistant Types", defaultType: "assistant:assistant" },
+  project: { label: "Project", heading: "Project Types", defaultType: "project:project" },
+  plot: { label: "Plot", heading: "Plot Types", defaultType: "plot:plotline" },
+};
+
+// The schema kinds in tab-strip display order (derived from the table's key
+// order — insertion order for string keys).
+export const SCHEMA_KINDS = Object.keys(SCHEMA_KIND_META) as SchemaKind[];
+
+// Narrow an arbitrary entry-type `kind` string to a SchemaKind, or null. Use
+// this wherever a value already meant to be a schema kind is read back off a
+// definition — never a fall-through ternary that guesses a default.
+export function asSchemaKind(kind: string | null | undefined): SchemaKind | null {
+  return kind != null && kind in SCHEMA_KIND_META ? (kind as SchemaKind) : null;
+}
+
 // Map an editor DocumentKind to the SchemaKind whose type tree governs it.
 // The editor opens plot via per-type documentKinds (`plot_template`, …) and
 // scenes as `structure_node`, neither of which is a schema kind — so any
@@ -86,8 +120,7 @@ export type SchemaKind = "scene" | "lore" | "research" | "prompt" | "assistant" 
 export function schemaKindForDocumentKind(documentKind: string): SchemaKind | null {
   if (documentKind === "structure_node") return "scene";
   if (documentKind.startsWith("plot")) return "plot";
-  const schemaKinds: SchemaKind[] = ["scene", "lore", "research", "prompt", "assistant", "project"];
-  return schemaKinds.includes(documentKind as SchemaKind) ? (documentKind as SchemaKind) : null;
+  return asSchemaKind(documentKind);
 }
 
 // A field's effective display label, resolved against an ANCHOR entry type

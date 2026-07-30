@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { MetadataSchema } from "@/lib/types";
 import {
+  asSchemaKind,
   coerceStringList,
   isMetadataValuePresent,
   kindEntryTypeFqns,
@@ -8,6 +9,9 @@ import {
   nestingLocalPrefix,
   normalizeListFieldValue,
   schemaKindForDocumentKind,
+  SCHEMA_KIND_META,
+  SCHEMA_KINDS,
+  type SchemaKind,
 } from "@/lib/utils/schemaTypeHelpers";
 
 // The entry_type roster shared by the view designer (ViewFlowNode pickers) and the
@@ -23,6 +27,37 @@ const SCHEMA = {
   },
   fields: {},
 } as unknown as MetadataSchema;
+
+describe("SCHEMA_KIND_META / SCHEMA_KINDS / asSchemaKind (the kind cascade — #729)", () => {
+  it("includes plot with the right tab label, heading and default type", () => {
+    expect(SCHEMA_KINDS).toContain("plot");
+    expect(SCHEMA_KIND_META.plot).toEqual({ label: "Plot", heading: "Plot Types", defaultType: "plot:plotline" });
+  });
+
+  it("SCHEMA_KINDS is exactly the table's keys, in order", () => {
+    // The tab strip renders from SCHEMA_KINDS and the SchemaPanes cascade reads
+    // SCHEMA_KIND_META — driving both off one object is what stops them drifting.
+    expect(SCHEMA_KINDS).toEqual(Object.keys(SCHEMA_KIND_META));
+  });
+
+  it("round-trips every kind through asSchemaKind — the derivation the Plot tab relies on", () => {
+    // SchemaPanes derives schemaFieldKind as `asSchemaKind(type.kind) ?? \"scene\"`.
+    // The shipped bug was plot NOT round-tripping (a ternax dropped it to scene),
+    // which silently scoped the Plot tab to the Scene tree. Pin every kind.
+    for (const kind of SCHEMA_KINDS) {
+      expect(asSchemaKind(kind)).toBe(kind);
+      expect(SCHEMA_KIND_META[kind].heading).toMatch(/Types$/);
+    }
+  });
+
+  it("asSchemaKind rejects non-kinds (documentKinds, junk, nullish) with null", () => {
+    for (const notAKind of ["plot_template", "structure_node", "chat", "", "Plot"] as unknown as SchemaKind[]) {
+      expect(asSchemaKind(notAKind)).toBeNull();
+    }
+    expect(asSchemaKind(null)).toBeNull();
+    expect(asSchemaKind(undefined)).toBeNull();
+  });
+});
 
 describe("schemaKindForDocumentKind", () => {
   it("resolves plot's per-type documentKinds to the plot schema kind (#729)", () => {

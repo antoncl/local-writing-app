@@ -17,9 +17,11 @@
   import type { OptionDraft } from "@/components/schema/SelectOptionsEditor.svelte";
   import GroupsManagerDialog from "@/components/dialogs/GroupsManagerDialog.svelte";
   import {
+    asSchemaKind,
     buildNodeTypeTree,
     buildSchemaFieldSections,
     schemaKindForDocumentKind,
+    SCHEMA_KIND_META,
     type NodeTypeTreeNode,
     type SchemaKind,
   } from "@/lib/utils/schemaTypeHelpers";
@@ -120,18 +122,10 @@
     schemaSelectedEntryType = metadataSchema?.entry_types[schemaFieldEntryType] ?? metadataSchema?.entry_types["scene:scene"] ?? null;
   });
   $effect.pre(() => {
-    schemaFieldKind =
-      schemaSelectedEntryType?.kind === "lore"
-        ? "lore"
-        : schemaSelectedEntryType?.kind === "research"
-          ? "research"
-          : schemaSelectedEntryType?.kind === "prompt"
-            ? "prompt"
-            : schemaSelectedEntryType?.kind === "assistant"
-              ? "assistant"
-              : schemaSelectedEntryType?.kind === "project"
-                ? "project"
-                : "scene";
+    // The selected type's `kind` IS a schema kind; validate-or-default rather
+    // than enumerate (the old ternax silently mapped plot → scene, breaking the
+    // Plot tab — #729).
+    schemaFieldKind = asSchemaKind(schemaSelectedEntryType?.kind) ?? "scene";
   });
   $effect.pre(() => {
     schemaNodeTypeTree = buildNodeTypeTree(metadataSchema, schemaFieldKind);
@@ -160,18 +154,7 @@
       ? metadataSchema.entry_types[selectedSchemaTypeId]?.group_applications
       : null) ?? []);
   let availableGroupEntries = $derived(Object.entries(metadataSchema?.groups ?? {}));
-  let schemaContextHeading =
-    $derived(schemaFieldKind === "lore"
-      ? "Lore Entry Types"
-      : schemaFieldKind === "research"
-        ? "Research Types"
-        : schemaFieldKind === "prompt"
-          ? "Prompt Types"
-          : schemaFieldKind === "assistant"
-            ? "Assistant Types"
-            : schemaFieldKind === "project"
-              ? "Project Types"
-              : "Scene Types");
+  let schemaContextHeading = $derived(SCHEMA_KIND_META[schemaFieldKind].heading);
 
   // --- Entry points App still drives (via bind:this) --------------------------
   export function syncSelection() {
@@ -279,16 +262,8 @@
   function createSchemaTypeDraft(layerId = projectSchemaLayerId(), parentTypeId = "") {
     selectedSchemaTypeId = null;
     const parentType = parentTypeId ? metadataSchema?.entry_types[parentTypeId] : null;
-    schemaTypeKind =
-      parentType?.kind === "scene"
-        ? "scene"
-        : parentType?.kind === "lore"
-          ? "lore"
-          : parentType?.kind === "prompt"
-            ? "prompt"
-            : parentType?.kind === "assistant"
-              ? "assistant"
-              : schemaFieldKind;
+    // Inherit the parent's kind; with no parent, stay in the current tab's kind.
+    schemaTypeKind = asSchemaKind(parentType?.kind) ?? schemaFieldKind;
     schemaTypeParent = parentTypeId || (schemaSelectedEntryType?.abstract || schemaFieldEntryType !== "scene:scene" ? schemaFieldEntryType : defaultSchemaParentType(schemaFieldKind));
     schemaTypeAbstract = false;
     schemaTypeReadonly = false;
@@ -306,14 +281,10 @@
     if (!entryType) return;
     const source = schemaTypeSource(typeId);
     selectedSchemaTypeId = typeId;
-    schemaTypeKind =
-      entryType.kind === "scene"
-        ? "scene"
-        : entryType.kind === "prompt"
-          ? "prompt"
-          : entryType.kind === "assistant"
-            ? "assistant"
-            : "lore";
+    // The type's own kind — validate-or-default. The old ternax listed only
+    // scene/prompt/assistant and defaulted the rest to "lore", so opening a
+    // plot / research / project type mislabeled the kind pill (#729).
+    schemaTypeKind = asSchemaKind(entryType.kind) ?? "lore";
     schemaTypeParent = entryType.parent ?? "";
     schemaTypeAbstract = Boolean(entryType.abstract);
     schemaTypeReadonly = Boolean(source?.built_in);
@@ -374,8 +345,10 @@
   }
 
   function defaultSchemaEntryType(kind: SchemaKind) {
-    const fallback = kind === "lore" ? "lore:lore_note" : kind === "research" ? "research:note" : kind === "prompt" ? "prompt:base" : kind === "assistant" ? "assistant:assistant" : kind === "project" ? "project:project" : kind === "plot" ? "plot:plotline" : "scene:scene";
-    return Object.entries(metadataSchema?.entry_types ?? {}).find(([, definition]) => definition.kind === kind)?.[0] ?? fallback;
+    return (
+      Object.entries(metadataSchema?.entry_types ?? {}).find(([, definition]) => definition.kind === kind)?.[0] ??
+      SCHEMA_KIND_META[kind].defaultType
+    );
   }
 
   function entryTypeIdsForField(fieldId: string, kind: SchemaKind) {

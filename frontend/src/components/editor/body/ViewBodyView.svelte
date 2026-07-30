@@ -1307,15 +1307,7 @@
     opacity: 0.35;
     cursor: default;
   }
-  /* Visually hidden, still read by assistive tech — the aria-live region. */
-  .sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-  }
+  /* .sr-only (the aria-live announcer) is the shared utility in styles.css. */
   .params-empty {
     margin: 0;
     padding: 10px 12px;

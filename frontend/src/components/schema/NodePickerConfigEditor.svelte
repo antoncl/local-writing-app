@@ -652,7 +652,7 @@
         {@const isOn = (config.presets ?? []).includes(preset.id)}
         <label class="ctx-preset-pill" class:active={isOn} title={preset.tooltip}>
           <input
-            class="ctx-preset-pill-input"
+            class="ctx-preset-pill-input sr-only"
             type="checkbox"
             checked={isOn}
             onchange={(e) => togglePreset(preset.id, (e.currentTarget as HTMLInputElement).checked)}
@@ -1300,18 +1300,9 @@
     color: var(--text);
   }
 
-  .ctx-preset-pill-input {
-    /* Visually hidden but focusable so a11y/keyboard still works. */
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    margin: -1px;
-    padding: 0;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border: 0;
-  }
+  /* .ctx-preset-pill-input carries the shared .sr-only utility (styles.css) to hide
+     the real checkbox off-screen while keeping it focusable; the class remains as the
+     identity hook for the :focus-visible sibling ring below. */
 
   .ctx-preset-pill-check {
     width: 15px;

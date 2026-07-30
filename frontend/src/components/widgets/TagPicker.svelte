@@ -217,7 +217,7 @@
     />
     <!-- The field's current value for assistive tech: read after the input on
          focus (aria-describedby) and announced on change (aria-live). -->
-    <span id={summaryId} class="tag-field-summary" aria-live="polite">{tagSummary}</span>
+    <span id={summaryId} class="sr-only" aria-live="polite">{tagSummary}</span>
     {#each chipStates as chip (chip.tag)}
       <TagChip name={chip.tag} pending={chip.pending} color={colorMap.get(chip.tag.toLowerCase()) ?? null} removable ariaContext={ariaLabel} onRemove={() => removeTag(chip.tag)} />
     {/each}
@@ -277,19 +277,7 @@
     border-color: var(--accent);
   }
 
-  /* Visually hidden, but present for assistive tech (the input's described-by
-     value summary) — the standard clip pattern, not display:none (which AT skips). */
-  .tag-field-summary {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-    border: 0;
-  }
+  /* The described-by value summary uses the shared .sr-only utility (styles.css). */
 
   .tag-entry {
     flex: 0 1 150px;

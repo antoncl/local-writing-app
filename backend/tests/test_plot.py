@@ -585,6 +585,24 @@ class PlotKindRegistrationTests(_PlotTestCase):
         )
         self.assertIn("plot:romance", self.service.read_metadata_schema().entry_types)
 
+    def test_a_plotline_subtype_instance_is_accepted_by_the_family_guard(self) -> None:
+        # The family guard admits SUB-TYPES (is_a plot:plotline), not just the
+        # exact type — a plot:plotline sub-type instance must create and read back
+        # through the plotlines endpoint. A regression tightening the guard to
+        # exact-match (`entry_type != family_root`) would 422 the create / 404 the
+        # read, and every OTHER test would still pass, so pin the is_a branch here.
+        layer_id = self.service._metadata_schema_layer_id(self.root)
+        self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=layer_id,
+                entry_type_id="plot:romance",
+                entry_type=EntryTypeDefinition(name="Romance", kind="plot", parent="plot:plotline"),
+            )
+        )
+        created = self.service.create_plotline(CreatePlotlineRequest(title="A Romance", entry_type="plot:romance"))
+        self.assertEqual(created.entry_type, "plot:romance")
+        self.assertEqual(self.service.read_plotline(created.id).entry_type, "plot:romance")
+
     def test_unknown_kind_is_still_rejected(self) -> None:
         layer_id = self.service._metadata_schema_layer_id(self.root)
         with self.assertRaises(ProjectServiceError) as ctx:

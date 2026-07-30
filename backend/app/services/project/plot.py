@@ -77,48 +77,6 @@ class _PlotNodeRead(NamedTuple):
 
 
 class PlotMixin:
-    # ----- Plotlines (plot:plotline) -------------------------------------
-
-    def list_plotlines(self) -> PlotlineList:
-        return PlotlineList(
-            entries=self._list_plot_folder_nodes(entry_type="plot:plotline", summary_cls=PlotlineSummary)
-        )
-
-    def create_plotline(self, request: CreatePlotlineRequest) -> PlotlineEntry:
-        return self.read_plotline(
-            self._create_plot_folder_node(
-                title=request.title,
-                requested_entry_type=request.entry_type,
-                default_entry_type="plot:plotline",
-                noun="plotline",
-            )
-        )
-
-    def read_plotline(self, entry_id: str) -> PlotlineEntry:
-        read = self._read_plot_folder_node(entry_id, expected_entry_type="plot:plotline", noun="plotline")
-        return PlotlineEntry(
-            id=read.node_id,
-            title=read.title,
-            body=read.body,
-            revision=read.revision,
-            entry_type=read.entry_type,
-            metadata=read.metadata,
-            computed_metadata=self._computed_entry_metadata(
-                read.body, node_id=read.node_id, entry_type=read.entry_type, schema=read.schema
-            ),
-            source_layer_id=read.index_entry.source_layer_id if read.index_entry else "",
-            source_layer_label=read.index_entry.source_layer_label if read.index_entry else "",
-        )
-
-    def save_plotline(self, entry_id: str, request: SavePlotlineRequest) -> PlotlineEntry:
-        return self.read_plotline(
-            self._save_plot_folder_node(entry_id, request, expected_entry_type="plot:plotline", noun="plotline")
-        )
-
-    def delete_plotline(self, entry_id: str) -> PlotlineList:
-        self._delete_plot_folder_node(entry_id, expected_entry_type="plot:plotline", noun="plotline")
-        return self.list_plotlines()
-
     # ----- Shared plot/ folder-node CRUD (plotlines, cards) ---------------
     #
     # Plotlines and cards are the same shape — book-local layered `plot/` Nodes
@@ -149,12 +107,14 @@ class PlotMixin:
                 422,
             )
 
-    def _require_plot_family_winner(self, entry_id: str, winner, family_root: str, *, noun: str) -> None:
+    def _require_plot_family_winner(
+        self, entry_id: str, winner, family_root: str, *, noun: str, schema: Any = None
+    ) -> None:
         # The delete guard: refuse to unlink a resolved node of a different
         # family through this endpoint (a plotline id on the cards delete path
         # would otherwise destroy the plotline and return the card list).
         if winner is not None and winner.kind == "plot" and family_root not in self.entry_type_ancestry(
-            winner.entry_type
+            winner.entry_type, schema=schema
         ):
             raise ProjectServiceError(f"Node {entry_id} is not a {noun}.", 404)
 
@@ -322,7 +282,9 @@ class PlotMixin:
         winner = self._build_node_index().by_id.get(entry_id)
         self._reject_inherited_book_local(entry_id, winner, root, noun=noun)
         # Refuse to delete a node of a different family through this endpoint.
-        self._require_plot_family_winner(entry_id, winner, expected_entry_type, noun=noun)
+        self._require_plot_family_winner(
+            entry_id, winner, expected_entry_type, noun=noun, schema=self.read_metadata_schema()
+        )
         path = self._plot_node_path(entry_id, winner, noun=noun)
         self._delete_node_file(path)  # unlink + un-shadow the memo (#392)
         self._purge_references_to({entry_id}, root)
@@ -342,6 +304,48 @@ class PlotMixin:
                 f"per-book — work with a {noun} created in this project.",
                 409,
             )
+
+    # ----- Plotlines (plot:plotline) -------------------------------------
+
+    def list_plotlines(self) -> PlotlineList:
+        return PlotlineList(
+            entries=self._list_plot_folder_nodes(entry_type="plot:plotline", summary_cls=PlotlineSummary)
+        )
+
+    def create_plotline(self, request: CreatePlotlineRequest) -> PlotlineEntry:
+        return self.read_plotline(
+            self._create_plot_folder_node(
+                title=request.title,
+                requested_entry_type=request.entry_type,
+                default_entry_type="plot:plotline",
+                noun="plotline",
+            )
+        )
+
+    def read_plotline(self, entry_id: str) -> PlotlineEntry:
+        read = self._read_plot_folder_node(entry_id, expected_entry_type="plot:plotline", noun="plotline")
+        return PlotlineEntry(
+            id=read.node_id,
+            title=read.title,
+            body=read.body,
+            revision=read.revision,
+            entry_type=read.entry_type,
+            metadata=read.metadata,
+            computed_metadata=self._computed_entry_metadata(
+                read.body, node_id=read.node_id, entry_type=read.entry_type, schema=read.schema
+            ),
+            source_layer_id=read.index_entry.source_layer_id if read.index_entry else "",
+            source_layer_label=read.index_entry.source_layer_label if read.index_entry else "",
+        )
+
+    def save_plotline(self, entry_id: str, request: SavePlotlineRequest) -> PlotlineEntry:
+        return self.read_plotline(
+            self._save_plot_folder_node(entry_id, request, expected_entry_type="plot:plotline", noun="plotline")
+        )
+
+    def delete_plotline(self, entry_id: str) -> PlotlineList:
+        self._delete_plot_folder_node(entry_id, expected_entry_type="plot:plotline", noun="plotline")
+        return self.list_plotlines()
 
     # ----- Cards (plot:card) ---------------------------------------------
     #

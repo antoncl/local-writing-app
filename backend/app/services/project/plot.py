@@ -40,13 +40,19 @@ from app.models import (
     PlotlineEntry,
     PlotlineList,
     PlotlineSummary,
+    PlotTemplate,
+    PlotTemplateList,
+    PlotTemplateSpec,
+    PlotTemplateSummary,
     SavePlotBoardRequest,
     SavePlotlineRequest,
+    SavePlotTemplateRequest,
 )
 from app.services.markdown_validation import validate_scene_markdown
 from app.services.project.errors import ProjectServiceError
 
 PLOT_BOARD_FILENAME = "plot-board.md"
+PLOT_TEMPLATE_ENTRY_TYPE = "plot:template"
 
 
 class PlotMixin:
@@ -228,7 +234,11 @@ class PlotMixin:
             )
 
     def _reject_inherited_plotline(self, entry_id: str, winner, root: Path) -> None:
-        if winner is not None and winner.kind == "plot" and winner.source_layer_id != self._metadata_schema_layer_id(root):
+        # Same owned/inherited predicate every Library tenant reads
+        # (`_node_is_owned_here`), but a *different* contract: a plotline is a
+        # book-local editable node whose inherited-fork routing is merely deferred,
+        # not a read-only Library node — so the message differs.
+        if winner is not None and winner.kind == "plot" and not self._node_is_owned_here(winner, root):
             raise ProjectServiceError(
                 f"Plotline {entry_id} is inherited from {winner.source_layer_label or 'an ancestor'}; "
                 "editing or deleting an inherited plotline is not supported yet (fork / override "
@@ -292,3 +302,153 @@ class PlotMixin:
             allow_unicode=True,
         ).strip()
         self._atomic_write(path, f"---\n{front_matter}\n---\n")
+
+    # ----- Templates (plot:template) — an ADR-0049 Library tenant ---------
+    #
+    # A diagnostic story-structure lens. Its beat roster + guidance live in a
+    # `template:` front-matter block (an opaque payload like the board's
+    # `layout`), the prose guide is the body. The built-in Library ships the
+    # 14 defaults as read-only ancestor nodes; a writer clones one into this
+    # project (a new id, editable) to adapt it. Read-only-in-place and clone are
+    # the shared Library-tenant surface (`_node_is_owned_here` /
+    # `_reject_inherited_library_write`); this mixin adds only the per-kind
+    # read/write of the `template:` block. Owned templates ARE `plot/` family
+    # nodes, so they index and reference-purge like plotlines.
+
+    def list_plot_templates(self) -> PlotTemplateList:
+        root = self._require_project()
+        index = self._build_node_index()
+        entries: list[PlotTemplateSummary] = []
+        for entry in index.by_id.values():
+            if entry.entry_type != PLOT_TEMPLATE_ENTRY_TYPE:
+                continue
+            try:
+                front_matter, body = self._read_markdown_with_front_matter(entry.path, strict=True)
+            except ProjectServiceError:
+                continue
+            entries.append(
+                PlotTemplateSummary(
+                    id=entry.id,
+                    title=str(front_matter.get("title") or entry.id),
+                    body=body,
+                    entry_type=PLOT_TEMPLATE_ENTRY_TYPE,
+                    template=self._parse_plot_template_spec(front_matter.get("template"), entry.id),
+                    source_layer_id=entry.source_layer_id,
+                    source_layer_label=entry.source_layer_label,
+                    is_library=entry.is_library,
+                    editable=self._node_is_owned_here(entry, root),
+                )
+            )
+        entries.sort(key=lambda entry: (entry.title.lower(), entry.id))
+        return PlotTemplateList(entries=entries)
+
+    def read_plot_template(self, entry_id: str) -> PlotTemplate:
+        root = self._require_project()
+        index = self._build_node_index()
+        index_entry = index.by_id.get(entry_id)
+        if index_entry is not None and index_entry.kind == "plot":
+            path = index_entry.path
+        else:
+            path = self._path_for_node_id(entry_id, "plot")
+        front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
+        node_id = self._node_id_for_path(path, front_matter)
+        if (front_matter.get("entry_type") or "") != PLOT_TEMPLATE_ENTRY_TYPE:
+            # A plotline (same `plot` kind, same folder) is not a template — refuse
+            # rather than hand back a shapeless spec.
+            raise ProjectServiceError(f"Node {node_id} is not a plot template.", 404)
+        return PlotTemplate(
+            id=node_id,
+            title=str(front_matter.get("title") or node_id),
+            body=body,
+            revision=self._revision(path),
+            entry_type=PLOT_TEMPLATE_ENTRY_TYPE,
+            template=self._parse_plot_template_spec(front_matter.get("template"), node_id),
+            source_layer_id=index_entry.source_layer_id if index_entry else "",
+            source_layer_label=index_entry.source_layer_label if index_entry else "",
+            is_library=index_entry.is_library if index_entry else False,
+            # Fail-closed truth the UI read-only lock reads (#689): an inherited
+            # winner is not owned → read-only. No index winner means a just-written
+            # owned clone, editable. Mirrors `_reject_inherited_library_write`.
+            editable=self._node_is_owned_here(index_entry, root) if index_entry else True,
+        )
+
+    def fork_plot_template(self, entry_id: str) -> PlotTemplate:
+        """Clone an inherited template into this project as an editable copy
+        (ADR-0049 §5, generalized from prompts in ADR-0048 S4b).
+
+        Mints a **new id** and leaves the Library / ancestor original in place —
+        the same "duplicate the default to adapt it" gesture prompts use, so
+        clone and per-project hide stay orthogonal. A template this project
+        already owns is directly editable, so there is nothing to clone.
+        """
+        root = self._require_project()
+        winner = self._build_node_index().by_id.get(entry_id)
+        if winner is None or winner.entry_type != PLOT_TEMPLATE_ENTRY_TYPE:
+            raise ProjectServiceError(f"Plot template {entry_id} not found.", 404)
+        if self._node_is_owned_here(winner, root):
+            raise ProjectServiceError(
+                f"Plot template {entry_id} is owned by this project and is directly "
+                "editable; there is nothing to clone.",
+                409,
+            )
+        source = self.read_plot_template(entry_id)
+        new_id = self._new_id("plot")
+        path = self._filepath_for_new_node(root / "plot", source.title)
+        self._write_plot_template_file(path, new_id, source.title, source.template, source.body)
+        return self.read_plot_template(new_id)
+
+    def save_plot_template(self, entry_id: str, request: SavePlotTemplateRequest) -> PlotTemplate:
+        # Inherited (Library / ancestor) templates are read-only in place — the
+        # structural 409, shared with prompts. Owned clones save freely.
+        self._reject_inherited_library_write(entry_id, kind="plot", noun="plot template")
+        path = self._path_for_node_id(entry_id, "plot")
+        front_matter = self._read_front_matter_only(path, strict=True)
+        node_id = self._node_id_for_path(path, front_matter)
+        if (front_matter.get("entry_type") or "") != PLOT_TEMPLATE_ENTRY_TYPE:
+            raise ProjectServiceError(f"Node {node_id} is not a plot template.", 404)
+        current_revision = self._revision(path)
+        if request.base_revision and request.base_revision != current_revision:
+            raise ProjectServiceError("Plot template changed on disk after it was opened.", 409)
+        markdown_errors = validate_scene_markdown(request.body)
+        if markdown_errors:
+            raise ProjectServiceError(" ".join(markdown_errors), 422)
+        self._write_plot_template_file(path, node_id, request.title, request.template, request.body)
+        self._maybe_rename_node_file(path, request.title)
+        return self.read_plot_template(node_id)
+
+    def delete_plot_template(self, entry_id: str) -> PlotTemplateList:
+        root = self._require_project()
+        self._reject_inherited_library_write(entry_id, kind="plot", noun="plot template")
+        winner = self._build_node_index().by_id.get(entry_id)
+        if winner is None or winner.entry_type != PLOT_TEMPLATE_ENTRY_TYPE:
+            raise ProjectServiceError(f"Plot template {entry_id} not found.", 404)
+        path = self._path_for_node_id(entry_id, "plot")
+        self._delete_node_file(path)  # unlink + un-shadow the memo (#392)
+        self._purge_references_to({entry_id}, root)
+        return self.list_plot_templates()
+
+    def _parse_plot_template_spec(self, raw: object, node_id: str) -> PlotTemplateSpec:
+        from pydantic import ValidationError
+
+        if not isinstance(raw, dict):
+            return PlotTemplateSpec()
+        try:
+            return PlotTemplateSpec.model_validate(raw)
+        except ValidationError as exc:
+            raise ProjectServiceError(f"Plot template {node_id} has an invalid `template` block: {exc}.", 422) from exc
+
+    def _write_plot_template_file(
+        self, path: Path, node_id: str, title: str, spec: PlotTemplateSpec, body: str
+    ) -> None:
+        front_matter = yaml.safe_dump(
+            {
+                "id": node_id,
+                "title": title,
+                "entry_type": PLOT_TEMPLATE_ENTRY_TYPE,
+                "template": spec.model_dump(mode="json"),
+            },
+            sort_keys=False,
+            allow_unicode=True,
+        ).strip()
+        body_text = f"{body.rstrip()}\n" if body and body.strip() else ""
+        self._atomic_write(path, f"---\n{front_matter}\n---\n\n{body_text}")

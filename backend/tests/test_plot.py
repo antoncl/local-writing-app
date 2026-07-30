@@ -1,11 +1,13 @@
-"""Backend tests for the `plot` kind (ADR-0048 S4a).
+"""Backend tests for the `plot` kind (ADR-0048 S4a + S4b).
 
-Two node types under the new kind: plotlines (`plot:plotline`, a flat layered
-entry) and the board (`plot:board`, a per-project layout singleton). These prove
-the wiring end-to-end through FastAPI plus the registration facts (family,
-schema, folder, whitelist) and the two design invariants — a plotline is indexed
-and reference-bearing, while the board is a directly-addressed singleton kept out
-of the node index so an ancestor's board can never leak in.
+Node types under the new kind: plotlines (`plot:plotline`, a flat layered entry),
+the board (`plot:board`, a per-project layout singleton), and templates
+(`plot:template`, S4b — the ADR-0049 Library's second tenant). These prove the
+wiring end-to-end through FastAPI plus the registration facts (family, schema,
+folder, whitelist, Library membership) and the design invariants — a plotline is
+indexed and reference-bearing, the board is a directly-addressed singleton kept
+out of the node index, and templates ship read-only from the Library and clone
+into the project on demand.
 """
 
 from __future__ import annotations
@@ -27,7 +29,11 @@ from app.models import (
     UpsertMetadataEntryTypeRequest,
 )
 from app.services.project.errors import ProjectServiceError
-from app.services.project.references import NODE_FAMILIES, REFERENCE_BEARING_KINDS
+from app.services.project.references import (
+    LIBRARY_LAYER_FAMILIES,
+    NODE_FAMILIES,
+    REFERENCE_BEARING_KINDS,
+)
 from app.services.project_service import ProjectService
 
 
@@ -143,6 +149,110 @@ class PlotBoardHttpTests(_PlotTestCase):
         self.assertEqual(self.service.list_plotlines().entries, [])
 
 
+_THREE_ACT = "builtin-plot-three-act-story-arc"
+
+
+class PlotTemplateLibraryTests(_PlotTestCase):
+    """`plot:template` is the ADR-0049 Library's second tenant (ADR-0048 S4b).
+
+    The 14 diagnostic templates ship as read-only ancestor nodes; a writer clones
+    one into the project (a new id, editable) to adapt it. Read-only-in-place and
+    clone are the shared Library-tenant surface, proven here for a non-prompt kind.
+    """
+
+    def test_ships_fourteen_readonly_library_templates(self) -> None:
+        listing = self.client.get("/api/plot/templates")
+        self.assertEqual(listing.status_code, 200, listing.text)
+        entries = listing.json()["entries"]
+        self.assertEqual(len(entries), 14)
+        # Every shipped template is inherited from the Library: read-only, flagged.
+        self.assertTrue(all(e["is_library"] for e in entries))
+        self.assertTrue(all(e["editable"] is False for e in entries))
+        self.assertIn(_THREE_ACT, [e["id"] for e in entries])
+
+    def test_read_round_trips_the_spec_and_guide(self) -> None:
+        got = self.client.get(f"/api/plot/templates/{_THREE_ACT}")
+        self.assertEqual(got.status_code, 200, got.text)
+        body = got.json()
+        self.assertEqual(body["entry_type"], "plot:template")
+        self.assertFalse(body["editable"])
+        self.assertEqual(body["template"]["family"], "act")
+        points = body["template"]["plot_points"]
+        self.assertEqual(len(points), 7)
+        self.assertEqual(points[0]["id"], "setup_pressure")
+        # The prose guide is the node body.
+        self.assertIn("# Three-Act Story Arc", body["body"])
+
+    def test_saving_an_inherited_template_is_refused(self) -> None:
+        refused = self.client.put(
+            f"/api/plot/templates/{_THREE_ACT}",
+            json={"title": "Hijacked", "body": "", "template": {}},
+        )
+        self.assertEqual(refused.status_code, 409, refused.text)
+        # The shipped node is untouched — a re-read still shows the original.
+        self.assertEqual(self.client.get(f"/api/plot/templates/{_THREE_ACT}").json()["title"], "Three-Act Story Arc")
+
+    def test_deleting_an_inherited_template_is_refused(self) -> None:
+        refused = self.client.delete(f"/api/plot/templates/{_THREE_ACT}")
+        self.assertEqual(refused.status_code, 409, refused.text)
+        self.assertEqual(self.client.get(f"/api/plot/templates/{_THREE_ACT}").status_code, 200)
+
+    def test_fork_mints_an_owned_editable_copy(self) -> None:
+        forked = self.client.post(f"/api/plot/templates/{_THREE_ACT}/fork")
+        self.assertEqual(forked.status_code, 200, forked.text)
+        clone = forked.json()
+        # New id, owned + editable, and the Library original stays in place.
+        self.assertTrue(clone["id"].startswith("plot_"))
+        self.assertNotEqual(clone["id"], _THREE_ACT)
+        self.assertTrue(clone["editable"])
+        self.assertFalse(clone["is_library"])
+        self.assertEqual(clone["title"], "Three-Act Story Arc")
+        # The whole spec came across (not just title/body).
+        self.assertEqual(len(clone["template"]["plot_points"]), 7)
+        # The owned clone is a plot/ family node — indexed like a plotline.
+        entry = self.service._build_node_index().by_id.get(clone["id"])
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry.entry_type, "plot:template")
+        # The Library original is still listed alongside the clone.
+        ids = [e["id"] for e in self.client.get("/api/plot/templates").json()["entries"]]
+        self.assertIn(_THREE_ACT, ids)
+        self.assertIn(clone["id"], ids)
+
+    def test_owned_clone_is_editable_and_deletable(self) -> None:
+        clone = self.client.post(f"/api/plot/templates/{_THREE_ACT}/fork").json()
+        spec = clone["template"]
+        spec["description"] = "My adapted lens."
+        saved = self.client.put(
+            f"/api/plot/templates/{clone['id']}",
+            json={"title": "My Three-Act", "body": "# Mine\n", "template": spec, "base_revision": clone["revision"]},
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        reread = self.client.get(f"/api/plot/templates/{clone['id']}").json()
+        self.assertEqual(reread["title"], "My Three-Act")
+        self.assertEqual(reread["template"]["description"], "My adapted lens.")
+        self.assertTrue(reread["editable"])
+        deleted = self.client.delete(f"/api/plot/templates/{clone['id']}")
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertEqual(self.client.get(f"/api/plot/templates/{clone['id']}").status_code, 404)
+
+    def test_forking_an_owned_template_is_refused(self) -> None:
+        clone = self.client.post(f"/api/plot/templates/{_THREE_ACT}/fork").json()
+        # Nothing to clone — an owned template is directly editable.
+        again = self.client.post(f"/api/plot/templates/{clone['id']}/fork")
+        self.assertEqual(again.status_code, 409, again.text)
+
+    def test_a_plotline_is_not_a_template(self) -> None:
+        created = self.client.post("/api/plot/plotlines", json={"title": "A Thread"}).json()
+        # Same `plot` kind + folder, but reading it as a template is refused.
+        self.assertEqual(self.client.get(f"/api/plot/templates/{created['id']}").status_code, 404)
+        # And templates never leak into the plotline list.
+        plotline_ids = [e["id"] for e in self.client.get("/api/plot/plotlines").json()["entries"]]
+        self.assertNotIn(_THREE_ACT, plotline_ids)
+
+    def test_missing_template_404s(self) -> None:
+        self.assertEqual(self.client.get("/api/plot/templates/builtin-plot-nope").status_code, 404)
+
+
 class PlotKindRegistrationTests(_PlotTestCase):
     def test_plot_family_registered_and_reference_bearing(self) -> None:
         self.assertIn("plot", {family.kind for family in NODE_FAMILIES})
@@ -152,7 +262,14 @@ class PlotKindRegistrationTests(_PlotTestCase):
         schema = self.service.read_metadata_schema()
         self.assertIn("plot:plotline", schema.entry_types)
         self.assertIn("plot:board", schema.entry_types)
+        self.assertIn("plot:template", schema.entry_types)
         self.assertEqual(schema.entry_types["plot:plotline"].kind, "plot")
+        self.assertEqual(schema.entry_types["plot:template"].kind, "plot")
+
+    def test_plot_is_a_library_tenant(self) -> None:
+        # The Library ships the plot family (its `plot/` folder holds templates),
+        # so a second, non-prompt tenant proves the Library model is kind-agnostic.
+        self.assertIn("plot", {family.kind for family in LIBRARY_LAYER_FAMILIES})
 
     def test_project_creation_makes_the_plot_folder(self) -> None:
         self.assertTrue((self.root / "plot").is_dir())

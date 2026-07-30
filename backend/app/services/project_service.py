@@ -34,6 +34,7 @@ from app.services.project.errors import ProjectServiceError
 from app.services.project.layers import MANIFEST_FILENAME as INDEX_MANIFEST_FILENAME
 from app.services.project.layers import SCHEMA_FILENAME as INDEX_SCHEMA_FILENAME
 from app.services.project.layers import LayerWalkMixin
+from app.services.project.library_tenant import LibraryTenantMixin
 from app.services.project.lifecycle import ProjectLifecycleMixin
 from app.services.project.lore import LoreEntriesMixin
 from app.services.project.lore_mutations import LoreMutationsMixin
@@ -79,6 +80,7 @@ class ProjectService(
     LoreEntriesMixin,
     LoreMutationsMixin,
     LayerWalkMixin,
+    LibraryTenantMixin,
     ManuscriptMixin,
     MetadataSchemaMixin,
     MetadataSchemaGroupsMixin,

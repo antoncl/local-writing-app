@@ -518,7 +518,14 @@ class PatchDeclinesWhenTheDiffIsHugeTests(PatchTestCase):
     triggers are ordinary: a `git pull`, a cloud sync that moves every mtime."""
 
     def test_a_diff_covering_most_of_the_project_rebuilds(self) -> None:
-        for i in range(8):
+        # The crossover is measured against the whole index — `len(candidates)`
+        # in the patch decision — and that includes the built-in Library nodes a
+        # rebuild re-walks (the prompts and, since ADR-0048 S4b, the 14 plot
+        # templates). So the churned set has to exceed half of *that*, not half
+        # of the project's own files; 40 edits clears it with room to spare as
+        # the Library grows.
+        node_count = 40
+        for i in range(node_count):
             self._write_lore(self.root, f"n{i}", f"Node {i}")
         self._open_index()
 
@@ -526,7 +533,7 @@ class PatchDeclinesWhenTheDiffIsHugeTests(PatchTestCase):
         # lands on the *next open* at once — the case the ~36% crossover is
         # about. In-app edits would patch one file at a time and never present a
         # batch, which is exactly why patching stays the cheap path in a session.
-        for i in range(8):
+        for i in range(node_count):
             self._write_lore_externally(self.root, f"n{i}", f"Node {i} edited")
 
         self.assertFalse(self._patched_without_full_walk())

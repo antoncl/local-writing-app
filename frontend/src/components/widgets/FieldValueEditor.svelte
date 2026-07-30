@@ -124,8 +124,9 @@
 
   function normaliseFieldValue(f: MetadataFieldDefinition, v: MetadataValue): MetadataValue {
     if (f.type === "multi_select" || f.type === "tags" || f.type === "entity_ref_list") {
-      // Shared list normaliser: `tags` de-dupes on the way to disk (#704), the
-      // other set-typed lists pass through (generalising that is #725).
+      // Shared list normaliser: every set-typed list de-dupes on the way to disk
+      // (#704/#725) under its own case policy — tags/multi_select fold case,
+      // entity_ref_list is case-sensitive. See normalizeListFieldValue.
       return normalizeListFieldValue(f.type, v);
     }
     if (f.type === "number") {
@@ -192,9 +193,11 @@
     <!-- Only the selected options — the read-only question is "what IS the
          value", not "what could it be". -->
     <div class="multi-select-chips" aria-label={label}>
-      <!-- Set() drops exact duplicates so the keyed each can't throw
-           each_key_duplicate on malformed data (same guard as tags, #247). -->
-      {#each [...new Set(metadataValueList(value))] as selected (selected)}
+      <!-- De-dupe through the shared normaliser so the read-only render matches
+           the SAVE policy (case-insensitive for multi_select, #725) — otherwise a
+           case-duplicate shows as two chips until the next save heals it — and the
+           keyed each can't throw each_key_duplicate on malformed data. -->
+      {#each normalizeListFieldValue("multi_select", value) as selected (selected)}
         <span class="multi-select-chip active static">{optionLabel(selected)}</span>
       {:else}
         <span class="fv-empty">—</span>

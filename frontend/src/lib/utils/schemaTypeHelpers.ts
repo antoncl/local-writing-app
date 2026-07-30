@@ -9,7 +9,7 @@
 // they're invoked from the component (where schema lives on props) or from
 // App.svelte (where it lives on its own `let` bindings).
 
-import { dedupeTags, splitCommaList } from "@/lib/utils/tags";
+import { dedupeList, foldCaseInsensitive, splitCommaList } from "@/lib/utils/tags";
 import type {
   EntryTypeDefinition,
   MetadataFieldDefinition,
@@ -63,14 +63,23 @@ export function coerceStringList(value: MetadataValue | undefined): string[] {
     : splitCommaList(String(value ?? ""));
 }
 
-// The SAVE-path normaliser for a list-shaped field value. `tags` is a set, so its
-// persisted value de-dupes case-insensitively (#704) — a duplicate from an
-// importer or hand-edited YAML must not reach disk, not only the render. The
-// other list types (multi_select, entity_ref_list) pass through un-deduped for
-// now; generalising that needs a per-type case policy and is tracked in #725.
+// The SAVE-path normaliser for a list-shaped field value. Every set-typed list
+// self-normalises on write, so a duplicate arriving from an importer or
+// hand-edited YAML is de-duped on the way to disk, not only in the render (#704
+// for tags; #725 generalised it to the siblings). The case policy differs by
+// type and is deliberate, NOT a mechanical "dedupe everything":
+//   - `tags` and `multi_select` are controlled vocabularies where case is
+//     presentation → CASE-INSENSITIVE, first spelling wins. (The multi_select
+//     toggle already MATCHES options case-insensitively, so the saved value must
+//     fold the same way, else `Draft`/`draft` toggles as one but persists as two.)
+//   - `entity_ref_list` items are entity identifiers (like collection membership)
+//     → CASE-SENSITIVE: `Alpha` and `alpha` are two distinct refs.
+// Any other field type is not set-shaped and passes through untouched.
 export function normalizeListFieldValue(fieldType: string, value: MetadataValue): string[] {
   const items = coerceStringList(value);
-  return fieldType === "tags" ? dedupeTags(items) : items;
+  if (fieldType === "tags" || fieldType === "multi_select") return dedupeList(items, foldCaseInsensitive);
+  if (fieldType === "entity_ref_list") return dedupeList(items);
+  return items;
 }
 
 // The schema's kind universe (a Node's "class"). Narrower than the wider

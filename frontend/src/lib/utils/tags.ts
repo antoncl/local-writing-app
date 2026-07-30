@@ -16,24 +16,40 @@ export function splitCommaList(raw: string | null | undefined): string[] {
   return out;
 }
 
-// De-dupe an already-tokenised list under the TAG set policy: case-insensitive,
-// first spelling wins. The write path handles both a comma string and an array,
-// so this takes a list (pair it with splitCommaList for the string case). A
-// value with exact or case duplicates (hand-edited YAML, an importer — pre-1.0
-// has no normalization) must NOT reach a keyed `{#each}`, which throws
-// `each_key_duplicate`, NOR be persisted, since a tag twice is one tag.
-export function dedupeTags(tags: string[]): string[] {
+// De-dupe an already-tokenised list, trimming and dropping empties, first
+// occurrence wins. `identity` maps each token to the key set-membership compares
+// on — the ONE knob the two set policies differ by (#725):
+//   - default (the token itself) → CASE-SENSITIVE: for reference-like lists whose
+//     items are identifiers (`entity_ref_list`, collection membership), where
+//     `Alpha` and `alpha` are two distinct members;
+//   - a lowercasing identity → CASE-INSENSITIVE: for controlled vocabularies
+//     (`tags`, `multi_select` options), where case is presentation, not identity.
+// A value with duplicates (hand-edited YAML, an importer — pre-1.0 has no
+// normalization) must NOT reach a keyed `{#each}`, which throws
+// `each_key_duplicate`, NOR be persisted, since a member twice is one member.
+export function dedupeList(
+  items: string[],
+  identity: (token: string) => string = (token) => token,
+): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
-  for (const tag of tags) {
-    const token = tag.trim();
+  for (const item of items) {
+    const token = item.trim();
     if (!token) continue;
-    const key = token.toLowerCase();
+    const key = identity(token);
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(token);
   }
   return out;
+}
+
+// The case-folding identity for controlled vocabularies (tags, multi_select).
+export const foldCaseInsensitive = (token: string): string => token.toLowerCase();
+
+// De-dupe under the TAG set policy: case-insensitive, first spelling wins.
+export function dedupeTags(tags: string[]): string[] {
+  return dedupeList(tags, foldCaseInsensitive);
 }
 
 // Canonical parser for a comma-joined tag string → an ordered, de-duplicated

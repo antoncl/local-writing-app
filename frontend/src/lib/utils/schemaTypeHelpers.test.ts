@@ -50,11 +50,24 @@ describe("normalizeListFieldValue", () => {
     expect(normalizeListFieldValue("tags", ["a", "A", "b"])).toEqual(["a", "b"]);
   });
 
-  // #725 boundary: the other set-typed lists deliberately DON'T de-dupe yet —
-  // pin the current behaviour so a future generalisation is a conscious change.
-  it("does NOT de-dupe multi_select or entity_ref_list (tracked in #725)", () => {
-    expect(normalizeListFieldValue("multi_select", "a, a, b")).toEqual(["a", "a", "b"]);
-    expect(normalizeListFieldValue("entity_ref_list", ["x", "x"])).toEqual(["x", "x"]);
+  // #725: multi_select is a controlled vocabulary — de-dupe CASE-INSENSITIVELY,
+  // matching the toggle's case-insensitive option compare, so a case dup can't be
+  // persisted while the toggle treats the two as one.
+  it("de-dupes multi_select case-insensitively (first spelling wins)", () => {
+    expect(normalizeListFieldValue("multi_select", "Draft, draft, Final")).toEqual(["Draft", "Final"]);
+    expect(normalizeListFieldValue("multi_select", ["a", "a", "A", "b"])).toEqual(["a", "b"]);
+  });
+
+  // #725: entity_ref_list items are identifiers — de-dupe CASE-SENSITIVELY, so
+  // exact dups collapse but `Alpha`/`alpha` stay distinct refs.
+  it("de-dupes entity_ref_list case-sensitively (exact dups only)", () => {
+    expect(normalizeListFieldValue("entity_ref_list", ["x", "x", "y"])).toEqual(["x", "y"]);
+    expect(normalizeListFieldValue("entity_ref_list", "Alpha, alpha, Alpha")).toEqual(["Alpha", "alpha"]);
+  });
+
+  // A non-set field type is not list-shaped and passes through untouched.
+  it("passes an unknown field type through without de-duping", () => {
+    expect(normalizeListFieldValue("text", "a, a, b")).toEqual(["a", "a", "b"]);
   });
 });
 

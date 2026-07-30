@@ -1243,3 +1243,23 @@ button.row-action-add.active {
 .inline-add-btn:hover {
   background: var(--surface);
 }
+
+/* Visually hidden, but present in the layout and tab order for assistive tech —
+   the standard clip recipe (not display:none, which AT skips, and which would
+   also drop a focusable element from the tab order). One home for what was
+   hand-rolled per-component; works for both off-screen text (aria-live
+   summaries) and off-screen-but-focusable controls (a visually-replaced input). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  /* clip is deprecated but universally supported; clip-path is the modern path.
+     Keeping both is the belt-and-suspenders recipe (no behavioural change today). */
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}

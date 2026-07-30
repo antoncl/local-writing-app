@@ -138,6 +138,15 @@ from app.models.entries import (
     StructureNode,
     UnlistAssistantRequest,
 )
+from app.models.plot import (
+    PlotTemplate,
+    PlotTemplateList,
+    PlotTemplatePoint,
+    PlotTemplateSpec,
+    PlotTemplateSummary,
+    SavePlotTemplateRequest,
+    SourceRef,
+)
 from app.models.project import (
     PROJECT_NODE_FILENAME,
     AncestorCandidate,
@@ -331,6 +340,11 @@ __all__ = [
     "PlotlineEntry",
     "PlotlineList",
     "PlotlineSummary",
+    "PlotTemplate",
+    "PlotTemplateList",
+    "PlotTemplatePoint",
+    "PlotTemplateSpec",
+    "PlotTemplateSummary",
     "PromptContextStrategy",
     "PromptEntry",
     "PromptEntryList",
@@ -357,6 +371,7 @@ __all__ = [
     "SaveMutationSetEntryRequest",
     "SavePlotBoardRequest",
     "SavePlotlineRequest",
+    "SavePlotTemplateRequest",
     "SaveProjectNodeRequest",
     "SavePromptEntryRequest",
     "SaveResearchNoteRequest",
@@ -364,6 +379,7 @@ __all__ = [
     "Scene",
     "ScopedTag",
     "SearchHit",
+    "SourceRef",
     "SearchRequest",
     "SearchResponse",
     "SelectOption",

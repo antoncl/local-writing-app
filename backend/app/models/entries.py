@@ -290,11 +290,12 @@ class PromptEntrySummary(BaseModel):
     # Whether this prompt may be edited in place here, vs being read-only because
     # it is inherited (a built-in Library node or an ancestor project's prompt).
     # This is the backend's OWN answer — the exact condition `save_prompt_entry`
-    # refuses with a 409 (`_reject_inherited_prompt_write`) — surfaced as a
+    # refuses with a 409 (`_reject_inherited_library_write`) — surfaced as a
     # read-model flag so the editor's read-only lock and the "Clone to edit"
     # banner read it instead of re-deriving ownership from the async schema
     # layers. That re-derivation drifting from this truth is what caused #676
-    # (#689). The two builders always set it from `_prompt_winner_is_owned`; the
+    # (#689). The two builders always set it from `_node_is_owned_here` (the
+    # shared Library-tenant predicate, ADR-0048 S4b); the
     # default is fail-CLOSED (locked) to match the read-only invariant — a path
     # that ever forgot to set it would lock, never silently unlock an inherited
     # prompt into the 409 dead-end.

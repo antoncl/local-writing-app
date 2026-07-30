@@ -177,6 +177,18 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "has_body": True,
             "color": "plum",
         },
+        "plot:template": {
+            # A diagnostic story-structure lens (ADR-0048 S4b), shipped read-only
+            # by the built-in Library (ADR-0049) or cloned into a project to adapt.
+            # Its beat roster + guidance live in a `template:` front-matter block
+            # (an opaque payload, like the board's `layout`), the prose guide is
+            # the body — so it carries no schema metadata fields. Declared here so
+            # its entry_type resolves.
+            "name": "Plot template",
+            "kind": "plot",
+            "fields": [],
+            "has_body": True,
+        },
         "plot:board": {
             # The plot board — a per-project layout singleton (ADR-0048 §3).
             # Presentation only (card positions, per-column ordering, collapsed

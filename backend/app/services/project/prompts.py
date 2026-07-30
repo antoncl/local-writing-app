@@ -18,7 +18,7 @@ and lore slices too.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from app.models import (
     CreatePromptEntryRequest,
@@ -30,11 +30,6 @@ from app.models import (
     SavePromptEntryRequest,
 )
 from app.services.project.errors import ProjectServiceError
-
-if TYPE_CHECKING:
-    from pathlib import Path
-
-    from app.services.project.node_index import NodeIndexEntry
 
 
 class PromptEntriesMixin:
@@ -62,7 +57,7 @@ class PromptEntriesMixin:
                     source_layer_id=entry.source_layer_id,
                     source_layer_label=entry.source_layer_label,
                     is_library=entry.is_library,
-                    editable=self._prompt_winner_is_owned(entry, root),
+                    editable=self._node_is_owned_here(entry, root),
                 )
             )
         entries.sort(key=lambda entry: (entry.title.lower(), entry.id))
@@ -141,26 +136,14 @@ class PromptEntriesMixin:
             source_layer_id=index_entry.source_layer_id if index_entry else "",
             source_layer_label=index_entry.source_layer_label if index_entry else "",
             is_library=index_entry.is_library if index_entry else False,
-            # Mirror `_reject_inherited_prompt_write` for every reachable state: a
+            # Mirror `_reject_inherited_library_write` for every reachable state: a
             # winner the project does not own is read-only (409 on save); no index
             # winner means the reject path returns (write allowed), so treat it as
             # editable (#689). (The reject also allows a non-prompt winner, which
             # this branch does not special-case — unreachable here, since a
             # non-prompt winner is re-routed to the on-disk path before this.)
-            editable=self._prompt_winner_is_owned(index_entry, root) if index_entry else True,
+            editable=self._node_is_owned_here(index_entry, root) if index_entry else True,
         )
-
-    def _prompt_winner_is_owned(self, winner: NodeIndexEntry, root: Path) -> bool:
-        """Whether the open project OWNS this prompt winner, vs inheriting it from
-        the built-in Library or an ancestor project.
-
-        The single predicate for the owned/inherited split, so the two consumers
-        cannot drift to opposite polarity: `fork_prompt_entry` clones only what is
-        NOT owned, `_reject_inherited_prompt_write` refuses to write what is NOT
-        owned. (lore.py / overrides.py compute the same split for their kinds;
-        folding those onto one helper is out of scope here — #676 review.)
-        """
-        return winner.source_layer_id == self._metadata_schema_layer_id(root)
 
     def fork_prompt_entry(self, entry_id: str) -> PromptEntry:
         """Clone an inherited prompt into this project as an editable copy
@@ -183,7 +166,7 @@ class PromptEntriesMixin:
         winner = self._build_node_index().by_id.get(entry_id)
         if winner is None or winner.kind != "prompt":
             raise ProjectServiceError(f"Prompt {entry_id} not found.", 404)
-        if self._prompt_winner_is_owned(winner, root):
+        if self._node_is_owned_here(winner, root):
             raise ProjectServiceError(
                 f"Prompt {entry_id} is owned by this project and is directly "
                 "editable; there is nothing to clone.",
@@ -207,30 +190,8 @@ class PromptEntriesMixin:
             ),
         )
 
-    def _reject_inherited_prompt_write(self, entry_id: str) -> None:
-        """Refuse a write to a prompt this project does not own.
-
-        A prompt whose index winner is an ancestor's — or a built-in Library
-        node (ADR-0049 §3) — is read-only in place. For the Library this is the
-        structural "never a write target" guarantee at the actual boundary: the
-        save/delete is refused here, not merely hidden in the UI, so overwriting
-        or deleting a shipped app file is unconstructable rather than validated.
-        (Prompts have no per-layer override or authoring-L path the way lore
-        does — the only path to a change is to clone the prompt into this
-        project, which slice 2 adds.)
-        """
-        root = self._require_project()
-        winner = self._build_node_index().by_id.get(entry_id)
-        if winner is None or winner.kind != "prompt":
-            return
-        if not self._prompt_winner_is_owned(winner, root):
-            label = winner.source_layer_label or "an ancestor"
-            raise ProjectServiceError(
-                f"This prompt is inherited from {label} and is read-only here.", 409
-            )
-
     def save_prompt_entry(self, entry_id: str, request: SavePromptEntryRequest) -> PromptEntry:
-        self._reject_inherited_prompt_write(entry_id)
+        self._reject_inherited_library_write(entry_id, kind="prompt", noun="prompt")
         path = self._path_for_node_id(entry_id, "prompt")
         front_matter = self._read_front_matter_only(path, strict=True)
         node_id = self._node_id_for_path(path, front_matter)
@@ -279,7 +240,7 @@ class PromptEntriesMixin:
         return parsed
 
     def delete_prompt_entry(self, entry_id: str) -> PromptEntryList:
-        self._reject_inherited_prompt_write(entry_id)
+        self._reject_inherited_library_write(entry_id, kind="prompt", noun="prompt")
         path = self._path_for_node_id(entry_id, "prompt")
         self._delete_node_file(path)  # unlink + un-shadow the memo (#392)
         return self.list_prompt_entries()

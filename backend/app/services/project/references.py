@@ -93,13 +93,16 @@ NODE_FAMILIES = [
 # than re-spelled as a literal — a second copy of the triple would drift.
 MACHINE_LAYER_FAMILIES = [family for family in NODE_FAMILIES if family.kind == "assistant"]
 
-# The families the built-in Library ships (ADR-0049). Prompts are the first and
-# only tenant; the model is kind-agnostic, so a later kind joins by adding its
-# family here and a folder in `builtin_library/` — no new mechanism. Deliberately
+# The families the built-in Library ships (ADR-0049). Prompts were the first
+# tenant; plot templates are the second (ADR-0048 S4b) — proof the model is
+# kind-agnostic, exactly as the design intended: a later kind joins by adding its
+# family here and a folder in `builtin_library/`, no new mechanism. Deliberately
 # a subset, not "everything a project layer carries": the Library is not a
 # project, and scoping it to what actually ships keeps the walk from globbing
-# folders that will never exist (the vertical-slice discipline in §4).
-LIBRARY_LAYER_FAMILIES = [family for family in NODE_FAMILIES if family.kind == "prompt"]
+# folders that will never exist (the vertical-slice discipline in §4). The
+# Library's `plot/` folder ships only `plot:template` nodes, so no plotline or
+# board resolves from this layer.
+LIBRARY_LAYER_FAMILIES = [family for family in NODE_FAMILIES if family.kind in ("prompt", "plot")]
 
 # Every kind whose files the index extracts reference edges from: the node
 # families above, plus the per-layer project node (#334), which lives at the

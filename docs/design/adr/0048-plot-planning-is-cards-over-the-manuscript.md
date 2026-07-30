@@ -89,8 +89,9 @@ What this feature must never become — the lines that hold when surprises push:
    a lanes-and-columns grid is a possible future feature, not a debt of this one.
 5. **No free-form arrows, for now.** An arrow that carries no meaning is worse than no arrow; edges
    return only when they mean something (as real references with semantics).
-6. **Opening a project never writes to it.** Built-in content is seeded when a project is created,
-   and by explicit action — never as a side effect of reading.
+6. **Opening a project never writes to it.** The templates the app ships are provided as a
+   read-only Library layer (ADR-0049), not seeded into the project's own files; a writer clones one
+   on demand. Anything created in the project is by explicit action — never a side effect of reading.
 7. **No parallel taxonomy.** The reverted `plotting:*` types stay dead; the `plot` kind defined
    here is the only home for plot concepts.
 
@@ -210,10 +211,14 @@ Purpose and "done means" are binding; internal ordering may flex (see *How this 
 - **S3. The patch loop generalizes** (§5, first half). Done means: lore behaves byte-for-byte as
   before, but the loop's seams take a node kind as a parameter; no plot code yet.
 
-**Phase 2 — the plot data model.**
-- **S4. The `plot` kind**: templates, template instances, plotlines, and the layout-only board node;
-  the 14 templates and guides ported; seeding on create only. Done means: the nodes exist, are
-  indexed, referenced, and schema-extensible, with the branch's behavioral tests ported and passing.
+**Phase 2 — the plot data model.** (S4 is split S4a/S4b — the kind first, then the Library tenant.)
+- **S4a. The `plot` kind**: plotlines (`plot:plotline`) and the layout-only board node
+  (`plot:board`, a per-project singleton). Done means: the nodes exist, are indexed, referenced, and
+  schema-extensible; `plot` is a layered kind so an ancestor's templates can resolve.
+- **S4b. Templates as a Library tenant**: `plot:template` provided via the ADR-0049 Library — the 14
+  templates and guides ported as read-only bundled nodes, instantiated on demand (use in place, clone
+  to own), not seeded into the project. Done means: the shared kind-agnostic Library surface serves a
+  second, non-prompt tenant, with behavioral tests ported and passing.
 - **S5. Cards** (§1): the `plot:card` type with synopsis, plotline, claims, and scene attachment;
   the *realize* and *attach* operations; **seed-from-manuscript** as an explicit action creating one
   attached card per existing scene. Done means: a mid-draft project reaches a fully populated card
@@ -312,7 +317,8 @@ A plan this long **will** meet surprises. The rule for absorbing them:
   drops; layered merge of item schemas.
 - **S3**: the lore suite unchanged and green is the acceptance test.
 - **S4–S6**: ported behavioral tests, especially spoiler gating pinned by absence assertions;
-  seeding writes on create only — and a test that *opening* writes nothing.
+  templates resolve read-only from the Library and clone into the project on demand — and a test
+  that *opening* writes nothing.
 - **S5**: cardinality invariants (n cards → one scene; attachment survives scene moves; dangling
   attachment on scene delete is visible, not silent).
 - **S11–S12**: round-trip tests in the 0046 style — garbled and partial patches surface, dropped

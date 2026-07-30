@@ -1,0 +1,127 @@
+"""Plot-template models (ADR-0048 S4b).
+
+A `plot:template` is a diagnostic story-structure lens (three-act, mythic quest,
+kishotenketsu, …) shipped by the built-in Library (ADR-0049) as a read-only
+ancestor node, or an owned copy a writer cloned to adapt. Its structured data —
+the beat roster and how to read it — lives in a `template:` front-matter block so
+AI/context code can resolve it without scraping the prose guide (which is the
+node body).
+
+Ported from the `origin/plotting` quarry's `models_plot.py`, dropping its
+legacy-shape acceptance (field aliases + before-validators): pre-1.0 stores only
+the current shape, so there is nothing old to read (`feedback_no_pre_1_0_migrations`).
+"""
+
+from __future__ import annotations
+
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+PlotTemplateFamily = Literal[
+    "act",
+    "journey",
+    "cycle",
+    "genre",
+    "puzzle",
+    "relationship",
+    "character_arc",
+    "custom",
+]
+PlotTemplatePrescriptiveness = Literal["descriptive", "diagnostic", "prescriptive"]
+PlotTemplateIPRisk = Literal["low", "medium", "high", "unknown"]
+PlotTemplateBuiltinPolicy = Literal["seed", "seed_generic", "reference_only", "user_authored"]
+
+
+class SourceRef(BaseModel):
+    """Provenance for a template — where its structure guidance came from."""
+
+    id: str = Field(min_length=1)
+    title: str = ""
+    url: str | None = None
+    citation: str = ""
+    note: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class PlotTemplatePoint(BaseModel):
+    """One beat in a template's roster: an elastic diagnostic marker, not a
+    chapter slot. `function_claim` names the story-state change the beat asserts;
+    cards (S5) claim points to argue the beat is earned."""
+
+    id: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    function_claim: str = ""
+    guidance: str = ""
+    required: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class PlotTemplateSpec(BaseModel):
+    """The structured payload of a `plot:template`, carried in front matter."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    version: int = 1
+    slug: str = ""
+    display_name: str = ""
+    aliases: list[str] = Field(default_factory=list)
+    family: PlotTemplateFamily = "custom"
+    description: str = ""
+    cultural_context: str = ""
+    prescriptiveness: PlotTemplatePrescriptiveness = "diagnostic"
+    ai_use_guidance: str = ""
+    global_diagnostic_questions: list[str] = Field(default_factory=list)
+    source_refs: list[SourceRef] = Field(default_factory=list)
+    ip_risk: PlotTemplateIPRisk = "unknown"
+    builtin_policy: PlotTemplateBuiltinPolicy = "user_authored"
+    template_version: str = ""
+    locale: str = ""
+    plot_points: list[PlotTemplatePoint] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class PlotTemplateSummary(BaseModel):
+    """A template as it appears in a list — the full spec (templates are small)
+    plus the Library provenance the picker needs to show read-only/clone state."""
+
+    id: str
+    title: str
+    body: str = ""
+    entry_type: str = "plot:template"
+    template: PlotTemplateSpec = Field(default_factory=PlotTemplateSpec)
+    source_layer_id: str = ""
+    source_layer_label: str = ""
+    is_library: bool = False
+    editable: bool = False
+
+
+class PlotTemplate(BaseModel):
+    """A single template read model. `editable` is the fail-closed truth the
+    UI's read-only lock reads (ADR-0049 #689): False unless this project owns the
+    node. `is_library` governs banner wording only, orthogonal to editability."""
+
+    id: str
+    title: str
+    body: str = ""
+    revision: str = ""
+    entry_type: str = "plot:template"
+    template: PlotTemplateSpec = Field(default_factory=PlotTemplateSpec)
+    source_layer_id: str = ""
+    source_layer_label: str = ""
+    is_library: bool = False
+    editable: bool = False
+
+
+class PlotTemplateList(BaseModel):
+    entries: list[PlotTemplateSummary] = Field(default_factory=list)
+
+
+class SavePlotTemplateRequest(BaseModel):
+    """Edit an owned template clone. Inherited (Library / ancestor) templates are
+    read-only in place and 409 on save — clone one to adapt it."""
+
+    title: str
+    body: str = ""
+    template: PlotTemplateSpec = Field(default_factory=PlotTemplateSpec)
+    base_revision: str = ""

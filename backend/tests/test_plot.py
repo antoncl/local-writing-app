@@ -190,8 +190,13 @@ class CardHttpTests(_PlotTestCase):
         self.assertNotIn(created["id"], [e["id"] for e in deleted.json()["entries"]])
         self.assertEqual(self.client.get(f"/api/plot/cards/{created['id']}").status_code, 404)
 
-    def test_missing_card_404s(self) -> None:
-        self.assertEqual(self.client.get("/api/plot/cards/plot_nope").status_code, 404)
+    def test_missing_card_404s_with_the_card_noun(self) -> None:
+        # The 404 names the card, not "Plotline" (the shared resolver's fixed
+        # label the plot readers used to fall through to — S5a review).
+        response = self.client.get("/api/plot/cards/plot_nope")
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("Card", response.json()["detail"])
+        self.assertNotIn("Plotline", response.json()["detail"])
 
     def test_create_rejects_plot_board_entry_type(self) -> None:
         response = self.client.post("/api/plot/cards", json={"title": "X", "entry_type": "plot:board"})
@@ -220,27 +225,108 @@ class CardReferenceTests(_PlotTestCase):
         chapter_id = next(c.id for c in doc.root.children if c.type == "scene:chapter")
         return self.service.create_scene(CreateSceneRequest(title=title, parent_id=chapter_id)).id
 
-    def test_plotline_reference_is_purged_when_the_plotline_is_deleted(self) -> None:
+    def _raw_metadata_on_disk(self, node_id: str) -> dict:
+        # Read the card's front matter straight from disk, bypassing read_card's
+        # read-side healing — so a purge assertion proves the write-back happened,
+        # not that the reader would have blanked a dangling ref anyway.
+        path = self.service._path_for_node_id(node_id, "plot")
+        front_matter = self.service._read_front_matter_only(path, strict=True)
+        return front_matter.get("metadata") or {}
+
+    def test_plotline_reference_is_purged_from_disk_when_the_plotline_is_deleted(self) -> None:
         plotline = self.service.create_plotline(CreatePlotlineRequest(title="Thread"))
         card = self.service.create_card(CreateCardRequest(title="Card"))
         self.service.save_card(card.id, SaveCardRequest(title="Card", metadata={"plotline": plotline.id}))
-        self.assertEqual(self.service.read_card(card.id).metadata.get("plotline"), plotline.id)
+        self.assertEqual(self._raw_metadata_on_disk(card.id).get("plotline"), plotline.id)
 
         self.service.delete_plotline(plotline.id)  # delete purges referrers (#345)
-        # The single-ref field is cleared (blanked to ""), so it no longer resolves
-        # to the deleted plotline — the visible dangle.
-        self.assertFalse(self.service.read_card(card.id).metadata.get("plotline"))
+        # Assert the purge rewrote the card FILE (blank the single-ref to ""), not
+        # via read_card — whose read-side healing would blank a dangling ref even
+        # if the purge had done nothing, masking a broken purge.
+        self.assertEqual(self._raw_metadata_on_disk(card.id).get("plotline"), "")
 
-    def test_scene_reference_round_trips_and_dangles_when_the_scene_is_deleted(self) -> None:
+    def test_scene_reference_is_purged_from_disk_when_the_scene_is_deleted(self) -> None:
         scene_id = self._make_scene()
         card = self.service.create_card(CreateCardRequest(title="Card"))
         self.service.save_card(card.id, SaveCardRequest(title="Card", metadata={"scene": scene_id}))
-        self.assertEqual(self.service.read_card(card.id).metadata.get("scene"), scene_id)
+        self.assertEqual(self._raw_metadata_on_disk(card.id).get("scene"), scene_id)
 
-        self.service.delete_scene(scene_id)
-        # Read-side healing clears the now-dangling attachment (ADR-0048 §1): the
-        # single-ref field blanks to "" once its target leaves the index.
-        self.assertFalse(self.service.read_card(card.id).metadata.get("scene"))
+        self.service.delete_scene(scene_id)  # delete_scene purges referrers too
+        # Same as the plotline case: this exercises the PURGE (delete_scene rewrites
+        # the card file), NOT read-side healing — the read-heal branch is covered
+        # directly by test_read_side_healing_blanks_a_dangling_reference below.
+        self.assertEqual(self._raw_metadata_on_disk(card.id).get("scene"), "")
+
+    def test_read_side_healing_blanks_a_dangling_reference(self) -> None:
+        # The genuine read-heal path, isolated from purge: a card FILE carrying a
+        # reference whose target never existed (save_card would 422 it, but an
+        # ancestor-project purge that rewrote the ancestor and not this book's card
+        # can leave one). read_card must blank it to "", not 422 and not the dead id.
+        card = self.service.create_card(CreateCardRequest(title="Card"))
+        path = self.service._path_for_node_id(card.id, "plot")
+        self.service._write_node_entry_file(path, card.id, "Card", "plot:card", {"plotline": "plot_ghost"}, "")
+        self.assertEqual(self.service.read_card(card.id).metadata.get("plotline"), "")
+
+    def test_save_rejects_a_reference_to_a_nonexistent_node(self) -> None:
+        # The card's reason to exist is its references, so save must reject a ghost
+        # target rather than persist a dangling ref (which the reader would heal).
+        card = self.service.create_card(CreateCardRequest(title="Card"))
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.save_card(card.id, SaveCardRequest(title="Card", metadata={"plotline": "plot_ghost"}))
+        self.assertEqual(ctx.exception.status_code, 422)
+
+
+class PlotCrossFamilyGuardTests(_PlotTestCase):
+    """Plotlines, cards, and templates share the `plot/` folder and the `plot_`
+    id space, so the endpoint is the only discriminator between them. A node of
+    one family must not be created, read, retyped, or deleted through another
+    family's endpoint (ADR-0048 S5a review): the `is_a` family guard enforces it.
+    read_plot_template always guarded this; the shared plot-folder CRUD now does
+    for plotlines and cards too."""
+
+    def test_creating_a_foreign_plot_type_via_the_cards_endpoint_is_refused(self) -> None:
+        for foreign in ("plot:plotline", "plot:template", "plot:board"):
+            response = self.client.post("/api/plot/cards", json={"title": "X", "entry_type": foreign})
+            self.assertEqual(response.status_code, 422, f"{foreign}: {response.text}")
+
+    def test_reading_a_plotline_via_the_cards_endpoint_404s(self) -> None:
+        plotline = self.client.post("/api/plot/plotlines", json={"title": "Thread"}).json()
+        self.assertEqual(self.client.get(f"/api/plot/cards/{plotline['id']}").status_code, 404)
+
+    def test_saving_a_card_over_a_plotline_is_refused_and_leaves_it_untouched(self) -> None:
+        plotline = self.client.post("/api/plot/plotlines", json={"title": "Thread"}).json()
+        # A color so a retype-to-card (which would drop non-card fields) is detectable.
+        self.client.put(
+            f"/api/plot/plotlines/{plotline['id']}",
+            json={"title": "Thread", "body": "b", "metadata": {"color": "rose"}},
+        )
+        response = self.client.put(f"/api/plot/cards/{plotline['id']}", json={"title": "Hijack", "body": ""})
+        self.assertEqual(response.status_code, 404, response.text)
+        got = self.client.get(f"/api/plot/plotlines/{plotline['id']}").json()
+        self.assertEqual(got["entry_type"], "plot:plotline")  # not retyped
+        self.assertEqual(got["metadata"]["color"], "rose")  # its own field survives
+
+    def test_deleting_a_plotline_via_the_cards_endpoint_is_refused(self) -> None:
+        plotline = self.client.post("/api/plot/plotlines", json={"title": "Thread"}).json()
+        self.assertEqual(self.client.delete(f"/api/plot/cards/{plotline['id']}").status_code, 404)
+        self.assertEqual(self.client.get(f"/api/plot/plotlines/{plotline['id']}").status_code, 200)
+
+    def test_saving_a_plotline_over_a_card_is_refused_symmetrically(self) -> None:
+        # The pre-existing plotline path is hardened by the same shared guard.
+        card = self.client.post("/api/plot/cards", json={"title": "Card"}).json()
+        response = self.client.put(f"/api/plot/plotlines/{card['id']}", json={"title": "Hijack", "body": ""})
+        self.assertEqual(response.status_code, 404, response.text)
+        self.assertEqual(self.client.get(f"/api/plot/cards/{card['id']}").json()["entry_type"], "plot:card")
+
+    def test_saving_an_owned_template_via_the_cards_endpoint_keeps_its_beat_roster(self) -> None:
+        # The worst case: a card-endpoint write over an owned template would drop
+        # its `template:` block (the beat roster) — _write_node_entry_file emits no
+        # such block. The is_a guard 404s it before any write.
+        library = next(t for t in self.client.get("/api/plot/templates").json()["entries"] if not t["editable"])
+        owned = self.client.post(f"/api/plot/templates/{library['id']}/fork").json()
+        response = self.client.put(f"/api/plot/cards/{owned['id']}", json={"title": "Hijack", "body": ""})
+        self.assertEqual(response.status_code, 404, response.text)
+        self.assertTrue(self.client.get(f"/api/plot/templates/{owned['id']}").json()["template"]["plot_points"])
 
 
 class PlotBoardHttpTests(_PlotTestCase):

@@ -558,20 +558,24 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "picker_config": {"sources": [{"kind": "lore"}]},
         },
         "plotline": {
-            # A card's primary plotline (ADR-0048 §1): a single reference to the
-            # `plot:plotline` thread the card belongs to, whose color tints the
-            # card on the board (S7). Single ref, not a list — a card has one
-            # primary thread; secondary-thread modelling waits for a workflow.
+            # A single reference to a `plot:plotline` thread. A shared catalog
+            # field (any type can reuse it); its current consumer is the card
+            # (ADR-0048 §1), which points at its one primary plotline — the
+            # plotline's color tints the card on the board (S7). Single ref, not
+            # a list; secondary-thread modelling waits for a workflow.
             "name": "Plotline",
             "type": "entity_ref",
             "picker_config": {"sources": [{"kind": "plot", "expr": {"type": "plot:plotline"}}]},
         },
         "scene": {
-            # A card's optional scene attachment (ADR-0048 §1): the single scene
-            # that realizes this card, or unset for backstory / not-yet-written
-            # material. 0..1 scene per card; the reverse (0..n cards per scene) is
-            # unconstrained. A deleted scene visibly dangles here (read-side
-            # reference healing strips it), the reference graph working for free.
+            # A single optional reference to a scene. A shared catalog field; its
+            # current consumer is the card's scene attachment (ADR-0048 §1): the
+            # scene that realizes the card, or unset for backstory / not-yet-
+            # written material (0..1 scene per card; the reverse is unconstrained).
+            # When the referenced scene is deleted the ref is cleared — blanked on
+            # the referrer, whether by the delete's reference purge (same project)
+            # or read-side healing (an ancestor delete). The ADR's "visible dangle"
+            # on the board is a later, board-layer concern, not this strip.
             "name": "Scene",
             "type": "entity_ref",
             "picker_config": {"sources": [{"kind": "scene", "expr": {"type": "scene:scene"}}]},

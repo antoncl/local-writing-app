@@ -10,6 +10,7 @@
   import ReferencePicker from "@/components/widgets/ReferencePicker.svelte";
   import ColoredSelect from "@/components/widgets/ColoredSelect.svelte";
   import TagPicker from "@/components/widgets/TagPicker.svelte";
+  import TagChip from "@/components/widgets/TagChip.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import { isMetadataValuePresent } from "@/lib/utils/schemaTypeHelpers";
   import type {
@@ -240,7 +241,7 @@
   {#if readOnly}
     <div class="multi-select-chips" aria-label={label}>
       {#each metadataValueList(value) as tag (tag)}
-        <span class="multi-select-chip active static">{tag}</span>
+        <TagChip name={tag} />
       {:else}
         <span class="fv-empty">—</span>
       {/each}
@@ -252,7 +253,7 @@
       scopeKind={documentKind}
       scopeEntryType={entryType}
       ariaLabel={label}
-      on:change={(event) => emit(event.detail.value)}
+      onChange={(v) => emit(v)}
     />
   {/if}
 {:else if field.type === "color"}

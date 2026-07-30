@@ -8,11 +8,13 @@ from fastapi import APIRouter
 
 from app.models import (
     AssistantTagList,
+    AssistantTagsOverview,
     MachineSettingsUpdate,
     MachineSettingsView,
+    MergeAssistantTagsRequest,
     SetAssistantTagColorRequest,
 )
-from app.runtime import translate_errors
+from app.runtime import CurrentProject, translate_errors
 from app.services import machine_settings as machine_settings_service
 
 router = APIRouter()
@@ -67,6 +69,23 @@ def get_assistant_tags() -> AssistantTagList:
     # Machine-global (assistants live machine-globally), so this is not scoped
     # to the open project (#88).
     return AssistantTagList(tags=machine_settings_service.load_assistant_tags())
+
+
+@router.get("/api/assistant-tags/overview", response_model=AssistantTagsOverview)
+def get_assistant_tags_overview(project: CurrentProject) -> AssistantTagsOverview:
+    # Machine-global vocabulary, but the use-counts read the open project's
+    # prompt docs, so this rides the project scope like the governance ops (#247).
+    # With no project open it degrades to the machine roster alone.
+    with translate_errors():
+        return project.read_assistant_tags_overview()
+
+
+@router.post("/api/assistant-tags/merge", response_model=AssistantTagList)
+def merge_assistant_tags(project: CurrentProject, request: MergeAssistantTagsRequest) -> AssistantTagList:
+    # Rename is a single-source merge. Rewrites reachable references then the
+    # flat store; the survivor keeps its own colour (#247).
+    with translate_errors():
+        return project.merge_assistant_tags(request)
 
 
 @router.put("/api/assistant-tags/{name}", response_model=AssistantTagList)

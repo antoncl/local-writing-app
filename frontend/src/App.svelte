@@ -465,14 +465,21 @@
     await storeRefreshKnownTags();
   }
 
-  // A tag merge rewrites tag values across documents on disk; pull the new
-  // tag roster AND re-sync the entry lists + open editors so the change is
-  // reflected everywhere immediately (not just on next reload).
+  // A tag merge/rename rewrites tag values across documents on disk; pull the new
+  // rosters AND re-sync the entry lists + open editors so the change is reflected
+  // everywhere immediately (not just on next reload). One reconcile serves BOTH
+  // vocabularies (#247 PR-3): assistant governance flows through the same
+  // vocabulary-revision signal, and its rename/merge rewrites assistant nodes
+  // (`metadata.tags`) + prompt docs (`metadata.assistant_tags`), so the assistant
+  // roster + list belong here too. Refreshing the untouched vocabulary on a given
+  // op is two cheap GETs — the uniform reconcile is worth that over two signals.
   async function refreshAfterTagChange() {
     await refreshKnownTags();
+    await refreshAssistantTags();
     await run(async () => {
       setLoreEntries((await api.listLoreEntries()).entries);
       setPromptEntries((await api.listPromptEntries()).entries);
+      await refreshAssistantEntries();
       await editorPanes.refreshOpenEditorPaneBaselines();
     });
   }

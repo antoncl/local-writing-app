@@ -333,6 +333,41 @@ def set_assistant_tag_color(name: str, color: str | None) -> list[AssistantTag]:
     return tags
 
 
+def merge_assistant_tags(sources: Iterable[str], target: str) -> list[AssistantTag]:
+    """Fold `sources` into `target` in the machine-global store (#247).
+
+    The store half of an assistant-tag merge/rename — the document rewrite lives
+    in AssistantTagsMixin, which calls this last. Case-insensitive on names; the
+    survivor takes `target`'s casing. Like project `merge_tags`, the survivor
+    keeps its OWN colour and the merged-away sources drop theirs with their
+    records; a brand-new target has no colour. Order-preserving so the store
+    file stays stable across a re-colour or re-merge.
+    """
+    clean_target = target.strip()
+    target_lower = clean_target.lower()
+    source_lowers = {
+        source.strip().lower()
+        for source in sources
+        if source.strip() and source.strip().lower() != target_lower
+    }
+    result: list[AssistantTag] = []
+    target_written = False
+    for tag in load_assistant_tags():
+        lower = tag.name.lower()
+        if lower in source_lowers:
+            continue  # merged away — its record (and colour) is dropped
+        if lower == target_lower:
+            # Survivor keeps its own colour, but takes the requested casing.
+            result.append(AssistantTag(name=clean_target, color=tag.color))
+            target_written = True
+        else:
+            result.append(tag)
+    if not target_written:
+        result.append(AssistantTag(name=clean_target, color=None))
+    save_assistant_tags(result)
+    return result
+
+
 def load_settings() -> MachineSettings:
     """Read config.yaml. Side-effect: on first load after upgrade, when no
     assistant files exist but the legacy `default_models` matrix does, write

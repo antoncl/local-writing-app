@@ -23,6 +23,7 @@ from app.models import (
 from app.scope import WorkScope
 from app.services.migrations import migrate_project
 from app.services.project.ai_invocations import AiInvocationsMixin
+from app.services.project.assistant_tags import AssistantTagsMixin
 from app.services.project.assistants import AssistantEntriesMixin
 from app.services.project.chats import ChatSessionsMixin
 from app.services.project.computed_metadata import ComputedMetadataMixin
@@ -72,6 +73,7 @@ NODE_INDEX_SNAPSHOT_FILENAME = _SNAPSHOT_RELATIVE_PATH.name
 class ProjectService(
     AiInvocationsMixin,
     AssistantEntriesMixin,
+    AssistantTagsMixin,
     ChatSessionsMixin,
     ComputedMetadataMixin,
     EmbeddedTodosMixin,

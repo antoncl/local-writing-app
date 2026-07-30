@@ -1,36 +1,41 @@
 <script lang="ts">
-  // The govern-from-the-"+" surface (#247, slice 2 PR-1). The + popover is where
-  // you browse the scoped roster while tagging, so it *is* the lightweight
-  // governance surface: each row adds the tag (click the name) and, one hover
-  // away, governs it (the ⋯ opens Suggest-on / Rename / Merge). Project tags
-  // only — the roster is single-origin per context, and every project op already
-  // has a backend endpoint (`updateTagScope`, `mergeTags`); rename is just a
-  // single-source merge to a not-yet-existing name.
+  // The govern-from-the-"+" surface (#247, slice 2 PR-1, generalized in PR-3).
+  // The + popover is where you browse the roster while tagging, so it *is* the
+  // lightweight governance surface: each row adds the tag (click the name) and,
+  // one hover away, governs it (the ⋯ opens Suggest-on / Rename / Merge).
   //
-  // After any op the backend rewrites tag values across documents on disk, so we
-  // bump `tagVocabularyRevision` — App runs the full reconcile (roster + entry
-  // lists + open-editor baselines) — and reload our own use-counts.
+  // Origin-agnostic: which vocabulary this governs (project tags — per-layer,
+  // scoped — or assistant tags — flat, machine-global, NO scope) is injected as
+  // an `adapter`, never branched on here. `adapter.supportsScope` is the one
+  // presentation difference — assistant tags hide "Suggest on…" and their scope
+  // chips. Rename is a single-source merge to a (new) name; both go through
+  // `adapter.merge`.
+  //
+  // After a rename/merge/scope the backend rewrites tag values across documents
+  // on disk, so `adapter.reconcile()` bumps App's one vocabulary-revision signal
+  // (roster + entry lists + open-editor baselines) and we reload our use-counts.
   import { onMount } from "svelte";
-  import { api } from "@/lib/api";
-  import { bumpTagVocabularyRevision, refreshKnownTags } from "@/lib/stores/tags";
   import NodePickerConfigEditor from "@/components/schema/NodePickerConfigEditor.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import { pickerMembership } from "@/lib/utils/pickerSources";
   import type { NodePickerConfig, ScopedTag } from "@/lib/types";
+  import type { TagGovernanceAdapter } from "@/lib/utils/tagGovernance";
 
   interface Props {
-    /** The scoped roster to show/govern (already filtered to this context). */
+    /** The roster to show/govern (already filtered to this context). */
     tags: ScopedTag[];
     /** Tags already on the entity — drives the "already added" affordance. */
     selectedKeys: Set<string>;
     scopeKind: string;
     scopeEntryType: string;
     ariaLabel: string;
+    /** The governance operations for this vocabulary (project vs assistant). */
+    adapter: TagGovernanceAdapter;
     /** Add a tag to the entity (the primary, most-frequent action). */
     onAdd: (name: string) => void;
   }
 
-  let { tags, selectedKeys, scopeKind, scopeEntryType, ariaLabel, onAdd }: Props = $props();
+  let { tags, selectedKeys, scopeKind, scopeEntryType, ariaLabel, adapter, onAdd }: Props = $props();
 
   // Per-tag document use-counts, keyed lowercase. Loaded lazily on open (a doc
   // scan) so the fast add-path isn't blocked; counts fill in when it resolves.
@@ -71,10 +76,7 @@
 
   async function loadCounts() {
     try {
-      const overview = await api.getTagsOverview();
-      const next = new Map<string, number>();
-      for (const t of overview.tags) next.set(t.name.toLowerCase(), t.count);
-      counts = next;
+      counts = await adapter.loadCounts();
       countsLoaded = true;
     } catch {
       // Counts are advisory; a failed scan just leaves them blank.
@@ -155,8 +157,8 @@
   // ---- ops ---------------------------------------------------------------
   async function afterOp() {
     await loadCounts();
-    // App reconciles roster + entry lists + open editors off this bump.
-    bumpTagVocabularyRevision();
+    // App reconciles roster + entry lists + open editors off the adapter's bump.
+    await adapter.reconcile();
   }
 
   // Per-tag remount counter (lowercased name → bump count). Incremented for the
@@ -172,12 +174,11 @@
     const key = name.toLowerCase();
     error = "";
     try {
-      await api.setTagColor(name, color);
       // Colour changes only the vocabulary's colour — not tag NAMES, use-counts,
-      // or any node's content — so refresh just the roster (every chip recolours
-      // from knownTagsStore). The full refreshAfterTagChange (entry-list reloads +
-      // open-editor baseline refetch) is for renames/merges that rewrite docs.
-      await refreshKnownTags();
+      // or any node's content — so the adapter refreshes just its roster (every
+      // chip recolours). The full reconcile (entry-list reloads + open-editor
+      // baseline refetch) is for renames/merges that rewrite docs.
+      await adapter.setColor(name, color);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
       swatchResets = { ...swatchResets, [key]: (swatchResets[key] ?? 0) + 1 };
@@ -188,7 +189,7 @@
     busy = true;
     error = "";
     try {
-      await api.updateTagScope(name, scopeDraft);
+      await adapter.updateScope(name, scopeDraft);
       closeRow();
       await afterOp();
     } catch (e) {
@@ -207,9 +208,9 @@
     busy = true;
     error = "";
     try {
-      // Rename === fold the one tag into a (new) name; mergeTags migrates every
-      // use and unions scope onto the target.
-      await api.mergeTags([name], target);
+      // Rename === fold the one tag into a (new) name; merge migrates every use
+      // (and, for project tags, unions scope onto the target).
+      await adapter.merge([name], target);
       closeRow();
       await afterOp();
     } catch (e) {
@@ -232,7 +233,7 @@
     busy = true;
     error = "";
     try {
-      await api.mergeTags(sources, target);
+      await adapter.merge(sources, target);
       cancelMerge();
       await afterOp();
     } catch (e) {
@@ -342,9 +343,11 @@
       <span class="trp-head-label">{activeTag}</span>
     </div>
     <div class="trp-menu">
-      <button class="trp-menu-item" type="button" onclick={() => activeTagObj && openScope(activeTagObj)}>
-        <i class="ti ti-target" aria-hidden="true"></i> Suggest on…
-      </button>
+      {#if adapter.supportsScope}
+        <button class="trp-menu-item" type="button" onclick={() => activeTagObj && openScope(activeTagObj)}>
+          <i class="ti ti-target" aria-hidden="true"></i> Suggest on…
+        </button>
+      {/if}
       <button class="trp-menu-item" type="button" onclick={() => openRename(activeTag!)}>
         <i class="ti ti-pencil" aria-hidden="true"></i> Rename…
       </button>
@@ -373,7 +376,9 @@
             onclick={() => onAdd(tag.name)}
           >
             <span class="trp-name">{tag.name}</span>
-            <span class="trp-scope">{scopeChips(tag.scope).join(" · ")}</span>
+            {#if adapter.supportsScope}
+              <span class="trp-scope">{scopeChips(tag.scope).join(" · ")}</span>
+            {/if}
           </button>
           <span class="trp-uses" title="uses">{count(tag.name)}</span>
           <button

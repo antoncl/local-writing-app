@@ -6,6 +6,7 @@
   import TagChip from "@/components/widgets/TagChip.svelte";
   import TagRosterPopover from "@/components/widgets/TagRosterPopover.svelte";
   import { parseTagList, tagColorMap } from "@/lib/utils/tags";
+  import { assistantTagGovernance, projectTagGovernance } from "@/lib/utils/tagGovernance";
 
   export let value: string = "";
   export let knownTags: ScopedTag[] = [];
@@ -15,10 +16,10 @@
   export let scopeEntryType: string = "";
   export let ariaLabel: string;
   export let placeholder: string = "Add tags…";
-  // Which vocabulary this field's roster comes from. Project tags govern from the
-  // + (scope / rename / merge, all backed by existing endpoints); assistant tags
-  // are machine-global with no merge/rename yet, so their + stays add-only until
-  // slice-2 PR-3 adds the backend. Decided once, at the pane that picks the
+  // Which vocabulary this field's roster comes from. Both govern from the + now
+  // (scope / rename / merge for project tags; rename / merge / colour for the
+  // flat, scope-less assistant tags) — the difference is the injected governance
+  // adapter, chosen here by origin. Decided once, at the pane that picks the
   // roster (App feeds the assistant/prompt pane a mixed roster), and threaded
   // down — never re-derived from the document kind here (#247).
   export let origin: "project" | "assistant" = "project";
@@ -118,6 +119,9 @@
   // re-run when the node's type changes (feedback_svelte5_reactivity_traps).
   $: suggestions = knownTags.filter((tag) => inScope(tag, scopeKind, scopeEntryType));
   $: selectedKeys = new Set(chips.map((t) => t.toLowerCase()));
+  // The governance operations for this roster's vocabulary — the only thing that
+  // differs between the two origins; the surface is one component (#247 PR-3).
+  $: governanceAdapter = origin === "assistant" ? assistantTagGovernance : projectTagGovernance;
 
   let open = false;
   let position: { x: number; y: number; width: number } | null = null;
@@ -215,37 +219,22 @@
   </div>
   {#if open && position}
     <div
-      class="tag-picker"
-      class:governing={origin === "project"}
+      class="tag-picker governing"
       style={`left: ${position.x}px; top: ${position.y}px; width: ${position.width}px;`}
       aria-label={`${ariaLabel} known tags`}
       use:portalToBody
     >
-      {#if origin === "project"}
-        <!-- Project tags: the + is also the lightweight governance surface. -->
-        <TagRosterPopover
-          tags={suggestions}
-          selectedKeys={selectedKeys}
-          scopeKind={scopeKind}
-          scopeEntryType={scopeEntryType}
-          ariaLabel={ariaLabel}
-          onAdd={(name) => addTag(name)}
-        />
-      {:else if suggestions.length > 0}
-        <!-- Assistant tags stay add-only until PR-3 adds their governance backend. -->
-        {#each suggestions as tag}
-          <!-- mousedown|preventDefault keeps the entry input focused, so picking a
-               pill can't blur→crystallise half-typed text into a stray chip. -->
-          <button
-            class:active={selectedKeys.has(tag.name.toLowerCase())}
-            type="button"
-            on:mousedown|preventDefault
-            on:click={() => addTag(tag.name)}
-          >{tag.name}</button>
-        {/each}
-      {:else}
-        <span>No tags suggested here yet.</span>
-      {/if}
+      <!-- The + is the lightweight governance surface for both vocabularies; the
+           adapter decides which ops (assistant tags hide scope). -->
+      <TagRosterPopover
+        tags={suggestions}
+        selectedKeys={selectedKeys}
+        scopeKind={scopeKind}
+        scopeEntryType={scopeEntryType}
+        adapter={governanceAdapter}
+        ariaLabel={ariaLabel}
+        onAdd={(name) => addTag(name)}
+      />
     </div>
   {/if}
 </div>
@@ -301,45 +290,19 @@
     background: var(--surface);
   }
 
+  /* The popover is a body-portaled frame around the governance roster, which
+     owns its own column layout + internal padding. */
   .tag-picker {
     position: fixed;
     z-index: 10000;
     display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
+    flex-direction: column;
     max-width: min(360px, calc(100vw - 24px));
     max-height: min(260px, calc(100vh - 24px));
-    overflow: auto;
-    padding: 8px;
+    overflow: visible;
     border: 1px solid var(--divider);
     border-radius: 6px;
     background: var(--surface);
     box-shadow: var(--elev-2);
-  }
-  /* Governance popover owns its own column layout + internal padding; the
-     wrap/gap/pad above are for the assistant add-only pill list. */
-  .tag-picker.governing {
-    flex-direction: column;
-    flex-wrap: nowrap;
-    gap: 0;
-    padding: 0;
-    overflow: visible;
-  }
-
-  .tag-picker button {
-    padding: 4px 7px;
-    border-radius: 999px;
-    font-size: var(--fs-sm);
-  }
-
-  .tag-picker button.active {
-    border-color: var(--accent);
-    color: var(--accent-deep);
-    background: var(--accent-soft);
-  }
-
-  .tag-picker span {
-    color: var(--text-3);
-    font-size: var(--fs-sm);
   }
 </style>

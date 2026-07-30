@@ -42,15 +42,15 @@
   );
 </script>
 
-<div class="ldc-card">
-  <header class="ldc-head">
+<div class="edc-card">
+  <header class="edc-head">
     <strong>Proposed new entry</strong>
-    <span class="ldc-title">{title}</span>
+    <span class="edc-title">{title}</span>
   </header>
   {#if fieldRows.length > 0}
-    <dl class="ldc-fields">
+    <dl class="edc-fields">
       {#each fieldRows as row (row.id)}
-        <div class="ldc-field">
+        <div class="edc-field">
           <dt>{row.label}</dt>
           <dd>{row.value || "—"}</dd>
         </div>
@@ -58,14 +58,14 @@
     </dl>
   {/if}
   {#if draft.body}
-    <div class="ldc-body">{draft.body}</div>
+    <div class="edc-body">{draft.body}</div>
   {/if}
   {#if dropped.length > 0}
-    <p class="ldc-notice">
+    <p class="edc-notice">
       Ignored {dropped.length} field(s) the model couldn't set legally: {dropped.join(", ")}.
     </p>
   {/if}
-  <div class="ldc-actions">
+  <div class="edc-actions">
     <button type="button" onclick={onDiscard} disabled={creating}>Discard</button>
     <button type="button" class="primary" onclick={onCreate} disabled={creating}>
       {creating ? "Creating…" : "Create entry"}
@@ -74,41 +74,41 @@
 </div>
 
 <style>
-  .ldc-card {
+  .edc-card {
     display: flex; flex-direction: column; gap: 10px;
     padding: 12px 14px; border-radius: 10px;
     border: 1px solid var(--accent); background: var(--inset);
   }
-  .ldc-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-  .ldc-head strong {
+  .edc-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .edc-head strong {
     font-size: var(--fs-xs); font-weight: 800; letter-spacing: 0.07em;
     text-transform: uppercase; color: var(--accent);
   }
-  .ldc-title { font-size: var(--fs-md); color: var(--text); font-weight: 600; }
-  .ldc-fields { margin: 0; display: flex; flex-direction: column; gap: 4px; }
-  .ldc-field { display: flex; gap: 10px; font-size: var(--fs-sm); }
-  .ldc-field dt {
+  .edc-title { font-size: var(--fs-md); color: var(--text); font-weight: 600; }
+  .edc-fields { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+  .edc-field { display: flex; gap: 10px; font-size: var(--fs-sm); }
+  .edc-field dt {
     flex: 0 0 34%; margin: 0; color: var(--text-3);
     font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
   }
-  .ldc-field dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
-  .ldc-body {
+  .edc-field dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
+  .edc-body {
     max-height: 200px; overflow-y: auto; white-space: pre-wrap;
     font-size: var(--fs-sm); color: var(--text-2);
     padding: 8px 10px; border-radius: 8px; background: var(--surface);
     border: 1px solid var(--divider);
   }
-  .ldc-notice { margin: 0; font-size: var(--fs-sm); color: var(--text-2); }
-  .ldc-actions { display: flex; justify-content: flex-end; gap: 10px; }
-  .ldc-actions button {
+  .edc-notice { margin: 0; font-size: var(--fs-sm); color: var(--text-2); }
+  .edc-actions { display: flex; justify-content: flex-end; gap: 10px; }
+  .edc-actions button {
     padding: 4px 12px; border-radius: var(--r-sm);
     border: 1px solid var(--border); background: var(--surface);
     color: var(--text-2); cursor: pointer; font: inherit; font-size: var(--fs-sm);
   }
-  .ldc-actions button:hover { background: var(--inset); }
-  .ldc-actions button[disabled] { opacity: 0.5; cursor: default; }
-  .ldc-actions button.primary { border-color: var(--accent); color: var(--accent); }
-  .ldc-actions button.primary:hover {
+  .edc-actions button:hover { background: var(--inset); }
+  .edc-actions button[disabled] { opacity: 0.5; cursor: default; }
+  .edc-actions button.primary { border-color: var(--accent); color: var(--accent); }
+  .edc-actions button.primary:hover {
     background: color-mix(in srgb, var(--accent) 10%, transparent);
   }
 </style>

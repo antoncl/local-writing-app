@@ -3,10 +3,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { entryBrainstorm } from "./entryBrainstorm.svelte";
 import type { EntryPatch } from "@/lib/types";
 
-// The cross-pane hand-off is the contract both ends of the lore brainstorm rely
-// on: the chat pane publishes a committed patch by entry id, the entry pane reads
-// it back by that same id (scene.id). If the keying drifts, the commit runs, the
-// AI bills, and the review flip silently never appears (ADR-0046 slice 2/3 review).
+// The cross-pane hand-off is the contract both ends of the entry-patch brainstorm
+// rely on: the chat pane publishes a committed patch by node id, the entry pane
+// reads it back by that same id. If the keying drifts, the commit runs, the AI
+// bills, and the review flip silently never appears (ADR-0046 slice 2/3 review).
 const patch = (body: string | null, fields: EntryPatch["fields"] = {}): EntryPatch => ({
   body,
   fields,

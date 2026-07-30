@@ -414,8 +414,7 @@
   // (launched via EntryBrainstormBar); the controller derives the proposed-vs-
   // current flips off the live buffer fed below, and the adopt write stays here
   // (owns `metadata` + prose buffer, so both land in one PUT — ADR-0046 §1). The
-  // controller is kind-agnostic; THIS host holds the "which kinds participate"
-  // policy — currently lore (the `documentKind === "lore"` gates below).
+  // controller is kind-agnostic; the host's participation policy is `patchLoopKind`.
   const entryReview = new EntryProposalController();
   $effect.pre(() => {
     entryReview.nodeId = scene?.id ?? null;
@@ -452,10 +451,15 @@
     if (scene?.id) return onFlushReviewCommit?.(scene.id);
   };
 
-  // A lore entry under an open brainstorm review is a frozen transaction (#634):
-  // the rail/title go read-only and the host suppresses autosave, so the diff's
+  // ADR-0048 §5 — the host's SINGLE gate for which kinds take part in the
+  // entry-patch loop: the freeze, launcher, and review overlay below all read it,
+  // so they can't drift (a review over an un-frozen pane moves the diff base,
+  // #634). Controller/store are kind-agnostic; widen per-kind here (lore only).
+  const patchLoopKind = $derived(documentKind === "lore");
+  // A node under an open brainstorm review is a frozen transaction (#634): the
+  // rail/title go read-only and the host suppresses autosave, so the diff's
   // "current" side cannot move under the review.
-  const reviewing = $derived(documentKind === "lore" && entryReview.hasReview);
+  const reviewing = $derived(patchLoopKind && entryReview.hasReview);
   // An INHERITED prompt is read-only in place: the backend refuses any save
   // (409) whether it is a built-in Library node (ADR-0049) or an ancestor
   // project's prompt (#676). Lock the whole editor — title, fields and the code
@@ -475,7 +479,7 @@
   // Mutually exclusive with `snapshotCompare` (scenes park; lore reviews) —
   // hence the `??` at the call site. `side: "was"` is nominal; `resolve` present
   // makes the panel show the proposed side per-field regardless.
-  const loreCompare = $derived(
+  const entryCompare = $derived(
     reviewing && entryReview.structuredFlips.length > 0
       ? {
           fields: entryReview.structuredCompareFields,
@@ -687,7 +691,7 @@
       overriddenFields={overriddenFieldsForPanel}
       computedFieldString={computedFieldString}
       effectiveOverrides={scrubbed ? scrub.overrides : null}
-      compare={snapshotCompare ?? loreCompare}
+      compare={snapshotCompare ?? entryCompare}
       readOnly={scrubbed || snapshotParked || reviewing || inheritedReadOnly}
       onEntryTypeChange={(next) => updateEntryType(next)}
       onStatusChange={(next) => updateStatus(next)}
@@ -762,7 +766,7 @@
             <input class="title-input" aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()}`} placeholder={documentNameLabel} bind:value={title} oninput={handleTitleInput} />
           {/if}
         </label>
-        {#if documentKind === "lore" && scene?.id}
+        {#if patchLoopKind && scene?.id}
           <EntryBrainstormBar entryId={scene.id} {promptEntries} {metadataSchema} />
         {/if}
       </div>
@@ -866,7 +870,7 @@
         tone="snapshot"
         onRunClick={(regionId, kind) => snapshots.adopt(regionId, kind)}
       />
-    {:else if documentKind === "lore" && entryReview.hasReview && entryReview.proposal}
+    {:else if patchLoopKind && entryReview.hasReview && entryReview.proposal}
       <!-- ADR-0046 slice 3: the brainstorm commit reviewed as flips (body + each
            long_text field). Like the snapshot overlay, the live buffer stays
            mounted and hidden beneath; adopting writes through the same

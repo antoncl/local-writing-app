@@ -489,23 +489,33 @@ class EntryPatchRoutesTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["fields"], {"bio": "Drafted."})
 
+    def test_patch_route_maps_missing_node_to_http_404(self) -> None:
+        # The service raises ProjectServiceError(404) for an id absent from the
+        # node index; the route's `translate_errors()` must surface that as an HTTP
+        # 404, not a 500 — the edge mapping the service-level test can't exercise.
+        resp = self.client.post(
+            "/api/ai/entry-patch/does-not-exist", json={"raw": '{"fields": {}}'}
+        )
+        self.assertEqual(resp.status_code, 404)
+
     def test_old_lore_prefixed_routes_are_gone(self) -> None:
-        # The old POST routes no longer serve the loop: `…/ai-patch` has no
-        # registered subpath (404); `/api/lore/ai-draft` now collides with
-        # `GET /api/lore/{entry_id}`, so POST is method-not-allowed (405).
-        # Either way the moved route is gone — neither returns the 200 it used to.
-        self.assertIn(
+        # The old POST routes no longer serve the loop, and each is gone in a
+        # DIFFERENT way — assert both exactly so a 404↔405 drift is caught:
+        #   `…/{id}/ai-patch` has no registered subpath at all           → 404
+        #   `/api/lore/ai-draft` is shadowed by GET `/api/lore/{entry_id}`
+        #   (entry_id="ai-draft"), which registers no POST handler        → 405
+        self.assertEqual(
             self.client.post(
                 f"/api/lore/{self.hero.id}/ai-patch", json={"raw": "{}"}
             ).status_code,
-            {404, 405},
+            404,
         )
-        self.assertIn(
+        self.assertEqual(
             self.client.post(
                 "/api/lore/ai-draft",
                 json={"entry_type": "lore:character", "raw": "{}"},
             ).status_code,
-            {404, 405},
+            405,
         )
 
 

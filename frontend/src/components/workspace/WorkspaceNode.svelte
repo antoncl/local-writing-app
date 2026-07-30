@@ -452,6 +452,17 @@
     align-items: stretch;
     min-width: 0;
     overflow-x: auto;
+    /* `overflow-x: auto` promotes overflow-y from visible to auto (CSS spec), so
+       when the tabs overflow horizontally the classic horizontal scrollbar steals
+       ~12px of the strip's height and pushes the full-height pills into a 1px
+       vertical overflow — spawning a SECOND, vertical scrollbar whose up/down
+       arrow buttons sit inertly in the tab header (worse: clipping at large font
+       sizes). Hiding this strip's own scrollbar removes the height theft entirely;
+       the tabs still scroll horizontally via wheel/drag (#732). */
+    scrollbar-width: none;
+  }
+  .ws-tabs::-webkit-scrollbar {
+    display: none;
   }
   /* Layout/chrome only — the pill visual (padding, colour, underline, cursor)
      comes from the shared .tab-strip-tab. This carries the flex row that lines

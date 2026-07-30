@@ -1,6 +1,5 @@
 <script lang="ts">
   import type {
-    AIPolicy,
     AncestorCandidate,
     ProjectChild,
     ProjectValidation,
@@ -37,21 +36,15 @@
 
   $: inheritRows = declarationRows(ancestors);
 
-  // Two-way bound: App is the source of truth. aiPolicy is set on project load
-  // and read back when saving AI settings; projectCostExpanded is bound because
-  // App resets it on project switch. Both stay there and bind down.
-  //
-  // "inherit" is the draft-only value the pane can hold that the stored policy
-  // cannot (#471): the project states no policy of its own and defers to its
-  // parent. Saving it clears the key; it is never a resolved value.
-  export let aiPolicy: AIPolicy | "inherit";
+  // Two-way bound: App resets projectCostExpanded on project switch, so it binds
+  // down and back up.
   export let projectCostExpanded: boolean;
 
-  // Actions — App owns the side effects (API calls). Several moved out: Validate
-  // to the pane header, Chats/Prompts/Mutations to the app menu, Health Check to
-  // the Settings AI tab (#629); loose-scene import to its own "Import documents…"
-  // surface (#635). This pane keeps only the AI-policy apply and TODO repair.
-  export let onSaveAISettings: () => void;
+  // Actions — App owns the side effects (API calls). Most moved out: Validate to
+  // the pane header, Chats/Prompts/Mutations to the app menu, Health Check to the
+  // Settings AI tab (#629); loose-scene import to its own "Import documents…"
+  // surface (#635); the AI-policy control to the project window as a modal
+  // (#417). This pane keeps only TODO repair (until validation moves too).
   export let onRepair: () => void;
   // Opening a child is a resolution-scope change, i.e. a unit boundary
   // (ADR-0045) — App routes it through the same open path as the switcher
@@ -101,36 +94,20 @@
     flat project, and #427 owns the affordance for the empty case.
 
     Placed above "Contains" so the pane reads the way the chain does: what this
-    project is built on, then what is built inside it.
+    project is built on, then what is built inside it. The AI access policy that
+    used to share this block (#629) moved to the project window as a modal (#417),
+    so the section is now just the declarations — and renders only when there are
+    ancestors to declare, rather than always carrying an AI fieldset.
   -->
-  <!--
-    Inheritance block (#629): the ancestor declarations and the AI access
-    policy sit together — both are per-project, inherit-flavoured settings (the
-    policy's headline option is literally "Inherit"). Rendered for any open
-    project; the declaration list only when the walk found ancestors to choose.
-  -->
-  <section class="project-inheritance" aria-label="Inheritance and AI access">
-    <h3>Inheritance</h3>
-    {#if inheritRows.length > 0}
+  {#if inheritRows.length > 0}
+    <section class="project-inheritance" aria-label="Inheritance">
+      <h3>Inheritance</h3>
       <div class="inherit-block" role="group" aria-labelledby="project-inherits-label">
         <span class="field-label" id="project-inherits-label">Inherits from</span>
         <InheritsFromList rows={inheritRows} busy={inheritSaving} onToggle={onToggleInherit} />
       </div>
-    {/if}
-
-    <fieldset class="ai-policy">
-      <legend>AI access</legend>
-      <label title="Set no policy of your own — inherit it from an ancestor project, or default to Off (#471)">
-        <input type="radio" bind:group={aiPolicy} value="inherit" /> Inherit
-      </label>
-      <label><input type="radio" bind:group={aiPolicy} value="off" /> Off</label>
-      <label><input type="radio" bind:group={aiPolicy} value="local-only" /> Local only</label>
-      <label><input type="radio" bind:group={aiPolicy} value="cloud-allowed" /> Cloud allowed</label>
-    </fieldset>
-    <div class="button-row">
-      <button type="button" on:click={onSaveAISettings}>Save AI Settings</button>
-    </div>
-  </section>
+    </section>
+  {/if}
 
   <!--
     The child roster (#310). Rendered only when there is something in it: a
@@ -199,8 +176,8 @@
 {/if}
 
 <style>
-  /* Co-located from styles.css (#14): single-owner Project styles. `.muted` and
-     `.button-row` are also used here but stay global (shared utilities). */
+  /* Co-located from styles.css (#14): single-owner Project styles. `.muted` is
+     also used here but stays global (shared utility). */
   .project-empty-hint {
     margin: 4px 0;
     font-size: var(--fs-md);
@@ -269,9 +246,9 @@
     color: var(--text-3);
   }
 
-  /* Same section rhythm as the AI block below — a sibling section of the
-     pane, not a nested treatment. The rows inside are plain NodeRows, so
-     they carry the canonical card chrome and need nothing here. */
+  /* Sibling sections of the pane, not nested treatments. The rows inside are
+     plain NodeRows, so they carry the canonical card chrome and need nothing
+     here. */
   .project-inheritance,
   .project-children {
     display: grid;
@@ -302,36 +279,6 @@
     color: var(--text-3);
     text-transform: uppercase;
     letter-spacing: 0.04em;
-  }
-
-  .ai-policy {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 14px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 8px 10px;
-  }
-
-  .ai-policy legend {
-    font-size: var(--fs-sm);
-    color: var(--text-2);
-    padding: 0 4px;
-  }
-
-  .ai-policy label {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: var(--fs-md);
-  }
-
-  /* The global `input, select { width: 100% }` (styles.css) stretches a radio
-     to fill its flex label, distorting these controls (#426 noted it here,
-     unfiled). Resetting the width is what fixes it — `flex: none` does not, as
-     the basis just reads the width property back. */
-  .ai-policy label input[type="radio"] {
-    width: auto;
   }
 
   .migration-applied {

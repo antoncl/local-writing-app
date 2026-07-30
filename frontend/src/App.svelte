@@ -22,6 +22,7 @@
   import MachineSettingsDialog from "@/components/dialogs/MachineSettingsDialog.svelte";
   import ImportDocumentsModal from "@/components/dialogs/ImportDocumentsModal.svelte";
   import ConfirmModal from "@/components/dialogs/ConfirmModal.svelte";
+  import AIPolicyModal from "@/components/dialogs/AIPolicyModal.svelte";
   import PlainTextEditor from "@/components/widgets/PlainTextEditor.svelte";
   import PromptInputField from "@/components/widgets/PromptInputField.svelte";
   import TopBar from "@/components/chrome/TopBar.svelte";
@@ -139,6 +140,9 @@
   // "Import documents" (#635) — the loose-scene adoption surface, opened from the
   // app menu. Its list comes from its own read, not the validation report.
   let importDocsOpen = $state(false);
+  // The per-project AI policy modal, launched from the project node window's
+  // action (#417). App owns the guard, like the other dialogs.
+  let aiPolicyModalOpen = $state(false);
   let looseScenes = $state<LooseScene[]>([]);
   let importBusy = $state(false);
   // The Lore pane owns its own add-menu (a ViewNodeList feature, #112 4c-iv); this
@@ -783,9 +787,7 @@
         onToggleInherit={(path) =>
           void projectSession.setDeclaration(toggledDeclaration(project?.ancestors, path))}
         inheritSaving={projectSession.declarationSaving}
-        bind:aiPolicy={aiSettings.policy}
         bind:projectCostExpanded
-        onSaveAISettings={() => aiSettings.save()}
         onRepair={repairProject}
       />
     </div>
@@ -955,6 +957,21 @@
   {#snippet editorDocActions(id: string)}
     {@const editorPane = editorPaneById(id)}
     {#if editorPane}
+      {#if editorPane.document?.type === "project"}
+        <!-- Project-only action, re-homed from the (vanishing) Project pane to
+             the project window (#417). Fails-closed: the modal owns the explicit
+             Save; this button only opens it. -->
+        <button
+          class="pin-button"
+          type="button"
+          title="Set this project's AI access policy"
+          aria-label="AI policy"
+          onmousedown={(event) => event.stopPropagation()}
+          onclick={() => (aiPolicyModalOpen = true)}
+        >
+          AI Policy
+        </button>
+      {/if}
       <button
         class="pin-button danger"
         type="button"
@@ -1160,6 +1177,8 @@
     onClose={() => (importDocsOpen = false)}
     onImport={importLooseScenes}
   />
+
+  <AIPolicyModal open={aiPolicyModalOpen} onClose={() => (aiPolicyModalOpen = false)} />
 
   {#if tagsManagerOpen}
     <TagManagerDialog onClose={() => (tagsManagerOpen = false)} />

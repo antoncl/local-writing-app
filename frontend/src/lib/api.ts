@@ -498,6 +498,12 @@ export const api = {
       body: JSON.stringify({ name, scope }),
     });
   },
+  setTagColor(name: string, color: string | null) {
+    return request<KnownTags>("/tags/color", {
+      method: "PUT",
+      body: JSON.stringify({ name, color }),
+    });
+  },
   mergeTags(sources: string[], target: string) {
     return request<KnownTags>("/tags/merge", {
       method: "POST",

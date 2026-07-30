@@ -14,7 +14,7 @@
   import TagChip from "@/components/widgets/TagChip.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import { isMetadataValuePresent } from "@/lib/utils/schemaTypeHelpers";
-  import { parseTagList } from "@/lib/utils/tags";
+  import { parseTagList, tagColorMap } from "@/lib/utils/tags";
   import type {
     LoreEntrySummary,
     MetadataFieldDefinition,
@@ -83,6 +83,8 @@
 
   const label = $derived(ariaLabel ?? field.name);
   const currentValue = $derived(metadataValueString(value));
+  // Built once, not per-chip, so the read-only tags render stays O(n) (#247).
+  const tagColors = $derived(tagColorMap(knownTags));
 
   function metadataValueString(v: MetadataValue | undefined): string {
     if (Array.isArray(v)) return v.join(", ");
@@ -251,7 +253,7 @@
   {#if readOnly}
     <div class="multi-select-chips" aria-label={label}>
       {#each parseTagList(currentValue) as tag (tag)}
-        <TagChip name={tag} />
+        <TagChip name={tag} color={tagColors.get(tag.toLowerCase()) ?? null} />
       {:else}
         <span class="fv-empty">—</span>
       {/each}

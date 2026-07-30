@@ -15,16 +15,22 @@ const getTagsOverview = vi.fn(async () => ({
 }));
 const updateTagScope = vi.fn(async () => ({ tags: [] }));
 const mergeTags = vi.fn(async () => ({ tags: [] }));
+const setTagColor = vi.fn(async () => ({ tags: [] }));
 vi.mock("@/lib/api", () => ({
   api: {
     getTagsOverview: (...a: unknown[]) => getTagsOverview(...(a as [])),
     updateTagScope: (...a: unknown[]) => updateTagScope(...(a as [])),
     mergeTags: (...a: unknown[]) => mergeTags(...(a as [])),
+    setTagColor: (...a: unknown[]) => setTagColor(...(a as [])),
   },
 }));
 
 const bump = vi.fn();
-vi.mock("@/lib/stores/tags", () => ({ bumpTagVocabularyRevision: () => bump() }));
+const refreshKnownTags = vi.fn(async () => {});
+vi.mock("@/lib/stores/tags", () => ({
+  bumpTagVocabularyRevision: () => bump(),
+  refreshKnownTags: () => refreshKnownTags(),
+}));
 
 import TagRosterPopover from "@/components/widgets/TagRosterPopover.svelte";
 
@@ -53,6 +59,9 @@ beforeEach(() => {
   getTagsOverview.mockClear();
   updateTagScope.mockClear();
   mergeTags.mockClear();
+  setTagColor.mockClear();
+  setTagColor.mockImplementation(async () => ({ tags: [] }));
+  refreshKnownTags.mockClear();
   bump.mockClear();
 });
 
@@ -120,6 +129,39 @@ describe("TagRosterPopover", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Merge" }));
     // A brand-new survivor isn't among the ticked, so both sources fold in.
     expect(mergeTags).toHaveBeenCalledWith(["alpha", "beta"], "cast");
+  });
+
+  it("sets a tag's colour from the row swatch, refreshing only the roster", async () => {
+    setup();
+    // The onMount count-load already ran; clear it so we can assert a colour set
+    // does NOT trigger another full-corpus getTagsOverview rescan.
+    getTagsOverview.mockClear();
+    // Each neutral row carries a swatch trigger ("Pick a color"); open the first.
+    const triggers = screen.getAllByRole("button", { name: "Pick a color" });
+    await fireEvent.click(triggers[0]);
+    // The palette is empty in tests, but the Clear affordance still exercises the
+    // swatch → setColor → api wiring end to end.
+    await fireEvent.click(screen.getByRole("button", { name: /Clear/ }));
+    expect(setTagColor).toHaveBeenCalledWith("alpha", null);
+    // Colour refreshes the roster (recolours chips), NOT the heavy reconcile, and
+    // never rescans use-counts.
+    await vi.waitFor(() => expect(refreshKnownTags).toHaveBeenCalled());
+    expect(bump).not.toHaveBeenCalled();
+    expect(getTagsOverview).not.toHaveBeenCalled();
+  });
+
+  it("does not refresh the roster when a colour write fails", async () => {
+    setTagColor.mockImplementationOnce(async () => {
+      throw new Error("colour service down");
+    });
+    setup();
+    const triggers = screen.getAllByRole("button", { name: "Pick a color" });
+    await fireEvent.click(triggers[0]);
+    await fireEvent.click(screen.getByRole("button", { name: /Clear/ }));
+    // The error surfaces and the success reconcile is skipped (the swatch reverts
+    // via a per-row remount, which is not observable in happy-dom).
+    await vi.waitFor(() => expect(screen.getByText("colour service down")).toBeInTheDocument());
+    expect(refreshKnownTags).not.toHaveBeenCalled();
   });
 
   it("backs out of the ⋯ menu to the plain list", async () => {

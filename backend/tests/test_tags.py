@@ -33,6 +33,7 @@ from app.models import (
     MergeTagsRequest,
     NodePickerConfig,
     SaveLoreEntryRequest,
+    UpdateTagColorRequest,
     UpdateTagScopeRequest,
 )
 from app.services.project.errors import ProjectServiceError
@@ -372,6 +373,173 @@ class LayeredTagsTests(unittest.TestCase):
         usage = next(usage for usage in self.service.read_tags_overview().tags if usage.name == "treecat")
 
         self.assertEqual(usage.count, 2)
+
+    # --- colour (#247) --------------------------------------------------
+
+    def test_read_carries_a_tags_colour(self) -> None:
+        self._write_layer_tags(self.root, [{"name": "grayson", "scope": {}, "color": "forest"}])
+
+        tag = self.service.read_known_tags().tags[0]
+
+        self.assertEqual(tag.color, "forest")
+
+    def test_nearer_layer_colour_wins(self) -> None:
+        # Colour is a single value, not a union like scope: the nearest asserting
+        # layer overrides. The book recolours the world's tag.
+        self._write_layer_tags(self.universe, [{"name": "treecat", "scope": {}, "color": "slate"}])
+        self._write_layer_tags(self.root, [{"name": "treecat", "scope": {}, "color": "forest"}])
+
+        self.assertEqual(self.service.read_known_tags().tags[0].color, "forest")
+
+    def test_ancestor_colour_is_inherited_when_the_nearer_layer_has_none(self) -> None:
+        self._write_layer_tags(self.universe, [{"name": "treecat", "scope": {}, "color": "slate"}])
+        self._write_layer_tags(self.root, [{"name": "treecat", "scope": {}}])
+
+        self.assertEqual(self.service.read_known_tags().tags[0].color, "slate")
+
+    def test_update_tag_color_writes_a_local_record(self) -> None:
+        self._write_layer_tags(self.root, [{"name": "grayson", "scope": {}}])
+
+        self.service.update_tag_color(UpdateTagColorRequest(name="grayson", color="forest"))
+
+        raw = self._raw_tags(self.root)
+        self.assertEqual(len(raw), 1)
+        self.assertEqual(raw[0]["name"], "grayson")
+        self.assertEqual(raw[0]["color"], "forest")
+        self.assertEqual(self.service.read_known_tags().tags[0].color, "forest")
+
+    def test_colouring_an_inherited_tag_does_not_widen_its_scope(self) -> None:
+        # Colouring an inherited-only tag writes a local record with an EMPTY
+        # scope; that empty scope must contribute no sources to the merged union,
+        # or the tag would silently broaden to "everywhere".
+        self._write_layer_tags(
+            self.universe, [{"name": "naval", "scope": _scope("lore", "lore:character")}]
+        )
+
+        self.service.update_tag_color(UpdateTagColorRequest(name="naval", color="forest"))
+
+        tag = self.service.read_known_tags().tags[0]
+        self.assertEqual(tag.color, "forest")
+        self.assertEqual(tag.scope.entry_types["lore"], ["lore:character"])
+        self.assertEqual(tag.scope.kinds, ["lore"])
+
+    def test_clearing_colour_drops_a_bare_local_record(self) -> None:
+        self._write_layer_tags(self.universe, [{"name": "treecat", "scope": {}, "color": "slate"}])
+        self.service.update_tag_color(UpdateTagColorRequest(name="treecat", color="forest"))
+
+        self.service.update_tag_color(UpdateTagColorRequest(name="treecat", color=None))
+
+        # The local color-only assertion is gone; the ancestor's colour resurfaces.
+        self.assertEqual(self._raw_tags(self.root), [])
+        self.assertEqual(self.service.read_known_tags().tags[0].color, "slate")
+
+    def test_clearing_colour_keeps_a_locally_scoped_record(self) -> None:
+        self._write_layer_tags(
+            self.root, [{"name": "naval", "scope": _scope("lore", "lore:character"), "color": "forest"}]
+        )
+
+        self.service.update_tag_color(UpdateTagColorRequest(name="naval", color=None))
+
+        # The scope is a real local assertion, so the record survives — only the
+        # colour is dropped.
+        self.assertEqual(self._raw_tags(self.root), [{"name": "naval", "scope": _scope("lore", "lore:character")}])
+
+    def test_merge_survivor_keeps_its_own_colour(self) -> None:
+        self._write_layer_tags(
+            self.root,
+            [
+                {"name": "navy", "scope": {}, "color": "forest"},
+                {"name": "fleet", "scope": {}, "color": "slate"},
+            ],
+        )
+
+        self.service.merge_tags(MergeTagsRequest(sources=["fleet"], target="navy"))
+
+        tag = next(tag for tag in self.service.read_known_tags().tags if tag.name == "navy")
+        self.assertEqual(tag.color, "forest")
+
+    def test_overview_carries_colour(self) -> None:
+        self._write_layer_tags(self.root, [{"name": "grayson", "scope": {}, "color": "forest"}])
+
+        usage = next(usage for usage in self.service.read_tags_overview().tags if usage.name == "grayson")
+
+        self.assertEqual(usage.color, "forest")
+
+    def test_saving_a_broadened_coloured_tag_keeps_its_colour(self) -> None:
+        # The write-back that matters most: a coloured tag applied to a NEW
+        # sub-type auto-broadens on a normal save; that rebuild must carry the
+        # colour, or routine writing silently wipes it.
+        self._write_layer_tags(
+            self.root, [{"name": "hero", "scope": _scope("lore", "lore:character"), "color": "forest"}]
+        )
+        entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Grayson", entry_type="lore:location"))
+        self.service.save_lore_entry(
+            entry.id,
+            SaveLoreEntryRequest(
+                title="Grayson",
+                body="A place.",
+                base_revision=entry.revision,
+                entry_type="lore:location",
+                metadata={"tags": ["hero"]},
+            ),
+        )
+
+        tag = next(tag for tag in self.service.read_known_tags().tags if tag.name == "hero")
+        self.assertEqual(tag.color, "forest")
+
+    def test_editing_scope_keeps_the_tags_colour(self) -> None:
+        self._write_layer_tags(
+            self.root, [{"name": "hero", "scope": _scope("lore", "lore:character"), "color": "forest"}]
+        )
+        wider = NodePickerConfig.from_membership(
+            kinds=["lore"], entry_types={"lore": ["lore:character", "lore:location"]}
+        )
+
+        self.service.update_tag_scope(UpdateTagScopeRequest(name="hero", scope=wider))
+
+        tag = next(tag for tag in self.service.read_known_tags().tags if tag.name == "hero")
+        self.assertEqual(tag.color, "forest")
+
+    def test_scope_edit_fully_covered_by_inheritance_keeps_local_colour(self) -> None:
+        # Ancestor scopes 'naval'; book colours it (a colour-only local record);
+        # re-asserting exactly the inherited scope leaves an empty delta — the
+        # colour-only record must survive rather than being popped.
+        self._write_layer_tags(
+            self.universe, [{"name": "naval", "scope": _scope("lore", "lore:character")}]
+        )
+        self.service.update_tag_color(UpdateTagColorRequest(name="naval", color="forest"))
+        inherited = NodePickerConfig.from_membership(kinds=["lore"], entry_types={"lore": ["lore:character"]})
+
+        self.service.update_tag_scope(UpdateTagScopeRequest(name="naval", scope=inherited))
+
+        tag = next(tag for tag in self.service.read_known_tags().tags if tag.name == "naval")
+        self.assertEqual(tag.color, "forest")
+
+    def test_a_malformed_colour_scalar_reads_as_neutral(self) -> None:
+        # A hand-edited/imported record with a non-string colour must read as
+        # neutral, never raise out of every tags read AND the scene-save path.
+        self._write_layer_tags(self.root, [{"name": "naval", "scope": {}, "color": 1}])
+
+        tag = self.service.read_known_tags().tags[0]
+
+        self.assertEqual(tag.name, "naval")
+        self.assertIsNone(tag.color)
+
+    def test_merge_survivor_without_colour_does_not_inherit_a_sources_colour(self) -> None:
+        # The discriminating case: survivor has NO colour, a source does — the
+        # source colour must NOT fold in (it drops with the source record).
+        self._write_layer_tags(
+            self.root,
+            [
+                {"name": "navy", "scope": {}},
+                {"name": "fleet", "scope": {}, "color": "slate"},
+            ],
+        )
+
+        self.service.merge_tags(MergeTagsRequest(sources=["fleet"], target="navy"))
+
+        tag = next(tag for tag in self.service.read_known_tags().tags if tag.name == "navy")
+        self.assertIsNone(tag.color)
 
 
 if __name__ == "__main__":

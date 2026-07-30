@@ -872,6 +872,17 @@ class CardLayeredTests(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 409)
         self.assertTrue((self.series / "plot" / "plot_series_card.md").exists())
 
+    def test_realizing_an_inherited_card_is_refused_without_minting_a_scene(self) -> None:
+        # realize has a side effect (it creates a scene), so the inherited-write
+        # refusal must happen BEFORE the scene is minted — otherwise the 409
+        # leaves an orphan scene in the book's manuscript.
+        self._write_ancestor_card(self.series, "plot_series_card", "Series Beat")
+        before = len(list((self.root / "scenes").glob("*.md")))
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.realize_card("plot_series_card", RealizeCardRequest())
+        self.assertEqual(ctx.exception.status_code, 409)
+        self.assertEqual(len(list((self.root / "scenes").glob("*.md"))), before)  # no orphan scene
+
 
 class PlotTemplateLayeredTests(unittest.TestCase):
     """A `plot:template` can be inherited from an ancestor *project*, not only the

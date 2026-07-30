@@ -432,12 +432,20 @@ class PlotMixin:
         holds the prose the writer has yet to write. 0..1 scene per card, so a
         card that already has one 409s rather than orphaning the first scene.
         """
+        root = self._require_project()
         card = self.read_card(entry_id)
         if card.metadata.get("scene"):
             raise ProjectServiceError(
                 f"Card {entry_id} already has a scene attached; detach it before realizing another.",
                 409,
             )
+        # Refuse a non-writable (inherited) card BEFORE minting the scene: realize
+        # has a side effect (create_scene), and save_card's book-local write guard
+        # would otherwise fire only after the scene exists — leaving an orphan
+        # scene behind on a 409. Run the same guard up front, on the resolved winner.
+        self._reject_inherited_book_local(
+            entry_id, self._build_node_index().by_id.get(entry_id), root, noun="card"
+        )
         scene = self.create_scene(CreateSceneRequest(title=card.title, parent_id=request.parent_id))
         return self._set_card_scene(card, scene.id)
 
@@ -451,7 +459,6 @@ class PlotMixin:
         already carded is skipped (0..n cards per scene, but seed adds at most
         the one it is responsible for).
         """
-        self._require_project()
         carded_scene_ids = {
             card.metadata["scene"]
             for card in self.list_cards().entries

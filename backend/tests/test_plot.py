@@ -308,6 +308,23 @@ class PlotKindRegistrationTests(_PlotTestCase):
         self.assertEqual(schema.entry_types["plot:plotline"].kind, "plot")
         self.assertEqual(schema.entry_types["plot:template"].kind, "plot")
 
+    def test_plot_kind_has_an_abstract_base_root(self) -> None:
+        # #724: like lore:base / prompt:base, the `plot` kind needs a single
+        # abstract root the three concrete types hang off — otherwise
+        # `defaultView("plot")` (descendants_of:<root>) resolves to just the first
+        # parentless type and the Plot templates pane comes up empty.
+        schema = self.service.read_metadata_schema()
+        base = schema.entry_types.get("plot:base")
+        self.assertIsNotNone(base)
+        self.assertTrue(base.abstract)
+        self.assertEqual(base.kind, "plot")
+        for concrete in ("plot:plotline", "plot:template", "plot:board"):
+            self.assertEqual(
+                schema.entry_types[concrete].parent,
+                "plot:base",
+                f"{concrete} must hang off plot:base so the whole-kind roster resolves",
+            )
+
     def test_plot_is_a_library_tenant(self) -> None:
         # The Library ships the plot family (its `plot/` folder holds templates),
         # so a second, non-prompt tenant proves the Library model is kind-agnostic.

@@ -48,6 +48,11 @@
     implicitContextMatcher?: import("@/lib/editor-core/implicitContextMatcher").CompiledMatcher | null;
     excludeId?: string | null;
     knownTags?: ScopedTag[];
+    // Which vocabulary a `tags` field's roster comes from — governs whether the
+    // TagPicker's + offers governance (project) or stays add-only (assistant),
+    // see TagPicker. Defaults to project; only the assistant/prompt editor pane
+    // passes "assistant".
+    tagOrigin?: "project" | "assistant";
     // A kind string used only as the TagPicker's scope (which takes a plain
     // `string` and tolerates unknown kinds); not narrowed to DocumentKind so
     // callers can pass a ViewSpec.kind without an unchecked cast.
@@ -70,6 +75,7 @@
     implicitContextMatcher = null,
     excludeId = null,
     knownTags = [],
+    tagOrigin = "project",
     documentKind = "scene",
     entryType = "",
     onNavigate,
@@ -254,6 +260,7 @@
     <TagPicker
       value={currentValue}
       knownTags={knownTags}
+      origin={tagOrigin}
       scopeKind={documentKind}
       scopeEntryType={entryType}
       ariaLabel={label}

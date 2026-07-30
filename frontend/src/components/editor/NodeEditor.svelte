@@ -68,6 +68,7 @@
     researchStructure?: import("@/lib/types").StructureDocument | null;
     loreEntries?: import("@/lib/types").LoreEntrySummary[];
     knownTags?: import("@/lib/types").ScopedTag[];
+    tagOrigin?: "project" | "assistant";
     // plugin on long-text metadata fields. App.svelte owns the compile.
     implicitContextMatcher?: import("@/lib/editor-core/implicitContextMatcher").CompiledMatcher | null;
     assistantEntries?: AssistantEntrySummary[];
@@ -124,6 +125,7 @@
     researchStructure = null,
     loreEntries = [],
     knownTags = [],
+    tagOrigin = "project",
     implicitContextMatcher = null,
     assistantEntries = [],
     defaultAssistantId = "",
@@ -676,6 +678,7 @@
       documentEntryTypes={documentEntryTypes}
       metadataFieldIds={metadataFieldIds}
       knownTags={knownTags}
+      tagOrigin={tagOrigin}
       loreEntries={loreEntries}
       promptEntries={promptEntries}
       structure={structure}

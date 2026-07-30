@@ -4,6 +4,7 @@
   import { pickerMembership } from "@/lib/utils/pickerSources";
   import { portalToBody } from "@/lib/actions/portal";
   import TagChip from "@/components/widgets/TagChip.svelte";
+  import TagRosterPopover from "@/components/widgets/TagRosterPopover.svelte";
   import { parseTagList } from "@/lib/utils/tags";
 
   export let value: string = "";
@@ -14,6 +15,13 @@
   export let scopeEntryType: string = "";
   export let ariaLabel: string;
   export let placeholder: string = "Add tags…";
+  // Which vocabulary this field's roster comes from. Project tags govern from the
+  // + (scope / rename / merge, all backed by existing endpoints); assistant tags
+  // are machine-global with no merge/rename yet, so their + stays add-only until
+  // slice-2 PR-3 adds the backend. Decided once, at the pane that picks the
+  // roster (App feeds the assistant/prompt pane a mixed roster), and threaded
+  // down — never re-derived from the document kind here (#247).
+  export let origin: "project" | "assistant" = "project";
   // Emits the committed tags as a comma-joined string (the wire contract the
   // parent round-trips). A callback prop, not a `change` event, so it composes
   // with the runes-based FieldValueEditor and is directly testable.
@@ -201,16 +209,27 @@
   {#if open && position}
     <div
       class="tag-picker"
+      class:governing={origin === "project"}
       style={`left: ${position.x}px; top: ${position.y}px; width: ${position.width}px;`}
       aria-label={`${ariaLabel} known tags`}
       use:portalToBody
     >
-      {#if suggestions.length > 0}
+      {#if origin === "project"}
+        <!-- Project tags: the + is also the lightweight governance surface. -->
+        <TagRosterPopover
+          tags={suggestions}
+          selectedKeys={selectedKeys}
+          scopeKind={scopeKind}
+          scopeEntryType={scopeEntryType}
+          ariaLabel={ariaLabel}
+          onAdd={(name) => addTag(name)}
+        />
+      {:else if suggestions.length > 0}
+        <!-- Assistant tags stay add-only until PR-3 adds their governance backend. -->
         {#each suggestions as tag}
           <button
             class:active={selectedKeys.has(tag.name.toLowerCase())}
             type="button"
-            on:mousedown|preventDefault
             on:click={() => addTag(tag.name)}
           >{tag.name}</button>
         {/each}
@@ -286,6 +305,15 @@
     border-radius: 6px;
     background: var(--surface);
     box-shadow: var(--elev-2);
+  }
+  /* Governance popover owns its own column layout + internal padding; the
+     wrap/gap/pad above are for the assistant add-only pill list. */
+  .tag-picker.governing {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    gap: 0;
+    padding: 0;
+    overflow: visible;
   }
 
   .tag-picker button {

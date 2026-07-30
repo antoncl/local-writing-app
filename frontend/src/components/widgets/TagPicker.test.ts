@@ -93,9 +93,18 @@ describe("TagPicker", () => {
     expect(onChange).toHaveBeenLastCalledWith("alpha");
   });
 
-  it("adds a tag picked from the + suggestion popover", async () => {
+  it("adds a tag picked from the + governance popover (project origin)", async () => {
     const { onChange } = setup({ value: "" });
     await fireEvent.click(screen.getByTitle("Add known tags"));
+    // Project tags open the governance roster (rows); clicking the name adds it.
+    await fireEvent.click(screen.getByText("shifter"));
+    expect(onChange).toHaveBeenLastCalledWith("shifter");
+  });
+
+  it("keeps the assistant + as an add-only pill list", async () => {
+    const { onChange } = setup({ value: "", origin: "assistant" });
+    await fireEvent.click(screen.getByTitle("Add known tags"));
+    // Assistant tags have no governance backend yet (PR-3) — a plain pill button.
     await fireEvent.click(screen.getByRole("button", { name: "shifter" }));
     expect(onChange).toHaveBeenLastCalledWith("shifter");
   });

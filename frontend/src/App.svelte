@@ -41,7 +41,7 @@
     refreshTodos as storeRefreshTodos,
     refreshEmbeddedTodos as storeRefreshEmbeddedTodos,
   } from "@/lib/stores/todos";
-  import { knownTagsStore, refreshKnownTags as storeRefreshKnownTags, setKnownTags } from "@/lib/stores/tags";
+  import { knownTagsStore, refreshKnownTags as storeRefreshKnownTags, setKnownTags, tagVocabularyRevision } from "@/lib/stores/tags";
   import { assistantTagsStore, refreshAssistantTags, assistantTagsAsScoped } from "@/lib/stores/assistantTags";
   import { validationStore, setValidation } from "@/lib/stores/validation";
   import {
@@ -476,6 +476,14 @@
       await editorPanes.refreshOpenEditorPaneBaselines();
     });
   }
+
+  // Any vocabulary-governance op (the + popover's governance surface, the tag
+  // manager) bumps `tagVocabularyRevision` after it rewrites tags on disk;
+  // reconcile once, here — so no picker has to thread a callback up through the
+  // components between it and App just to re-sync (#247). Skips the initial 0.
+  $effect(() => {
+    if ($tagVocabularyRevision > 0) void refreshAfterTagChange();
+  });
 
   async function refreshTodos() {
     await storeRefreshTodos();
@@ -978,6 +986,9 @@
         knownTags={editorPane.document?.type === "assistant" || editorPane.document?.type === "prompt"
           ? [...knownTags, ...assistantTagScoped]
           : knownTags}
+        tagOrigin={editorPane.document?.type === "assistant" || editorPane.document?.type === "prompt"
+          ? "assistant"
+          : "project"}
         implicitContextMatcher={implicitContextMatcher}
         assistantEntries={assistantEntries}
         defaultAssistantId={defaultAssistantId}

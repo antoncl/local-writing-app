@@ -4,7 +4,7 @@
   // long_text field as the SAME run-diff flip — the body seam applied to a
   // named field value (§6.3). The orientation (proposal = cool `was`, current =
   // warm `now`) comes from `reviewBodyProposal` and must not be re-diffed the
-  // other way (memo #590 / loreRevision.ts).
+  // other way (memo #590 / entryRevision.ts).
   //
   // Self-contained: captures its starting text once (it is {#key}-remounted per
   // proposal), accumulates the resolution as regions are adopted, and reports
@@ -13,7 +13,7 @@
 
   import { untrack } from "svelte";
   import ReadOnlyBodyOverlay from "@/components/editor/body/ReadOnlyBodyOverlay.svelte";
-  import { reviewBodyProposal } from "@/lib/utils/loreRevision";
+  import { reviewBodyProposal } from "@/lib/utils/entryRevision";
   import { adoptRegion, renderDiffRuns, type DiffRegion } from "@/lib/utils/diffRuns";
   import type { DiffRun } from "@/lib/types";
 

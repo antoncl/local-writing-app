@@ -29,7 +29,7 @@
 // write, never how. The host merges the fields into its own metadata state,
 // adopts the body through its prose buffer, and issues the explicit flush.
 import type { EntryMetadata, MetadataFieldType, MetadataSchema, MetadataValue } from "@/lib/types";
-import type { FieldFlip } from "@/lib/utils/loreRevision";
+import type { FieldFlip } from "@/lib/utils/entryRevision";
 import { entryBrainstorm } from "@/lib/stores/entryBrainstorm.svelte";
 
 /** One structured (non-prose) field the patch proposes, reviewed as an atomic

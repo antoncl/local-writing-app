@@ -1,24 +1,45 @@
 import type { ScopedTag } from "@/lib/types";
 
-// Canonical parser for a comma-joined tag string → an ordered, de-duplicated
-// list (#247). Tags are a set: the same tag twice is one tag, and a value that
-// arrives with exact or case duplicates (hand-edited YAML, an importer, another
-// writer — pre-1.0 has no normalization) must NOT reach a keyed `{#each}`, which
-// throws `each_key_duplicate`. De-dupe is case-insensitive; the first spelling
-// wins. Prefer this over hand-rolling `split(",").map(trim).filter(Boolean)`.
-export function parseTagList(raw: string | null | undefined): string[] {
+// The one home for the `split(",").map(trim).filter(Boolean)` idiom (#247/#704):
+// a comma-joined value → trimmed, non-empty tokens, order preserved, NO de-dupe.
+// Callers that want set semantics layer a de-dupe on top — the policy is not the
+// same everywhere (tags de-dupe case-insensitively; collection membership, whose
+// items are case-sensitive identifiers, keeps `Alpha`/`alpha` distinct), so the
+// split and the de-dupe are separate steps rather than one baked-in helper.
+export function splitCommaList(raw: string | null | undefined): string[] {
   if (raw == null || raw === "") return [];
   const out: string[] = [];
-  const seen = new Set<string>();
   for (const item of String(raw).split(",")) {
-    const tag = item.trim();
-    if (!tag) continue;
-    const key = tag.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(tag);
+    const token = item.trim();
+    if (token) out.push(token);
   }
   return out;
+}
+
+// De-dupe an already-tokenised list under the TAG set policy: case-insensitive,
+// first spelling wins. The write path handles both a comma string and an array,
+// so this takes a list (pair it with splitCommaList for the string case). A
+// value with exact or case duplicates (hand-edited YAML, an importer — pre-1.0
+// has no normalization) must NOT reach a keyed `{#each}`, which throws
+// `each_key_duplicate`, NOR be persisted, since a tag twice is one tag.
+export function dedupeTags(tags: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const tag of tags) {
+    const token = tag.trim();
+    if (!token) continue;
+    const key = token.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(token);
+  }
+  return out;
+}
+
+// Canonical parser for a comma-joined tag string → an ordered, de-duplicated
+// list (#247). Prefer this over hand-rolling the split + de-dupe.
+export function parseTagList(raw: string | null | undefined): string[] {
+  return dedupeTags(splitCommaList(raw));
 }
 
 // The one home for "what colour is this tag?" — a lowercased-name → swatch-id

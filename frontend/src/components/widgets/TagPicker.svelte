@@ -35,7 +35,17 @@
   let entryText = "";
   let inputEl: HTMLInputElement | null = null;
 
+  // Stable ids for the a11y wiring below (#706). The token-field rework moved the
+  // value out of the input (which now announces empty) and into the chips, so a
+  // visually-hidden, polite summary wired to the input via aria-describedby
+  // restores the spoken value on focus — "Tags, edit text, alpha, shifter" — and
+  // announces additions/removals as they happen. The chips' × buttons keep their
+  // own per-tag labels. `popoverId` links the + button to the roster it opens.
+  const summaryId = `tag-picker-summary-${Math.random().toString(36).slice(2, 9)}`;
+  const popoverId = `tag-picker-menu-${Math.random().toString(36).slice(2, 9)}`;
+
   $: chips = parseTagList(value);
+  $: tagSummary = chips.length ? chips.join(", ") : "No tags selected";
   // "Known" means present in the vocabulary at all — a known-but-out-of-scope tag
   // is still known (not pending). Scope only governs what the + *suggests*.
   $: knownKeys = new Set(knownTags.map((t) => t.name.toLowerCase()));
@@ -201,9 +211,13 @@
       bind:value={entryText}
       placeholder={chips.length ? "" : placeholder}
       aria-label={ariaLabel}
+      aria-describedby={summaryId}
       on:keydown={onKeydown}
       on:blur={crystallize}
     />
+    <!-- The field's current value for assistive tech: read after the input on
+         focus (aria-describedby) and announced on change (aria-live). -->
+    <span id={summaryId} class="tag-field-summary" aria-live="polite">{tagSummary}</span>
     {#each chipStates as chip (chip.tag)}
       <TagChip name={chip.tag} pending={chip.pending} color={colorMap.get(chip.tag.toLowerCase()) ?? null} removable ariaContext={ariaLabel} onRemove={() => removeTag(chip.tag)} />
     {/each}
@@ -213,12 +227,17 @@
       class="tag-picker-toggle"
       type="button"
       title="Add known tags"
+      aria-label="Add known tags"
+      aria-haspopup="true"
+      aria-expanded={open}
+      aria-controls={popoverId}
       on:mousedown|preventDefault
       on:click|stopPropagation={toggle}
     >+</button>
   </div>
   {#if open && position}
     <div
+      id={popoverId}
       class="tag-picker governing"
       style={`left: ${position.x}px; top: ${position.y}px; width: ${position.width}px;`}
       aria-label={`${ariaLabel} known tags`}
@@ -256,6 +275,20 @@
   }
   .tag-field:focus-within {
     border-color: var(--accent);
+  }
+
+  /* Visually hidden, but present for assistive tech (the input's described-by
+     value summary) — the standard clip pattern, not display:none (which AT skips). */
+  .tag-field-summary {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
   }
 
   .tag-entry {

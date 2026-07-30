@@ -7,6 +7,7 @@
 // resolution stay byte-identical to ADR-0009 — this module is authoring-layer
 // arithmetic only. Membership only: effective collections render
 // base-order-then-adds, reorder is not representable and the diff ignores it.
+import { splitCommaList } from "@/lib/utils/tags";
 import type { MutationRowDraft } from "./mutationNodes";
 
 /** One existing add/remove/replace record of the unit being re-edited. */
@@ -16,6 +17,10 @@ export interface CollectionRecord {
   value: string;
 }
 
+// Collection membership is CASE-SENSITIVE (its items are entity/reference
+// identifiers — `Alpha` and `alpha` are two distinct members), so this keeps a
+// distinct policy from the case-insensitive tag de-dupe. Only the tokenisation
+// is shared with tags, via splitCommaList (#704).
 function dedupe(items: string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -32,7 +37,7 @@ function dedupe(items: string[]): string[] {
  *  string) to a clean membership list. */
 export function asMembershipList(value: unknown): string[] {
   if (Array.isArray(value)) return dedupe(value.map((item) => String(item)));
-  if (typeof value === "string") return dedupe(value.split(","));
+  if (typeof value === "string") return dedupe(splitCommaList(value));
   return [];
 }
 

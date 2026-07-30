@@ -9,10 +9,11 @@ here. The shared `ProjectService` singleton + error translation live in
 from __future__ import annotations
 
 import atexit
-from collections.abc import AsyncIterator
+import traceback
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import (
@@ -26,6 +27,8 @@ from app.routers import (
     scenes,
     snapshots,
 )
+from app.runtime import root_from_header
+from app.services.error_log import append_error_line
 from app.services.project.node_index_gate import node_index_gate
 
 # The node-index snapshot is flushed lazily behind a dirty flag (#476); write any
@@ -58,6 +61,35 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def record_unhandled_errors(
+    request: Request,
+    call_next: Callable[[Request], Awaitable[Response]],
+) -> Response:
+    """Give a genuine `500` a durable line before it vanishes into the console (#386).
+
+    Domain failures (`ProjectServiceError`) are already turned into HTTP responses
+    upstream, so only *unexpected* exceptions — the ones the UI sees as a bare
+    "Internal Server Error" with nothing behind it — reach this `except`. We record
+    one line to the request's own project log, then re-raise unchanged so the 500
+    is produced exactly as before. Recording never alters the outcome: it writes to
+    the scope the request already carries, and the writer swallows its own failures.
+    """
+    try:
+        return await call_next(request)
+    except Exception as exc:
+        root = root_from_header(request.headers.get("X-Project-Root"))
+        if root is not None:
+            append_error_line(
+                root,
+                origin="backend",
+                message=f"{type(exc).__name__}: {exc}",
+                detail="".join(traceback.format_exception(exc)),
+                context=f"{request.method} {request.url.path}",
+            )
+        raise
+
 
 # Registration order mirrors the original single-file route order.
 app.include_router(project.router)

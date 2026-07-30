@@ -150,6 +150,7 @@ from app.models.plot import (
 from app.models.project import (
     PROJECT_NODE_FILENAME,
     AncestorCandidate,
+    ClientErrorReport,
     CreateDirectoryRequest,
     CreateProjectRequest,
     DirectoryEntry,
@@ -274,6 +275,7 @@ __all__ = [
     "DeleteMetadataFieldRequest",
     "DeleteMetadataGroupRequest",
     "AncestorCandidate",
+    "ClientErrorReport",
     "CreateDirectoryRequest",
     "DirectoryEntry",
     "DirectoryListing",

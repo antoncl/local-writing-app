@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import { api } from "@/lib/api";
+  import { installGlobalErrorLogging, reportClientError } from "@/lib/errorLog";
   import CodeEditor from "@/components/widgets/CodeEditor.svelte";
   import NodeEditor from "@/components/editor/NodeEditor.svelte";
   import DirectoryPickerModal from "@/components/dialogs/DirectoryPickerModal.svelte";
@@ -161,6 +162,9 @@
   let cleanupThemeWiring: (() => void) | null = null;
 
   onMount(() => {
+    // Catch the failures that never reach run() — uncaught render errors, dropped
+    // promises — and record them to the project's errors.log too (#386).
+    installGlobalErrorLogging();
     // Clicking a tab in the tiled shell focuses that document; editorPanes sets
     // focusedEditorPaneId directly when it opens/raises a pane, and the effect
     // below mirrors that into the active tab.
@@ -434,6 +438,9 @@
       return true;
     } catch (caught) {
       error = caught instanceof Error ? caught.message : String(caught);
+      // The on-screen string is erased by the next action; also record it durably
+      // so a failure the author didn't read in time isn't lost forever (#386).
+      reportClientError(caught, "run");
       return false;
     }
   }

@@ -360,6 +360,24 @@ class PlotMixin:
             # A plotline (same `plot` kind, same folder) is not a template — refuse
             # rather than hand back a shapeless spec.
             raise ProjectServiceError(f"Node {node_id} is not a plot template.", 404)
+        # Same read-side healing every node kind gets (#345), matching read_plotline:
+        # `plot:template` is schema-extensible, so a schema-editor-added field must be
+        # stripped-if-retired / reference-purged / validated, not silently dropped
+        # (S4c finding #5). No-op while templates carry no built-in fields.
+        schema = self.read_metadata_schema()
+        metadata = self._normalise_metadata(front_matter.get("metadata"), path)
+        metadata = self._strip_unknown_metadata_fields(metadata, PLOT_TEMPLATE_ENTRY_TYPE, schema)
+        metadata = self._strip_dangling_references(metadata, schema, index)
+        metadata_errors = self._validate_entry_metadata(
+            label=f"Plot template {node_id}",
+            entry_type=PLOT_TEMPLATE_ENTRY_TYPE,
+            expected_kind="plot",
+            metadata=metadata,
+            schema=schema,
+            node_index=index,
+        )
+        if metadata_errors:
+            raise ProjectServiceError(" ".join(metadata_errors), 422)
         return PlotTemplate(
             id=node_id,
             title=str(front_matter.get("title") or node_id),
@@ -367,6 +385,10 @@ class PlotMixin:
             revision=self._revision(path),
             entry_type=PLOT_TEMPLATE_ENTRY_TYPE,
             template=self._parse_plot_template_spec(front_matter.get("template"), node_id),
+            metadata=metadata,
+            computed_metadata=self._computed_entry_metadata(
+                body, node_id=node_id, entry_type=PLOT_TEMPLATE_ENTRY_TYPE, schema=schema
+            ),
             source_layer_id=index_entry.source_layer_id if index_entry else "",
             source_layer_label=index_entry.source_layer_label if index_entry else "",
             is_library=index_entry.is_library if index_entry else False,

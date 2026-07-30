@@ -48,6 +48,7 @@ import {
 } from "@/lib/stores/structure";
 import { refreshLoreEntries, setLoreEntries } from "@/lib/stores/lore";
 import { refreshPromptEntries, setPromptEntries } from "@/lib/stores/prompts";
+import { refreshPlotTemplates } from "@/lib/stores/plotTemplates";
 import { refreshAssistantEntries, setAssistantEntries } from "@/lib/stores/assistants";
 import { refreshKnownTags } from "@/lib/stores/tags";
 import { referenceIndexStore, refreshReferenceIndexInBackground } from "@/lib/stores/references";
@@ -65,6 +66,7 @@ import type {
   EntryMetadata,
   LoreEntry,
   MetadataSchema,
+  PlotTemplate,
   PromptEntry,
   PromptInputDefinition,
   ProjectNode,
@@ -275,7 +277,9 @@ class EditorPanesController {
           ? api.getLoreEntry(document.id)
           : document.type === "prompt"
             ? api.getPromptEntry(document.id)
-            : api.getScene(document.id),
+            : document.type === "plot_template"
+              ? api.getPlotTemplate(document.id)
+              : api.getScene(document.id),
       ),
     );
     const refreshedByKey = new Map(refreshedDocuments.map((document, index) => [`${documentRefs[index].type}:${document.id}`, document]));
@@ -558,6 +562,12 @@ class EditorPanesController {
         savedDocument = await api.savePromptEntry(draftDocument as PromptEntry, pane.draftMarkdown);
         // A prompt's assistant_tags may have registered new machine tags (#88).
         void refreshAssistantTags();
+      } else if (documentKind === "plot_template") {
+        // An owned template clone (ADR-0048 S4c). The `template:` spec rides
+        // through unchanged — there is no beat editor yet — so only title + body
+        // change here. Inherited templates never reach this: the read-only lock
+        // blocks the edit and a save would 409 backend-side.
+        savedDocument = await api.savePlotTemplate(draftDocument as PlotTemplate, pane.draftMarkdown);
       } else if (documentKind === "assistant") {
         savedDocument = await api.saveAssistantEntry(draftDocument as AssistantEntry);
         void refreshAssistantTags();
@@ -640,6 +650,8 @@ class EditorPanesController {
         await refreshResearchStructure();
       } else if (documentKind === "prompt") {
         await refreshPromptEntries();
+      } else if (documentKind === "plot_template") {
+        await refreshPlotTemplates();
       } else if (documentKind === "assistant") {
         await refreshAssistantEntries();
       } else if (documentKind === "project") {
@@ -1033,27 +1045,44 @@ class EditorPanesController {
     this.activeChatId = chatId;
   }
 
-  async openPrompt(entryId: string): Promise<void> {
-    const existingPane = this.panes.find((pane) => pane.document?.type === "prompt" && pane.document.id === entryId);
+  // Open one "entry" document (prompt / plot template / assistant / view) in a
+  // pane: focus an already-open copy, else acquire a target pane, fetch the
+  // document, and seed the pane's drafts from it. The four openers differ only in
+  // which fields the drafts carry, so they share this skeleton rather than each
+  // keeping a near-identical copy ([[feedback_one_traversal_not_six]] — unify the
+  // re-derivation before adding a consumer, which is what `plot_template` was).
+  //   - `body`: seed `draftMarkdown` from the prose body (prompt / plot template);
+  //     assistants and views are body-less, so it stays "".
+  //   - `metadata: false`: a view is frontmatter-only and owns its own spec, so it
+  //     seeds no schema metadata (mirrors the chat precedent — save is a no-op).
+  //   - `inputs`: only prompts carry per-entry inputs; other kinds keep the pane's.
+  async #openEntryDocument(
+    type: DocumentRef["type"],
+    id: string,
+    focusLabel: string,
+    fetch: (id: string) => Promise<EditableDocument>,
+    opts: { body?: boolean; metadata?: boolean; inputs?: boolean } = {},
+  ): Promise<void> {
+    const existingPane = this.panes.find((pane) => pane.document?.type === type && pane.document.id === id);
     if (existingPane) {
-      this.#focusExisting(existingPane, "open prompt");
+      this.#focusExisting(existingPane, focusLabel);
       return;
     }
-    const targetPane = await this.#acquireTargetPane({ type: "prompt", id: entryId });
-    const entry = await api.getPromptEntry(entryId);
+    const targetPane = await this.#acquireTargetPane({ type, id });
+    const entry = await fetch(id);
     this.panes = this.panes.map((pane) =>
       pane.id === targetPane.id
         ? {
             ...pane,
-            document: { type: "prompt", id: entry.id },
+            document: { type, id: entry.id },
             scene: entry,
             dirty: false,
             draftTitle: entry.title,
-            draftMarkdown: entry.body,
+            draftMarkdown: opts.body ? ((entry as { body?: string }).body ?? "") : "",
             draftStatus: "",
             draftEntryType: entry.entry_type,
-            draftMetadata: cloneMetadata(entry.metadata),
-            draftInputs: JSON.parse(JSON.stringify(entry.inputs ?? [])),
+            draftMetadata: opts.metadata === false ? {} : cloneMetadata(entry.metadata ?? {}),
+            ...(opts.inputs ? { draftInputs: JSON.parse(JSON.stringify((entry as PromptEntry).inputs ?? [])) } : {}),
             saving: false,
             recentlySaved: false,
           }
@@ -1061,67 +1090,27 @@ class EditorPanesController {
     );
     this.focusedEditorPaneId = targetPane.id;
     this.setStatus(`Loaded ${entry.title}`);
+  }
+
+  async openPrompt(entryId: string): Promise<void> {
+    return this.#openEntryDocument("prompt", entryId, "open prompt", (id) => api.getPromptEntry(id), {
+      body: true,
+      inputs: true,
+    });
+  }
+
+  async openPlotTemplate(entryId: string): Promise<void> {
+    return this.#openEntryDocument("plot_template", entryId, "open plot template", (id) => api.getPlotTemplate(id), {
+      body: true,
+    });
   }
 
   async openAssistant(entryId: string): Promise<void> {
-    const existingPane = this.panes.find((pane) => pane.document?.type === "assistant" && pane.document.id === entryId);
-    if (existingPane) {
-      this.#focusExisting(existingPane, "open assistant");
-      return;
-    }
-    const targetPane = await this.#acquireTargetPane({ type: "assistant", id: entryId });
-    const entry = await api.getAssistantEntry(entryId);
-    this.panes = this.panes.map((pane) =>
-      pane.id === targetPane.id
-        ? {
-            ...pane,
-            document: { type: "assistant", id: entry.id },
-            scene: entry,
-            dirty: false,
-            draftTitle: entry.title,
-            draftMarkdown: "",
-            draftStatus: "",
-            draftEntryType: entry.entry_type,
-            draftMetadata: cloneMetadata(entry.metadata),
-            saving: false,
-            recentlySaved: false,
-          }
-        : pane,
-    );
-    this.focusedEditorPaneId = targetPane.id;
-    this.setStatus(`Loaded ${entry.title}`);
+    return this.#openEntryDocument("assistant", entryId, "open assistant", (id) => api.getAssistantEntry(id));
   }
 
   async openView(viewId: string): Promise<void> {
-    const existingPane = this.panes.find((pane) => pane.document?.type === "view" && pane.document.id === viewId);
-    if (existingPane) {
-      this.#focusExisting(existingPane, "open view");
-      return;
-    }
-    const targetPane = await this.#acquireTargetPane({ type: "view", id: viewId });
-    const node = await api.getView(viewId);
-    this.panes = this.panes.map((pane) =>
-      pane.id === targetPane.id
-        ? {
-            ...pane,
-            document: { type: "view", id: node.id },
-            scene: node,
-            dirty: false,
-            draftTitle: node.title,
-            // A view is frontmatter-only — no prose body, status, or fields.
-            // The ViewBodyView owns the spec and persists it directly, mirroring
-            // the chat precedent (saveEditorPane is a no-op for views).
-            draftMarkdown: "",
-            draftStatus: "",
-            draftEntryType: node.entry_type,
-            draftMetadata: {},
-            saving: false,
-            recentlySaved: false,
-          }
-        : pane,
-    );
-    this.focusedEditorPaneId = targetPane.id;
-    this.setStatus(`Loaded ${node.title}`);
+    return this.#openEntryDocument("view", viewId, "open view", (id) => api.getView(id), { metadata: false });
   }
 
   // Mint a blank view anchored to `kind` and open the designer on it. Callers
@@ -1258,6 +1247,16 @@ class EditorPanesController {
     const clone = await api.forkPromptEntry(entryId);
     await refreshPromptEntries();
     await this.openPrompt(clone.id);
+    this.setStatus(`Cloned ${clone.title} into this project`);
+  }
+
+  // Clone a Library/ancestor plot template into this project (ADR-0048 S4c), the
+  // same clone-to-own gesture as prompts: mint a new id, refresh the shelf, open
+  // the owned copy. No dirty-flush (the source is read-only in place).
+  async forkPlotTemplate(entryId: string): Promise<void> {
+    const clone = await api.forkPlotTemplate(entryId);
+    await refreshPlotTemplates();
+    await this.openPlotTemplate(clone.id);
     this.setStatus(`Cloned ${clone.title} into this project`);
   }
 

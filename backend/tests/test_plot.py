@@ -25,7 +25,10 @@ from app.main import app
 from app.models import (
     CreatePlotlineRequest,
     EntryTypeDefinition,
+    PlotTemplatePoint,
+    PlotTemplateSpec,
     SavePlotlineRequest,
+    SavePlotTemplateRequest,
     UpsertMetadataEntryTypeRequest,
 )
 from app.services.project.errors import ProjectServiceError
@@ -150,6 +153,9 @@ class PlotBoardHttpTests(_PlotTestCase):
 
 
 _THREE_ACT = "builtin-plot-three-act-story-arc"
+# The shipped node file behind _THREE_ACT — read to prove a refused write left it
+# byte-untouched (backend/app/builtin_library/plot/, relative to backend/tests/).
+_BUILTIN_THREE_ACT = Path(__file__).resolve().parents[1] / "app" / "builtin_library" / "plot" / "three-act-story-arc.md"
 
 
 class PlotTemplateLibraryTests(_PlotTestCase):
@@ -184,12 +190,16 @@ class PlotTemplateLibraryTests(_PlotTestCase):
         self.assertIn("# Three-Act Story Arc", body["body"])
 
     def test_saving_an_inherited_template_is_refused(self) -> None:
+        before = _BUILTIN_THREE_ACT.read_bytes()
         refused = self.client.put(
             f"/api/plot/templates/{_THREE_ACT}",
             json={"title": "Hijacked", "body": "", "template": {}},
         )
         self.assertEqual(refused.status_code, 409, refused.text)
-        # The shipped node is untouched — a re-read still shows the original.
+        # The 409 must precede any write: the shipped file is byte-untouched.
+        self.assertEqual(_BUILTIN_THREE_ACT.read_bytes(), before)
+        self.assertNotIn(b"Hijacked", before)
+        # And a re-read still shows the original.
         self.assertEqual(self.client.get(f"/api/plot/templates/{_THREE_ACT}").json()["title"], "Three-Act Story Arc")
 
     def test_deleting_an_inherited_template_is_refused(self) -> None:
@@ -362,6 +372,82 @@ class PlotlineLayeredTests(unittest.TestCase):
             self.service.delete_plotline("plot_series")
         self.assertEqual(ctx.exception.status_code, 409)
         self.assertTrue((self.series / "plot" / "plot_series.md").exists())
+
+
+class PlotTemplateLayeredTests(unittest.TestCase):
+    """A `plot:template` can be inherited from an ancestor *project*, not only the
+    built-in Library. It is read-only in place there too — save/delete refuse and
+    leave the ancestor's file untouched, and fork clones it into this book. Mirrors
+    PlotlineLayeredTests, but templates carry a `template:` spec block and (unlike
+    plotlines, whose inherited-fork is deferred) support clone-to-own here.
+    """
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
+        self.series = self.base / "series"
+        self.root = self.series / "book01"
+        self.service = ProjectService.created_at(self.root, "Book 1")
+        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
+        self.config_dir.mkdir()
+        self._patcher = patch(
+            "app.services.machine_settings.config_path",
+            return_value=self.config_dir / "config.yaml",
+        )
+        self._patcher.start()
+        declare_full_chain(self.service, self.root, self.base)
+
+    def tearDown(self) -> None:
+        self._patcher.stop()
+        self.temp_dir.cleanup()
+
+    def _write_ancestor_template(self, folder: Path, node_id: str, title: str) -> Path:
+        (folder / "plot").mkdir(parents=True, exist_ok=True)
+        path = folder / "plot" / f"{node_id}.md"
+        spec = PlotTemplateSpec(
+            slug=node_id,
+            display_name=title,
+            plot_points=[PlotTemplatePoint(id="p1", title="Beat 1", function_claim="Sets the frame.")],
+        )
+        self.service._write_plot_template_file(path, node_id, title, spec, "# Series Guide\n")
+        return path
+
+    def test_inherited_template_is_readable_and_read_only(self) -> None:
+        self._write_ancestor_template(self.series, "plot_series_tpl", "Series Arc")
+        got = self.service.read_plot_template("plot_series_tpl")
+        self.assertEqual(got.title, "Series Arc")
+        self.assertFalse(got.editable)  # inherited from an ancestor project → read-only
+        self.assertTrue(got.source_layer_id)  # provenance surfaced
+        self.assertEqual(len(got.template.plot_points), 1)
+
+    def test_saving_an_inherited_template_is_refused_and_ancestor_untouched(self) -> None:
+        path = self._write_ancestor_template(self.series, "plot_series_tpl", "Series Arc")
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.save_plot_template(
+                "plot_series_tpl", SavePlotTemplateRequest(title="Hijacked", template=PlotTemplateSpec())
+            )
+        self.assertEqual(ctx.exception.status_code, 409)
+        ancestor = path.read_text(encoding="utf-8")
+        self.assertIn("Series Arc", ancestor)
+        self.assertNotIn("Hijacked", ancestor)
+
+    def test_deleting_an_inherited_template_is_refused_and_ancestor_survives(self) -> None:
+        path = self._write_ancestor_template(self.series, "plot_series_tpl", "Series Arc")
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.delete_plot_template("plot_series_tpl")
+        self.assertEqual(ctx.exception.status_code, 409)
+        self.assertTrue(path.exists())
+
+    def test_forking_an_inherited_template_clones_into_this_book(self) -> None:
+        path = self._write_ancestor_template(self.series, "plot_series_tpl", "Series Arc")
+        clone = self.service.fork_plot_template("plot_series_tpl")
+        self.assertNotEqual(clone.id, "plot_series_tpl")
+        self.assertTrue(clone.editable)  # the book owns the clone
+        self.assertEqual(clone.title, "Series Arc")
+        self.assertEqual(len(clone.template.plot_points), 1)  # spec copied
+        # The clone lives in this book, the ancestor original is left in place.
+        self.assertTrue((self.root / "plot").is_dir())
+        self.assertTrue(path.exists())
 
 
 if __name__ == "__main__":

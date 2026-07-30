@@ -42,19 +42,30 @@ class LibraryTenantMixin:
         """
         return winner.source_layer_id == self._metadata_schema_layer_id(root)
 
-    def _reject_inherited_library_write(self, entry_id: str, *, kind: str, noun: str) -> None:
+    def _reject_inherited_library_write(
+        self, entry_id: str, *, noun: str, kind: str | None = None, entry_type: str | None = None
+    ) -> None:
         """Refuse a write to a Library / ancestor node this project does not own.
 
         The structural "never a write target" guarantee at the actual boundary
         (ADR-0049 §3): the save/delete is refused here, not merely hidden in the
         UI, so overwriting or deleting a shipped app node is unconstructable
         rather than validated. A no-op when there is no index winner (a just-
-        created, not-yet-indexed node is owned) or the winner is a different kind.
+        created, not-yet-indexed node is owned) or the winner is out of scope.
         The only path to a change is to clone the node into this project.
+
+        Scope the winner match to what the calling surface actually gates on:
+        `kind` when the whole kind is one tenant (prompts — every prompt
+        entry_type), `entry_type` when the kind hosts more than one thing and
+        only one is this tenant (plot — `plot:template`, not the plotlines the
+        `plot` kind also carries).
         """
         root = self._require_project()
         winner = self._build_node_index().by_id.get(entry_id)
-        if winner is None or winner.kind != kind:
+        if winner is None:
+            return
+        in_scope = winner.entry_type == entry_type if entry_type is not None else winner.kind == kind
+        if not in_scope:
             return
         if not self._node_is_owned_here(winner, root):
             label = winner.source_layer_label or "an ancestor"

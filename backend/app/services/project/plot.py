@@ -324,7 +324,11 @@ class PlotMixin:
                 continue
             try:
                 front_matter, body = self._read_markdown_with_front_matter(entry.path, strict=True)
+                template = self._parse_plot_template_spec(front_matter.get("template"), entry.id)
             except ProjectServiceError:
+                # A file that will not read or whose `template:` block is corrupt is
+                # skipped from the list (the single-entry read still 422s), exactly
+                # as list_prompt_entries / list_plotlines skip unreadable entries.
                 continue
             entries.append(
                 PlotTemplateSummary(
@@ -332,7 +336,7 @@ class PlotMixin:
                     title=str(front_matter.get("title") or entry.id),
                     body=body,
                     entry_type=PLOT_TEMPLATE_ENTRY_TYPE,
-                    template=self._parse_plot_template_spec(front_matter.get("template"), entry.id),
+                    template=template,
                     source_layer_id=entry.source_layer_id,
                     source_layer_label=entry.source_layer_label,
                     is_library=entry.is_library,
@@ -399,8 +403,10 @@ class PlotMixin:
 
     def save_plot_template(self, entry_id: str, request: SavePlotTemplateRequest) -> PlotTemplate:
         # Inherited (Library / ancestor) templates are read-only in place — the
-        # structural 409, shared with prompts. Owned clones save freely.
-        self._reject_inherited_library_write(entry_id, kind="plot", noun="plot template")
+        # structural 409, shared with prompts. Scope the reject to `plot:template`
+        # (the `plot` kind also carries plotlines, which reject separately). Owned
+        # clones save freely.
+        self._reject_inherited_library_write(entry_id, entry_type=PLOT_TEMPLATE_ENTRY_TYPE, noun="plot template")
         path = self._path_for_node_id(entry_id, "plot")
         front_matter = self._read_front_matter_only(path, strict=True)
         node_id = self._node_id_for_path(path, front_matter)
@@ -418,7 +424,7 @@ class PlotMixin:
 
     def delete_plot_template(self, entry_id: str) -> PlotTemplateList:
         root = self._require_project()
-        self._reject_inherited_library_write(entry_id, kind="plot", noun="plot template")
+        self._reject_inherited_library_write(entry_id, entry_type=PLOT_TEMPLATE_ENTRY_TYPE, noun="plot template")
         winner = self._build_node_index().by_id.get(entry_id)
         if winner is None or winner.entry_type != PLOT_TEMPLATE_ENTRY_TYPE:
             raise ProjectServiceError(f"Plot template {entry_id} not found.", 404)
@@ -430,8 +436,15 @@ class PlotMixin:
     def _parse_plot_template_spec(self, raw: object, node_id: str) -> PlotTemplateSpec:
         from pydantic import ValidationError
 
-        if not isinstance(raw, dict):
+        # Absent block → an empty spec (a minimal template is legal). But a block
+        # that is *present and malformed* is corruption, whether it is a non-mapping
+        # or a mapping that fails validation — 422 both, not a silent blank spec.
+        if raw is None:
             return PlotTemplateSpec()
+        if not isinstance(raw, dict):
+            raise ProjectServiceError(
+                f"Plot template {node_id} has an invalid `template` block: it must be a mapping.", 422
+            )
         try:
             return PlotTemplateSpec.model_validate(raw)
         except ValidationError as exc:

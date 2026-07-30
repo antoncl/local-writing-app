@@ -165,6 +165,19 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "fields": [],
             "has_body": False,
         },
+        "plot:base": {
+            # Abstract root for the `plot` kind, mirroring lore:base / prompt:base
+            # (#724). Every multi-type kind needs one: `kindRootEntryTypeId` /
+            # `defaultView(kind)` resolve the whole-kind roster as
+            # `descendants_of:<kind>:base`, so without a single abstract root the
+            # plot types are unrelated parentless siblings and the default view
+            # collapses to just the first one — which left the Plot templates pane
+            # empty. Carries no shared fields (plotline/template/board share none).
+            "name": "Plot",
+            "kind": "plot",
+            "abstract": True,
+            "fields": [],
+        },
         "plot:plotline": {
             # A story thread the writer creates at will (ADR-0048 §2). The
             # intrinsic title is its name; `color` tints its chips and card
@@ -173,6 +186,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # Node under `plot/`, layered like lore.
             "name": "Plotline",
             "kind": "plot",
+            "parent": "plot:base",
             "fields": ["color"],
             "has_body": True,
             "color": "plum",
@@ -186,6 +200,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # its entry_type resolves.
             "name": "Plot template",
             "kind": "plot",
+            "parent": "plot:base",
             "fields": [],
             "has_body": True,
         },
@@ -199,6 +214,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # payload on the node, not user metadata.
             "name": "Board",
             "kind": "plot",
+            "parent": "plot:base",
             "fields": [],
             "has_body": False,
         },

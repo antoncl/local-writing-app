@@ -1171,3 +1171,37 @@ describe("nestWarnings — surfacing diagnostics (#110)", () => {
     expect(nestWarnings(res.diagnostics)).toEqual(["1 unmatched child dropped (matched no parent)."]);
   });
 });
+
+describe("defaultView(\"plot\") over the Plot templates shelf (#724)", () => {
+  // The pane calls defaultView("plot") with no schema arg, so its roster lowers to
+  // the fallback `descendants_of: "plot:base"`. That only resolves if the schema
+  // actually defines plot:base with the concrete plot types hanging off it — the
+  // fix for the empty-templates pane. `descendantFqns` is inclusive of the root.
+  const TEMPLATES: EvalNode[] = [
+    { id: "builtin-plot-three-act", entry_type: "plot:template", title: "Three-Act Story Arc", metadata: {} },
+    { id: "builtin-plot-kishotenketsu", entry_type: "plot:template", title: "Kishotenketsu", metadata: {} },
+  ];
+  const plotSchema = (withBase: boolean) =>
+    ({
+      version: 1,
+      entry_types: {
+        ...(withBase ? { "plot:base": { name: "Plot", kind: "plot", abstract: true, fields: [] } } : {}),
+        "plot:plotline": { name: "Plotline", kind: "plot", ...(withBase ? { parent: "plot:base" } : {}), fields: [] },
+        "plot:template": { name: "Plot template", kind: "plot", ...(withBase ? { parent: "plot:base" } : {}), fields: [] },
+        "plot:board": { name: "Board", kind: "plot", ...(withBase ? { parent: "plot:base" } : {}), fields: [] },
+      },
+      fields: { title: { name: "Title", type: "text", category: "intrinsic" }, entry_type: { name: "Type", type: "text", category: "intrinsic" } },
+    }) as unknown as MetadataSchema;
+
+  it("shows every template once plot:base roots the kind", () => {
+    const shown = evaluateView(defaultView("plot"), TEMPLATES, { schema: plotSchema(true) }).nodes.map((n) => n.id);
+    expect(shown).toEqual(["builtin-plot-three-act", "builtin-plot-kishotenketsu"]);
+  });
+
+  it("comes up empty without plot:base — the pre-#724 regression", () => {
+    // Parentless siblings: `descendants_of: plot:base` (the fallback roster) has no
+    // plot:base to expand, so nothing matches and the shelf renders empty.
+    const shown = evaluateView(defaultView("plot"), TEMPLATES, { schema: plotSchema(false) }).nodes.map((n) => n.id);
+    expect(shown).toEqual([]);
+  });
+});

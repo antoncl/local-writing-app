@@ -105,6 +105,10 @@ class _WitnessScope:
     field_types: dict[str, str]
     labels: dict[str, str]
     options: dict[str, list[str]]
+    # List fields whose items carry prose (#698) — excluded from `state` by
+    # id, because the type-level UNWITNESSED_FIELD_TYPES check cannot see
+    # inside an item shape.
+    prose_list_fields: frozenset[str]
 
 
 class SnapshotWitnessMixin:
@@ -205,6 +209,7 @@ class SnapshotWitnessMixin:
             field_types=_field_types_from(schema),
             labels=labels,
             options=options,
+            prose_list_fields=_prose_bearing_list_fields(schema),
         )
 
         scene_edges = (
@@ -335,6 +340,8 @@ class SnapshotWitnessMixin:
         # a report that named only the stored value would be wrong inside an
         # interval, and one that named only the override would be empty outside.
         def witnessed(key: str) -> bool:
+            if key in scope.prose_list_fields:
+                return False
             return scope.field_types.get(key, "text") not in UNWITNESSED_FIELD_TYPES
 
         state: dict[str, Any] = {
@@ -422,6 +429,24 @@ class SnapshotWitnessMixin:
             return self.read_metadata_schema()
         except ProjectServiceError:
             return None
+
+
+def _prose_bearing_list_fields(schema: Any | None) -> frozenset[str]:
+    """List fields whose item shape includes a long_text member (#698).
+
+    A paragraph inside a list item is exactly as unbounded as a top-level
+    long_text — the ~40x bloat UNWITNESSED_FIELD_TYPES was measured to stop —
+    but the type-level check sees only "list". The item_type long_text sugar
+    is covered too: the resolver normalizes it into `item_members`."""
+
+    out: set[str] = set()
+    for field_id, field in (getattr(schema, "fields", None) or {}).items():
+        if getattr(field, "type", "") != "list":
+            continue
+        members = getattr(field, "item_members", None) or []
+        if any(getattr(member, "type", "") == "long_text" for member in members):
+            out.add(field_id)
+    return frozenset(out)
 
 
 def _field_types_from(schema: Any | None) -> dict[str, str]:

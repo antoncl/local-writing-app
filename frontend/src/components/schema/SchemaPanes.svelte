@@ -522,15 +522,45 @@
     };
 
     // Detect option values that are being removed (present before, gone now, and
-    // not a rename source) — those get cleared from existing documents.
+    // not a rename source) — those get cleared from existing documents. A list
+    // field with the select item sugar carries options the same way (#698).
     const previousField = previousFieldId ? metadataSchema?.fields[previousFieldId] : null;
+    const previousHadOptions =
+      previousField != null &&
+      (previousField.type === "select" ||
+        previousField.type === "multi_select" ||
+        (previousField.type === "list" && previousField.item_type === "select"));
     const newValueSet = new Set(options.map((o) => o.value));
     const renameKeys = new Set(Object.keys(optionMigration ?? {}));
-    const removedValues = hasOptions && previousField && (previousField.type === "select" || previousField.type === "multi_select")
+    const removedValues = hasOptions && previousField && previousHadOptions
       ? previousField.options.map((o) => o.value).filter((v) => !newValueSet.has(v) && !renameKeys.has(v))
       : [];
 
     const persist = () => persistSchemaField({ layerId, entryType, previousFieldId, nextFieldId, nextField, optionMigration });
+
+    // Changing an existing list field's ITEM SHAPE (#698) doesn't convert
+    // stored items — there is no migration for structure. Existing values
+    // keep their old shape: the widget shows them read-only as mismatched,
+    // and saves fail validation until the items are re-entered. Make that a
+    // deliberate, confirmed act instead of a silent one.
+    const shapeChanged =
+      previousField?.type === "list" &&
+      payload.type === "list" &&
+      ((previousField.item_group ?? null) !== (payload.itemGroup ?? null) ||
+        (previousField.item_type ?? null) !== (payload.itemType ?? null));
+    if (shapeChanged) {
+      confirmService.request({
+        title: "Change this list's item shape?",
+        message:
+          "Existing items keep their current shape — they will show as unrecognized and " +
+          "entries that carry them cannot be saved until those items are re-entered or removed.",
+        confirmLabel: "Change shape & save",
+        destructive: true,
+        cannotBeUndone: true,
+        onConfirm: persist,
+      });
+      return;
+    }
 
     if (removedValues.length > 0) {
       confirmService.request({

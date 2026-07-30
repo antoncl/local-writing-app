@@ -320,6 +320,18 @@ class LayerOverridesMixin:
                 base_value = base.get(field)
                 new_value = submitted.get(field)
                 if new_value != base_value:
+                    if field_type == "list":
+                        # #698 v1: the override row format is string-typed (the
+                        # #58 marker grammar), so a structured list value has no
+                        # honest representation here — str() would persist a
+                        # Python repr the fold then serves as the value. Refuse
+                        # loudly instead of corrupting; structured override rows
+                        # are a filed follow-up.
+                        raise ProjectServiceError(
+                            f"Ordered-list field {field} cannot be overridden from a "
+                            "descendant layer yet; edit the entry in the project that owns it.",
+                            422,
+                        )
                     # A field omitted from the payload clears to empty, matching an
                     # owned save (which drops the key by rewriting the whole file).
                     rows.append(MutationSetRow(field=field, op="replace", value="" if new_value is None else str(new_value)))

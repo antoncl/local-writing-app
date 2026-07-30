@@ -54,6 +54,7 @@ from app.services.project.research import ResearchNotesMixin
 from app.services.project.scene_snapshots import SceneSnapshotsMixin
 from app.services.project.scene_todos import SceneTodoAnchorsMixin
 from app.services.project.schema import MetadataSchemaMixin
+from app.services.project.schema_groups import MetadataSchemaGroupsMixin
 from app.services.project.search import SearchMixin
 from app.services.project.snapshot_diff import SnapshotDiffMixin
 from app.services.project.snapshot_witness import SnapshotWitnessMixin
@@ -79,6 +80,7 @@ class ProjectService(
     LayerWalkMixin,
     ManuscriptMixin,
     MetadataSchemaMixin,
+    MetadataSchemaGroupsMixin,
     MetadataValuesMixin,
     NodeIndexPatchMixin,
     LayerOverridesMixin,

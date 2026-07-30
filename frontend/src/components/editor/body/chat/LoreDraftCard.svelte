@@ -7,6 +7,7 @@
   actions. Extracted so ChatBodyView stays under the file-size cap.
 -->
 <script lang="ts">
+  import { metadataValueDisplayString } from "@/lib/utils/schemaTypeHelpers";
   import type { EntryPatch, MetadataSchema } from "@/lib/types";
 
   interface Props {
@@ -32,7 +33,10 @@
       .map(([id, value]) => ({
         id,
         label: metadataSchema?.fields?.[id]?.name ?? id,
-        value: Array.isArray(value) ? value.join(", ") : String(value ?? ""),
+        // The shared record-aware rule (#698): this card is the ONLY review
+        // surface before create — a list of records must read as its member
+        // values, never "[object Object]".
+        value: metadataValueDisplayString(value),
       })),
   );
 </script>

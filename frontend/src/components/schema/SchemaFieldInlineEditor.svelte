@@ -132,11 +132,15 @@
             presets: [...(f.picker_config.presets ?? [])],
           }
         : { sources: [{ kind: "lore" }] }) as NodePickerConfig,
-      // `list` item shape (#698): "group:<id>" or "scalar:<type>"; a fresh
-      // draft starts on plain text items until the author picks a shape.
+      // `list` item shape (#698): "group:<id>" or "scalar:<type>". A field
+      // that isn't already a list seeds EMPTY — switching a field's type to
+      // Ordered list must not silently persist a shape the author never
+      // chose; the Done button stays disabled until they pick one.
       itemShape: f?.item_group
         ? `group:${f.item_group}`
-        : `scalar:${f?.item_type ?? "text"}`,
+        : f?.item_type
+          ? `scalar:${f.item_type}`
+          : "",
     };
   });
   let type: MetadataFieldType = $state(seed.type);
@@ -153,6 +157,14 @@
   const itemGroup = $derived(itemShape.startsWith("group:") ? itemShape.slice(6) : null);
   const itemType = $derived(
     itemShape.startsWith("scalar:") ? (itemShape.slice(7) as ListItemScalarType) : null,
+  );
+  // Groups offered as item shapes: reference/tags/date members are legal to
+  // APPLY (flattened) but not inside list items (v1) — offering such a group
+  // here would just 422 on save, so it is filtered out.
+  const shapeableGroups = $derived(
+    Object.entries(groups).filter(([, groupDef]) =>
+      groupDef.members.every((m) => !["entity_ref", "entity_ref_list", "tags", "date"].includes(m.type)),
+    ),
   );
   let typeMenuOpen = $state(false);
   let keyEditing = $state(false);
@@ -346,9 +358,12 @@
     <div class="sfi-computed">
       <label class="sfi-field">Items are
         <select bind:value={itemShape} aria-label="List item shape">
-          {#if Object.keys(groups).length > 0}
+          {#if !itemShape}
+            <option value="" disabled>Choose an item shape…</option>
+          {/if}
+          {#if shapeableGroups.length > 0}
             <optgroup label="A group…">
-              {#each Object.entries(groups) as [groupId, groupDef] (groupId)}
+              {#each shapeableGroups as [groupId, groupDef] (groupId)}
                 <option value={`group:${groupId}`}>
                   {groupDef.name} ({groupDef.members.map((m) => m.name || m.key).join(" · ")})
                 </option>

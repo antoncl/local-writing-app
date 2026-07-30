@@ -131,16 +131,23 @@
       error = "A group name is required.";
       return;
     }
+    // Spread the DRAFT member first: it was loaded as {...member} from the
+    // resolved group, so member `options`, `picker_config`, and `default`
+    // ride through untouched. Rebuilding from a hand-picked key set here
+    // silently wiped all three (plus the group's own icon) on every save —
+    // and since #698 makes members a validation-bearing item shape, a wiped
+    // select member also disabled its allowed-values check.
     const members = draftMembers
       .filter((member) => member.name.trim())
       .map((member) => ({
+        ...member,
         key: member.key || slug(member.name),
         name: member.name.trim(),
-        type: member.type,
-        ...(member.icon ? { icon: member.icon } : {}),
       }));
+    const existing = draftIsNew ? null : groups[draftId];
     const group: MetadataGroupDefinition = {
       name: draftName.trim() || id,
+      ...(existing?.icon ? { icon: existing.icon } : {}),
       members,
     };
     busy = true;

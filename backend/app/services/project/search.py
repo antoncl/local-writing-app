@@ -167,9 +167,16 @@ class SearchMixin:
             if isinstance(raw_value, dict):
                 values.extend(self._iter_metadata_search_values(raw_value, label))
             elif isinstance(raw_value, list):
-                text = ", ".join(str(item) for item in raw_value if item is not None)
+                # A list may hold record items (#698): recurse per indexed
+                # item so their member text is searchable, instead of
+                # str(dict) burying it in a Python repr.
+                scalars = [item for item in raw_value if item is not None and not isinstance(item, dict)]
+                text = ", ".join(str(item) for item in scalars)
                 if text:
                     values.append((label, text))
+                for position, item in enumerate(raw_value):
+                    if isinstance(item, dict):
+                        values.extend(self._iter_metadata_search_values(item, f"{label}[{position}]"))
             else:
                 text = str(raw_value)
                 if text:

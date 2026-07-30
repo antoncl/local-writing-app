@@ -144,3 +144,32 @@ describe("ListValueEditor — scalar sugar (item_type)", () => {
     expect(screen.getByText("+ Add item")).toBeInTheDocument();
   });
 });
+
+describe("ListValueEditor — shape-mismatched items (post shape-switch)", () => {
+  it("renders a record item in a scalar list read-only instead of feeding a text input", () => {
+    // A shape switch left a record behind in an item_type:text list. Feeding
+    // it to the text editor would corrupt it on the first keystroke — it must
+    // render as a read-only row (member values, not [object Object]).
+    render(ListValueEditor, {
+      field: scalarField,
+      value: [{ question: "Who?", status: "open" }, "Ash"],
+      onChange: () => {},
+    });
+    expect(screen.getByText("Who? · open")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("[object Object]")).toBeNull();
+    // The matching item still edits normally.
+    expect(screen.getByDisplayValue("Ash")).toBeInTheDocument();
+  });
+
+  it("renders a scalar item in a group list read-only with no expand", async () => {
+    render(ListValueEditor, {
+      field: recordField,
+      value: ["stray string", { question: "Who?", status: "open" }],
+      onChange: () => {},
+    });
+    const stray = screen.getByText("stray string");
+    await fireEvent.click(stray);
+    // No member editors opened for the mismatched row.
+    expect(screen.queryByDisplayValue("stray string")).toBeNull();
+  });
+});

@@ -380,11 +380,15 @@ def _field_catalog(project: ProjectService, schema: Any, value: Any) -> list[dic
             continue
         # `options` is always present (empty when the field has none) so the
         # create template can test `f.options` without hitting StrictUndefined.
+        # For `list` fields the top-level options are SUPPRESSED: the select
+        # sugar stores its choices on the field, but "one of: …" at field
+        # level reads as a constraint on the field's own (non-array) value —
+        # the choices belong to the item descriptor below.
         descriptor: dict[str, Any] = {
             "id": field_id,
             "label": field.name,
             "type": field.type,
-            "options": [opt.value for opt in field.options] if field.options else [],
+            "options": [opt.value for opt in field.options] if field.options and field.type != "list" else [],
         }
         # List fields (#698): describe the item shape so the model emits
         # legal items — flat scalars for item_type sugar, member-keyed maps
@@ -485,6 +489,12 @@ def register_helpers(
         lambda scene, character: _character_thread(project, schema, scene, character)
     )
     env.globals["is_a"] = lambda node, entry_type: _is_a(project, schema, node, entry_type)
+    # Plain JSON for values quoted to the model (#698). Jinja's `| tojson`
+    # is htmlsafe_json_dumps: it escapes ' & < > to \uXXXX and sorts keys —
+    # the model imitates both (escapes persist into adopted values, and the
+    # member order contradicts the catalog). json.dumps preserves insertion
+    # order and emits readable text.
+    env.globals["plain_json"] = lambda value: json.dumps(value, ensure_ascii=False)
 
 
 def create_environment_for_project(

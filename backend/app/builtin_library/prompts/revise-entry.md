@@ -36,7 +36,7 @@ When the author asks you to finalize (or says "commit"), stop brainstorming and 
 
 The fields you may set:
 {% for f in field_catalog(e) %}
-- {{ f.id }} ({{ f.label }}) — {{ f.type }}{% if f.options %}; one of: {{ f.options | join(", ") }}{% endif %}{% if f.get("items") %}{% if f.item_scalar %}; a JSON array of {{ f["items"][0].type }} values{% else %}; a JSON array of objects, each with keys: {% for m in f["items"] %}{{ m.key }} ({{ m.type }}{% if m.options %}; one of: {{ m.options | join(", ") }}{% endif %}){% if not loop.last %}, {% endif %}{% endfor %}{% endif %}{% endif %}
+- {{ f.id }} ({{ f.label }}) — {{ f.type }}{% if f.options %}; one of: {{ f.options | join(", ") }}{% endif %}{% if f.get("items") %}{% if f.item_scalar %}; a JSON array of {{ f["items"][0].type }} values{% if f["items"][0].options %}, each one of: {{ f["items"][0].options | join(", ") }}{% endif %}{% else %}; a JSON array of objects, each with keys: {% for m in f["items"] %}{{ m.key }} ({{ m.type }}{% if m.options %}; one of: {{ m.options | join(", ") }}{% endif %}){% if not loop.last %}, {% endif %}{% endfor %}{% endif %}{% endif %}
 {% else %}
 - (none beyond title/body)
 {% endfor %}
@@ -60,7 +60,7 @@ _(This entry has no body yet.)_
 ### Current field values
 {% for f in current %}
 {% set val = e.metadata.get(f.id) %}
-- {{ f.label }} ({{ f.id }}): {% if f.type == "list" %}{% if val %}{{ val | tojson }}{% else %}_(empty)_{% endif %}{% elif val is sequence and val is not string %}{{ val | join(", ") or "_(empty)_" }}{% elif val is none or val == "" %}_(empty)_{% else %}{{ val }}{% endif %}
+- {{ f.label }} ({{ f.id }}): {% if f.type == "list" %}{% if val %}{{ plain_json(val) }}{% else %}_(empty)_{% endif %}{% elif val is sequence and val is not string %}{{ val | join(", ") or "_(empty)_" }}{% elif val is none or val == "" %}_(empty)_{% else %}{{ val }}{% endif %}
 {% endfor %}
 {% endif %}
 {% else %}
@@ -75,7 +75,7 @@ When the author asks you to finalize (or says "commit"), stop brainstorming and 
 
 The fields you may set:
 {% for f in field_catalog(draft_type) %}
-- {{ f.id }} ({{ f.label }}) — {{ f.type }}{% if f.options %}; one of: {{ f.options | join(", ") }}{% endif %}{% if f.get("items") %}{% if f.item_scalar %}; a JSON array of {{ f["items"][0].type }} values{% else %}; a JSON array of objects, each with keys: {% for m in f["items"] %}{{ m.key }} ({{ m.type }}{% if m.options %}; one of: {{ m.options | join(", ") }}{% endif %}){% if not loop.last %}, {% endif %}{% endfor %}{% endif %}{% endif %}
+- {{ f.id }} ({{ f.label }}) — {{ f.type }}{% if f.options %}; one of: {{ f.options | join(", ") }}{% endif %}{% if f.get("items") %}{% if f.item_scalar %}; a JSON array of {{ f["items"][0].type }} values{% if f["items"][0].options %}, each one of: {{ f["items"][0].options | join(", ") }}{% endif %}{% else %}; a JSON array of objects, each with keys: {% for m in f["items"] %}{{ m.key }} ({{ m.type }}{% if m.options %}; one of: {{ m.options | join(", ") }}{% endif %}){% if not loop.last %}, {% endif %}{% endfor %}{% endif %}{% endif %}
 {% else %}
 - (none beyond title/body)
 {% endfor %}

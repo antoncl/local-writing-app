@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.base import (
     AIPolicy,
@@ -104,16 +104,14 @@ class MetadataFieldDefinition(BaseModel):
     def _accept_bare_strings(cls, value: Any) -> Any:
         return _normalize_select_options(value)
 
-    @model_validator(mode="after")
-    def _list_shape_is_exactly_one(self) -> MetadataFieldDefinition:
-        if self.type == "list":
-            if (self.item_group is None) == (self.item_type is None):
-                raise ValueError(
-                    "a list field declares exactly one of item_group / item_type"
-                )
-        elif self.item_group is not None or self.item_type is not None:
-            raise ValueError("item_group / item_type only apply to list fields")
-        return self
+    # The exactly-one-of item_group / item_type rule is deliberately NOT a
+    # model validator: layers merge field definitions by key union, so an
+    # ancestor's item_group plus a child's item_type can legitimately meet in
+    # one merged def — a raising validator would turn that authoring conflict
+    # into an unreadable schema (500 on every read). Like the computed-
+    # settings rule, it is a soft, reportable schema-integrity error
+    # (`_validate_metadata_schema_definition`), and the resolver breaks the
+    # tie deterministically (item_group wins) so reads stay serviceable.
 
 
 class PromptInputDefinition(BaseModel):

@@ -401,39 +401,20 @@ class MetadataValuesMixin:
                     "AI patch", field_id, value, field, node_index=None
                 )
                 if errors:
-                    # List fields degrade per ITEM (#698, ADR-0048 §6): keep
-                    # the valid items and name each dropped one as
-                    # field[index] — one bad item must not sink the rest.
-                    # Every other type drops whole, as before.
-                    if field.type == "list" and isinstance(value, list):
-                        kept, item_drops = self._salvage_list_items(field_id, value, field)
-                        dropped.extend(item_drops)
-                        if kept:
-                            fields[field_id] = kept
-                        continue
+                    # A field with any illegal value drops WHOLE — for `list`
+                    # fields too (#698). The prompt asks the model for the
+                    # complete replacement list, so keeping only the valid
+                    # items and letting the author adopt that partial list
+                    # would silently delete the entry's other items while the
+                    # UI reports the field as merely "ignored". Dropping whole
+                    # leaves the current value untouched; per-item validation
+                    # still names the offending item in the error the author
+                    # can act on (`field[2].status must be one of …`).
                     dropped.append(field_id)
                     continue
                 fields[field_id] = value
 
         return AIEntryPatch(body=body_value, fields=fields, dropped=dropped)
-
-    def _salvage_list_items(
-        self, field_id: str, value: list[Any], field: MetadataFieldDefinition
-    ) -> tuple[list[Any], list[str]]:
-        """Split a proposed list value into (valid items, dropped labels).
-
-        Items validate independently (list validation has no cross-item
-        rules), so each is checked as a one-item list; failures are reported
-        as ``field_id[index]`` in the patch's ``dropped``."""
-
-        kept: list[Any] = []
-        drops: list[str] = []
-        for index, item in enumerate(value):
-            if self._validate_list_field_value("AI patch", field_id, [item], field, node_index=None):
-                drops.append(f"{field_id}[{index}]")
-            else:
-                kept.append(item)
-        return kept, drops
 
     def _strip_unknown_metadata_fields(
         self,
@@ -465,12 +446,36 @@ class MetadataValuesMixin:
         allowed = set(entry_type_definition.fields) if entry_type_definition else set()
         cleaned: dict[str, Any] = {}
         for field_id, value in metadata.items():
-            if field_id not in schema.fields:
+            field = schema.fields.get(field_id)
+            if field is None:
                 continue
             if allowed and field_id not in allowed:
                 continue
-            cleaned[field_id] = value
+            cleaned[field_id] = self._strip_unknown_list_members(field, value)
         return cleaned
+
+    @staticmethod
+    def _strip_unknown_list_members(field: MetadataFieldDefinition, value: Any) -> Any:
+        """The nested twin of the unknown-field strip (#698): a group edit can
+        retire a member while stored items still carry its key, and the rail
+        renders only schema members — so the orphaned key would be invisible
+        yet fail every save. Same read-side contract as the field-level strip:
+        the file keeps the stale key until the next save writes back clean."""
+
+        if field.type != "list" or field.item_type is not None or not isinstance(value, list):
+            return value
+        member_keys = {member.key for member in field.item_members or []}
+        if not member_keys:
+            return value
+        cleaned_items: list[Any] = []
+        changed = False
+        for item in value:
+            if isinstance(item, dict) and any(key not in member_keys for key in item):
+                cleaned_items.append({key: v for key, v in item.items() if key in member_keys})
+                changed = True
+            else:
+                cleaned_items.append(item)
+        return cleaned_items if changed else value
 
     def _strip_dangling_references(
         self,

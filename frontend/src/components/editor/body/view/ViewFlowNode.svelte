@@ -361,8 +361,11 @@
     for (const f of nodeFields) {
       // Every field projects — a reference field to a node-set, a scalar field
       // to a value-set (#196, ADR-0031 §D) — except `long_text`: freeform prose
-      // has no stable identity, so it's presence-only (§H).
-      if (f.def.type === "long_text") continue;
+      // has no stable identity, so it's presence-only (§H). `list` (#698) is
+      // excluded the same way: a record item stringifies to nothing stable
+      // ("[object Object]"), so projecting one yields a meaningless one-token
+      // value-set that silently matches everything or nothing.
+      if (f.def.type === "long_text" || f.def.type === "list") continue;
       out.push({ key: f.key, name: f.name });
     }
     const refDef = ctx.fieldByKey("references");
@@ -678,7 +681,11 @@
   <div class="vfield-row">
     <select class="vfield" value={fieldKey} onchange={(e) => setField({ key: e.currentTarget.value })}>
       <option value="">— field —</option>
-      {#each nodeFields as f (f.key)}
+      <!-- `list` is excluded (#698): the evaluator string-coerces operands,
+           so a record item compares as "[object Object]" — a predicate that
+           silently matches everything or nothing, and the literal slot would
+           persist raw records into the view spec. -->
+      {#each nodeFields.filter((f) => f.def.type !== "list") as f (f.key)}
         <option value={f.key}>{f.name}</option>
       {/each}
     </select>

@@ -28,6 +28,28 @@ export function isMetadataValuePresent(value: MetadataValue | undefined): boolea
   return value !== undefined && value !== null && value !== "";
 }
 
+// ONE value → display-string rule (#698). Every review/display surface that
+// hand-rolled `Array.join(", ")` rendered a list of RECORDS as
+// "[object Object], [object Object]" — on exactly the surfaces where adopt /
+// create decisions are made. Records render as their non-empty member values
+// joined with " · " (the collapsed-row idiom), arrays join with ", ".
+export function metadataValueDisplayString(value: MetadataValue | undefined): string {
+  if (value === null || value === undefined) return "";
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => metadataValueDisplayString(item))
+      .filter(Boolean)
+      .join(", ");
+  }
+  if (typeof value === "object") {
+    return Object.values(value)
+      .map((member) => metadataValueDisplayString(member))
+      .filter(Boolean)
+      .join(" · ");
+  }
+  return String(value);
+}
+
 // The schema's kind universe (a Node's "class"). Narrower than the wider
 // DocumentKind, which also covers chat / snippet / structure_node — none
 // of which have their own schema-type tree.

@@ -405,6 +405,20 @@ class ReadSideHealingCoversMoreThanSceneAndLoreTests(ReferencePurgeTestCase):
         self.assertIn("seren", assistant.read_text(encoding="utf-8"))
         self.assertEqual(self.service.read_assistant_entry("asst1").metadata.get("ally"), [])
 
+    def test_a_plot_template_hides_a_dangling_reference(self) -> None:
+        # S4c finding #5: read_plot_template was wired without the read-side healer,
+        # so a schema-editor-added entity_ref on `plot:template` would keep rendering
+        # a row for a deleted target. The template block is absent here (parses to an
+        # empty spec) — the point is that the metadata alongside it is healed too.
+        self._add_ally_field("plot:template")
+        self._write_lore(self.root, "seren", "Seren")
+        template = self._write_node(self.root / "plot" / "t.md", "tmpl1", "plot:template")
+
+        self._delete_without_purging("seren")
+
+        self.assertIn("seren", template.read_text(encoding="utf-8"), "premise: the file still carries the stale id")
+        self.assertEqual(self.service.read_plot_template("tmpl1").metadata.get("ally"), [])
+
     def test_a_live_reference_survives_every_read_path(self) -> None:
         """The healer must not turn into a blanket eraser — that would trade a
         stale row for silent data loss on the next save."""

@@ -27,7 +27,7 @@
   import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataSchema, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
   import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
   import { metadataSchemaStore } from "@/lib/stores/schema";
-  import { promptReadOnlyInPlace } from "@/lib/utils/provenance";
+  import { readOnlyInPlace } from "@/lib/utils/provenance";
   import LayerAuthoringBar from "@/components/editor/LayerAuthoringBar.svelte";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { backlinksFor } from "@/lib/views/backlinks";
@@ -468,12 +468,14 @@
   // body — and let the ancestor banner offer "Clone to edit" instead of letting
   // the author type into a dead-end.
   //
-  // Keyed on the backend's own `editable` verdict via `promptReadOnlyInPlace`
+  // Keyed on the backend's own `editable` verdict via `readOnlyInPlace`
   // (the same helper the banner uses), not re-derived from the async schema
   // layers. The flag rides on the document, so there is no load gap and the lock
-  // cannot drift from the backend's 409 (#689). Fails closed. Own prompts are
-  // editable, and lore (which forks in place) is untouched.
-  const inheritedReadOnly = $derived(promptReadOnlyInPlace(documentKind, scene));
+  // cannot drift from the backend's 409 (#689). Kind-agnostic across ADR-0049
+  // Library tenants (prompts + plot templates — ADR-0048 S4c): every such read-
+  // model stamps `editable` and no other does. Fails closed. Own clones are
+  // editable, and lore (which forks in place) carries no flag, so it is untouched.
+  const inheritedReadOnly = $derived(readOnlyInPlace(scene));
   // The interactive flip lens the rail renders during a lore review (slice 3b):
   // the proposed structured fields as click-to-adopt flips, wired to the
   // controller's per-field resolution. Same `compare` shape snapshot compare
@@ -626,7 +628,20 @@
   // structure_node has no schema kind of its own — Acts/Chapters share
   // kind="scene" in the metadata schema. Reuse the scene entry types so
   // the type selector still lists Act/Chapter/Scene/etc.
-  let documentEntryTypes = $derived(Object.entries(metadataSchema?.entry_types ?? {}).filter(([, definition]) => definition.kind === (documentKind === "structure_node" ? "scene" : documentKind) && !definition.abstract));
+  // The entry-type control's options. For most kinds `documentKind` IS the schema
+  // kind, so we list that kind's concrete sub-types (a switchable variant set —
+  // prompt:base ↔ prompt:roleplay). Two kinds don't line up 1:1: `structure_node`
+  // is a scene, and `plot_template`'s schema kind is `plot` — but plot's other
+  // entry_types (plotline, board) are DISTINCT node classes, not interchangeable
+  // variants, so a template offers only its own type (never a reclassify), and
+  // showing it also fixes the otherwise-blank select (S4c finding #2).
+  let documentEntryTypes = $derived(
+    documentKind === "plot_template"
+      ? Object.entries(metadataSchema?.entry_types ?? {}).filter(([typeId]) => typeId === entryType)
+      : Object.entries(metadataSchema?.entry_types ?? {}).filter(
+          ([, definition]) => definition.kind === (documentKind === "structure_node" ? "scene" : documentKind) && !definition.abstract,
+        ),
+  );
   let activeEntryType = $derived(metadataSchema?.entry_types[entryType] ?? metadataSchema?.entry_types[defaultEntryType()]);
   // Svelte 5 reactivity trap ([[feedback-svelte5-reactivity-traps]]):
   // chaining `$: a = ...activeEntryType...` after `$: activeEntryType =

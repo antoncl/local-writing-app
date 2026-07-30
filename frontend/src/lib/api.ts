@@ -55,6 +55,8 @@ import type {
   SaveProjectNodeRequest,
   PromptEntry,
   PromptEntryList,
+  PlotTemplate,
+  PlotTemplateList,
   MutationSetEntry,
   MutationSetEntryList,
   MutationSetRow,
@@ -852,6 +854,34 @@ export const api = {
   // shipped original in place; the returned entry is the local copy.
   forkPromptEntry(entryId: string) {
     return request<PromptEntry>(`/prompts/${entryId}/fork`, { method: "POST" });
+  },
+  // Plot templates (ADR-0048 S4c) — the ADR-0049 Library's second tenant. Same
+  // browse/read/clone shape as prompts: list the resolved shelf, read one (with
+  // its fail-closed `editable` verdict), clone an inherited one into an owned
+  // editable copy, save/delete owned clones (inherited → 409 backend-side).
+  listPlotTemplates() {
+    return request<PlotTemplateList>("/plot/templates");
+  },
+  getPlotTemplate(entryId: string) {
+    return request<PlotTemplate>(`/plot/templates/${entryId}`);
+  },
+  forkPlotTemplate(entryId: string) {
+    return request<PlotTemplate>(`/plot/templates/${entryId}/fork`, { method: "POST" });
+  },
+  savePlotTemplate(entry: PlotTemplate, body: string) {
+    return request<PlotTemplate>(`/plot/templates/${entry.id}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        title: entry.title,
+        body,
+        template: entry.template,
+        metadata: entry.metadata,
+        base_revision: entry.revision,
+      }),
+    });
+  },
+  deletePlotTemplate(entryId: string) {
+    return request<PlotTemplateList>(`/plot/templates/${entryId}`, { method: "DELETE" });
   },
   // Reusable mutation sets (#62).
   listMutationSetEntries() {

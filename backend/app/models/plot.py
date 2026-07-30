@@ -107,6 +107,14 @@ class PlotTemplate(BaseModel):
     revision: str = ""
     entry_type: str = "plot:template"
     template: PlotTemplateSpec = Field(default_factory=PlotTemplateSpec)
+    # Schema-typed metadata, healed on read like every other node kind (#345):
+    # `plot:template` carries no built-in fields today, but the schema editor can
+    # add one to it, so the read path strips retired fields + dangling references
+    # and validates rather than dropping author metadata silently (S4c finding #5).
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    # Read-only computed/mutable-field projection, same as every editable read
+    # model the NodeEditor renders (empty until a computed field is defined here).
+    computed_metadata: dict[str, Any] = Field(default_factory=dict)
     source_layer_id: str = ""
     source_layer_label: str = ""
     is_library: bool = False
@@ -124,4 +132,8 @@ class SavePlotTemplateRequest(BaseModel):
     title: str
     body: str = ""
     template: PlotTemplateSpec = Field(default_factory=PlotTemplateSpec)
+    # Schema-typed metadata round-trips like every other editable node (S4c
+    # finding #1): the read path heals + returns it, so the write path must
+    # persist it, or a schema-editor-added field would be wiped on the first save.
+    metadata: dict[str, Any] = Field(default_factory=dict)
     base_revision: str = ""

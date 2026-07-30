@@ -9,6 +9,7 @@
   import Lore from "@/components/panes/Lore.svelte";
   import Assistants from "@/components/panes/Assistants.svelte";
   import Prompts from "@/components/panes/Prompts.svelte";
+  import PlotTemplates from "@/components/panes/PlotTemplates.svelte";
   import Mutations from "@/components/panes/Mutations.svelte";
   import Chats from "@/components/panes/Chats.svelte";
   import Project from "@/components/panes/Project.svelte";
@@ -57,6 +58,7 @@
     promptEntriesStore,
     setPromptEntries,
   } from "@/lib/stores/prompts";
+  import { plotTemplatesStore } from "@/lib/stores/plotTemplates";
   import { openProjectHidden } from "@/lib/stores/hiddenLibrary";
   import {
     assistantEntriesStore,
@@ -68,7 +70,7 @@
     metadataSchemaStore,
     projectLayerIdStore,
   } from "@/lib/stores/schema";
-  import { isInherited, promptReadOnlyInPlace } from "@/lib/utils/provenance";
+  import { isInherited, readOnlyInPlace } from "@/lib/utils/provenance";
   import { implicitContextMatcherStore } from "@/lib/stores/derived";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
@@ -361,6 +363,7 @@
     assistant: "assistant",
     chat: "chat",
     view: "view",
+    plot_template: "template",
   };
   const paneDeleteNoun = (type: string | undefined) => (type && PANE_DELETE_NOUN[type]) || "scene";
 
@@ -513,14 +516,15 @@
   }
 
   function paneEntryFromAncestor(pane: EditorPaneState): boolean {
-    // For a prompt the banner's "inherited / read-only here" is the backend's own
+    // For an ADR-0049 Library tenant (a prompt, or a plot template — ADR-0048
+    // S4c) the banner's "inherited / read-only here" is the backend's own
     // `editable` verdict, read through the SAME helper as NodeEditor's read-only
     // lock (#689) — so the banner and the lock cannot disagree. This also drops
-    // the prompt path's dependence on the async schema store: the flag rides on
+    // the tenant path's dependence on the async schema store: the flag rides on
     // the document, so the banner no longer lags the lock during schema load (the
     // #676 review's concern, now removed rather than worked around).
-    if (pane.document?.type === "prompt") {
-      return promptReadOnlyInPlace("prompt", pane.scene);
+    if (pane.document?.type === "prompt" || pane.document?.type === "plot_template") {
+      return readOnlyInPlace(pane.scene);
     }
     // Lore and other inheritable kinds keep the display-only provenance read
     // (#313), shared with the level pill and rail treatment. Reads the store
@@ -531,6 +535,10 @@
 
   function openPromptsPane() {
     workspaceLayout.ensureVisible("prompts");
+  }
+
+  function openPlotTemplatesPane() {
+    workspaceLayout.ensureVisible("plotTemplates");
   }
 
   function openMutationsPane() {
@@ -656,6 +664,7 @@
   let validation = $derived($validationStore);
   let metadataSchema = $derived($metadataSchemaStore);
   let promptEntries = $derived($promptEntriesStore);
+  let plotTemplates = $derived($plotTemplatesStore);
   let assistantEntries = $derived($assistantEntriesStore);
   // The per-pane selected-view spec is no longer derived here: an explicit-view
   // pane declares `view: { kind }` on its region entry, and the central RegionBody
@@ -695,6 +704,7 @@
   onOpenProjectNode={() => void editorPanes.openProjectNode()}
   onOpenChats={openChatsPane}
   onOpenPrompts={openPromptsPane}
+  onOpenPlotTemplates={openPlotTemplatesPane}
   onOpenMutations={openMutationsPane}
   onOpenImport={openImportDocs}
   onManageAllTags={() => (tagsManagerOpen = true)}
@@ -742,6 +752,7 @@
       lore: { title: "Lore", body: loreBody, actions: loreActions, view: { kind: "lore", switcher: true } },
       research: { title: "Research", body: researchBody, view: { kind: "research" } },
       prompts: { title: "Prompts", body: promptsBody, actions: promptsActions, view: { kind: "prompt" }, closable: true, onClose: closeRegion("prompts") },
+      plotTemplates: { title: "Plot templates", body: plotTemplatesBody, view: { kind: "plot" }, closable: true, onClose: closeRegion("plotTemplates") },
       mutations: { title: "Reusable mutations", body: mutationsBody, actions: mutationsActions, closable: true, onClose: closeRegion("mutations") },
       assistants: { title: "Assistants", body: assistantsBody, actions: assistantsActions, view: { kind: "assistant", switcher: true }, closable: true, onClose: closeRegion("assistants") },
       chats: { title: "Chats", body: chatsBody, actions: chatsActions, closable: true, onClose: closeRegion("chats") },
@@ -876,6 +887,17 @@
     </div>
   {/snippet}
 
+  {#snippet plotTemplatesBody(viewSpec: ViewSpec | undefined)}
+    <div class="pane-content schema-list">
+      <PlotTemplates
+        entries={plotTemplates}
+        {viewSpec}
+        onOpenEntry={(id) => editorPanes.openPlotTemplate(id)}
+        onCloneEntry={(id) => run(() => editorPanes.forkPlotTemplate(id))}
+      />
+    </div>
+  {/snippet}
+
   {#snippet mutationsActions()}
     <button class="pin-button" type="button" title="New mutation set" aria-label="New mutation set" onmousedown={(event) => event.stopPropagation()} onclick={() => mutationsPane?.openNew()}>+</button>
   {/snippet}
@@ -942,19 +964,26 @@
     {@const editorPane = editorPaneById(id)}
     {#if editorPane}
       {#if paneEntryFromAncestor(editorPane)}
-        {@const isPrompt = editorPane.document?.type === "prompt"}
-        {@const isLibraryPrompt =
-          isPrompt && !!(editorPane.scene as { is_library?: boolean } | undefined)?.is_library}
+        <!-- ADR-0049 Library tenants (a prompt, or a plot template — ADR-0048 S4c)
+             share the read-only-in-place banner and the clone-to-a-new-id gesture;
+             only the noun and the fork method differ. Lore is the odd one out (an
+             in-place fork that keeps the id). -->
+        {@const paneKind = editorPane.document?.type}
+        {@const isPlotTemplate = paneKind === "plot_template"}
+        {@const isLibraryTenant = paneKind === "prompt" || isPlotTemplate}
+        {@const tenantNoun = isPlotTemplate ? "template" : "prompt"}
+        {@const isShipped =
+          isLibraryTenant && !!(editorPane.scene as { is_library?: boolean } | undefined)?.is_library}
         <div
           class="ancestor-banner"
-          title={isPrompt
-            ? isLibraryPrompt
-              ? "This prompt ships with the app and is read-only here. Clone it for an editable copy in this project."
-              : "This prompt is inherited from an ancestor project and is read-only here. Clone it for an editable copy in this project."
+          title={isLibraryTenant
+            ? isShipped
+              ? `This ${tenantNoun} ships with the app and is read-only here. Clone it for an editable copy in this project.`
+              : `This ${tenantNoun} is inherited from an ancestor project and is read-only here. Clone it for an editable copy in this project.`
             : "This entry lives in an ancestor project. Edits write back to the original file."}
         >
-          <span>{isLibraryPrompt ? "Shipped with the app" : `from ${editorPane.scene?.source_layer_label ?? "ancestor"}`}</span>
-          {#if editorPane.document?.type === "lore" && editorPane.scene}
+          <span>{isShipped ? "Shipped with the app" : `from ${editorPane.scene?.source_layer_label ?? "ancestor"}`}</span>
+          {#if paneKind === "lore" && editorPane.scene}
             <button
               class="fork-button"
               type="button"
@@ -964,16 +993,21 @@
             >
               <span aria-hidden="true">⧉</span> Fork here
             </button>
-          {:else if isPrompt && editorPane.scene}
-            <!-- Any inherited prompt (Library or an ancestor project, #676)
-                 clones to a new local id — the "duplicate the default view"
-                 gesture, not lore's in-place fork. -->
+          {:else if isLibraryTenant && editorPane.scene}
+            <!-- Any inherited Library tenant (Library or an ancestor project, #676)
+                 clones to a new local id — the "duplicate the default" gesture,
+                 not lore's in-place fork. -->
             <button
               class="fork-button"
               type="button"
-              title="Clone this inherited prompt into an editable copy in this project"
+              title={`Clone this inherited ${tenantNoun} into an editable copy in this project`}
               aria-label="Clone into this project"
-              onclick={() => run(() => editorPanes.forkPrompt(editorPane.scene!.id))}
+              onclick={() =>
+                run(() =>
+                  isPlotTemplate
+                    ? editorPanes.forkPlotTemplate(editorPane.scene!.id)
+                    : editorPanes.forkPrompt(editorPane.scene!.id),
+                )}
             >
               <span aria-hidden="true">⧉</span> Clone to edit
             </button>

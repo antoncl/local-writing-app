@@ -44,34 +44,39 @@ export function isInherited(node: NodeProvenance, ownLayerId: string): boolean {
 }
 
 /**
- * Whether an open prompt document is read-only in place — i.e. inherited from the
+ * Whether an open document is read-only in place — i.e. inherited from the
  * built-in Library or an ancestor project, so a save would 409.
  *
- * The backend already computes this and carries it on the prompt read-model as
+ * The backend already computes this and carries it on the read-model as
  * `editable` (#689); this is the single frontend reader of that verdict, shared by
  * NodeEditor's editability lock AND App's "Clone to edit" ancestor banner so the
  * two cannot drift (the #676 divergence). Unlike the old front-end ownership
  * re-derivation (source-layer compared against the open project's own layer), it
  * does NOT consult the async schema-layer store, so there is no load-gap where an
- * inherited prompt flashes editable.
+ * inherited document flashes editable.
  *
- * Fail CLOSED for prompts: a prompt document is treated as read-only unless the
- * server affirmatively marked it editable (`editable === true`). A missing flag
- * (stale/partial payload) locks rather than letting a save reach the 409. A null
- * document is not locked — there is nothing to edit yet. Non-prompt kinds are
- * never locked by this; their editability is a different axis (lore forks in
- * place, scenes are always owned).
+ * Kind-agnostic (ADR-0048 S4c): the verdict is keyed purely on the `editable`
+ * flag, not the document kind. Every ADR-0049 Library tenant read-model stamps
+ * `editable` — prompts (#689) and now `plot:template` — and only those; other
+ * read-models (scenes, lore, research, views) omit the field entirely, so a
+ * check for its *presence* draws the boundary the old `documentKind === "prompt"`
+ * guard drew, and a third tenant needs no change here.
+ *
+ * Fail CLOSED: when the flag is present, the document is read-only unless the
+ * server affirmatively marked it editable (`editable === true`) — a stamped-false
+ * or ambiguous value locks rather than letting a save reach the 409. A document
+ * with no `editable` field is a kind whose editability is a different axis (lore
+ * forks in place, scenes are always owned) and is not locked; nor is a null
+ * document, where there is nothing to edit yet.
  */
-export function promptReadOnlyInPlace(
-  documentKind: string,
+export function readOnlyInPlace(
   // The open document, any editor kind. The index signature lets the whole
   // `EditableDocument` union assign in (a `Scene` carries no `editable`, which a
   // bare `{ editable?: boolean }` would reject as a weak type) while `editable`
   // stays typed for the read below.
   scene: { editable?: boolean; [key: string]: unknown } | null | undefined,
 ): boolean {
-  if (documentKind !== "prompt") return false;
-  return !!scene && scene.editable !== true;
+  return scene != null && "editable" in scene && scene.editable !== true;
 }
 
 /** How a metadata field's effective value is sourced, for the rail's tint (#517). */

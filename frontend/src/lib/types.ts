@@ -4,6 +4,12 @@
 // their children with splitters; TabGroup leaves stack panels as tabs.
 // (The former floating-MDI PaneId/PaneState geometry types are gone with the
 // paneLayout shim — #157.)
+
+// Plot-template types live in ./plotTemplateTypes (this file is at the size cap).
+// Imported here so `EditableDocument` can name PlotTemplate; also re-exported
+// below so `@/lib/types` stays the single barrel.
+import type { PlotTemplate } from "./plotTemplateTypes";
+
 export type PanelId = string;
 
 export type TabGroup = {
@@ -125,7 +131,7 @@ export type ResearchNote = {
   source_layer_label?: string;
 };
 
-export type EditableDocument = Scene | LoreEntry | PromptEntry | AssistantEntry | ResearchNote | ViewNode;
+export type EditableDocument = Scene | LoreEntry | PromptEntry | AssistantEntry | ResearchNote | ViewNode | PlotTemplate;
 
 // Document-kind discriminator shared across editor components. Broader than
 // MetadataSchema.entry_types[*].kind: includes the synthetic shapes the
@@ -140,6 +146,7 @@ export type DocumentKind =
   | "chat"
   | "project"
   | "structure_node"
+  | "plot_template"
   | "view";
 
 export type LoreEntryList = {
@@ -168,7 +175,7 @@ export type PromptEntrySummary = {
   is_library?: boolean;
   // Backend's own read-only-in-place verdict (#689): false when the prompt is
   // inherited (Library or ancestor project) and a save would 409. The read-only
-  // lock and "Clone to edit" banner key on this via `promptReadOnlyInPlace`.
+  // lock and "Clone to edit" banner key on this via `readOnlyInPlace`.
   editable?: boolean;
 };
 
@@ -191,6 +198,17 @@ export type PromptEntry = {
 export type PromptEntryList = {
   entries: PromptEntrySummary[];
 };
+
+// Plot-template types (ADR-0048 S4b/S4c) live in ./plotTemplateTypes to keep this
+// file under the size cap; re-exported so `@/lib/types` stays the single barrel.
+export type {
+  PlotTemplate,
+  PlotTemplateSummary,
+  PlotTemplateList,
+  PlotTemplateSpec,
+  PlotTemplatePoint,
+  PlotTemplateSourceRef,
+} from "./plotTemplateTypes";
 
 export type AssistantEntrySummary = {
   id: string;

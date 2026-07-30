@@ -5,7 +5,7 @@ import {
   inheritedLayerLabel,
   isFieldOwnClearable,
   isInherited,
-  promptReadOnlyInPlace,
+  readOnlyInPlace,
 } from "@/lib/utils/provenance";
 
 describe("inheritedLayerLabel", () => {
@@ -43,30 +43,35 @@ describe("isInherited", () => {
   });
 });
 
-describe("promptReadOnlyInPlace (single reader of the backend #689 verdict)", () => {
-  it("locks a prompt the backend marked not editable", () => {
-    expect(promptReadOnlyInPlace("prompt", { editable: false })).toBe(true);
+describe("readOnlyInPlace (single reader of the backend #689 verdict)", () => {
+  it("locks a document the backend marked not editable", () => {
+    expect(readOnlyInPlace({ editable: false })).toBe(true);
   });
 
-  it("unlocks a prompt the backend marked editable", () => {
-    expect(promptReadOnlyInPlace("prompt", { editable: true })).toBe(false);
+  it("unlocks a document the backend marked editable", () => {
+    expect(readOnlyInPlace({ editable: true })).toBe(false);
   });
 
-  it("fails CLOSED for a prompt whose flag is absent (stale/partial payload)", () => {
-    // A missing flag must lock rather than let a save reach the backend's 409.
-    expect(promptReadOnlyInPlace("prompt", {})).toBe(true);
+  it("is kind-agnostic — same verdict whatever ADR-0049 tenant stamped the flag", () => {
+    // Prompts (#689) and plot templates (ADR-0048 S4c) both carry `editable`;
+    // the gate keys on the flag, not the kind, so a third tenant needs no change.
+    expect(readOnlyInPlace({ editable: false, entry_type: "plot:template" })).toBe(true);
+    expect(readOnlyInPlace({ editable: true, entry_type: "plot:template" })).toBe(false);
+  });
+
+  it("does not lock a kind that carries no `editable` flag", () => {
+    // Scenes, lore, research and views omit the field entirely — their
+    // editability is a different axis (lore forks in place, scenes are always
+    // owned). Absence of the flag is the boundary the old kind guard drew. Every
+    // Library-tenant read-model always stamps the flag, so a genuine tenant
+    // payload never reaches this branch.
+    expect(readOnlyInPlace({})).toBe(false);
+    expect(readOnlyInPlace({ status: "draft", entry_type: "scene" })).toBe(false);
   });
 
   it("does not lock when there is no document yet (nothing to edit)", () => {
-    expect(promptReadOnlyInPlace("prompt", null)).toBe(false);
-    expect(promptReadOnlyInPlace("prompt", undefined)).toBe(false);
-  });
-
-  it("never locks a non-prompt kind, even if it happens to carry the flag", () => {
-    // Lore forks in place and scenes are always owned — their editability is a
-    // different axis, so this gate must leave them alone.
-    expect(promptReadOnlyInPlace("lore", { editable: false })).toBe(false);
-    expect(promptReadOnlyInPlace("scene", {})).toBe(false);
+    expect(readOnlyInPlace(null)).toBe(false);
+    expect(readOnlyInPlace(undefined)).toBe(false);
   });
 });
 

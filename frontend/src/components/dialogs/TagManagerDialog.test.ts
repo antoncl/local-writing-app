@@ -49,9 +49,10 @@ describe("TagManagerDialog (Manage tags home)", () => {
     expect(screen.queryByTitle("Add canon")).toBeNull();
     expect(screen.queryByTitle("Add prose")).toBeNull();
 
-    // Two independent filter inputs, one per section.
-    expect(screen.getByLabelText("Filter Project tags")).toBeInTheDocument();
-    expect(screen.getByLabelText("Filter Assistant tags")).toBeInTheDocument();
+    // Two independent filter inputs, one per section. ariaLabel is a bare noun
+    // (the roster suffixes " tags" for its container label, so no doubling).
+    expect(screen.getByLabelText("Filter Project")).toBeInTheDocument();
+    expect(screen.getByLabelText("Filter Assistant")).toBeInTheDocument();
   });
 
   it("closes via the Close button", async () => {

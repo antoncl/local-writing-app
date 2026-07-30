@@ -194,9 +194,12 @@ describe("TagRosterPopover", () => {
     expect(screen.getByRole("button", { name: "Govern alpha" })).toBeInTheDocument();
   });
 
-  it("suppresses the Create affordance when there is no add-target", async () => {
+  it("suppresses the Create affordance and uses manager copy for an empty filter", async () => {
     setupManager();
     await fireEvent.input(screen.getByLabelText("Filter Tags"), { target: { value: "gamma" } });
     expect(screen.queryByText(/Create/)).toBeNull();
+    // No add-target: the empty state drops the "suggested" (add-context) wording.
+    expect(screen.getByText("No matching tags.")).toBeInTheDocument();
+    expect(screen.queryByText(/suggested/)).toBeNull();
   });
 });

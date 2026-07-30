@@ -49,7 +49,7 @@
             tags={projectTags}
             selectedKeys={noSelection}
             adapter={projectTagGovernance}
-            ariaLabel="Project tags"
+            ariaLabel="Project"
           />
         {/if}
       </section>
@@ -65,7 +65,7 @@
             tags={assistantTags}
             selectedKeys={noSelection}
             adapter={assistantTagGovernance}
-            ariaLabel="Assistant tags"
+            ariaLabel="Assistant"
           />
         {/if}
       </section>

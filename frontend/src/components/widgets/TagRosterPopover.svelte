@@ -404,7 +404,7 @@
           >⋯</button>
         </div>
       {:else}
-        {#if !createCandidate}<span class="trp-empty">No tags suggested here yet.</span>{/if}
+        {#if !createCandidate}<span class="trp-empty">{onAdd ? "No tags suggested here yet." : "No matching tags."}</span>{/if}
       {/each}
       {#if createCandidate}
         <button class="trp-create" type="button" onmousedown={(e) => e.preventDefault()} onclick={() => onAdd?.(createCandidate)}>

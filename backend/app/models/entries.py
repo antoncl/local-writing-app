@@ -96,51 +96,71 @@ class SaveResearchNoteRequest(BaseModel):
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
 
 
-class PlotlineSummary(BaseModel):
+class _PlotFolderSummary(BaseModel):
+    """A `plot/` folder node in a list (plotline, card): one shared shape — only
+    the per-family `entry_type` default differs on the subclasses below."""
+
     id: str
     title: str
     body: str = ""
-    entry_type: str = "plot:plotline"
+    entry_type: str = ""
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     source_layer_id: str = ""
     source_layer_label: str = ""
 
 
-class PlotlineEntry(BaseModel):
-    """A plotline (ADR-0048 §2): a story thread the writer creates at will.
-
-    A name (the intrinsic title), a color (per-entry tint, for the board's
-    chips and card tints), and a description (the prose body). Cards reference
-    one as their primary plotline (S5). An ordinary flat Node under `plot/`,
-    so identity, index, references, and layered schema all apply for free.
-    """
+class _PlotFolderEntry(BaseModel):
+    """A single `plot/` folder node (plotline, card): a book-local layered Node
+    with schema-driven metadata + a prose body, so identity, the index,
+    references, and layered schema all apply for free. Subclasses set only the
+    per-family `entry_type` default."""
 
     id: str
     title: str
     body: str = ""
     revision: str = ""
-    entry_type: str = "plot:plotline"
+    entry_type: str = ""
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     source_layer_id: str = ""
     source_layer_label: str = ""
 
 
+class _PlotFolderCreateRequest(BaseModel):
+    title: str = Field(min_length=1)
+    entry_type: str = ""
+
+
+class _PlotFolderSaveRequest(BaseModel):
+    title: str = Field(min_length=1)
+    body: str = ""
+    base_revision: str | None = None
+    entry_type: str = ""
+    metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+
+
+class PlotlineSummary(_PlotFolderSummary):
+    entry_type: str = "plot:plotline"
+
+
+class PlotlineEntry(_PlotFolderEntry):
+    """A plotline (ADR-0048 §2): a story thread the writer creates at will — a
+    name (the title), a color (metadata, for the board's chips/tints), and a
+    description (the body). Cards reference one as their primary plotline."""
+
+    entry_type: str = "plot:plotline"
+
+
 class PlotlineList(BaseModel):
     entries: list[PlotlineSummary] = Field(default_factory=list)
 
 
-class CreatePlotlineRequest(BaseModel):
-    title: str = Field(min_length=1)
+class CreatePlotlineRequest(_PlotFolderCreateRequest):
     entry_type: str = "plot:plotline"
 
 
-class SavePlotlineRequest(BaseModel):
-    title: str = Field(min_length=1)
-    body: str = ""
-    base_revision: str | None = None
+class SavePlotlineRequest(_PlotFolderSaveRequest):
     entry_type: str = "plot:plotline"
-    metadata: dict[str, MetadataValue] = Field(default_factory=dict)
 
 
 class PlotBoard(BaseModel):
@@ -163,6 +183,32 @@ class PlotBoard(BaseModel):
 class SavePlotBoardRequest(BaseModel):
     base_revision: str | None = None
     layout: dict[str, Any] = Field(default_factory=dict)
+
+
+class CardSummary(_PlotFolderSummary):
+    entry_type: str = "plot:card"
+
+
+class CardEntry(_PlotFolderEntry):
+    """A card (ADR-0048 §1): a unit of story function — "this happens, and it
+    does this job for the story." A synopsis (the body), a primary `plotline`
+    reference, and an optional `scene` reference (0..1 scene per card, 0..n cards
+    per scene). Claims (§4) are deferred to a workflow-driven slice — see the
+    `plot:card` schema comment in default_schema.py for the reasoning."""
+
+    entry_type: str = "plot:card"
+
+
+class CardList(BaseModel):
+    entries: list[CardSummary] = Field(default_factory=list)
+
+
+class CreateCardRequest(_PlotFolderCreateRequest):
+    entry_type: str = "plot:card"
+
+
+class SaveCardRequest(_PlotFolderSaveRequest):
+    entry_type: str = "plot:card"
 
 
 class MoveLoreNoteToResearchResponse(BaseModel):

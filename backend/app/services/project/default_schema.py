@@ -191,6 +191,23 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "has_body": True,
             "color": "plum",
         },
+        "plot:card": {
+            # A unit of story function (ADR-0048 §1): "this happens, and it does
+            # this job for the story." The synopsis is the prose body; `plotline`
+            # points at its primary thread; `scene` is an optional attachment
+            # (0..1 scene per card, 0..n cards per scene — no uniqueness the other
+            # way). Claims (§4) are deferred: the closed beat roster they validate
+            # against only exists once templates are instantiated (a later slice),
+            # so per §4 ("widen when a workflow demands it, not before") the card
+            # carries no claims field yet — it is added when a workflow first
+            # exercises it, or by a writer as a schema extension. A flat Node under
+            # `plot/`, layered like the plotline it references.
+            "name": "Card",
+            "kind": "plot",
+            "parent": "plot:base",
+            "fields": ["plotline", "scene"],
+            "has_body": True,
+        },
         "plot:template": {
             # A diagnostic story-structure lens (ADR-0048 S4b), shipped read-only
             # by the built-in Library (ADR-0049) or cloned into a project to adapt.
@@ -539,6 +556,29 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Related Entries",
             "type": "entity_ref_list",
             "picker_config": {"sources": [{"kind": "lore"}]},
+        },
+        "plotline": {
+            # A single reference to a `plot:plotline` thread. A shared catalog
+            # field (any type can reuse it); its current consumer is the card
+            # (ADR-0048 §1), which points at its one primary plotline — the
+            # plotline's color tints the card on the board (S7). Single ref, not
+            # a list; secondary-thread modelling waits for a workflow.
+            "name": "Plotline",
+            "type": "entity_ref",
+            "picker_config": {"sources": [{"kind": "plot", "expr": {"type": "plot:plotline"}}]},
+        },
+        "scene": {
+            # A single optional reference to a scene. A shared catalog field; its
+            # current consumer is the card's scene attachment (ADR-0048 §1): the
+            # scene that realizes the card, or unset for backstory / not-yet-
+            # written material (0..1 scene per card; the reverse is unconstrained).
+            # When the referenced scene is deleted the ref is cleared — blanked on
+            # the referrer, whether by the delete's reference purge (same project)
+            # or read-side healing (an ancestor delete). The ADR's "visible dangle"
+            # on the board is a later, board-layer concern, not this strip.
+            "name": "Scene",
+            "type": "entity_ref",
+            "picker_config": {"sources": [{"kind": "scene", "expr": {"type": "scene:scene"}}]},
         },
         "word_count": {
             "name": "Word Count",

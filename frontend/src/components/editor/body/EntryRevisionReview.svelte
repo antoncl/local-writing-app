@@ -15,7 +15,7 @@
   // can commit the same pending changes. Nothing is written during review.
 
   import RevisionFlip from "@/components/editor/body/RevisionFlip.svelte";
-  import type { FieldFlip } from "@/lib/utils/loreRevision";
+  import type { FieldFlip } from "@/lib/utils/entryRevision";
 
   let {
     currentBody,

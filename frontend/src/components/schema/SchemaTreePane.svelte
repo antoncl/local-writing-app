@@ -21,7 +21,13 @@
   import CountPill from "@/components/widgets/CountPill.svelte";
   import { resolveColor } from "@/lib/utils/colors";
   import { fieldTypeLabel } from "@/lib/utils/fieldIcons";
-  import { sourceBadgeLabel, type NodeTypeTreeNode, type SchemaKind } from "@/lib/utils/schemaTypeHelpers";
+  import {
+    sourceBadgeLabel,
+    SCHEMA_KINDS as SCHEMA_KIND_ORDER,
+    SCHEMA_KIND_META,
+    type NodeTypeTreeNode,
+    type SchemaKind,
+  } from "@/lib/utils/schemaTypeHelpers";
   import type { MetadataSchemaOverview } from "@/lib/types";
   import { metadataSchemaStore } from "@/lib/stores/schema";
 
@@ -67,15 +73,12 @@
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
   const metadataSchema = $derived($metadataSchemaStore);
 
-  // The kind tabs, in display order. Mirrors the schema's kind universe.
-  const SCHEMA_KINDS: Array<{ id: SchemaKind; label: string }> = [
-    { id: "scene", label: "Scene" },
-    { id: "lore", label: "Lore" },
-    { id: "research", label: "Research" },
-    { id: "prompt", label: "Prompt" },
-    { id: "assistant", label: "Assistant" },
-    { id: "project", label: "Project" },
-  ];
+  // The kind tabs, in display order — labels from the shared kind table so the
+  // strip and the SchemaPanes cascade can never disagree on the kind set (#729).
+  const SCHEMA_KINDS: Array<{ id: SchemaKind; label: string }> = SCHEMA_KIND_ORDER.map((id) => ({
+    id,
+    label: SCHEMA_KIND_META[id].label,
+  }));
 
   function typeSourceFor(typeId: string) {
     return metadataSchemaOverview?.entry_type_sources[typeId] ?? null;

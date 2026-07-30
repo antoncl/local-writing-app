@@ -6,7 +6,6 @@
 
 import { writable } from "svelte/store";
 import { api } from "@/lib/api";
-import { getSwatch } from "@/lib/utils/colors";
 import type { AssistantTag, ScopedTag } from "@/lib/types";
 
 export const assistantTagsStore = writable<AssistantTag[]>([]);
@@ -26,17 +25,8 @@ export function clearAssistantTags(): void {
 // Present the assistant tags to the tag pickers as ScopedTag with an empty
 // scope (suggest-everywhere), so they merge cleanly into a NodeEditor's
 // `knownTags` for assistant/prompt editing without a picker-specific code path.
+// Colour rides along (swatch id) so the shared `tagColorMap` — the one home for
+// "what colour is this tag?" — covers both vocabularies (#247, PR-3b).
 export function assistantTagsAsScoped(tags: AssistantTag[]): ScopedTag[] {
-  return tags.map((tag) => ({ name: tag.name, scope: { sources: [] } }));
-}
-
-// name → resolved hex, for the colored NodeRow chips. Tags with no color (or an
-// unknown swatch id) are absent from the map.
-export function assistantTagColorHexes(tags: AssistantTag[]): Map<string, string> {
-  const map = new Map<string, string>();
-  for (const tag of tags) {
-    const hex = tag.color ? getSwatch(tag.color)?.hex ?? null : null;
-    if (hex) map.set(tag.name, hex);
-  }
-  return map;
+  return tags.map((tag) => ({ name: tag.name, scope: { sources: [] }, color: tag.color }));
 }

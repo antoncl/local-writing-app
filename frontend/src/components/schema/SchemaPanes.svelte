@@ -54,9 +54,6 @@
     // Re-pull open editor panes after a schema mutation rewrote entry data on
     // disk (field rename / option removal / field delete).
     refreshOpenEditorPaneBaselines: (transform?: (metadata: EntryMetadata) => EntryMetadata) => Promise<void>;
-    // The schema pane's "Tags…" button opens App's tag manager (tag management
-    // is orthogonal to schema authoring and stays App-owned).
-    onOpenTagsManager: () => void;
   }
 
   let {
@@ -64,7 +61,6 @@
     run,
     setStatus,
     refreshOpenEditorPaneBaselines,
-    onOpenTagsManager,
   }: Props = $props();
 
   // --- Schema store (read live for reactivity inside the cluster) -------------
@@ -825,7 +821,6 @@
 
 {#snippet schemaActions()}
     <button class="pin-button" type="button" title="Add detail type" aria-label="Add detail type" onmousedown={(event) => event.stopPropagation()} onclick={() => createSchemaTypeDraft()}>+</button>
-    <button class="pin-button" type="button" onmousedown={(event) => event.stopPropagation()} onclick={() => onOpenTagsManager()}>Tags…</button>
 {/snippet}
 {#snippet schemaBody()}
   <SchemaTreePane

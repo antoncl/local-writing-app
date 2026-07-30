@@ -23,11 +23,15 @@ from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import (
+    CreateCardRequest,
     CreatePlotlineRequest,
+    CreateSceneRequest,
+    CreateStructureNodeRequest,
     EntryTypeDefinition,
     MetadataFieldDefinition,
     PlotTemplatePoint,
     PlotTemplateSpec,
+    SaveCardRequest,
     SavePlotlineRequest,
     SavePlotTemplateRequest,
     UpsertMetadataEntryTypeRequest,
@@ -116,6 +120,127 @@ class PlotlineHttpTests(_PlotTestCase):
             json={"title": "X", "body": "", "entry_type": "plot:board"},
         )
         self.assertEqual(response.status_code, 422, response.text)
+
+
+class CardHttpTests(_PlotTestCase):
+    """Cards (ADR-0048 §1 / S5a) — the plotline's structural twin, so the CRUD
+    surface mirrors it: create / read / list / save / delete, book-local, with the
+    board singleton refused on the plot/ folder path."""
+
+    def _create(self, title: str = "A Card") -> dict:
+        response = self.client.post("/api/plot/cards", json={"title": title})
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    def test_create_read_list_round_trip(self) -> None:
+        created = self._create("The Confession")
+        self.assertTrue(created["id"].startswith("plot_"))
+        self.assertEqual(created["entry_type"], "plot:card")
+
+        got = self.client.get(f"/api/plot/cards/{created['id']}")
+        self.assertEqual(got.status_code, 200, got.text)
+        self.assertEqual(got.json()["title"], "The Confession")
+
+        listing = self.client.get("/api/plot/cards")
+        self.assertEqual(listing.status_code, 200, listing.text)
+        self.assertIn(created["id"], [e["id"] for e in listing.json()["entries"]])
+
+    def test_cards_and_plotlines_do_not_leak_into_each_others_lists(self) -> None:
+        # Both are `plot`-kind nodes in the same plot/ folder; the lists filter on
+        # exact entry_type, so a card never shows among plotlines and vice versa.
+        card = self._create("A Card")
+        plotline = self.client.post("/api/plot/plotlines", json={"title": "A Thread"}).json()
+        card_ids = [e["id"] for e in self.client.get("/api/plot/cards").json()["entries"]]
+        plotline_ids = [e["id"] for e in self.client.get("/api/plot/plotlines").json()["entries"]]
+        self.assertIn(card["id"], card_ids)
+        self.assertNotIn(plotline["id"], card_ids)
+        self.assertIn(plotline["id"], plotline_ids)
+        self.assertNotIn(card["id"], plotline_ids)
+
+    def test_save_round_trips_title_synopsis_body_and_refs(self) -> None:
+        plotline = self.client.post("/api/plot/plotlines", json={"title": "Sister arc"}).json()
+        created = self._create()
+        saved = self.client.put(
+            f"/api/plot/cards/{created['id']}",
+            json={
+                "title": "Renamed",
+                "body": "She admits the lie.",
+                "metadata": {"plotline": plotline["id"]},
+            },
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        got = self.client.get(f"/api/plot/cards/{created['id']}").json()
+        self.assertEqual(got["title"], "Renamed")
+        # Synopsis is the body, stored `rstrip() + "\n"` like every prose node.
+        self.assertEqual(got["body"], "She admits the lie.\n")
+        self.assertEqual(got["metadata"]["plotline"], plotline["id"])
+
+    def test_stale_base_revision_conflicts(self) -> None:
+        created = self._create()
+        conflict = self.client.put(
+            f"/api/plot/cards/{created['id']}",
+            json={"title": "X", "body": "", "base_revision": "stale"},
+        )
+        self.assertEqual(conflict.status_code, 409, conflict.text)
+
+    def test_delete_removes_from_list_and_404s(self) -> None:
+        created = self._create()
+        deleted = self.client.delete(f"/api/plot/cards/{created['id']}")
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertNotIn(created["id"], [e["id"] for e in deleted.json()["entries"]])
+        self.assertEqual(self.client.get(f"/api/plot/cards/{created['id']}").status_code, 404)
+
+    def test_missing_card_404s(self) -> None:
+        self.assertEqual(self.client.get("/api/plot/cards/plot_nope").status_code, 404)
+
+    def test_create_rejects_plot_board_entry_type(self) -> None:
+        response = self.client.post("/api/plot/cards", json={"title": "X", "entry_type": "plot:board"})
+        self.assertEqual(response.status_code, 422, response.text)
+
+    def test_save_rejects_plot_board_entry_type(self) -> None:
+        created = self._create()
+        response = self.client.put(
+            f"/api/plot/cards/{created['id']}",
+            json={"title": "X", "body": "", "entry_type": "plot:board"},
+        )
+        self.assertEqual(response.status_code, 422, response.text)
+
+
+class CardReferenceTests(_PlotTestCase):
+    """Cards are ordinary nodes, so the reference graph works for free (ADR-0048
+    §1): a card's `plotline` / `scene` references round-trip, and a deleted target
+    visibly stops resolving — purged when the delete purges referrers (plotline),
+    healed on read when it does not (scene)."""
+
+    def _make_scene(self, title: str = "Arrival") -> str:
+        structure = self.service.read_structure()
+        doc = self.service.create_structure_node(
+            CreateStructureNodeRequest(title="Chapter", entry_type="scene:chapter", parent_id=structure.root.id)
+        )
+        chapter_id = next(c.id for c in doc.root.children if c.type == "scene:chapter")
+        return self.service.create_scene(CreateSceneRequest(title=title, parent_id=chapter_id)).id
+
+    def test_plotline_reference_is_purged_when_the_plotline_is_deleted(self) -> None:
+        plotline = self.service.create_plotline(CreatePlotlineRequest(title="Thread"))
+        card = self.service.create_card(CreateCardRequest(title="Card"))
+        self.service.save_card(card.id, SaveCardRequest(title="Card", metadata={"plotline": plotline.id}))
+        self.assertEqual(self.service.read_card(card.id).metadata.get("plotline"), plotline.id)
+
+        self.service.delete_plotline(plotline.id)  # delete purges referrers (#345)
+        # The single-ref field is cleared (blanked to ""), so it no longer resolves
+        # to the deleted plotline — the visible dangle.
+        self.assertFalse(self.service.read_card(card.id).metadata.get("plotline"))
+
+    def test_scene_reference_round_trips_and_dangles_when_the_scene_is_deleted(self) -> None:
+        scene_id = self._make_scene()
+        card = self.service.create_card(CreateCardRequest(title="Card"))
+        self.service.save_card(card.id, SaveCardRequest(title="Card", metadata={"scene": scene_id}))
+        self.assertEqual(self.service.read_card(card.id).metadata.get("scene"), scene_id)
+
+        self.service.delete_scene(scene_id)
+        # Read-side healing clears the now-dangling attachment (ADR-0048 §1): the
+        # single-ref field blanks to "" once its target leaves the index.
+        self.assertFalse(self.service.read_card(card.id).metadata.get("scene"))
 
 
 class PlotBoardHttpTests(_PlotTestCase):
@@ -305,8 +430,29 @@ class PlotKindRegistrationTests(_PlotTestCase):
         self.assertIn("plot:plotline", schema.entry_types)
         self.assertIn("plot:board", schema.entry_types)
         self.assertIn("plot:template", schema.entry_types)
+        self.assertIn("plot:card", schema.entry_types)
         self.assertEqual(schema.entry_types["plot:plotline"].kind, "plot")
         self.assertEqual(schema.entry_types["plot:template"].kind, "plot")
+        self.assertEqual(schema.entry_types["plot:card"].kind, "plot")
+
+    def test_card_type_is_shown_and_editable_in_detail_types(self) -> None:
+        # ADR-0048 §1 / #738: the card must appear in Detail Types (a `plot`-kind
+        # entry type, so #729's Plot tab surfaces it) with editable fields. The
+        # resolved fields carry the intrinsic title (editable) plus the card's
+        # `plotline` and `scene` references — the fields the schema-authoring UI
+        # and the editor render. `has_body` gives it the synopsis prose editor.
+        card = self.service.read_metadata_schema().entry_types["plot:card"]
+        self.assertTrue(card.has_body)  # synopsis is the body
+        self.assertIn("plotline", card.fields)
+        self.assertIn("scene", card.fields)
+        self.assertIn("title", card.fields)  # intrinsic, injected first — editable
+
+    def test_card_is_indexed_and_kind_tagged(self) -> None:
+        created = self.service.create_card(CreateCardRequest(title="A Card"))
+        entry = self.service._build_node_index().by_id.get(created.id)
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry.kind, "plot")
+        self.assertEqual(entry.entry_type, "plot:card")
 
     def test_plot_kind_has_an_abstract_base_root(self) -> None:
         # #724: like lore:base / prompt:base, the `plot` kind needs a single
@@ -318,7 +464,7 @@ class PlotKindRegistrationTests(_PlotTestCase):
         self.assertIsNotNone(base)
         self.assertTrue(base.abstract)
         self.assertEqual(base.kind, "plot")
-        for concrete in ("plot:plotline", "plot:template", "plot:board"):
+        for concrete in ("plot:plotline", "plot:template", "plot:board", "plot:card"):
             self.assertEqual(
                 schema.entry_types[concrete].parent,
                 "plot:base",
@@ -421,6 +567,61 @@ class PlotlineLayeredTests(unittest.TestCase):
             self.service.delete_plotline("plot_series")
         self.assertEqual(ctx.exception.status_code, 409)
         self.assertTrue((self.series / "plot" / "plot_series.md").exists())
+
+
+class CardLayeredTests(unittest.TestCase):
+    """A card can be inherited from an ancestor (a series-level card flows into the
+    book, ADR-0048 §1), and shares the plotline's deferred-inherited-write
+    contract: read is fine, save/delete refuse and leave the ancestor untouched.
+    Mirrors PlotlineLayeredTests — cards and plotlines are the same book-local
+    plot-planning shape."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
+        self.series = self.base / "series"
+        self.root = self.series / "book01"
+        self.service = ProjectService.created_at(self.root, "Book 1")
+        self.config_dir = Path(self.temp_dir.name).resolve() / "config"
+        self.config_dir.mkdir()
+        self._patcher = patch(
+            "app.services.machine_settings.config_path",
+            return_value=self.config_dir / "config.yaml",
+        )
+        self._patcher.start()
+        declare_full_chain(self.service, self.root, self.base)
+
+    def tearDown(self) -> None:
+        self._patcher.stop()
+        self.temp_dir.cleanup()
+
+    def _write_ancestor_card(self, folder: Path, node_id: str, title: str) -> None:
+        (folder / "plot").mkdir(parents=True, exist_ok=True)
+        self.service._write_node_entry_file(
+            folder / "plot" / f"{node_id}.md", node_id, title, "plot:card", {}, ""
+        )
+
+    def test_inherited_card_is_readable(self) -> None:
+        self._write_ancestor_card(self.series, "plot_series_card", "Series Beat")
+        got = self.service.read_card("plot_series_card")
+        self.assertEqual(got.title, "Series Beat")
+        self.assertTrue(got.source_layer_id)  # provenance surfaced
+
+    def test_saving_an_inherited_card_is_refused_and_ancestor_untouched(self) -> None:
+        self._write_ancestor_card(self.series, "plot_series_card", "Series Beat")
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.save_card("plot_series_card", SaveCardRequest(title="Hijacked", body="new"))
+        self.assertEqual(ctx.exception.status_code, 409)
+        ancestor = (self.series / "plot" / "plot_series_card.md").read_text(encoding="utf-8")
+        self.assertIn("Series Beat", ancestor)
+        self.assertNotIn("Hijacked", ancestor)
+
+    def test_deleting_an_inherited_card_is_refused_and_ancestor_survives(self) -> None:
+        self._write_ancestor_card(self.series, "plot_series_card", "Series Beat")
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.delete_card("plot_series_card")
+        self.assertEqual(ctx.exception.status_code, 409)
+        self.assertTrue((self.series / "plot" / "plot_series_card.md").exists())
 
 
 class PlotTemplateLayeredTests(unittest.TestCase):

@@ -78,6 +78,7 @@ describe("resolveSchemaScope — the Detail Types cascade end-to-end (#729)", ()
       "plot:base": { name: "Plot", kind: "plot", abstract: true },
       "plot:template": { name: "Plot template", kind: "plot", parent: "plot:base" },
       "plot:plotline": { name: "Plotline", kind: "plot", parent: "plot:base" },
+      "plot:card": { name: "Card", kind: "plot", parent: "plot:base" },
     },
     fields: {},
   } as unknown as MetadataSchema;
@@ -92,7 +93,13 @@ describe("resolveSchemaScope — the Detail Types cascade end-to-end (#729)", ()
     const scope = resolveSchemaScope(CASCADE_SCHEMA, "plot:template");
     expect(scope.kind).toBe("plot");
     expect(scope.heading).toBe("Plot Types");
-    expect(treeIds(scope.tree)).toEqual(expect.arrayContaining(["plot:base", "plot:template", "plot:plotline"]));
+    // plot:card (S5a, #738) resolves into the Plot tree like every plot type —
+    // this is what makes it visible + editable under Detail Types → Plot, the
+    // requirement of #738. SchemaPanes is a headless RegionRegistrar (can't be
+    // mounted), so this scope test is the render coverage for that surface.
+    expect(treeIds(scope.tree)).toEqual(
+      expect.arrayContaining(["plot:base", "plot:template", "plot:plotline", "plot:card"]),
+    );
     // And NOT the scene tree — the exact collapse the old ternary caused.
     expect(treeIds(scope.tree)).not.toContain("scene:scene");
   });

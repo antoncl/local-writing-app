@@ -1,21 +1,25 @@
-"""Plot-planning routes (ADR-0048 S4a/S4b): plotlines, the board singleton, and
-templates.
+"""Plot-planning routes (ADR-0048 S4a/S4b/S5a): plotlines, cards, the board
+singleton, and templates.
 
-The board, plotlines, and templates are distinct sub-resources
-(`/api/plot/board`, `/api/plot/plotlines/...`, `/api/plot/templates/...`) so no
-entry id can shadow another route.
+The board, plotlines, cards, and templates are distinct sub-resources
+(`/api/plot/board`, `/api/plot/plotlines/...`, `/api/plot/cards/...`,
+`/api/plot/templates/...`) so no entry id can shadow another route.
 """
 from __future__ import annotations
 
 from fastapi import APIRouter
 
 from app.models import (
+    CardEntry,
+    CardList,
+    CreateCardRequest,
     CreatePlotlineRequest,
     PlotBoard,
     PlotlineEntry,
     PlotlineList,
     PlotTemplate,
     PlotTemplateList,
+    SaveCardRequest,
     SavePlotBoardRequest,
     SavePlotlineRequest,
     SavePlotTemplateRequest,
@@ -66,6 +70,36 @@ def save_plotline(project: CurrentProject, entry_id: str, request: SavePlotlineR
 def delete_plotline(project: CurrentProject, entry_id: str) -> PlotlineList:
     with translate_errors():
         return project.delete_plotline(entry_id)
+
+
+@router.get("/api/plot/cards", response_model=CardList)
+def list_cards(project: CurrentProject) -> CardList:
+    with translate_errors():
+        return project.list_cards()
+
+
+@router.post("/api/plot/cards", response_model=CardEntry)
+def create_card(project: CurrentProject, request: CreateCardRequest) -> CardEntry:
+    with translate_errors():
+        return project.create_card(request)
+
+
+@router.get("/api/plot/cards/{entry_id}", response_model=CardEntry)
+def get_card(project: CurrentProject, entry_id: str) -> CardEntry:
+    with translate_errors():
+        return project.read_card(entry_id)
+
+
+@router.put("/api/plot/cards/{entry_id}", response_model=CardEntry)
+def save_card(project: CurrentProject, entry_id: str, request: SaveCardRequest) -> CardEntry:
+    with translate_errors():
+        return project.save_card(entry_id, request)
+
+
+@router.delete("/api/plot/cards/{entry_id}", response_model=CardList)
+def delete_card(project: CurrentProject, entry_id: str) -> CardList:
+    with translate_errors():
+        return project.delete_card(entry_id)
 
 
 @router.get("/api/plot/templates", response_model=PlotTemplateList)

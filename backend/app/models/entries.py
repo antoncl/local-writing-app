@@ -165,6 +165,57 @@ class SavePlotBoardRequest(BaseModel):
     layout: dict[str, Any] = Field(default_factory=dict)
 
 
+class CardSummary(BaseModel):
+    id: str
+    title: str
+    body: str = ""
+    entry_type: str = "plot:card"
+    metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+    source_layer_id: str = ""
+    source_layer_label: str = ""
+
+
+class CardEntry(BaseModel):
+    """A card (ADR-0048 §1): a unit of story function — "this happens, and it
+    does this job for the story."
+
+    A synopsis (the prose body), a primary `plotline` reference, and an optional
+    `scene` reference (0..1 scene per card; 0..n cards per scene). Claims (§4)
+    are a later, workflow-driven addition — the roster to validate them against
+    only exists once templates are instantiated, so they stay off the built-in
+    type until a slice exercises them (§4: "widen when a workflow demands it").
+    An ordinary flat Node under `plot/`, layered like the plotline it points at,
+    so identity, index, references, and layered schema all apply for free.
+    """
+
+    id: str
+    title: str
+    body: str = ""
+    revision: str = ""
+    entry_type: str = "plot:card"
+    metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+    computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+    source_layer_id: str = ""
+    source_layer_label: str = ""
+
+
+class CardList(BaseModel):
+    entries: list[CardSummary] = Field(default_factory=list)
+
+
+class CreateCardRequest(BaseModel):
+    title: str = Field(min_length=1)
+    entry_type: str = "plot:card"
+
+
+class SaveCardRequest(BaseModel):
+    title: str = Field(min_length=1)
+    body: str = ""
+    base_revision: str | None = None
+    entry_type: str = "plot:card"
+    metadata: dict[str, MetadataValue] = Field(default_factory=dict)
+
+
 class MoveLoreNoteToResearchResponse(BaseModel):
     """Result of POST /api/lore/{id}/move-to-research.
 

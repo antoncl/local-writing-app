@@ -211,6 +211,16 @@ class SaveCardRequest(_PlotFolderSaveRequest):
     entry_type: str = "plot:card"
 
 
+class RealizeCardRequest(BaseModel):
+    """Body for POST /api/plot/cards/{id}/realize (ADR-0048 §1, *realize*): where
+    the scene minted from the card lands in the manuscript. `parent_id` is an
+    optional container node; absent (or unknown) drops the scene into the first
+    container, matching create_scene's placement fallback. Send `{}` for the
+    default placement. Seed-from-manuscript takes no body."""
+
+    parent_id: str | None = None
+
+
 class MoveLoreNoteToResearchResponse(BaseModel):
     """Result of POST /api/lore/{id}/move-to-research.
 

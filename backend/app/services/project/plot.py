@@ -41,6 +41,7 @@ from app.models import (
     CardSummary,
     CreateCardRequest,
     CreatePlotlineRequest,
+    CreateSceneRequest,
     PlotBoard,
     PlotlineEntry,
     PlotlineList,
@@ -49,6 +50,7 @@ from app.models import (
     PlotTemplateList,
     PlotTemplateSpec,
     PlotTemplateSummary,
+    RealizeCardRequest,
     SaveCardRequest,
     SavePlotBoardRequest,
     SavePlotlineRequest,
@@ -393,6 +395,93 @@ class PlotMixin:
     def delete_card(self, entry_id: str) -> CardList:
         self._delete_plot_folder_node(entry_id, expected_entry_type="plot:card", noun="card")
         return self.list_cards()
+
+    # ----- Card operations: realize, attach, seed (ADR-0048 §1) -----------
+    #
+    # *attach* — binding a card to an existing scene — is not its own operation:
+    # it is a `save_card` that sets the `scene` entity_ref, which the board's
+    # picker will drive (S7). `_set_card_scene` below is that write, reused by
+    # both realize and seed so the ref is always schema-validated (the scene
+    # must exist) through the one save path. *realize* creates the scene first;
+    # *seed-from-manuscript* is the bulk inverse — a card for every scene.
+
+    def _set_card_scene(self, card: CardEntry, scene_id: str) -> CardEntry:
+        # Attach = write the card's `scene` ref through the normal save path, so
+        # the ref is schema-validated and the index / reference graph stay
+        # coherent. Attachment lives only on the card (scenes never grow planning
+        # fields — ADR binding decisions), so this is the whole of "attach".
+        metadata = {**card.metadata, "scene": scene_id}
+        return self.save_card(
+            card.id,
+            SaveCardRequest(
+                title=card.title,
+                body=card.body,
+                entry_type=card.entry_type,
+                metadata=metadata,
+                base_revision=card.revision,
+            ),
+        )
+
+    def realize_card(self, entry_id: str, request: RealizeCardRequest) -> CardEntry:
+        """Create a scene from a card and attach it (ADR-0048 §1, *realize*).
+
+        A planned card becomes a real, empty scene slotted into the manuscript
+        (titled after the card; placement via `parent_id`, else the first
+        container — create_scene's fallback), linked back through the card's
+        `scene` ref. The synopsis stays on the card as the plan; the new scene
+        holds the prose the writer has yet to write. 0..1 scene per card, so a
+        card that already has one 409s rather than orphaning the first scene.
+        """
+        card = self.read_card(entry_id)
+        if card.metadata.get("scene"):
+            raise ProjectServiceError(
+                f"Card {entry_id} already has a scene attached; detach it before realizing another.",
+                409,
+            )
+        scene = self.create_scene(CreateSceneRequest(title=card.title, parent_id=request.parent_id))
+        return self._set_card_scene(card, scene.id)
+
+    def seed_cards_from_manuscript(self) -> CardList:
+        """Create one attached card per manuscript scene that has none (ADR-0048 §1/§S5).
+
+        An explicit, re-runnable bulk action: walk the manuscript in reading
+        order and mint a `plot:card` for every scene not already referenced by a
+        card, attaching each to its scene (title from the scene; plotline left
+        for the writer). Idempotent — a second run adds nothing, because a scene
+        already carded is skipped (0..n cards per scene, but seed adds at most
+        the one it is responsible for).
+        """
+        self._require_project()
+        carded_scene_ids = {
+            card.metadata["scene"]
+            for card in self.list_cards().entries
+            if card.metadata.get("scene")
+        }
+        for scene_id, title in self._manuscript_scene_nodes():
+            if scene_id in carded_scene_ids:
+                continue
+            card = self.create_card(CreateCardRequest(title=title))
+            self._set_card_scene(card, scene_id)
+            carded_scene_ids.add(scene_id)
+        return self.list_cards()
+
+    def _manuscript_scene_nodes(self) -> list[tuple[str, str]]:
+        # (scene_id, title) for every leaf *scene*, in manuscript reading order —
+        # the source list seed-from-manuscript mints cards from. Only true leaves
+        # count: containers (acts/chapters) also carry a backing `scene_id`, so
+        # the filter is `_is_leaf_node` (type == scene:scene), not merely
+        # "has a scene_id". Title is the manuscript node's title (what the writer
+        # sees in the tree), which create_scene seeds and rename keeps in step.
+        ordered: list[tuple[str, str]] = []
+
+        def walk(node) -> None:
+            if self._is_leaf_node(node) and node.scene_id:
+                ordered.append((node.scene_id, node.title))
+            for child in node.children:
+                walk(child)
+
+        walk(self.read_structure().root)
+        return ordered
 
     # ----- The board (plot:board) — a per-project layout singleton --------
 

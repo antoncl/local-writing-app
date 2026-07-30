@@ -772,20 +772,21 @@ export const api = {
   },
   // ADR-0046 §4/§6.3: validate a brainstorm-commit reply into a review-ready
   // patch. The raw model text is sent server-side (never shown), parsed, and
-  // validated per-field against the entry's schema; illegal fields are dropped
-  // and a garbled reply is flagged.
-  validateAiEntryPatch(entryId: string, raw: string) {
-    return request<AIEntryPatch>(`/lore/${encodeURIComponent(entryId)}/ai-patch`, {
+  // validated per-field against the node's schema; illegal fields are dropped
+  // and a garbled reply is flagged. Kind-neutral (ADR-0048 §5): the node's
+  // `entry_type` is resolved by id server-side, so any schema-typed node works.
+  validateAiEntryPatch(nodeId: string, raw: string) {
+    return request<AIEntryPatch>(`/ai/entry-patch/${encodeURIComponent(nodeId)}`, {
       method: "POST",
       body: JSON.stringify({ raw }),
     });
   },
   // ADR-0046 §6.4: the create-mode sibling — validate a from-scratch brainstorm
-  // commit against a target entry_type (no entry exists yet). Same review-ready
-  // AIEntryPatch and garbled handling; the adopted draft is created via
-  // createLoreEntry + saveLoreEntry, not a diff.
+  // commit against a target entry_type (no node exists yet; the entry_type FQN
+  // carries the kind). Same review-ready AIEntryPatch and garbled handling; the
+  // adopted draft is created through the kind's own create + save endpoints.
   validateAiEntryDraft(entryType: string, raw: string) {
-    return request<AIEntryPatch>("/lore/ai-draft", {
+    return request<AIEntryPatch>("/ai/entry-draft", {
       method: "POST",
       body: JSON.stringify({ entry_type: entryType, raw }),
     });

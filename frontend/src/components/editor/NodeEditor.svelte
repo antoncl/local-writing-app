@@ -6,10 +6,10 @@
   import SnapshotStrip from "@/components/editor/SnapshotStrip.svelte";
   import EditorRail from "@/components/editor/EditorRail.svelte";
   import ReadOnlyBodyOverlay from "@/components/editor/body/ReadOnlyBodyOverlay.svelte";
-  import LoreRevisionReview from "@/components/editor/body/LoreRevisionReview.svelte";
-  import LoreBrainstormBar from "@/components/editor/LoreBrainstormBar.svelte";
+  import EntryRevisionReview from "@/components/editor/body/EntryRevisionReview.svelte";
+  import EntryBrainstormBar from "@/components/editor/EntryBrainstormBar.svelte";
   import { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
-  import { LoreProposalController } from "@/lib/stores/loreProposal.svelte";
+  import { EntryProposalController } from "@/lib/stores/entryProposal.svelte";
   import { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
   import { implicitContextFor } from "@/lib/stores/implicitContext.svelte";
   import { notchWhen } from "@/lib/utils/snapshotTime";
@@ -409,24 +409,24 @@
   // silently never mounted).
   let metadataSchema = $derived($metadataSchemaStore);
 
-  // ADR-0046 slice 2/3 — the lore brainstorm review. A `revise:entry` chat
-  // commits an EntryPatch (launched via LoreBrainstormBar); the controller
-  // derives the proposed-vs-current flips (body + each changed long_text field,
-  // slice 3a) off the live buffer state fed below. The write side of an adopt
-  // stays here — it owns `metadata` and the prose buffer — so body + metadata
-  // coalesce into one lore PUT (ADR-0046 §1).
-  const loreReview = new LoreProposalController();
+  // ADR-0046 slice 2/3 — the entry-patch brainstorm review, generalized to any
+  // schema-typed node (ADR-0048 §5). A `revise:entry` chat commits an EntryPatch
+  // (launched via EntryBrainstormBar); the controller derives the proposed-vs-
+  // current flips off the live buffer fed below, and the adopt write stays here
+  // (owns `metadata` + prose buffer, so both land in one PUT — ADR-0046 §1). The
+  // controller is kind-agnostic; THIS host holds the "which kinds participate"
+  // policy — currently lore (the `documentKind === "lore"` gates below).
+  const entryReview = new EntryProposalController();
   $effect.pre(() => {
-    loreReview.documentKind = documentKind;
-    loreReview.sceneId = scene?.id ?? null;
-    loreReview.schema = metadataSchema;
+    entryReview.nodeId = scene?.id ?? null;
+    entryReview.schema = metadataSchema;
     // `title`/`status` live off `metadata` in their own shell state, but a patch
     // can flip them (a rename / a status change), so fold them into the metadata
     // view the controller diffs against — else their flip's "current" side reads
     // as unset. Adoption routes them back out (onAdoptFields below).
-    loreReview.metadata = { ...metadata, title, status };
+    entryReview.metadata = { ...metadata, title, status };
   });
-  loreReview.onAdoptFields = (fields) => {
+  entryReview.onAdoptFields = (fields) => {
     // `title`/`status` are proposable but stored off `metadata` (saved via the
     // top-level payload fields, and the backend applies a rename on post), so
     // route an adopted flip to the matching shell state and keep it out of the
@@ -443,19 +443,19 @@
     }
     metadata = { ...metadata, ...next };
   };
-  loreReview.onAdoptBody = (body) => proseBodyView?.adoptBody(body);
-  loreReview.onEmitChange = emitChange;
-  loreReview.readCurrentBody = () => proseBodyView?.getBody() ?? scene?.body ?? "";
+  entryReview.onAdoptBody = (body) => proseBodyView?.adoptBody(body);
+  entryReview.onEmitChange = emitChange;
+  entryReview.readCurrentBody = () => proseBodyView?.getBody() ?? scene?.body ?? "";
   // The one explicit post that ends a commit — the pane controller cancels the
   // (frozen) timer and PUTs once (body + metadata together).
-  loreReview.onFlush = () => {
+  entryReview.onFlush = () => {
     if (scene?.id) return onFlushReviewCommit?.(scene.id);
   };
 
   // A lore entry under an open brainstorm review is a frozen transaction (#634):
   // the rail/title go read-only and the host suppresses autosave, so the diff's
   // "current" side cannot move under the review.
-  const reviewing = $derived(documentKind === "lore" && loreReview.hasReview);
+  const reviewing = $derived(documentKind === "lore" && entryReview.hasReview);
   // An INHERITED prompt is read-only in place: the backend refuses any save
   // (409) whether it is a built-in Library node (ADR-0049) or an ancestor
   // project's prompt (#676). Lock the whole editor — title, fields and the code
@@ -476,22 +476,22 @@
   // hence the `??` at the call site. `side: "was"` is nominal; `resolve` present
   // makes the panel show the proposed side per-field regardless.
   const loreCompare = $derived(
-    reviewing && loreReview.structuredFlips.length > 0
+    reviewing && entryReview.structuredFlips.length > 0
       ? {
-          fields: loreReview.structuredCompareFields,
+          fields: entryReview.structuredCompareFields,
           side: "was" as const,
           resolve: {
-            adopted: (fieldId: string) => loreReview.isStructuredAdopted(fieldId),
-            onToggle: (fieldId: string) => loreReview.toggleStructured(fieldId),
+            adopted: (fieldId: string) => entryReview.isStructuredAdopted(fieldId),
+            onToggle: (fieldId: string) => entryReview.toggleStructured(fieldId),
           },
         }
       : null,
   );
   // The hooks the pane's close path uses to commit or discard the review.
   const reviewCommitter = {
-    hasChanges: () => loreReview.hasPendingChanges,
-    commit: () => loreReview.commit(),
-    discard: () => loreReview.abandon(),
+    hasChanges: () => entryReview.hasPendingChanges,
+    commit: () => entryReview.commit(),
+    discard: () => entryReview.abandon(),
   };
   // Freeze while reviewing, thaw (null) the instant the review ends or the pane
   // unmounts. Idempotent on the host side; the flush-on-enter runs once.
@@ -504,8 +504,8 @@
   // Reset accumulated review resolution whenever the proposal identity changes,
   // so a superseding commit starts clean instead of inheriting prior adoptions.
   $effect(() => {
-    loreReview.proposal;
-    loreReview.resetResolution();
+    entryReview.proposal;
+    entryReview.resetResolution();
   });
 
   // Editor-pane handle exports — forwarded to ProseBodyView and called by the
@@ -763,7 +763,7 @@
           {/if}
         </label>
         {#if documentKind === "lore" && scene?.id}
-          <LoreBrainstormBar entryId={scene.id} {promptEntries} {metadataSchema} />
+          <EntryBrainstormBar entryId={scene.id} {promptEntries} {metadataSchema} />
         {/if}
       </div>
       <!-- Layer override authoring (#314 / ADR-0042): choose which level this
@@ -866,21 +866,21 @@
         tone="snapshot"
         onRunClick={(regionId, kind) => snapshots.adopt(regionId, kind)}
       />
-    {:else if documentKind === "lore" && loreReview.hasReview && loreReview.proposal}
+    {:else if documentKind === "lore" && entryReview.hasReview && entryReview.proposal}
       <!-- ADR-0046 slice 3: the brainstorm commit reviewed as flips (body + each
            long_text field). Like the snapshot overlay, the live buffer stays
            mounted and hidden beneath; adopting writes through the same
            emitChange autosave (body + metadata in one PUT). -->
-      {#key loreReview.proposal}
-        <LoreRevisionReview
-          currentBody={loreReview.currentBody()}
-          proposedBody={loreReview.proposal.body}
-          fields={loreReview.fields}
-          hasChanges={loreReview.hasPendingChanges}
-          onBodyResolved={(v) => loreReview.setBodyResolution(v)}
-          onFieldResolved={(id, v) => loreReview.setFieldResolution(id, v)}
-          onDone={() => loreReview.commit()}
-          onDiscard={() => loreReview.abandon()}
+      {#key entryReview.proposal}
+        <EntryRevisionReview
+          currentBody={entryReview.currentBody()}
+          proposedBody={entryReview.proposal.body}
+          fields={entryReview.fields}
+          hasChanges={entryReview.hasPendingChanges}
+          onBodyResolved={(v) => entryReview.setBodyResolution(v)}
+          onFieldResolved={(id, v) => entryReview.setFieldResolution(id, v)}
+          onDone={() => entryReview.commit()}
+          onDiscard={() => entryReview.abandon()}
         />
       {/key}
     {/if}

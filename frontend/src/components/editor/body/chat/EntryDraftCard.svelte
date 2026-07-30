@@ -1,10 +1,11 @@
 <!--
-  LoreDraftCard — the "Proposed new entry" review card for a create-mode lore
-  brainstorm (ADR-0046 §6.4). A from-scratch draft has no prior state to diff
-  against, so it is reviewed WHOLE (title / fields / body), not as a flip:
-  Create runs the existing create path, Discard writes nothing. Presentational
-  — the parent (ChatBodyView) owns the draft state and the create/discard
-  actions. Extracted so ChatBodyView stays under the file-size cap.
+  EntryDraftCard — the "Proposed new entry" review card for a create-mode
+  entry-patch brainstorm (ADR-0046 §6.4; generalized to any schema-typed node,
+  ADR-0048 §5). A from-scratch draft has no prior state to diff against, so it is
+  reviewed WHOLE (title / fields / body), not as a flip: Create runs the kind's
+  existing create path, Discard writes nothing. Presentational — the parent
+  (ChatBodyView) owns the draft state and the create/discard actions. Extracted
+  so ChatBodyView stays under the file-size cap.
 -->
 <script lang="ts">
   import { metadataValueDisplayString } from "@/lib/utils/schemaTypeHelpers";

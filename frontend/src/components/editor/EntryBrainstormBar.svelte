@@ -1,11 +1,13 @@
 <script lang="ts">
-  // The lore-entry brainstorm launcher (ADR-0046 slice 2). Extracted from
-  // NodeEditor so the shell stays under the size guard and the launch concern
-  // is one cohesive unit. Renders a quiet header verb that opens the first
-  // available `revise:entry` prompt (output.kind `entry_patch`) as a chat bound
-  // to this entry — seeded as its `entry` input, which the template loads via
-  // entry(input.entry). Hidden when no such prompt instance exists yet (issue
-  // #606 — pre-rolled prompts still need a materialized instance).
+  // The entry-patch brainstorm launcher (ADR-0046 slice 2; the loop generalized
+  // to any schema-typed node, ADR-0048 §5). Extracted from NodeEditor so the
+  // shell stays under the size guard and the launch concern is one cohesive unit.
+  // Renders a quiet header verb that opens the first available `revise:entry`
+  // prompt (output.kind `entry_patch`) as a chat bound to this node — seeded as
+  // its `entry` input, which the template loads via entry(input.entry). Hidden
+  // when no such prompt instance exists yet (issue #606 — pre-rolled prompts
+  // still need a materialized instance). The component is kind-neutral; the host
+  // (NodeEditor) decides which kinds render it (currently lore — no plot yet).
   //
   // A temporary home: ADR-0047's node contextual-actions are the eventual
   // surface, but that is unbuilt, so this follows roleplay's invocation shape.

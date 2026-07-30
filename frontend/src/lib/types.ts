@@ -283,7 +283,7 @@ export type EntryPatch = {
   fields: Record<string, MetadataValue>;
 };
 
-// The validated patch returned by POST /api/lore/{id}/ai-patch. `dropped` names
+// The validated patch returned by POST /api/ai/entry-patch/{id}. `dropped` names
 // fields the model proposed that were rejected (unknown / illegal / non-
 // proposable); `garbled` is true when the reply wasn't a JSON object at all.
 export type AIEntryPatch = EntryPatch & {

@@ -334,7 +334,9 @@ class MetadataValuesMixin:
         )
 
     def validate_ai_entry_patch(self, entry_id: str, raw: str) -> AIEntryPatch:
-        """Turn a brainstorm-commit reply into a validated, review-ready patch.
+        """Turn a brainstorm-commit reply into a validated, review-ready patch
+        for **any schema-typed node** (ADR-0048 §5: the loop's seams are keyed
+        on a node's `entry_type`, not on `kind == "lore"`).
 
         ADR-0046 §4/§6.3: the reply is expected to be a JSON object
         ``{"body": <str>, "fields": {<field_id>: <value>}}``. We parse it
@@ -349,24 +351,29 @@ class MetadataValuesMixin:
         `garbled` — the author is told, rather than the commit silently doing
         nothing.
 
-        This only produces the patch for review; the actual write still goes
-        through the normal layered `save_lore_entry` (canonicalisation,
-        override deltas), so nothing here needs to re-implement the save path.
+        The target's `entry_type` is resolved from the node index (which
+        carries it for every kind), so this needs no kind-specific read. This
+        only produces the patch for review; the actual write still goes through
+        the node's normal layered save path (canonicalisation, override deltas),
+        so nothing here re-implements the save path.
         """
 
-        entry = self.read_lore_entry(entry_id)
+        entry = self._build_node_index().by_id.get(entry_id)
+        if entry is None:
+            raise ProjectServiceError(f"Node {entry_id} does not exist.", 404)
         return self._validate_ai_entry_patch_for_type(entry.entry_type, raw)
 
     def validate_ai_entry_draft(self, entry_type: str, raw: str) -> AIEntryPatch:
         """Create-mode sibling of `validate_ai_entry_patch` (ADR-0046 §6.4).
 
-        A from-scratch brainstorm has no entry to read, so validation is scoped
-        to the *target entry_type* directly rather than an existing entry's
-        schema. The per-field drop rules, the parse, and the garbled condition
-        are identical — the only difference is where the allowed field set comes
-        from. The adopted draft is written through the existing create path
-        (`POST /api/lore` + `PUT /api/lore/{id}`), not a diff, so this too only
-        produces the review-ready patch.
+        A from-scratch brainstorm has no node to read, so validation is scoped
+        to the *target entry_type* directly rather than an existing node's
+        schema. The `entry_type` FQN (`kind:key`) is kind-carrying, so this is
+        already kind-neutral (ADR-0048 §5). The per-field drop rules, the parse,
+        and the garbled condition are identical — the only difference is where
+        the allowed field set comes from. The adopted draft is written through
+        the kind's existing create path (`POST /api/lore` + `PUT /api/lore/{id}`
+        for lore), not a diff, so this too only produces the review-ready patch.
         """
 
         return self._validate_ai_entry_patch_for_type(entry_type, raw)

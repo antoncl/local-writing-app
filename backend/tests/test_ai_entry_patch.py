@@ -16,10 +16,14 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from fastapi.testclient import TestClient
 from project_fixtures import open_test_project
 
+from app.main import app
 from app.models import (
     CreateLoreEntryRequest,
+    CreateSceneRequest,
+    CreateStructureNodeRequest,
     SaveLoreEntryRequest,
 )
 from app.services.ai.entry_patch import parse_entry_patch_json
@@ -28,6 +32,7 @@ from app.services.ai.helpers import (
     _field_catalog,
     create_environment_for_project,
 )
+from app.services.project.errors import ProjectServiceError
 
 
 def add_character_patch_fields(service, root: Path) -> None:
@@ -402,6 +407,106 @@ class FieldCatalogFromTypeTests(unittest.TestCase):
         self.assertIn("Age (age): 0", rendered)
         self.assertIn("Deceased (deceased): False", rendered)
         self.assertIn("Epithet (epithet): _(empty)_", rendered)
+
+
+class KindAgnosticSeamTests(unittest.TestCase):
+    """ADR-0048 §5 — `validate_ai_entry_patch` resolves the target's entry_type
+    from the node index, so it works for ANY schema-typed node kind, not just
+    lore. These pin that the lore read is gone: a missing id is a plain 404, and
+    a non-lore node is validated against its OWN entry_type's schema."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.service = open_test_project(self.root, "Kind-agnostic seam")
+        # `bio` becomes a lore:character field (and a global field def).
+        add_character_patch_fields(self.service, self.root)
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_missing_node_is_a_plain_404(self) -> None:
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.validate_ai_entry_patch("does-not-exist", '{"fields": {}}')
+        self.assertEqual(ctx.exception.status_code, 404)
+
+    def test_resolves_a_scenes_own_entry_type_not_lore(self) -> None:
+        # A scene under a chapter: a non-lore schema-typed node. `bio` is a
+        # lore:character field absent from the scene's type, so validating a
+        # patch that proposes it must DROP it — proof the seam resolved the
+        # scene's entry_type from the index. Had it wrongly read lore, `bio`
+        # would survive.
+        structure = self.service.read_structure()
+        doc = self.service.create_structure_node(
+            CreateStructureNodeRequest(
+                title="Chapter", entry_type="scene:chapter", parent_id=structure.root.id
+            )
+        )
+        chapter_id = next(c.id for c in doc.root.children if c.type == "scene:chapter")
+        scene = self.service.create_scene(
+            CreateSceneRequest(title="Scene", parent_id=chapter_id)
+        )
+        patch = self.service.validate_ai_entry_patch(
+            scene.id, '{"fields": {"bio": "not a scene field"}}'
+        )
+        self.assertEqual(patch.fields, {})
+        self.assertIn("bio", patch.dropped)
+
+
+class EntryPatchRoutesTests(unittest.TestCase):
+    """ADR-0048 §5 — the validate/review path is kind-neutral at the HTTP edge:
+    `/api/ai/entry-patch/{id}` and `/api/ai/entry-draft`, off the `/api/lore`
+    prefix (pre-1.0: the old lore-prefixed routes are removed, not aliased)."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.service = open_test_project(self.root, "Entry-patch routes")
+        add_character_patch_fields(self.service, self.root)
+        self.hero = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Seren", entry_type="lore:character")
+        )
+        self.client = TestClient(app)
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_kind_neutral_patch_route_validates(self) -> None:
+        resp = self.client.post(
+            f"/api/ai/entry-patch/{self.hero.id}",
+            json={"raw": '{"body": "New.", "fields": {"bio": "A new bio."}}'},
+        )
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body["body"], "New.")
+        self.assertEqual(body["fields"], {"bio": "A new bio."})
+
+    def test_kind_neutral_draft_route_validates(self) -> None:
+        resp = self.client.post(
+            "/api/ai/entry-draft",
+            json={"entry_type": "lore:character", "raw": '{"fields": {"bio": "Drafted."}}'},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["fields"], {"bio": "Drafted."})
+
+    def test_old_lore_prefixed_routes_are_gone(self) -> None:
+        # The old POST routes no longer serve the loop: `…/ai-patch` has no
+        # registered subpath (404); `/api/lore/ai-draft` now collides with
+        # `GET /api/lore/{entry_id}`, so POST is method-not-allowed (405).
+        # Either way the moved route is gone — neither returns the 200 it used to.
+        self.assertIn(
+            self.client.post(
+                f"/api/lore/{self.hero.id}/ai-patch", json={"raw": "{}"}
+            ).status_code,
+            {404, 405},
+        )
+        self.assertIn(
+            self.client.post(
+                "/api/lore/ai-draft",
+                json={"entry_type": "lore:character", "raw": "{}"},
+            ).status_code,
+            {404, 405},
+        )
 
 
 if __name__ == "__main__":

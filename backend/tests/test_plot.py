@@ -31,6 +31,7 @@ from app.models import (
     MetadataFieldDefinition,
     PlotTemplatePoint,
     PlotTemplateSpec,
+    RealizeCardRequest,
     SaveCardRequest,
     SavePlotlineRequest,
     SavePlotTemplateRequest,
@@ -44,6 +45,7 @@ from app.services.project.references import (
     REFERENCE_BEARING_KINDS,
 )
 from app.services.project_service import ProjectService
+from app.services.tree_structure import TreeStructureService
 
 
 class _PlotTestCase(unittest.TestCase):
@@ -274,6 +276,149 @@ class CardReferenceTests(_PlotTestCase):
         with self.assertRaises(ProjectServiceError) as ctx:
             self.service.save_card(card.id, SaveCardRequest(title="Card", metadata={"plotline": "plot_ghost"}))
         self.assertEqual(ctx.exception.status_code, 422)
+
+
+class CardOperationTests(_PlotTestCase):
+    """The card operations (ADR-0048 §1 / §S5). *realize* mints a scene from a
+    card and attaches it; *seed-from-manuscript* is the bulk inverse — one
+    attached card per existing scene; *attach* is a plain card save the board's
+    picker will drive, so it has no endpoint here. Plus the settled cardinality
+    invariants: 0..n cards per scene, 0..1 scene per card, attachment is by id
+    (survives a scene move), and a deleted scene dangles visibly."""
+
+    def _chapter(self, title: str = "Chapter") -> str:
+        structure = self.service.read_structure()
+        doc = self.service.create_structure_node(
+            CreateStructureNodeRequest(title=title, entry_type="scene:chapter", parent_id=structure.root.id)
+        )
+        return next(c.id for c in doc.root.children if c.type == "scene:chapter" and c.title == title)
+
+    def _scene(self, parent_id: str, title: str) -> str:
+        return self.service.create_scene(CreateSceneRequest(title=title, parent_id=parent_id)).id
+
+    def _structure_node_id_for_scene(self, scene_id: str) -> str:
+        node = TreeStructureService.find_by_leaf_ref(self.service.read_structure(), scene_id)
+        assert node is not None
+        return node.id
+
+    def _leaf_scene_ids(self) -> set[str]:
+        # Every leaf scene in the manuscript (a fresh project pre-seeds one, so
+        # the seed assertions are relative to this, not to a hardcoded count).
+        ids: set[str] = set()
+
+        def walk(node) -> None:
+            if node.type == "scene:scene" and node.scene_id:
+                ids.add(node.scene_id)
+            for child in node.children:
+                walk(child)
+
+        walk(self.service.read_structure().root)
+        return ids
+
+    # ----- realize --------------------------------------------------------
+
+    def test_realize_mints_and_attaches_a_scene(self) -> None:
+        card = self.client.post("/api/plot/cards", json={"title": "The Confession"}).json()
+        realized = self.client.post(f"/api/plot/cards/{card['id']}/realize", json={})
+        self.assertEqual(realized.status_code, 200, realized.text)
+        scene_id = realized.json()["metadata"]["scene"]
+        self.assertTrue(scene_id.startswith("scene_"))
+        # The scene is real, titled after the card, and starts empty — the
+        # synopsis is the card's plan, not the scene's prose.
+        scene = self.service.read_scene(scene_id)
+        self.assertEqual(scene.title, "The Confession")
+        self.assertEqual(scene.body, "")
+
+    def test_realize_keeps_the_synopsis_on_the_card(self) -> None:
+        card = self.service.create_card(CreateCardRequest(title="Card"))
+        self.service.save_card(card.id, SaveCardRequest(title="Card", body="She finally tells him."))
+        realized = self.service.realize_card(card.id, RealizeCardRequest())
+        self.assertEqual(realized.body, "She finally tells him.\n")  # synopsis stays on the card
+        self.assertEqual(self.service.read_scene(realized.metadata["scene"]).body, "")  # scene prose is empty
+
+    def test_realize_places_the_scene_under_a_given_parent(self) -> None:
+        chapter_id = self._chapter("Act One")
+        card = self.service.create_card(CreateCardRequest(title="Beat"))
+        realized = self.service.realize_card(card.id, RealizeCardRequest(parent_id=chapter_id))
+        chapter = TreeStructureService.find_node(self.service.read_structure(), chapter_id)
+        node_id = self._structure_node_id_for_scene(realized.metadata["scene"])
+        self.assertIn(node_id, [c.id for c in chapter.children])
+
+    def test_realize_on_an_attached_card_409s(self) -> None:
+        scene_id = self._scene(self._chapter(), "Existing")
+        card = self.service.create_card(CreateCardRequest(title="Card"))
+        self.service.save_card(card.id, SaveCardRequest(title="Card", metadata={"scene": scene_id}))
+        # 0..1 scene per card: realizing again would orphan the first scene.
+        response = self.client.post(f"/api/plot/cards/{card.id}/realize", json={})
+        self.assertEqual(response.status_code, 409, response.text)
+
+    # ----- seed-from-manuscript ------------------------------------------
+
+    def test_seed_creates_one_attached_card_per_scene(self) -> None:
+        chapter_id = self._chapter()
+        scene_ids = [self._scene(chapter_id, t) for t in ("Arrival", "The Turn", "Aftermath")]
+        all_scenes = self._leaf_scene_ids()
+        seeded = self.client.post("/api/plot/seed-from-manuscript")
+        self.assertEqual(seeded.status_code, 200, seeded.text)
+        cards = self.service.list_cards().entries
+        # Exactly one card per leaf scene, attached — my three among them.
+        self.assertEqual({c.metadata.get("scene") for c in cards}, all_scenes)
+        self.assertEqual(len(cards), len(all_scenes))
+        self.assertLessEqual(set(scene_ids), all_scenes)
+        # Title mirrors the scene.
+        arrival = next(c for c in cards if c.metadata.get("scene") == scene_ids[0])
+        self.assertEqual(arrival.title, "Arrival")
+
+    def test_seed_is_idempotent(self) -> None:
+        chapter_id = self._chapter()
+        for t in ("One", "Two"):
+            self._scene(chapter_id, t)
+        expected = len(self._leaf_scene_ids())
+        first = self.service.seed_cards_from_manuscript()
+        second = self.service.seed_cards_from_manuscript()
+        self.assertEqual(len(first.entries), expected)
+        self.assertEqual(len(second.entries), expected)  # a second run adds nothing
+
+    def test_seed_skips_scenes_that_already_have_a_card(self) -> None:
+        chapter_id = self._chapter()
+        kept, fresh = self._scene(chapter_id, "Kept"), self._scene(chapter_id, "New")
+        all_scenes = self._leaf_scene_ids()
+        existing = self.service.create_card(CreateCardRequest(title="Hand-made"))
+        self.service.save_card(existing.id, SaveCardRequest(title="Hand-made", metadata={"scene": kept}))
+        self.service.seed_cards_from_manuscript()
+        cards = self.service.list_cards().entries
+        # One card per leaf scene, no duplicate for the scene that already had a
+        # hand-made card (the kept scene keeps exactly one).
+        self.assertEqual(len(cards), len(all_scenes))
+        self.assertEqual({c.metadata.get("scene") for c in cards}, all_scenes)
+        self.assertEqual(sum(1 for c in cards if c.metadata.get("scene") == kept), 1)
+        self.assertIn(fresh, {c.metadata.get("scene") for c in cards})
+
+    # ----- cardinality invariants (ADR §S5) -------------------------------
+
+    def test_many_cards_may_attach_one_scene(self) -> None:
+        scene_id = self._scene(self._chapter(), "Crowded")
+        for title in ("Beat A", "Beat B"):
+            card = self.service.create_card(CreateCardRequest(title=title))
+            self.service.save_card(card.id, SaveCardRequest(title=title, metadata={"scene": scene_id}))
+        attached = [c for c in self.service.list_cards().entries if c.metadata.get("scene") == scene_id]
+        self.assertEqual(len(attached), 2)  # 0..n cards per scene — no uniqueness the other way
+
+    def test_attachment_survives_a_scene_move(self) -> None:
+        source, dest = self._chapter("Source"), self._chapter("Dest")
+        scene_id = self._scene(source, "Wanderer")
+        card = self.service.create_card(CreateCardRequest(title="Card"))
+        self.service.save_card(card.id, SaveCardRequest(title="Card", metadata={"scene": scene_id}))
+        self.service.move_structure_node(self._structure_node_id_for_scene(scene_id), dest, 0)
+        # The ref is by id, not by path or manuscript slot, so the move is invisible to it.
+        self.assertEqual(self.service.read_card(card.id).metadata.get("scene"), scene_id)
+
+    def test_realized_scene_deletion_leaves_the_card_visibly_dangling(self) -> None:
+        card = self.service.create_card(CreateCardRequest(title="Card"))
+        realized = self.service.realize_card(card.id, RealizeCardRequest())
+        self.service.delete_scene(realized.metadata["scene"])
+        # Not silent, not a dead id: the attachment blanks to "" (§S5 / #345 heal).
+        self.assertEqual(self.service.read_card(card.id).metadata.get("scene"), "")
 
 
 class PlotCrossFamilyGuardTests(_PlotTestCase):
@@ -726,6 +871,17 @@ class CardLayeredTests(unittest.TestCase):
             self.service.delete_card("plot_series_card")
         self.assertEqual(ctx.exception.status_code, 409)
         self.assertTrue((self.series / "plot" / "plot_series_card.md").exists())
+
+    def test_realizing_an_inherited_card_is_refused_without_minting_a_scene(self) -> None:
+        # realize has a side effect (it creates a scene), so the inherited-write
+        # refusal must happen BEFORE the scene is minted — otherwise the 409
+        # leaves an orphan scene in the book's manuscript.
+        self._write_ancestor_card(self.series, "plot_series_card", "Series Beat")
+        before = len(list((self.root / "scenes").glob("*.md")))
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.realize_card("plot_series_card", RealizeCardRequest())
+        self.assertEqual(ctx.exception.status_code, 409)
+        self.assertEqual(len(list((self.root / "scenes").glob("*.md"))), before)  # no orphan scene
 
 
 class PlotTemplateLayeredTests(unittest.TestCase):

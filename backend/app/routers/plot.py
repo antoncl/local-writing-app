@@ -19,6 +19,7 @@ from app.models import (
     PlotlineList,
     PlotTemplate,
     PlotTemplateList,
+    RealizeCardRequest,
     SaveCardRequest,
     SavePlotBoardRequest,
     SavePlotlineRequest,
@@ -100,6 +101,20 @@ def save_card(project: CurrentProject, entry_id: str, request: SaveCardRequest) 
 def delete_card(project: CurrentProject, entry_id: str) -> CardList:
     with translate_errors():
         return project.delete_card(entry_id)
+
+
+@router.post("/api/plot/cards/{entry_id}/realize", response_model=CardEntry)
+def realize_card(project: CurrentProject, entry_id: str, request: RealizeCardRequest) -> CardEntry:
+    """Create a scene from a card and attach it (ADR-0048 §1, *realize*)."""
+    with translate_errors():
+        return project.realize_card(entry_id, request)
+
+
+@router.post("/api/plot/seed-from-manuscript", response_model=CardList)
+def seed_cards_from_manuscript(project: CurrentProject) -> CardList:
+    """Create one attached card per scene that has none (ADR-0048 §1/§S5)."""
+    with translate_errors():
+        return project.seed_cards_from_manuscript()
 
 
 @router.get("/api/plot/templates", response_model=PlotTemplateList)

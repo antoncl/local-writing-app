@@ -1256,7 +1256,10 @@ button.row-action-add.active {
   padding: 0;
   margin: -1px;
   overflow: hidden;
+  /* clip is deprecated but universally supported; clip-path is the modern path.
+     Keeping both is the belt-and-suspenders recipe (no behavioural change today). */
   clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
 }

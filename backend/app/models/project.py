@@ -33,11 +33,15 @@ class ClientErrorReport(BaseModel):
 
     The UI has no disk of its own, so it ships each caught error here to be
     appended to the open project's `errors.log`. `context` names where it
-    happened (an action label); `detail` carries a stack or extra text. Only
-    `message` is required — the point is that *something* durable is written.
+    happened (an action label); `detail` carries a stack or extra text.
+
+    `message` is deliberately *not* length-constrained: a caught value can be a
+    blank-message `Error()` or an empty string, and rejecting those (422) would
+    silently drop the exact silent-failure class this log exists to catch. The
+    writer substitutes a placeholder so a blank message still leaves a line.
     """
 
-    message: str = Field(min_length=1)
+    message: str = ""
     context: str | None = None
     detail: str | None = None
 

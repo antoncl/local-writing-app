@@ -62,6 +62,14 @@ class TestAppendErrorLine:
         assert "context:" not in text
         assert "—" not in text
 
+    def test_a_blank_message_gets_a_placeholder(self, tmp_path: Path) -> None:
+        # A bare Error()/`throw ""` still deserves a line — the silent-failure
+        # class this log exists to catch must not itself vanish.
+        append_error_line(tmp_path, origin="browser", message="", context="run")
+        text = _log_text(tmp_path)
+        assert "browser error: (no message)" in text
+        assert "(context: run)" in text
+
     def test_a_failed_write_is_swallowed(self, tmp_path: Path) -> None:
         missing = tmp_path / "does-not-exist"  # parent dir absent → open('a') raises
         append_error_line(missing, origin="backend", message="boom")  # must not raise
@@ -108,9 +116,14 @@ class TestLogHttp(unittest.TestCase):
         self.assertIn("browser error: client failure", text)
         self.assertIn("(context: open-project)", text)
 
-    def test_missing_message_is_a_422(self) -> None:
-        resp = self.client.post("/api/log", json={"context": "no message field"})
-        self.assertEqual(resp.status_code, 422, resp.text)
+    def test_a_blank_or_missing_message_is_recorded_not_rejected(self) -> None:
+        # The blank-message class is exactly what must not be dropped: accept it
+        # (no 422) and write a placeholder line rather than swallowing a 422.
+        resp = self.client.post("/api/log", json={"context": "open-project"})
+        self.assertEqual(resp.status_code, 204, resp.text)
+        text = _log_text(self.root)
+        self.assertIn("browser error: (no message)", text)
+        self.assertIn("(context: open-project)", text)
 
     def test_an_unhandled_500_records_a_backend_line(self) -> None:
         client = TestClient(app, raise_server_exceptions=False)

@@ -26,6 +26,11 @@ from pathlib import Path
 
 LOG_FILENAME = "errors.log"
 
+# A caught value can carry an empty message (a bare `Error()`, `throw ""`). That
+# is still a failure worth a durable line, so it gets a placeholder rather than a
+# blank one — the silent-failure class is exactly what this log exists to catch.
+_NO_MESSAGE = "(no message)"
+
 
 def _one_line(value: str) -> str:
     """Collapse any run of whitespace (incl. newlines) so one record is one line.
@@ -57,7 +62,7 @@ def append_error_line(
     """
     try:
         stamp = datetime.now(UTC).astimezone().isoformat(timespec="seconds")
-        parts = [f"[{stamp}]", origin, f"{level}:", _one_line(message)]
+        parts = [f"[{stamp}]", origin, f"{level}:", _one_line(message) or _NO_MESSAGE]
         if context:
             parts.append(f"(context: {_one_line(context)})")
         if detail:

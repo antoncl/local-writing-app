@@ -29,6 +29,7 @@ from app.routers import (
 )
 from app.runtime import root_from_header
 from app.services.error_log import append_error_line
+from app.services.machine_settings import error_log_dir
 from app.services.project.node_index_gate import node_index_gate
 
 # The node-index snapshot is flushed lazily behind a dirty flag (#476); write any
@@ -72,22 +73,26 @@ async def record_unhandled_errors(
     Domain failures (`ProjectServiceError`) are already turned into HTTP responses
     upstream, so only *unexpected* exceptions — the ones the UI sees as a bare
     "Internal Server Error" with nothing behind it — reach this `except`. We record
-    one line to the request's own project log, then re-raise unchanged so the 500
-    is produced exactly as before. Recording never alters the outcome: it writes to
-    the scope the request already carries, and the writer swallows its own failures.
+    one line, then re-raise unchanged so the 500 is produced exactly as before.
+    Recording never alters the outcome, and the writer swallows its own failures.
+
+    The line lands in the scope the request carries: the project's own log when
+    `X-Project-Root` is present, else the machine-scope log (#741) — a 500 raised
+    resolving `/api/project/open` has no project yet, and that is exactly the class
+    that used to vanish here.
     """
     try:
         return await call_next(request)
     except Exception as exc:
-        root = root_from_header(request.headers.get("X-Project-Root"))
-        if root is not None:
-            append_error_line(
-                root,
-                origin="backend",
-                message=f"{type(exc).__name__}: {exc}",
-                detail="".join(traceback.format_exception(exc)),
-                context=f"{request.method} {request.url.path}",
-            )
+        header_root = root_from_header(request.headers.get("X-Project-Root"))
+        append_error_line(
+            header_root if header_root is not None else error_log_dir(),
+            origin="backend",
+            message=f"{type(exc).__name__}: {exc}",
+            detail="".join(traceback.format_exception(exc)),
+            context=f"{request.method} {request.url.path}",
+            ensure_dir=header_root is None,
+        )
         raise
 
 

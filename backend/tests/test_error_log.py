@@ -1,8 +1,10 @@
-"""The durable error log (#386): the writer, the browser route, the backend middleware.
+"""The durable error log (#386, #741): the writer, the browser route, the middleware.
 
 Three seams under test: `append_error_line` (the swallowing writer), the
 `POST /api/log` route that records a browser-origin line, and the `main.py`
 middleware that gives a genuine `500` a backend-origin line before it vanishes.
+Each seam is exercised in both scopes — the open project's log, and the
+machine-scope log (`error_log_dir()`) used when no project is bound (#741).
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from project_fixtures import clear_test_scope, open_test_project
 from app.main import app
 from app.models import ClientErrorReport
 from app.services.error_log import LOG_FILENAME, append_error_line
+from app.services.machine_settings import error_log_dir
 from app.services.project_service import ProjectService
 
 
@@ -75,9 +78,16 @@ class TestAppendErrorLine:
         append_error_line(missing, origin="backend", message="boom")  # must not raise
         assert not (missing / LOG_FILENAME).exists()
 
+    def test_ensure_dir_creates_a_missing_root(self, tmp_path: Path) -> None:
+        # The machine-scope path (#741): the config dir may not exist yet when the
+        # first error is a project-open failure before any settings were saved.
+        missing = tmp_path / "config" / "nested"  # neither level exists
+        append_error_line(missing, origin="backend", message="boom", ensure_dir=True)
+        assert "backend error: boom" in _log_text(missing)
+
 
 class TestRecordClientError:
-    """The mixin bridges a browser report to the open project's log."""
+    """The mixin bridges a browser report to the project or machine log."""
 
     def test_writes_a_browser_line_to_the_open_project(self, tmp_path: Path) -> None:
         service = ProjectService.created_at(tmp_path / "book", "Book")
@@ -88,9 +98,17 @@ class TestRecordClientError:
         assert "browser error: ui blew up" in text
         assert "(context: save-scene)" in text
 
-    def test_no_project_open_is_a_silent_noop(self) -> None:
-        service = ProjectService(None)  # unbound — no per-project log to write
-        service.record_client_error(ClientErrorReport(message="whatever"))  # must not raise
+    def test_no_project_open_writes_to_the_machine_log(self) -> None:
+        # Unbound (no project open) is no longer a no-op (#741): the report lands
+        # in the machine-scope log. `error_log_dir()` is isolated to a per-test
+        # tempdir by the autouse conftest fixture (via the patched config_path).
+        service = ProjectService(None)
+        service.record_client_error(
+            ClientErrorReport(message="pre-open boom", context="open-project")
+        )
+        text = _log_text(error_log_dir())
+        assert "browser error: pre-open boom" in text
+        assert "(context: open-project)" in text
 
 
 class TestLogHttp(unittest.TestCase):
@@ -134,6 +152,32 @@ class TestLogHttp(unittest.TestCase):
         self.assertEqual(resp.status_code, 500)
         text = _log_text(self.root)
         self.assertIn("backend error: ValueError: kaboom in the route", text)
+        self.assertIn("POST /api/log", text)
+
+    def test_post_log_with_no_project_open_writes_to_the_machine_log(self) -> None:
+        # No project bound → no X-Project-Root on the wire → the browser report
+        # lands in the machine-scope log, not the project one (#741).
+        clear_test_scope()
+        resp = self.client.post(
+            "/api/log", json={"message": "pre-open failure", "context": "open-project"}
+        )
+        self.assertEqual(resp.status_code, 204, resp.text)
+        text = _log_text(error_log_dir())
+        self.assertIn("browser error: pre-open failure", text)
+        self.assertFalse((self.root / LOG_FILENAME).exists())  # not the project log
+
+    def test_an_unhandled_500_with_no_project_records_a_machine_backend_line(self) -> None:
+        # The class slice 1 could not catch: a 500 with no project bound (a bad
+        # ancestor manifest while resolving /api/project/open) now lands machine-side.
+        clear_test_scope()
+        client = TestClient(app, raise_server_exceptions=False)
+        with patch.object(
+            ProjectService, "record_client_error", side_effect=ValueError("kaboom, no project")
+        ):
+            resp = client.post("/api/log", json={"message": "x"})
+        self.assertEqual(resp.status_code, 500)
+        text = _log_text(error_log_dir())
+        self.assertIn("backend error: ValueError: kaboom, no project", text)
         self.assertIn("POST /api/log", text)
 
 

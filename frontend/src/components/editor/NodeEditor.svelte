@@ -628,7 +628,20 @@
   // structure_node has no schema kind of its own — Acts/Chapters share
   // kind="scene" in the metadata schema. Reuse the scene entry types so
   // the type selector still lists Act/Chapter/Scene/etc.
-  let documentEntryTypes = $derived(Object.entries(metadataSchema?.entry_types ?? {}).filter(([, definition]) => definition.kind === (documentKind === "structure_node" ? "scene" : documentKind) && !definition.abstract));
+  // The entry-type control's options. For most kinds `documentKind` IS the schema
+  // kind, so we list that kind's concrete sub-types (a switchable variant set —
+  // prompt:base ↔ prompt:roleplay). Two kinds don't line up 1:1: `structure_node`
+  // is a scene, and `plot_template`'s schema kind is `plot` — but plot's other
+  // entry_types (plotline, board) are DISTINCT node classes, not interchangeable
+  // variants, so a template offers only its own type (never a reclassify), and
+  // showing it also fixes the otherwise-blank select (S4c finding #2).
+  let documentEntryTypes = $derived(
+    documentKind === "plot_template"
+      ? Object.entries(metadataSchema?.entry_types ?? {}).filter(([typeId]) => typeId === entryType)
+      : Object.entries(metadataSchema?.entry_types ?? {}).filter(
+          ([, definition]) => definition.kind === (documentKind === "structure_node" ? "scene" : documentKind) && !definition.abstract,
+        ),
+  );
   let activeEntryType = $derived(metadataSchema?.entry_types[entryType] ?? metadataSchema?.entry_types[defaultEntryType()]);
   // Svelte 5 reactivity trap ([[feedback-svelte5-reactivity-traps]]):
   // chaining `$: a = ...activeEntryType...` after `$: activeEntryType =

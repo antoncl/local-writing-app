@@ -31,6 +31,7 @@ Shared tooling resolves through the MRO (`_require_project`,
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -420,7 +421,7 @@ class PlotMixin:
         source = self.read_plot_template(entry_id)
         new_id = self._new_id("plot")
         path = self._filepath_for_new_node(root / "plot", source.title)
-        self._write_plot_template_file(path, new_id, source.title, source.template, source.body)
+        self._write_plot_template_file(path, new_id, source.title, source.template, source.body, source.metadata)
         return self.read_plot_template(new_id)
 
     def save_plot_template(self, entry_id: str, request: SavePlotTemplateRequest) -> PlotTemplate:
@@ -429,6 +430,7 @@ class PlotMixin:
         # (the `plot` kind also carries plotlines, which reject separately). Owned
         # clones save freely.
         self._reject_inherited_library_write(entry_id, entry_type=PLOT_TEMPLATE_ENTRY_TYPE, noun="plot template")
+        index = self._build_node_index()
         path = self._path_for_node_id(entry_id, "plot")
         front_matter = self._read_front_matter_only(path, strict=True)
         node_id = self._node_id_for_path(path, front_matter)
@@ -440,7 +442,22 @@ class PlotMixin:
         markdown_errors = validate_scene_markdown(request.body)
         if markdown_errors:
             raise ProjectServiceError(" ".join(markdown_errors), 422)
-        self._write_plot_template_file(path, node_id, request.title, request.template, request.body)
+        # Validate metadata against the schema before persisting it (S4c finding #1),
+        # the same contract as save_plotline — the read path heals it, so the write
+        # path must carry it rather than silently dropping author-added fields.
+        schema = self.read_metadata_schema()
+        metadata = self._normalise_metadata(request.metadata, path)
+        metadata_errors = self._validate_entry_metadata(
+            label=f"Plot template {node_id}",
+            entry_type=PLOT_TEMPLATE_ENTRY_TYPE,
+            expected_kind="plot",
+            metadata=metadata,
+            schema=schema,
+            node_index=index,
+        )
+        if metadata_errors:
+            raise ProjectServiceError(" ".join(metadata_errors), 422)
+        self._write_plot_template_file(path, node_id, request.title, request.template, request.body, metadata)
         self._maybe_rename_node_file(path, request.title)
         return self.read_plot_template(node_id)
 
@@ -473,15 +490,26 @@ class PlotMixin:
             raise ProjectServiceError(f"Plot template {node_id} has an invalid `template` block: {exc}.", 422) from exc
 
     def _write_plot_template_file(
-        self, path: Path, node_id: str, title: str, spec: PlotTemplateSpec, body: str
+        self,
+        path: Path,
+        node_id: str,
+        title: str,
+        spec: PlotTemplateSpec,
+        body: str,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
+        front_matter_data: dict[str, Any] = {
+            "id": node_id,
+            "title": title,
+            "entry_type": PLOT_TEMPLATE_ENTRY_TYPE,
+            "template": spec.model_dump(mode="json"),
+        }
+        # Only emit a `metadata:` block when there is something to store — an empty
+        # dict is noise, matching the omit-empty behaviour of _write_node_entry_file.
+        if metadata:
+            front_matter_data["metadata"] = metadata
         front_matter = yaml.safe_dump(
-            {
-                "id": node_id,
-                "title": title,
-                "entry_type": PLOT_TEMPLATE_ENTRY_TYPE,
-                "template": spec.model_dump(mode="json"),
-            },
+            front_matter_data,
             sort_keys=False,
             allow_unicode=True,
         ).strip()

@@ -25,11 +25,13 @@ from app.main import app
 from app.models import (
     CreatePlotlineRequest,
     EntryTypeDefinition,
+    MetadataFieldDefinition,
     PlotTemplatePoint,
     PlotTemplateSpec,
     SavePlotlineRequest,
     SavePlotTemplateRequest,
     UpsertMetadataEntryTypeRequest,
+    UpsertMetadataFieldRequest,
 )
 from app.services.project.errors import ProjectServiceError
 from app.services.project.references import (
@@ -250,6 +252,36 @@ class PlotTemplateLibraryTests(_PlotTestCase):
         # Nothing to clone — an owned template is directly editable.
         again = self.client.post(f"/api/plot/templates/{clone['id']}/fork")
         self.assertEqual(again.status_code, 409, again.text)
+
+    def test_owned_clone_metadata_round_trips_on_save(self) -> None:
+        # S4c finding #1: read_plot_template heals + returns metadata, so the save
+        # path must persist it — a schema-editor-added field must survive an edit,
+        # not be silently wiped (the write-side of the S4b finding #5 gap). Add a
+        # `note` field to plot:template, set it on an owned clone, save, re-read.
+        layer_id = self.service._metadata_schema_layer_id(self.root)
+        self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=layer_id,
+                field_id="note",
+                field=MetadataFieldDefinition(name="Note", type="text"),
+                entry_type="plot:template",
+            )
+        )
+        clone = self.client.post(f"/api/plot/templates/{_THREE_ACT}/fork").json()
+        saved = self.client.put(
+            f"/api/plot/templates/{clone['id']}",
+            json={
+                "title": clone["title"],
+                "body": "# edited\n",
+                "template": clone["template"],
+                "metadata": {"note": "keep me"},
+                "base_revision": clone["revision"],
+            },
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        # Persisted to disk, not just echoed: a fresh read carries the field.
+        reread = self.client.get(f"/api/plot/templates/{clone['id']}").json()
+        self.assertEqual(reread["metadata"].get("note"), "keep me")
 
     def test_a_plotline_is_not_a_template(self) -> None:
         created = self.client.post("/api/plot/plotlines", json={"title": "A Thread"}).json()

@@ -48,7 +48,7 @@ import {
 } from "@/lib/stores/structure";
 import { refreshLoreEntries, setLoreEntries } from "@/lib/stores/lore";
 import { refreshPromptEntries, setPromptEntries } from "@/lib/stores/prompts";
-import { refreshPlotTemplates } from "@/lib/stores/plotTemplates";
+import { refreshPlotTemplates, setPlotTemplates } from "@/lib/stores/plotTemplates";
 import { refreshAssistantEntries, setAssistantEntries } from "@/lib/stores/assistants";
 import { refreshKnownTags } from "@/lib/stores/tags";
 import { referenceIndexStore, refreshReferenceIndexInBackground } from "@/lib/stores/references";
@@ -728,26 +728,17 @@ class EditorPanesController {
     } catch (error) {
       console.warn("Failed to fetch backlinks", error);
     }
+    // Confirm-dialog copy per kind (assistant/chat fall through to the prompt
+    // wording, as before). Maps rather than nested ternaries so a new kind is one
+    // line in each place, not another ternary rung.
     const fileLabel =
-      documentKind === "scene"
-        ? "scene"
-        : documentKind === "lore"
-          ? "entry"
-          : documentKind === "research"
-            ? "note"
-            : documentKind === "view"
-              ? "view"
-              : "prompt";
+      ({ scene: "scene", lore: "entry", research: "note", view: "view", plot_template: "template" } as Record<string, string>)[
+        documentKind
+      ] ?? "prompt";
     const titleLabel =
-      documentKind === "scene"
-        ? "Delete Scene"
-        : documentKind === "lore"
-          ? "Delete Entry"
-          : documentKind === "research"
-            ? "Delete Note"
-            : documentKind === "view"
-              ? "Delete View"
-              : "Delete Prompt";
+      ({ scene: "Delete Scene", lore: "Delete Entry", research: "Delete Note", view: "Delete View", plot_template: "Delete Template" } as Record<string, string>)[
+        documentKind
+      ] ?? "Delete Prompt";
     const baseMessage = `Delete "${sceneTitle}"? This removes the ${fileLabel} file from the project.`;
     const message =
       backlinks.length > 0
@@ -781,6 +772,11 @@ class EditorPanesController {
       }
     } else if (documentKind === "prompt") {
       setPromptEntries((await api.deletePromptEntry(pane.scene.id)).entries);
+    } else if (documentKind === "plot_template") {
+      // An owned plot-template clone deletes via its own endpoint — routing it
+      // through api.deleteScene would 404 (it is a `plot` node, not a scene), the
+      // same hazard the `view` branch below guards against.
+      setPlotTemplates((await api.deletePlotTemplate(pane.scene.id)).entries);
     } else if (documentKind === "assistant") {
       setAssistantEntries((await api.deleteAssistantEntry(pane.scene.id)).entries);
     } else if (documentKind === "chat") {

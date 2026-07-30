@@ -132,4 +132,8 @@ class SavePlotTemplateRequest(BaseModel):
     title: str
     body: str = ""
     template: PlotTemplateSpec = Field(default_factory=PlotTemplateSpec)
+    # Schema-typed metadata round-trips like every other editable node (S4c
+    # finding #1): the read path heals + returns it, so the write path must
+    # persist it, or a schema-editor-added field would be wiped on the first save.
+    metadata: dict[str, Any] = Field(default_factory=dict)
     base_revision: str = ""

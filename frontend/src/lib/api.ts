@@ -875,9 +875,13 @@ export const api = {
         title: entry.title,
         body,
         template: entry.template,
+        metadata: entry.metadata,
         base_revision: entry.revision,
       }),
     });
+  },
+  deletePlotTemplate(entryId: string) {
+    return request<PlotTemplateList>(`/plot/templates/${entryId}`, { method: "DELETE" });
   },
   // Reusable mutation sets (#62).
   listMutationSetEntries() {

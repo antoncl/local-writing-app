@@ -363,6 +363,7 @@
     assistant: "assistant",
     chat: "chat",
     view: "view",
+    plot_template: "template",
   };
   const paneDeleteNoun = (type: string | undefined) => (type && PANE_DELETE_NOUN[type]) || "scene";
 

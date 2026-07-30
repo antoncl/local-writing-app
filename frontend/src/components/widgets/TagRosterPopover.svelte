@@ -34,6 +34,7 @@
   // Per-tag document use-counts, keyed lowercase. Loaded lazily on open (a doc
   // scan) so the fast add-path isn't blocked; counts fill in when it resolves.
   let counts = $state(new Map<string, number>());
+  let countsLoaded = $state(false);
   let busy = $state(false);
   let error = $state("");
 
@@ -73,6 +74,7 @@
       const next = new Map<string, number>();
       for (const t of overview.tags) next.set(t.name.toLowerCase(), t.count);
       counts = next;
+      countsLoaded = true;
     } catch {
       // Counts are advisory; a failed scan just leaves them blank.
     }
@@ -118,6 +120,9 @@
   function startMerge(seed: string) {
     merging = true;
     activeTag = null;
+    // Clear any list filter: merge mode shows the tick list with no filter box,
+    // so a leftover filter would silently hide (un-tickable) merge candidates.
+    filter = "";
     ticked = new Set([seed.toLowerCase()]);
     survivor = seed;
     survivorNew = "";
@@ -190,10 +195,18 @@
 
   async function doMerge() {
     if (!canMerge) return;
+    // The survivor is the merge TARGET, never one of its own sources — folding a
+    // tag into itself is a no-op that the backend would reject when the survivor
+    // is an inherited tag (`_reject_sources_above_this_layer`) and could drop the
+    // target when it drops the sources. So when the survivor is a ticked tag,
+    // exclude it; TagManagerDialog keeps target and sources separate the same way.
+    const target = chosenSurvivor;
+    const sources = tickedNames.filter((n) => n.toLowerCase() !== target.toLowerCase());
+    if (sources.length === 0) return;
     busy = true;
     error = "";
     try {
-      await api.mergeTags(tickedNames, chosenSurvivor);
+      await api.mergeTags(sources, target);
       cancelMerge();
       await afterOp();
     } catch (e) {
@@ -250,7 +263,9 @@
       </div>
       {#if confirmingMerge}
         <div class="trp-confirm">
-          <span class="trp-confirm-msg">Rewrites {mergeRewriteUses} tag use{mergeRewriteUses === 1 ? "" : "s"} · can't be undone</span>
+          <span class="trp-confirm-msg">{countsLoaded
+            ? `Rewrites ${mergeRewriteUses} tag use${mergeRewriteUses === 1 ? "" : "s"} · can't be undone`
+            : "Counting uses… · can't be undone"}</span>
           <span class="trp-spacer"></span>
           <button class="trp-cancel" type="button" onclick={() => (confirmingMerge = false)}>Cancel</button>
           <button class="trp-danger" type="button" disabled={!canMerge} onclick={doMerge}>Merge</button>

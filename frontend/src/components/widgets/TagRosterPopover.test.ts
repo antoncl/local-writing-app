@@ -104,7 +104,22 @@ describe("TagRosterPopover", () => {
     await fireEvent.click(screen.getByText("beta")); // tick the second
     await fireEvent.click(screen.getByRole("button", { name: "Merge…" })); // arm the confirm
     await fireEvent.click(screen.getByRole("button", { name: "Merge" })); // confirm
-    expect(mergeTags).toHaveBeenCalledWith(["alpha", "beta"], "alpha");
+    // The survivor (alpha) is the TARGET, never its own source — only beta is a
+    // source, so alpha is never folded into itself (which the backend rejects for
+    // inherited tags and could drop the target on).
+    expect(mergeTags).toHaveBeenCalledWith(["beta"], "alpha");
+  });
+
+  it("excludes the survivor from sources when merging into a new name", async () => {
+    setup();
+    await fireEvent.click(screen.getByRole("button", { name: "Govern alpha" }));
+    await fireEvent.click(screen.getByText("Merge…"));
+    await fireEvent.click(screen.getByText("beta"));
+    await fireEvent.input(screen.getByLabelText("Merge into a new name"), { target: { value: "cast" } });
+    await fireEvent.click(screen.getByRole("button", { name: "Merge…" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Merge" }));
+    // A brand-new survivor isn't among the ticked, so both sources fold in.
+    expect(mergeTags).toHaveBeenCalledWith(["alpha", "beta"], "cast");
   });
 
   it("backs out of the ⋯ menu to the plain list", async () => {

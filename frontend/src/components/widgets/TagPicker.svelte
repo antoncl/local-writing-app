@@ -227,9 +227,12 @@
       {:else if suggestions.length > 0}
         <!-- Assistant tags stay add-only until PR-3 adds their governance backend. -->
         {#each suggestions as tag}
+          <!-- mousedown|preventDefault keeps the entry input focused, so picking a
+               pill can't blur→crystallise half-typed text into a stray chip. -->
           <button
             class:active={selectedKeys.has(tag.name.toLowerCase())}
             type="button"
+            on:mousedown|preventDefault
             on:click={() => addTag(tag.name)}
           >{tag.name}</button>
         {/each}

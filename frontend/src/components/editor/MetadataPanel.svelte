@@ -28,6 +28,7 @@
     documentEntryTypes: [string, EntryTypeDefinition][];
     metadataFieldIds: string[];
     knownTags?: import("@/lib/types").ScopedTag[];
+    tagOrigin?: "project" | "assistant";
     loreEntries?: LoreEntrySummary[];
     promptEntries?: PromptEntrySummary[];
     structure?: StructureDocument | null;
@@ -99,6 +100,7 @@
     documentEntryTypes,
     metadataFieldIds,
     knownTags = [],
+    tagOrigin = "project",
     loreEntries = [],
     promptEntries = [],
     structure = null,
@@ -428,6 +430,7 @@
                       implicitContextMatcher={implicitContextMatcher}
                       excludeId={excludeId}
                       knownTags={knownTags}
+                      tagOrigin={tagOrigin}
                       documentKind={documentKind}
                       entryType={entryType}
                       onChange={() => {}}
@@ -491,6 +494,7 @@
                 implicitContextMatcher={implicitContextMatcher}
                 excludeId={excludeId}
                 knownTags={knownTags}
+                tagOrigin={tagOrigin}
                 documentKind={documentKind}
                 entryType={entryType}
                 onChange={(v) => onMetadataChange?.({ ...metadata, [fieldId]: v })}

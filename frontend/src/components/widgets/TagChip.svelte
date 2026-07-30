@@ -10,8 +10,12 @@
   // tag carries no colour until someone spends one on it, so most chips render
   // neutral (var(--inset)) and recede; a coloured tag gets a soft wash of its
   // swatch colour so the few axes the writer scans by pop while the label stays
-  // legible. The colour is applied inline (per-tag, not a token) via color-mix,
-  // which the style-token guard leaves alone.
+  // legible. The wash is exposed as the `--tag-fill` / `--tag-stroke` custom
+  // props on the chip container — the chip's own per-tag colour sets them inline
+  // (per-tag, not a token, via color-mix, which the style-token guard leaves
+  // alone), and any external consumer that needs to re-tint (a mutated metadata
+  // row) sets the SAME two props rather than reaching into the private SVG path
+  // (#705). The default fills come from the props' fallbacks.
   import { getSwatch } from "@/lib/utils/colors";
 
   interface Props {
@@ -50,19 +54,23 @@
   );
 </script>
 
-<span class="tag-chip" class:pending class:removable bind:clientWidth={w}>
+<!-- Per-tag colour as a SOFT WASH, not the raw saturated hex: a full-strength
+     fill fails contrast under the neutral var(--text-2) label. color-mix with
+     transparent is theme-adaptive and inline (so not a style-token). Stroke is a
+     stronger mix for a quiet edge. Set as custom props on the container so they
+     cascade to the SVG path AND stay overridable by an external tint (#705). -->
+<span
+  class="tag-chip"
+  class:pending
+  class:removable
+  bind:clientWidth={w}
+  style={hex
+    ? `--tag-fill: color-mix(in srgb, ${hex} 22%, transparent); --tag-stroke: color-mix(in srgb, ${hex} 55%, transparent)`
+    : undefined}
+>
   {#if path}
     <svg class="tag-chip-shape" width={w} height={H} viewBox={`0 0 ${w} ${H}`} aria-hidden="true">
-      <!-- Per-tag colour as a SOFT WASH, not the raw saturated hex: a full-strength
-           fill fails contrast under the neutral var(--text-2) label. color-mix with
-           transparent is theme-adaptive and inline (so not a style-token). Stroke is
-           a stronger mix for a quiet edge. -->
-      <path
-        d={path}
-        style={hex
-          ? `fill: color-mix(in srgb, ${hex} 22%, transparent); stroke: color-mix(in srgb, ${hex} 55%, transparent)`
-          : undefined}
-      />
+      <path d={path} />
     </svg>
   {/if}
   <span class="tag-chip-label">{name}</span>
@@ -102,8 +110,9 @@
     overflow: visible;
   }
   .tag-chip-shape path {
-    fill: var(--inset);
-    stroke: var(--border);
+    /* Neutral fallbacks; a coloured tag (or an external tint) supplies the props. */
+    fill: var(--tag-fill, var(--inset));
+    stroke: var(--tag-stroke, var(--border));
     stroke-width: 0.75;
   }
 

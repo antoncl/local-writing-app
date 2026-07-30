@@ -108,4 +108,43 @@ describe("TagPicker", () => {
     await fireEvent.click(screen.getByRole("button", { name: "shifter" }));
     expect(onChange).toHaveBeenLastCalledWith("shifter");
   });
+
+  it("re-filters the + suggestions when the node's scope changes (reactive)", async () => {
+    // A tag scoped to lore/character: suggested on a matching node, hidden elsewhere.
+    // Guards the inner-deps trap — `suggestions` must read scopeKind/scopeEntryType
+    // directly so a type change re-runs the filter (feedback_svelte5_reactivity_traps).
+    const scoped = [{ name: "arc", scope: { sources: [{ kind: "lore", expr: { type: "character" } }] } }];
+    const props = { value: "", knownTags: scoped, ariaLabel: "Tags", onChange: () => {} };
+    const { rerender } = render(TagPicker, {
+      props: { ...props, scopeKind: "lore", scopeEntryType: "character" },
+    });
+    await fireEvent.click(screen.getByTitle("Add known tags"));
+    expect(screen.getByText("arc")).toBeInTheDocument();
+    // Same open popover, a scene node now: the out-of-scope tag drops from the roster.
+    await rerender({ ...props, scopeKind: "scene", scopeEntryType: "" });
+    expect(screen.queryByText("arc")).not.toBeInTheDocument();
+  });
+
+  it("exposes the committed tags to assistive tech via an aria-describedby summary (#706)", () => {
+    const { input } = setup({ value: "alpha, shifter" });
+    const summaryId = input.getAttribute("aria-describedby");
+    expect(summaryId).toBeTruthy();
+    // Focusing the field reads this after the label: "Tags, edit text, alpha, shifter".
+    expect(document.getElementById(summaryId!)).toHaveTextContent("alpha, shifter");
+  });
+
+  it("summarises an empty field for assistive tech (#706)", () => {
+    const { input } = setup({ value: "" });
+    const summary = document.getElementById(input.getAttribute("aria-describedby")!);
+    expect(summary).toHaveTextContent("No tags selected");
+  });
+
+  it("marks the + toggle as an expandable popup control (#706)", async () => {
+    setup({ value: "" });
+    const toggle = screen.getByTitle("Add known tags");
+    expect(toggle).toHaveAttribute("aria-haspopup", "true");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+  });
 });

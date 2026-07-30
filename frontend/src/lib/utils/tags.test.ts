@@ -1,6 +1,29 @@
 import { describe, it, expect } from "vitest";
-import { parseTagList, tagColorMap } from "@/lib/utils/tags";
+import { dedupeTags, parseTagList, splitCommaList, tagColorMap } from "@/lib/utils/tags";
 import type { ScopedTag } from "@/lib/types";
+
+describe("splitCommaList", () => {
+  it("splits, trims, and drops empty tokens — WITHOUT de-duping", () => {
+    // Case duplicates survive: the split is policy-free; de-dupe is a caller's step.
+    expect(splitCommaList(" a , b ,, c , A ")).toEqual(["a", "b", "c", "A"]);
+  });
+
+  it("returns an empty list for null / undefined / empty", () => {
+    expect(splitCommaList(null)).toEqual([]);
+    expect(splitCommaList(undefined)).toEqual([]);
+    expect(splitCommaList("")).toEqual([]);
+  });
+});
+
+describe("dedupeTags", () => {
+  it("de-dupes an already-tokenised list case-insensitively, first spelling wins", () => {
+    expect(dedupeTags(["Alpha", "alpha", "ALPHA", "beta"])).toEqual(["Alpha", "beta"]);
+  });
+
+  it("trims and drops empty entries", () => {
+    expect(dedupeTags([" a ", "", "  ", "b"])).toEqual(["a", "b"]);
+  });
+});
 
 describe("parseTagList", () => {
   it("splits, trims, and drops empty tokens", () => {

@@ -113,6 +113,14 @@ export class HttpError extends Error {
   }
 }
 
+/** A caught client-side failure shipped to the backend error log (#386).
+ * `context` names where it happened; `detail` carries a stack or extra text. */
+export interface ClientErrorReport {
+  message: string;
+  context?: string;
+  detail?: string;
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${baseUrl}${path}`, {
     ...options,
@@ -289,6 +297,23 @@ export const api = {
     // Switching projects is just another open; overwrite the wire scope (#413).
     projectScopeRoot = info.root_path;
     return info;
+  },
+  // Ship a caught client-side error to the backend so it lands in the open
+  // project's `errors.log` (#386). Deliberately bypasses `request()`: it must
+  // not throw on a non-2xx (the route returns an empty 204) and it must never
+  // fail the operation it is recording, so a down backend, an absent project, or
+  // a network error is swallowed. `keepalive` lets a report survive page unload.
+  async logClientError(report: ClientErrorReport): Promise<void> {
+    try {
+      await fetch(`${baseUrl}/log`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...scopeHeaders() },
+        body: JSON.stringify(report),
+        keepalive: true,
+      });
+    } catch {
+      // Logging must never break the app — drop a failed report silently (#386).
+    }
   },
   // Partial update, per field: an omitted key leaves that setting alone.
   // `inherits: []` is therefore a deliberate flat project, not "no opinion" —

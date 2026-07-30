@@ -28,6 +28,20 @@ class OpenProjectRequest(BaseModel):
     root_path: str = Field(min_length=1)
 
 
+class ClientErrorReport(BaseModel):
+    """A runtime failure the browser POSTs to `/api/log` (#386).
+
+    The UI has no disk of its own, so it ships each caught error here to be
+    appended to the open project's `errors.log`. `context` names where it
+    happened (an action label); `detail` carries a stack or extra text. Only
+    `message` is required — the point is that *something* durable is written.
+    """
+
+    message: str = Field(min_length=1)
+    context: str | None = None
+    detail: str | None = None
+
+
 class AncestorCandidate(BaseModel):
     """One folder between the configured base and the open project (#309).
 

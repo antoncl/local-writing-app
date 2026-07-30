@@ -36,13 +36,25 @@ from app.scope import WorkScope
 from app.services.project_service import ProjectService, ProjectServiceError
 
 
+def root_from_header(x_project_root: str | None) -> Path | None:
+    """Decode the `X-Project-Root` header to a resolved path (or `None`).
+
+    The one place the header's URL-encoding and path resolution live, shared by
+    the request resolver and the error middleware (#386) so both read the scope
+    the same way.
+    """
+    if not x_project_root:
+        return None
+    return Path(unquote(x_project_root)).expanduser().resolve()
+
+
 def resolve_current_project(
     x_project_root: Annotated[str | None, Header()] = None,
 ) -> ProjectService:
     """Bind a service to this request's scope — once, here, and nowhere else."""
-    if not x_project_root:
+    root = root_from_header(x_project_root)
+    if root is None:
         return ProjectService(None)
-    root = Path(unquote(x_project_root)).expanduser().resolve()
     return ProjectService(WorkScope(root=root))
 
 

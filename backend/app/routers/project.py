@@ -7,6 +7,7 @@ from fastapi import APIRouter, Query
 
 from app.models import (
     AncestorCandidate,
+    ClientErrorReport,
     CreateDirectoryRequest,
     CreateProjectRequest,
     CreateStructureNodeRequest,
@@ -36,6 +37,16 @@ from app.services.project.node_index_gate import node_index_gate
 from app.services.project_service import ProjectService
 
 router = APIRouter()
+
+
+@router.post("/api/log", status_code=204)
+def log_client_error(project: CurrentProject, report: ClientErrorReport) -> None:
+    """Append a browser-reported runtime error to the open project's log (#386).
+
+    Fire-and-forget from the UI's side: recording swallows its own write errors,
+    so this never fails the operation the client was reporting on.
+    """
+    project.record_client_error(report)
 
 
 @router.get("/api/health")

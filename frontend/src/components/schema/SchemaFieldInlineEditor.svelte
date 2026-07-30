@@ -1,5 +1,12 @@
 <script lang="ts" module>
-  import type { MetadataFieldType, MetadataFieldDefinition, NodePickerConfig } from "@/lib/types";
+  import { LIST_ITEM_SCALAR_TYPES } from "@/lib/types";
+  import type {
+    ListItemScalarType,
+    MetadataFieldType,
+    MetadataFieldDefinition,
+    MetadataGroupDefinition,
+    NodePickerConfig,
+  } from "@/lib/types";
   import type { OptionDraft } from "@/components/schema/SelectOptionsEditor.svelte";
 
   // The assembled field draft emitted on save. The parent (App.saveSchemaField)
@@ -16,7 +23,12 @@
     computedFunction: "word_count" | "counter";
     computedScope: "siblings" | "manuscript";
     pickerConfig: NodePickerConfig;
+    // `list` fields only (#698): exactly one is non-null — the item shape is
+    // a named group or a single scalar type. Both null for every other type.
+    itemGroup: string | null;
+    itemType: ListItemScalarType | null;
   };
+
 </script>
 
 <script lang="ts">
@@ -55,6 +67,9 @@
     selectedFieldId?: string | null;
     readonly?: boolean;
     layerId?: string;
+    // The schema's named group definitions — the item-shape choices a `list`
+    // field can reference (#698). Keyed by group id.
+    groups?: Record<string, MetadataGroupDefinition>;
     // --- Callback props (parent owns persistence) ---
     onSave?: (payload: FieldDraftPayload) => void;
     onCancel?: () => void;
@@ -66,6 +81,7 @@
     selectedFieldId = null,
     readonly = false,
     layerId = "",
+    groups = {},
     onSave = () => {},
     onCancel = () => {},
     onRemove = () => {},
@@ -107,6 +123,15 @@
             presets: [...(f.picker_config.presets ?? [])],
           }
         : { sources: [{ kind: "lore" }] }) as NodePickerConfig,
+      // `list` item shape (#698): "group:<id>" or "scalar:<type>". A field
+      // that isn't already a list seeds EMPTY — switching a field's type to
+      // Ordered list must not silently persist a shape the author never
+      // chose; the Done button stays disabled until they pick one.
+      itemShape: f?.item_group
+        ? `group:${f.item_group}`
+        : f?.item_type
+          ? `scalar:${f.item_type}`
+          : "",
     };
   });
   let type: MetadataFieldType = $state(seed.type);
@@ -119,6 +144,27 @@
   let computedFunction: "word_count" | "counter" = $state(seed.computedFunction);
   let computedScope: "siblings" | "manuscript" = $state(seed.computedScope);
   let pickerConfig: NodePickerConfig = $state(seed.pickerConfig);
+  let itemShape: string = $state(seed.itemShape);
+  const itemGroup = $derived(itemShape.startsWith("group:") ? itemShape.slice(6) : null);
+  const itemType = $derived(
+    itemShape.startsWith("scalar:") ? (itemShape.slice(7) as ListItemScalarType) : null,
+  );
+  // Groups offered as item shapes: only members inside the one scalar
+  // catalog (LIST_ITEM_SCALAR_TYPES — same source as the backend's positive
+  // integrity check). A group with, e.g., an entity_ref member is legal to
+  // APPLY (flattened) but would 422 as an item shape, so it isn't offered.
+  const shapeableGroups = $derived(
+    Object.entries(groups).filter(([, groupDef]) =>
+      groupDef.members.every((m) => (LIST_ITEM_SCALAR_TYPES as readonly string[]).includes(m.type)),
+    ),
+  );
+  // An EXISTING field can point at a group the filter above excludes (the
+  // group gained an unsupported member later) or that no longer exists — the
+  // select must still show the field's real shape rather than render blank
+  // and unreachable (the organize-level fallback idiom).
+  const currentShapeMissing = $derived(
+    itemGroup !== null && !shapeableGroups.some(([groupId]) => groupId === itemGroup),
+  );
   let typeMenuOpen = $state(false);
   let keyEditing = $state(false);
   let keyManual = $state(false);
@@ -157,10 +203,33 @@
   }
 
   function emitSave() {
-    onSave({ type, name, id, icon, group, defaultValue, options, computedFunction, computedScope, pickerConfig });
+    onSave({
+      type,
+      name,
+      id,
+      icon,
+      group,
+      defaultValue,
+      options,
+      computedFunction,
+      computedScope,
+      pickerConfig,
+      itemGroup: type === "list" ? itemGroup : null,
+      itemType: type === "list" ? itemType : null,
+    });
   }
 
-  const saveDisabled = $derived(!layerId || !id.trim() || !name.trim());
+  const saveDisabled = $derived(
+    !layerId ||
+      !id.trim() ||
+      !name.trim() ||
+      (type === "list" && !itemGroup && !itemType) ||
+      // An unresolvable current shape can't be persisted (the backend
+      // integrity check 422s it), so block Done and say why inline rather
+      // than let the author hit a server error — they must pick a supported
+      // shape (or Cancel) to proceed.
+      (type === "list" && currentShapeMissing),
+  );
 </script>
 
 <svelte:window onmousedown={handleDocumentMousedown} />
@@ -289,17 +358,68 @@
       </p>
     </div>
   {/if}
-  {#if type === "select" || type === "multi_select"}
+  {#if type === "list"}
+    <!-- The list type's whole config is ONE question (#698, per the agreed
+         mockup): what is an item — a named group (defined once, in Groups,
+         never re-declared per list) or a single value. -->
+    <div class="sfi-computed">
+      <label class="sfi-field">Items are
+        <select bind:value={itemShape} aria-label="List item shape">
+          {#if !itemShape}
+            <option value="" disabled>Choose an item shape…</option>
+          {/if}
+          {#if currentShapeMissing}
+            <!-- The field's real shape stays representable even when the
+                 group is filtered out (unsupported members) or deleted —
+                 with the reason that actually applies. -->
+            <option value={`group:${itemGroup}`} disabled>
+              {groups[itemGroup ?? ""]
+                ? `${groups[itemGroup ?? ""].name} (current shape — unsupported members)`
+                : `${itemGroup} (current shape — group not found)`}
+            </option>
+          {/if}
+          {#if shapeableGroups.length > 0}
+            <optgroup label="A group…">
+              {#each shapeableGroups as [groupId, groupDef] (groupId)}
+                <option value={`group:${groupId}`}>
+                  {groupDef.name} ({groupDef.members.map((m) => m.name || m.key).join(" · ")})
+                </option>
+              {/each}
+            </optgroup>
+          {/if}
+          <optgroup label="A single value…">
+            {#each LIST_ITEM_SCALAR_TYPES as scalarChoice (scalarChoice)}
+              <option value={`scalar:${scalarChoice}`}>{fieldTypeLabel(scalarChoice)}</option>
+            {/each}
+          </optgroup>
+        </select>
+      </label>
+      {#if currentShapeMissing}
+        <p class="sfi-options-hint">
+          <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+          this field's item shape is no longer valid — pick a supported shape to save (existing items keep their shape until then)
+        </p>
+      {:else}
+        <p class="sfi-options-hint">
+          <i class="ti ti-info-circle" aria-hidden="true"></i>
+          a group shape is defined once, in Groups — reused here, never re-declared
+        </p>
+      {/if}
+    </div>
+  {/if}
+  {#if type === "select" || type === "multi_select" || (type === "list" && itemType === "select")}
     <SelectOptionsEditor
       options={options}
       onChange={(next) => (options = next)}
     />
   {/if}
-  {#if type !== "computed"}
+  {#if type !== "computed" && type !== "list"}
     <!-- Default-value editor (#38). Shared with the prompt-inputs editor
          via DefaultValueEditor. Empty = no default (the historic
          behaviour). Computed fields omit this — their value is derived,
-         not authored. -->
+         not authored. `list` omits it too (v1, #698): the string-typed
+         default contract can't carry structured items, and list defaults
+         are rare enough to defer rather than half-support. -->
     <label class="sfi-field sfi-default-field">
       Default for new entries
       <DefaultValueEditor

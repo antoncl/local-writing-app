@@ -22,6 +22,7 @@ export const DEFAULT_FIELD_GLYPH: Record<MetadataFieldType, string> = {
   tags: "tag",
   computed: "calculator",
   color: "palette",
+  list: "list-numbers",
 };
 
 // The Tabler name for a field: its own `icon` override, else the type
@@ -48,6 +49,7 @@ export const FIELD_TYPE_CHOICES: MetadataFieldType[] = [
   "boolean",
   "select",
   "multi_select",
+  "list",
   "entity_ref",
   "entity_ref_list",
   "tags",
@@ -72,6 +74,9 @@ export function fieldTypeLabel(type: MetadataFieldType): string {
     tags: "Tags",
     computed: "Computed",
     color: "Colour",
+    // "Ordered list", not "List": multi_select already owns the bare
+    // "List" label, and the ADR-0048 §6 noun for this type is ordered.
+    list: "Ordered list",
   };
   return labels[type] ?? type;
 }
@@ -126,8 +131,8 @@ export const CURATED_ICON_CATEGORIES: IconCategory[] = [
     label: "Symbols",
     icons: [
       "tag", "tags", "link", "affiliate", "hash", "pin", "paperclip",
-      "quote", "list-check", "letter-case", "align-left", "toggle-right",
-      "calculator",
+      "quote", "list-check", "list-numbers", "letter-case", "align-left",
+      "toggle-right", "calculator",
     ],
   },
 ];

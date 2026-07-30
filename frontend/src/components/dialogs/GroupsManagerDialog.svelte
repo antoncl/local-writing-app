@@ -2,6 +2,7 @@
   import { api } from "@/lib/api";
   import IconPicker from "@/components/widgets/IconPicker.svelte";
   import { fieldIconClass, DEFAULT_FIELD_GLYPH } from "@/lib/utils/fieldIcons";
+  import { dropPositionFromEvent, reorderByPosition } from "@/lib/utils/listOrder";
   import type { GroupMember, MetadataGroupDefinition, MetadataSchema } from "@/lib/types";
 
   // Reusable L2 group definitions (keyed by id) + the layer to save into.
@@ -104,9 +105,7 @@
     if (memberDragIndex === null || memberDragIndex === index) return;
     event.preventDefault();
     if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
-    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    const position = event.clientY < rect.top + rect.height / 2 ? "before" : "after";
-    memberDropTarget = { index, position };
+    memberDropTarget = { index, position: dropPositionFromEvent(event) };
   }
   function clearMemberDrag() {
     memberDragIndex = null;
@@ -117,12 +116,7 @@
     const position = memberDropTarget?.position ?? "before";
     clearMemberDrag();
     if (from === null || from === index) return;
-    const next = [...draftMembers];
-    const [moved] = next.splice(from, 1);
-    let insertAt = index > from ? index - 1 : index;
-    if (position === "after") insertAt += 1;
-    next.splice(insertAt, 0, moved);
-    draftMembers = next;
+    draftMembers = reorderByPosition(draftMembers, from, index, position);
   }
 
   async function saveGroup() {
@@ -131,14 +125,27 @@
       error = "A group name is required.";
       return;
     }
+    // Spread the DRAFT member first: it was loaded as {...member} from the
+    // resolved group, so member `options`, `picker_config`, and `default`
+    // ride through untouched. Rebuilding from a hand-picked key set here
+    // silently wiped all three (plus the group's own icon) on every save —
+    // and since #698 makes members a validation-bearing item shape, a wiped
+    // select member also disabled its allowed-values check.
     const members = draftMembers
       .filter((member) => member.name.trim())
       .map((member) => ({
+        ...member,
         key: member.key || slug(member.name),
         name: member.name.trim(),
-        type: member.type,
-        ...(member.icon ? { icon: member.icon } : {}),
       }));
+    // The group's own icon is deliberately NOT written here: this dialog has
+    // no icon editor, so it never round-trips through the draft. Reading it
+    // back off the merged `groups` map and re-persisting would copy an
+    // ANCESTOR layer's icon down into this layer's file, freezing it against
+    // later ancestor changes (the layered-schema hygiene the backend
+    // model_dump excludes enforce). Omitting it leaves an ancestor's icon
+    // intact in the merged view; a same-layer icon is the same "no editor"
+    // limitation member options had before this PR — tracked, not regressed.
     const group: MetadataGroupDefinition = {
       name: draftName.trim() || id,
       members,

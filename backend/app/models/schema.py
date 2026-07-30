@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Final, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -12,6 +12,13 @@ from app.models.base import (
     _normalize_select_options,
 )
 from app.models_views import NodePickerConfig
+
+# The single catalog of scalar types a list item may be (#698) — the Literal
+# is the source, the frozenset its runtime mirror (via get_args, so the two
+# cannot drift). The schema-integrity member check is the POSITIVE form of
+# this same catalog: a group member type outside it cannot be an item shape.
+ListItemScalarType = Literal["text", "long_text", "number", "boolean", "select", "color"]
+LIST_ITEM_SCALAR_TYPES: Final[frozenset[str]] = frozenset(get_args(ListItemScalarType))
 
 
 class MetadataFieldDefinition(BaseModel):
@@ -29,10 +36,40 @@ class MetadataFieldDefinition(BaseModel):
         "tags",
         "computed",
         "color",
+        "list",
     ]
     options: list[SelectOption] = Field(default_factory=list)
     picker_config: NodePickerConfig | None = None
     computed: dict[str, str] | None = None
+    # `list` fields (#698 / ADR-0048 §6): an ordered list whose item shape is
+    # EITHER a named group (`item_group` = a MetadataGroupDefinition id — the
+    # group consumed nested, the second consumption mode beside application
+    # flattening) OR a single scalar (`item_type` — sugar, normalized to a
+    # one-member shape before validation/UI; values stored as a flat YAML
+    # scalar sequence, the way multi_select stores). Exactly one of the two
+    # must be set when type == "list"; both must be absent otherwise. A
+    # select-typed item_type reads its choices from this field's `options`.
+    # v1 keeps entity_ref / entity_ref_list / tags OUT of item shapes — the
+    # read-side healers only walk top-level values, and a half-healed nested
+    # ref would be a silent mis-link (enforced at schema-integrity time for
+    # item_group; by the Literal below for item_type).
+    item_group: str | None = None
+    item_type: ListItemScalarType | None = None
+    # DERIVED, not authored (the `category` pattern): the resolved item shape
+    # for list fields — the named group's members, or the item_type sugar
+    # normalized to a one-member shape (key "value", options seeded from this
+    # field's `options`). Stamped by the schema resolver on read; None on
+    # authored input; never persisted. Validation and the UI read ONLY this,
+    # so both consume one internal model regardless of how the shape was
+    # declared.
+    item_members: list[GroupMember] | None = None
+    # DERIVED like `item_members`: True when the stamped shape is the
+    # item_type sugar (items store flat scalars), False when it is a group
+    # (items store member-keyed maps). This — never `item_type is not None` —
+    # is the shape discriminator every consumer must read: on a cross-layer
+    # both-keys conflict the resolver's tie-break decides, and a consumer
+    # keying on the raw declaration would take the losing side.
+    item_scalar: bool | None = None
     # Optional Tabler icon name (without the `ti-` prefix), e.g. "shield-half".
     # Empty/None falls back to the default glyph for the field's type
     # (see the metadata revision design). Display-only; the macro contract
@@ -78,6 +115,15 @@ class MetadataFieldDefinition(BaseModel):
     @classmethod
     def _accept_bare_strings(cls, value: Any) -> Any:
         return _normalize_select_options(value)
+
+    # The exactly-one-of item_group / item_type rule is deliberately NOT a
+    # model validator: layers merge field definitions by key union, so an
+    # ancestor's item_group plus a child's item_type can legitimately meet in
+    # one merged def — a raising validator would turn that authoring conflict
+    # into an unreadable schema (500 on every read). Like the computed-
+    # settings rule, it is a soft, reportable schema-integrity error
+    # (`_validate_metadata_schema_definition`), and the resolver breaks the
+    # tie deterministically (item_group wins) so reads stay serviceable.
 
 
 class PromptInputDefinition(BaseModel):

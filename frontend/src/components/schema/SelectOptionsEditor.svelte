@@ -24,6 +24,7 @@
   // list in via `options` and stores the new list on receipt.
 
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
+  import { dropPositionFromEvent, reorderByPosition } from "@/lib/utils/listOrder";
 
   interface Props {
     options?: OptionDraft[];
@@ -59,21 +60,6 @@
 
   let dragIndex = $state<number | null>(null);
   let dropTarget = $state<{ index: number; position: "before" | "after" } | null>(null);
-
-  function dropPositionFromEvent(event: DragEvent): "before" | "after" {
-    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    return event.clientY < rect.top + rect.height / 2 ? "before" : "after";
-  }
-
-  function reorderByPosition<T>(list: T[], from: number, to: number, position: "before" | "after"): T[] {
-    if (from < 0 || to < 0) return list;
-    const next = [...list];
-    const [moved] = next.splice(from, 1);
-    let insertAt = to > from ? to - 1 : to;
-    if (position === "after") insertAt += 1;
-    next.splice(insertAt, 0, moved);
-    return next;
-  }
 
   function onDragStart(index: number) {
     dragIndex = index;

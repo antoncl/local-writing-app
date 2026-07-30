@@ -13,6 +13,7 @@
   import SchemaTreePane from "@/components/schema/SchemaTreePane.svelte";
   import SchemaTypeEditor, { type TypeDraftPayload } from "@/components/schema/SchemaTypeEditor.svelte";
   import type { FieldDraftPayload } from "@/components/schema/SchemaFieldInlineEditor.svelte";
+  import { dropPositionFromEvent, reorderByPosition } from "@/lib/utils/listOrder";
   import type { OptionDraft } from "@/components/schema/SelectOptionsEditor.svelte";
   import GroupsManagerDialog from "@/components/dialogs/GroupsManagerDialog.svelte";
   import {
@@ -483,7 +484,12 @@
     // rewrites stored entry data. Reorder-safe (keyed by originalValue, not
     // position); added rows have no originalValue so they never migrate.
     const optionMigration = buildOptionMigrationFromDrafts(payload.options);
-    const hasOptions = payload.type === "select" || payload.type === "multi_select";
+    // A list whose items are the `select` scalar reads its choices from the
+    // field's own options (#698) — same rows editor, same persistence.
+    const hasOptions =
+      payload.type === "select" ||
+      payload.type === "multi_select" ||
+      (payload.type === "list" && payload.itemType === "select");
     const hasPicker = payload.type === "entity_ref" || payload.type === "entity_ref_list";
     const computedSpec: Record<string, string> | null =
       payload.type === "computed"
@@ -496,13 +502,19 @@
     // key entirely so the field stays defaultless rather than seeding a falsy
     // value into new entries.
     const defaultValue =
-      payload.type === "computed" ? undefined : schemaFieldDefaultForStorage(payload.type, payload.defaultValue);
+      payload.type === "computed" || payload.type === "list"
+        ? undefined
+        : schemaFieldDefaultForStorage(payload.type, payload.defaultValue);
     const nextField: MetadataFieldDefinition = {
       name: payload.name.trim() || nextFieldId,
       type: payload.type,
       options: hasOptions ? options : [],
       ...(hasPicker ? { picker_config: payload.pickerConfig } : {}),
       ...(computedSpec ? { computed: computedSpec } : {}),
+      // List item shape (#698): exactly one of the two, enforced by the
+      // editor's single "Items are" control (and again by the backend model).
+      ...(payload.type === "list" && payload.itemGroup ? { item_group: payload.itemGroup } : {}),
+      ...(payload.type === "list" && payload.itemType ? { item_type: payload.itemType } : {}),
       ...(payload.group.trim() ? { group: payload.group.trim() } : {}),
       // Per-field icon override (chosen in the IconPicker). null/empty = fall
       // back to the field-type default glyph.
@@ -511,28 +523,73 @@
     };
 
     // Detect option values that are being removed (present before, gone now, and
-    // not a rename source) — those get cleared from existing documents.
+    // not a rename source) — those get cleared from existing documents. A list
+    // field with the select item sugar carries options the same way (#698).
     const previousField = previousFieldId ? metadataSchema?.fields[previousFieldId] : null;
+    const previousHadOptions =
+      previousField != null &&
+      (previousField.type === "select" ||
+        previousField.type === "multi_select" ||
+        (previousField.type === "list" && previousField.item_type === "select"));
     const newValueSet = new Set(options.map((o) => o.value));
     const renameKeys = new Set(Object.keys(optionMigration ?? {}));
-    const removedValues = hasOptions && previousField && (previousField.type === "select" || previousField.type === "multi_select")
+    const removedValues = hasOptions && previousField && previousHadOptions
       ? previousField.options.map((o) => o.value).filter((v) => !newValueSet.has(v) && !renameKeys.has(v))
       : [];
 
     const persist = () => persistSchemaField({ layerId, entryType, previousFieldId, nextFieldId, nextField, optionMigration });
 
+    // Changing an existing list field's ITEM SHAPE (#698) doesn't convert
+    // stored items — there is no migration for structure. Existing values
+    // keep their old shape: the widget shows them read-only as mismatched,
+    // and saves fail validation until the items are re-entered. Make that a
+    // deliberate, confirmed act instead of a silent one.
+    const shapeChanged =
+      previousField?.type === "list" &&
+      payload.type === "list" &&
+      ((previousField.item_group ?? null) !== (payload.itemGroup ?? null) ||
+        (previousField.item_type ?? null) !== (payload.itemType ?? null));
+
+    // Confirms COMPOSE — a save can both change the item shape and remove
+    // option values, and each warning names a different loss, so neither may
+    // swallow the other. Chain from the last step back to persist. The shape
+    // confirm deliberately has NO dontShowAgainKey: suppressing it would
+    // rebuild the silent structural change the gesture exists to stop (the
+    // LayerAuthoringBar precedent).
+    let commit: () => Promise<void> = persist;
     if (removedValues.length > 0) {
-      confirmService.request({
-        title: removedValues.length > 1 ? "Remove these option values?" : "Remove this option value?",
-        message: `Removing ${removedValues.join(", ")} will clear ${removedValues.length > 1 ? "them" : "it"} from every document that currently uses ${removedValues.length > 1 ? "them" : "it"}.`,
-        confirmLabel: "Remove & save",
-        destructive: true,
-        cannotBeUndone: true,
-        dontShowAgainKey: "removeSelectOptions",
-        onConfirm: persist,
-      });
-    } else {
+      const next = commit;
+      commit = async () => {
+        confirmService.request({
+          title: removedValues.length > 1 ? "Remove these option values?" : "Remove this option value?",
+          message: `Removing ${removedValues.join(", ")} will clear ${removedValues.length > 1 ? "them" : "it"} from every document that currently uses ${removedValues.length > 1 ? "them" : "it"}.`,
+          confirmLabel: "Remove & save",
+          destructive: true,
+          cannotBeUndone: true,
+          dontShowAgainKey: "removeSelectOptions",
+          onConfirm: next,
+        });
+      };
+    }
+    if (shapeChanged) {
+      const next = commit;
+      commit = async () => {
+        confirmService.request({
+          title: "Change this list's item shape?",
+          message:
+            "Existing items keep their current shape — they will show as unrecognized and " +
+            "entries that carry them cannot be saved until those items are re-entered or removed.",
+          confirmLabel: "Change shape & save",
+          destructive: true,
+          cannotBeUndone: true,
+          onConfirm: next,
+        });
+      };
+    }
+    if (commit === persist) {
       await run(persist);
+    } else {
+      await commit();
     }
   }
 
@@ -711,24 +768,6 @@
       }
     }
     return Object.keys(migration).length > 0 ? migration : null;
-  }
-
-  // Shared drop-position helper: before/after based on cursor vs row midpoint.
-  // Mirrors the NodeRow tree-drag marker so every reorderable list reads the
-  // same way (a 2px accent insertion line; see .drop-before/.drop-after CSS).
-  function dropPositionFromEvent(event: DragEvent): "before" | "after" {
-    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    return event.clientY < rect.top + rect.height / 2 ? "before" : "after";
-  }
-  // Reorder helper: move `from` index to before/after `to` index.
-  function reorderByPosition<T>(list: T[], from: number, to: number, position: "before" | "after"): T[] {
-    if (from < 0 || to < 0) return list;
-    const next = [...list];
-    const [moved] = next.splice(from, 1);
-    let insertAt = to > from ? to - 1 : to;
-    if (position === "after") insertAt += 1;
-    next.splice(insertAt, 0, moved);
-    return next;
   }
 
   function onFieldDragStart(fieldId: string) {

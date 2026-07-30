@@ -105,6 +105,10 @@ class _WitnessScope:
     field_types: dict[str, str]
     labels: dict[str, str]
     options: dict[str, list[str]]
+    # Field ids excluded from `state` — the type rule (UNWITNESSED_FIELD_TYPES)
+    # and the item-shape rule (#698: a list whose items carry long_text prose)
+    # computed as ONE set in one traversal, so `witnessed()` is one lookup.
+    unwitnessed_ids: frozenset[str]
 
 
 class SnapshotWitnessMixin:
@@ -205,6 +209,7 @@ class SnapshotWitnessMixin:
             field_types=_field_types_from(schema),
             labels=labels,
             options=options,
+            unwitnessed_ids=unwitnessed_field_ids(schema),
         )
 
         scene_edges = (
@@ -335,7 +340,7 @@ class SnapshotWitnessMixin:
         # a report that named only the stored value would be wrong inside an
         # interval, and one that named only the override would be empty outside.
         def witnessed(key: str) -> bool:
-            return scope.field_types.get(key, "text") not in UNWITNESSED_FIELD_TYPES
+            return key not in scope.unwitnessed_ids
 
         state: dict[str, Any] = {
             key: value for key, value in base_metadata.items() if witnessed(key)
@@ -422,6 +427,31 @@ class SnapshotWitnessMixin:
             return self.read_metadata_schema()
         except ProjectServiceError:
             return None
+
+
+def unwitnessed_field_ids(schema: Any | None) -> frozenset[str]:
+    """Every field id the witness excludes from `state`, as one rule.
+
+    Two halves: the type rule (UNWITNESSED_FIELD_TYPES — unbounded prose,
+    including the intrinsic body), and the item-shape rule (#698: a list
+    whose item shape includes a long_text member is exactly as unbounded —
+    the ~40x bloat the type rule was measured to stop — but the type check
+    sees only "list"; the item_type long_text sugar is covered because the
+    resolver normalizes it into `item_members`).
+
+    Exported for the drift compare: a stored witness was written under the
+    rules of ITS day, so a field that has since become unwitnessed must be
+    pruned from the stored side too — otherwise the report renders the
+    field as having been emptied when only the schema changed."""
+
+    out = {key for key, ftype in _field_types_from(schema).items() if ftype in UNWITNESSED_FIELD_TYPES}
+    for field_id, field in (getattr(schema, "fields", None) or {}).items():
+        if getattr(field, "type", "") != "list":
+            continue
+        members = getattr(field, "item_members", None) or []
+        if any(getattr(member, "type", "") == "long_text" for member in members):
+            out.add(field_id)
+    return frozenset(out)
 
 
 def _field_types_from(schema: Any | None) -> dict[str, str]:

@@ -257,7 +257,19 @@ class LayerOverridesMixin:
             for row in record.rows:
                 field_type = field_types.get(row.field, "text")
                 applied = True
-                if field_type in COLLECTION_FIELD_TYPES:
+                if field_type == "list":
+                    # #698: string rows cannot carry structured items. "" is
+                    # the representable clear (folds to an empty list); any
+                    # other value — a hand-edited file, or a row written while
+                    # the field was still a scalar type before a retype — is
+                    # ignored rather than installed as a string the reads
+                    # would then reject ("a hand-edited file cannot corrupt
+                    # the fold" must hold for this type too).
+                    if row.op == "replace" and row.value == "":
+                        result[row.field] = []
+                    else:
+                        applied = False
+                elif field_type in COLLECTION_FIELD_TYPES:
                     current = _as_str_list(result.get(row.field))
                     if row.op == "replace":
                         current = _split_collection_value(row.value)
@@ -320,6 +332,22 @@ class LayerOverridesMixin:
                 base_value = base.get(field)
                 new_value = submitted.get(field)
                 if new_value != base_value:
+                    if field_type == "list":
+                        # #698 v1: the override row format is string-typed (the
+                        # #58 marker grammar), so a NON-EMPTY structured list has
+                        # no honest representation here — str() would persist a
+                        # Python repr the fold then serves as the value. Clearing
+                        # IS representable (value="" folds to []), so the revert
+                        # gesture keeps working; anything else refuses loudly.
+                        # Structured override rows are a filed follow-up.
+                        if new_value in (None, "", []):
+                            rows.append(MutationSetRow(field=field, op="replace", value=""))
+                            continue
+                        raise ProjectServiceError(
+                            f"Ordered-list field {field} cannot be overridden from a "
+                            "descendant layer yet; edit the entry in the project that owns it.",
+                            422,
+                        )
                     # A field omitted from the payload clears to empty, matching an
                     # owned save (which drops the key by rewriting the whole file).
                     rows.append(MutationSetRow(field=field, op="replace", value="" if new_value is None else str(new_value)))

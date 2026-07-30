@@ -23,6 +23,7 @@ from typing import Any
 
 from app.models import (
     AIEntryPatch,
+    GroupMember,
     MetadataFieldDefinition,
     MetadataSchema,
     ScopedTag,
@@ -251,7 +252,86 @@ class MetadataValuesMixin:
             for item in value:
                 errors.extend(self._validate_reference_target(label, field_id, item, field, node_index))
             return errors
+        if field.type == "list":
+            return self._validate_list_field_value(label, field_id, value, field, node_index=node_index)
         return []
+
+    def _validate_list_field_value(
+        self,
+        label: str,
+        field_id: str,
+        value: Any,
+        field: MetadataFieldDefinition,
+        *,
+        node_index: NodeIndex | None = None,
+    ) -> list[str]:
+        """Per-item validation for list fields (#698, ADR-0048 §6).
+
+        Items recurse through `_validate_metadata_field_value` with each
+        member viewed as a plain field definition — the per-scalar validators
+        apply verbatim, nothing list-specific re-implements them. The shape
+        comes from the resolver-stamped `item_members` (one internal model:
+        `item_type` sugar arrives here already normalized to a one-member
+        shape and stores flat scalars; `item_group` lists store maps keyed by
+        member key)."""
+
+        if not isinstance(value, list):
+            return [f"{label} metadata field {field_id} must be a list."]
+        members = field.item_members or []
+        if not members:
+            return [
+                f"{label} metadata field {field_id} has no resolved item shape "
+                f"(unknown item_group {field.item_group}?)."
+            ]
+        errors: list[str] = []
+        # `item_scalar` is the resolver's tie-break verdict — never branch on
+        # the raw item_type here, which a cross-layer conflict can leave set
+        # while the stamped shape is the group's.
+        if field.item_scalar:
+            member_field = self._group_member_as_field(members[0])
+            for index, item in enumerate(value):
+                errors.extend(
+                    self._validate_metadata_field_value(
+                        label, f"{field_id}[{index}]", item, member_field, node_index=node_index
+                    )
+                )
+            return errors
+        # Member field defs are built ONCE per call, not per item — validation
+        # runs on read too, so this is the hot loop of opening an entry.
+        member_fields = {member.key: self._group_member_as_field(member) for member in members}
+        for index, item in enumerate(value):
+            if not isinstance(item, dict):
+                errors.append(f"{label} metadata field {field_id}[{index}] must be a map of member values.")
+                continue
+            for member_key, member_value in item.items():
+                member_field = member_fields.get(member_key)
+                if member_field is None:
+                    errors.append(
+                        f"{label} metadata field {field_id}[{index}] has unknown member {member_key}."
+                    )
+                    continue
+                errors.extend(
+                    self._validate_metadata_field_value(
+                        label,
+                        f"{field_id}[{index}].{member_key}",
+                        member_value,
+                        member_field,
+                        node_index=node_index,
+                    )
+                )
+        return errors
+
+    @staticmethod
+    def _group_member_as_field(member: GroupMember) -> MetadataFieldDefinition:
+        """A list item's member, viewed as a plain field definition, so the
+        per-scalar validators (and their reference checks) apply verbatim."""
+
+        return MetadataFieldDefinition(
+            name=member.name or member.key,
+            type=member.type,
+            options=member.options,
+            picker_config=member.picker_config,
+        )
 
     def validate_ai_entry_patch(self, entry_id: str, raw: str) -> AIEntryPatch:
         """Turn a brainstorm-commit reply into a validated, review-ready patch.
@@ -326,6 +406,15 @@ class MetadataValuesMixin:
                     "AI patch", field_id, value, field, node_index=None
                 )
                 if errors:
+                    # A field with any illegal value drops WHOLE — for `list`
+                    # fields too (#698). The prompt asks the model for the
+                    # complete replacement list, so keeping only the valid
+                    # items and letting the author adopt that partial list
+                    # would silently delete the entry's other items while the
+                    # UI reports the field as merely "ignored". Dropping whole
+                    # leaves the current value untouched; per-item validation
+                    # still names the offending item in the error the author
+                    # can act on (`field[2].status must be one of …`).
                     dropped.append(field_id)
                     continue
                 fields[field_id] = value
@@ -362,12 +451,36 @@ class MetadataValuesMixin:
         allowed = set(entry_type_definition.fields) if entry_type_definition else set()
         cleaned: dict[str, Any] = {}
         for field_id, value in metadata.items():
-            if field_id not in schema.fields:
+            field = schema.fields.get(field_id)
+            if field is None:
                 continue
             if allowed and field_id not in allowed:
                 continue
-            cleaned[field_id] = value
+            cleaned[field_id] = self._strip_unknown_list_members(field, value)
         return cleaned
+
+    @staticmethod
+    def _strip_unknown_list_members(field: MetadataFieldDefinition, value: Any) -> Any:
+        """The nested twin of the unknown-field strip (#698): a group edit can
+        retire a member while stored items still carry its key, and the rail
+        renders only schema members — so the orphaned key would be invisible
+        yet fail every save. Same read-side contract as the field-level strip:
+        the file keeps the stale key until the next save writes back clean."""
+
+        if field.type != "list" or field.item_scalar or not isinstance(value, list):
+            return value
+        member_keys = {member.key for member in field.item_members or []}
+        if not member_keys:
+            return value
+        cleaned_items: list[Any] = []
+        changed = False
+        for item in value:
+            if isinstance(item, dict) and any(key not in member_keys for key in item):
+                cleaned_items.append({key: v for key, v in item.items() if key in member_keys})
+                changed = True
+            else:
+                cleaned_items.append(item)
+        return cleaned_items if changed else value
 
     def _strip_dangling_references(
         self,

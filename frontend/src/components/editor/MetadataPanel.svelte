@@ -4,7 +4,7 @@
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import ColoredSelect from "@/components/widgets/ColoredSelect.svelte";
   import { fieldIconClass } from "@/lib/utils/fieldIcons";
-  import { effectiveFieldLabel, effectiveFieldHidden } from "@/lib/utils/schemaTypeHelpers";
+  import { effectiveFieldLabel, effectiveFieldHidden, metadataValueDisplayString } from "@/lib/utils/schemaTypeHelpers";
   import type {
     DocumentKind,
     EntryMetadata,
@@ -189,16 +189,15 @@
       field.type === "entity_ref" ||
       field.type === "entity_ref_list" ||
       field.type === "tags" ||
+      field.type === "list" ||
       (field.type === "multi_select" && field.options.length > 0)
     );
   }
 
-  function metadataValueString(value: MetadataValue | undefined): string {
-    if (Array.isArray(value)) return value.join(", ");
-    if (value === null || value === undefined) return "";
-    if (typeof value === "object") return JSON.stringify(value);
-    return String(value);
-  }
+  // The shared record-aware rule (#698): the flip's "Current:" hint and the
+  // default hint must render a list of records as member values, never
+  // "[object Object]" — this line is what the author reads before adopting.
+  const metadataValueString = metadataValueDisplayString;
 
   function isMutated(fieldId: string): boolean {
     return effectiveOverrides != null && fieldId in effectiveOverrides;

@@ -16,6 +16,7 @@
   // warm = the scene as it is (§H). Nothing here draws a glyph — a snapshot
   // difference exists only while parked, and a glyph puts a permanent-looking
   // mark on a temporary condition (§J).
+  import { metadataValueDisplayString } from "@/lib/utils/schemaTypeHelpers";
   import type {
     EntityDrift,
     FieldReinterpretation,
@@ -27,12 +28,13 @@
 
   /** A value as the author reads it. An absence renders as the same "(none)"
    *  the metadata rail uses — two spellings of nothing must not look like a
-   *  change, which is what `same_rendered_value` already enforces on the wire. */
+   *  change, which is what `same_rendered_value` already enforces on the wire.
+   *  Uses the shared record-aware rule (#698): a list of records must NAME its
+   *  member values — "the report IS the feature", and "[object Object]" names
+   *  nothing. */
   function shown(value: unknown): string {
-    if (value === null || value === undefined || value === "") return "(none)";
-    if (Array.isArray(value)) return value.length ? value.join(", ") : "(none)";
-    if (typeof value === "object") return JSON.stringify(value);
-    return String(value);
+    const rendered = metadataValueDisplayString(value as never);
+    return rendered === "" ? "(none)" : rendered;
   }
 
   /** The headline for one entity, in the author's vocabulary.

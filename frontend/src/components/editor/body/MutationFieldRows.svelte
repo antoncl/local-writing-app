@@ -54,12 +54,15 @@
   }
 
   // The mutable fields for an entry type: intrinsic title/body + its resolved
-  // schema fields, minus computed (derived).
+  // schema fields, minus computed (derived) and `list` (#698: the marker
+  // grammar is string-typed — a structured item has no honest representation
+  // in a mutation row, and String() would write "[object Object]" into the
+  // scene body; per-item mutation ops for lists are a follow-up).
   export function buildFieldOptions(schema: MetadataSchema | null, entryType: string): FieldOption[] {
     const opts = INTRINSIC_FIELDS.map((f) => ({ id: f.id, label: f.def.name, def: f.def }));
     for (const id of schema?.entry_types[entryType]?.fields ?? []) {
       const def = schema?.fields[id];
-      if (!def || def.type === "computed") continue;
+      if (!def || def.type === "computed" || def.type === "list") continue;
       opts.push({ id, label: def.name ?? id, def });
     }
     return opts;
@@ -171,6 +174,12 @@
                 value: "",
               })}
           >
+            {#if row.field && !fieldOptions.some((f) => f.id === row.field)}
+              <!-- An existing row can target a field the roster now excludes
+                   (e.g. retyped to `list`, #698) — keep its target visible
+                   instead of a blank select the author can't interpret. -->
+              <option value={row.field} disabled>{labelFor(row.field)} — not mutable</option>
+            {/if}
             {#each fieldOptions as f (f.id)}
               <option value={f.id}>{f.label}</option>
             {/each}

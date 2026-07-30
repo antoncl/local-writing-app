@@ -380,14 +380,35 @@ def _field_catalog(project: ProjectService, schema: Any, value: Any) -> list[dic
             continue
         # `options` is always present (empty when the field has none) so the
         # create template can test `f.options` without hitting StrictUndefined.
-        catalog.append(
-            {
-                "id": field_id,
-                "label": field.name,
-                "type": field.type,
-                "options": [opt.value for opt in field.options] if field.options else [],
-            }
-        )
+        # For `list` fields the top-level options are SUPPRESSED: the select
+        # sugar stores its choices on the field, but "one of: …" at field
+        # level reads as a constraint on the field's own (non-array) value —
+        # the choices belong to the item descriptor below.
+        descriptor: dict[str, Any] = {
+            "id": field_id,
+            "label": field.name,
+            "type": field.type,
+            "options": [opt.value for opt in field.options] if field.options and field.type != "list" else [],
+        }
+        # List fields (#698): describe the item shape so the model emits
+        # legal items — flat scalars for item_type sugar, member-keyed maps
+        # for a group shape. `items` mirrors the top-level descriptor shape
+        # per member; templates test `f['items']` the way they test options.
+        if field.type == "list" and field.item_members:
+            # The resolver's tie-break verdict, never the raw declaration —
+            # a cross-layer both-keys conflict would otherwise make this
+            # describe a record list as a flat scalar array.
+            descriptor["item_scalar"] = bool(field.item_scalar)
+            descriptor["items"] = [
+                {
+                    "key": member.key,
+                    "label": member.name or member.key,
+                    "type": member.type,
+                    "options": [opt.value for opt in member.options] if member.options else [],
+                }
+                for member in field.item_members
+            ]
+        catalog.append(descriptor)
     return catalog
 
 
@@ -471,6 +492,12 @@ def register_helpers(
         lambda scene, character: _character_thread(project, schema, scene, character)
     )
     env.globals["is_a"] = lambda node, entry_type: _is_a(project, schema, node, entry_type)
+    # Plain JSON for values quoted to the model (#698). Jinja's `| tojson`
+    # is htmlsafe_json_dumps: it escapes ' & < > to \uXXXX and sorts keys —
+    # the model imitates both (escapes persist into adopted values, and the
+    # member order contradicts the catalog). json.dumps preserves insertion
+    # order and emits readable text.
+    env.globals["plain_json"] = lambda value: json.dumps(value, ensure_ascii=False)
 
 
 def create_environment_for_project(

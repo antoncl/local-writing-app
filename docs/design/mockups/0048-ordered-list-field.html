@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#698 — list field mockup</title>
+<!--
+  #698 / ADR-0048 S2 — the ordered-list field type, tried as a mockup before any widget code.
+
+  INTENT: one new metadata type — LIST — whose item shape is either an EXISTING named
+  field group (MetadataGroupDefinition: a group already IS an ordered list of scalar
+  field specs, consumed nested here instead of flattened) or a single scalar type
+  (sugar, normalized internally to a one-member shape; stored as a flat YAML list of
+  scalars the way multi_select already stores). "Group" stays the only shape noun the
+  UI teaches — no "record". One row-based add/remove/reorder widget, used identically
+  across definition-default and instance-value (the #40 uniformity rule), with ONE
+  density rule derived from the shape (section B2).
+
+  ANTI-GOALS:
+    · no inline multi-member shape declaration — a multi-field item shape is ALWAYS
+      a named group, defined once in Groups, never re-declared per list;
+    · no second widget — thin shapes change row density, not the mechanism;
+    · no plot semantics — no beats, no claims; fixtures are open questions/aliases;
+    · no new scalar types, no changes to existing field behaviour.
+
+  USER JOURNEY (the thing to walk):
+    1. Author, type editor: adds a field "Open questions", picks type "List",
+       answers ONE question — items are a group ("Open question") or a single
+       value — and optionally seeds default items with the SAME widget the
+       writer will use.
+    2. Writer, metadata rail: sees the list as rows (title member + muted summary),
+       drags to reorder, expands ONE row in place to edit (schema-field-row idiom),
+       adds and removes rows. Thin shapes edit inline in the row (B2).
+    3. AI proposes changes: the 0046 flip works PER ITEM — edited rows flip on
+       click, added rows arrive tinted, removals are struck — not one atomic
+       whole-list flip.
+
+  Tokens are COPIES of frontend/src/styles.css; they drift. Do not import.
+-->
+<style>
+*{box-sizing:border-box}
+:root{
+  --fs-xs:11px; --fs-sm:12px; --fs-md:13px; --fs-lg:15px; --fs-2xl:20px;
+  --sans:"Segoe UI",system-ui,sans-serif; --serif:Georgia,"Times New Roman",serif; --mono:Consolas,ui-monospace,monospace;
+  --w-medium:500; --w-semibold:600; --w-bold:700;
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px; --sp-6:32px;
+  --r-sm:4px; --r-md:6px; --r-lg:10px; --r-pill:999px;
+  color-scheme:light;
+  --surface:#ffffff; --board:#f4f6f5; --panel:#edf3f1; --inset:#f1f5f3;
+  --border:#cbd6d2; --border-strong:#b4c2bc; --divider:#e2e8e5;
+  --text:#242424; --text-2:#4d5753; --text-3:#74817b;
+  --accent:#2f6f5e; --accent-emphasis:#234e43; --accent-soft:#edf6f2; --accent-soft2:#dff0ea;
+  --star:#6b5a0c; --star-soft:#f3eed2; --star-border:#c8b896;
+  --danger:#8a3b2e; --danger-soft:#f7ece9;
+  --shadow2:rgba(36,36,36,0.10); --elev-2:0 6px 18px var(--shadow2);
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --surface:#1f2522; --board:#181c1a; --panel:#20272a; --inset:#242a28;
+  --border:#3a4541; --border-strong:#4a5651; --divider:#2a322f;
+  --text:#e8edeb; --text-2:#a9b6b0; --text-3:#7e8a84;
+  --accent:#6cc4a6; --accent-emphasis:#7cc0a1; --accent-soft:#1f3a32; --accent-soft2:#2a4a3f;
+  --star:#d4b94e; --star-soft:#3a3216; --star-border:#5e5430;
+  --danger:#d38b7d; --danger-soft:#3a241f;
+  --shadow2:rgba(0,0,0,0.50); --elev-2:0 6px 18px var(--shadow2);
+}
+body{margin:0;background:var(--board);color:var(--text);font-family:var(--sans);font-size:var(--fs-md);line-height:1.45;padding:var(--sp-6) var(--sp-4);}
+.sheet{max-width:860px;margin:0 auto;}
+.eyebrow{font-family:var(--mono);font-size:var(--fs-xs);letter-spacing:.06em;color:var(--text-3);text-transform:uppercase;margin:0 0 var(--sp-2);}
+h1{font-family:var(--serif);font-size:var(--fs-2xl);font-weight:var(--w-bold);margin:0 0 var(--sp-2);}
+h2{font-family:var(--serif);font-size:var(--fs-lg);margin:0;}
+.lede{color:var(--text-2);max-width:70ch;margin:0;}
+.lede code,.note code{font-family:var(--mono);font-size:.92em;background:var(--inset);padding:1px 5px;border-radius:var(--r-sm);}
+.bench{background:var(--panel);border:1px solid var(--border);border-radius:var(--r-lg);padding:var(--sp-3);margin:var(--sp-4) 0 var(--sp-5);display:flex;gap:var(--sp-4);align-items:center;flex-wrap:wrap;}
+.bench-label{font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden;}
+.seg button{border:0;background:var(--surface);color:var(--text-2);font:inherit;font-size:var(--fs-sm);padding:var(--sp-1) var(--sp-3);cursor:pointer;border-right:1px solid var(--border);}
+.seg button:last-child{border-right:0;}
+.seg button.on{background:var(--accent);color:#fff;}
+:root[data-theme="dark"] .seg button.on{color:#0e1512;}
+
+section{margin:0 0 var(--sp-6);}
+.sec-head{display:flex;align-items:baseline;gap:var(--sp-3);border-bottom:1px solid var(--divider);padding-bottom:var(--sp-2);margin-bottom:var(--sp-3);}
+.sec-head .tag{font-family:var(--mono);font-size:var(--fs-xs);color:var(--text-3);}
+.note{color:var(--text-2);font-size:var(--fs-sm);max-width:72ch;margin:var(--sp-2) 0 var(--sp-3);}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:var(--sp-4);}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-4);align-items:start;}
+@media(max-width:760px){.two{grid-template-columns:1fr;}}
+
+/* ---------- A: field inline editor (schema-field-row idiom) ---------- */
+.fed{border:1px solid var(--accent);border-left:3px solid var(--accent);border-radius:var(--r-md);background:var(--surface);padding:var(--sp-3);}
+.fed-row{display:flex;align-items:center;gap:var(--sp-2);margin-bottom:var(--sp-3);}
+.fed-row label{width:92px;flex:0 0 92px;font-size:var(--fs-sm);color:var(--text-2);}
+.inp{flex:1;min-width:0;border:1px solid var(--border);background:var(--surface);color:var(--text);font:inherit;font-size:var(--fs-md);padding:var(--sp-1) var(--sp-2);border-radius:var(--r-sm);}
+select.inp{cursor:pointer;flex:0 1 auto;}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:var(--r-pill);padding:2px 10px;font-size:var(--fs-sm);background:var(--inset);color:var(--text-2);}
+.link-accent{color:var(--accent);font-size:var(--fs-sm);text-decoration:none;cursor:pointer;background:none;border:0;font-family:inherit;padding:0;}
+.link-accent:hover{text-decoration:underline;}
+.fed .sub{font-size:var(--fs-xs);color:var(--text-3);margin:-6px 0 var(--sp-3) calc(92px + var(--sp-2));}
+.yaml{background:var(--inset);border:1px solid var(--divider);border-radius:var(--r-md);padding:var(--sp-3);font-family:var(--mono);font-size:var(--fs-sm);line-height:1.5;overflow-x:auto;white-space:pre;color:var(--text-2);margin:0;}
+.yaml b{color:var(--accent-emphasis);font-weight:var(--w-semibold);}
+:root[data-theme="dark"] .yaml b{color:var(--accent);}
+
+/* ---------- B: the row widget ---------- */
+.rl{border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface);overflow:hidden;}
+.rl-row{border-bottom:1px solid var(--divider);}
+.rl-row:last-of-type{border-bottom:0;}
+.rl-head{display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-2) var(--sp-2);cursor:pointer;background:var(--surface);}
+.rl-head:hover{background:var(--inset);}
+.rl-row.dragging{opacity:.4;}
+.rl-row.dragover{box-shadow:inset 0 2px 0 var(--accent);}
+.grip{color:var(--text-3);cursor:grab;flex:0 0 auto;font-size:14px;letter-spacing:-1px;padding:0 2px;user-select:none;}
+.rl-title{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.rl-title .muted{color:var(--text-3);font-size:var(--fs-sm);margin-left:var(--sp-2);}
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:var(--fs-xs);border-radius:var(--r-pill);padding:1px 8px;flex:0 0 auto;}
+.pill .dot{width:7px;height:7px;border-radius:50%;}
+.pill.open{background:var(--star-soft);color:var(--star);}
+.pill.open .dot{background:var(--star);}
+.pill.answered{background:var(--accent-soft2);color:var(--accent-emphasis);}
+.pill.answered .dot{background:var(--accent);}
+.pill.parked{background:var(--inset);color:var(--text-3);}
+.pill.parked .dot{background:var(--text-3);}
+.rl-x{border:0;background:none;color:var(--text-3);cursor:pointer;font-size:14px;padding:2px 6px;border-radius:var(--r-sm);visibility:hidden;flex:0 0 auto;}
+.rl-head:hover .rl-x{visibility:visible;}
+.rl-x:hover{color:var(--danger);background:var(--danger-soft);}
+.rl-edit{border-left:3px solid var(--accent);background:var(--accent-soft);padding:var(--sp-3) var(--sp-3) var(--sp-3) var(--sp-3);}
+:root[data-theme="dark"] .rl-edit{background:var(--accent-soft);}
+.rl-edit .fed-row{margin-bottom:var(--sp-2);}
+.rl-edit .fed-row:last-child{margin-bottom:0;}
+.rl-edit textarea.inp{resize:vertical;min-height:44px;font-family:inherit;}
+.rl-row.open > .rl-head{background:var(--accent-soft);}
+.btn{border:1px solid var(--border);background:var(--surface);color:var(--text-2);font:inherit;font-size:var(--fs-sm);padding:var(--sp-1) var(--sp-3);border-radius:var(--r-md);cursor:pointer;}
+.btn:hover{border-color:var(--border-strong);color:var(--text);}
+.rl-add{display:block;width:100%;text-align:left;border:0;border-top:1px dashed var(--border);background:none;color:var(--accent);font:inherit;font-size:var(--fs-sm);padding:var(--sp-2) var(--sp-3);cursor:pointer;}
+.rl-add:hover{background:var(--accent-soft);}
+.rl.empty .rl-add{border-top:0;}
+.rl-head.tall{align-items:flex-start;}
+.rl-head.tall .grip,.rl-head.tall .rl-x{margin-top:6px;}
+.rl-head textarea.inp{resize:vertical;min-height:40px;font-family:inherit;}
+
+/* rail framing around the widget */
+.rail-frame{background:var(--panel);border:1px solid var(--border);border-radius:var(--r-lg);padding:var(--sp-3);}
+.rail-field{display:flex;align-items:baseline;gap:var(--sp-2);margin-bottom:var(--sp-2);}
+.rail-field .fk{font-size:var(--fs-sm);color:var(--text-2);}
+.rail-field .count{font-size:var(--fs-xs);color:var(--text-3);}
+
+/* ---------- D: per-item flip ---------- */
+.rl-row.prop-added .rl-head{background:var(--accent-soft);}
+.rl-row.prop-removed .rl-head .rl-title{text-decoration:line-through;color:var(--text-3);}
+.rl-row.prop-removed .rl-head{background:var(--danger-soft);}
+.rl-row.prop-edited .rl-head{background:var(--star-soft);cursor:pointer;}
+:root[data-theme="dark"] .rl-row.prop-edited .rl-head{background:var(--star-soft);}
+.prop-badge{font-size:var(--fs-xs);font-family:var(--mono);border-radius:var(--r-sm);padding:0 6px;flex:0 0 auto;}
+.prop-added .prop-badge{color:var(--accent-emphasis);background:var(--accent-soft2);}
+.prop-removed .prop-badge{color:var(--danger);background:transparent;}
+.prop-edited .prop-badge{color:var(--star);background:transparent;}
+.hint{font-size:var(--fs-xs);color:var(--text-3);padding:var(--sp-1) var(--sp-3) var(--sp-2);}
+</style>
+</head>
+<body>
+<div class="sheet">
+  <p class="eyebrow">#698 · ADR-0048 §6 · mockup — tried, not sketched</p>
+  <h1>The <code>list</code> field: a named group, kept nested</h1>
+  <p class="lede">One new type. An item is either an <em>existing</em> named field group — the same
+  <code>MetadataGroupDefinition</code> that flattening applications use today, consumed nested instead —
+  or a single value (sugar for a one-member shape). "Group" stays the only shape noun; there is no
+  "record". One row widget everywhere, one density rule (B2). Fixture: a character's
+  <b>Open questions</b> (group members: question · status · note).</p>
+
+  <div class="bench">
+    <span class="bench-label">Theme</span>
+    <span class="seg"><button class="on" onclick="setTheme('light',this)">Light</button><button onclick="setTheme('dark',this)">Dark</button></span>
+    <span class="bench-label">Section C</span>
+    <span class="seg"><button class="on" onclick="setProp(false,this)">At rest</button><button onclick="setProp(true,this)">AI proposal arrives</button></span>
+  </div>
+
+  <!-- ============ A ============ -->
+  <section>
+    <div class="sec-head"><h2>A · Defining one (type editor)</h2><span class="tag">SchemaFieldInlineEditor + one new config block</span></div>
+    <p class="note">The type picker gains <b>List</b>. Its whole config is <em>one question</em> — what is an
+    item? — answered with a named group <b>or</b> a single value type. A multi-field shape is always a
+    group (defined once, in Groups, never re-declared per list); a single-value list skips the ceremony.
+    The <b>Default</b> row uses the exact widget from section B (the #40 rule); it is collapsed here
+    because defaults for lists are rare.</p>
+    <div class="two">
+      <div class="fed">
+        <div class="fed-row"><label>Name</label><input class="inp" value="Open questions"></div>
+        <div class="fed-row"><label>Type</label><span class="chip">☰ List</span></div>
+        <div class="fed-row"><label>Items are</label>
+          <select class="inp">
+            <optgroup label="A group…">
+              <option selected>Open question (question · status · note)</option>
+              <option>GMO (goal · motivation · obstacle)</option>
+            </optgroup>
+            <optgroup label="A single value…">
+              <option>Text</option><option>Long text</option><option>Number</option><option>Select…</option>
+            </optgroup>
+          </select>
+          <button class="link-accent">Manage groups…</button>
+        </div>
+        <div class="sub">a group shape is defined once, in Groups — reused here, never re-declared</div>
+        <div class="fed-row"><label>Default</label><button class="link-accent">+ seed default items…</button></div>
+      </div>
+      <pre class="yaml">fields:
+  open_questions:
+    name: Open questions
+    <b>type: list</b>
+    <b>item_group: open_question</b>   # multi-field items → a named group
+
+  aliases:
+    name: Aliases
+    <b>type: list</b>
+    <b>item_type: text</b>             # single-value items → stored as a flat
+                                # scalar list, like multi_select today
+groups:
+  open_question:              # already exists today
+    name: Open question
+    members:
+      - {key: question, type: text}
+      - {key: status,   type: select, options: [open, answered, parked]}
+      - {key: note,     type: long_text}</pre>
+    </div>
+  </section>
+
+  <!-- ============ B ============ -->
+  <section>
+    <div class="sec-head"><h2>B · Editing one (metadata rail)</h2><span class="tag">live — drag rows, click to expand, add, remove</span></div>
+    <p class="note">Collapsed row = <b>title member</b> (the group's first text-ish member) + status pill +
+    muted note snippet. Click expands <em>in place</em>, one row at a time — the schema-field-row idiom,
+    accent-striped. The header stays put while open (title and pill track your typing); click it again, or
+    any other row, to collapse. <b>No Done button</b> — values land as you type, the same autosave contract
+    as every other rail field. Member fields reuse the per-scalar widgets verbatim
+    (<code>FieldValueEditor</code> per member). Order is the value; the drag handle is the only reorder
+    affordance.</p>
+    <div class="rail-frame">
+      <div class="rail-field"><span class="fk">☰ Open questions</span><span class="count" id="b-count"></span></div>
+      <div class="rl" id="b-list"></div>
+    </div>
+  </section>
+
+  <!-- ============ B2 ============ -->
+  <section>
+    <div class="sec-head"><h2>B2 · The same widget, thinner shapes</h2><span class="tag">live — one density rule, derived from the item shape</span></div>
+    <p class="note">Not every list is a group. The rule: <b>one member of an inline-editable type
+    (text · number · select · color · boolean) → edit directly in the row</b> — no expand step, no
+    title/summary split; a plain list of strings must not cost three clicks per item. A single
+    <code>long_text</code> member keeps the row-per-item frame with a growing textarea. Two or more
+    members → section B's collapsed row + expand-in-place. Same widget, same grip/add/remove chrome —
+    only the row's interior changes. A plot template's beat roster (name · guidance · act) lands in
+    the section-B form with nothing new. <b>long_text members use the app's default long_text editor</b>
+    (<code>MetadataLongTextEditor</code>, via the same <code>FieldValueEditor</code> dispatch as every
+    member) — the plain textareas on this page are the static mockup's stand-in, not the proposal.</p>
+    <div class="two">
+      <div class="rail-frame">
+        <div class="rail-field"><span class="fk">☰ Aliases</span><span class="count">item_type: text</span></div>
+        <div class="rl" id="alias-list"></div>
+      </div>
+      <div class="rail-frame">
+        <div class="rail-field"><span class="fk">☰ Backstory fragments</span><span class="count">item_type: long_text</span></div>
+        <div class="rl" id="frag-list"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ C ============ -->
+  <section>
+    <div class="sec-head"><h2>C · An AI proposal, per item</h2><span class="tag">toggle "AI proposal arrives" above</span></div>
+    <p class="note">The 0046 flip, at item grain instead of whole-value: <b>edited</b> rows (amber) flip
+    current↔proposed on click; <b>added</b> rows arrive tinted green; <b>removed</b> rows are struck.
+    Adopting follows <code>compare.resolve</code>'s click-to-adopt — nothing is written until Done, same as lore today.
+    Items are matched by position-with-content-similarity server-side; the UI only ever sees add/edit/remove.</p>
+    <div class="rail-frame">
+      <div class="rail-field"><span class="fk">☰ Open questions</span><span class="count" id="c-note">at rest — flip the bench toggle</span></div>
+      <div class="rl" id="c-list"></div>
+      <div class="hint" id="c-hint" style="display:none">click an amber row to flip it · struck rows drop on adopt · tinted rows are new</div>
+    </div>
+  </section>
+
+  <p class="note"><b>Storage, proposed:</b> <code>item_type</code> lists store a flat YAML scalar
+  sequence (exactly how <code>multi_select</code> stores today); <code>item_group</code> lists store a
+  sequence of maps keyed by member key. One internal model — the scalar form is normalized to a
+  one-member shape before validation and the widget ever see it.</p>
+  <p class="note"><b>Deliberately unsettled here:</b> the wire grammar for per-item AI patches (S2 ships
+  whole-list validation; per-item flips can start as a diff computed client-side), and nested
+  <code>entity_ref</code>/<code>tags</code> members — the healers only walk top-level values today, so v1 may
+  exclude reference-typed members from item shapes rather than half-support them.</p>
+</div>
+
+<script>
+function setTheme(t,btn){document.documentElement.dataset.theme=t==='dark'?'dark':'';
+  for(const b of btn.parentElement.children)b.classList.toggle('on',b===btn);}
+
+/* ---------- B: working row widget ---------- */
+const STATUS={open:'open',answered:'answered',parked:'parked'};
+let items=[
+  {question:'Who forged the harbor letter?',status:'open',note:'Ties to the chapter 12 reveal.'},
+  {question:'Why does Mara protect the smith?',status:'answered',note:'A debt from the fire — settled in her backstory entry.'},
+  {question:'Where is the third key?',status:'parked',note:''},
+];
+let openIdx=-1,dragIdx=-1;
+const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function rowHead(it,i,extra){
+  return `<div class="rl-head" ${extra||''}>
+    <span class="grip" draggable="true" data-grip="${i}">⋮⋮</span>
+    <span class="rl-title">${esc(it.question)||'<span class="muted">untitled</span>'}<span class="muted">${esc((it.note||'').slice(0,42))}${(it.note||'').length>42?'…':''}</span></span>
+    <span class="pill ${it.status}"><span class="dot"></span>${it.status}</span>
+    <button class="rl-x" data-x="${i}" title="Remove">✕</button>
+  </div>`;
+}
+const bEl=document.getElementById('b-list');
+function renderB(){
+  bEl.classList.toggle('empty',items.length===0);
+  bEl.innerHTML=items.map((it,i)=>{
+    const head=rowHead(it,i,`data-open="${i}"`);
+    if(i!==openIdx)return `<div class="rl-row" data-i="${i}">${head}</div>`;
+    // expanded: the header STAYS (click it again to collapse — no Done button;
+    // values land as you type, exactly like every other rail field's autosave)
+    return `<div class="rl-row open" data-i="${i}">${head}
+      <div class="rl-edit">
+        <div class="fed-row"><label>Question</label><input class="inp" data-f="question" data-i="${i}" value="${esc(it.question)}"></div>
+        <div class="fed-row"><label>Status</label><select class="inp" data-f="status" data-i="${i}">
+          ${Object.keys(STATUS).map(s=>`<option ${s===it.status?'selected':''}>${s}</option>`).join('')}</select></div>
+        <div class="fed-row"><label>Note</label><textarea class="inp" rows="2" data-f="note" data-i="${i}">${esc(it.note)}</textarea></div>
+      </div></div>`;
+  }).join('')+`<button class="rl-add">+ Add question</button>`;
+  document.getElementById('b-count').textContent=items.length+' item'+(items.length===1?'':'s')+' · ordered';
+}
+/* delegated handlers — bound once, survive every re-render and live header swap */
+bEl.addEventListener('click',e=>{
+  if(e.target.closest('.rl-add')){items.push({question:'',status:'open',note:''});openIdx=items.length-1;renderB();
+    const f=bEl.querySelector('.rl-edit input[data-f="question"]');if(f)f.focus();return;}
+  const x=e.target.closest('[data-x]');
+  if(x){items.splice(+x.dataset.x,1);openIdx=-1;renderB();return;}
+  if(e.target.closest('[data-grip]'))return;
+  const h=e.target.closest('[data-open]');
+  if(h){const i=+h.dataset.open;openIdx=(openIdx===i?-1:i);renderB();}
+});
+bEl.addEventListener('input',e=>{
+  const inp=e.target.closest('[data-f]');if(!inp)return;
+  const i=+inp.dataset.i;items[i][inp.dataset.f]=inp.value;
+  const head=bEl.querySelector(`.rl-row[data-i="${i}"] > .rl-head`);
+  if(head){const tmp=document.createElement('div');tmp.innerHTML=rowHead(items[i],i,`data-open="${i}"`);
+    head.replaceWith(tmp.firstElementChild);}   // title + pill track the typing live
+});
+bEl.addEventListener('dragstart',e=>{const g=e.target.closest('[data-grip]');if(!g)return;
+  dragIdx=+g.dataset.grip;g.closest('.rl-row').classList.add('dragging');e.dataTransfer.effectAllowed='move';});
+bEl.addEventListener('dragend',()=>{dragIdx=-1;renderB();});
+bEl.addEventListener('dragover',e=>{const r=e.target.closest('.rl-row');if(!r)return;e.preventDefault();r.classList.add('dragover');});
+bEl.addEventListener('dragleave',e=>{const r=e.target.closest('.rl-row');if(r)r.classList.remove('dragover');});
+bEl.addEventListener('drop',e=>{const r=e.target.closest('.rl-row');if(!r)return;e.preventDefault();
+  const to=+r.dataset.i;if(dragIdx<0||to===dragIdx)return;
+  const[m]=items.splice(dragIdx,1);items.splice(to,0,m);openIdx=-1;renderB();});
+renderB();
+
+/* ---------- B2: shape-adaptive thin lists (same chrome, inline rows) ---------- */
+function scalarList(elId, arr, kind){
+  const el=document.getElementById(elId);
+  let drag=-1;
+  function render(){
+    el.innerHTML=arr.map((v,i)=>`<div class="rl-row" data-i="${i}">
+      <div class="rl-head${kind==='long'?' tall':''}" style="cursor:default">
+        <span class="grip" draggable="true" data-grip="${i}">⋮⋮</span>
+        ${kind==='long'
+          ?`<textarea class="inp" rows="2" data-i="${i}">${esc(v)}</textarea>`
+          :`<input class="inp" data-i="${i}" value="${esc(v)}">`}
+        <button class="rl-x" data-x="${i}" title="Remove">✕</button>
+      </div></div>`).join('')+`<button class="rl-add">+ Add</button>`;
+    el.querySelector('.rl-add').onclick=()=>{arr.push('');render();
+      const f=el.querySelectorAll('.inp');f[f.length-1].focus();};
+    for(const x of el.querySelectorAll('[data-x]'))x.onclick=()=>{arr.splice(+x.dataset.x,1);render();};
+    for(const inp of el.querySelectorAll('.inp'))inp.oninput=()=>{arr[+inp.dataset.i]=inp.value;};
+    for(const g of el.querySelectorAll('[data-grip]'))
+      g.addEventListener('dragstart',e=>{drag=+g.dataset.grip;e.dataTransfer.effectAllowed='move';});
+    for(const row of el.querySelectorAll('.rl-row')){
+      row.addEventListener('dragover',e=>{e.preventDefault();row.classList.add('dragover');});
+      row.addEventListener('dragleave',()=>row.classList.remove('dragover'));
+      row.addEventListener('drop',e=>{e.preventDefault();const to=+row.dataset.i;
+        if(drag<0||to===drag)return;const[m]=arr.splice(drag,1);arr.splice(to,0,m);drag=-1;render();});
+    }
+  }
+  render();
+}
+scalarList('alias-list',['Ash','The Harbor Rat','Ashlen of Veyle'],'text');
+scalarList('frag-list',[
+  'Grew up on the tide-flats; the fire took the family forge when she was nine.',
+  'Apprenticed to the smith who now owes her silence.',
+],'long');
+
+/* ---------- C: per-item flip ---------- */
+let propOn=false;
+const flip={};   // idx -> adopted?
+function setProp(on,btn){propOn=on;for(const b of btn.parentElement.children)b.classList.toggle('on',b===btn);renderC();}
+function renderC(){
+  const el=document.getElementById('c-list');
+  const base=[
+    {question:'Who forged the harbor letter?',status:'open',note:'Ties to the chapter 12 reveal.'},
+    {question:'Why does Mara protect the smith?',status:'answered',note:'A debt from the fire — settled in her backstory entry.'},
+    {question:'Where is the third key?',status:'parked',note:''},
+  ];
+  document.getElementById('c-hint').style.display=propOn?'':'none';
+  document.getElementById('c-note').textContent=propOn?'reviewing a proposal — nothing written yet':'at rest — flip the bench toggle';
+  if(!propOn){el.innerHTML=base.map((it,i)=>`<div class="rl-row">${rowHead(it,'c'+i)}</div>`).join('');
+    el.querySelectorAll('.rl-x').forEach(x=>x.remove());return;}
+  const edited={question:'Who forged the harbor letter?',status:'answered',note:'The smith — confirmed by the ledger scene.'};
+  const it0=flip[0]?edited:base[0];
+  const snip=s=>esc(s.slice(0,42))+(s.length>42?'…':'');
+  const rows=[];
+  rows.push(`<div class="rl-row prop-edited" data-flip="0"><div class="rl-head"><span class="prop-badge">~</span>
+      <span class="rl-title">${esc(it0.question)}<span class="muted">${snip(it0.note)}</span></span>
+      <span class="pill ${it0.status}"><span class="dot"></span>${it0.status}</span></div></div>`);
+  rows.push(`<div class="rl-row"><div class="rl-head"><span class="prop-badge" style="opacity:0">·</span>
+      <span class="rl-title">${esc(base[1].question)}<span class="muted">${snip(base[1].note)}</span></span>
+      <span class="pill answered"><span class="dot"></span>answered</span></div></div>`);
+  rows.push(`<div class="rl-row prop-removed"><div class="rl-head"><span class="prop-badge">−</span>
+      <span class="rl-title">${esc(base[2].question)}</span>
+      <span class="pill parked"><span class="dot"></span>parked</span></div></div>`);
+  rows.push(`<div class="rl-row prop-added"><div class="rl-head"><span class="prop-badge">+</span>
+      <span class="rl-title">What does the ledger prove?<span class="muted">Proposed — follows from the forged letter.</span></span>
+      <span class="pill open"><span class="dot"></span>open</span></div></div>`);
+  el.innerHTML=rows.join('');
+  const er=el.querySelector('[data-flip]');
+  er.addEventListener('click',()=>{flip[0]=!flip[0];renderC();});
+}
+renderC();
+</script>
+</body>
+</html>

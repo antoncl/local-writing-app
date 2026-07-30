@@ -357,6 +357,12 @@ def merge_assistant_tags(sources: Iterable[str], target: str) -> list[AssistantT
         if lower in source_lowers:
             continue  # merged away — its record (and colour) is dropped
         if lower == target_lower:
+            if target_written:
+                # The store can hold two casing variants of a name (register /
+                # set-colour dedupe by EXACT name), and both match the target.
+                # Write the survivor exactly ONCE — keeping the first record's
+                # colour — so a merge can never emit a duplicate record.
+                continue
             # Survivor keeps its own colour, but takes the requested casing.
             result.append(AssistantTag(name=clean_target, color=tag.color))
             target_written = True

@@ -25,6 +25,7 @@ from project_fixtures import clear_test_scope, open_test_project
 
 from app.main import app
 from app.models import (
+    AssistantTag,
     CreateAssistantEntryRequest,
     CreatePromptEntryRequest,
     MergeAssistantTagsRequest,
@@ -92,6 +93,23 @@ class AssistantTagGovernanceTests(unittest.TestCase):
 
         store = {tag.name: tag.color for tag in result.tags}
         self.assertEqual(store, {"Editor": "teal"})  # Beta gone; survivor keeps teal, not rose
+
+    def test_merge_never_emits_a_duplicate_target_record(self) -> None:
+        # The store can hold two casing variants of a name (register / set-colour
+        # dedupe by EXACT name), and both match the merge target. The fold must
+        # still write the survivor exactly once, keeping the first record's colour.
+        ms.save_assistant_tags(
+            [
+                AssistantTag(name="Editor", color="teal"),
+                AssistantTag(name="editor", color=None),
+                AssistantTag(name="Beta", color=None),
+            ]
+        )
+
+        result = self.service.merge_assistant_tags(MergeAssistantTagsRequest(sources=["Beta"], target="Editor"))
+
+        editor_records = [tag for tag in result.tags if tag.name.lower() == "editor"]
+        self.assertEqual([(tag.name, tag.color) for tag in editor_records], [("Editor", "teal")])
 
     def test_merge_into_a_brand_new_target_leaves_it_colourless(self) -> None:
         self._make_machine_assistant("Ed", ["Beta"])

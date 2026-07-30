@@ -56,6 +56,18 @@ describe("TagRosterPopover", () => {
     expect(onAdd).toHaveBeenLastCalledWith("alpha");
   });
 
+  it("keeps the entry input focused — a row's mousedown default is prevented", async () => {
+    const { onAdd } = setup();
+    // fireEvent resolves to false when the handler called preventDefault, so the
+    // field's blur→crystallise never fires and half-typed text can't become a
+    // stray chip when a suggestion is clicked.
+    const notCancelled = await fireEvent.mouseDown(screen.getByTitle("Add alpha"));
+    expect(notCancelled).toBe(false);
+    // The click still adds — mousedown-prevent doesn't block activation.
+    await fireEvent.click(screen.getByTitle("Add alpha"));
+    expect(onAdd).toHaveBeenLastCalledWith("alpha");
+  });
+
   it("filters the shown rows", async () => {
     setup();
     await fireEvent.input(screen.getByLabelText("Filter Tags"), { target: { value: "bet" } });

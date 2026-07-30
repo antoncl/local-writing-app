@@ -373,6 +373,7 @@
             class:active={selectedKeys.has(tag.name.toLowerCase())}
             type="button"
             title={selectedKeys.has(tag.name.toLowerCase()) ? `${tag.name} (already added)` : `Add ${tag.name}`}
+            onmousedown={(e) => e.preventDefault()}
             onclick={() => onAdd(tag.name)}
           >
             <span class="trp-name">{tag.name}</span>
@@ -392,7 +393,7 @@
         {#if !createCandidate}<span class="trp-empty">No tags suggested here yet.</span>{/if}
       {/each}
       {#if createCandidate}
-        <button class="trp-create" type="button" onclick={() => onAdd(createCandidate)}>
+        <button class="trp-create" type="button" onmousedown={(e) => e.preventDefault()} onclick={() => onAdd(createCandidate)}>
           <span class="trp-create-plus" aria-hidden="true">+</span> Create “{createCandidate}”
         </button>
       {/if}

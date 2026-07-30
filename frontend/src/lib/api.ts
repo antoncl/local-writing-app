@@ -20,6 +20,7 @@ import type {
   ChatSessionJournalEntry,
   ChatUsage,
   AssistantTagList,
+  AssistantTagsOverview,
   ProjectCostResponse,
   ChatSession,
   ChatSessionList,
@@ -487,6 +488,16 @@ export const api = {
     return request<AssistantTagList>(`/assistant-tags/${encodeURIComponent(name)}`, {
       method: "PUT",
       body: JSON.stringify({ color }),
+    });
+  },
+  getAssistantTagsOverview() {
+    return request<AssistantTagsOverview>("/assistant-tags/overview");
+  },
+  mergeAssistantTags(sources: string[], target: string) {
+    // Rename is a single-source merge, exactly like mergeTags (#247).
+    return request<AssistantTagList>("/assistant-tags/merge", {
+      method: "POST",
+      body: JSON.stringify({ sources, target }),
     });
   },
   getTagsOverview() {

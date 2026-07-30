@@ -78,6 +78,29 @@ class AssistantTagList(BaseModel):
     tags: list[AssistantTag] = Field(default_factory=list)
 
 
+class AssistantTagUsage(BaseModel):
+    """One assistant tag with its use-count, for the governance surface (#247).
+
+    The assistant mirror of `TagUsage`, minus `scope`: assistant tags are a
+    flat machine-global vocabulary (name + colour only), so there is nothing to
+    scope. `count` is the number of references across the reachable assistant +
+    prompt documents (see AssistantTagsMixin)."""
+
+    name: str
+    count: int = 0
+    color: str | None = None
+
+
+class AssistantTagsOverview(BaseModel):
+    tags: list[AssistantTagUsage] = Field(default_factory=list)
+
+
+class MergeAssistantTagsRequest(BaseModel):
+    # Rename is a single-source merge, exactly like MergeTagsRequest.
+    sources: list[str] = Field(default_factory=list)
+    target: str = Field(min_length=1)
+
+
 class SetAssistantTagColorRequest(BaseModel):
     # A palette swatch id, or null to clear the color.
     color: str | None = None

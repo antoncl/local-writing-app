@@ -263,6 +263,18 @@ export type AssistantTagList = {
   tags: AssistantTag[];
 };
 
+// The assistant mirror of TagUsage, minus scope: assistant tags are flat
+// (name + colour only), so there is nothing to scope (#247).
+export type AssistantTagUsage = {
+  name: string;
+  count: number;
+  color?: string | null;
+};
+
+export type AssistantTagsOverview = {
+  tags: AssistantTagUsage[];
+};
+
 export type TagUsage = {
   name: string;
   scope: NodePickerConfig;

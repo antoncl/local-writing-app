@@ -68,15 +68,6 @@ export function groupRuns(runs: DiffRun[]): {
   return { regionIdByRun, regions };
 }
 
-/** The action a click on a run performs, in the author's words (ADR-0044
- *  Amendment 4). A cool run restores the snapshot's wording; a warm run in a
- *  modification keeps the current wording; a warm *lone insertion* has no
- *  snapshot side to choose against, so the meaningful move is to remove it. */
-function titleFor(kind: DiffRun["kind"], region: DiffRegion): string {
-  if (kind === "was") return "Restore this";
-  return region.wasText ? "Keep this" : "Remove this";
-}
-
 /**
  * Rendered HTML for one view state.
  *
@@ -85,21 +76,17 @@ function titleFor(kind: DiffRun["kind"], region: DiffRegion): string {
  * paragraph per run. The buffer is flushed around every stacked run, which is
  * what keeps a block-spanning change out of the inline stream.
  *
- * Every changed run carries a `data-region` and a `title`: the overlay makes it
- * clickable so the author can adopt one region while parked (Amendment 4). The
- * title is the affordance — no glyph is added, so §J holds as written.
+ * Every changed run carries a `data-region` so the overlay can make it clickable
+ * to adopt one region while parked (Amendment 4). No glyph and no tooltip: the
+ * run's own colour plus a hover firming is the whole affordance (§J). A native
+ * `title` tooltip once labelled the action, but native tooltips vanish the moment
+ * the cursor moves toward the text they describe, so it read as flaky and
+ * undercut the very click it was advertising (#710) — the colour carries it.
  */
-export async function renderDiffRuns(
-  runs: DiffRun[],
-  view: DiffView,
-  // The run's affordance label (ADR-0044 Amendment 4). Defaults to the snapshot
-  // wording ("Restore this"); the AI-lore proposal review passes its own so a
-  // cool run reads "Use this", not "Restore this" (ADR-0046 §5, memo #590).
-  titleForRun: (kind: DiffRun["kind"], region: DiffRegion) => string = titleFor,
-): Promise<string> {
+export async function renderDiffRuns(runs: DiffRun[], view: DiffView): Promise<string> {
   const parts: string[] = [];
   let buffer = "";
-  const { regionIdByRun, regions } = groupRuns(runs);
+  const { regionIdByRun } = groupRuns(runs);
 
   const flush = async () => {
     // Whitespace-only buffers are the block separators between two stacked
@@ -117,7 +104,7 @@ export async function renderDiffRuns(
       continue;
     }
     const id = regionIdByRun[i];
-    const attrs = `data-region="${id}" title="${titleForRun(run.kind, regions[id as number])}"`;
+    const attrs = `data-region="${id}"`;
     if (run.stacked) {
       // A stacked run carrying only a block separator would render as an empty
       // tinted box — a mark with nothing under it, which reads as a change the

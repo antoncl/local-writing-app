@@ -11,8 +11,10 @@ from project_fixtures import open_test_project
 from app.main import app
 from app.models import (
     CreateLoreEntryRequest,
+    CreatePromptEntryRequest,
     CreateStructureNodeRequest,
     SaveLoreEntryRequest,
+    SavePromptEntryRequest,
     SaveSceneRequest,
 )
 from app.services.ai.sessions import default_registry
@@ -113,6 +115,78 @@ class PreviewEndpointTests(unittest.TestCase):
         text = response.json()["messages"][0]["blocks"][0]["text"]
         self.assertIn("POV: Honor Harrington", text)
         self.assertIn("Captain of the Fearless", text)
+
+    def test_preview_can_include_prompt_snippet(self) -> None:
+        snippet = self.service.create_prompt_entry(
+            CreatePromptEntryRequest(
+                title="Plot Function Summary",
+                entry_type="prompt:snippet",
+            )
+        )
+        self.service.save_prompt_entry(
+            snippet.id,
+            SavePromptEntryRequest(
+                title=snippet.title,
+                body="Function means the story job a beat performs for the plot.",
+                base_revision=snippet.revision,
+                entry_type="prompt:snippet",
+                metadata={},
+                inputs=[],
+            ),
+        )
+
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": (
+                    '{% role "user" %}Before. '
+                    '{% include "Plot Function Summary" %} '
+                    "After.{% endrole %}"
+                ),
+                "target_scene_id": self.scene_id,
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertIsNone(body["error"])
+        text = body["messages"][0]["blocks"][0]["text"]
+        self.assertIn("Before.", text)
+        self.assertIn("Function means the story job", text)
+        self.assertIn("After.", text)
+
+    def test_preview_can_include_prompt_snippet_by_id(self) -> None:
+        snippet = self.service.create_prompt_entry(
+            CreatePromptEntryRequest(
+                title="Reusable Context",
+                entry_type="prompt:snippet",
+            )
+        )
+        self.service.save_prompt_entry(
+            snippet.id,
+            SavePromptEntryRequest(
+                title=snippet.title,
+                body="Reusable snippet body.",
+                base_revision=snippet.revision,
+                entry_type="prompt:snippet",
+                metadata={},
+                inputs=[],
+            ),
+        )
+
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": (
+                    '{% role "user" %}Start '
+                    f'{{% include "{snippet.id}" %}} '
+                    "End{% endrole %}"
+                ),
+                "target_scene_id": self.scene_id,
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        text = response.json()["messages"][0]["blocks"][0]["text"]
+        self.assertIn("Reusable snippet body.", text)
 
     def test_preview_emits_cache_break_blocks(self) -> None:
         response = self.client.post(

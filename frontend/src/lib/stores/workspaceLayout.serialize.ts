@@ -10,7 +10,6 @@ import type { LayoutNode, PanelId, Split, SplitDir, TabGroup } from "@/lib/types
 
 // Stable ids for the default groups so HOMES can target them and a persisted
 // layout can be reconciled against them. User-created groups get generated ids.
-export const G_PROJECT = "g-project";
 export const G_DRAFT = "g-draft";
 export const G_EDITOR = "g-editor";
 export const G_SIDE = "g-side";
@@ -27,7 +26,6 @@ export function isEditorPanelId(id: string): boolean {
 // allowlist for validating a persisted layout (any tab id that is neither an
 // editor doc nor a known region is dropped on load).
 export const HOMES: Record<string, string> = {
-  project: G_PROJECT,
   outline: G_DRAFT,
   lore: G_SIDE,
   research: G_SIDE,
@@ -80,16 +78,16 @@ function cloneNode(node: LayoutNode): LayoutNode {
 
 export type PresetName = "writing" | "schema" | "research";
 
-// The starting "writing" arrangement: Project + Draft stacked left, editor in
-// the centre, Lore/Research over TODO/Search on the right. The other presets
-// re-anchor the same regions for a schema-authoring or research session. Every
-// preset MUST include an empty group with id G_EDITOR so open documents re-home
-// into it after the preset is applied. Presets only reference regions that are
-// always registered and self-sufficient (no empty schema_type editor).
+// The starting "writing" arrangement: Draft on the left, editor in the centre,
+// Lore/Research over TODO/Search on the right. The other presets re-anchor the
+// same regions for a schema-authoring or research session. Every preset MUST
+// include an empty group with id G_EDITOR so open documents re-home into it
+// after the preset is applied. Presets only reference regions that are always
+// registered and self-sufficient (no empty schema_type editor).
 export const PRESETS: Record<PresetName, () => Split> = {
   writing: () =>
     split("root", "row", [
-      split("s-left", "col", [group(G_PROJECT, ["project"]), group(G_DRAFT, ["outline"])], [0.4, 0.6]),
+      group(G_DRAFT, ["outline"]),
       group(G_EDITOR, []),
       split("s-right", "col", [group(G_SIDE, ["lore", "research"]), group(G_TOOLS, ["todo", "search"])], [0.62, 0.38]),
     ], [0.24, 0.54, 0.22]),
@@ -267,7 +265,6 @@ export const EDITOR_MIN_WIDTH = 360;
 export const MIN_ROW_HEIGHT = 140;
 
 const MIN_WIDTHS: Record<string, number> = {
-  project: 200,
   outline: 220,
   lore: 240,
   research: 240,

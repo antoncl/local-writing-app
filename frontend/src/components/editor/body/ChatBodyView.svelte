@@ -48,7 +48,7 @@
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
   import { entryBrainstorm } from "@/lib/stores/entryBrainstorm.svelte";
   import { treeActions } from "@/lib/stores/treeActions.svelte";
-  import { refreshChatSessions, refreshProjectCost } from "@/lib/stores/chats";
+  import { refreshChatSessions } from "@/lib/stores/chats";
   import {
     assistantScopeTags,
     assistantTitle,
@@ -451,7 +451,6 @@
     const chatId = scene?.id;
     if (!chatId) return;
     try {
-      const hadCost = pendingTurnCost != null;
       const saved = await api.saveNode<ChatSession>(chatId, currentChatSessionPayload());
       activeChatTitle = saved.title;
       activeChatPinned = saved.pinned;
@@ -462,10 +461,6 @@
       // cost-total footer accurate without re-fetching.
       chatSession = saved;
       onBodyChange?.();
-      // A turn that accumulated cost moves the project-wide rollup chip. Write
-      // through the cost store directly; the chip re-renders reactively (no
-      // host signal needed — #14 Step 3).
-      if (hadCost) void refreshProjectCost();
     } catch (e) {
       chatError = `Couldn't save chat: ${(e as Error).message}`;
     }

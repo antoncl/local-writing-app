@@ -14,7 +14,6 @@
   import PlotBoardPane from "@/components/panes/PlotBoardPane.svelte";
   import Mutations from "@/components/panes/Mutations.svelte";
   import Chats from "@/components/panes/Chats.svelte";
-  import Project from "@/components/panes/Project.svelte";
   import Search from "@/components/panes/Search.svelte";
   import Todo from "@/components/panes/Todo.svelte";
   import Workspace from "@/components/workspace/Workspace.svelte";
@@ -32,14 +31,7 @@
   import { renderChatContent } from "@/lib/utils/chatMessageRender";
   import { declarationRows, toggledDeclaration } from "@/lib/utils/projectChain";
   import { get } from "svelte/store";
-  import {
-    chatSessionsStore,
-    projectCostTotalStore,
-    projectCostBreakdownStore,
-    refreshProjectCost as storeRefreshProjectCost,
-    setChatSessions,
-    setProjectCost,
-  } from "@/lib/stores/chats";
+  import { chatSessionsStore, setChatSessions } from "@/lib/stores/chats";
   import {
     todosStore,
     embeddedTodosStore,
@@ -136,7 +128,6 @@
   // Which chat is open in an editor pane lives on the editorPanes controller
   // (editorPanes.activeChatId); the chat-session roster + openers live in the
   // chatSessions controller (lib/stores/chatSessions).
-  let projectCostExpanded = $state(false);
   let appState = $state<AppState>({ name: "needsProject" });
   // One "Manage tags" home governs both vocabularies (#247 PR-3b).
   let tagsManagerOpen = $state(false);
@@ -298,7 +289,7 @@
   // The cross-subsystem workspace wiring, injected into projectSession as
   // onOpenWorkspace and run before loadProjectData. projectSession owns the
   // last-opened-project persistence; this just resets and re-seeds App's
-  // many editor/AI/cost/color/chat subsystems for the newly opened project.
+  // many editor/AI/color/chat subsystems for the newly opened project.
   function openProjectWorkspace(nextProject: ProjectInfo) {
     resetEditorWorkspace();
     projectPath = nextProject.root_path;
@@ -307,18 +298,11 @@
     layoutPresets.load();
     projectTitle = nextProject.title;
     aiSettings.seedFromProject(nextProject);
-    setProjectCost(null, []);
-    projectCostExpanded = false;
     appState = { name: "projectOpen", project: nextProject };
     workspaceLayout.activate("outline");
     void chatSessions.hydrateForProject();
-    void refreshProjectCost();
     void aiSettings.refreshProjectColor();
     void paneViews.loadForProject(projectPath);
-  }
-
-  async function refreshProjectCost(): Promise<void> {
-    await storeRefreshProjectCost();
   }
 
   function resetEditorWorkspace() {
@@ -664,12 +648,6 @@
   // inside ChatBodyView now; App only tracks the session roster (Chats pane)
   // and which chat is currently open in an editor pane (active-row highlight).
   let chatSessionList = $derived($chatSessionsStore);
-  // V2: project-wide cost rollup. Refreshed on project open and after
-  // each chat save. `projectCostBreakdown` is the per-chat list returned
-  // by /api/ai/project-cost; populated only when the user expands the
-  // chip so common loads don't pay for full enumeration.
-  let projectCostTotal = $derived($projectCostTotalStore);
-  let projectCostBreakdown = $derived($projectCostBreakdownStore);
   let project = $derived(appState.name === "projectOpen" ? appState.project : null);
   // The declaration editor's rows (#417 slice 4b), fed to the breadcrumb popover
   // that replaced the Project pane's Inheritance section. The whole enumeration,
@@ -782,7 +760,12 @@
     />
   {:else}
     <div class="welcome">
-      {@render projectBody()}
+      <!-- The Project pane is gone (#417 slice 6); this is the only remaining
+           no-project state, inlined here rather than routed through a pane that
+           could vanish. Once a project opens, the tiled Workspace takes over. -->
+      <p class="muted welcome-hint">
+        No project open. Pick one from the switcher above — recents, browse, or create new.
+      </p>
     </div>
   {/if}
 
@@ -799,7 +782,6 @@
 
   <RegionRegistrar
     regions={{
-      project: { title: "Project", body: projectBody },
       outline: { title: "Draft", body: outlineBody, view: { kind: "scene", switcher: true } },
       lore: { title: "Lore", body: loreBody, actions: loreActions, view: { kind: "lore", switcher: true } },
       research: { title: "Research", body: researchBody, view: { kind: "research" } },
@@ -813,18 +795,6 @@
       search: { title: "Search", body: searchBody },
     }}
   />
-
-  {#snippet projectBody()}
-    <div class="pane-content project-panel">
-      <Project
-        {isProjectOpen}
-        {projectTitle}
-        {projectCostTotal}
-        {projectCostBreakdown}
-        bind:projectCostExpanded
-      />
-    </div>
-  {/snippet}
 
   {#snippet outlineBody(viewSpec: ViewSpec | undefined)}
     <div class="pane-content">
@@ -1251,7 +1221,7 @@
 
 <style>
   /* Main area below the top bar. The tiled Workspace fills it; before a project
-     opens, the Project region shows centred as a welcome surface. */
+     opens, a centred welcome hint shows instead. */
   .app-main {
     display: flex;
     flex-direction: column;
@@ -1270,8 +1240,10 @@
     padding: var(--sp-5);
     overflow: auto;
   }
-  .welcome > :global(.project-panel) {
+  .welcome-hint {
     width: min(560px, 100%);
+    margin: var(--sp-1) 0;
+    font-size: var(--fs-md);
   }
 
   /* The plot board fills its tile (a canvas, not a padded list); PlotEditor's
@@ -1279,14 +1251,6 @@
   .plot-board-host {
     display: flex;
     min-height: 0;
-  }
-
-  /* Project region content wrapper (rendered as a snippet into the shell). */
-  .project-panel {
-    display: grid;
-    align-content: start;
-    gap: var(--sp-2);
-    padding: var(--sp-3);
   }
 
   /* Ancestor-entry documents: a slim banner above the editor (edits still write

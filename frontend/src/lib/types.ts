@@ -216,6 +216,9 @@ export type {
   PlotBoardProjection,
   PlotBoardCard,
   PlotBoardPlotline,
+  PlotBoardLayout,
+  PlotBoard,
+  BoardXY,
 } from "./plotBoardTypes";
 
 export type AssistantEntrySummary = {

@@ -58,6 +58,8 @@ import type {
   PlotTemplate,
   PlotTemplateList,
   PlotBoardProjection,
+  PlotBoard,
+  PlotBoardLayout,
   MutationSetEntry,
   MutationSetEntryList,
   MutationSetRow,
@@ -913,6 +915,15 @@ export const api = {
   // the opaque layout, in one GET. Get-or-creates the `plot:board` singleton.
   getPlotBoardProjection() {
     return request<PlotBoardProjection>("/plot/board/projection");
+  },
+  // Persist the board layout (ADR-0048 S7c). PUT round-trips the opaque layout
+  // dict with an optimistic base_revision; returns the board with its advanced
+  // revision (the next save's base).
+  savePlotBoard(payload: { base_revision: string; layout: PlotBoardLayout }) {
+    return request<PlotBoard>("/plot/board", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
   },
   // Reusable mutation sets (#62).
   listMutationSetEntries() {

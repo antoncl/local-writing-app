@@ -13,16 +13,16 @@ import {
   connectCommand,
   deleteCommands,
   moveNodesCommand,
-  type DesignerGraphPort,
+  type GraphPort,
   type XY,
-} from "./designerCommands";
+} from "./graphCommands";
 
 type TestNode = { id: string; position: XY; data: { cfg: Record<string, unknown> } };
 type TestEdge = { id: string; source: string; target: string };
 
 function makeGraph(nodes: TestNode[] = [], edges: TestEdge[] = []) {
   const graph = { nodes, edges };
-  const port: DesignerGraphPort<TestNode, TestEdge> = {
+  const port: GraphPort<TestNode, TestEdge> = {
     getNodes: () => graph.nodes,
     setNodes: (n) => (graph.nodes = n),
     getEdges: () => graph.edges,
@@ -38,7 +38,7 @@ const node = (id: string, x = 0, y = 0, cfg: Record<string, unknown> = {}): Test
 });
 const edge = (id: string, source: string, target: string): TestEdge => ({ id, source, target });
 
-describe("designerCommands", () => {
+describe("graphCommands", () => {
   it("round-trips an add through the caretaker", () => {
     const { graph, port } = makeGraph([node("out")]);
     const caretaker = new UndoCaretaker();
@@ -170,7 +170,7 @@ describe("designerCommands", () => {
     type KindedNode = TestNode & { data: { kind: string; cfg: Record<string, unknown> } };
     const target: KindedNode = { id: "a1", position: { x: 0, y: 0 }, data: { kind: "filter", cfg: { mode: "keep" } } };
     const graph = { nodes: [target] as KindedNode[], edges: [] as TestEdge[] };
-    const port: DesignerGraphPort<KindedNode, TestEdge> = {
+    const port: GraphPort<KindedNode, TestEdge> = {
       getNodes: () => graph.nodes,
       setNodes: (n) => (graph.nodes = n),
       getEdges: () => graph.edges,

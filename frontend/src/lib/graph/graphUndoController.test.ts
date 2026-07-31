@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * The DesignerUndoController — the extracted testable layer between the
+ * The GraphUndoController — the extracted testable layer between the
  * SvelteFlow canvas and the caretaker (#681 review). Driven exactly the way
  * the canvas drives it: a fake port over plain arrays, synthetic
  * KeyboardEvents, and assertions on the graph plus the announcement.
@@ -8,21 +8,21 @@
  * element targets; no component is mounted.
  */
 import { describe, expect, it } from "vitest";
-import { DesignerUndoController } from "./designerUndo.svelte";
-import type { DesignerGraphPort, XY } from "@/lib/views/designerCommands";
+import { GraphUndoController } from "./graphUndoController.svelte";
+import type { GraphPort, XY } from "@/lib/graph/graphCommands";
 
 type TestNode = { id: string; position: XY; data: { kind: string; cfg: Record<string, unknown> } };
 type TestEdge = { id: string; source: string; target: string };
 
 function makeSurface(nodes: TestNode[] = [], edges: TestEdge[] = []) {
   const graph = { nodes, edges };
-  const port: DesignerGraphPort<TestNode, TestEdge> = {
+  const port: GraphPort<TestNode, TestEdge> = {
     getNodes: () => graph.nodes,
     setNodes: (n) => (graph.nodes = n),
     getEdges: () => graph.edges,
     setEdges: (e) => (graph.edges = e),
   };
-  return { graph, port, ctl: new DesignerUndoController(port) };
+  return { graph, port, ctl: new GraphUndoController(port) };
 }
 
 const node = (id: string, x = 0, y = 0): TestNode => ({ id, position: { x, y }, data: { kind: "all", cfg: {} } });
@@ -32,7 +32,7 @@ function chord(key: string, extra: Partial<KeyboardEventInit> = {}): KeyboardEve
   return new KeyboardEvent("keydown", { key, ctrlKey: true, bubbles: true, cancelable: true, ...extra });
 }
 
-describe("DesignerUndoController", () => {
+describe("GraphUndoController", () => {
   it("routes Ctrl+Z to undo, Ctrl+Y and Ctrl+Shift+Z to redo", () => {
     const { graph, ctl } = makeSurface([]);
     const added = node("a0");

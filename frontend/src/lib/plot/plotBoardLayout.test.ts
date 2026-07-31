@@ -6,6 +6,8 @@
 import { describe, expect, it } from "vitest";
 import {
   buildBoardNodes,
+  cardPositionsFromNodes,
+  readBoardPositions,
   CARD_GAP_X,
   CARD_HEIGHT,
   CARD_WIDTH,
@@ -130,5 +132,78 @@ describe("buildBoardNodes", () => {
     );
     expect(laneNodes(nodes)[0]).toMatchObject({ width: LANE_LABEL_WIDTH, height: CARD_HEIGHT });
     expect(cardNodes(nodes)[0]).toMatchObject({ width: CARD_WIDTH, height: CARD_HEIGHT });
+  });
+
+  it("makes cards draggable (S7c layout editing) and keeps lane headers fixed", () => {
+    const nodes = buildBoardNodes(
+      projection({ plotlines: [line("plot_a", "A")], cards: [card("c1", { plotline: "plot_a" })] }),
+    );
+    expect(cardNodes(nodes)[0].draggable).toBe(true);
+    expect(laneNodes(nodes)[0].draggable).toBe(false);
+  });
+
+  it("applies a saved position override to its card, leaving unsaved cards on the grid", () => {
+    const proj = projection({
+      plotlines: [line("plot_a", "A")],
+      cards: [card("moved", { plotline: "plot_a" }), card("stay", { plotline: "plot_a" })],
+    });
+    const nodes = buildBoardNodes(proj, { moved: { x: 999, y: 42 } });
+    const byId = new Map(cardNodes(nodes).map((c) => [c.id, c]));
+    expect(byId.get("moved")!.position).toEqual({ x: 999, y: 42 });
+    // The unsaved sibling keeps its derived slot (second column of lane A).
+    expect(byId.get("stay")!.position).toEqual({
+      x: LANE_LABEL_WIDTH + LABEL_TO_CARD_GAP + (CARD_WIDTH + CARD_GAP_X),
+      y: 0,
+    });
+  });
+});
+
+describe("readBoardPositions", () => {
+  it("reads well-formed per-card positions out of the opaque layout", () => {
+    expect(readBoardPositions({ positions: { c1: { x: 10, y: 20 }, c2: { x: 30, y: 40 } } })).toEqual({
+      c1: { x: 10, y: 20 },
+      c2: { x: 30, y: 40 },
+    });
+  });
+
+  it("degrades to no overrides for a missing or malformed layout (the board must render)", () => {
+    expect(readBoardPositions({})).toEqual({});
+    expect(readBoardPositions({ positions: null } as unknown as Record<string, unknown>)).toEqual({});
+    // A partial / non-numeric entry is dropped, valid siblings survive.
+    expect(
+      readBoardPositions({ positions: { bad: { x: "no" }, ok: { x: 1, y: 2 } } } as unknown as Record<string, unknown>),
+    ).toEqual({ ok: { x: 1, y: 2 } });
+  });
+
+  it("rejects non-finite coordinates (NaN/Infinity can't be placed by SvelteFlow)", () => {
+    expect(
+      readBoardPositions({
+        positions: { nan: { x: NaN, y: 0 }, inf: { x: 1, y: Infinity }, ok: { x: 3, y: 4 } },
+      } as unknown as Record<string, unknown>),
+    ).toEqual({ ok: { x: 3, y: 4 } });
+  });
+});
+
+describe("cardPositionsFromNodes", () => {
+  it("serializes only card positions raw (unrounded), excluding lane headers", () => {
+    const nodes = buildBoardNodes(
+      projection({ plotlines: [line("plot_a", "A")], cards: [card("c1", { plotline: "plot_a" })] }),
+      { c1: { x: 12.4, y: 7.6 } },
+    );
+    const positions = cardPositionsFromNodes(nodes);
+    // Raw, not rounded — the persist threshold must match moveNodesCommand's raw
+    // drag record, else a sub-pixel move records an undo step that saves nothing.
+    expect(positions).toEqual({ c1: { x: 12.4, y: 7.6 } });
+    // No `lane:plot_a` key — lane headers are derived, never stored.
+    expect(Object.keys(positions)).toEqual(["c1"]);
+  });
+
+  it("round-trips through readBoardPositions", () => {
+    const nodes = buildBoardNodes(
+      projection({ plotlines: [line("plot_a", "A")], cards: [card("c1", { plotline: "plot_a" })] }),
+      { c1: { x: 5, y: 6 } },
+    );
+    const serialized = { positions: cardPositionsFromNodes(nodes) };
+    expect(readBoardPositions(serialized)).toEqual({ c1: { x: 5, y: 6 } });
   });
 });

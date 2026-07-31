@@ -1,17 +1,18 @@
-// The view designer's undo command vocabulary (ADR-0050 §8 slice 1, #681).
+// The shared undo command vocabulary for node-canvas surfaces (ADR-0050 §8
+// slice 1, #681; generalized off the view designer in S7c/#760 as the plot
+// board became the second consumer the ADR anticipated).
 //
 // Each builder captures the memento a gesture needs to reverse itself and
-// returns caretaker `Command`s — the designer-side half of the split the ADR
+// returns caretaker `Command`s — the graph-side half of the split the ADR
 // makes: the caretaker (`undoCaretaker.svelte.ts`) knows only commands; this
 // module knows nodes and edges and nothing about the stack. It lives outside
-// the component because SvelteFlow is not headless-testable (§7 slice 0) —
+// any component because SvelteFlow is not headless-testable (§7 slice 0) —
 // everything reversible is exercised by the sibling `.test.ts` against a fake
-// port; the canvas only supplies the port and the gesture boundaries.
+// port; a canvas only supplies the port and the gesture boundaries.
 //
-// Commands mutate through a `DesignerGraphPort` — direct array swaps on the
-// component's rune state, deliberately NOT the recording committers: the
-// caretaker throws on `record` during a replay, and these closures are the
-// replay.
+// Commands mutate through a `GraphPort` — direct array swaps on the surface's
+// rune state, deliberately NOT the recording committers: the caretaker throws
+// on `record` during a replay, and these closures are the replay.
 //
 // Mementos are shallow clones with the `position` cloned a level deeper:
 // SvelteFlow drags mutate `node.position` **in place** through the `$state`
@@ -25,8 +26,8 @@ export type XY = { x: number; y: number };
 type Identified = { id: string };
 type Positioned = Identified & { position: XY };
 
-/** The component-side mutators the closures replay through. */
-export type DesignerGraphPort<N extends Identified, E extends Identified> = {
+/** The surface-side mutators the closures replay through. */
+export type GraphPort<N extends Identified, E extends Identified> = {
   getNodes(): N[];
   setNodes(nodes: N[]): void;
   getEdges(): E[];
@@ -48,7 +49,7 @@ function cloneNode<N extends Positioned>(node: N): N {
 /** The palette created a node (§1: "I created node N"; memento = birth state).
  *  Record AFTER appending — recording never executes. */
 export function addNodeCommand<N extends Positioned, E extends Identified>(
-  port: DesignerGraphPort<N, E>,
+  port: GraphPort<N, E>,
   node: N,
 ): Command {
   const memento = cloneNode(node);
@@ -60,7 +61,7 @@ export function addNodeCommand<N extends Positioned, E extends Identified>(
 }
 
 function deleteEdgeCommand<N extends Identified, E extends Identified>(
-  port: DesignerGraphPort<N, E>,
+  port: GraphPort<N, E>,
   edge: E,
   transaction: string,
 ): Command {
@@ -82,7 +83,7 @@ function deleteEdgeCommand<N extends Identified, E extends Identified>(
  * The concluding command carries the gesture's announcement label.
  */
 export function deleteCommands<N extends Positioned, E extends Identified>(
-  port: DesignerGraphPort<N, E>,
+  port: GraphPort<N, E>,
   nodes: N[],
   edges: E[],
 ): Command[] {
@@ -115,7 +116,7 @@ export function deleteCommands<N extends Positioned, E extends Identified>(
  * it.
  */
 export function configCommands<C, N extends Identified & { data: { cfg: C } }, E extends Identified>(
-  port: DesignerGraphPort<N, E>,
+  port: GraphPort<N, E>,
   id: string,
   before: C,
   after: C,
@@ -141,7 +142,7 @@ export function configCommands<C, N extends Identified & { data: { cfg: C } }, E
  * caller. Undo removes what appeared and restores what was displaced.
  */
 export function connectCommand<N extends Identified, E extends Identified>(
-  port: DesignerGraphPort<N, E>,
+  port: GraphPort<N, E>,
   added: E[],
   removed: E[],
 ): Command {
@@ -163,7 +164,7 @@ export function connectCommand<N extends Identified, E extends Identified>(
  * records nothing).
  */
 export function moveNodesCommand<N extends Positioned, E extends Identified>(
-  port: DesignerGraphPort<N, E>,
+  port: GraphPort<N, E>,
   moves: { id: string; from: XY; to: XY }[],
 ): Command | null {
   const real = moves

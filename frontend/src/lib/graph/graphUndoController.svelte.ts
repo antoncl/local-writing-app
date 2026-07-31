@@ -1,14 +1,17 @@
-// The designer's undo/redo controller (ADR-0050 slice 1, #681) — the glue
-// between the canvas component and the caretaker: one per-view history,
-// the gesture recorders the committers call, the Ctrl+Z/Y/Shift+Z chord
-// handler, and the §7 announcement state. Extracted from ViewBodyView so the
-// component stays under the size cap and this layer — everything reversible —
-// is reachable by unit tests (SvelteFlow itself is not headless-testable).
+// The shared node-canvas undo/redo controller (ADR-0050 slice 1, #681;
+// generalized off the view designer in S7c/#760 for the plot board) — the glue
+// between a canvas component and the caretaker: one per-surface history, the
+// gesture recorders the committers call, the Ctrl+Z/Y/Shift+Z chord handler,
+// and the §7 announcement state. It lives outside any component so the layer —
+// everything reversible — is reachable by unit tests (SvelteFlow itself is not
+// headless-testable), and so a second surface reuses it unchanged.
 //
-// The controller records commands built by `designerCommands`; the commands
-// replay through the `DesignerGraphPort` — raw array swaps on the component's
-// rune state, deliberately NOT the recording committers (the caretaker throws
-// on `record` during a replay).
+// The controller records commands built by `graphCommands`; the commands
+// replay through the `GraphPort` — raw array swaps on the surface's rune state,
+// deliberately NOT the recording committers (the caretaker throws on `record`
+// during a replay). A surface uses only the recorders its gestures need — the
+// plot board (S7c) records only drags; connect/config stay for edge-and-config
+// canvases like the view designer.
 import { UndoCaretaker } from "@/lib/stores/undoCaretaker.svelte";
 import {
   addNodeCommand,
@@ -16,9 +19,9 @@ import {
   connectCommand,
   deleteCommands,
   moveNodesCommand,
-  type DesignerGraphPort,
+  type GraphPort,
   type XY,
-} from "@/lib/views/designerCommands";
+} from "@/lib/graph/graphCommands";
 
 type NodeLike = { id: string; position: XY };
 type EdgeLike = { id: string; source: string; target: string };
@@ -29,12 +32,12 @@ type ConnectionLike = {
   targetHandle?: string | null;
 };
 
-export class DesignerUndoController<N extends NodeLike, E extends EdgeLike> {
+export class GraphUndoController<N extends NodeLike, E extends EdgeLike> {
   // Reassigned wholesale on reset — one caretaker per loaded view (§3:
   // per-surface history; a fresh instance keeps one document's history from
   // bleeding into the next).
   #caretaker = $state(new UndoCaretaker());
-  readonly #port: DesignerGraphPort<N, E>;
+  readonly #port: GraphPort<N, E>;
   /** Pre-drag positions of the dragged set, captured on dragstart so the
    *  whole gesture records as ONE command on release (#187). */
   #dragStart: Map<string, XY> | null = null;
@@ -48,7 +51,7 @@ export class DesignerUndoController<N extends NodeLike, E extends EdgeLike> {
   /** What the `aria-live` region reads out (§7). */
   announcement = $state("");
 
-  constructor(port: DesignerGraphPort<N, E>) {
+  constructor(port: GraphPort<N, E>) {
     this.#port = port;
   }
 
@@ -91,7 +94,7 @@ export class DesignerUndoController<N extends NodeLike, E extends EdgeLike> {
 
   /** A config edit plus the incident edges its validity sweep dropped. */
   recordConfig(id: string, before: unknown, after: unknown, droppedEdges: E[]): void {
-    const port = this.#port as DesignerGraphPort<N & { data: { cfg: unknown } }, E>;
+    const port = this.#port as GraphPort<N & { data: { cfg: unknown } }, E>;
     for (const c of configCommands(port, id, before, after, droppedEdges)) this.#caretaker.record(c);
   }
 
@@ -162,9 +165,10 @@ export class DesignerUndoController<N extends NodeLike, E extends EdgeLike> {
   }
 
   /**
-   * The designer-scoped chord handler (§3) — attached to the `.view-designer`
-   * section, riding bubbling from whatever inside has focus, never
-   * `svelte:window`. Chords inside a text input stay with the input's native
+   * The surface-scoped chord handler (§3) — attached to the surface's own
+   * section (`.view-designer`, `.plot-board`), riding bubbling from whatever
+   * inside has focus, never `svelte:window`, so one canvas's Ctrl+Z can't reach
+   * another's caretaker. Chords inside a text input stay with the input's native
    * undo. Ctrl+Z → undo; Ctrl+Y and Ctrl+Shift+Z → redo (TipTap's redo — §3
    * uniformity).
    */

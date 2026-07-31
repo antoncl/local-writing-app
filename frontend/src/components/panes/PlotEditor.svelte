@@ -1,88 +1,213 @@
 <!--
-  PlotEditor — the plot board (ADR-0048 S7, slice S7b). A read-only SvelteFlow
-  canvas that renders the S7a board projection: plotlines as horizontal lanes,
-  cards laid out in their lane, each showing its synopsis and scene-attachment.
-  This is the surface the whole plot UI grows on — S7c makes the layout editable
-  (with Tier-1 undo via ADR-0050), S7d adds the card content ops, S7e the plotline
-  surfaces. Here it only DISPLAYS: nodes are non-draggable, non-selectable,
-  non-connectable.
+  PlotEditor — the plot board (ADR-0048 S7). A SvelteFlow canvas that renders the
+  S7a projection: plotlines as horizontal lanes, cards laid out in their lane.
+  S7b displayed it read-only; S7c (#760) makes the CARD layout editable — cards
+  drag, positions persist to the board's opaque `layout`, and a drag is undoable
+  via the shared ADR-0050 caretaker (Tier-1: layout only). Lane headers stay
+  fixed. Content ops (realize/attach/seed = S7d) and plotline surfaces (S7e) are
+  later sub-slices; per ADR-0048 binding decision 1 they are intentful mutations
+  OUTSIDE the caretaker (an in-memory undo must never reverse a scene mint).
 
-  The projection → nodes transform is the pure, unit-tested `buildBoardNodes`
-  (lib/plot/plotBoardLayout.ts) — the canvas itself is not headless-testable
-  ([[reference_svelteflow_headless_limits]]), so all the logic lives there and the
-  custom nodes (PlotCardNode / PlotLaneNode) carry their own mount tests.
+  The projection → nodes transform is the pure, unit-tested `buildBoardNodes`; the
+  undo logic is the pure GraphUndoController + caretaker — the canvas itself is not
+  headless-testable ([[reference_svelteflow_headless_limits]]), so every reversible
+  bit lives outside it and the custom nodes carry their own mount tests.
 -->
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import "@xyflow/svelte/dist/style.css";
   import { SvelteFlow, Controls, type ColorMode, type Edge } from "@xyflow/svelte";
   import { themePreference } from "@/lib/utils/theme";
-  import { buildBoardNodes, type PlotBoardNode } from "@/lib/plot/plotBoardLayout";
+  import {
+    buildBoardNodes,
+    cardPositionsFromNodes,
+    readBoardPositions,
+    type PlotBoardNode,
+  } from "@/lib/plot/plotBoardLayout";
+  import { GraphUndoController } from "@/lib/graph/graphUndoController.svelte";
+  import type { GraphPort } from "@/lib/graph/graphCommands";
+  import { savePlotBoardLayout } from "@/lib/stores/plotBoard";
+  import UndoRedoControls from "@/components/UndoRedoControls.svelte";
   import ViewportFit from "@/components/editor/body/view/ViewportFit.svelte";
   import PlotCardNode from "./plot/PlotCardNode.svelte";
   import PlotLaneNode from "./plot/PlotLaneNode.svelte";
-  import type { PlotBoardProjection } from "@/lib/types";
+  import type { BoardXY, PlotBoardProjection } from "@/lib/types";
 
-  // The board's read model, fetched by the opener into the plotBoard store. Null
-  // until the first refresh resolves; the pane shows a neutral loading blank.
+  // The board's read model, fetched by the opener / PlotBoardPane into the store.
+  // Null until the first refresh resolves; the pane shows a neutral loading blank.
   let { projection }: { projection: PlotBoardProjection | null } = $props();
 
-  // Svelte Flow's node array, bound to the canvas. Re-derived from the projection
-  // whenever it changes; read-only, so we never write back. edges stay empty in
-  // S7b (card→scene/plotline wires are S7f, and don't render headless anyway).
+  // Coalesce a drag's position churn into one save on release.
+  const SAVE_DEBOUNCE_MS = 600;
+
+  // Svelte Flow's arrays, bound to the canvas. Edges stay empty in S7c (card→
+  // scene/plotline wires are S7f, and don't render headless anyway).
   let flowNodes = $state<PlotBoardNode[]>([]);
   let flowEdges = $state<Edge[]>([]);
-  // $effect.PRE, not $effect: a plain effect runs after children mount, so
-  // <SvelteFlow>'s init-only `fitView` would frame an empty array before this
-  // populated it. Pre runs before the DOM update in the same flush, so the nodes
-  // are in place when the canvas first mounts (projection null→set).
-  $effect.pre(() => {
-    flowNodes = projection ? buildBoardNodes(projection) : [];
-  });
+  // Optimistic base for the next layout save, and a snapshot guard so the persist
+  // effect fires only on a real change — never on the just-loaded state.
+  let revision = $state("");
+  let lastSavedPositions = $state("");
+  // True while a card is dragging, so the debounce waits for release (one save
+  // per gesture), mirroring ViewBodyView's autosave.
+  let dragging = $state(false);
+  // The board id currently hydrated into flowNodes — a plain (non-reactive) local.
+  // The rehydrate effect compares the incoming projection's board_id against it so a
+  // refetch of the SAME document (re-opening the menu) doesn't rebuild the canvas and
+  // discard an in-progress edit; only a genuinely different board re-hydrates.
+  let loadedBoardId = "";
+
+  // The board's undo history (ADR-0050): the shared caretaker via GraphUndoController,
+  // its own instance per §3, replaying through a port over our rune arrays. In S7c
+  // it records only drags — content ops are intentful and outside undo.
+  const graphPort: GraphPort<PlotBoardNode, Edge> = {
+    getNodes: () => flowNodes,
+    setNodes: (n) => (flowNodes = n),
+    getEdges: () => flowEdges,
+    setEdges: (e) => (flowEdges = e),
+  };
+  const undoCtl = new GraphUndoController<PlotBoardNode, Edge>(graphPort);
 
   const nodeTypes = { plotCard: PlotCardNode, plotLane: PlotLaneNode };
-  // Svelte Flow ships light-only chrome; drive its theme from the app's (the
-  // preference values map straight to ColorMode, per ViewBodyView).
+  // Svelte Flow ships light-only chrome; drive its theme from the app's.
   let colorMode = $derived($themePreference as ColorMode);
 
-  // Empty = the singleton exists but holds no plotlines and no cards yet. Seeding
-  // from the manuscript is a content op (S7d), so the hint stays descriptive here.
+  // Empty = the singleton exists but holds no plotlines and no cards yet.
   let isEmpty = $derived(!!projection && projection.plotlines.length === 0 && projection.cards.length === 0);
+
+  // (Re)hydrate from a fetched projection. Guarded on board_id so it fires once per
+  // DOCUMENT, not per projection reference: a layout save doesn't touch the store, but
+  // the opener / PlotBoardPane can re-set an equal projection, and rebuilding then
+  // would discard an in-progress edit and reset undo. The snapshot reads the LOCAL
+  // built array, never the reactive `flowNodes` — reading flowNodes back would
+  // subscribe this effect to xyflow's in-place position mutations, so every drag would
+  // re-run it and snap the card back. $effect.PRE so nodes are present before
+  // <SvelteFlow> mounts (projection null→set).
+  $effect.pre(() => {
+    if (!projection) {
+      loadedBoardId = "";
+      flowNodes = [];
+      dragging = false;
+      return;
+    }
+    if (projection.board_id === loadedBoardId) return;
+    loadedBoardId = projection.board_id;
+    const saved = readBoardPositions(projection.layout);
+    const nodes = buildBoardNodes(projection, saved);
+    flowNodes = nodes;
+    revision = projection.board_revision;
+    // Snapshot from the local `nodes` (not reactive flowNodes) so a never-touched
+    // board doesn't save on open and this effect stays subscribed to `projection` only.
+    lastSavedPositions = JSON.stringify(cardPositionsFromNodes(nodes));
+    dragging = false;
+    undoCtl.reset();
+  });
+
+  // Autosave the layout: skip while dragging (coalesce the gesture) and when nothing
+  // changed, else debounce a PUT. The projection/dragging guard runs FIRST so a drag
+  // doesn't re-serialize the whole board every frame (ViewBodyView's pattern). Undo/
+  // redo mutate the same positions and persist through here too — no separate save; a
+  // load matches the snapshot, so it never writes.
+  $effect(() => {
+    if (!projection || dragging) return;
+    const positions = cardPositionsFromNodes(flowNodes);
+    const serialized = JSON.stringify(positions);
+    if (serialized === lastSavedPositions) return;
+    const handle = setTimeout(() => void persist(positions, serialized), SAVE_DEBOUNCE_MS);
+    return () => clearTimeout(handle);
+  });
+
+  // Flush a pending (debounced) layout change when the pane unmounts, so closing the
+  // board right after a drag doesn't lose it. Best-effort: the PUT is fired, not
+  // awaited (the fetch outlives the component). Project-switch / reload flushing is
+  // the deferred save-state machine (#756).
+  onDestroy(() => {
+    if (!projection || dragging) return;
+    const positions = cardPositionsFromNodes(flowNodes);
+    const serialized = JSON.stringify(positions);
+    if (serialized !== lastSavedPositions) void persist(positions, serialized);
+  });
+
+  async function persist(positions: Record<string, BoardXY>, serialized: string): Promise<void> {
+    try {
+      revision = await savePlotBoardLayout({ positions }, revision);
+      lastSavedPositions = serialized;
+    } catch {
+      // Leave the guard unadvanced so the next change retries. The surfaced
+      // load/error state machine (409 rebase, in-flight guard) is #756.
+    }
+  }
 </script>
 
-<div class="plot-board" role="application" aria-label="Plot board">
+<!-- The keydown is board-scoped (ADR-0050 §3): it rides BUBBLING from whatever
+     focusable element inside has focus (canvas, controls), so a chord in another
+     pane can never reach this caretaker. Same sanctioned delegation exception as
+     the view designer — the labelled section is an implicit region, and making it
+     a tab stop would add a ghost stop for keyboard users. -->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<section class="plot-board" aria-label="Plot board" onkeydown={undoCtl.handleKeydown}>
   {#if !projection}
     <p class="board-hint muted">Loading the board…</p>
   {:else if isEmpty}
     <p class="board-hint muted">No plotlines or cards yet. Add a plotline, or seed cards from the manuscript.</p>
   {:else}
-    <SvelteFlow
-      bind:nodes={flowNodes}
-      bind:edges={flowEdges}
-      {nodeTypes}
-      {colorMode}
-      nodesDraggable={false}
-      nodesConnectable={false}
-      elementsSelectable={false}
-      minZoom={0.2}
-    >
-      <!-- §G (design language): a flat --board surface, no dotted <Background/>. -->
-      <Controls showLock={false} />
-      <!-- Frame the board on load. The `fitView` PROP is deliberately NOT used:
-           it fires on init, before the async-arrived nodes are registered, so it
-           frames an empty canvas. This imperative fit re-frames 80ms after the
-           projection changes, once the nodes are measured — the fix ViewBodyView
-           uses for the same "populate nodes after mount" pattern. -->
-      <ViewportFit trigger={projection} options={{ padding: 0.2, maxZoom: 1 }} />
-    </SvelteFlow>
+    <div class="board-toolbar">
+      <UndoRedoControls
+        canUndo={undoCtl.canUndo}
+        canRedo={undoCtl.canRedo}
+        undoTitle={undoCtl.undoTitle}
+        redoTitle={undoCtl.redoTitle}
+        announcement={undoCtl.announcement}
+        onUndo={() => undoCtl.undo()}
+        onRedo={() => undoCtl.redo()}
+      />
+    </div>
+    <div class="board-canvas">
+      <SvelteFlow
+        bind:nodes={flowNodes}
+        bind:edges={flowEdges}
+        {nodeTypes}
+        {colorMode}
+        nodesConnectable={false}
+        elementsSelectable={false}
+        onnodedragstart={({ nodes }) => {
+          dragging = true;
+          undoCtl.dragStart(nodes);
+        }}
+        onnodedragstop={({ nodes }) => {
+          dragging = false;
+          undoCtl.dragStop(nodes);
+        }}
+        minZoom={0.2}
+      >
+        <!-- §G (design language): a flat --board surface, no dotted <Background/>. -->
+        <Controls showLock={false} />
+        <!-- Frame the board on load. The init-only `fitView` PROP frames an empty
+             canvas (nodes arrive after mount), so this imperative fit reframes once
+             the projection's nodes are measured — the ViewBodyView fix. -->
+        <ViewportFit trigger={projection} options={{ padding: 0.2, maxZoom: 1 }} />
+      </SvelteFlow>
+    </div>
   {/if}
-</div>
+</section>
 
 <style>
   .plot-board {
+    display: flex;
+    flex-direction: column;
     width: 100%;
     height: 100%;
     min-height: 0;
     background: var(--board);
+  }
+  .board-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    padding: var(--sp-1) var(--sp-2);
+  }
+  .board-canvas {
+    flex: 1;
+    min-height: 0;
   }
   .board-hint {
     padding: 16px;

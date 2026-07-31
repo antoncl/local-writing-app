@@ -3,14 +3,18 @@
 // the canvas itself is not headless-testable ([[reference_svelteflow_headless_limits]]),
 // so the graph-building is verified here and the composition in a real browser.
 //
-// The read-only board groups cards into horizontal lanes, one per plotline (in
-// projection order), plus a trailing "Unassigned" lane for cards with no plotline
-// (or one that no longer resolves — refs are purged on delete, so this is just
+// The board groups cards into horizontal lanes, one per plotline (in projection
+// order), plus a trailing "Unassigned" lane for cards with no plotline (or one
+// that no longer resolves — refs are purged on delete, so this is just
 // defensive). Each lane gets a header node at the left; its cards flow rightward.
-// Layout editing / drag / persistence is S7c — here positions are derived, fixed.
+//
+// S7c makes card positions editable: `buildBoardNodes` takes the saved position
+// overrides and a dragged card keeps its spot (lane headers stay derived/fixed).
+// `readBoardPositions` / `cardPositionsFromNodes` are the read/write ends of the
+// board's opaque `layout` dict that the PlotEditor round-trips.
 
 import type { Node } from "@xyflow/svelte";
-import type { PlotBoardProjection } from "@/lib/types";
+import type { BoardXY, PlotBoardLayout, PlotBoardProjection } from "@/lib/types";
 
 // A lane header node: the plotline's name, its colour swatch id (for the accent),
 // and how many cards sit in the lane.
@@ -45,10 +49,15 @@ export const ROW_STRIDE = CARD_HEIGHT + 60;
 // with a real plotline node id, which is `lane:<plot_...>`.
 export const UNASSIGNED_LANE_ID = "lane:__unassigned__";
 
-// Build the fixed read-only layout. Plotlines keep projection order; the
-// Unassigned lane is appended only when it holds at least one card, so an
-// all-assigned board shows no empty trailing lane.
-export function buildBoardNodes(projection: PlotBoardProjection): PlotBoardNode[] {
+// Build the board layout. Plotlines keep projection order; the Unassigned lane
+// is appended only when it holds at least one card, so an all-assigned board
+// shows no empty trailing lane. `saved` carries per-card position overrides
+// (S7c): a card present there keeps that spot, otherwise it falls to its derived
+// lane-grid slot.
+export function buildBoardNodes(
+  projection: PlotBoardProjection,
+  saved: Record<string, BoardXY> = {},
+): PlotBoardNode[] {
   const plotlineById = new Map(projection.plotlines.map((line) => [line.id, line]));
 
   // Bucket cards by their resolved lane, preserving projection card order within
@@ -92,16 +101,20 @@ export function buildBoardNodes(projection: PlotBoardProjection): PlotBoardNode[
     });
 
     laneCards.forEach((card, colIndex) => {
+      const derived = {
+        x: LANE_LABEL_WIDTH + LABEL_TO_CARD_GAP + colIndex * (CARD_WIDTH + CARD_GAP_X),
+        y,
+      };
       nodes.push({
         id: card.id,
         type: "plotCard",
-        position: {
-          x: LANE_LABEL_WIDTH + LABEL_TO_CARD_GAP + colIndex * (CARD_WIDTH + CARD_GAP_X),
-          y,
-        },
+        // Saved position wins (S7c: a pinned card); an unsaved card falls to its
+        // derived lane-grid slot, so a card added later flows in automatically.
+        position: saved[card.id] ?? derived,
         width: CARD_WIDTH,
         height: CARD_HEIGHT,
-        draggable: false,
+        // Cards drag (S7c layout editing); lane headers stay fixed to the grid.
+        draggable: true,
         selectable: false,
         data: {
           title: card.title,
@@ -114,4 +127,32 @@ export function buildBoardNodes(projection: PlotBoardProjection): PlotBoardNode[
   });
 
   return nodes;
+}
+
+// Read the typed position overrides out of the projection's opaque `layout`
+// dict. An unknown / malformed shape degrades to no overrides (every card keeps
+// its derived slot) rather than throwing — the board must always render.
+export function readBoardPositions(layout: Record<string, unknown>): Record<string, BoardXY> {
+  const positions = (layout as PlotBoardLayout).positions;
+  if (!positions || typeof positions !== "object") return {};
+  const out: Record<string, BoardXY> = {};
+  for (const [id, p] of Object.entries(positions)) {
+    // Number.isFinite (not typeof === "number", which admits NaN/Infinity): a
+    // non-finite coordinate can't be placed by SvelteFlow, and the board must render.
+    if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) out[id] = { x: p.x, y: p.y };
+  }
+  return out;
+}
+
+// Serialize the current card positions for persistence (S7c). Only plotCard nodes —
+// lane headers are derived (fixed) and never stored. Positions are stored raw (not
+// rounded) so the persist threshold matches moveNodesCommand's raw-inequality drag
+// record: rounding here would let a sub-pixel drag record an undo step that saved
+// nothing, so a later Ctrl+Z would reverse an invisible move.
+export function cardPositionsFromNodes(nodes: PlotBoardNode[]): Record<string, BoardXY> {
+  const out: Record<string, BoardXY> = {};
+  for (const n of nodes) {
+    if (n.type === "plotCard") out[n.id] = { x: n.position.x, y: n.position.y };
+  }
+  return out;
 }

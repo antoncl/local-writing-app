@@ -4,8 +4,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { get } from "svelte/store";
 import { api } from "@/lib/api";
-import { clearPlotBoard, plotBoardStore, refreshPlotBoard } from "./plotBoard";
-import type { PlotBoardProjection } from "@/lib/types";
+import { clearPlotBoard, plotBoardStore, refreshPlotBoard, savePlotBoardLayout } from "./plotBoard";
+import type { PlotBoard, PlotBoardProjection } from "@/lib/types";
 
 const projection = (): PlotBoardProjection => ({
   board_id: "b",
@@ -46,5 +46,28 @@ describe("refreshPlotBoard", () => {
     await refreshPlotBoard();
     await refreshPlotBoard();
     expect(spy).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("savePlotBoardLayout", () => {
+  const board = (revision: string): PlotBoard => ({
+    id: "b",
+    title: "Board",
+    revision,
+    entry_type: "plot:board",
+    layout: {},
+  });
+
+  it("PUTs the layout with the optimistic base and returns the advanced revision", async () => {
+    const spy = vi.spyOn(api, "savePlotBoard").mockResolvedValue(board("r2"));
+    const next = await savePlotBoardLayout({ positions: { c1: { x: 1, y: 2 } } }, "r1");
+    expect(spy).toHaveBeenCalledWith({ base_revision: "r1", layout: { positions: { c1: { x: 1, y: 2 } } } });
+    expect(next).toBe("r2");
+  });
+
+  it("does not touch the store (the editor owns the live revision)", async () => {
+    vi.spyOn(api, "savePlotBoard").mockResolvedValue(board("r2"));
+    await savePlotBoardLayout({ positions: {} }, "r1");
+    expect(get(plotBoardStore)).toBeNull();
   });
 });

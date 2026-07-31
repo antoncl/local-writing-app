@@ -1241,7 +1241,7 @@
   }
   .welcome-hint {
     width: min(560px, 100%);
-    margin: 4px 0;
+    margin: var(--sp-1) 0;
     font-size: var(--fs-md);
   }
 

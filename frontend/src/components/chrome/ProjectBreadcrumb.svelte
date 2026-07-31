@@ -7,6 +7,7 @@
     type DeclarationRow,
   } from "@/lib/utils/projectChain";
   import InheritsFromList from "@/components/widgets/InheritsFromList.svelte";
+  import Popover from "./Popover.svelte";
 
   // The full crumb tooltip: identity, then what its inheritance state means
   // (#417 slice 4). `available`/`stale` are the ancestors #431 used to hide, so
@@ -73,72 +74,26 @@
   $: hasChildren = childProjects.length > 0;
 
   // The inheritance-editor popover (#417 slice 4b, replacing the Project pane's
-  // Inheritance section). Anchored to `.breadcrumb-root` — NOT the scrolling
-  // `.project-chain`, whose `overflow-x` clips both axes and would swallow a
-  // panel dropped below it — and hung off the "edit…" affordance.
+  // Inheritance section) and the "Contains" descent menu (#417 slice 5) are both
+  // `<Popover>` (#766.1) — the overlay + anchored panel + Escape-refocus + (for
+  // the modal editor) focus-into + Tab-trap all live in that primitive now. Both
+  // anchor to `.breadcrumb-root` — NOT the scrolling `.project-chain`, whose
+  // `overflow-x` clips both axes and would swallow a panel dropped below it. The
+  // editor is a modal `role="dialog"` (it owns focus while open); the descent
+  // menu is a non-modal `role="menu"` like the switcher, because descending is
+  // navigation, not editing.
   let popoverOpen = false;
   let editButton: HTMLButtonElement | null = null;
-  let popoverEl: HTMLElement | null = null;
+  let descendOpen = false;
+  let descendButton: HTMLButtonElement | null = null;
 
   function togglePopover(): void {
     popoverOpen = !popoverOpen;
     if (popoverOpen) descendOpen = false; // never both bar popovers at once
   }
-  function closePopover(): void {
-    popoverOpen = false;
-  }
-  // Escape returns focus to the trigger: the panel unmounts with the popover, so
-  // without this focus falls to <body> and the next Tab restarts from the top of
-  // the document (the switcher restores focus for the same reason). A click on
-  // the overlay does NOT refocus — a mouse user dismissing shouldn't have focus
-  // yanked back onto the button.
-  function closePopoverAndRefocus(): void {
-    closePopover();
-    editButton?.focus();
-  }
-
-  // The popover is a `role="dialog"` with `aria-modal` + an overlay, so it owns
-  // focus while open (the switcher's `role="menu"` does not, hence the different
-  // treatment). Everything tabbable inside it, for the initial focus + the trap.
-  const POPOVER_FOCUSABLE =
-    'input:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
-  // Svelte action: move focus into the panel the moment it mounts (i.e. on open),
-  // so a keyboard/SR user lands INSIDE the dialog rather than on the trigger,
-  // which is now behind the overlay. Falls back to the panel itself (tabindex=-1)
-  // when every row is disabled (mid-save), so the dialog is still announced.
-  function focusIntoPopover(node: HTMLElement): void {
-    (node.querySelector<HTMLElement>(POPOVER_FOCUSABLE) ?? node).focus();
-  }
-
-  // Keep Tab / Shift+Tab within the open dialog — it is modal, so focus must not
-  // walk out to the bar controls sitting behind the overlay.
-  function trapPopoverTab(event: KeyboardEvent): void {
-    if (!popoverEl) return;
-    const focusable = [...popoverEl.querySelectorAll<HTMLElement>(POPOVER_FOCUSABLE)];
-    if (focusable.length === 0) return;
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  }
-
-  // All popover keyboard handling rides the one window listener (no handler on
-  // the dialog div, which would trip the a11y linter): Escape closes, Tab traps.
-  // The modal inherit dialog owns Escape/Tab while open; otherwise the non-modal
-  // descent menu (below) takes Escape.
-  function handleKeydown(event: KeyboardEvent): void {
-    if (popoverOpen) {
-      if (event.key === "Escape") closePopoverAndRefocus();
-      else if (event.key === "Tab") trapPopoverTab(event);
-      return;
-    }
-    if (descendOpen && event.key === "Escape") closeDescendAndRefocus();
+  function toggleDescend(): void {
+    descendOpen = !descendOpen;
+    if (descendOpen) popoverOpen = false; // never both bar popovers at once
   }
   // If the last actionable ancestor is repaired away (a stale untick that leaves
   // only organisational folders), `canDeclare` goes false and the anchor button
@@ -146,27 +101,8 @@
   // longer has anything to edit.
   $: if (!canDeclare) popoverOpen = false;
 
-  // The "Contains" descent menu (#417 slice 5) — a `role="menu"` like the
-  // project switcher, NOT the modal dialog the inheritance editor is: descending
-  // is navigation, so it mirrors the switcher's non-modal dismiss (overlay +
-  // Escape refocus) rather than trapping focus. Anchored to `.breadcrumb-root`
-  // like the inherit popover, for the same overflow-clip reason.
-  let descendOpen = false;
-  let descendButton: HTMLButtonElement | null = null;
-
-  function toggleDescend(): void {
-    descendOpen = !descendOpen;
-    if (descendOpen) popoverOpen = false; // never both bar popovers at once
-  }
   function closeDescend(): void {
     descendOpen = false;
-  }
-  // Escape refocuses the trigger (the menu unmounts, so focus would otherwise
-  // fall to <body>); an overlay click does not, matching the inherit popover and
-  // the switcher.
-  function closeDescendAndRefocus(): void {
-    closeDescend();
-    descendButton?.focus();
   }
   // Opening a child is a scope change (ADR-0045), exactly like clicking a crumb,
   // so it goes through the same `onOpen`; the host refocuses its stable anchor
@@ -179,8 +115,6 @@
   // cannot linger (mirrors the inherit popover's `canDeclare` guard).
   $: if (!hasChildren) descendOpen = false;
 </script>
-
-<svelte:window on:keydown={handleKeydown} />
 
 <!--
   The resolution-scope selector (#311): which project is being built.
@@ -333,56 +267,63 @@
       </div>
     {/if}
 
-    {#if popoverOpen}
-      <!-- Click-outside dismiss (does not refocus; see closePopover). -->
-      <div class="popover-overlay" role="presentation" on:click={closePopover}></div>
-      <!-- Modal editor: `focusIntoPopover` pulls focus in on mount, the window
-           keydown handler traps Tab + closes on Escape (#417 slice 4b review). -->
-      <div
-        class="inherit-popover"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="inherit-popover-label"
-        id="inherit-popover"
-        tabindex="-1"
-        bind:this={popoverEl}
-        use:focusIntoPopover
-      >
-        <div class="inherit-popover-label" id="inherit-popover-label">Inherits from</div>
-        <InheritsFromList rows={inheritRows} busy={inheritSaving} onToggle={onToggleInherit} />
-      </div>
-    {/if}
+    <!-- Modal editor: Popover pulls focus in on mount, traps Tab, closes on
+         Escape (#766.1). Anchored under the breadcrumb-root's left edge (the
+         "edit…" trigger scrolls with the chain, so the stable root edge is the
+         anchor — the #766.3 tradeoff). -->
+    <Popover
+      bind:open={popoverOpen}
+      triggerEl={editButton}
+      role="dialog"
+      labelledby="inherit-popover-label"
+      id="inherit-popover"
+      offset={6}
+      minWidth="260px"
+      maxWidth="360px"
+      padding="10px"
+      gap="6px"
+    >
+      <div class="inherit-popover-label" id="inherit-popover-label">Inherits from</div>
+      <InheritsFromList rows={inheritRows} busy={inheritSaving} onToggle={onToggleInherit} />
+    </Popover>
 
-    {#if descendOpen}
-      <!-- Descent menu (#417 slice 5): a non-modal role="menu", mirroring the
-           project switcher — overlay for click-outside, Escape refocuses the
-           trigger (handled on the window listener), focus not trapped. Each item
-           opens a child project (a scope change via `onOpen`). -->
-      <div class="popover-overlay" role="presentation" on:click={closeDescend}></div>
-      <div class="contains-menu" role="menu" aria-label="Projects inside this one" id="contains-menu">
-        {#each childProjects as child (child.path)}
-          <!-- `name` (the folder) shows only when it differs from the title: a
-               project keeps its folder name as its default title, so an
-               unconditional line would print the same string twice. The item's
-               accessible name is a clean "Open <title>" (aria-label), so the
-               folder-name span is decorative (aria-hidden) — a screen reader
-               never reads the raw slug as if it were part of the name. -->
-          <button
-            type="button"
-            class="contains-item"
-            role="menuitem"
-            aria-label={`Open ${child.title}`}
-            title={child.path}
-            on:click={() => handleOpenChild(child.path)}
-          >
-            <span class="contains-title">{child.title}</span>
-            {#if child.name !== child.title}
-              <span class="contains-name" aria-hidden="true">{child.name}</span>
-            {/if}
-          </button>
-        {/each}
-      </div>
-    {/if}
+    <!-- Descent menu (#417 slice 5): a non-modal role="menu", mirroring the
+         project switcher — overlay for click-outside, Escape refocuses the
+         trigger, focus not trapped. Each item opens a child project (a scope
+         change via `onOpen`). -->
+    <Popover
+      bind:open={descendOpen}
+      triggerEl={descendButton}
+      role="menu"
+      label="Projects inside this one"
+      id="contains-menu"
+      offset={6}
+      minWidth="200px"
+      maxWidth="320px"
+      maxHeight="calc(100vh - 60px)"
+    >
+      {#each childProjects as child (child.path)}
+        <!-- `name` (the folder) shows only when it differs from the title: a
+             project keeps its folder name as its default title, so an
+             unconditional line would print the same string twice. The item's
+             accessible name is a clean "Open <title>" (aria-label), so the
+             folder-name span is decorative (aria-hidden) — a screen reader
+             never reads the raw slug as if it were part of the name. -->
+        <button
+          type="button"
+          class="contains-item"
+          role="menuitem"
+          aria-label={`Open ${child.title}`}
+          title={child.path}
+          on:click={() => handleOpenChild(child.path)}
+        >
+          <span class="contains-title">{child.title}</span>
+          {#if child.name !== child.title}
+            <span class="contains-name" aria-hidden="true">{child.name}</span>
+          {/if}
+        </button>
+      {/each}
+    </Popover>
   </div>
 {/if}
 
@@ -564,35 +505,11 @@
     text-decoration: none;
   }
 
-  /* The inheritance-editor popover (#417 slice 4b). Overlay + panel mirror the
-     top bar's switcher menu: a full-viewport catcher for the click-outside
-     dismiss, and a panel anchored under the left of the breadcrumb (the "edit…"
-     trigger scrolls with the chain, so the stable root edge is the anchor). The
-     z-indexes match the switcher's (overlay below, panel above) within the top
-     bar's stacking context. */
-  .popover-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 99;
-  }
-
-  .inherit-popover {
-    position: absolute;
-    top: calc(100% + 6px);
-    left: 0;
-    z-index: 101;
-    min-width: 260px;
-    max-width: 360px;
-    display: grid;
-    gap: 6px;
-    padding: 10px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    box-shadow: var(--elev-2);
-  }
-
-  /* One quiet label over the list — the popover is small enough that the pane's
+  /* The inheritance-editor popover's box (#417 slice 4b) is now the shared
+     `<Popover>` primitive (#766.1): overlay, positioning, anchor and the panel
+     card all live there, sized by the props the markup passes. Only the panel's
+     CONTENTS keep their styles here (they render in this component's scope).
+     One quiet label over the list — the popover is small enough that the pane's
      "Inheritance" heading + "Inherits from" sub-label collapse to this one line. */
   .inherit-popover-label {
     font-size: var(--fs-xs);
@@ -601,30 +518,7 @@
     letter-spacing: 0.04em;
   }
 
-  /* The descent menu (#417 slice 5). Overlay is shared with the inherit popover
-     (only one bar popover is open at a time); the panel mirrors the top bar's
-     project switcher — same z-index, anchored under the breadcrumb root's left
-     edge like the inherit popover. `max-height` + scroll because `children` is
-     uncapped: a shelf with many book folders must not push the list past the
-     window (the switcher menu caps itself for the same reason). */
-  .contains-menu {
-    position: absolute;
-    top: calc(100% + 6px);
-    left: 0;
-    z-index: 101;
-    min-width: 200px;
-    max-width: 320px;
-    max-height: calc(100vh - 60px);
-    overflow-y: auto;
-    display: grid;
-    gap: 1px;
-    padding: 6px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    box-shadow: var(--elev-2);
-  }
-
+  /* The descent menu's items (#417 slice 5); the panel box is `<Popover>`. */
   .contains-item {
     display: grid;
     gap: 2px;

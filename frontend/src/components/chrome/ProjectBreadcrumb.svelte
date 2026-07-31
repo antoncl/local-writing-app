@@ -275,7 +275,7 @@
           {#if index > 0}
             <span class="crumb-sep" aria-hidden="true">›</span>
           {/if}
-          {#if crumb.navigable}
+          {#if crumb.state !== "stale"}
             <!-- A real ancestor project: click = scope change. `available` (not
                  inherited) renders dimmed so a skipped layer is visible;
                  `declared` is the solid default (#417 slice 4). The dim is

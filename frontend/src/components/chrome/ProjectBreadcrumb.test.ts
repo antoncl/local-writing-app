@@ -181,6 +181,24 @@ describe("ProjectBreadcrumb — inheritance popover (#417 slice 4b)", () => {
     expect(screen.queryByRole("button")).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
   });
+
+  it("withholds the edit affordance when the only enumerated row is a disabled folder", () => {
+    // A project directly inside the machine root enumerates that root as a single
+    // NON-toggleable `folder` row — present, but nothing to declare. The edit
+    // affordance must still be withheld: it must never open onto an all-disabled
+    // list (#427). The `inheritRows: []` case above can't prove this — it pins the
+    // EMPTY enumeration; this pins that a present-but-untoggleable row is equally
+    // "nothing to edit" (#766.2, restoring the dropped `canDeclareInheritance`
+    // unit case that a `canDeclare = inheritRows.some(r => r.toggleable)` regression
+    // would slip past).
+    render(ProjectBreadcrumb, {
+      props: { chain: CHAIN, inheritRows: [row("writing", { state: "folder", toggleable: false })] },
+    });
+    expect(
+      screen.queryByRole("button", { name: "Edit what this project inherits from" }),
+    ).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
 });
 
 describe("ProjectBreadcrumb — descent menu (#417 slice 5)", () => {

@@ -491,6 +491,47 @@ class TheResolvedChainReachesTheWireTests(DeclaredChainTestCase):
             [(row["id"], row["label"]) for row in layers],
         )
 
+    def test_the_shared_rows_agree_even_beside_available_and_stale(self) -> None:
+        """The label-agreement pin, generalised past the all-declared fixture.
+
+        `test_the_chain_agrees_with_the_schema_layers_view` holds *full* equality
+        only because its fixture is all-declared. Since #417 slice 4 the chain
+        also carries `available`/`stale` rows the schema-layers view never has, so
+        full equality no longer models the invariant — and those chain-only rows
+        (the drift-prone new labels) would get no cross-view check at all. The
+        invariant that survives is narrower: on the rows the two projections
+        SHARE (same layer id) they must still name the layer identically, because
+        both stamp through `_stamp_project_layers`/`_layer_label_for_folder`; the
+        moment either starts deriving its own labels this diverges. A mixed
+        fixture would fail the equality test above spuriously, so it needs its own
+        case.
+        """
+        make_project_folder(self.service, self.base)  # available (not declared)
+        make_project_folder(self.service, self.universe, "The Honorverse")  # declared
+        make_project_folder(self.service, self.series, "Honor Harrington")
+        declare(self.service, self.root, [self.universe, self.series])
+        (self.series / "project.yaml").unlink()  # series → stale
+        bind_test_project(self.service)
+
+        with TestClient(app) as client:
+            chain = client.get("/api/project").json()["chain"]
+            layers = client.get("/api/metadata/schema/layers").json()["layers"]
+
+        layer_label = {row["id"]: row["label"] for row in layers}
+        shared = [row for row in chain if row["id"] in layer_label]
+
+        # The shared rows are the declared universe + the leaf book — both must
+        # name the layer exactly as the schema-layers view does.
+        self.assertEqual(
+            [(row["id"], row["label"]) for row in shared],
+            [(row["id"], layer_label[row["id"]]) for row in shared],
+        )
+        self.assertGreaterEqual(len(shared), 2)  # not a vacuous pass
+        # …and the chain really does carry rows the layers view does not (the
+        # available base + the stale series), so this is genuinely the mixed case
+        # the all-declared equality test cannot reach.
+        self.assertTrue(any(row["id"] not in layer_label for row in chain))
+
 
 class WritingTheDeclarationTests(DeclaredChainTestCase):
     def test_settings_update_stores_a_relative_path(self) -> None:

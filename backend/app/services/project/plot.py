@@ -258,6 +258,27 @@ class PlotMixin:
             index_entry=index_entry,
         )
 
+    def _build_plot_folder_entry(self, read: _PlotNodeRead, entry_cls):
+        # The one Entry-construction mapping shared by every plain plot-folder
+        # reader (plotline, card, template instance): identity + healed metadata +
+        # computed fields + layer provenance. Only the model class differs, so the
+        # three readers pass it in rather than repeating the 10-field mapping.
+        # (Templates read differently — they add the `template:` spec + Library
+        # provenance — so they build their model directly, not through here.)
+        return entry_cls(
+            id=read.node_id,
+            title=read.title,
+            body=read.body,
+            revision=read.revision,
+            entry_type=read.entry_type,
+            metadata=read.metadata,
+            computed_metadata=self._computed_entry_metadata(
+                read.body, node_id=read.node_id, entry_type=read.entry_type, schema=read.schema
+            ),
+            source_layer_id=read.index_entry.source_layer_id if read.index_entry else "",
+            source_layer_label=read.index_entry.source_layer_label if read.index_entry else "",
+        )
+
     def _save_plot_folder_node(self, entry_id: str, request, *, expected_entry_type: str, noun: str) -> str:
         root = self._require_project()
         schema = self.read_metadata_schema()
@@ -350,19 +371,9 @@ class PlotMixin:
         )
 
     def read_plotline(self, entry_id: str) -> PlotlineEntry:
-        read = self._read_plot_folder_node(entry_id, expected_entry_type="plot:plotline", noun="plotline")
-        return PlotlineEntry(
-            id=read.node_id,
-            title=read.title,
-            body=read.body,
-            revision=read.revision,
-            entry_type=read.entry_type,
-            metadata=read.metadata,
-            computed_metadata=self._computed_entry_metadata(
-                read.body, node_id=read.node_id, entry_type=read.entry_type, schema=read.schema
-            ),
-            source_layer_id=read.index_entry.source_layer_id if read.index_entry else "",
-            source_layer_label=read.index_entry.source_layer_label if read.index_entry else "",
+        return self._build_plot_folder_entry(
+            self._read_plot_folder_node(entry_id, expected_entry_type="plot:plotline", noun="plotline"),
+            PlotlineEntry,
         )
 
     def save_plotline(self, entry_id: str, request: SavePlotlineRequest) -> PlotlineEntry:
@@ -397,19 +408,9 @@ class PlotMixin:
         )
 
     def read_card(self, entry_id: str) -> CardEntry:
-        read = self._read_plot_folder_node(entry_id, expected_entry_type="plot:card", noun="card")
-        return CardEntry(
-            id=read.node_id,
-            title=read.title,
-            body=read.body,
-            revision=read.revision,
-            entry_type=read.entry_type,
-            metadata=read.metadata,
-            computed_metadata=self._computed_entry_metadata(
-                read.body, node_id=read.node_id, entry_type=read.entry_type, schema=read.schema
-            ),
-            source_layer_id=read.index_entry.source_layer_id if read.index_entry else "",
-            source_layer_label=read.index_entry.source_layer_label if read.index_entry else "",
+        return self._build_plot_folder_entry(
+            self._read_plot_folder_node(entry_id, expected_entry_type="plot:card", noun="card"),
+            CardEntry,
         )
 
     def save_card(self, entry_id: str, request: SaveCardRequest) -> CardEntry:
@@ -546,21 +547,11 @@ class PlotMixin:
         )
 
     def read_template_instance(self, entry_id: str) -> TemplateInstanceEntry:
-        read = self._read_plot_folder_node(
-            entry_id, expected_entry_type=PLOT_TEMPLATE_INSTANCE_ENTRY_TYPE, noun="plot instance"
-        )
-        return TemplateInstanceEntry(
-            id=read.node_id,
-            title=read.title,
-            body=read.body,
-            revision=read.revision,
-            entry_type=read.entry_type,
-            metadata=read.metadata,
-            computed_metadata=self._computed_entry_metadata(
-                read.body, node_id=read.node_id, entry_type=read.entry_type, schema=read.schema
+        return self._build_plot_folder_entry(
+            self._read_plot_folder_node(
+                entry_id, expected_entry_type=PLOT_TEMPLATE_INSTANCE_ENTRY_TYPE, noun="plot instance"
             ),
-            source_layer_id=read.index_entry.source_layer_id if read.index_entry else "",
-            source_layer_label=read.index_entry.source_layer_label if read.index_entry else "",
+            TemplateInstanceEntry,
         )
 
     def save_template_instance(
@@ -591,11 +582,12 @@ class PlotMixin:
         the source template is gone.
         """
         source = self.read_plot_template(template_id)
+        # read_plot_template validated the beats field, so every item is a member
+        # map (a non-dict item would have 422'd on read) — no shape guard needed here.
         source_beats = source.metadata.get("beats") or []
         instance_beats = [
             {key: beat[key] for key in _INSTANCE_BEAT_SNAPSHOT_KEYS if key in beat}
             for beat in source_beats
-            if isinstance(beat, dict)
         ]
         new_id = self._create_plot_folder_node(
             title=source.title,

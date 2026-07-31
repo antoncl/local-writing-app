@@ -801,6 +801,18 @@ class TemplateInstanceHttpTests(_PlotTestCase):
         self.assertEqual(instance["metadata"]["source_template_id"], _THREE_ACT)
         self.assertEqual(instance["metadata"]["source_template_name"], "Three-Act Story Arc")
 
+    def test_instantiate_copies_every_snapshot_member_faithfully(self) -> None:
+        # Full fidelity across ALL snapshot keys for every beat, compared against
+        # the source template — so a regression dropping (say) `guidance` or
+        # `required` from _INSTANCE_BEAT_SNAPSHOT_KEYS is caught, not just title/id.
+        template_beats = self.client.get(f"/api/plot/templates/{_THREE_ACT}").json()["metadata"]["beats"]
+        instance_beats = self._instantiate()["metadata"]["instance_beats"]
+        self.assertEqual(len(instance_beats), len(template_beats))
+        for src, got in zip(template_beats, instance_beats, strict=True):
+            for key in ("title", "function", "guidance", "required", "id"):
+                self.assertEqual(got.get(key), src.get(key), f"beat member {key} not copied faithfully")
+            self.assertNotIn("specifics", got)  # the one member left for the writer
+
     def test_instance_is_indexed_book_local_and_the_template_stays_pristine(self) -> None:
         before = _BUILTIN_THREE_ACT.read_bytes()
         instance = self._instantiate()
@@ -851,6 +863,32 @@ class TemplateInstanceHttpTests(_PlotTestCase):
         self.assertEqual(instance["metadata"].get("instance_beats", []), [])
         self.assertFalse(instance["metadata"].get("source_template_id"))
         self.assertFalse(instance["metadata"].get("source_template_name"))
+
+    def test_ad_hoc_instance_can_author_and_save_beats(self) -> None:
+        # The "roll your own plot" path (Anton): create an empty instance, author
+        # beats from scratch — including `specifics` — and save through the standard
+        # metadata path. Distinct from the specifics round-trip (which starts from an
+        # instantiated, pre-filled roster).
+        instance = self.client.post("/api/plot/instances", json={"title": "Custom arc"}).json()
+        beats = [
+            {"id": "b1", "title": "Inciting spark", "specifics": "Mara loses the ledger.", "required": True},
+            {"id": "b2", "title": "The reckoning", "specifics": "Jon finds the debt.", "required": False},
+        ]
+        saved = self.client.put(
+            f"/api/plot/instances/{instance['id']}",
+            json={
+                "title": "Custom arc",
+                "body": "",
+                "metadata": {"instance_beats": beats},
+                "base_revision": instance["revision"],
+            },
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        got = self.client.get(f"/api/plot/instances/{instance['id']}").json()["metadata"]["instance_beats"]
+        self.assertEqual(len(got), 2)
+        self.assertEqual(got[0]["title"], "Inciting spark")
+        self.assertEqual(got[0]["specifics"], "Mara loses the ledger.")
+        self.assertEqual(got[1]["required"], False)
 
     def test_delete_removes_from_list_and_404s(self) -> None:
         instance = self._instantiate()

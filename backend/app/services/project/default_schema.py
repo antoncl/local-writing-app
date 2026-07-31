@@ -580,8 +580,9 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # (which adds the per-beat `specifics` member); `plot:template_instance`
             # is its consumer. A separate field, not a reuse of `beats`, because a
             # field binds to exactly one item_group and the instance's beats carry
-            # the extra member.
-            "name": "Plot beats",
+            # the extra member. Named distinctly from the template's `beats`
+            # ("Plot beats") so the two are tellable apart in the field catalog.
+            "name": "Specialized beats",
             "type": "list",
             "item_group": "plot_instance_beat",
         },

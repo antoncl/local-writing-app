@@ -222,6 +222,28 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "fields": ["beats"],
             "has_body": True,
         },
+        "plot:template_instance": {
+            # The book-local, specialized copy of a template's beat roster
+            # (ADR-0048 §3, S7 Slice 2, #776). A template is generic ("the lovers
+            # have an argument"); the instance is where the writer makes that
+            # concrete to *this* book ("…about her hiding the debt"), and where an
+            # ad-hoc plot with no template behind it lives. The plotline's / card's
+            # third structural twin — a book-local flat Node under `plot/`, layered,
+            # freely editable (never a read-only Library node like the template it
+            # was cloned from). `instance_beats` holds the specialized roster; the
+            # generic beat is snapshot-copied in at instantiate so the instance is
+            # self-contained (an ad-hoc instance has no template to fall back to).
+            # `source_template_id` / `source_template_name` are the lineage
+            # snapshot — "which of the 14 arcs is this?" — captured at instantiate
+            # and durable even after the beats diverge or the source template is
+            # gone (a live ref would heal-to-blank, which for lineage is exactly
+            # wrong); both hidden, both empty for an ad-hoc instance.
+            "name": "Plot instance",
+            "kind": "plot",
+            "parent": "plot:base",
+            "fields": ["instance_beats", "source_template_id", "source_template_name"],
+            "has_body": True,
+        },
         "plot:board": {
             # The plot board — a per-project layout singleton (ADR-0048 §3).
             # Presentation only (card positions, per-column ordering, collapsed
@@ -494,6 +516,26 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 {"key": "id", "name": "ID", "type": "text"},
             ],
         },
+        "plot_instance_beat": {
+            # A specialized beat on a template instance (ADR-0048 S7 Slice 2, #776).
+            # The `plot_beat` shape plus one member: `specifics`, where the generic
+            # requirement becomes concrete to this book. The generic title /
+            # function / guidance ride along (snapshot-copied at instantiate) so the
+            # writer specializes *against* the requirement instead of losing it; the
+            # stable `id` carries the beat's identity for the card->beat links of a
+            # later slice. Kept distinct from `plot_beat` (rather than adding
+            # `specifics` there) so a template's read-only beats never sprout an
+            # empty book-specialization slot they can't use.
+            "name": "Plot instance beat",
+            "members": [
+                {"key": "title", "name": "Title", "type": "text"},
+                {"key": "function", "name": "Function", "type": "long_text"},
+                {"key": "guidance", "name": "Guidance", "type": "long_text"},
+                {"key": "specifics", "name": "Specifics", "type": "long_text"},
+                {"key": "required", "name": "Required", "type": "boolean", "default": True},
+                {"key": "id", "name": "ID", "type": "text"},
+            ],
+        },
     },
     "fields": {
         # Intrinsic identity triple (#116). Every node carries `id`, `title`,
@@ -531,6 +573,39 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Plot beats",
             "type": "list",
             "item_group": "plot_beat",
+        },
+        "instance_beats": {
+            # A template instance's specialized beat roster (ADR-0048 S7 Slice 2,
+            # #776). The `beats` field's sibling, bound to `plot_instance_beat`
+            # (which adds the per-beat `specifics` member); `plot:template_instance`
+            # is its consumer. A separate field, not a reuse of `beats`, because a
+            # field binds to exactly one item_group and the instance's beats carry
+            # the extra member. Named distinctly from the template's `beats`
+            # ("Plot beats") so the two are tellable apart in the field catalog.
+            "name": "Specialized beats",
+            "type": "list",
+            "item_group": "plot_instance_beat",
+        },
+        "source_template_id": {
+            # Lineage snapshot (ADR-0048 S7 Slice 2, #776): the stable id of the
+            # template a `plot:template_instance` was instantiated from, captured at
+            # instantiate. Empty for an ad-hoc instance. Hidden so it doesn't
+            # clutter the panel; unhide per type to filter/group instances by their
+            # source in a View. A plain text snapshot, not a live `entity_ref` — the
+            # lineage must survive the source template being edited, renamed, or
+            # deleted, which a healing ref would not.
+            "name": "Source template id",
+            "type": "text",
+            "hidden": True,
+        },
+        "source_template_name": {
+            # The display name of the source template, snapshotted at instantiate so
+            # the instance can show "Mythic Quest Arc" without re-resolving a
+            # (possibly inherited or since-deleted) template. Empty for an ad-hoc
+            # instance. Hidden, like `source_template_id`.
+            "name": "Source template",
+            "type": "text",
+            "hidden": True,
         },
         "dynamics": {
             # Scene-current per-character beats for the roleplay use case.

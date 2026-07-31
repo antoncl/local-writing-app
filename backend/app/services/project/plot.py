@@ -42,6 +42,7 @@ from app.models import (
     CreateCardRequest,
     CreatePlotlineRequest,
     CreateSceneRequest,
+    CreateTemplateInstanceRequest,
     PlotBoard,
     PlotBoardCard,
     PlotBoardPlotline,
@@ -58,12 +59,21 @@ from app.models import (
     SavePlotBoardRequest,
     SavePlotlineRequest,
     SavePlotTemplateRequest,
+    SaveTemplateInstanceRequest,
+    TemplateInstanceEntry,
+    TemplateInstanceList,
+    TemplateInstanceSummary,
 )
 from app.services.markdown_validation import validate_scene_markdown
 from app.services.project.errors import ProjectServiceError
 
 PLOT_BOARD_FILENAME = "plot-board.md"
 PLOT_TEMPLATE_ENTRY_TYPE = "plot:template"
+PLOT_TEMPLATE_INSTANCE_ENTRY_TYPE = "plot:template_instance"
+# The `plot_beat` members carried verbatim into a `plot_instance_beat` when a
+# template is instantiated (ADR-0048 S7 Slice 2, #776). `specifics` is left for
+# the writer, so it is not in this snapshot set.
+_INSTANCE_BEAT_SNAPSHOT_KEYS = ("title", "function", "guidance", "required", "id")
 
 
 class _PlotNodeRead(NamedTuple):
@@ -164,7 +174,13 @@ class PlotMixin:
         return entries
 
     def _create_plot_folder_node(
-        self, *, title: str, requested_entry_type: str, default_entry_type: str, noun: str
+        self,
+        *,
+        title: str,
+        requested_entry_type: str,
+        default_entry_type: str,
+        noun: str,
+        seed_metadata: dict[str, Any] | None = None,
     ) -> str:
         root = self._require_project()
         entry_type = requested_entry_type or default_entry_type
@@ -173,6 +189,12 @@ class PlotMixin:
         # sibling family), subsuming the old board-only guard.
         self._require_plot_family(entry_type, default_entry_type, noun=noun, schema=schema)
         initial_metadata = self._initial_metadata_from_defaults(entry_type, schema)
+        # `seed_metadata` lets a caller (instantiate) hand a new node its starting
+        # field values — the snapshotted beat roster + lineage — over the defaults.
+        # Normalised + validated exactly like a save's metadata, so a bad seed 422s
+        # rather than reaching disk.
+        if seed_metadata:
+            initial_metadata = self._normalise_metadata({**initial_metadata, **seed_metadata}, root / "plot")
         metadata_errors = self._validate_entry_metadata(
             label=f"{noun.capitalize()} new",
             entry_type=entry_type,
@@ -234,6 +256,27 @@ class PlotMixin:
             schema=schema,
             front_matter=front_matter,
             index_entry=index_entry,
+        )
+
+    def _build_plot_folder_entry(self, read: _PlotNodeRead, entry_cls):
+        # The one Entry-construction mapping shared by every plain plot-folder
+        # reader (plotline, card, template instance): identity + healed metadata +
+        # computed fields + layer provenance. Only the model class differs, so the
+        # three readers pass it in rather than repeating the 10-field mapping.
+        # (Templates read differently — they add the `template:` spec + Library
+        # provenance — so they build their model directly, not through here.)
+        return entry_cls(
+            id=read.node_id,
+            title=read.title,
+            body=read.body,
+            revision=read.revision,
+            entry_type=read.entry_type,
+            metadata=read.metadata,
+            computed_metadata=self._computed_entry_metadata(
+                read.body, node_id=read.node_id, entry_type=read.entry_type, schema=read.schema
+            ),
+            source_layer_id=read.index_entry.source_layer_id if read.index_entry else "",
+            source_layer_label=read.index_entry.source_layer_label if read.index_entry else "",
         )
 
     def _save_plot_folder_node(self, entry_id: str, request, *, expected_entry_type: str, noun: str) -> str:
@@ -328,19 +371,9 @@ class PlotMixin:
         )
 
     def read_plotline(self, entry_id: str) -> PlotlineEntry:
-        read = self._read_plot_folder_node(entry_id, expected_entry_type="plot:plotline", noun="plotline")
-        return PlotlineEntry(
-            id=read.node_id,
-            title=read.title,
-            body=read.body,
-            revision=read.revision,
-            entry_type=read.entry_type,
-            metadata=read.metadata,
-            computed_metadata=self._computed_entry_metadata(
-                read.body, node_id=read.node_id, entry_type=read.entry_type, schema=read.schema
-            ),
-            source_layer_id=read.index_entry.source_layer_id if read.index_entry else "",
-            source_layer_label=read.index_entry.source_layer_label if read.index_entry else "",
+        return self._build_plot_folder_entry(
+            self._read_plot_folder_node(entry_id, expected_entry_type="plot:plotline", noun="plotline"),
+            PlotlineEntry,
         )
 
     def save_plotline(self, entry_id: str, request: SavePlotlineRequest) -> PlotlineEntry:
@@ -375,19 +408,9 @@ class PlotMixin:
         )
 
     def read_card(self, entry_id: str) -> CardEntry:
-        read = self._read_plot_folder_node(entry_id, expected_entry_type="plot:card", noun="card")
-        return CardEntry(
-            id=read.node_id,
-            title=read.title,
-            body=read.body,
-            revision=read.revision,
-            entry_type=read.entry_type,
-            metadata=read.metadata,
-            computed_metadata=self._computed_entry_metadata(
-                read.body, node_id=read.node_id, entry_type=read.entry_type, schema=read.schema
-            ),
-            source_layer_id=read.index_entry.source_layer_id if read.index_entry else "",
-            source_layer_label=read.index_entry.source_layer_label if read.index_entry else "",
+        return self._build_plot_folder_entry(
+            self._read_plot_folder_node(entry_id, expected_entry_type="plot:card", noun="card"),
+            CardEntry,
         )
 
     def save_card(self, entry_id: str, request: SaveCardRequest) -> CardEntry:
@@ -492,6 +515,92 @@ class PlotMixin:
 
         walk(self.read_structure().root)
         return ordered
+
+    # ----- Template instances (plot:template_instance) -------------------
+    #
+    # The book-local, specialized copy of a template's beat roster (ADR-0048 §3):
+    # where a generic template requirement becomes concrete to this book, and
+    # where an ad-hoc plot with no template behind it lives. The plotline's /
+    # card's third structural twin, so list / create / read / save / delete are
+    # thin wrappers over the shared `_*_plot_folder_node` CRUD — the specialized
+    # `instance_beats` and the `source_template_*` lineage ride through `metadata`
+    # like any field, so no bespoke read/write is needed. `instantiate_plot_template`
+    # is the one bespoke op: it snapshots a template's beats into a fresh instance.
+
+    def list_template_instances(self) -> TemplateInstanceList:
+        return TemplateInstanceList(
+            entries=self._list_plot_folder_nodes(
+                entry_type=PLOT_TEMPLATE_INSTANCE_ENTRY_TYPE, summary_cls=TemplateInstanceSummary
+            )
+        )
+
+    def create_template_instance(self, request: CreateTemplateInstanceRequest) -> TemplateInstanceEntry:
+        # Ad-hoc: an empty instance the writer authors beats on directly. No
+        # template behind it, so no lineage and no snapshot — a plain create.
+        return self.read_template_instance(
+            self._create_plot_folder_node(
+                title=request.title,
+                requested_entry_type=request.entry_type,
+                default_entry_type=PLOT_TEMPLATE_INSTANCE_ENTRY_TYPE,
+                noun="plot instance",
+            )
+        )
+
+    def read_template_instance(self, entry_id: str) -> TemplateInstanceEntry:
+        return self._build_plot_folder_entry(
+            self._read_plot_folder_node(
+                entry_id, expected_entry_type=PLOT_TEMPLATE_INSTANCE_ENTRY_TYPE, noun="plot instance"
+            ),
+            TemplateInstanceEntry,
+        )
+
+    def save_template_instance(
+        self, entry_id: str, request: SaveTemplateInstanceRequest
+    ) -> TemplateInstanceEntry:
+        return self.read_template_instance(
+            self._save_plot_folder_node(
+                entry_id, request, expected_entry_type=PLOT_TEMPLATE_INSTANCE_ENTRY_TYPE, noun="plot instance"
+            )
+        )
+
+    def delete_template_instance(self, entry_id: str) -> TemplateInstanceList:
+        self._delete_plot_folder_node(
+            entry_id, expected_entry_type=PLOT_TEMPLATE_INSTANCE_ENTRY_TYPE, noun="plot instance"
+        )
+        return self.list_template_instances()
+
+    def instantiate_plot_template(self, template_id: str) -> TemplateInstanceEntry:
+        """Apply a template to this book (ADR-0048 §3): snapshot its beats into a
+        new, book-local `plot:template_instance` the writer then specializes.
+
+        The template stays pristine (it may be an inherited, read-only Library
+        node); the instance is a book-local editable copy. The beat roster is
+        *copied*, not linked — an instance must stand alone (an ad-hoc one has no
+        template at all), and snapshotting is what lets the writer diverge from the
+        generic beats freely. `source_template_id` / `source_template_name` record
+        the lineage, so the instance can still name its arc after it diverges or
+        the source template is gone.
+        """
+        source = self.read_plot_template(template_id)
+        # read_plot_template validated the beats field, so every item is a member
+        # map (a non-dict item would have 422'd on read) — no shape guard needed here.
+        source_beats = source.metadata.get("beats") or []
+        instance_beats = [
+            {key: beat[key] for key in _INSTANCE_BEAT_SNAPSHOT_KEYS if key in beat}
+            for beat in source_beats
+        ]
+        new_id = self._create_plot_folder_node(
+            title=source.title,
+            requested_entry_type="",
+            default_entry_type=PLOT_TEMPLATE_INSTANCE_ENTRY_TYPE,
+            noun="plot instance",
+            seed_metadata={
+                "instance_beats": instance_beats,
+                "source_template_id": source.id,
+                "source_template_name": source.title,
+            },
+        )
+        return self.read_template_instance(new_id)
 
     # ----- The board (plot:board) — a per-project layout singleton --------
 

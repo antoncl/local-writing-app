@@ -1,13 +1,16 @@
-"""Backend tests for the `plot` kind (ADR-0048 S4a + S4b).
+"""Backend tests for the `plot` kind (ADR-0048 S4a + S4b + S5a + S7 Slice 2).
 
 Node types under the new kind: plotlines (`plot:plotline`, a flat layered entry),
-the board (`plot:board`, a per-project layout singleton), and templates
-(`plot:template`, S4b — the ADR-0049 Library's second tenant). These prove the
-wiring end-to-end through FastAPI plus the registration facts (family, schema,
-folder, whitelist, Library membership) and the design invariants — a plotline is
-indexed and reference-bearing, the board is a directly-addressed singleton kept
-out of the node index, and templates ship read-only from the Library and clone
-into the project on demand.
+cards (`plot:card`), the board (`plot:board`, a per-project layout singleton),
+templates (`plot:template`, S4b — the ADR-0049 Library's second tenant), and
+template instances (`plot:template_instance`, S7 Slice 2 / #776 — the book-local,
+specialized copy of a template's beat roster). These prove the wiring end-to-end
+through FastAPI plus the registration facts (family, schema, folder, whitelist,
+Library membership) and the design invariants — a plotline is indexed and
+reference-bearing, the board is a directly-addressed singleton kept out of the
+node index, templates ship read-only from the Library and clone into the project
+on demand, and an instance snapshots a template's beats into an editable,
+book-local node whose lineage survives the source template being deleted.
 """
 
 from __future__ import annotations
@@ -462,6 +465,19 @@ class PlotCrossFamilyGuardTests(_PlotTestCase):
         self.assertEqual(response.status_code, 404, response.text)
         self.assertEqual(self.client.get(f"/api/plot/cards/{card['id']}").json()["entry_type"], "plot:card")
 
+    def test_creating_a_foreign_plot_type_via_the_instances_endpoint_is_refused(self) -> None:
+        for foreign in ("plot:plotline", "plot:card", "plot:template", "plot:board"):
+            response = self.client.post("/api/plot/instances", json={"title": "X", "entry_type": foreign})
+            self.assertEqual(response.status_code, 422, f"{foreign}: {response.text}")
+
+    def test_reading_a_card_via_the_instances_endpoint_404s(self) -> None:
+        card = self.client.post("/api/plot/cards", json={"title": "Card"}).json()
+        self.assertEqual(self.client.get(f"/api/plot/instances/{card['id']}").status_code, 404)
+
+    def test_reading_an_instance_via_the_cards_endpoint_404s(self) -> None:
+        instance = self.client.post("/api/plot/instances", json={"title": "Inst"}).json()
+        self.assertEqual(self.client.get(f"/api/plot/cards/{instance['id']}").status_code, 404)
+
     def test_saving_an_owned_template_via_the_cards_endpoint_keeps_its_beat_roster(self) -> None:
         # The worst case: a card-endpoint write over an owned template would drop
         # its `template:` block (the beat roster) — _write_node_entry_file emits no
@@ -755,6 +771,167 @@ class PlotTemplateLibraryTests(_PlotTestCase):
         self.assertEqual(self.client.get("/api/plot/templates/builtin-plot-nope").status_code, 404)
 
 
+class TemplateInstanceHttpTests(_PlotTestCase):
+    """Template instances (ADR-0048 §3 / S7 Slice 2, #776): the book-local,
+    specialized copy of a template's beat roster — where a generic requirement is
+    made concrete to this book, and where an ad-hoc plot lives. The plotline's /
+    card's third structural twin, so the CRUD mirrors them; `instantiate` is the
+    one bespoke op that snapshots a template's beats in."""
+
+    def _instantiate(self, template_id: str = _THREE_ACT) -> dict:
+        response = self.client.post(f"/api/plot/templates/{template_id}/instantiate")
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    def test_instantiate_snapshots_beats_and_lineage(self) -> None:
+        instance = self._instantiate()
+        # A book-local editable node of the new type, titled after the template.
+        self.assertTrue(instance["id"].startswith("plot_"))
+        self.assertEqual(instance["entry_type"], "plot:template_instance")
+        self.assertEqual(instance["title"], "Three-Act Story Arc")
+        # The 7 beats came across verbatim (title / function / stable id); the
+        # per-beat `specifics` is left for the writer, so it is not snapshotted.
+        beats = instance["metadata"]["instance_beats"]
+        self.assertEqual(len(beats), 7)
+        self.assertEqual(beats[0]["id"], "setup_pressure")
+        self.assertEqual(beats[0]["title"], "Setup pressure")
+        self.assertIn("Establishes", beats[0]["function"])
+        self.assertNotIn("specifics", beats[0])
+        # Lineage snapshot — "which of the 14 arcs is this?"
+        self.assertEqual(instance["metadata"]["source_template_id"], _THREE_ACT)
+        self.assertEqual(instance["metadata"]["source_template_name"], "Three-Act Story Arc")
+
+    def test_instantiate_copies_every_snapshot_member_faithfully(self) -> None:
+        # Full fidelity across ALL snapshot keys for every beat, compared against
+        # the source template — so a regression dropping (say) `guidance` or
+        # `required` from _INSTANCE_BEAT_SNAPSHOT_KEYS is caught, not just title/id.
+        template_beats = self.client.get(f"/api/plot/templates/{_THREE_ACT}").json()["metadata"]["beats"]
+        instance_beats = self._instantiate()["metadata"]["instance_beats"]
+        self.assertEqual(len(instance_beats), len(template_beats))
+        for src, got in zip(template_beats, instance_beats, strict=True):
+            for key in ("title", "function", "guidance", "required", "id"):
+                self.assertEqual(got.get(key), src.get(key), f"beat member {key} not copied faithfully")
+            self.assertNotIn("specifics", got)  # the one member left for the writer
+
+    def test_instance_is_indexed_book_local_and_the_template_stays_pristine(self) -> None:
+        before = _BUILTIN_THREE_ACT.read_bytes()
+        instance = self._instantiate()
+        entry = self.service._build_node_index().by_id.get(instance["id"])
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry.kind, "plot")
+        self.assertEqual(entry.entry_type, "plot:template_instance")
+        # Instantiate is a pure read of the (inherited, read-only) template — the
+        # shipped file is byte-untouched.
+        self.assertEqual(_BUILTIN_THREE_ACT.read_bytes(), before)
+        # It appears in the instances listing and reads back on its own endpoint.
+        listed = [e["id"] for e in self.client.get("/api/plot/instances").json()["entries"]]
+        self.assertIn(instance["id"], listed)
+        self.assertEqual(self.client.get(f"/api/plot/instances/{instance['id']}").status_code, 200)
+
+    def test_specifics_round_trip_through_the_standard_save(self) -> None:
+        # The Slice-2 win: the writer makes a generic beat concrete to this book,
+        # and it persists through the ordinary metadata save path (no bespoke editor).
+        instance = self._instantiate()
+        beats = instance["metadata"]["instance_beats"]
+        beats[0]["specifics"] = "The debt Mara hides from Jon."
+        saved = self.client.put(
+            f"/api/plot/instances/{instance['id']}",
+            json={
+                "title": "Mara & Jon",
+                "body": "",
+                "metadata": {**instance["metadata"], "instance_beats": beats},
+                "base_revision": instance["revision"],
+            },
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        reread = self.client.get(f"/api/plot/instances/{instance['id']}").json()
+        self.assertEqual(reread["title"], "Mara & Jon")
+        got = reread["metadata"]["instance_beats"]
+        self.assertEqual(len(got), 7)
+        self.assertEqual(got[0]["specifics"], "The debt Mara hides from Jon.")
+        self.assertEqual(got[0]["title"], "Setup pressure")  # generic context rode along
+        # Lineage preserved across the save (the hidden fields round-trip in metadata).
+        self.assertEqual(reread["metadata"]["source_template_name"], "Three-Act Story Arc")
+
+    def test_ad_hoc_instance_has_empty_beats_and_no_lineage(self) -> None:
+        created = self.client.post("/api/plot/instances", json={"title": "My own plot"})
+        self.assertEqual(created.status_code, 200, created.text)
+        instance = created.json()
+        self.assertEqual(instance["entry_type"], "plot:template_instance")
+        self.assertEqual(instance["title"], "My own plot")
+        # No template behind it → no beats, no lineage.
+        self.assertEqual(instance["metadata"].get("instance_beats", []), [])
+        self.assertFalse(instance["metadata"].get("source_template_id"))
+        self.assertFalse(instance["metadata"].get("source_template_name"))
+
+    def test_ad_hoc_instance_can_author_and_save_beats(self) -> None:
+        # The "roll your own plot" path (Anton): create an empty instance, author
+        # beats from scratch — including `specifics` — and save through the standard
+        # metadata path. Distinct from the specifics round-trip (which starts from an
+        # instantiated, pre-filled roster).
+        instance = self.client.post("/api/plot/instances", json={"title": "Custom arc"}).json()
+        beats = [
+            {"id": "b1", "title": "Inciting spark", "specifics": "Mara loses the ledger.", "required": True},
+            {"id": "b2", "title": "The reckoning", "specifics": "Jon finds the debt.", "required": False},
+        ]
+        saved = self.client.put(
+            f"/api/plot/instances/{instance['id']}",
+            json={
+                "title": "Custom arc",
+                "body": "",
+                "metadata": {"instance_beats": beats},
+                "base_revision": instance["revision"],
+            },
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        got = self.client.get(f"/api/plot/instances/{instance['id']}").json()["metadata"]["instance_beats"]
+        self.assertEqual(len(got), 2)
+        self.assertEqual(got[0]["title"], "Inciting spark")
+        self.assertEqual(got[0]["specifics"], "Mara loses the ledger.")
+        self.assertEqual(got[1]["required"], False)
+
+    def test_delete_removes_from_list_and_404s(self) -> None:
+        instance = self._instantiate()
+        deleted = self.client.delete(f"/api/plot/instances/{instance['id']}")
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertNotIn(instance["id"], [e["id"] for e in deleted.json()["entries"]])
+        self.assertEqual(self.client.get(f"/api/plot/instances/{instance['id']}").status_code, 404)
+
+    def test_lineage_survives_the_source_template_being_deleted(self) -> None:
+        # The durability point (Anton): instantiate from an OWNED template, then
+        # delete it. `source_template_*` are plain text, not a live ref, so the
+        # reference purge never touches them and the instance still names its arc —
+        # a healing entity_ref would have blanked here.
+        clone = self.client.post(f"/api/plot/templates/{_THREE_ACT}/fork").json()
+        instance = self._instantiate(clone["id"])
+        self.assertEqual(instance["metadata"]["source_template_id"], clone["id"])
+        self.assertEqual(self.client.delete(f"/api/plot/templates/{clone['id']}").status_code, 200)
+        reread = self.client.get(f"/api/plot/instances/{instance['id']}").json()
+        self.assertEqual(reread["metadata"]["source_template_name"], "Three-Act Story Arc")
+        self.assertEqual(len(reread["metadata"]["instance_beats"]), 7)
+
+    def test_instantiate_from_an_inherited_library_template(self) -> None:
+        # The source is a read-only Library node; instantiate reads it fine and the
+        # instance is book-local + editable regardless.
+        instance = self._instantiate(_THREE_ACT)
+        saved = self.client.put(
+            f"/api/plot/instances/{instance['id']}",
+            json={"title": "Renamed", "body": "", "metadata": instance["metadata"], "base_revision": instance["revision"]},
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+
+    def test_instantiating_a_missing_template_404s(self) -> None:
+        self.assertEqual(self.client.post("/api/plot/templates/builtin-plot-nope/instantiate").status_code, 404)
+
+    def test_instantiating_a_non_template_plot_node_404s(self) -> None:
+        # instantiate resolves the template through the family guard — a plotline id
+        # is not a template, so it 404s rather than snapshotting a bogus roster.
+        plotline = self.client.post("/api/plot/plotlines", json={"title": "Thread"}).json()
+        self.assertEqual(
+            self.client.post(f"/api/plot/templates/{plotline['id']}/instantiate").status_code, 404
+        )
+
+
 class PlotKindRegistrationTests(_PlotTestCase):
     def test_plot_family_registered_and_reference_bearing(self) -> None:
         self.assertIn("plot", {family.kind for family in NODE_FAMILIES})
@@ -799,12 +976,29 @@ class PlotKindRegistrationTests(_PlotTestCase):
         self.assertIsNotNone(base)
         self.assertTrue(base.abstract)
         self.assertEqual(base.kind, "plot")
-        for concrete in ("plot:plotline", "plot:template", "plot:board", "plot:card"):
+        for concrete in ("plot:plotline", "plot:template", "plot:template_instance", "plot:board", "plot:card"):
             self.assertEqual(
                 schema.entry_types[concrete].parent,
                 "plot:base",
                 f"{concrete} must hang off plot:base so the whole-kind roster resolves",
             )
+
+    def test_template_instance_type_and_group_registered(self) -> None:
+        # ADR-0048 S7 Slice 2 (#776): the instance is a `plot`-kind concrete type
+        # with the specialized-beat + lineage fields, and its beats bind to a
+        # `plot_instance_beat` group that adds `specifics` to the `plot_beat` shape.
+        schema = self.service.read_metadata_schema()
+        inst = schema.entry_types.get("plot:template_instance")
+        self.assertIsNotNone(inst)
+        self.assertEqual(inst.kind, "plot")
+        self.assertTrue(inst.has_body)
+        for field_id in ("instance_beats", "source_template_id", "source_template_name"):
+            self.assertIn(field_id, inst.fields)
+        group = schema.groups.get("plot_instance_beat")
+        self.assertIsNotNone(group)
+        member_keys = {member.key for member in group.members}
+        self.assertIn("specifics", member_keys)
+        self.assertTrue({"title", "function", "guidance", "required", "id"} <= member_keys)
 
     def test_plot_is_a_library_tenant(self) -> None:
         # The Library ships the plot family (its `plot/` folder holds templates),

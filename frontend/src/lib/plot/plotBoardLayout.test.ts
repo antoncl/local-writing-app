@@ -1,8 +1,8 @@
-// Pure-logic test for the plot-board layout (ADR-0048 S7b). The SvelteFlow canvas
-// itself is not headless-testable ([[reference_svelteflow_headless_limits]]), so
-// the board's real logic — lane bucketing, positions, and the derived card/lane
-// data — is verified here (node env, no DOM); the custom nodes carry their own
-// mount tests, and the composition is browser-checked.
+// Pure-logic test for the plot-board layout (ADR-0048 S7 Slice 4). The SvelteFlow
+// canvas itself is not headless-testable ([[reference_svelteflow_headless_limits]]),
+// so the board's real logic — container grouping, nesting, positions, and the derived
+// card/container data — is verified here (node env, no DOM); the custom nodes carry
+// their own mount tests, and the composition is browser-checked.
 import { describe, expect, it } from "vitest";
 import {
   buildBoardNodes,
@@ -13,12 +13,10 @@ import {
   CARD_GAP_X,
   CARD_HEIGHT,
   CARD_WIDTH,
-  LABEL_TO_CARD_GAP,
-  LANE_LABEL_WIDTH,
-  ROW_STRIDE,
-  UNASSIGNED_LANE_ID,
+  CONTAINER_HEADER,
+  CONTAINER_PAD,
   type PlotCardData,
-  type PlotLaneData,
+  type PlotContainerData,
 } from "./plotBoardLayout";
 import type { PlotBoardProjection } from "@/lib/types";
 
@@ -28,12 +26,14 @@ function projection(over: Partial<PlotBoardProjection> = {}): PlotBoardProjectio
     board_revision: "r1",
     layout: {},
     plotlines: [],
+    containers: [],
     cards: [],
     ...over,
   };
 }
 
 const line = (id: string, title: string, color: string | null = null) => ({ id, title, color });
+const container = (id: string, title: string, parent: string | null = null) => ({ id, title, parent });
 const card = (
   id: string,
   over: Partial<PlotBoardProjection["cards"][number]> = {},
@@ -43,120 +43,143 @@ const card = (
   synopsis: "",
   plotline: null,
   scene: null,
+  container: null,
   ...over,
 });
 
-// Narrow a node's data by type discriminator for the assertions below.
-const laneNodes = (nodes: ReturnType<typeof buildBoardNodes>) => nodes.filter((n) => n.type === "plotLane");
+const containerNodes = (nodes: ReturnType<typeof buildBoardNodes>) => nodes.filter((n) => n.type === "plotContainer");
 const cardNodes = (nodes: ReturnType<typeof buildBoardNodes>) => nodes.filter((n) => n.type === "plotCard");
+const dataOf = (nodes: ReturnType<typeof buildBoardNodes>, id: string) => nodes.find((n) => n.id === id)!.data;
 
 describe("buildBoardNodes", () => {
   it("returns no nodes for an empty board", () => {
     expect(buildBoardNodes(projection())).toEqual([]);
   });
 
-  it("makes one lane node per plotline, in projection order and row-strided", () => {
-    const nodes = buildBoardNodes(projection({ plotlines: [line("plot_a", "A"), line("plot_b", "B")] }));
-    const lanes = laneNodes(nodes);
-    expect(lanes.map((l) => (l.data as PlotLaneData).title)).toEqual(["A", "B"]);
-    expect(lanes.map((l) => l.position.y)).toEqual([0, ROW_STRIDE]);
-    // A plotline with no cards still shows its lane (the thread is always visible).
-    expect((lanes[0].data as PlotLaneData).count).toBe(0);
-  });
-
-  it("places a plotline's cards in its lane row, flowing rightward", () => {
+  it("nests a card in its chapter box inside its act box", () => {
     const nodes = buildBoardNodes(
       projection({
-        plotlines: [line("plot_a", "A")],
-        cards: [card("c1", { plotline: "plot_a" }), card("c2", { plotline: "plot_a" })],
+        containers: [container("act", "Act I"), container("chap", "Chapter 1", "act")],
+        cards: [card("c1", { container: "chap", scene: "s1" })],
       }),
     );
-    const cards = cardNodes(nodes);
-    expect(cards.map((c) => c.id)).toEqual(["c1", "c2"]);
-    // Both on the lane's row (y=0), stepping by CARD_WIDTH + CARD_GAP_X after the label.
-    expect(cards.map((c) => c.position.y)).toEqual([0, 0]);
-    expect(cards[0].position.x).toBe(LANE_LABEL_WIDTH + LABEL_TO_CARD_GAP);
-    expect(cards[1].position.x).toBe(LANE_LABEL_WIDTH + LABEL_TO_CARD_GAP + (CARD_WIDTH + CARD_GAP_X));
-    expect((laneNodes(nodes)[0].data as PlotLaneData).count).toBe(2);
+    // One box per structural level, act then chapter (act renders behind), then the card.
+    expect(nodes.map((n) => n.type)).toEqual(["plotContainer", "plotContainer", "plotCard"]);
+    expect(containerNodes(nodes).map((n) => n.id)).toEqual(["container:act", "container:chap"]);
+
+    const act = nodes.find((n) => n.id === "container:act")!;
+    const chap = nodes.find((n) => n.id === "container:chap")!;
+    const c1 = cardNodes(nodes)[0];
+    // The card sits at 2·(header+pad) in from the act's top-left (padded through both boxes).
+    expect(c1.position).toEqual({ x: 2 * CONTAINER_PAD, y: 2 * (CONTAINER_HEADER + CONTAINER_PAD) });
+    // The chapter box wraps the card (pad + header); the act box wraps the chapter box.
+    expect(chap.position).toEqual({ x: CONTAINER_PAD, y: CONTAINER_HEADER + CONTAINER_PAD });
+    expect(act.position).toEqual({ x: 0, y: 0 });
+    expect(act.width).toBe(CARD_WIDTH + 4 * CONTAINER_PAD);
+    expect(act.height).toBe(CARD_HEIGHT + 4 * CONTAINER_PAD + 2 * CONTAINER_HEADER);
+    // Levels + transitive counts drive the box styling / header.
+    expect(dataOf(nodes, "container:act")).toMatchObject({ title: "Act I", count: 1, level: 0 });
+    expect(dataOf(nodes, "container:chap")).toMatchObject({ title: "Chapter 1", count: 1, level: 1 });
   });
 
-  it("collects unattached-to-plotline cards into a trailing Unassigned lane", () => {
+  it("renders a single box for a card whose container is a top-level act (no chapter)", () => {
     const nodes = buildBoardNodes(
-      projection({ plotlines: [line("plot_a", "A")], cards: [card("c1", { plotline: null })] }),
+      projection({ containers: [container("act", "Act I")], cards: [card("c1", { container: "act", scene: "s1" })] }),
     );
-    const lanes = laneNodes(nodes);
-    expect(lanes.map((l) => l.id)).toEqual(["lane:plot_a", UNASSIGNED_LANE_ID]);
-    expect((lanes[1].data as PlotLaneData).title).toBe("Unassigned");
-    // The card sits in the Unassigned row (the second lane), not lane A.
-    expect(cardNodes(nodes)[0].position.y).toBe(ROW_STRIDE);
+    // Only the act box — the card is a direct child of the act, no nested chapter.
+    expect(containerNodes(nodes).map((n) => n.id)).toEqual(["container:act"]);
+    expect(cardNodes(nodes)[0].position).toEqual({ x: CONTAINER_PAD, y: CONTAINER_HEADER + CONTAINER_PAD });
+    expect(nodes.find((n) => n.id === "container:act")!.position).toEqual({ x: 0, y: 0 });
   });
 
-  it("treats a card pointing at an unknown plotline as Unassigned (defensive)", () => {
+  it("collapses a middle 'part' container with no direct cards, nesting the chapter under the act", () => {
     const nodes = buildBoardNodes(
-      projection({ plotlines: [line("plot_a", "A")], cards: [card("c1", { plotline: "plot_gone" })] }),
+      projection({
+        containers: [container("act", "Act I"), container("part", "Part A", "act"), container("chap", "Chapter 1", "part")],
+        cards: [card("c1", { container: "chap", scene: "s1" })],
+      }),
     );
-    expect(laneNodes(nodes).map((l) => l.id)).toContain(UNASSIGNED_LANE_ID);
-    expect((laneNodes(nodes).find((l) => l.id === UNASSIGNED_LANE_ID)!.data as PlotLaneData).count).toBe(1);
+    // The empty middle part draws no box; the chapter nests directly in the act.
+    expect(containerNodes(nodes).map((n) => n.id)).toEqual(["container:act", "container:chap"]);
+    expect(dataOf(nodes, "container:chap")).toMatchObject({ level: 1 });
+    // The act still counts the card transitively.
+    expect(dataOf(nodes, "container:act")).toMatchObject({ count: 1 });
   });
 
-  it("omits the Unassigned lane when every card is assigned", () => {
+  it("floats a homeless card (no container) outside every box", () => {
+    const nodes = buildBoardNodes(projection({ cards: [card("loose", { container: null })] }));
+    expect(containerNodes(nodes)).toEqual([]);
+    expect(cardNodes(nodes).map((n) => n.id)).toEqual(["loose"]);
+  });
+
+  it("treats a card pointing at an unknown container as homeless (defensive)", () => {
+    const nodes = buildBoardNodes(projection({ cards: [card("c1", { container: "gone" })] }));
+    expect(containerNodes(nodes)).toEqual([]);
+    expect(cardNodes(nodes)).toHaveLength(1);
+  });
+
+  it("keeps act boxes in manuscript reading order", () => {
     const nodes = buildBoardNodes(
-      projection({ plotlines: [line("plot_a", "A")], cards: [card("c1", { plotline: "plot_a" })] }),
+      projection({
+        containers: [container("act1", "Act I"), container("act2", "Act II")],
+        cards: [card("c1", { container: "act1", scene: "s1" }), card("c2", { container: "act2", scene: "s2" })],
+      }),
     );
-    expect(laneNodes(nodes).map((l) => l.id)).toEqual(["lane:plot_a"]);
+    expect(containerNodes(nodes).map((n) => (n.data as PlotContainerData).title)).toEqual(["Act I", "Act II"]);
+    // The second act stacks below the first (larger y).
+    const [a1, a2] = containerNodes(nodes);
+    expect(a2.position.y).toBeGreaterThan(a1.position.y);
   });
 
-  it("derives card data: synopsis, scene-attachment, and the plotline colour", () => {
+  it("derives card data: synopsis, scene-attachment, and the plotline colour (independent of container)", () => {
     const nodes = buildBoardNodes(
       projection({
         plotlines: [line("plot_a", "A", "forest")],
+        containers: [container("chap", "Chapter 1")],
         cards: [
-          card("attached", { plotline: "plot_a", synopsis: "she leaves", scene: "scene_1" }),
-          card("loose", { plotline: "plot_a", scene: null }),
+          card("attached", { plotline: "plot_a", synopsis: "she leaves", scene: "scene_1", container: "chap" }),
+          card("loose", { plotline: "plot_a", scene: null, container: null }),
         ],
       }),
     );
-    const [attached, loose] = cardNodes(nodes).map((c) => c.data as PlotCardData);
+    const attached = dataOf(nodes, "attached") as PlotCardData;
+    const loose = dataOf(nodes, "loose") as PlotCardData;
+    // Colour comes from the plotline whether the card is in a container or homeless.
     expect(attached).toMatchObject({ synopsis: "she leaves", attached: true, color: "forest" });
     expect(loose).toMatchObject({ attached: false, color: "forest" });
   });
 
-  it("gives Unassigned cards a null colour", () => {
-    const nodes = buildBoardNodes(projection({ cards: [card("c1", { plotline: null })] }));
-    expect((cardNodes(nodes)[0].data as PlotCardData).color).toBeNull();
+  it("gives a card with no plotline a null colour", () => {
+    const nodes = buildBoardNodes(
+      projection({ containers: [container("chap", "Chapter 1")], cards: [card("c1", { plotline: null, container: "chap" })] }),
+    );
+    expect((dataOf(nodes, "c1") as PlotCardData).color).toBeNull();
   });
 
-  it("sizes nodes from the geometry constants (single source with the CSS)", () => {
-    // Node size is set here, not measured by SvelteFlow, so position math and the
-    // rendered box can't drift — the components fill their box at 100%.
+  it("sizes card nodes from the geometry constants (single source with the CSS)", () => {
     const nodes = buildBoardNodes(
-      projection({ plotlines: [line("plot_a", "A")], cards: [card("c1", { plotline: "plot_a" })] }),
+      projection({ containers: [container("chap", "Chapter 1")], cards: [card("c1", { container: "chap" })] }),
     );
-    expect(laneNodes(nodes)[0]).toMatchObject({ width: LANE_LABEL_WIDTH, height: CARD_HEIGHT });
     expect(cardNodes(nodes)[0]).toMatchObject({ width: CARD_WIDTH, height: CARD_HEIGHT });
   });
 
-  it("makes cards draggable (S7c layout editing) and keeps lane headers fixed", () => {
+  it("makes cards draggable (S7c layout editing) and keeps container boxes fixed", () => {
     const nodes = buildBoardNodes(
-      projection({ plotlines: [line("plot_a", "A")], cards: [card("c1", { plotline: "plot_a" })] }),
+      projection({ containers: [container("chap", "Chapter 1")], cards: [card("c1", { container: "chap" })] }),
     );
     expect(cardNodes(nodes)[0].draggable).toBe(true);
-    expect(laneNodes(nodes)[0].draggable).toBe(false);
+    expect(containerNodes(nodes)[0].draggable).toBe(false);
   });
 
-  it("applies a saved position override to its card, leaving unsaved cards on the grid", () => {
+  it("applies a saved override and lets the soft box follow the moved card", () => {
     const proj = projection({
-      plotlines: [line("plot_a", "A")],
-      cards: [card("moved", { plotline: "plot_a" }), card("stay", { plotline: "plot_a" })],
+      containers: [container("chap", "Chapter 1")],
+      cards: [card("moved", { container: "chap" })],
     });
-    const nodes = buildBoardNodes(proj, { moved: { x: 999, y: 42 } });
-    const byId = new Map(cardNodes(nodes).map((c) => [c.id, c]));
-    expect(byId.get("moved")!.position).toEqual({ x: 999, y: 42 });
-    // The unsaved sibling keeps its derived slot (second column of lane A).
-    expect(byId.get("stay")!.position).toEqual({
-      x: LANE_LABEL_WIDTH + LABEL_TO_CARD_GAP + (CARD_WIDTH + CARD_GAP_X),
-      y: 0,
-    });
+    const nodes = buildBoardNodes(proj, { moved: { x: 500, y: 500 } });
+    expect(cardNodes(nodes)[0].position).toEqual({ x: 500, y: 500 });
+    // The chapter box re-wraps the card at its pinned spot (pad + header offset).
+    expect(containerNodes(nodes)[0].position).toEqual({ x: 500 - CONTAINER_PAD, y: 500 - CONTAINER_PAD - CONTAINER_HEADER });
   });
 });
 
@@ -187,22 +210,22 @@ describe("readBoardPositions", () => {
 });
 
 describe("cardPositionsFromNodes", () => {
-  it("serializes only card positions raw (unrounded), excluding lane headers", () => {
+  it("serializes only card positions raw (unrounded), excluding container boxes", () => {
     const nodes = buildBoardNodes(
-      projection({ plotlines: [line("plot_a", "A")], cards: [card("c1", { plotline: "plot_a" })] }),
+      projection({ containers: [container("chap", "Chapter 1")], cards: [card("c1", { container: "chap" })] }),
       { c1: { x: 12.4, y: 7.6 } },
     );
     const positions = cardPositionsFromNodes(nodes);
     // Raw, not rounded — the persist threshold must match moveNodesCommand's raw
     // drag record, else a sub-pixel move records an undo step that saves nothing.
     expect(positions).toEqual({ c1: { x: 12.4, y: 7.6 } });
-    // No `lane:plot_a` key — lane headers are derived, never stored.
+    // No `container:chap` key — container boxes are derived, never stored.
     expect(Object.keys(positions)).toEqual(["c1"]);
   });
 
   it("round-trips through readBoardPositions", () => {
     const nodes = buildBoardNodes(
-      projection({ plotlines: [line("plot_a", "A")], cards: [card("c1", { plotline: "plot_a" })] }),
+      projection({ containers: [container("chap", "Chapter 1")], cards: [card("c1", { container: "chap" })] }),
       { c1: { x: 5, y: 6 } },
     );
     const serialized = { positions: cardPositionsFromNodes(nodes) };
@@ -211,40 +234,71 @@ describe("cardPositionsFromNodes", () => {
 });
 
 describe("overriddenCardPositions (sparse persist)", () => {
+  const proj = () =>
+    projection({
+      containers: [container("chap", "Chapter 1")],
+      cards: [card("c1", { container: "chap" }), card("c2", { container: "chap" })],
+    });
+
   it("keeps only the cards in the override set", () => {
-    const nodes = buildBoardNodes(
-      projection({ plotlines: [line("p1", "Main")], cards: [card("c1", { plotline: "p1" }), card("c2", { plotline: "p1" })] }),
-    );
-    // Only c1 is pinned; c2 derives from its lane and must not be persisted.
+    const nodes = buildBoardNodes(proj());
+    // Only c1 is pinned; c2 derives from its container and must not be persisted.
     expect(overriddenCardPositions(nodes, new Set(["c1"]))).toHaveProperty("c1");
     expect(overriddenCardPositions(nodes, new Set(["c1"]))).not.toHaveProperty("c2");
   });
 
   it("is empty when nothing is overridden (a never-dragged board saves nothing)", () => {
-    const nodes = buildBoardNodes(projection({ plotlines: [line("p1", "Main")], cards: [card("c1", { plotline: "p1" })] }));
+    const nodes = buildBoardNodes(proj());
     expect(overriddenCardPositions(nodes, new Set())).toEqual({});
   });
 });
 
 describe("projectionDataKey (rebuild-on-data-change)", () => {
   const base = () =>
-    projection({ plotlines: [line("p1", "Main", "blue")], cards: [card("c1", { plotline: "p1", synopsis: "s" })] });
+    projection({
+      plotlines: [line("p1", "Main", "blue")],
+      containers: [container("chap", "Chapter 1")],
+      cards: [card("c1", { plotline: "p1", synopsis: "s", container: "chap" })],
+    });
 
   it("is stable when only the layout (positions) differs", () => {
     // A layout save must NOT change the key — else a re-open would rebuild and drop edits.
     expect(projectionDataKey(base())).toBe(projectionDataKey({ ...base(), layout: { positions: { c1: { x: 9, y: 9 } } } }));
   });
 
-  it("changes when a card is reassigned to another plotline (→ reflow)", () => {
+  it("changes when a card's container changes (→ reflow)", () => {
+    const rehomed = projection({
+      plotlines: [line("p1", "Main", "blue")],
+      containers: [container("chap", "Chapter 1"), container("chap2", "Chapter 2")],
+      cards: [card("c1", { plotline: "p1", synopsis: "s", container: "chap2" })],
+    });
+    expect(projectionDataKey(rehomed)).not.toBe(projectionDataKey(base()));
+  });
+
+  it("changes when a card is reassigned to another plotline (→ recolour)", () => {
     const reassigned = projection({
       plotlines: [line("p1", "Main", "blue"), line("p2", "Sub", "pink")],
-      cards: [card("c1", { plotline: "p2", synopsis: "s" })],
+      containers: [container("chap", "Chapter 1")],
+      cards: [card("c1", { plotline: "p2", synopsis: "s", container: "chap" })],
     });
     expect(projectionDataKey(reassigned)).not.toBe(projectionDataKey(base()));
   });
 
+  it("changes when a container is renamed", () => {
+    const renamed = projection({
+      plotlines: [line("p1", "Main", "blue")],
+      containers: [container("chap", "Chapter One")],
+      cards: [card("c1", { plotline: "p1", synopsis: "s", container: "chap" })],
+    });
+    expect(projectionDataKey(renamed)).not.toBe(projectionDataKey(base()));
+  });
+
   it("changes when a card's synopsis changes", () => {
-    const edited = projection({ plotlines: [line("p1", "Main", "blue")], cards: [card("c1", { plotline: "p1", synopsis: "different" })] });
+    const edited = projection({
+      plotlines: [line("p1", "Main", "blue")],
+      containers: [container("chap", "Chapter 1")],
+      cards: [card("c1", { plotline: "p1", synopsis: "different", container: "chap" })],
+    });
     expect(projectionDataKey(edited)).not.toBe(projectionDataKey(base()));
   });
 });

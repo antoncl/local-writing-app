@@ -1,12 +1,13 @@
 <!--
   PlotEditor — the plot board (ADR-0048 S7). A SvelteFlow canvas that renders the
-  S7a projection: plotlines as horizontal lanes, cards laid out in their lane.
-  S7b displayed it read-only; S7c (#760) makes the CARD layout editable — cards
-  drag, positions persist to the board's opaque `layout`, and a drag is undoable
-  via the shared ADR-0050 caretaker (Tier-1: layout only). Lane headers stay
-  fixed. Content ops (realize/attach/seed = S7d) and plotline surfaces (S7e) are
-  later sub-slices; per ADR-0048 binding decision 1 they are intentful mutations
-  OUTSIDE the caretaker (an in-memory undo must never reverse a scene mint).
+  projection: cards laid out inside their manuscript container (act/chapter) boxes,
+  coloured by plotline (Slice 4 — the free-flow, structure-container layout; the old
+  plotline swimlanes are gone). S7b displayed it read-only; S7c (#760) makes the CARD
+  layout editable — cards drag, positions persist to the board's opaque `layout`, and
+  a drag is undoable via the shared ADR-0050 caretaker (Tier-1: layout only). Container
+  boxes are non-interactive and derived (never dragged or stored). Content ops
+  (realize/attach/seed = S7d) are intentful mutations OUTSIDE the caretaker per
+  ADR-0048 binding decision 1 (an in-memory undo must never reverse a scene mint).
 
   The projection → nodes transform is the pure, unit-tested `buildBoardNodes`; the
   undo logic is the pure GraphUndoController + caretaker — the canvas itself is not
@@ -40,7 +41,7 @@
   import UndoRedoControls from "@/components/UndoRedoControls.svelte";
   import ViewportFit from "@/components/editor/body/view/ViewportFit.svelte";
   import PlotCardNode from "./plot/PlotCardNode.svelte";
-  import PlotLaneNode from "./plot/PlotLaneNode.svelte";
+  import PlotContainerNode from "./plot/PlotContainerNode.svelte";
   import { PLOT_CARD_ACTIONS, type PlotCardActions } from "./plot/plotCardActions";
   import type { BoardXY, PlotBoardProjection } from "@/lib/types";
 
@@ -97,9 +98,10 @@
     onDetach: (cardId) => void detachCardScene(cardId),
     onEditSynopsis: (cardId, synopsis) => void saveCardSynopsis(cardId, synopsis),
     // Reassign the card's plotline ("" → Unassigned). A content op → the projection's
-    // data-key changes → the board rebuilds and an un-pinned card reflows into the new
-    // lane (a pinned card keeps its spot). A getter so the submenu reads the current
-    // lanes fresh from the projection (the designerContext pattern).
+    // data-key changes → the board rebuilds and the card re-colours (its container, and
+    // so its position, are unchanged — plotline is now colour, not grouping). A getter
+    // so the submenu reads the current plotlines fresh from the projection (the
+    // designerContext pattern).
     onSetPlotline: (cardId, plotlineId) => void reassignCardPlotline(cardId, plotlineId),
     get plotlines() {
       return projection?.plotlines ?? [];
@@ -120,7 +122,7 @@
     });
   }
 
-  const nodeTypes = { plotCard: PlotCardNode, plotLane: PlotLaneNode };
+  const nodeTypes = { plotCard: PlotCardNode, plotContainer: PlotContainerNode };
   // Svelte Flow ships light-only chrome; drive its theme from the app's.
   let colorMode = $derived($themePreference as ColorMode);
 
@@ -131,9 +133,9 @@
   // per data change, not per projection reference: a layout save doesn't touch the
   // store, but the opener / PlotBoardPane can re-set an equal projection (same key →
   // skip, so an in-progress edit survives), while a content op changes a card field
-  // (different key → rebuild, so a reassigned un-pinned card reflows into its new
-  // lane). `overriddenIds` reseeds from the saved layout each rebuild — the sparse set
-  // an un-pinned card is absent from, so buildBoardNodes derives its (new-lane) slot.
+  // (different key → rebuild, so a re-homed un-pinned card reflows into its new
+  // container). `overriddenIds` reseeds from the saved layout each rebuild — the sparse
+  // set an un-pinned card is absent from, so buildBoardNodes derives its slot.
   // The snapshot reads the LOCAL built array, never the reactive `flowNodes` — reading
   // flowNodes back would subscribe this effect to xyflow's in-place position mutations,
   // so every drag would re-run it and snap the card back. $effect.PRE so nodes are

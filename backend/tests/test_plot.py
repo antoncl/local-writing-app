@@ -583,6 +583,113 @@ class PlotBoardProjectionTests(PlotTestCase):
         projection = self.client.get("/api/plot/board/projection").json()
         self.assertEqual(projection["layout"], layout)
         self.assertTrue(projection["board_revision"])  # a saved board carries a revision
+
+
+class PlotBoardContainerProjectionTests(PlotTestCase):
+    """The board projection's manuscript-structure join (ADR-0048 S7 Slice 4): a
+    card lays out inside its scene's INNERMOST container, and the projection carries
+    the used containers (plus ancestors) in manuscript reading order so the board
+    can nest a chapter box inside its act. Membership is derived from the scene —
+    a homeless card (no scene, or a scene under the root) has no container."""
+
+    def _node(self, title: str, entry_type: str, parent_id: str) -> str:
+        self.service.create_structure_node(
+            CreateStructureNodeRequest(title=title, entry_type=entry_type, parent_id=parent_id)
+        )
+        found: list[str] = []
+
+        def walk(node) -> None:
+            if node.title == title and node.type == entry_type:
+                found.append(node.id)
+            for child in node.children:
+                walk(child)
+
+        walk(self.service.read_structure().root)
+        return found[-1]
+
+    def _card_on(self, title: str, scene_id: str | None) -> str:
+        card = self.service.create_card(CreateCardRequest(title=title))
+        metadata = {"scene": scene_id} if scene_id else {}
+        self.service.save_card(card.id, SaveCardRequest(title=title, body="", metadata=metadata))
+        return card.id
+
+    def _containers_by_id(self, projection) -> dict:
+        return {c.id: c for c in projection.containers}
+
+    def test_card_projects_its_innermost_container_with_the_nesting(self) -> None:
+        root = self.service.read_structure().root.id
+        act = self._node("Act I", "scene:act", root)
+        chapter = self._node("Chapter 1", "scene:chapter", act)
+        scene = self.service.create_scene(CreateSceneRequest(title="Opening", parent_id=chapter)).id
+        card_id = self._card_on("Beat card", scene)
+
+        projection = self.service.read_plot_board_projection()
+        projected = next(c for c in projection.cards if c.id == card_id)
+        # The card's home is the scene's immediate container (the chapter), not the act.
+        self.assertEqual(projected.container, chapter)
+        by_id = self._containers_by_id(projection)
+        self.assertEqual(by_id[chapter].parent, act)  # chapter nests inside its act
+        self.assertIsNone(by_id[act].parent)  # the act is top-level (parent is the root)
+        self.assertEqual(by_id[chapter].title, "Chapter 1")
+
+    def test_containers_are_in_manuscript_reading_order(self) -> None:
+        root = self.service.read_structure().root.id
+        act1 = self._node("Act I", "scene:act", root)
+        chapter1 = self._node("Chapter 1", "scene:chapter", act1)
+        act2 = self._node("Act II", "scene:act", root)
+        chapter2 = self._node("Chapter 2", "scene:chapter", act2)
+        for title, chapter in (("c1", chapter1), ("c2", chapter2)):
+            scene = self.service.create_scene(CreateSceneRequest(title=title, parent_id=chapter)).id
+            self._card_on(title, scene)
+
+        ids = [c.id for c in self.service.read_plot_board_projection().containers]
+        # Pre-order (reading order): each act immediately followed by its chapter.
+        self.assertEqual(ids, [act1, chapter1, act2, chapter2])
+
+    def test_only_containers_that_hold_a_carded_scene_are_projected(self) -> None:
+        root = self.service.read_structure().root.id
+        act = self._node("Act I", "scene:act", root)
+        carded = self._node("Carded", "scene:chapter", act)
+        empty = self._node("Empty", "scene:chapter", act)
+        # `empty` even holds a scene — but no card points at it, so it is not a
+        # board concern and must not be projected.
+        self.service.create_scene(CreateSceneRequest(title="lonely", parent_id=empty))
+        scene = self.service.create_scene(CreateSceneRequest(title="carded scene", parent_id=carded)).id
+        self._card_on("card", scene)
+
+        ids = {c.id for c in self.service.read_plot_board_projection().containers}
+        self.assertEqual(ids, {act, carded})  # the ancestor act rides along; the empty chapter does not
+
+    def test_a_scene_less_card_is_homeless(self) -> None:
+        card_id = self._card_on("Floating", None)
+        projected = next(c for c in self.service.read_plot_board_projection().cards if c.id == card_id)
+        self.assertIsNone(projected.container)
+
+    def test_a_scene_under_the_root_is_homeless(self) -> None:
+        # A fresh project has no containers, so create_scene drops the scene under
+        # the root itself — its card has no container box to lay out inside.
+        scene = self.service.create_scene(CreateSceneRequest(title="Rootless")).id
+        card_id = self._card_on("under root", scene)
+        projection = self.service.read_plot_board_projection()
+        projected = next(c for c in projection.cards if c.id == card_id)
+        self.assertIsNone(projected.container)
+        self.assertEqual(projection.containers, [])
+
+    def test_deleting_the_scene_makes_the_card_homeless(self) -> None:
+        root = self.service.read_structure().root.id
+        chapter = self._node("Chapter 1", "scene:chapter", root)
+        scene = self.service.create_scene(CreateSceneRequest(title="Opening", parent_id=chapter)).id
+        card_id = self._card_on("Beat card", scene)
+        self.service.delete_scene(scene)
+
+        projection = self.service.read_plot_board_projection()
+        projected = next(c for c in projection.cards if c.id == card_id)
+        # delete_scene purges the card's ref (§S5) → no scene → no container, and
+        # the now-empty chapter drops out of the projection.
+        self.assertIsNone(projected.container)
+        self.assertEqual(projection.containers, [])
+
+
 class PlotKindRegistrationTests(PlotTestCase):
     def test_plot_family_registered_and_reference_bearing(self) -> None:
         self.assertIn("plot", {family.kind for family in NODE_FAMILIES})

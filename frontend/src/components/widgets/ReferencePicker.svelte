@@ -34,6 +34,9 @@
   // param picking kind=assistant can enumerate them everywhere, without every
   // caller threading the roster (#257). The other rosters still arrive as props.
   import { assistantEntriesStore } from "@/lib/stores/assistants";
+  // Plotlines read from the store too (#742), same reasoning as assistants (#257):
+  // a `plot:plotline` ref resolves anywhere without the caller threading the roster.
+  import { plotlineEntriesStore } from "@/lib/stores/plotlines";
 
   export let field: MetadataFieldDefinition;
   export let value: string | string[] | null | undefined;
@@ -94,6 +97,7 @@
   $: sceneIndex = structure ? flattenScenesAll(structure.root) : new Map<string, { id: string; title: string; entry_type: string }>();
   $: loreIndex = new Map(loreEntries.map((e) => [e.id, e] as const));
   $: promptIndex = new Map(promptEntries.map((e) => [e.id, e] as const));
+  $: plotIndex = new Map($plotlineEntriesStore.map((e) => [e.id, e] as const));
   $: assistantIndex = new Map($assistantEntriesStore.map((e) => [e.id, e] as const));
   $: selectedRefs = selectedIds.map((id) => resolveRefById(id));
   $: refNodes = selectedRefs.map((ref): RefNode => ({ ...ref, entry_type: ref.entry_type ?? "" }));
@@ -127,6 +131,8 @@
     if (snippet) return { id, kind: "snippet", title: snippet.title, entry_type: snippet.entry_type };
     const assistant = assistantIndex.get(id);
     if (assistant) return { id, kind: "assistant", title: assistant.title, entry_type: assistant.entry_type };
+    const plotline = plotIndex.get(id);
+    if (plotline) return { id, kind: "plot", title: plotline.title, entry_type: plotline.entry_type };
     // Fall back to the picker's configured kind so a freshly-saved ref whose
     // index hasn't refreshed yet still shows the right type-pill color.
     const fallbackKind = (targetKind || "lore") as NodePickerRef["kind"];
@@ -206,6 +212,7 @@
             researchStructure={researchStructure}
             loreEntries={loreEntries}
             promptEntries={promptEntries}
+            plotEntries={$plotlineEntriesStore}
             assistantEntries={$assistantEntriesStore}
             on:change={handlePickerChange}
           />

@@ -23,6 +23,7 @@
     NodePickerRef,
     LoreEntrySummary,
     MetadataSchema,
+    PlotlineSummary,
     PromptEntrySummary,
     StructureDocument,
     StructureNode,
@@ -62,6 +63,10 @@
   export let researchStructure: StructureDocument | null = null;
   export let loreEntries: LoreEntrySummary[] = [];
   export let promptEntries: PromptEntrySummary[] = [];
+  // Plotlines for the card's `plotline` ref (ADR-0048 #742) — the picker's only
+  // `plot` source today. A flat list like assistants; the board's lanes and this
+  // picker both draw from the plotline roster.
+  export let plotEntries: PlotlineSummary[] = [];
   // Assistants are machine-global nodes; enumerated here so views/pickers can
   // hand-pick them (the view designer's hand_picked leaf over kind=assistant).
   export let assistantEntries: AssistantEntrySummary[] = [];
@@ -82,7 +87,7 @@
 
   const dispatch = createEventDispatcher<{ change: { value: NodePickerRef[] } }>();
 
-  type Category = "scene" | "lore" | "snippet" | "assistant" | "research";
+  type Category = "scene" | "lore" | "snippet" | "assistant" | "research" | "plot";
 
   let open = false;
   let search = "";
@@ -320,6 +325,15 @@
     search,
   );
 
+  // Plotlines matching the config's per-kind entry_type whitelist + search (#742).
+  $: plotCandidates = filterByTitle(
+    plotEntries.filter((p) => {
+      const allowed = new Set(membership.entryTypes.plot ?? []);
+      return allowed.size === 0 || allowed.has(p.entry_type);
+    }),
+    search,
+  );
+
   // Chip text resolution. Show the entry-type's display name from the
   // schema when known; fall back to a sensible singular for the kind.
   // Fixes the inverted-affordance bug where `character` chips read the
@@ -330,6 +344,7 @@
     research: "Note",
     snippet: "Snippet",
     assistant: "Assistant",
+    plot: "Plotline",
     preset: "Preset",
   };
 
@@ -453,6 +468,17 @@
         })),
       );
       if (items.length > 0) groups.push({ id: "assistants", label: "Assistants", items });
+    }
+
+    if (allowedKinds.includes("plot")) {
+      const items = dropExcluded(
+        plotCandidates.map((p) => ({
+          ref: { id: p.id, kind: "plot" as const, title: p.title, entry_type: p.entry_type },
+          tag: itemTag("plot", p.entry_type),
+          monogram: itemMonogram("plot", p.entry_type),
+        })),
+      );
+      if (items.length > 0) groups.push({ id: "plotlines", label: "Plotlines", items });
     }
 
     return groups;

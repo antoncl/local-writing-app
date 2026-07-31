@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ProjectChainLayer } from "@/lib/types";
+  import type { ProjectChainLayer, ProjectChild } from "@/lib/types";
   import {
     declaredChain,
     inheritsNothing,
@@ -44,6 +44,17 @@
   // Apply one tick/untick. The parent owns the mutation (`toggledDeclaration` →
   // `setDeclaration`); `InheritsFromList` never trusts the DOM checkbox.
   export let onToggleInherit: (path: string) => void = () => {};
+  // The child projects directly inside the open one (#310), fed from
+  // `project.children` (#417 slice 5). The breadcrumb owns the chain's *down*
+  // direction now, so descent lives on the bar rather than in the retiring
+  // Project pane. Opening a child is a scope change exactly like clicking a
+  // crumb, so it reuses `onOpen` — one "open a project in the chain" callback,
+  // fed the children here instead of the ancestors — rather than threading a
+  // second open handler through the top bar. NOT named `children`: that is
+  // Svelte 5's reserved default-slot snippet name (and this codebase's own
+  // `children: Snippet` convention, e.g. Modal.svelte), which a runes migration
+  // would collide with.
+  export let childProjects: ProjectChild[] = [];
 
   $: crumbs = declaredChain(chain);
   $: empty = inheritsNothing(chain);
@@ -56,6 +67,10 @@
   // very rows the popover renders, so the affordance and its contents cannot
   // disagree about what is actionable.
   $: canDeclare = inheritRows.some((row) => row.toggleable);
+  // The bar's "down" direction (#417 slice 5): is there a child project to
+  // descend into? Only surfaced when there is — a leaf has none, and an
+  // always-present control would read as a dead affordance.
+  $: hasChildren = childProjects.length > 0;
 
   // The inheritance-editor popover (#417 slice 4b, replacing the Project pane's
   // Inheritance section). Anchored to `.breadcrumb-root` — NOT the scrolling
@@ -67,6 +82,7 @@
 
   function togglePopover(): void {
     popoverOpen = !popoverOpen;
+    if (popoverOpen) descendOpen = false; // never both bar popovers at once
   }
   function closePopover(): void {
     popoverOpen = false;
@@ -114,16 +130,54 @@
 
   // All popover keyboard handling rides the one window listener (no handler on
   // the dialog div, which would trip the a11y linter): Escape closes, Tab traps.
+  // The modal inherit dialog owns Escape/Tab while open; otherwise the non-modal
+  // descent menu (below) takes Escape.
   function handleKeydown(event: KeyboardEvent): void {
-    if (!popoverOpen) return;
-    if (event.key === "Escape") closePopoverAndRefocus();
-    else if (event.key === "Tab") trapPopoverTab(event);
+    if (popoverOpen) {
+      if (event.key === "Escape") closePopoverAndRefocus();
+      else if (event.key === "Tab") trapPopoverTab(event);
+      return;
+    }
+    if (descendOpen && event.key === "Escape") closeDescendAndRefocus();
   }
   // If the last actionable ancestor is repaired away (a stale untick that leaves
   // only organisational folders), `canDeclare` goes false and the anchor button
   // unmounts — close the popover so its overlay cannot linger over a bar that no
   // longer has anything to edit.
   $: if (!canDeclare) popoverOpen = false;
+
+  // The "Contains" descent menu (#417 slice 5) — a `role="menu"` like the
+  // project switcher, NOT the modal dialog the inheritance editor is: descending
+  // is navigation, so it mirrors the switcher's non-modal dismiss (overlay +
+  // Escape refocus) rather than trapping focus. Anchored to `.breadcrumb-root`
+  // like the inherit popover, for the same overflow-clip reason.
+  let descendOpen = false;
+  let descendButton: HTMLButtonElement | null = null;
+
+  function toggleDescend(): void {
+    descendOpen = !descendOpen;
+    if (descendOpen) popoverOpen = false; // never both bar popovers at once
+  }
+  function closeDescend(): void {
+    descendOpen = false;
+  }
+  // Escape refocuses the trigger (the menu unmounts, so focus would otherwise
+  // fall to <body>); an overlay click does not, matching the inherit popover and
+  // the switcher.
+  function closeDescendAndRefocus(): void {
+    closeDescend();
+    descendButton?.focus();
+  }
+  // Opening a child is a scope change (ADR-0045), exactly like clicking a crumb,
+  // so it goes through the same `onOpen`; the host refocuses its stable anchor
+  // (the switcher), since the rebuilt chain may not carry this button.
+  function handleOpenChild(path: string): void {
+    closeDescend();
+    onOpen(path);
+  }
+  // If the children vanish under a scope change, close the menu so its overlay
+  // cannot linger (mirrors the inherit popover's `canDeclare` guard).
+  $: if (!hasChildren) descendOpen = false;
 </script>
 
 <svelte:window on:keydown={handleKeydown} />
@@ -187,6 +241,32 @@
   away. The root stays out of the flow's overflow and yields in the top bar (the
   flex tuning that used to live on `.project-chain` moved up to it).
 -->
+<!--
+  The "down" direction (#417 slice 5): a quiet chevron at the END of the strip,
+  after the crumbs and the inheritance remedy, opening the descent menu. Rendered
+  in both strip branches (populated chain AND the flat-project note — a top-level
+  project directly in the machine root still has children), so it lives in a
+  snippet. `flex: none` (like `.chain-edit`) keeps it from being crushed as the
+  chain yields; it scrolls with the strip, accepting the same left-anchor
+  trade-off the edit affordance already does.
+-->
+{#snippet descendControl()}
+  {#if hasChildren}
+    <!-- "Contains ▾" — a labelled text affordance in the `edit…` link idiom, not
+         a bare glyph (its visible text is also its accessible name, so no
+         aria-label to fight the label-in-name rule; the caret is decorative). -->
+    <button
+      bind:this={descendButton}
+      type="button"
+      class="note-action chain-descend"
+      aria-haspopup="menu"
+      aria-expanded={descendOpen}
+      aria-controls={descendOpen ? "contains-menu" : undefined}
+      title="Open a project inside this one"
+      on:click={toggleDescend}>Contains<span class="descend-caret" aria-hidden="true">▾</span></button>
+  {/if}
+{/snippet}
+
 {#if crumbs.length > 0 || empty}
   <div class="breadcrumb-root">
     {#if crumbs.length > 0}
@@ -236,17 +316,20 @@
             title="Edit what this project inherits from"
             on:click={togglePopover}>edit…</button>
         {/if}
+        {@render descendControl()}
       </nav>
     {:else}
       <div class="project-chain">
         <!-- The genuinely-flat case: no ancestor projects at all, so nothing to
              declare (canDeclare is always false here — a toggleable ancestor
              would have produced a crumb above, taking the branch overhead). The
-             remedy lives on the populated bar, not here. -->
+             remedy lives on the populated bar, not here. The descent chevron
+             still appears when this flat project contains children. -->
         <span
           class="chain-note"
           title="Nothing sits between this project and the projects folder, so there is nothing to inherit from."
         >Inherits from nothing</span>
+        {@render descendControl()}
       </div>
     {/if}
 
@@ -267,6 +350,37 @@
       >
         <div class="inherit-popover-label" id="inherit-popover-label">Inherits from</div>
         <InheritsFromList rows={inheritRows} busy={inheritSaving} onToggle={onToggleInherit} />
+      </div>
+    {/if}
+
+    {#if descendOpen}
+      <!-- Descent menu (#417 slice 5): a non-modal role="menu", mirroring the
+           project switcher — overlay for click-outside, Escape refocuses the
+           trigger (handled on the window listener), focus not trapped. Each item
+           opens a child project (a scope change via `onOpen`). -->
+      <div class="popover-overlay" role="presentation" on:click={closeDescend}></div>
+      <div class="contains-menu" role="menu" aria-label="Projects inside this one" id="contains-menu">
+        {#each childProjects as child (child.path)}
+          <!-- `name` (the folder) shows only when it differs from the title: a
+               project keeps its folder name as its default title, so an
+               unconditional line would print the same string twice. The item's
+               accessible name is a clean "Open <title>" (aria-label), so the
+               folder-name span is decorative (aria-hidden) — a screen reader
+               never reads the raw slug as if it were part of the name. -->
+          <button
+            type="button"
+            class="contains-item"
+            role="menuitem"
+            aria-label={`Open ${child.title}`}
+            title={child.path}
+            on:click={() => handleOpenChild(child.path)}
+          >
+            <span class="contains-title">{child.title}</span>
+            {#if child.name !== child.title}
+              <span class="contains-name" aria-hidden="true">{child.name}</span>
+            {/if}
+          </button>
+        {/each}
       </div>
     {/if}
   </div>
@@ -429,6 +543,27 @@
     flex: none;
   }
 
+  /* The "Contains ▾" descent affordance (#417 slice 5) — the bar's "down"
+     direction, the last thing in the strip. It reuses `.note-action` (the
+     `edit…` link idiom: a word inside the sentence, not a bordered control) and
+     adds `flex: none` so it is not crushed as the chain yields — a fixed
+     control, not a scrolling hop. The gap sets it apart from `· edit…`, which
+     is joined to the crumbs by `·`; descent is separate navigation, not the
+     inheritance remedy, so it takes no `·`. */
+  .project-chain .chain-descend {
+    flex: none;
+    margin-left: 12px;
+  }
+  /* The caret carries the "opens a menu" signal (`▾`, the app's established
+     dropdown glyph); it is not part of the underlined word, so it opts out of
+     the link underline. */
+  .project-chain .chain-descend .descend-caret {
+    display: inline-block;
+    margin-left: 3px;
+    font-size: var(--fs-xs);
+    text-decoration: none;
+  }
+
   /* The inheritance-editor popover (#417 slice 4b). Overlay + panel mirror the
      top bar's switcher menu: a full-viewport catcher for the click-outside
      dismiss, and a panel anchored under the left of the breadcrumb (the "edit…"
@@ -464,5 +599,56 @@
     color: var(--text-3);
     text-transform: uppercase;
     letter-spacing: 0.04em;
+  }
+
+  /* The descent menu (#417 slice 5). Overlay is shared with the inherit popover
+     (only one bar popover is open at a time); the panel mirrors the top bar's
+     project switcher — same z-index, anchored under the breadcrumb root's left
+     edge like the inherit popover. `max-height` + scroll because `children` is
+     uncapped: a shelf with many book folders must not push the list past the
+     window (the switcher menu caps itself for the same reason). */
+  .contains-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 101;
+    min-width: 200px;
+    max-width: 320px;
+    max-height: calc(100vh - 60px);
+    overflow-y: auto;
+    display: grid;
+    gap: 1px;
+    padding: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: var(--elev-2);
+  }
+
+  .contains-item {
+    display: grid;
+    gap: 2px;
+    padding: 8px 10px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    text-align: left;
+    cursor: pointer;
+    width: 100%;
+    color: var(--text);
+  }
+  .contains-item:hover {
+    background: var(--panel);
+  }
+
+  .contains-title {
+    font-size: var(--fs-md);
+    color: var(--text);
+  }
+
+  .contains-name {
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+    font-family: var(--mono);
   }
 </style>

@@ -737,6 +737,7 @@
   currentProjectColor={aiSettings.projectColor}
   recentProjects={projectSession.recentProjects}
   chain={project?.chain ?? []}
+  childProjects={project?.children ?? []}
   onOpenProjectPath={(path) => void projectSession.openProjectAt(path)}
   projectOpen={isProjectOpen}
   themePref={$themePreference}
@@ -819,8 +820,6 @@
         {projectTitle}
         {projectCostTotal}
         {projectCostBreakdown}
-        projectChildren={project?.children ?? []}
-        onOpenChild={(path) => void projectSession.openProjectAt(path)}
         bind:projectCostExpanded
       />
     </div>

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ProjectChainLayer, RecentProject } from "@/lib/types";
+  import type { ProjectChainLayer, ProjectChild, RecentProject } from "@/lib/types";
   import type { DeclarationRow } from "@/lib/utils/projectChain";
   import type { ThemePreference } from "@/lib/utils/theme";
 
@@ -14,11 +14,16 @@
   export let currentProjectColor: string | null = null;
   export let recentProjects: RecentProject[] = [];
   // The resolved ancestor chain (#432), passed straight through to the
-  // breadcrumb. Children are not surfaced here: the child roster ("Contains")
-  // lives solely in the Project pane (ADR-0047 slice 4). Descent while the pane
-  // is hidden goes through re-opening it — the vanishing-pane case is #417's to
-  // fix, not a second roster's to paper over.
+  // breadcrumb.
   export let chain: ProjectChainLayer[] = [];
+  // The child projects directly inside the open one (#310), threaded to the
+  // breadcrumb's descent menu (#417 slice 5): the breadcrumb owns the chain's
+  // "down" direction now, retiring the Project pane's "Contains" roster. This is
+  // exactly #417 fixing the vanishing-pane case — descent no longer depends on a
+  // pane that can disappear. Opening one reuses `onOpenProjectPath` (a child is
+  // just another project path to open), so no separate handler is threaded.
+  // NOT named `children` — that is Svelte 5's default-slot snippet name.
+  export let childProjects: ProjectChild[] = [];
   export let onOpenProjectPath: (path: string) => void = () => {};
   // The inheritance declaration editor moved onto the breadcrumb itself (#417
   // slice 4b): its rows, the in-flight-save lock, and the toggle side effect are
@@ -356,6 +361,7 @@
 
   <ProjectBreadcrumb
     {chain}
+    {childProjects}
     {inheritRows}
     {inheritSaving}
     {onToggleInherit}

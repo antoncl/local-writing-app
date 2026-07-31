@@ -6,6 +6,7 @@
   // (the palette surface is delegated to PaletteEditor).
   import type {
     AIHealthResponse,
+    AIPolicy,
     MachineSettingsDraft,
     MachineSettingsView,
     ProviderCredentialsView,
@@ -33,6 +34,33 @@
   export let draft: MachineSettingsDraft | null = null;
   export let onCancel: () => void = () => {};
   export let onSave: () => void = () => {};
+
+  // The application-global default AI policy (#746). Deliberately NOT part of
+  // the batched `draft`/`onSave`: widening AI permission must be its own
+  // explicit gesture, never a side effect of saving an unrelated field like a
+  // provider key (decisions_ai_permission_fails_closed). It holds its own draft,
+  // seeded from the persisted `settings` on each open, and commits via
+  // `onApplyPolicy` — mirroring the per-project AIPolicyModal.
+  export let onApplyPolicy: (policy: AIPolicy) => Promise<boolean> = async () => false;
+
+  let policyDraft: AIPolicy = "off";
+  let policyWasOpen = false;
+  let applyingPolicy = false;
+  // Snapshot the stored policy on each open→shown transition only; our own apply
+  // re-syncs `settings` from the parent, and re-seeding on that would be a no-op
+  // anyway (draft already equals the saved value).
+  $: if (open !== policyWasOpen) {
+    if (open) policyDraft = settings?.ai_policy ?? "off";
+    policyWasOpen = open;
+  }
+  $: policyDirty = policyDraft !== (settings?.ai_policy ?? "off");
+
+  async function applyPolicy() {
+    if (applyingPolicy) return;
+    applyingPolicy = true;
+    await onApplyPolicy(policyDraft);
+    applyingPolicy = false;
+  }
 
   // The AI-connection test, re-homed from the Project pane (#629): it pings the
   // default assistant's provider, so it belongs beside the providers it tests.
@@ -108,6 +136,29 @@
         aria-labelledby={`settings-tab-${activeTab}`}
       >
         {#if activeTab === "ai"}
+          <section class="app-policy">
+            <h3>Default AI access</h3>
+            <p class="muted">
+              The policy a project falls back to when it states none of its own — the top of every
+              inheritance chain. New and standalone projects resolve here. Applied on its own, so a
+              stray click never widens AI access.
+            </p>
+            <fieldset class="ai-policy">
+              <legend>Access</legend>
+              <label><input type="radio" bind:group={policyDraft} value="off" /> Off</label>
+              <label><input type="radio" bind:group={policyDraft} value="local-only" /> Local only</label>
+              <label><input type="radio" bind:group={policyDraft} value="cloud-allowed" /> Cloud allowed</label>
+            </fieldset>
+            <div class="button-row">
+              <button
+                type="button"
+                class="primary"
+                disabled={!policyDirty || applyingPolicy}
+                on:click={applyPolicy}
+              >{applyingPolicy ? "Applying…" : "Apply"}</button>
+            </div>
+          </section>
+
           <p class="muted">Your cloud subscriptions. Keys are masked on read — a provider stays configured until you remove it, and rotating a key replaces it.</p>
 
           <ProviderSubscriptions
@@ -245,6 +296,46 @@
 
   .stored-at {
     font-size: var(--fs-sm);
+  }
+
+  /* The app-wide AI policy section (#746). The fieldset mirrors the per-project
+     AIPolicyModal so the two controls read as the same kind of thing. */
+  .app-policy {
+    display: grid;
+    grid-auto-rows: min-content;
+    gap: 8px;
+  }
+
+  .app-policy h3 {
+    margin: 0;
+  }
+
+  .ai-policy {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+  }
+
+  .ai-policy legend {
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+    padding: 0 4px;
+  }
+
+  .ai-policy label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: var(--fs-md);
+  }
+
+  /* The global `input, select { width: 100% }` (styles.css) stretches a radio to
+     fill its flex label. Reset the width, as AIPolicyModal does. */
+  .ai-policy label input[type="radio"] {
+    width: auto;
   }
 
   .health-check {

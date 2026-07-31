@@ -273,6 +273,20 @@ class ProjectSession {
     });
   }
 
+  // Set the application-global default AI policy (#746) — the chain's outermost
+  // fallback. Its own explicit write, never folded into the batched settings
+  // Save, because widening AI permission must be a deliberate gesture
+  // (decisions_ai_permission_fails_closed). Used by the Settings → AI control
+  // (change of mind) and by the wizard's first-run AI step (establishing it).
+  // Sparse partial PUT: `merge_update` leaves every other machine setting
+  // untouched. Re-syncs `machineSettings` so the control reflects the saved
+  // value.
+  async saveAiPolicy(policy: AIPolicy): Promise<boolean> {
+    return this.run(async () => {
+      this.machineSettings = await api.updateMachineSettings({ ai_policy: policy });
+    });
+  }
+
   // ---- Project lifecycle entry points ----
   // Create a project at the given path with the given title. The layer walk's
   // bound is the machine root (#429), so creation neither takes nor sends one.

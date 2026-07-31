@@ -3,6 +3,8 @@
 // `@/lib/types` so it stays the single import surface. A leaf module — nothing
 // here is referenced back in types.ts.
 
+import type { AIPolicy } from "./aiTypes";
+
 export type ProviderCredentialsView = {
   anthropic_api_key: string;
   openai_api_key: string;
@@ -37,6 +39,9 @@ export type MachineSettingsView = {
   recent_projects: RecentProject[];
   palette: Swatch[];
   display: DisplaySettings;
+  // The application-global default AI policy (#746) — the chain's outermost
+  // fallback. No "inherit": it IS the floor.
+  ai_policy: AIPolicy;
   config_path: string;
 };
 
@@ -48,6 +53,7 @@ export type MachineSettingsUpdate = {
   recent_projects?: RecentProject[];
   palette?: Swatch[];
   display?: DisplaySettings;
+  ai_policy?: AIPolicy;
 };
 
 // Editor-side draft for MachineSettingsDialog. Flat (provider keys hoisted

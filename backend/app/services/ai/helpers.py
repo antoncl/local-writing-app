@@ -506,9 +506,13 @@ def create_environment_for_project(
     journal: list[Any] | None = None,
 ) -> SandboxedEnvironment:
     """Convenience: env with extensions and project helpers registered."""
+    from app.services.ai.snippet_loader import PromptSnippetLoader
     from app.services.ai.templates import create_environment
 
     env = create_environment()
+    # Without a loader, Jinja raises on any `{% include %}`; this resolves an
+    # include name to a `prompt:snippet` entry so snippets can be reused (#771).
+    env.loader = PromptSnippetLoader(project)
     register_helpers(env, project, session, journal)
     return env
 

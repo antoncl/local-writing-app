@@ -31,36 +31,31 @@ template:
   builtin_policy: seed_generic
   template_version: '1.0'
   locale: en
-  plot_points:
-  - id: ki_introduction
-    title: Introduction
-    function_claim: Introduces the situation, image, relationship, or premise without
-      needing immediate conflict.
+  metadata: {}
+metadata:
+  beats:
+  - title: Introduction
+    function: Introduces the situation, image, relationship, or premise without needing
+      immediate conflict.
     guidance: ''
     required: true
-    metadata: {}
-  - id: sho_development
-    title: Development
-    function_claim: Develops the initial material through variation, deepening, or
-      accumulation.
+    id: ki_introduction
+  - title: Development
+    function: Develops the initial material through variation, deepening, or accumulation.
     guidance: ''
     required: true
-    metadata: {}
-  - id: ten_turn
-    title: Turn
-    function_claim: Introduces contrast, surprise, or new perspective that recontextualizes
+    id: sho_development
+  - title: Turn
+    function: Introduces contrast, surprise, or new perspective that recontextualizes
       the first two parts.
     guidance: ''
     required: true
-    metadata: {}
-  - id: ketsu_reconciliation
-    title: Reconciliation
-    function_claim: Combines introduction, development, and turn into a satisfying
-      new understanding.
+    id: ten_turn
+  - title: Reconciliation
+    function: Combines introduction, development, and turn into a satisfying new understanding.
     guidance: ''
     required: true
-    metadata: {}
-  metadata: {}
+    id: ketsu_reconciliation
 ---
 
 # Kishotenketsu Four-Part Arc

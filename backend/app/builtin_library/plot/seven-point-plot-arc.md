@@ -30,51 +30,45 @@ template:
   builtin_policy: seed_generic
   template_version: '1.0'
   locale: en
-  plot_points:
-  - id: hook
-    title: Hook
-    function_claim: Shows the initial state that will contrast with the resolution.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: first_turn
-    title: First plot turn
-    function_claim: Introduces the central conflict or opportunity that moves the
-      story forward.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: first_pinch
-    title: First pressure point
-    function_claim: Applies antagonistic pressure that proves the problem is real.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: midpoint_shift
-    title: Midpoint shift
-    function_claim: Moves the protagonist from reaction toward action.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: second_pinch
-    title: Second pressure point
-    function_claim: Tightens stakes and removes easy paths.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: second_turn
-    title: Second plot turn
-    function_claim: Provides the final missing insight, resource, or decision path.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: resolution
-    title: Resolution
-    function_claim: Pays off the hook by showing the changed ending state.
-    guidance: ''
-    required: true
-    metadata: {}
   metadata: {}
+metadata:
+  beats:
+  - title: Hook
+    function: Shows the initial state that will contrast with the resolution.
+    guidance: ''
+    required: true
+    id: hook
+  - title: First plot turn
+    function: Introduces the central conflict or opportunity that moves the story
+      forward.
+    guidance: ''
+    required: true
+    id: first_turn
+  - title: First pressure point
+    function: Applies antagonistic pressure that proves the problem is real.
+    guidance: ''
+    required: true
+    id: first_pinch
+  - title: Midpoint shift
+    function: Moves the protagonist from reaction toward action.
+    guidance: ''
+    required: true
+    id: midpoint_shift
+  - title: Second pressure point
+    function: Tightens stakes and removes easy paths.
+    guidance: ''
+    required: true
+    id: second_pinch
+  - title: Second plot turn
+    function: Provides the final missing insight, resource, or decision path.
+    guidance: ''
+    required: true
+    id: second_turn
+  - title: Resolution
+    function: Pays off the hook by showing the changed ending state.
+    guidance: ''
+    required: true
+    id: resolution
 ---
 
 # Seven-Point Plot Arc

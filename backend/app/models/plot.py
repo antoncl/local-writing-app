@@ -2,10 +2,11 @@
 
 A `plot:template` is a diagnostic story-structure lens (three-act, mythic quest,
 kishotenketsu, …) shipped by the built-in Library (ADR-0049) as a read-only
-ancestor node, or an owned copy a writer cloned to adapt. Its structured data —
-the beat roster and how to read it — lives in a `template:` front-matter block so
-AI/context code can resolve it without scraping the prose guide (which is the
-node body).
+ancestor node, or an owned copy a writer cloned to adapt. The beat roster is the
+`beats` ordered-list metadata field (S7 Slice 1, #736), not part of this spec;
+the `template:` front-matter block modelled here carries the remaining
+template-level attributes (family, guidance, provenance) so AI/context code can
+resolve them without scraping the prose guide (the node body).
 
 Ported from the `origin/plotting` quarry's `models_plot.py`, dropping its
 legacy-shape acceptance (field aliases + before-validators): pre-1.0 stores only
@@ -44,21 +45,10 @@ class SourceRef(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class PlotTemplatePoint(BaseModel):
-    """One beat in a template's roster: an elastic diagnostic marker, not a
-    chapter slot. `function_claim` names the story-state change the beat asserts;
-    cards (S5) claim points to argue the beat is earned."""
-
-    id: str = Field(min_length=1)
-    title: str = Field(min_length=1)
-    function_claim: str = ""
-    guidance: str = ""
-    required: bool = True
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
 class PlotTemplateSpec(BaseModel):
-    """The structured payload of a `plot:template`, carried in front matter."""
+    """The structured payload of a `plot:template`, carried in the `template:`
+    front-matter block — template-level attributes only. The beat roster moved to
+    the `beats` ordered-list metadata field (S7 Slice 1, #736)."""
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -77,7 +67,6 @@ class PlotTemplateSpec(BaseModel):
     builtin_policy: PlotTemplateBuiltinPolicy = "user_authored"
     template_version: str = ""
     locale: str = ""
-    plot_points: list[PlotTemplatePoint] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

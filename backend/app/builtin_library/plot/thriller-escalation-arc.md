@@ -30,50 +30,44 @@ template:
   builtin_policy: seed_generic
   template_version: '1.0'
   locale: en
-  plot_points:
-  - id: threat_declared
-    title: Threat declared
-    function_claim: Makes the danger concrete enough to track.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: stakes_clock
-    title: Stakes and clock
-    function_claim: Defines what is at risk and why delay matters.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: first_reversal
-    title: First reversal
-    function_claim: Shows the threat adapting, expanding, or becoming personal.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: no_safe_place
-    title: No safe place
-    function_claim: Removes refuge, trust, or procedural protection.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: truth_exposure
-    title: Truth exposure
-    function_claim: Reveals information that changes who or what can be trusted.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: last_window
-    title: Last window
-    function_claim: Narrows the problem to one dangerous, time-bound option.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: confrontation
-    title: Confrontation
-    function_claim: Forces direct action against the threat.
-    guidance: ''
-    required: true
-    metadata: {}
   metadata: {}
+metadata:
+  beats:
+  - title: Threat declared
+    function: Makes the danger concrete enough to track.
+    guidance: ''
+    required: true
+    id: threat_declared
+  - title: Stakes and clock
+    function: Defines what is at risk and why delay matters.
+    guidance: ''
+    required: true
+    id: stakes_clock
+  - title: First reversal
+    function: Shows the threat adapting, expanding, or becoming personal.
+    guidance: ''
+    required: true
+    id: first_reversal
+  - title: No safe place
+    function: Removes refuge, trust, or procedural protection.
+    guidance: ''
+    required: true
+    id: no_safe_place
+  - title: Truth exposure
+    function: Reveals information that changes who or what can be trusted.
+    guidance: ''
+    required: true
+    id: truth_exposure
+  - title: Last window
+    function: Narrows the problem to one dangerous, time-bound option.
+    guidance: ''
+    required: true
+    id: last_window
+  - title: Confrontation
+    function: Forces direct action against the threat.
+    guidance: ''
+    required: true
+    id: confrontation
 ---
 
 # Thriller Escalation Arc

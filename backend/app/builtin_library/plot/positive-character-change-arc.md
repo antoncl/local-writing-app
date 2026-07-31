@@ -30,45 +30,39 @@ template:
   builtin_policy: seed_generic
   template_version: '1.0'
   locale: en
-  plot_points:
-  - id: want_and_lie
-    title: Want and lie
-    function_claim: Shows what the character wants and the false belief shaping that
-      want.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: need_pressure
-    title: Need pressure
-    function_claim: Creates pressure that the old belief cannot solve.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: truth_glimpse
-    title: Truth glimpse
-    function_claim: Offers evidence of a better value or self-understanding.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: lie_cost
-    title: Lie cost
-    function_claim: Makes clinging to the old belief visibly costly.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: truth_choice
-    title: Truth choice
-    function_claim: Requires action from the changed belief.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: changed_self
-    title: Changed self
-    function_claim: Shows the new internal state in external behavior.
-    guidance: ''
-    required: true
-    metadata: {}
   metadata: {}
+metadata:
+  beats:
+  - title: Want and lie
+    function: Shows what the character wants and the false belief shaping that want.
+    guidance: ''
+    required: true
+    id: want_and_lie
+  - title: Need pressure
+    function: Creates pressure that the old belief cannot solve.
+    guidance: ''
+    required: true
+    id: need_pressure
+  - title: Truth glimpse
+    function: Offers evidence of a better value or self-understanding.
+    guidance: ''
+    required: true
+    id: truth_glimpse
+  - title: Lie cost
+    function: Makes clinging to the old belief visibly costly.
+    guidance: ''
+    required: true
+    id: lie_cost
+  - title: Truth choice
+    function: Requires action from the changed belief.
+    guidance: ''
+    required: true
+    id: truth_choice
+  - title: Changed self
+    function: Shows the new internal state in external behavior.
+    guidance: ''
+    required: true
+    id: changed_self
 ---
 
 # Positive Character Change Arc

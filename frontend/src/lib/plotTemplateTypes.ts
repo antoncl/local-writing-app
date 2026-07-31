@@ -3,10 +3,12 @@
 // the single import barrel.
 //
 // A `plot:template` is a diagnostic story-structure lens shipped by the built-in
-// Library (ADR-0049) or an owned clone. Its beat roster + guidance live in the
-// `template` spec (opaque to the editor — it round-trips verbatim); the prose
-// guide is the body. The Library provenance fields mirror PromptEntry exactly,
-// so the same read-only-in-place lock, clone, and hide affordances apply.
+// Library (ADR-0049) or an owned clone. Its beat roster is the `beats` ordered-list
+// metadata field (S7 Slice 1, #736) — edited via MetadataPanel like any field; the
+// `template` spec carries the remaining template-level attributes (opaque to the
+// editor — it round-trips verbatim), and the prose guide is the body. The Library
+// provenance fields mirror PromptEntry exactly, so the same read-only-in-place lock,
+// clone, and hide affordances apply.
 
 import type { EntryMetadata } from "./types";
 
@@ -16,15 +18,6 @@ export type PlotTemplateSourceRef = {
   url?: string | null;
   citation?: string;
   note?: string;
-  metadata?: EntryMetadata;
-};
-
-export type PlotTemplatePoint = {
-  id: string;
-  title: string;
-  function_claim?: string;
-  guidance?: string;
-  required?: boolean;
   metadata?: EntryMetadata;
 };
 
@@ -44,7 +37,6 @@ export type PlotTemplateSpec = {
   builtin_policy?: string;
   template_version?: string;
   locale?: string;
-  plot_points?: PlotTemplatePoint[];
   metadata?: EntryMetadata;
 };
 

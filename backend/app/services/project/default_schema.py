@@ -212,14 +212,14 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         "plot:template": {
             # A diagnostic story-structure lens (ADR-0048 S4b), shipped read-only
             # by the built-in Library (ADR-0049) or cloned into a project to adapt.
-            # Its beat roster + guidance live in a `template:` front-matter block
-            # (an opaque payload, like the board's `layout`), the prose guide is
-            # the body — so it carries no schema metadata fields. Declared here so
-            # its entry_type resolves.
+            # The beat roster is the `beats` ordered-list field (S7 Slice 1, #736) —
+            # visible + editable via MetadataPanel like any field; the prose guide
+            # is the body. Template-level attributes (family, ai_use_guidance, …)
+            # still ride in the `template:` front-matter block for now.
             "name": "Plot template",
             "kind": "plot",
             "parent": "plot:base",
-            "fields": [],
+            "fields": ["beats"],
             "has_body": True,
         },
         "plot:board": {
@@ -474,6 +474,27 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "body_shape": "view",
         },
     },
+    "groups": {
+        "plot_beat": {
+            # ADR-0048 S7 Slice 1 (#736): a plot template's beat roster is a real
+            # ordered structured-list field (`beats`), not an opaque `template:`
+            # payload — so beats render + edit through the standard MetadataPanel
+            # widget like any other field. This is the first built-in item_group;
+            # its members are the beat's shape: a short title, the story function
+            # it asserts, optional authoring guidance, whether the beat is a
+            # required part of the structure, and a stable `id` the card->beat
+            # links of Slice 3 point at (preserved verbatim from the roster so
+            # that slice needs no re-migration).
+            "name": "Plot beat",
+            "members": [
+                {"key": "title", "name": "Title", "type": "text"},
+                {"key": "function", "name": "Function", "type": "long_text"},
+                {"key": "guidance", "name": "Guidance", "type": "long_text"},
+                {"key": "required", "name": "Required", "type": "boolean", "default": True},
+                {"key": "id", "name": "ID", "type": "text"},
+            ],
+        },
+    },
     "fields": {
         # Intrinsic identity triple (#116). Every node carries `id`, `title`,
         # and `entry_type` in top-level front matter — not in `metadata`.
@@ -502,6 +523,15 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             ],
         },
         "summary": {"name": "Summary", "type": "long_text"},
+        "beats": {
+            # The plot-template beat roster (ADR-0048 S7 Slice 1, #736). An ordered
+            # structured-list field whose items take the `plot_beat` group shape;
+            # `plot:template` is its consumer. Replaces the opaque `template.plot_points`
+            # payload so beats are visible + editable through the field system (goal 7).
+            "name": "Plot beats",
+            "type": "list",
+            "item_group": "plot_beat",
+        },
         "dynamics": {
             # Scene-current per-character beats for the roleplay use case.
             # The roleplay template reads this verbatim; both characters

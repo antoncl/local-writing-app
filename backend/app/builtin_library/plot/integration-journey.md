@@ -31,46 +31,40 @@ template:
   builtin_policy: seed_generic
   template_version: '1.0'
   locale: en
-  plot_points:
-  - id: identity_pressure
-    title: Identity pressure
-    function_claim: Shows the inherited role, value system, or belonging that no longer
+  metadata: {}
+metadata:
+  beats:
+  - title: Identity pressure
+    function: Shows the inherited role, value system, or belonging that no longer
       fits.
     guidance: ''
     required: true
-    metadata: {}
-  - id: adaptation_strategy
-    title: Adaptation strategy
-    function_claim: Shows the survival strategy that wins approval while splitting
-      the self.
+    id: identity_pressure
+  - title: Adaptation strategy
+    function: Shows the survival strategy that wins approval while splitting the self.
     guidance: ''
     required: true
-    metadata: {}
-  - id: outer_success_inner_cost
-    title: Outer success, inner cost
-    function_claim: Lets achievement expose depletion, isolation, or spiritual dryness.
+    id: adaptation_strategy
+  - title: Outer success, inner cost
+    function: Lets achievement expose depletion, isolation, or spiritual dryness.
     guidance: ''
     required: true
-    metadata: {}
-  - id: descent
-    title: Descent
-    function_claim: Pressure exposes the limits of the old survival strategy.
+    id: outer_success_inner_cost
+  - title: Descent
+    function: Pressure exposes the limits of the old survival strategy.
     guidance: ''
     required: true
-    metadata: {}
-  - id: reconnection
-    title: Reconnection
-    function_claim: The protagonist claims or rebuilds a needed source of belonging.
+    id: descent
+  - title: Reconnection
+    function: The protagonist claims or rebuilds a needed source of belonging.
     guidance: ''
     required: true
-    metadata: {}
-  - id: integration
-    title: Integration
-    function_claim: Inner and outer choices align in action.
+    id: reconnection
+  - title: Integration
+    function: Inner and outer choices align in action.
     guidance: ''
     required: true
-    metadata: {}
-  metadata: {}
+    id: integration
 ---
 
 # Integration Journey

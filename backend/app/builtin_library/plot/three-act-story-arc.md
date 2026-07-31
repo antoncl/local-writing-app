@@ -30,51 +30,45 @@ template:
   builtin_policy: seed_generic
   template_version: '1.0'
   locale: en
-  plot_points:
-  - id: setup_pressure
-    title: Setup pressure
-    function_claim: Establishes ordinary conditions, desire, and pressure before commitment.
+  metadata: {}
+metadata:
+  beats:
+  - title: Setup pressure
+    function: Establishes ordinary conditions, desire, and pressure before commitment.
     guidance: ''
     required: true
-    metadata: {}
-  - id: inciting_change
-    title: Inciting change
-    function_claim: Introduces a disruption the protagonist cannot fully ignore.
+    id: setup_pressure
+  - title: Inciting change
+    function: Introduces a disruption the protagonist cannot fully ignore.
     guidance: ''
     required: true
-    metadata: {}
-  - id: first_turn
-    title: First turn
-    function_claim: Makes the old path unavailable and commits the story to its central
+    id: inciting_change
+  - title: First turn
+    function: Makes the old path unavailable and commits the story to its central
       problem.
     guidance: ''
     required: true
-    metadata: {}
-  - id: midpoint_reversal
-    title: Midpoint reversal
-    function_claim: Changes the power balance, information state, or strategy.
+    id: first_turn
+  - title: Midpoint reversal
+    function: Changes the power balance, information state, or strategy.
     guidance: ''
     required: true
-    metadata: {}
-  - id: crisis
-    title: Crisis
-    function_claim: Forces the hard choice before resolution.
+    id: midpoint_reversal
+  - title: Crisis
+    function: Forces the hard choice before resolution.
     guidance: ''
     required: true
-    metadata: {}
-  - id: climax
-    title: Climax
-    function_claim: Tests the final choice in irreversible action.
+    id: crisis
+  - title: Climax
+    function: Tests the final choice in irreversible action.
     guidance: ''
     required: true
-    metadata: {}
-  - id: resolution
-    title: Resolution
-    function_claim: Shows the consequence of the final choice.
+    id: climax
+  - title: Resolution
+    function: Shows the consequence of the final choice.
     guidance: ''
     required: true
-    metadata: {}
-  metadata: {}
+    id: resolution
 ---
 
 # Three-Act Story Arc

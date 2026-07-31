@@ -81,6 +81,13 @@ _INSTANCE_BEAT_SNAPSHOT_KEYS = ("title", "function", "guidance", "required", "id
 # beat that lacks one and re-salts a within-list collision, so a card→beat link
 # (Slice 3b) always has a stable, list-unique target to point at.
 _BEAT_LIST_FIELDS = ("beats", "instance_beats")
+PLOT_CARD_ENTRY_TYPE = "plot:card"
+# Card-only metadata fields (ADR-0048 S7 Slice 3b). `beat_links` is the list of
+# card→beat links — each a *(instance node id, beat id)* text pair, healed
+# plot-locally because v1 bars refs from list-item shapes. `page_status` is the
+# on/off-page vs unwritten marker, with `on_page` derived from the scene link.
+_BEAT_LINK_FIELD = "beat_links"
+_PAGE_STATUS_FIELD = "page_status"
 
 
 class _PlotNodeRead(NamedTuple):
@@ -244,6 +251,8 @@ class PlotMixin:
         metadata = self._normalise_metadata(front_matter.get("metadata"), path)
         metadata = self._strip_unknown_metadata_fields(metadata, raw_entry_type, schema)
         metadata = self._strip_dangling_references(metadata, schema, index)
+        if raw_entry_type == PLOT_CARD_ENTRY_TYPE:
+            metadata = self._normalise_card_metadata(metadata, index)
         metadata_errors = self._validate_entry_metadata(
             label=f"{noun.capitalize()} {node_id}",
             entry_type=raw_entry_type,
@@ -318,6 +327,12 @@ class PlotMixin:
             raise ProjectServiceError(" ".join(markdown_errors), 422)
         metadata = self._normalise_metadata(request.metadata, path)
         metadata = self._ensure_beat_identity(metadata)
+        # Gate on the concrete type being written (like the read path's
+        # `raw_entry_type`), not the endpoint constant `expected_entry_type` — so
+        # save and read agree in every case. plot:card is a leaf here (the module
+        # lists cards by exact type), so both consistently skip any subtype.
+        if request.entry_type == PLOT_CARD_ENTRY_TYPE:
+            metadata = self._normalise_card_metadata(metadata, index)
         metadata_errors = self._validate_entry_metadata(
             label=f"{noun.capitalize()} {node_id}",
             entry_type=request.entry_type,
@@ -378,6 +393,93 @@ class PlotMixin:
             candidate = "beat_" + hashlib.sha256(f"{name}{salt}".encode()).hexdigest()[:12]
             if candidate not in taken:
                 return candidate
+
+    def _normalise_card_metadata(self, metadata: dict[str, Any], index: Any) -> dict[str, Any]:
+        """Card-only metadata normalization (ADR-0048 S7 Slice 3b).
+
+        Runs on every card save AND read — the same two-path symmetry the `scene`
+        ref already has (purge-on-delete + heal-on-read). Heals the card→beat links
+        (drops any that no longer resolve), then derives `page_status` from the scene
+        attachment. `plot:card` is the only plot node carrying either field, so the
+        save/read callers gate this to cards.
+        """
+        self._heal_beat_links(metadata, index)
+        self._derive_card_page_status(metadata)
+        return metadata
+
+    def _heal_beat_links(self, metadata: dict[str, Any], index: Any) -> None:
+        """Keep only card→beat links that still resolve (ADR-0048 S7 Slice 3b).
+
+        A `beat_links` item is a *(instance node id, beat id)* pair stored as plain
+        text — v1 keeps refs out of list-item shapes, so the top-level reference
+        purge/heal never reaches these. This is that healing, plot-local: a link
+        survives only if its `instance` is a live `plot:template_instance` **and** its
+        `beat_id` is in that instance's current roster. A link to a deleted instance,
+        or to a beat since removed from the roster, is dropped — the board can only
+        draw links that mean something. An incomplete link (a blank half) is dropped
+        too: half a pair points nowhere, and a duplicate *(instance, beat_id)* is
+        collapsed — a card fulfils a beat once, so the stored list stays canonical for
+        the edge/diagnostic consumers of later slices. When nothing survives the key
+        is removed, so an all-dangling list heals to sparse rather than an empty `[]`.
+        """
+        links = metadata.get(_BEAT_LINK_FIELD)
+        if not isinstance(links, list):
+            return
+        rosters: dict[str, set[str] | None] = {}
+        seen: set[tuple[str, str]] = set()
+        healed: list[Any] = []
+        for link in links:
+            if not isinstance(link, dict):
+                continue  # not a link shape — points nowhere
+            instance_id = link.get("instance")
+            beat_id = link.get("beat_id")
+            if not (isinstance(instance_id, str) and instance_id and isinstance(beat_id, str) and beat_id):
+                continue  # incomplete pair
+            key = (instance_id, beat_id)
+            if key in seen:
+                continue  # a card fulfils a beat once — drop the duplicate
+            if instance_id not in rosters:
+                rosters[instance_id] = self._instance_beat_ids(instance_id, index)
+            roster = rosters[instance_id]
+            if roster is None or beat_id not in roster:
+                continue  # instance gone / not an instance / beat left the roster
+            seen.add(key)
+            healed.append(link)
+        if healed:
+            metadata[_BEAT_LINK_FIELD] = healed
+        else:
+            metadata.pop(_BEAT_LINK_FIELD, None)
+
+    def _instance_beat_ids(self, instance_id: str, index: Any) -> set[str] | None:
+        """The beat ids in a `plot:template_instance`'s roster, or None when the id is
+        not a live instance. Reads just the front matter (the lightest node read); the
+        instance's own writes guarantee its beats are id-healed."""
+        entry = index.by_id.get(instance_id)
+        if entry is None or entry.entry_type != PLOT_TEMPLATE_INSTANCE_ENTRY_TYPE:
+            return None
+        front_matter = self._read_front_matter_only(entry.path, strict=True)
+        metadata = self._normalise_metadata(front_matter.get("metadata"), entry.path)
+        beats = metadata.get("instance_beats")
+        if not isinstance(beats, list):
+            return set()
+        return {
+            beat["id"]
+            for beat in beats
+            if isinstance(beat, dict) and isinstance(beat.get("id"), str) and beat["id"]
+        }
+
+    @staticmethod
+    def _derive_card_page_status(metadata: dict[str, Any]) -> None:
+        """`page_status` is authored only as off_page vs unwritten; on_page is derived
+        (ADR-0048 S7 Slice 3b). A card with a `scene` attachment IS on the page → force
+        `on_page`; when the scene is gone a stale `on_page` is cleared back to blank
+        (which reads as `unwritten`). An authored off_page / unwritten is left as-is,
+        and blank + no scene stays blank — sparse, and reads as unwritten."""
+        scene = metadata.get("scene")
+        if isinstance(scene, str) and scene:
+            metadata[_PAGE_STATUS_FIELD] = "on_page"
+        elif metadata.get(_PAGE_STATUS_FIELD) == "on_page":
+            metadata.pop(_PAGE_STATUS_FIELD, None)
 
     def _delete_plot_folder_node(self, entry_id: str, *, expected_entry_type: str, noun: str) -> None:
         # Root captured before the unlink so the purge rewrites the project this

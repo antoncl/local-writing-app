@@ -206,7 +206,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Card",
             "kind": "plot",
             "parent": "plot:base",
-            "fields": ["plotline", "scene"],
+            "fields": ["plotline", "scene", "page_status", "beat_links"],
             "has_body": True,
         },
         "plot:template": {
@@ -536,6 +536,21 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 {"key": "id", "name": "ID", "type": "text"},
             ],
         },
+        "plot_beat_link": {
+            # A card->beat link (ADR-0048 S7 Slice 3b): the card names which beat of
+            # which template instance it fulfils. Consumed nested as the `beat_links`
+            # list field's item shape, so a card carries a LIST of these (multiple
+            # beats per card). Both members are plain `text`, NOT `entity_ref`: v1
+            # keeps refs out of item shapes (the top-level ref-healers walk only
+            # top-level values), so `instance` holds the instance node id as text and
+            # plot.py heals these by hand on card save + read — dropping a link whose
+            # instance is gone or whose `beat_id` has left that instance's roster.
+            "name": "Beat link",
+            "members": [
+                {"key": "instance", "name": "Instance", "type": "text"},
+                {"key": "beat_id", "name": "Beat", "type": "text"},
+            ],
+        },
     },
     "fields": {
         # Intrinsic identity triple (#116). Every node carries `id`, `title`,
@@ -686,6 +701,38 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Scene",
             "type": "entity_ref",
             "picker_config": {"sources": [{"kind": "scene", "expr": {"type": "scene:scene"}}]},
+        },
+        "page_status": {
+            # A card's page status (ADR-0048 S7 Slice 3b): whether its story beat is
+            # realized in prose. `on_page` is DERIVED — a card with a `scene` link is
+            # on the page, so plot.py forces it on card save + read and clears a stale
+            # `on_page` when the scene is removed. Absent (the sparse default) reads as
+            # `unwritten` — a placeholder to promote; `off_page` is the writer's
+            # deliberate "this happens off-screen, no scene ever" (diagnostics must not
+            # nag it toward a scene). So a writer only authors off_page vs unwritten;
+            # on_page is the app's business, driven by the scene attachment.
+            "name": "Page status",
+            "type": "select",
+            "options": [
+                {"value": "unwritten", "color": "stone"},
+                {"value": "off_page", "color": "graphite"},
+                {"value": "on_page", "color": "moss"},
+            ],
+        },
+        "beat_links": {
+            # A card's beat links (ADR-0048 S7 Slice 3b): the beats this card fulfils,
+            # each a `plot_beat_link` (a template-instance id + a beat id within that
+            # instance's roster). An ordered `list` so one card can serve several beats.
+            # Its consumer is `plot:card`. Integrity is plot-local: the item shape is
+            # plain text (v1 bars refs from item shapes), so plot.py heals dangling
+            # links on card save + read, not the top-level reference machinery.
+            # Hidden by default, like the lineage id fields (`source_template_id` /
+            # `source_template_name`): the members are raw ids meant for the board's
+            # link editor (a later slice), not hand-entry in the generic panel.
+            "name": "Beat links",
+            "type": "list",
+            "item_group": "plot_beat_link",
+            "hidden": True,
         },
         "word_count": {
             "name": "Word Count",

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ProjectChainLayer, RecentProject } from "@/lib/types";
+  import type { DeclarationRow } from "@/lib/utils/projectChain";
   import type { ThemePreference } from "@/lib/utils/theme";
 
   import { tick } from "svelte";
@@ -19,16 +20,14 @@
   // fix, not a second roster's to paper over.
   export let chain: ProjectChainLayer[] = [];
   export let onOpenProjectPath: (path: string) => void = () => {};
-  // Reveal the inheritance declaration editor (#426) for the empty-chain note
-  // (#427). Not the same gesture as the Project action button below: that one
-  // opens the project NODE in an editor tab, this one brings the Project pane
-  // — which is where the declaration list lives — back on screen.
-  export let onOpenInheritance: () => void = () => {};
-  // Whether that editor would have any actionable row (#427). False both when
-  // the enumeration is empty (a project outside the machine root) AND when its
-  // only ancestor is the projects folder itself (a top-level project) — see
-  // `canDeclareInheritance`. Withheld so "set up…" never links to a dead end.
-  export let canDeclareInheritance: boolean = false;
+  // The inheritance declaration editor moved onto the breadcrumb itself (#417
+  // slice 4b): its rows, the in-flight-save lock, and the toggle side effect are
+  // threaded straight through to the popover the breadcrumb hosts. The parent
+  // feeds `inheritRows` from `declarationRows(ancestors)` and owns the mutation;
+  // the breadcrumb derives from the rows whether there is anything to edit.
+  export let inheritRows: DeclarationRow[] = [];
+  export let inheritSaving: boolean = false;
+  export let onToggleInherit: (path: string) => void = () => {};
   // Event hooks. The parent owns all side effects; this component is
   // purely presentational + dropdown state.
   export let onSelectRecent: (path: string) => void = () => {};
@@ -357,9 +356,10 @@
 
   <ProjectBreadcrumb
     {chain}
-    canDeclare={canDeclareInheritance}
+    {inheritRows}
+    {inheritSaving}
+    {onToggleInherit}
     onOpen={handleOpenProjectPath}
-    onSetUpInheritance={onOpenInheritance}
   />
 
   <div class="switcher-wrap">

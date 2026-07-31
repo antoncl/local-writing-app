@@ -1,6 +1,12 @@
 <script lang="ts">
   import type { ProjectChainLayer } from "@/lib/types";
-  import { declaredChain, inheritsNothing, type ChainCrumb } from "@/lib/utils/projectChain";
+  import {
+    declaredChain,
+    inheritsNothing,
+    type ChainCrumb,
+    type DeclarationRow,
+  } from "@/lib/utils/projectChain";
+  import InheritsFromList from "@/components/widgets/InheritsFromList.svelte";
 
   // The full crumb tooltip: identity, then what its inheritance state means
   // (#417 slice 4). `available`/`stale` are the ancestors #431 used to hide, so
@@ -25,24 +31,65 @@
   // with its own index and merged schema. The parent owns that; this component
   // only says which one was chosen.
   export let onOpen: (path: string) => void = () => {};
-  // Where "set up…" goes: the declaration editor (#426), which lives in the
-  // Project pane. The parent owns revealing it — this component knows the
-  // chain is empty, not where the editor is mounted.
-  export let onSetUpInheritance: () => void = () => {};
-  // Is there an ancestor the declaration editor could actually offer to
-  // inherit from — i.e. an enumerated folder that is itself a project? Not the
-  // same as "the enumeration is non-empty": a project directly inside the
-  // machine root enumerates that root folder, which is not a project and is
-  // shown only as a disabled row. And outside the machine root, or on a
-  // machine with none set (#429), the enumeration is empty outright. In both
-  // cases the editor has nothing tickable, so "set up…" would be a link to a
-  // dead end — the same defect this note removes. The remedy is withheld and
-  // the statement stands alone.
-  export let canDeclare: boolean = false;
+  // The declaration editor's rows (#417 slice 4b): the WHOLE ancestor
+  // enumeration as DeclarationRow[] — the payload the retired Project pane used
+  // to render, now hosted in a popover hung off this bar. The parent feeds it
+  // from `declarationRows(ancestors)` and owns the toggle side effect; this
+  // component only shows the rows and reports which box was clicked.
+  export let inheritRows: DeclarationRow[] = [];
+  // A declaration save is in flight (`projectSession.declarationSaving`) — locks
+  // the popover's checkboxes, because a second tick mid-round-trip would be
+  // computed from the enumeration the first one is about to replace (#426).
+  export let inheritSaving: boolean = false;
+  // Apply one tick/untick. The parent owns the mutation (`toggledDeclaration` →
+  // `setDeclaration`); `InheritsFromList` never trusts the DOM checkbox.
+  export let onToggleInherit: (path: string) => void = () => {};
 
   $: crumbs = declaredChain(chain);
   $: empty = inheritsNothing(chain);
+  // Is there an ancestor the editor could actually act on — i.e. any toggleable
+  // row? Not "the enumeration is non-empty": a project directly inside the
+  // machine root enumerates that root folder, a non-project shown as a disabled
+  // row, and outside the root (or with none set, #429) the enumeration is empty
+  // outright. In both cases there is nothing to edit, so the "edit…" affordance
+  // is withheld — it must never open onto a dead end (#427). Derived from the
+  // very rows the popover renders, so the affordance and its contents cannot
+  // disagree about what is actionable.
+  $: canDeclare = inheritRows.some((row) => row.toggleable);
+
+  // The inheritance-editor popover (#417 slice 4b, replacing the Project pane's
+  // Inheritance section). Anchored to `.breadcrumb-root` — NOT the scrolling
+  // `.project-chain`, whose `overflow-x` clips both axes and would swallow a
+  // panel dropped below it — and hung off the "edit…" affordance.
+  let popoverOpen = false;
+  let editButton: HTMLButtonElement | null = null;
+
+  function togglePopover(): void {
+    popoverOpen = !popoverOpen;
+  }
+  function closePopover(): void {
+    popoverOpen = false;
+  }
+  // Escape returns focus to the trigger: the panel unmounts with the popover, so
+  // without this focus falls to <body> and the next Tab restarts from the top of
+  // the document (the switcher restores focus for the same reason). A click on
+  // the overlay does NOT refocus — a mouse user dismissing shouldn't have focus
+  // yanked back onto the button.
+  function closePopoverAndRefocus(): void {
+    closePopover();
+    editButton?.focus();
+  }
+  function handleKeydown(event: KeyboardEvent): void {
+    if (event.key === "Escape" && popoverOpen) closePopoverAndRefocus();
+  }
+  // If the last actionable ancestor is repaired away (a stale untick that leaves
+  // only organisational folders), `canDeclare` goes false and the anchor button
+  // unmounts — close the popover so its overlay cannot linger over a bar that no
+  // longer has anything to edit.
+  $: if (!canDeclare) popoverOpen = false;
 </script>
+
+<svelte:window on:keydown={handleKeydown} />
 
 <!--
   The resolution-scope selector (#311): which project is being built.
@@ -95,77 +142,102 @@
   the closed lexicon of `docs/design/design-language.md` §4) is inherited, not
   widened: `·` is punctuation between words, not a glyph standing for an operation.
 -->
-{#if crumbs.length > 0}
-  <nav class="project-chain" aria-label="Project chain">
-    {#each crumbs as crumb, index (crumb.path)}
-      {#if index > 0}
-        <span class="crumb-sep" aria-hidden="true">›</span>
-      {/if}
-      {#if crumb.navigable}
-        <!-- A real ancestor project: click = scope change. `available` (not
-             inherited) renders dimmed so a skipped layer is visible; `declared`
-             is the solid default (#417 slice 4). The dim is presentation only,
-             so the state also rides an sr-only suffix for assistive tech. -->
-        <button
-          type="button"
-          class="crumb"
-          class:available={crumb.state === "available"}
-          title={crumbTitle(crumb)}
-          on:click={() => onOpen(crumb.path)}
-        >{crumb.label}{#if crumb.state === "available"}<span class="sr-only"> — not inherited</span>{/if}</button>
-      {:else}
-        <!-- `stale`: declared but no longer a project, so there is nothing to
-             open — a struck, flagged marker rather than a button, its repair in
-             the declaration editor (#417 slice 4, reversing #431). The struck
-             styling is visual only; sr-only text carries the meaning. -->
-        <span class="crumb stale" title={crumbTitle(crumb)}
-          >{crumb.label}<span class="sr-only"> — declared, but no longer a project</span></span>
-      {/if}
-    {/each}
-    {#if canDeclare}
-      <!-- The declaration editor's entry point (#417 slice 4). #431's "set up…"
-           lived on the empty note, but the note now renders only when there is
-           nothing to declare (canDeclare false), so the remedy moved here, where
-           there ARE ancestors to edit. Reveals the pane editor for now; slice 4b
-           swaps it for an inline popover. `·` joins a statement to its remedy,
-           never a hop, so it stays disjoint from `›`. -->
-      <span class="note-sep" aria-hidden="true">·</span>
-      <button
-        type="button"
-        class="note-action chain-edit"
-        aria-label="Edit what this project inherits from"
-        title="Edit what this project inherits from"
-        on:click={onSetUpInheritance}>edit…</button>
+<!--
+  The breadcrumb and its inheritance popover share one positioned root
+  (#417 slice 4b). The popover MUST anchor here and not inside `.project-chain`:
+  that strip sets `overflow-x: auto`, which per CSS forces the other axis to
+  `auto` too, so a panel dropped below the crumbs would be clipped or scrolled
+  away. The root stays out of the flow's overflow and yields in the top bar (the
+  flex tuning that used to live on `.project-chain` moved up to it).
+-->
+{#if crumbs.length > 0 || empty}
+  <div class="breadcrumb-root">
+    {#if crumbs.length > 0}
+      <nav class="project-chain" aria-label="Project chain">
+        {#each crumbs as crumb, index (crumb.path)}
+          {#if index > 0}
+            <span class="crumb-sep" aria-hidden="true">›</span>
+          {/if}
+          {#if crumb.navigable}
+            <!-- A real ancestor project: click = scope change. `available` (not
+                 inherited) renders dimmed so a skipped layer is visible;
+                 `declared` is the solid default (#417 slice 4). The dim is
+                 presentation only, so the state also rides an sr-only suffix for
+                 assistive tech. -->
+            <button
+              type="button"
+              class="crumb"
+              class:available={crumb.state === "available"}
+              title={crumbTitle(crumb)}
+              on:click={() => onOpen(crumb.path)}
+            >{crumb.label}{#if crumb.state === "available"}<span class="sr-only"> — not inherited</span>{/if}</button>
+          {:else}
+            <!-- `stale`: declared but no longer a project, so there is nothing to
+                 open — a struck, flagged marker rather than a button, its repair
+                 in the declaration editor (#417 slice 4, reversing #431). The
+                 struck styling is visual only; sr-only text carries the meaning. -->
+            <span class="crumb stale" title={crumbTitle(crumb)}
+              >{crumb.label}<span class="sr-only"> — declared, but no longer a project</span></span>
+          {/if}
+        {/each}
+        {#if canDeclare}
+          <!-- The declaration editor's entry point (#417 slice 4/4b). #431's
+               "set up…" lived on the empty note, but the note now renders only
+               when there is nothing to declare, so the remedy sits here, where
+               there ARE ancestors to edit. Slice 4b makes it OPEN the inline
+               popover below rather than reveal the pane. `·` joins a statement to
+               its remedy, never a hop, so it stays disjoint from `›`. -->
+          <span class="note-sep" aria-hidden="true">·</span>
+          <button
+            bind:this={editButton}
+            type="button"
+            class="note-action chain-edit"
+            aria-haspopup="dialog"
+            aria-expanded={popoverOpen}
+            aria-label="Edit what this project inherits from"
+            title="Edit what this project inherits from"
+            on:click={togglePopover}>edit…</button>
+        {/if}
+      </nav>
+    {:else}
+      <div class="project-chain">
+        <!-- The genuinely-flat case: no ancestor projects at all, so nothing to
+             declare (canDeclare is always false here — a toggleable ancestor
+             would have produced a crumb above, taking the branch overhead). The
+             remedy lives on the populated bar, not here. -->
+        <span
+          class="chain-note"
+          title="Nothing sits between this project and the projects folder, so there is nothing to inherit from."
+        >Inherits from nothing</span>
+      </div>
     {/if}
-  </nav>
-{:else if empty}
-  <div class="project-chain">
-    <!-- The genuinely-flat case: no ancestor projects at all, so nothing to
-         declare (canDeclare is always false here — a toggleable ancestor would
-         have produced a crumb above, taking the branch overhead). The remedy
-         lives on the populated bar, not here. -->
-    <span
-      class="chain-note"
-      title="Nothing sits between this project and the projects folder, so there is nothing to inherit from."
-    >Inherits from nothing</span>
+
+    {#if popoverOpen}
+      <!-- Click-outside dismiss (does not refocus; see closePopover). -->
+      <div class="popover-overlay" role="presentation" on:click={closePopover}></div>
+      <div class="inherit-popover" role="dialog" aria-labelledby="inherit-popover-label">
+        <div class="inherit-popover-label" id="inherit-popover-label">Inherits from</div>
+        <InheritsFromList rows={inheritRows} busy={inheritSaving} onToggle={onToggleInherit} />
+      </div>
+    {/if}
   </div>
 {/if}
 
 <style>
-  .project-chain {
+  /* The positioning context for the inheritance popover (#417 slice 4b) AND the
+     top bar's yielding item — the two are the same box on purpose. The popover
+     has to anchor to something that is NOT the scrolling strip, so the flex
+     tuning that used to sit on `.project-chain` moved up here and the strip is
+     now a plain child that fills it and scrolls. */
+  .breadcrumb-root {
+    position: relative;
     display: flex;
     align-items: center;
-    gap: 2px;
     /* This is the one item in the bar that yields: the wordmark, the switcher
        and the actions are all `flex: none`, so a chain too wide for the space
-       scrolls here rather than deforming its neighbours. Shrinking the crumbs
-       instead was measured and rejected — four crumbs at 900px collapsed to
-       14px each, clickable and unidentifiable.
-
-       ⚠ It is **left-anchored**: when it does scroll, the crumb pushed out of
-       view is the nearest ancestor, which is the likeliest hop. Pinning the end
-       was tried in JS and reverted (00bc123) after it hung the renderer; doing
-       it in CSS, which cannot loop, is open work. */
+       scrolls inside it rather than deforming its neighbours. Shrinking the
+       crumbs instead was measured and rejected — four crumbs at 900px collapsed
+       to 14px each, clickable and unidentifiable. */
     min-width: 0;
     /* Yield *first and completely*, before the switcher gives up a pixel.
        Flex shrinks proportionally to base size by default, and the chain's base
@@ -175,6 +247,19 @@
        order explicit: the chain is the only item here that can lose space
        without losing a function. */
     flex-shrink: 999;
+  }
+
+  .project-chain {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    /* Fills the root and scrolls within it (the yield behaviour lives on the
+       root now). ⚠ It is **left-anchored**: when it does scroll, the crumb
+       pushed out of view is the nearest ancestor, which is the likeliest hop.
+       Pinning the end was tried in JS and reverted (00bc123) after it hung the
+       renderer; doing it in CSS, which cannot loop, is open work. */
+    flex: 1;
+    min-width: 0;
     overflow-x: auto;
     scrollbar-width: thin;
     /* The path is context, not the subject: it recedes so the switcher button
@@ -287,5 +372,42 @@
      are — it is a fixed remedy, not a hop that scrolls. */
   .project-chain .chain-edit {
     flex: none;
+  }
+
+  /* The inheritance-editor popover (#417 slice 4b). Overlay + panel mirror the
+     top bar's switcher menu: a full-viewport catcher for the click-outside
+     dismiss, and a panel anchored under the left of the breadcrumb (the "edit…"
+     trigger scrolls with the chain, so the stable root edge is the anchor). The
+     z-indexes match the switcher's (overlay below, panel above) within the top
+     bar's stacking context. */
+  .popover-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 99;
+  }
+
+  .inherit-popover {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 101;
+    min-width: 260px;
+    max-width: 360px;
+    display: grid;
+    gap: 6px;
+    padding: 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: var(--elev-2);
+  }
+
+  /* One quiet label over the list — the popover is small enough that the pane's
+     "Inheritance" heading + "Inherits from" sub-label collapse to this one line. */
+  .inherit-popover-label {
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
   }
 </style>

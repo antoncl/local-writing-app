@@ -1,13 +1,8 @@
 <script lang="ts">
-  import type {
-    AncestorCandidate,
-    ProjectChild,
-  } from "@/lib/types";
-  import InheritsFromList from "@/components/widgets/InheritsFromList.svelte";
+  import type { ProjectChild } from "@/lib/types";
   import NodeList from "@/components/widgets/NodeList.svelte";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import { formatCostEur } from "@/lib/utils/money";
-  import { declarationRows } from "@/lib/utils/projectChain";
 
   export let isProjectOpen: boolean;
   export let projectTitle: string;
@@ -18,20 +13,6 @@
   // Empty for a leaf, which is the only thing that distinguishes one: there
   // is no level type to branch on, and depth is not consulted anywhere.
   export let projectChildren: ProjectChild[] = [];
-  // The WHOLE ancestor enumeration (#309), not the declared subset — the
-  // editor's job is to offer the rows the breadcrumb filters out. Flags, not
-  // filtering, is why one payload serves both consumers.
-  export let ancestors: AncestorCandidate[] = [];
-  // Applied on the click, not on a Save button. There is nothing to compose:
-  // one tick is one complete intent, and a draft would need a dirty model to
-  // buy nothing. It is not a permission control, so the fail-closed rule that
-  // keeps AI access behind an explicit save does not reach here.
-  export let onToggleInherit: (path: string) => void;
-  // True for the duration of a declaration save, including the project-data
-  // reload it triggers. See the checkbox below for why it has to disable them.
-  export let inheritSaving: boolean = false;
-
-  $: inheritRows = declarationRows(ancestors);
 
   // Two-way bound: App resets projectCostExpanded on project switch, so it binds
   // down and back up.
@@ -41,11 +22,11 @@
   // its result panel to the project window as a modal (#417), alongside the
   // AI-policy control; Chats/Prompts/Mutations to the app menu, Health Check to
   // the Settings AI tab (#629); loose-scene import to its own "Import
-  // documents…" surface (#635). What's left here is read-only project info plus
-  // the inheritance roster, all bound for the breadcrumb before the pane goes.
-  // Opening a child is a resolution-scope change, i.e. a unit boundary
-  // (ADR-0045) — App routes it through the same open path as the switcher
-  // rather than mutating anything in place.
+  // documents…" surface (#635); the inheritance roster to the breadcrumb popover
+  // (#417 slice 4b). What's left here is read-only project info plus the child
+  // roster, still bound for the breadcrumb before the pane goes. Opening a child
+  // is a resolution-scope change, i.e. a unit boundary (ADR-0045) — App routes
+  // it through the same open path as the switcher rather than mutating in place.
   export let onOpenChild: (path: string) => void;
 </script>
 
@@ -86,27 +67,11 @@
   </div>
 
   <!--
-    The inheritance declaration (#426). Rendered only when the walk found
-    something: a project directly under the machine root, or one outside it,
-    has an empty enumeration and there is nothing to choose from. Same rule as
-    the child roster below — an always-present empty section is noise on every
-    flat project, and #427 owns the affordance for the empty case.
-
-    Placed above "Contains" so the pane reads the way the chain does: what this
-    project is built on, then what is built inside it. The AI access policy that
-    used to share this block (#629) moved to the project window as a modal (#417),
-    so the section is now just the declarations — and renders only when there are
-    ancestors to declare, rather than always carrying an AI fieldset.
+    The inheritance declaration moved onto the breadcrumb (#417 slice 4b): the
+    "edit…" affordance on the populated chain opens a popover hosting the same
+    `InheritsFromList`, so the editor lives where the inheritance STATE is now
+    shown (slice 4a) rather than in a pane that #417 is retiring.
   -->
-  {#if inheritRows.length > 0}
-    <section class="project-inheritance" aria-label="Inheritance">
-      <h3>Inheritance</h3>
-      <div class="inherit-block" role="group" aria-labelledby="project-inherits-label">
-        <span class="field-label" id="project-inherits-label">Inherits from</span>
-        <InheritsFromList rows={inheritRows} busy={inheritSaving} onToggle={onToggleInherit} />
-      </div>
-    </section>
-  {/if}
 
   <!--
     The child roster (#310). Rendered only when there is something in it: a
@@ -200,10 +165,9 @@
     color: var(--text-3);
   }
 
-  /* Sibling sections of the pane, not nested treatments. The rows inside are
+  /* A sibling section of the pane, not a nested treatment. The rows inside are
      plain NodeRows, so they carry the canonical card chrome and need nothing
      here. */
-  .project-inheritance,
   .project-children {
     display: grid;
     gap: 10px;
@@ -212,7 +176,6 @@
     border-top: 1px solid var(--border);
   }
 
-  .project-inheritance h3,
   .project-children h3 {
     margin: 0;
     font-size: var(--fs-md);
@@ -221,18 +184,4 @@
     letter-spacing: 0.04em;
     text-transform: uppercase;
   }
-
-  .inherit-block {
-    display: grid;
-    gap: 6px;
-  }
-
-  /* Sub-label for the ancestor declarations inside the Inheritance block. */
-  .field-label {
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-
 </style>

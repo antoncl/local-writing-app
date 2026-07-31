@@ -164,31 +164,6 @@ export function declarationRows(ancestors: AncestorCandidate[] | undefined): Dec
 }
 
 /**
- * Would the declaration editor have anything to act on for this project (#427)?
- *
- * The gate on the empty-chain note's "set up…" remedy. Offering the link when
- * the editor opens onto nothing tickable is the same defect the note removes —
- * an affordance that promises something it does not have — so it is withheld in
- * exactly the cases `declarationRows` produces no actionable row:
- *
- * - **outside the machine root, or none set (#429)** — the enumeration is
- *   empty, so there are no rows at all;
- * - **a top-level project** directly inside the projects folder — its only
- *   enumerated ancestor is that root folder, which is not a project and renders
- *   as a permanently-disabled row.
- *
- * Derived FROM `declarationRows` rather than re-deriving "is_project means
- * declarable" inline, so the breadcrumb and the editor cannot disagree about
- * what is actionable. `toggleable` — not `is_project` — is the right test: a
- * declared ancestor that stopped being a project (#431's stale case) is not a
- * project yet is still repairable by unticking, and the editor offers exactly
- * that, so the remedy should point there too.
- */
-export function canDeclareInheritance(ancestors: AncestorCandidate[] | undefined): boolean {
-  return declarationRows(ancestors).some((row) => row.toggleable);
-}
-
-/**
  * The declaration to send after ticking or unticking `path` (#426).
  *
  * Absolute paths: `_validated_declaration` accepts either form and stores the

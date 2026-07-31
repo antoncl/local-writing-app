@@ -50,8 +50,11 @@
   // Project pane. Opening a child is a scope change exactly like clicking a
   // crumb, so it reuses `onOpen` — one "open a project in the chain" callback,
   // fed the children here instead of the ancestors — rather than threading a
-  // second open handler through the top bar.
-  export let children: ProjectChild[] = [];
+  // second open handler through the top bar. NOT named `children`: that is
+  // Svelte 5's reserved default-slot snippet name (and this codebase's own
+  // `children: Snippet` convention, e.g. Modal.svelte), which a runes migration
+  // would collide with.
+  export let childProjects: ProjectChild[] = [];
 
   $: crumbs = declaredChain(chain);
   $: empty = inheritsNothing(chain);
@@ -67,7 +70,7 @@
   // The bar's "down" direction (#417 slice 5): is there a child project to
   // descend into? Only surfaced when there is — a leaf has none, and an
   // always-present control would read as a dead affordance.
-  $: hasChildren = children.length > 0;
+  $: hasChildren = childProjects.length > 0;
 
   // The inheritance-editor popover (#417 slice 4b, replacing the Project pane's
   // Inheritance section). Anchored to `.breadcrumb-root` — NOT the scrolling
@@ -249,16 +252,18 @@
 -->
 {#snippet descendControl()}
   {#if hasChildren}
+    <!-- "Contains ▾" — a labelled text affordance in the `edit…` link idiom, not
+         a bare glyph (its visible text is also its accessible name, so no
+         aria-label to fight the label-in-name rule; the caret is decorative). -->
     <button
       bind:this={descendButton}
       type="button"
-      class="chain-descend"
+      class="note-action chain-descend"
       aria-haspopup="menu"
       aria-expanded={descendOpen}
       aria-controls={descendOpen ? "contains-menu" : undefined}
-      aria-label="Open a project inside this one"
-      title="Projects inside this one"
-      on:click={toggleDescend}>▾</button>
+      title="Open a project inside this one"
+      on:click={toggleDescend}>Contains<span class="descend-caret" aria-hidden="true">▾</span></button>
   {/if}
 {/snippet}
 
@@ -355,20 +360,24 @@
            opens a child project (a scope change via `onOpen`). -->
       <div class="popover-overlay" role="presentation" on:click={closeDescend}></div>
       <div class="contains-menu" role="menu" aria-label="Projects inside this one" id="contains-menu">
-        {#each children as child (child.path)}
+        {#each childProjects as child (child.path)}
           <!-- `name` (the folder) shows only when it differs from the title: a
                project keeps its folder name as its default title, so an
-               unconditional line would print the same string twice. -->
+               unconditional line would print the same string twice. The item's
+               accessible name is a clean "Open <title>" (aria-label), so the
+               folder-name span is decorative (aria-hidden) — a screen reader
+               never reads the raw slug as if it were part of the name. -->
           <button
             type="button"
             class="contains-item"
             role="menuitem"
+            aria-label={`Open ${child.title}`}
             title={child.path}
             on:click={() => handleOpenChild(child.path)}
           >
             <span class="contains-title">{child.title}</span>
             {#if child.name !== child.title}
-              <span class="contains-name">{child.name}</span>
+              <span class="contains-name" aria-hidden="true">{child.name}</span>
             {/if}
           </button>
         {/each}
@@ -534,26 +543,25 @@
     flex: none;
   }
 
-  /* The "Contains" descent chevron (#417 slice 5) — the bar's "down" direction,
-     the last thing in the strip. `flex: none` like `.chain-edit`: a fixed
-     control, not a scrolling hop. A quiet glyph that gains a hover box, reading
-     as a control without shouting over the crumbs. `▾` is the app's established
-     "opens a menu" glyph (the switcher, the cost caret). */
+  /* The "Contains ▾" descent affordance (#417 slice 5) — the bar's "down"
+     direction, the last thing in the strip. It reuses `.note-action` (the
+     `edit…` link idiom: a word inside the sentence, not a bordered control) and
+     adds `flex: none` so it is not crushed as the chain yields — a fixed
+     control, not a scrolling hop. The gap sets it apart from `· edit…`, which
+     is joined to the crumbs by `·`; descent is separate navigation, not the
+     inheritance remedy, so it takes no `·`. */
   .project-chain .chain-descend {
     flex: none;
-    margin-left: 6px;
-    padding: 4px 6px;
-    border: 1px solid transparent;
-    border-radius: 6px;
-    background: transparent;
-    color: var(--text-3);
-    font-size: var(--fs-xs);
-    line-height: 1;
-    cursor: pointer;
+    margin-left: 12px;
   }
-  .project-chain .chain-descend:hover {
-    background: var(--panel);
-    color: var(--text);
+  /* The caret carries the "opens a menu" signal (`▾`, the app's established
+     dropdown glyph); it is not part of the underlined word, so it opts out of
+     the link underline. */
+  .project-chain .chain-descend .descend-caret {
+    display: inline-block;
+    margin-left: 3px;
+    font-size: var(--fs-xs);
+    text-decoration: none;
   }
 
   /* The inheritance-editor popover (#417 slice 4b). Overlay + panel mirror the

@@ -22,7 +22,8 @@
   // exactly #417 fixing the vanishing-pane case — descent no longer depends on a
   // pane that can disappear. Opening one reuses `onOpenProjectPath` (a child is
   // just another project path to open), so no separate handler is threaded.
-  export let children: ProjectChild[] = [];
+  // NOT named `children` — that is Svelte 5's default-slot snippet name.
+  export let childProjects: ProjectChild[] = [];
   export let onOpenProjectPath: (path: string) => void = () => {};
   // The inheritance declaration editor moved onto the breadcrumb itself (#417
   // slice 4b): its rows, the in-flight-save lock, and the toggle side effect are
@@ -360,7 +361,7 @@
 
   <ProjectBreadcrumb
     {chain}
-    {children}
+    {childProjects}
     {inheritRows}
     {inheritSaving}
     {onToggleInherit}

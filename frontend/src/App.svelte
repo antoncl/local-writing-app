@@ -737,7 +737,7 @@
   currentProjectColor={aiSettings.projectColor}
   recentProjects={projectSession.recentProjects}
   chain={project?.chain ?? []}
-  children={project?.children ?? []}
+  childProjects={project?.children ?? []}
   onOpenProjectPath={(path) => void projectSession.openProjectAt(path)}
   projectOpen={isProjectOpen}
   themePref={$themePreference}

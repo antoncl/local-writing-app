@@ -184,19 +184,19 @@ describe("ProjectBreadcrumb — inheritance popover (#417 slice 4b)", () => {
 });
 
 describe("ProjectBreadcrumb — descent menu (#417 slice 5)", () => {
-  it("hides the descent chevron when the project has no children", () => {
-    render(ProjectBreadcrumb, { props: { chain: CHAIN, children: [] } });
-    expect(screen.queryByRole("button", { name: "Open a project inside this one" })).toBeNull();
+  it("hides the descent affordance when the project has no children", () => {
+    render(ProjectBreadcrumb, { props: { chain: CHAIN, childProjects: [] } });
+    expect(screen.queryByRole("button", { name: "Contains" })).toBeNull();
   });
 
   it("opens the menu, lists the children (folder name only when it differs), and opens one via onOpen", async () => {
     // Children reuse the crumb `onOpen` callback — a child is just another
     // project path to open (a scope change), so no separate handler is threaded.
     const onOpen = vi.fn();
-    render(ProjectBreadcrumb, { props: { chain: CHAIN, children: CHILDREN, onOpen } });
+    render(ProjectBreadcrumb, { props: { chain: CHAIN, childProjects: CHILDREN, onOpen } });
 
     // Closed to start: the chevron is collapsed, no menu.
-    const descend = screen.getByRole("button", { name: "Open a project inside this one" });
+    const descend = screen.getByRole("button", { name: "Contains" });
     expect(descend.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByRole("menu", { name: "Projects inside this one" })).toBeNull();
 
@@ -208,12 +208,15 @@ describe("ProjectBreadcrumb — descent menu (#417 slice 5)", () => {
     // It is a non-modal navigation menu, not the inheritance dialog.
     expect(screen.queryByRole("dialog")).toBeNull();
 
-    // Both children render as menuitems; the renamed one shows its folder name,
-    // the same-named one does not (no duplicate line).
-    const one = screen.getByRole("menuitem", { name: "Chapter One" });
-    const sequel = screen.getByRole("menuitem", { name: /Sequel/ });
+    // Both children render as menuitems. The accessible name is a clean
+    // "Open <title>" (aria-label), so a screen reader never reads the folder
+    // slug as part of the name — but the slug still renders VISIBLY for the
+    // renamed one, and the same-named one prints no duplicate line.
+    const one = screen.getByRole("menuitem", { name: "Open Chapter One" });
+    const sequel = screen.getByRole("menuitem", { name: "Open Sequel" });
     expect(one).toBeInTheDocument();
-    expect(sequel.textContent).toContain("sequel-draft");
+    expect(sequel.textContent).toContain("sequel-draft"); // folder shown visibly
+    expect(sequel.getAttribute("aria-label")).toBe("Open Sequel"); // but not in the a11y name
     expect(one.textContent).not.toContain("Chapter One Chapter One");
 
     // Opening a child routes through onOpen with its path and closes the menu.
@@ -223,8 +226,8 @@ describe("ProjectBreadcrumb — descent menu (#417 slice 5)", () => {
   });
 
   it("closes on Escape (refocusing the chevron) and on an outside click", async () => {
-    render(ProjectBreadcrumb, { props: { chain: CHAIN, children: CHILDREN } });
-    const descend = screen.getByRole("button", { name: "Open a project inside this one" });
+    render(ProjectBreadcrumb, { props: { chain: CHAIN, childProjects: CHILDREN } });
+    const descend = screen.getByRole("button", { name: "Contains" });
 
     await fireEvent.click(descend);
     expect(screen.queryByRole("menu")).toBeInTheDocument();
@@ -243,10 +246,10 @@ describe("ProjectBreadcrumb — descent menu (#417 slice 5)", () => {
     // No ancestors → the "Inherits from nothing" note branch — but a top-level
     // project can still contain child projects, so the chevron rides that branch.
     render(ProjectBreadcrumb, {
-      props: { chain: [layer("book", { is_root: true })], inheritRows: [], children: CHILDREN },
+      props: { chain: [layer("book", { is_root: true })], inheritRows: [], childProjects: CHILDREN },
     });
     expect(screen.getByText("Inherits from nothing")).toBeInTheDocument();
-    const descend = screen.getByRole("button", { name: "Open a project inside this one" });
+    const descend = screen.getByRole("button", { name: "Contains" });
     await fireEvent.click(descend);
     expect(screen.getByRole("menu", { name: "Projects inside this one" })).toBeInTheDocument();
   });
@@ -254,12 +257,12 @@ describe("ProjectBreadcrumb — descent menu (#417 slice 5)", () => {
   it("never opens both bar popovers at once", async () => {
     // The inherit dialog and the descent menu are mutually exclusive: opening one
     // closes the other, so their shared overlay can't stack.
-    render(ProjectBreadcrumb, { props: { chain: CHAIN, inheritRows: ROWS, children: CHILDREN } });
+    render(ProjectBreadcrumb, { props: { chain: CHAIN, inheritRows: ROWS, childProjects: CHILDREN } });
 
     await fireEvent.click(screen.getByRole("button", { name: "Edit what this project inherits from" }));
     expect(screen.queryByRole("dialog")).toBeInTheDocument();
 
-    await fireEvent.click(screen.getByRole("button", { name: "Open a project inside this one" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Contains" }));
     expect(screen.queryByRole("menu", { name: "Projects inside this one" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).toBeNull();
 

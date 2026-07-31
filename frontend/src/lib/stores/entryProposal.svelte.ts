@@ -28,7 +28,7 @@
 // callbacks are: the controller decides only WHAT the patch touches and WHEN to
 // write, never how. The host merges the fields into its own metadata state,
 // adopts the body through its prose buffer, and issues the explicit flush.
-import type { EntryMetadata, MetadataFieldType, MetadataSchema, MetadataValue } from "@/lib/types";
+import type { DiffView, EntryMetadata, MetadataFieldType, MetadataSchema, MetadataValue } from "@/lib/types";
 import type { FieldFlip } from "@/lib/utils/entryRevision";
 import { entryBrainstorm } from "@/lib/stores/entryBrainstorm.svelte";
 
@@ -170,6 +170,31 @@ export class EntryProposalController {
   // still distinguishable from "declined" (both would be null-valued otherwise).
   adoptedStructured = $state<Record<string, boolean>>({});
 
+  // ---- the judge axis: which whole version the prose flips render (#710) -----
+  //
+  // The same three-state view the snapshot compare drives (`SnapshotStripController
+  // .view`): `both` interleaves the diff (merge), `was` shows the AI's proposal
+  // whole and `now` shows the current text whole (judge). The prose flips honour it
+  // through the shared `renderDiffRuns(runs, view)`; the structured rail is left on
+  // its adopt lens, which already shows the proposed value AND a "Current:" hint,
+  // so a version toggle would tell it nothing the row does not already say. Unlike
+  // the snapshot (which keeps the view across notch steps), a new proposal resets
+  // to `both` — see `resetResolution`.
+  view = $state<DiffView>("both");
+
+  /** Read one whole version, or `both` to interleave the diff (the snapshot's
+   *  A·S·B, ADR-0044 §I). A pure render switch — it changes nothing but which
+   *  runs the prose flips show. */
+  setView(view: DiffView): void {
+    this.view = view;
+  }
+
+  /** `now`/`was` toggle against `both`, so one gesture both enters and leaves a
+   *  single version — the snapshot's `toggleView`. */
+  toggleView(view: "now" | "was"): void {
+    this.view = this.view === view ? "both" : view;
+  }
+
   /** A body flip reports its running resolution (null while unchanged). */
   setBodyResolution(value: string | null): void {
     this.resolvedBody = value;
@@ -195,6 +220,25 @@ export class EntryProposalController {
     };
   }
 
+  /** Take the whole candidate — the mirror of the snapshot's atomic `restore()`
+   *  (#710). Marks every reviewable unit adopted: the body and each `long_text`
+   *  field resolve to their whole proposed value, every structured flip to
+   *  adopted. It only ACCUMULATES — the host follows it with `commit()`, so the
+   *  whole-adopt still lands as the same single PUT as a hand-picked one (§1).
+   *  Its opposite, "reject all", is `abandon()`: keep the current version whole,
+   *  write nothing — the pair the review surfaces as one gesture each. */
+  acceptAll(): void {
+    const proposal = this.proposal;
+    if (!proposal) return;
+    if (proposal.body !== null) this.resolvedBody = proposal.body;
+    const text: Record<string, string | null> = {};
+    for (const flip of this.fields) text[flip.fieldId] = flip.proposedValue;
+    this.resolvedText = text;
+    const structured: Record<string, boolean> = {};
+    for (const flip of this.structuredFlips) structured[flip.fieldId] = true;
+    this.adoptedStructured = structured;
+  }
+
   /** Whether the author has adopted anything — the "you have changes" signal the
    *  close guard reads to decide between a silent discard and the Save prompt. */
   hasPendingChanges = $derived(
@@ -210,6 +254,9 @@ export class EntryProposalController {
     this.resolvedBody = null;
     this.resolvedText = {};
     this.adoptedStructured = {};
+    // A fresh review opens on the interleaved diff — the judge toggle is a
+    // per-review reading choice, not carried across proposals (#710).
+    this.view = "both";
   }
 
   /** The body the author currently sees (live buffer, not the saved file) — the

@@ -899,8 +899,14 @@
           proposedBody={entryReview.proposal.body}
           fields={entryReview.fields}
           hasChanges={entryReview.hasPendingChanges}
+          view={entryReview.view}
+          onView={(v) => entryReview.setView(v)}
           onBodyResolved={(v) => entryReview.setBodyResolution(v)}
           onFieldResolved={(id, v) => entryReview.setFieldResolution(id, v)}
+          onAcceptAll={() => {
+            entryReview.acceptAll();
+            void entryReview.commit();
+          }}
           onDone={() => entryReview.commit()}
           onDiscard={() => entryReview.abandon()}
         />

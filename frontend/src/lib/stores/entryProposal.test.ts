@@ -389,3 +389,92 @@ describe("EntryProposalController — structured field flips (slice 3b)", () => 
     expect(c.hasPendingChanges).toBe(false);
   });
 });
+
+describe("EntryProposalController — judge axis + whole-version decide (#710)", () => {
+  beforeEach(() => {
+    for (const id of ["e1", "e2"]) entryBrainstorm.clear(id);
+  });
+
+  it("opens on the interleaved diff and toggles a single whole version", () => {
+    const c = entryController("e1");
+    expect(c.view).toBe("both");
+    c.setView("was");
+    expect(c.view).toBe("was");
+    c.setView("now");
+    expect(c.view).toBe("now");
+  });
+
+  it("toggleView flips a version against Both — one gesture in and out", () => {
+    const c = entryController("e1");
+    c.toggleView("was"); // into the proposed whole
+    expect(c.view).toBe("was");
+    c.toggleView("was"); // same key leaves it
+    expect(c.view).toBe("both");
+    c.toggleView("now"); // the other whole
+    expect(c.view).toBe("now");
+    c.toggleView("was"); // switching wholes does not pass through Both
+    expect(c.view).toBe("was");
+  });
+
+  it("resets the view to Both when a proposal is superseded", () => {
+    const c = entryController("e1");
+    c.setView("was");
+    c.resetResolution();
+    expect(c.view).toBe("both");
+  });
+
+  it("acceptAll marks the body, every long_text, and every structured flip adopted", () => {
+    const c = entryController("e1");
+    c.metadata = { bio: "old bio", allegiance: "Rebels" };
+    entryBrainstorm.propose(
+      "e1",
+      patch("new body", { bio: "new bio", allegiance: "Crown" }),
+    );
+    expect(c.hasPendingChanges).toBe(false);
+
+    c.acceptAll();
+
+    expect(c.resolvedBody).toBe("new body");
+    expect(c.resolvedText).toEqual({ bio: "new bio" });
+    expect(c.isStructuredAdopted("allegiance")).toBe(true);
+    expect(c.hasPendingChanges).toBe(true);
+  });
+
+  it("acceptAll leaves resolvedBody null for a fields-only patch", () => {
+    const c = entryController("e1");
+    entryBrainstorm.propose("e1", patch(null, { allegiance: "Crown" }));
+    c.acceptAll();
+    expect(c.resolvedBody).toBeNull();
+    expect(c.isStructuredAdopted("allegiance")).toBe(true);
+  });
+
+  it("acceptAll then commit writes the WHOLE candidate in one PUT", async () => {
+    const c = entryController("e1");
+    const onAdoptFields = vi.fn();
+    const onAdoptBody = vi.fn();
+    const onFlush = vi.fn();
+    c.onAdoptFields = onAdoptFields;
+    c.onAdoptBody = onAdoptBody;
+    c.onEmitChange = vi.fn();
+    c.onFlush = onFlush;
+    c.metadata = { bio: "old", allegiance: "Rebels" };
+    entryBrainstorm.propose("e1", patch("new body", { bio: "new bio", allegiance: "Crown" }));
+
+    c.acceptAll();
+    await c.commit();
+
+    // The whole-adopt lands as the SAME single flush as a hand-picked commit —
+    // body + every field in one PUT, not a bespoke bulk-write path.
+    expect(onAdoptBody).toHaveBeenCalledWith("new body");
+    expect(onAdoptFields).toHaveBeenCalledTimes(1);
+    expect(onAdoptFields).toHaveBeenCalledWith({ bio: "new bio", allegiance: "Crown" });
+    expect(onFlush).toHaveBeenCalledTimes(1);
+    expect(c.proposal).toBeNull();
+  });
+
+  it("acceptAll is a no-op with no proposal (nothing to take)", () => {
+    const c = entryController("e2");
+    c.acceptAll();
+    expect(c.hasPendingChanges).toBe(false);
+  });
+});

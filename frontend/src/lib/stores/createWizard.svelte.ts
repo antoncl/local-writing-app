@@ -102,6 +102,12 @@ class CreateWizard {
 
   // ---- Navigation ----
   #stepIndex = $state(0);
+  // Whether this run began with no machine root configured — i.e. first run
+  // (#746). Snapshotted at `start()`, because the root step flips
+  // `needsRootFolder` false mid-flow, and submit needs to know where the AI
+  // policy belongs: the app-wide default (first run) or the new project
+  // (subsequent). See `submit()`.
+  #firstRun = $state(false);
 
   // ---- Injected host hooks (set in App.onMount) ----
   onError: (message: string) => void = () => {};
@@ -133,6 +139,12 @@ class CreateWizard {
     field: keyof ProviderCredentialsView,
     value: string,
   ) => Promise<void> = async () => {};
+  // Write the application-global default AI policy (#746), from the first-run AI
+  // step. Machine-global substrate, like the provider credentials and assistants
+  // beside it — the new book inherits it. Awaited before create so the freshly
+  // created project resolves against it. Unused on subsequent runs (the policy
+  // is per-project then).
+  onSaveAppPolicy: (policy: AIPolicy) => Promise<void> = async () => {};
   onHireAssistant: (
     title: string,
     provider: string,
@@ -232,6 +244,8 @@ class CreateWizard {
   // ---- Lifecycle ----
   start() {
     this.reset();
+    // Snapshot first-run before the root step can flip it (#746 — see submit()).
+    this.#firstRun = this.needsRootFolder;
     this.open = true;
   }
 
@@ -463,11 +477,20 @@ class CreateWizard {
   // ---- Final action ----
   async submit() {
     if (!this.isFinalStep || !this.canAdvance) return;
+    // §7 (#746): on first run the AI-step policy establishes the APP-WIDE
+    // default (the machine layer — there is no root project to hold it), and the
+    // first project states nothing, inheriting it. On subsequent creation the
+    // policy is a per-project choice, applied to the new project. Either way
+    // "inherit" (#aiPolicyToPersist === undefined) writes nothing and the chain
+    // resolves it.
+    if (this.#firstRun && this.#aiPolicyToPersist) {
+      await this.onSaveAppPolicy(this.#aiPolicyToPersist);
+    }
     await this.onCreateProject(
       this.resolvedRoot,
       this.title.trim(),
       this.inherits,
-      this.#aiPolicyToPersist,
+      this.#firstRun ? undefined : this.#aiPolicyToPersist,
       this.nodeOverrides,
       this.description.trim(),
     );

@@ -432,5 +432,75 @@ class DisplaySettingsTests(unittest.TestCase):
         self.assertTrue(display.paragraph_indent)  # not reset to False
 
 
+class AppWideAiPolicyTests(unittest.TestCase):
+    """The application-global default AI policy (#746) — the chain's floor."""
+
+    def setUp(self) -> None:
+        clear_test_scope()
+        self.client = TestClient(app)
+
+    def test_view_defaults_off_when_unset(self) -> None:
+        view = self.client.get("/api/settings/machine").json()
+        self.assertEqual(view["ai_policy"], "off")
+
+    def test_put_persists_ai_policy(self) -> None:
+        returned = self.client.put("/api/settings/machine", json={"ai_policy": "cloud-allowed"})
+        self.assertEqual(returned.status_code, 200, returned.text)
+        self.assertEqual(returned.json()["ai_policy"], "cloud-allowed")
+        # Survives a fresh load from disk.
+        self.assertEqual(ms.load_settings().ai_policy, "cloud-allowed")
+
+    def test_put_rejects_a_value_outside_the_policy_set(self) -> None:
+        bad = self.client.put("/api/settings/machine", json={"ai_policy": "cloud_allowed"})
+        self.assertEqual(bad.status_code, 422)
+
+    def test_ai_policy_patch_leaves_other_settings_untouched(self) -> None:
+        self.client.put("/api/settings/machine", json={"default_provider": "anthropic"})
+        self.client.put("/api/settings/machine", json={"ai_policy": "local-only"})
+        settings = ms.load_settings()
+        self.assertEqual(settings.default_provider, "anthropic")
+        self.assertEqual(settings.ai_policy, "local-only")
+
+
+class DefaultAiPolicyReadTests(unittest.TestCase):
+    """`default_ai_policy()` is the resolver's seed — a raw read that must not
+    carry `load_settings()`'s side effects (#746, review finding)."""
+
+    def _write_config(self, data: dict) -> None:
+        path = ms.config_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    def test_reads_the_stored_value(self) -> None:
+        self._write_config({"ai_policy": "cloud-allowed"})
+        self.assertEqual(ms.default_ai_policy(), "cloud-allowed")
+
+    def test_defaults_off_when_unset_or_out_of_set(self) -> None:
+        self.assertEqual(ms.default_ai_policy(), "off")  # no config file
+        for bad in ({"ai_policy": "cloud_allowed"}, {"ai_policy": None}, {"ai_policy": 3}, {}):
+            with self.subTest(config=bad):
+                self._write_config(bad)
+                self.assertEqual(ms.default_ai_policy(), "off")
+
+    def test_does_not_write_the_way_load_settings_would(self) -> None:
+        # A config that arms load_settings()'s assistant-file migration: legacy
+        # default_models present, no assistant files yet. default_ai_policy() must
+        # read the policy WITHOUT triggering that write — a read path must not
+        # write (the rule projects_root() documents).
+        self._write_config({"ai_policy": "local-only", "default_models": {"ollama": "llama3.2"}})
+        assistants = ms.assistants_dir()
+
+        self.assertEqual(ms.default_ai_policy(), "local-only")
+        self.assertFalse(
+            assistants.exists() and any(assistants.glob("*.md")),
+            "default_ai_policy() must not materialize assistant files",
+        )
+
+        # Contrast: load_settings() DOES write here, proving the trigger is armed
+        # and the raw read genuinely avoids it.
+        ms.load_settings()
+        self.assertTrue(any(assistants.glob("*.md")))
+
+
 if __name__ == "__main__":
     unittest.main()

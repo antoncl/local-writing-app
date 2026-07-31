@@ -233,6 +233,11 @@
     createWizard.getMachineSettings = () => projectSession.machineSettings;
     createWizard.onSaveProviderCredential = (field, value) =>
       projectSession.saveProviderCredential(field, value);
+    // First-run AI policy is the app-wide default (#746) — machine-global like
+    // the credentials/assistants above; the new book inherits it.
+    createWizard.onSaveAppPolicy = async (policy) => {
+      await projectSession.saveAiPolicy(policy);
+    };
     createWizard.onReorderAssistants = async (orderedIds) => {
       await run(async () => {
         setAssistantEntries((await api.reorderAssistants(orderedIds, "")).entries);
@@ -1172,6 +1177,7 @@
     bind:draft={projectSession.machineSettingsDraft}
     onCancel={() => projectSession.cancelMachineSettings()}
     onSave={() => void projectSession.saveMachineSettings()}
+    onApplyPolicy={(policy) => projectSession.saveAiPolicy(policy)}
     health={{
       onCheck: () => void aiSettings.runHealthCheck(),
       result: aiSettings.healthResult,

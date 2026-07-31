@@ -44,6 +44,24 @@ def _set_policy(service: Any, root: Path, policy: Any) -> None:
     service._write_yaml(root / "project.yaml", manifest)
 
 
+def _set_machine_policy(policy: str) -> None:
+    """Set the application-global default AI policy (#746) in the redirected
+    machine config. Writes the config file directly, like `set_projects_root`,
+    so it preserves the root the chain fixtures already wrote and does not run
+    the app's save-path upgrades."""
+    import yaml
+
+    from app.services import machine_settings as ms_service
+
+    path = ms_service.config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {}
+    if path.exists():
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    data["ai_policy"] = policy
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+
 class AiPolicyChainTests(unittest.TestCase):
     """A three-level chain: shelf › universe › book, fully declared."""
 
@@ -159,6 +177,37 @@ class AiPolicyChainTests(unittest.TestCase):
         """
         _set_policy(self.service, self.universe, "cloud-allowed")
         set_projects_root(None)
+        self.assertEqual(self.service.ai_policy(), "off")
+
+    # ----- the application-global default is the floor (#746) -----------
+
+    def test_the_machine_default_reaches_a_chain_that_states_nothing(self) -> None:
+        """The feature #746 adds: the outermost fallback is now a real setting.
+
+        A chain where nobody states a policy no longer bottoms out at a
+        hardcoded `off` — it resolves to the machine-level default, exactly as
+        an ancestor's `cloud-allowed` reaches a book that states none.
+        """
+        _set_machine_policy("cloud-allowed")
+        self.assertEqual(self.service.ai_policy(), "cloud-allowed")
+        # The two readers still agree — the seed feeds both.
+        self.assertEqual(self.service.current_project().ai_policy, "cloud-allowed")
+
+    def test_a_stated_layer_still_overrides_the_machine_default(self) -> None:
+        """The seed is the floor, not a lock. A nearer explicit statement wins
+        over the machine default the same way it wins over an ancestor — here a
+        book saying `off` under a `cloud-allowed` machine default.
+        """
+        _set_machine_policy("cloud-allowed")
+        _set_policy(self.service, self.book, "off")
+        self.assertEqual(self.service.ai_policy(), "off")
+
+    def test_an_unset_machine_default_keeps_the_fail_closed_off(self) -> None:
+        """The default's own default is `off` — a machine that never set one
+        resolves a silent chain to `off`, unchanged from before #746
+        (`decisions_ai_permission_fails_closed`).
+        """
+        _set_machine_policy("off")
         self.assertEqual(self.service.ai_policy(), "off")
 
     # ----- fail-closed, in the two places it belongs --------------------

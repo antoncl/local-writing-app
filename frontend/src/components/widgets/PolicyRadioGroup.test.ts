@@ -32,9 +32,4 @@ describe("PolicyRadioGroup", () => {
     expect(radio("Local only").checked).toBe(true);
     expect(radio("Off").checked).toBe(false);
   });
-
-  it("uses the given legend", () => {
-    render(PolicyRadioGroup, { props: { value: "off", legend: "Default AI access" } });
-    expect(screen.getByText("Default AI access")).toBeInTheDocument();
-  });
 });

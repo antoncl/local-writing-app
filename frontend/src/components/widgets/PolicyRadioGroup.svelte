@@ -14,16 +14,14 @@
   let {
     value = $bindable("off"),
     includeInherit = false,
-    legend = "Access",
   }: {
     value?: AIPolicyDraft;
     includeInherit?: boolean;
-    legend?: string;
   } = $props();
 </script>
 
 <fieldset class="ai-policy">
-  <legend>{legend}</legend>
+  <legend>Access</legend>
   {#if includeInherit}
     <label
       title="Set no policy of your own — inherit it from an ancestor project, or default to Off (#471)"

@@ -9,6 +9,7 @@
 // "save preset" field on any dismiss (the `onClose` hook). The breadcrumb's own
 // test already covers the modal path through the same primitive.
 import { describe, it, expect, vi } from "vitest";
+import { tick } from "svelte";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import TopBar from "./TopBar.svelte";
 import type { RecentProject } from "@/lib/types";
@@ -68,15 +69,29 @@ describe("TopBar — project switcher (#766.1)", () => {
     expect(screen.queryByRole("menu", { name: "Project switcher" })).toBeNull();
   });
 
-  it("clears a stale recent through the host without closing the menu (#423)", async () => {
+  it("clears a stale recent, keeping the menu open and focus inside it via bind:panel (#423)", async () => {
+    // The host callback here does NOT drop the row (a plain spy), so after the
+    // click both ×-buttons still exist. handleRemoveRecent then lands focus on the
+    // button that slid into the vacated slot — with no removal that is the SAME ×
+    // (index 0). That focus juggle reads `.recent-remove` out of the panel the
+    // primitive hands back through `bind:panel`; a broken binding leaves
+    // switcherMenuEl null and falls through to focusing the switcher TOGGLE, which
+    // this pins against (the one genuinely novel wiring in the #766.1 rewire).
     const onRemoveRecent = vi.fn();
     render(TopBar, { props: { currentTitle: "My Book", recentProjects: RECENTS, onRemoveRecent } });
 
     await fireEvent.click(screen.getByRole("button", { name: "My Book" }));
-    await fireEvent.click(screen.getByRole("button", { name: "Remove One from recent projects" }));
+    const removeOne = screen.getByRole("button", { name: "Remove One from recent projects" });
+    await fireEvent.click(removeOne);
+    await tick(); // let handleRemoveRecent's await onRemoveRecent + await tick settle
+    await tick();
+
     expect(onRemoveRecent).toHaveBeenCalledWith("/w/one");
     // Clearing dead rows is housekeeping, not navigation — the menu stays open.
     expect(screen.queryByRole("menu", { name: "Project switcher" })).toBeInTheDocument();
+    // Focus stayed inside the panel (on the ×), not dropped to the switcher toggle.
+    expect(document.activeElement).toBe(removeOne);
+    expect(document.activeElement).not.toBe(screen.getByRole("button", { name: "My Book" }));
   });
 });
 

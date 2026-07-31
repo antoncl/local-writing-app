@@ -26,6 +26,10 @@ function layer(name: string, overrides: Partial<ProjectChainLayer> = {}): Projec
     label: name,
     path: `/writing/${name}`,
     is_root: false,
+    // A plain layer is a declared project; override the two flags for the
+    // available/stale cases (#417 slice 4).
+    is_project: true,
+    inherited: true,
     ...overrides,
   };
 }
@@ -46,9 +50,27 @@ describe("declaredChain", () => {
     ]);
 
     expect(crumbs).toEqual([
-      { path: "/writing/honorverse", label: "The Honorverse" },
-      { path: "/writing/honor-harrington", label: "Honor Harrington" },
+      { path: "/writing/honorverse", label: "The Honorverse", state: "declared", navigable: true },
+      { path: "/writing/honor-harrington", label: "Honor Harrington", state: "declared", navigable: true },
     ]);
+  });
+
+  it("dims an ancestor project the open project does not inherit from", () => {
+    // #417 slice 4: an `available` ancestor (is_project, not inherited) is the
+    // skipped layer #431 hid. It is still a real project, so it navigates.
+    const [crumb] = declaredChain([layer("honorverse", { inherited: false })]);
+
+    expect(crumb.state).toBe("available");
+    expect(crumb.navigable).toBe(true);
+  });
+
+  it("marks a stale declared ancestor non-navigable", () => {
+    // A declared ancestor whose project.yaml is gone: flagged, and NOT
+    // navigable — there is no project to open (#417 slice 4).
+    const [crumb] = declaredChain([layer("honorverse", { is_project: false, inherited: true })]);
+
+    expect(crumb.state).toBe("stale");
+    expect(crumb.navigable).toBe(false);
   });
 
   it("drops the open project — the switcher renders it, not the path", () => {
@@ -63,7 +85,9 @@ describe("declaredChain", () => {
     // same folder by its directory name.
     const crumbs = declaredChain([layer("root", { label: "Base Folder" })]);
 
-    expect(crumbs).toEqual([{ path: "/writing/root", label: "Base Folder" }]);
+    expect(crumbs).toEqual([
+      { path: "/writing/root", label: "Base Folder", state: "declared", navigable: true },
+    ]);
   });
 
   it("treats a missing chain as a flat project", () => {

@@ -945,14 +945,16 @@ export type ProjectChild = {
 };
 
 /**
- * One layer of the RESOLVED chain, outermost first, the open project last
- * (#432).
+ * One layer of the breadcrumb chain, outermost first, the open project last
+ * (#432; state added for #417 slice 4).
  *
- * The twin of `AncestorCandidate`: that one is the whole enumeration, flagged
- * so the declaration editor can offer the undeclared rows; this one is only
- * the layers that contribute, already selected and already named by the
- * backend walker. Nothing here is re-derived client-side — that duplication,
- * and its disagreement with the walker over labels, is what #432 removed.
+ * Still named by the backend walker, never re-derived client-side — that
+ * duplication, and its disagreement over labels, is what #432 removed. Since
+ * slice 4 the chain also carries every ancestor project + stale declaration
+ * with its `is_project`/`inherited` state, so the bar can render a skipped
+ * layer dimmed and a stale one flagged rather than hide a legal gap (the
+ * reversal of #431). `is_project` × `inherited` gives declared / available /
+ * stale; a pure organisational folder is omitted from the chain entirely.
  */
 export type ProjectChainLayer = {
   id: string;
@@ -960,6 +962,8 @@ export type ProjectChainLayer = {
   path: string;
   /** The open project itself, always last. */
   is_root: boolean;
+  is_project: boolean;
+  inherited: boolean;
 };
 
 export type ProjectInfo = {

@@ -1,40 +1,60 @@
 import type { AncestorCandidate, ProjectChainLayer } from "@/lib/types";
 
-/** One hop in the breadcrumb: somewhere the author can open. */
+/**
+ * A crumb's inheritance state — the `is_project` × `inherited` cross the
+ * backend now ships on each chain layer (#417 slice 4). Drives how the bar
+ * renders it: `declared` solid, `available` dimmed, `stale` flagged.
+ */
+export type ChainCrumbState = "declared" | "available" | "stale";
+
+/** One hop in the breadcrumb. */
 export type ChainCrumb = {
   path: string;
   label: string;
+  state: ChainCrumbState;
+  /**
+   * Whether selecting it opens that project. A `declared`/`available` crumb is
+   * a real project and navigates; a `stale` crumb is a folder whose
+   * `project.yaml` is gone, so there is nothing to open — it is shown as a
+   * flagged, non-navigable marker whose repair lives in the declaration editor.
+   */
+  navigable: boolean;
 };
 
+function crumbState(layer: ProjectChainLayer): ChainCrumbState {
+  if (layer.is_project) return layer.inherited ? "declared" : "available";
+  return "stale"; // a non-project layer only reaches the chain when inherited
+}
+
 /**
- * The declared chain, outermost first, as breadcrumb hops (#311, #432).
+ * The chain, outermost first, as breadcrumb hops (#311, #432; #417 slice 4).
  *
- * **Reads the resolved chain; derives nothing.** This used to filter
- * `ProjectInfo.ancestors` on `inherited && is_project` and label each hop
- * `title || name` — a transcription of `_project_layer_folders` and
- * `_layer_label_for_folder`, i.e. a second implementation of a traversal the
- * backend walker already owns. The two disagreed: the walker labels a
- * titleless outermost layer that is the machine root **"Base Folder"**, and
- * this labelled the same folder by its directory name, so the schema-layers
- * view and the breadcrumb could name one layer two ways in the same session.
- * `ProjectInfo.chain` now ships the walker's own answer.
+ * **Reads the resolved chain; derives nothing but presentation.** Labels are
+ * the walker's own (#432 deleted the frontend transcript that filtered
+ * `ancestors` and re-labelled `title || name`, because it disagreed with the
+ * walker over the machine-root "Base Folder" case). This maps to crumbs and
+ * drops the root layer, which the bar renders as the project switcher rather
+ * than as a crumb.
  *
- * The only thing left here is presentation: drop the root layer. The chain
- * includes the open project as its innermost entry, and the bar renders that
- * as the project switcher rather than as a crumb.
- *
- * Gaps stay legal upstream (a project may declare a grandparent and not its
- * parent), so this is a path through the ancestry rather than a walk of
- * consecutive folders. #431 settled that the bar does NOT mark the gap: the
- * undeclared middle folder is not in `chain` (the backend yields only
- * `is_project and inherited` layers), so there is nothing here to hide or to
- * flag — the honest treatment of a deliberate, legal gap is to render the
- * declared layers contiguously, which is all this can do.
+ * The one behaviour change is the reversal of #431. #431 rendered only the
+ * declared layers, contiguously, so a legal gap (a project declaring a
+ * grandparent and skipping its parent) was invisible. The bar now doubles as
+ * the inheritance-state display, so the backend carries the skipped ancestors,
+ * and each crumb gets a `state`: `available` (an ancestor project not inherited
+ * — the skipped layer, dimmed) and `stale` (a declared ancestor whose manifest
+ * is gone — flagged) join `declared`. Making the gap visible where the author
+ * who set it up would notice it is the point; a pure organisational folder,
+ * which has no inheritance state to show, the backend still omits.
  */
 export function declaredChain(chain: ProjectChainLayer[] | undefined): ChainCrumb[] {
   return (chain ?? [])
     .filter((layer) => !layer.is_root)
-    .map((layer) => ({ path: layer.path, label: layer.label }));
+    .map((layer) => ({
+      path: layer.path,
+      label: layer.label,
+      state: crumbState(layer),
+      navigable: layer.is_project,
+    }));
 }
 
 /**
@@ -45,11 +65,16 @@ export function declaredChain(chain: ProjectChainLayer[] | undefined): ChainCrum
  *
  * - **no project open** — the chain is absent or empty, and the bar has no
  *   subject to say anything about;
- * - **a flat project** — the chain holds the open project and nothing else,
- *   because it declares no ancestors (ADR-0039 Amendment 1: absent means
- *   inherits nothing).
+ * - **a flat project** — the chain holds the open project and nothing else.
  *
- * The second used to render as blank space, which left the switcher button
+ * Since #417 slice 4 the second means the project has **no ancestor projects at
+ * all** (it sits directly inside the machine root, or outside it): there is
+ * nothing to render even dimmed. A project that merely declares no ancestors
+ * but has one above it is no longer "nothing" — that ancestor now shows as an
+ * `available` crumb, which is the whole point of the reversal. The note is
+ * reserved for the genuinely-empty case.
+ *
+ * The flat case used to render as blank space, which left the switcher button
  * beside it reading as a one-item breadcrumb — the mechanism behind the
  * misclick in #427. It gets a stated note instead.
  */

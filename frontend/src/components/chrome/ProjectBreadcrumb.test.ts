@@ -10,7 +10,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import ProjectBreadcrumb from "./ProjectBreadcrumb.svelte";
-import type { ProjectChainLayer } from "@/lib/types";
+import type { ProjectChainLayer, ProjectChild } from "@/lib/types";
 import type { DeclarationRow } from "@/lib/utils/projectChain";
 
 function layer(name: string, overrides: Partial<ProjectChainLayer> = {}): ProjectChainLayer {
@@ -42,6 +42,14 @@ const CHAIN = [
   layer("series", { label: "Series", inherited: false }), // available
   layer("gone", { label: "Gone", is_project: false, inherited: true }), // stale
   layer("book", { label: "Book", is_root: true }), // the open project (leaf)
+];
+
+// The child projects inside the open one (#417 slice 5). "Chapter One" keeps its
+// folder name as its title (nothing to disambiguate); "Sequel" has been renamed,
+// so its folder name is worth showing.
+const CHILDREN: ProjectChild[] = [
+  { path: "/w/book/chapter-one", name: "Chapter One", title: "Chapter One" },
+  { path: "/w/book/sequel", name: "sequel-draft", title: "Sequel" },
 ];
 
 // The enumeration behind that chain: the disabled projects-folder, the declared
@@ -172,5 +180,92 @@ describe("ProjectBreadcrumb — inheritance popover (#417 slice 4b)", () => {
     expect(screen.getByText("Inherits from nothing")).toBeInTheDocument();
     expect(screen.queryByRole("button")).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+describe("ProjectBreadcrumb — descent menu (#417 slice 5)", () => {
+  it("hides the descent chevron when the project has no children", () => {
+    render(ProjectBreadcrumb, { props: { chain: CHAIN, children: [] } });
+    expect(screen.queryByRole("button", { name: "Open a project inside this one" })).toBeNull();
+  });
+
+  it("opens the menu, lists the children (folder name only when it differs), and opens one via onOpen", async () => {
+    // Children reuse the crumb `onOpen` callback — a child is just another
+    // project path to open (a scope change), so no separate handler is threaded.
+    const onOpen = vi.fn();
+    render(ProjectBreadcrumb, { props: { chain: CHAIN, children: CHILDREN, onOpen } });
+
+    // Closed to start: the chevron is collapsed, no menu.
+    const descend = screen.getByRole("button", { name: "Open a project inside this one" });
+    expect(descend.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("menu", { name: "Projects inside this one" })).toBeNull();
+
+    await fireEvent.click(descend);
+    expect(descend.getAttribute("aria-expanded")).toBe("true");
+    const menu = screen.getByRole("menu", { name: "Projects inside this one" });
+    expect(menu).toBeInTheDocument();
+
+    // It is a non-modal navigation menu, not the inheritance dialog.
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    // Both children render as menuitems; the renamed one shows its folder name,
+    // the same-named one does not (no duplicate line).
+    const one = screen.getByRole("menuitem", { name: "Chapter One" });
+    const sequel = screen.getByRole("menuitem", { name: /Sequel/ });
+    expect(one).toBeInTheDocument();
+    expect(sequel.textContent).toContain("sequel-draft");
+    expect(one.textContent).not.toContain("Chapter One Chapter One");
+
+    // Opening a child routes through onOpen with its path and closes the menu.
+    await fireEvent.click(sequel);
+    expect(onOpen).toHaveBeenCalledWith("/w/book/sequel");
+    expect(screen.queryByRole("menu", { name: "Projects inside this one" })).toBeNull();
+  });
+
+  it("closes on Escape (refocusing the chevron) and on an outside click", async () => {
+    render(ProjectBreadcrumb, { props: { chain: CHAIN, children: CHILDREN } });
+    const descend = screen.getByRole("button", { name: "Open a project inside this one" });
+
+    await fireEvent.click(descend);
+    expect(screen.queryByRole("menu")).toBeInTheDocument();
+    await fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(document.activeElement).toBe(descend);
+
+    // Reopen, then dismiss by clicking the overlay (no refocus).
+    await fireEvent.click(descend);
+    expect(screen.queryByRole("menu")).toBeInTheDocument();
+    await fireEvent.click(document.querySelector(".popover-overlay")!);
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("shows descent on a flat project that still contains children", async () => {
+    // No ancestors → the "Inherits from nothing" note branch — but a top-level
+    // project can still contain child projects, so the chevron rides that branch.
+    render(ProjectBreadcrumb, {
+      props: { chain: [layer("book", { is_root: true })], inheritRows: [], children: CHILDREN },
+    });
+    expect(screen.getByText("Inherits from nothing")).toBeInTheDocument();
+    const descend = screen.getByRole("button", { name: "Open a project inside this one" });
+    await fireEvent.click(descend);
+    expect(screen.getByRole("menu", { name: "Projects inside this one" })).toBeInTheDocument();
+  });
+
+  it("never opens both bar popovers at once", async () => {
+    // The inherit dialog and the descent menu are mutually exclusive: opening one
+    // closes the other, so their shared overlay can't stack.
+    render(ProjectBreadcrumb, { props: { chain: CHAIN, inheritRows: ROWS, children: CHILDREN } });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Edit what this project inherits from" }));
+    expect(screen.queryByRole("dialog")).toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole("button", { name: "Open a project inside this one" }));
+    expect(screen.queryByRole("menu", { name: "Projects inside this one" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    // And back the other way.
+    await fireEvent.click(screen.getByRole("button", { name: "Edit what this project inherits from" }));
+    expect(screen.queryByRole("dialog")).toBeInTheDocument();
+    expect(screen.queryByRole("menu", { name: "Projects inside this one" })).toBeNull();
   });
 });

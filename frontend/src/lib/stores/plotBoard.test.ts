@@ -11,6 +11,7 @@ import {
   plotBoardStore,
   realizeCard,
   refreshPlotBoard,
+  saveCardSynopsis,
   savePlotBoardLayout,
   seedCardsFromManuscript,
 } from "./plotBoard";
@@ -123,6 +124,16 @@ describe("card content ops", () => {
     vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
     await detachCardScene("c1");
     expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0][0].metadata).toEqual({ plotline: "p1" });
+  });
+
+  it("saveCardSynopsis saves the new body, metadata untouched", async () => {
+    vi.spyOn(api, "getCard").mockResolvedValue(card({ plotline: "p1" }));
+    const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
+    vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    await saveCardSynopsis("c1", "a fresh synopsis");
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0][1]).toBe("a fresh synopsis");
     expect(save.mock.calls[0][0].metadata).toEqual({ plotline: "p1" });
   });
 });

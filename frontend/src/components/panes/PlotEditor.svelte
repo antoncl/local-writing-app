@@ -14,7 +14,7 @@
   bit lives outside it and the custom nodes carry their own mount tests.
 -->
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, setContext } from "svelte";
   import "@xyflow/svelte/dist/style.css";
   import { SvelteFlow, Controls, type ColorMode, type Edge } from "@xyflow/svelte";
   import { themePreference } from "@/lib/utils/theme";
@@ -26,11 +26,20 @@
   } from "@/lib/plot/plotBoardLayout";
   import { GraphUndoController } from "@/lib/graph/graphUndoController.svelte";
   import type { GraphPort } from "@/lib/graph/graphCommands";
-  import { savePlotBoardLayout } from "@/lib/stores/plotBoard";
+  import {
+    savePlotBoardLayout,
+    realizeCard,
+    detachCardScene,
+    saveCardSynopsis,
+    seedCardsFromManuscript,
+  } from "@/lib/stores/plotBoard";
+  import { editorPanes } from "@/lib/stores/editorPanes.svelte";
+  import { confirmService } from "@/lib/stores/confirmService.svelte";
   import UndoRedoControls from "@/components/UndoRedoControls.svelte";
   import ViewportFit from "@/components/editor/body/view/ViewportFit.svelte";
   import PlotCardNode from "./plot/PlotCardNode.svelte";
   import PlotLaneNode from "./plot/PlotLaneNode.svelte";
+  import { PLOT_CARD_ACTIONS, type PlotCardActions } from "./plot/plotCardActions";
   import type { BoardXY, PlotBoardProjection } from "@/lib/types";
 
   // The board's read model, fetched by the opener / PlotBoardPane into the store.
@@ -67,6 +76,32 @@
     setEdges: (e) => (flowEdges = e),
   };
   const undoCtl = new GraphUndoController<PlotBoardNode, Edge>(graphPort);
+
+  // Per-card actions handed to PlotCardNode via context (ADR-0048 S7d). Content ops
+  // are intentful backend mutations OUTSIDE the layout caretaker (binding decision 1)
+  // — realize/detach never enter the Ctrl+Z history. Each store helper refetches the
+  // projection so the board re-projects the changed card (visible reflow is the
+  // rehydrate-on-content-op wiring in the reflow slice).
+  setContext<PlotCardActions>(PLOT_CARD_ACTIONS, {
+    onOpen: (cardId) => void editorPanes.openPlotCard(cardId),
+    onRealize: (cardId) => void realizeCard(cardId),
+    onDetach: (cardId) => void detachCardScene(cardId),
+    onEditSynopsis: (cardId, synopsis) => void saveCardSynopsis(cardId, synopsis),
+  });
+
+  // Seed-from-manuscript (ADR-0048 §S5): bulk, idempotent. Confirmed because it can
+  // mint many cards at once, though re-running it is safe (already-carded scenes skip).
+  function seed(): void {
+    confirmService.request({
+      title: "Seed from manuscript",
+      message: "Create one card per scene that isn't carded yet, each attached to its scene. Safe to run again — already-carded scenes are skipped.",
+      confirmLabel: "Seed cards",
+      destructive: false,
+      onConfirm: async () => {
+        await seedCardsFromManuscript();
+      },
+    });
+  }
 
   const nodeTypes = { plotCard: PlotCardNode, plotLane: PlotLaneNode };
   // Svelte Flow ships light-only chrome; drive its theme from the app's.
@@ -148,21 +183,29 @@
 <section class="plot-board" aria-label="Plot board" onkeydown={undoCtl.handleKeydown}>
   {#if !projection}
     <p class="board-hint muted">Loading the board…</p>
-  {:else if isEmpty}
-    <p class="board-hint muted">No plotlines or cards yet. Add a plotline, or seed cards from the manuscript.</p>
   {:else}
     <div class="board-toolbar">
-      <UndoRedoControls
-        canUndo={undoCtl.canUndo}
-        canRedo={undoCtl.canRedo}
-        undoTitle={undoCtl.undoTitle}
-        redoTitle={undoCtl.redoTitle}
-        announcement={undoCtl.announcement}
-        onUndo={() => undoCtl.undo()}
-        onRedo={() => undoCtl.redo()}
-      />
+      <!-- Seed stays reachable on an empty board — it is how you populate one. -->
+      <button class="seed-btn" onclick={seed}>
+        <i class="ti ti-seedling" aria-hidden="true"></i>
+        Seed from manuscript
+      </button>
+      {#if !isEmpty}
+        <UndoRedoControls
+          canUndo={undoCtl.canUndo}
+          canRedo={undoCtl.canRedo}
+          undoTitle={undoCtl.undoTitle}
+          redoTitle={undoCtl.redoTitle}
+          announcement={undoCtl.announcement}
+          onUndo={() => undoCtl.undo()}
+          onRedo={() => undoCtl.redo()}
+        />
+      {/if}
     </div>
-    <div class="board-canvas">
+    {#if isEmpty}
+      <p class="board-hint muted">No plotlines or cards yet. Seed cards from the manuscript, or add a plotline, to begin.</p>
+    {:else}
+      <div class="board-canvas">
       <SvelteFlow
         bind:nodes={flowNodes}
         bind:edges={flowEdges}
@@ -187,7 +230,8 @@
              the projection's nodes are measured — the ViewBodyView fix. -->
         <ViewportFit trigger={projection} options={{ padding: 0.2, maxZoom: 1 }} />
       </SvelteFlow>
-    </div>
+      </div>
+    {/if}
   {/if}
 </section>
 
@@ -202,8 +246,28 @@
   }
   .board-toolbar {
     display: flex;
-    justify-content: flex-end;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-2);
     padding: var(--sp-1) var(--sp-2);
+  }
+  .seed-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    font-size: var(--fs-sm);
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-md);
+    cursor: pointer;
+  }
+  .seed-btn:hover {
+    background: var(--surface);
+  }
+  .seed-btn i {
+    color: var(--text-3);
   }
   .board-canvas {
     flex: 1;

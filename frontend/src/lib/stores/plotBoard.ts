@@ -65,6 +65,14 @@ export async function attachCardScene(cardId: string, sceneId: string): Promise<
   await refreshPlotBoard();
 }
 
+// Save an in-place synopsis edit — the synopsis IS the card body. Fetch first so
+// the save carries the card's live revision + metadata unchanged.
+export async function saveCardSynopsis(cardId: string, synopsis: string): Promise<void> {
+  const card = await api.getCard(cardId);
+  await api.saveCard({ ...card }, synopsis);
+  await refreshPlotBoard();
+}
+
 // Detach: clear the card's scene ref (drop the key — the save replaces metadata).
 export async function detachCardScene(cardId: string): Promise<void> {
   const card = await api.getCard(cardId);

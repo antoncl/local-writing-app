@@ -43,6 +43,7 @@ BUILTIN_COMPUTED_FUNCTIONS: tuple[str, ...] = (
     "references",
     "assistant_listed",
     "assistant_position",
+    "path",
 )
 COMPUTED_FUNCTIONS: tuple[str, ...] = AUTHORABLE_COMPUTED_FUNCTIONS + BUILTIN_COMPUTED_FUNCTIONS
 
@@ -433,6 +434,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "measurement_system",
                 "target_word_count",
                 "series_number",
+                "path",
                 "project_cost",
             ],
             "has_body": True,
@@ -612,6 +614,16 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "AI cost",
             "type": "computed",
             "computed": {"function": "cost", "scope": "project"},
+        },
+        "path": {
+            # The project folder's absolute filesystem path. Read-only, and
+            # NOT body-derived: its resolver is `read_project_node`, which has
+            # the root Path in hand — hence a BUILTIN function, not an
+            # authorable one. Rehomed here off the retiring Project pane's
+            # identity block (#417 slice 3).
+            "name": "Path",
+            "type": "computed",
+            "computed": {"function": "path"},
         },
         "references": {
             # Any-field backlinks — the built-in node-set computed field

@@ -810,7 +810,6 @@
       <Project
         {isProjectOpen}
         {projectTitle}
-        {projectPath}
         {projectCostTotal}
         {projectCostBreakdown}
         projectChildren={project?.children ?? []}

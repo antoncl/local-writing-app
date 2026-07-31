@@ -9,8 +9,9 @@ This dispatch covers the BODY-derived functions only — see
 `default_schema.AUTHORABLE_COMPUTED_FUNCTIONS` / `BUILTIN_COMPUTED_FUNCTIONS`
 for the full vocabulary. The built-in ones are stamped by their own resolver
 (`references` at view-eval time on the frontend; the assistant curation pair by
-the layer traversal in `assistants.py`), so an unknown function falling through
-the chain below and yielding no value is correct, not a gap.
+the layer traversal in `assistants.py`; `path` by `read_project_node`, which has
+the project root in hand — `project_node.py`), so an unknown function falling
+through the chain below and yielding no value is correct, not a gap.
 """
 
 from __future__ import annotations

@@ -466,7 +466,13 @@
                 onChange={(value) => onStatusChange?.(value)}
               />
             {:else if field.type === "computed"}
-              <span class="fr-computed">{computedFieldString(fieldId)}<i class="ti ti-lock" aria-hidden="true"></i></span>
+              {@const computedValue = computedFieldString(fieldId)}
+              <!-- Read-only derived value. The text breaks on any character so a
+                   long, space-less computed value (a filesystem `path`, #417 s3)
+                   wraps within the rail instead of overflowing, and the full
+                   value sits on the title tooltip — restoring the overflow
+                   handling the old Project-pane path display had. -->
+              <span class="fr-computed" title={computedValue}><span class="fr-computed-text">{computedValue}</span><i class="ti ti-lock" aria-hidden="true"></i></span>
             {:else if field.type === "color"}
               <!-- Color renders at its display_order slot like any field
                    (ADR-0029 §G) — the hoist is gone. The swatch + the
@@ -887,9 +893,19 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
+    min-width: 0;
     font-family: var(--mono);
     font-size: var(--fs-sm);
     color: var(--text-3);
+  }
+  .fr-computed-text {
+    /* A computed value can be a long, space-less string (a filesystem `path`,
+       #417 s3); break on any character so it wraps within the rail rather than
+       overflowing it. Short values (word_count / cost) are unaffected. */
+    overflow-wrap: anywhere;
+  }
+  .fr-computed .ti-lock {
+    flex: none;
   }
 
   .color-row .fr-val {

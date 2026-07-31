@@ -13,11 +13,12 @@
 <script lang="ts">
   import "@xyflow/svelte/dist/style.css";
   import { SvelteFlow, Controls, type ColorMode, type Node, type Edge } from "@xyflow/svelte";
-  import { DesignerUndoController } from "./view/designerUndo.svelte";
+  import { GraphUndoController } from "@/lib/graph/graphUndoController.svelte";
+  import UndoRedoControls from "@/components/UndoRedoControls.svelte";
   import { DND_MIME, centrePos, toFlowPos } from "./view/insertionPlacement";
   import { hydrateGraph, repairGraphCycles, tagEdge, toFlowNode, type FlowData } from "./view/hydrateView";
   import { PALETTE, defaultCfg } from "./view/paletteData";
-  import type { DesignerGraphPort } from "@/lib/views/designerCommands";
+  import type { GraphPort } from "@/lib/graph/graphCommands";
   import { untrack } from "svelte";
   import { themePreference } from "@/lib/utils/theme";
   import ViewFlowNode from "./view/ViewFlowNode.svelte";
@@ -207,14 +208,14 @@
   // The controller owns the per-view caretaker, the gesture recorders the
   // committers call, the chord handler and the §7 announcement; commands
   // replay through `graphPort` — raw array swaps, never back through a
-  // recording committer. See `view/designerUndo.svelte.ts`.
-  const graphPort: DesignerGraphPort<Node<FlowData>, Edge> = {
+  // recording committer. See `lib/graph/graphUndoController.svelte.ts`.
+  const graphPort: GraphPort<Node<FlowData>, Edge> = {
     getNodes: () => flowNodes,
     setNodes: (n) => (flowNodes = n),
     getEdges: () => flowEdges,
     setEdges: (e) => (flowEdges = e),
   };
-  const undoCtl = new DesignerUndoController(graphPort);
+  const undoCtl = new GraphUndoController(graphPort);
 
   // ---- hydrate from the opened view node ----
   $effect(() => {
@@ -880,29 +881,19 @@
         </div>
       {/each}
     </div>
-    <!-- Undo/redo (ADR-0050 §7): the canvas doesn't telegraph Ctrl+Z the way a
-         text field does, so the affordance is visible — and it is the a11y
-         story: named, disabled when idle, a non-chord target. -->
-    <div class="undo-cluster" role="group" aria-label="History">
-      <button
-        type="button"
-        class="undo-btn"
-        disabled={!undoCtl.canUndo}
-        aria-label="Undo"
-        title={undoCtl.undoTitle}
-        onclick={() => undoCtl.undo()}
-      ><i class="ti ti-arrow-back-up" aria-hidden="true"></i></button>
-      <button
-        type="button"
-        class="undo-btn"
-        disabled={!undoCtl.canRedo}
-        aria-label="Redo"
-        title={undoCtl.redoTitle}
-        onclick={() => undoCtl.redo()}
-      ><i class="ti ti-arrow-forward-up" aria-hidden="true"></i></button>
+    <!-- Undo/redo (ADR-0050 §7), the shared control (used by the plot board
+         too); pushed to the toolbar's far end. -->
+    <div class="undo-slot">
+      <UndoRedoControls
+        canUndo={undoCtl.canUndo}
+        canRedo={undoCtl.canRedo}
+        undoTitle={undoCtl.undoTitle}
+        redoTitle={undoCtl.redoTitle}
+        announcement={undoCtl.announcement}
+        onUndo={() => undoCtl.undo()}
+        onRedo={() => undoCtl.redo()}
+      />
     </div>
-    <!-- What just reversed, for screen readers (§7): "Undid delete node". -->
-    <span class="sr-only" aria-live="polite">{undoCtl.announcement}</span>
   </div>
 
   <!-- Shared collapse toggle for the rail-like panes (§240): the same Tabler
@@ -1281,33 +1272,12 @@
   .rail-toggle:hover {
     color: var(--text);
   }
-  /* Undo/redo (ADR-0050 §7). Sits at the toolbar's far end, apart from the
-     palette tray; the same quiet ghost icon-button voice as .rail-toggle,
-     plus the disabled state the caretaker's canUndo/canRedo drives. */
-  .undo-cluster {
+  /* Undo/redo (ADR-0050 §7): the shared UndoRedoControls, pushed to the
+     toolbar's far end, apart from the palette tray. The button voice lives in
+     the component now. */
+  .undo-slot {
     margin-left: auto;
-    display: flex;
-    gap: var(--sp-1);
   }
-  .undo-btn {
-    border: none;
-    background: transparent;
-    color: var(--text-3);
-    font-size: var(--fs-md);
-    line-height: 1;
-    cursor: pointer;
-    padding: var(--sp-1);
-    border-radius: var(--r-sm);
-  }
-  .undo-btn:hover:not(:disabled) {
-    color: var(--text);
-    background: var(--inset);
-  }
-  .undo-btn:disabled {
-    opacity: 0.35;
-    cursor: default;
-  }
-  /* .sr-only (the aria-live announcer) is the shared utility in styles.css. */
   .params-empty {
     margin: 0;
     padding: 10px 12px;

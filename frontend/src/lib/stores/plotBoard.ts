@@ -9,7 +9,7 @@
 
 import { writable } from "svelte/store";
 import { api } from "@/lib/api";
-import type { PlotBoardProjection } from "@/lib/types";
+import type { PlotBoardLayout, PlotBoardProjection } from "@/lib/types";
 
 export const plotBoardStore = writable<PlotBoardProjection | null>(null);
 
@@ -26,6 +26,16 @@ export function refreshPlotBoard(): Promise<void> {
       inFlight = null;
     });
   return inFlight;
+}
+
+// Persist the board layout (ADR-0048 S7c) and return the board's advanced
+// revision (the mounted editor's next optimistic base). Deliberately does NOT
+// touch plotBoardStore: the store's projection is only the editor's initial seed
+// (refetched on the next open), and re-setting it would rebuild the canvas from
+// under an in-progress edit. The PlotEditor owns the live revision from here on.
+export async function savePlotBoardLayout(layout: PlotBoardLayout, baseRevision: string): Promise<string> {
+  const saved = await api.savePlotBoard({ base_revision: baseRevision, layout });
+  return saved.revision;
 }
 
 // Drop the previous project's board so it can't flash on the next project's pane

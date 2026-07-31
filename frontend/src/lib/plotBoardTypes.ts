@@ -35,3 +35,25 @@ export type PlotBoardProjection = {
   plotlines: PlotBoardPlotline[];
   cards: PlotBoardCard[];
 };
+
+// A point on the board canvas.
+export type BoardXY = { x: number; y: number };
+
+// The board's opaque `layout` payload, as S7c shapes it: per-card position
+// overrides keyed by card id. A card absent from `positions` falls back to its
+// derived lane-grid default; once the layout is saved, every card is pinned
+// here. Lane headers are always derived (fixed), so they never appear.
+export type PlotBoardLayout = {
+  positions?: Record<string, BoardXY>;
+};
+
+// The board singleton as the save endpoint (`PUT /api/plot/board`) returns it
+// (ADR-0048 §3). S7c reads back only the advanced `revision` — the next save's
+// optimistic base.
+export type PlotBoard = {
+  id: string;
+  title: string;
+  revision: string;
+  entry_type: string;
+  layout: Record<string, unknown>;
+};

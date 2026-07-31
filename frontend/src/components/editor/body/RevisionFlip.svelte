@@ -14,7 +14,7 @@
   import { untrack } from "svelte";
   import ReadOnlyBodyOverlay from "@/components/editor/body/ReadOnlyBodyOverlay.svelte";
   import { reviewBodyProposal } from "@/lib/utils/entryRevision";
-  import { adoptRegion, renderDiffRuns, type DiffRegion } from "@/lib/utils/diffRuns";
+  import { adoptRegion, renderDiffRuns } from "@/lib/utils/diffRuns";
   import type { DiffRun, DiffView } from "@/lib/types";
 
   let {
@@ -40,13 +40,6 @@
 
   const originalText = untrack(() => currentText);
 
-  // Run titles reworded for a proposal — "Restore this" is snapshot wording
-  // (memo #590). A cool run is the proposal; a warm run is the current wording.
-  function flipTitle(kind: DiffRun["kind"], region: DiffRegion): string {
-    if (kind === "was") return region.nowText ? "Use this wording" : "Add this";
-    return region.wasText ? "Keep this" : "Remove this";
-  }
-
   let runs = $state<DiffRun[]>(untrack(() => reviewBodyProposal(currentText, proposedText).runs));
 
   let html = $state("");
@@ -54,7 +47,7 @@
     const snapshot = runs;
     const activeView = view;
     let cancelled = false;
-    void renderDiffRuns(snapshot, activeView, flipTitle).then((rendered) => {
+    void renderDiffRuns(snapshot, activeView).then((rendered) => {
       if (!cancelled) html = rendered;
     });
     return () => {

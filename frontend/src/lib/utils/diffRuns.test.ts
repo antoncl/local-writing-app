@@ -346,16 +346,18 @@ describe("adoptRegion re-projects one region, and only writes when the scene cha
   });
 });
 
-describe("each changed run carries the action as its title (Amendment 4)", () => {
-  // The tooltip is the whole discoverability affordance — no banner, no glyph —
-  // so the words are a contract, not decoration. A lone insertion says *remove*,
-  // and that is what makes the one asymmetry (warm keeps, but a lone insertion
-  // drops) legible at the point of the click.
-  it("cool restores, warm keeps, and a lone insertion removes", async () => {
+describe("changed runs carry only data-region — no native title tooltip (#710)", () => {
+  // The per-run action was once a native `title` tooltip, but native tooltips
+  // vanish the moment the cursor moves toward the text they describe, so it read
+  // as flaky and undercut the click it advertised. The run's colour + a hover
+  // firming is the affordance now; the run carries `data-region` for the click
+  // handler and nothing else.
+  it("tags each changed run with its region and no title", async () => {
     const html = await renderDiffRuns(SHAPES, "both");
-    expect(html).toContain('<span class="r-was" data-region="0" title="Restore this">still</span>');
-    expect(html).toContain('<span class="r-now" data-region="0" title="Keep this">restless</span>');
-    expect(html).toContain('<span class="r-now" data-region="1" title="Remove this">Nothing moved. </span>');
-    expect(html).toContain('<span class="r-was" data-region="2" title="Restore this">, as taught,</span>');
+    expect(html).toContain('<span class="r-was" data-region="0">still</span>');
+    expect(html).toContain('<span class="r-now" data-region="0">restless</span>');
+    expect(html).toContain('<span class="r-now" data-region="1">Nothing moved. </span>');
+    expect(html).toContain('<span class="r-was" data-region="2">, as taught,</span>');
+    expect(html).not.toContain("title=");
   });
 });

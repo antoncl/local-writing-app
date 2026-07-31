@@ -15,6 +15,7 @@
   // can commit the same pending changes. Nothing is written during review.
 
   import RevisionFlip from "@/components/editor/body/RevisionFlip.svelte";
+  import SegmentedControl from "@/components/widgets/SegmentedControl.svelte";
   import type { FieldFlip } from "@/lib/utils/entryRevision";
   import type { DiffView } from "@/lib/types";
 
@@ -25,6 +26,7 @@
     hasChanges,
     view,
     onView,
+    onToggleView,
     onBodyResolved,
     onFieldResolved,
     onAcceptAll,
@@ -42,8 +44,11 @@
     hasChanges: boolean;
     /** Which whole version the prose flips read — the judge axis (#710). */
     view: DiffView;
-    /** Switch the judge axis (the segmented control). */
+    /** Set the judge axis to a specific view (the segmented control, `b` key). */
     onView: (view: DiffView) => void;
+    /** Toggle a single whole version against Both (the `a`/`s` keys) — the
+     *  controller owns the toggle semantics, exactly like the snapshot strip. */
+    onToggleView: (view: "now" | "was") => void;
     /** Push the body flip's running resolution to the controller (null while
      *  unchanged from current). The controller accumulates; nothing writes here. */
     onBodyResolved: (value: string | null) => void;
@@ -61,17 +66,61 @@
 
   // The judge axis, worded for a proposal (the snapshot's Active·Snapshot·Both):
   // the current entry (warm `now`), the AI's version (cool `was`), or the diff.
-  // Only meaningful when there is prose to read whole; a structured-only patch
-  // hides it (the rail already shows both sides of each field).
-  const VIEWS: { id: DiffView; label: string; hint: string }[] = [
-    { id: "now", label: "Current", hint: "the entry as it is now" },
-    { id: "was", label: "Proposed", hint: "the AI's version" },
-    { id: "both", label: "Both", hint: "both versions, adjacent" },
-  ];
+  // A/S/B mirror the snapshot's compare keys. Only meaningful when there is prose
+  // to read whole; a structured-only patch hides it (the rail already shows both
+  // sides of each field, and the rail follows the view on its own).
+  const VIEWS = [
+    { id: "now", label: "Current", hint: "the entry as it is now", key: "A" },
+    { id: "was", label: "Proposed", hint: "the AI's version", key: "S" },
+    { id: "both", label: "Both", hint: "both versions, adjacent", key: "B" },
+  ] as const;
   const hasProse = $derived(proposedBody !== null || fields.length > 0);
+
+  // A/S/B keys, mirrored from the snapshot strip (SnapshotStrip.onKeydown). The
+  // review is a read-only frozen surface, so the letters are free — but only for
+  // the pane that owns this review: a review in a hidden tab, or one whose pane
+  // does not hold focus, must not answer. Toggle semantics live in the
+  // controller (`onToggleView`); auto-repeat is swallowed so a held key does not
+  // strobe the view.
+  let rootEl: HTMLDivElement | null = $state(null);
+
+  function addressedToThisPane(target: HTMLElement | null): boolean {
+    if (!rootEl) return false;
+    if (rootEl.closest(".hidden-doc")) return false;
+    const pane = rootEl.closest(".editor-panel");
+    const focused = target?.closest?.(".editor-panel") ?? null;
+    return !focused || !pane || focused === pane;
+  }
+
+  function onKeydown(event: KeyboardEvent): void {
+    if (!hasProse) return;
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    const target = event.target as HTMLElement | null;
+    if (target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName ?? "")) return;
+    if (!/^[asb]$/i.test(event.key)) return;
+    if (!addressedToThisPane(target)) return;
+    if (event.repeat) {
+      event.preventDefault();
+      return;
+    }
+    switch (event.key.toLowerCase()) {
+      case "a":
+        onToggleView("now");
+        break;
+      case "s":
+        onToggleView("was");
+        break;
+      case "b":
+        onView("both");
+        break;
+    }
+    event.preventDefault();
+  }
 </script>
 
-<div class="entry-revision-review">
+<svelte:window onkeydown={onKeydown} />
+
+<div class="entry-revision-review" bind:this={rootEl}>
   <div class="review-bar">
     <span class="review-hint">
       {#if hasProse}
@@ -82,18 +131,8 @@
     </span>
     {#if hasProse}
       <!-- The judge axis: read the current entry or the AI's version whole,
-           before deciding (#710). One choice, so a segmented control. -->
-      <div class="review-view" role="group" aria-label="Which version">
-        {#each VIEWS as option (option.id)}
-          <button
-            type="button"
-            class="rv"
-            class:on={view === option.id}
-            title={`${option.label} — ${option.hint}`}
-            aria-pressed={view === option.id}
-            onclick={() => onView(option.id)}>{option.label}</button>
-        {/each}
-      </div>
+           before deciding (#710). Same control the snapshot compare uses. -->
+      <SegmentedControl items={VIEWS} value={view} ariaLabel="Which version" onSelect={onView} />
     {/if}
     <div class="review-actions">
       <!-- The whole-version pair (#710): take the whole candidate, or keep the
@@ -145,41 +184,14 @@
     background: color-mix(in srgb, var(--diff-was) 8%, transparent);
   }
   .review-hint {
+    /* Fill the bar so the judge control + actions group at the right, rather
+       than the control floating mid-bar under `space-between` (#710). */
+    flex: 1;
     font-size: var(--fs-sm);
     color: var(--text-2);
   }
   .was-swatch {
     color: var(--diff-was);
-    font-weight: 600;
-  }
-  /* The judge axis (#710). A segmented control, matching the snapshot compare's
-     Active·Snapshot·Both: one choice — which version am I reading. */
-  .review-view {
-    display: inline-flex;
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
-    overflow: hidden;
-  }
-  .rv {
-    font: inherit;
-    font-size: var(--fs-sm);
-    padding: 3px 9px;
-    border: 0;
-    border-left: 1px solid var(--border);
-    background: var(--surface);
-    color: var(--text-2);
-    cursor: pointer;
-    transition: background-color 80ms linear, color 80ms linear;
-  }
-  .rv:first-child {
-    border-left: 0;
-  }
-  .rv:hover {
-    background: var(--inset);
-  }
-  .rv.on {
-    background: var(--accent-soft);
-    color: var(--accent-emphasis);
     font-weight: 600;
   }
   .review-actions {

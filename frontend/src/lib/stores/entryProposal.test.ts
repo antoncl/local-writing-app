@@ -423,6 +423,17 @@ describe("EntryProposalController — judge axis + whole-version decide (#710)",
     expect(c.view).toBe("both");
   });
 
+  it("fieldSide picks the rail's whole side — 'was' only in the Proposed view", () => {
+    // The structured rail follows the toggle (#710): reading Current or Both
+    // shows the entry's own values ('now'); only Proposed shows the AI's ('was').
+    const c = entryController("e1");
+    expect(c.fieldSide()).toBe("now"); // both
+    c.setView("now");
+    expect(c.fieldSide()).toBe("now");
+    c.setView("was");
+    expect(c.fieldSide()).toBe("was");
+  });
+
   it("acceptAll marks the body, every long_text, and every structured flip adopted", () => {
     const c = entryController("e1");
     c.metadata = { bio: "old bio", allegiance: "Rebels" };

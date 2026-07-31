@@ -20,6 +20,7 @@ function baseProps(over: Record<string, unknown> = {}) {
     hasChanges: false,
     view: "both" as const,
     onView: vi.fn(),
+    onToggleView: vi.fn(),
     onBodyResolved: vi.fn(),
     onFieldResolved: vi.fn(),
     onAcceptAll: vi.fn(),
@@ -68,6 +69,31 @@ describe("EntryRevisionReview — #710 whole-version gestures", () => {
     expect(onAcceptAll).toHaveBeenCalledTimes(1);
     await fireEvent.click(button("Reject all"));
     expect(onDiscard).toHaveBeenCalledTimes(1);
+  });
+
+  it("wires A/S/B keys to the view axis (A/S toggle, B resets to Both)", async () => {
+    const onView = vi.fn();
+    const onToggleView = vi.fn();
+    render(EntryRevisionReview, { props: baseProps({ onView, onToggleView }) });
+    await fireEvent.keyDown(window, { key: "a" });
+    expect(onToggleView).toHaveBeenLastCalledWith("now");
+    await fireEvent.keyDown(window, { key: "s" });
+    expect(onToggleView).toHaveBeenLastCalledWith("was");
+    await fireEvent.keyDown(window, { key: "b" });
+    expect(onView).toHaveBeenLastCalledWith("both");
+  });
+
+  it("ignores A/S/B keys typed into an input, and auto-repeat", async () => {
+    const onToggleView = vi.fn();
+    const onView = vi.fn();
+    render(EntryRevisionReview, { props: baseProps({ onToggleView, onView }) });
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    await fireEvent.keyDown(input, { key: "a" });
+    await fireEvent.keyDown(window, { key: "a", repeat: true });
+    expect(onToggleView).not.toHaveBeenCalled();
+    expect(onView).not.toHaveBeenCalled();
+    input.remove();
   });
 
   it("keeps the per-unit commit gesture: Close with no changes, Done with some", () => {

@@ -18,6 +18,7 @@
   import { tick } from "svelte";
   import { SNAPSHOT_DESCRIPTION_MAX, type SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
   import DriftReport from "@/components/editor/DriftReport.svelte";
+  import SegmentedControl from "@/components/widgets/SegmentedControl.svelte";
   import { notchAges, notchTooltip, notchWhen } from "@/lib/utils/snapshotTime";
   import { LIVE_LEFT, TICKS, agePosition, notchPositions, trackSpanMinutes } from "@/lib/utils/snapshotTrack";
 
@@ -286,19 +287,9 @@
 
     <!-- The compare axis. It lives HERE and not beside the track because it is
          variable-width, and nothing sharing the track's row may change width —
-         that would slide every notch along the timeline (§E). -->
-    <div class="compare" role="group" aria-label="Which version">
-      {#each VIEWS as option (option.id)}
-        <button
-          type="button"
-          class="cmp"
-          class:on={strip.view === option.id}
-          title={`${option.label} — ${option.hint} (${option.key})`}
-          aria-pressed={strip.view === option.id}
-          onclick={() => strip.setView(option.id)}
-        >{option.label}<kbd>{option.key}</kbd></button>
-      {/each}
-    </div>
+         that would slide every notch along the timeline (§E). Shared with the
+         brainstorm review's judge toggle (#710). -->
+    <SegmentedControl items={VIEWS} value={strip.view} ariaLabel="Which version" onSelect={(id) => strip.setView(id)} />
 
     <span class="keys" aria-hidden="true"><kbd>←</kbd><kbd>→</kbd> when · <kbd>Esc</kbd> live</span>
     <div class="spacer"></div>
@@ -616,54 +607,6 @@
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
   }
-  /* Active · Snapshot · Both. A segmented control rather than three loose
-     buttons: they are one choice, and the selected one is the answer to
-     "which version am I reading". */
-  .compare {
-    display: inline-flex;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    overflow: hidden;
-  }
-  .cmp {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font: inherit;
-    font-size: var(--fs-sm);
-    padding: 3px 9px;
-    border: 0;
-    border-left: 1px solid var(--border);
-    background: var(--surface);
-    color: var(--text-2);
-    cursor: pointer;
-    transition: background-color 80ms linear, color 80ms linear;
-  }
-  .cmp:first-child {
-    border-left: 0;
-  }
-  .cmp:hover {
-    background: var(--inset);
-  }
-  .cmp.on {
-    background: var(--accent-soft);
-    color: var(--accent-emphasis);
-    font-weight: 600;
-  }
-  .cmp kbd {
-    font-family: inherit;
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    padding: 0 3px;
-    background: var(--panel);
-  }
-  .cmp.on kbd {
-    color: var(--accent-emphasis);
-    border-color: currentColor;
-  }
-
   .keys {
     display: inline-flex;
     align-items: center;

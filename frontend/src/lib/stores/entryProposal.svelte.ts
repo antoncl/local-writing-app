@@ -195,6 +195,13 @@ export class EntryProposalController {
     this.view = this.view === view ? "both" : view;
   }
 
+  /** Which whole side the structured rail reads when the author is reading one
+   *  version (the snapshot's `fieldSide`). `both` is the interactive adopt lens
+   *  and has no single side, so the host only consults this for `now`/`was`. */
+  fieldSide(): "now" | "was" {
+    return this.view === "was" ? "was" : "now";
+  }
+
   /** A body flip reports its running resolution (null while unchanged). */
   setBodyResolution(value: string | null): void {
     this.resolvedBody = value;

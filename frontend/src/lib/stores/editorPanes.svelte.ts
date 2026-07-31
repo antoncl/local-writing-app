@@ -34,34 +34,33 @@ import {
   isEditorPaneDirty,
 } from "@/lib/editor-core/editorPaneModel";
 import { confirmService } from "@/lib/stores/confirmService.svelte";
+import {
+  requestDeleteScene as runRequestDeleteScene,
+  requestDeleteView as runRequestDeleteView,
+} from "./editorPaneDelete";
 import { clearImplicitContext, implicitContextFor } from "@/lib/stores/implicitContext.svelte";
-import { findNodeBySceneId, findStructureNodeById } from "@/lib/utils/treeHelpers";
+import { findStructureNodeById } from "@/lib/utils/treeHelpers";
 import { metadataSchemaStore, projectSchemaLayerId } from "@/lib/stores/schema";
 import { authoringDefaultLayerId } from "@/lib/utils/layerAuthoring";
 import {
   structureStore,
-  researchStructureStore,
   refreshStructure,
   refreshResearchStructure,
-  setStructure,
-  setResearchStructure,
 } from "@/lib/stores/structure";
-import { refreshLoreEntries, setLoreEntries } from "@/lib/stores/lore";
-import { refreshPromptEntries, setPromptEntries } from "@/lib/stores/prompts";
-import { refreshPlotTemplates, setPlotTemplates } from "@/lib/stores/plotTemplates";
-import { refreshAssistantEntries, setAssistantEntries } from "@/lib/stores/assistants";
+import { refreshLoreEntries } from "@/lib/stores/lore";
+import { refreshPromptEntries } from "@/lib/stores/prompts";
+import { refreshPlotTemplates } from "@/lib/stores/plotTemplates";
+import { refreshAssistantEntries } from "@/lib/stores/assistants";
 import { refreshKnownTags } from "@/lib/stores/tags";
-import { referenceIndexStore, refreshReferenceIndexInBackground } from "@/lib/stores/references";
+import { refreshReferenceIndexInBackground } from "@/lib/stores/references";
 import { forwardRefsOf, sameRefSet } from "@/lib/views/referenceIndex";
-import { backlinksFor } from "@/lib/views/backlinks";
 import { defaultView } from "@/lib/views/evaluateView";
 import { refreshTodos, refreshEmbeddedTodos } from "@/lib/stores/todos";
 import { paneViews } from "@/lib/stores/paneViews.svelte";
-import { chatSessionsStore, refreshChatSessions, setChatSessions } from "@/lib/stores/chats";
+import { chatSessionsStore, refreshChatSessions } from "@/lib/stores/chats";
 import { bodyHasMutationMarkers, mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
 import type {
   AssistantEntry,
-  Backlink,
   EditableDocument,
   EntryMetadata,
   LoreEntry,
@@ -714,92 +713,12 @@ class EditorPanesController {
     if (state === "saved") this.#autosave.flashSaved(id);
   }
 
-  async requestDeleteScene(id: string): Promise<void> {
-    const pane = this.panes.find((candidate) => candidate.id === id);
-    if (!pane?.scene) return;
-    const documentKind = pane.document?.type ?? "scene";
-    // The project window must not delete the project's own `project.md` (#750) —
-    // refuse it as the guard, not just via the disabled button (a stale ref or
-    // future caller would otherwise fall through to #deleteScene).
-    if (documentKind === "project") return;
-    const sceneTitle = pane.scene.title;
-    const sceneId = pane.scene.id;
-    let backlinks: Backlink[] = [];
-    try {
-      // The open node's referrers (#194): membership from the in-memory reverse
-      // index, rows resolved on demand — same helper the backlinks panel uses.
-      backlinks = await backlinksFor(sceneId, get(referenceIndexStore));
-    } catch (error) {
-      console.warn("Failed to fetch backlinks", error);
-    }
-    // Confirm-dialog copy per kind (assistant/chat fall through to the prompt
-    // wording, as before). Maps rather than nested ternaries so a new kind is one
-    // line in each place, not another ternary rung.
-    const fileLabel =
-      ({ scene: "scene", lore: "entry", research: "note", view: "view", plot_template: "template" } as Record<string, string>)[
-        documentKind
-      ] ?? "prompt";
-    const titleLabel =
-      ({ scene: "Delete Scene", lore: "Delete Entry", research: "Delete Note", view: "Delete View", plot_template: "Delete Template" } as Record<string, string>)[
-        documentKind
-      ] ?? "Delete Prompt";
-    const baseMessage = `Delete "${sceneTitle}"? This removes the ${fileLabel} file from the project.`;
-    const message =
-      backlinks.length > 0
-        ? `${baseMessage}\n\n${backlinks.length} ${backlinks.length === 1 ? "entry references" : "entries reference"} this — those links will become broken:`
-        : baseMessage;
-    const details = backlinks.map((link) => `${link.title} — ${link.field_name}`);
-    confirmService.request({
-      title: titleLabel,
-      message,
-      details,
-      confirmLabel: titleLabel,
-      destructive: true,
-      onConfirm: () => this.#deleteScene(id),
-    });
-  }
-
-  async #deleteScene(id: string): Promise<void> {
-    const pane = this.panes.find((candidate) => candidate.id === id);
-    if (!pane?.scene) return;
-    const documentKind = pane.document?.type ?? "scene";
-    const sceneTitle = pane.scene.title;
-    if (documentKind === "lore") {
-      setLoreEntries((await api.deleteLoreEntry(pane.scene.id)).entries);
-    } else if (documentKind === "research") {
-      // Delete the tree node that points at this note; the backend
-      // unlinks the markdown file as part of the cascade.
-      const researchStructure = get(researchStructureStore);
-      const node = researchStructure ? findNodeBySceneId(researchStructure.root, pane.scene.id) : null;
-      if (node) {
-        setResearchStructure(await api.deleteResearchNode(node.id));
-      }
-    } else if (documentKind === "prompt") {
-      setPromptEntries((await api.deletePromptEntry(pane.scene.id)).entries);
-    } else if (documentKind === "plot_template") {
-      // An owned plot-template clone deletes via its own endpoint — routing it
-      // through api.deleteScene would 404 (it is a `plot` node, not a scene), the
-      // same hazard the `view` branch below guards against.
-      setPlotTemplates((await api.deletePlotTemplate(pane.scene.id)).entries);
-    } else if (documentKind === "assistant") {
-      setAssistantEntries((await api.deleteAssistantEntry(pane.scene.id)).entries);
-    } else if (documentKind === "chat") {
-      setChatSessions((await api.deleteChatSession(pane.scene.id)).sessions);
-      if (this.activeChatId === pane.scene.id) this.activeChatId = null;
-    } else if (documentKind === "view") {
-      // A view is a frontmatter-only node with its own deleter; routing it
-      // through api.deleteScene 404s ("Scene <view-id> does not exist").
-      await api.deleteView(pane.scene.id);
-      await paneViews.reload();
-    } else {
-      setStructure(await api.deleteScene(pane.scene.id));
-      await refreshTodos();
-    }
-    // A delete drops the node's outgoing refs and dangles any backlinks to it,
-    // so rebuild the reverse reference index (#184 Phase 2) in the background.
-    refreshReferenceIndexInBackground();
-    this.tearDown(id);
-    this.setStatus(`Deleted ${sceneTitle}`);
+  // Delete flow (confirm → delete) lives in editorPaneDelete: cohesive, and it
+  // touches only this controller's public surface, so it extracts cleanly as
+  // free functions with the controller as host (keeps this file off the
+  // 1500-line fail-cap without fragmenting the autosave data-loss path).
+  requestDeleteScene(id: string): Promise<void> {
+    return runRequestDeleteScene(this, id);
   }
 
   // Sync a tree rename into any open pane showing the renamed scene. The rename
@@ -1142,25 +1061,9 @@ class EditorPanesController {
     await this.openView(node.id);
   }
 
-  // Delete a saved view from a list affordance (e.g. the ViewSwitcher),
-  // confirming first. Works whether or not the view is currently open: it
-  // tears down any pane showing it and refreshes the view roster.
+  // Delete a saved view from a list affordance — see editorPaneDelete.
   requestDeleteView(viewId: string, title: string): void {
-    confirmService.request({
-      title: "Delete View",
-      message: `Delete "${title}"? This removes the view file from the project.`,
-      confirmLabel: "Delete View",
-      destructive: true,
-      onConfirm: () => this.#deleteView(viewId),
-    });
-  }
-
-  async #deleteView(viewId: string): Promise<void> {
-    await api.deleteView(viewId);
-    const pane = this.panes.find((p) => p.document?.type === "view" && p.document.id === viewId);
-    if (pane) this.tearDown(pane.id);
-    await paneViews.reload();
-    this.setStatus("Deleted view");
+    runRequestDeleteView(this, viewId, title);
   }
 
   async openLore(entryId: string): Promise<void> {

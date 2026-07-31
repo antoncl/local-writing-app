@@ -57,8 +57,12 @@ describe("MetadataPanel — project path field (#417 slice 3)", () => {
     expect(screen.getByText("Path")).toBeInTheDocument();
     const value = screen.getByText(PROJECT_PATH);
     expect(value).toBeInTheDocument();
-    // Read-only: the computed lock glyph, and no editor control on the row.
-    expect(value.querySelector(".ti-lock")).not.toBeNull();
+    // Full value on the title tooltip so a clipped/wrapped path stays legible
+    // (parity with the old Project-pane display).
+    expect(value.closest(".fr-computed")?.getAttribute("title")).toBe(PROJECT_PATH);
+    // Read-only: the computed lock glyph sits alongside the value, and no editor
+    // control anywhere on the row.
+    expect(value.closest(".fr-computed")?.querySelector(".ti-lock")).not.toBeNull();
     expect(
       value.closest(".field-row")?.querySelector("input, textarea, select"),
     ).toBeNull();

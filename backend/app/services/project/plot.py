@@ -338,12 +338,13 @@ class PlotMixin:
         A card→beat link (Slice 3b) is the composite *(instance node id, beat id)*,
         so a beat's id only needs to be unique **within its own list** — the node
         half already disambiguates the instance, and `instantiate` keeps copying a
-        template beat's id into the instance (provenance). The id is minted from the
-        beat's title plus a random salt, so two beats sharing a title still get
-        distinct ids. It is minted once and then persisted: a beat that already
-        carries a non-colliding id keeps it, so renaming a beat never changes its id
-        and 3b's links survive the edit. A within-list collision (copy-pasting a beat
-        carries its id along) is re-salted.
+        template beat's id into the instance (provenance). Each id is minted with a
+        fresh per-beat salt (`_mint_beat_id`); the salt — not the title — is what
+        makes it unique, so even two beats with identical titles diverge, and the id
+        is opaque hex rather than a legible slug. It is minted once and then
+        persisted: a beat that already carries a non-colliding id keeps it, so
+        renaming a beat never changes its id and 3b's links survive the edit. A
+        within-list collision (copy-pasting a beat carries its id along) is re-salted.
 
         Auto-fill only — nothing here rejects. A blank beat still saves and simply
         gains an id, matching the sparse-spec principle: an incomplete beat must
@@ -367,8 +368,10 @@ class PlotMixin:
 
     @staticmethod
     def _mint_beat_id(title: object, taken: set[str]) -> str:
-        """`beat_<sha256(title+salt)[:12]>`, salt = `uuid4().hex` — re-salted until it
-        lands outside `taken`, so a fresh mint never re-introduces a collision."""
+        """`beat_<sha256(title+salt)[:12]>`, salt = `uuid4().hex`. The title is folded
+        into the hash but the per-mint salt alone guarantees uniqueness; the result is
+        opaque, not a legible slug. Re-salted until it lands outside `taken`, so a
+        fresh mint never re-introduces a collision."""
         name = title if isinstance(title, str) else ""
         while True:
             salt = uuid.uuid4().hex

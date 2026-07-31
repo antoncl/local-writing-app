@@ -510,6 +510,81 @@ class PlotBoardHttpTests(_PlotTestCase):
         self.assertEqual(self.service.list_plotlines().entries, [])
 
 
+class PlotBoardProjectionTests(_PlotTestCase):
+    """The board projection (ADR-0048 S7a): one read model — plotlines, cards with
+    their plotline/scene refs, and the board's opaque layout. A deleted scene
+    purges the card ref, so a gone scene projects as an unattached card, never a
+    dangling pointer. Computed and read-only; card + plotline + board data only,
+    never templates or beats (S8)."""
+
+    def _scene(self, title: str) -> str:
+        structure = self.service.read_structure()
+        doc = self.service.create_structure_node(
+            CreateStructureNodeRequest(title="Chapter", entry_type="scene:chapter", parent_id=structure.root.id)
+        )
+        chapter_id = next(c.id for c in doc.root.children if c.type == "scene:chapter")
+        return self.service.create_scene(CreateSceneRequest(title=title, parent_id=chapter_id)).id
+
+    def test_empty_board_projects_empty_and_creates_the_singleton(self) -> None:
+        response = self.client.get("/api/plot/board/projection")
+        self.assertEqual(response.status_code, 200, response.text)
+        projection = response.json()
+        self.assertTrue(projection["board_id"].startswith("plot_"))
+        self.assertEqual(projection["plotlines"], [])
+        self.assertEqual(projection["cards"], [])
+        self.assertEqual(projection["layout"], {})
+        # The projection opens the board, so a first read mints the singleton.
+        self.assertTrue((self.root / "plot-board.md").exists())
+
+    def test_projects_cards_with_resolved_plotline_and_scene_refs(self) -> None:
+        romance = self.service.create_plotline(CreatePlotlineRequest(title="Romance"))
+        self.service.save_plotline(romance.id, SavePlotlineRequest(title="Romance", metadata={"color": "rose"}))
+        self.service.create_plotline(CreatePlotlineRequest(title="Mystery"))
+        scene_id = self._scene("The Meeting")
+        card = self.service.create_card(CreateCardRequest(title="They Meet"))
+        self.service.save_card(
+            card.id,
+            SaveCardRequest(
+                title="They Meet",
+                body="She spills his coffee.",
+                metadata={"plotline": romance.id, "scene": scene_id},
+            ),
+        )
+        projection = self.client.get("/api/plot/board/projection").json()
+        # Both plotlines are present; a set colour is carried, an unset one is null.
+        lanes = {p["title"]: p for p in projection["plotlines"]}
+        self.assertEqual(lanes["Romance"]["color"], "rose")
+        self.assertIsNone(lanes["Mystery"]["color"])
+        # The card carries its synopsis (the body) and both resolved refs.
+        projected = next(c for c in projection["cards"] if c["id"] == card.id)
+        self.assertEqual(projected["synopsis"], "She spills his coffee.\n")
+        self.assertEqual(projected["plotline"], romance.id)
+        self.assertEqual(projected["scene"], scene_id)
+
+    def test_unattached_card_projects_null_refs(self) -> None:
+        card = self.service.create_card(CreateCardRequest(title="Floating"))
+        projected = next(c for c in self.service.read_plot_board_projection().cards if c.id == card.id)
+        self.assertIsNone(projected.plotline)
+        self.assertIsNone(projected.scene)
+
+    def test_deleting_an_attached_scene_leaves_the_card_unattached(self) -> None:
+        card = self.service.create_card(CreateCardRequest(title="Orphan"))
+        realized = self.service.realize_card(card.id, RealizeCardRequest())
+        self.service.delete_scene(realized.metadata["scene"])
+        projected = next(c for c in self.service.read_plot_board_projection().cards if c.id == card.id)
+        # delete_scene purges the card's ref (§S5), so the card projects as
+        # unattached — not a live scene, and not a dangling pointer to chase.
+        self.assertIsNone(projected.scene)
+
+    def test_layout_is_carried_through_verbatim(self) -> None:
+        self.client.get("/api/plot/board")  # create
+        layout = {"positions": {"card_a": {"x": 40, "y": 12}}, "viewport": {"zoom": 1.5}}
+        self.client.put("/api/plot/board", json={"layout": layout})
+        projection = self.client.get("/api/plot/board/projection").json()
+        self.assertEqual(projection["layout"], layout)
+        self.assertTrue(projection["board_revision"])  # a saved board carries a revision
+
+
 _THREE_ACT = "builtin-plot-three-act-story-arc"
 # The shipped node file behind _THREE_ACT — read to prove a refused write left it
 # byte-untouched (backend/app/builtin_library/plot/, relative to backend/tests/).

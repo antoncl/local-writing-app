@@ -15,6 +15,7 @@ from app.models import (
     CreateCardRequest,
     CreatePlotlineRequest,
     PlotBoard,
+    PlotBoardProjection,
     PlotlineEntry,
     PlotlineList,
     PlotTemplate,
@@ -41,6 +42,14 @@ def get_plot_board(project: CurrentProject) -> PlotBoard:
 def save_plot_board(project: CurrentProject, request: SavePlotBoardRequest) -> PlotBoard:
     with translate_errors():
         return project.save_plot_board(request)
+
+
+@router.get("/api/plot/board/projection", response_model=PlotBoardProjection)
+def get_plot_board_projection(project: CurrentProject) -> PlotBoardProjection:
+    """The board's render model — plotlines + cards (with their refs) + the
+    opaque layout, in one read (ADR-0048 S7a)."""
+    with translate_errors():
+        return project.read_plot_board_projection()
 
 
 @router.get("/api/plot/plotlines", response_model=PlotlineList)

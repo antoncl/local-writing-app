@@ -30,98 +30,84 @@ template:
   builtin_policy: seed_generic
   template_version: '1.0'
   locale: en
-  plot_points:
-  - id: opening_state
-    title: Opening state
-    function_claim: Shows the protagonist and world before pressure changes them.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: theme_pressure
-    title: Theme pressure
-    function_claim: Raises the value question the story will test.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: setup_web
-    title: Setup web
-    function_claim: Plants relationships, wants, lacks, and practical stakes.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: catalyst
-    title: Catalyst
-    function_claim: Delivers the disruption that creates story motion.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: choice_debate
-    title: Choice debate
-    function_claim: Lets the protagonist weigh avoidance, risk, and desire.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: new_world_entry
-    title: New world entry
-    function_claim: Moves the protagonist into the story's main pressure field.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: promise_play
-    title: Promise play
-    function_claim: Explores the premise, genre engine, and expected pleasures.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: central_shift
-    title: Central shift
-    function_claim: Reframes the visible win, loss, or understanding of the problem.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: opposition_closes
-    title: Opposition closes
-    function_claim: Increases pressure from antagonists, consequences, or inner resistance.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: apparent_loss
-    title: Apparent loss
-    function_claim: Makes the current strategy fail in a way that cannot be hand-waved.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: dark_reckoning
-    title: Dark reckoning
-    function_claim: Lets the protagonist face the cost, lie, or impossible bargain.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: solution_synthesis
-    title: Solution synthesis
-    function_claim: Combines learned truth with practical action.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: final_plan
-    title: Final plan
-    function_claim: Commits to the ending strategy and its cost.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: final_test
-    title: Final test
-    function_claim: Proves the changed strategy under maximum pressure.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: final_state
-    title: Final state
-    function_claim: Shows the transformed world, self, or relationship.
-    guidance: ''
-    required: true
-    metadata: {}
   metadata: {}
+metadata:
+  beats:
+  - title: Opening state
+    function: Shows the protagonist and world before pressure changes them.
+    guidance: ''
+    required: true
+    id: opening_state
+  - title: Theme pressure
+    function: Raises the value question the story will test.
+    guidance: ''
+    required: true
+    id: theme_pressure
+  - title: Setup web
+    function: Plants relationships, wants, lacks, and practical stakes.
+    guidance: ''
+    required: true
+    id: setup_web
+  - title: Catalyst
+    function: Delivers the disruption that creates story motion.
+    guidance: ''
+    required: true
+    id: catalyst
+  - title: Choice debate
+    function: Lets the protagonist weigh avoidance, risk, and desire.
+    guidance: ''
+    required: true
+    id: choice_debate
+  - title: New world entry
+    function: Moves the protagonist into the story's main pressure field.
+    guidance: ''
+    required: true
+    id: new_world_entry
+  - title: Promise play
+    function: Explores the premise, genre engine, and expected pleasures.
+    guidance: ''
+    required: true
+    id: promise_play
+  - title: Central shift
+    function: Reframes the visible win, loss, or understanding of the problem.
+    guidance: ''
+    required: true
+    id: central_shift
+  - title: Opposition closes
+    function: Increases pressure from antagonists, consequences, or inner resistance.
+    guidance: ''
+    required: true
+    id: opposition_closes
+  - title: Apparent loss
+    function: Makes the current strategy fail in a way that cannot be hand-waved.
+    guidance: ''
+    required: true
+    id: apparent_loss
+  - title: Dark reckoning
+    function: Lets the protagonist face the cost, lie, or impossible bargain.
+    guidance: ''
+    required: true
+    id: dark_reckoning
+  - title: Solution synthesis
+    function: Combines learned truth with practical action.
+    guidance: ''
+    required: true
+    id: solution_synthesis
+  - title: Final plan
+    function: Commits to the ending strategy and its cost.
+    guidance: ''
+    required: true
+    id: final_plan
+  - title: Final test
+    function: Proves the changed strategy under maximum pressure.
+    guidance: ''
+    required: true
+    id: final_test
+  - title: Final state
+    function: Shows the transformed world, self, or relationship.
+    guidance: ''
+    required: true
+    id: final_state
 ---
 
 # Fifteen-Beat Transformation Arc

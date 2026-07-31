@@ -30,81 +30,69 @@ template:
   builtin_policy: seed_generic
   template_version: '1.0'
   locale: en
-  plot_points:
-  - id: starting_order
-    title: Starting order
-    function_claim: Shows the world and identity before disruption.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: summons
-    title: Summons
-    function_claim: Presents the invitation, threat, or need that calls for change.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: resistance
-    title: Resistance
-    function_claim: Shows why the protagonist cannot or will not engage yet.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: guidance
-    title: Guidance
-    function_claim: Offers tools, warning, model, or misleading counsel.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: crossing
-    title: Crossing
-    function_claim: Commits the protagonist to unfamiliar rules.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: trial_network
-    title: Trial network
-    function_claim: Tests skill, loyalty, desire, and perception.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: deep_approach
-    title: Deep approach
-    function_claim: Narrows options before the central ordeal.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: ordeal
-    title: Ordeal
-    function_claim: Tests the protagonist at a symbolic or practical death point.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: reward
-    title: Reward
-    function_claim: Gains a boon, truth, wound, or leverage from the ordeal.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: return_route
-    title: Return route
-    function_claim: Drives the changed protagonist back toward consequence.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: last_transformation
-    title: Last transformation
-    function_claim: Requires the deepest change to survive the ending pressure.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: boon_shared
-    title: Boon shared
-    function_claim: Shows the changed relationship between protagonist, world, and
-      gift.
-    guidance: ''
-    required: true
-    metadata: {}
   metadata: {}
+metadata:
+  beats:
+  - title: Starting order
+    function: Shows the world and identity before disruption.
+    guidance: ''
+    required: true
+    id: starting_order
+  - title: Summons
+    function: Presents the invitation, threat, or need that calls for change.
+    guidance: ''
+    required: true
+    id: summons
+  - title: Resistance
+    function: Shows why the protagonist cannot or will not engage yet.
+    guidance: ''
+    required: true
+    id: resistance
+  - title: Guidance
+    function: Offers tools, warning, model, or misleading counsel.
+    guidance: ''
+    required: true
+    id: guidance
+  - title: Crossing
+    function: Commits the protagonist to unfamiliar rules.
+    guidance: ''
+    required: true
+    id: crossing
+  - title: Trial network
+    function: Tests skill, loyalty, desire, and perception.
+    guidance: ''
+    required: true
+    id: trial_network
+  - title: Deep approach
+    function: Narrows options before the central ordeal.
+    guidance: ''
+    required: true
+    id: deep_approach
+  - title: Ordeal
+    function: Tests the protagonist at a symbolic or practical death point.
+    guidance: ''
+    required: true
+    id: ordeal
+  - title: Reward
+    function: Gains a boon, truth, wound, or leverage from the ordeal.
+    guidance: ''
+    required: true
+    id: reward
+  - title: Return route
+    function: Drives the changed protagonist back toward consequence.
+    guidance: ''
+    required: true
+    id: return_route
+  - title: Last transformation
+    function: Requires the deepest change to survive the ending pressure.
+    guidance: ''
+    required: true
+    id: last_transformation
+  - title: Boon shared
+    function: Shows the changed relationship between protagonist, world, and gift.
+    guidance: ''
+    required: true
+    id: boon_shared
 ---
 
 # Twelve-Step Quest Arc

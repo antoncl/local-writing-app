@@ -30,56 +30,49 @@ template:
   builtin_policy: seed_generic
   template_version: '1.0'
   locale: en
-  plot_points:
-  - id: comfort
-    title: Comfort
-    function_claim: Shows the known state before desire pulls the character outward.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: need
-    title: Need
-    function_claim: Clarifies the want, lack, or pressure that breaks stasis.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: go
-    title: Go
-    function_claim: Moves into an unfamiliar situation or tactic.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: search
-    title: Search
-    function_claim: Forces adaptation through pursuit, trial, or improvisation.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: find
-    title: Find
-    function_claim: Reaches the apparent goal or discovers what the goal really costs.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: take_cost
-    title: Take the cost
-    function_claim: Pays for the gain with loss, compromise, or irreversible change.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: return
-    title: Return
-    function_claim: Carries the changed self or prize back toward the known world.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: changed
-    title: Changed
-    function_claim: Shows the contrast between the initial and final state.
-    guidance: ''
-    required: true
-    metadata: {}
   metadata: {}
+metadata:
+  beats:
+  - title: Comfort
+    function: Shows the known state before desire pulls the character outward.
+    guidance: ''
+    required: true
+    id: comfort
+  - title: Need
+    function: Clarifies the want, lack, or pressure that breaks stasis.
+    guidance: ''
+    required: true
+    id: need
+  - title: Go
+    function: Moves into an unfamiliar situation or tactic.
+    guidance: ''
+    required: true
+    id: go
+  - title: Search
+    function: Forces adaptation through pursuit, trial, or improvisation.
+    guidance: ''
+    required: true
+    id: search
+  - title: Find
+    function: Reaches the apparent goal or discovers what the goal really costs.
+    guidance: ''
+    required: true
+    id: find
+  - title: Take the cost
+    function: Pays for the gain with loss, compromise, or irreversible change.
+    guidance: ''
+    required: true
+    id: take_cost
+  - title: Return
+    function: Carries the changed self or prize back toward the known world.
+    guidance: ''
+    required: true
+    id: return
+  - title: Changed
+    function: Shows the contrast between the initial and final state.
+    guidance: ''
+    required: true
+    id: changed
 ---
 
 # Circular Change Arc

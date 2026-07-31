@@ -29,7 +29,6 @@ from app.models import (
     CreateStructureNodeRequest,
     EntryTypeDefinition,
     MetadataFieldDefinition,
-    PlotTemplatePoint,
     PlotTemplateSpec,
     RealizeCardRequest,
     SaveCardRequest,
@@ -471,7 +470,7 @@ class PlotCrossFamilyGuardTests(_PlotTestCase):
         owned = self.client.post(f"/api/plot/templates/{library['id']}/fork").json()
         response = self.client.put(f"/api/plot/cards/{owned['id']}", json={"title": "Hijack", "body": ""})
         self.assertEqual(response.status_code, 404, response.text)
-        self.assertTrue(self.client.get(f"/api/plot/templates/{owned['id']}").json()["template"]["plot_points"])
+        self.assertTrue(self.client.get(f"/api/plot/templates/{owned['id']}").json()["metadata"]["beats"])
 
 
 class PlotBoardHttpTests(_PlotTestCase):
@@ -616,9 +615,13 @@ class PlotTemplateLibraryTests(_PlotTestCase):
         self.assertEqual(body["entry_type"], "plot:template")
         self.assertFalse(body["editable"])
         self.assertEqual(body["template"]["family"], "act")
-        points = body["template"]["plot_points"]
-        self.assertEqual(len(points), 7)
-        self.assertEqual(points[0]["id"], "setup_pressure")
+        # The beat roster is now the `beats` ordered-list metadata field (#736),
+        # not the opaque `template:` block — it heals + validates on read.
+        beats = body["metadata"]["beats"]
+        self.assertEqual(len(beats), 7)
+        self.assertEqual(beats[0]["id"], "setup_pressure")
+        self.assertEqual(beats[0]["title"], "Setup pressure")
+        self.assertIn("Establishes", beats[0]["function"])
         # The prose guide is the node body.
         self.assertIn("# Three-Act Story Arc", body["body"])
 
@@ -650,8 +653,8 @@ class PlotTemplateLibraryTests(_PlotTestCase):
         self.assertTrue(clone["editable"])
         self.assertFalse(clone["is_library"])
         self.assertEqual(clone["title"], "Three-Act Story Arc")
-        # The whole spec came across (not just title/body).
-        self.assertEqual(len(clone["template"]["plot_points"]), 7)
+        # The whole entry came across (not just title/body) — beats included.
+        self.assertEqual(len(clone["metadata"]["beats"]), 7)
         # The owned clone is a plot/ family node — indexed like a plotline.
         entry = self.service._build_node_index().by_id.get(clone["id"])
         self.assertIsNotNone(entry)
@@ -713,6 +716,32 @@ class PlotTemplateLibraryTests(_PlotTestCase):
         # Persisted to disk, not just echoed: a fresh read carries the field.
         reread = self.client.get(f"/api/plot/templates/{clone['id']}").json()
         self.assertEqual(reread["metadata"].get("note"), "keep me")
+
+    def test_owned_clone_beats_are_editable_and_round_trip(self) -> None:
+        # The #736 win: the beat roster is a real `beats` ordered-list field, so it
+        # edits + persists through the standard metadata save path — no bespoke beat
+        # editor, no opaque `template:` block. Fork, rename a beat + drop one, save,
+        # re-read, and confirm the edit stuck and stable beat ids survived.
+        clone = self.client.post(f"/api/plot/templates/{_THREE_ACT}/fork").json()
+        beats = clone["metadata"]["beats"]
+        self.assertEqual(len(beats), 7)
+        beats[0]["title"] = "Reframed setup"
+        edited = beats[:-1]  # drop the trailing beat → 6
+        saved = self.client.put(
+            f"/api/plot/templates/{clone['id']}",
+            json={
+                "title": clone["title"],
+                "body": clone["body"],
+                "template": clone["template"],
+                "metadata": {"beats": edited},
+                "base_revision": clone["revision"],
+            },
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        got = self.client.get(f"/api/plot/templates/{clone['id']}").json()["metadata"]["beats"]
+        self.assertEqual(len(got), 6)
+        self.assertEqual(got[0]["title"], "Reframed setup")
+        self.assertEqual(got[0]["id"], "setup_pressure")  # stable id preserved through the edit
 
     def test_a_plotline_is_not_a_template(self) -> None:
         created = self.client.post("/api/plot/plotlines", json={"title": "A Thread"}).json()
@@ -989,12 +1018,9 @@ class PlotTemplateLayeredTests(unittest.TestCase):
     def _write_ancestor_template(self, folder: Path, node_id: str, title: str) -> Path:
         (folder / "plot").mkdir(parents=True, exist_ok=True)
         path = folder / "plot" / f"{node_id}.md"
-        spec = PlotTemplateSpec(
-            slug=node_id,
-            display_name=title,
-            plot_points=[PlotTemplatePoint(id="p1", title="Beat 1", function_claim="Sets the frame.")],
-        )
-        self.service._write_plot_template_file(path, node_id, title, spec, "# Series Guide\n")
+        spec = PlotTemplateSpec(slug=node_id, display_name=title)
+        metadata = {"beats": [{"id": "p1", "title": "Beat 1", "function": "Sets the frame."}]}
+        self.service._write_plot_template_file(path, node_id, title, spec, "# Series Guide\n", metadata)
         return path
 
     def test_inherited_template_is_readable_and_read_only(self) -> None:
@@ -1003,7 +1029,7 @@ class PlotTemplateLayeredTests(unittest.TestCase):
         self.assertEqual(got.title, "Series Arc")
         self.assertFalse(got.editable)  # inherited from an ancestor project → read-only
         self.assertTrue(got.source_layer_id)  # provenance surfaced
-        self.assertEqual(len(got.template.plot_points), 1)
+        self.assertEqual(len(got.metadata["beats"]), 1)
 
     def test_saving_an_inherited_template_is_refused_and_ancestor_untouched(self) -> None:
         path = self._write_ancestor_template(self.series, "plot_series_tpl", "Series Arc")
@@ -1029,7 +1055,7 @@ class PlotTemplateLayeredTests(unittest.TestCase):
         self.assertNotEqual(clone.id, "plot_series_tpl")
         self.assertTrue(clone.editable)  # the book owns the clone
         self.assertEqual(clone.title, "Series Arc")
-        self.assertEqual(len(clone.template.plot_points), 1)  # spec copied
+        self.assertEqual(len(clone.metadata["beats"]), 1)  # beats copied
         # The clone lives in this book, the ancestor original is left in place.
         self.assertTrue((self.root / "plot").is_dir())
         self.assertTrue(path.exists())

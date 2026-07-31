@@ -150,7 +150,6 @@ from app.models.entries import (
 from app.models.plot import (
     PlotTemplate,
     PlotTemplateList,
-    PlotTemplatePoint,
     PlotTemplateSpec,
     PlotTemplateSummary,
     SavePlotTemplateRequest,
@@ -360,7 +359,6 @@ __all__ = [
     "PlotlineSummary",
     "PlotTemplate",
     "PlotTemplateList",
-    "PlotTemplatePoint",
     "PlotTemplateSpec",
     "PlotTemplateSummary",
     "PromptContextStrategy",

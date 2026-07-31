@@ -30,38 +30,34 @@ template:
   builtin_policy: seed_generic
   template_version: '1.0'
   locale: en
-  plot_points:
-  - id: want_and_wound
-    title: Want and wound
-    function_claim: Shows the desire and pain that make the false path attractive.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: truth_rejected
-    title: Truth rejected
-    function_claim: Offers a healthier alternative the character refuses or misunderstands.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: false_gain
-    title: False gain
-    function_claim: Rewards the destructive strategy enough to deepen commitment.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: moral_point_of_no_return
-    title: Moral point of no return
-    function_claim: Turns the false belief into an irreversible choice.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: collapse_or_coronation
-    title: Collapse or coronation
-    function_claim: Shows the consequence of fully embracing the destructive path.
-    guidance: ''
-    required: true
-    metadata: {}
   metadata: {}
+metadata:
+  beats:
+  - title: Want and wound
+    function: Shows the desire and pain that make the false path attractive.
+    guidance: ''
+    required: true
+    id: want_and_wound
+  - title: Truth rejected
+    function: Offers a healthier alternative the character refuses or misunderstands.
+    guidance: ''
+    required: true
+    id: truth_rejected
+  - title: False gain
+    function: Rewards the destructive strategy enough to deepen commitment.
+    guidance: ''
+    required: true
+    id: false_gain
+  - title: Moral point of no return
+    function: Turns the false belief into an irreversible choice.
+    guidance: ''
+    required: true
+    id: moral_point_of_no_return
+  - title: Collapse or coronation
+    function: Shows the consequence of fully embracing the destructive path.
+    guidance: ''
+    required: true
+    id: collapse_or_coronation
 ---
 
 # Negative Character Change Arc

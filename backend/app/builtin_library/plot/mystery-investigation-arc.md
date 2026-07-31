@@ -30,50 +30,44 @@ template:
   builtin_policy: seed_generic
   template_version: '1.0'
   locale: en
-  plot_points:
-  - id: crime_or_question
-    title: Crime or question
-    function_claim: Creates the explicit puzzle the reader tracks.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: investigator_engages
-    title: Investigator engages
-    function_claim: Commits a viewpoint character to seeking the truth.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: first_clue
-    title: First clue
-    function_claim: Provides inspectable evidence, not just atmosphere.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: suspect_web
-    title: Suspect web
-    function_claim: Builds plausible motives, opportunity, alibis, and competing interpretations.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: red_herring
-    title: Red herring
-    function_claim: Supports a plausible but wrong interpretation.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: reveal_chain
-    title: Reveal chain
-    function_claim: Lets the solution feel earned before confirmation.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: solution
-    title: Solution
-    function_claim: Resolves the puzzle with evidence already made available.
-    guidance: ''
-    required: true
-    metadata: {}
   metadata: {}
+metadata:
+  beats:
+  - title: Crime or question
+    function: Creates the explicit puzzle the reader tracks.
+    guidance: ''
+    required: true
+    id: crime_or_question
+  - title: Investigator engages
+    function: Commits a viewpoint character to seeking the truth.
+    guidance: ''
+    required: true
+    id: investigator_engages
+  - title: First clue
+    function: Provides inspectable evidence, not just atmosphere.
+    guidance: ''
+    required: true
+    id: first_clue
+  - title: Suspect web
+    function: Builds plausible motives, opportunity, alibis, and competing interpretations.
+    guidance: ''
+    required: true
+    id: suspect_web
+  - title: Red herring
+    function: Supports a plausible but wrong interpretation.
+    guidance: ''
+    required: true
+    id: red_herring
+  - title: Reveal chain
+    function: Lets the solution feel earned before confirmation.
+    guidance: ''
+    required: true
+    id: reveal_chain
+  - title: Solution
+    function: Resolves the puzzle with evidence already made available.
+    guidance: ''
+    required: true
+    id: solution
 ---
 
 # Mystery Investigation Arc

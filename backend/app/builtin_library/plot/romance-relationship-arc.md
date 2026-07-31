@@ -30,51 +30,44 @@ template:
   builtin_policy: seed_generic
   template_version: '1.0'
   locale: en
-  plot_points:
-  - id: encounter
-    title: Encounter
-    function_claim: Brings the relationship participants into meaningful contact.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: attraction_resistance
-    title: Attraction and resistance
-    function_claim: Creates pull while naming why intimacy is risky or inconvenient.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: bond_deepens
-    title: Bond deepens
-    function_claim: Shows trust, vulnerability, intimacy, or partnership becoming
-      real.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: relationship_test
-    title: Relationship test
-    function_claim: Forces external pressure or internal wounds against the bond.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: dark_moment
-    title: Dark moment
-    function_claim: Makes the relationship appear genuinely impossible or too costly.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: repair_choice
-    title: Repair choice
-    function_claim: Requires accountability, courage, sacrifice, or changed behavior.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: satisfying_ending
-    title: Satisfying ending
-    function_claim: Confirms an emotionally satisfying optimistic relationship state.
-    guidance: ''
-    required: true
-    metadata: {}
   metadata: {}
+metadata:
+  beats:
+  - title: Encounter
+    function: Brings the relationship participants into meaningful contact.
+    guidance: ''
+    required: true
+    id: encounter
+  - title: Attraction and resistance
+    function: Creates pull while naming why intimacy is risky or inconvenient.
+    guidance: ''
+    required: true
+    id: attraction_resistance
+  - title: Bond deepens
+    function: Shows trust, vulnerability, intimacy, or partnership becoming real.
+    guidance: ''
+    required: true
+    id: bond_deepens
+  - title: Relationship test
+    function: Forces external pressure or internal wounds against the bond.
+    guidance: ''
+    required: true
+    id: relationship_test
+  - title: Dark moment
+    function: Makes the relationship appear genuinely impossible or too costly.
+    guidance: ''
+    required: true
+    id: dark_moment
+  - title: Repair choice
+    function: Requires accountability, courage, sacrifice, or changed behavior.
+    guidance: ''
+    required: true
+    id: repair_choice
+  - title: Satisfying ending
+    function: Confirms an emotionally satisfying optimistic relationship state.
+    guidance: ''
+    required: true
+    id: satisfying_ending
 ---
 
 # Romance Relationship Arc

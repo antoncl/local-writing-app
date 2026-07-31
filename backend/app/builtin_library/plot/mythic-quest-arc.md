@@ -29,57 +29,49 @@ template:
   builtin_policy: seed_generic
   template_version: '1.0'
   locale: en
-  plot_points:
-  - id: known_world
-    title: Known world
-    function_claim: Establishes the protagonist's starting order and its limits.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: call_to_change
-    title: Call to change
-    function_claim: Invites or forces movement beyond the known world.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: threshold
-    title: Threshold
-    function_claim: Crosses into a space where old rules no longer suffice.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: tests_allies_enemies
-    title: Tests, allies, enemies
-    function_claim: Builds pressure through trials, bargains, helpers, and opposition.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: central_ordeal
-    title: Central ordeal
-    function_claim: Confronts the protagonist with the story's deepest test.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: boon_or_cost
-    title: Boon or cost
-    function_claim: Obtains knowledge, power, loss, or obligation that changes the
-      return.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: return_pressure
-    title: Return pressure
-    function_claim: Forces the boon or change back toward the original world.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: integrated_return
-    title: Integrated return
-    function_claim: Shows what the journey changes for self and community.
-    guidance: ''
-    required: true
-    metadata: {}
   metadata: {}
+metadata:
+  beats:
+  - title: Known world
+    function: Establishes the protagonist's starting order and its limits.
+    guidance: ''
+    required: true
+    id: known_world
+  - title: Call to change
+    function: Invites or forces movement beyond the known world.
+    guidance: ''
+    required: true
+    id: call_to_change
+  - title: Threshold
+    function: Crosses into a space where old rules no longer suffice.
+    guidance: ''
+    required: true
+    id: threshold
+  - title: Tests, allies, enemies
+    function: Builds pressure through trials, bargains, helpers, and opposition.
+    guidance: ''
+    required: true
+    id: tests_allies_enemies
+  - title: Central ordeal
+    function: Confronts the protagonist with the story's deepest test.
+    guidance: ''
+    required: true
+    id: central_ordeal
+  - title: Boon or cost
+    function: Obtains knowledge, power, loss, or obligation that changes the return.
+    guidance: ''
+    required: true
+    id: boon_or_cost
+  - title: Return pressure
+    function: Forces the boon or change back toward the original world.
+    guidance: ''
+    required: true
+    id: return_pressure
+  - title: Integrated return
+    function: Shows what the journey changes for self and community.
+    guidance: ''
+    required: true
+    id: integrated_return
 ---
 
 # Mythic Quest Arc

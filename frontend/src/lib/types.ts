@@ -207,7 +207,6 @@ export type {
   PlotTemplateSummary,
   PlotTemplateList,
   PlotTemplateSpec,
-  PlotTemplatePoint,
   PlotTemplateSourceRef,
 } from "./plotTemplateTypes";
 export type {

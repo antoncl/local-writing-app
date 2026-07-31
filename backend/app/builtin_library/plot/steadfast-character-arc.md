@@ -30,38 +30,34 @@ template:
   builtin_policy: seed_generic
   template_version: '1.0'
   locale: en
-  plot_points:
-  - id: core_truth
-    title: Core truth
-    function_claim: Establishes the value the character will hold under pressure.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: world_challenge
-    title: World challenge
-    function_claim: Shows the world testing, dismissing, or punishing that value.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: cost_of_steadfastness
-    title: Cost of steadfastness
-    function_claim: Makes remaining true meaningfully expensive.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: influence_turn
-    title: Influence turn
-    function_claim: Shows another character, institution, or system beginning to change.
-    guidance: ''
-    required: true
-    metadata: {}
-  - id: world_changed
-    title: World changed
-    function_claim: Pays off the steadfast value through external transformation.
-    guidance: ''
-    required: true
-    metadata: {}
   metadata: {}
+metadata:
+  beats:
+  - title: Core truth
+    function: Establishes the value the character will hold under pressure.
+    guidance: ''
+    required: true
+    id: core_truth
+  - title: World challenge
+    function: Shows the world testing, dismissing, or punishing that value.
+    guidance: ''
+    required: true
+    id: world_challenge
+  - title: Cost of steadfastness
+    function: Makes remaining true meaningfully expensive.
+    guidance: ''
+    required: true
+    id: cost_of_steadfastness
+  - title: Influence turn
+    function: Shows another character, institution, or system beginning to change.
+    guidance: ''
+    required: true
+    id: influence_turn
+  - title: World changed
+    function: Pays off the steadfast value through external transformation.
+    guidance: ''
+    required: true
+    id: world_changed
 ---
 
 # Steadfast Character Arc

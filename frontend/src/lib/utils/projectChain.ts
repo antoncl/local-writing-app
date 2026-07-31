@@ -25,14 +25,12 @@ export type ChainCrumbState = Exclude<DeclarationRowState, "folder">;
 export type ChainCrumb = {
   path: string;
   label: string;
+  // `state` decides navigability too, so there is no separate `navigable` field
+  // (#763.3): a `declared`/`available` crumb is a real project and opens; a
+  // `stale` crumb's `project.yaml` is gone, so there is nothing to open — the
+  // component branches on `state === "stale"` directly, which is all a
+  // `navigable` boolean ever encoded (`navigable === state !== "stale"`).
   state: ChainCrumbState;
-  /**
-   * Whether selecting it opens that project. A `declared`/`available` crumb is
-   * a real project and navigates; a `stale` crumb is a folder whose
-   * `project.yaml` is gone, so there is nothing to open — it is shown as a
-   * flagged, non-navigable marker whose repair lives in the declaration editor.
-   */
-  navigable: boolean;
 };
 
 /**
@@ -64,7 +62,7 @@ export function declaredChain(chain: ProjectChainLayer[] | undefined): ChainCrum
     // ever leaks through, drop it here rather than mislabel it `stale` (fail
     // safe, not fail loud). This also narrows `state` to `ChainCrumbState`.
     if (state === "folder") continue;
-    crumbs.push({ path: layer.path, label: layer.label, state, navigable: layer.is_project });
+    crumbs.push({ path: layer.path, label: layer.label, state });
   }
   return crumbs;
 }

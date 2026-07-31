@@ -1273,17 +1273,6 @@ export type AIGenerateResponse = {
   cost_usd?: number | null;
 };
 
-export type ProjectCostChatRow = {
-  id: string;
-  title: string;
-  cost_usd: number;
-};
-
-export type ProjectCostResponse = {
-  total_usd: number;
-  chats: ProjectCostChatRow[];
-};
-
 export type AIInvocation = {
   id: string;
   ts: string;

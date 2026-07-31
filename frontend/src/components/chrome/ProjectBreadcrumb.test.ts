@@ -96,7 +96,14 @@ describe("ProjectBreadcrumb — inheritance popover (#417 slice 4b)", () => {
 
     await fireEvent.click(edit);
     expect(edit.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toBeInTheDocument();
+
+    // It's a modal dialog that owns focus: aria wiring + focus lands inside it
+    // (on the first enabled row), not on the trigger behind the overlay.
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(edit.getAttribute("aria-controls")).toBe("inherit-popover");
+    expect(dialog.contains(document.activeElement)).toBe(true);
 
     // Every enumerated row renders, including the disabled organisational folder.
     const universe = screen.getByRole("checkbox", { name: "Inherit from Universe" });
@@ -108,6 +115,24 @@ describe("ProjectBreadcrumb — inheritance popover (#417 slice 4b)", () => {
     // DOM checkbox (the save can fail).
     await fireEvent.click(screen.getByRole("checkbox", { name: "Inherit from Series" }));
     expect(onToggleInherit).toHaveBeenCalledWith("/w/Series");
+  });
+
+  it("keeps Tab focus inside the open dialog", async () => {
+    render(ProjectBreadcrumb, { props: { chain: CHAIN, inheritRows: ROWS } });
+    await fireEvent.click(screen.getByRole("button", { name: "Edit what this project inherits from" }));
+
+    // The disabled folder row is skipped, so the trap cycles the two enabled
+    // rows: first = Universe, last = Series.
+    const first = screen.getByRole("checkbox", { name: "Inherit from Universe" });
+    const last = screen.getByRole("checkbox", { name: "Inherit from Series" });
+    expect(document.activeElement).toBe(first); // initial focus landed inside
+
+    // Tab off the last wraps to the first; Shift+Tab off the first wraps to last.
+    last.focus();
+    await fireEvent.keyDown(window, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+    await fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
   });
 
   it("locks the checkboxes while a declaration save is in flight", async () => {

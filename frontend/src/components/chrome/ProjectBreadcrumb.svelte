@@ -63,6 +63,7 @@
   // panel dropped below it — and hung off the "edit…" affordance.
   let popoverOpen = false;
   let editButton: HTMLButtonElement | null = null;
+  let popoverEl: HTMLElement | null = null;
 
   function togglePopover(): void {
     popoverOpen = !popoverOpen;
@@ -79,8 +80,44 @@
     closePopover();
     editButton?.focus();
   }
+
+  // The popover is a `role="dialog"` with `aria-modal` + an overlay, so it owns
+  // focus while open (the switcher's `role="menu"` does not, hence the different
+  // treatment). Everything tabbable inside it, for the initial focus + the trap.
+  const POPOVER_FOCUSABLE =
+    'input:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+  // Svelte action: move focus into the panel the moment it mounts (i.e. on open),
+  // so a keyboard/SR user lands INSIDE the dialog rather than on the trigger,
+  // which is now behind the overlay. Falls back to the panel itself (tabindex=-1)
+  // when every row is disabled (mid-save), so the dialog is still announced.
+  function focusIntoPopover(node: HTMLElement): void {
+    (node.querySelector<HTMLElement>(POPOVER_FOCUSABLE) ?? node).focus();
+  }
+
+  // Keep Tab / Shift+Tab within the open dialog — it is modal, so focus must not
+  // walk out to the bar controls sitting behind the overlay.
+  function trapPopoverTab(event: KeyboardEvent): void {
+    if (!popoverEl) return;
+    const focusable = [...popoverEl.querySelectorAll<HTMLElement>(POPOVER_FOCUSABLE)];
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  // All popover keyboard handling rides the one window listener (no handler on
+  // the dialog div, which would trip the a11y linter): Escape closes, Tab traps.
   function handleKeydown(event: KeyboardEvent): void {
-    if (event.key === "Escape" && popoverOpen) closePopoverAndRefocus();
+    if (!popoverOpen) return;
+    if (event.key === "Escape") closePopoverAndRefocus();
+    else if (event.key === "Tab") trapPopoverTab(event);
   }
   // If the last actionable ancestor is repaired away (a stale untick that leaves
   // only organisational folders), `canDeclare` goes false and the anchor button
@@ -194,6 +231,7 @@
             class="note-action chain-edit"
             aria-haspopup="dialog"
             aria-expanded={popoverOpen}
+            aria-controls={popoverOpen ? "inherit-popover" : undefined}
             aria-label="Edit what this project inherits from"
             title="Edit what this project inherits from"
             on:click={togglePopover}>edit…</button>
@@ -215,7 +253,18 @@
     {#if popoverOpen}
       <!-- Click-outside dismiss (does not refocus; see closePopover). -->
       <div class="popover-overlay" role="presentation" on:click={closePopover}></div>
-      <div class="inherit-popover" role="dialog" aria-labelledby="inherit-popover-label">
+      <!-- Modal editor: `focusIntoPopover` pulls focus in on mount, the window
+           keydown handler traps Tab + closes on Escape (#417 slice 4b review). -->
+      <div
+        class="inherit-popover"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="inherit-popover-label"
+        id="inherit-popover"
+        tabindex="-1"
+        bind:this={popoverEl}
+        use:focusIntoPopover
+      >
         <div class="inherit-popover-label" id="inherit-popover-label">Inherits from</div>
         <InheritsFromList rows={inheritRows} busy={inheritSaving} onToggle={onToggleInherit} />
       </div>
@@ -226,13 +275,18 @@
 <style>
   /* The positioning context for the inheritance popover (#417 slice 4b) AND the
      top bar's yielding item — the two are the same box on purpose. The popover
-     has to anchor to something that is NOT the scrolling strip, so the flex
-     tuning that used to sit on `.project-chain` moved up here and the strip is
-     now a plain child that fills it and scrolls. */
+     has to anchor to something that is NOT the scrolling strip, so `.breadcrumb-root`
+     takes over the flex-item role `.project-chain` used to play in the bar, and
+     the strip becomes a block child that fills it and scrolls.
+
+     Kept a plain BLOCK (not a flex container): as the bar's flex item it carries
+     the exact `flex-shrink: 999; min-width: 0` the strip carried before, so the
+     measured #311 yield is unchanged; the strip fills it as a normal block. An
+     earlier `display: flex` + `flex: 1` child was rejected in review — `flex: 1`
+     is basis-0, which changes the strip's intrinsic contribution to the bar's
+     sizing, the one thing #311 warns is measured, not reasoned. */
   .breadcrumb-root {
     position: relative;
-    display: flex;
-    align-items: center;
     /* This is the one item in the bar that yields: the wordmark, the switcher
        and the actions are all `flex: none`, so a chain too wide for the space
        scrolls inside it rather than deforming its neighbours. Shrinking the
@@ -253,12 +307,13 @@
     display: flex;
     align-items: center;
     gap: 2px;
-    /* Fills the root and scrolls within it (the yield behaviour lives on the
-       root now). ⚠ It is **left-anchored**: when it does scroll, the crumb
-       pushed out of view is the nearest ancestor, which is the likeliest hop.
-       Pinning the end was tried in JS and reverted (00bc123) after it hung the
-       renderer; doing it in CSS, which cannot loop, is open work. */
-    flex: 1;
+    /* Fills the block root (width, not flex-grow, so nothing about the strip's
+       intrinsic size changes) and scrolls within it. ⚠ It is **left-anchored**:
+       when it does scroll, the crumb pushed out of view is the nearest ancestor,
+       which is the likeliest hop. Pinning the end was tried in JS and reverted
+       (00bc123) after it hung the renderer; doing it in CSS, which cannot loop,
+       is open work. */
+    width: 100%;
     min-width: 0;
     overflow-x: auto;
     scrollbar-width: thin;

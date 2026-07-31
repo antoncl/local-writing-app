@@ -1,10 +1,9 @@
 """Step 6 of V2: per-chat cost accumulator + per-slot cache write
-timestamps, and the project-level rollup endpoint.
+timestamps.
 
 Saves are additive — `cost_delta_usd` accumulates into
 `ChatSession.cost_usd_total`; `cache_write_slots` stamps the named
-slots with the current server time. The /api/ai/project-cost endpoint
-sums across all chats.
+slots with the current server time.
 """
 
 from __future__ import annotations
@@ -123,59 +122,6 @@ class ChatCostAccumulatorTests(unittest.TestCase):
         chat = self.service.read_chat_session(cid)
         self.assertIn("system", chat.cache_write_times)
         self.assertIn("lore", chat.cache_write_times)
-
-
-class ProjectCostEndpointTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name).resolve() / "project"
-        self.service = open_test_project(self.root, "Project Cost Tests")
-        default_registry.clear()
-        self.client = TestClient(app)
-
-    def tearDown(self) -> None:
-        default_registry.clear()
-        self.temp_dir.cleanup()
-
-    def test_no_chats_returns_zero(self) -> None:
-        response = self.client.get("/api/ai/project-cost")
-        self.assertEqual(response.status_code, 200, response.text)
-        body = response.json()
-        self.assertEqual(body["total_usd"], 0.0)
-        self.assertEqual(body["chats"], [])
-
-    def test_sum_across_chats(self) -> None:
-        def make_with_cost(title: str, cost: float) -> str:
-            chat = self.service.create_chat_session(
-                CreateChatSessionRequest(title=title, system_prompt="")
-            )
-            self.service.save_chat_session(
-                chat.id,
-                SaveChatSessionRequest(
-                    title=title,
-                    prompt_entry_id="",
-                    assistant_id="",
-                    system_prompt="",
-                    pinned=False,
-                    cost_delta_usd=cost,
-                ),
-            )
-            return chat.id
-
-        make_with_cost("Brainstorm", 0.10)
-        make_with_cost("Continuation", 0.30)
-        make_with_cost("Empty", 0.0)
-
-        response = self.client.get("/api/ai/project-cost")
-        body = response.json()
-        self.assertAlmostEqual(body["total_usd"], 0.40)
-        # Phase C2 Slice B: zero-cost chats don't appear in the per-chat
-        # list — the source is the ai_invocations log and zero-delta saves
-        # don't append a row. "Empty" is omitted.
-        self.assertEqual(len(body["chats"]), 2)
-        # Sorted desc by cost.
-        self.assertEqual(body["chats"][0]["title"], "Continuation")
-        self.assertEqual(body["chats"][1]["title"], "Brainstorm")
 
 
 if __name__ == "__main__":

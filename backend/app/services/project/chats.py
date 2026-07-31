@@ -8,10 +8,8 @@ moved verbatim from project_service.py — shared helpers they call
 `self.resolve_assistant`, `self.append_ai_invocation`) still live on the
 core class and resolve through the MRO at call time.
 
-`compute_project_cost` and `_utcnow_iso` deliberately stay in core: the
-former is a cost-reporting surface over the unified ai_invocations log
-(not chat CRUD), and the latter is a generic timestamp util the
-ai_invocations writer also uses.
+`_utcnow_iso` deliberately stays in core: a generic timestamp util the
+ai_invocations writer also uses (not chat CRUD).
 """
 
 from __future__ import annotations
@@ -178,7 +176,7 @@ class ChatSessionsMixin:
         # Phase C2 Slice B: per-turn cost no longer lives on the chat YAML
         # — it lands as an ai_invocations row tagged with chat_session_id.
         # cost_usd_total stays at 0 (kept on the model for back-compat
-        # round-trips); compute_project_cost reads the unified log.
+        # round-trips); it re-derives from the unified log on read.
         if request.cost_delta_usd is not None and request.cost_delta_usd > 0:
             delta = float(request.cost_delta_usd)
             # Try to resolve provider/model via the chat's assistant for

@@ -30,7 +30,7 @@
   import TopBar from "@/components/chrome/TopBar.svelte";
   import { installThemeWiring, themePreference, nextPreference, type ThemePreference } from "@/lib/utils/theme";
   import { renderChatContent } from "@/lib/utils/chatMessageRender";
-  import { canDeclareInheritance, toggledDeclaration } from "@/lib/utils/projectChain";
+  import { declarationRows, toggledDeclaration } from "@/lib/utils/projectChain";
   import { get } from "svelte/store";
   import {
     chatSessionsStore,
@@ -670,6 +670,11 @@
   let projectCostTotal = $derived($projectCostTotalStore);
   let projectCostBreakdown = $derived($projectCostBreakdownStore);
   let project = $derived(appState.name === "projectOpen" ? appState.project : null);
+  // The declaration editor's rows (#417 slice 4b), fed to the breadcrumb popover
+  // that replaced the Project pane's Inheritance section. The whole enumeration,
+  // not the declared subset — the popover offers exactly the rows the breadcrumb
+  // hides. The toggle side effect stays in the TopBar wiring below.
+  let inheritRows = $derived(declarationRows(project?.ancestors));
   let isProjectOpen = $derived(appState.name === "projectOpen");
   let structure = $derived($structureStore);
   // Research tree — parallel structure to the manuscript tree. Topics
@@ -751,8 +756,10 @@
   onOpenMutations={openMutationsPane}
   onOpenImport={openImportDocs}
   onManageAllTags={() => (tagsManagerOpen = true)}
-  onOpenInheritance={() => workspaceLayout.ensureVisible("project")}
-  canDeclareInheritance={canDeclareInheritance(project?.ancestors)}
+  {inheritRows}
+  inheritSaving={projectSession.declarationSaving}
+  onToggleInherit={(path) =>
+    void projectSession.setDeclaration(toggledDeclaration(project?.ancestors, path))}
   activePreset={workspaceLayout.activePreset}
   userPresets={layoutPresets.presets.map((preset) => preset.name)}
   onApplyPreset={(name) => workspaceLayout.applyPreset(name as PresetName)}
@@ -813,11 +820,7 @@
         {projectCostTotal}
         {projectCostBreakdown}
         projectChildren={project?.children ?? []}
-        ancestors={project?.ancestors ?? []}
         onOpenChild={(path) => void projectSession.openProjectAt(path)}
-        onToggleInherit={(path) =>
-          void projectSession.setDeclaration(toggledDeclaration(project?.ancestors, path))}
-        inheritSaving={projectSession.declarationSaving}
         bind:projectCostExpanded
       />
     </div>

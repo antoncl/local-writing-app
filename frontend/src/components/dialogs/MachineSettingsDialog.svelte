@@ -11,7 +11,9 @@
     MachineSettingsView,
     ProviderCredentialsView,
   } from "@/lib/types";
+  import type { AIPolicyDraft } from "@/lib/stores/aiSettings.svelte";
   import Modal from "@/components/dialogs/Modal.svelte";
+  import PolicyRadioGroup from "@/components/widgets/PolicyRadioGroup.svelte";
   import ProjectsFolderPicker from "@/components/widgets/ProjectsFolderPicker.svelte";
   import ProviderSubscriptions from "@/components/widgets/ProviderSubscriptions.svelte";
   import PaletteEditor from "@/components/widgets/PaletteEditor.svelte";
@@ -43,7 +45,10 @@
   // `onApplyPolicy` — mirroring the per-project AIPolicyModal.
   export let onApplyPolicy: (policy: AIPolicy) => Promise<boolean> = async () => false;
 
-  let policyDraft: AIPolicy = "off";
+  // Typed as the draft superset so it can bind the shared PolicyRadioGroup, but
+  // the "inherit" stop is never rendered here (the app-wide floor can't inherit),
+  // so `applyPolicy` narrows back to AIPolicy before committing.
+  let policyDraft: AIPolicyDraft = "off";
   let policyWasOpen = false;
   let applyingPolicy = false;
   // Snapshot the stored policy on each open→shown transition only; our own apply
@@ -56,7 +61,9 @@
   $: policyDirty = policyDraft !== (settings?.ai_policy ?? "off");
 
   async function applyPolicy() {
-    if (applyingPolicy) return;
+    // The floor has no "inherit" stop; guard so the type stays honest and a
+    // stray value can never widen past the three real policies (fails-closed).
+    if (applyingPolicy || policyDraft === "inherit") return;
     applyingPolicy = true;
     await onApplyPolicy(policyDraft);
     applyingPolicy = false;
@@ -143,12 +150,7 @@
               inheritance chain. New and standalone projects resolve here. Applied on its own, so a
               stray click never widens AI access.
             </p>
-            <fieldset class="ai-policy">
-              <legend>Access</legend>
-              <label><input type="radio" bind:group={policyDraft} value="off" /> Off</label>
-              <label><input type="radio" bind:group={policyDraft} value="local-only" /> Local only</label>
-              <label><input type="radio" bind:group={policyDraft} value="cloud-allowed" /> Cloud allowed</label>
-            </fieldset>
+            <PolicyRadioGroup bind:value={policyDraft} />
             <div class="button-row">
               <button
                 type="button"
@@ -298,8 +300,8 @@
     font-size: var(--fs-sm);
   }
 
-  /* The app-wide AI policy section (#746). The fieldset mirrors the per-project
-     AIPolicyModal so the two controls read as the same kind of thing. */
+  /* The app-wide AI policy section (#746). The radio group itself is the shared
+     PolicyRadioGroup widget (#780); this just lays out its heading and blurb. */
   .app-policy {
     display: grid;
     grid-auto-rows: min-content;
@@ -308,34 +310,6 @@
 
   .app-policy h3 {
     margin: 0;
-  }
-
-  .ai-policy {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 14px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 8px 10px;
-  }
-
-  .ai-policy legend {
-    font-size: var(--fs-sm);
-    color: var(--text-2);
-    padding: 0 4px;
-  }
-
-  .ai-policy label {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: var(--fs-md);
-  }
-
-  /* The global `input, select { width: 100% }` (styles.css) stretches a radio to
-     fill its flex label. Reset the width, as AIPolicyModal does. */
-  .ai-policy label input[type="radio"] {
-    width: auto;
   }
 
   .health-check {

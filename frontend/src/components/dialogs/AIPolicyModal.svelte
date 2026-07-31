@@ -10,6 +10,7 @@
   // cleaner than the old pane, which left the controller's value mutated.
   import { aiSettings, type AIPolicyDraft } from "@/lib/stores/aiSettings.svelte";
   import Modal from "@/components/dialogs/Modal.svelte";
+  import PolicyRadioGroup from "@/components/widgets/PolicyRadioGroup.svelte";
 
   let { open, onClose }: { open: boolean; onClose: () => void } = $props();
 
@@ -38,17 +39,7 @@
       Controls whether this project may reach AI providers. <strong>Inherit</strong> takes the
       policy from an ancestor project — or Off at the top of the chain.
     </p>
-    <fieldset class="ai-policy">
-      <legend>Access</legend>
-      <label
-        title="Set no policy of your own — inherit it from an ancestor project, or default to Off (#471)"
-      >
-        <input type="radio" bind:group={draft} value="inherit" /> Inherit
-      </label>
-      <label><input type="radio" bind:group={draft} value="off" /> Off</label>
-      <label><input type="radio" bind:group={draft} value="local-only" /> Local only</label>
-      <label><input type="radio" bind:group={draft} value="cloud-allowed" /> Cloud allowed</label>
-    </fieldset>
+    <PolicyRadioGroup bind:value={draft} includeInherit />
     {#snippet actions()}
       <button type="button" onclick={onClose}>Cancel</button>
       <button type="button" class="primary" onclick={save}>Save</button>
@@ -62,33 +53,5 @@
     font-size: var(--fs-sm);
     color: var(--text-2);
     line-height: 1.4;
-  }
-
-  .ai-policy {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 14px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 8px 10px;
-  }
-
-  .ai-policy legend {
-    font-size: var(--fs-sm);
-    color: var(--text-2);
-    padding: 0 4px;
-  }
-
-  .ai-policy label {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: var(--fs-md);
-  }
-
-  /* The global `input, select { width: 100% }` (styles.css) stretches a radio
-     to fill its flex label, distorting these controls. Reset the width. */
-  .ai-policy label input[type="radio"] {
-    width: auto;
   }
 </style>

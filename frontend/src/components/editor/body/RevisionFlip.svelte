@@ -15,12 +15,13 @@
   import ReadOnlyBodyOverlay from "@/components/editor/body/ReadOnlyBodyOverlay.svelte";
   import { reviewBodyProposal } from "@/lib/utils/entryRevision";
   import { adoptRegion, renderDiffRuns, type DiffRegion } from "@/lib/utils/diffRuns";
-  import type { DiffRun } from "@/lib/types";
+  import type { DiffRun, DiffView } from "@/lib/types";
 
   let {
     currentText,
     proposedText,
     label,
+    view = "both",
     onResolved,
   }: {
     /** The value as the author currently sees it (the warm `now` side). */
@@ -29,6 +30,10 @@
     proposedText: string;
     /** Section heading — "Body", or a long_text field's label. */
     label: string;
+    /** Which whole version to read (#710): `both` interleaves the diff, `now`
+     *  shows the current text whole, `was` the proposed text whole. The runs
+     *  carry both versions, so a change is a re-render, never a re-diff. */
+    view?: DiffView;
     /** Report the running resolution: null while unchanged from the original. */
     onResolved: (value: string | null) => void;
   } = $props();
@@ -47,8 +52,9 @@
   let html = $state("");
   $effect(() => {
     const snapshot = runs;
+    const activeView = view;
     let cancelled = false;
-    void renderDiffRuns(snapshot, "both", flipTitle).then((rendered) => {
+    void renderDiffRuns(snapshot, activeView, flipTitle).then((rendered) => {
       if (!cancelled) html = rendered;
     });
     return () => {

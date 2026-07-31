@@ -481,20 +481,28 @@
   // controller's per-field resolution. Same `compare` shape snapshot compare
   // feeds MetadataPanel, plus the `resolve` callbacks that make it interactive.
   // Mutually exclusive with `snapshotCompare` (scenes park; lore reviews) —
-  // hence the `??` at the call site. `side: "was"` is nominal; `resolve` present
-  // makes the panel show the proposed side per-field regardless.
-  const entryCompare = $derived(
-    reviewing && entryReview.structuredFlips.length > 0
-      ? {
-          fields: entryReview.structuredCompareFields,
-          side: "was" as const,
-          resolve: {
-            adopted: (fieldId: string) => entryReview.isStructuredAdopted(fieldId),
-            onToggle: (fieldId: string) => entryReview.toggleStructured(fieldId),
-          },
-        }
-      : null,
-  );
+  // hence the `??` at the call site.
+  //
+  // The rail follows the judge toggle (#710), reusing MetadataPanel's two lenses:
+  // `both` is the interactive adopt lens (`resolve` present → shows the proposed
+  // side, click-to-adopt); a single-version view drops `resolve` and reads that
+  // whole side passively, exactly like the snapshot compare — so "read the current
+  // version whole" switches the fields too, not just the prose.
+  const entryCompare = $derived.by(() => {
+    if (!reviewing || entryReview.structuredFlips.length === 0) return null;
+    const fields = entryReview.structuredCompareFields;
+    if (entryReview.view === "both") {
+      return {
+        fields,
+        side: "was" as const,
+        resolve: {
+          adopted: (fieldId: string) => entryReview.isStructuredAdopted(fieldId),
+          onToggle: (fieldId: string) => entryReview.toggleStructured(fieldId),
+        },
+      };
+    }
+    return { fields, side: entryReview.fieldSide() };
+  });
   // The hooks the pane's close path uses to commit or discard the review.
   const reviewCommitter = {
     hasChanges: () => entryReview.hasPendingChanges,
@@ -899,8 +907,15 @@
           proposedBody={entryReview.proposal.body}
           fields={entryReview.fields}
           hasChanges={entryReview.hasPendingChanges}
+          view={entryReview.view}
+          onView={(v) => entryReview.setView(v)}
+          onToggleView={(v) => entryReview.toggleView(v)}
           onBodyResolved={(v) => entryReview.setBodyResolution(v)}
           onFieldResolved={(id, v) => entryReview.setFieldResolution(id, v)}
+          onAcceptAll={() => {
+            entryReview.acceptAll();
+            void entryReview.commit();
+          }}
           onDone={() => entryReview.commit()}
           onDiscard={() => entryReview.abandon()}
         />

@@ -726,9 +726,13 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # Its consumer is `plot:card`. Integrity is plot-local: the item shape is
             # plain text (v1 bars refs from item shapes), so plot.py heals dangling
             # links on card save + read, not the top-level reference machinery.
+            # Hidden by default, like the lineage id fields (`source_template_id` /
+            # `source_template_name`): the members are raw ids meant for the board's
+            # link editor (a later slice), not hand-entry in the generic panel.
             "name": "Beat links",
             "type": "list",
             "item_group": "plot_beat_link",
+            "hidden": True,
         },
         "word_count": {
             "name": "Word Count",

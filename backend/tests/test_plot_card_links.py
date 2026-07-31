@@ -163,6 +163,16 @@ class CardBeatLinkTests(_CardLinkTestCase):
         )
         self.assertNotIn("beat_links", self._read_card(card)["metadata"])
 
+    def test_duplicate_links_are_collapsed(self) -> None:
+        # A card fulfils a beat once — a repeated (instance, beat_id) pair is deduped
+        # so the stored list stays canonical for the edge/diagnostic consumers later.
+        instance = self._instance()
+        beat_id = instance["metadata"]["instance_beats"][0]["id"]
+        link = {"instance": instance["id"], "beat_id": beat_id}
+        card = self._new_card()
+        self._save_card(card, {"beat_links": [link, dict(link)]})
+        self.assertEqual(self._read_card(card)["metadata"]["beat_links"], [link])
+
 
 class CardPageStatusTests(_CardLinkTestCase):
     def test_a_scene_link_derives_on_page(self) -> None:
@@ -200,3 +210,17 @@ class CardPageStatusTests(_CardLinkTestCase):
         self.assertEqual(self._read_card(card)["metadata"]["page_status"], "on_page")
         self._save_card(card, {"page_status": "on_page"})  # scene removed from the payload
         self.assertNotIn("page_status", self._read_card(card)["metadata"])
+
+    def test_deleting_the_scene_clears_on_page_on_read(self) -> None:
+        # The purge path, not a re-save: delete_scene blanks the card's scene ref but
+        # never re-derives page_status, so the on-disk `on_page` goes stale until the
+        # read-side heal clears it. Proves the derivation's two-path symmetry against a
+        # real scene delete (the scene ref's own purge-on-delete + heal-on-read).
+        scene_id = self._scene()
+        card = self._new_card()
+        self._save_card(card, {"scene": scene_id})
+        self.assertEqual(self._read_card(card)["metadata"]["page_status"], "on_page")
+        self.service.delete_scene(scene_id)
+        metadata = self._read_card(card)["metadata"]
+        self.assertFalse(metadata.get("scene"))  # ref purged
+        self.assertNotIn("page_status", metadata)  # stale on_page healed away on read

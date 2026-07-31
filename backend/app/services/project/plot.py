@@ -327,7 +327,11 @@ class PlotMixin:
             raise ProjectServiceError(" ".join(markdown_errors), 422)
         metadata = self._normalise_metadata(request.metadata, path)
         metadata = self._ensure_beat_identity(metadata)
-        if expected_entry_type == PLOT_CARD_ENTRY_TYPE:
+        # Gate on the concrete type being written (like the read path's
+        # `raw_entry_type`), not the endpoint constant `expected_entry_type` — so
+        # save and read agree in every case. plot:card is a leaf here (the module
+        # lists cards by exact type), so both consistently skip any subtype.
+        if request.entry_type == PLOT_CARD_ENTRY_TYPE:
             metadata = self._normalise_card_metadata(metadata, index)
         metadata_errors = self._validate_entry_metadata(
             label=f"{noun.capitalize()} {node_id}",
@@ -413,13 +417,16 @@ class PlotMixin:
         `beat_id` is in that instance's current roster. A link to a deleted instance,
         or to a beat since removed from the roster, is dropped — the board can only
         draw links that mean something. An incomplete link (a blank half) is dropped
-        too: half a pair points nowhere. When nothing survives the key is removed, so
-        an all-dangling list heals to sparse rather than an empty `[]`.
+        too: half a pair points nowhere, and a duplicate *(instance, beat_id)* is
+        collapsed — a card fulfils a beat once, so the stored list stays canonical for
+        the edge/diagnostic consumers of later slices. When nothing survives the key
+        is removed, so an all-dangling list heals to sparse rather than an empty `[]`.
         """
         links = metadata.get(_BEAT_LINK_FIELD)
         if not isinstance(links, list):
             return
         rosters: dict[str, set[str] | None] = {}
+        seen: set[tuple[str, str]] = set()
         healed: list[Any] = []
         for link in links:
             if not isinstance(link, dict):
@@ -428,11 +435,15 @@ class PlotMixin:
             beat_id = link.get("beat_id")
             if not (isinstance(instance_id, str) and instance_id and isinstance(beat_id, str) and beat_id):
                 continue  # incomplete pair
+            key = (instance_id, beat_id)
+            if key in seen:
+                continue  # a card fulfils a beat once — drop the duplicate
             if instance_id not in rosters:
                 rosters[instance_id] = self._instance_beat_ids(instance_id, index)
             roster = rosters[instance_id]
             if roster is None or beat_id not in roster:
                 continue  # instance gone / not an instance / beat left the roster
+            seen.add(key)
             healed.append(link)
         if healed:
             metadata[_BEAT_LINK_FIELD] = healed

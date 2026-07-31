@@ -12,10 +12,8 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from fastapi.testclient import TestClient
 from project_fixtures import open_test_project
 
-from app.main import app
 from app.models import (
     CreateChatSessionRequest,
     SaveChatSessionRequest,
@@ -29,7 +27,6 @@ class ChatCostAccumulatorTests(unittest.TestCase):
         self.root = Path(self.temp_dir.name).resolve() / "project"
         self.service = open_test_project(self.root, "Cost Acc Tests")
         default_registry.clear()
-        self.client = TestClient(app)
 
     def tearDown(self) -> None:
         default_registry.clear()

@@ -381,13 +381,16 @@
 
     <!-- The project switcher as a shared `<Popover>` (#766.1). `bind:panel`
          hands the panel back so the remove-a-recent flow can juggle focus among
-         the ×-buttons after a row unmounts (#423). -->
+         the ×-buttons after a row unmounts (#423). Right-anchored (#766.3): the
+         trigger sits on the right of the bar, so a wide (320–480px) panel must
+         grow leftward into the bar rather than off the viewport's right edge. -->
     <Popover
       bind:open={switcherOpen}
       bind:panel={switcherMenuEl}
       triggerEl={switcherButton}
       role="menu"
       label="Project switcher"
+      anchor="right"
       minWidth="320px"
       maxWidth="480px"
       maxHeight="calc(100vh - 60px)"

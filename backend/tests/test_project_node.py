@@ -49,6 +49,19 @@ class ProjectNodeServiceTests(unittest.TestCase):
         self.assertEqual(self.service.read_project_node().id, node.id)
         self.assertIn(f"id: {node.id}", (self.root / "project.md").read_text(encoding="utf-8"))
 
+    def test_project_node_stamps_the_folder_path_as_a_computed_field(self) -> None:
+        # #417 slice 3: the filesystem path moved off the retiring Project pane
+        # onto the project node as a read-only `path` computed field. Its value
+        # is the project folder — resolved here, not by the body-derived
+        # computed dispatch, which has no path input.
+        node = self.service.read_project_node()
+        self.assertEqual(Path(node.computed_metadata["path"]), self.root)
+        # The schema advertises it as a computed field ON the project type, so
+        # MetadataPanel renders a locked read-only row rather than an editor.
+        schema = self.service.read_metadata_schema()
+        self.assertIn("path", schema.entry_types["project:project"].fields)
+        self.assertEqual(schema.fields["path"].type, "computed")
+
     def test_save_project_node_preserves_the_minted_id(self) -> None:
         node = self.service.read_project_node()
         saved = self.service.save_project_node(

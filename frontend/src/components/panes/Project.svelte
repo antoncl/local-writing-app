@@ -11,7 +11,6 @@
 
   export let isProjectOpen: boolean;
   export let projectTitle: string;
-  export let projectPath: string;
   export let projectCostTotal: number | null;
   export let projectCostBreakdown: { id: string; title: string; cost_usd: number }[];
   // Project folders directly inside this one (#310). Direct children only —
@@ -57,7 +56,9 @@
 {:else}
   <div class="project-identity">
     <strong class="project-identity-title">{projectTitle}</strong>
-    <code class="project-identity-path" title={projectPath}>{projectPath}</code>
+    <!-- The filesystem path moved to the project node's editor window as a
+         read-only `path` computed field (#417 slice 3) — off the pane so it
+         survives the pane's removal. Title + cost stay here until slice 6. -->
     {#if projectCostTotal != null && projectCostTotal > 0}
       <button
         type="button"
@@ -158,19 +159,6 @@
   .project-identity-title {
     font-size: var(--fs-xl);
     color: var(--text);
-  }
-
-  .project-identity-path {
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-    background: var(--inset);
-    border: 1px solid var(--divider);
-    border-radius: 3px;
-    padding: 2px 6px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-family: var(--mono);
   }
 
   .project-cost-chip {

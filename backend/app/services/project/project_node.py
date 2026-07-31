@@ -43,6 +43,13 @@ class ProjectNodeMixin:
         # node has carried schema-driven metadata since #334, so it can hold a
         # reference whose target was deleted.
         metadata = self._strip_dangling_references(metadata, self.read_metadata_schema(), self._build_node_index())
+        computed_metadata = self._computed_entry_metadata(body, node_id=node_id, entry_type=entry_type)
+        # The project folder's path is a project-node fact, not body-derived, so
+        # the body dispatch has no input for it — its resolver lives here, where
+        # the root Path is already in hand (#417 slice 3, the `path` computed
+        # field). Stamped unconditionally; the schema's field list decides
+        # whether it renders.
+        computed_metadata["path"] = str(path.parent)
         return ProjectNode(
             id=node_id,
             title=title,
@@ -50,7 +57,7 @@ class ProjectNodeMixin:
             revision=self._revision(path),
             entry_type=entry_type,
             metadata=metadata,
-            computed_metadata=self._computed_entry_metadata(body, node_id=node_id, entry_type=entry_type),
+            computed_metadata=computed_metadata,
         )
 
     def save_project_node(self, request: SaveProjectNodeRequest) -> ProjectNode:

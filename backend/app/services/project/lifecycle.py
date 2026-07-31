@@ -666,18 +666,19 @@ class ProjectLifecycleMixin:
         frontend's re-derivation (`decisions_walker_visitor_uniformity`).
 
         ⚠ Cost: one manifest read per chain layer, on top of the walk's own (the
-        label rule reads each ancestor's manifest for its title), plus one
-        `load_settings()` read for the seed (#746). Both `current_project()` and
-        `ai_policy()` pay it per call, and `ai_policy()` is on five AI routes —
-        which already call `load_settings()` themselves. That is the same waste
-        #466 records for `current_project()`'s double walk, one consumer further
-        on; the fix is a memo over the walk, which belongs with #392/#466 and
-        not here.
+        label rule reads each ancestor's manifest for its title), plus one raw
+        config read for the seed (#746 — `default_ai_policy()`, a direct read
+        like `projects_root()`, **not** `load_settings()`: a resolve path must
+        not carry that loader's migration/palette writes). Both
+        `current_project()` and `ai_policy()` pay it per call. That is the same
+        waste #466 records for `current_project()`'s double walk, one consumer
+        further on; the fix is a memo over the walk, which belongs with
+        #392/#466 and not here.
         """
         from app.services import machine_settings as ms_service
 
         resolver = _AIPolicyResolver(
-            self._stated_ai_policy, default=ms_service.load_settings().ai_policy
+            self._stated_ai_policy, default=ms_service.default_ai_policy()
         )
         self.visit_layers(resolver, root)
         return resolver.policy

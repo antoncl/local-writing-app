@@ -5,7 +5,7 @@ import sys
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import yaml
 from pydantic import BaseModel, Field
@@ -224,6 +224,34 @@ def projects_root() -> Path | None:
         return Path(raw).expanduser().resolve()
     except (OSError, ValueError):
         return None
+
+
+def default_ai_policy() -> AIPolicy:
+    """The application-global default AI policy (#746) — the outermost fallback
+    of every project's inheritance chain, resolved when nothing up the chain
+    states one (`_AIPolicyResolver`'s seed).
+
+    **A raw read, not `load_settings()`, for the same reason `projects_root()`
+    is.** This seeds `_resolved_ai_policy`, which runs on every AI route and on
+    `current_project()` (project open) — a read/resolve path. `load_settings()`
+    can *write* (`_migrate_default_models_to_files_if_empty`) and mutate the
+    palette (`_top_up_palette`), and a read path must not be able to write. So
+    read the one field directly, isolated by the config-path redirect like
+    `projects_root()`.
+
+    Fail-closed: unset, unreadable, or out-of-set is `off`
+    (`decisions_ai_permission_fails_closed`)."""
+    path = config_path()
+    if not path.exists():
+        return "off"
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (yaml.YAMLError, OSError, UnicodeDecodeError):
+        return "off"
+    if not isinstance(data, dict):
+        return "off"
+    value = data.get("ai_policy")
+    return value if value in get_args(AIPolicy) else "off"
 
 
 def is_within_root(path: Path, root: Path | None) -> bool:

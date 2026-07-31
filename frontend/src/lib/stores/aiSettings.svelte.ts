@@ -77,9 +77,13 @@ class AISettings {
     }
   }
 
-  async save(): Promise<void> {
-    if (!this.isProjectOpen()) return;
-    await this.run(async () => {
+  // Returns whether the persist succeeded, so a caller (the AI Policy modal) can
+  // keep itself open on failure instead of closing as if the save landed — this
+  // is a permission control, so a silent "looked saved but wasn't" is the case
+  // to avoid (decisions_ai_permission_fails_closed). `run` reports the error.
+  async save(): Promise<boolean> {
+    if (!this.isProjectOpen()) return false;
+    return await this.run(async () => {
       const updatedProject = await api.updateProjectSettings({
         ai_policy: this.policy,
       });

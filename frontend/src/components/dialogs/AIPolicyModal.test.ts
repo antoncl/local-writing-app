@@ -18,7 +18,8 @@ const radio = (name: string) =>
 
 beforeEach(() => {
   mock.aiSettings.policy = "off";
-  mock.aiSettings.save.mockClear();
+  mock.aiSettings.save.mockReset();
+  mock.aiSettings.save.mockResolvedValue(true); // persist succeeds by default
 });
 
 describe("AIPolicyModal", () => {
@@ -34,7 +35,7 @@ describe("AIPolicyModal", () => {
     expect(radio("Off").checked).toBe(false);
   });
 
-  it("commits the draft and persists only on Save", async () => {
+  it("commits the draft and persists, then closes, only on a successful Save", async () => {
     const onClose = vi.fn();
     render(AIPolicyModal, { props: { open: true, onClose } });
 
@@ -42,9 +43,22 @@ describe("AIPolicyModal", () => {
     expect(mock.aiSettings.save).not.toHaveBeenCalled(); // radio click alone never persists
 
     await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalledTimes(1)); // closes after persist lands
     expect(mock.aiSettings.policy).toBe("cloud-allowed"); // committed
     expect(mock.aiSettings.save).toHaveBeenCalledTimes(1); // persisted
-    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays open when the save fails — the change isn't silently lost", async () => {
+    mock.aiSettings.save.mockResolvedValue(false); // persist reports failure
+    const onClose = vi.fn();
+    render(AIPolicyModal, { props: { open: true, onClose } });
+
+    await fireEvent.click(radio("Cloud allowed"));
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await vi.waitFor(() => expect(mock.aiSettings.save).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve)); // let the awaited save settle
+    expect(onClose).not.toHaveBeenCalled(); // modal stays open, not a false success
   });
 
   it("discards the draft on Cancel — fails closed", async () => {

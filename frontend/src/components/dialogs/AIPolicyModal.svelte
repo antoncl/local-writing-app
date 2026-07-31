@@ -23,10 +23,12 @@
     wasOpen = open;
   });
 
-  function save(): void {
+  async function save(): Promise<void> {
     aiSettings.policy = draft; // commit the draft, then persist — the one place
-    aiSettings.save(); // AI access is written (fails-closed).
-    onClose();
+    // AI access is written (fails-closed). Close only when the persist landed;
+    // on failure `save` surfaces the error and we stay open so the change isn't
+    // silently lost on a permission control.
+    if (await aiSettings.save()) onClose();
   }
 </script>
 

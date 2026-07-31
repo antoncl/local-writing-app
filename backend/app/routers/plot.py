@@ -1,9 +1,10 @@
-"""Plot-planning routes (ADR-0048 S4a/S4b/S5a): plotlines, cards, the board
-singleton, and templates.
+"""Plot-planning routes (ADR-0048 S4a/S4b/S5a/S7-Slice2): plotlines, cards, the
+board singleton, templates, and template instances.
 
-The board, plotlines, cards, and templates are distinct sub-resources
+The board, plotlines, cards, templates, and instances are distinct sub-resources
 (`/api/plot/board`, `/api/plot/plotlines/...`, `/api/plot/cards/...`,
-`/api/plot/templates/...`) so no entry id can shadow another route.
+`/api/plot/templates/...`, `/api/plot/instances/...`) so no entry id can shadow
+another route.
 """
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ from app.models import (
     CardList,
     CreateCardRequest,
     CreatePlotlineRequest,
+    CreateTemplateInstanceRequest,
     PlotBoard,
     PlotBoardProjection,
     PlotlineEntry,
@@ -25,6 +27,9 @@ from app.models import (
     SavePlotBoardRequest,
     SavePlotlineRequest,
     SavePlotTemplateRequest,
+    SaveTemplateInstanceRequest,
+    TemplateInstanceEntry,
+    TemplateInstanceList,
 )
 from app.runtime import CurrentProject, translate_errors
 
@@ -145,6 +150,14 @@ def fork_plot_template(project: CurrentProject, entry_id: str) -> PlotTemplate:
         return project.fork_plot_template(entry_id)
 
 
+@router.post("/api/plot/templates/{entry_id}/instantiate", response_model=TemplateInstanceEntry)
+def instantiate_plot_template(project: CurrentProject, entry_id: str) -> TemplateInstanceEntry:
+    """Apply a template to this book — snapshot its beats into a new, book-local,
+    specializable instance (ADR-0048 §3)."""
+    with translate_errors():
+        return project.instantiate_plot_template(entry_id)
+
+
 @router.put("/api/plot/templates/{entry_id}", response_model=PlotTemplate)
 def save_plot_template(project: CurrentProject, entry_id: str, request: SavePlotTemplateRequest) -> PlotTemplate:
     with translate_errors():
@@ -155,3 +168,36 @@ def save_plot_template(project: CurrentProject, entry_id: str, request: SavePlot
 def delete_plot_template(project: CurrentProject, entry_id: str) -> PlotTemplateList:
     with translate_errors():
         return project.delete_plot_template(entry_id)
+
+
+@router.get("/api/plot/instances", response_model=TemplateInstanceList)
+def list_template_instances(project: CurrentProject) -> TemplateInstanceList:
+    with translate_errors():
+        return project.list_template_instances()
+
+
+@router.post("/api/plot/instances", response_model=TemplateInstanceEntry)
+def create_template_instance(project: CurrentProject, request: CreateTemplateInstanceRequest) -> TemplateInstanceEntry:
+    """Create an ad-hoc instance — a plot with no template behind it (ADR-0048 §3)."""
+    with translate_errors():
+        return project.create_template_instance(request)
+
+
+@router.get("/api/plot/instances/{entry_id}", response_model=TemplateInstanceEntry)
+def get_template_instance(project: CurrentProject, entry_id: str) -> TemplateInstanceEntry:
+    with translate_errors():
+        return project.read_template_instance(entry_id)
+
+
+@router.put("/api/plot/instances/{entry_id}", response_model=TemplateInstanceEntry)
+def save_template_instance(
+    project: CurrentProject, entry_id: str, request: SaveTemplateInstanceRequest
+) -> TemplateInstanceEntry:
+    with translate_errors():
+        return project.save_template_instance(entry_id, request)
+
+
+@router.delete("/api/plot/instances/{entry_id}", response_model=TemplateInstanceList)
+def delete_template_instance(project: CurrentProject, entry_id: str) -> TemplateInstanceList:
+    with translate_errors():
+        return project.delete_template_instance(entry_id)

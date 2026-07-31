@@ -221,6 +221,35 @@ class RealizeCardRequest(BaseModel):
     parent_id: str | None = None
 
 
+class TemplateInstanceSummary(_PlotFolderSummary):
+    entry_type: str = "plot:template_instance"
+
+
+class TemplateInstanceEntry(_PlotFolderEntry):
+    """A template instance (ADR-0048 §3): the book-local, specialized copy of a
+    template's beat roster — where a generic requirement is made concrete to this
+    book, and where an ad-hoc plot lives. The plotline's / card's third structural
+    twin: a book-local layered `plot/` Node, freely editable. Its `instance_beats`
+    metadata field holds the specialized roster; `source_template_id` /
+    `source_template_name` metadata carry the lineage snapshot ("which arc is
+    this?"). Only the `entry_type` default distinguishes the model — the extra
+    data rides through `metadata` like any field."""
+
+    entry_type: str = "plot:template_instance"
+
+
+class TemplateInstanceList(BaseModel):
+    entries: list[TemplateInstanceSummary] = Field(default_factory=list)
+
+
+class CreateTemplateInstanceRequest(_PlotFolderCreateRequest):
+    entry_type: str = "plot:template_instance"
+
+
+class SaveTemplateInstanceRequest(_PlotFolderSaveRequest):
+    entry_type: str = "plot:template_instance"
+
+
 class PlotBoardPlotline(BaseModel):
     """A plotline as the board sees it (ADR-0048 S7a): a thread — id, title, and
     a colour for its chip/tint. A plotline is NOT a template instance and carries

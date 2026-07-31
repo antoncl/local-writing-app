@@ -932,6 +932,127 @@ class TemplateInstanceHttpTests(_PlotTestCase):
         )
 
 
+class BeatIdentityTests(_PlotTestCase):
+    """ADR-0048 S7 Slice 3a (#779): every beat carries a stable, list-unique `id`.
+
+    A card→beat link (Slice 3b) points at the composite *(instance node id, beat
+    id)*, so a beat's id must be present and unique within its own list. The write
+    path mints one where it is missing (`beat_<sha256(title+salt)[:12]>`) and
+    re-salts a within-list collision. It is auto-fill only — a blank beat still
+    saves, matching the sparse-spec principle — and stable once minted, so 3b's
+    links survive edits. Both write surfaces are covered: the template `beats`
+    field and the instance `instance_beats` field.
+    """
+
+    def _fork(self) -> dict:
+        return self.client.post(f"/api/plot/templates/{_THREE_ACT}/fork").json()
+
+    def _save_template_beats(self, clone: dict, beats: list[dict]) -> dict:
+        saved = self.client.put(
+            f"/api/plot/templates/{clone['id']}",
+            json={
+                "title": clone["title"],
+                "body": clone["body"],
+                "template": clone["template"],
+                "metadata": {"beats": beats},
+                "base_revision": clone["revision"],
+            },
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        return self.client.get(f"/api/plot/templates/{clone['id']}").json()
+
+    def test_a_new_beat_without_an_id_is_minted(self) -> None:
+        clone = self._fork()
+        beats = clone["metadata"]["beats"] + [{"title": "A fresh beat", "function": "Does a thing."}]
+        got = self._save_template_beats(clone, beats)["metadata"]["beats"]
+        self.assertEqual(len(got), 8)
+        self.assertEqual(got[0]["id"], "setup_pressure")  # pre-existing human id untouched
+        self.assertTrue(got[-1]["id"].startswith("beat_"))  # the appended beat gained a minted id
+        self.assertGreater(len(got[-1]["id"]), len("beat_"))
+
+    def test_two_same_title_beats_get_distinct_ids(self) -> None:
+        # Salt, not title, guarantees uniqueness: identically-named beats diverge.
+        clone = self._fork()
+        got = self._save_template_beats(clone, [{"title": "Twist"}, {"title": "Twist"}])["metadata"]["beats"]
+        self.assertEqual(len(got), 2)
+        self.assertTrue(all(b["id"].startswith("beat_") for b in got))
+        self.assertNotEqual(got[0]["id"], got[1]["id"])
+
+    def test_a_blank_beat_saves_and_gains_an_id(self) -> None:
+        # No `required` gate: an empty beat (no title, no id) must not block the
+        # write — it simply saves and is minted an id (sparse-spec principle).
+        clone = self._fork()
+        got = self._save_template_beats(clone, [{}])["metadata"]["beats"]
+        self.assertEqual(len(got), 1)
+        self.assertTrue(got[0]["id"].startswith("beat_"))
+
+    def test_a_minted_id_survives_a_retitle(self) -> None:
+        # Minted once, then persisted: renaming a beat never changes its id, so a
+        # 3b link to it survives the edit.
+        clone = self._fork()
+        first = self._save_template_beats(clone, [{"title": "Original"}])
+        minted = first["metadata"]["beats"][0]["id"]
+        self.assertTrue(minted.startswith("beat_"))
+        retitled = self._save_template_beats(
+            {**clone, "revision": first["revision"]},
+            [{"id": minted, "title": "Renamed"}],
+        )["metadata"]["beats"]
+        self.assertEqual(retitled[0]["id"], minted)
+        self.assertEqual(retitled[0]["title"], "Renamed")
+
+    def test_a_within_list_id_collision_is_resalted(self) -> None:
+        # Copy-pasting a beat carries its id along; the second occurrence is
+        # re-minted so the two stay distinct — never rejected.
+        clone = self._fork()
+        got = self._save_template_beats(
+            clone, [{"id": "dup", "title": "A"}, {"id": "dup", "title": "B"}]
+        )["metadata"]["beats"]
+        ids = [b["id"] for b in got]
+        self.assertEqual(len(set(ids)), 2)
+        self.assertEqual(ids.count("dup"), 1)  # the first kept it; the clash re-salted
+
+    def test_ad_hoc_instance_beats_are_minted(self) -> None:
+        # The instance `instance_beats` write path is hooked too, not only the
+        # template `beats` path — an ad-hoc instance's hand-authored beats get ids.
+        instance = self.client.post("/api/plot/instances", json={"title": "Custom"}).json()
+        saved = self.client.put(
+            f"/api/plot/instances/{instance['id']}",
+            json={
+                "title": "Custom",
+                "body": "",
+                "metadata": {"instance_beats": [{"title": "Spark"}, {"title": "Spark"}]},
+                "base_revision": instance["revision"],
+            },
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        got = self.client.get(f"/api/plot/instances/{instance['id']}").json()["metadata"]["instance_beats"]
+        self.assertTrue(all(b["id"].startswith("beat_") for b in got))
+        self.assertNotEqual(got[0]["id"], got[1]["id"])
+
+    def test_instantiate_keeps_copied_ids_and_mints_added_beats(self) -> None:
+        # Provenance + growth: instantiate copies the template's beat ids verbatim
+        # (already list-unique), and a beat added afterwards is minted a fresh id
+        # while the copied ones stay put.
+        instance = self.client.post(f"/api/plot/templates/{_THREE_ACT}/instantiate").json()
+        beats = instance["metadata"]["instance_beats"]
+        self.assertEqual(beats[0]["id"], "setup_pressure")  # copied verbatim
+        beats = [*beats, {"title": "An added beat"}]
+        saved = self.client.put(
+            f"/api/plot/instances/{instance['id']}",
+            json={
+                "title": instance["title"],
+                "body": "",
+                "metadata": {**instance["metadata"], "instance_beats": beats},
+                "base_revision": instance["revision"],
+            },
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        got = self.client.get(f"/api/plot/instances/{instance['id']}").json()["metadata"]["instance_beats"]
+        self.assertEqual(len(got), 8)
+        self.assertEqual(got[0]["id"], "setup_pressure")  # copied id untouched
+        self.assertTrue(got[-1]["id"].startswith("beat_"))  # added beat minted
+
+
 class PlotKindRegistrationTests(_PlotTestCase):
     def test_plot_family_registered_and_reference_bearing(self) -> None:
         self.assertIn("plot", {family.kind for family in NODE_FAMILIES})

@@ -122,13 +122,14 @@
 
 <div class="entry-revision-review" bind:this={rootEl}>
   <div class="review-bar">
-    <span class="review-hint">
-      {#if hasProse}
-        Proposed revision — read each version whole, or click the <span class="was-swatch">dotted</span> wording to adopt it.
-      {:else}
-        Proposed revision — adopt the field changes in the details panel.
-      {/if}
-    </span>
+    <!-- A compact label, not a paragraph: the how-to rides the hover title so it
+         costs no permanent space (#710 review — screen real estate is scarce). -->
+    <span
+      class="review-hint"
+      title={hasProse
+        ? "Read a whole version with Current / Proposed / Both (A / S / B), or click the dotted wording to adopt one part."
+        : "Adopt the proposed field changes in the details panel."}
+      >Proposed revision</span>
     {#if hasProse}
       <!-- The judge axis: read the current entry or the AI's version whole,
            before deciding (#710). Same control the snapshot compare uses. -->
@@ -189,10 +190,6 @@
     flex: 1;
     font-size: var(--fs-sm);
     color: var(--text-2);
-  }
-  .was-swatch {
-    color: var(--diff-was);
-    font-weight: 600;
   }
   .review-actions {
     display: flex;

@@ -174,16 +174,26 @@ describe("readBoardPositions", () => {
       readBoardPositions({ positions: { bad: { x: "no" }, ok: { x: 1, y: 2 } } } as unknown as Record<string, unknown>),
     ).toEqual({ ok: { x: 1, y: 2 } });
   });
+
+  it("rejects non-finite coordinates (NaN/Infinity can't be placed by SvelteFlow)", () => {
+    expect(
+      readBoardPositions({
+        positions: { nan: { x: NaN, y: 0 }, inf: { x: 1, y: Infinity }, ok: { x: 3, y: 4 } },
+      } as unknown as Record<string, unknown>),
+    ).toEqual({ ok: { x: 3, y: 4 } });
+  });
 });
 
 describe("cardPositionsFromNodes", () => {
-  it("serializes only card positions, rounded, excluding lane headers", () => {
+  it("serializes only card positions raw (unrounded), excluding lane headers", () => {
     const nodes = buildBoardNodes(
       projection({ plotlines: [line("plot_a", "A")], cards: [card("c1", { plotline: "plot_a" })] }),
       { c1: { x: 12.4, y: 7.6 } },
     );
     const positions = cardPositionsFromNodes(nodes);
-    expect(positions).toEqual({ c1: { x: 12, y: 8 } });
+    // Raw, not rounded — the persist threshold must match moveNodesCommand's raw
+    // drag record, else a sub-pixel move records an undo step that saves nothing.
+    expect(positions).toEqual({ c1: { x: 12.4, y: 7.6 } });
     // No `lane:plot_a` key — lane headers are derived, never stored.
     expect(Object.keys(positions)).toEqual(["c1"]);
   });

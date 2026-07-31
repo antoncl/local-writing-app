@@ -137,18 +137,22 @@ export function readBoardPositions(layout: Record<string, unknown>): Record<stri
   if (!positions || typeof positions !== "object") return {};
   const out: Record<string, BoardXY> = {};
   for (const [id, p] of Object.entries(positions)) {
-    if (p && typeof p.x === "number" && typeof p.y === "number") out[id] = { x: p.x, y: p.y };
+    // Number.isFinite (not typeof === "number", which admits NaN/Infinity): a
+    // non-finite coordinate can't be placed by SvelteFlow, and the board must render.
+    if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) out[id] = { x: p.x, y: p.y };
   }
   return out;
 }
 
-// Serialize the current card positions for persistence (S7c). Only plotCard
-// nodes — lane headers are derived (fixed) and never stored. Rounded to whole px
-// so sub-pixel drag jitter doesn't churn the saved layout.
+// Serialize the current card positions for persistence (S7c). Only plotCard nodes —
+// lane headers are derived (fixed) and never stored. Positions are stored raw (not
+// rounded) so the persist threshold matches moveNodesCommand's raw-inequality drag
+// record: rounding here would let a sub-pixel drag record an undo step that saved
+// nothing, so a later Ctrl+Z would reverse an invisible move.
 export function cardPositionsFromNodes(nodes: PlotBoardNode[]): Record<string, BoardXY> {
   const out: Record<string, BoardXY> = {};
   for (const n of nodes) {
-    if (n.type === "plotCard") out[n.id] = { x: Math.round(n.position.x), y: Math.round(n.position.y) };
+    if (n.type === "plotCard") out[n.id] = { x: n.position.x, y: n.position.y };
   }
   return out;
 }

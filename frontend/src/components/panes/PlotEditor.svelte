@@ -14,6 +14,7 @@
   bit lives outside it and the custom nodes carry their own mount tests.
 -->
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import "@xyflow/svelte/dist/style.css";
   import { SvelteFlow, Controls, type ColorMode, type Edge } from "@xyflow/svelte";
   import { themePreference } from "@/lib/utils/theme";
@@ -50,6 +51,11 @@
   // True while a card is dragging, so the debounce waits for release (one save
   // per gesture), mirroring ViewBodyView's autosave.
   let dragging = $state(false);
+  // The board id currently hydrated into flowNodes — a plain (non-reactive) local.
+  // The rehydrate effect compares the incoming projection's board_id against it so a
+  // refetch of the SAME document (re-opening the menu) doesn't rebuild the canvas and
+  // discard an in-progress edit; only a genuinely different board re-hydrates.
+  let loadedBoardId = "";
 
   // The board's undo history (ADR-0050): the shared caretaker via GraphUndoController,
   // its own instance per §3, replaying through a port over our rune arrays. In S7c
@@ -69,36 +75,57 @@
   // Empty = the singleton exists but holds no plotlines and no cards yet.
   let isEmpty = $derived(!!projection && projection.plotlines.length === 0 && projection.cards.length === 0);
 
-  // (Re)hydrate from a fetched projection: fresh document → fresh nodes, revision,
-  // save-guard, and a cleared history (§3: undo never crosses documents). Runs ONLY
-  // when the projection prop itself changes (open / reopen) — a layout save does not
-  // update the store, so our own saves never re-enter here and rebuild the canvas
-  // from under an edit. $effect.PRE so the nodes are present before <SvelteFlow>
-  // mounts (projection null→set), matching S7b.
+  // (Re)hydrate from a fetched projection. Guarded on board_id so it fires once per
+  // DOCUMENT, not per projection reference: a layout save doesn't touch the store, but
+  // the opener / PlotBoardPane can re-set an equal projection, and rebuilding then
+  // would discard an in-progress edit and reset undo. The snapshot reads the LOCAL
+  // built array, never the reactive `flowNodes` — reading flowNodes back would
+  // subscribe this effect to xyflow's in-place position mutations, so every drag would
+  // re-run it and snap the card back. $effect.PRE so nodes are present before
+  // <SvelteFlow> mounts (projection null→set).
   $effect.pre(() => {
     if (!projection) {
+      loadedBoardId = "";
       flowNodes = [];
+      dragging = false;
       return;
     }
+    if (projection.board_id === loadedBoardId) return;
+    loadedBoardId = projection.board_id;
     const saved = readBoardPositions(projection.layout);
-    flowNodes = buildBoardNodes(projection, saved);
+    const nodes = buildBoardNodes(projection, saved);
+    flowNodes = nodes;
     revision = projection.board_revision;
-    // Snapshot exactly what we rendered (derived + overrides) so a never-touched
-    // board doesn't save on open — only a drag / undo diverges from this.
-    lastSavedPositions = JSON.stringify(cardPositionsFromNodes(flowNodes));
+    // Snapshot from the local `nodes` (not reactive flowNodes) so a never-touched
+    // board doesn't save on open and this effect stays subscribed to `projection` only.
+    lastSavedPositions = JSON.stringify(cardPositionsFromNodes(nodes));
+    dragging = false;
     undoCtl.reset();
   });
 
-  // Autosave the layout: watch card positions, skip while dragging and when nothing
-  // changed, else debounce a PUT. Undo/redo mutate the same positions, so they
-  // persist through this path too — no separate save. A load matches the snapshot,
-  // so it never triggers a write.
+  // Autosave the layout: skip while dragging (coalesce the gesture) and when nothing
+  // changed, else debounce a PUT. The projection/dragging guard runs FIRST so a drag
+  // doesn't re-serialize the whole board every frame (ViewBodyView's pattern). Undo/
+  // redo mutate the same positions and persist through here too — no separate save; a
+  // load matches the snapshot, so it never writes.
   $effect(() => {
+    if (!projection || dragging) return;
     const positions = cardPositionsFromNodes(flowNodes);
     const serialized = JSON.stringify(positions);
-    if (!projection || dragging || serialized === lastSavedPositions) return;
+    if (serialized === lastSavedPositions) return;
     const handle = setTimeout(() => void persist(positions, serialized), SAVE_DEBOUNCE_MS);
     return () => clearTimeout(handle);
+  });
+
+  // Flush a pending (debounced) layout change when the pane unmounts, so closing the
+  // board right after a drag doesn't lose it. Best-effort: the PUT is fired, not
+  // awaited (the fetch outlives the component). Project-switch / reload flushing is
+  // the deferred save-state machine (#756).
+  onDestroy(() => {
+    if (!projection || dragging) return;
+    const positions = cardPositionsFromNodes(flowNodes);
+    const serialized = JSON.stringify(positions);
+    if (serialized !== lastSavedPositions) void persist(positions, serialized);
   });
 
   async function persist(positions: Record<string, BoardXY>, serialized: string): Promise<void> {
@@ -106,8 +133,8 @@
       revision = await savePlotBoardLayout({ positions }, revision);
       lastSavedPositions = serialized;
     } catch {
-      // Leave the guard unadvanced so the next change retries. A surfaced
-      // load/error state machine is #756.
+      // Leave the guard unadvanced so the next change retries. The surfaced
+      // load/error state machine (409 rebase, in-flight guard) is #756.
     }
   }
 </script>

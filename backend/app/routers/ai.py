@@ -33,8 +33,6 @@ from app.models import (
     PreviewContentBlock,
     PreviewErrorInfo,
     PreviewMessage,
-    ProjectCostChatRow,
-    ProjectCostResponse,
     SaveChatSessionRequest,
     ValidateEntryDraftRequest,
     ValidateEntryPatchRequest,
@@ -973,24 +971,6 @@ async def ai_generate_stream(project: CurrentProject, request: AIGenerateRequest
             descriptor=descriptor,
         ),
         media_type="application/x-ndjson",
-    )
-
-
-@router.get("/api/ai/project-cost", response_model=ProjectCostResponse)
-def ai_project_cost(project: CurrentProject) -> ProjectCostResponse:
-    """Sum of per-chat cost_usd_total across the current project."""
-    with translate_errors():
-        result = project.compute_project_cost()
-    return ProjectCostResponse(
-        total_usd=float(result.get("total_usd", 0.0) or 0.0),
-        chats=[
-            ProjectCostChatRow(
-                id=str(row.get("id", "")),
-                title=str(row.get("title", "")),
-                cost_usd=float(row.get("cost_usd", 0.0) or 0.0),
-            )
-            for row in result.get("chats", [])
-        ],
     )
 
 

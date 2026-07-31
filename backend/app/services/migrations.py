@@ -59,7 +59,7 @@ def _move_chat_costs_to_invocation_log(root: Path) -> None:
     (Phase C2 Slice B). Each chat with a non-zero cost_usd_total
     contributes one summary row to the log (chat_session_id, scene_id,
     cost_usd, ts), and cost_usd_total is zeroed in the chat YAML.
-    compute_project_cost reads only the log post-migration."""
+    Cost surfaces re-derive from the log post-migration."""
     chats_dir = root / "chats"
     if not chats_dir.exists():
         return

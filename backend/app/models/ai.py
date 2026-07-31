@@ -365,20 +365,6 @@ class AIContextPresetResponse(BaseModel):
     content: str
 
 
-class ProjectCostChatRow(BaseModel):
-    id: str
-    title: str
-    cost_usd: float
-
-
-class ProjectCostResponse(BaseModel):
-    """V2: sum of chat session costs in the current project. Frontend
-    converts to EUR for display (see decisions_currency_display)."""
-
-    total_usd: float
-    chats: list[ProjectCostChatRow] = Field(default_factory=list)
-
-
 # --- Persistent chat sessions (Phase 3) ---
 
 

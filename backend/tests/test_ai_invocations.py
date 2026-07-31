@@ -275,7 +275,7 @@ class CrossKindCostDispatchTests(unittest.TestCase):
 class ChatSessionCostViaLogTests(unittest.TestCase):
     """Phase C2 Slice B. Chat-session cost is no longer accumulated on
     the chat YAML — each non-zero save delta lands as an ai_invocations
-    row tagged with chat_session_id. compute_project_cost reads the log.
+    row tagged with chat_session_id; cost_usd_total re-derives from the log.
     """
 
     def setUp(self) -> None:
@@ -328,24 +328,6 @@ class ChatSessionCostViaLogTests(unittest.TestCase):
         chat = self.service.read_chat_session(chat_id)
         # cost_usd_total is re-derived on every read; YAML value stays 0.
         self.assertAlmostEqual(chat.cost_usd_total, 0.30, places=6)
-
-    def test_project_cost_groups_by_chat_and_buckets_accepts(self) -> None:
-        chat_id = self._create_chat("My Chat")
-        self._save_with_cost(chat_id, 0.40)
-        # An accept-flow row with no chat_session_id falls into "_other".
-        self.client.post(
-            "/api/ai/invocations",
-            json={"scene_id": "scene_x", "cost_usd": 0.25},
-        )
-        response = self.client.get("/api/ai/project-cost")
-        body = response.json()
-        self.assertAlmostEqual(body["total_usd"], 0.65, places=6)
-        rows = {row["id"]: row for row in body["chats"]}
-        self.assertIn(chat_id, rows)
-        self.assertAlmostEqual(rows[chat_id]["cost_usd"], 0.40, places=6)
-        self.assertEqual(rows[chat_id]["title"], "My Chat")
-        self.assertIn("_other", rows)
-        self.assertAlmostEqual(rows["_other"]["cost_usd"], 0.25, places=6)
 
 
 if __name__ == "__main__":

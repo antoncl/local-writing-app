@@ -9,6 +9,7 @@
 // Imported here so `EditableDocument` can name PlotTemplate; also re-exported
 // below so `@/lib/types` stays the single barrel.
 import type { PlotTemplate } from "./plotTemplateTypes";
+import type { CardEntry } from "./plotCardTypes";
 
 export type PanelId = string;
 
@@ -131,11 +132,9 @@ export type ResearchNote = {
   source_layer_label?: string;
 };
 
-export type EditableDocument = Scene | LoreEntry | PromptEntry | AssistantEntry | ResearchNote | ViewNode | PlotTemplate;
+export type EditableDocument = Scene | LoreEntry | PromptEntry | AssistantEntry | ResearchNote | ViewNode | PlotTemplate | CardEntry;
 
-// Document-kind discriminator shared across editor components. Broader than
-// MetadataSchema.entry_types[*].kind: includes the synthetic shapes the
-// editor handles directly (chat / snippet / structure_node).
+// Document-kind discriminator: schema kinds plus synthetic editor shapes (chat / snippet / structure_node / plot_card).
 export type DocumentKind =
   | "scene"
   | "lore"
@@ -147,6 +146,7 @@ export type DocumentKind =
   | "project"
   | "structure_node"
   | "plot_template"
+  | "plot_card"
   | "view";
 
 export type LoreEntryList = {

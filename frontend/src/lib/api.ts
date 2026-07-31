@@ -945,12 +945,12 @@ export const api = {
       body: JSON.stringify({ title }),
     });
   },
-  saveCard(entry: CardEntry) {
+  saveCard(entry: CardEntry, body: string) {
     return request<CardEntry>(`/plot/cards/${entry.id}`, {
       method: "PUT",
       body: JSON.stringify({
         title: entry.title,
-        body: entry.body,
+        body,
         metadata: entry.metadata,
         base_revision: entry.revision,
       }),

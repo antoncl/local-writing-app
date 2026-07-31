@@ -57,10 +57,11 @@ export async function seedCardsFromManuscript(): Promise<void> {
   await refreshPlotBoard();
 }
 
-// Attach: bind the card to an existing scene by id.
+// Attach: bind the card to an existing scene by id. The body is unchanged — pass
+// the card's own body so the save round-trips the synopsis verbatim.
 export async function attachCardScene(cardId: string, sceneId: string): Promise<void> {
   const card = await api.getCard(cardId);
-  await api.saveCard({ ...card, metadata: { ...card.metadata, scene: sceneId } });
+  await api.saveCard({ ...card, metadata: { ...card.metadata, scene: sceneId } }, card.body);
   await refreshPlotBoard();
 }
 
@@ -69,7 +70,7 @@ export async function detachCardScene(cardId: string): Promise<void> {
   const card = await api.getCard(cardId);
   const metadata = { ...card.metadata };
   delete metadata.scene;
-  await api.saveCard({ ...card, metadata });
+  await api.saveCard({ ...card, metadata }, card.body);
   await refreshPlotBoard();
 }
 

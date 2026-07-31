@@ -933,17 +933,10 @@ export const api = {
   // the endpoint path is the only family discriminator (the backend enforces an
   // is_a family guard on each). Attach/detach have no endpoint of their own — they
   // are a saveCard that sets / clears the `scene` ref in `metadata` (ADR §1).
-  listCards() {
-    return request<CardList>("/plot/cards");
-  },
+  // (list/create card endpoints exist backend-side; add the client methods when a
+  // caller needs them — seed covers bulk create, the board reads via the projection.)
   getCard(entryId: string) {
     return request<CardEntry>(`/plot/cards/${entryId}`);
-  },
-  createCard(title: string) {
-    return request<CardEntry>("/plot/cards", {
-      method: "POST",
-      body: JSON.stringify({ title }),
-    });
   },
   saveCard(entry: CardEntry, body: string) {
     return request<CardEntry>(`/plot/cards/${entry.id}`, {

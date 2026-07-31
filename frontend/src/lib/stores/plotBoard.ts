@@ -9,7 +9,7 @@
 
 import { writable } from "svelte/store";
 import { api } from "@/lib/api";
-import type { PlotBoardLayout, PlotBoardProjection } from "@/lib/types";
+import type { CardEntry, PlotBoardLayout, PlotBoardProjection } from "@/lib/types";
 
 export const plotBoardStore = writable<PlotBoardProjection | null>(null);
 
@@ -57,14 +57,6 @@ export async function seedCardsFromManuscript(): Promise<void> {
   await refreshPlotBoard();
 }
 
-// Attach: bind the card to an existing scene by id. The body is unchanged — pass
-// the card's own body so the save round-trips the synopsis verbatim.
-export async function attachCardScene(cardId: string, sceneId: string): Promise<void> {
-  const card = await api.getCard(cardId);
-  await api.saveCard({ ...card, metadata: { ...card.metadata, scene: sceneId } }, card.body);
-  await refreshPlotBoard();
-}
-
 // Save an in-place synopsis edit — the synopsis IS the card body. Fetch first so
 // the save carries the card's live revision + metadata unchanged.
 export async function saveCardSynopsis(cardId: string, synopsis: string): Promise<void> {
@@ -73,25 +65,33 @@ export async function saveCardSynopsis(cardId: string, synopsis: string): Promis
   await refreshPlotBoard();
 }
 
-// Reassign the card's plotline ("" clears it → the Unassigned lane). The refetched
-// projection changes the board's data-key, so the board rebuilds and an un-pinned
-// card reflows into the new lane (a pinned one keeps its spot — S7d reflow).
-export async function reassignCardPlotline(cardId: string, plotlineId: string): Promise<void> {
+// The single get → mutate a clone of the card's metadata → save (body unchanged) →
+// refetch path the metadata-ref content ops share (detach, reassign — and attach
+// once a board affordance wires it). saveCard replaces metadata wholesale, so the
+// mutator adds/removes keys on a copy.
+async function mutateCardMetadata(cardId: string, mutate: (metadata: CardEntry["metadata"]) => void): Promise<void> {
   const card = await api.getCard(cardId);
   const metadata = { ...card.metadata };
-  if (plotlineId) metadata.plotline = plotlineId;
-  else delete metadata.plotline;
+  mutate(metadata);
   await api.saveCard({ ...card, metadata }, card.body);
   await refreshPlotBoard();
 }
 
+// Reassign the card's plotline ("" clears it → the Unassigned lane). The refetched
+// projection changes the board's data-key, so the board rebuilds and an un-pinned
+// card reflows into the new lane (a pinned one keeps its spot — S7d reflow).
+export function reassignCardPlotline(cardId: string, plotlineId: string): Promise<void> {
+  return mutateCardMetadata(cardId, (metadata) => {
+    if (plotlineId) metadata.plotline = plotlineId;
+    else delete metadata.plotline;
+  });
+}
+
 // Detach: clear the card's scene ref (drop the key — the save replaces metadata).
-export async function detachCardScene(cardId: string): Promise<void> {
-  const card = await api.getCard(cardId);
-  const metadata = { ...card.metadata };
-  delete metadata.scene;
-  await api.saveCard({ ...card, metadata }, card.body);
-  await refreshPlotBoard();
+export function detachCardScene(cardId: string): Promise<void> {
+  return mutateCardMetadata(cardId, (metadata) => {
+    delete metadata.scene;
+  });
 }
 
 // Drop the previous project's board so it can't flash on the next project's pane

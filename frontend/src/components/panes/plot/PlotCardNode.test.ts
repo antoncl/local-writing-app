@@ -105,6 +105,28 @@ describe("PlotCardNode — content-op menu (S7d)", () => {
     expect(acts.onEditSynopsis).toHaveBeenCalledWith("card_3", "new synopsis");
   });
 
+  it("does not re-save an unchanged synopsis whose body has a trailing newline", async () => {
+    // The projection synopsis is the raw body, stored with a trailing "\n"; a blur
+    // with no edit must not fire a save (it would churn forever otherwise).
+    const acts = actions();
+    renderWithActions({ synopsis: "unchanged\n" }, acts, "card_6");
+    await fireEvent.click(screen.getByRole("button", { name: "unchanged" }));
+    const box = screen.getByPlaceholderText("Add a synopsis…") as HTMLTextAreaElement;
+    await fireEvent.blur(box);
+    expect(acts.onEditSynopsis).not.toHaveBeenCalled();
+  });
+
+  it("Escape cancels the synopsis edit without committing", async () => {
+    const acts = actions();
+    renderWithActions({ synopsis: "keep me" }, acts, "card_7");
+    await fireEvent.click(screen.getByRole("button", { name: "keep me" }));
+    const box = screen.getByPlaceholderText("Add a synopsis…") as HTMLTextAreaElement;
+    await fireEvent.input(box, { target: { value: "discard this" } });
+    await fireEvent.keyDown(box, { key: "Escape" });
+    await fireEvent.blur(box);
+    expect(acts.onEditSynopsis).not.toHaveBeenCalled();
+  });
+
   it("reassigns the plotline from the Set-plotline submenu", async () => {
     const acts = actions([
       { id: "pl_a", title: "Main plot", color: null },

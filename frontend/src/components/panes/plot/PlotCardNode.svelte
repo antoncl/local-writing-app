@@ -81,7 +81,16 @@
   function commitEdit() {
     editing = false;
     const next = draft.trim();
-    if (actions && id && next !== data.synopsis) actions.onEditSynopsis(id, next);
+    // Compare against the TRIMMED body: the projection's synopsis is the raw card
+    // body, which the backend stores with a trailing newline, so a plain `!==` would
+    // treat every no-op open/close as a change and re-save forever.
+    if (actions && id && next !== data.synopsis.trim()) actions.onEditSynopsis(id, next);
+  }
+  // Escape cancels: reset the draft to the saved body, so the blur that fires when
+  // the textarea unmounts commits nothing (next === the saved value).
+  function cancelEdit() {
+    draft = data.synopsis;
+    editing = false;
   }
 </script>
 
@@ -111,9 +120,7 @@
         placeholder="Add a synopsis…"
         onblur={commitEdit}
         onkeydown={(e) => {
-          if (e.key === "Escape") {
-            editing = false;
-          }
+          if (e.key === "Escape") cancelEdit();
         }}
       ></textarea>
     {:else if actions}

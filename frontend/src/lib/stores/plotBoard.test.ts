@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { get } from "svelte/store";
 import { api } from "@/lib/api";
 import {
-  attachCardScene,
   clearPlotBoard,
   detachCardScene,
   plotBoardStore,
@@ -108,15 +107,6 @@ describe("card content ops", () => {
     await seedCardsFromManuscript();
     expect(seed).toHaveBeenCalledTimes(1);
     expect(refresh).toHaveBeenCalledTimes(1);
-  });
-
-  it("attachCardScene saves the card with the scene ref set", async () => {
-    vi.spyOn(api, "getCard").mockResolvedValue(card({ plotline: "p1" }));
-    const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
-    vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
-    await attachCardScene("c1", "scene9");
-    expect(save).toHaveBeenCalledTimes(1);
-    expect(save.mock.calls[0][0].metadata).toEqual({ plotline: "p1", scene: "scene9" });
   });
 
   it("detachCardScene saves the card with the scene ref dropped", async () => {

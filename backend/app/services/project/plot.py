@@ -43,6 +43,9 @@ from app.models import (
     CreatePlotlineRequest,
     CreateSceneRequest,
     PlotBoard,
+    PlotBoardCard,
+    PlotBoardPlotline,
+    PlotBoardProjection,
     PlotlineEntry,
     PlotlineList,
     PlotlineSummary,
@@ -546,6 +549,42 @@ class PlotMixin:
             allow_unicode=True,
         ).strip()
         self._atomic_write(path, f"---\n{front_matter}\n---\n")
+
+    def read_plot_board_projection(self) -> PlotBoardProjection:
+        """The board's render model in one read (ADR-0048 S7a): the plotlines, the
+        cards with their plotline/scene refs, and the board's opaque layout.
+        Read-only and computed — card + plotline + board data only, never templates
+        or beats (S8).
+
+        Card refs need no dangling-resolution here: deleting a scene or a plotline
+        purges the referencing cards (delete_scene / delete_plotline →
+        `_purge_references_to`), so a stored ref is always either live or already
+        blanked to "" — the same invariant the unset case relies on. A plain
+        `or None` is the whole of "resolve a ref"; a gone scene projects as an
+        unattached card (ADR §S5), never a dangling pointer.
+        """
+        board = self.read_plot_board()
+        plotlines = [
+            PlotBoardPlotline(id=line.id, title=line.title, color=line.metadata.get("color") or None)
+            for line in self.list_plotlines().entries
+        ]
+        cards = [
+            PlotBoardCard(
+                id=card.id,
+                title=card.title,
+                synopsis=card.body,
+                plotline=card.metadata.get("plotline") or None,
+                scene=card.metadata.get("scene") or None,
+            )
+            for card in self.list_cards().entries
+        ]
+        return PlotBoardProjection(
+            board_id=board.id,
+            board_revision=board.revision,
+            layout=board.layout,
+            plotlines=plotlines,
+            cards=cards,
+        )
 
     # ----- Templates (plot:template) — an ADR-0049 Library tenant ---------
     #

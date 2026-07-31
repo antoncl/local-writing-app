@@ -221,6 +221,47 @@ class RealizeCardRequest(BaseModel):
     parent_id: str | None = None
 
 
+class PlotBoardPlotline(BaseModel):
+    """A plotline as the board sees it (ADR-0048 S7a): a thread — id, title, and
+    a colour for its chip/tint. A plotline is NOT a template instance and carries
+    no beats (ADR §2); the board renders it as a thread, nothing more, so an S8
+    template-instance link can be added later without changing this shape."""
+
+    id: str
+    title: str
+    color: str | None = None
+
+
+class PlotBoardCard(BaseModel):
+    """A card as the board renders it (ADR-0048 S7a): identity, the synopsis (the
+    card body), and the plotline and scene it points at (each None when unset).
+    Deleting a scene or a plotline purges the referencing cards
+    (`delete_scene` / `delete_plotline` → `_purge_references_to`), so a ref here
+    is always either live or already blanked — an attachment is live or gone,
+    never a dangling pointer (ADR §S5). The board renders a gone scene as an
+    unattached card, nothing more."""
+
+    id: str
+    title: str
+    synopsis: str = ""
+    plotline: str | None = None
+    scene: str | None = None
+
+
+class PlotBoardProjection(BaseModel):
+    """The read model the PlotEditor board renders from (ADR-0048 S7a): the
+    plotlines, the cards with their refs, and the board's opaque `layout` payload
+    (card positions / grouping — its shape is the canvas's, S7c). Computed and
+    read-only; defined over card + plotline + board data only, never templates or
+    beats (those arrive in S8)."""
+
+    board_id: str = ""
+    board_revision: str = ""
+    layout: dict[str, Any] = Field(default_factory=dict)
+    plotlines: list[PlotBoardPlotline] = Field(default_factory=list)
+    cards: list[PlotBoardCard] = Field(default_factory=list)
+
+
 class MoveLoreNoteToResearchResponse(BaseModel):
     """Result of POST /api/lore/{id}/move-to-research.
 

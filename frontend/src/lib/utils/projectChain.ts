@@ -1,11 +1,25 @@
 import type { AncestorCandidate, ProjectChainLayer } from "@/lib/types";
 
 /**
- * A crumb's inheritance state — the `is_project` × `inherited` cross the
- * backend now ships on each chain layer (#417 slice 4). Drives how the bar
- * renders it: `declared` solid, `available` dimmed, `stale` flagged.
+ * The one place the `is_project` × `inherited` cross is named (#417 slice 4).
+ * Both the breadcrumb (`declaredChain`) and the declaration editor
+ * (`declarationRows`) read the same two backend booleans, so they must agree on
+ * what a folder IS — deriving the cross twice is exactly the walker-vs-frontend
+ * drift #432 deleted, and both consumers live in this one file. (`DeclarationRowState`
+ * is declared lower; TS type aliases hoist.)
  */
-export type ChainCrumbState = "declared" | "available" | "stale";
+export function inheritanceState(isProject: boolean, inherited: boolean): DeclarationRowState {
+  if (isProject) return inherited ? "declared" : "available";
+  return inherited ? "stale" : "folder";
+}
+
+/**
+ * A crumb's inheritance state (#417 slice 4). The bar can only ever show three
+ * of `inheritanceState`'s four cells: a pure `folder` has no inheritance state,
+ * so the backend omits it and `declaredChain` drops one defensively if it ever
+ * leaks through. `declared` renders solid, `available` dimmed, `stale` flagged.
+ */
+export type ChainCrumbState = Exclude<DeclarationRowState, "folder">;
 
 /** One hop in the breadcrumb. */
 export type ChainCrumb = {
@@ -20,11 +34,6 @@ export type ChainCrumb = {
    */
   navigable: boolean;
 };
-
-function crumbState(layer: ProjectChainLayer): ChainCrumbState {
-  if (layer.is_project) return layer.inherited ? "declared" : "available";
-  return "stale"; // a non-project layer only reaches the chain when inherited
-}
 
 /**
  * The chain, outermost first, as breadcrumb hops (#311, #432; #417 slice 4).
@@ -47,14 +56,17 @@ function crumbState(layer: ProjectChainLayer): ChainCrumbState {
  * which has no inheritance state to show, the backend still omits.
  */
 export function declaredChain(chain: ProjectChainLayer[] | undefined): ChainCrumb[] {
-  return (chain ?? [])
-    .filter((layer) => !layer.is_root)
-    .map((layer) => ({
-      path: layer.path,
-      label: layer.label,
-      state: crumbState(layer),
-      navigable: layer.is_project,
-    }));
+  const crumbs: ChainCrumb[] = [];
+  for (const layer of chain ?? []) {
+    if (layer.is_root) continue;
+    const state = inheritanceState(layer.is_project, layer.inherited);
+    // The backend omits a pure organisational folder from the chain; if one
+    // ever leaks through, drop it here rather than mislabel it `stale` (fail
+    // safe, not fail loud). This also narrows `state` to `ChainCrumbState`.
+    if (state === "folder") continue;
+    crumbs.push({ path: layer.path, label: layer.label, state, navigable: layer.is_project });
+  }
+  return crumbs;
 }
 
 /**
@@ -128,28 +140,25 @@ export function declarationRows(ancestors: AncestorCandidate[] | undefined): Dec
   return (ancestors ?? []).map((row) => {
     const label = row.title?.trim() || row.name;
     const named = label !== row.name ? row.name : null;
-    if (row.is_project) {
-      return {
-        path: row.path,
-        label,
-        detail: named,
-        state: row.inherited ? "declared" : "available",
-        checked: row.inherited,
-        toggleable: true,
-      };
-    }
+    const state = inheritanceState(row.is_project, row.inherited);
     return {
       path: row.path,
       label,
-      // Matches what `declared_ancestor_warnings` says about each case, so the
-      // row and the validation report do not describe the same folder in two
-      // different vocabularies.
-      detail: row.inherited
-        ? "Declared, but no longer a project — it contributes nothing."
-        : "Not a project — nothing to inherit.",
-      state: row.inherited ? "stale" : "folder",
+      // The `stale`/`folder` details match what `declared_ancestor_warnings`
+      // says about each case, so the row and the validation report do not
+      // describe the same folder in two different vocabularies; a project row
+      // shows its folder name only when the title differs.
+      detail:
+        state === "stale"
+          ? "Declared, but no longer a project — it contributes nothing."
+          : state === "folder"
+            ? "Not a project — nothing to inherit."
+            : named,
+      state,
       checked: row.inherited,
-      toggleable: row.inherited,
+      // A pure `folder` is the only state with no gesture; declared/available
+      // tick to add/remove and `stale`'s untick is the repair.
+      toggleable: state !== "folder",
     };
   });
 }

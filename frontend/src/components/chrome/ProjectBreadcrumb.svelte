@@ -64,7 +64,10 @@
   THE NOTE VOCABULARY (#427):
   a `.chain-note` is a quiet, non-navigable statement living inside the strip,
   saying what the crumbs cannot. Exactly ONE state uses it — the empty chain:
-  the note IS the strip, "Inherits from nothing" plus the remedy.
+  the note IS the strip, stating "Inherits from nothing". Since #417 slice 4 it
+  carries no remedy: the note renders only when there is nothing to declare (no
+  ancestor project), so the "edit inheritance" remedy moved onto the POPULATED
+  bar, where there are ancestors to act on. `·` still joins it to that remedy.
 
   #431 asked whether two more states earn a mark: a GAP (a project declaring a
   grandparent and skipping the parent) and a STALE layer (a declared ancestor
@@ -101,34 +104,50 @@
       {#if crumb.navigable}
         <!-- A real ancestor project: click = scope change. `available` (not
              inherited) renders dimmed so a skipped layer is visible; `declared`
-             is the solid default (#417 slice 4). -->
+             is the solid default (#417 slice 4). The dim is presentation only,
+             so the state also rides an sr-only suffix for assistive tech. -->
         <button
           type="button"
           class="crumb"
           class:available={crumb.state === "available"}
           title={crumbTitle(crumb)}
           on:click={() => onOpen(crumb.path)}
-        >{crumb.label}</button>
+        >{crumb.label}{#if crumb.state === "available"}<span class="sr-only"> — not inherited</span>{/if}</button>
       {:else}
         <!-- `stale`: declared but no longer a project, so there is nothing to
              open — a struck, flagged marker rather than a button, its repair in
-             the declaration editor (#417 slice 4, reversing #431). -->
-        <span class="crumb stale" title={crumbTitle(crumb)}>{crumb.label}</span>
+             the declaration editor (#417 slice 4, reversing #431). The struck
+             styling is visual only; sr-only text carries the meaning. -->
+        <span class="crumb stale" title={crumbTitle(crumb)}
+          >{crumb.label}<span class="sr-only"> — declared, but no longer a project</span></span>
       {/if}
     {/each}
+    {#if canDeclare}
+      <!-- The declaration editor's entry point (#417 slice 4). #431's "set up…"
+           lived on the empty note, but the note now renders only when there is
+           nothing to declare (canDeclare false), so the remedy moved here, where
+           there ARE ancestors to edit. Reveals the pane editor for now; slice 4b
+           swaps it for an inline popover. `·` joins a statement to its remedy,
+           never a hop, so it stays disjoint from `›`. -->
+      <span class="note-sep" aria-hidden="true">·</span>
+      <button
+        type="button"
+        class="note-action chain-edit"
+        aria-label="Edit what this project inherits from"
+        title="Edit what this project inherits from"
+        on:click={onSetUpInheritance}>edit…</button>
+    {/if}
   </nav>
 {:else if empty}
   <div class="project-chain">
+    <!-- The genuinely-flat case: no ancestor projects at all, so nothing to
+         declare (canDeclare is always false here — a toggleable ancestor would
+         have produced a crumb above, taking the branch overhead). The remedy
+         lives on the populated bar, not here. -->
     <span
       class="chain-note"
-      title={canDeclare
-        ? "This project declares no ancestors, so it inherits nothing."
-        : "Nothing sits between this project and the projects folder, so there is nothing to inherit from."}
-    >Inherits from nothing{#if canDeclare}<span class="note-sep" aria-hidden="true">·</span><button
-        type="button"
-        class="note-action"
-        aria-label="Set up what this project inherits from"
-        on:click={onSetUpInheritance}>set up…</button>{/if}</span>
+      title="Nothing sits between this project and the projects folder, so there is nothing to inherit from."
+    >Inherits from nothing</span>
   </div>
 {/if}
 
@@ -261,5 +280,12 @@
 
   .project-chain .note-action:hover {
     color: var(--text);
+  }
+
+  /* The "edit inheritance" remedy on the populated bar (#417 slice 4). `flex:
+     none` keeps it from being crushed as the chain yields, the way the crumbs
+     are — it is a fixed remedy, not a hop that scrolls. */
+  .project-chain .chain-edit {
+    flex: none;
   }
 </style>

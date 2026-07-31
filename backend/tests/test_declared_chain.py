@@ -385,6 +385,44 @@ class TheResolvedChainReachesTheWireTests(DeclaredChainTestCase):
             ],
         )
 
+    def test_declared_available_and_stale_render_together_in_walk_order(self) -> None:
+        """All three states in one chain (#417 slice 4). Guards ordering — a
+        stale row kept among live ones must stay outermost-first, not float — and
+        makes `available` unambiguous: alongside a declared (True,True) and a
+        stale (False,True) it can no longer coincide with the leaf default."""
+        make_project_folder(self.service, self.base)  # titleless base project, not declared → available
+        make_project_folder(self.service, self.universe, "The Honorverse")  # declared
+        make_project_folder(self.service, self.series, "Honor Harrington")
+        declare(self.service, self.root, [self.universe, self.series])
+        (self.series / "project.yaml").unlink()  # series → stale
+
+        self.assertEqual(
+            self._chain(),
+            [
+                # available base, labelled by its FOLDER NAME not "Base Folder",
+                # because it is itself a project (the slice-4 sentinel fix).
+                ("writing", "writing", False, True, False),
+                ("The Honorverse", "honorverse", False, True, True),  # declared
+                ("honor-harrington", "honor-harrington", False, False, True),  # stale
+                ("Book 1", "book01", True, True, False),  # leaf
+            ],
+        )
+
+    def test_a_base_folder_that_is_a_project_shows_its_name_not_the_sentinel(self) -> None:
+        """The machine root can now surface as a crumb (#417 slice 4). A titleless
+        base *project* must show its folder name, not the "Base Folder" sentinel —
+        which is reserved for a base that is NOT a project (the helper's own
+        docstring, now enforced)."""
+        make_project_folder(self.service, self.base)  # titleless project AT the machine root
+
+        self.assertEqual(
+            self._chain(),
+            [
+                ("writing", "writing", False, True, False),
+                ("Book 1", "book01", True, True, False),
+            ],
+        )
+
     def test_a_flat_project_is_a_chain_of_one(self) -> None:
         self.assertEqual(self._chain(), [("Book 1", "book01", True, True, False)])
 

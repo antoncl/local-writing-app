@@ -660,7 +660,18 @@ class LayerWalkMixin:
         title = self._readable_project_title(folder)
         if title:
             return title
-        if layer_index == 0 and folder == self._metadata_schema_base_folder(root):
+        # "Base Folder" is the sentinel for the configured root as an
+        # organisational bound — NOT for a project. Before #417 slice 4 the base
+        # only reached the breadcrumb as a declared layer, but the widened chain
+        # now lets it appear as an `available` or `stale` crumb, where a titleless
+        # base *project* would wrongly read "Base Folder" instead of its folder
+        # name (contradicting the stale-label contract). The `not is_project`
+        # guard is what the docstring already promised; it was just unenforced.
+        if (
+            layer_index == 0
+            and folder == self._metadata_schema_base_folder(root)
+            and not (folder / MANIFEST_FILENAME).exists()
+        ):
             return "Base Folder"
         return folder.name
 

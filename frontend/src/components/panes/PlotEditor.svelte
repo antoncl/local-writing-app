@@ -126,8 +126,10 @@
   // Svelte Flow ships light-only chrome; drive its theme from the app's.
   let colorMode = $derived($themePreference as ColorMode);
 
-  // Empty = the singleton exists but holds no plotlines and no cards yet.
-  let isEmpty = $derived(!!projection && projection.plotlines.length === 0 && projection.cards.length === 0);
+  // Empty = the singleton exists but holds no cards yet. The board lays out CARDS
+  // (in their containers); plotlines are only a colour axis and never render alone,
+  // so a board with plotlines but no cards is still an empty canvas — hint, not blank.
+  let isEmpty = $derived(!!projection && projection.cards.length === 0);
 
   // (Re)hydrate from a fetched projection. Guarded on the DATA-key so it fires once
   // per data change, not per projection reference: a layout save doesn't touch the
@@ -229,7 +231,7 @@
       {/if}
     </div>
     {#if isEmpty}
-      <p class="board-hint muted">No plotlines or cards yet. Seed cards from the manuscript, or add a plotline, to begin.</p>
+      <p class="board-hint muted">No cards yet. Seed cards from the manuscript, or add one, to begin.</p>
     {:else}
       <div class="board-canvas">
       <SvelteFlow

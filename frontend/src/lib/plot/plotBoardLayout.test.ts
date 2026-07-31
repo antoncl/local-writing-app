@@ -92,6 +92,31 @@ describe("buildBoardNodes", () => {
     expect(nodes.find((n) => n.id === "container:act")!.position).toEqual({ x: 0, y: 0 });
   });
 
+  it("wraps both a nested chapter box and a direct act-card in the act box", () => {
+    const nodes = buildBoardNodes(
+      projection({
+        containers: [container("act", "Act I"), container("chap", "Chapter 1", "act")],
+        cards: [card("inChap", { container: "chap", scene: "s1" }), card("inAct", { container: "act", scene: "s2" })],
+      }),
+    );
+    expect(containerNodes(nodes).map((n) => n.id)).toEqual(["container:act", "container:chap"]);
+    const act = nodes.find((n) => n.id === "container:act")!;
+    const chap = nodes.find((n) => n.id === "container:chap")!;
+    const inAct = nodes.find((n) => n.id === "inAct")!;
+    const encloses = (outer: (typeof nodes)[number], x: number, y: number, w: number, h: number) =>
+      outer.position.x <= x &&
+      outer.position.y <= y &&
+      x + w <= outer.position.x + outer.width! &&
+      y + h <= outer.position.y + outer.height!;
+    // The act box must enclose BOTH its chapter box and its own direct card (the
+    // rect-union path — neither source may be dropped).
+    expect(encloses(act, chap.position.x, chap.position.y, chap.width!, chap.height!)).toBe(true);
+    expect(encloses(act, inAct.position.x, inAct.position.y, CARD_WIDTH, CARD_HEIGHT)).toBe(true);
+    // The direct card sits below the chapter box, not overlapping it.
+    expect(inAct.position.y).toBeGreaterThanOrEqual(chap.position.y + chap.height!);
+    expect(dataOf(nodes, "container:act")).toMatchObject({ count: 2 });
+  });
+
   it("collapses a middle 'part' container with no direct cards, nesting the chapter under the act", () => {
     const nodes = buildBoardNodes(
       projection({

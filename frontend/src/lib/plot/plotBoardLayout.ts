@@ -142,7 +142,6 @@ export function buildBoardNodes(
   // pinned position then overrides. Acts stack top-to-bottom; within an act, its
   // chapter boxes stack, each a single row of cards, then the act's own direct cards.
   const derived = new Map<string, BoardXY>();
-  const rowWidth = (n: number) => n * CARD_WIDTH + Math.max(0, n - 1) * CARD_GAP_X;
   let actY = 0;
   for (const act of acts) {
     const innerBoxes = innerBoxesByAct.get(act.id) ?? [];
@@ -158,14 +157,17 @@ export function buildBoardNodes(
     }
     directCards.forEach((card, i) => derived.set(card.id, { x: contentX + i * (CARD_WIDTH + CARD_GAP_X), y: cursorY }));
     if (directCards.length) cursorY += CARD_HEIGHT + CONTAINER_GAP;
-    // cursorY overshot by one CONTAINER_GAP past the last child; the act's bottom
-    // pad brings it back to the box edge, then a gap to the next act.
-    actY = cursorY - CONTAINER_GAP + CONTAINER_PAD + CONTAINER_GAP;
+    // Each child already advanced cursorY by a trailing CONTAINER_GAP, which serves
+    // as the gap to the next act; add the act box's own bottom padding on top of it.
+    actY = cursorY + CONTAINER_PAD;
   }
   // Homeless cards: a loose row below every act, outside any box (they float).
   homeless.forEach((card, i) => derived.set(card.id, { x: i * (CARD_WIDTH + CARD_GAP_X), y: actY + CONTAINER_HEADER }));
 
-  const positionOf = (id: string): BoardXY => saved[id] ?? derived.get(id) ?? { x: 0, y: 0 };
+  // Every projection card is assigned a derived slot above (inner-box, direct-act, or
+  // homeless), so `derived.get` is non-null for any real card id — the `!` states that
+  // invariant rather than silently defaulting a missing card to the origin.
+  const positionOf = (id: string): BoardXY => saved[id] ?? derived.get(id)!;
 
   // --- Box geometry from FINAL positions (pins applied), computed inner-first so an
   // act box wraps its chapter boxes and its direct cards.

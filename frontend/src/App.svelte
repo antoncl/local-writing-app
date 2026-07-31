@@ -47,7 +47,7 @@
   } from "@/lib/stores/todos";
   import { knownTagsStore, refreshKnownTags as storeRefreshKnownTags, setKnownTags, tagVocabularyRevision } from "@/lib/stores/tags";
   import { assistantTagsStore, refreshAssistantTags, assistantTagsAsScoped } from "@/lib/stores/assistantTags";
-  import { validationStore, setValidation } from "@/lib/stores/validation";
+  import { validationStore, setValidation, clearValidation } from "@/lib/stores/validation";
   import {
     structureStore,
     researchStructureStore,
@@ -591,6 +591,10 @@
   }
 
   async function validateProject() {
+    // Drop the prior result before re-checking so a run that fails mid-flight
+    // (run() swallows the error) can't leave a stale "looks consistent" on the
+    // modal — `validating` masks the cleared state until a fresh result lands.
+    clearValidation();
     validating = true;
     try {
       await run(async () => {
@@ -604,6 +608,7 @@
   }
 
   async function repairProject() {
+    clearValidation();
     validating = true;
     try {
       await run(async () => {

@@ -47,6 +47,15 @@ describe("ValidateModal", () => {
     expect(screen.queryByRole("button", { name: "Repair TODO Links" })).toBeNull();
   });
 
+  it("disables Repair while a check/repair is in flight", () => {
+    render(ValidateModal, { props: { ...base, validation: withIssues, checking: true } });
+    // Footer stays rendered off the pre-run result, but Repair must not fire a
+    // concurrent repair while checking.
+    expect(
+      (screen.getByRole("button", { name: "Repair TODO Links" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
   it("lists errors and warnings and offers Repair when there are issues", async () => {
     const onRepair = vi.fn();
     render(ValidateModal, { props: { ...base, validation: withIssues, onRepair } });

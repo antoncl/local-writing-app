@@ -64,7 +64,10 @@
     {/if}
     {#snippet actions()}
       {#if hasIssues}
-        <button type="button" onclick={onRepair}>Repair TODO Links</button>
+        <!-- Disabled while a check/repair is in flight so a second click can't
+             fire a concurrent repair POST (the body reads "Checking…" but this
+             stays rendered off the pre-run result). -->
+        <button type="button" onclick={onRepair} disabled={checking}>Repair TODO Links</button>
       {/if}
       <button type="button" class="primary" onclick={onClose}>Close</button>
     {/snippet}

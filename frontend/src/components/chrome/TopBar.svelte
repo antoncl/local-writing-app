@@ -5,6 +5,7 @@
 
   import { tick } from "svelte";
   import ProjectBreadcrumb from "./ProjectBreadcrumb.svelte";
+  import Popover from "./Popover.svelte";
 
   // Null when no project is open — switcher shows "Open a project…".
   export let currentTitle: string | null;
@@ -216,18 +217,6 @@
     onNewProject();
   }
 
-  function handleKeydown(event: KeyboardEvent) {
-    if (event.key !== "Escape") return;
-    if (switcherOpen) {
-      switcherOpen = false;
-      switcherButton?.focus();
-    }
-    if (appMenuOpen) {
-      closeAppMenu();
-      appMenuButton?.focus();
-    }
-  }
-
   function formatRelativeTime(iso: string): string {
     const then = new Date(iso).getTime();
     if (Number.isNaN(then)) return "";
@@ -253,8 +242,6 @@
   }
 </script>
 
-<svelte:window on:keydown={handleKeydown} />
-
 <header class="top-bar">
   <div class="app-menu-wrap">
     <button
@@ -271,11 +258,19 @@
       <span aria-hidden="true">≡</span>
     </button>
 
-    {#if appMenuOpen}
-      <!-- click-outside dismiss -->
-      <div class="switcher-overlay" role="presentation" on:click={closeAppMenu}></div>
-
-      <div class="switcher-menu app-menu-panel" role="menu" aria-label="Application menu">
+    <!-- The single invocation surface (ADR-0047) as a shared `<Popover>` (#766.1),
+         a touch narrower than the switcher since the labels are short. onClose
+         resets the inline "save preset" field on any dismiss. -->
+    <Popover
+      bind:open={appMenuOpen}
+      triggerEl={appMenuButton}
+      role="menu"
+      label="Application menu"
+      minWidth="240px"
+      maxWidth="480px"
+      maxHeight="calc(100vh - 60px)"
+      onClose={resetSaveField}
+    >
         <div class="switcher-section-label">This project</div>
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} on:click={() => runAction(onOpenProjectNode)}>Project</button>
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} on:click={() => runAction(onOpenDetailTypes)}>Detail Types</button>
@@ -353,8 +348,7 @@
           <span class="switcher-icon" aria-hidden="true">⚙</span>
           Settings…
         </button>
-      </div>
-    {/if}
+    </Popover>
   </div>
 
   <span class="wordmark">Local Writer</span>
@@ -385,15 +379,19 @@
       <span class="switcher-label">{currentTitle ?? "Open a project…"}</span>
     </button>
 
-    {#if switcherOpen}
-      <!-- click-outside dismiss -->
-      <div
-        class="switcher-overlay"
-        role="presentation"
-        on:click={closeSwitcher}
-      ></div>
-
-      <div class="switcher-menu" role="menu" aria-label="Project switcher" bind:this={switcherMenuEl}>
+    <!-- The project switcher as a shared `<Popover>` (#766.1). `bind:panel`
+         hands the panel back so the remove-a-recent flow can juggle focus among
+         the ×-buttons after a row unmounts (#423). -->
+    <Popover
+      bind:open={switcherOpen}
+      bind:panel={switcherMenuEl}
+      triggerEl={switcherButton}
+      role="menu"
+      label="Project switcher"
+      minWidth="320px"
+      maxWidth="480px"
+      maxHeight="calc(100vh - 60px)"
+    >
         {#if recentProjects.length > 0}
           <div class="switcher-section-label">Recent</div>
           {#each recentProjects as recent, i (recent.path)}
@@ -436,8 +434,7 @@
           <span class="switcher-icon" aria-hidden="true">✨</span>
           New project…
         </button>
-      </div>
-    {/if}
+    </Popover>
   </div>
 
   <div class="actions">
@@ -549,35 +546,12 @@
      pattern is reserved for label clusters (e.g. .project-color-dot in the
      switcher). */
 
-  .top-bar .switcher-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 99;
-  }
-
-  .top-bar .switcher-menu {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    z-index: 101;
-    min-width: 320px;
-    max-width: 480px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    box-shadow: var(--elev-2);
-    padding: 6px;
-    display: grid;
-    gap: 1px;
-    /* `children` is uncapped, unlike `recentProjects` which the backend caps at
-       RECENT_PROJECTS_MAX. A shelf with many book folders grew this menu past
-       the bottom of the window and took "Open folder…" / "New project…" with
-       it — the app's only entry affordances — with nothing to scroll, since the
-       page behind is a separate scroll container. */
-    max-height: calc(100vh - 60px);
-    overflow-y: auto;
-  }
-
+  /* The switcher/app-menu overlay + panel box are the shared `<Popover>`
+     primitive now (#766.1): the full-viewport catcher, the anchored card, and
+     its `max-height` scroll cap (a shelf of many book folders must not push the
+     "Open folder…" / "New project…" entries off the bottom of the window, with
+     nothing to scroll behind them) all live there, driven by the props the
+     markup passes. Only the panel CONTENTS keep their styles here. */
   .top-bar .switcher-section-label {
     font-size: var(--fs-xs);
     text-transform: uppercase;
@@ -762,12 +736,6 @@
     background: var(--panel);
     border-color: var(--accent-emphasis);
     color: var(--accent-emphasis);
-  }
-
-  /* Anchored under the ≡ at the left edge (switcher-menu defaults to left: 0),
-     a touch narrower than the project switcher since the labels are short. */
-  .top-bar .switcher-menu.app-menu-panel {
-    min-width: 240px;
   }
 
   .top-bar .preset-item {

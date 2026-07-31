@@ -342,22 +342,21 @@ class ProjectLifecycleMixin:
         )
 
     def _project_chain_for_api(self, root: Path) -> list[ProjectChainLayer]:
-        """The resolved chain, straight off the walker (#432).
+        """The breadcrumb chain, straight off the walker (#432; #417 slice 4).
 
-        Deliberately `collect_layers` rather than a filter over the
-        enumeration this method sits next to. The chain's membership rule
-        (`declared and is_project, plus root`) and its naming rule (manifest
-        title, else the "Base Folder" case, else the folder name) both live in
-        `layers.py`, and re-applying either here would recreate exactly the
+        Deliberately `resolved_chain_layers` rather than a filter over the
+        enumeration this method sits next to. That method owns the chain's
+        membership (every ancestor project + stale declaration + the leaf) and
+        its naming (manifest title, else the "Base Folder" case, else the folder
+        name) in `layers.py`; re-applying either here would recreate exactly the
         duplication this exists to delete —
         `decisions_walker_visitor_uniformity`: every hierarchy walk goes
         through the walker, even a one-line one; optimise inside it, never
         bypass it.
 
-        The machine layer is excluded (`include_machine` defaults False): it
-        contributes assistants, carries no `metadata.schema.yaml`, and is not
-        a project anyone can navigate to. `read_metadata_schema_layers` makes
-        the same choice, which is why the two views agree by construction.
+        Since slice 4 the chain carries the ancestors #431 hid (available/stale)
+        with their `is_project`/`inherited` state, so the bar can render the
+        skipped layers dimmed/flagged rather than pretend a legal gap away.
         """
         return [
             ProjectChainLayer(
@@ -365,8 +364,10 @@ class ProjectLifecycleMixin:
                 label=layer.label,
                 path=str(layer.folder),
                 is_root=layer.is_root,
+                is_project=is_project,
+                inherited=inherited,
             )
-            for layer in self.collect_layers(root)
+            for layer, is_project, inherited in self.resolved_chain_layers(root)
         ]
 
     def ai_policy(self) -> AIPolicy:

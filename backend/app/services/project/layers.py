@@ -252,6 +252,45 @@ class LayerWalkMixin:
         ] + [root]
         return self._stamp_project_layers(root, folders)
 
+    def resolved_chain_layers(self, root: Path) -> list[tuple[IndexLayer, bool, bool]]:
+        """The breadcrumb chain: each stamped layer paired with its
+        `(is_project, inherited)` state (#417 slice 4, reversing #431).
+
+        Membership is every ancestor that is a project OR still declared — i.e.
+        `declared` and `available` projects, plus a `stale` declaration
+        (`inherited` but no longer a project) — then the open project as the
+        leaf. A pure organisational folder (neither a project nor declared) is
+        the one thing dropped: it has no inheritance state to render, and the
+        declaration editor is where its "not a project" note belongs.
+
+        This is the reversal of #431, which rendered only the declared subset so
+        the bar could not show a skipped layer. The bar now doubles as the
+        inheritance-state display, so it must carry the `available`/`stale`
+        rows it used to hide — dimmed and flagged respectively.
+
+        Stamping still routes through `_stamp_project_layers` (the id/label/rank
+        authority the schema-layers chain also uses), so the two cannot drift on
+        how a layer is named — the property #432 bought. Only the membership
+        differs, and it lives here in the walker, not in a frontend transcript.
+        The `(is_project, inherited)` pair rides alongside because `IndexLayer`
+        is the node-index structure and has no place for breadcrumb state.
+        """
+        resolved = root.resolve()
+        rows = [
+            (folder, is_project, inherited)
+            for folder, is_project, inherited in self.declared_ancestor_candidates(root)
+            if is_project or inherited
+        ]
+        state = {folder: (is_project, inherited) for folder, is_project, inherited in rows}
+        folders = [folder for folder, _, _ in rows] + [resolved]
+        # The leaf (the open project) is not in `declared_ancestor_candidates`
+        # (you do not inherit from yourself), so it defaults to (project, not
+        # inherited); the bar keys the leaf off `is_root`, not off this pair.
+        return [
+            (layer, *state.get(layer.folder, (True, False)))
+            for layer in self._stamp_project_layers(resolved, folders)
+        ]
+
     def collect_layers(
         self, root: Path, *, include_machine: bool = False, include_library: bool = False
     ) -> list[IndexLayer]:
@@ -621,7 +660,18 @@ class LayerWalkMixin:
         title = self._readable_project_title(folder)
         if title:
             return title
-        if layer_index == 0 and folder == self._metadata_schema_base_folder(root):
+        # "Base Folder" is the sentinel for the configured root as an
+        # organisational bound — NOT for a project. Before #417 slice 4 the base
+        # only reached the breadcrumb as a declared layer, but the widened chain
+        # now lets it appear as an `available` or `stale` crumb, where a titleless
+        # base *project* would wrongly read "Base Folder" instead of its folder
+        # name (contradicting the stale-label contract). The `not is_project`
+        # guard is what the docstring already promised; it was just unenforced.
+        if (
+            layer_index == 0
+            and folder == self._metadata_schema_base_folder(root)
+            and not (folder / MANIFEST_FILENAME).exists()
+        ):
             return "Base Folder"
         return folder.name
 

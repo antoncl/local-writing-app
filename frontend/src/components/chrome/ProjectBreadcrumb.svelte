@@ -1,6 +1,19 @@
 <script lang="ts">
   import type { ProjectChainLayer } from "@/lib/types";
-  import { declaredChain, inheritsNothing } from "@/lib/utils/projectChain";
+  import { declaredChain, inheritsNothing, type ChainCrumb } from "@/lib/utils/projectChain";
+
+  // The full crumb tooltip: identity, then what its inheritance state means
+  // (#417 slice 4). `available`/`stale` are the ancestors #431 used to hide, so
+  // the hover has to say why they read differently — dimmed is "here but not
+  // inherited", struck is "declared but the project is gone".
+  function crumbTitle(crumb: ChainCrumb): string {
+    const identity = crumb.label === crumb.path ? crumb.path : `${crumb.label} — ${crumb.path}`;
+    if (crumb.state === "available")
+      return `${identity}\nNot inherited — an ancestor project this one does not build on.`;
+    if (crumb.state === "stale")
+      return `${identity}\nDeclared, but no longer a project — it contributes nothing. Repair it in the inheritance editor.`;
+    return identity;
+  }
 
   // The RESOLVED chain as the backend walker computed it (#432) — already the
   // declared subset, already labelled. This took the whole enumeration and
@@ -51,21 +64,30 @@
   THE NOTE VOCABULARY (#427):
   a `.chain-note` is a quiet, non-navigable statement living inside the strip,
   saying what the crumbs cannot. Exactly ONE state uses it — the empty chain:
-  the note IS the strip, "Inherits from nothing" plus the remedy.
+  the note IS the strip, stating "Inherits from nothing". Since #417 slice 4 it
+  carries no remedy: the note renders only when there is nothing to declare (no
+  ancestor project), so the "edit inheritance" remedy moved onto the POPULATED
+  bar, where there are ancestors to act on. `·` still joins it to that remedy.
 
-  #431 asked whether two more states earn a note: a GAP (a project declaring a
+  #431 asked whether two more states earn a mark: a GAP (a project declaring a
   grandparent and skipping the parent) and a STALE layer (a declared ancestor
-  whose `project.yaml` was deleted). The answer is no, and it is settled at the
-  data layer rather than here. `_project_layer_folders` yields only folders that
-  are `is_project and inherited`, so neither ever reaches this component: a gap's
-  undeclared middle folder was never in the chain to begin with, and a stale
-  layer drops out the moment its manifest goes. There is nothing to mark because
-  there is nothing to render. The reasoning: a gap is a deliberate, legal
-  decluttering (an author foldering "Books/" under a series is not a defect), and
-  a "defective folder" — a plausible-looking tree with no `project.yaml` — cannot
-  be told apart from an ordinary folder with any confidence, so marking one would
-  be a guess. The broken layer that IS repairable still surfaces where the repair
-  lives: the declaration editor's `stale` row (`declarationRows`), not here.
+  whose `project.yaml` was deleted). #431 answered no; **#417 slice 4 reverses
+  that** — the bar now doubles as the inheritance-state display, so the backend
+  carries these ancestors it used to drop and each crumb gets a `state`:
+    - `available` — the skipped parent, an ancestor project not inherited,
+      rendered DIMMED. #431 called a gap a deliberate decluttering not worth
+      marking; the counter that won is that the person most likely to be
+      surprised by a gap is the author who set it up and forgot, and this bar is
+      where they would catch it. A dimmed crumb is not a guess about a defect —
+      it is the plain fact "this ancestor exists and you do not build on it".
+    - `stale` — a declared ancestor whose manifest is gone, rendered STRUCK and
+      non-navigable (there is no project to open). #431 withheld it for fear of
+      mislabelling an ordinary folder, but a `stale` row is not a guess: it is
+      exactly `inherited and not is_project`, the author's own declaration
+      pointing at something that stopped being a project. The repair still lives
+      in the declaration editor; the bar only surfaces that something is wrong.
+  A pure organisational folder (neither inherited nor a project) still never
+  reaches here — the backend omits it, there being no inheritance state to show.
 
   So `›` is only ever a real hop between two layers, and `·` only ever joins a
   statement to its remedy — the two separators stay disjoint and neither carries
@@ -79,26 +101,53 @@
       {#if index > 0}
         <span class="crumb-sep" aria-hidden="true">›</span>
       {/if}
+      {#if crumb.navigable}
+        <!-- A real ancestor project: click = scope change. `available` (not
+             inherited) renders dimmed so a skipped layer is visible; `declared`
+             is the solid default (#417 slice 4). The dim is presentation only,
+             so the state also rides an sr-only suffix for assistive tech. -->
+        <button
+          type="button"
+          class="crumb"
+          class:available={crumb.state === "available"}
+          title={crumbTitle(crumb)}
+          on:click={() => onOpen(crumb.path)}
+        >{crumb.label}{#if crumb.state === "available"}<span class="sr-only"> — not inherited</span>{/if}</button>
+      {:else}
+        <!-- `stale`: declared but no longer a project, so there is nothing to
+             open — a struck, flagged marker rather than a button, its repair in
+             the declaration editor (#417 slice 4, reversing #431). The struck
+             styling is visual only; sr-only text carries the meaning. -->
+        <span class="crumb stale" title={crumbTitle(crumb)}
+          >{crumb.label}<span class="sr-only"> — declared, but no longer a project</span></span>
+      {/if}
+    {/each}
+    {#if canDeclare}
+      <!-- The declaration editor's entry point (#417 slice 4). #431's "set up…"
+           lived on the empty note, but the note now renders only when there is
+           nothing to declare (canDeclare false), so the remedy moved here, where
+           there ARE ancestors to edit. Reveals the pane editor for now; slice 4b
+           swaps it for an inline popover. `·` joins a statement to its remedy,
+           never a hop, so it stays disjoint from `›`. -->
+      <span class="note-sep" aria-hidden="true">·</span>
       <button
         type="button"
-        class="crumb"
-        title={crumb.label === crumb.path ? crumb.path : `${crumb.label} — ${crumb.path}`}
-        on:click={() => onOpen(crumb.path)}
-      >{crumb.label}</button>
-    {/each}
+        class="note-action chain-edit"
+        aria-label="Edit what this project inherits from"
+        title="Edit what this project inherits from"
+        on:click={onSetUpInheritance}>edit…</button>
+    {/if}
   </nav>
 {:else if empty}
   <div class="project-chain">
+    <!-- The genuinely-flat case: no ancestor projects at all, so nothing to
+         declare (canDeclare is always false here — a toggleable ancestor would
+         have produced a crumb above, taking the branch overhead). The remedy
+         lives on the populated bar, not here. -->
     <span
       class="chain-note"
-      title={canDeclare
-        ? "This project declares no ancestors, so it inherits nothing."
-        : "Nothing sits between this project and the projects folder, so there is nothing to inherit from."}
-    >Inherits from nothing{#if canDeclare}<span class="note-sep" aria-hidden="true">·</span><button
-        type="button"
-        class="note-action"
-        aria-label="Set up what this project inherits from"
-        on:click={onSetUpInheritance}>set up…</button>{/if}</span>
+      title="Nothing sits between this project and the projects folder, so there is nothing to inherit from."
+    >Inherits from nothing</span>
   </div>
 {/if}
 
@@ -159,6 +208,28 @@
     color: var(--text);
   }
 
+  /* `available` — an ancestor project not inherited (#417 slice 4). Dimmed so a
+     deliberately-skipped layer reads as present-but-not-built-on; still a full
+     crumb that opens the project, and hover restores it to full strength. */
+  .project-chain .crumb.available {
+    opacity: 0.5;
+  }
+  .project-chain .crumb.available:hover {
+    opacity: 1;
+  }
+
+  /* `stale` — a declared ancestor whose project.yaml is gone (#417 slice 4,
+     reversing #431). Struck and tinted to read as broken; non-interactive,
+     because there is no project to open. The repair lives in the declaration
+     editor, not here, so it takes no hover box. */
+  .project-chain .crumb.stale,
+  .project-chain .crumb.stale:hover {
+    color: var(--star-border);
+    background: transparent;
+    text-decoration: line-through dotted;
+    cursor: default;
+  }
+
   .project-chain .crumb-sep {
     flex: none;
     color: var(--text-3);
@@ -209,5 +280,12 @@
 
   .project-chain .note-action:hover {
     color: var(--text);
+  }
+
+  /* The "edit inheritance" remedy on the populated bar (#417 slice 4). `flex:
+     none` keeps it from being crushed as the chain yields, the way the crumbs
+     are — it is a fixed remedy, not a hop that scrolls. */
+  .project-chain .chain-edit {
+    flex: none;
   }
 </style>

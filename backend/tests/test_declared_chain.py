@@ -256,7 +256,9 @@ class TheEnumerationReachesTheWireTests(DeclaredChainTestCase):
 
 
 class TheResolvedChainReachesTheWireTests(DeclaredChainTestCase):
-    """`ProjectInfo.chain` — the selection and the labels, decided once (#432).
+    """`ProjectInfo.chain` — the selection, the labels, and the per-segment
+    inheritance state, decided once in the walker (#432; membership widened for
+    #417 slice 4).
 
     These cases used to live in the frontend's `projectChain.test.ts`, against
     a transcription of `_project_layer_folders` + `_layer_label_for_folder`
@@ -265,49 +267,73 @@ class TheResolvedChainReachesTheWireTests(DeclaredChainTestCase):
     layer that is the machine root "Base Folder", and the copy called the same
     folder by its directory name. They belong here, against the code that
     actually decides them.
+
+    Since slice 4 the chain is the reversal of #431: it carries every ancestor
+    project plus a stale declaration, each flagged `is_project`/`inherited`, so
+    the bar renders `available` ancestors dimmed and `stale` ones flagged rather
+    than hiding a legal gap. Each row is asserted as
+    `(label, folder_name, is_root, is_project, inherited)`.
     """
 
-    def _chain(self) -> list[tuple[str, str, bool]]:
+    def _chain(self) -> list[tuple[str, str, bool, bool, bool]]:
         bind_test_project(self.service)
         with TestClient(app) as client:
             payload = client.get("/api/project").json()
-        return [(row["label"], Path(row["path"]).name, row["is_root"]) for row in payload["chain"]]
+        return [
+            (row["label"], Path(row["path"]).name, row["is_root"], row["is_project"], row["inherited"])
+            for row in payload["chain"]
+        ]
 
-    def test_the_chain_is_the_declared_subset_outermost_first(self) -> None:
+    def test_declared_ancestors_are_solid_layers_outermost_first(self) -> None:
         make_project_folder(self.service, self.universe, "The Honorverse")
         make_project_folder(self.service, self.series, "Honor Harrington")
         declare(self.service, self.root, [self.universe, self.series])
 
+        # Every ancestor is a declared project (is_project & inherited), so the
+        # bar renders all of them solid; the leaf is the open project.
         self.assertEqual(
             self._chain(),
             [
-                ("The Honorverse", "honorverse", False),
-                ("Honor Harrington", "honor-harrington", False),
-                ("Book 1", "book01", True),
+                ("The Honorverse", "honorverse", False, True, True),
+                ("Honor Harrington", "honor-harrington", False, True, True),
+                ("Book 1", "book01", True, True, False),
             ],
         )
 
-    def test_an_ancestor_project_that_was_never_declared_is_not_in_the_chain(self) -> None:
-        """#318's wizard offers it from `ancestors`; the chain must not imply
-        it is part of what is being built here."""
+    def test_an_undeclared_ancestor_project_is_available_in_the_chain(self) -> None:
+        """The reversal of #431 (#417 slice 4): an ancestor project the open
+        project does not inherit from is now IN the chain, flagged
+        `is_project & not inherited` so the bar renders it dimmed — the skipped
+        layer is visible rather than silently absent. It is not `is_root`, so
+        it is a crumb, not the leaf."""
         make_project_folder(self.service, self.universe, "The Honorverse")
 
-        self.assertEqual(self._chain(), [("Book 1", "book01", True)])
+        self.assertEqual(
+            self._chain(),
+            [
+                ("The Honorverse", "honorverse", False, True, False),
+                ("Book 1", "book01", True, True, False),
+            ],
+        )
 
-    def test_a_declared_folder_that_is_not_a_project_is_not_in_the_chain(self) -> None:
-        """The `is_project` half of the rule, and #431's stale-layer decision:
-        a declared folder whose manifest was deleted keeps its declaration —
-        `declared_ancestor_warnings` and the declaration editor's `stale` row
-        say so where the repair lives — but it contributes nothing, so it is
-        not a layer and gets no crumb. #431 settled that the bar does NOT mark
-        it: a "defective folder" cannot be told from an ordinary one with any
-        confidence, so a mark would be a guess. It vanishes from the chain by
-        design, not by oversight."""
+    def test_a_stale_declaration_is_flagged_in_the_chain(self) -> None:
+        """The reversal of #431's stale-layer decision (#417 slice 4): a
+        declared folder whose manifest was deleted keeps its declaration but no
+        longer contributes, so it is `inherited & not is_project` — `stale`. The
+        bar now DOES carry it, flagged, because the author ticked something and
+        is otherwise getting silence; the repair (untick) lives in the editor.
+        Its label falls back to the folder name (there is no manifest to read)."""
         make_project_folder(self.service, self.universe, "The Honorverse")
         declare(self.service, self.root, [self.universe])
         (self.universe / "project.yaml").unlink()
 
-        self.assertEqual(self._chain(), [("Book 1", "book01", True)])
+        self.assertEqual(
+            self._chain(),
+            [
+                ("honorverse", "honorverse", False, False, True),
+                ("Book 1", "book01", True, True, False),
+            ],
+        )
 
     def test_a_declared_project_with_no_title_falls_back_to_its_folder_name(self) -> None:
         self.universe.mkdir(parents=True, exist_ok=True)
@@ -316,7 +342,10 @@ class TheResolvedChainReachesTheWireTests(DeclaredChainTestCase):
 
         self.assertEqual(
             self._chain(),
-            [("honorverse", "honorverse", False), ("Book 1", "book01", True)],
+            [
+                ("honorverse", "honorverse", False, True, True),
+                ("Book 1", "book01", True, True, False),
+            ],
         )
 
     def test_a_blank_title_falls_back_like_a_missing_one(self) -> None:
@@ -329,27 +358,73 @@ class TheResolvedChainReachesTheWireTests(DeclaredChainTestCase):
 
         self.assertEqual(
             self._chain(),
-            [("honorverse", "honorverse", False), ("Book 1", "book01", True)],
+            [
+                ("honorverse", "honorverse", False, True, True),
+                ("Book 1", "book01", True, True, False),
+            ],
         )
 
-    def test_a_gap_is_carried_as_declared(self) -> None:
-        """Declaring a grandparent without its parent is legal upstream, so the
-        chain reports two layers with a folder between them. #431 settled that
-        the bar does NOT mark the gap — the undeclared middle folder simply
-        never enters the chain — and this pins the data side of that: the walk
-        does not quietly fill the gap in, so there is no phantom layer for the
-        bar to render or to flag."""
+    def test_a_gap_shows_the_skipped_ancestor_as_available(self) -> None:
+        """Declaring a grandparent without its parent is legal upstream. The
+        reversal of #431 (#417 slice 4): the skipped parent — an ancestor
+        project that is not inherited — is now carried in the chain as
+        `available` (is_project & not inherited), so the bar renders it dimmed
+        BETWEEN the two declared layers. Making the gap visible where the author
+        who set it up would notice it is the whole point of the dual-purpose
+        bar."""
         make_project_folder(self.service, self.universe, "The Honorverse")
         make_project_folder(self.service, self.series, "Honor Harrington")
         declare(self.service, self.root, [self.universe])
 
         self.assertEqual(
             self._chain(),
-            [("The Honorverse", "honorverse", False), ("Book 1", "book01", True)],
+            [
+                ("The Honorverse", "honorverse", False, True, True),
+                ("Honor Harrington", "honor-harrington", False, True, False),
+                ("Book 1", "book01", True, True, False),
+            ],
+        )
+
+    def test_declared_available_and_stale_render_together_in_walk_order(self) -> None:
+        """All three states in one chain (#417 slice 4). Guards ordering — a
+        stale row kept among live ones must stay outermost-first, not float — and
+        makes `available` unambiguous: alongside a declared (True,True) and a
+        stale (False,True) it can no longer coincide with the leaf default."""
+        make_project_folder(self.service, self.base)  # titleless base project, not declared → available
+        make_project_folder(self.service, self.universe, "The Honorverse")  # declared
+        make_project_folder(self.service, self.series, "Honor Harrington")
+        declare(self.service, self.root, [self.universe, self.series])
+        (self.series / "project.yaml").unlink()  # series → stale
+
+        self.assertEqual(
+            self._chain(),
+            [
+                # available base, labelled by its FOLDER NAME not "Base Folder",
+                # because it is itself a project (the slice-4 sentinel fix).
+                ("writing", "writing", False, True, False),
+                ("The Honorverse", "honorverse", False, True, True),  # declared
+                ("honor-harrington", "honor-harrington", False, False, True),  # stale
+                ("Book 1", "book01", True, True, False),  # leaf
+            ],
+        )
+
+    def test_a_base_folder_that_is_a_project_shows_its_name_not_the_sentinel(self) -> None:
+        """The machine root can now surface as a crumb (#417 slice 4). A titleless
+        base *project* must show its folder name, not the "Base Folder" sentinel —
+        which is reserved for a base that is NOT a project (the helper's own
+        docstring, now enforced)."""
+        make_project_folder(self.service, self.base)  # titleless project AT the machine root
+
+        self.assertEqual(
+            self._chain(),
+            [
+                ("writing", "writing", False, True, False),
+                ("Book 1", "book01", True, True, False),
+            ],
         )
 
     def test_a_flat_project_is_a_chain_of_one(self) -> None:
-        self.assertEqual(self._chain(), [("Book 1", "book01", True)])
+        self.assertEqual(self._chain(), [("Book 1", "book01", True, True, False)])
 
     def test_a_malformed_ancestor_manifest_does_not_stop_the_project_opening(self) -> None:
         """A label is decoration on someone else's folder (#430, forced by #432).
@@ -368,9 +443,14 @@ class TheResolvedChainReachesTheWireTests(DeclaredChainTestCase):
         declare(self.service, self.root, [self.universe])
         (self.universe / "project.yaml").write_text("title: [unclosed\n", encoding="utf-8")
 
+        # The manifest is unreadable but present, so the layer is still a
+        # declared project (is_project & inherited); only its label falls back.
         self.assertEqual(
             self._chain(),
-            [("honorverse", "honorverse", False), ("Book 1", "book01", True)],
+            [
+                ("honorverse", "honorverse", False, True, True),
+                ("Book 1", "book01", True, True, False),
+            ],
         )
 
     def test_a_malformed_ancestor_manifest_leaves_the_validation_report_readable(self) -> None:
@@ -389,8 +469,14 @@ class TheResolvedChainReachesTheWireTests(DeclaredChainTestCase):
     def test_the_chain_agrees_with_the_schema_layers_view(self) -> None:
         """The disagreement #432 exists to remove, pinned as an equality.
 
-        Both views are `collect_layers` now, so this fails the moment either
-        one starts deriving its own answer again.
+        The two are separate projections now — the schema-layers view is
+        `collect_layers` (the declared effective layers), the breadcrumb is
+        `resolved_chain_layers` (which since #417 slice 4 also carries
+        available/stale rows). On the DECLARED subset they must still name every
+        layer identically, because both stamp through
+        `_stamp_project_layers`/`_layer_label_for_folder`; this setup has only
+        declared layers, so full equality still holds and fails the moment
+        either starts deriving its own labels again.
         """
         make_project_folder(self.service, self.universe, "The Honorverse")
         declare(self.service, self.root, [self.universe])

@@ -92,31 +92,41 @@ class ProjectChild(BaseModel):
 
 
 class ProjectChainLayer(BaseModel):
-    """One layer of the RESOLVED chain — what this project is actually built
-    from, outermost first, the open project last (#432).
+    """One layer of the breadcrumb chain, outermost first, the open project
+    last (#432; membership widened for #417 slice 4).
 
-    The twin of `AncestorCandidate`, and the distinction is the point.
-    `ancestors` is the *enumeration*: every folder the walk crossed, flagged
-    rather than filtered, because the declaration editor (#426) has to offer
-    the undeclared rows and mark the non-project ones. This is the *chain*:
-    only the layers that contribute, already selected and already named.
+    Still the walker's own answer, never the frontend's: `id` and `label` come
+    straight off the same `_stamp_project_layers`/`_layer_label_for_folder` the
+    schema-layers view uses, so a consumer cannot re-derive and drift (the
+    disagreement #432 deleted — a frontend copy that filtered `ancestors` on
+    `inherited && is_project` and labelled `title || name`).
 
-    It exists because the frontend was re-deriving it — filtering `ancestors`
-    on `inherited && is_project` and labelling with `title || name`, a
-    transcription of `_project_layer_folders` and `_layer_label_for_folder`
-    that the walker had already computed. Two implementations of one traversal,
-    and they disagreed. `id` and `label` are read straight off `IndexLayer`,
-    so a consumer cannot drift from the walk again.
+    **What changed for #417 slice 4:** the breadcrumb now doubles as the
+    inheritance-state display, so the chain carries the ancestors #431 hid.
+    `is_project` crossed with `inherited` gives the same four states the
+    declaration editor derives from `AncestorCandidate`:
+
+    - declared  = `is_project and inherited`   — a contributing layer (solid);
+    - available = `is_project and not inherited`— an ancestor project not
+      inherited, which #431 dropped and the bar now renders **dimmed** so a
+      deliberately-skipped layer is visible rather than silently absent;
+    - stale     = `not is_project and inherited`— declared but no longer a
+      project, rendered **flagged** (the repair lives in the editor).
+
+    A pure organisational folder (neither) has no inheritance state to show and
+    is omitted from the chain entirely — the declaration editor still lists it.
+    The leaf (`is_root`) is the open project: `is_project` true, `inherited`
+    moot; the bar renders it as the project switcher, not as a crumb.
     """
 
     id: str
     label: str
     path: str
-    # The open project itself, always the innermost entry. Flagged rather than
-    # dropped: the breadcrumb renders the ancestors and lets the project
-    # switcher be the last crumb, while the schema-layers view wants the whole
-    # sequence. Filtering here would just move the re-derivation.
     is_root: bool = False
+    # The inheritance state the bar renders (#417 slice 4). See the class
+    # docstring for the is_project × inherited → declared/available/stale cross.
+    is_project: bool = False
+    inherited: bool = False
 
 
 class ProjectInfo(BaseModel):
@@ -142,9 +152,11 @@ class ProjectInfo(BaseModel):
     # shape serving both is what stops the second endpoint asking the same
     # question a different way.
     ancestors: list[AncestorCandidate] = Field(default_factory=list)
-    # The resolved chain over the same walk (#432) — the declared subset, named
-    # by the walker. Ships beside `ancestors`, not instead of it: they answer
-    # different questions and both have a consumer.
+    # The breadcrumb chain over the same walk (#432), named by the walker. Since
+    # #417 slice 4 it carries every ancestor project + stale declaration with
+    # its inheritance state, not just the declared subset — the bar renders the
+    # skipped layers dimmed/flagged. Ships beside `ancestors`, not instead of
+    # it: the declaration editor still needs the non-project rows `chain` omits.
     chain: list[ProjectChainLayer] = Field(default_factory=list)
     children: list[ProjectChild] = Field(default_factory=list)
     # The project node's authored fields (project.md), resolved nearest-explicit-

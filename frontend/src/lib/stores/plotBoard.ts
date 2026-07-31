@@ -38,6 +38,41 @@ export async function savePlotBoardLayout(layout: PlotBoardLayout, baseRevision:
   return saved.revision;
 }
 
+// Card content ops (ADR-0048 §1, S7d). These are intentful backend mutations,
+// deliberately OUTSIDE the ADR-0050 layout caretaker — an in-memory undo must
+// never reverse a scene mint (binding decision 1). Each mutates, then refetches
+// the projection so the board re-projects the changed card set. attach/detach have
+// no endpoint of their own: they are a saveCard that sets / clears `metadata.scene`
+// (get the current card first, so the save carries its live revision + metadata).
+
+// Realize: mint a scene from the card and attach it. 409 if already attached.
+export async function realizeCard(cardId: string, parentId: string | null = null): Promise<void> {
+  await api.realizeCard(cardId, parentId);
+  await refreshPlotBoard();
+}
+
+// Seed: one attached card per un-carded leaf scene, in manuscript order (idempotent).
+export async function seedCardsFromManuscript(): Promise<void> {
+  await api.seedFromManuscript();
+  await refreshPlotBoard();
+}
+
+// Attach: bind the card to an existing scene by id.
+export async function attachCardScene(cardId: string, sceneId: string): Promise<void> {
+  const card = await api.getCard(cardId);
+  await api.saveCard({ ...card, metadata: { ...card.metadata, scene: sceneId } });
+  await refreshPlotBoard();
+}
+
+// Detach: clear the card's scene ref (drop the key — the save replaces metadata).
+export async function detachCardScene(cardId: string): Promise<void> {
+  const card = await api.getCard(cardId);
+  const metadata = { ...card.metadata };
+  delete metadata.scene;
+  await api.saveCard({ ...card, metadata });
+  await refreshPlotBoard();
+}
+
 // Drop the previous project's board so it can't flash on the next project's pane
 // (called from the project-clear fan-out).
 export function clearPlotBoard(): void {

@@ -199,8 +199,9 @@ export type PromptEntryList = {
   entries: PromptEntrySummary[];
 };
 
-// Plot-template types (ADR-0048 S4b/S4c) live in ./plotTemplateTypes to keep this
-// file under the size cap; re-exported so `@/lib/types` stays the single barrel.
+// Plot types (ADR-0048) live in sibling files — templates (S4b/S4c), the board
+// projection (S7a/S7b), and cards + plotlines (S5a/S5b) — to keep this file under
+// the size cap; re-exported so `@/lib/types` stays the single import barrel.
 export type {
   PlotTemplate,
   PlotTemplateSummary,
@@ -209,9 +210,6 @@ export type {
   PlotTemplatePoint,
   PlotTemplateSourceRef,
 } from "./plotTemplateTypes";
-
-// Plot-board projection types (ADR-0048 S7a/S7b) live in ./plotBoardTypes, same
-// reason as the templates above; re-exported so `@/lib/types` stays the barrel.
 export type {
   PlotBoardProjection,
   PlotBoardCard,
@@ -220,6 +218,14 @@ export type {
   PlotBoard,
   BoardXY,
 } from "./plotBoardTypes";
+export type {
+  CardEntry,
+  CardSummary,
+  CardList,
+  PlotlineEntry,
+  PlotlineSummary,
+  PlotlineList,
+} from "./plotCardTypes";
 
 export type AssistantEntrySummary = {
   id: string;

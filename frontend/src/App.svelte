@@ -23,6 +23,7 @@
   import ImportDocumentsModal from "@/components/dialogs/ImportDocumentsModal.svelte";
   import ConfirmModal from "@/components/dialogs/ConfirmModal.svelte";
   import AIPolicyModal from "@/components/dialogs/AIPolicyModal.svelte";
+  import ValidateModal from "@/components/dialogs/ValidateModal.svelte";
   import PlainTextEditor from "@/components/widgets/PlainTextEditor.svelte";
   import PromptInputField from "@/components/widgets/PromptInputField.svelte";
   import TopBar from "@/components/chrome/TopBar.svelte";
@@ -46,7 +47,7 @@
   } from "@/lib/stores/todos";
   import { knownTagsStore, refreshKnownTags as storeRefreshKnownTags, setKnownTags, tagVocabularyRevision } from "@/lib/stores/tags";
   import { assistantTagsStore, refreshAssistantTags, assistantTagsAsScoped } from "@/lib/stores/assistantTags";
-  import { validationStore, setValidation } from "@/lib/stores/validation";
+  import { validationStore, setValidation, clearValidation } from "@/lib/stores/validation";
   import {
     structureStore,
     researchStructureStore,
@@ -143,6 +144,11 @@
   // The per-project AI policy modal, launched from the project node window's
   // action (#417). App owns the guard, like the other dialogs.
   let aiPolicyModalOpen = $state(false);
+  // The project-validation modal, launched from the same project window action
+  // strip (#417). `validating` drives the modal's "Checking…" state; both
+  // validate and repair toggle it so the result never flashes stale.
+  let validateModalOpen = $state(false);
+  let validating = $state(false);
   let looseScenes = $state<LooseScene[]>([]);
   let importBusy = $state(false);
   // The Lore pane owns its own add-menu (a ViewNodeList feature, #112 4c-iv); this
@@ -585,22 +591,37 @@
   }
 
   async function validateProject() {
-    await run(async () => {
-      const result = await api.validateProject();
-      setValidation(result);
-      status = result.valid ? "Project validation passed" : "Project validation found issues";
-    });
+    // Drop the prior result before re-checking so a run that fails mid-flight
+    // (run() swallows the error) can't leave a stale "looks consistent" on the
+    // modal — `validating` masks the cleared state until a fresh result lands.
+    clearValidation();
+    validating = true;
+    try {
+      await run(async () => {
+        const result = await api.validateProject();
+        setValidation(result);
+        status = result.valid ? "Project validation passed" : "Project validation found issues";
+      });
+    } finally {
+      validating = false;
+    }
   }
 
   async function repairProject() {
-    await run(async () => {
-      const result = await api.repairProject();
-      setValidation(result);
-      await refreshStructure();
-      await refreshTodos();
-      await storeRefreshEmbeddedTodos();
-      status = result.valid ? "Project repair complete" : "Project repair complete with remaining issues";
-    });
+    clearValidation();
+    validating = true;
+    try {
+      await run(async () => {
+        const result = await api.repairProject();
+        setValidation(result);
+        await refreshStructure();
+        await refreshTodos();
+        await storeRefreshEmbeddedTodos();
+        status = result.valid ? "Project repair complete" : "Project repair complete with remaining issues";
+      });
+    } finally {
+      validating = false;
+    }
   }
 
   async function openImportDocs() {
@@ -758,7 +779,7 @@
 
   <RegionRegistrar
     regions={{
-      project: { title: "Project", body: projectBody, actions: projectActions },
+      project: { title: "Project", body: projectBody },
       outline: { title: "Draft", body: outlineBody, view: { kind: "scene", switcher: true } },
       lore: { title: "Lore", body: loreBody, actions: loreActions, view: { kind: "lore", switcher: true } },
       research: { title: "Research", body: researchBody, view: { kind: "research" } },
@@ -780,7 +801,6 @@
         {projectPath}
         {projectCostTotal}
         {projectCostBreakdown}
-        {validation}
         projectChildren={project?.children ?? []}
         ancestors={project?.ancestors ?? []}
         onOpenChild={(path) => void projectSession.openProjectAt(path)}
@@ -788,24 +808,8 @@
           void projectSession.setDeclaration(toggledDeclaration(project?.ancestors, path))}
         inheritSaving={projectSession.declarationSaving}
         bind:projectCostExpanded
-        onRepair={repairProject}
       />
     </div>
-  {/snippet}
-
-  {#snippet projectActions()}
-    <!-- Project maintenance verbs, re-homed from the pane body to the header
-         (#629). The result renders in the dashboard body via the `validation`
-         prop, so trigger and result stay together. -->
-    <button
-      class="pin-button"
-      type="button"
-      title="Check this project's files for problems"
-      aria-label="Validate project"
-      disabled={!isProjectOpen}
-      onmousedown={(event) => event.stopPropagation()}
-      onclick={() => void validateProject()}
-    >Validate</button>
   {/snippet}
 
   {#snippet outlineBody(viewSpec: ViewSpec | undefined)}
@@ -958,9 +962,23 @@
     {@const editorPane = editorPaneById(id)}
     {#if editorPane}
       {#if editorPane.document?.type === "project"}
-        <!-- Project-only action, re-homed from the (vanishing) Project pane to
-             the project window (#417). Fails-closed: the modal owns the explicit
-             Save; this button only opens it. -->
+        <!-- Project-only actions, re-homed from the (vanishing) Project pane to
+             the project window (#417). AI Policy is fails-closed (the modal owns
+             the explicit Save; this button only opens it); Validate opens the
+             result modal and kicks off a fresh check. -->
+        <button
+          class="pin-button"
+          type="button"
+          title="Check this project's files for problems"
+          aria-label="Validate project"
+          onmousedown={(event) => event.stopPropagation()}
+          onclick={() => {
+            validateModalOpen = true;
+            void validateProject();
+          }}
+        >
+          Validate
+        </button>
         <button
           class="pin-button"
           type="button"
@@ -972,10 +990,13 @@
           AI Policy
         </button>
       {/if}
+      <!-- The project node is its own window; deleting it would remove
+           `project.md` (#750). Offer Delete on every other kind, never on the
+           project itself — belt to the requestDeleteScene guard's braces. -->
       <button
         class="pin-button danger"
         type="button"
-        disabled={!editorPane.scene}
+        disabled={!editorPane.scene || editorPane.document?.type === "project"}
         title={`Delete this ${paneDeleteNoun(editorPane.document?.type)}`}
         onmousedown={(event) => event.stopPropagation()}
         onclick={() => editorPanes.requestDeleteScene(editorPane.id)}
@@ -1179,6 +1200,13 @@
   />
 
   <AIPolicyModal open={aiPolicyModalOpen} onClose={() => (aiPolicyModalOpen = false)} />
+  <ValidateModal
+    open={validateModalOpen}
+    onClose={() => (validateModalOpen = false)}
+    {validation}
+    checking={validating}
+    onRepair={repairProject}
+  />
 
   {#if tagsManagerOpen}
     <TagManagerDialog onClose={() => (tagsManagerOpen = false)} />

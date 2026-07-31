@@ -718,6 +718,10 @@ class EditorPanesController {
     const pane = this.panes.find((candidate) => candidate.id === id);
     if (!pane?.scene) return;
     const documentKind = pane.document?.type ?? "scene";
+    // The project window must not delete the project's own `project.md` (#750) —
+    // refuse it as the guard, not just via the disabled button (a stale ref or
+    // future caller would otherwise fall through to #deleteScene).
+    if (documentKind === "project") return;
     const sceneTitle = pane.scene.title;
     const sceneId = pane.scene.id;
     let backlinks: Backlink[] = [];

@@ -2,7 +2,6 @@
   import type {
     AncestorCandidate,
     ProjectChild,
-    ProjectValidation,
   } from "@/lib/types";
   import InheritsFromList from "@/components/widgets/InheritsFromList.svelte";
   import NodeList from "@/components/widgets/NodeList.svelte";
@@ -15,7 +14,6 @@
   export let projectPath: string;
   export let projectCostTotal: number | null;
   export let projectCostBreakdown: { id: string; title: string; cost_usd: number }[];
-  export let validation: ProjectValidation | null;
   // Project folders directly inside this one (#310). Direct children only —
   // a level offers the places you can open *from here*, not the whole shelf.
   // Empty for a leaf, which is the only thing that distinguishes one: there
@@ -40,12 +38,12 @@
   // down and back up.
   export let projectCostExpanded: boolean;
 
-  // Actions — App owns the side effects (API calls). Most moved out: Validate to
-  // the pane header, Chats/Prompts/Mutations to the app menu, Health Check to the
-  // Settings AI tab (#629); loose-scene import to its own "Import documents…"
-  // surface (#635); the AI-policy control to the project window as a modal
-  // (#417). This pane keeps only TODO repair (until validation moves too).
-  export let onRepair: () => void;
+  // Actions — App owns the side effects (API calls). All moved out: Validate +
+  // its result panel to the project window as a modal (#417), alongside the
+  // AI-policy control; Chats/Prompts/Mutations to the app menu, Health Check to
+  // the Settings AI tab (#629); loose-scene import to its own "Import
+  // documents…" surface (#635). What's left here is read-only project info plus
+  // the inheritance roster, all bound for the breadcrumb before the pane goes.
   // Opening a child is a resolution-scope change, i.e. a unit boundary
   // (ADR-0045) — App routes it through the same open path as the switcher
   // rather than mutating anything in place.
@@ -141,38 +139,6 @@
       </NodeList>
     </section>
   {/if}
-{/if}
-
-{#if validation}
-  <section class:invalid={!validation.valid} class="validation-panel" aria-label="Project validation result">
-    <h3>{validation.valid ? "Project Looks Consistent" : "Project Issues Found"}</h3>
-    {#if validation.migrations_applied.length > 0}
-      <strong>Migrations Applied</strong>
-      {#each validation.migrations_applied as migration}
-        <p class="migration-applied">{migration}</p>
-      {/each}
-    {/if}
-    {#if validation.errors.length > 0}
-      <strong>Errors</strong>
-      {#each validation.errors as validationError}
-        <p>{validationError}</p>
-      {/each}
-    {/if}
-    {#if validation.warnings.length > 0}
-      <strong>Warnings</strong>
-      {#each validation.warnings as validationWarning}
-        <p>{validationWarning}</p>
-      {/each}
-    {/if}
-    {#if validation.errors.length === 0 && validation.warnings.length === 0}
-      <p>No structure, scene, or TODO synchronization issues found.</p>
-    {/if}
-    {#if validation.errors.length > 0 || validation.warnings.length > 0}
-      <div class="validation-actions">
-        <button type="button" on:click={onRepair}>Repair TODO Links</button>
-      </div>
-    {/if}
-  </section>
 {/if}
 
 <style>
@@ -281,43 +247,4 @@
     letter-spacing: 0.04em;
   }
 
-  .migration-applied {
-    color: var(--accent-deep);
-    font-family: var(--mono);
-    font-size: var(--fs-sm);
-  }
-
-  .validation-panel {
-    display: grid;
-    gap: 5px;
-    padding: 10px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--surface);
-  }
-
-  .validation-panel.invalid {
-    border-color: var(--star-border);
-    background: var(--star-soft);
-  }
-
-  .validation-panel strong {
-    margin-top: 4px;
-    color: var(--text-2);
-    font-size: var(--fs-sm);
-    text-transform: uppercase;
-  }
-
-  .validation-panel p {
-    margin: 0;
-    color: var(--text-2);
-    font-size: var(--fs-sm);
-    line-height: 1.35;
-  }
-
-  .validation-actions {
-    display: flex;
-    justify-content: flex-end;
-    margin-top: 6px;
-  }
 </style>

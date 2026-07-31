@@ -30,6 +30,8 @@ Shared tooling resolves through the MRO (`_require_project`,
 
 from __future__ import annotations
 
+import hashlib
+import uuid
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -74,6 +76,11 @@ PLOT_TEMPLATE_INSTANCE_ENTRY_TYPE = "plot:template_instance"
 # template is instantiated (ADR-0048 S7 Slice 2, #776). `specifics` is left for
 # the writer, so it is not in this snapshot set.
 _INSTANCE_BEAT_SNAPSHOT_KEYS = ("title", "function", "guidance", "required", "id")
+# The metadata list-fields whose items are beats carrying a stable `id` member
+# (ADR-0048 S7 Slice 3a, #779). Every write of one of these mints an id for any
+# beat that lacks one and re-salts a within-list collision, so a card→beat link
+# (Slice 3b) always has a stable, list-unique target to point at.
+_BEAT_LIST_FIELDS = ("beats", "instance_beats")
 
 
 class _PlotNodeRead(NamedTuple):
@@ -195,6 +202,7 @@ class PlotMixin:
         # rather than reaching disk.
         if seed_metadata:
             initial_metadata = self._normalise_metadata({**initial_metadata, **seed_metadata}, root / "plot")
+            initial_metadata = self._ensure_beat_identity(initial_metadata)
         metadata_errors = self._validate_entry_metadata(
             label=f"{noun.capitalize()} new",
             entry_type=entry_type,
@@ -309,6 +317,7 @@ class PlotMixin:
         if markdown_errors:
             raise ProjectServiceError(" ".join(markdown_errors), 422)
         metadata = self._normalise_metadata(request.metadata, path)
+        metadata = self._ensure_beat_identity(metadata)
         metadata_errors = self._validate_entry_metadata(
             label=f"{noun.capitalize()} {node_id}",
             entry_type=request.entry_type,
@@ -322,6 +331,53 @@ class PlotMixin:
         self._write_node_entry_file(path, node_id, request.title, request.entry_type, metadata, request.body)
         self._maybe_rename_node_file(path, request.title)
         return node_id
+
+    def _ensure_beat_identity(self, metadata: dict[str, Any]) -> dict[str, Any]:
+        """Give every beat a stable, list-unique `id` (ADR-0048 S7 Slice 3a, #779).
+
+        A card→beat link (Slice 3b) is the composite *(instance node id, beat id)*,
+        so a beat's id only needs to be unique **within its own list** — the node
+        half already disambiguates the instance, and `instantiate` keeps copying a
+        template beat's id into the instance (provenance). Each id is minted with a
+        fresh per-beat salt (`_mint_beat_id`); the salt — not the title — is what
+        makes it unique, so even two beats with identical titles diverge, and the id
+        is opaque hex rather than a legible slug. It is minted once and then
+        persisted: a beat that already carries a non-colliding id keeps it, so
+        renaming a beat never changes its id and 3b's links survive the edit. A
+        within-list collision (copy-pasting a beat carries its id along) is re-salted.
+
+        Auto-fill only — nothing here rejects. A blank beat still saves and simply
+        gains an id, matching the sparse-spec principle: an incomplete beat must
+        never block a write.
+        """
+        for field in _BEAT_LIST_FIELDS:
+            beats = metadata.get(field)
+            if not isinstance(beats, list):
+                continue
+            seen: set[str] = set()
+            for beat in beats:
+                if not isinstance(beat, dict):
+                    continue  # a non-dict item 422s in validation; leave it be
+                beat_id = beat.get("id")
+                if isinstance(beat_id, str) and beat_id and beat_id not in seen:
+                    seen.add(beat_id)
+                    continue
+                beat["id"] = self._mint_beat_id(beat.get("title"), seen)
+                seen.add(beat["id"])
+        return metadata
+
+    @staticmethod
+    def _mint_beat_id(title: object, taken: set[str]) -> str:
+        """`beat_<sha256(title+salt)[:12]>`, salt = `uuid4().hex`. The title is folded
+        into the hash but the per-mint salt alone guarantees uniqueness; the result is
+        opaque, not a legible slug. Re-salted until it lands outside `taken`, so a
+        fresh mint never re-introduces a collision."""
+        name = title if isinstance(title, str) else ""
+        while True:
+            salt = uuid.uuid4().hex
+            candidate = "beat_" + hashlib.sha256(f"{name}{salt}".encode()).hexdigest()[:12]
+            if candidate not in taken:
+                return candidate
 
     def _delete_plot_folder_node(self, entry_id: str, *, expected_entry_type: str, noun: str) -> None:
         # Root captured before the unlink so the purge rewrites the project this
@@ -813,6 +869,7 @@ class PlotMixin:
         # path must carry it rather than silently dropping author-added fields.
         schema = self.read_metadata_schema()
         metadata = self._normalise_metadata(request.metadata, path)
+        metadata = self._ensure_beat_identity(metadata)
         metadata_errors = self._validate_entry_metadata(
             label=f"Plot template {node_id}",
             entry_type=PLOT_TEMPLATE_ENTRY_TYPE,

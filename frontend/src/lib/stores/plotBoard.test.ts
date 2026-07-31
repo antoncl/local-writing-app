@@ -10,6 +10,7 @@ import {
   detachCardScene,
   plotBoardStore,
   realizeCard,
+  reassignCardPlotline,
   refreshPlotBoard,
   saveCardSynopsis,
   savePlotBoardLayout,
@@ -135,5 +136,22 @@ describe("card content ops", () => {
     expect(save).toHaveBeenCalledTimes(1);
     expect(save.mock.calls[0][1]).toBe("a fresh synopsis");
     expect(save.mock.calls[0][0].metadata).toEqual({ plotline: "p1" });
+  });
+
+  it("reassignCardPlotline sets the plotline ref, then refetches", async () => {
+    vi.spyOn(api, "getCard").mockResolvedValue(card({ plotline: "p1", scene: "sc" }));
+    const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
+    const refresh = vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    await reassignCardPlotline("c1", "p2");
+    expect(save.mock.calls[0][0].metadata).toEqual({ plotline: "p2", scene: "sc" });
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("reassignCardPlotline with an empty id clears the plotline (→ Unassigned)", async () => {
+    vi.spyOn(api, "getCard").mockResolvedValue(card({ plotline: "p1", scene: "sc" }));
+    const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
+    vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    await reassignCardPlotline("c1", "");
+    expect(save.mock.calls[0][0].metadata).toEqual({ scene: "sc" });
   });
 });

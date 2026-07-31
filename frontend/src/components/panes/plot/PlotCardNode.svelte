@@ -28,19 +28,27 @@
   let accent = $derived(getSwatch(data.color)?.hex ?? null);
 
   let menuOpen = $state(false);
+  // The menu has two pages: the actions, and the "Set plotline" lane list.
+  let menuView = $state<"main" | "plotline">("main");
   let editing = $state(false);
   let draft = $state("");
   let textarea = $state<HTMLTextAreaElement | null>(null);
 
   function toggleMenu() {
+    menuView = "main";
     menuOpen = !menuOpen;
   }
   function closeMenu() {
     menuOpen = false;
+    menuView = "main";
   }
   function run(op: ((cardId: string) => void) | undefined) {
     closeMenu();
     if (op && id) op(id);
+  }
+  function setPlotline(plotlineId: string) {
+    closeMenu();
+    if (actions && id) actions.onSetPlotline(id, plotlineId);
   }
 
   async function startEdit() {
@@ -115,17 +123,37 @@
 
   {#if menuOpen && actions}
     <div class="card-menu nodrag nopan" role="menu" aria-label="Card actions">
-      <button role="menuitem" class="menu-item" onclick={() => run(actions.onOpen)}>
-        <i class="ti ti-pencil" aria-hidden="true"></i> Open card
-      </button>
-      {#if data.attached}
-        <button role="menuitem" class="menu-item" onclick={() => run(actions.onDetach)}>
-          <i class="ti ti-unlink" aria-hidden="true"></i> Detach scene
+      {#if menuView === "main"}
+        <button role="menuitem" class="menu-item" onclick={() => run(actions.onOpen)}>
+          <i class="ti ti-pencil" aria-hidden="true"></i> Open card
+        </button>
+        {#if data.attached}
+          <button role="menuitem" class="menu-item" onclick={() => run(actions.onDetach)}>
+            <i class="ti ti-unlink" aria-hidden="true"></i> Detach scene
+          </button>
+        {:else}
+          <button role="menuitem" class="menu-item" onclick={() => run(actions.onRealize)}>
+            <i class="ti ti-wand" aria-hidden="true"></i> Realize scene
+          </button>
+        {/if}
+        <button role="menuitem" class="menu-item" onclick={() => (menuView = "plotline")}>
+          <i class="ti ti-route" aria-hidden="true"></i> Set plotline
+          <i class="ti ti-chevron-right chevron" aria-hidden="true"></i>
         </button>
       {:else}
-        <button role="menuitem" class="menu-item" onclick={() => run(actions.onRealize)}>
-          <i class="ti ti-wand" aria-hidden="true"></i> Realize scene
+        <button class="menu-item menu-back" onclick={() => (menuView = "main")}>
+          <i class="ti ti-chevron-left" aria-hidden="true"></i> Set plotline
         </button>
+        <div class="menu-scroll" role="group" aria-label="Plotlines">
+          {#each actions.plotlines as line (line.id)}
+            <button role="menuitem" class="menu-item" onclick={() => setPlotline(line.id)}>
+              {line.title}
+            </button>
+          {/each}
+          <button role="menuitem" class="menu-item menu-unassigned" onclick={() => setPlotline("")}>
+            Unassigned
+          </button>
+        </div>
       {/if}
     </div>
   {/if}
@@ -291,5 +319,22 @@
   }
   .menu-item i {
     color: var(--text-3);
+  }
+  .chevron {
+    margin-left: auto;
+  }
+  .menu-back {
+    color: var(--text-2);
+    font-weight: 600;
+  }
+  .menu-scroll {
+    display: flex;
+    flex-direction: column;
+    max-height: 180px;
+    overflow-y: auto;
+  }
+  .menu-unassigned {
+    color: var(--text-2);
+    font-style: italic;
   }
 </style>

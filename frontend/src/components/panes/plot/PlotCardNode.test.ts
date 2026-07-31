@@ -18,8 +18,15 @@ const data = (over: Partial<PlotCardData> = {}): PlotCardData => ({
   ...over,
 });
 
-function actions(): PlotCardActions {
-  return { onOpen: vi.fn(), onRealize: vi.fn(), onDetach: vi.fn(), onEditSynopsis: vi.fn() };
+function actions(plotlines: PlotCardActions["plotlines"] = []): PlotCardActions {
+  return {
+    onOpen: vi.fn(),
+    onRealize: vi.fn(),
+    onDetach: vi.fn(),
+    onEditSynopsis: vi.fn(),
+    onSetPlotline: vi.fn(),
+    plotlines,
+  };
 }
 
 function renderWithActions(over: Partial<PlotCardData>, acts: PlotCardActions, id = "card_1") {
@@ -96,5 +103,27 @@ describe("PlotCardNode — content-op menu (S7d)", () => {
     await fireEvent.input(box, { target: { value: "new synopsis" } });
     await fireEvent.blur(box);
     expect(acts.onEditSynopsis).toHaveBeenCalledWith("card_3", "new synopsis");
+  });
+
+  it("reassigns the plotline from the Set-plotline submenu", async () => {
+    const acts = actions([
+      { id: "pl_a", title: "Main plot", color: null },
+      { id: "pl_b", title: "Romance", color: null },
+    ]);
+    renderWithActions({ attached: false }, acts, "card_4");
+    await fireEvent.click(screen.getByLabelText("Card actions"));
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Set plotline" }));
+    // Second page lists the lanes + Unassigned.
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Romance" }));
+    expect(acts.onSetPlotline).toHaveBeenCalledWith("card_4", "pl_b");
+  });
+
+  it("clears the plotline via Unassigned", async () => {
+    const acts = actions([{ id: "pl_a", title: "Main plot", color: null }]);
+    renderWithActions({ attached: false }, acts, "card_5");
+    await fireEvent.click(screen.getByLabelText("Card actions"));
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Set plotline" }));
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Unassigned" }));
+    expect(acts.onSetPlotline).toHaveBeenCalledWith("card_5", "");
   });
 });

@@ -7,6 +7,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildBoardNodes,
   cardPositionsFromNodes,
+  overriddenCardPositions,
+  projectionDataKey,
   readBoardPositions,
   CARD_GAP_X,
   CARD_HEIGHT,
@@ -205,5 +207,44 @@ describe("cardPositionsFromNodes", () => {
     );
     const serialized = { positions: cardPositionsFromNodes(nodes) };
     expect(readBoardPositions(serialized)).toEqual({ c1: { x: 5, y: 6 } });
+  });
+});
+
+describe("overriddenCardPositions (sparse persist)", () => {
+  it("keeps only the cards in the override set", () => {
+    const nodes = buildBoardNodes(
+      projection({ plotlines: [line("p1", "Main")], cards: [card("c1", { plotline: "p1" }), card("c2", { plotline: "p1" })] }),
+    );
+    // Only c1 is pinned; c2 derives from its lane and must not be persisted.
+    expect(overriddenCardPositions(nodes, new Set(["c1"]))).toHaveProperty("c1");
+    expect(overriddenCardPositions(nodes, new Set(["c1"]))).not.toHaveProperty("c2");
+  });
+
+  it("is empty when nothing is overridden (a never-dragged board saves nothing)", () => {
+    const nodes = buildBoardNodes(projection({ plotlines: [line("p1", "Main")], cards: [card("c1", { plotline: "p1" })] }));
+    expect(overriddenCardPositions(nodes, new Set())).toEqual({});
+  });
+});
+
+describe("projectionDataKey (rebuild-on-data-change)", () => {
+  const base = () =>
+    projection({ plotlines: [line("p1", "Main", "blue")], cards: [card("c1", { plotline: "p1", synopsis: "s" })] });
+
+  it("is stable when only the layout (positions) differs", () => {
+    // A layout save must NOT change the key — else a re-open would rebuild and drop edits.
+    expect(projectionDataKey(base())).toBe(projectionDataKey({ ...base(), layout: { positions: { c1: { x: 9, y: 9 } } } }));
+  });
+
+  it("changes when a card is reassigned to another plotline (→ reflow)", () => {
+    const reassigned = projection({
+      plotlines: [line("p1", "Main", "blue"), line("p2", "Sub", "pink")],
+      cards: [card("c1", { plotline: "p2", synopsis: "s" })],
+    });
+    expect(projectionDataKey(reassigned)).not.toBe(projectionDataKey(base()));
+  });
+
+  it("changes when a card's synopsis changes", () => {
+    const edited = projection({ plotlines: [line("p1", "Main", "blue")], cards: [card("c1", { plotline: "p1", synopsis: "different" })] });
+    expect(projectionDataKey(edited)).not.toBe(projectionDataKey(base()));
   });
 });

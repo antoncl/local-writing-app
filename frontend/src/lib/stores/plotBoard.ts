@@ -73,6 +73,18 @@ export async function saveCardSynopsis(cardId: string, synopsis: string): Promis
   await refreshPlotBoard();
 }
 
+// Reassign the card's plotline ("" clears it → the Unassigned lane). The refetched
+// projection changes the board's data-key, so the board rebuilds and an un-pinned
+// card reflows into the new lane (a pinned one keeps its spot — S7d reflow).
+export async function reassignCardPlotline(cardId: string, plotlineId: string): Promise<void> {
+  const card = await api.getCard(cardId);
+  const metadata = { ...card.metadata };
+  if (plotlineId) metadata.plotline = plotlineId;
+  else delete metadata.plotline;
+  await api.saveCard({ ...card, metadata }, card.body);
+  await refreshPlotBoard();
+}
+
 // Detach: clear the card's scene ref (drop the key — the save replaces metadata).
 export async function detachCardScene(cardId: string): Promise<void> {
   const card = await api.getCard(cardId);

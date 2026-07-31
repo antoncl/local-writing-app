@@ -156,3 +156,31 @@ export function cardPositionsFromNodes(nodes: PlotBoardNode[]): Record<string, B
   }
   return out;
 }
+
+// The sparse persist (S7d reflow): store a position ONLY for cards the writer has
+// explicitly placed (dragged this session or already in the saved layout). An
+// un-placed card is absent, so it derives from its lane — which is what lets a
+// plotline reassignment reflow it into the new lane. Pinning every card (the S7c
+// behaviour) would strand a reassigned card in its old lane's band.
+export function overriddenCardPositions(nodes: PlotBoardNode[], overridden: Set<string>): Record<string, BoardXY> {
+  const all = cardPositionsFromNodes(nodes);
+  const out: Record<string, BoardXY> = {};
+  for (const id of Object.keys(all)) {
+    if (overridden.has(id)) out[id] = all[id];
+  }
+  return out;
+}
+
+// A content-identity key over the projection's DATA — board id + each card's fields
+// + each plotline — deliberately EXCLUDING the layout (positions). The board
+// rehydrates only when this changes: a content op (e.g. a plotline reassignment)
+// changes a card field, so the board rebuilds and an un-pinned card reflows into its
+// new lane; a re-open of the SAME data leaves the key unchanged, so an in-progress
+// layout edit is not discarded (the guard S7c did by board_id, now data-aware).
+export function projectionDataKey(p: PlotBoardProjection): string {
+  return JSON.stringify([
+    p.board_id,
+    p.cards.map((c) => [c.id, c.title, c.synopsis, c.plotline, c.scene]),
+    p.plotlines.map((l) => [l.id, l.title, l.color]),
+  ]);
+}

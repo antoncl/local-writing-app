@@ -27,6 +27,8 @@ export const UI_GLYPHS: string[] = [
   "arrow-up",
   "check",
   "chevron-down",
+  "chevron-left",
+  "chevron-right",
   "chevron-up",
   "cloud",
   "device-desktop",

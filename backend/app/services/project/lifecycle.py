@@ -74,9 +74,10 @@ class _AIPolicyResolver(LayerVisitor):
     The walk runs outermost first, so "last statement seen" *is* "nearest
     explicit statement wins" — no comparison, no rank arithmetic, and no second
     notion of which end of the chain is near. A layer that states nothing leaves
-    the answer alone; a chain where nobody states anything leaves the `off` it
-    starts with, which is the fail-closed floor rather than a permissive
-    default.
+    the answer alone; a chain where nobody states anything leaves the seed it
+    starts with — the application-global default (#746), itself `off` unless the
+    machine config states otherwise, so still a fail-closed floor rather than a
+    permissive default.
 
     A bespoke visitor rather than `collect_layers` + a comprehension because
     there is real per-layer work here (a manifest read); the reader is injected
@@ -84,9 +85,15 @@ class _AIPolicyResolver(LayerVisitor):
     the service — see `LayerCollector` for the other legitimate shape.
     """
 
-    def __init__(self, stated: Callable[[Path], AIPolicy | None]) -> None:
+    def __init__(
+        self, stated: Callable[[Path], AIPolicy | None], default: AIPolicy = "off"
+    ) -> None:
         self._stated = stated
-        self.policy: AIPolicy = "off"
+        # The seed is the application-global default (#746) — the outermost
+        # fallback of the chain, resolved when no layer states a policy. It
+        # defaults to `off` so a caller that does not supply one still gets the
+        # fail-closed floor (`decisions_ai_permission_fails_closed`).
+        self.policy: AIPolicy = default
 
     def visit_layer(self, layer: IndexLayer) -> None:
         stated = self._stated(layer.folder)
@@ -628,8 +635,10 @@ class ProjectLifecycleMixin:
     def _resolved_ai_policy(self, root: Path) -> AIPolicy:
         """The permission in force here, resolved over the layer chain (#312).
 
-        **Nearest explicit statement wins, and a chain that states nothing is
-        `off`.** An ancestor's policy is a *default* for everything beneath it,
+        **Nearest explicit statement wins, and a chain that states nothing
+        resolves to the application-global default** (#746) — itself `off`
+        unless the machine config raises it. An ancestor's policy is a *default*
+        for everything beneath it,
         not a lock: a universe set to `cloud-allowed` lets its books use the
         model without each one saying so, and a book that says `off` is off
         regardless. Anton's call, recorded on #312 — "B, but overrideable".
@@ -646,8 +655,10 @@ class ProjectLifecycleMixin:
 
         Fail-closed keeps the two places it belongs: an unreadable or
         unrecognised *value* is `off` (see `_stated_ai_policy`), and a chain
-        with no statement anywhere resolves to `off` here rather than to some
-        permissive default.
+        with no statement anywhere resolves to the application-global default
+        here (#746) — `off` unless the machine config raises it — rather than to
+        some permissive default. The machine field is itself an `AIPolicy`
+        Literal, so a hand-edited garbage value fails load, never mis-seeds.
 
         Through `visit_layers`, not a private walk — the chain's membership rule
         is the declaration's, and a permission resolved over a second, slightly
@@ -655,13 +666,19 @@ class ProjectLifecycleMixin:
         frontend's re-derivation (`decisions_walker_visitor_uniformity`).
 
         ⚠ Cost: one manifest read per chain layer, on top of the walk's own (the
-        label rule reads each ancestor's manifest for its title). Both
-        `current_project()` and `ai_policy()` pay it per call, and `ai_policy()`
-        is on five AI routes. That is the same waste #466 records for
-        `current_project()`'s double walk, one consumer further on; the fix is a
-        memo over the walk, which belongs with #392/#466 and not here.
+        label rule reads each ancestor's manifest for its title), plus one
+        `load_settings()` read for the seed (#746). Both `current_project()` and
+        `ai_policy()` pay it per call, and `ai_policy()` is on five AI routes —
+        which already call `load_settings()` themselves. That is the same waste
+        #466 records for `current_project()`'s double walk, one consumer further
+        on; the fix is a memo over the walk, which belongs with #392/#466 and
+        not here.
         """
-        resolver = _AIPolicyResolver(self._stated_ai_policy)
+        from app.services import machine_settings as ms_service
+
+        resolver = _AIPolicyResolver(
+            self._stated_ai_policy, default=ms_service.load_settings().ai_policy
+        )
         self.visit_layers(resolver, root)
         return resolver.policy
 

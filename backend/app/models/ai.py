@@ -81,6 +81,9 @@ class MachineSettingsView(BaseModel):
     recent_projects: list[RecentProjectView] = Field(default_factory=list)
     palette: list[Swatch] = Field(default_factory=list)
     display: DisplaySettings = Field(default_factory=DisplaySettings)
+    # The application-global default AI policy (#746) — resolved at the top of
+    # every project's inheritance chain.
+    ai_policy: AIPolicy = "off"
     config_path: str
 
 
@@ -104,6 +107,11 @@ class MachineSettingsUpdate(BaseModel):
     # Prose-presentation prefs (#127 / #575). None = leave untouched; a value
     # replaces the whole block (all three fields travel together from the UI).
     display: DisplaySettings | None = None
+    # The application-global default AI policy (#746). None = leave untouched.
+    # Widening it is a permission change, so the UI applies it as its own
+    # explicit gesture, never folded into the batched settings Save
+    # (decisions_ai_permission_fails_closed).
+    ai_policy: AIPolicy | None = None
 
 
 class AIHealthRequest(BaseModel):

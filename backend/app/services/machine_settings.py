@@ -10,7 +10,7 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field
 
-from app.models import AssistantTag, DisplaySettings, RecentProject, Swatch
+from app.models import AIPolicy, AssistantTag, DisplaySettings, RecentProject, Swatch
 from app.services.project.errors import ProjectServiceError
 
 APP_NAME = "local-writing-app"
@@ -112,6 +112,15 @@ class MachineSettings(BaseModel):
     recent_projects: list[RecentProject] = Field(default_factory=list)
     palette: list[Swatch] = Field(default_factory=_seed_palette)
     display: DisplaySettings = Field(default_factory=DisplaySettings)
+    # The application-global default AI access policy (#746) — the outermost
+    # fallback of the inheritance chain, resolved when a project states `inherit`
+    # and nothing up its chain states a policy (`_AIPolicyResolver`'s seed). An
+    # application-global preference like `display`/`palette`, not machine
+    # substrate; it lives here because the config dir is the app's home outside
+    # the projects, and the machine root folder is a bare container, not a
+    # project that could carry it. No `inherit` — this IS the floor. Seeds `off`
+    # (fail-closed, decisions_ai_permission_fails_closed).
+    ai_policy: AIPolicy = "off"
 
 
 def config_dir() -> Path:
@@ -446,11 +455,28 @@ def mask_credentials(settings: MachineSettings) -> dict[str, Any]:
     return payload
 
 
+def _apply_provider_patch(base: dict[str, Any], providers_patch: Any) -> None:
+    """Merge a provider-credentials patch into `base` in place. A MASK sentinel
+    or a None value means 'keep current' — so rotating one key never clears the
+    others (which arrive masked on read)."""
+    if not isinstance(providers_patch, dict):
+        return
+    providers = base.setdefault("providers", {})
+    for key, value in providers_patch.items():
+        if value is None or value == MASK:
+            continue
+        providers[key] = value
+
+
 def merge_update(current: MachineSettings, patch: dict[str, Any]) -> MachineSettings:
     """Apply a partial update; MASK sentinels mean 'keep current value'."""
     base = current.model_dump(mode="json")
-    if "default_provider" in patch and patch["default_provider"] is not None:
-        base["default_provider"] = patch["default_provider"]
+    # Plain scalar passthroughs: set when present and non-null. `ai_policy`'s
+    # Literal bound on MachineSettings rejects a bad value at the final
+    # model_validate, so an out-of-set string never persists.
+    for key in ("default_provider", "ai_policy"):
+        if key in patch and patch[key] is not None:
+            base[key] = patch[key]
     if "default_models" in patch and isinstance(patch["default_models"], dict):
         base.setdefault("default_models", {}).update(patch["default_models"])
     if "default_projects_folder" in patch and patch["default_projects_folder"] is not None:
@@ -467,15 +493,7 @@ def merge_update(current: MachineSettings, patch: dict[str, Any]) -> MachineSett
             Swatch.model_validate(s).model_dump(mode="json")
             for s in patch["palette"]
         ]
-    providers_patch = patch.get("providers")
-    if isinstance(providers_patch, dict):
-        providers = base.setdefault("providers", {})
-        for key, value in providers_patch.items():
-            if value is None:
-                continue
-            if value == MASK:
-                continue  # keep current
-            providers[key] = value
+    _apply_provider_patch(base, patch.get("providers"))
     display_patch = patch.get("display")
     if isinstance(display_patch, dict):
         # The three prose-presentation fields travel together from the UI; the

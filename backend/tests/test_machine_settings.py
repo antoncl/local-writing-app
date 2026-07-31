@@ -432,5 +432,35 @@ class DisplaySettingsTests(unittest.TestCase):
         self.assertTrue(display.paragraph_indent)  # not reset to False
 
 
+class AppWideAiPolicyTests(unittest.TestCase):
+    """The application-global default AI policy (#746) — the chain's floor."""
+
+    def setUp(self) -> None:
+        clear_test_scope()
+        self.client = TestClient(app)
+
+    def test_view_defaults_off_when_unset(self) -> None:
+        view = self.client.get("/api/settings/machine").json()
+        self.assertEqual(view["ai_policy"], "off")
+
+    def test_put_persists_ai_policy(self) -> None:
+        returned = self.client.put("/api/settings/machine", json={"ai_policy": "cloud-allowed"})
+        self.assertEqual(returned.status_code, 200, returned.text)
+        self.assertEqual(returned.json()["ai_policy"], "cloud-allowed")
+        # Survives a fresh load from disk.
+        self.assertEqual(ms.load_settings().ai_policy, "cloud-allowed")
+
+    def test_put_rejects_a_value_outside_the_policy_set(self) -> None:
+        bad = self.client.put("/api/settings/machine", json={"ai_policy": "cloud_allowed"})
+        self.assertEqual(bad.status_code, 422)
+
+    def test_ai_policy_patch_leaves_other_settings_untouched(self) -> None:
+        self.client.put("/api/settings/machine", json={"default_provider": "anthropic"})
+        self.client.put("/api/settings/machine", json={"ai_policy": "local-only"})
+        settings = ms.load_settings()
+        self.assertEqual(settings.default_provider, "anthropic")
+        self.assertEqual(settings.ai_policy, "local-only")
+
+
 if __name__ == "__main__":
     unittest.main()

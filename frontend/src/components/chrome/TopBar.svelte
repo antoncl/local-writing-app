@@ -50,6 +50,7 @@
   export let onOpenChats: () => void = () => {};
   export let onOpenPrompts: () => void = () => {};
   export let onOpenPlotTemplates: () => void = () => {};
+  export let onOpenPlotBoard: () => void = () => {};
   export let onOpenMutations: () => void = () => {};
   // Loose-scene import — its own home now (#635), a rare project action.
   export let onOpenImport: () => void = () => {};
@@ -278,6 +279,7 @@
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} on:click={() => runAction(onOpenChats)}>Chats</button>
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} on:click={() => runAction(onOpenPrompts)}>Prompts</button>
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} on:click={() => runAction(onOpenPlotTemplates)}>Plot templates</button>
+        <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} on:click={() => runAction(onOpenPlotBoard)}>Plot board</button>
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} on:click={() => runAction(onOpenMutations)}>Mutations</button>
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} on:click={() => runAction(onOpenImport)}>Import documents…</button>
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} on:click={() => runAction(onManageAllTags)}>Manage all tags…</button>

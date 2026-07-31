@@ -7,6 +7,7 @@ import { refreshStructure, refreshResearchStructure, clearStructure } from "@/li
 import { refreshLoreEntries, clearLore } from "@/lib/stores/lore";
 import { refreshPromptEntries, clearPrompts } from "@/lib/stores/prompts";
 import { refreshPlotTemplates, clearPlotTemplates } from "@/lib/stores/plotTemplates";
+import { clearPlotBoard } from "@/lib/stores/plotBoard";
 import { refreshMutationSetEntries, clearMutationSets } from "@/lib/stores/mutationSets";
 import { refreshSchema, clearSchema } from "@/lib/stores/schema";
 import { refreshReferenceIndex, clearReferenceIndex } from "@/lib/stores/references";
@@ -45,6 +46,7 @@ export function clearProjectData(): void {
   clearLore();
   clearPrompts();
   clearPlotTemplates();
+  clearPlotBoard();
   clearMutationSets();
   clearSchema();
   clearReferenceIndex();

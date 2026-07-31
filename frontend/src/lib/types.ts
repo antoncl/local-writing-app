@@ -210,6 +210,14 @@ export type {
   PlotTemplateSourceRef,
 } from "./plotTemplateTypes";
 
+// Plot-board projection types (ADR-0048 S7a/S7b) live in ./plotBoardTypes, same
+// reason as the templates above; re-exported so `@/lib/types` stays the barrel.
+export type {
+  PlotBoardProjection,
+  PlotBoardCard,
+  PlotBoardPlotline,
+} from "./plotBoardTypes";
+
 export type AssistantEntrySummary = {
   id: string;
   title: string;

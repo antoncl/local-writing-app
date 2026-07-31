@@ -57,6 +57,7 @@ import type {
   PromptEntryList,
   PlotTemplate,
   PlotTemplateList,
+  PlotBoardProjection,
   MutationSetEntry,
   MutationSetEntryList,
   MutationSetRow,
@@ -907,6 +908,11 @@ export const api = {
   },
   deletePlotTemplate(entryId: string) {
     return request<PlotTemplateList>(`/plot/templates/${entryId}`, { method: "DELETE" });
+  },
+  // The board's read model (ADR-0048 S7a): plotlines + cards (with their refs) +
+  // the opaque layout, in one GET. Get-or-creates the `plot:board` singleton.
+  getPlotBoardProjection() {
+    return request<PlotBoardProjection>("/plot/board/projection");
   },
   // Reusable mutation sets (#62).
   listMutationSetEntries() {

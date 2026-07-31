@@ -11,6 +11,7 @@
   import Assistants from "@/components/panes/Assistants.svelte";
   import Prompts from "@/components/panes/Prompts.svelte";
   import PlotTemplates from "@/components/panes/PlotTemplates.svelte";
+  import PlotEditor from "@/components/panes/PlotEditor.svelte";
   import Mutations from "@/components/panes/Mutations.svelte";
   import Chats from "@/components/panes/Chats.svelte";
   import Project from "@/components/panes/Project.svelte";
@@ -62,6 +63,7 @@
     setPromptEntries,
   } from "@/lib/stores/prompts";
   import { plotTemplatesStore } from "@/lib/stores/plotTemplates";
+  import { plotBoardStore, refreshPlotBoard } from "@/lib/stores/plotBoard";
   import { openProjectHidden } from "@/lib/stores/hiddenLibrary";
   import {
     assistantEntriesStore,
@@ -558,6 +560,14 @@
     workspaceLayout.ensureVisible("plotTemplates");
   }
 
+  function openPlotBoardPane() {
+    // Fetch-then-show, like openChatsPane / openAssistantsPane — but through run()
+    // so an HTTP error surfaces in the banner rather than being swallowed. The
+    // pane opens immediately and shows "Loading…" until the projection resolves.
+    void run(() => refreshPlotBoard());
+    workspaceLayout.ensureVisible("plotEditor");
+  }
+
   function openMutationsPane() {
     workspaceLayout.ensureVisible("mutations");
   }
@@ -697,6 +707,7 @@
   let metadataSchema = $derived($metadataSchemaStore);
   let promptEntries = $derived($promptEntriesStore);
   let plotTemplates = $derived($plotTemplatesStore);
+  let plotBoard = $derived($plotBoardStore);
   let assistantEntries = $derived($assistantEntriesStore);
   // The per-pane selected-view spec is no longer derived here: an explicit-view
   // pane declares `view: { kind }` on its region entry, and the central RegionBody
@@ -737,6 +748,7 @@
   onOpenChats={openChatsPane}
   onOpenPrompts={openPromptsPane}
   onOpenPlotTemplates={openPlotTemplatesPane}
+  onOpenPlotBoard={openPlotBoardPane}
   onOpenMutations={openMutationsPane}
   onOpenImport={openImportDocs}
   onManageAllTags={() => (tagsManagerOpen = true)}
@@ -785,6 +797,7 @@
       research: { title: "Research", body: researchBody, view: { kind: "research" } },
       prompts: { title: "Prompts", body: promptsBody, actions: promptsActions, view: { kind: "prompt" }, closable: true, onClose: closeRegion("prompts") },
       plotTemplates: { title: "Plot templates", body: plotTemplatesBody, view: { kind: "plot" }, closable: true, onClose: closeRegion("plotTemplates") },
+      plotEditor: { title: "Plot board", body: plotEditorBody, closable: true, onClose: closeRegion("plotEditor") },
       mutations: { title: "Reusable mutations", body: mutationsBody, actions: mutationsActions, closable: true, onClose: closeRegion("mutations") },
       assistants: { title: "Assistants", body: assistantsBody, actions: assistantsActions, view: { kind: "assistant", switcher: true }, closable: true, onClose: closeRegion("assistants") },
       chats: { title: "Chats", body: chatsBody, actions: chatsActions, closable: true, onClose: closeRegion("chats") },
@@ -908,6 +921,15 @@
         onOpenEntry={(id) => editorPanes.openPlotTemplate(id)}
         onCloneEntry={(id) => run(() => editorPanes.forkPlotTemplate(id))}
       />
+    </div>
+  {/snippet}
+
+  {#snippet plotEditorBody()}
+    <!-- No .pane-content here: the board is a canvas, not a padded/scrolling list.
+         The host fills the tile (`.ws-doc > *:last-child` gets flex:1) so the
+         SvelteFlow surface has a definite height to render into. -->
+    <div class="plot-board-host">
+      <PlotEditor projection={plotBoard} />
     </div>
   {/snippet}
 
@@ -1249,6 +1271,13 @@
   }
   .welcome > :global(.project-panel) {
     width: min(560px, 100%);
+  }
+
+  /* The plot board fills its tile (a canvas, not a padded list); PlotEditor's
+     own root takes 100% of this flex host. */
+  .plot-board-host {
+    display: flex;
+    min-height: 0;
   }
 
   /* Project region content wrapper (rendered as a snippet into the shell). */

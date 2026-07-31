@@ -261,6 +261,22 @@ class PlotBoardPlotline(BaseModel):
     color: str | None = None
 
 
+class PlotBoardContainer(BaseModel):
+    """A manuscript container (an act, a chapter — whatever container types the
+    project declares) as the board renders it (ADR-0048 S7 Slice 4): a soft,
+    free-flow box that holds the cards whose scenes live under it. `parent` is
+    the enclosing container's id, or None when its parent is the manuscript root
+    (a top-level act) — so the board can nest a chapter box inside its act. Only
+    containers that transitively hold a placed card (plus their ancestors) are
+    projected, in manuscript reading order; an empty container is not a board
+    concern. Structure, not thread: a container carries no colour (plotline is
+    the colour axis, orthogonal to this structural one)."""
+
+    id: str
+    title: str
+    parent: str | None = None
+
+
 class PlotBoardCard(BaseModel):
     """A card as the board renders it (ADR-0048 S7a): identity, the synopsis (the
     card body), and the plotline and scene it points at (each None when unset).
@@ -268,26 +284,33 @@ class PlotBoardCard(BaseModel):
     (`delete_scene` / `delete_plotline` → `_purge_references_to`), so a ref here
     is always either live or already blanked — an attachment is live or gone,
     never a dangling pointer (ADR §S5). The board renders a gone scene as an
-    unattached card, nothing more."""
+    unattached card, nothing more.
+
+    `container` (Slice 4) is the card's scene's innermost manuscript container id
+    (the box it lays out inside), or None when the card is homeless — no scene, or
+    a scene directly under the root. Derived from the scene, never authored: a
+    card's structural home follows its attachment, so dragging never changes it."""
 
     id: str
     title: str
     synopsis: str = ""
     plotline: str | None = None
     scene: str | None = None
+    container: str | None = None
 
 
 class PlotBoardProjection(BaseModel):
     """The read model the PlotEditor board renders from (ADR-0048 S7a): the
-    plotlines, the cards with their refs, and the board's opaque `layout` payload
-    (card positions / grouping — its shape is the canvas's, S7c). Computed and
-    read-only; defined over card + plotline + board data only, never templates or
-    beats (those arrive in S8)."""
+    plotlines, the manuscript containers (Slice 4), the cards with their refs,
+    and the board's opaque `layout` payload (card positions — its shape is the
+    canvas's, S7c). Computed and read-only; defined over card + plotline +
+    structure + board data only, never templates or beats (those arrive in S8)."""
 
     board_id: str = ""
     board_revision: str = ""
     layout: dict[str, Any] = Field(default_factory=dict)
     plotlines: list[PlotBoardPlotline] = Field(default_factory=list)
+    containers: list[PlotBoardContainer] = Field(default_factory=list)
     cards: list[PlotBoardCard] = Field(default_factory=list)
 
 

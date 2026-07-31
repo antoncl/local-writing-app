@@ -47,6 +47,7 @@ from app.models import (
     CreateTemplateInstanceRequest,
     PlotBoard,
     PlotBoardCard,
+    PlotBoardContainer,
     PlotBoardPlotline,
     PlotBoardProjection,
     PlotlineEntry,
@@ -62,6 +63,7 @@ from app.models import (
     SavePlotlineRequest,
     SavePlotTemplateRequest,
     SaveTemplateInstanceRequest,
+    StructureNode,
     TemplateInstanceEntry,
     TemplateInstanceList,
     TemplateInstanceSummary,
@@ -818,10 +820,11 @@ class PlotMixin:
         self._atomic_write(path, f"---\n{front_matter}\n---\n")
 
     def read_plot_board_projection(self) -> PlotBoardProjection:
-        """The board's render model in one read (ADR-0048 S7a): the plotlines, the
-        cards with their plotline/scene refs, and the board's opaque layout.
-        Read-only and computed — card + plotline + board data only, never templates
-        or beats (S8).
+        """The board's render model in one read (ADR-0048 S7a + Slice 4): the
+        plotlines, the manuscript containers a card lays out inside, the cards with
+        their plotline/scene refs + resolved container, and the board's opaque
+        layout. Read-only and computed — card + plotline + structure + board data
+        only, never templates or beats (S8).
 
         Card refs need no dangling-resolution here: deleting a scene or a plotline
         purges the referencing cards (delete_scene / delete_plotline →
@@ -829,29 +832,81 @@ class PlotMixin:
         blanked to "" — the same invariant the unset case relies on. A plain
         `or None` is the whole of "resolve a ref"; a gone scene projects as an
         unattached card (ADR §S5), never a dangling pointer.
+
+        The structure is walked exactly once (`_board_container_map`) and joined
+        onto the cards in memory, so the projection adds no per-card structure I/O.
         """
         board = self.read_plot_board()
         plotlines = [
             PlotBoardPlotline(id=line.id, title=line.title, color=line.metadata.get("color") or None)
             for line in self.list_plotlines().entries
         ]
-        cards = [
-            PlotBoardCard(
-                id=card.id,
-                title=card.title,
-                synopsis=card.body,
-                plotline=card.metadata.get("plotline") or None,
-                scene=card.metadata.get("scene") or None,
+        containers, scene_to_container = self._board_container_map()
+        cards: list[PlotBoardCard] = []
+        used_containers: set[str] = set()
+        for card in self.list_cards().entries:
+            scene = card.metadata.get("scene") or None
+            container = scene_to_container.get(scene) if scene else None
+            # Mark the card's container and every ancestor used, so a nesting box
+            # (a "part" between act and chapter) is projected even with no direct card.
+            cursor = container
+            while cursor is not None and cursor not in used_containers:
+                used_containers.add(cursor)
+                cursor = containers[cursor].parent
+            cards.append(
+                PlotBoardCard(
+                    id=card.id,
+                    title=card.title,
+                    synopsis=card.body,
+                    plotline=card.metadata.get("plotline") or None,
+                    scene=scene,
+                    container=container,
+                )
             )
-            for card in self.list_cards().entries
-        ]
+        # Reading order (containers is already ordered), used-only — an empty
+        # container is not a board concern.
+        board_containers = [c for cid, c in containers.items() if cid in used_containers]
         return PlotBoardProjection(
             board_id=board.id,
             board_revision=board.revision,
             layout=board.layout,
             plotlines=plotlines,
+            containers=board_containers,
             cards=cards,
         )
+
+    def _board_container_map(self) -> tuple[dict[str, PlotBoardContainer], dict[str, str]]:
+        """Walk the manuscript once → (containers-by-id in reading order,
+        scene_id → innermost-container-id).
+
+        A *container* is a non-leaf structure node other than the root — an act, a
+        chapter, whatever container types the project declares (`_is_leaf_node`
+        draws the leaf/container line, the same test seed-from-manuscript uses). A
+        card lays out inside its scene's INNERMOST container (the scene's immediate
+        parent); the board nests that box inside its ancestors via `parent`. A scene
+        directly under the root has no container (it maps to nothing here), so its
+        card is homeless — same as a scene-less card.
+
+        `containers` is insertion-ordered by a pre-order walk, i.e. manuscript
+        reading order, which the board relies on to lay acts/chapters out in order.
+        """
+        containers: dict[str, PlotBoardContainer] = {}
+        scene_to_container: dict[str, str] = {}
+
+        def walk(node: StructureNode, parent_container: str | None) -> None:
+            for child in node.children:
+                if self._is_leaf_node(child):
+                    if child.scene_id and parent_container is not None:
+                        scene_to_container[child.scene_id] = parent_container
+                else:
+                    if child.id not in containers:
+                        containers[child.id] = PlotBoardContainer(
+                            id=child.id, title=child.title, parent=parent_container
+                        )
+                    walk(child, child.id)
+
+        walk(self.read_structure().root, None)
+        return containers, scene_to_container
 
     # ----- Templates (plot:template) — an ADR-0049 Library tenant ---------
     #

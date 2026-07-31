@@ -11,7 +11,7 @@
   import Assistants from "@/components/panes/Assistants.svelte";
   import Prompts from "@/components/panes/Prompts.svelte";
   import PlotTemplates from "@/components/panes/PlotTemplates.svelte";
-  import PlotEditor from "@/components/panes/PlotEditor.svelte";
+  import PlotBoardPane from "@/components/panes/PlotBoardPane.svelte";
   import Mutations from "@/components/panes/Mutations.svelte";
   import Chats from "@/components/panes/Chats.svelte";
   import Project from "@/components/panes/Project.svelte";
@@ -63,7 +63,7 @@
     setPromptEntries,
   } from "@/lib/stores/prompts";
   import { plotTemplatesStore } from "@/lib/stores/plotTemplates";
-  import { plotBoardStore, refreshPlotBoard } from "@/lib/stores/plotBoard";
+  import { refreshPlotBoard } from "@/lib/stores/plotBoard";
   import { openProjectHidden } from "@/lib/stores/hiddenLibrary";
   import {
     assistantEntriesStore,
@@ -707,7 +707,6 @@
   let metadataSchema = $derived($metadataSchemaStore);
   let promptEntries = $derived($promptEntriesStore);
   let plotTemplates = $derived($plotTemplatesStore);
-  let plotBoard = $derived($plotBoardStore);
   let assistantEntries = $derived($assistantEntriesStore);
   // The per-pane selected-view spec is no longer derived here: an explicit-view
   // pane declares `view: { kind }` on its region entry, and the central RegionBody
@@ -929,7 +928,7 @@
          The host fills the tile (`.ws-doc > *:last-child` gets flex:1) so the
          SvelteFlow surface has a definite height to render into. -->
     <div class="plot-board-host">
-      <PlotEditor projection={plotBoard} />
+      <PlotBoardPane />
     </div>
   {/snippet}
 

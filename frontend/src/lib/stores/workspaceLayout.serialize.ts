@@ -37,6 +37,12 @@ export const HOMES: Record<string, string> = {
   mutations: G_SIDE,
   assistants: G_SIDE,
   chats: G_SIDE,
+  // The plot board is a large SvelteFlow canvas (like the view designer), so it
+  // homes to the central editor group, not the side column — it tabs alongside
+  // the open documents. RegionBody renders it there; the group mixes tab kinds
+  // per-tab. Being in HOMES also makes it a known region, so it now survives a
+  // reload — PlotBoardPane refetches the projection on restore.
+  plotEditor: G_EDITOR,
   todo: G_TOOLS,
   search: G_TOOLS,
 };
@@ -271,6 +277,8 @@ const MIN_WIDTHS: Record<string, number> = {
   mutations: 260,
   assistants: 260,
   chats: 240,
+  // A canvas wants elbow room — match the editor documents it tabs beside.
+  plotEditor: EDITOR_MIN_WIDTH,
   todo: 200,
   search: 220,
 };

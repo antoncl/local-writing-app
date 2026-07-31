@@ -10,6 +10,7 @@
 // below so `@/lib/types` stays the single barrel.
 import type { PlotTemplate } from "./plotTemplateTypes";
 import type { CardEntry } from "./plotCardTypes";
+import type { AIPolicy } from "./aiTypes";
 
 export type PanelId = string;
 
@@ -927,8 +928,6 @@ export type ProjectValidation = {
   migrations_applied: string[];
 };
 
-export type AIPolicy = "off" | "local-only" | "cloud-allowed";
-
 /**
  * One folder between the configured base and the open project (#309).
  *
@@ -1001,13 +1000,6 @@ export type ProjectInfo = {
   metadata?: Record<string, unknown>;
 };
 
-export type ProviderCredentialsView = {
-  anthropic_api_key: string;
-  openai_api_key: string;
-  openrouter_api_key: string;
-  ollama_host: string;
-};
-
 export type ProjectNode = {
   id: string;
   title: string;
@@ -1026,377 +1018,57 @@ export type SaveProjectNodeRequest = {
   metadata?: Record<string, unknown>;
 };
 
-export type RecentProject = {
-  path: string;
-  title: string;
-  opened_at: string;
-  // False when this recent now points outside the machine projects root (#441):
-  // shown as unavailable — equivalent to a deleted folder — not offered to open.
-  within_root: boolean;
-};
+// Machine-settings wire types live in ./machineTypes (#763.5) — extracted to
+// keep this barrel under the file-size cap; re-exported so `@/lib/types` stays
+// the one import surface.
+export type {
+  ProviderCredentialsView,
+  RecentProject,
+  Swatch,
+  DisplaySettings,
+  MachineSettingsView,
+  MachineSettingsUpdate,
+  MachineSettingsDraft,
+} from "./machineTypes";
 
-export type Swatch = {
-  id: string;
-  label: string;
-  hex: string;
-};
-
-// Per-user prose-presentation prefs (#127 / #575), applied as CSS vars on :root.
-export type DisplaySettings = { ui_scale: number; paragraph_align: "left" | "justify"; paragraph_indent: boolean };
-
-export type MachineSettingsView = {
-  version: number;
-  providers: ProviderCredentialsView;
-  default_provider: string;
-  default_models: Record<string, string>;
-  default_projects_folder: string;
-  recent_projects: RecentProject[];
-  palette: Swatch[];
-  display: DisplaySettings;
-  config_path: string;
-};
-
-export type MachineSettingsUpdate = {
-  providers?: Partial<ProviderCredentialsView>;
-  default_provider?: string;
-  default_models?: Record<string, string>;
-  default_projects_folder?: string;
-  recent_projects?: RecentProject[];
-  palette?: Swatch[];
-  display?: DisplaySettings;
-};
-
-// Editor-side draft for MachineSettingsDialog. Flat (provider keys hoisted
-// to top level) so two-way binding to inputs is straightforward; the parent
-// reshapes into MachineSettingsUpdate at save time.
-export type MachineSettingsDraft = {
-  anthropic_api_key: string;
-  openai_api_key: string;
-  openrouter_api_key: string;
-  ollama_host: string;
-  default_provider: string;
-  default_models: Record<string, string>;
-  default_projects_folder: string;
-  palette: Swatch[];
-  display: DisplaySettings;
-};
-
-export type AIHealthResponse = {
-  provider: string;
-  model: string;
-  ok: boolean;
-  latency_ms: number;
-  policy: AIPolicy;
-  error?: string | null;
-};
-
-export type AIProviderInfo = {
-  name: string;
-  display_name: string;
-};
-
-export type AIProviderList = {
-  providers: AIProviderInfo[];
-};
-
-export type AICapabilityTier = "fast" | "balanced" | "premium" | "reasoning" | "local";
-
-export type AIModelInfo = {
-  id: string;
-  display_name: string;
-  provider: string;
-  context_window: number;
-  tier: AICapabilityTier;
-  capabilities: string[];
-  deprecated: boolean;
-  sunset_date?: string | null;
-  successor?: string | null;
-  cost_in_per_mtok?: number | null;
-  cost_out_per_mtok?: number | null;
-  cache_read_multiplier?: number | null;
-};
-
-export type AIProviderModelList = {
-  provider: string;
-  models: AIModelInfo[];
-};
-
-export type AITierResolution = {
-  provider: string;
-  tier: string;
-  model_id: string | null;
-};
-
-export type AIPreviewRequest = {
-  template_source: string;
-  target_scene_id: string;
-  session_id?: string | null;
-  inputs?: Record<string, unknown>;
-  text_before?: string;
-  text_after?: string;
-  commit?: boolean;
-  // Explicit mutation resolution scene from a `scene_ref` input (ADR-0012);
-  // overrides target_scene_id for effective-state resolution.
-  resolution_scene_id?: string;
-  // V2: when set, preview response includes estimated_cost_usd + caching_style.
-  assistant_id?: string | null;
-};
-
-export type PreviewContentBlock = {
-  text: string;
-  cache_break_after: boolean;
-};
-
-export type PreviewMessage = {
-  role: string;
-  blocks: PreviewContentBlock[];
-};
-
-export type PreviewCacheBlock = {
-  label: string;
-  role: string;
-  tokens: number;
-  cache_break_after: boolean;
-};
-
-// Populated on AIPreviewResponse.error when the render failed. The preview
-// endpoint returns 200 with this set rather than throwing — the editor
-// auto-fires preview before required inputs are filled, so an unrendered
-// template is an expected state. `/api/ai/generate` still throws.
-export type PreviewErrorInfo = {
-  message: string;
-  // "undefined" — Jinja UndefinedError; undefined_name set when derivable.
-  // "syntax"    — TemplateSyntaxError; line set.
-  // "scene_not_found" — preview target_scene_id didn't resolve.
-  // "other"     — catch-all.
-  kind: "undefined" | "syntax" | "scene_not_found" | "other";
-  line?: number | null;
-  col?: number | null;
-  undefined_name?: string | null;
-};
-
-export type AIPreviewResponse = {
-  messages: PreviewMessage[];
-  warnings: string[];
-  char_count: number;
-  session_id?: string | null;
-  rendered: boolean;
-  error?: PreviewErrorInfo | null;
-  // V2 telemetry. estimated_tokens always populated; cost null when no
-  // assistant or pricing unknown.
-  estimated_tokens?: number;
-  cache_blocks?: PreviewCacheBlock[];
-  estimated_cost_usd?: number | null;
-  provider?: string | null;
-  model?: string | null;
-  caching_style?: "none" | "auto" | "explicit" | null;
-};
-
-export type ChatMessage = {
-  role: "user" | "assistant";
-  content: string;
-  // UI-side accumulator fields populated during the streaming chat turn.
-  // Optional on the wire — the backend ignores extras on send.
-  thinking?: string;
-  truncated?: boolean;
-  journal_added?: ChatSessionJournalEntry[];
-  usage?: ChatUsage | null;
-  cost_usd?: number | null;
-};
-
-export type AIChatRequest = {
-  provider?: string | null;
-  model?: string | null;
-  assistant_id?: string | null;
-  system_prompt?: string;
-  messages: ChatMessage[];
-  max_tokens?: number;
-  chat_id?: string | null;
-};
-
-export type ChatUsage = {
-  input_tokens: number;
-  cached_input_tokens: number;
-  cache_write_tokens: number;
-  output_tokens: number;
-};
-
-export type AIChatResponse = {
-  role: "assistant";
-  content: string;
-  provider: string;
-  model: string;
-  latency_ms: number;
-  policy: AIPolicy;
-  ok: boolean;
-  error?: string | null;
-  stop_reason?: string | null;
-  truncated: boolean;
-  journal_added?: ChatSessionJournalEntry[];
-  // V2 telemetry. Null on failure or when provider didn't return usage.
-  usage?: ChatUsage | null;
-  cost_usd?: number | null;
-};
-
-export type AIGenerateRequest = {
-  template_source: string;
-  target_scene_id: string;
-  session_id?: string | null;
-  inputs?: Record<string, unknown>;
-  text_before?: string;
-  text_after?: string;
-  selection?: string;
-  commit?: boolean;
-  // Explicit mutation resolution scene from a `scene_ref` input (ADR-0012);
-  // overrides target_scene_id for effective-state resolution.
-  resolution_scene_id?: string;
-  provider?: string | null;
-  model?: string | null;
-  assistant_id?: string | null;
-  max_tokens?: number;
-};
-
-export type AIContextPresetResponse = {
-  kind: string;
-  content: string;
-};
-
-export type AIGenerateResponse = {
-  content: string;
-  rendered_messages: PreviewMessage[];
-  rendered_warnings: string[];
-  char_count: number;
-  provider: string;
-  model: string;
-  latency_ms: number;
-  policy: AIPolicy;
-  ok: boolean;
-  error?: string | null;
-  stop_reason?: string | null;
-  truncated: boolean;
-  session_id?: string | null;
-  usage?: ChatUsage | null;
-  cost_usd?: number | null;
-};
-
-export type AIInvocation = {
-  id: string;
-  ts: string;
-  prompt_entry_id?: string;
-  prompt_entry_type?: string;
-  scene_id?: string;
-  character_id?: string;
-  provider?: string;
-  model?: string;
-  usage?: ChatUsage | null;
-  cost_usd?: number | null;
-};
-
-export type AIInvocationList = {
-  invocations: AIInvocation[];
-};
-
-export type CreateAIInvocationRequest = {
-  prompt_entry_id?: string;
-  prompt_entry_type?: string;
-  scene_id?: string;
-  character_id?: string;
-  provider?: string;
-  model?: string;
-  usage?: ChatUsage | null;
-  cost_usd?: number | null;
-};
-
-export type ChatSessionMessage = {
-  role: "user" | "assistant";
-  content: string;
-  thinking?: string;
-  truncated?: boolean;
-  journal_added?: ChatSessionJournalEntry[];
-  usage?: ChatUsage | null;
-  cost_usd?: number | null;
-};
-
-export type ChatSessionContextItem = {
-  kind: "scene" | "lore" | "snippet" | "preset";
-  id: string;
-  entry_type?: string;
-  title?: string;
-};
-
-export type ChatSessionJournalEntry = {
-  entry_id: string;
-  title?: string;
-  entry_type?: string;
-  added_at_turn?: number;
-  source?: "user_message" | "rendered_prompt" | "depth1_expansion";
-};
-
-export type ChatSession = {
-  id: string;
-  title: string;
-  prompt_entry_id: string;
-  assistant_id: string;
-  system_prompt: string;
-  // Scene this chat was opened against; passed as the `scene` binding at
-  // first-send render. Empty for freeform / Chats-pane chats.
-  target_scene_id?: string;
-  pinned: boolean;
-  created_at: string;
-  updated_at: string;
-  context_items: ChatSessionContextItem[];
-  messages: ChatSessionMessage[];
-  inputs?: Record<string, unknown>;
-  journal?: ChatSessionJournalEntry[];
-  // V2: running USD cost (display as EUR via money.ts).
-  cost_usd_total?: number;
-  // V2: per-cache-slot ISO timestamps of last cache write.
-  cache_write_times?: Record<string, string>;
-};
-
-export type ChatSessionSummary = {
-  id: string;
-  title: string;
-  prompt_entry_id: string;
-  assistant_id: string;
-  pinned: boolean;
-  created_at: string;
-  updated_at: string;
-  message_count: number;
-  cost_usd_total?: number;
-};
-
-export type ChatSessionList = {
-  sessions: ChatSessionSummary[];
-};
-
-export type CreateChatSessionRequest = {
-  title?: string;
-  prompt_entry_id?: string;
-  assistant_id?: string;
-  system_prompt?: string;
-  target_scene_id?: string;
-};
-
-export type SaveChatSessionRequest = {
-  title: string;
-  prompt_entry_id: string;
-  assistant_id: string;
-  system_prompt: string;
-  target_scene_id?: string;
-  pinned: boolean;
-  context_items: ChatSessionContextItem[];
-  messages: ChatSessionMessage[];
-  inputs?: Record<string, unknown>;
-  journal?: ChatSessionJournalEntry[];
-  // V2: incremental cost to ADD to persisted cost_usd_total. Backend
-  // clamps negatives to 0 (cost is monotonic).
-  cost_delta_usd?: number;
-  // V2: slot labels whose cache_write_times entry should be stamped
-  // with the current server time. Send when the response's usage had
-  // cache_write_tokens > 0 for that slot.
-  cache_write_slots?: string[];
-};
+// AI wire types live in ./aiTypes (#763.5) — extracted to keep this barrel
+// under the file-size cap; re-exported so `@/lib/types` stays the one import
+// surface. `AIPolicy` is imported above for local use (ProjectInfo,
+// PromptEntryTypeExtras) and re-exported here alongside the rest.
+export type {
+  AIPolicy,
+  AIHealthResponse,
+  AIProviderInfo,
+  AIProviderList,
+  AICapabilityTier,
+  AIModelInfo,
+  AIProviderModelList,
+  AITierResolution,
+  AIPreviewRequest,
+  PreviewContentBlock,
+  PreviewMessage,
+  PreviewCacheBlock,
+  PreviewErrorInfo,
+  AIPreviewResponse,
+  ChatMessage,
+  AIChatRequest,
+  ChatUsage,
+  AIChatResponse,
+  AIGenerateRequest,
+  AIContextPresetResponse,
+  AIGenerateResponse,
+  AIInvocation,
+  AIInvocationList,
+  CreateAIInvocationRequest,
+  ChatSessionMessage,
+  ChatSessionContextItem,
+  ChatSessionJournalEntry,
+  ChatSession,
+  ChatSessionSummary,
+  ChatSessionList,
+  CreateChatSessionRequest,
+  SaveChatSessionRequest,
+} from "./aiTypes";
 
 export type DirectoryEntry = {
   name: string;

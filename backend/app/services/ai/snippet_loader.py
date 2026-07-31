@@ -31,43 +31,30 @@ class PromptSnippetLoader(BaseLoader):
         return entry.body, entry.id, lambda: False
 
     def _resolve_snippet(self, raw_name: str) -> Any | None:
+        """Find the `prompt:snippet` entry an include name refers to, or None.
+
+        None means "no such snippet" (→ TemplateNotFound); read/schema errors
+        are left to propagate so a genuinely-present-but-unreadable snippet
+        surfaces the real failure instead of a misleading "not found".
+        """
         name = raw_name.strip()
         stem = name[:-3] if name.lower().endswith(".md") else name
-        try:
-            schema = self.project.read_metadata_schema()
-            entries = self.project.list_prompt_entries().entries
-        except Exception:
-            return None
+        schema = self.project.read_metadata_schema()
+        entries = self.project.list_prompt_entries().entries
 
+        # `entry_type_ancestry` is the shared "is X a kind-of Y" primitive
+        # (ADR-0026) — reuse it rather than re-walking the parent chain here.
         snippets = [
             entry
             for entry in entries
-            if _entry_type_descends_from(schema, entry.entry_type, "prompt:snippet")
+            if "prompt:snippet"
+            in self.project.entry_type_ancestry(entry.entry_type, schema=schema)
         ]
         for entry in snippets:
-            if entry.id == name or entry.id == stem:
-                try:
-                    return self.project.read_prompt_entry(entry.id)
-                except Exception:
-                    return None
+            if entry.id in (name, stem):
+                return self.project.read_prompt_entry(entry.id)
 
         title_matches = [entry for entry in snippets if entry.title in {name, stem}]
         if len(title_matches) != 1:
             return None
-        try:
-            return self.project.read_prompt_entry(title_matches[0].id)
-        except Exception:
-            return None
-
-
-def _entry_type_descends_from(schema: Any, entry_type: Any, ancestor: str) -> bool:
-    cursor = str(entry_type or "")
-    seen: set[str] = set()
-    while cursor and cursor not in seen:
-        if cursor == ancestor:
-            return True
-        seen.add(cursor)
-        definition = getattr(schema, "entry_types", {}).get(cursor)
-        parent = getattr(definition, "parent", "") if definition is not None else ""
-        cursor = parent if isinstance(parent, str) else ""
-    return False
+        return self.project.read_prompt_entry(title_matches[0].id)

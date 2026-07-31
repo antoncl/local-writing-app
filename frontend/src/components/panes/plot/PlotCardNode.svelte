@@ -33,6 +33,26 @@
   let editing = $state(false);
   let draft = $state("");
   let textarea = $state<HTMLTextAreaElement | null>(null);
+  let rootEl = $state<HTMLElement | null>(null);
+
+  // Close the menu on an outside pointerdown or Escape — NOT on focusout, which
+  // would fire (and wrongly close) the moment the two-page menu swaps pages and
+  // removes the focused button. Only while open, cleaned up on close / unmount.
+  $effect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: PointerEvent) => {
+      if (rootEl && !rootEl.contains(e.target as Node)) closeMenu();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeMenu();
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("keydown", onKey, true);
+    };
+  });
 
   function toggleMenu() {
     menuView = "main";
@@ -65,13 +85,7 @@
   }
 </script>
 
-<div
-  class="card-root"
-  role="presentation"
-  onfocusout={(e) => {
-    if (!e.currentTarget.contains(e.relatedTarget as Node)) closeMenu();
-  }}
->
+<div class="card-root" bind:this={rootEl}>
   <article class="plot-card" style={accent ? `--card-accent: ${accent}` : undefined} class:accented={accent}>
     <div class="card-head">
       <h4 class="card-title" title={data.title}>{data.title || "Untitled card"}</h4>

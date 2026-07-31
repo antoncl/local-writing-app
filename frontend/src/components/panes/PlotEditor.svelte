@@ -17,6 +17,7 @@
   import { SvelteFlow, Controls, type ColorMode, type Edge } from "@xyflow/svelte";
   import { themePreference } from "@/lib/utils/theme";
   import { buildBoardNodes, type PlotBoardNode } from "@/lib/plot/plotBoardLayout";
+  import ViewportFit from "@/components/editor/body/view/ViewportFit.svelte";
   import PlotCardNode from "./plot/PlotCardNode.svelte";
   import PlotLaneNode from "./plot/PlotLaneNode.svelte";
   import type { PlotBoardProjection } from "@/lib/types";
@@ -30,7 +31,11 @@
   // S7b (card→scene/plotline wires are S7f, and don't render headless anyway).
   let flowNodes = $state<PlotBoardNode[]>([]);
   let flowEdges = $state<Edge[]>([]);
-  $effect(() => {
+  // $effect.PRE, not $effect: a plain effect runs after children mount, so
+  // <SvelteFlow>'s init-only `fitView` would frame an empty array before this
+  // populated it. Pre runs before the DOM update in the same flush, so the nodes
+  // are in place when the canvas first mounts (projection null→set).
+  $effect.pre(() => {
     flowNodes = projection ? buildBoardNodes(projection) : [];
   });
 
@@ -58,11 +63,16 @@
       nodesDraggable={false}
       nodesConnectable={false}
       elementsSelectable={false}
-      fitView
       minZoom={0.2}
     >
       <!-- §G (design language): a flat --board surface, no dotted <Background/>. -->
       <Controls showLock={false} />
+      <!-- Frame the board on load. The `fitView` PROP is deliberately NOT used:
+           it fires on init, before the async-arrived nodes are registered, so it
+           frames an empty canvas. This imperative fit re-frames 80ms after the
+           projection changes, once the nodes are measured — the fix ViewBodyView
+           uses for the same "populate nodes after mount" pattern. -->
+      <ViewportFit trigger={projection} options={{ padding: 0.2, maxZoom: 1 }} />
     </SvelteFlow>
   {/if}
 </div>
@@ -72,7 +82,7 @@
     width: 100%;
     height: 100%;
     min-height: 0;
-    background: var(--board, var(--bg));
+    background: var(--board);
   }
   .board-hint {
     padding: 16px;

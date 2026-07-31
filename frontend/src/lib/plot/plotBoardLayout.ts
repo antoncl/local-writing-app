@@ -53,9 +53,9 @@ export function buildBoardNodes(projection: PlotBoardProjection): PlotBoardNode[
 
   // Bucket cards by their resolved lane, preserving projection card order within
   // each lane. A card whose plotline is null or unknown falls to Unassigned.
-  const laneOrder: string[] = projection.plotlines.map((line) => line.id);
+  // Keyed by plotline id (real lanes) or UNASSIGNED_LANE_ID.
   const cardsByLane = new Map<string, PlotBoardProjection["cards"]>();
-  for (const id of laneOrder) cardsByLane.set(id, []);
+  for (const line of projection.plotlines) cardsByLane.set(line.id, []);
   for (const card of projection.cards) {
     const laneId = card.plotline && plotlineById.has(card.plotline) ? card.plotline : UNASSIGNED_LANE_ID;
     if (!cardsByLane.has(laneId)) cardsByLane.set(laneId, []);
@@ -64,7 +64,7 @@ export function buildBoardNodes(projection: PlotBoardProjection): PlotBoardNode[
 
   // Every plotline gets a lane (even empty) so the thread is always visible;
   // Unassigned appears only when non-empty.
-  const lanes: string[] = [...laneOrder];
+  const lanes: string[] = projection.plotlines.map((line) => line.id);
   if ((cardsByLane.get(UNASSIGNED_LANE_ID)?.length ?? 0) > 0) lanes.push(UNASSIGNED_LANE_ID);
 
   const nodes: PlotBoardNode[] = [];
@@ -73,10 +73,15 @@ export function buildBoardNodes(projection: PlotBoardProjection): PlotBoardNode[
     const line = laneId === UNASSIGNED_LANE_ID ? null : plotlineById.get(laneId)!;
     const laneCards = cardsByLane.get(laneId) ?? [];
 
+    // Node size is set here from the geometry constants (not left to SvelteFlow's
+    // DOM measurement), so positions and rendered size share ONE source of truth;
+    // the node components fill their box at 100%.
     nodes.push({
-      id: `lane:${line ? line.id : "__unassigned__"}`,
+      id: line ? `lane:${line.id}` : UNASSIGNED_LANE_ID,
       type: "plotLane",
       position: { x: 0, y },
+      width: LANE_LABEL_WIDTH,
+      height: CARD_HEIGHT,
       draggable: false,
       selectable: false,
       data: {
@@ -94,12 +99,14 @@ export function buildBoardNodes(projection: PlotBoardProjection): PlotBoardNode[
           x: LANE_LABEL_WIDTH + LABEL_TO_CARD_GAP + colIndex * (CARD_WIDTH + CARD_GAP_X),
           y,
         },
+        width: CARD_WIDTH,
+        height: CARD_HEIGHT,
         draggable: false,
         selectable: false,
         data: {
           title: card.title,
           synopsis: card.synopsis,
-          attached: card.scene !== null,
+          attached: card.scene != null,
           color: line ? line.color : null,
         },
       });

@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildBoardNodes,
   CARD_GAP_X,
+  CARD_HEIGHT,
   CARD_WIDTH,
   LABEL_TO_CARD_GAP,
   LANE_LABEL_WIDTH,
@@ -119,5 +120,15 @@ describe("buildBoardNodes", () => {
   it("gives Unassigned cards a null colour", () => {
     const nodes = buildBoardNodes(projection({ cards: [card("c1", { plotline: null })] }));
     expect((cardNodes(nodes)[0].data as PlotCardData).color).toBeNull();
+  });
+
+  it("sizes nodes from the geometry constants (single source with the CSS)", () => {
+    // Node size is set here, not measured by SvelteFlow, so position math and the
+    // rendered box can't drift — the components fill their box at 100%.
+    const nodes = buildBoardNodes(
+      projection({ plotlines: [line("plot_a", "A")], cards: [card("c1", { plotline: "plot_a" })] }),
+    );
+    expect(laneNodes(nodes)[0]).toMatchObject({ width: LANE_LABEL_WIDTH, height: CARD_HEIGHT });
+    expect(cardNodes(nodes)[0]).toMatchObject({ width: CARD_WIDTH, height: CARD_HEIGHT });
   });
 });

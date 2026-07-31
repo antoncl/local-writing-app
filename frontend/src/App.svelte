@@ -555,9 +555,9 @@
   }
 
   function openPlotBoardPane() {
-    // Refresh through run() so an HTTP error surfaces in the banner; the pane
-    // opens immediately and shows "Loading…" until the projection resolves
-    // (mirrors openChatsPane / openAssistantsPane: fetch-then-show).
+    // Fetch-then-show, like openChatsPane / openAssistantsPane — but through run()
+    // so an HTTP error surfaces in the banner rather than being swallowed. The
+    // pane opens immediately and shows "Loading…" until the projection resolves.
     void run(() => refreshPlotBoard());
     workspaceLayout.ensureVisible("plotEditor");
   }

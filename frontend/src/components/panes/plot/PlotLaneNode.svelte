@@ -25,11 +25,13 @@
 <style>
   .plot-lane {
     box-sizing: border-box;
-    width: 150px;
+    /* Size comes from the node box (set in plotBoardLayout from the geometry
+       constants); fill it so positions and rendered size share one source. */
+    width: 100%;
+    height: 100%;
     display: flex;
     align-items: center;
     gap: 6px;
-    height: 110px;
     padding: 0 6px;
   }
   .lane-dot {

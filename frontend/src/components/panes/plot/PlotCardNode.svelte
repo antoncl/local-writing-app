@@ -8,15 +8,17 @@
   via the `plotCard` node type; drag/select are disabled at the canvas level.
 -->
 <script lang="ts">
-  import { getSwatch, resolveColorForKind } from "@/lib/utils/colors";
+  import { getSwatch } from "@/lib/utils/colors";
   import type { PlotCardData } from "@/lib/plot/plotBoardLayout";
 
   // Svelte Flow passes the node's id/data/selection state as props.
   let { data }: { id?: string; data: PlotCardData; selected?: boolean } = $props();
 
-  // The owning plotline's colour, else the plot kind default (plum). Applied as a
-  // CSS var so no hex literal lands in style code (the style-token guard).
-  let accent = $derived(getSwatch(data.color)?.hex ?? resolveColorForKind("plot")?.hex ?? null);
+  // The owning plotline's colour, as a left stripe. Null for a colourless plotline
+  // or the Unassigned lane — matching PlotLaneNode's neutral dot, so a card never
+  // wears an accent its lane header contradicts. Applied as a CSS var, so no hex
+  // literal lands in style code (the style-token guard).
+  let accent = $derived(getSwatch(data.color)?.hex ?? null);
 </script>
 
 <article class="plot-card" style={accent ? `--card-accent: ${accent}` : undefined} class:accented={accent}>
@@ -33,8 +35,10 @@
 <style>
   .plot-card {
     box-sizing: border-box;
-    width: 210px;
-    height: 110px;
+    /* Size comes from the node box (set in plotBoardLayout from the geometry
+       constants); fill it so positions and rendered size share one source. */
+    width: 100%;
+    height: 100%;
     display: flex;
     flex-direction: column;
     gap: 4px;

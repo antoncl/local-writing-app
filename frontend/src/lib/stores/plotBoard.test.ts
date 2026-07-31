@@ -4,8 +4,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { get } from "svelte/store";
 import { api } from "@/lib/api";
-import { clearPlotBoard, plotBoardStore, refreshPlotBoard, savePlotBoardLayout } from "./plotBoard";
-import type { PlotBoard, PlotBoardProjection } from "@/lib/types";
+import {
+  clearPlotBoard,
+  detachCardScene,
+  plotBoardStore,
+  realizeCard,
+  reassignCardPlotline,
+  refreshPlotBoard,
+  saveCardSynopsis,
+  savePlotBoardLayout,
+  seedCardsFromManuscript,
+} from "./plotBoard";
+import type { CardEntry, PlotBoard, PlotBoardProjection } from "@/lib/types";
 
 const projection = (): PlotBoardProjection => ({
   board_id: "b",
@@ -69,5 +79,69 @@ describe("savePlotBoardLayout", () => {
     vi.spyOn(api, "savePlotBoard").mockResolvedValue(board("r2"));
     await savePlotBoardLayout({ positions: {} }, "r1");
     expect(get(plotBoardStore)).toBeNull();
+  });
+});
+
+describe("card content ops", () => {
+  const card = (metadata: CardEntry["metadata"] = {}): CardEntry => ({
+    id: "c1",
+    title: "The letter",
+    body: "",
+    revision: "cr1",
+    entry_type: "plot:card",
+    metadata,
+    computed_metadata: {},
+  });
+
+  it("realizeCard mints/attaches, then refetches the projection", async () => {
+    const realize = vi.spyOn(api, "realizeCard").mockResolvedValue(card());
+    const refresh = vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    await realizeCard("c1", "chap1");
+    expect(realize).toHaveBeenCalledWith("c1", "chap1");
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("seedCardsFromManuscript seeds, then refetches", async () => {
+    const seed = vi.spyOn(api, "seedFromManuscript").mockResolvedValue({ entries: [] });
+    const refresh = vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    await seedCardsFromManuscript();
+    expect(seed).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("detachCardScene saves the card with the scene ref dropped", async () => {
+    vi.spyOn(api, "getCard").mockResolvedValue(card({ plotline: "p1", scene: "scene9" }));
+    const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
+    vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    await detachCardScene("c1");
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0][0].metadata).toEqual({ plotline: "p1" });
+  });
+
+  it("saveCardSynopsis saves the new body, metadata untouched", async () => {
+    vi.spyOn(api, "getCard").mockResolvedValue(card({ plotline: "p1" }));
+    const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
+    vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    await saveCardSynopsis("c1", "a fresh synopsis");
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0][1]).toBe("a fresh synopsis");
+    expect(save.mock.calls[0][0].metadata).toEqual({ plotline: "p1" });
+  });
+
+  it("reassignCardPlotline sets the plotline ref, then refetches", async () => {
+    vi.spyOn(api, "getCard").mockResolvedValue(card({ plotline: "p1", scene: "sc" }));
+    const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
+    const refresh = vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    await reassignCardPlotline("c1", "p2");
+    expect(save.mock.calls[0][0].metadata).toEqual({ plotline: "p2", scene: "sc" });
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("reassignCardPlotline with an empty id clears the plotline (→ Unassigned)", async () => {
+    vi.spyOn(api, "getCard").mockResolvedValue(card({ plotline: "p1", scene: "sc" }));
+    const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
+    vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    await reassignCardPlotline("c1", "");
+    expect(save.mock.calls[0][0].metadata).toEqual({ scene: "sc" });
   });
 });

@@ -380,6 +380,7 @@
     chat: "chat",
     view: "view",
     plot_template: "template",
+    plot_card: "card",
   };
   const paneDeleteNoun = (type: string | undefined) => (type && PANE_DELETE_NOUN[type]) || "scene";
 

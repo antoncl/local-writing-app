@@ -15,6 +15,7 @@ import { referenceIndexStore, refreshReferenceIndexInBackground } from "@/lib/st
 import { setLoreEntries } from "@/lib/stores/lore";
 import { setPromptEntries } from "@/lib/stores/prompts";
 import { setPlotTemplates } from "@/lib/stores/plotTemplates";
+import { refreshPlotBoard } from "@/lib/stores/plotBoard";
 import { setAssistantEntries } from "@/lib/stores/assistants";
 import { setChatSessions } from "@/lib/stores/chats";
 import { researchStructureStore, setResearchStructure, setStructure } from "@/lib/stores/structure";
@@ -57,11 +58,11 @@ export async function requestDeleteScene(host: DeletePaneHost, id: string): Prom
   // wording, as before). Maps rather than nested ternaries so a new kind is one
   // line in each place, not another ternary rung.
   const fileLabel =
-    ({ scene: "scene", lore: "entry", research: "note", view: "view", plot_template: "template" } as Record<string, string>)[
+    ({ scene: "scene", lore: "entry", research: "note", view: "view", plot_template: "template", plot_card: "card" } as Record<string, string>)[
       documentKind
     ] ?? "prompt";
   const titleLabel =
-    ({ scene: "Delete Scene", lore: "Delete Entry", research: "Delete Note", view: "Delete View", plot_template: "Delete Template" } as Record<string, string>)[
+    ({ scene: "Delete Scene", lore: "Delete Entry", research: "Delete Note", view: "Delete View", plot_template: "Delete Template", plot_card: "Delete Card" } as Record<string, string>)[
       documentKind
     ] ?? "Delete Prompt";
   const baseMessage = `Delete "${sceneTitle}"? This removes the ${fileLabel} file from the project.`;
@@ -102,6 +103,12 @@ async function deleteScene(host: DeletePaneHost, id: string): Promise<void> {
     // through api.deleteScene would 404 (it is a `plot` node, not a scene), the
     // same hazard the `view` branch below guards against.
     setPlotTemplates((await api.deletePlotTemplate(pane.scene.id)).entries);
+  } else if (documentKind === "plot_card") {
+    // A book-local card deletes via its own endpoint (a `plot` node, not a scene,
+    // so api.deleteScene would 404 — same hazard as the template/view branches).
+    // No card list store to update; refresh the board so it drops the card.
+    await api.deleteCard(pane.scene.id);
+    await refreshPlotBoard();
   } else if (documentKind === "assistant") {
     setAssistantEntries((await api.deleteAssistantEntry(pane.scene.id)).entries);
   } else if (documentKind === "chat") {

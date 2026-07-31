@@ -10,10 +10,10 @@ import { render, screen, fireEvent } from "@/lib/test/component";
 import NodePicker from "./NodePicker.svelte";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import { hideLibraryEntry, openProjectHidden } from "@/lib/stores/hiddenLibrary";
-import type { MetadataSchema, PromptEntrySummary } from "@/lib/types";
+import type { MetadataSchema, PlotlineSummary, PromptEntrySummary } from "@/lib/types";
 
 const SCHEMA = {
-  entry_types: { "prompt:snippet": { name: "Snippet" } },
+  entry_types: { "prompt:snippet": { name: "Snippet" }, "plot:plotline": { name: "Plotline" } },
   fields: {},
 } as unknown as MetadataSchema;
 
@@ -27,6 +27,10 @@ function snippet(id: string, title: string): PromptEntrySummary {
     inputs: [],
     is_library: true,
   };
+}
+
+function plotline(id: string, title: string): PlotlineSummary {
+  return { id, title, body: "", entry_type: "plot:plotline", metadata: {} };
 }
 
 beforeEach(() => {
@@ -56,5 +60,40 @@ describe("NodePicker snippet picker — hide filter (ADR-0049 #682)", () => {
 
     expect(screen.getByText("Keeper")).toBeInTheDocument();
     expect(screen.queryByText("Goner")).toBeNull();
+  });
+});
+
+describe("NodePicker plot source (#742)", () => {
+  it("enumerates plotline candidates for a plot:plotline ref", async () => {
+    render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "plot", expr: { type: "plot:plotline" } }] },
+        plotEntries: [plotline("p1", "Main plot"), plotline("p2", "Romance")],
+        affordance: "add",
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+
+    // The gap #742 closes: before the plot branch, this list was empty.
+    expect(screen.getByText("Plotlines")).toBeInTheDocument();
+    expect(screen.getByText("Main plot")).toBeInTheDocument();
+    expect(screen.getByText("Romance")).toBeInTheDocument();
+  });
+
+  it("filters candidates to the config's entry_type whitelist", async () => {
+    render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "plot", expr: { type: "plot:plotline" } }] },
+        // A stray non-plotline plot node must not leak into the plotline picker.
+        plotEntries: [plotline("p1", "Main plot"), { ...plotline("c1", "A card"), entry_type: "plot:card" }],
+        affordance: "add",
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+
+    expect(screen.getByText("Main plot")).toBeInTheDocument();
+    expect(screen.queryByText("A card")).toBeNull();
   });
 });

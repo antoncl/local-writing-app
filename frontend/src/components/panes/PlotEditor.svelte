@@ -14,23 +14,34 @@
   bit lives outside it and the custom nodes carry their own mount tests.
 -->
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, setContext } from "svelte";
   import "@xyflow/svelte/dist/style.css";
   import { SvelteFlow, Controls, type ColorMode, type Edge } from "@xyflow/svelte";
   import { themePreference } from "@/lib/utils/theme";
   import {
     buildBoardNodes,
-    cardPositionsFromNodes,
+    overriddenCardPositions,
+    projectionDataKey,
     readBoardPositions,
     type PlotBoardNode,
   } from "@/lib/plot/plotBoardLayout";
   import { GraphUndoController } from "@/lib/graph/graphUndoController.svelte";
   import type { GraphPort } from "@/lib/graph/graphCommands";
-  import { savePlotBoardLayout } from "@/lib/stores/plotBoard";
+  import {
+    savePlotBoardLayout,
+    realizeCard,
+    detachCardScene,
+    saveCardSynopsis,
+    reassignCardPlotline,
+    seedCardsFromManuscript,
+  } from "@/lib/stores/plotBoard";
+  import { editorPanes } from "@/lib/stores/editorPanes.svelte";
+  import { confirmService } from "@/lib/stores/confirmService.svelte";
   import UndoRedoControls from "@/components/UndoRedoControls.svelte";
   import ViewportFit from "@/components/editor/body/view/ViewportFit.svelte";
   import PlotCardNode from "./plot/PlotCardNode.svelte";
   import PlotLaneNode from "./plot/PlotLaneNode.svelte";
+  import { PLOT_CARD_ACTIONS, type PlotCardActions } from "./plot/plotCardActions";
   import type { BoardXY, PlotBoardProjection } from "@/lib/types";
 
   // The board's read model, fetched by the opener / PlotBoardPane into the store.
@@ -51,11 +62,18 @@
   // True while a card is dragging, so the debounce waits for release (one save
   // per gesture), mirroring ViewBodyView's autosave.
   let dragging = $state(false);
-  // The board id currently hydrated into flowNodes — a plain (non-reactive) local.
-  // The rehydrate effect compares the incoming projection's board_id against it so a
-  // refetch of the SAME document (re-opening the menu) doesn't rebuild the canvas and
-  // discard an in-progress edit; only a genuinely different board re-hydrates.
-  let loadedBoardId = "";
+  // The projection DATA-key currently hydrated into flowNodes — a plain (non-reactive)
+  // local. The rehydrate effect compares the incoming projection's data-key against it:
+  // a re-open with identical data (same key) doesn't rebuild the canvas or discard an
+  // in-progress layout edit, but a content op (a card field changed → different key)
+  // does — so a reassigned card reflows. Keyed on data, not board_id (S7c), because a
+  // reassignment keeps the same board.
+  let loadedDataKey = "";
+  // Which cards carry an explicit position override (the sparse model, S7d reflow):
+  // seeded from the saved layout on each rebuild, grown as the writer drags. Plain /
+  // non-reactive — read at persist time (the effect already re-runs on flowNodes) and
+  // at drag time, never a reactive dep.
+  let overriddenIds = new Set<string>();
 
   // The board's undo history (ADR-0050): the shared caretaker via GraphUndoController,
   // its own instance per §3, replaying through a port over our rune arrays. In S7c
@@ -68,6 +86,40 @@
   };
   const undoCtl = new GraphUndoController<PlotBoardNode, Edge>(graphPort);
 
+  // Per-card actions handed to PlotCardNode via context (ADR-0048 S7d). Content ops
+  // are intentful backend mutations OUTSIDE the layout caretaker (binding decision 1)
+  // — realize/detach never enter the Ctrl+Z history. Each store helper refetches the
+  // projection so the board re-projects the changed card (visible reflow is the
+  // rehydrate-on-content-op wiring in the reflow slice).
+  setContext<PlotCardActions>(PLOT_CARD_ACTIONS, {
+    onOpen: (cardId) => void editorPanes.openPlotCard(cardId),
+    onRealize: (cardId) => void realizeCard(cardId),
+    onDetach: (cardId) => void detachCardScene(cardId),
+    onEditSynopsis: (cardId, synopsis) => void saveCardSynopsis(cardId, synopsis),
+    // Reassign the card's plotline ("" → Unassigned). A content op → the projection's
+    // data-key changes → the board rebuilds and an un-pinned card reflows into the new
+    // lane (a pinned card keeps its spot). A getter so the submenu reads the current
+    // lanes fresh from the projection (the designerContext pattern).
+    onSetPlotline: (cardId, plotlineId) => void reassignCardPlotline(cardId, plotlineId),
+    get plotlines() {
+      return projection?.plotlines ?? [];
+    },
+  });
+
+  // Seed-from-manuscript (ADR-0048 §S5): bulk, idempotent. Confirmed because it can
+  // mint many cards at once, though re-running it is safe (already-carded scenes skip).
+  function seed(): void {
+    confirmService.request({
+      title: "Seed from manuscript",
+      message: "Create one card per scene that isn't carded yet, each attached to its scene. Safe to run again — already-carded scenes are skipped.",
+      confirmLabel: "Seed cards",
+      destructive: false,
+      onConfirm: async () => {
+        await seedCardsFromManuscript();
+      },
+    });
+  }
+
   const nodeTypes = { plotCard: PlotCardNode, plotLane: PlotLaneNode };
   // Svelte Flow ships light-only chrome; drive its theme from the app's.
   let colorMode = $derived($themePreference as ColorMode);
@@ -75,42 +127,49 @@
   // Empty = the singleton exists but holds no plotlines and no cards yet.
   let isEmpty = $derived(!!projection && projection.plotlines.length === 0 && projection.cards.length === 0);
 
-  // (Re)hydrate from a fetched projection. Guarded on board_id so it fires once per
-  // DOCUMENT, not per projection reference: a layout save doesn't touch the store, but
-  // the opener / PlotBoardPane can re-set an equal projection, and rebuilding then
-  // would discard an in-progress edit and reset undo. The snapshot reads the LOCAL
-  // built array, never the reactive `flowNodes` — reading flowNodes back would
-  // subscribe this effect to xyflow's in-place position mutations, so every drag would
-  // re-run it and snap the card back. $effect.PRE so nodes are present before
-  // <SvelteFlow> mounts (projection null→set).
+  // (Re)hydrate from a fetched projection. Guarded on the DATA-key so it fires once
+  // per data change, not per projection reference: a layout save doesn't touch the
+  // store, but the opener / PlotBoardPane can re-set an equal projection (same key →
+  // skip, so an in-progress edit survives), while a content op changes a card field
+  // (different key → rebuild, so a reassigned un-pinned card reflows into its new
+  // lane). `overriddenIds` reseeds from the saved layout each rebuild — the sparse set
+  // an un-pinned card is absent from, so buildBoardNodes derives its (new-lane) slot.
+  // The snapshot reads the LOCAL built array, never the reactive `flowNodes` — reading
+  // flowNodes back would subscribe this effect to xyflow's in-place position mutations,
+  // so every drag would re-run it and snap the card back. $effect.PRE so nodes are
+  // present before <SvelteFlow> mounts (projection null→set).
   $effect.pre(() => {
     if (!projection) {
-      loadedBoardId = "";
+      loadedDataKey = "";
+      overriddenIds = new Set();
       flowNodes = [];
       dragging = false;
       return;
     }
-    if (projection.board_id === loadedBoardId) return;
-    loadedBoardId = projection.board_id;
+    const key = projectionDataKey(projection);
+    if (key === loadedDataKey) return;
+    loadedDataKey = key;
     const saved = readBoardPositions(projection.layout);
+    overriddenIds = new Set(Object.keys(saved));
     const nodes = buildBoardNodes(projection, saved);
     flowNodes = nodes;
     revision = projection.board_revision;
     // Snapshot from the local `nodes` (not reactive flowNodes) so a never-touched
     // board doesn't save on open and this effect stays subscribed to `projection` only.
-    lastSavedPositions = JSON.stringify(cardPositionsFromNodes(nodes));
+    lastSavedPositions = JSON.stringify(overriddenCardPositions(nodes, overriddenIds));
     dragging = false;
     undoCtl.reset();
   });
 
   // Autosave the layout: skip while dragging (coalesce the gesture) and when nothing
   // changed, else debounce a PUT. The projection/dragging guard runs FIRST so a drag
-  // doesn't re-serialize the whole board every frame (ViewBodyView's pattern). Undo/
-  // redo mutate the same positions and persist through here too — no separate save; a
-  // load matches the snapshot, so it never writes.
+  // doesn't re-serialize the whole board every frame (ViewBodyView's pattern). Only
+  // overridden (dragged/pinned) cards persist — the sparse model. Undo/redo mutate the
+  // same positions and persist through here too; a load matches the snapshot, so it
+  // never writes.
   $effect(() => {
     if (!projection || dragging) return;
-    const positions = cardPositionsFromNodes(flowNodes);
+    const positions = overriddenCardPositions(flowNodes, overriddenIds);
     const serialized = JSON.stringify(positions);
     if (serialized === lastSavedPositions) return;
     const handle = setTimeout(() => void persist(positions, serialized), SAVE_DEBOUNCE_MS);
@@ -123,7 +182,7 @@
   // the deferred save-state machine (#756).
   onDestroy(() => {
     if (!projection || dragging) return;
-    const positions = cardPositionsFromNodes(flowNodes);
+    const positions = overriddenCardPositions(flowNodes, overriddenIds);
     const serialized = JSON.stringify(positions);
     if (serialized !== lastSavedPositions) void persist(positions, serialized);
   });
@@ -148,21 +207,29 @@
 <section class="plot-board" aria-label="Plot board" onkeydown={undoCtl.handleKeydown}>
   {#if !projection}
     <p class="board-hint muted">Loading the board…</p>
-  {:else if isEmpty}
-    <p class="board-hint muted">No plotlines or cards yet. Add a plotline, or seed cards from the manuscript.</p>
   {:else}
     <div class="board-toolbar">
-      <UndoRedoControls
-        canUndo={undoCtl.canUndo}
-        canRedo={undoCtl.canRedo}
-        undoTitle={undoCtl.undoTitle}
-        redoTitle={undoCtl.redoTitle}
-        announcement={undoCtl.announcement}
-        onUndo={() => undoCtl.undo()}
-        onRedo={() => undoCtl.redo()}
-      />
+      <!-- Seed stays reachable on an empty board — it is how you populate one. -->
+      <button class="seed-btn" onclick={seed}>
+        <i class="ti ti-seedling" aria-hidden="true"></i>
+        Seed from manuscript
+      </button>
+      {#if !isEmpty}
+        <UndoRedoControls
+          canUndo={undoCtl.canUndo}
+          canRedo={undoCtl.canRedo}
+          undoTitle={undoCtl.undoTitle}
+          redoTitle={undoCtl.redoTitle}
+          announcement={undoCtl.announcement}
+          onUndo={() => undoCtl.undo()}
+          onRedo={() => undoCtl.redo()}
+        />
+      {/if}
     </div>
-    <div class="board-canvas">
+    {#if isEmpty}
+      <p class="board-hint muted">No plotlines or cards yet. Seed cards from the manuscript, or add a plotline, to begin.</p>
+    {:else}
+      <div class="board-canvas">
       <SvelteFlow
         bind:nodes={flowNodes}
         bind:edges={flowEdges}
@@ -177,6 +244,9 @@
         onnodedragstop={({ nodes }) => {
           dragging = false;
           undoCtl.dragStop(nodes);
+          // A dragged card becomes overridden (pinned): it now persists and keeps its
+          // spot across a reassignment instead of reflowing.
+          for (const node of nodes) if (node.type === "plotCard") overriddenIds.add(node.id);
         }}
         minZoom={0.2}
       >
@@ -187,7 +257,8 @@
              the projection's nodes are measured — the ViewBodyView fix. -->
         <ViewportFit trigger={projection} options={{ padding: 0.2, maxZoom: 1 }} />
       </SvelteFlow>
-    </div>
+      </div>
+    {/if}
   {/if}
 </section>
 
@@ -202,8 +273,28 @@
   }
   .board-toolbar {
     display: flex;
-    justify-content: flex-end;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-2);
     padding: var(--sp-1) var(--sp-2);
+  }
+  .seed-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    font-size: var(--fs-sm);
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-md);
+    cursor: pointer;
+  }
+  .seed-btn:hover {
+    background: var(--surface);
+  }
+  .seed-btn i {
+    color: var(--text-3);
   }
   .board-canvas {
     flex: 1;

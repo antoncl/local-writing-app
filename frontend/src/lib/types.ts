@@ -9,6 +9,7 @@
 // Imported here so `EditableDocument` can name PlotTemplate; also re-exported
 // below so `@/lib/types` stays the single barrel.
 import type { PlotTemplate } from "./plotTemplateTypes";
+import type { CardEntry } from "./plotCardTypes";
 
 export type PanelId = string;
 
@@ -131,11 +132,9 @@ export type ResearchNote = {
   source_layer_label?: string;
 };
 
-export type EditableDocument = Scene | LoreEntry | PromptEntry | AssistantEntry | ResearchNote | ViewNode | PlotTemplate;
+export type EditableDocument = Scene | LoreEntry | PromptEntry | AssistantEntry | ResearchNote | ViewNode | PlotTemplate | CardEntry;
 
-// Document-kind discriminator shared across editor components. Broader than
-// MetadataSchema.entry_types[*].kind: includes the synthetic shapes the
-// editor handles directly (chat / snippet / structure_node).
+// Document-kind discriminator: schema kinds plus synthetic editor shapes (chat / snippet / structure_node / plot_card).
 export type DocumentKind =
   | "scene"
   | "lore"
@@ -147,6 +146,7 @@ export type DocumentKind =
   | "project"
   | "structure_node"
   | "plot_template"
+  | "plot_card"
   | "view";
 
 export type LoreEntryList = {
@@ -199,8 +199,9 @@ export type PromptEntryList = {
   entries: PromptEntrySummary[];
 };
 
-// Plot-template types (ADR-0048 S4b/S4c) live in ./plotTemplateTypes to keep this
-// file under the size cap; re-exported so `@/lib/types` stays the single barrel.
+// Plot types (ADR-0048) live in sibling files — templates (S4b/S4c), the board
+// projection (S7a/S7b), and cards + plotlines (S5a/S5b) — to keep this file under
+// the size cap; re-exported so `@/lib/types` stays the single import barrel.
 export type {
   PlotTemplate,
   PlotTemplateSummary,
@@ -209,9 +210,6 @@ export type {
   PlotTemplatePoint,
   PlotTemplateSourceRef,
 } from "./plotTemplateTypes";
-
-// Plot-board projection types (ADR-0048 S7a/S7b) live in ./plotBoardTypes, same
-// reason as the templates above; re-exported so `@/lib/types` stays the barrel.
 export type {
   PlotBoardProjection,
   PlotBoardCard,
@@ -220,6 +218,14 @@ export type {
   PlotBoard,
   BoardXY,
 } from "./plotBoardTypes";
+export type {
+  CardEntry,
+  CardSummary,
+  CardList,
+  PlotlineEntry,
+  PlotlineSummary,
+  PlotlineList,
+} from "./plotCardTypes";
 
 export type AssistantEntrySummary = {
   id: string;
@@ -649,7 +655,7 @@ export type NodePickerConfig = {
 // target; the picker UI enforces single-selection.
 export type NodePickerRef = {
   id: string;
-  kind: "scene" | "lore" | "snippet" | "assistant" | "research" | "preset";
+  kind: "scene" | "lore" | "snippet" | "assistant" | "research" | "plot" | "preset";
   title: string;
   entry_type?: string;
   target?: boolean;

@@ -60,6 +60,9 @@ import type {
   PlotBoardProjection,
   PlotBoard,
   PlotBoardLayout,
+  CardEntry,
+  CardList,
+  PlotlineList,
   MutationSetEntry,
   MutationSetEntryList,
   MutationSetRow,
@@ -924,6 +927,49 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(payload),
     });
+  },
+  // Plot cards + plotlines (ADR-0048 S5a/S5b) — the board's content ops, wired in
+  // S7d. Cards and plotlines share the `plot/` folder + a book-local layered CRUD;
+  // the endpoint path is the only family discriminator (the backend enforces an
+  // is_a family guard on each). Attach/detach have no endpoint of their own — they
+  // are a saveCard that sets / clears the `scene` ref in `metadata` (ADR §1).
+  // (list/create card endpoints exist backend-side; add the client methods when a
+  // caller needs them — seed covers bulk create, the board reads via the projection.)
+  getCard(entryId: string) {
+    return request<CardEntry>(`/plot/cards/${entryId}`);
+  },
+  saveCard(entry: CardEntry, body: string) {
+    return request<CardEntry>(`/plot/cards/${entry.id}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        title: entry.title,
+        body,
+        metadata: entry.metadata,
+        base_revision: entry.revision,
+      }),
+    });
+  },
+  deleteCard(entryId: string) {
+    return request<CardList>(`/plot/cards/${entryId}`, { method: "DELETE" });
+  },
+  // Mint a scene from the card and attach it (ADR §1 *realize*). `parentId` places
+  // the scene (null → the backend's first-container fallback). 409 if the card is
+  // already attached (0..1 scene per card).
+  realizeCard(entryId: string, parentId: string | null = null) {
+    return request<CardEntry>(`/plot/cards/${entryId}/realize`, {
+      method: "POST",
+      body: JSON.stringify({ parent_id: parentId }),
+    });
+  },
+  // Bulk inverse of realize (ADR §S5): one attached card per un-carded leaf scene,
+  // in manuscript order. Idempotent — skips already-carded scenes.
+  seedFromManuscript() {
+    return request<CardList>("/plot/seed-from-manuscript", { method: "POST" });
+  },
+  // The plotline roster — the ReferencePicker's `plot` source (#742) and the
+  // board's lanes both draw from this.
+  listPlotlines() {
+    return request<PlotlineList>("/plot/plotlines");
   },
   // Reusable mutation sets (#62).
   listMutationSetEntries() {

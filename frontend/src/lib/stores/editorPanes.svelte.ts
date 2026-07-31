@@ -50,6 +50,7 @@ import {
 import { refreshLoreEntries } from "@/lib/stores/lore";
 import { refreshPromptEntries } from "@/lib/stores/prompts";
 import { refreshPlotTemplates } from "@/lib/stores/plotTemplates";
+import { refreshPlotBoard } from "@/lib/stores/plotBoard";
 import { refreshAssistantEntries } from "@/lib/stores/assistants";
 import { refreshKnownTags } from "@/lib/stores/tags";
 import { refreshReferenceIndexInBackground } from "@/lib/stores/references";
@@ -61,6 +62,7 @@ import { chatSessionsStore, refreshChatSessions } from "@/lib/stores/chats";
 import { bodyHasMutationMarkers, mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
 import type {
   AssistantEntry,
+  CardEntry,
   EditableDocument,
   EntryMetadata,
   LoreEntry,
@@ -278,7 +280,9 @@ class EditorPanesController {
             ? api.getPromptEntry(document.id)
             : document.type === "plot_template"
               ? api.getPlotTemplate(document.id)
-              : api.getScene(document.id),
+              : document.type === "plot_card"
+                ? api.getCard(document.id)
+                : api.getScene(document.id),
       ),
     );
     const refreshedByKey = new Map(refreshedDocuments.map((document, index) => [`${documentRefs[index].type}:${document.id}`, document]));
@@ -567,6 +571,12 @@ class EditorPanesController {
         // change here. Inherited templates never reach this: the read-only lock
         // blocks the edit and a save would 409 backend-side.
         savedDocument = await api.savePlotTemplate(draftDocument as PlotTemplate, pane.draftMarkdown);
+      } else if (documentKind === "plot_card") {
+        // A book-local card (ADR-0048 S7d): title + synopsis (body) + metadata
+        // (plotline / scene refs) round-trip via the card endpoint. Content ops
+        // (realize/attach/detach) mutate the scene ref through their own paths;
+        // this save carries whatever the editor changed.
+        savedDocument = await api.saveCard(draftDocument as CardEntry, pane.draftMarkdown);
       } else if (documentKind === "assistant") {
         savedDocument = await api.saveAssistantEntry(draftDocument as AssistantEntry);
         void refreshAssistantTags();
@@ -651,6 +661,10 @@ class EditorPanesController {
         await refreshPromptEntries();
       } else if (documentKind === "plot_template") {
         await refreshPlotTemplates();
+      } else if (documentKind === "plot_card") {
+        // Reflect a card edit (plotline / scene / synopsis) on the board if it is
+        // open. In-flight-guarded, so it is cheap when the board is closed.
+        await refreshPlotBoard();
       } else if (documentKind === "assistant") {
         await refreshAssistantEntries();
       } else if (documentKind === "project") {
@@ -1020,6 +1034,16 @@ class EditorPanesController {
 
   async openPlotTemplate(entryId: string): Promise<void> {
     return this.#openEntryDocument("plot_template", entryId, "open plot template", (id) => api.getPlotTemplate(id), {
+      body: true,
+    });
+  }
+
+  // Open a plot card (ADR-0048 S7d) as a NodeEditor document — the "Open card"
+  // route from the board. The card's synopsis is the prose body; its plotline /
+  // scene refs render as metadata fields (the plotline field via the #742 picker).
+  // A book-local node, so no Library provenance / read-only lock applies.
+  async openPlotCard(entryId: string): Promise<void> {
+    return this.#openEntryDocument("plot_card", entryId, "open plot card", (id) => api.getCard(id), {
       body: true,
     });
   }

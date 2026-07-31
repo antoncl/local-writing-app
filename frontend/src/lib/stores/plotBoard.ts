@@ -9,7 +9,7 @@
 
 import { writable } from "svelte/store";
 import { api } from "@/lib/api";
-import type { PlotBoardLayout, PlotBoardProjection } from "@/lib/types";
+import type { CardEntry, PlotBoardLayout, PlotBoardProjection } from "@/lib/types";
 
 export const plotBoardStore = writable<PlotBoardProjection | null>(null);
 
@@ -36,6 +36,62 @@ export function refreshPlotBoard(): Promise<void> {
 export async function savePlotBoardLayout(layout: PlotBoardLayout, baseRevision: string): Promise<string> {
   const saved = await api.savePlotBoard({ base_revision: baseRevision, layout });
   return saved.revision;
+}
+
+// Card content ops (ADR-0048 §1, S7d). These are intentful backend mutations,
+// deliberately OUTSIDE the ADR-0050 layout caretaker — an in-memory undo must
+// never reverse a scene mint (binding decision 1). Each mutates, then refetches
+// the projection so the board re-projects the changed card set. attach/detach have
+// no endpoint of their own: they are a saveCard that sets / clears `metadata.scene`
+// (get the current card first, so the save carries its live revision + metadata).
+
+// Realize: mint a scene from the card and attach it. 409 if already attached.
+export async function realizeCard(cardId: string, parentId: string | null = null): Promise<void> {
+  await api.realizeCard(cardId, parentId);
+  await refreshPlotBoard();
+}
+
+// Seed: one attached card per un-carded leaf scene, in manuscript order (idempotent).
+export async function seedCardsFromManuscript(): Promise<void> {
+  await api.seedFromManuscript();
+  await refreshPlotBoard();
+}
+
+// Save an in-place synopsis edit — the synopsis IS the card body. Fetch first so
+// the save carries the card's live revision + metadata unchanged.
+export async function saveCardSynopsis(cardId: string, synopsis: string): Promise<void> {
+  const card = await api.getCard(cardId);
+  await api.saveCard({ ...card }, synopsis);
+  await refreshPlotBoard();
+}
+
+// The single get → mutate a clone of the card's metadata → save (body unchanged) →
+// refetch path the metadata-ref content ops share (detach, reassign — and attach
+// once a board affordance wires it). saveCard replaces metadata wholesale, so the
+// mutator adds/removes keys on a copy.
+async function mutateCardMetadata(cardId: string, mutate: (metadata: CardEntry["metadata"]) => void): Promise<void> {
+  const card = await api.getCard(cardId);
+  const metadata = { ...card.metadata };
+  mutate(metadata);
+  await api.saveCard({ ...card, metadata }, card.body);
+  await refreshPlotBoard();
+}
+
+// Reassign the card's plotline ("" clears it → the Unassigned lane). The refetched
+// projection changes the board's data-key, so the board rebuilds and an un-pinned
+// card reflows into the new lane (a pinned one keeps its spot — S7d reflow).
+export function reassignCardPlotline(cardId: string, plotlineId: string): Promise<void> {
+  return mutateCardMetadata(cardId, (metadata) => {
+    if (plotlineId) metadata.plotline = plotlineId;
+    else delete metadata.plotline;
+  });
+}
+
+// Detach: clear the card's scene ref (drop the key — the save replaces metadata).
+export function detachCardScene(cardId: string): Promise<void> {
+  return mutateCardMetadata(cardId, (metadata) => {
+    delete metadata.scene;
+  });
 }
 
 // Drop the previous project's board so it can't flash on the next project's pane

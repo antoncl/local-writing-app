@@ -71,6 +71,14 @@ MANIFEST_FILENAME = "project.yaml"
 # project inherits from (#309 / ADR-0039 Amendment 1). Absent means none.
 INHERITS_KEY = "inherits"
 
+# The open project's own `(is_project, inherited)` pair in the breadcrumb chain
+# (#417 slice 4). It is a project and it does not inherit from itself, and it is
+# never in `declared_ancestor_candidates` (you are not your own ancestor), so
+# `resolved_chain_layers` stamps the leaf with this rather than looking it up.
+# Named so the pair reads as "the leaf's state" and not as a bare `(True, False)`
+# that `inheritanceState` would otherwise classify as an `available` crumb.
+LEAF_STATE = (True, False)
+
 
 @lru_cache(maxsize=1024)
 def _layer_id_for_folder(folder: Path) -> str:
@@ -281,15 +289,20 @@ class LayerWalkMixin:
             for folder, is_project, inherited in self.declared_ancestor_candidates(root)
             if is_project or inherited
         ]
-        state = {folder: (is_project, inherited) for folder, is_project, inherited in rows}
-        folders = [folder for folder, _, _ in rows] + [resolved]
-        # The leaf (the open project) is not in `declared_ancestor_candidates`
-        # (you do not inherit from yourself), so it defaults to (project, not
-        # inherited); the bar keys the leaf off `is_root`, not off this pair.
-        return [
-            (layer, *state.get(layer.folder, (True, False)))
-            for layer in self._stamp_project_layers(resolved, folders)
-        ]
+        folders = [folder for folder, _, _ in rows]
+        # `_stamp_project_layers` stamps `folders + [leaf]` in order, 1:1, so the
+        # stamped layers line up positionally with each row's state followed by
+        # the leaf's `LEAF_STATE` (the leaf is not in `rows` — you do not inherit
+        # from yourself; the bar keys it off `is_root`, not this pair). A `zip`
+        # says that alignment out loud and would surface a future reorder, where
+        # the old folder-keyed dict + magic `.get(folder, (True, False))` default
+        # silently handed every layer a state instead.
+        states = [(is_project, inherited) for _, is_project, inherited in rows] + [LEAF_STATE]
+        stamped = self._stamp_project_layers(resolved, folders + [resolved])
+        # `strict=True` enforces the 1:1 alignment rather than trusting it — a
+        # future change that unbalanced folders and states raises here instead of
+        # silently truncating the chain.
+        return [(layer, *state) for layer, state in zip(stamped, states, strict=True)]
 
     def collect_layers(
         self, root: Path, *, include_machine: bool = False, include_library: bool = False

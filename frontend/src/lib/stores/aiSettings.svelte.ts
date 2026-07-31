@@ -6,9 +6,8 @@
 // projectChooser / projectSession): one app shell, one of each, so a
 // module-level instance with rune fields is the idiomatic shape.
 //
-// `policy` is two-way bound by the Project pane
-// (bind:aiPolicy={aiSettings.policy}) — a member-expression bind on a $state
-// class field, the projectSession.machineSettingsDraft pattern. It is the only
+// `policy` is the draft the AI Policy modal edits and commits on Save (#417 —
+// moved off the Project pane, which used to two-way bind it). It is the only
 // per-project AI setting left; the provider / model-class pair that used to sit
 // beside it was write-only and was retired in #330.
 //
@@ -78,9 +77,13 @@ class AISettings {
     }
   }
 
-  async save(): Promise<void> {
-    if (!this.isProjectOpen()) return;
-    await this.run(async () => {
+  // Returns whether the persist succeeded, so a caller (the AI Policy modal) can
+  // keep itself open on failure instead of closing as if the save landed — this
+  // is a permission control, so a silent "looked saved but wasn't" is the case
+  // to avoid (decisions_ai_permission_fails_closed). `run` reports the error.
+  async save(): Promise<boolean> {
+    if (!this.isProjectOpen()) return false;
+    return await this.run(async () => {
       const updatedProject = await api.updateProjectSettings({
         ai_policy: this.policy,
       });

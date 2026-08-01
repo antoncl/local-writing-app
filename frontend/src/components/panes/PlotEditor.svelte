@@ -112,9 +112,20 @@
   // New card (#793): the board's direct-authoring entry point — create an unattached
   // card and open it so the writer can name it + write the synopsis. No confirm: a
   // single card is cheap and reversible (delete). It lands homeless until attached.
+  // `creating` guards against a double-click minting two cards, and surfaces a create
+  // failure in the app error banner instead of a silent unhandled rejection.
+  let creating = $state(false);
   async function newCard(): Promise<void> {
-    const id = await createCard("New card");
-    void editorPanes.openPlotCard(id);
+    if (creating) return;
+    creating = true;
+    try {
+      const id = await createCard("New card");
+      void editorPanes.openPlotCard(id);
+    } catch (e) {
+      editorPanes.setError(e instanceof Error ? e.message : "Could not create the card.");
+    } finally {
+      creating = false;
+    }
   }
 
   // Seed-from-manuscript (ADR-0048 §S5): bulk, idempotent. Confirmed because it can
@@ -225,7 +236,7 @@
       <!-- Both stay reachable on an empty board — they are how you populate one:
            New card authors one directly; Seed bulk-mints from the manuscript. -->
       <div class="toolbar-actions">
-        <button class="board-btn" onclick={newCard}>
+        <button class="board-btn" onclick={newCard} disabled={creating}>
           <i class="ti ti-plus" aria-hidden="true"></i>
           New card
         </button>
@@ -315,8 +326,12 @@
     border-radius: var(--r-md);
     cursor: pointer;
   }
-  .board-btn:hover {
+  .board-btn:hover:not(:disabled) {
     background: var(--surface);
+  }
+  .board-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
   .board-btn i {
     color: var(--text-3);

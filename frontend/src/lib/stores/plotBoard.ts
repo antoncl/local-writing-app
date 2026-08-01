@@ -28,6 +28,25 @@ export function refreshPlotBoard(): Promise<void> {
   return inFlight;
 }
 
+// A mutation's refresh must reflect state AFTER the mutation. The coalescing guard
+// above is right for READ triggers (mount + opener collapse into one fetch), but a
+// mutation must NOT piggyback on a read-refresh that began BEFORE it — that fetch
+// resolves with a pre-mutation projection and the new state never lands. Drain any
+// such in-flight read first, then run one fresh fetch whose (post-mutation) result
+// sets the store last. A fetch that starts here is post-mutation, so coalescing with
+// it is fine.
+async function refreshAfterMutation(): Promise<void> {
+  const pending = inFlight;
+  if (pending) {
+    try {
+      await pending;
+    } catch {
+      // A failed read-refresh is retried by the fresh fetch below.
+    }
+  }
+  await refreshPlotBoard();
+}
+
 // Persist the board layout (ADR-0048 S7c) and return the board's advanced
 // revision (the mounted editor's next optimistic base). Deliberately does NOT
 // touch plotBoardStore: the store's projection is only the editor's initial seed
@@ -48,13 +67,13 @@ export async function savePlotBoardLayout(layout: PlotBoardLayout, baseRevision:
 // Realize: mint a scene from the card and attach it. 409 if already attached.
 export async function realizeCard(cardId: string, parentId: string | null = null): Promise<void> {
   await api.realizeCard(cardId, parentId);
-  await refreshPlotBoard();
+  await refreshAfterMutation();
 }
 
 // Seed: one attached card per un-carded leaf scene, in manuscript order (idempotent).
 export async function seedCardsFromManuscript(): Promise<void> {
   await api.seedFromManuscript();
-  await refreshPlotBoard();
+  await refreshAfterMutation();
 }
 
 // Create a single unattached card — the board's direct-authoring entry point (#793,
@@ -63,7 +82,7 @@ export async function seedCardsFromManuscript(): Promise<void> {
 // the caller can open the card to name it.
 export async function createCard(title: string): Promise<string> {
   const card = await api.createCard(title);
-  await refreshPlotBoard();
+  await refreshAfterMutation();
   return card.id;
 }
 
@@ -72,7 +91,7 @@ export async function createCard(title: string): Promise<string> {
 export async function saveCardSynopsis(cardId: string, synopsis: string): Promise<void> {
   const card = await api.getCard(cardId);
   await api.saveCard({ ...card }, synopsis);
-  await refreshPlotBoard();
+  await refreshAfterMutation();
 }
 
 // The single get → mutate a clone of the card's metadata → save (body unchanged) →
@@ -84,7 +103,7 @@ async function mutateCardMetadata(cardId: string, mutate: (metadata: CardEntry["
   const metadata = { ...card.metadata };
   mutate(metadata);
   await api.saveCard({ ...card, metadata }, card.body);
-  await refreshPlotBoard();
+  await refreshAfterMutation();
 }
 
 // Reassign the card's plotline ("" clears it → the Unassigned lane). The refetched

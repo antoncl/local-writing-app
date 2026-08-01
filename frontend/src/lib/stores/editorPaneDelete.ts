@@ -15,6 +15,7 @@ import { referenceIndexStore, refreshReferenceIndexInBackground } from "@/lib/st
 import { setLoreEntries } from "@/lib/stores/lore";
 import { setPromptEntries } from "@/lib/stores/prompts";
 import { setPlotTemplates } from "@/lib/stores/plotTemplates";
+import { setTemplateInstances } from "@/lib/stores/templateInstances";
 import { refreshPlotBoard } from "@/lib/stores/plotBoard";
 import { setAssistantEntries } from "@/lib/stores/assistants";
 import { setChatSessions } from "@/lib/stores/chats";
@@ -109,6 +110,10 @@ async function deleteScene(host: DeletePaneHost, id: string): Promise<void> {
     // No card list store to update; refresh the board so it drops the card.
     await api.deleteCard(pane.scene.id);
     await refreshPlotBoard();
+  } else if (documentKind === "plot_template_instance") {
+    // A book-local plot arc deletes via its own endpoint (a `plot` node — deleteScene
+    // would 404); the delete returns the refreshed roster for the palette.
+    setTemplateInstances((await api.deleteTemplateInstance(pane.scene.id)).entries);
   } else if (documentKind === "assistant") {
     setAssistantEntries((await api.deleteAssistantEntry(pane.scene.id)).entries);
   } else if (documentKind === "chat") {

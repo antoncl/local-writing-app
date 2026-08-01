@@ -57,6 +57,16 @@ export async function seedCardsFromManuscript(): Promise<void> {
   await refreshPlotBoard();
 }
 
+// Create a single unattached card — the board's direct-authoring entry point (#793,
+// the plotter's construction surface). No scene, so it projects homeless until the
+// writer attaches / realizes it. Refetches the projection, and returns the new id so
+// the caller can open the card to name it.
+export async function createCard(title: string): Promise<string> {
+  const card = await api.createCard(title);
+  await refreshPlotBoard();
+  return card.id;
+}
+
 // Save an in-place synopsis edit — the synopsis IS the card body. Fetch first so
 // the save carries the card's live revision + metadata unchanged.
 export async function saveCardSynopsis(cardId: string, synopsis: string): Promise<void> {

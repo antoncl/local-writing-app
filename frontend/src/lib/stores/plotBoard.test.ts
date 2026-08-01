@@ -6,6 +6,7 @@ import { get } from "svelte/store";
 import { api } from "@/lib/api";
 import {
   clearPlotBoard,
+  createCard,
   detachCardScene,
   plotBoardStore,
   realizeCard,
@@ -100,6 +101,15 @@ describe("card content ops", () => {
     await realizeCard("c1", "chap1");
     expect(realize).toHaveBeenCalledWith("c1", "chap1");
     expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("createCard creates a card, refetches, and returns the new id", async () => {
+    const create = vi.spyOn(api, "createCard").mockResolvedValue(card());
+    const refresh = vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    const id = await createCard("New card");
+    expect(create).toHaveBeenCalledWith("New card");
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(id).toBe("c1");
   });
 
   it("seedCardsFromManuscript seeds, then refetches", async () => {

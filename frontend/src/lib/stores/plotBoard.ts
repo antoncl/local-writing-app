@@ -86,6 +86,15 @@ export async function createCard(title: string): Promise<string> {
   return card.id;
 }
 
+// Rename a card in place (#798) — the title is intrinsic, not metadata. Fetch first
+// so the save carries the card's live revision + body + metadata unchanged. The card
+// UI drops empty titles before calling, matching the backend's non-empty requirement.
+export async function renameCard(cardId: string, title: string): Promise<void> {
+  const card = await api.getCard(cardId);
+  await api.saveCard({ ...card, title }, card.body);
+  await refreshAfterMutation();
+}
+
 // Save an in-place synopsis edit — the synopsis IS the card body. Fetch first so
 // the save carries the card's live revision + metadata unchanged.
 export async function saveCardSynopsis(cardId: string, synopsis: string): Promise<void> {

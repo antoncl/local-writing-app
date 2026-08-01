@@ -92,12 +92,60 @@
     draft = data.synopsis;
     editing = false;
   }
+
+  // Inline title (name) editing (#798) — the same click-to-edit pattern as the
+  // synopsis, so a card can be named on the board without opening the editor.
+  let titleEditing = $state(false);
+  let titleDraft = $state("");
+  let titleInput = $state<HTMLInputElement | null>(null);
+
+  async function startTitleEdit() {
+    if (!actions) return;
+    titleDraft = data.title;
+    titleEditing = true;
+    await tick();
+    titleInput?.select();
+  }
+  function commitTitle() {
+    titleEditing = false;
+    const next = titleDraft.trim();
+    // A card title must be non-empty (the backend rejects ""), so an emptied name
+    // reverts to the saved title; otherwise save only a real change.
+    if (actions && id && next && next !== data.title) actions.onEditTitle(id, next);
+  }
+  // Escape cancels: reset the draft so the unmount blur commits nothing.
+  function cancelTitle() {
+    titleDraft = data.title;
+    titleEditing = false;
+  }
 </script>
 
 <div class="card-root" bind:this={rootEl}>
   <article class="plot-card" style={accent ? `--card-accent: ${accent}` : undefined} class:accented={accent}>
     <div class="card-head">
-      <h4 class="card-title" title={data.title}>{data.title || "Untitled card"}</h4>
+      {#if titleEditing}
+        <input
+          bind:this={titleInput}
+          bind:value={titleDraft}
+          class="card-title-edit nodrag nopan"
+          placeholder="Card name"
+          onblur={commitTitle}
+          onkeydown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              e.currentTarget.blur();
+            } else if (e.key === "Escape") {
+              cancelTitle();
+            }
+          }}
+        />
+      {:else if actions}
+        <button class="card-title card-title-btn nodrag nopan" title="Click to rename" onclick={startTitleEdit}>
+          {data.title || "Untitled card"}
+        </button>
+      {:else}
+        <h4 class="card-title" title={data.title}>{data.title || "Untitled card"}</h4>
+      {/if}
       {#if actions}
         <button
           class="card-kebab nodrag nopan"
@@ -222,6 +270,28 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  /* Click-to-rename affordance — the title look, but a real button (size/weight
+     come from .card-title; reset button chrome and inherit the font family). */
+  .card-title-btn {
+    text-align: left;
+    border: none;
+    background: transparent;
+    padding: 0;
+    cursor: text;
+    font-family: inherit;
+    color: var(--text);
+  }
+  .card-title-edit {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-sm);
+    padding: 1px 4px;
   }
   /* Quiet until the card is hovered or the button is focused / the menu is open. */
   .card-kebab {

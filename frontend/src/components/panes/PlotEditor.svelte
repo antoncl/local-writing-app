@@ -36,6 +36,7 @@
     reassignCardPlotline,
     seedCardsFromManuscript,
     createCard,
+    renameCard,
   } from "@/lib/stores/plotBoard";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
@@ -97,6 +98,7 @@
     onOpen: (cardId) => void editorPanes.openPlotCard(cardId),
     onRealize: (cardId) => void realizeCard(cardId),
     onDetach: (cardId) => void detachCardScene(cardId),
+    onEditTitle: (cardId, title) => void renameCard(cardId, title),
     onEditSynopsis: (cardId, synopsis) => void saveCardSynopsis(cardId, synopsis),
     // Reassign the card's plotline ("" → Unassigned). A content op → the projection's
     // data-key changes → the board rebuilds and the card re-colours (its container, and
@@ -110,17 +112,18 @@
   });
 
   // New card (#793): the board's direct-authoring entry point — create an unattached
-  // card and open it so the writer can name it + write the synopsis. No confirm: a
-  // single card is cheap and reversible (delete). It lands homeless until attached.
-  // `creating` guards against a double-click minting two cards, and surfaces a create
-  // failure in the app error banner instead of a silent unhandled rejection.
+  // card that appears on the board (homeless) where the writer names + describes it
+  // inline. Deliberately does NOT open the NodeEditor (#798): staying on the board is
+  // the point; the full editor is a choice (the card's ⋮ → "Open card"). No confirm: a
+  // single card is cheap and reversible (delete). `creating` guards against a
+  // double-click minting two cards, and surfaces a create failure in the app error
+  // banner instead of a silent unhandled rejection.
   let creating = $state(false);
   async function newCard(): Promise<void> {
     if (creating) return;
     creating = true;
     try {
-      const id = await createCard("New card");
-      void editorPanes.openPlotCard(id);
+      await createCard("New card");
     } catch (e) {
       editorPanes.setError(e instanceof Error ? e.message : "Could not create the card.");
     } finally {
@@ -283,10 +286,12 @@
       >
         <!-- §G (design language): a flat --board surface, no dotted <Background/>. -->
         <Controls showLock={false} />
-        <!-- Frame the board on load. The init-only `fitView` PROP frames an empty
-             canvas (nodes arrive after mount), so this imperative fit reframes once
-             the projection's nodes are measured — the ViewBodyView fix. -->
-        <ViewportFit trigger={projection} options={{ padding: 0.2, maxZoom: 1 }} />
+        <!-- Frame the board ONCE, when it first loads (#798). Triggering on `board_id`
+             (stable across refetches) rather than the whole `projection` means a content
+             op — adding/editing a card — no longer reframes the canvas out from under the
+             writer; the viewport stays where they left it. `minZoom` clamps the initial
+             fit so a spread-out board can't shrink to the canvas floor and read as empty. -->
+        <ViewportFit trigger={projection?.board_id} options={{ padding: 0.2, maxZoom: 1, minZoom: 0.5 }} />
       </SvelteFlow>
       </div>
     {/if}

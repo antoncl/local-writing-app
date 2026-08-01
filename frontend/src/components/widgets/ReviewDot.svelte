@@ -6,14 +6,17 @@
   // reads as "a revision from that chat is waiting" and clears itself the moment
   // the review is committed or discarded (its callers read entryBrainstorm).
   // One home so the tab and the roster can't drift apart.
+  //
+  // `role="img"` so the aria-label is a real accessible name (a bare span's is
+  // unreliably announced). No `title` tooltip — the chat cue already names the
+  // pending review, and native tooltips flee the cursor (#710 review / PR #791).
 </script>
 
-<span class="review-dot" title="A brainstorm revision is ready to review" aria-label="Review pending"></span>
+<span class="review-dot" role="img" aria-label="Review pending"></span>
 
 <style>
   .review-dot {
     flex: none;
-    display: inline-block;
     width: 7px;
     height: 7px;
     border-radius: 50%;

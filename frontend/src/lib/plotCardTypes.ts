@@ -1,12 +1,14 @@
-// Plot card + plotline types (ADR-0048 S5a/S5b, wired to the board in S7d). Kept
-// out of the monolithic `types.ts` (at the file-size cap); re-exported from there
-// so `@/lib/types` stays the single import barrel. Mirrors the backend
-// `Card*` / `Plotline*` models (models/entries.py) field-for-field.
+// Plot card, plotline + template-instance types (ADR-0048 S5a/S5b, S7 Slice 5a).
+// Kept out of the monolithic `types.ts` (at the file-size cap); re-exported from
+// there so `@/lib/types` stays the single import barrel. Mirrors the backend
+// `Card*` / `Plotline*` / `TemplateInstance*` models (models/entries.py)
+// field-for-field.
 //
-// A card (`plot:card`) and a plotline (`plot:plotline`) are both book-local
-// layered `plot/` folder nodes with the same shape — a title, a prose body, and
-// schema-driven `metadata` — so they share one base here as they do on the
-// backend (`_PlotFolder*`). The endpoint is the only family discriminator.
+// A card (`plot:card`), a plotline (`plot:plotline`), and a template instance
+// (`plot:template_instance`) are all book-local layered `plot/` folder nodes with
+// the same shape — a title, a prose body, and schema-driven `metadata` — so they
+// share one base here as they do on the backend (`_PlotFolder*`). The endpoint is
+// the only family discriminator.
 
 import type { EntryMetadata } from "./types";
 
@@ -50,3 +52,12 @@ export type CardList = { entries: CardSummary[] };
 export type PlotlineSummary = PlotFolderSummary;
 export type PlotlineEntry = PlotFolderEntry;
 export type PlotlineList = { entries: PlotlineSummary[] };
+
+// A template instance (ADR-0048 §3 / S7 Slice 5a): a book-local, specialized copy
+// of a template's beat roster — the plotter's *arc*. Its specialized beats
+// (`metadata.instance_beats`) and lineage snapshot (`source_template_id` /
+// `source_template_name`) ride inside `metadata`; ad-hoc arcs carry the same shape
+// with no lineage. The card/plotline third twin.
+export type TemplateInstanceSummary = PlotFolderSummary;
+export type TemplateInstanceEntry = PlotFolderEntry;
+export type TemplateInstanceList = { entries: TemplateInstanceSummary[] };

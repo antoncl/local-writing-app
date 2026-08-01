@@ -54,4 +54,19 @@ describe("entryBrainstorm cross-pane store", () => {
     expect(() => entryBrainstorm.clear("missing")).not.toThrow();
     expect(entryBrainstorm.proposalFor("missing")).toBeNull();
   });
+
+  it("hasProposalFor is the hand-off dot's truth — true iff a proposal is pending (#710)", () => {
+    expect(entryBrainstorm.hasProposalFor("a")).toBe(false);
+    entryBrainstorm.propose("a", patch("body"));
+    expect(entryBrainstorm.hasProposalFor("a")).toBe(true);
+    expect(entryBrainstorm.hasProposalFor("b")).toBe(false); // no cross-talk
+    entryBrainstorm.clear("a");
+    expect(entryBrainstorm.hasProposalFor("a")).toBe(false); // clears with the review
+  });
+
+  it("hasProposalFor stays true for a fields-only patch (structured-only review)", () => {
+    // A structured-only commit still needs the dot — the review is on the rail.
+    entryBrainstorm.propose("a", patch(null, { bio: "field only" }));
+    expect(entryBrainstorm.hasProposalFor("a")).toBe(true);
+  });
 });

@@ -35,6 +35,14 @@ class EntryBrainstorm {
     return this.#proposals[entryId] ?? null;
   }
 
+  /** Whether a review is pending for `entryId` — the hand-off marker's source of
+   *  truth (#710 slice 3). The tab dot and the roster dot both read it; because
+   *  `#proposals` is `$state`, callers stay reactive and the marker clears the
+   *  instant `clear()` runs (the review committed or discarded on the entry). */
+  hasProposalFor(entryId: string): boolean {
+    return entryId in this.#proposals;
+  }
+
   /** Entry pane: drop the proposal once saved or discarded. */
   clear(entryId: string): void {
     if (!(entryId in this.#proposals)) return;

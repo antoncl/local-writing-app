@@ -22,6 +22,7 @@
   import RegionActions from "./RegionActions.svelte";
   import RegionBody from "./RegionBody.svelte";
   import { WORKSPACE_KEY, type WorkspaceEditor } from "./workspaceContext";
+  import ReviewDot from "@/components/widgets/ReviewDot.svelte";
 
   let { node }: { node: LayoutNode } = $props();
   const editor = getContext<WorkspaceEditor>(WORKSPACE_KEY);
@@ -33,6 +34,9 @@
   }
   function badgeOf(id: PanelId): { text: string; saved: boolean; error?: boolean } | null {
     return isEditorPanelId(id) ? editor.badge(id) : null;
+  }
+  function reviewPendingOf(id: PanelId): boolean {
+    return isEditorPanelId(id) ? editor.reviewPending(id) : false;
   }
   function closableOf(id: PanelId): boolean {
     return isEditorPanelId(id) ? true : panelRegistry.get(id)?.closable ?? false;
@@ -226,6 +230,7 @@
             ondragstart={(event) => onTabDragStart(event, tab)}
             ondragend={() => workspaceLayout.endDrag()}
           >
+            {#if reviewPendingOf(tab)}<ReviewDot />{/if}
             <span class="ws-tab-label">{titleOf(tab)}</span>
             {#if b}
               <span class="ws-tab-badge" class:saved={b.saved} class:error={b.error}>{b.text}</span>

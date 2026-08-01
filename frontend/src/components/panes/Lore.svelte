@@ -8,8 +8,6 @@
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import RowCaret from "@/components/widgets/RowCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
-  import ReviewDot from "@/components/widgets/ReviewDot.svelte";
-  import { entryBrainstorm } from "@/lib/stores/entryBrainstorm.svelte";
   import { entryTypeChoicesByKind } from "@/lib/utils/treeHelpers";
   import { treeActions } from "@/lib/stores/treeActions.svelte";
   import { chatSessions } from "@/lib/stores/chatSessions.svelte";
@@ -219,9 +217,6 @@
       {/if}
     {/snippet}
     {#snippet trailing()}
-      {#if entryBrainstorm.hasProposalFor(entry.id)}
-        <ReviewDot />
-      {/if}
       {#if ctx.collapsible}
         <CountPill count={ctx.childCount} />
       {/if}

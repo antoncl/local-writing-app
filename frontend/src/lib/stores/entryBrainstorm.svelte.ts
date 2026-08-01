@@ -36,11 +36,15 @@ class EntryBrainstorm {
   }
 
   /** Whether a review is pending for `entryId` — the hand-off marker's source of
-   *  truth (#710 slice 3). The tab dot and the roster dot both read it; because
-   *  `#proposals` is `$state`, callers stay reactive and the marker clears the
-   *  instant `clear()` runs (the review committed or discarded on the entry). */
+   *  truth (#710 slice 3). The tab dot and the roster dot both read it; it stays
+   *  reactive because it goes through `proposalFor`'s property read (the `$state`
+   *  proxy's `get` trap), so the marker appears the instant a commit `propose()`s
+   *  and clears the instant `clear()` runs. (A bare `entryId in this.#proposals`
+   *  goes through the proxy's `has` trap, which does NOT register a dependency, so
+   *  the dot would render once and never update — the #710 slice-3 review caught
+   *  exactly that.) */
   hasProposalFor(entryId: string): boolean {
-    return entryId in this.#proposals;
+    return this.proposalFor(entryId) !== null;
   }
 
   /** Entry pane: drop the proposal once saved or discarded. */

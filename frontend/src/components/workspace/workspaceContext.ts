@@ -14,6 +14,9 @@ export type WorkspaceEditor = {
   // Save-state badge ("Save failed" / "Saving…" / "Unsaved" / "Saved"), or null
   // when clean. `error` marks the failed-save state for danger styling (#263).
   badge: (id: PanelId) => { text: string; saved: boolean; error?: boolean } | null;
+  // Whether an AI brainstorm review is pending on this document — the #710 slice-3
+  // hand-off dot. App resolves the panel id to the node id and asks entryBrainstorm.
+  reviewPending: (id: PanelId) => boolean;
   // Close (save-and-close) a document tab.
   onClose: (id: PanelId) => void;
   // The document editor, keyed by panel id (branches in App scope so the

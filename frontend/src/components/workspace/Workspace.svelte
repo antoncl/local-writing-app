@@ -21,6 +21,9 @@
     get badge() {
       return props.badge;
     },
+    get reviewPending() {
+      return props.reviewPending;
+    },
     get body() {
       return props.body;
     },

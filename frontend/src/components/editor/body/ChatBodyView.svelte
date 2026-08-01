@@ -685,10 +685,17 @@
         chatNotice = "The model proposed no changes to commit.";
         return;
       }
-      if (patch.dropped.length > 0) {
-        chatNotice = `Ignored ${patch.dropped.length} field(s) the model couldn't set legally: ${patch.dropped.join(", ")}.`;
-      }
       entryBrainstorm.propose(entryId, { body: patch.body, fields: patch.fields });
+      // Hand-off cue (#710 slice 3): the commit lands here in the chat pane but
+      // the review renders on the entry pane. Name where it went so the author
+      // knows to flip over — the entry's tab and roster row now carry a dot too.
+      const target = loreEntries.find((entry) => entry.id === entryId);
+      const reviewOn = target ? target.title : "the entry";
+      const dropped =
+        patch.dropped.length > 0
+          ? ` Ignored ${patch.dropped.length} field(s) the model couldn't set legally: ${patch.dropped.join(", ")}.`
+          : "";
+      chatNotice = `Committed — review it on ${reviewOn}.${dropped}`;
     } catch (e) {
       chatError = (e as Error).message;
     } finally {

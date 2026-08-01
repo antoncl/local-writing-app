@@ -80,6 +80,7 @@
     computeDraftTitleOverrides,
   } from "@/lib/editor-core/editorPaneModel";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
+  import { entryBrainstorm } from "@/lib/stores/entryBrainstorm.svelte";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
   import { projectChooser } from "@/lib/stores/projectChooser.svelte";
   import { createWizard } from "@/lib/stores/createWizard.svelte";
@@ -432,6 +433,14 @@
     if (pane.recentlySaved) return { text: "Saved", saved: true };
     return null;
   }
+  // The #710 slice-3 hand-off dot: resolve the tab's panel id to its node id and
+  // ask the brainstorm bridge whether a review is pending there. Reactive because
+  // both the pane list and entryBrainstorm's map are `$state`, so the dot clears
+  // the moment the review is committed or discarded on the entry.
+  function editorReviewPending(id: string): boolean {
+    const nodeId = editorPaneById(id)?.scene?.id;
+    return nodeId != null && entryBrainstorm.hasProposalFor(nodeId);
+  }
 
   async function run(action: () => Promise<void>): Promise<boolean> {
     error = "";
@@ -759,6 +768,7 @@
     <Workspace
       title={editorTitle}
       badge={editorBadge}
+      reviewPending={editorReviewPending}
       onClose={(id) => void editorPanes.close(id)}
       body={editorDocBody}
       actions={editorDocActions}

@@ -23,6 +23,7 @@ function actions(plotlines: PlotCardActions["plotlines"] = []): PlotCardActions 
     onOpen: vi.fn(),
     onRealize: vi.fn(),
     onDetach: vi.fn(),
+    onEditTitle: vi.fn(),
     onEditSynopsis: vi.fn(),
     onSetPlotline: vi.fn(),
     plotlines,
@@ -93,6 +94,37 @@ describe("PlotCardNode — content-op menu (S7d)", () => {
     await fireEvent.click(screen.getByLabelText("Card actions"));
     await fireEvent.click(screen.getByRole("menuitem", { name: "Open card" }));
     expect(acts.onOpen).toHaveBeenCalledWith("card_2");
+  });
+
+  it("renames the card in place and commits the change on blur", async () => {
+    const acts = actions();
+    renderWithActions({ title: "Old name" }, acts, "card_t1");
+    await fireEvent.click(screen.getByRole("button", { name: "Old name" }));
+    const input = screen.getByPlaceholderText("Card name") as HTMLInputElement;
+    await fireEvent.input(input, { target: { value: "New name" } });
+    await fireEvent.blur(input);
+    expect(acts.onEditTitle).toHaveBeenCalledWith("card_t1", "New name");
+  });
+
+  it("does not save an emptied title (the backend requires a non-empty name)", async () => {
+    const acts = actions();
+    renderWithActions({ title: "Keep" }, acts, "card_t2");
+    await fireEvent.click(screen.getByRole("button", { name: "Keep" }));
+    const input = screen.getByPlaceholderText("Card name") as HTMLInputElement;
+    await fireEvent.input(input, { target: { value: "   " } });
+    await fireEvent.blur(input);
+    expect(acts.onEditTitle).not.toHaveBeenCalled();
+  });
+
+  it("Escape cancels the title edit without committing", async () => {
+    const acts = actions();
+    renderWithActions({ title: "Original" }, acts, "card_t3");
+    await fireEvent.click(screen.getByRole("button", { name: "Original" }));
+    const input = screen.getByPlaceholderText("Card name") as HTMLInputElement;
+    await fireEvent.input(input, { target: { value: "discard" } });
+    await fireEvent.keyDown(input, { key: "Escape" });
+    await fireEvent.blur(input);
+    expect(acts.onEditTitle).not.toHaveBeenCalled();
   });
 
   it("edits the synopsis in place and commits the change on blur", async () => {

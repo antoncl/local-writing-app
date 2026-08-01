@@ -12,6 +12,7 @@ import {
   realizeCard,
   reassignCardPlotline,
   refreshPlotBoard,
+  renameCard,
   saveCardSynopsis,
   savePlotBoardLayout,
   seedCardsFromManuscript,
@@ -146,6 +147,18 @@ describe("card content ops", () => {
     await detachCardScene("c1");
     expect(save).toHaveBeenCalledTimes(1);
     expect(save.mock.calls[0][0].metadata).toEqual({ plotline: "p1" });
+  });
+
+  it("renameCard saves the new title with body + metadata untouched, then refetches", async () => {
+    vi.spyOn(api, "getCard").mockResolvedValue(card({ plotline: "p1" }));
+    const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
+    const refresh = vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    await renameCard("c1", "Renamed");
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0][0].title).toBe("Renamed");
+    expect(save.mock.calls[0][0].metadata).toEqual({ plotline: "p1" });
+    expect(save.mock.calls[0][1]).toBe(""); // body unchanged
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 
   it("saveCardSynopsis saves the new body, metadata untouched", async () => {

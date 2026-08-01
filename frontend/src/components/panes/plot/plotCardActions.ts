@@ -16,6 +16,8 @@ export type PlotCardActions = {
   onRealize: (cardId: string) => void;
   // Clear the card's scene ref (attached cards only).
   onDetach: (cardId: string) => void;
+  // Persist an in-place title (name) edit. Empty titles are dropped by the card.
+  onEditTitle: (cardId: string, title: string) => void;
   // Persist an in-place synopsis (body) edit.
   onEditSynopsis: (cardId: string, synopsis: string) => void;
   // Reassign the card's plotline ("" → Unassigned) — the reflow trigger.

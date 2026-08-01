@@ -35,6 +35,7 @@
     saveCardSynopsis,
     reassignCardPlotline,
     seedCardsFromManuscript,
+    createCard,
   } from "@/lib/stores/plotBoard";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
@@ -107,6 +108,25 @@
       return projection?.plotlines ?? [];
     },
   });
+
+  // New card (#793): the board's direct-authoring entry point — create an unattached
+  // card and open it so the writer can name it + write the synopsis. No confirm: a
+  // single card is cheap and reversible (delete). It lands homeless until attached.
+  // `creating` guards against a double-click minting two cards, and surfaces a create
+  // failure in the app error banner instead of a silent unhandled rejection.
+  let creating = $state(false);
+  async function newCard(): Promise<void> {
+    if (creating) return;
+    creating = true;
+    try {
+      const id = await createCard("New card");
+      void editorPanes.openPlotCard(id);
+    } catch (e) {
+      editorPanes.setError(e instanceof Error ? e.message : "Could not create the card.");
+    } finally {
+      creating = false;
+    }
+  }
 
   // Seed-from-manuscript (ADR-0048 §S5): bulk, idempotent. Confirmed because it can
   // mint many cards at once, though re-running it is safe (already-carded scenes skip).
@@ -213,11 +233,18 @@
     <p class="board-hint muted">Loading the board…</p>
   {:else}
     <div class="board-toolbar">
-      <!-- Seed stays reachable on an empty board — it is how you populate one. -->
-      <button class="seed-btn" onclick={seed}>
-        <i class="ti ti-seedling" aria-hidden="true"></i>
-        Seed from manuscript
-      </button>
+      <!-- Both stay reachable on an empty board — they are how you populate one:
+           New card authors one directly; Seed bulk-mints from the manuscript. -->
+      <div class="toolbar-actions">
+        <button class="board-btn" onclick={newCard} disabled={creating}>
+          <i class="ti ti-plus" aria-hidden="true"></i>
+          New card
+        </button>
+        <button class="board-btn" onclick={seed}>
+          <i class="ti ti-seedling" aria-hidden="true"></i>
+          Seed from manuscript
+        </button>
+      </div>
       {#if !isEmpty}
         <UndoRedoControls
           canUndo={undoCtl.canUndo}
@@ -282,7 +309,12 @@
     gap: var(--sp-2);
     padding: var(--sp-1) var(--sp-2);
   }
-  .seed-btn {
+  .toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+  }
+  .board-btn {
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -294,10 +326,14 @@
     border-radius: var(--r-md);
     cursor: pointer;
   }
-  .seed-btn:hover {
+  .board-btn:hover:not(:disabled) {
     background: var(--surface);
   }
-  .seed-btn i {
+  .board-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .board-btn i {
     color: var(--text-3);
   }
   .board-canvas {

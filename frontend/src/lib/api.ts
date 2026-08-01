@@ -929,8 +929,17 @@ export const api = {
   // the endpoint path is the only family discriminator (the backend enforces an
   // is_a family guard on each). Attach/detach have no endpoint of their own — they
   // are a saveCard that sets / clears the `scene` ref in `metadata` (ADR §1).
-  // (list/create card endpoints exist backend-side; add the client methods when a
-  // caller needs them — seed covers bulk create, the board reads via the projection.)
+  // (the list-card endpoint exists backend-side; add its client method when a caller
+  // needs it — the board reads the card set via the projection, not a flat list.)
+  // Create a single unattached card — the board's direct-authoring entry point
+  // (#793), the per-card inverse of seed. Returns the created card so the caller can
+  // open it to name it. No scene → it projects homeless until attached / realized.
+  createCard(title: string) {
+    return request<CardEntry>("/plot/cards", {
+      method: "POST",
+      body: JSON.stringify({ title }),
+    });
+  },
   getCard(entryId: string) {
     return request<CardEntry>(`/plot/cards/${entryId}`);
   },

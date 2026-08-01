@@ -6,6 +6,7 @@ import { get } from "svelte/store";
 import { api } from "@/lib/api";
 import {
   clearPlotBoard,
+  createCard,
   detachCardScene,
   plotBoardStore,
   realizeCard,
@@ -100,6 +101,34 @@ describe("card content ops", () => {
     await realizeCard("c1", "chap1");
     expect(realize).toHaveBeenCalledWith("c1", "chap1");
     expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("createCard creates a card, refetches, and returns the new id", async () => {
+    const create = vi.spyOn(api, "createCard").mockResolvedValue(card());
+    const refresh = vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    const id = await createCard("New card");
+    expect(create).toHaveBeenCalledWith("New card");
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(id).toBe("c1");
+  });
+
+  it("createCard forces a fresh fetch, not coalescing with a pre-create read-refresh", async () => {
+    vi.spyOn(api, "createCard").mockResolvedValue(card());
+    const stale = projection(); // the read-refresh's result: started BEFORE the create, 0 cards
+    const withCard: PlotBoardProjection = {
+      ...projection(),
+      cards: [{ id: "c1", title: "New card", synopsis: "", plotline: null, scene: null, container: null }],
+    };
+    const fetchSpy = vi
+      .spyOn(api, "getPlotBoardProjection")
+      .mockResolvedValueOnce(stale) // 1st: the in-flight read-refresh (pre-create)
+      .mockResolvedValueOnce(withCard); // 2nd: the forced post-create fetch
+    const readRefresh = refreshPlotBoard(); // in flight before the mutation
+    await createCard("New card"); // must NOT piggyback on the stale read — forces a 2nd fetch
+    await readRefresh;
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    // The store lands on the post-create projection, not the stale one.
+    expect(get(plotBoardStore)?.cards.length).toBe(1);
   });
 
   it("seedCardsFromManuscript seeds, then refetches", async () => {

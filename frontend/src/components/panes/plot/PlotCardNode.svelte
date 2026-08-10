@@ -41,6 +41,13 @@
   let statusInfo = $derived(STATUS_META[pageStatus] ?? STATUS_META.unwritten);
   let statusColor = $derived(getSwatch(statusInfo.swatch)?.hex ?? null);
 
+  // Show the first few beat badges, then a "+N" chip for the rest — so a card with
+  // many beats never silently hides them (the chip's tooltip names the overflow).
+  const BEAT_BADGE_CAP = 4;
+  let visibleBeats = $derived(data.beats.slice(0, BEAT_BADGE_CAP));
+  let hiddenBeats = $derived(data.beats.slice(BEAT_BADGE_CAP));
+  let hiddenBeatsLabel = $derived(hiddenBeats.map((b) => b.title).join(", "));
+
   let menuOpen = $state(false);
   // The menu has three pages: the actions, the "Set plotline" lane list, and the
   // "Beats…" link picker.
@@ -79,8 +86,14 @@
   });
 
   function toggleMenu() {
-    menuView = "main";
-    menuOpen = !menuOpen;
+    // Close via closeMenu so a pending beats edit is flushed — clicking the kebab to
+    // dismiss the menu while on the beats page must not silently drop the draft.
+    if (menuOpen) {
+      closeMenu();
+    } else {
+      menuView = "main";
+      menuOpen = true;
+    }
   }
   function closeMenu() {
     commitBeats(); // flush a pending beats edit before the menu goes away
@@ -241,9 +254,12 @@
 
     {#if data.beats.length}
       <div class="card-beats" aria-label="Beats">
-        {#each data.beats as beat (beat.instance_id + ":" + beat.beat_id)}
+        {#each visibleBeats as beat (beat.instance_id + ":" + beat.beat_id)}
           <span class="beat-badge" title={`${beat.instance_title} · ${beat.title}`}>{beat.title}</span>
         {/each}
+        {#if hiddenBeats.length}
+          <span class="beat-badge beat-more" title={hiddenBeatsLabel}>+{hiddenBeats.length}</span>
+        {/if}
       </div>
     {/if}
 
@@ -452,8 +468,6 @@
     display: flex;
     flex-wrap: wrap;
     gap: 3px;
-    overflow: hidden;
-    max-height: 34px;
   }
   .beat-badge {
     max-width: 100%;
@@ -467,6 +481,11 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  /* The overflow chip — quieter than a real beat, and never shrinks. */
+  .beat-more {
+    flex: 0 0 auto;
+    color: var(--text-3);
   }
   /* The 3-state page marker (Slice 5b): on_page (moss) / off_page (graphite) /
      unwritten (stone, hollow). The dot colour is the page_status option swatch,

@@ -216,6 +216,15 @@ describe("PlotCardNode — beats + page marker (S7 Slice 5b)", () => {
     expect(screen.getByText("Refusal")).toBeInTheDocument();
   });
 
+  it("caps the badges and shows a +N overflow chip instead of hiding beats silently", () => {
+    const many = Array.from({ length: 6 }, (_, i) => beat({ beat_id: `b${i}`, title: `Beat ${i}` }));
+    render(PlotCardNode, { props: { data: data({ beats: many }) } });
+    expect(screen.getByText("Beat 0")).toBeInTheDocument();
+    expect(screen.getByText("Beat 3")).toBeInTheDocument(); // first 4 shown
+    expect(screen.queryByText("Beat 4")).toBeNull(); // capped
+    expect(screen.getByText("+2")).toBeInTheDocument(); // the overflow is visible
+  });
+
   it("shows the on-page marker when page_status is on_page", () => {
     render(PlotCardNode, { props: { data: data({ pageStatus: "on_page" }) } });
     expect(screen.getByText("On the page")).toBeInTheDocument();
@@ -271,6 +280,19 @@ describe("PlotCardNode — beats + page marker (S7 Slice 5b)", () => {
     await fireEvent.click(screen.getByRole("menuitem", { name: /Beats/ }));
     await fireEvent.click(screen.getByRole("button", { name: /Beats/ })); // back with no toggle
     expect(acts.onSetBeats).not.toHaveBeenCalled();
+  });
+
+  it("commits beat edits when the menu is dismissed via the kebab button", async () => {
+    // Closing the menu with the kebab (not the back arrow) must still flush the draft
+    // — otherwise beat toggles are silently lost.
+    const acts = actions([], [arcFixture([{ id: "b1", title: "Call to Adventure" }])]);
+    renderWithActions({ beats: [] }, acts, "card_kb");
+    const kebab = screen.getByRole("button", { name: "Card actions" }); // not the menu div
+    await fireEvent.click(kebab); // open
+    await fireEvent.click(screen.getByRole("menuitem", { name: /Beats/ })); // beats page
+    await fireEvent.click(screen.getByRole("checkbox")); // link the beat
+    await fireEvent.click(kebab); // close via kebab
+    expect(acts.onSetBeats).toHaveBeenCalledWith("card_kb", [{ instance: "i1", beat_id: "b1" }]);
   });
 
   it("pre-checks a beat the card already fulfils in the picker", async () => {

@@ -16,6 +16,8 @@ import {
   saveCardSynopsis,
   savePlotBoardLayout,
   seedCardsFromManuscript,
+  setCardBeatLinks,
+  setCardPageStatus,
 } from "./plotBoard";
 import type { CardEntry, PlotBoard, PlotBoardProjection } from "@/lib/types";
 
@@ -118,7 +120,9 @@ describe("card content ops", () => {
     const stale = projection(); // the read-refresh's result: started BEFORE the create, 0 cards
     const withCard: PlotBoardProjection = {
       ...projection(),
-      cards: [{ id: "c1", title: "New card", synopsis: "", plotline: null, scene: null, container: null }],
+      cards: [
+        { id: "c1", title: "New card", synopsis: "", plotline: null, scene: null, container: null, page_status: null, beats: [] },
+      ],
     };
     const fetchSpy = vi
       .spyOn(api, "getPlotBoardProjection")
@@ -186,5 +190,37 @@ describe("card content ops", () => {
     vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
     await reassignCardPlotline("c1", "");
     expect(save.mock.calls[0][0].metadata).toEqual({ scene: "sc" });
+  });
+
+  it("setCardBeatLinks writes the whole link set as canonical pairs, then refetches", async () => {
+    vi.spyOn(api, "getCard").mockResolvedValue(card({ plotline: "p1" }));
+    const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
+    const refresh = vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    await setCardBeatLinks("c1", [{ instance: "i1", beat_id: "b1" }, { instance: "i1", beat_id: "b2" }]);
+    expect(save.mock.calls[0][0].metadata).toEqual({
+      plotline: "p1",
+      beat_links: [{ instance: "i1", beat_id: "b1" }, { instance: "i1", beat_id: "b2" }],
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("setCardBeatLinks with an empty set drops the key (sparse)", async () => {
+    vi.spyOn(api, "getCard").mockResolvedValue(card({ plotline: "p1", beat_links: [{ instance: "i1", beat_id: "b1" }] }));
+    const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
+    vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    await setCardBeatLinks("c1", []);
+    expect(save.mock.calls[0][0].metadata).toEqual({ plotline: "p1" });
+  });
+
+  it("setCardPageStatus off_page sets the value; unwritten drops it (the sparse default)", async () => {
+    vi.spyOn(api, "getCard").mockResolvedValue(card({ page_status: "unwritten" }));
+    const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
+    vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    await setCardPageStatus("c1", "off_page");
+    expect(save.mock.calls[0][0].metadata).toEqual({ page_status: "off_page" });
+
+    vi.spyOn(api, "getCard").mockResolvedValue(card({ page_status: "off_page" }));
+    await setCardPageStatus("c1", "unwritten");
+    expect(save.mock.calls[1][0].metadata).toEqual({});
   });
 });

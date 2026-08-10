@@ -15,6 +15,8 @@
   import { getSwatch } from "@/lib/utils/colors";
   import type { PlotCardData } from "@/lib/plot/plotBoardLayout";
   import { PLOT_CARD_ACTIONS, type PlotCardActions } from "./plotCardActions";
+  import type { PlotBeatLink } from "@/lib/stores/plotBoard";
+  import PlotBeatPicker from "./PlotBeatPicker.svelte";
 
   // Svelte Flow passes the node's id/data/selection state as props.
   let { id, data }: { id?: string; data: PlotCardData; selected?: boolean } = $props();
@@ -27,9 +29,31 @@
   // or the Unassigned lane. Applied as a CSS var, so no hex literal lands in style code.
   let accent = $derived(getSwatch(data.color)?.hex ?? null);
 
+  // The 3-state page marker (Slice 5b): on_page (scene attached) / off_page / unwritten.
+  // Null page_status is the sparse default → unwritten. The dot colour comes from the
+  // page_status option swatches (moss/graphite/stone), applied as a CSS var (no hex in style).
+  const STATUS_META: Record<string, { swatch: string; label: string }> = {
+    on_page: { swatch: "moss", label: "On the page" },
+    off_page: { swatch: "graphite", label: "Off the page" },
+    unwritten: { swatch: "stone", label: "Unwritten" },
+  };
+  let pageStatus = $derived(data.pageStatus ?? "unwritten");
+  let statusInfo = $derived(STATUS_META[pageStatus] ?? STATUS_META.unwritten);
+  let statusColor = $derived(getSwatch(statusInfo.swatch)?.hex ?? null);
+
   let menuOpen = $state(false);
-  // The menu has two pages: the actions, and the "Set plotline" lane list.
-  let menuView = $state<"main" | "plotline">("main");
+  // The menu has three pages: the actions, the "Set plotline" lane list, and the
+  // "Beats…" link picker.
+  let menuView = $state<"main" | "plotline" | "beats">("main");
+
+  // A local draft of the card's beat links while the beats page is open (Slice 5b):
+  // toggles mutate this, and one save flushes on leaving the page / closing the menu.
+  // Batching avoids a refetch-per-checkbox (which would rebuild the board and close
+  // the menu mid-edit). null = not editing beats.
+  let beatDraft = $state<PlotBeatLink[] | null>(null);
+  let draftKeys = $derived(
+    beatDraft ? new Set(beatDraft.map((l) => `${l.instance}:${l.beat_id}`)) : new Set<string>(),
+  );
   let editing = $state(false);
   let draft = $state("");
   let textarea = $state<HTMLTextAreaElement | null>(null);
@@ -59,6 +83,7 @@
     menuOpen = !menuOpen;
   }
   function closeMenu() {
+    commitBeats(); // flush a pending beats edit before the menu goes away
     menuOpen = false;
     menuView = "main";
   }
@@ -69,6 +94,36 @@
   function setPlotline(plotlineId: string) {
     closeMenu();
     if (actions && id) actions.onSetPlotline(id, plotlineId);
+  }
+
+  // Beats page: seed the draft from the card's current links, toggle in place, flush
+  // one save on leave. `data.beats` updates from the refetched projection after.
+  function openBeats() {
+    beatDraft = data.beats.map((b) => ({ instance: b.instance_id, beat_id: b.beat_id }));
+    menuView = "beats";
+  }
+  function toggleBeat(instanceId: string, beatId: string, checked: boolean) {
+    if (!beatDraft) return;
+    beatDraft = checked
+      ? [...beatDraft, { instance: instanceId, beat_id: beatId }]
+      : beatDraft.filter((l) => !(l.instance === instanceId && l.beat_id === beatId));
+  }
+  function commitBeats() {
+    if (beatDraft && actions && id) {
+      const current = new Set(data.beats.map((b) => `${b.instance_id}:${b.beat_id}`));
+      const draft = new Set(beatDraft.map((l) => `${l.instance}:${l.beat_id}`));
+      const changed = draft.size !== current.size || [...draft].some((k) => !current.has(k));
+      if (changed) actions.onSetBeats(id, beatDraft);
+    }
+    beatDraft = null;
+  }
+  function backFromBeats() {
+    commitBeats();
+    menuView = "main";
+  }
+  function setPageStatus(status: "off_page" | "unwritten") {
+    closeMenu();
+    if (actions && id) actions.onSetPageStatus(id, status);
   }
 
   async function startEdit() {
@@ -184,9 +239,21 @@
       <p class="card-synopsis">{data.synopsis}</p>
     {/if}
 
-    <span class="card-scene" class:attached={data.attached}>
-      <span class="scene-dot" aria-hidden="true"></span>
-      {data.attached ? "Scene attached" : "No scene"}
+    {#if data.beats.length}
+      <div class="card-beats" aria-label="Beats">
+        {#each data.beats as beat (beat.instance_id + ":" + beat.beat_id)}
+          <span class="beat-badge" title={`${beat.instance_title} · ${beat.title}`}>{beat.title}</span>
+        {/each}
+      </div>
+    {/if}
+
+    <span
+      class="card-status"
+      class:hollow={pageStatus === "unwritten"}
+      style={statusColor ? `--status-color: ${statusColor}` : undefined}
+    >
+      <span class="status-dot" aria-hidden="true"></span>
+      {statusInfo.label}
     </span>
   </article>
 
@@ -209,7 +276,24 @@
           <i class="ti ti-route" aria-hidden="true"></i> Set plotline
           <i class="ti ti-chevron-right chevron" aria-hidden="true"></i>
         </button>
-      {:else}
+        <button role="menuitem" class="menu-item" onclick={openBeats}>
+          <i class="ti ti-stack-2" aria-hidden="true"></i>
+          Beats{data.beats.length ? ` (${data.beats.length})` : ""}
+          <i class="ti ti-chevron-right chevron" aria-hidden="true"></i>
+        </button>
+        <!-- on_page is derived from the scene; only an unattached card authors
+             off_page (deliberate backstory) vs unwritten (a placeholder to promote). -->
+        {#if !data.attached}
+          <button
+            role="menuitem"
+            class="menu-item"
+            onclick={() => setPageStatus(pageStatus === "off_page" ? "unwritten" : "off_page")}
+          >
+            <i class="ti ti-eye-off" aria-hidden="true"></i>
+            {pageStatus === "off_page" ? "Mark unwritten" : "Mark off-page"}
+          </button>
+        {/if}
+      {:else if menuView === "plotline"}
         <button class="menu-item menu-back" onclick={() => (menuView = "main")}>
           <i class="ti ti-chevron-left" aria-hidden="true"></i> Set plotline
         </button>
@@ -223,6 +307,11 @@
             Unassigned
           </button>
         </div>
+      {:else}
+        <button class="menu-item menu-back" onclick={backFromBeats}>
+          <i class="ti ti-chevron-left" aria-hidden="true"></i> Beats
+        </button>
+        <PlotBeatPicker arcs={actions.arcs} linked={draftKeys} onToggle={toggleBeat} />
       {/if}
     </div>
   {/if}
@@ -356,26 +445,52 @@
     border-radius: var(--r-sm);
     padding: 3px 5px;
   }
-  .card-scene {
+  /* Beat badges (Slice 5b): the beats this card fulfils, a wrapping chip row.
+     Neutral — plotline is the colour axis (the left stripe), beats are a distinct
+     axis, so a chip carries no plotline colour. The arc name rides in the tooltip. */
+  .card-beats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    overflow: hidden;
+    max-height: 34px;
+  }
+  .beat-badge {
+    max-width: 100%;
+    padding: 0 6px;
+    font-size: var(--fs-xs);
+    line-height: 1.5;
+    color: var(--text-2);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* The 3-state page marker (Slice 5b): on_page (moss) / off_page (graphite) /
+     unwritten (stone, hollow). The dot colour is the page_status option swatch,
+     passed in as --status-color; unwritten draws an outline dot (nothing yet). */
+  .card-status {
     display: inline-flex;
     align-items: center;
     gap: 5px;
     font-size: var(--fs-xs);
-    color: var(--text-3);
-  }
-  .card-scene.attached {
     color: var(--text-2);
   }
-  /* A hollow dot for an unattached card, filled once a scene is attached. */
-  .scene-dot {
+  .card-status.hollow {
+    color: var(--text-3);
+  }
+  .status-dot {
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    border: 1px solid var(--text-3);
+    background: var(--status-color, var(--text-3));
+    border: 1px solid var(--status-color, var(--text-3));
   }
-  .card-scene.attached .scene-dot {
-    background: var(--text-2);
-    border-color: var(--text-2);
+  .card-status.hollow .status-dot {
+    background: transparent;
+    border-color: var(--text-3);
   }
   /* Rendered outside .plot-card so the card's overflow:hidden can't clip it. */
   .card-menu {

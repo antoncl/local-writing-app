@@ -24,6 +24,17 @@ export type PlotBoardContainer = {
   parent: string | null;
 };
 
+// A card→beat link resolved for the board (ADR-0048 S7 Slice 5b): a beat the card
+// fulfils, with its title + owning arc (template instance) title for the badge +
+// tooltip. The stored link is only ids; the projection resolves the titles, so the
+// board renders labels directly. A link whose arc/beat is gone is never projected.
+export type PlotBoardBeat = {
+  instance_id: string;
+  instance_title: string;
+  beat_id: string;
+  title: string;
+};
+
 // A card as the board renders it: identity, the synopsis (the card body), the
 // plotline + scene it points at (each null when unset), and its innermost
 // manuscript `container` (the box it lays out inside — null when homeless, i.e.
@@ -31,6 +42,12 @@ export type PlotBoardContainer = {
 // unattached (`scene: null`) and homeless (`container: null`), never a dangling
 // pointer — the backend purges referencing cards on delete (ADR §S5). `container`
 // is derived from the scene, never authored: dragging a card never re-homes it.
+//
+// `page_status` (Slice 5b) is whether the card is realized in prose: `on_page`
+// (derived — a scene is attached), the authored `off_page` / `unwritten`, or null
+// (the sparse default → unwritten). Derived from the current scene, so a stale
+// stored `on_page` never reaches the board. `beats` are the card's resolved beat
+// links — the badges it wears (empty when it fulfils none).
 export type PlotBoardCard = {
   id: string;
   title: string;
@@ -38,6 +55,8 @@ export type PlotBoardCard = {
   plotline: string | null;
   scene: string | null;
   container: string | null;
+  page_status: string | null;
+  beats: PlotBoardBeat[];
 };
 
 // The whole board in one read: the plotlines (colour threads), the manuscript

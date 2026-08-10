@@ -34,6 +34,8 @@
     detachCardScene,
     saveCardSynopsis,
     reassignCardPlotline,
+    setCardBeatLinks,
+    setCardPageStatus,
     seedCardsFromManuscript,
     createCard,
     renameCard,
@@ -109,8 +111,20 @@
     // so the submenu reads the current plotlines fresh from the projection (the
     // designerContext pattern).
     onSetPlotline: (cardId, plotlineId) => void reassignCardPlotline(cardId, plotlineId),
+    // Set the card's whole beat-link set (Slice 5b). A content op → the projection's
+    // data-key changes (it now folds each card's beats) → the board rebuilds and the
+    // badges refresh.
+    onSetBeats: (cardId, links) => void setCardBeatLinks(cardId, links),
+    // Declare an unattached card off_page vs unwritten (Slice 5b). on_page is derived
+    // from the scene, so it is never set here.
+    onSetPageStatus: (cardId, status) => void setCardPageStatus(cardId, status),
     get plotlines() {
       return projection?.plotlines ?? [];
+    },
+    // The book's arcs + their beats, for the card's beat picker — the same live
+    // roster the rail shows (loaded on project open).
+    get arcs() {
+      return arcs;
     },
   });
 

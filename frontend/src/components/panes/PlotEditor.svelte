@@ -26,6 +26,8 @@
     readBoardPositions,
     type PlotBoardNode,
   } from "@/lib/plot/plotBoardLayout";
+  import { buildBoardEdges, EDGE_LAYERS, type EdgeLayer } from "@/lib/plot/plotBoardEdges";
+  import { loadEdgeLayers, saveEdgeLayers, toggleEdgeLayer } from "@/lib/plot/edgeLayerPrefs";
   import { GraphUndoController } from "@/lib/graph/graphUndoController.svelte";
   import type { GraphPort } from "@/lib/graph/graphCommands";
   import {
@@ -46,9 +48,10 @@
   import { plotTemplatesStore } from "@/lib/stores/plotTemplates";
   import UndoRedoControls from "@/components/UndoRedoControls.svelte";
   import ViewportFit from "@/components/editor/body/view/ViewportFit.svelte";
-  import PlotCardNode from "./plot/PlotCardNode.svelte";
+  import PlotCardNodeFlow from "./plot/PlotCardNodeFlow.svelte";
   import PlotContainerNode from "./plot/PlotContainerNode.svelte";
   import PlotArcRail from "./plot/PlotArcRail.svelte";
+  import Popover from "@/components/chrome/Popover.svelte";
   import { PLOT_CARD_ACTIONS, type PlotCardActions } from "./plot/plotCardActions";
   import type { BoardXY, PlotBoardProjection } from "@/lib/types";
 
@@ -158,6 +161,25 @@
   let arcs = $derived($templateInstancesStore);
   let templates = $derived($plotTemplatesStore);
 
+  // Edge layers (ADR-0048 S7 Slice 6a): the board's other dimensions, drawn as
+  // toggleable card→card edges. Which layers are on is a viewing mode → localStorage
+  // (loaded once here), default empty so the board stays quiet until a writer opens
+  // one. `layersOpen` drives the toolbar popover; `layersTrigger` is its refocus
+  // anchor. Labels + hints live here (presentation); the canonical layer list and
+  // the pure edge-builder live in `lib/plot`.
+  let activeLayers = $state<Set<EdgeLayer>>(loadEdgeLayers());
+  let layersOpen = $state(false);
+  let layersTrigger = $state<HTMLElement | null>(null);
+  const LAYER_META: Record<EdgeLayer, { label: string; hint: string }> = {
+    manuscript: { label: "Manuscript order", hint: "The reveal-order spine — cards in the order their scenes are read." },
+    beats: { label: "Beat sequence", hint: "Cards that share a beat, in the order they advance through it." },
+  };
+
+  function toggleLayer(layer: EdgeLayer): void {
+    activeLayers = toggleEdgeLayer(activeLayers, layer);
+    saveEdgeLayers(activeLayers);
+  }
+
   function removeArc(id: string): void {
     const arc = arcs.find((a) => a.id === id);
     confirmService.request({
@@ -185,7 +207,7 @@
     });
   }
 
-  const nodeTypes = { plotCard: PlotCardNode, plotContainer: PlotContainerNode };
+  const nodeTypes = { plotCard: PlotCardNodeFlow, plotContainer: PlotContainerNode };
   // Svelte Flow ships light-only chrome; drive its theme from the app's.
   let colorMode = $derived($themePreference as ColorMode);
 
@@ -226,6 +248,15 @@
     lastSavedPositions = JSON.stringify(overriddenCardPositions(nodes, overriddenIds));
     dragging = false;
     undoCtl.reset();
+  });
+
+  // Rebuild the edge layers whenever the projection or the active layer set changes
+  // (Slice 6a). Edges are DERIVED and read-only (the board is not connectable), so
+  // this just reassigns `flowEdges` — they never enter the layout persistence or the
+  // undo caretaker (only card drags do). Reads projection + activeLayers only (never
+  // flowEdges back), so it can't loop with SvelteFlow's own writes.
+  $effect(() => {
+    flowEdges = projection ? buildBoardEdges(projection, activeLayers) : [];
   });
 
   // Autosave the layout: skip while dragging (coalesce the gesture) and when nothing
@@ -288,6 +319,47 @@
           <i class="ti ti-route" aria-hidden="true"></i>
           Arcs{arcs.length ? ` (${arcs.length})` : ""}
         </button>
+        <!-- Edge layers (Slice 6a): a popover of the board's toggleable dimensions.
+             `layers-wrap` is the position:relative anchor Popover drops from. -->
+        <div class="layers-wrap">
+          <button
+            class="board-btn"
+            class:active={activeLayers.size > 0}
+            aria-haspopup="menu"
+            aria-expanded={layersOpen}
+            bind:this={layersTrigger}
+            onclick={() => (layersOpen = !layersOpen)}
+          >
+            <i class="ti ti-versions" aria-hidden="true"></i>
+            Layers{activeLayers.size ? ` (${activeLayers.size})` : ""}
+          </button>
+          <Popover
+            bind:open={layersOpen}
+            triggerEl={layersTrigger}
+            label="Edge layers"
+            minWidth="260px"
+            padding="6px"
+            gap="2px"
+          >
+            {#each EDGE_LAYERS as layer (layer)}
+              <button
+                class="layer-item"
+                role="menuitemcheckbox"
+                aria-checked={activeLayers.has(layer)}
+                onclick={() => toggleLayer(layer)}
+              >
+                <i
+                  class="ti layer-check {activeLayers.has(layer) ? 'ti-check' : ''}"
+                  aria-hidden="true"
+                ></i>
+                <span class="layer-text">
+                  <span class="layer-label">{LAYER_META[layer].label}</span>
+                  <span class="layer-hint">{LAYER_META[layer].hint}</span>
+                </span>
+              </button>
+            {/each}
+          </Popover>
+        </div>
         <button class="board-btn" onclick={newCard} disabled={creating}>
           <i class="ti ti-plus" aria-hidden="true"></i>
           New card
@@ -432,5 +504,66 @@
   .muted {
     color: var(--text-3);
     font-size: var(--fs-sm);
+  }
+
+  /* The Layers popover (Slice 6a). `layers-wrap` is the position:relative anchor
+     the in-flow Popover drops from; the rows carry their own scope here (Popover
+     owns only the shell). */
+  .layers-wrap {
+    position: relative;
+  }
+  .layer-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 8px;
+    text-align: left;
+    color: var(--text);
+    background: none;
+    border: none;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+  }
+  .layer-item:hover {
+    background: var(--panel);
+  }
+  .layer-check {
+    flex: 0 0 auto;
+    width: 16px;
+    margin-top: 2px;
+    font-size: var(--fs-sm);
+    color: var(--accent);
+  }
+  .layer-text {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .layer-label {
+    font-size: var(--fs-sm);
+    color: var(--text);
+  }
+  .layer-hint {
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+  }
+
+  /* Edge layers (Slice 6a). Derived edges read QUIET — thin, low-opacity, dashed,
+     no arrowhead (the layout already carries reading direction). Two neutral greys
+     told apart by dash density; token colours only, so the style-token guard stays
+     green. The authored causal layer (6b) will read stronger: solid accent + an
+     arrowhead. Scoped :global because SvelteFlow owns the edge DOM. */
+  .plot-board :global(.svelte-flow__edge-path) {
+    stroke-width: 1.5;
+    stroke-opacity: 0.55;
+  }
+  .plot-board :global(.svelte-flow__edge.manuscript-edge .svelte-flow__edge-path) {
+    stroke: var(--text-3);
+    stroke-dasharray: 2 4;
+  }
+  .plot-board :global(.svelte-flow__edge.beat-edge .svelte-flow__edge-path) {
+    stroke: var(--text-2);
+    stroke-dasharray: 7 4;
   }
 </style>

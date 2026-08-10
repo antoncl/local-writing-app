@@ -311,7 +311,13 @@ class PlotBoardCard(BaseModel):
     is the sparse default and reads as `unwritten`. Derived here from the current
     scene attachment, so a stale stored `on_page` on a since-detached card never
     projects. `beats` (Slice 5b) are the card's resolved beat links — the badges it
-    wears."""
+    wears.
+
+    `sequence` (Slice 6) is the card's scene's manuscript reading-order rank
+    (0-based, pre-order), or None when the card has no scene — an off-page /
+    unwritten card holds no reveal-order position. Derived from the current scene,
+    so it tracks re-attachment. The board's manuscript-order edge layer chains
+    cards by this rank; the beat-sequence layer orders a beat's cards by it."""
 
     id: str
     title: str
@@ -321,6 +327,7 @@ class PlotBoardCard(BaseModel):
     container: str | None = None
     page_status: str | None = None
     beats: list[PlotBoardBeat] = Field(default_factory=list)
+    sequence: int | None = None
 
 
 class PlotBoardProjection(BaseModel):

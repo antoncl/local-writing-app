@@ -46,6 +46,7 @@ const card = (
   container: null,
   page_status: null,
   beats: [],
+  sequence: null,
   ...over,
 });
 
@@ -82,6 +83,19 @@ describe("buildBoardNodes", () => {
     // Levels + transitive counts drive the box styling / header.
     expect(dataOf(nodes, "container:act")).toMatchObject({ title: "Act I", count: 1, level: 0 });
     expect(dataOf(nodes, "container:chap")).toMatchObject({ title: "Chapter 1", count: 1, level: 1 });
+  });
+
+  it("seeds `measured` on card and container nodes so xyflow can route edges pre-observer", () => {
+    // The edge layers (Slice 6a) only draw once both endpoint nodes are measured;
+    // xyflow's ResizeObserver may not have run yet (and never does in a headless
+    // pane), so buildBoardNodes seeds `measured` from the known geometry.
+    const nodes = buildBoardNodes(
+      projection({ containers: [container("act", "Act I")], cards: [card("c1", { container: "act", scene: "s1" })] }),
+    );
+    const cardNode = cardNodes(nodes)[0];
+    expect(cardNode.measured).toEqual({ width: CARD_WIDTH, height: CARD_HEIGHT });
+    const box = nodes.find((n) => n.id === "container:act")!;
+    expect(box.measured).toEqual({ width: box.width, height: box.height });
   });
 
   it("renders a single box for a card whose container is a top-level act (no chapter)", () => {

@@ -46,6 +46,7 @@ from app.models import (
     CreateSceneRequest,
     CreateTemplateInstanceRequest,
     PlotBoard,
+    PlotBoardBeat,
     PlotBoardCard,
     PlotBoardContainer,
     PlotBoardPlotline,
@@ -842,6 +843,10 @@ class PlotMixin:
             for line in self.list_plotlines().entries
         ]
         containers, scene_to_container = self._board_container_map()
+        # Resolve card→beat badges against the live arcs once per projection (Slice
+        # 5b): the stored links carry only ids, so this catalog turns each into a
+        # titled badge with a map lookup instead of a read per link.
+        beat_catalog = self._instance_beat_catalog(self._build_node_index())
         cards: list[PlotBoardCard] = []
         used_containers: set[str] = set()
         for card in self.list_cards().entries:
@@ -861,6 +866,8 @@ class PlotMixin:
                     plotline=card.metadata.get("plotline") or None,
                     scene=scene,
                     container=container,
+                    page_status=self._board_page_status(card.metadata, scene),
+                    beats=self._resolve_card_beats(card.metadata, beat_catalog),
                 )
             )
         # Reading order (containers is already ordered), used-only — an empty
@@ -907,6 +914,83 @@ class PlotMixin:
 
         walk(self.read_structure().root, None)
         return containers, scene_to_container
+
+    @staticmethod
+    def _board_page_status(metadata: dict[str, Any], scene: str | None) -> str | None:
+        """The card's page status as the board shows it (ADR-0048 S7 Slice 5b):
+        `on_page` when a scene is attached (derived, overriding any stored value),
+        else the authored `off_page` / `unwritten`, else None — the sparse default,
+        which reads as unwritten. Derived from the CURRENT scene, so a stale stored
+        `on_page` on a since-detached card (the card list skips read-side healing)
+        never reaches the board — the same rule `_derive_card_page_status` writes."""
+        if scene:
+            return "on_page"
+        stored = metadata.get(_PAGE_STATUS_FIELD)
+        return stored if stored in ("off_page", "unwritten") else None
+
+    def _instance_beat_catalog(self, index: Any) -> dict[str, tuple[str, dict[str, str]]]:
+        """`instance_id -> (arc title, {beat_id: beat title})` for every live
+        `plot:template_instance` (ADR-0048 S7 Slice 5b). One front-matter read per
+        arc, built once per projection so a card's beat badges resolve by map lookup
+        rather than a read per link. An unreadable arc is skipped — it resolves no
+        beats, so its links drop, matching `_heal_beat_links`."""
+        catalog: dict[str, tuple[str, dict[str, str]]] = {}
+        for entry in index.by_id.values():
+            if entry.entry_type != PLOT_TEMPLATE_INSTANCE_ENTRY_TYPE:
+                continue
+            try:
+                front_matter = self._read_front_matter_only(entry.path, strict=True)
+            except ProjectServiceError:
+                continue
+            metadata = self._normalise_metadata(front_matter.get("metadata"), entry.path)
+            beats = metadata.get("instance_beats")
+            titles: dict[str, str] = {}
+            if isinstance(beats, list):
+                for beat in beats:
+                    if isinstance(beat, dict) and isinstance(beat.get("id"), str) and beat["id"]:
+                        titles[beat["id"]] = str(beat.get("title") or "")
+            catalog[entry.id] = (str(front_matter.get("title") or entry.id), titles)
+        return catalog
+
+    def _resolve_card_beats(
+        self, metadata: dict[str, Any], catalog: dict[str, tuple[str, dict[str, str]]]
+    ) -> list[PlotBoardBeat]:
+        """Resolve a card's stored `beat_links` (id pairs) into board badges (ADR-0048
+        S7 Slice 5b), dropping any link whose arc or beat is gone (the display side of
+        `_heal_beat_links`) and collapsing duplicate pairs. Badge order follows the
+        stored list, so it is stable across reads and the writer's arrangement holds."""
+        links = metadata.get(_BEAT_LINK_FIELD)
+        if not isinstance(links, list):
+            return []
+        resolved: list[PlotBoardBeat] = []
+        seen: set[tuple[str, str]] = set()
+        for link in links:
+            if not isinstance(link, dict):
+                continue
+            instance_id = link.get("instance")
+            beat_id = link.get("beat_id")
+            if not (isinstance(instance_id, str) and instance_id and isinstance(beat_id, str) and beat_id):
+                continue
+            key = (instance_id, beat_id)
+            if key in seen:
+                continue
+            entry = catalog.get(instance_id)
+            if entry is None:
+                continue  # arc gone → drop (display-side heal)
+            instance_title, beat_titles = entry
+            title = beat_titles.get(beat_id)
+            if title is None:
+                continue  # beat left the roster → drop
+            seen.add(key)
+            resolved.append(
+                PlotBoardBeat(
+                    instance_id=instance_id,
+                    instance_title=instance_title,
+                    beat_id=beat_id,
+                    title=title,
+                )
+            )
+        return resolved
 
     # ----- Templates (plot:template) — an ADR-0049 Library tenant ---------
     #

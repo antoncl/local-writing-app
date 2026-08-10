@@ -44,6 +44,8 @@ const card = (
   plotline: null,
   scene: null,
   container: null,
+  page_status: null,
+  beats: [],
   ...over,
 });
 

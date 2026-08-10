@@ -214,6 +214,7 @@ export type {
 export type {
   PlotBoardProjection,
   PlotBoardCard,
+  PlotBoardBeat,
   PlotBoardContainer,
   PlotBoardPlotline,
   PlotBoardLayout,

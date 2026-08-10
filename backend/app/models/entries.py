@@ -277,6 +277,21 @@ class PlotBoardContainer(BaseModel):
     parent: str | None = None
 
 
+class PlotBoardBeat(BaseModel):
+    """A card→beat link resolved for the board (ADR-0048 S7 Slice 5b): a beat the
+    card fulfils, with its title and owning arc (template instance) title for the
+    badge + tooltip. The stored link (`beat_links`) carries only ids
+    (`instance` + `beat_id`); the projection resolves the titles against the live
+    instances so the frontend renders labels without its own join. A link whose
+    instance or beat no longer exists is dropped, never projected (the display side
+    of `_heal_beat_links`)."""
+
+    instance_id: str
+    instance_title: str
+    beat_id: str
+    title: str
+
+
 class PlotBoardCard(BaseModel):
     """A card as the board renders it (ADR-0048 S7a): identity, the synopsis (the
     card body), and the plotline and scene it points at (each None when unset).
@@ -289,7 +304,14 @@ class PlotBoardCard(BaseModel):
     `container` (Slice 4) is the card's scene's innermost manuscript container id
     (the box it lays out inside), or None when the card is homeless — no scene, or
     a scene directly under the root. Derived from the scene, never authored: a
-    card's structural home follows its attachment, so dragging never changes it."""
+    card's structural home follows its attachment, so dragging never changes it.
+
+    `page_status` (Slice 5b) is whether the card is realized in prose: `on_page`
+    (derived — a scene is attached), or the authored `off_page` / `unwritten`. None
+    is the sparse default and reads as `unwritten`. Derived here from the current
+    scene attachment, so a stale stored `on_page` on a since-detached card never
+    projects. `beats` (Slice 5b) are the card's resolved beat links — the badges it
+    wears."""
 
     id: str
     title: str
@@ -297,6 +319,8 @@ class PlotBoardCard(BaseModel):
     plotline: str | None = None
     scene: str | None = None
     container: str | None = None
+    page_status: str | None = None
+    beats: list[PlotBoardBeat] = Field(default_factory=list)
 
 
 class PlotBoardProjection(BaseModel):

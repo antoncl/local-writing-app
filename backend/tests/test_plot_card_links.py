@@ -224,3 +224,86 @@ class CardPageStatusTests(_CardLinkTestCase):
         metadata = self._read_card(card)["metadata"]
         self.assertFalse(metadata.get("scene"))  # ref purged
         self.assertNotIn("page_status", metadata)  # stale on_page healed away on read
+
+
+class CardBeatBadgeProjectionTests(_CardLinkTestCase):
+    """The board projection (ADR-0048 S7 Slice 5b) resolves a card's beat links into
+    titled badges and carries the derived page_status — display over the stored id
+    pairs, so the frontend renders labels + the marker without its own join."""
+
+    def _projected_card(self, card_id: str) -> dict:
+        projection = self.client.get("/api/plot/board/projection")
+        self.assertEqual(projection.status_code, 200, projection.text)
+        return next(c for c in projection.json()["cards"] if c["id"] == card_id)
+
+    def test_a_linked_beat_projects_as_a_titled_badge(self) -> None:
+        instance = self._instance()
+        beat = instance["metadata"]["instance_beats"][0]
+        card = self._new_card()
+        self._save_card(card, {"beat_links": [{"instance": instance["id"], "beat_id": beat["id"]}]})
+        beats = self._projected_card(card)["beats"]
+        self.assertEqual(len(beats), 1)
+        self.assertEqual(beats[0]["beat_id"], beat["id"])
+        self.assertEqual(beats[0]["title"], beat["title"])
+        self.assertEqual(beats[0]["instance_id"], instance["id"])
+        self.assertEqual(beats[0]["instance_title"], instance["title"])
+
+    def test_badges_follow_the_stored_link_order(self) -> None:
+        instance = self._instance()
+        b = instance["metadata"]["instance_beats"]
+        card = self._new_card()
+        self._save_card(
+            card,
+            {
+                "beat_links": [
+                    {"instance": instance["id"], "beat_id": b[2]["id"]},
+                    {"instance": instance["id"], "beat_id": b[0]["id"]},
+                ]
+            },
+        )
+        titles = [beat["title"] for beat in self._projected_card(card)["beats"]]
+        self.assertEqual(titles, [b[2]["title"], b[0]["title"]])
+
+    def test_a_badge_is_dropped_when_its_arc_is_deleted(self) -> None:
+        # Deleting the instance never rewrites the card (a link heals only on the
+        # card's own read/save, and beat_links is plain text so the ref purge skips
+        # it), so the projection drops the badge display-side against the live catalog.
+        instance = self._instance()
+        beat = instance["metadata"]["instance_beats"][0]
+        card = self._new_card()
+        self._save_card(card, {"beat_links": [{"instance": instance["id"], "beat_id": beat["id"]}]})
+        self.assertEqual(self.client.delete(f"/api/plot/instances/{instance['id']}").status_code, 200)
+        self.assertEqual(self._projected_card(card)["beats"], [])
+
+    def test_an_unlinked_card_projects_no_badges(self) -> None:
+        card = self._new_card()
+        self._save_card(card, {})
+        self.assertEqual(self._projected_card(card)["beats"], [])
+
+    def test_projection_derives_on_page_from_the_scene(self) -> None:
+        scene_id = self._scene()
+        card = self._new_card()
+        self._save_card(card, {"scene": scene_id})
+        self.assertEqual(self._projected_card(card)["page_status"], "on_page")
+
+    def test_projection_carries_an_authored_off_page(self) -> None:
+        card = self._new_card()
+        self._save_card(card, {"page_status": "off_page"})
+        self.assertEqual(self._projected_card(card)["page_status"], "off_page")
+
+    def test_projection_page_status_is_null_when_unwritten(self) -> None:
+        card = self._new_card()
+        self._save_card(card, {})
+        self.assertIsNone(self._projected_card(card)["page_status"])
+
+    def test_projection_clears_a_stale_on_page_after_the_scene_is_deleted(self) -> None:
+        # delete_scene purges the scene ref but never re-derives page_status; the
+        # projection derives from the CURRENT scene, so a since-detached card reads
+        # unwritten (null), never a stale on_page.
+        scene_id = self._scene()
+        card = self._new_card()
+        self._save_card(card, {"scene": scene_id})
+        self.service.delete_scene(scene_id)
+        projected = self._projected_card(card)
+        self.assertIsNone(projected["scene"])
+        self.assertIsNone(projected["page_status"])

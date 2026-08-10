@@ -132,6 +132,32 @@ export function detachCardScene(cardId: string): Promise<void> {
   });
 }
 
+// One card→beat link: an (arc instance id, beat id) pair — the stored shape of a
+// `beat_links` item (both plain text, healed plot-locally on save; ADR-0048 S7 5b).
+export type PlotBeatLink = { instance: string; beat_id: string };
+
+// Set the card's whole beat-link list (ADR-0048 S7 Slice 5b) — the beat picker owns
+// the desired set and writes it here. `saveCard` heals dangling links, so passing the
+// picker's live selection is always canonical; an empty set drops the key (sparse).
+export function setCardBeatLinks(cardId: string, links: PlotBeatLink[]): Promise<void> {
+  return mutateCardMetadata(cardId, (metadata) => {
+    if (links.length) metadata.beat_links = links.map((l) => ({ instance: l.instance, beat_id: l.beat_id }));
+    else delete metadata.beat_links;
+  });
+}
+
+// Set the card's authored page status (ADR-0048 S7 Slice 5b) — only off_page vs
+// unwritten; on_page is derived by the backend from the scene, so this is offered
+// only for an unattached card. `unwritten` is the sparse default, so it drops the
+// key rather than materializing a value (a save on an attached card would be
+// overridden back to on_page regardless).
+export function setCardPageStatus(cardId: string, status: "off_page" | "unwritten"): Promise<void> {
+  return mutateCardMetadata(cardId, (metadata) => {
+    if (status === "off_page") metadata.page_status = "off_page";
+    else delete metadata.page_status;
+  });
+}
+
 // Drop the previous project's board so it can't flash on the next project's pane
 // (called from the project-clear fan-out).
 export function clearPlotBoard(): void {

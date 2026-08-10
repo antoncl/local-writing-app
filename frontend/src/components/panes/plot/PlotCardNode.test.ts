@@ -9,16 +9,38 @@ import { render, screen, fireEvent } from "@/lib/test/component";
 import PlotCardNode from "./PlotCardNode.svelte";
 import { PLOT_CARD_ACTIONS, type PlotCardActions } from "./plotCardActions";
 import type { PlotCardData } from "@/lib/plot/plotBoardLayout";
+import type { PlotBoardBeat, TemplateInstanceSummary } from "@/lib/types";
+
+const beat = (over: Partial<PlotBoardBeat> = {}): PlotBoardBeat => ({
+  instance_id: "i1",
+  instance_title: "Hero's Journey",
+  beat_id: "b1",
+  title: "Call to Adventure",
+  ...over,
+});
+
+const arcFixture = (beats: { id: string; title: string }[] = [{ id: "b1", title: "Call to Adventure" }]): TemplateInstanceSummary => ({
+  id: "i1",
+  title: "Hero's Journey",
+  body: "",
+  entry_type: "plot:template_instance",
+  metadata: { instance_beats: beats },
+});
 
 const data = (over: Partial<PlotCardData> = {}): PlotCardData => ({
   title: "She leaves home",
   synopsis: "The heroine packs a bag and walks out.",
   attached: false,
   color: null,
+  pageStatus: null,
+  beats: [],
   ...over,
 });
 
-function actions(plotlines: PlotCardActions["plotlines"] = []): PlotCardActions {
+function actions(
+  plotlines: PlotCardActions["plotlines"] = [],
+  arcs: PlotCardActions["arcs"] = [],
+): PlotCardActions {
   return {
     onOpen: vi.fn(),
     onRealize: vi.fn(),
@@ -26,7 +48,10 @@ function actions(plotlines: PlotCardActions["plotlines"] = []): PlotCardActions 
     onEditTitle: vi.fn(),
     onEditSynopsis: vi.fn(),
     onSetPlotline: vi.fn(),
+    onSetBeats: vi.fn(),
+    onSetPageStatus: vi.fn(),
     plotlines,
+    arcs,
   };
 }
 
@@ -41,14 +66,14 @@ describe("PlotCardNode", () => {
     expect(screen.getByText("The heroine packs a bag and walks out.")).toBeInTheDocument();
   });
 
-  it("shows scene attachment state", () => {
-    render(PlotCardNode, { props: { data: data({ attached: true }) } });
-    expect(screen.getByText("Scene attached")).toBeInTheDocument();
+  it("shows the on-page marker for an attached card", () => {
+    render(PlotCardNode, { props: { data: data({ attached: true, pageStatus: "on_page" }) } });
+    expect(screen.getByText("On the page")).toBeInTheDocument();
   });
 
-  it("shows an unattached card as having no scene", () => {
-    render(PlotCardNode, { props: { data: data({ attached: false }) } });
-    expect(screen.getByText("No scene")).toBeInTheDocument();
+  it("shows the unwritten marker for a fresh unattached card", () => {
+    render(PlotCardNode, { props: { data: data({ attached: false, pageStatus: null }) } });
+    expect(screen.getByText("Unwritten")).toBeInTheDocument();
   });
 
   it("falls back to a placeholder title for an untitled card", () => {
@@ -179,5 +204,80 @@ describe("PlotCardNode — content-op menu (S7d)", () => {
     await fireEvent.click(screen.getByRole("menuitem", { name: "Set plotline" }));
     await fireEvent.click(screen.getByRole("menuitem", { name: "Unassigned" }));
     expect(acts.onSetPlotline).toHaveBeenCalledWith("card_5", "");
+  });
+});
+
+describe("PlotCardNode — beats + page marker (S7 Slice 5b)", () => {
+  it("renders a badge for each beat the card fulfils", () => {
+    render(PlotCardNode, {
+      props: { data: data({ beats: [beat({ beat_id: "b1", title: "Call to Adventure" }), beat({ beat_id: "b2", title: "Refusal" })] }) },
+    });
+    expect(screen.getByText("Call to Adventure")).toBeInTheDocument();
+    expect(screen.getByText("Refusal")).toBeInTheDocument();
+  });
+
+  it("shows the on-page marker when page_status is on_page", () => {
+    render(PlotCardNode, { props: { data: data({ pageStatus: "on_page" }) } });
+    expect(screen.getByText("On the page")).toBeInTheDocument();
+  });
+
+  it("shows the off-page marker when page_status is off_page", () => {
+    render(PlotCardNode, { props: { data: data({ pageStatus: "off_page" }) } });
+    expect(screen.getByText("Off the page")).toBeInTheDocument();
+  });
+
+  it("falls back to the unwritten marker when page_status is null", () => {
+    render(PlotCardNode, { props: { data: data({ pageStatus: null }) } });
+    expect(screen.getByText("Unwritten")).toBeInTheDocument();
+  });
+
+  it("offers Mark off-page for an unattached unwritten card", async () => {
+    const acts = actions();
+    renderWithActions({ attached: false, pageStatus: null }, acts, "card_p1");
+    await fireEvent.click(screen.getByLabelText("Card actions"));
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Mark off-page" }));
+    expect(acts.onSetPageStatus).toHaveBeenCalledWith("card_p1", "off_page");
+  });
+
+  it("offers Mark unwritten for an off-page card, and reverts it", async () => {
+    const acts = actions();
+    renderWithActions({ attached: false, pageStatus: "off_page" }, acts, "card_p2");
+    await fireEvent.click(screen.getByLabelText("Card actions"));
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Mark unwritten" }));
+    expect(acts.onSetPageStatus).toHaveBeenCalledWith("card_p2", "unwritten");
+  });
+
+  it("hides the page-status toggle for an attached card (on_page is derived)", async () => {
+    const acts = actions();
+    renderWithActions({ attached: true, pageStatus: "on_page" }, acts);
+    await fireEvent.click(screen.getByLabelText("Card actions"));
+    expect(screen.queryByRole("menuitem", { name: /Mark (off-page|unwritten)/ })).toBeNull();
+  });
+
+  it("opens the beat picker and links a checked beat on leaving the page", async () => {
+    const acts = actions([], [arcFixture([{ id: "b1", title: "Call to Adventure" }])]);
+    renderWithActions({ beats: [] }, acts, "card_bk");
+    await fireEvent.click(screen.getByLabelText("Card actions"));
+    await fireEvent.click(screen.getByRole("menuitem", { name: /Beats/ }));
+    await fireEvent.click(screen.getByRole("checkbox")); // link the beat
+    await fireEvent.click(screen.getByRole("button", { name: /Beats/ })); // back → commit
+    expect(acts.onSetBeats).toHaveBeenCalledWith("card_bk", [{ instance: "i1", beat_id: "b1" }]);
+  });
+
+  it("does not save when the beat selection is unchanged", async () => {
+    const acts = actions([], [arcFixture([{ id: "b1", title: "Call to Adventure" }])]);
+    renderWithActions({ beats: [beat({ beat_id: "b1" })] }, acts, "card_bn");
+    await fireEvent.click(screen.getByLabelText("Card actions"));
+    await fireEvent.click(screen.getByRole("menuitem", { name: /Beats/ }));
+    await fireEvent.click(screen.getByRole("button", { name: /Beats/ })); // back with no toggle
+    expect(acts.onSetBeats).not.toHaveBeenCalled();
+  });
+
+  it("pre-checks a beat the card already fulfils in the picker", async () => {
+    const acts = actions([], [arcFixture([{ id: "b1", title: "Call to Adventure" }])]);
+    renderWithActions({ beats: [beat({ beat_id: "b1" })] }, acts, "card_bc");
+    await fireEvent.click(screen.getByLabelText("Card actions"));
+    await fireEvent.click(screen.getByRole("menuitem", { name: /Beats/ }));
+    expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(true);
   });
 });

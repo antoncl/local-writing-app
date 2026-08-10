@@ -18,7 +18,7 @@
 // they key on the `plotCard` node type, so container boxes never enter the layout.
 
 import type { Node } from "@xyflow/svelte";
-import type { BoardXY, PlotBoardLayout, PlotBoardProjection } from "@/lib/types";
+import type { BoardXY, PlotBoardBeat, PlotBoardLayout, PlotBoardProjection } from "@/lib/types";
 
 // A container box: an act/chapter's title, how many cards it (transitively) holds,
 // and its nesting level (0 = a top-level act, 1 = a box nested inside one). The box
@@ -37,6 +37,11 @@ export type PlotCardData = {
   synopsis: string;
   attached: boolean;
   color: string | null;
+  // Page status (Slice 5b): on_page (scene attached) / off_page / unwritten. null =
+  // the sparse default, rendered as unwritten. Drives the card's 3-state marker.
+  pageStatus: string | null;
+  // The resolved beats this card fulfils (Slice 5b) — the badges it wears.
+  beats: PlotBoardBeat[];
 };
 
 export type PlotBoardNode = Node<PlotContainerData | PlotCardData>;
@@ -223,6 +228,8 @@ export function buildBoardNodes(
         synopsis: card.synopsis,
         attached: card.scene != null,
         color: line?.color ?? null,
+        pageStatus: card.page_status,
+        beats: card.beats,
       },
     });
   }
@@ -281,7 +288,16 @@ export function overriddenCardPositions(nodes: PlotBoardNode[], overridden: Set<
 export function projectionDataKey(p: PlotBoardProjection): string {
   return JSON.stringify([
     p.board_id,
-    p.cards.map((c) => [c.id, c.title, c.synopsis, c.plotline, c.scene, c.container]),
+    p.cards.map((c) => [
+      c.id,
+      c.title,
+      c.synopsis,
+      c.plotline,
+      c.scene,
+      c.container,
+      c.page_status,
+      c.beats.map((b) => [b.instance_id, b.beat_id, b.title]),
+    ]),
     p.plotlines.map((l) => [l.id, l.title, l.color]),
     p.containers.map((c) => [c.id, c.title, c.parent]),
   ]);

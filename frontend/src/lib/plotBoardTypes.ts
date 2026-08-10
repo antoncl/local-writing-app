@@ -48,6 +48,11 @@ export type PlotBoardBeat = {
 // (the sparse default → unwritten). Derived from the current scene, so a stale
 // stored `on_page` never reaches the board. `beats` are the card's resolved beat
 // links — the badges it wears (empty when it fulfils none).
+//
+// `sequence` (Slice 6) is the card's scene's manuscript reading-order rank
+// (0-based), or null when it has no scene — an off-page / unwritten card holds no
+// reveal-order position. The manuscript-order edge layer chains cards by this
+// rank; the beat-sequence layer orders a beat's cards by it.
 export type PlotBoardCard = {
   id: string;
   title: string;
@@ -57,6 +62,7 @@ export type PlotBoardCard = {
   container: string | null;
   page_status: string | null;
   beats: PlotBoardBeat[];
+  sequence: number | null;
 };
 
 // The whole board in one read: the plotlines (colour threads), the manuscript

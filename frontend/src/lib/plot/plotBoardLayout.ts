@@ -220,6 +220,12 @@ export function buildBoardNodes(
       position: positionOf(card.id),
       width: CARD_WIDTH,
       height: CARD_HEIGHT,
+      // Seed `measured` from our own geometry (size is single-sourced here, not
+      // DOM-measured): xyflow only draws an edge once BOTH endpoint nodes are
+      // measured, and its ResizeObserver may not have run yet (never does in a
+      // 0-size / headless pane) — so without this the edge layers render nothing.
+      // Only card nodes carry it: the edge layers connect cards, never containers.
+      measured: { width: CARD_WIDTH, height: CARD_HEIGHT },
       draggable: true,
       selectable: false,
       zIndex: 2,

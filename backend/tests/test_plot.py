@@ -689,6 +689,64 @@ class PlotBoardContainerProjectionTests(PlotTestCase):
         self.assertIsNone(projected.container)
         self.assertEqual(projection.containers, [])
 
+    def _sequence_of(self, projection, card_id: str) -> int | None:
+        return next(c for c in projection.cards if c.id == card_id).sequence
+
+    def test_sequence_follows_manuscript_reading_order(self) -> None:
+        # Slice 6: each carded scene's reveal-order rank drives the manuscript edge
+        # layer. Two acts, one carded scene each — the first reads before the second.
+        root = self.service.read_structure().root.id
+        act1 = self._node("Act I", "scene:act", root)
+        chapter1 = self._node("Chapter 1", "scene:chapter", act1)
+        act2 = self._node("Act II", "scene:act", root)
+        chapter2 = self._node("Chapter 2", "scene:chapter", act2)
+        scene1 = self.service.create_scene(CreateSceneRequest(title="s1", parent_id=chapter1)).id
+        scene2 = self.service.create_scene(CreateSceneRequest(title="s2", parent_id=chapter2)).id
+        first = self._card_on("first", scene1)
+        second = self._card_on("second", scene2)
+
+        projection = self.service.read_plot_board_projection()
+        first_seq = self._sequence_of(projection, first)
+        second_seq = self._sequence_of(projection, second)
+        # scene1 reads immediately before scene2, so their ranks are consecutive —
+        # a relative assertion (robust to the project's pre-existing starter scene,
+        # which occupies an earlier rank) and exactly what the manuscript chain needs.
+        self.assertIsNotNone(first_seq)
+        self.assertEqual(second_seq, first_seq + 1)
+
+    def test_a_scene_less_card_has_no_sequence(self) -> None:
+        card_id = self._card_on("Floating", None)
+        # No scene → no reveal-order position, so it joins no manuscript chain.
+        self.assertIsNone(self._sequence_of(self.service.read_plot_board_projection(), card_id))
+
+    def test_a_scene_under_the_root_is_still_ranked(self) -> None:
+        # Homeless (no container) but carded — it holds a real reading position, so
+        # it is ranked and can join the manuscript spine.
+        scene = self.service.create_scene(CreateSceneRequest(title="Rootless")).id
+        card_id = self._card_on("under root", scene)
+        projection = self.service.read_plot_board_projection()
+        self.assertIsNone(next(c for c in projection.cards if c.id == card_id).container)
+        self.assertIsNotNone(self._sequence_of(projection, card_id))  # ranked despite being homeless
+
+    def test_cards_on_the_same_scene_share_a_sequence(self) -> None:
+        # n cards per scene (ADR §S5) → they sit at the same reveal-order rank.
+        root = self.service.read_structure().root.id
+        chapter = self._node("Chapter 1", "scene:chapter", root)
+        scene = self.service.create_scene(CreateSceneRequest(title="Opening", parent_id=chapter)).id
+        a = self._card_on("a", scene)
+        b = self._card_on("b", scene)
+        projection = self.service.read_plot_board_projection()
+        self.assertEqual(self._sequence_of(projection, a), self._sequence_of(projection, b))
+
+    def test_detaching_the_scene_clears_the_sequence(self) -> None:
+        root = self.service.read_structure().root.id
+        chapter = self._node("Chapter 1", "scene:chapter", root)
+        scene = self.service.create_scene(CreateSceneRequest(title="Opening", parent_id=chapter)).id
+        card_id = self._card_on("Beat card", scene)
+        self.service.delete_scene(scene)
+        # Ref purged → no scene → no sequence (tracks re-attachment, like page_status).
+        self.assertIsNone(self._sequence_of(self.service.read_plot_board_projection(), card_id))
+
 
 class PlotKindRegistrationTests(PlotTestCase):
     def test_plot_family_registered_and_reference_bearing(self) -> None:

@@ -863,7 +863,7 @@ class PlotMixin:
             PlotBoardPlotline(id=line.id, title=line.title, color=line.metadata.get("color") or None)
             for line in self.list_plotlines().entries
         ]
-        containers, scene_to_container = self._board_container_map()
+        containers, scene_to_container, scene_to_order = self._board_container_map()
         # Resolve card→beat badges against the live arcs once per projection (Slice
         # 5b): the stored links carry only ids, so this catalog turns each into a
         # titled badge with a map lookup instead of a read per link. Read only the arcs
@@ -897,6 +897,7 @@ class PlotMixin:
                     container=container,
                     page_status=self._board_page_status(card.metadata, scene),
                     beats=self._resolve_card_beats(card.metadata, beat_catalog),
+                    sequence=scene_to_order.get(scene) if scene else None,
                 )
             )
         # Reading order (containers is already ordered), used-only — an empty
@@ -911,9 +912,11 @@ class PlotMixin:
             cards=cards,
         )
 
-    def _board_container_map(self) -> tuple[dict[str, PlotBoardContainer], dict[str, str]]:
+    def _board_container_map(
+        self,
+    ) -> tuple[dict[str, PlotBoardContainer], dict[str, str], dict[str, int]]:
         """Walk the manuscript once → (containers-by-id in reading order,
-        scene_id → innermost-container-id).
+        scene_id → innermost-container-id, scene_id → reading-order rank).
 
         A *container* is a non-leaf structure node other than the root — an act, a
         chapter, whatever container types the project declares (`_is_leaf_node`
@@ -923,17 +926,28 @@ class PlotMixin:
         directly under the root has no container (it maps to nothing here), so its
         card is homeless — same as a scene-less card.
 
+        `scene_to_order` ranks EVERY carded leaf scene by manuscript reading order
+        (0-based, in pre-order) — including a scene directly under the root, which
+        is homeless (no container) yet still holds a reveal-order position (ADR-0048
+        S7 Slice 6). The board's manuscript-order edge layer chains cards by this
+        rank, and the beat-sequence layer orders a beat's cards by it.
+
         `containers` is insertion-ordered by a pre-order walk, i.e. manuscript
         reading order, which the board relies on to lay acts/chapters out in order.
         """
         containers: dict[str, PlotBoardContainer] = {}
         scene_to_container: dict[str, str] = {}
+        scene_to_order: dict[str, int] = {}
 
         def walk(node: StructureNode, parent_container: str | None) -> None:
             for child in node.children:
                 if self._is_leaf_node(child):
-                    if child.scene_id and parent_container is not None:
-                        scene_to_container[child.scene_id] = parent_container
+                    if child.scene_id:
+                        # Rank by encounter order (pre-order == reading order); a
+                        # scene under the root is homeless but still ranked.
+                        scene_to_order[child.scene_id] = len(scene_to_order)
+                        if parent_container is not None:
+                            scene_to_container[child.scene_id] = parent_container
                 else:
                     if child.id not in containers:
                         containers[child.id] = PlotBoardContainer(
@@ -942,7 +956,7 @@ class PlotMixin:
                     walk(child, child.id)
 
         walk(self.read_structure().root, None)
-        return containers, scene_to_container
+        return containers, scene_to_container, scene_to_order
 
     def _board_page_status(self, metadata: dict[str, Any], scene: str | None) -> str | None:
         """The card's page status as the board shows it (ADR-0048 S7 Slice 5b):

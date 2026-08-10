@@ -1,6 +1,6 @@
 # ADR-0051: A node owns its conversations — chats are subject-referencing first-class nodes
 
-- Status: **Proposed** — 2026-08-10. Designed with Anton over the brainstorm-usability thread.
+- Status: **Accepted** — 2026-08-10 (Anton, PR #812). Designed with him over the brainstorm-usability thread.
 - Issue: #811 (umbrella) · Pre-1.0 (no release milestone)
 - Follows: ADR-0046 (AI lore editing is a reviewable patch — the commit loop this generalizes),
   ADR-0040 (the node index — edges are a function of value **and** definition, so an added
@@ -230,8 +230,8 @@ is the identical surface pointed at a scene — nothing new was built for it.
 - **The Chats pane flows through `evaluateView`;** the per-entry Conversations panel is a
   backlinks-anchored list.
 - **Two pre-existing cache-cost inaccuracies are noted, not fixed here:** the 1h system cache write is
-  billed at the 5m multiplier (under-reported), and the "lore" TTL chip is defined but never fed (only
-  the `system` slot is stamped). Separate cleanup.
+  billed at the 5m multiplier (under-reported, #814), and the "lore" TTL chip is defined but never fed
+  (only the `system` slot is stamped, #815). Separate cleanup.
 
 ## Slice plan — one lane, disjoint, vertical (reorderable)
 
@@ -261,4 +261,4 @@ Stated so a later thread does not read silence as *decided*:
 - **The scenes Conversations surface.** Same machinery, its own later slice; not designed here.
 - **Anchor-in-spec relational views** (a saved view whose predicates name the current node). Waits on
   the `$self` reintroduction deferred to Views 2.0 (ADR-0032 Amendment 2).
-- **The two cache-cost inaccuracies.** Real, separate, and not this feature's to fix.
+- **The two cache-cost inaccuracies** (#814, #815). Real, separate, and not this feature's to fix.

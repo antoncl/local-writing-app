@@ -59,6 +59,7 @@ import { forwardRefsOf, sameRefSet } from "@/lib/views/referenceIndex";
 import { defaultView } from "@/lib/views/evaluateView";
 import { refreshTodos, refreshEmbeddedTodos } from "@/lib/stores/todos";
 import { paneViews } from "@/lib/stores/paneViews.svelte";
+import { subordinatePanes } from "@/lib/stores/subordinatePanes";
 import { chatSessionsStore, refreshChatSessions } from "@/lib/stores/chats";
 import { bodyHasMutationMarkers, mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
 import type {
@@ -210,6 +211,10 @@ class EditorPanesController {
     this.activeChatId = null;
     this.#reviewLocks.clear();
     this.#nextEditorPaneIndex = 1;
+    // Panes are dropped wholesale here (no per-pane tearDown) and the id counter
+    // restarts, so any surviving subordinate link would mis-fire once an id is
+    // reused in the new project — drop them all.
+    subordinatePanes.clear();
   }
 
   // Remove any lingering autosave timers (App unmount / shutdown).
@@ -476,6 +481,11 @@ class EditorPanesController {
     this.#autosave.cancel(id);
     this.#reviewLocks.delete(id);
     this.#autosave.cancelSavedIndicator(id);
+    // This pane is the master for any subordinate panes (its Brainstorm chat, its
+    // "Edit type…" pane) — close them too. And drop this pane's own subordinate
+    // link if it was itself a child, so a later parent close can't re-close it.
+    subordinatePanes.unregister(id);
+    subordinatePanes.closeChildrenOf(id);
     const closing = this.panes.find((candidate) => candidate.id === id);
     // The detected set is per open document; drop it so the registry does not
     // grow with pane churn (#439).

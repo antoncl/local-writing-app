@@ -1091,6 +1091,7 @@
         dirty={editorPane.dirty}
         recentlySaved={editorPane.recentlySaved}
         authoringLayerId={editorPane.authoringLayerId}
+        hostPaneId={editorPane.id}
         todoStatusHint={editorPane.document?.type === "scene" && editorPane.scene && sceneEntryHasBody(editorPane.scene as Scene) ? embeddedHintForScene(editorPane.scene.id) : ""}
         onFocus={() => workspaceLayout.focus(editorPane.id)}
         onChange={(detail) =>
@@ -1103,7 +1104,7 @@
             detail.metadata,
             detail.inputs,
           )}
-        onCustomData={(detail) => schemaPanes?.openForCustomData(detail.entryType, detail.kind)}
+        onCustomData={(detail) => schemaPanes?.openForCustomData(detail.entryType, detail.kind, editorPane.id)}
         onNavigate={(detail) => navigateToBacklink(detail.id, detail.kind)}
         onOpenChat={(detail) => chatSessions.openChatFromPromptEntry(detail.entry, detail.inputs, detail.sceneId, detail.assistantId)}
         onViewSaveState={(state) => editorPanes.setViewSaveState(editorPane.id, state)}

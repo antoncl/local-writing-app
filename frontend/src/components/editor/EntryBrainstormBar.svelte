@@ -24,10 +24,14 @@
     entryId,
     promptEntries,
     metadataSchema,
+    hostPaneId = null,
   }: {
     entryId: string;
     promptEntries: PromptEntrySummary[];
     metadataSchema: MetadataSchema | null;
+    // The editor pane hosting this bar. The launched chat registers as its
+    // subordinate so it auto-closes when this entry's pane closes.
+    hostPaneId?: string | null;
   } = $props();
 
   let ctx = $derived<PromptResolutionContext>({
@@ -42,7 +46,7 @@
   async function launch(): Promise<void> {
     const prompt = brainstormPrompts[0];
     if (!prompt || !entryId) return;
-    await chatSessions.openChatFromPromptEntry(prompt, { entry: entryId }, null);
+    await chatSessions.openChatFromPromptEntry(prompt, { entry: entryId }, null, "", hostPaneId);
   }
 </script>
 

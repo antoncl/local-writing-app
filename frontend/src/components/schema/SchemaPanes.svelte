@@ -34,6 +34,7 @@
   } from "@/lib/stores/schema";
   import { setValidation } from "@/lib/stores/validation";
   import { workspaceLayout } from "@/lib/stores/workspaceLayout.svelte";
+  import { subordinatePanes } from "@/lib/stores/subordinatePanes";
   import RegionRegistrar from "@/components/workspace/RegionRegistrar.svelte";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
   import type {
@@ -157,8 +158,8 @@
   export function syncSelection() {
     syncSchemaAuthoringSelection();
   }
-  export function openForCustomData(entryType: string, kind: DocumentKind) {
-    openSchemaForCustomData(entryType, kind);
+  export function openForCustomData(entryType: string, kind: DocumentKind, ownerPaneId: string | null = null) {
+    openSchemaForCustomData(entryType, kind, ownerPaneId);
   }
   export function openDetailTypes() {
     openDetailTypesPane();
@@ -270,12 +271,24 @@
     schemaTypeInitColor = null;
     schemaTypeInitPrompt = null;
     schemaTypeDraftToken += 1;
+    // A new-type draft is a schema-tree action with no owning editor — clear any
+    // stale subordinate link so it isn't auto-closed with an unrelated pane.
+    subordinatePanes.unregister("schema_type");
     workspaceLayout.ensureVisible("schema_type");
   }
 
-  function openSchemaTypeDetail(typeId: string) {
+  function openSchemaTypeDetail(typeId: string, ownerPaneId: string | null = null) {
     const entryType = metadataSchema?.entry_types[typeId];
     if (!entryType) return;
+    // schema_type is a singleton pane. Opened from an entry editor's "Edit type…"
+    // it is that pane's subordinate (auto-closes with it); opened from the schema
+    // tree it has no owner, so clear any stale link rather than let it die with an
+    // unrelated editor.
+    if (ownerPaneId) {
+      subordinatePanes.register("schema_type", ownerPaneId, () => closeSchemaPane("schema_type"));
+    } else {
+      subordinatePanes.unregister("schema_type");
+    }
     const source = schemaTypeSource(typeId);
     selectedSchemaTypeId = typeId;
     // The type's own kind — validate-or-default. The old ternary listed only
@@ -304,7 +317,7 @@
     return "";
   }
 
-  function openSchemaForCustomData(entryType: string, documentKind: DocumentKind) {
+  function openSchemaForCustomData(entryType: string, documentKind: DocumentKind, ownerPaneId: string | null = null) {
     // Phase B: the entry editor's "Edit type…" button opens ONLY the per-type
     // editor (schema_type pane) — not the schema/tree hierarchy view. Tree
     // access is the top bar's "Detail Types" button.
@@ -317,7 +330,7 @@
     const resolvedTypeId = candidate?.kind === kind ? entryType : defaultSchemaEntryType(kind);
     schemaFieldEntryType = resolvedTypeId;
     if (resolvedTypeId && metadataSchema?.entry_types[resolvedTypeId]) {
-      openSchemaTypeDetail(resolvedTypeId);
+      openSchemaTypeDetail(resolvedTypeId, ownerPaneId);
     } else {
       // No matching type — fall back to opening the tree so the user can pick or
       // create one. Rare edge case for new projects.
@@ -360,7 +373,9 @@
       return;
     }
     // Warn before discarding unsaved detail-type edits (#68). Cancel/backdrop
-    // keeps editing; only "Discard changes" actually closes.
+    // keeps editing; only "Discard changes" actually closes. Drop any subordinate
+    // link on the way out so closing the owning editor later can't re-close a pane
+    // that is already gone.
     if (schemaTypeDirty) {
       confirmService.request({
         title: "Discard changes?",
@@ -368,11 +383,13 @@
         confirmLabel: "Discard changes",
         destructive: true,
         onConfirm: async () => {
+          subordinatePanes.unregister("schema_type");
           workspaceLayout.removePanel("schema_type");
         },
       });
       return;
     }
+    subordinatePanes.unregister("schema_type");
     workspaceLayout.removePanel("schema_type");
   }
 
@@ -807,7 +824,7 @@
     projectSchemaLayerId={projectSchemaLayerId}
     onSwitchKind={switchSchemaKind}
     onCreateType={createSchemaTypeDraft}
-    onOpenType={openSchemaTypeDetail}
+    onOpenType={(typeId) => openSchemaTypeDetail(typeId)}
     onStartTypeDrag={startSchemaTypeDrag}
     onDropTypeOnParent={dropSchemaTypeOnParent}
     onDeleteType={requestDeleteSchemaType}

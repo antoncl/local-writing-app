@@ -13,6 +13,7 @@
 import { get } from "svelte/store";
 import { api } from "@/lib/api";
 import { editorPanes } from "@/lib/stores/editorPanes.svelte";
+import { subordinatePanes } from "@/lib/stores/subordinatePanes";
 import { resolutionSceneIdFromInputs } from "@/lib/editor-core/promptResolution";
 import {
   chatSessionsStore,
@@ -55,6 +56,7 @@ class ChatSessions {
     inputs: Record<string, unknown>,
     sceneId: string | null,
     assistantId: string = "",
+    parentPaneId: string | null = null,
   ): Promise<void> {
     await this.run(async () => {
       // A `scene_ref` input (ADR-0012) sets the chat's resolution scene,
@@ -86,6 +88,17 @@ class ChatSessions {
       }
       await this.refresh();
       await editorPanes.openChat(session.id);
+      // A chat launched from a host node (the lore Brainstorm bar) is subordinate
+      // to that node's pane — close it when the master closes. The pane id is the
+      // one now hosting this chat document.
+      if (parentPaneId) {
+        const chatPaneId = editorPanes.panes.find(
+          (pane) => pane.document?.type === "chat" && pane.document.id === session.id,
+        )?.id;
+        if (chatPaneId) {
+          subordinatePanes.register(chatPaneId, parentPaneId, () => void editorPanes.close(chatPaneId));
+        }
+      }
       this.setStatus(`Opened ${entry.title} as a chat`);
     });
   }

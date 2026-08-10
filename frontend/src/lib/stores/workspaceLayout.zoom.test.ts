@@ -63,6 +63,31 @@ describe("workspaceLayout tile zoom (#219)", () => {
     expect(workspaceLayout.zoomedGroupId).toBeNull();
   });
 
+  it("un-zooms when the last editor document closes (editor group is never pruned)", () => {
+    workspaceLayout.ensureVisible("editor_scene1");
+    const editorGroup = workspaceLayout.groupOf("editor_scene1");
+    expect(editorGroup).not.toBeNull();
+    workspaceLayout.toggleZoom(editorGroup!.id);
+    expect(workspaceLayout.zoomedGroupId).toBe(editorGroup!.id);
+    // Closing the last document leaves the perennial editor group in place as an
+    // empty placeholder — but the zoom must clear so the shell reverts to the
+    // prior layout instead of hanging maximized on nothing.
+    workspaceLayout.removePanel("editor_scene1");
+    expect(workspaceLayout.groupById(editorGroup!.id)).not.toBeNull();
+    expect(editorGroup!.tabs.length).toBe(0);
+    expect(workspaceLayout.zoomedGroupId).toBeNull();
+  });
+
+  it("keeps the zoom while the editor group still holds another document", () => {
+    workspaceLayout.ensureVisible("editor_a");
+    workspaceLayout.ensureVisible("editor_b");
+    const editorGroup = workspaceLayout.groupOf("editor_a")!;
+    workspaceLayout.toggleZoom(editorGroup.id);
+    workspaceLayout.removePanel("editor_a");
+    // Not the last tab — zoom stays put.
+    expect(workspaceLayout.zoomedGroupId).toBe(editorGroup.id);
+  });
+
   it("applyPreset drops an active zoom (ephemeral view state)", () => {
     const g = workspaceLayout.allGroups()[0];
     workspaceLayout.toggleZoom(g.id);

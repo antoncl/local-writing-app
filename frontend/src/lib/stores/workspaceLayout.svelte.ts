@@ -112,12 +112,17 @@ class WorkspaceLayout {
     if (g) this.zoomedGroupId = g.id;
   }
 
-  // Drop a stale zoom target after a structural change removed its group, so a
-  // pruned tile can't leave the shell stuck on a group that no longer exists.
+  // Drop a stale zoom target after a structural change so a tile can't leave the
+  // shell stuck: either the group was pruned away, or its last tab closed. The
+  // empty-but-present case is how the perennial editor group traps zoom — it is
+  // never pruned (#maybePrune bails for G_EDITOR), so closing the last document
+  // would otherwise leave the shell maximized on an empty editor placeholder.
+  // Clearing zoom re-tiles to the split tree underneath (tmux-zoom semantics),
+  // which IS the "revert to the previous layout" the user expects.
   #clearZoomIfMissing(): void {
-    if (this.zoomedGroupId && !this.groupById(this.zoomedGroupId)) {
-      this.zoomedGroupId = null;
-    }
+    if (!this.zoomedGroupId) return;
+    const g = this.groupById(this.zoomedGroupId);
+    if (!g || g.tabs.length === 0) this.zoomedGroupId = null;
   }
 
   #idSeq = 1;
@@ -232,6 +237,9 @@ class WorkspaceLayout {
       g.active = g.tabs[Math.min(idx, g.tabs.length - 1)] ?? null;
     }
     this.#maybePrune(g.id);
+    // The editor group is never pruned, so #pruneGroup's own clear won't run when
+    // its last document closes — un-zoom here too (revert to the prior layout).
+    this.#clearZoomIfMissing();
     if (this.focusedPanel === panelId) this.focusedPanel = null;
     if (!isEditorPanelId(panelId)) this.#markCustom();
     this.#schedulePersist();

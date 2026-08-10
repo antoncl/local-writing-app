@@ -87,6 +87,10 @@
     // via onAuthoringLayerChange.
     authoringLayerId?: string | null;
     todoStatusHint?: string;
+    // The workspace pane hosting this editor. Threaded to EntryBrainstormBar so a
+    // launched Brainstorm chat registers as this pane's subordinate (auto-closes
+    // with it). Null when the host isn't a tiled pane (e.g. a test mount).
+    hostPaneId?: string | null;
     // INTERNAL on: listeners (to still-legacy MetadataPanel/*BodyView) are unchanged.
     onChange?: ((payload: { title: string; body: string; status: string; entryType: string; metadata: EntryMetadata; inputs?: PromptInputDefinition[] }) => void) | undefined;
     onFocus?: (() => void) | undefined;
@@ -136,6 +140,7 @@
     recentlySaved = false,
     authoringLayerId = null,
     todoStatusHint = "",
+    hostPaneId = null,
     onChange = undefined,
     onFocus = undefined,
     onCustomData = undefined,
@@ -793,7 +798,7 @@
           {/if}
         </label>
         {#if patchLoopKind && scene?.id}
-          <EntryBrainstormBar entryId={scene.id} {promptEntries} {metadataSchema} />
+          <EntryBrainstormBar entryId={scene.id} {promptEntries} {metadataSchema} {hostPaneId} />
         {/if}
       </div>
       <!-- Layer override authoring (#314 / ADR-0042): choose which level this

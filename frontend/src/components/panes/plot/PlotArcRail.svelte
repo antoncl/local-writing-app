@@ -11,6 +11,7 @@
 -->
 <script lang="ts">
   import type { TemplateInstanceSummary, PlotTemplateSummary } from "@/lib/types";
+  import { instanceBeats } from "@/lib/plot/instanceBeats";
 
   let {
     instances,
@@ -27,14 +28,6 @@
     onCreateBlank: () => void;
     onRemove: (id: string) => void;
   } = $props();
-
-  // A specialized beat, as it rides in the instance's metadata (`instance_beats` —
-  // a list of maps keyed by member key; we only render the title here).
-  type BeatRow = { title?: string; id?: string };
-  function beatsOf(instance: TemplateInstanceSummary): BeatRow[] {
-    const value = instance.metadata?.instance_beats;
-    return Array.isArray(value) ? (value as BeatRow[]) : [];
-  }
 
   // One arc's beats expand at a time — a glance-first rail; the full editor is a click away.
   let expandedId = $state<string | null>(null);
@@ -110,7 +103,7 @@
   {:else}
     <ul class="arc-list">
       {#each instances as instance (instance.id)}
-        {@const beats = beatsOf(instance)}
+        {@const beats = instanceBeats(instance)}
         {@const isOpen = expandedId === instance.id}
         <li class="arc" class:expanded={isOpen}>
           <div class="arc-row">

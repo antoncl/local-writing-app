@@ -9,6 +9,7 @@
 -->
 <script lang="ts">
   import type { TemplateInstanceSummary } from "@/lib/types";
+  import { instanceBeats } from "@/lib/plot/instanceBeats";
 
   let {
     arcs,
@@ -21,11 +22,6 @@
     onToggle: (instanceId: string, beatId: string, checked: boolean) => void;
   } = $props();
 
-  type BeatRow = { id?: string; title?: string };
-  function beatsOf(arc: TemplateInstanceSummary): BeatRow[] {
-    const value = arc.metadata?.instance_beats;
-    return Array.isArray(value) ? (value as BeatRow[]) : [];
-  }
   const key = (instanceId: string, beatId: string) => `${instanceId}:${beatId}`;
 </script>
 
@@ -34,7 +30,7 @@
     <p class="picker-empty">No arcs yet. Add one from the board's Arcs palette to link beats.</p>
   {:else}
     {#each arcs as arc (arc.id)}
-      {@const beats = beatsOf(arc)}
+      {@const beats = instanceBeats(arc)}
       <div class="arc-group">
         <p class="arc-label" title={arc.title}>{arc.title || "Untitled arc"}</p>
         {#if beats.length === 0}

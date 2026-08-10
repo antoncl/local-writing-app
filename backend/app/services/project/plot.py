@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -410,6 +411,30 @@ class PlotMixin:
         self._derive_card_page_status(metadata)
         return metadata
 
+    @staticmethod
+    def _iter_valid_beat_link_pairs(links: Any) -> Iterator[tuple[str, str]]:
+        """Yield each well-formed, unique *(instance id, beat id)* pair from a stored
+        `beat_links` value (ADR-0048 S7 3b/5b), skipping non-dict items, incomplete
+        pairs (a blank half points nowhere), and duplicate pairs (a card fulfils a beat
+        once). The shared front half of `_heal_beat_links` (which then filters by live
+        roster) and `_resolve_card_beats` (which resolves titles) — one place decides
+        what a valid link *is*, so the two can't drift on it."""
+        if not isinstance(links, list):
+            return
+        seen: set[tuple[str, str]] = set()
+        for link in links:
+            if not isinstance(link, dict):
+                continue
+            instance_id = link.get("instance")
+            beat_id = link.get("beat_id")
+            if not (isinstance(instance_id, str) and instance_id and isinstance(beat_id, str) and beat_id):
+                continue
+            key = (instance_id, beat_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            yield key
+
     def _heal_beat_links(self, metadata: dict[str, Any], index: Any) -> None:
         """Keep only card→beat links that still resolve (ADR-0048 S7 Slice 3b).
 
@@ -419,35 +444,23 @@ class PlotMixin:
         survives only if its `instance` is a live `plot:template_instance` **and** its
         `beat_id` is in that instance's current roster. A link to a deleted instance,
         or to a beat since removed from the roster, is dropped — the board can only
-        draw links that mean something. An incomplete link (a blank half) is dropped
-        too: half a pair points nowhere, and a duplicate *(instance, beat_id)* is
-        collapsed — a card fulfils a beat once, so the stored list stays canonical for
-        the edge/diagnostic consumers of later slices. When nothing survives the key
-        is removed, so an all-dangling list heals to sparse rather than an empty `[]`.
+        draw links that mean something. Well-formedness + dedup are the shared
+        `_iter_valid_beat_link_pairs`; this adds the roster filter and re-emits each
+        surviving pair as a canonical `{instance, beat_id}` dict. When nothing survives
+        the key is removed, so an all-dangling list heals to sparse rather than `[]`.
         """
         links = metadata.get(_BEAT_LINK_FIELD)
         if not isinstance(links, list):
             return
         rosters: dict[str, set[str] | None] = {}
-        seen: set[tuple[str, str]] = set()
         healed: list[Any] = []
-        for link in links:
-            if not isinstance(link, dict):
-                continue  # not a link shape — points nowhere
-            instance_id = link.get("instance")
-            beat_id = link.get("beat_id")
-            if not (isinstance(instance_id, str) and instance_id and isinstance(beat_id, str) and beat_id):
-                continue  # incomplete pair
-            key = (instance_id, beat_id)
-            if key in seen:
-                continue  # a card fulfils a beat once — drop the duplicate
+        for instance_id, beat_id in self._iter_valid_beat_link_pairs(links):
             if instance_id not in rosters:
                 rosters[instance_id] = self._instance_beat_ids(instance_id, index)
             roster = rosters[instance_id]
             if roster is None or beat_id not in roster:
                 continue  # instance gone / not an instance / beat left the roster
-            seen.add(key)
-            healed.append(link)
+            healed.append({"instance": instance_id, "beat_id": beat_id})
         if healed:
             metadata[_BEAT_LINK_FIELD] = healed
         else:
@@ -472,15 +485,23 @@ class PlotMixin:
         }
 
     @staticmethod
-    def _derive_card_page_status(metadata: dict[str, Any]) -> None:
+    def _page_status_from_scene(scene: Any) -> str | None:
+        """The DERIVED half of `page_status` (ADR-0048 S7 3b/5b): a scene attachment IS
+        `on_page`, overriding any stored value; without a scene nothing is derived (the
+        authored off_page / unwritten stands). The one rule the save/read healer
+        (`_derive_card_page_status`) and the board projection (`_board_page_status`)
+        both read — so "what makes a card on_page" is defined once and can't drift."""
+        return "on_page" if isinstance(scene, str) and scene else None
+
+    def _derive_card_page_status(self, metadata: dict[str, Any]) -> None:
         """`page_status` is authored only as off_page vs unwritten; on_page is derived
         (ADR-0048 S7 Slice 3b). A card with a `scene` attachment IS on the page → force
         `on_page`; when the scene is gone a stale `on_page` is cleared back to blank
         (which reads as `unwritten`). An authored off_page / unwritten is left as-is,
         and blank + no scene stays blank — sparse, and reads as unwritten."""
-        scene = metadata.get("scene")
-        if isinstance(scene, str) and scene:
-            metadata[_PAGE_STATUS_FIELD] = "on_page"
+        derived = self._page_status_from_scene(metadata.get("scene"))
+        if derived is not None:
+            metadata[_PAGE_STATUS_FIELD] = derived
         elif metadata.get(_PAGE_STATUS_FIELD) == "on_page":
             metadata.pop(_PAGE_STATUS_FIELD, None)
 
@@ -845,11 +866,19 @@ class PlotMixin:
         containers, scene_to_container = self._board_container_map()
         # Resolve card→beat badges against the live arcs once per projection (Slice
         # 5b): the stored links carry only ids, so this catalog turns each into a
-        # titled badge with a map lookup instead of a read per link.
-        beat_catalog = self._instance_beat_catalog(self._build_node_index())
+        # titled badge with a map lookup instead of a read per link. Read only the arcs
+        # some card actually links — an arc no card points at costs no front-matter
+        # read (and a board with no beat links reads no arcs at all).
+        card_entries = self.list_cards().entries
+        referenced_arcs = {
+            instance_id
+            for card in card_entries
+            for instance_id, _beat_id in self._iter_valid_beat_link_pairs(card.metadata.get(_BEAT_LINK_FIELD))
+        }
+        beat_catalog = self._instance_beat_catalog(self._build_node_index(), referenced_arcs)
         cards: list[PlotBoardCard] = []
         used_containers: set[str] = set()
-        for card in self.list_cards().entries:
+        for card in card_entries:
             scene = card.metadata.get("scene") or None
             container = scene_to_container.get(scene) if scene else None
             # Mark the card's container and every ancestor used, so a nesting box
@@ -915,28 +944,34 @@ class PlotMixin:
         walk(self.read_structure().root, None)
         return containers, scene_to_container
 
-    @staticmethod
-    def _board_page_status(metadata: dict[str, Any], scene: str | None) -> str | None:
+    def _board_page_status(self, metadata: dict[str, Any], scene: str | None) -> str | None:
         """The card's page status as the board shows it (ADR-0048 S7 Slice 5b):
-        `on_page` when a scene is attached (derived, overriding any stored value),
-        else the authored `off_page` / `unwritten`, else None — the sparse default,
-        which reads as unwritten. Derived from the CURRENT scene, so a stale stored
-        `on_page` on a since-detached card (the card list skips read-side healing)
-        never reaches the board — the same rule `_derive_card_page_status` writes."""
-        if scene:
-            return "on_page"
+        `on_page` when a scene is attached (the shared `_page_status_from_scene` rule,
+        overriding any stored value), else the authored `off_page` / `unwritten`, else
+        None — the sparse default, which reads as unwritten. Derived from the CURRENT
+        scene, so a stale stored `on_page` on a since-detached card (the card list
+        skips read-side healing) never reaches the board. The valid-value filter is a
+        read-time defense (write-time schema validation is what strips a bad value)."""
+        derived = self._page_status_from_scene(scene)
+        if derived is not None:
+            return derived
         stored = metadata.get(_PAGE_STATUS_FIELD)
         return stored if stored in ("off_page", "unwritten") else None
 
-    def _instance_beat_catalog(self, index: Any) -> dict[str, tuple[str, dict[str, str]]]:
-        """`instance_id -> (arc title, {beat_id: beat title})` for every live
-        `plot:template_instance` (ADR-0048 S7 Slice 5b). One front-matter read per
-        arc, built once per projection so a card's beat badges resolve by map lookup
-        rather than a read per link. An unreadable arc is skipped — it resolves no
-        beats, so its links drop, matching `_heal_beat_links`."""
+    def _instance_beat_catalog(
+        self, index: Any, referenced: set[str]
+    ) -> dict[str, tuple[str, dict[str, str]]]:
+        """`instance_id -> (arc title, {beat_id: beat title})` for each `referenced`
+        live `plot:template_instance` (ADR-0048 S7 Slice 5b) — the arcs some card
+        actually links, so an arc no card points at costs no read. One front-matter
+        read per referenced arc, built once per projection so a card's beat badges
+        resolve by map lookup rather than a read per link. An unreadable arc is skipped
+        — it resolves no beats, so its links drop, matching `_heal_beat_links`."""
         catalog: dict[str, tuple[str, dict[str, str]]] = {}
         for entry in index.by_id.values():
             if entry.entry_type != PLOT_TEMPLATE_INSTANCE_ENTRY_TYPE:
+                continue
+            if entry.id not in referenced:
                 continue
             try:
                 front_matter = self._read_front_matter_only(entry.path, strict=True)
@@ -957,31 +992,19 @@ class PlotMixin:
     ) -> list[PlotBoardBeat]:
         """Resolve a card's stored `beat_links` (id pairs) into board badges (ADR-0048
         S7 Slice 5b), dropping any link whose arc or beat is gone (the display side of
-        `_heal_beat_links`) and collapsing duplicate pairs. Badge order follows the
-        stored list, so it is stable across reads and the writer's arrangement holds."""
-        links = metadata.get(_BEAT_LINK_FIELD)
-        if not isinstance(links, list):
-            return []
+        `_heal_beat_links`). Well-formedness + dedup are the shared
+        `_iter_valid_beat_link_pairs`; this adds the catalog lookup + title resolution.
+        Badge order follows the stored list, so it is stable across reads and the
+        writer's arrangement holds."""
         resolved: list[PlotBoardBeat] = []
-        seen: set[tuple[str, str]] = set()
-        for link in links:
-            if not isinstance(link, dict):
-                continue
-            instance_id = link.get("instance")
-            beat_id = link.get("beat_id")
-            if not (isinstance(instance_id, str) and instance_id and isinstance(beat_id, str) and beat_id):
-                continue
-            key = (instance_id, beat_id)
-            if key in seen:
-                continue
+        for instance_id, beat_id in self._iter_valid_beat_link_pairs(metadata.get(_BEAT_LINK_FIELD)):
             entry = catalog.get(instance_id)
             if entry is None:
-                continue  # arc gone → drop (display-side heal)
+                continue  # arc gone / not referenced → drop (display-side heal)
             instance_title, beat_titles = entry
             title = beat_titles.get(beat_id)
             if title is None:
                 continue  # beat left the roster → drop
-            seen.add(key)
             resolved.append(
                 PlotBoardBeat(
                     instance_id=instance_id,

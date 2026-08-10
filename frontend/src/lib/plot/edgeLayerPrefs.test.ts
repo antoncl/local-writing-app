@@ -33,8 +33,8 @@ describe("edgeLayerPrefs", () => {
   });
 
   it("ignores unknown / stale layer names in storage", () => {
-    // e.g. a future "causal" pref read back on a downgrade, or corruption.
-    const store = fakeStorage({ [KEY]: JSON.stringify(["manuscript", "causal", 7]) });
+    // e.g. a future layer name read back on a downgrade, or corruption.
+    const store = fakeStorage({ [KEY]: JSON.stringify(["manuscript", "themes", 7]) });
     expect(loadEdgeLayers(store)).toEqual(new Set(["manuscript"]));
   });
 

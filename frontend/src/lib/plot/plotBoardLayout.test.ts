@@ -47,6 +47,7 @@ const card = (
   page_status: null,
   beats: [],
   sequence: null,
+  causal_links: [],
   ...over,
 });
 

@@ -17,6 +17,7 @@
   import { PLOT_CARD_ACTIONS, type PlotCardActions } from "./plotCardActions";
   import type { PlotBeatLink } from "@/lib/stores/plotBoard";
   import PlotBeatPicker from "./PlotBeatPicker.svelte";
+  import PlotCausalPicker from "./PlotCausalPicker.svelte";
 
   // Svelte Flow passes the node's id/data/selection state as props.
   let { id, data }: { id?: string; data: PlotCardData; selected?: boolean } = $props();
@@ -49,9 +50,9 @@
   let hiddenBeatsLabel = $derived(hiddenBeats.map((b) => b.title).join(", "));
 
   let menuOpen = $state(false);
-  // The menu has three pages: the actions, the "Set plotline" lane list, and the
-  // "Beats…" link picker.
-  let menuView = $state<"main" | "plotline" | "beats">("main");
+  // The menu has four pages: the actions, the "Set plotline" lane list, the "Beats…"
+  // link picker, and the "Leads to…" causal-link picker.
+  let menuView = $state<"main" | "plotline" | "beats" | "causal">("main");
 
   // A local draft of the card's beat links while the beats page is open (Slice 5b):
   // toggles mutate this, and one save flushes on leaving the page / closing the menu.
@@ -61,6 +62,11 @@
   let draftKeys = $derived(
     beatDraft ? new Set(beatDraft.map((l) => `${l.instance}:${l.beat_id}`)) : new Set<string>(),
   );
+
+  // The same batched-draft pattern for the causal ("Leads to…") links (Slice 6b): a
+  // draft set of target card ids, flushed as one save on leave. null = not editing.
+  let causalDraft = $state<string[] | null>(null);
+  let draftCausalIds = $derived(causalDraft ? new Set(causalDraft) : new Set<string>());
   let editing = $state(false);
   let draft = $state("");
   let textarea = $state<HTMLTextAreaElement | null>(null);
@@ -86,8 +92,8 @@
   });
 
   function toggleMenu() {
-    // Close via closeMenu so a pending beats edit is flushed — clicking the kebab to
-    // dismiss the menu while on the beats page must not silently drop the draft.
+    // Close via closeMenu so a pending beats / causal edit is flushed — clicking the
+    // kebab to dismiss the menu while on a picker page must not silently drop the draft.
     if (menuOpen) {
       closeMenu();
     } else {
@@ -97,6 +103,7 @@
   }
   function closeMenu() {
     commitBeats(); // flush a pending beats edit before the menu goes away
+    commitCausal(); // and a pending "Leads to…" edit
     menuOpen = false;
     menuView = "main";
   }
@@ -132,6 +139,30 @@
   }
   function backFromBeats() {
     commitBeats();
+    menuView = "main";
+  }
+
+  // "Leads to…" page: seed the draft from the card's current causal links, toggle in
+  // place, flush one save on leave. `data.causalLinks` updates from the refetch after.
+  function openCausal() {
+    causalDraft = [...data.causalLinks];
+    menuView = "causal";
+  }
+  function toggleCausal(targetId: string, checked: boolean) {
+    if (!causalDraft) return;
+    causalDraft = checked ? [...causalDraft, targetId] : causalDraft.filter((t) => t !== targetId);
+  }
+  function commitCausal() {
+    if (causalDraft && actions && id) {
+      const current = new Set(data.causalLinks);
+      const next = new Set(causalDraft);
+      const changed = next.size !== current.size || [...next].some((t) => !current.has(t));
+      if (changed) actions.onSetCausal(id, causalDraft);
+    }
+    causalDraft = null;
+  }
+  function backFromCausal() {
+    commitCausal();
     menuView = "main";
   }
   function setPageStatus(status: "off_page" | "unwritten") {
@@ -297,6 +328,11 @@
           Beats{data.beats.length ? ` (${data.beats.length})` : ""}
           <i class="ti ti-chevron-right chevron" aria-hidden="true"></i>
         </button>
+        <button role="menuitem" class="menu-item" onclick={openCausal}>
+          <i class="ti ti-arrow-bar-to-right" aria-hidden="true"></i>
+          Leads to…{data.causalLinks.length ? ` (${data.causalLinks.length})` : ""}
+          <i class="ti ti-chevron-right chevron" aria-hidden="true"></i>
+        </button>
         <!-- on_page is derived from the scene; only an unattached card authors
              off_page (deliberate backstory) vs unwritten (a placeholder to promote). -->
         {#if !data.attached}
@@ -323,11 +359,16 @@
             Unassigned
           </button>
         </div>
-      {:else}
+      {:else if menuView === "beats"}
         <button class="menu-item menu-back" onclick={backFromBeats}>
           <i class="ti ti-chevron-left" aria-hidden="true"></i> Beats
         </button>
         <PlotBeatPicker arcs={actions.arcs} linked={draftKeys} onToggle={toggleBeat} />
+      {:else}
+        <button class="menu-item menu-back" onclick={backFromCausal}>
+          <i class="ti ti-chevron-left" aria-hidden="true"></i> Leads to…
+        </button>
+        <PlotCausalPicker cards={actions.cards} selfId={id} linked={draftCausalIds} onToggle={toggleCausal} />
       {/if}
     </div>
   {/if}

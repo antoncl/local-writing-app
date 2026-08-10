@@ -37,6 +37,7 @@
     saveCardSynopsis,
     reassignCardPlotline,
     setCardBeatLinks,
+    setCardCausalLinks,
     setCardPageStatus,
     seedCardsFromManuscript,
     createCard,
@@ -118,6 +119,10 @@
     // data-key changes (it now folds each card's beats) → the board rebuilds and the
     // badges refresh.
     onSetBeats: (cardId, links) => void setCardBeatLinks(cardId, links),
+    // Set the card's whole causal-link set (Slice 6b). A content op → the projection's
+    // data-key changes (it now folds each card's causal targets) → the board rebuilds
+    // and the causal edge layer redraws.
+    onSetCausal: (cardId, targets) => void setCardCausalLinks(cardId, targets),
     // Declare an unattached card off_page vs unwritten (Slice 5b). on_page is derived
     // from the scene, so it is never set here.
     onSetPageStatus: (cardId, status) => void setCardPageStatus(cardId, status),
@@ -128,6 +133,11 @@
     // roster the rail shows (loaded on project open).
     get arcs() {
       return arcs;
+    },
+    // Every card's id + title, for the "Leads to…" picker (Slice 6b) — read fresh from
+    // the projection so a just-added card is immediately a link target.
+    get cards() {
+      return projection?.cards.map((c) => ({ id: c.id, title: c.title })) ?? [];
     },
   });
 
@@ -173,6 +183,7 @@
   const LAYER_META: Record<EdgeLayer, { label: string; hint: string }> = {
     manuscript: { label: "Manuscript order", hint: "The reveal-order spine — cards in the order their scenes are read." },
     beats: { label: "Beat sequence", hint: "Cards that share a beat, in the order they advance through it." },
+    causal: { label: "Causal", hint: "The “leads to” edges you draw — one card causing another." },
   };
 
   function toggleLayer(layer: EdgeLayer): void {
@@ -549,11 +560,13 @@
     color: var(--text-3);
   }
 
-  /* Edge layers (Slice 6a). Derived edges read QUIET — thin, low-opacity, dashed,
+  /* Edge layers (Slice 6a/6b). DERIVED edges read QUIET — thin, low-opacity, dashed,
      no arrowhead (the layout already carries reading direction). Two neutral greys
-     told apart by dash density; token colours only, so the style-token guard stays
-     green. The authored causal layer (6b) will read stronger: solid accent + an
-     arrowhead. Scoped :global because SvelteFlow owns the edge DOM. */
+     told apart by dash density. The AUTHORED causal layer (6b) reads STRONGER: a
+     solid accent stroke at full opacity + an arrowhead (the marker, coloured accent
+     in the edge builder), because its direction is the writer's assertion, not an
+     artefact of layout. Token colours only, so the style-token guard stays green.
+     Scoped :global because SvelteFlow owns the edge DOM. */
   .plot-board :global(.svelte-flow__edge-path) {
     stroke-width: 1.5;
     stroke-opacity: 0.55;
@@ -565,5 +578,9 @@
   .plot-board :global(.svelte-flow__edge.beat-edge .svelte-flow__edge-path) {
     stroke: var(--text-2);
     stroke-dasharray: 7 4;
+  }
+  .plot-board :global(.svelte-flow__edge.causal-edge .svelte-flow__edge-path) {
+    stroke: var(--accent);
+    stroke-opacity: 1;
   }
 </style>

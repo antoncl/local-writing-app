@@ -34,12 +34,14 @@ const data = (over: Partial<PlotCardData> = {}): PlotCardData => ({
   color: null,
   pageStatus: null,
   beats: [],
+  causalLinks: [],
   ...over,
 });
 
 function actions(
   plotlines: PlotCardActions["plotlines"] = [],
   arcs: PlotCardActions["arcs"] = [],
+  cards: PlotCardActions["cards"] = [],
 ): PlotCardActions {
   return {
     onOpen: vi.fn(),
@@ -49,9 +51,11 @@ function actions(
     onEditSynopsis: vi.fn(),
     onSetPlotline: vi.fn(),
     onSetBeats: vi.fn(),
+    onSetCausal: vi.fn(),
     onSetPageStatus: vi.fn(),
     plotlines,
     arcs,
+    cards,
   };
 }
 
@@ -301,5 +305,53 @@ describe("PlotCardNode — beats + page marker (S7 Slice 5b)", () => {
     await fireEvent.click(screen.getByLabelText("Card actions"));
     await fireEvent.click(screen.getByRole("menuitem", { name: /Beats/ }));
     expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(true);
+  });
+});
+
+describe("PlotCardNode — causal links (S7 Slice 6b)", () => {
+  const others = [
+    { id: "other", title: "The storm hits" },
+    { id: "third", title: "They reconcile" },
+  ];
+
+  it("opens the “Leads to…” picker and links a checked card on leaving the page", async () => {
+    const acts = actions([], [], others);
+    renderWithActions({ causalLinks: [] }, acts, "card_a");
+    await fireEvent.click(screen.getByLabelText("Card actions"));
+    await fireEvent.click(screen.getByRole("menuitem", { name: /Leads to/ }));
+    await fireEvent.click(screen.getAllByRole("checkbox")[0]); // link "other"
+    await fireEvent.click(screen.getByRole("button", { name: /Leads to/ })); // back → commit
+    expect(acts.onSetCausal).toHaveBeenCalledWith("card_a", ["other"]);
+  });
+
+  it("does not save when the causal selection is unchanged", async () => {
+    const acts = actions([], [], others);
+    renderWithActions({ causalLinks: ["other"] }, acts, "card_b");
+    await fireEvent.click(screen.getByLabelText("Card actions"));
+    await fireEvent.click(screen.getByRole("menuitem", { name: /Leads to/ }));
+    await fireEvent.click(screen.getByRole("button", { name: /Leads to/ })); // back with no toggle
+    expect(acts.onSetCausal).not.toHaveBeenCalled();
+  });
+
+  it("commits causal edits when the menu is dismissed via the kebab button", async () => {
+    const acts = actions([], [], others);
+    renderWithActions({ causalLinks: [] }, acts, "card_kb");
+    const kebab = screen.getByRole("button", { name: "Card actions" });
+    await fireEvent.click(kebab); // open
+    await fireEvent.click(screen.getByRole("menuitem", { name: /Leads to/ }));
+    await fireEvent.click(screen.getAllByRole("checkbox")[0]); // link "other"
+    await fireEvent.click(kebab); // close via kebab flushes the draft
+    expect(acts.onSetCausal).toHaveBeenCalledWith("card_kb", ["other"]);
+  });
+
+  it("pre-checks a target the card already leads to, and excludes itself", async () => {
+    const acts = actions([], [], [{ id: "card_pc", title: "Self" }, ...others]);
+    renderWithActions({ causalLinks: ["other"] }, acts, "card_pc");
+    await fireEvent.click(screen.getByLabelText("Card actions"));
+    await fireEvent.click(screen.getByRole("menuitem", { name: /Leads to/ }));
+    const boxes = screen.getAllByRole("checkbox") as HTMLInputElement[];
+    expect(boxes).toHaveLength(2); // self filtered out of the 3 cards
+    expect(boxes[0].checked).toBe(true); // "other", already linked
+    expect(boxes[1].checked).toBe(false); // "third"
   });
 });

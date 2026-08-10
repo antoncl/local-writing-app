@@ -265,6 +265,87 @@ class CardReferenceTests(PlotTestCase):
         self.assertEqual(ctx.exception.status_code, 422)
 
 
+class CardCausalLinkTests(PlotTestCase):
+    """Authored card→card causal links (ADR-0048 S7 Slice 6b): the "leads to" edges a
+    writer draws. Stored as plain-text target ids in `causal_links` (v1 bars refs from
+    list-item shapes), so integrity is plot-local — `_heal_causal_links` drops, on card
+    save AND read, any target that is gone, is a non-card, is the card itself, or
+    duplicates another; an all-dangling list heals to sparse, never `[]`. The board's
+    causal edge layer draws one directed edge per surviving target."""
+
+    def _raw_causal_on_disk(self, node_id: str) -> object:
+        # The card's stored `causal_links` straight from disk (bypassing read-side
+        # healing) — a heal assertion here proves the save write-back happened.
+        path = self.service._path_for_node_id(node_id, "plot")
+        front_matter = self.service._read_front_matter_only(path, strict=True)
+        return (front_matter.get("metadata") or {}).get("causal_links")
+
+    def _projected_causal(self, card_id: str) -> list[str]:
+        projection = self.service.read_plot_board_projection()
+        return next(c for c in projection.cards if c.id == card_id).causal_links
+
+    def _save_causal(self, card_id: str, title: str, targets: list[str]) -> None:
+        self.service.save_card(
+            card_id,
+            SaveCardRequest(title=title, metadata={"causal_links": [{"target": t} for t in targets]}),
+        )
+
+    def test_a_link_to_a_live_card_round_trips(self) -> None:
+        a = self.service.create_card(CreateCardRequest(title="A"))
+        b = self.service.create_card(CreateCardRequest(title="B"))
+        self._save_causal(a.id, "A", [b.id])
+        self.assertEqual(self._raw_causal_on_disk(a.id), [{"target": b.id}])
+        self.assertEqual(self._projected_causal(a.id), [b.id])
+
+    def test_a_self_link_is_dropped(self) -> None:
+        a = self.service.create_card(CreateCardRequest(title="A"))
+        self._save_causal(a.id, "A", [a.id])
+        self.assertIsNone(self._raw_causal_on_disk(a.id))  # healed to sparse, not [{target: self}]
+        self.assertEqual(self._projected_causal(a.id), [])
+
+    def test_duplicate_targets_are_deduped(self) -> None:
+        a = self.service.create_card(CreateCardRequest(title="A"))
+        b = self.service.create_card(CreateCardRequest(title="B"))
+        self._save_causal(a.id, "A", [b.id, b.id])
+        self.assertEqual(self._raw_causal_on_disk(a.id), [{"target": b.id}])
+
+    def test_a_non_card_target_is_dropped(self) -> None:
+        # A plotline is a live node but not a card, so it is no valid edge endpoint.
+        a = self.service.create_card(CreateCardRequest(title="A"))
+        plotline = self.service.create_plotline(CreatePlotlineRequest(title="Thread"))
+        self._save_causal(a.id, "A", [plotline.id])
+        self.assertIsNone(self._raw_causal_on_disk(a.id))
+
+    def test_read_side_healing_drops_a_gone_target(self) -> None:
+        # `causal_links` are plain text, so deleting the target card does NOT purge the
+        # referrer (the ref machinery never reaches item shapes) — the reader heals it.
+        a = self.service.create_card(CreateCardRequest(title="A"))
+        b = self.service.create_card(CreateCardRequest(title="B"))
+        self._save_causal(a.id, "A", [b.id])
+        self.service.delete_card(b.id)
+        self.assertIsNone(self.service.read_card(a.id).metadata.get("causal_links"))
+        self.assertEqual(self._projected_causal(a.id), [])
+
+    def test_an_all_dangling_list_heals_to_sparse(self) -> None:
+        # A card FILE whose only causal target never existed (an ancestor-project purge
+        # can leave one): read heals to sparse (key removed), never a bare `[]`.
+        a = self.service.create_card(CreateCardRequest(title="A"))
+        path = self.service._path_for_node_id(a.id, "plot")
+        self.service._write_node_entry_file(
+            path, a.id, "A", "plot:card", {"causal_links": [{"target": "plot_ghost"}]}, ""
+        )
+        self.assertIsNone(self.service.read_card(a.id).metadata.get("causal_links"))
+
+    def test_projection_keeps_only_live_targets(self) -> None:
+        a = self.service.create_card(CreateCardRequest(title="A"))
+        b = self.service.create_card(CreateCardRequest(title="B"))
+        c = self.service.create_card(CreateCardRequest(title="C"))
+        self._save_causal(a.id, "A", [b.id, c.id])
+        self.assertEqual(set(self._projected_causal(a.id)), {b.id, c.id})
+        self.service.delete_card(c.id)
+        self.assertEqual(self._projected_causal(a.id), [b.id])
+
+
 class CardOperationTests(PlotTestCase):
     """The card operations (ADR-0048 §1 / §S5). *realize* mints a scene from a
     card and attaches it; *seed-from-manuscript* is the bulk inverse — one

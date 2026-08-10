@@ -317,7 +317,12 @@ class PlotBoardCard(BaseModel):
     (0-based, pre-order), or None when the card has no scene — an off-page /
     unwritten card holds no reveal-order position. Derived from the current scene,
     so it tracks re-attachment. The board's manuscript-order edge layer chains
-    cards by this rank; the beat-sequence layer orders a beat's cards by it."""
+    cards by this rank; the beat-sequence layer orders a beat's cards by it.
+
+    `causal_links` (Slice 6b) are the ids of the cards this card *leads to* — the
+    author-drawn causal edges, each a live card id (self-references and dead / gone
+    targets dropped, the display side of `_heal_causal_links`). The board's causal
+    edge layer draws one directed edge per id."""
 
     id: str
     title: str
@@ -328,6 +333,7 @@ class PlotBoardCard(BaseModel):
     page_status: str | None = None
     beats: list[PlotBoardBeat] = Field(default_factory=list)
     sequence: int | None = None
+    causal_links: list[str] = Field(default_factory=list)
 
 
 class PlotBoardProjection(BaseModel):

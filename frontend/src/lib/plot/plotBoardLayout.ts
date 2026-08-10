@@ -42,6 +42,9 @@ export type PlotCardData = {
   pageStatus: string | null;
   // The resolved beats this card fulfils (Slice 5b) — the badges it wears.
   beats: PlotBoardBeat[];
+  // The ids of the cards this card leads to (Slice 6b) — the authored causal links,
+  // seeding the "Leads to…" picker's checked state.
+  causalLinks: string[];
 };
 
 export type PlotBoardNode = Node<PlotContainerData | PlotCardData>;
@@ -236,6 +239,7 @@ export function buildBoardNodes(
         color: line?.color ?? null,
         pageStatus: card.page_status,
         beats: card.beats,
+        causalLinks: card.causal_links,
       },
     });
   }
@@ -303,6 +307,7 @@ export function projectionDataKey(p: PlotBoardProjection): string {
       c.container,
       c.page_status,
       c.beats.map((b) => [b.instance_id, b.beat_id, b.title]),
+      c.causal_links,
     ]),
     p.plotlines.map((l) => [l.id, l.title, l.color]),
     p.containers.map((c) => [c.id, c.title, c.parent]),

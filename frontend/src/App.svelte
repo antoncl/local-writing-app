@@ -1068,8 +1068,14 @@
           {/if}
         </div>
       {/if}
+<!-- Key the bind:this off the stable snippet param `id`, NOT `editorPane.id`:
+           Svelte re-evaluates a bind:this target on teardown, and `editorPane`
+           (= editorPaneById(id)) is already undefined once the pane is closed —
+           dereferencing `.id` there threw and aborted the whole effect flush, so
+           the layout reconcile never ran and dead editor tabs were left as
+           "Editor" ghosts (#806). `id` always equals editorPane.id. -->
       <NodeEditor
-        bind:this={editorPanes.editorPaneComponents[editorPane.id]}
+        bind:this={editorPanes.editorPaneComponents[id]}
         scene={editorPane.scene}
         documentKind={editorPane.document?.type ?? "scene"}
         promptEntries={promptEntries}

@@ -155,7 +155,7 @@ class DeleteNodeDispatchTests(unittest.TestCase):
         created = self.service.create_chat_session(
             CreateChatSessionRequest(title="Delete Chat Test")
         )
-        chat_path = self.root / "chats" / f"{created.id}.yaml"
+        chat_path = self.root / "chats" / f"{created.id}.md"
         self.assertTrue(chat_path.exists())
         result = self.service.delete_node(created.id)
         self.assertIsNone(result)

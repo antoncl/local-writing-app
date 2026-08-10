@@ -97,7 +97,7 @@ class NodeHttpEndpointTests(unittest.TestCase):
 
     def test_delete_chat_via_unified_endpoint(self) -> None:
         chat = self._create_chat()
-        chat_path = self.root / "chats" / f"{chat['id']}.yaml"
+        chat_path = self.root / "chats" / f"{chat['id']}.md"
         self.assertTrue(chat_path.exists())
         response = self.client.delete(f"/api/nodes/{chat['id']}")
         self.assertEqual(response.status_code, 204, response.text)

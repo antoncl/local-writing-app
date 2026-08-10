@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from project_fixtures import open_test_project
 
 from app.main import app
+from app.models import CreateChatSessionRequest, SaveChatSessionRequest
 
 
 class ChatSessionEndpointTests(unittest.TestCase):
@@ -25,7 +26,7 @@ class ChatSessionEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json(), {"sessions": []})
 
-    def test_create_persists_yaml_file_and_returns_session(self) -> None:
+    def test_create_persists_node_file_and_returns_session(self) -> None:
         response = self.client.post(
             "/api/chats",
             json={"title": "First chat", "assistant_id": "asst-1"},
@@ -40,7 +41,7 @@ class ChatSessionEndpointTests(unittest.TestCase):
         self.assertTrue(body["created_at"])
         self.assertEqual(body["created_at"], body["updated_at"])
         # File on disk
-        chat_path = self.root / "chats" / f"{body['id']}.yaml"
+        chat_path = self.root / "chats" / f"{body['id']}.md"
         self.assertTrue(chat_path.exists())
 
     def test_get_returns_full_session(self) -> None:
@@ -82,6 +83,33 @@ class ChatSessionEndpointTests(unittest.TestCase):
         # created_at preserved, updated_at refreshed
         self.assertEqual(body["created_at"], created["created_at"])
 
+    def test_message_content_with_a_fence_line_round_trips(self) -> None:
+        # A chat is a body-less Node file (ADR-0051 S1) whose transcript lives in
+        # front matter. A message whose content contains a bare `---` line must
+        # not truncate that front matter — yaml escapes the newline, but lock it.
+        # Driven through `self.service` so one instance owns both the write and
+        # the index it builds.
+        chat = self.service.create_chat_session(CreateChatSessionRequest(title="T"))
+        tricky = "before\n---\nafter"
+        self.service.save_chat_session(
+            chat.id,
+            SaveChatSessionRequest(
+                title="T",
+                messages=[
+                    {"role": "user", "content": tricky},
+                    {"role": "assistant", "content": "---"},
+                ],
+            ),
+        )
+        # Round-trips through the CRUD reader...
+        got = self.service.read_chat_session(chat.id)
+        self.assertEqual(got.messages[0].content, tricky)
+        self.assertEqual(got.messages[1].content, "---")
+        # ...and the index reader (front-matter-only) still sees the chat.
+        index = self.service._build_node_index(self.root)
+        self.assertIn(chat.id, index.by_id)
+        self.assertEqual(index.by_id[chat.id].kind, "chat")
+
     def test_list_sorts_pinned_first_then_recent(self) -> None:
         self.client.post("/api/chats", json={"title": "a"})
         b = self.client.post("/api/chats", json={"title": "b"}).json()
@@ -118,7 +146,7 @@ class ChatSessionEndpointTests(unittest.TestCase):
 
     def test_delete_removes_file_and_returns_updated_list(self) -> None:
         created = self.client.post("/api/chats", json={"title": "T"}).json()
-        path = self.root / "chats" / f"{created['id']}.yaml"
+        path = self.root / "chats" / f"{created['id']}.md"
         self.assertTrue(path.exists())
         response = self.client.delete(f"/api/chats/{created['id']}")
         self.assertEqual(response.status_code, 200, response.text)

@@ -463,17 +463,14 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "color": "violet",
         },
         "chat:chat_session": {
-            # Chat-as-node base type (Phase 3 of the NodeEditor
-            # modularization). Concrete (not abstract) because chats are
-            # instantiated directly via the chats pane — Phase 3a only
-            # registers the type here; ChatSession storage at
-            # <project>/chats/<id>.yaml stays the source of truth until
-            # Phase 3b migrates it onto the Node CRUD path. The fields
-            # users edit on a chat (prompt binding, assistant, system
-            # brief, message history, journal) live on the ChatSession
-            # Python model, not the metadata schema — none are declared
-            # here. body_shape="chat" wires the future ChatBodyView once
-            # Phase 4 ships.
+            # Chat-as-node base type. Concrete (not abstract) because chats are
+            # instantiated directly via the chats pane. Storage is an ordinary
+            # body-less Node file at <project>/chats/<id>.md (ADR-0051 S1); the
+            # ChatSession payload (prompt binding, assistant, system brief,
+            # message history, journal) lives in the file's front matter, driven
+            # by the Python model, so none of it is declared as schema fields
+            # here. `color` is the one metadata field; `subject` (an entity_ref
+            # to what the chat is about) arrives in ADR-0051 S2.
             "name": "Chat",
             "kind": "chat",
             "fields": ["color"],

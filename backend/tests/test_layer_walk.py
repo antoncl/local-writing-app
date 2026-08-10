@@ -686,9 +686,13 @@ class PerLayerCollectionRulesTests(unittest.TestCase):
 
     def _write_chat(self, layer_folder: Path, chat_id: str) -> None:
         (layer_folder / "chats").mkdir(parents=True, exist_ok=True)
-        self.service._write_yaml(
-            layer_folder / "chats" / f"{chat_id}.yaml",
-            {"id": chat_id, "title": f"Chat {chat_id}", "messages": []},
+        self.service._write_node_entry_file(
+            layer_folder / "chats" / f"{chat_id}.md",
+            chat_id,
+            f"Chat {chat_id}",
+            "chat:chat_session",
+            {},
+            "",
         )
 
     def test_machine_layer_contributes_assistants_only(self) -> None:

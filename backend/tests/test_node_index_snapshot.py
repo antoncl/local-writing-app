@@ -480,17 +480,22 @@ class DegradedBuildTests(SnapshotTestCase):
         self.assertTrue(snapshot.snapshot_path(self.root).exists())
 
     def test_unreadable_chat_is_not_cached(self) -> None:
+        # Chats are Node files now (ADR-0051 S1); an unreadable one degrades the
+        # index through the generic collector, exactly like any other node kind,
+        # so a transient read failure is never baked into the snapshot cache.
         chats = self.root / "chats"
         chats.mkdir(parents=True, exist_ok=True)
-        (chats / "chat_1.yaml").write_text("id: chat_1\ntitle: Talk\n", encoding="utf-8")
-        real = self.service._read_yaml
+        self.service._write_node_entry_file(
+            chats / "chat_1.md", "chat_1", "Talk", "chat:chat_session", {}, ""
+        )
+        real = self.service._read_front_matter_only
 
         def failing(path: Path, *args: object, **kwargs: object) -> object:
-            if path.suffix == ".yaml" and path.parent.name == "chats":
+            if path.suffix == ".md" and path.parent.name == "chats":
                 raise OSError("not hydrated")
             return real(path, *args, **kwargs)
 
-        self.service._read_yaml = failing  # type: ignore[method-assign]
+        self.service._read_front_matter_only = failing  # type: ignore[method-assign]
         degraded = self._open_index()
         self.assertNotIn("chat_1", degraded.by_id)
         self.assertFalse(snapshot.snapshot_path(self.root).exists())

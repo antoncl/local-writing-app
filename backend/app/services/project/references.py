@@ -87,6 +87,13 @@ NODE_FAMILIES = [
     # deliberately NOT in this family so an ancestor's board never leaks into
     # the resolved set (one board per open book, ADR-0048 §3).
     NodeFamily("plot", "plot", "plot:plotline"),
+    # Chats (ADR-0051 S1): body-less Node files under `chats/`, each carrying
+    # the ChatSession payload (messages/journal/inputs/…) in front matter. Root-
+    # scoped like scenes (see `_families_for_layer`) — a chat belongs to the open
+    # project, an ancestor's chats never resolve into it. Reference-bearing from
+    # here on (the `subject` entity_ref arrives in S2); today the type declares
+    # only `color`, so it contributes no edges.
+    NodeFamily("chat", "chats", "chat:chat_session"),
 ]
 
 # The one family the out-of-tree machine layer contributes. Looked up rather
@@ -107,8 +114,9 @@ LIBRARY_LAYER_FAMILIES = [family for family in NODE_FAMILIES if family.kind in (
 # Every kind whose files the index extracts reference edges from: the node
 # families above, plus the per-layer project node (#334), which lives at the
 # layer root rather than in a kind folder and so is collected separately.
-# Chats are absent on purpose — they are YAML sessions, indexed for
-# addressability only, and no collector derives edges from them.
+# Chats joined the families in ADR-0051 S1 — they are now ordinary Node files,
+# so they are reference-bearing like every other kind (contributing no edges
+# until the `subject` entity_ref lands in S2).
 #
 # Derived rather than re-spelled, because the two consumers that must agree
 # with edge extraction are destructive-adjacent: `_purge_references_to` rewrites
@@ -150,13 +158,6 @@ class _NodeIndexBuilder(LayerVisitor):
                 duplicate_relative_to=self._root,
                 schema=self._schema,
             )
-        # Chat sessions live as YAML files (not Node-shaped .md), so they need
-        # their own collector. Read-only for now: this makes them discoverable
-        # as nodes (kind="chat") for reference graphs and the unified-CRUD
-        # migration to come, but ChatSession storage remains the source of
-        # truth (Phase 3b-i / decisions-node-editor-modularization).
-        if layer.is_root:
-            self._service._collect_chat_entries(layer=layer, index=self._index)
         if not layer.is_machine and not layer.is_library:
             self._service._collect_project_node_entry(
                 layer=layer, index=self._index, schema=self._schema
@@ -190,9 +191,6 @@ class _ManifestBuilder(LayerVisitor):
     def visit_layer(self, layer: IndexLayer) -> None:
         for family in self._service._families_for_layer(layer):
             for path in sorted((layer.folder / family.folder_name).glob("*.md")):
-                self.record(path)
-        if layer.is_root:
-            for path in sorted((layer.folder / "chats").glob("*.yaml")):
                 self.record(path)
         if not layer.is_machine and not layer.is_library:
             # Recorded even when absent — `project.md` is required to exist
@@ -658,10 +656,6 @@ class ReferencesMixin:
             )
         elif unit.kind == "project_node":
             self._collect_project_node_entry(layer=unit.layer, index=probe, schema=schema)
-        elif unit.kind == "chat":
-            # One file, not the whole chats/ folder (#392) — a chat's signature
-            # is (id, title), readable from the file that was just written.
-            self._collect_chat_file(path, layer=unit.layer, index=probe)
         else:  # pragma: no cover - _patch_unit yields no other kind
             return self._SIGNATURE_STRUCTURAL
         if probe.errors or probe.has_unparsed_nodes:
@@ -730,78 +724,6 @@ class ReferencesMixin:
                 path.unlink()
         if paths:
             self._apply_index_write(paths, structural=True)
-
-    def _collect_chat_entries(self, *, layer: IndexLayer, index: NodeIndex) -> None:
-        """Walk <project>/chats/*.yaml and add an index entry per session.
-
-        Storage stays YAML — this is just a discovery layer so chats are
-        addressable from the unified node index alongside other kinds.
-        """
-        chats_dir = layer.folder / "chats"
-        if not chats_dir.exists():
-            return
-        for path in sorted(chats_dir.glob("*.yaml")):
-            self._collect_chat_file(path, layer=layer, index=index)
-
-    def _collect_chat_file(self, path: Path, *, layer: IndexLayer, index: NodeIndex) -> None:
-        """Collect exactly one chat session file into `index`.
-
-        Split out of the folder walk (#392) so the change-gate can re-derive a
-        single chat's signature by reading *that* file, rather than re-parsing
-        every chat session — each of which carries its whole message journal —
-        to answer whether one chat's title moved.
-        """
-        try:
-            data = self._read_yaml(path)
-        except Exception as exc:
-            index.add_diagnostic(
-                layer_id=layer.id,
-                path=path,
-                message=f"Failed to read chat session {path.name}: {exc}",
-                is_error=True,
-            )
-            index.has_unparsed_nodes = True
-            # Same rule as the schema read: a chat we could not open is
-            # missing from the index entirely, and its file is unchanged, so
-            # a snapshot would keep it missing across every later open.
-            index.degraded = index.degraded or isinstance(exc, OSError)
-            return
-        if not isinstance(data, dict):
-            return
-        raw_id = data.get("id")
-        if not isinstance(raw_id, str) or not raw_id.strip():
-            return
-        chat_id = raw_id.strip()
-        raw_title = data.get("title")
-        title = raw_title.strip() if isinstance(raw_title, str) and raw_title.strip() else "Untitled chat"
-        entry = NodeIndexEntry(
-            id=chat_id,
-            kind="chat",
-            entry_type="chat:chat_session",
-            path=path,
-            title=title,
-            source_layer_id=layer.id,
-            source_layer_label=layer.label,
-        )
-        if index.candidates.get(chat_id):
-            # Chat ids are prefixed (`chat_…`) and minted via _new_id, so
-            # cross-kind collisions shouldn't happen in practice. If one
-            # ever does, surface it rather than silently shadowing: `kind`
-            # partitions identity, so a chat and a lore entry sharing an id
-            # are two things colliding, not one shadowing the other.
-            #
-            # `blocks_patch`: this chat contributes no entry, so a per-file patch
-            # that later dropped the colliding entry could not promote it — the
-            # same rejection shape as a same-layer duplicate id.
-            index.add_diagnostic(
-                layer_id=layer.id,
-                path=path,
-                message=f"Chat id {chat_id} collides with an existing entry.",
-                is_error=True,
-                blocks_patch=True,
-            )
-            return
-        index.add(entry)
 
     def _collect_project_node_entry(
         self, *, layer: IndexLayer, index: NodeIndex, schema: MetadataSchema | None = None
@@ -893,7 +815,7 @@ class ReferencesMixin:
             return MACHINE_LAYER_FAMILIES
         if layer.is_library:
             return LIBRARY_LAYER_FAMILIES
-        return [family for family in NODE_FAMILIES if family.kind != "scene" or layer.is_root]
+        return [family for family in NODE_FAMILIES if family.kind not in ("scene", "chat") or layer.is_root]
 
     def _collect_machine_layer_assistants(
         self,
@@ -967,6 +889,22 @@ class ReferencesMixin:
             # A file on disk whose id we could not read — so `by_id` stops
             # being a complete answer to "does this id exist" (#379).
             index.has_unparsed_nodes = True
+            return
+        except OSError as exc:
+            # We could not *read* the file at all — a cloud-sync placeholder, an
+            # AV lock, a concurrent checkout — as opposed to malformed content.
+            # Degrade so this build is not cached: the file is unchanged, so a
+            # cached snapshot missing this node would match the manifest and be
+            # served on every later open (ADR-0051 S1 generalised this from the
+            # chat collector; same rule as the schema read, `_resolve_index`).
+            index.add_diagnostic(
+                layer_id=layer.id,
+                path=path,
+                message=f"Failed to read {family.kind} file {path.name}: {exc}",
+                is_error=True,
+            )
+            index.has_unparsed_nodes = True
+            index.degraded = True
             return
 
         raw_node_id = front_matter.get("id")
@@ -1126,6 +1064,7 @@ class ReferencesMixin:
             "mutation_set": "mutation-sets",
             "view": "views",
             "plot": "plot",
+            "chat": "chats",
         }
         label_by_kind = {
             "scene": "Scene",
@@ -1135,6 +1074,7 @@ class ReferencesMixin:
             "mutation_set": "Mutation set",
             "view": "View",
             "plot": "Plotline",
+            "chat": "Chat",
         }
         fallback_folder = folder_by_kind.get(kind, "lore")
         fallback_path = root / fallback_folder / f"{node_id}.md"

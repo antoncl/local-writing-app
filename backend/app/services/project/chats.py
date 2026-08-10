@@ -1,9 +1,11 @@
 """Chat-session slice of ProjectService (#14 backend split).
 
-Chat sessions are persisted one-YAML-per-chat under `<project>/chats/`.
-This mixin owns their CRUD; `ProjectService` composes it. Method bodies
-moved verbatim from project_service.py — shared helpers they call
-(`self._require_project`, `self._read_yaml`, `self._write_yaml`,
+Chat sessions are persisted one Node-file-per-chat under `<project>/chats/`
+— body-less `.md` nodes carrying the ChatSession payload in front matter
+(ADR-0051 S1, the views / mutation-set shape). This mixin owns their CRUD;
+`ProjectService` composes it. Shared helpers they call
+(`self._require_project`, `self._write_node_entry_file`,
+`self._read_markdown_with_front_matter`, `self._delete_node_file`,
 `self._utcnow_iso`, `self._new_id`, `self._read_ai_invocations_raw`,
 `self.resolve_assistant`, `self.append_ai_invocation`) still live on the
 core class and resolve through the MRO at call time.
@@ -37,7 +39,28 @@ class ChatSessionsMixin:
     def _chat_path(self, chat_id: str) -> Path:
         if not re.fullmatch(r"chat_[a-zA-Z0-9_-]+", chat_id):
             raise ProjectServiceError(f"Invalid chat id {chat_id!r}.", 422)
-        return self._chats_dir() / f"{chat_id}.yaml"
+        return self._chats_dir() / f"{chat_id}.md"
+
+    def _write_chat_session(self, path: Path, session: ChatSession) -> None:
+        """Persist a chat as a body-less Node file (ADR-0051 S1).
+
+        Identity (`id`/`title`/`entry_type`) is the node header; the rest of
+        the ChatSession payload rides `extra=` into front matter. `metadata`
+        is empty — the `chat:chat_session` type declares only `color`, which
+        nothing writes today (a future node-editor path is the one that would).
+        """
+        dumped = session.model_dump()
+        extra = {key: value for key, value in dumped.items() if key not in ("id", "title")}
+        self._write_node_entry_file(
+            path,
+            session.id,
+            session.title,
+            "chat:chat_session",
+            {},
+            "",
+            extra=extra,
+            omit_empty_metadata=True,
+        )
 
     def list_chat_sessions(self) -> ChatSessionList:
         folder = self._chats_dir()
@@ -45,10 +68,10 @@ class ChatSessionsMixin:
             return ChatSessionList(sessions=[])
         summaries: list[ChatSessionSummary] = []
         for entry in folder.iterdir():
-            if not entry.is_file() or entry.suffix.lower() != ".yaml":
+            if not entry.is_file() or entry.suffix.lower() != ".md":
                 continue
             try:
-                data = self._read_yaml(entry)
+                data, _ = self._read_markdown_with_front_matter(entry, strict=False)
             except Exception:
                 continue
             if not isinstance(data, dict) or not data.get("id"):
@@ -87,7 +110,7 @@ class ChatSessionsMixin:
         path = self._chat_path(chat_id)
         if not path.exists():
             raise ProjectServiceError(f"Chat {chat_id} does not exist.", 404)
-        data = self._read_yaml(path)
+        data, _ = self._read_markdown_with_front_matter(path, strict=True)
         if not isinstance(data, dict):
             raise ProjectServiceError(f"Chat {chat_id} is malformed.", 500)
         session = ChatSession.model_validate(data)
@@ -121,7 +144,7 @@ class ChatSessionsMixin:
             context_items=[],
             messages=[],
         )
-        self._write_yaml(self._chat_path(session.id), session.model_dump())
+        self._write_chat_session(self._chat_path(session.id), session)
         return session
 
     def save_chat_session(
@@ -243,7 +266,7 @@ class ChatSessionsMixin:
             cost_usd_total=next_cost,
             cache_write_times=next_cache_times,
         )
-        self._write_yaml(path, updated.model_dump())
+        self._write_chat_session(path, updated)
         return updated
 
     def delete_chat_session(self, chat_id: str) -> ChatSessionList:

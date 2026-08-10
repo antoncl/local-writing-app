@@ -40,10 +40,13 @@
   } from "@/lib/stores/plotBoard";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
+  import { templateInstancesStore, deleteTemplateInstance } from "@/lib/stores/templateInstances";
+  import { plotTemplatesStore } from "@/lib/stores/plotTemplates";
   import UndoRedoControls from "@/components/UndoRedoControls.svelte";
   import ViewportFit from "@/components/editor/body/view/ViewportFit.svelte";
   import PlotCardNode from "./plot/PlotCardNode.svelte";
   import PlotContainerNode from "./plot/PlotContainerNode.svelte";
+  import PlotArcRail from "./plot/PlotArcRail.svelte";
   import { PLOT_CARD_ACTIONS, type PlotCardActions } from "./plot/plotCardActions";
   import type { BoardXY, PlotBoardProjection } from "@/lib/types";
 
@@ -129,6 +132,29 @@
     } finally {
       creating = false;
     }
+  }
+
+  // The arc palette (ADR-0048 S7 Slice 5a): a collapsible rail listing the book's
+  // plot arcs (template instances) + their beats. Collapsed by default so the
+  // read-only / pantser flow is undisturbed; the toolbar toggle opens it. Its data
+  // is the always-loaded instance roster + the template shelf (for "add from
+  // template"); actions route to editorPanes (open / instantiate / blank) and the
+  // store's delete. Removing an arc discards its specialized beats → confirm first.
+  let railOpen = $state(false);
+  let arcs = $derived($templateInstancesStore);
+  let templates = $derived($plotTemplatesStore);
+
+  function removeArc(id: string): void {
+    const arc = arcs.find((a) => a.id === id);
+    confirmService.request({
+      title: "Remove arc",
+      message: `Remove ${arc?.title ? `“${arc.title}”` : "this arc"}? Its specialized beats are discarded. Cards that referenced its beats keep their links until re-saved.`,
+      confirmLabel: "Remove arc",
+      destructive: true,
+      onConfirm: async () => {
+        await deleteTemplateInstance(id);
+      },
+    });
   }
 
   // Seed-from-manuscript (ADR-0048 §S5): bulk, idempotent. Confirmed because it can
@@ -239,6 +265,15 @@
       <!-- Both stay reachable on an empty board — they are how you populate one:
            New card authors one directly; Seed bulk-mints from the manuscript. -->
       <div class="toolbar-actions">
+        <button
+          class="board-btn"
+          class:active={railOpen}
+          aria-pressed={railOpen}
+          onclick={() => (railOpen = !railOpen)}
+        >
+          <i class="ti ti-route" aria-hidden="true"></i>
+          Arcs{arcs.length ? ` (${arcs.length})` : ""}
+        </button>
         <button class="board-btn" onclick={newCard} disabled={creating}>
           <i class="ti ti-plus" aria-hidden="true"></i>
           New card
@@ -260,6 +295,18 @@
         />
       {/if}
     </div>
+    <div class="board-main">
+      {#if railOpen}
+        <PlotArcRail
+          instances={arcs}
+          {templates}
+          onOpen={(id) => void editorPanes.openPlotTemplateInstance(id)}
+          onInstantiate={(id) => void editorPanes.instantiatePlotTemplate(id)}
+          onCreateBlank={() => void editorPanes.createBlankPlotArc()}
+          onRemove={removeArc}
+        />
+      {/if}
+      <div class="board-body">
     {#if isEmpty}
       <p class="board-hint muted">No cards yet. Seed cards from the manuscript, or add one, to begin.</p>
     {:else}
@@ -295,6 +342,8 @@
       </SvelteFlow>
       </div>
     {/if}
+      </div>
+    </div>
   {/if}
 </section>
 
@@ -334,6 +383,11 @@
   .board-btn:hover:not(:disabled) {
     background: var(--surface);
   }
+  .board-btn.active {
+    background: var(--surface);
+    border-color: var(--accent);
+    color: var(--text);
+  }
   .board-btn:disabled {
     opacity: 0.5;
     cursor: default;
@@ -341,9 +395,22 @@
   .board-btn i {
     color: var(--text-3);
   }
-  .board-canvas {
+  /* Rail + canvas sit in a row below the toolbar; the rail is a fixed-width column,
+     the body takes the rest (canvas or the empty-cards hint). */
+  .board-main {
     flex: 1;
     min-height: 0;
+    display: flex;
+    align-items: stretch;
+  }
+  .board-body {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+  }
+  .board-canvas {
+    width: 100%;
+    height: 100%;
   }
   .board-hint {
     padding: 16px;

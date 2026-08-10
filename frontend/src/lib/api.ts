@@ -62,6 +62,8 @@ import type {
   CardEntry,
   CardList,
   PlotlineList,
+  TemplateInstanceEntry,
+  TemplateInstanceList,
   MutationSetEntry,
   MutationSetEntryList,
   MutationSetRow,
@@ -975,6 +977,43 @@ export const api = {
   // board's lanes both draw from this.
   listPlotlines() {
     return request<PlotlineList>("/plot/plotlines");
+  },
+  // Template instances (ADR-0048 §3, wired to the board's arc palette in S7 Slice
+  // 5a) — the plotter's arcs. Book-local layered `plot/` nodes sharing the card's
+  // CRUD shape; the specialized beats + lineage ride through `metadata`. `instantiate`
+  // is the only bespoke op: it snapshots a Library template's beat roster into a new
+  // owned arc (lives among the template routes backend-side); ad-hoc arcs are a plain
+  // create. Delete returns the refreshed roster (write-through, like plotline delete).
+  listTemplateInstances() {
+    return request<TemplateInstanceList>("/plot/instances");
+  },
+  getTemplateInstance(entryId: string) {
+    return request<TemplateInstanceEntry>(`/plot/instances/${entryId}`);
+  },
+  createTemplateInstance(title: string) {
+    return request<TemplateInstanceEntry>("/plot/instances", {
+      method: "POST",
+      body: JSON.stringify({ title }),
+    });
+  },
+  saveTemplateInstance(entry: TemplateInstanceEntry, body: string) {
+    return request<TemplateInstanceEntry>(`/plot/instances/${entry.id}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        title: entry.title,
+        body,
+        metadata: entry.metadata,
+        base_revision: entry.revision,
+      }),
+    });
+  },
+  deleteTemplateInstance(entryId: string) {
+    return request<TemplateInstanceList>(`/plot/instances/${entryId}`, { method: "DELETE" });
+  },
+  // Snapshot a Library template's beats into a new owned arc (ADR-0048 §3). Returns
+  // the created instance so the caller can open it to specialize the beats.
+  instantiatePlotTemplate(templateId: string) {
+    return request<TemplateInstanceEntry>(`/plot/templates/${templateId}/instantiate`, { method: "POST" });
   },
   // Reusable mutation sets (#62).
   listMutationSetEntries() {

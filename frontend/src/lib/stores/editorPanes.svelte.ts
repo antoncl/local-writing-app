@@ -211,6 +211,10 @@ class EditorPanesController {
     this.activeChatId = null;
     this.#reviewLocks.clear();
     this.#nextEditorPaneIndex = 1;
+    // Panes are dropped wholesale here (no per-pane tearDown) and the id counter
+    // restarts, so any surviving subordinate link would mis-fire once an id is
+    // reused in the new project — drop them all.
+    subordinatePanes.clear();
   }
 
   // Remove any lingering autosave timers (App unmount / shutdown).

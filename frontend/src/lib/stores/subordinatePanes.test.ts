@@ -45,6 +45,15 @@ describe("subordinatePanes registry", () => {
     expect(close).not.toHaveBeenCalled();
   });
 
+  it("clear() drops every link (project switch)", () => {
+    const close = vi.fn();
+    subordinatePanes.register("child_z", "master_3", close);
+    subordinatePanes.clear();
+
+    subordinatePanes.closeChildrenOf("master_3");
+    expect(close).not.toHaveBeenCalled();
+  });
+
   it("re-registering re-homes a singleton child to a new owner", () => {
     // The schema_type pane is a singleton reopened from different editors.
     const close = vi.fn();

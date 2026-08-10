@@ -26,6 +26,14 @@ export type EdgeLayer = "manuscript" | "beats";
 // downgrade) is dropped rather than trusted.
 export const EDGE_LAYERS: readonly EdgeLayer[] = ["manuscript", "beats"];
 
+// The card node's anchor-handle ids. xyflow will not render an edge unless its
+// `sourceHandle`/`targetHandle` resolve to real Handles on the endpoint nodes, so
+// these MUST match the ids `PlotCardNodeFlow` gives its Handles. Single-sourced
+// here (and asserted in the tests) precisely because a drift between the two
+// silently kills every edge and can't be caught headlessly.
+export const CARD_SOURCE_HANDLE = "out";
+export const CARD_TARGET_HANDLE = "in";
+
 // Order cards along a chain: by manuscript reading order (`sequence`), with the
 // scene-less cards (no sequence — off-page / unwritten) after every ranked one, in
 // their projection order. `order` is the card's index in `projection.cards`, the
@@ -57,8 +65,8 @@ function chain(sorted: Ranked[], prefix: string, className: string): Edge[] {
       id: `${prefix}:${source}->${target}`,
       source,
       target,
-      sourceHandle: "out",
-      targetHandle: "in",
+      sourceHandle: CARD_SOURCE_HANDLE,
+      targetHandle: CARD_TARGET_HANDLE,
       class: className,
     });
   }

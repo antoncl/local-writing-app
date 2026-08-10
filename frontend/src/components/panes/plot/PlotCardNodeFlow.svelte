@@ -16,6 +16,7 @@
 <script lang="ts">
   import { Handle, Position } from "@xyflow/svelte";
   import PlotCardNode from "./PlotCardNode.svelte";
+  import { CARD_SOURCE_HANDLE, CARD_TARGET_HANDLE } from "@/lib/plot/plotBoardEdges";
   import type { PlotCardData } from "@/lib/plot/plotBoardLayout";
 
   // The props xyflow hands a node component; forwarded straight to the card.
@@ -23,8 +24,8 @@
 </script>
 
 <div class="card-flow">
-  <Handle type="target" position={Position.Left} id="in" class="edge-anchor" isConnectable={false} />
-  <Handle type="source" position={Position.Right} id="out" class="edge-anchor" isConnectable={false} />
+  <Handle type="target" position={Position.Left} id={CARD_TARGET_HANDLE} class="edge-anchor" isConnectable={false} />
+  <Handle type="source" position={Position.Right} id={CARD_SOURCE_HANDLE} class="edge-anchor" isConnectable={false} />
   <PlotCardNode {id} {data} {selected} />
 </div>
 
@@ -35,12 +36,10 @@
     height: 100%;
   }
   /* Invisible edge anchors — the derived edges attach here, but the card shows no
-     connection ports in 6a. */
+     connection ports in 6a. The handle keeps its base size (edges anchor to it);
+     opacity + pointer-events are the whole hide/disable story. */
   .card-flow :global(.edge-anchor) {
     opacity: 0;
     pointer-events: none;
-    min-width: 0;
-    min-height: 0;
-    border: none;
   }
 </style>

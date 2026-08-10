@@ -3,7 +3,7 @@
 // so the derived-edge logic lives — and is verified — here; the compositing is
 // browser-checked.
 import { describe, expect, it } from "vitest";
-import { buildBoardEdges, type EdgeLayer } from "./plotBoardEdges";
+import { buildBoardEdges, CARD_SOURCE_HANDLE, CARD_TARGET_HANDLE, type EdgeLayer } from "./plotBoardEdges";
 import type { PlotBoardBeat, PlotBoardProjection } from "@/lib/types";
 
 function projection(cards: PlotBoardProjection["cards"]): PlotBoardProjection {
@@ -132,6 +132,23 @@ describe("buildBoardEdges", () => {
       expect(edges[0].class).toBe("beat-edge");
       expect(edges[0].id.startsWith("beat:")).toBe(true);
     });
+  });
+
+  it("anchors every edge to the card node's source/target handles", () => {
+    // Load-bearing + un-headless-testable: xyflow renders nothing unless these
+    // resolve to PlotCardNodeFlow's Handle ids. Pin them so a rename on either
+    // side (the wrapper reads the SAME constants) fails here instead of silently
+    // dropping every edge in the real browser.
+    const p = projection([
+      card("a", { sequence: 0, beats: [beat("arc", "b1")] }),
+      card("b", { sequence: 1, beats: [beat("arc", "b1")] }),
+    ]);
+    const edges = buildBoardEdges(p, layers("manuscript", "beats"));
+    expect(edges.length).toBeGreaterThan(0);
+    for (const e of edges) {
+      expect(e.sourceHandle).toBe(CARD_SOURCE_HANDLE);
+      expect(e.targetHandle).toBe(CARD_TARGET_HANDLE);
+    }
   });
 
   it("emits both layers together with disjoint ids (Slice 7 needs ≥2 at once)", () => {

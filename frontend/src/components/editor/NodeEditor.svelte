@@ -944,12 +944,14 @@
         {#if entryReview.proposal.reviewMode === "replace"}
           <!-- `replace`: a whole-field swap (a scene summary regenerated from the
                body) — a plain current→proposed card, no run-diff (a regenerated
-               value has no meaningful per-run diff). The `replace` patch carries
-               no body, so Replace only ever writes the field. -->
+               value has no meaningful per-run diff). Replace adopts ONLY the shown
+               long_text fields via `acceptFields` — never the body or a structured
+               flip — so the write set equals what the card displays and a scene's
+               prose can't be rewritten. -->
           <ReplaceReviewCard
             fields={entryReview.fields}
             onReplace={() => {
-              entryReview.acceptAll();
+              entryReview.acceptFields();
               void entryReview.commit();
             }}
             onDiscard={() => entryReview.abandon()}

@@ -40,21 +40,6 @@ export function effectiveOutputKind(
   return output.kind;
 }
 
-// How an entry_patch prompt's committed proposal should be reviewed — the
-// `output.review` axis declared on the prompt's entry_type (ADR-0051 S5-next).
-// `replace` means a whole-field swap card (a scene summary); anything else —
-// including the near-universal `visual_diff` and any absent/legacy value —
-// falls back to the per-run adopt flip. Only entry_patch prompts consult this;
-// the other surfaces don't review.
-export function effectiveReviewMode(
-  ctx: PromptResolutionContext,
-  entry: PromptEntrySummary,
-): "visual_diff" | "replace" {
-  const definition = ctx.metadataSchema?.entry_types[entry.entry_type];
-  const review = definition?.prompt?.context_strategy?.output?.review;
-  return review === "replace" ? "replace" : "visual_diff";
-}
-
 // Drop the writer's hidden built-in Library prompts (ADR-0049 slice 3) from a
 // roster. This is the shared seam every prompt-DISCOVERY surface routes through:
 // the slash menu / toolbar / brainstorm bars via promptEntriesForSurface below,

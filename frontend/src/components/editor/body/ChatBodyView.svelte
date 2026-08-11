@@ -683,9 +683,9 @@
           "Couldn't read the model's response as a patch — ask it to finalize again.";
         return;
       }
-      // `replace` (a scene summary) swaps one field whole and must NEVER carry a
-      // body — a scene's body is its manuscript prose. Strip any body the model
-      // returned, so "prose is never rewritten" holds structurally, not on trust.
+      // `replace` (a scene summary) swaps one field whole; strip any body the
+      // model returned so the stored proposal stays fields-only (the commit-side
+      // guarantee that prose is never rewritten lives in `acceptFields`).
       const reviewMode: ReviewMode = activeOutput?.review === "replace" ? "replace" : "visual_diff";
       const body = reviewMode === "replace" ? null : patch.body;
       const hasBody = body != null;

@@ -138,6 +138,9 @@ export function buildBoardEdges(projection: PlotBoardProjection, layers: Set<Edg
           target,
           sourceHandle: CARD_SOURCE_HANDLE,
           targetHandle: CARD_TARGET_HANDLE,
+          // The custom edge (PlotCausalEdge) renders the same path + a hover-× to
+          // remove the link; the class keeps the token stroke/arrowhead styling.
+          type: "causal",
           class: "causal-edge",
           markerEnd: { type: MarkerType.ArrowClosed, color: CAUSAL_MARKER_COLOR },
           // Authored → the only selectable/deletable edges: click to select, Delete to

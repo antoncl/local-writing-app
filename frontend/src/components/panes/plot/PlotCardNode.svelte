@@ -257,8 +257,11 @@
     {/if}
 
     {#if data.beats.length}
-      <div class="card-beats" aria-label="Beats">
-        {#each visibleBeats as beat (beat.instance_id + ":" + beat.beat_id)}
+      <!-- Interactive: show EVERY beat, each with its × — the row becomes a wheel-safe
+           (`nowheel`, so the canvas doesn't zoom) bounded scroll so even a heavily-
+           beated card can unlink any of them. Read-only keeps the compact cap + "+N". -->
+      <div class="card-beats" class:editable={actions} class:nowheel={actions} aria-label="Beats">
+        {#each actions ? data.beats : visibleBeats as beat (beat.instance_id + ":" + beat.beat_id)}
           <span class="beat-badge" title={`${beat.instance_title} · ${beat.title}`}>
             <span class="beat-badge-label">{beat.title}</span>
             {#if actions}
@@ -272,7 +275,7 @@
             {/if}
           </span>
         {/each}
-        {#if hiddenBeats.length}
+        {#if !actions && hiddenBeats.length}
           <span class="beat-badge beat-more" title={hiddenBeatsLabel}>+{hiddenBeats.length}</span>
         {/if}
       </div>
@@ -479,6 +482,13 @@
     display: flex;
     flex-wrap: wrap;
     gap: 3px;
+  }
+  /* Interactive: a bounded scroll so every beat (each removable) is reachable without
+     the card growing; `nowheel` (added in markup) keeps the wheel from zooming the
+     canvas. The synopsis above (flex:1, min-height:0) yields the space. */
+  .card-beats.editable {
+    max-height: 44px;
+    overflow-y: auto;
   }
   .beat-badge {
     display: inline-flex;

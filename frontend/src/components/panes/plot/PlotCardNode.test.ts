@@ -307,4 +307,12 @@ describe("PlotCardNode — beat linking by drag (S7 #824)", () => {
     render(PlotCardNode, { props: { data: data({ beats: [beat()] }) } });
     expect(screen.queryByRole("button", { name: /Unlink beat/ })).toBeNull();
   });
+
+  it("makes every beat removable on an interactive card, past the read-only +N cap", () => {
+    const many = Array.from({ length: 6 }, (_, i) => beat({ beat_id: `b${i}`, title: `Beat ${i}` }));
+    const { container } = renderWithActions({ beats: many }, actions(), "card_many");
+    // All six carry an × (no beat hidden behind a non-removable +N chip).
+    expect(container.querySelectorAll(".beat-badge-x")).toHaveLength(6);
+    expect(screen.queryByText(/^\+\d/)).toBeNull();
+  });
 });

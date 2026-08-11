@@ -106,11 +106,16 @@ export async function saveCardSynopsis(cardId: string, synopsis: string): Promis
 // The single get → mutate a clone of the card's metadata → save (body unchanged) →
 // refetch path the metadata-ref content ops share (detach, reassign — and attach
 // once a board affordance wires it). saveCard replaces metadata wholesale, so the
-// mutator adds/removes keys on a copy.
-async function mutateCardMetadata(cardId: string, mutate: (metadata: CardEntry["metadata"]) => void): Promise<void> {
+// mutator adds/removes keys on a copy. A mutator that returns `false` signals "no
+// change" — the save + refetch (and its board rebuild) are skipped, so e.g. dropping
+// an already-linked beat is a cheap no-op instead of a redundant round-trip.
+async function mutateCardMetadata(
+  cardId: string,
+  mutate: (metadata: CardEntry["metadata"]) => boolean | void,
+): Promise<void> {
   const card = await api.getCard(cardId);
   const metadata = { ...card.metadata };
-  mutate(metadata);
+  if (mutate(metadata) === false) return;
   await api.saveCard({ ...card, metadata }, card.body);
   await refreshAfterMutation();
 }
@@ -149,12 +154,12 @@ function beatLinksOf(metadata: CardEntry["metadata"]): PlotBeatLink[] {
 }
 
 // Drop a beat onto a card → add the link (deduped; a card fulfils a beat once).
+// Already linked → no change, so skip the save + board rebuild.
 export function linkCardBeat(cardId: string, instance: string, beat_id: string): Promise<void> {
   return mutateCardMetadata(cardId, (metadata) => {
     const links = beatLinksOf(metadata);
-    if (!links.some((l) => l.instance === instance && l.beat_id === beat_id)) {
-      links.push({ instance, beat_id });
-    }
+    if (links.some((l) => l.instance === instance && l.beat_id === beat_id)) return false;
+    links.push({ instance, beat_id });
     metadata.beat_links = links;
   });
 }
@@ -184,7 +189,8 @@ export function linkCardCausal(cardId: string, targetId: string): Promise<void> 
   if (cardId === targetId) return Promise.resolve(); // a card does not lead to itself
   return mutateCardMetadata(cardId, (metadata) => {
     const links = causalTargetsOf(metadata);
-    if (!links.some((l) => l.target === targetId)) links.push({ target: targetId });
+    if (links.some((l) => l.target === targetId)) return false; // already linked → no-op
+    links.push({ target: targetId });
     metadata.causal_links = links;
   });
 }

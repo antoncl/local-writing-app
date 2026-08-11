@@ -53,9 +53,15 @@
   import ViewportFit from "@/components/editor/body/view/ViewportFit.svelte";
   import PlotCardNodeFlow from "./plot/PlotCardNodeFlow.svelte";
   import PlotContainerNode from "./plot/PlotContainerNode.svelte";
+  import PlotCausalEdge from "./plot/PlotCausalEdge.svelte";
   import PlotArcRail from "./plot/PlotArcRail.svelte";
   import Popover from "@/components/chrome/Popover.svelte";
-  import { PLOT_CARD_ACTIONS, type PlotCardActions } from "./plot/plotCardActions";
+  import {
+    PLOT_CARD_ACTIONS,
+    type PlotCardActions,
+    PLOT_EDGE_ACTIONS,
+    type PlotEdgeActions,
+  } from "./plot/plotCardActions";
   import type { BoardXY, PlotBoardProjection } from "@/lib/types";
 
   // The board's read model, fetched by the opener / PlotBoardPane into the store.
@@ -208,6 +214,12 @@
   }
 
   const nodeTypes = { plotCard: PlotCardNodeFlow, plotContainer: PlotContainerNode };
+  // Authored causal edges render via PlotCausalEdge (a hover-× to remove the link);
+  // derived edges keep the default renderer.
+  const edgeTypes = { causal: PlotCausalEdge };
+  setContext<PlotEdgeActions>(PLOT_EDGE_ACTIONS, {
+    onUnlinkCausal: (source, target) => void unlinkCardCausal(source, target),
+  });
   // Svelte Flow ships light-only chrome; drive its theme from the app's.
   let colorMode = $derived($themePreference as ColorMode);
 
@@ -420,6 +432,7 @@
         bind:nodes={flowNodes}
         bind:edges={flowEdges}
         {nodeTypes}
+        {edgeTypes}
         {colorMode}
         nodesConnectable={true}
         elementsSelectable={true}

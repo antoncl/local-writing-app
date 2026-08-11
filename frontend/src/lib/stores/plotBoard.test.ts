@@ -207,12 +207,13 @@ describe("card content ops", () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("linkCardBeat is a no-op-dedup when the beat is already linked", async () => {
+  it("linkCardBeat skips the save + refetch when the beat is already linked (no-op)", async () => {
     vi.spyOn(api, "getCard").mockResolvedValue(card({ beat_links: [{ instance: "i1", beat_id: "b1" }] }));
     const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
-    vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    const refresh = vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
     await linkCardBeat("c1", "i1", "b1");
-    expect(save.mock.calls[0][0].metadata.beat_links).toEqual([{ instance: "i1", beat_id: "b1" }]);
+    expect(save).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
   });
 
   it("unlinkCardBeat removes one link; emptying it drops the key (sparse)", async () => {

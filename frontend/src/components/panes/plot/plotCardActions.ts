@@ -36,3 +36,12 @@ export type PlotCardActions = {
 
 // Symbol key so the context can't collide with a string-keyed one.
 export const PLOT_CARD_ACTIONS = Symbol("plotCardActions");
+
+// Actions the custom causal EDGE renders (#824): a visible × to remove the "leads to"
+// link (select-edge + Delete stays too, but the × makes removal discoverable). Provided
+// by PlotEditor so the edge component stays free of store imports, like the card.
+export type PlotEdgeActions = {
+  onUnlinkCausal: (source: string, target: string) => void;
+};
+
+export const PLOT_EDGE_ACTIONS = Symbol("plotEdgeActions");

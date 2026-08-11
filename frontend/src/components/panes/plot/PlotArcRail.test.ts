@@ -18,10 +18,13 @@ const arc = (over: Partial<TemplateInstanceSummary> & { id: string; title: strin
 const template = (id: string, title: string): PlotTemplateSummary =>
   ({ id, title, body: "", entry_type: "plot:template", metadata: {} }) as unknown as PlotTemplateSummary;
 
-function renderRail(over: { instances?: TemplateInstanceSummary[]; templates?: PlotTemplateSummary[] } = {}) {
+function renderRail(
+  over: { instances?: TemplateInstanceSummary[]; templates?: PlotTemplateSummary[]; usedBeatKeys?: Set<string> } = {},
+) {
   const props = {
     instances: [] as TemplateInstanceSummary[],
     templates: [] as PlotTemplateSummary[],
+    usedBeatKeys: new Set<string>(),
     onOpen: vi.fn(),
     onInstantiate: vi.fn(),
     onCreateBlank: vi.fn(),
@@ -58,6 +61,20 @@ describe("PlotArcRail", () => {
     expect(screen.queryByText("Inciting incident")).toBeNull();
     await fireEvent.click(screen.getByLabelText("Expand beats"));
     expect(screen.getByText("Inciting incident")).toBeInTheDocument();
+  });
+
+  it("makes an id-bearing beat draggable and checks a used beat (#824 palette)", async () => {
+    renderRail({
+      instances: [
+        arc({ id: "i1", title: "Arc", metadata: { instance_beats: [{ id: "b1", title: "One" }, { id: "b2", title: "Two" }] } }),
+      ],
+      usedBeatKeys: new Set(["i1:b1"]),
+    });
+    await fireEvent.click(screen.getByLabelText("Expand beats"));
+    const one = screen.getByText("One").closest("li") as HTMLElement;
+    expect(one.getAttribute("draggable")).toBe("true");
+    // "One" is already on a card → the linked check shows; "Two" is not.
+    expect(screen.getByTitle("Linked to a card")).toBeInTheDocument();
   });
 
   it("opens an arc via its id", async () => {

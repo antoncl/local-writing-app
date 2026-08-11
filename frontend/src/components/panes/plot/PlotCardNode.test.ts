@@ -9,7 +9,8 @@ import { render, screen, fireEvent } from "@/lib/test/component";
 import PlotCardNode from "./PlotCardNode.svelte";
 import { PLOT_CARD_ACTIONS, type PlotCardActions } from "./plotCardActions";
 import type { PlotCardData } from "@/lib/plot/plotBoardLayout";
-import type { PlotBoardBeat, TemplateInstanceSummary } from "@/lib/types";
+import type { PlotBoardBeat } from "@/lib/types";
+import { PLOT_DND_MIME } from "@/lib/plot/plotDnd";
 
 const beat = (over: Partial<PlotBoardBeat> = {}): PlotBoardBeat => ({
   instance_id: "i1",
@@ -17,14 +18,6 @@ const beat = (over: Partial<PlotBoardBeat> = {}): PlotBoardBeat => ({
   beat_id: "b1",
   title: "Call to Adventure",
   ...over,
-});
-
-const arcFixture = (beats: { id: string; title: string }[] = [{ id: "b1", title: "Call to Adventure" }]): TemplateInstanceSummary => ({
-  id: "i1",
-  title: "Hero's Journey",
-  body: "",
-  entry_type: "plot:template_instance",
-  metadata: { instance_beats: beats },
 });
 
 const data = (over: Partial<PlotCardData> = {}): PlotCardData => ({
@@ -38,11 +31,7 @@ const data = (over: Partial<PlotCardData> = {}): PlotCardData => ({
   ...over,
 });
 
-function actions(
-  plotlines: PlotCardActions["plotlines"] = [],
-  arcs: PlotCardActions["arcs"] = [],
-  cards: PlotCardActions["cards"] = [],
-): PlotCardActions {
+function actions(plotlines: PlotCardActions["plotlines"] = []): PlotCardActions {
   return {
     onOpen: vi.fn(),
     onRealize: vi.fn(),
@@ -50,13 +39,25 @@ function actions(
     onEditTitle: vi.fn(),
     onEditSynopsis: vi.fn(),
     onSetPlotline: vi.fn(),
-    onSetBeats: vi.fn(),
-    onSetCausal: vi.fn(),
+    onLinkBeat: vi.fn(),
+    onUnlinkBeat: vi.fn(),
     onSetPageStatus: vi.fn(),
     plotlines,
-    arcs,
-    cards,
   };
+}
+
+// A stand-in DataTransfer carrying a beat drag (or, with mime="", a foreign drag).
+function beatDataTransfer(instance: string, beatId: string): DataTransfer {
+  const store: Record<string, string> = {
+    [PLOT_DND_MIME]: JSON.stringify({ kind: "beat", instance, beat_id: beatId }),
+  };
+  return {
+    types: Object.keys(store),
+    getData: (t: string) => store[t] ?? "",
+    setData: (t: string, v: string) => void (store[t] = v),
+    dropEffect: "none",
+    effectAllowed: "all",
+  } as unknown as DataTransfer;
 }
 
 function renderWithActions(over: Partial<PlotCardData>, acts: PlotCardActions, id = "card_1") {
@@ -267,91 +268,51 @@ describe("PlotCardNode — beats + page marker (S7 Slice 5b)", () => {
     expect(screen.queryByRole("menuitem", { name: /Mark (off-page|unwritten)/ })).toBeNull();
   });
 
-  it("opens the beat picker and links a checked beat on leaving the page", async () => {
-    const acts = actions([], [arcFixture([{ id: "b1", title: "Call to Adventure" }])]);
-    renderWithActions({ beats: [] }, acts, "card_bk");
+  it("has no Beats / Leads-to menu items (those are drag gestures now, #824)", async () => {
+    renderWithActions({ beats: [] }, actions());
     await fireEvent.click(screen.getByLabelText("Card actions"));
-    await fireEvent.click(screen.getByRole("menuitem", { name: /Beats/ }));
-    await fireEvent.click(screen.getByRole("checkbox")); // link the beat
-    await fireEvent.click(screen.getByRole("button", { name: /Beats/ })); // back → commit
-    expect(acts.onSetBeats).toHaveBeenCalledWith("card_bk", [{ instance: "i1", beat_id: "b1" }]);
-  });
-
-  it("does not save when the beat selection is unchanged", async () => {
-    const acts = actions([], [arcFixture([{ id: "b1", title: "Call to Adventure" }])]);
-    renderWithActions({ beats: [beat({ beat_id: "b1" })] }, acts, "card_bn");
-    await fireEvent.click(screen.getByLabelText("Card actions"));
-    await fireEvent.click(screen.getByRole("menuitem", { name: /Beats/ }));
-    await fireEvent.click(screen.getByRole("button", { name: /Beats/ })); // back with no toggle
-    expect(acts.onSetBeats).not.toHaveBeenCalled();
-  });
-
-  it("commits beat edits when the menu is dismissed via the kebab button", async () => {
-    // Closing the menu with the kebab (not the back arrow) must still flush the draft
-    // — otherwise beat toggles are silently lost.
-    const acts = actions([], [arcFixture([{ id: "b1", title: "Call to Adventure" }])]);
-    renderWithActions({ beats: [] }, acts, "card_kb");
-    const kebab = screen.getByRole("button", { name: "Card actions" }); // not the menu div
-    await fireEvent.click(kebab); // open
-    await fireEvent.click(screen.getByRole("menuitem", { name: /Beats/ })); // beats page
-    await fireEvent.click(screen.getByRole("checkbox")); // link the beat
-    await fireEvent.click(kebab); // close via kebab
-    expect(acts.onSetBeats).toHaveBeenCalledWith("card_kb", [{ instance: "i1", beat_id: "b1" }]);
-  });
-
-  it("pre-checks a beat the card already fulfils in the picker", async () => {
-    const acts = actions([], [arcFixture([{ id: "b1", title: "Call to Adventure" }])]);
-    renderWithActions({ beats: [beat({ beat_id: "b1" })] }, acts, "card_bc");
-    await fireEvent.click(screen.getByLabelText("Card actions"));
-    await fireEvent.click(screen.getByRole("menuitem", { name: /Beats/ }));
-    expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(true);
+    expect(screen.queryByRole("menuitem", { name: /Beats/ })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: /Leads to/ })).toBeNull();
   });
 });
 
-describe("PlotCardNode — causal links (S7 Slice 6b)", () => {
-  const others = [
-    { id: "other", title: "The storm hits" },
-    { id: "third", title: "They reconcile" },
-  ];
-
-  it("opens the “Leads to…” picker and links a checked card on leaving the page", async () => {
-    const acts = actions([], [], others);
-    renderWithActions({ causalLinks: [] }, acts, "card_a");
-    await fireEvent.click(screen.getByLabelText("Card actions"));
-    await fireEvent.click(screen.getByRole("menuitem", { name: /Leads to/ }));
-    await fireEvent.click(screen.getAllByRole("checkbox")[0]); // link "other"
-    await fireEvent.click(screen.getByRole("button", { name: /Leads to/ })); // back → commit
-    expect(acts.onSetCausal).toHaveBeenCalledWith("card_a", ["other"]);
+describe("PlotCardNode — beat linking by drag (S7 #824)", () => {
+  it("links a beat dropped from the palette onto the card", async () => {
+    const acts = actions();
+    const { container } = renderWithActions({ beats: [] }, acts, "card_d1");
+    const card = container.querySelector(".plot-card") as HTMLElement;
+    const dataTransfer = beatDataTransfer("i1", "b1");
+    await fireEvent.dragOver(card, { dataTransfer });
+    await fireEvent.drop(card, { dataTransfer });
+    expect(acts.onLinkBeat).toHaveBeenCalledWith("card_d1", "i1", "b1");
   });
 
-  it("does not save when the causal selection is unchanged", async () => {
-    const acts = actions([], [], others);
-    renderWithActions({ causalLinks: ["other"] }, acts, "card_b");
-    await fireEvent.click(screen.getByLabelText("Card actions"));
-    await fireEvent.click(screen.getByRole("menuitem", { name: /Leads to/ }));
-    await fireEvent.click(screen.getByRole("button", { name: /Leads to/ })); // back with no toggle
-    expect(acts.onSetCausal).not.toHaveBeenCalled();
+  it("ignores a drop that carries no beat payload", async () => {
+    const acts = actions();
+    const { container } = renderWithActions({ beats: [] }, acts, "card_d2");
+    const card = container.querySelector(".plot-card") as HTMLElement;
+    const foreign = { types: ["text/plain"], getData: () => "", setData: () => {} } as unknown as DataTransfer;
+    await fireEvent.drop(card, { dataTransfer: foreign });
+    expect(acts.onLinkBeat).not.toHaveBeenCalled();
   });
 
-  it("commits causal edits when the menu is dismissed via the kebab button", async () => {
-    const acts = actions([], [], others);
-    renderWithActions({ causalLinks: [] }, acts, "card_kb");
-    const kebab = screen.getByRole("button", { name: "Card actions" });
-    await fireEvent.click(kebab); // open
-    await fireEvent.click(screen.getByRole("menuitem", { name: /Leads to/ }));
-    await fireEvent.click(screen.getAllByRole("checkbox")[0]); // link "other"
-    await fireEvent.click(kebab); // close via kebab flushes the draft
-    expect(acts.onSetCausal).toHaveBeenCalledWith("card_kb", ["other"]);
+  it("unlinks a beat via the × on its badge", async () => {
+    const acts = actions();
+    renderWithActions({ beats: [beat({ beat_id: "b1", title: "Call to Adventure" })] }, acts, "card_u1");
+    await fireEvent.click(screen.getByRole("button", { name: /Unlink beat Call to Adventure/ }));
+    expect(acts.onUnlinkBeat).toHaveBeenCalledWith("card_u1", "i1", "b1");
   });
 
-  it("pre-checks a target the card already leads to, and excludes itself", async () => {
-    const acts = actions([], [], [{ id: "card_pc", title: "Self" }, ...others]);
-    renderWithActions({ causalLinks: ["other"] }, acts, "card_pc");
-    await fireEvent.click(screen.getByLabelText("Card actions"));
-    await fireEvent.click(screen.getByRole("menuitem", { name: /Leads to/ }));
-    const boxes = screen.getAllByRole("checkbox") as HTMLInputElement[];
-    expect(boxes).toHaveLength(2); // self filtered out of the 3 cards
-    expect(boxes[0].checked).toBe(true); // "other", already linked
-    expect(boxes[1].checked).toBe(false); // "third"
+  it("shows no unlink × on the badges of a read-only card (no actions)", () => {
+    render(PlotCardNode, { props: { data: data({ beats: [beat()] }) } });
+    expect(screen.queryByRole("button", { name: /Unlink beat/ })).toBeNull();
+  });
+
+  it("makes every beat removable on an interactive card, past the read-only +N cap", () => {
+    const many = Array.from({ length: 6 }, (_, i) => beat({ beat_id: `b${i}`, title: `Beat ${i}` }));
+    const { container } = renderWithActions({ beats: many }, actions(), "card_many");
+    // All six carry an × (no beat hidden behind a non-removable +N chip).
+    expect(container.querySelectorAll(".beat-badge-x")).toHaveLength(6);
+    expect(screen.queryByText(/^\+\d/)).toBeNull();
   });
 });

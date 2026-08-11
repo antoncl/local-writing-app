@@ -75,6 +75,10 @@ function chain(sorted: Ranked[], prefix: string, className: string): Edge[] {
       sourceHandle: CARD_SOURCE_HANDLE,
       targetHandle: CARD_TARGET_HANDLE,
       class: className,
+      // Derived edges are read-only — not selectable/deletable, so a Delete key only
+      // ever removes an AUTHORED causal edge (#824), never a computed layer edge.
+      selectable: false,
+      deletable: false,
     });
   }
   return edges;
@@ -134,8 +138,15 @@ export function buildBoardEdges(projection: PlotBoardProjection, layers: Set<Edg
           target,
           sourceHandle: CARD_SOURCE_HANDLE,
           targetHandle: CARD_TARGET_HANDLE,
+          // The custom edge (PlotCausalEdge) renders the same path + a hover-× to
+          // remove the link; the class keeps the token stroke/arrowhead styling.
+          type: "causal",
           class: "causal-edge",
           markerEnd: { type: MarkerType.ArrowClosed, color: CAUSAL_MARKER_COLOR },
+          // Authored → the only selectable/deletable edges: click to select, Delete to
+          // remove the "leads to" link (#824, PlotEditor.onDeleteCausal).
+          selectable: true,
+          deletable: true,
         });
       }
     }

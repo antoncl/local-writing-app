@@ -1,13 +1,17 @@
 <!--
   PlotCardNode — a card on the plot board (ADR-0048 S7b read-only → S7d interactive).
-  Still imports NOTHING from @xyflow/svelte (a card has no connection ports), so it
-  stays free of the flow runtime context and mountable in happy-dom for its render
-  test ([[reference_component_test_harness]]). Interactivity arrives via a Svelte
-  context (PlotEditor provides the handlers); when it is absent — the S7b read-only
-  case and the happy-dom mount test — the card renders exactly as before, no actions.
+  Still imports NOTHING from @xyflow/svelte (a card has no connection ports of its own —
+  the causal handles live on the PlotCardNodeFlow wrapper), so it stays mountable in
+  happy-dom for its render test ([[reference_component_test_harness]]). Interactivity
+  arrives via a Svelte context (PlotEditor provides the handlers); when it is absent —
+  the S7b read-only case and the mount test — the card renders read-only, no actions.
 
-  Interactive controls carry `nodrag nopan` so a click/type inside them never starts
-  a canvas drag or pan (the xyflow convention). The action menu renders OUTSIDE the
+  Beat links are authored by DRAGGING a beat from the Arcs palette onto the card (#824):
+  the card is an HTML5 drop target and each beat badge carries an × to unlink. Causal
+  edges are drawn card-to-card via the wrapper's handles (SvelteFlow), not here.
+
+  Interactive controls carry `nodrag nopan` so a click/type inside them never starts a
+  canvas drag or pan (the xyflow convention). The action menu renders OUTSIDE the
   clipped `.plot-card` so it isn't cut off by the card's fixed height / overflow.
 -->
 <script lang="ts">
@@ -15,17 +19,13 @@
   import { getSwatch } from "@/lib/utils/colors";
   import type { PlotCardData } from "@/lib/plot/plotBoardLayout";
   import { PLOT_CARD_ACTIONS, type PlotCardActions } from "./plotCardActions";
-  import type { PlotBeatLink } from "@/lib/stores/plotBoard";
-  import PlotBeatPicker from "./PlotBeatPicker.svelte";
-  import PlotCausalPicker from "./PlotCausalPicker.svelte";
-  import PlotLinkPopover from "./PlotLinkPopover.svelte";
-  import { portalToBody } from "@/lib/actions/portal";
+  import { hasPlotBeatDrag, readPlotBeatDrag } from "@/lib/plot/plotDnd";
 
   // Svelte Flow passes the node's id/data/selection state as props.
   let { id, data }: { id?: string; data: PlotCardData; selected?: boolean } = $props();
 
   // Absent in the read-only board (S7b) and in the happy-dom mount test → the card
-  // shows no kebab / edit affordance, unchanged from S7b.
+  // shows no kebab / edit / drop affordance, unchanged from S7b.
   const actions = getContext<PlotCardActions | undefined>(PLOT_CARD_ACTIONS);
 
   // The owning plotline's colour, as a left stripe. Null for a colourless plotline
@@ -52,80 +52,22 @@
   let hiddenBeatsLabel = $derived(hiddenBeats.map((b) => b.title).join(", "));
 
   let menuOpen = $state(false);
-  // The menu has four pages: the actions, the "Set plotline" lane list, the "Beats…"
-  // link picker, and the "Leads to…" causal-link picker.
-  let menuView = $state<"main" | "plotline" | "beats" | "causal">("main");
-
-  // A local draft of the card's beat links while the beats page is open (Slice 5b):
-  // toggles mutate this, and one save flushes on leaving the page / closing the menu.
-  // Batching avoids a refetch-per-checkbox (which would rebuild the board and close
-  // the menu mid-edit). null = not editing beats.
-  let beatDraft = $state<PlotBeatLink[] | null>(null);
-  let draftKeys = $derived(
-    beatDraft ? new Set(beatDraft.map((l) => `${l.instance}:${l.beat_id}`)) : new Set<string>(),
-  );
-
-  // The same batched-draft pattern for the causal ("Leads to…") links (Slice 6b): a
-  // draft set of target card ids, flushed as one save on leave. null = not editing.
-  let causalDraft = $state<string[] | null>(null);
-  let draftCausalIds = $derived(causalDraft ? new Set(causalDraft) : new Set<string>());
-
-  // The beats / "Leads to…" pickers live on the roomy PlotLinkPopover (#820), not the
-  // narrow kebab menu. `pickerFilter` is its shared filter query (reset on open).
-  let pickerFilter = $state("");
-  const pickerOpen = $derived(menuView === "beats" || menuView === "causal");
-
-  // The picker is PORTALED to <body> and positioned in viewport coords, so it renders
-  // at screen scale (a fixed 300px) instead of scaling with the board's zoom — the
-  // card lives inside SvelteFlow's CSS transform, which would otherwise shrink an
-  // in-canvas panel with the canvas ([[reference_svelteflow_headless_limits]] / #245,
-  // the SwatchPicker/TagPicker pattern). Anchored to the card's screen rect, flipped
-  // to stay on-screen; re-measured on open and on scroll/resize while open.
-  const PICKER_W = 300;
-  const PICKER_MAX_H = 372; // header + filter + the 300px scroll body, roughly
-  const PICKER_GAP = 4;
-  let pickerLeft = $state(0);
-  let pickerTop = $state(0);
-  function positionPicker(): void {
-    const r = rootEl?.getBoundingClientRect();
-    if (!r) return;
-    let left = r.left;
-    if (left + PICKER_W + 8 > window.innerWidth) left = Math.max(8, r.right - PICKER_W);
-    let top = r.bottom + PICKER_GAP;
-    if (top + PICKER_MAX_H + 8 > window.innerHeight) top = Math.max(8, r.top - PICKER_MAX_H - PICKER_GAP);
-    pickerLeft = left;
-    pickerTop = top;
-  }
-  $effect(() => {
-    if (!pickerOpen) return;
-    positionPicker();
-    const reflow = () => positionPicker();
-    window.addEventListener("scroll", reflow, true); // capture: catches pane scrolls too
-    window.addEventListener("resize", reflow);
-    return () => {
-      window.removeEventListener("scroll", reflow, true);
-      window.removeEventListener("resize", reflow);
-    };
-  });
+  // Two pages: the actions and the "Set plotline" lane list. Beats + causal are no
+  // longer menu pages — they're drag gestures now (#824).
+  let menuView = $state<"main" | "plotline">("main");
 
   let editing = $state(false);
   let draft = $state("");
   let textarea = $state<HTMLTextAreaElement | null>(null);
   let rootEl = $state<HTMLElement | null>(null);
-  let pickerEl = $state<HTMLElement | null>(null); // the portaled picker, for hit-testing
 
-  // Close the menu on an outside pointerdown or Escape — NOT on focusout, which
-  // would fire (and wrongly close) the moment the two-page menu swaps pages and
-  // removes the focused button. Only while open, cleaned up on close / unmount.
+  // Close the menu on an outside pointerdown or Escape — NOT on focusout, which would
+  // fire (and wrongly close) the moment the two-page menu swaps pages and removes the
+  // focused button. Only while open, cleaned up on close / unmount.
   $effect(() => {
     if (!menuOpen) return;
     const onDown = (e: PointerEvent) => {
-      const target = e.target as Node;
-      if (rootEl && rootEl.contains(target)) return;
-      // The picker is portaled to <body>, so it is NOT inside rootEl — a click on its
-      // rows/filter must not dismiss. `pickerEl` is bound on the portaled element.
-      if (pickerEl && pickerEl.contains(target)) return;
-      closeMenu();
+      if (rootEl && !rootEl.contains(e.target as Node)) closeMenu();
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") closeMenu();
@@ -139,8 +81,6 @@
   });
 
   function toggleMenu() {
-    // Close via closeMenu so a pending beats / causal edit is flushed — clicking the
-    // kebab to dismiss the menu while on a picker page must not silently drop the draft.
     if (menuOpen) {
       closeMenu();
     } else {
@@ -149,8 +89,6 @@
     }
   }
   function closeMenu() {
-    commitBeats(); // flush a pending beats edit before the menu goes away
-    commitCausal(); // and a pending "Leads to…" edit
     menuOpen = false;
     menuView = "main";
   }
@@ -162,61 +100,37 @@
     closeMenu();
     if (actions && id) actions.onSetPlotline(id, plotlineId);
   }
-
-  // Beats page: seed the draft from the card's current links, toggle in place, flush
-  // one save on leave. `data.beats` updates from the refetched projection after.
-  function openBeats() {
-    beatDraft = data.beats.map((b) => ({ instance: b.instance_id, beat_id: b.beat_id }));
-    pickerFilter = "";
-    menuView = "beats";
-  }
-  function toggleBeat(instanceId: string, beatId: string, checked: boolean) {
-    if (!beatDraft) return;
-    beatDraft = checked
-      ? [...beatDraft, { instance: instanceId, beat_id: beatId }]
-      : beatDraft.filter((l) => !(l.instance === instanceId && l.beat_id === beatId));
-  }
-  function commitBeats() {
-    if (beatDraft && actions && id) {
-      const current = new Set(data.beats.map((b) => `${b.instance_id}:${b.beat_id}`));
-      const draft = new Set(beatDraft.map((l) => `${l.instance}:${l.beat_id}`));
-      const changed = draft.size !== current.size || [...draft].some((k) => !current.has(k));
-      if (changed) actions.onSetBeats(id, beatDraft);
-    }
-    beatDraft = null;
-  }
-  function backFromBeats() {
-    commitBeats();
-    menuView = "main";
-  }
-
-  // "Leads to…" page: seed the draft from the card's current causal links, toggle in
-  // place, flush one save on leave. `data.causalLinks` updates from the refetch after.
-  function openCausal() {
-    causalDraft = [...data.causalLinks];
-    pickerFilter = "";
-    menuView = "causal";
-  }
-  function toggleCausal(targetId: string, checked: boolean) {
-    if (!causalDraft) return;
-    causalDraft = checked ? [...causalDraft, targetId] : causalDraft.filter((t) => t !== targetId);
-  }
-  function commitCausal() {
-    if (causalDraft && actions && id) {
-      const current = new Set(data.causalLinks);
-      const next = new Set(causalDraft);
-      const changed = next.size !== current.size || [...next].some((t) => !current.has(t));
-      if (changed) actions.onSetCausal(id, causalDraft);
-    }
-    causalDraft = null;
-  }
-  function backFromCausal() {
-    commitCausal();
-    menuView = "main";
-  }
   function setPageStatus(status: "off_page" | "unwritten") {
     closeMenu();
     if (actions && id) actions.onSetPageStatus(id, status);
+  }
+
+  // --- Beat linking by drag (#824). The card accepts a beat dragged from the Arcs
+  // palette; dropping links it. `dragOver` drives the accept-highlight. Only an
+  // interactive card (actions present) accepts drops.
+  let dragOver = $state(false);
+  function onCardDragOver(e: DragEvent) {
+    if (!actions || !hasPlotBeatDrag(e)) return;
+    e.preventDefault(); // allow the drop
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+    dragOver = true;
+  }
+  function onCardDragLeave(e: DragEvent) {
+    // dragleave fires when crossing into a child too — ignore those so the highlight
+    // doesn't flicker; only a leave that exits the card clears it.
+    if ((e.currentTarget as Node).contains(e.relatedTarget as Node | null)) return;
+    dragOver = false;
+  }
+  function onCardDrop(e: DragEvent) {
+    dragOver = false;
+    if (!actions || !id) return;
+    const payload = readPlotBeatDrag(e);
+    if (!payload) return;
+    e.preventDefault();
+    actions.onLinkBeat(id, payload.instance, payload.beat_id);
+  }
+  function unlinkBeat(instanceId: string, beatId: string) {
+    if (actions && id) actions.onUnlinkBeat(id, instanceId, beatId);
   }
 
   async function startEdit() {
@@ -269,7 +183,17 @@
 </script>
 
 <div class="card-root" bind:this={rootEl}>
-  <article class="plot-card" style={accent ? `--card-accent: ${accent}` : undefined} class:accented={accent}>
+  <!-- svelte-ignore a11y_no_static_element_interactions -- the card is an HTML5 drop
+       target for beats; the keyboard path to link is the Arcs editor, not this drop. -->
+  <article
+    class="plot-card"
+    class:accented={accent}
+    class:drag-over={dragOver}
+    style={accent ? `--card-accent: ${accent}` : undefined}
+    ondragover={onCardDragOver}
+    ondragleave={onCardDragLeave}
+    ondrop={onCardDrop}
+  >
     <div class="card-head">
       {#if titleEditing}
         <input
@@ -333,11 +257,25 @@
     {/if}
 
     {#if data.beats.length}
-      <div class="card-beats" aria-label="Beats">
-        {#each visibleBeats as beat (beat.instance_id + ":" + beat.beat_id)}
-          <span class="beat-badge" title={`${beat.instance_title} · ${beat.title}`}>{beat.title}</span>
+      <!-- Interactive: show EVERY beat, each with its × — the row becomes a wheel-safe
+           (`nowheel`, so the canvas doesn't zoom) bounded scroll so even a heavily-
+           beated card can unlink any of them. Read-only keeps the compact cap + "+N". -->
+      <div class="card-beats" class:editable={actions} class:nowheel={actions} aria-label="Beats">
+        {#each actions ? data.beats : visibleBeats as beat (beat.instance_id + ":" + beat.beat_id)}
+          <span class="beat-badge" title={`${beat.instance_title} · ${beat.title}`}>
+            <span class="beat-badge-label">{beat.title}</span>
+            {#if actions}
+              <button
+                class="beat-badge-x nodrag nopan"
+                aria-label={`Unlink beat ${beat.title}`}
+                onclick={() => unlinkBeat(beat.instance_id, beat.beat_id)}
+              >
+                <i class="ti ti-x" aria-hidden="true"></i>
+              </button>
+            {/if}
+          </span>
         {/each}
-        {#if hiddenBeats.length}
+        {#if !actions && hiddenBeats.length}
           <span class="beat-badge beat-more" title={hiddenBeatsLabel}>+{hiddenBeats.length}</span>
         {/if}
       </div>
@@ -353,27 +291,7 @@
     </span>
   </article>
 
-  {#if menuOpen && actions && pickerOpen}
-    <!-- Beats / "Leads to…" live on the roomy shared popover (#820). Portaled to
-         <body> and positioned in viewport coords so it renders at a fixed 300px
-         regardless of board zoom, and flipped to stay on-screen near a board edge. -->
-    <div
-      bind:this={pickerEl}
-      class="card-picker nodrag nopan"
-      style={`left:${pickerLeft}px; top:${pickerTop}px;`}
-      use:portalToBody
-    >
-      {#if menuView === "beats"}
-        <PlotLinkPopover title="Beats" bind:filter={pickerFilter} onBack={backFromBeats}>
-          <PlotBeatPicker arcs={actions.arcs} linked={draftKeys} onToggle={toggleBeat} filter={pickerFilter} />
-        </PlotLinkPopover>
-      {:else}
-        <PlotLinkPopover title="Leads to…" bind:filter={pickerFilter} onBack={backFromCausal}>
-          <PlotCausalPicker cards={actions.cards} selfId={id} linked={draftCausalIds} onToggle={toggleCausal} filter={pickerFilter} />
-        </PlotLinkPopover>
-      {/if}
-    </div>
-  {:else if menuOpen && actions}
+  {#if menuOpen && actions}
     <div class="card-menu nodrag nopan" role="menu" aria-label="Card actions">
       {#if menuView === "main"}
         <button role="menuitem" class="menu-item" onclick={() => run(actions.onOpen)}>
@@ -392,16 +310,6 @@
           <i class="ti ti-route" aria-hidden="true"></i> Set plotline
           <i class="ti ti-chevron-right chevron" aria-hidden="true"></i>
         </button>
-        <button role="menuitem" class="menu-item" onclick={openBeats}>
-          <i class="ti ti-stack-2" aria-hidden="true"></i>
-          Beats{data.beats.length ? ` (${data.beats.length})` : ""}
-          <i class="ti ti-chevron-right chevron" aria-hidden="true"></i>
-        </button>
-        <button role="menuitem" class="menu-item" onclick={openCausal}>
-          <i class="ti ti-arrow-bar-to-right" aria-hidden="true"></i>
-          Leads to…{data.causalLinks.length ? ` (${data.causalLinks.length})` : ""}
-          <i class="ti ti-chevron-right chevron" aria-hidden="true"></i>
-        </button>
         <!-- on_page is derived from the scene; only an unattached card authors
              off_page (deliberate backstory) vs unwritten (a placeholder to promote). -->
         {#if !data.attached}
@@ -414,7 +322,7 @@
             {pageStatus === "off_page" ? "Mark unwritten" : "Mark off-page"}
           </button>
         {/if}
-      {:else if menuView === "plotline"}
+      {:else}
         <button class="menu-item menu-back" onclick={() => (menuView = "main")}>
           <i class="ti ti-chevron-left" aria-hidden="true"></i> Set plotline
         </button>
@@ -460,6 +368,11 @@
      rounded corners, the same signature NodeRow / ViewFlowNode use for kind. */
   .plot-card.accented {
     box-shadow: inset 4px 0 0 0 var(--card-accent), var(--elev-1);
+  }
+  /* Accept-highlight while a beat is dragged over the card (#824). */
+  .plot-card.drag-over {
+    border-color: var(--accent);
+    background: var(--accent-soft);
   }
   .card-head {
     display: flex;
@@ -563,28 +476,64 @@
   }
   /* Beat badges (Slice 5b): the beats this card fulfils, a wrapping chip row.
      Neutral — plotline is the colour axis (the left stripe), beats are a distinct
-     axis, so a chip carries no plotline colour. The arc name rides in the tooltip. */
+     axis, so a chip carries no plotline colour. The arc name rides in the tooltip.
+     Each badge carries an × to unlink (#824), revealed on hover. */
   .card-beats {
     display: flex;
     flex-wrap: wrap;
     gap: 3px;
   }
+  /* Interactive: a bounded scroll so every beat (each removable) is reachable without
+     the card growing; `nowheel` (added in markup) keeps the wheel from zooming the
+     canvas. The synopsis above (flex:1, min-height:0) yields the space. */
+  .card-beats.editable {
+    max-height: 44px;
+    overflow-y: auto;
+  }
   .beat-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
     max-width: 100%;
-    padding: 0 6px;
+    padding: 0 4px 0 6px;
     font-size: var(--fs-xs);
     line-height: 1.5;
     color: var(--text-2);
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--r-pill);
+  }
+  .beat-badge-label {
+    min-width: 0;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  /* The overflow chip — quieter than a real beat, and never shrinks. */
-  .beat-more {
+  .beat-badge-x {
     flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-3);
+    cursor: pointer;
+    border-radius: var(--r-pill);
+    opacity: 0;
+    transition: opacity 120ms ease;
+  }
+  .beat-badge:hover .beat-badge-x,
+  .beat-badge-x:focus-visible {
+    opacity: 1;
+  }
+  .beat-badge-x:hover {
+    color: var(--danger);
+  }
+  /* The overflow chip — quieter than a real beat, and never shrinks. */
+  .beat-badge.beat-more {
+    flex: 0 0 auto;
+    padding: 0 6px;
     color: var(--text-3);
   }
   /* The 3-state page marker (Slice 5b): on_page (moss) / off_page (graphite) /
@@ -625,25 +574,6 @@
     border: 1px solid var(--border-strong);
     border-radius: var(--r-md);
     box-shadow: var(--elev-2);
-  }
-  /* The roomy link-picker surface (#820) — the beats / "Leads to…" editors need real
-     width. Portaled to <body> (use:portalToBody) and positioned in VIEWPORT coords
-     (left/top set inline from the card's screen rect), so `position: fixed` resolves
-     against the viewport and the panel renders at a true 300px rather than scaling
-     with the board's zoom transform. z-index matches the app's portaled popovers
-     (SwatchPicker/TagPicker). */
-  .card-picker {
-    position: fixed;
-    z-index: 10000;
-    width: 300px;
-    max-width: 300px;
-    display: flex;
-    flex-direction: column;
-    background: var(--panel);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--r-md);
-    box-shadow: var(--elev-2);
-    overflow: hidden; /* clip the header/filter borders to the rounded corners */
   }
   .menu-item {
     display: flex;

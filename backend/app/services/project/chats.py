@@ -58,7 +58,9 @@ class ChatSessionsMixin:
         """
         dumped = session.model_dump()
         messages = dumped.pop("messages", None) or []
-        subject = str(dumped.pop("subject", "") or "")
+        # `session` is a validated ChatSession, so `subject` is always a `str`
+        # here (the sparseness lives on the read side, which guards for it).
+        subject = dumped.pop("subject", "")
         metadata: dict = {"subject": subject} if subject else {}
         extra = {key: value for key, value in dumped.items() if key not in ("id", "title")}
         extra["message_count"] = len(messages)

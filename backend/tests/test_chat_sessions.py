@@ -393,6 +393,45 @@ class ChatSubjectAndBodyTests(unittest.TestCase):
         summary = next(s for s in self.service.list_chat_sessions().sessions if s.id == chat.id)
         self.assertEqual(summary.message_count, 40)
 
+    def test_a_front_matter_scalar_with_a_fence_line_does_not_truncate_the_header(self) -> None:
+        # The transcript moved to the body, but front-matter scalars remain — the
+        # system brief is free-form and can itself contain a bare `---` line. It
+        # serializes as an indented scalar; the header-only index reader must not
+        # mistake that indented `---` for the closing delimiter and truncate the
+        # front matter, which would silently drop the chat (and its subject edge)
+        # from the index. This is the front-matter counterpart to the body-side
+        # fence test, guarding the `_read_front_matter_only` delimiter parity fix.
+        self._write_lore("aurora", "Aurora")
+        chat = self.service.create_chat_session(
+            CreateChatSessionRequest(
+                title="T",
+                subject="aurora",
+                system_prompt="Be terse.\n---\nStay in scope.",
+            )
+        )
+        # The index still sees the chat and its subject edge — front matter intact.
+        index = self.service._build_node_index(self.root)
+        self.assertIn(chat.id, index.by_id)
+        self.assertIn(chat.id, [edge.src for edge in index.edges_by_dst.get("aurora", [])])
+        # And the brief round-trips through the CRUD reader unharmed.
+        self.assertEqual(
+            self.service.read_chat_session(chat.id).system_prompt,
+            "Be terse.\n---\nStay in scope.",
+        )
+
+    def test_subject_can_point_at_a_scene(self) -> None:
+        # The picker is kind-neutral (lore + scenes); S5 folds target_scene_id
+        # into subject, so a scene-kind subject must edge like any other.
+        (self.root / "scenes").mkdir(parents=True, exist_ok=True)
+        self.service._write_node_entry_file(
+            self.root / "scenes" / "sc1.md", "sc1", "Opening", "scene:scene", {}, ""
+        )
+        chat = self.service.create_chat_session(
+            CreateChatSessionRequest(title="About the opening", subject="sc1")
+        )
+        index = self.service._build_node_index(self.root)
+        self.assertIn(chat.id, [edge.src for edge in index.edges_by_dst.get("sc1", [])])
+
 
 if __name__ == "__main__":
     unittest.main()

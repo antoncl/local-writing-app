@@ -328,19 +328,36 @@ class PurgeCoversEveryReferenceBearingKindTests(ReferencePurgeTestCase):
 
         self.assertEqual(chat_path.read_text(encoding="utf-8"), before)
 
-    def test_a_chat_subject_ref_is_purged_when_its_target_is_deleted(self) -> None:
+    def test_a_chat_subject_ref_is_purged_but_the_transcript_survives(self) -> None:
         """The counterpart: a chat that points `subject` at a deleted id is a real
-        dangling reference and must be purged like any other entity_ref — this is
-        exactly the `changed` branch the test above pins the other side of."""
+        dangling reference and must be purged like any other entity_ref. But the
+        purge rewrites the chat file (`_write_markdown_with_front_matter`), and
+        the transcript now lives in the body — so clearing the ref must leave the
+        conversation intact. Both halves are asserted: subject cleared, messages
+        preserved."""
         self._write_lore(self.root, "seren", "Seren")
         chat = self.service.create_chat_session(
             CreateChatSessionRequest(title="About Seren", subject="seren")
+        )
+        self.service.save_chat_session(
+            chat.id,
+            SaveChatSessionRequest(
+                title="About Seren",
+                subject="seren",
+                messages=[
+                    {"role": "user", "content": "who is seren?"},
+                    {"role": "assistant", "content": "A long answer.\nWith two lines."},
+                ],
+            ),
         )
         self.assertEqual(self.service.read_chat_session(chat.id).subject, "seren")
 
         self.service.delete_lore_entry("seren")
 
-        self.assertEqual(self.service.read_chat_session(chat.id).subject, "")
+        purged = self.service.read_chat_session(chat.id)
+        self.assertEqual(purged.subject, "")
+        self.assertEqual([m.content for m in purged.messages],
+                         ["who is seren?", "A long answer.\nWith two lines."])
 
     def test_the_purge_preserves_front_matter_it_does_not_own(self) -> None:
         """The typed writers spelled out a fixed key set, so a purge silently

@@ -137,6 +137,40 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
     );
   });
 
+  it("moves focus onto the submenu's first item when drilling in (#832)", async () => {
+    renderPanel([
+      revisePrompt("p-tone", "Revise/Tone"),
+      revisePrompt("p-length", "Revise/Length"),
+    ]);
+    await fireEvent.click(screen.getByRole("button", { name: /New/ }));
+    await tick();
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Revise" }));
+    await tick();
+    // The activated group button unmounted; focus must land on the first child
+    // (alpha: "Length") rather than falling to <body> — otherwise the drilled-in
+    // menu is unreachable by keyboard.
+    expect(screen.getByRole("menuitem", { name: "Length" })).toHaveFocus();
+  });
+
+  it("ascends one level on Escape while drilled in, keeping the menu open (#832)", async () => {
+    renderPanel([
+      revisePrompt("p-tone", "Revise/Tone"),
+      revisePrompt("p-length", "Revise/Length"),
+    ]);
+    await fireEvent.click(screen.getByRole("button", { name: /New/ }));
+    await tick();
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Revise" }));
+    await tick();
+    expect(screen.queryByRole("menuitem", { name: "Revise" })).toBeNull();
+
+    // Escape on a submenu item ascends (does NOT bubble to the Popover's window
+    // listener, which would close the whole menu). The "Revise" group re-appearing
+    // proves both: the level ascended AND the Popover stayed open.
+    await fireEvent.keyDown(screen.getByRole("menuitem", { name: "Length" }), { key: "Escape" });
+    await tick();
+    expect(screen.getByRole("menuitem", { name: "Revise" })).toBeInTheDocument();
+  });
+
   it("does not render when there is nothing to resume and no prompt to start", () => {
     referenceIndexStore.set(new Map());
     const { container } = renderPanel();

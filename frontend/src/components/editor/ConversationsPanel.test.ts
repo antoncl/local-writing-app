@@ -113,6 +113,30 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
     );
   });
 
+  it("folds '/'-titled prompts into a submenu the ＋New menu drills into (#832)", async () => {
+    const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue(undefined);
+    renderPanel([
+      revisePrompt("p-tone", "Revise/Tone"),
+      revisePrompt("p-length", "Revise/Length"),
+    ]);
+
+    await fireEvent.click(screen.getByRole("button", { name: /New/ }));
+    await tick();
+    // Two prompts sharing the "Revise" prefix collapse into one group entry.
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Revise" }));
+    await tick();
+    // Drilled in: the leaves are reachable, the group entry is gone.
+    expect(screen.queryByRole("menuitem", { name: "Revise" })).toBeNull();
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Tone" }));
+
+    expect(spawn).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "p-tone" }),
+      { entry: "hero" },
+      null,
+      expect.objectContaining({ subject: "hero" }),
+    );
+  });
+
   it("does not render when there is nothing to resume and no prompt to start", () => {
     referenceIndexStore.set(new Map());
     const { container } = renderPanel();

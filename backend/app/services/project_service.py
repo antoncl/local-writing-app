@@ -430,11 +430,12 @@ class ProjectService(
             for line in handle:
                 # The closing delimiter is a `---` alone on a line at column 0
                 # (what the writer emits and what `_read_markdown_with_front_matter`
-                # splits on). Match `rstrip()`, not `strip()`: a front-matter
-                # scalar carrying a `---` line — a chat message body, ADR-0051 S1 —
-                # is indented under its key, and stripping the indent would read it
-                # as the terminator and truncate the front matter mid-value.
-                if line.rstrip() == "---":
+                # splits on). Strip only the line-ending, not all trailing
+                # whitespace: an indented front-matter scalar carrying a `---`
+                # line (e.g. a chat's system brief) must not be read as the
+                # terminator, and `--- ` with trailing spaces is not the
+                # delimiter the CRUD reader's exact `\n---\n` split would honour.
+                if line.rstrip("\r\n") == "---":
                     break
                 lines.append(line)
             else:

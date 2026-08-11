@@ -435,6 +435,12 @@ class ChatSession(BaseModel):
     # binding so prompts that reference scene body/metadata resolve it.
     # Empty for freeform chats and chats started from the Chats pane.
     target_scene_id: str = ""
+    # ADR-0051 S2: the node this chat is *about* — a lore entry, character, or
+    # scene. Persisted as the `subject` entity_ref in the node's front-matter
+    # `metadata`, so the index extracts a chat→subject edge and the subject
+    # surfaces its conversations through the ordinary backlink machinery. Empty
+    # for freeform chats. (Generalizes `target_scene_id`; the fold is S5.)
+    subject: str = ""
     pinned: bool = False
     created_at: str
     updated_at: str
@@ -485,6 +491,9 @@ class CreateChatSessionRequest(BaseModel):
     assistant_id: str = ""
     system_prompt: str = ""
     target_scene_id: str = ""
+    # ADR-0051 S2: the node this chat is about (a brainstorm launch stamps the
+    # originating lore entry / scene here). Persisted into `metadata.subject`.
+    subject: str = ""
 
 
 class SaveChatSessionRequest(BaseModel):
@@ -493,6 +502,10 @@ class SaveChatSessionRequest(BaseModel):
     assistant_id: str = ""
     system_prompt: str = ""
     target_scene_id: str = ""
+    # ADR-0051 S2: echoed back on every save so the subject survives per-turn
+    # writes (like target_scene_id). Falls back to the persisted value when a
+    # caller omits it, so it is never silently dropped.
+    subject: str = ""
     pinned: bool = False
     context_items: list[ChatSessionContextItem] = Field(default_factory=list)
     messages: list[ChatSessionMessage] = Field(default_factory=list)

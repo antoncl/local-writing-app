@@ -22,11 +22,16 @@
 
   let {
     entryId,
+    entryTitle = "",
     promptEntries,
     metadataSchema,
     hostPaneId = null,
   }: {
     entryId: string;
+    // The host node's display title — names the launched chat "<entry> — <prompt>"
+    // so brainstorming two entries with the same prompt doesn't yield two
+    // identically-titled chats (ADR-0051 S2).
+    entryTitle?: string;
     promptEntries: PromptEntrySummary[];
     metadataSchema: MetadataSchema | null;
     // The editor pane hosting this bar. The launched chat registers as its
@@ -46,7 +51,13 @@
   async function launch(): Promise<void> {
     const prompt = brainstormPrompts[0];
     if (!prompt || !entryId) return;
-    await chatSessions.openChatFromPromptEntry(prompt, { entry: entryId }, null, "", hostPaneId);
+    // This entry IS the subject the brainstorm is about (ADR-0051 S2): stamp it
+    // so the chat surfaces in "chats about this entry" and is named after it.
+    await chatSessions.openChatFromPromptEntry(prompt, { entry: entryId }, null, {
+      parentPaneId: hostPaneId,
+      subject: entryId,
+      subjectTitle: entryTitle,
+    });
   }
 </script>
 

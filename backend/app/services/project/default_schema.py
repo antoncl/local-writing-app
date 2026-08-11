@@ -464,16 +464,17 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         },
         "chat:chat_session": {
             # Chat-as-node base type. Concrete (not abstract) because chats are
-            # instantiated directly via the chats pane. Storage is an ordinary
-            # body-less Node file at <project>/chats/<id>.md (ADR-0051 S1); the
-            # ChatSession payload (prompt binding, assistant, system brief,
-            # message history, journal) lives in the file's front matter, driven
-            # by the Python model, so none of it is declared as schema fields
-            # here. `color` is the one metadata field; `subject` (an entity_ref
-            # to what the chat is about) arrives in ADR-0051 S2.
+            # instantiated directly via the chats pane. Storage is a Node file at
+            # <project>/chats/<id>.md: the ChatSession session state (prompt
+            # binding, assistant, system brief, journal) lives in front matter,
+            # and the message transcript lives in the node *body* (ADR-0051 S2) —
+            # kept out of front matter so the index never parses it. `subject` is
+            # a live entity_ref (what the chat is about); `color` is the per-node
+            # tint. Neither is written by any editor today, but declaring
+            # `subject` is what makes the chat→subject edge extract.
             "name": "Chat",
             "kind": "chat",
-            "fields": ["color"],
+            "fields": ["subject", "color"],
             "has_body": False,
             "body_shape": "chat",
             "color": "graphite",
@@ -688,6 +689,17 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Related Entries",
             "type": "entity_ref_list",
             "picker_config": {"sources": [{"kind": "lore"}]},
+        },
+        "subject": {
+            # ADR-0051 S2: what a chat is *about* — the node it was opened
+            # against (a lore entry, character, or scene). A live `entity_ref`,
+            # so the index extracts a chat→subject edge and the subject surfaces
+            # its conversations through the ordinary backlink machinery, with no
+            # chat-specific traversal. Kind-neutral: the picker offers lore
+            # entries and scenes (character = lore:character).
+            "name": "Subject",
+            "type": "entity_ref",
+            "picker_config": {"sources": [{"kind": "lore"}, {"kind": "scene"}]},
         },
         "plotline": {
             # A single reference to a `plot:plotline` thread. A shared catalog

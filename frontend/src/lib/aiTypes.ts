@@ -267,6 +267,9 @@ export type ChatSession = {
   // Scene this chat was opened against; passed as the `scene` binding at
   // first-send render. Empty for freeform / Chats-pane chats.
   target_scene_id?: string;
+  // ADR-0051 S2: the node this chat is about (a lore entry / scene). Surfaces
+  // "chats about X" via the reverse-reference index. Empty for freeform chats.
+  subject?: string;
   pinned: boolean;
   created_at: string;
   updated_at: string;
@@ -302,6 +305,9 @@ export type CreateChatSessionRequest = {
   assistant_id?: string;
   system_prompt?: string;
   target_scene_id?: string;
+  // ADR-0051 S2: the node this chat is about (a lore entry / scene). Persisted
+  // into the chat's metadata.subject so the index extracts a chat→subject edge.
+  subject?: string;
 };
 
 export type SaveChatSessionRequest = {
@@ -310,6 +316,9 @@ export type SaveChatSessionRequest = {
   assistant_id: string;
   system_prompt: string;
   target_scene_id?: string;
+  // ADR-0051 S2: echoed on save so the subject survives per-turn writes;
+  // backend falls back to the persisted value when omitted.
+  subject?: string;
   pinned: boolean;
   context_items: ChatSessionContextItem[];
   messages: ChatSessionMessage[];

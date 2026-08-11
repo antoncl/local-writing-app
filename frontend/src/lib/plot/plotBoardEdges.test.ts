@@ -3,7 +3,16 @@
 // so the derived-edge logic lives — and is verified — here; the compositing is
 // browser-checked.
 import { describe, expect, it } from "vitest";
-import { buildBoardEdges, CARD_SOURCE_HANDLE, CARD_TARGET_HANDLE, type EdgeLayer } from "./plotBoardEdges";
+import {
+  buildBoardEdges,
+  CARD_SOURCE_HANDLE,
+  CARD_TARGET_HANDLE,
+  CAUSAL_MARKER_COLOR,
+  CAUSAL_WARN_COLOR,
+  causalWarnMessage,
+  type CausalEdgeData,
+  type EdgeLayer,
+} from "./plotBoardEdges";
 import type { PlotBoardBeat, PlotBoardProjection } from "@/lib/types";
 
 function projection(cards: PlotBoardProjection["cards"]): PlotBoardProjection {
@@ -162,6 +171,77 @@ describe("buildBoardEdges", () => {
     it("is silent unless the causal layer is on", () => {
       const p = projection([card("a", { causal_links: ["b"] }), card("b")]);
       expect(buildBoardEdges(p, layers("manuscript", "beats"))).toEqual([]);
+    });
+  });
+
+  describe("out-of-order diagnostic (Slice 7)", () => {
+    const dataOf = (e: { data?: unknown }) => e.data as CausalEdgeData;
+
+    it("flags a causal edge whose cause is revealed after its effect", () => {
+      // “Cause” is read 2nd (seq 1) but leads to “Effect”, read 1st (seq 0).
+      const p = projection([
+        card("a", { sequence: 1, title: "Cause", causal_links: ["b"] }),
+        card("b", { sequence: 0, title: "Effect" }),
+      ]);
+      const [edge] = buildBoardEdges(p, layers("causal"));
+      expect(edge.class).toContain("causal-warn");
+      expect(dataOf(edge).outOfOrder).toBe(true);
+      // Carries both titles so the edge composes a concrete why/what-to-do message.
+      expect(dataOf(edge)).toMatchObject({ sourceTitle: "Cause", targetTitle: "Effect" });
+      expect(edge.markerEnd).toMatchObject({ color: CAUSAL_WARN_COLOR });
+    });
+
+    it("does not flag a causal edge that runs with reveal order", () => {
+      const p = projection([card("a", { sequence: 0, causal_links: ["b"] }), card("b", { sequence: 1 })]);
+      const [edge] = buildBoardEdges(p, layers("causal"));
+      expect(edge.class).toBe("causal-edge");
+      expect(dataOf(edge).outOfOrder).toBe(false);
+      expect(edge.markerEnd).toMatchObject({ color: CAUSAL_MARKER_COLOR });
+    });
+
+    it("treats equal reveal ranks as in order (only strictly-after warns)", () => {
+      // Two cards on one scene share a rank — the cause is not strictly after the effect.
+      const p = projection([card("a", { sequence: 3, causal_links: ["b"] }), card("b", { sequence: 3 })]);
+      expect(dataOf(buildBoardEdges(p, layers("causal"))[0]).outOfOrder).toBe(false);
+    });
+
+    it("exempts an edge touching a card with no reveal position (null sequence)", () => {
+      // An off-page source or target holds no reveal-order position → can't be out of order.
+      const p = projection([
+        card("a", { sequence: null, causal_links: ["b"] }),
+        card("b", { sequence: 0, causal_links: ["c"] }),
+        card("c", { sequence: null }),
+      ]);
+      const edges = buildBoardEdges(p, layers("causal"));
+      expect(edges.every((e) => !dataOf(e).outOfOrder)).toBe(true);
+      expect(edges.every((e) => e.class === "causal-edge")).toBe(true);
+    });
+
+    it("fires without the manuscript layer on (not gated on other layers)", () => {
+      const p = projection([
+        card("a", { sequence: 1, causal_links: ["b"] }),
+        card("b", { sequence: 0 }),
+      ]);
+      // Only the causal layer is on; the warning still resolves from the cards' sequences.
+      const [edge] = buildBoardEdges(p, layers("causal"));
+      expect(dataOf(edge).outOfOrder).toBe(true);
+    });
+  });
+
+  describe("causalWarnMessage (the copy the reader sees — un-headless-testable in the edge)", () => {
+    it("names both cards and states why + what to do", () => {
+      const msg = causalWarnMessage("Cause", "Effect");
+      // Both cards, so the warning is concrete, not a generic colour.
+      expect(msg).toContain("“Cause”");
+      expect(msg).toContain("“Effect”");
+      // WHY (revealed later / cause after effect) + WHAT to do (move the source earlier).
+      expect(msg).toMatch(/read later/);
+      expect(msg).toMatch(/Move “Cause” earlier/);
+    });
+
+    it("interpolates the source (not the target) into the fix", () => {
+      // The action names the card to MOVE — the source (cause), not the effect.
+      expect(causalWarnMessage("Setup", "Payoff")).toContain("Move “Setup” earlier");
     });
   });
 

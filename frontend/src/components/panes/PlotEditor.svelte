@@ -606,4 +606,11 @@
     stroke: var(--accent);
     stroke-opacity: 1;
   }
+  /* Slice 7 diagnostic — a causal edge whose cause is revealed AFTER its effect
+     (`buildBoardEdges` tags it `.causal-warn`) recolours to the `--warn` amber; the
+     arrowhead is recoloured to match in the edge builder, and PlotCausalEdge adds a
+     ⚠ with the why/what-to-do tooltip. Declared after `.causal-edge` so it wins. */
+  .plot-board :global(.svelte-flow__edge.causal-warn .svelte-flow__edge-path) {
+    stroke: var(--warn);
+  }
 </style>

@@ -41,6 +41,30 @@ export const CARD_TARGET_HANDLE = "in";
 // edge's stroke so head and line read as one stroke.
 export const CAUSAL_MARKER_COLOR = "var(--accent)";
 
+// The out-of-order causal arrowhead's colour (Slice 7): the `--warn` amber, so a
+// warning edge's head reads the same as its stroke (recoloured amber via the
+// `.causal-warn` scoped rule). A token, matching CAUSAL_MARKER_COLOR's contract.
+export const CAUSAL_WARN_COLOR = "var(--warn)";
+
+// The `data` a causal edge carries to PlotCausalEdge (Slice 7). `outOfOrder` is the
+// setup-after-payoff diagnostic — the cause is revealed AFTER its effect in reading
+// order; the titles let the edge compose a concrete why/what-to-do message without a
+// second lookup. Only causal edges carry this; the derived layers have no `data`.
+export type CausalEdgeData = {
+  outOfOrder: boolean;
+  sourceTitle: string;
+  targetTitle: string;
+};
+
+// The why + what-to-do copy an out-of-order causal edge shows (Slice 7). Pure and
+// exported so the sentence the reader actually sees is unit-testable — the edge can't
+// mount headlessly ([[reference_svelteflow_headless_limits]]), so this is the only
+// place the copy is covered. Names both cards so the warning is concrete, not a
+// generic colour (the decoration-must-explain decision).
+export function causalWarnMessage(sourceTitle: string, targetTitle: string): string {
+  return `Out of reveal order: “${sourceTitle}” leads to “${targetTitle}”, but its scene is read later — the cause lands after its effect. Move “${sourceTitle}” earlier in the manuscript, or reconsider the link.`;
+}
+
 // Order cards along a chain: by manuscript reading order (`sequence`), with the
 // scene-less cards (no sequence — off-page / unwritten) after every ranked one, in
 // their projection order. `order` is the card's index in `projection.cards`, the
@@ -127,22 +151,44 @@ export function buildBoardEdges(projection: PlotBoardProjection, layers: Set<Edg
   // arrowhead the derived layers omit. Skip a target that isn't a live card or is
   // the card itself (defensive; the backend heals these) so a stale projection can
   // never emit a dangling or self edge.
+  //
+  // Slice 7 cross-dimension diagnostic — setup-after-payoff: when the source's
+  // reveal-order rank is AFTER the target's (`source.sequence > target.sequence`),
+  // the cause is revealed after its effect. That edge is flagged out-of-order and
+  // recoloured `--warn`; PlotCausalEdge decorates it with a why/what-to-do marker.
+  // The check reads the cards' `sequence` directly (both dimensions live in the same
+  // projection), so it fires whenever causal edges are drawn — never gated on the
+  // manuscript layer being toggled on. Cards with no scene (null sequence) hold no
+  // reveal position, so an edge touching one is never out of order.
   if (layers.has("causal")) {
-    const cardIds = new Set(projection.cards.map((c) => c.id));
+    const byId = new Map(projection.cards.map((c) => [c.id, c]));
     for (const card of projection.cards) {
-      for (const target of card.causal_links) {
-        if (target === card.id || !cardIds.has(target)) continue;
+      for (const targetId of card.causal_links) {
+        const target = byId.get(targetId);
+        if (targetId === card.id || !target) continue;
+        const outOfOrder =
+          card.sequence != null && target.sequence != null && card.sequence > target.sequence;
+        const data: CausalEdgeData = {
+          outOfOrder,
+          sourceTitle: card.title,
+          targetTitle: target.title,
+        };
         edges.push({
-          id: `causal:${card.id}->${target}`,
+          id: `causal:${card.id}->${targetId}`,
           source: card.id,
-          target,
+          target: targetId,
           sourceHandle: CARD_SOURCE_HANDLE,
           targetHandle: CARD_TARGET_HANDLE,
           // The custom edge (PlotCausalEdge) renders the same path + a hover-× to
-          // remove the link; the class keeps the token stroke/arrowhead styling.
+          // remove the link; the class keeps the token stroke/arrowhead styling, and
+          // `causal-warn` swaps the stroke to `--warn` for an out-of-order edge.
           type: "causal",
-          class: "causal-edge",
-          markerEnd: { type: MarkerType.ArrowClosed, color: CAUSAL_MARKER_COLOR },
+          class: outOfOrder ? "causal-edge causal-warn" : "causal-edge",
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            color: outOfOrder ? CAUSAL_WARN_COLOR : CAUSAL_MARKER_COLOR,
+          },
+          data,
           // Authored → the only selectable/deletable edges: click to select, Delete to
           // remove the "leads to" link (#824, PlotEditor.onDeleteCausal).
           selectable: true,

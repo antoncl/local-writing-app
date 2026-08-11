@@ -6,12 +6,18 @@
   which positions + portals it) that removes the link — the visible counterpart to the
   beat badge's ×. Select-edge + Delete still works too (the edge stays deletable).
 
+  Slice 7 cross-dimension diagnostic: when `data.outOfOrder` (the cause is revealed AFTER
+  its effect in reading order — flagged in `buildBoardEdges`), the edge also wears an amber
+  ⚠ whose tooltip states WHY it's a problem and WHAT to do, per the decoration-must-explain
+  decision. The stroke recolour to `--warn` is the scoped `.causal-warn` rule in PlotEditor.
+
   Free of store imports (the unlink action arrives via context), mirroring the card.
 -->
 <script lang="ts">
   import { BaseEdge, EdgeLabel, getBezierPath, type EdgeProps } from "@xyflow/svelte";
   import { getContext } from "svelte";
   import { PLOT_EDGE_ACTIONS, type PlotEdgeActions } from "./plotCardActions";
+  import { causalWarnMessage, type CausalEdgeData } from "@/lib/plot/plotBoardEdges";
 
   let {
     id,
@@ -24,31 +30,55 @@
     sourcePosition,
     targetPosition,
     markerEnd,
+    data,
   }: EdgeProps = $props();
 
   const actions = getContext<PlotEdgeActions | undefined>(PLOT_EDGE_ACTIONS);
 
-  // [path, labelX, labelY, ...] — the label coords put the × at the curve's midpoint.
+  // The diagnostic payload the edge builder attached (undefined on a legacy/derived edge).
+  let diag = $derived(data as CausalEdgeData | undefined);
+
+  // WHY it's an issue + WHAT to do — the tooltip on the amber ⚠ (only an out-of-order
+  // edge shows it, so it's composed only then). The copy lives in the pure edge module
+  // where it's unit-tested — the edge can't mount headlessly to check it here.
+  let warnMessage = $derived(diag?.outOfOrder ? causalWarnMessage(diag.sourceTitle, diag.targetTitle) : "");
+
+  // [path, labelX, labelY, ...] — the label coords put the marker(s) at the curve's midpoint.
   let bezier = $derived(getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition }));
+
+  let canUnlink = $derived(!!actions && !!source && !!target);
 </script>
 
 <BaseEdge {id} path={bezier[0]} {markerEnd} />
-{#if actions && source && target}
+{#if diag?.outOfOrder || canUnlink}
   <EdgeLabel x={bezier[1]} y={bezier[2]}>
-    <button
-      class="causal-edge-x nodrag nopan"
-      aria-label="Remove causal link"
-      onclick={() => actions.onUnlinkCausal(source, target)}
-    >
-      <i class="ti ti-x" aria-hidden="true"></i>
-    </button>
+    <div class="causal-edge-label nodrag nopan">
+      {#if diag?.outOfOrder}
+        <span class="causal-edge-warn" role="img" aria-label={warnMessage} title={warnMessage}>
+          <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+        </span>
+      {/if}
+      {#if canUnlink}
+        <button
+          class="causal-edge-x"
+          aria-label="Remove causal link"
+          onclick={() => actions?.onUnlinkCausal(source, target)}
+        >
+          <i class="ti ti-x" aria-hidden="true"></i>
+        </button>
+      {/if}
+    </div>
   </EdgeLabel>
 {/if}
 
 <style>
   /* EdgeLabel positions + portals the wrapper at the edge midpoint; this is just the
-     chip. Quiet until hovered — a small accent circle so a causal edge always shows how
-     to remove it, without cluttering a board full of them. */
+     chip row (the warning marker, then the remove ×). */
+  .causal-edge-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
   .causal-edge-x {
     display: inline-flex;
     align-items: center;
@@ -69,5 +99,21 @@
   .causal-edge-x:hover {
     opacity: 1;
     background: var(--accent-soft);
+  }
+  /* The out-of-order warning: an amber ⚠ that always shows (a known story hole must not
+     hide), its tooltip carrying the why/what-to-do. Reads stronger than the quiet ×. */
+  .causal-edge-warn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border: 1px solid var(--warn-border);
+    border-radius: 50%;
+    background: var(--warn-soft);
+    color: var(--warn);
+    font-size: var(--fs-sm);
+    line-height: 1;
+    cursor: help;
   }
 </style>

@@ -235,21 +235,16 @@ export function resolvePromptPositionalArgs(
   };
 }
 
-// True iff the prompt entry-type chain includes `roleplay` (so any
-// future sub-type of roleplay still gets character-tagged on Accept).
+// True iff the prompt entry-type chain includes `roleplay` (so any future
+// sub-type of roleplay still gets character-tagged on Accept). Shares the one
+// parent-chain walk (`entryTypeIsA`); the explicit schema guard keeps the
+// historical "no schema ⇒ not roleplay" behaviour (entryTypeIsA would otherwise
+// exact-match without one).
 export function isRoleplayPromptEntry(
   ctx: PromptResolutionContext,
   entry: PromptEntrySummary | null | undefined,
 ): boolean {
-  if (!entry || !ctx.metadataSchema) return false;
-  let cursor: string | undefined = entry.entry_type;
-  const seen = new Set<string>();
-  while (cursor && !seen.has(cursor)) {
-    if (cursor === "prompt:roleplay") return true;
-    seen.add(cursor);
-    cursor = ctx.metadataSchema.entry_types[cursor]?.parent ?? undefined;
-  }
-  return false;
+  return !!entry && !!ctx.metadataSchema && entryTypeIsA(ctx, entry.entry_type, "prompt:roleplay");
 }
 
 // The mutation resolution scene from a `scene_ref` input (ADR-0012): the first

@@ -58,6 +58,21 @@ function revisePrompt(id: string, title: string): PromptEntrySummary {
   } as unknown as PromptEntrySummary;
 }
 
+// An entry_patch (brainstorm) prompt whose `entry` input targets `targetType` —
+// the per-node filter (ADR-0048 S8b) shows it only on a subject that is-a it.
+function targetedPrompt(id: string, title: string, targetType: string): PromptEntrySummary {
+  return {
+    id,
+    title,
+    body: "",
+    entry_type: "prompt:revise",
+    metadata: {},
+    inputs: [
+      { name: "entry", type: "context_pick", label: "E", target: { sources: [{ expr: { type: targetType } }] } },
+    ],
+  } as unknown as PromptEntrySummary;
+}
+
 function chatPanelPrompt(id: string, title: string): PromptEntrySummary {
   return {
     id,
@@ -215,6 +230,26 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
     expect(container.querySelector(".conv-new")).toBeNull();
     // The panel still renders — there are chats to resume.
     expect(container.querySelector(".entry-conversations")).not.toBeNull();
+  });
+
+  it("hides an entry_patch prompt whose target the subject is not (ADR-0048 S8b)", () => {
+    // A plot-card-targeting brainstorm prompt on a LORE subject → excluded, so
+    // ＋New has nothing to start (the resume list still renders).
+    const { container } = renderPanel(
+      [targetedPrompt("p-card", "Revise plot card", "plot:card")],
+      undefined,
+      "lore:character",
+    );
+    expect(container.querySelector(".conv-new")).toBeNull();
+    expect(container.querySelector(".entry-conversations")).not.toBeNull();
+  });
+
+  it("shows an entry_patch prompt for a subject that is its target type (ADR-0048 S8b)", async () => {
+    // The same prompt on a plot:card subject → offered.
+    renderPanel([targetedPrompt("p-card", "Revise plot card", "plot:card")], undefined, "plot:card");
+    await fireEvent.click(screen.getByRole("button", { name: /New/ }));
+    await tick();
+    expect(screen.getByRole("menuitem", { name: "Revise plot card" })).toBeInTheDocument();
   });
 
   it("does not render when there is nothing to resume and no prompt to start", () => {

@@ -96,12 +96,11 @@
   // set is further scoped to the prompts whose entry-input target admits THIS
   // node's type (ADR-0048 S8b) — a lore entry offers the lore revise prompt, a plot
   // card the plot-card one, not cross; the chat_panel surface is not so filtered.
+  let surfacePrompts = $derived(promptEntriesForSurface(ctx, newSurface));
   let newPrompts = $derived(
     newSurface === "entry_patch"
-      ? promptEntriesForSurface(ctx, "entry_patch").filter((prompt) =>
-          promptTargetsEntryType(ctx, prompt, subjectEntryType),
-        )
-      : promptEntriesForSurface(ctx, newSurface),
+      ? surfacePrompts.filter((prompt) => promptTargetsEntryType(ctx, prompt, subjectEntryType))
+      : surfacePrompts,
   );
   // Prompt titles with "/" fold into a navigable submenu (#832); a flat list of
   // slashless titles yields a flat menu, unchanged.

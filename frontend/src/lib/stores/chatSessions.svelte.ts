@@ -15,6 +15,7 @@ import { api } from "@/lib/api";
 import { editorPanes } from "@/lib/stores/editorPanes.svelte";
 import { subordinatePanes } from "@/lib/stores/subordinatePanes";
 import { resolutionSceneIdFromInputs } from "@/lib/editor-core/promptResolution";
+import { refreshReferenceIndexInBackground } from "@/lib/stores/references";
 import {
   chatSessionsStore,
   refreshChatSessions,
@@ -101,6 +102,12 @@ class ChatSessions {
         });
       }
       await this.refresh();
+      // A chat created with a `subject` mints a chat→subject edge (ADR-0051 S2);
+      // the creation path bypasses saveEditorPane's change-gated index refresh
+      // (#200), so refresh the reverse index here — otherwise the subject's
+      // Conversations surface (S3) stays stale until reload and the writer, seeing
+      // an empty list, spawns the very duplicate this feature removes.
+      if (subject) refreshReferenceIndexInBackground();
       await editorPanes.openChat(session.id);
       // A chat launched from a host node (the lore Brainstorm bar) is subordinate
       // to that node's pane — close it when the master closes. The pane id is the

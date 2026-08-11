@@ -7,7 +7,7 @@
   import EditorRail from "@/components/editor/EditorRail.svelte";
   import ReadOnlyBodyOverlay from "@/components/editor/body/ReadOnlyBodyOverlay.svelte";
   import EntryRevisionReview from "@/components/editor/body/EntryRevisionReview.svelte";
-  import EntryBrainstormBar from "@/components/editor/EntryBrainstormBar.svelte";
+  import ConversationsPanel from "@/components/editor/ConversationsPanel.svelte";
   import { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
   import { EntryProposalController } from "@/lib/stores/entryProposal.svelte";
   import { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
@@ -87,7 +87,7 @@
     // via onAuthoringLayerChange.
     authoringLayerId?: string | null;
     todoStatusHint?: string;
-    // The workspace pane hosting this editor. Threaded to EntryBrainstormBar so a
+    // The workspace pane hosting this editor. Threaded to ConversationsPanel so a
     // launched Brainstorm chat registers as this pane's subordinate (auto-closes
     // with it). Null when the host isn't a tiled pane (e.g. a test mount).
     hostPaneId?: string | null;
@@ -418,7 +418,7 @@
 
   // ADR-0046 slice 2/3 — the entry-patch brainstorm review, generalized to any
   // schema-typed node (ADR-0048 §5). A `revise:entry` chat commits an EntryPatch
-  // (launched via EntryBrainstormBar); the controller derives the proposed-vs-
+  // (launched via ConversationsPanel's ＋New menu); the controller derives the proposed-vs-
   // current flips off the live buffer fed below, and the adopt write stays here
   // (owns `metadata` + prose buffer, so both land in one PUT — ADR-0046 §1). The
   // controller is kind-agnostic; the host's participation policy is `patchLoopKind`.
@@ -742,6 +742,21 @@
         on:navigate={(event) => onNavigate?.(event.detail)}
       />
     {/key}
+    {#if patchLoopKind && scene?.id}
+      <!-- The Conversations surface (ADR-0051 S3): the chats about this entry,
+           resume-first, + a ＋New menu — the launcher that replaced the
+           silent-spawn brainstorm verb. Keyed on the node id so its expand /
+           menu state resets when the open entry changes. -->
+      {#key scene.id}
+        <ConversationsPanel
+          subjectId={scene.id}
+          subjectTitle={title}
+          {promptEntries}
+          {metadataSchema}
+          {hostPaneId}
+        />
+      {/key}
+    {/if}
     {#if documentKind === "lore" && scene?.id}
       <MutationTimeline
         units={scrub.units}
@@ -797,9 +812,6 @@
             <input class="title-input" aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()}`} placeholder={documentNameLabel} bind:value={title} oninput={handleTitleInput} />
           {/if}
         </label>
-        {#if patchLoopKind && scene?.id}
-          <EntryBrainstormBar entryId={scene.id} entryTitle={title} {promptEntries} {metadataSchema} {hostPaneId} />
-        {/if}
       </div>
       <!-- Layer override authoring (#314 / ADR-0042): choose which level this
            inherited entry's edits write to. Renders only for an inherited lore

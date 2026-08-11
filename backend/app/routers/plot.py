@@ -18,6 +18,7 @@ from app.models import (
     CreateTemplateInstanceRequest,
     PlotBoard,
     PlotBoardProjection,
+    PlotContext,
     PlotlineEntry,
     PlotlineList,
     PlotTemplate,
@@ -55,6 +56,20 @@ def get_plot_board_projection(project: CurrentProject) -> PlotBoardProjection:
     opaque layout, in one read (ADR-0048 S7a)."""
     with translate_errors():
         return project.read_plot_board_projection()
+
+
+@router.get("/api/plot/board/context", response_model=PlotContext)
+def get_plot_context(project: CurrentProject, as_of: str | None = None) -> PlotContext:
+    """What the AI sees to reason about the plot (ADR-0048 S8a): the board's plot
+    state — plotlines, arcs with full beat rosters, and cards with synopses / beat
+    links / causal edges — spoiler-gated by manuscript reveal order.
+
+    `as_of` (a card or scene id) anchors the gate: cards up to and including its
+    reveal position are shown, later cards are withheld and only counted. Omit it
+    for the whole board. This is the "what the AI sees" preview; the same read
+    feeds Slice 8b's card brainstorm as prompt context."""
+    with translate_errors():
+        return project.read_plot_context(as_of)
 
 
 @router.get("/api/plot/plotlines", response_model=PlotlineList)

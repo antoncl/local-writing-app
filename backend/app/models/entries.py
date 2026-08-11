@@ -351,6 +351,90 @@ class PlotBoardProjection(BaseModel):
     cards: list[PlotBoardCard] = Field(default_factory=list)
 
 
+class PlotContextBeat(BaseModel):
+    """A beat in an arc's roster as the AI reads it (ADR-0048 S8a): the
+    requirement a card is measured against — its title, the story `function` it
+    serves, and the writer's `guidance`. Carried for EVERY beat in the roster,
+    including beats no card fulfils yet, so the AI can name the gaps."""
+
+    beat_id: str
+    title: str
+    function: str = ""
+    guidance: str = ""
+
+
+class PlotContextArc(BaseModel):
+    """A template instance (an "arc") as the AI reads it (ADR-0048 S8a): the plot
+    structure the cards are measured against. NOT gated by reveal order — an arc
+    is the writer's own scaffolding, not manuscript content — so its full beat
+    roster is always present. `source_template_name` is the lineage snapshot (the
+    named structure it was rolled from), blank for an ad-hoc arc."""
+
+    id: str
+    title: str
+    source_template_name: str = ""
+    beats: list[PlotContextBeat] = Field(default_factory=list)
+
+
+class PlotContextPlotline(BaseModel):
+    """A plotline (thread) as the AI reads it (ADR-0048 S8a): id, title, colour —
+    the same thread the board colours cards by. Never gated."""
+
+    id: str
+    title: str
+    color: str | None = None
+
+
+class PlotContextCard(BaseModel):
+    """A card as the AI reads it (ADR-0048 S8a): its `synopsis` (the prose
+    stand-in a beat's fulfilment is reasoned from), its plotline, its reveal-order
+    `sequence`, its `page_status`, the beats it fulfils, and the cards it *leads
+    to* (`causal_out`). Only cards the spoiler gate ADMITS appear — a card past
+    the `as_of` anchor is withheld (counted in `PlotContext.omitted_cards`), and
+    `causal_out` is filtered to admitted targets so a withheld card never leaks
+    through an edge."""
+
+    id: str
+    title: str
+    synopsis: str = ""
+    plotline_id: str | None = None
+    plotline_title: str | None = None
+    scene_id: str | None = None
+    sequence: int | None = None
+    page_status: str | None = None
+    beats: list[PlotBoardBeat] = Field(default_factory=list)
+    causal_out: list[str] = Field(default_factory=list)
+
+
+class PlotContext(BaseModel):
+    """What the AI sees to reason about the plot (ADR-0048 S8a): the board's plot
+    state assembled into one packet, spoiler-gated by manuscript reveal order.
+
+    Given an `as_of` anchor (a card or a scene), cards are included up to and
+    including its reveal `sequence`; later cards are withheld and only COUNTED
+    (`omitted_cards`), so the AI knows more exists without seeing it — a pantser
+    can ask "what's next" without the model reading ahead and railroading them.
+    With no anchor the whole board is present (`completeness == "whole_board"`):
+    plotter mode, nothing to spoil. Arcs and plotlines are never gated — they are
+    the writer's own scaffolding, not manuscript content, and the full beat roster
+    is what lets the AI name a beat no card fulfils yet.
+
+    Assembled read-only from card + plotline + arc + structure data (ADR-0048
+    S4–S6), reusing the board projection's resolve helpers. This is context
+    assembly (prompt INPUT); none of the quarry's claims/evidence apparatus is
+    carried (migration principle 2), and the AI writes back through the JSON
+    node-patch loop, not an XML suggestion protocol (Slice 8b)."""
+
+    board_id: str = ""
+    completeness: str = "whole_board"
+    as_of_scene_id: str | None = None
+    as_of_sequence: int | None = None
+    omitted_cards: int = 0
+    plotlines: list[PlotContextPlotline] = Field(default_factory=list)
+    arcs: list[PlotContextArc] = Field(default_factory=list)
+    cards: list[PlotContextCard] = Field(default_factory=list)
+
+
 class MoveLoreNoteToResearchResponse(BaseModel):
     """Result of POST /api/lore/{id}/move-to-research.
 

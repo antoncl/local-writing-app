@@ -76,6 +76,14 @@ disguise. `cost` is already derived from `ai_invocations` and stays telemetry-ow
 The exact frontmatter serialization is an implementation choice for the first slice, not fixed here
 (ADR-0005: a guessed storage slot acquires authority it never earned).
 
+> **S2 amends the storage slot.** The transcript (`messages`) moved to the node **body**, not the
+> frontmatter, once S2 enrolled the chat in the index: `_read_front_matter_only` parses every node up
+> to the closing `---`, so an unbounded transcript in frontmatter is re-parsed on every index build
+> and save for a header the index never needs. Keeping only the small session header + `metadata`
+> (where `subject` lives) in frontmatter, and the transcript below the fence, is exactly how scenes
+> keep prose out of the index. The "empty body" line above was the guess ADR-0005 warns about; the
+> slice that carried the cost is the one that corrected it.
+
 **No migration.** Pre-1.0, existing chat files are recreated, not migrated — no migration script,
 no defensive reads (the standing pre-1.0 rule).
 

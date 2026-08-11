@@ -19,6 +19,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import yaml
+
 from app.models import (
     ChatSession,
     ChatSessionList,
@@ -42,22 +44,38 @@ class ChatSessionsMixin:
         return self._chats_dir() / f"{chat_id}.md"
 
     def _write_chat_session(self, path: Path, session: ChatSession) -> None:
-        """Persist a chat as a body-less Node file (ADR-0051 S1).
+        """Persist a chat as a Node file (ADR-0051 S2).
 
-        Identity (`id`/`title`/`entry_type`) is the node header; the rest of
-        the ChatSession payload rides `extra=` into front matter. `metadata`
-        is empty — the `chat:chat_session` type declares only `color`, which
-        nothing writes today (a future node-editor path is the one that would).
+        Identity (`id`/`title`/`entry_type`) is the node header. The message
+        transcript goes to the node **body** — kept out of front matter so the
+        index (`_read_front_matter_only`) and the roster stop at the closing
+        delimiter and never parse an unbounded conversation. `subject` (what the
+        chat is about) is an `entity_ref`, so it lives in `metadata`, where the
+        edge extractor finds it. The remaining session state rides `extra=` into
+        front matter, plus a denormalized `message_count` so the roster reads
+        the header alone; it is written here atomically with the transcript it
+        counts, so it cannot drift.
         """
         dumped = session.model_dump()
+        messages = dumped.pop("messages", None) or []
+        # `session` is a validated ChatSession, so `subject` is always a `str`
+        # here (the sparseness lives on the read side, which guards for it).
+        subject = dumped.pop("subject", "")
+        metadata: dict = {"subject": subject} if subject else {}
         extra = {key: value for key, value in dumped.items() if key not in ("id", "title")}
+        extra["message_count"] = len(messages)
+        body = (
+            yaml.safe_dump({"messages": messages}, sort_keys=False, allow_unicode=True)
+            if messages
+            else ""
+        )
         self._write_node_entry_file(
             path,
             session.id,
             session.title,
             "chat:chat_session",
-            {},
-            "",
+            metadata,
+            body,
             extra=extra,
             omit_empty_metadata=True,
         )
@@ -71,12 +89,19 @@ class ChatSessionsMixin:
             if not entry.is_file() or entry.suffix.lower() != ".md":
                 continue
             try:
-                data, _ = self._read_markdown_with_front_matter(entry, strict=False)
+                # Header only — the transcript is in the body (ADR-0051 S2), so
+                # the roster never reads an unbounded conversation. `message_count`
+                # is denormalized into front matter by `_write_chat_session`.
+                data = self._read_front_matter_only(entry, strict=False)
             except Exception:
                 continue
-            if not isinstance(data, dict) or not data.get("id"):
+            if not data.get("id"):
                 continue
-            messages = data.get("messages") or []
+            raw_count = data.get("message_count", 0)
+            try:
+                message_count = int(raw_count)
+            except (TypeError, ValueError):
+                message_count = 0
             raw_cost = data.get("cost_usd_total", 0.0)
             try:
                 cost_usd_total = float(raw_cost) if raw_cost is not None else 0.0
@@ -91,7 +116,7 @@ class ChatSessionsMixin:
                     pinned=bool(data.get("pinned", False)),
                     created_at=str(data.get("created_at", "") or ""),
                     updated_at=str(data.get("updated_at", "") or ""),
-                    message_count=len(messages) if isinstance(messages, list) else 0,
+                    message_count=message_count,
                     cost_usd_total=cost_usd_total,
                 )
             )
@@ -110,9 +135,20 @@ class ChatSessionsMixin:
         path = self._chat_path(chat_id)
         if not path.exists():
             raise ProjectServiceError(f"Chat {chat_id} does not exist.", 404)
-        data, _ = self._read_markdown_with_front_matter(path, strict=True)
-        if not isinstance(data, dict):
-            raise ProjectServiceError(f"Chat {chat_id} is malformed.", 500)
+        front, body = self._read_markdown_with_front_matter(path, strict=True)
+        # `strict=True` already guarantees a dict-or-raise, so `front` is a map.
+        data = dict(front)
+        data.pop("message_count", None)  # denormalized roster hint; not a model field
+        # `subject` is stored as an entity_ref in `metadata` (so the index
+        # extracts the edge); the model carries it top-level. Lift it back out.
+        meta = data.pop("metadata", None)
+        if isinstance(meta, dict) and meta.get("subject"):
+            data["subject"] = str(meta.get("subject") or "")
+        # The transcript lives in the body (ADR-0051 S2), serialized as YAML.
+        if body.strip():
+            parsed = yaml.safe_load(body)
+            if isinstance(parsed, dict):
+                data["messages"] = parsed.get("messages") or []
         session = ChatSession.model_validate(data)
         # Phase C2 Slice B: cost_usd_total is now a projection of the
         # unified ai_invocations log. The persisted YAML value is kept
@@ -138,6 +174,7 @@ class ChatSessionsMixin:
             assistant_id=request.assistant_id,
             system_prompt=request.system_prompt,
             target_scene_id=request.target_scene_id,
+            subject=request.subject,
             pinned=False,
             created_at=now,
             updated_at=now,
@@ -256,6 +293,9 @@ class ChatSessionsMixin:
             # per-turn saves. Fall back to the persisted value when a
             # caller omits it, so it's never silently dropped.
             target_scene_id=request.target_scene_id or existing.target_scene_id,
+            # Echoed on every save; fall back to the persisted value so a caller
+            # that omits it never silently drops the subject (ADR-0051 S2).
+            subject=request.subject or existing.subject,
             pinned=request.pinned,
             created_at=existing.created_at,
             updated_at=self._utcnow_iso(),

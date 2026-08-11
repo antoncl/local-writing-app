@@ -84,11 +84,11 @@ class ChatSessionEndpointTests(unittest.TestCase):
         self.assertEqual(body["created_at"], created["created_at"])
 
     def test_message_content_with_a_fence_line_round_trips(self) -> None:
-        # A chat is a body-less Node file (ADR-0051 S1) whose transcript lives in
-        # front matter. A message whose content contains a bare `---` line must
-        # not truncate that front matter — yaml escapes the newline, but lock it.
-        # Driven through `self.service` so one instance owns both the write and
-        # the index it builds.
+        # A chat's transcript lives in the node body (ADR-0051 S2). A message
+        # whose content contains a bare `---` line must round-trip and must not
+        # be mistaken for the front-matter delimiter by the header-only index
+        # reader. Driven through `self.service` so one instance owns both the
+        # write and the index it builds.
         chat = self.service.create_chat_session(CreateChatSessionRequest(title="T"))
         tricky = "before\n---\nafter"
         self.service.save_chat_session(
@@ -301,6 +301,136 @@ class ChatSessionEndpointTests(unittest.TestCase):
         self.assertTrue(body["pinned"])
         self.assertEqual(len(body["context_items"]), 1)
         self.assertEqual(len(body["messages"]), 2)
+
+
+class ChatSubjectAndBodyTests(unittest.TestCase):
+    """ADR-0051 S2: a chat carries a `subject` entity_ref (so a node surfaces
+    its conversations), and its transcript lives in the node body (so the index
+    never parses an unbounded conversation)."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.service = open_test_project(self.root, "Chat Subject Tests")
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _write_lore(self, node_id: str, title: str) -> None:
+        (self.root / "lore").mkdir(parents=True, exist_ok=True)
+        self.service._write_node_entry_file(
+            self.root / "lore" / f"{node_id}.md", node_id, title, "lore:entry", {}, ""
+        )
+
+    def test_subject_persists_into_metadata_and_edges_a_backlink(self) -> None:
+        # A brainstorm launch stamps the originating node as the chat's subject.
+        self._write_lore("aurora", "Aurora")
+        chat = self.service.create_chat_session(
+            CreateChatSessionRequest(title="Aurora — Revise entry", subject="aurora")
+        )
+        # It lands in the front-matter `metadata` (where the edge extractor looks),
+        # not as a bare top-level key.
+        front = self.service._read_front_matter_only(self.root / "chats" / f"{chat.id}.md")
+        self.assertEqual(front.get("metadata", {}).get("subject"), "aurora")
+        self.assertNotIn("subject", {k for k in front if k != "metadata"})
+        # And the index extracts a chat→subject edge with no chat-specific code,
+        # so the subject answers "chats about me" through the reverse index.
+        index = self.service._build_node_index(self.root)
+        inbound = index.edges_by_dst.get("aurora", [])
+        self.assertIn(chat.id, [edge.src for edge in inbound])
+        self.assertEqual(
+            [edge.field_id for edge in inbound if edge.src == chat.id], ["subject"]
+        )
+        # Round-trips back onto the model.
+        self.assertEqual(self.service.read_chat_session(chat.id).subject, "aurora")
+
+    def test_no_subject_writes_no_metadata_and_no_edge(self) -> None:
+        chat = self.service.create_chat_session(CreateChatSessionRequest(title="Freeform"))
+        front = self.service._read_front_matter_only(self.root / "chats" / f"{chat.id}.md")
+        # `omit_empty_metadata` keeps the header tidy when there's nothing to say.
+        self.assertNotIn("metadata", front)
+        index = self.service._build_node_index(self.root)
+        self.assertEqual(index.edges_by_src.get(chat.id, []), [])
+
+    def test_subject_survives_a_save_that_omits_it(self) -> None:
+        self._write_lore("aurora", "Aurora")
+        chat = self.service.create_chat_session(
+            CreateChatSessionRequest(title="T", subject="aurora")
+        )
+        # A general save (rename / message append) doesn't forward subject; the
+        # persisted value must not be silently dropped.
+        saved = self.service.save_chat_session(
+            chat.id,
+            SaveChatSessionRequest(title="Renamed", messages=[{"role": "user", "content": "hi"}]),
+        )
+        self.assertEqual(saved.subject, "aurora")
+        self.assertEqual(self.service.read_chat_session(chat.id).subject, "aurora")
+
+    def test_transcript_lives_in_the_body_and_the_index_reads_only_the_header(self) -> None:
+        chat = self.service.create_chat_session(CreateChatSessionRequest(title="T"))
+        # A sizeable transcript — the exact case the body move exists for.
+        transcript = [
+            {"role": "user" if i % 2 == 0 else "assistant", "content": f"line {i}\nmore {i}"}
+            for i in range(40)
+        ]
+        self.service.save_chat_session(
+            chat.id, SaveChatSessionRequest(title="T", messages=transcript)
+        )
+        path = self.root / "chats" / f"{chat.id}.md"
+        # The header-only reader (the index path) stops at the delimiter: it sees
+        # the denormalized count but never the transcript itself.
+        front = self.service._read_front_matter_only(path)
+        self.assertNotIn("messages", front)
+        self.assertEqual(front.get("message_count"), 40)
+        # The transcript is in the body, after the closing `---`.
+        _, body = self.service._read_markdown_with_front_matter(path, strict=True)
+        self.assertIn("line 39", body)
+        # And it round-trips losslessly through the CRUD reader.
+        got = self.service.read_chat_session(chat.id)
+        self.assertEqual(len(got.messages), 40)
+        self.assertEqual(got.messages[39].content, "line 39\nmore 39")
+        # The roster reflects the count without reading the body.
+        summary = next(s for s in self.service.list_chat_sessions().sessions if s.id == chat.id)
+        self.assertEqual(summary.message_count, 40)
+
+    def test_a_front_matter_scalar_with_a_fence_line_does_not_truncate_the_header(self) -> None:
+        # The transcript moved to the body, but front-matter scalars remain — the
+        # system brief is free-form and can itself contain a bare `---` line. It
+        # serializes as an indented scalar; the header-only index reader must not
+        # mistake that indented `---` for the closing delimiter and truncate the
+        # front matter, which would silently drop the chat (and its subject edge)
+        # from the index. This is the front-matter counterpart to the body-side
+        # fence test, guarding the `_read_front_matter_only` delimiter parity fix.
+        self._write_lore("aurora", "Aurora")
+        chat = self.service.create_chat_session(
+            CreateChatSessionRequest(
+                title="T",
+                subject="aurora",
+                system_prompt="Be terse.\n---\nStay in scope.",
+            )
+        )
+        # The index still sees the chat and its subject edge — front matter intact.
+        index = self.service._build_node_index(self.root)
+        self.assertIn(chat.id, index.by_id)
+        self.assertIn(chat.id, [edge.src for edge in index.edges_by_dst.get("aurora", [])])
+        # And the brief round-trips through the CRUD reader unharmed.
+        self.assertEqual(
+            self.service.read_chat_session(chat.id).system_prompt,
+            "Be terse.\n---\nStay in scope.",
+        )
+
+    def test_subject_can_point_at_a_scene(self) -> None:
+        # The picker is kind-neutral (lore + scenes); S5 folds target_scene_id
+        # into subject, so a scene-kind subject must edge like any other.
+        (self.root / "scenes").mkdir(parents=True, exist_ok=True)
+        self.service._write_node_entry_file(
+            self.root / "scenes" / "sc1.md", "sc1", "Opening", "scene:scene", {}, ""
+        )
+        chat = self.service.create_chat_session(
+            CreateChatSessionRequest(title="About the opening", subject="sc1")
+        )
+        index = self.service._build_node_index(self.root)
+        self.assertIn(chat.id, [edge.src for edge in index.edges_by_dst.get("sc1", [])])
 
 
 if __name__ == "__main__":

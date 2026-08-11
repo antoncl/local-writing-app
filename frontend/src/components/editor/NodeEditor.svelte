@@ -798,7 +798,7 @@
           {/if}
         </label>
         {#if patchLoopKind && scene?.id}
-          <EntryBrainstormBar entryId={scene.id} {promptEntries} {metadataSchema} {hostPaneId} />
+          <EntryBrainstormBar entryId={scene.id} entryTitle={title} {promptEntries} {metadataSchema} {hostPaneId} />
         {/if}
       </div>
       <!-- Layer override authoring (#314 / ADR-0042): choose which level this

@@ -24,6 +24,7 @@ from tempfile import TemporaryDirectory
 
 from layer_fixtures import declare_full_chain
 
+from app.models import CreateChatSessionRequest, SaveChatSessionRequest
 from app.services.project_service import ProjectService
 
 
@@ -304,30 +305,59 @@ class PurgeCoversEveryReferenceBearingKindTests(ReferencePurgeTestCase):
 
         self.assertNotIn("seren", assistant.read_text(encoding="utf-8"))
 
-    def test_a_chat_session_is_untouched(self) -> None:
-        """Chats are ordinary Node files now (ADR-0051 S1) and reference-bearing,
-        but `chat:chat_session` declares no entity_ref field — so the purge finds
-        nothing to change and must leave the file (transcript and all) byte-
-        identical. The safety rests on the `if not changed: continue` guard, so
-        this locks it: adding a chat entity_ref later would trip this test first."""
+    def test_a_chat_session_without_a_subject_is_untouched(self) -> None:
+        """Chats are ordinary reference-bearing Node files (ADR-0051), but a chat
+        that names no `subject` has no entity_ref to purge — so a delete must
+        leave the file (transcript and all) byte-identical, even when the
+        transcript mentions the purged id in prose. The safety rests on the
+        `if not changed: continue` guard; this locks it. A chat that DOES point
+        `subject` at the deleted id is the opposite case, covered separately."""
         self._write_lore(self.root, "seren", "Seren")
-        chats = self.root / "chats"
-        chats.mkdir(parents=True, exist_ok=True)
-        chat_path = chats / "chat_1.md"
-        self.service._write_node_entry_file(
-            chat_path,
-            "chat_1",
-            "Talk",
-            "chat:chat_session",
-            {},
-            "",
-            extra={"messages": [{"role": "user", "body": "seren"}]},
+        chat = self.service.create_chat_session(CreateChatSessionRequest(title="Talk"))
+        self.service.save_chat_session(
+            chat.id,
+            SaveChatSessionRequest(
+                title="Talk",
+                messages=[{"role": "user", "content": "tell me about seren"}],
+            ),
         )
+        chat_path = self.root / "chats" / f"{chat.id}.md"
         before = chat_path.read_text(encoding="utf-8")
 
         self.service.delete_lore_entry("seren")
 
         self.assertEqual(chat_path.read_text(encoding="utf-8"), before)
+
+    def test_a_chat_subject_ref_is_purged_but_the_transcript_survives(self) -> None:
+        """The counterpart: a chat that points `subject` at a deleted id is a real
+        dangling reference and must be purged like any other entity_ref. But the
+        purge rewrites the chat file (`_write_markdown_with_front_matter`), and
+        the transcript now lives in the body — so clearing the ref must leave the
+        conversation intact. Both halves are asserted: subject cleared, messages
+        preserved."""
+        self._write_lore(self.root, "seren", "Seren")
+        chat = self.service.create_chat_session(
+            CreateChatSessionRequest(title="About Seren", subject="seren")
+        )
+        self.service.save_chat_session(
+            chat.id,
+            SaveChatSessionRequest(
+                title="About Seren",
+                subject="seren",
+                messages=[
+                    {"role": "user", "content": "who is seren?"},
+                    {"role": "assistant", "content": "A long answer.\nWith two lines."},
+                ],
+            ),
+        )
+        self.assertEqual(self.service.read_chat_session(chat.id).subject, "seren")
+
+        self.service.delete_lore_entry("seren")
+
+        purged = self.service.read_chat_session(chat.id)
+        self.assertEqual(purged.subject, "")
+        self.assertEqual([m.content for m in purged.messages],
+                         ["who is seren?", "A long answer.\nWith two lines."])
 
     def test_the_purge_preserves_front_matter_it_does_not_own(self) -> None:
         """The typed writers spelled out a fixed key set, so a purge silently

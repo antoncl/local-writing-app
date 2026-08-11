@@ -1112,7 +1112,7 @@
           )}
         onCustomData={(detail) => schemaPanes?.openForCustomData(detail.entryType, detail.kind, editorPane.id)}
         onNavigate={(detail) => navigateToBacklink(detail.id, detail.kind)}
-        onOpenChat={(detail) => chatSessions.openChatFromPromptEntry(detail.entry, detail.inputs, detail.sceneId, detail.assistantId)}
+        onOpenChat={(detail) => chatSessions.openChatFromPromptEntry(detail.entry, detail.inputs, detail.sceneId, { assistantId: detail.assistantId })}
         onViewSaveState={(state) => editorPanes.setViewSaveState(editorPane.id, state)}
         onAuthoringLayerChange={(layerId) => editorPanes.setEditorPaneAuthoringLayer(editorPane.id, layerId)}
         onResetField={(fieldId) => editorPane.scene && run(() => editorPanes.resetLoreOverrideField(editorPane.scene!.id, fieldId))}

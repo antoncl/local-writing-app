@@ -55,20 +55,33 @@ class ChatSessions {
     entry: PromptEntrySummary,
     inputs: Record<string, unknown>,
     sceneId: string | null,
-    assistantId: string = "",
-    parentPaneId: string | null = null,
+    opts: {
+      assistantId?: string;
+      parentPaneId?: string | null;
+      // ADR-0051 S2: the node this chat is about (the brainstorm launcher passes
+      // the originating entry id). Stamped as the chat's subject so it surfaces
+      // in "chats about X". `subjectTitle` is the subject's display name, used
+      // to name the chat "<subject> — <prompt>" instead of a bare prompt title.
+      subject?: string;
+      subjectTitle?: string;
+    } = {},
   ): Promise<void> {
+    const { assistantId = "", parentPaneId = null, subject = "", subjectTitle = "" } = opts;
     await this.run(async () => {
       // A `scene_ref` input (ADR-0012) sets the chat's resolution scene,
       // overriding the originating scene; it then drives per-turn journal
       // resolution (backend reads chat.target_scene_id) and the first-send
       // render alike.
       const resolutionScene = resolutionSceneIdFromInputs(entry, inputs) || (sceneId ?? "");
+      // Name the chat after its subject so brainstorming two entries with the
+      // same prompt no longer yields two identically-titled chats.
+      const title = subjectTitle ? `${subjectTitle} — ${entry.title}` : entry.title;
       const session = await api.createChatSession({
         prompt_entry_id: entry.id,
         assistant_id: assistantId,
-        title: entry.title,
+        title,
         target_scene_id: resolutionScene,
+        subject,
       });
       if (Object.keys(inputs).length > 0) {
         // Persist resolved inputs via the unified node path so ChatBodyView
@@ -80,6 +93,7 @@ class ChatSessions {
           assistant_id: session.assistant_id,
           system_prompt: session.system_prompt,
           target_scene_id: session.target_scene_id ?? resolutionScene,
+          subject: session.subject ?? subject,
           pinned: session.pinned,
           context_items: [],
           messages: [],

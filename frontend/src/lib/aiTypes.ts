@@ -64,6 +64,11 @@ export type AIPreviewRequest = {
   // Explicit mutation resolution scene from a `scene_ref` input (ADR-0012);
   // overrides target_scene_id for effective-state resolution.
   resolution_scene_id?: string;
+  // ADR-0051 S5: the bound chat's subject. A scene subject is the chat's
+  // anchored scene (the old target_scene_id) — the backend derives the scene
+  // from it as the lowest-priority `{{ scene }}` binding, so a resumed chat
+  // renders its scene without the frontend knowing which subjects are scenes.
+  subject?: string;
   // V2: when set, preview response includes estimated_cost_usd + caching_style.
   assistant_id?: string | null;
 };
@@ -264,11 +269,10 @@ export type ChatSession = {
   prompt_entry_id: string;
   assistant_id: string;
   system_prompt: string;
-  // Scene this chat was opened against; passed as the `scene` binding at
-  // first-send render. Empty for freeform / Chats-pane chats.
-  target_scene_id?: string;
-  // ADR-0051 S2: the node this chat is about (a lore entry / scene). Surfaces
-  // "chats about X" via the reverse-reference index. Empty for freeform chats.
+  // ADR-0051 S2/S5: the node this chat is about (a lore entry / character /
+  // scene). Surfaces "chats about X" via the reverse-reference index. **A scene
+  // subject IS the chat's anchored scene** (S5 folded the old target_scene_id):
+  // the backend derives the render/journal scene from it. Empty for freeform.
   subject?: string;
   pinned: boolean;
   created_at: string;
@@ -304,9 +308,9 @@ export type CreateChatSessionRequest = {
   prompt_entry_id?: string;
   assistant_id?: string;
   system_prompt?: string;
-  target_scene_id?: string;
-  // ADR-0051 S2: the node this chat is about (a lore entry / scene). Persisted
+  // ADR-0051 S2/S5: the node this chat is about (a lore entry / scene). Persisted
   // into the chat's metadata.subject so the index extracts a chat→subject edge.
+  // A scene subject is also the chat's anchored scene (folded target_scene_id).
   subject?: string;
 };
 
@@ -315,9 +319,9 @@ export type SaveChatSessionRequest = {
   prompt_entry_id: string;
   assistant_id: string;
   system_prompt: string;
-  target_scene_id?: string;
-  // ADR-0051 S2: echoed on save so the subject survives per-turn writes;
-  // backend falls back to the persisted value when omitted.
+  // ADR-0051 S2/S5: echoed on save so the subject survives per-turn writes;
+  // backend falls back to the persisted value when omitted. Carries the scene
+  // anchor for scene chats (folded target_scene_id).
   subject?: string;
   pinned: boolean;
   context_items: ChatSessionContextItem[];

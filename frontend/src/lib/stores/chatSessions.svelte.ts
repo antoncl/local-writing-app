@@ -14,7 +14,6 @@ import { get } from "svelte/store";
 import { api } from "@/lib/api";
 import { editorPanes } from "@/lib/stores/editorPanes.svelte";
 import { subordinatePanes } from "@/lib/stores/subordinatePanes";
-import { resolutionSceneIdFromInputs } from "@/lib/editor-core/promptResolution";
 import { refreshReferenceIndexInBackground } from "@/lib/stores/references";
 import {
   chatSessionsStore,
@@ -67,13 +66,16 @@ class ChatSessions {
       subjectTitle?: string;
     } = {},
   ): Promise<void> {
-    const { assistantId = "", parentPaneId = null, subject = "", subjectTitle = "" } = opts;
+    const { assistantId = "", parentPaneId = null, subjectTitle = "" } = opts;
     await this.run(async () => {
-      // A `scene_ref` input (ADR-0012) sets the chat's resolution scene,
-      // overriding the originating scene; it then drives per-turn journal
-      // resolution (backend reads chat.target_scene_id) and the first-send
-      // render alike.
-      const resolutionScene = resolutionSceneIdFromInputs(entry, inputs) || (sceneId ?? "");
+      // ADR-0051 S5: a chat launched *from* a scene (sceneId set) with no
+      // explicit subject is about that scene — the scene becomes its subject,
+      // which the backend also reads as the anchored render/journal scene (the
+      // old target_scene_id folded into subject). An explicit subject (the lore
+      // brainstorm launcher) always wins. A `scene_ref` input's as-of resolution
+      // scene rides in `inputs` and is resolved per-render (ADR-0012), so it no
+      // longer needs a separate stored field here.
+      const subject = opts.subject || (sceneId ?? "");
       // Name the chat after its subject so brainstorming two entries with the
       // same prompt no longer yields two identically-titled chats.
       const title = subjectTitle ? `${subjectTitle} — ${entry.title}` : entry.title;
@@ -81,19 +83,17 @@ class ChatSessions {
         prompt_entry_id: entry.id,
         assistant_id: assistantId,
         title,
-        target_scene_id: resolutionScene,
         subject,
       });
       if (Object.keys(inputs).length > 0) {
         // Persist resolved inputs via the unified node path so ChatBodyView
-        // restores them as drafts on load. Echo target_scene_id so it's
-        // never dropped (backend also falls back to the persisted value).
+        // restores them as drafts on load. Echo subject so it's never dropped
+        // (backend also falls back to the persisted value).
         await api.saveNode<ChatSession>(session.id, {
           title: session.title,
           prompt_entry_id: session.prompt_entry_id,
           assistant_id: session.assistant_id,
           system_prompt: session.system_prompt,
-          target_scene_id: session.target_scene_id ?? resolutionScene,
           subject: session.subject ?? subject,
           pinned: session.pinned,
           context_items: [],

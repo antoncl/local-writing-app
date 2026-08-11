@@ -139,6 +139,7 @@ def build_preview(
     commit: bool,
     selection: str = "",
     resolution_scene_id: str = "",
+    subject: str = "",
 ) -> tuple[RenderedTemplate, str | None]:
     """Render the template and return (output, session_id_used).
 
@@ -148,9 +149,15 @@ def build_preview(
     # Mutation resolution scene, in precedence order (ADR-0012): an explicit
     # `scene_ref` input (the frontend resolves the input value into
     # `resolution_scene_id`) wins, then a scene marked ★ in a context_pick
-    # input, then the caller's implicit target_scene_id.
+    # input, then the caller's implicit target_scene_id, then — for a bound chat
+    # — its `subject` when that subject is a scene (ADR-0051 S5: the old
+    # target_scene_id field folded into subject; the index kind lookup is cheap).
+    subject_scene_id = project_service._subject_scene_id(subject) if subject else ""
     effective_scene_id = (
-        resolution_scene_id or _find_marked_target_scene_id(inputs) or target_scene_id
+        resolution_scene_id
+        or _find_marked_target_scene_id(inputs)
+        or target_scene_id
+        or subject_scene_id
     )
 
     if effective_scene_id:

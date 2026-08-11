@@ -36,12 +36,14 @@
   import {
     promptEntriesForSurface,
     type PromptResolutionContext,
+    type PromptSurface,
   } from "@/lib/editor-core/promptResolution";
   import type { ChatSessionSummary, MetadataSchema, PromptEntrySummary } from "@/lib/types";
 
   let {
     subjectId,
     subjectTitle = "",
+    newSurface = "entry_patch",
     promptEntries,
     metadataSchema,
     hostPaneId = null,
@@ -50,6 +52,10 @@
     // The subject's display title — names a launched chat "<subject> — <prompt>"
     // (ADR-0051 S2), so two brainstorms of the same entry don't collide.
     subjectTitle?: string;
+    // The prompt surface the ＋New menu offers, per subject kind (ADR-0051 S5):
+    // `entry_patch` (brainstorm) for a lore entry, `chat_panel` for a scene. The
+    // ＋New menu hides itself when no prompt resolves to this surface.
+    newSurface?: PromptSurface;
     promptEntries: PromptEntrySummary[];
     metadataSchema: MetadataSchema | null;
     // The editor pane hosting this panel; a launched chat registers as its
@@ -76,9 +82,10 @@
     availableScenes: [],
     hiddenPromptIds: $hiddenLibraryStore,
   });
-  // The brainstorm prompts applicable to this node — the ＋New menu. (Broader
-  // conversation kinds join when `subject` generalizes `target_scene_id`, S5.)
-  let newPrompts = $derived(promptEntriesForSurface(ctx, "entry_patch"));
+  // The prompts applicable to this node — the ＋New menu. The surface varies by
+  // subject kind (ADR-0051 S5): brainstorm (`entry_patch`) for a lore entry,
+  // chat prompts (`chat_panel`) for a scene.
+  let newPrompts = $derived(promptEntriesForSurface(ctx, newSurface));
   // Prompt titles with "/" fold into a navigable submenu (#832); a flat list of
   // slashless titles yields a flat menu, unchanged.
   let newMenu = $derived(buildPromptMenuTree(newPrompts));

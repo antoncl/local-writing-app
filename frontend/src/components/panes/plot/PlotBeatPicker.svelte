@@ -5,7 +5,9 @@
 
   Purely presentational — no store/editor/xyflow imports, so it mounts in happy-dom
   for its render test. The card owns the current link set + the write; this reports a
-  toggle and shows the checked state.
+  toggle and shows the checked state. Rendered inside PlotLinkPopover (#820), which
+  owns the scroll box + the filter input; `filter` is that query (matched on beat
+  title, keeping only arcs that still have a matching beat).
 -->
 <script lang="ts">
   import type { TemplateInstanceSummary } from "@/lib/types";
@@ -15,40 +17,56 @@
     arcs,
     linked,
     onToggle,
+    filter = "",
   }: {
     arcs: TemplateInstanceSummary[];
     // Composite keys of currently-linked beats: `${instanceId}:${beatId}`.
     linked: Set<string>;
     onToggle: (instanceId: string, beatId: string, checked: boolean) => void;
+    // Case-insensitive beat-title filter from PlotLinkPopover (empty → show all).
+    filter?: string;
   } = $props();
 
   const key = (instanceId: string, beatId: string) => `${instanceId}:${beatId}`;
+
+  let query = $derived(filter.trim().toLowerCase());
+  // Each arc with its id-bearing beats narrowed by the query; arcs with no surviving
+  // beat drop out entirely while filtering, so the list collapses to what matched.
+  let shownArcs = $derived(
+    arcs
+      .map((arc) => ({
+        arc,
+        beats: instanceBeats(arc).filter(
+          (b) => b.id && (!query || (b.title ?? "").toLowerCase().includes(query)),
+        ),
+      }))
+      .filter(({ beats }) => !query || beats.length > 0),
+  );
 </script>
 
 <div class="beat-picker" role="group" aria-label="Beats this card fulfils">
   {#if arcs.length === 0}
     <p class="picker-empty">No arcs yet. Add one from the board's Arcs palette to link beats.</p>
+  {:else if shownArcs.length === 0}
+    <p class="picker-empty">No beats match your filter.</p>
   {:else}
-    {#each arcs as arc (arc.id)}
-      {@const beats = instanceBeats(arc)}
+    {#each shownArcs as { arc, beats } (arc.id)}
       <div class="arc-group">
         <p class="arc-label" title={arc.title}>{arc.title || "Untitled arc"}</p>
         {#if beats.length === 0}
           <p class="arc-nobeats">No beats yet.</p>
         {:else}
           {#each beats as beat, i (beat.id ?? i)}
-            {#if beat.id}
-              {@const checked = linked.has(key(arc.id, beat.id))}
-              <label class="beat-row">
-                <input
-                  type="checkbox"
-                  class="nodrag nopan"
-                  {checked}
-                  onchange={(e) => onToggle(arc.id, beat.id as string, e.currentTarget.checked)}
-                />
-                <span class="beat-title">{beat.title || "Untitled beat"}</span>
-              </label>
-            {/if}
+            {@const checked = linked.has(key(arc.id, beat.id as string))}
+            <label class="beat-row">
+              <input
+                type="checkbox"
+                class="nodrag nopan"
+                {checked}
+                onchange={(e) => onToggle(arc.id, beat.id as string, e.currentTarget.checked)}
+              />
+              <span class="beat-title">{beat.title || "Untitled beat"}</span>
+            </label>
           {/each}
         {/if}
       </div>
@@ -60,9 +78,6 @@
   .beat-picker {
     display: flex;
     flex-direction: column;
-    max-height: 220px;
-    overflow-y: auto;
-    padding: 2px;
   }
   .picker-empty,
   .arc-nobeats {

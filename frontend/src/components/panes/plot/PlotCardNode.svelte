@@ -18,6 +18,8 @@
   import type { PlotBeatLink } from "@/lib/stores/plotBoard";
   import PlotBeatPicker from "./PlotBeatPicker.svelte";
   import PlotCausalPicker from "./PlotCausalPicker.svelte";
+  import PlotLinkPopover from "./PlotLinkPopover.svelte";
+  import { portalToBody } from "@/lib/actions/portal";
 
   // Svelte Flow passes the node's id/data/selection state as props.
   let { id, data }: { id?: string; data: PlotCardData; selected?: boolean } = $props();
@@ -67,10 +69,50 @@
   // draft set of target card ids, flushed as one save on leave. null = not editing.
   let causalDraft = $state<string[] | null>(null);
   let draftCausalIds = $derived(causalDraft ? new Set(causalDraft) : new Set<string>());
+
+  // The beats / "Leads to…" pickers live on the roomy PlotLinkPopover (#820), not the
+  // narrow kebab menu. `pickerFilter` is its shared filter query (reset on open).
+  let pickerFilter = $state("");
+  const pickerOpen = $derived(menuView === "beats" || menuView === "causal");
+
+  // The picker is PORTALED to <body> and positioned in viewport coords, so it renders
+  // at screen scale (a fixed 300px) instead of scaling with the board's zoom — the
+  // card lives inside SvelteFlow's CSS transform, which would otherwise shrink an
+  // in-canvas panel with the canvas ([[reference_svelteflow_headless_limits]] / #245,
+  // the SwatchPicker/TagPicker pattern). Anchored to the card's screen rect, flipped
+  // to stay on-screen; re-measured on open and on scroll/resize while open.
+  const PICKER_W = 300;
+  const PICKER_MAX_H = 372; // header + filter + the 300px scroll body, roughly
+  const PICKER_GAP = 4;
+  let pickerLeft = $state(0);
+  let pickerTop = $state(0);
+  function positionPicker(): void {
+    const r = rootEl?.getBoundingClientRect();
+    if (!r) return;
+    let left = r.left;
+    if (left + PICKER_W + 8 > window.innerWidth) left = Math.max(8, r.right - PICKER_W);
+    let top = r.bottom + PICKER_GAP;
+    if (top + PICKER_MAX_H + 8 > window.innerHeight) top = Math.max(8, r.top - PICKER_MAX_H - PICKER_GAP);
+    pickerLeft = left;
+    pickerTop = top;
+  }
+  $effect(() => {
+    if (!pickerOpen) return;
+    positionPicker();
+    const reflow = () => positionPicker();
+    window.addEventListener("scroll", reflow, true); // capture: catches pane scrolls too
+    window.addEventListener("resize", reflow);
+    return () => {
+      window.removeEventListener("scroll", reflow, true);
+      window.removeEventListener("resize", reflow);
+    };
+  });
+
   let editing = $state(false);
   let draft = $state("");
   let textarea = $state<HTMLTextAreaElement | null>(null);
   let rootEl = $state<HTMLElement | null>(null);
+  let pickerEl = $state<HTMLElement | null>(null); // the portaled picker, for hit-testing
 
   // Close the menu on an outside pointerdown or Escape — NOT on focusout, which
   // would fire (and wrongly close) the moment the two-page menu swaps pages and
@@ -78,7 +120,12 @@
   $effect(() => {
     if (!menuOpen) return;
     const onDown = (e: PointerEvent) => {
-      if (rootEl && !rootEl.contains(e.target as Node)) closeMenu();
+      const target = e.target as Node;
+      if (rootEl && rootEl.contains(target)) return;
+      // The picker is portaled to <body>, so it is NOT inside rootEl — a click on its
+      // rows/filter must not dismiss. `pickerEl` is bound on the portaled element.
+      if (pickerEl && pickerEl.contains(target)) return;
+      closeMenu();
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") closeMenu();
@@ -120,6 +167,7 @@
   // one save on leave. `data.beats` updates from the refetched projection after.
   function openBeats() {
     beatDraft = data.beats.map((b) => ({ instance: b.instance_id, beat_id: b.beat_id }));
+    pickerFilter = "";
     menuView = "beats";
   }
   function toggleBeat(instanceId: string, beatId: string, checked: boolean) {
@@ -146,6 +194,7 @@
   // place, flush one save on leave. `data.causalLinks` updates from the refetch after.
   function openCausal() {
     causalDraft = [...data.causalLinks];
+    pickerFilter = "";
     menuView = "causal";
   }
   function toggleCausal(targetId: string, checked: boolean) {
@@ -304,7 +353,27 @@
     </span>
   </article>
 
-  {#if menuOpen && actions}
+  {#if menuOpen && actions && pickerOpen}
+    <!-- Beats / "Leads to…" live on the roomy shared popover (#820). Portaled to
+         <body> and positioned in viewport coords so it renders at a fixed 300px
+         regardless of board zoom, and flipped to stay on-screen near a board edge. -->
+    <div
+      bind:this={pickerEl}
+      class="card-picker nodrag nopan"
+      style={`left:${pickerLeft}px; top:${pickerTop}px;`}
+      use:portalToBody
+    >
+      {#if menuView === "beats"}
+        <PlotLinkPopover title="Beats" bind:filter={pickerFilter} onBack={backFromBeats}>
+          <PlotBeatPicker arcs={actions.arcs} linked={draftKeys} onToggle={toggleBeat} filter={pickerFilter} />
+        </PlotLinkPopover>
+      {:else}
+        <PlotLinkPopover title="Leads to…" bind:filter={pickerFilter} onBack={backFromCausal}>
+          <PlotCausalPicker cards={actions.cards} selfId={id} linked={draftCausalIds} onToggle={toggleCausal} filter={pickerFilter} />
+        </PlotLinkPopover>
+      {/if}
+    </div>
+  {:else if menuOpen && actions}
     <div class="card-menu nodrag nopan" role="menu" aria-label="Card actions">
       {#if menuView === "main"}
         <button role="menuitem" class="menu-item" onclick={() => run(actions.onOpen)}>
@@ -359,16 +428,6 @@
             Unassigned
           </button>
         </div>
-      {:else if menuView === "beats"}
-        <button class="menu-item menu-back" onclick={backFromBeats}>
-          <i class="ti ti-chevron-left" aria-hidden="true"></i> Beats
-        </button>
-        <PlotBeatPicker arcs={actions.arcs} linked={draftKeys} onToggle={toggleBeat} />
-      {:else}
-        <button class="menu-item menu-back" onclick={backFromCausal}>
-          <i class="ti ti-chevron-left" aria-hidden="true"></i> Leads to…
-        </button>
-        <PlotCausalPicker cards={actions.cards} selfId={id} linked={draftCausalIds} onToggle={toggleCausal} />
       {/if}
     </div>
   {/if}
@@ -566,6 +625,25 @@
     border: 1px solid var(--border-strong);
     border-radius: var(--r-md);
     box-shadow: var(--elev-2);
+  }
+  /* The roomy link-picker surface (#820) — the beats / "Leads to…" editors need real
+     width. Portaled to <body> (use:portalToBody) and positioned in VIEWPORT coords
+     (left/top set inline from the card's screen rect), so `position: fixed` resolves
+     against the viewport and the panel renders at a true 300px rather than scaling
+     with the board's zoom transform. z-index matches the app's portaled popovers
+     (SwatchPicker/TagPicker). */
+  .card-picker {
+    position: fixed;
+    z-index: 10000;
+    width: 300px;
+    max-width: 300px;
+    display: flex;
+    flex-direction: column;
+    background: var(--panel);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-md);
+    box-shadow: var(--elev-2);
+    overflow: hidden; /* clip the header/filter borders to the rounded corners */
   }
   .menu-item {
     display: flex;

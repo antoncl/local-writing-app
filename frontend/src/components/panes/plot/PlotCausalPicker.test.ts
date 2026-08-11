@@ -14,7 +14,9 @@ const cards: PlotCardChoice[] = [
   { id: "c", title: "They reconcile" },
 ];
 
-function renderPicker(over: { cards?: PlotCardChoice[]; selfId?: string; linked?: string[] } = {}) {
+function renderPicker(
+  over: { cards?: PlotCardChoice[]; selfId?: string; linked?: string[]; filter?: string } = {},
+) {
   const onToggle = vi.fn();
   render(PlotCausalPicker, {
     props: {
@@ -22,6 +24,7 @@ function renderPicker(over: { cards?: PlotCardChoice[]; selfId?: string; linked?
       selfId: over.selfId,
       linked: new Set(over.linked ?? []),
       onToggle,
+      filter: over.filter ?? "",
     },
   });
   return { onToggle };
@@ -58,5 +61,17 @@ describe("PlotCausalPicker", () => {
   it("shows an empty hint when there is no other card to link to", () => {
     renderPicker({ cards: [{ id: "solo", title: "Alone" }], selfId: "solo" });
     expect(screen.getByText(/No other cards yet/i)).toBeInTheDocument();
+  });
+
+  it("narrows the list to cards whose title matches the filter (case-insensitive)", () => {
+    renderPicker({ filter: "storm" });
+    expect(screen.getByText("The storm hits")).toBeInTheDocument();
+    expect(screen.queryByText("She leaves home")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("checkbox")).toHaveLength(1);
+  });
+
+  it("distinguishes a no-match filter from an empty board", () => {
+    renderPicker({ filter: "zzz" });
+    expect(screen.getByText(/No cards match your filter/i)).toBeInTheDocument();
   });
 });

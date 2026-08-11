@@ -15,9 +15,9 @@ const arc = (id: string, title: string, beats: { id: string; title: string }[]):
   metadata: { instance_beats: beats },
 });
 
-function renderPicker(arcs: TemplateInstanceSummary[], linked: string[] = []) {
+function renderPicker(arcs: TemplateInstanceSummary[], linked: string[] = [], filter = "") {
   const onToggle = vi.fn();
-  render(PlotBeatPicker, { props: { arcs, linked: new Set(linked), onToggle } });
+  render(PlotBeatPicker, { props: { arcs, linked: new Set(linked), onToggle, filter } });
   return { onToggle };
 }
 
@@ -51,5 +51,25 @@ describe("PlotBeatPicker", () => {
   it("shows a per-arc note when an arc has no beats", () => {
     renderPicker([arc("i1", "Bare arc", [])]);
     expect(screen.getByText(/No beats yet/i)).toBeInTheDocument();
+  });
+
+  it("narrows to beats whose title matches the filter, dropping arcs with no match", () => {
+    renderPicker(
+      [
+        arc("i1", "Hero's Journey", [{ id: "b1", title: "Call to Adventure" }, { id: "b2", title: "Refusal" }]),
+        arc("i2", "Other Arc", [{ id: "b3", title: "Midpoint" }]),
+      ],
+      [],
+      "call",
+    );
+    expect(screen.getByText("Call to Adventure")).toBeInTheDocument();
+    expect(screen.queryByText("Refusal")).not.toBeInTheDocument();
+    expect(screen.queryByText("Midpoint")).not.toBeInTheDocument();
+    expect(screen.queryByText("Other Arc")).not.toBeInTheDocument(); // arc with no match drops out
+  });
+
+  it("shows a no-match hint when the filter matches no beat", () => {
+    renderPicker([arc("i1", "Arc", [{ id: "b1", title: "One" }])], [], "zzz");
+    expect(screen.getByText(/No beats match your filter/i)).toBeInTheDocument();
   });
 });

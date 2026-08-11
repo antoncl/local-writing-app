@@ -11,8 +11,27 @@
   import { onMount } from "svelte";
   import PlotEditor from "./PlotEditor.svelte";
   import { plotBoardStore, refreshPlotBoard } from "@/lib/stores/plotBoard";
+  import { structureStore } from "@/lib/stores/structure";
 
   onMount(() => {
+    void refreshPlotBoard();
+  });
+
+  // Keep the board truthful when the manuscript structure changes while it's open
+  // (#834). Card `sequence` (reveal order) and the container boxes are backend-DERIVED
+  // from the manuscript, so a scene reorder/add/remove must refetch the projection —
+  // otherwise the manuscript-order spine and the out-of-order causal warnings (Slice 7)
+  // render against a stale reading order and never update. Scoped to while-open (this
+  // pane only mounts then), matching the board's on-demand design. `primed` skips the
+  // initial read so this fires only on a real change; the store's in-flight guard
+  // collapses any overlap with the mount fetch above.
+  let primed = false;
+  $effect(() => {
+    void $structureStore; // track manuscript changes
+    if (!primed) {
+      primed = true;
+      return;
+    }
     void refreshPlotBoard();
   });
 </script>

@@ -77,6 +77,57 @@ export function promptEntryDescription(
   return ctx.metadataSchema?.entry_types[entry.entry_type]?.name ?? entry.entry_type;
 }
 
+// The entry_type an entry_patch prompt operates on — the `expr.type`s named by
+// its context_pick inputs' targets (e.g. `revise:entry` → lore:base,
+// `revise:plot_card` → plot:card).
+function promptTargetEntryTypes(entry: PromptEntrySummary): string[] {
+  const types: string[] = [];
+  for (const input of entry.inputs ?? []) {
+    if (input.type !== "context_pick") continue;
+    const target = input.target as { sources?: Array<{ expr?: { type?: string } }> } | null | undefined;
+    for (const source of target?.sources ?? []) {
+      const type = source.expr?.type;
+      if (typeof type === "string" && type) types.push(type);
+    }
+  }
+  return types;
+}
+
+// Walk `entryType`'s schema parent chain for `ancestor` (is-a). Without a schema,
+// only an exact match holds. Mirrors `isRoleplayPromptEntry`'s ancestry walk.
+function entryTypeIsA(
+  ctx: PromptResolutionContext,
+  entryType: string,
+  ancestor: string,
+): boolean {
+  if (!ctx.metadataSchema) return entryType === ancestor;
+  let cursor: string | undefined = entryType;
+  const seen = new Set<string>();
+  while (cursor && !seen.has(cursor)) {
+    if (cursor === ancestor) return true;
+    seen.add(cursor);
+    cursor = ctx.metadataSchema.entry_types[cursor]?.parent ?? undefined;
+  }
+  return false;
+}
+
+// True iff a node of schema type `entryType` can be the SUBJECT of `entry` — i.e.
+// one of the prompt's context_pick input targets is an ancestor-or-self of
+// `entryType`. Scopes the brainstorm ＋New menu to the prompts a given node admits
+// (ADR-0048 S8b): a lore entry offers the lore revise prompt, a plot card offers
+// the plot-card one, not cross. A prompt that names no target applies anywhere
+// (no entry-input constraint to narrow it), preserving the pre-S8b behaviour.
+export function promptTargetsEntryType(
+  ctx: PromptResolutionContext,
+  entry: PromptEntrySummary,
+  entryType: string | null | undefined,
+): boolean {
+  if (!entryType) return false;
+  const targets = promptTargetEntryTypes(entry);
+  if (targets.length === 0) return true;
+  return targets.some((target) => entryTypeIsA(ctx, entryType, target));
+}
+
 export function effectivePromptInputs(entry: PromptEntrySummary): PromptInputDefinition[] {
   return entry.inputs ?? [];
 }

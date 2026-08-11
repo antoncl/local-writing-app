@@ -461,8 +461,11 @@
   // ADR-0048 §5 — the host's SINGLE gate for which kinds take part in the
   // entry-patch loop: the freeze, launcher, and review overlay below all read it,
   // so they can't drift (a review over an un-frozen pane moves the diff base,
-  // #634). Controller/store are kind-agnostic; widen per-kind here (lore only).
-  const patchLoopKind = $derived(documentKind === "lore");
+  // #634). Controller/store are kind-agnostic; widen per-kind here. Plot cards
+  // join lore (ADR-0048 S8b): a card brainstorm on the `revise:plot_card` prompt
+  // commits an EntryPatch through the same loop, and the Conversations ＋New menu
+  // filters to the prompts each kind's node admits (see ConversationsPanel).
+  const patchLoopKind = $derived(documentKind === "lore" || documentKind === "plot_card");
   // A node under an open brainstorm review is a frozen transaction (#634): the
   // rail/title go read-only and the host suppresses autosave, so the diff's
   // "current" side cannot move under the review.
@@ -751,6 +754,7 @@
         <ConversationsPanel
           subjectId={scene.id}
           subjectTitle={title}
+          subjectEntryType={entryType}
           {promptEntries}
           {metadataSchema}
           {hostPaneId}

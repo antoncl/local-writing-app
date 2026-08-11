@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   hidePromptEntries,
   promptEntriesForSurface,
+  promptTargetsEntryType,
   type PromptResolutionContext,
 } from "@/lib/editor-core/promptResolution";
 import type { MetadataSchema, PromptEntrySummary } from "@/lib/types";
@@ -79,5 +80,59 @@ describe("hidePromptEntries (ADR-0049 #682)", () => {
   it("returns the roster unchanged for an undefined or empty set", () => {
     expect(hidePromptEntries(entries, undefined)).toBe(entries);
     expect(hidePromptEntries(entries, new Set())).toBe(entries);
+  });
+});
+
+// The per-node brainstorm filter (ADR-0048 S8b): the ＋New menu shows only the
+// entry_patch prompts whose entry-input target admits the open node's type, so a
+// lore entry offers the lore revise prompt and a plot card the plot-card one.
+describe("promptTargetsEntryType (ADR-0048 S8b)", () => {
+  const isaSchema = {
+    entry_types: {
+      "lore:base": {},
+      "lore:character": { parent: "lore:base" },
+      "plot:base": {},
+      "plot:card": { parent: "plot:base" },
+    },
+  } as unknown as MetadataSchema;
+
+  function isaCtx(): PromptResolutionContext {
+    return { metadataSchema: isaSchema, promptEntries: [], loreEntries: [], availableScenes: [] };
+  }
+
+  function targeted(id: string, targetType: string): PromptEntrySummary {
+    return {
+      id,
+      title: id,
+      body: "",
+      entry_type: "prompt:revise",
+      metadata: {},
+      inputs: [
+        { name: "entry", type: "context_pick", label: "E", target: { sources: [{ expr: { type: targetType } }] } },
+      ],
+    } as unknown as PromptEntrySummary;
+  }
+
+  const lorePrompt = targeted("p-lore", "lore:base");
+  const cardPrompt = targeted("p-card", "plot:card");
+
+  it("admits a subject that is-a the prompt's target type", () => {
+    expect(promptTargetsEntryType(isaCtx(), lorePrompt, "lore:character")).toBe(true); // descendant
+    expect(promptTargetsEntryType(isaCtx(), cardPrompt, "plot:card")).toBe(true); // exact
+  });
+
+  it("rejects a cross-kind subject", () => {
+    expect(promptTargetsEntryType(isaCtx(), lorePrompt, "plot:card")).toBe(false);
+    expect(promptTargetsEntryType(isaCtx(), cardPrompt, "lore:character")).toBe(false);
+  });
+
+  it("an untargeted prompt applies to any resolved subject", () => {
+    const untargeted = prompt("p-any", "prompt:revise"); // inputs: []
+    expect(promptTargetsEntryType(isaCtx(), untargeted, "plot:card")).toBe(true);
+  });
+
+  it("shows nothing until the subject type resolves", () => {
+    expect(promptTargetsEntryType(isaCtx(), lorePrompt, "")).toBe(false);
+    expect(promptTargetsEntryType(isaCtx(), lorePrompt, null)).toBe(false);
   });
 });

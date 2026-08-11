@@ -52,11 +52,15 @@ function revisePrompt(id: string, title: string): PromptEntrySummary {
   } as unknown as PromptEntrySummary;
 }
 
-function renderPanel(promptEntries: PromptEntrySummary[] = []) {
+function renderPanel(
+  promptEntries: PromptEntrySummary[] = [],
+  subjectEntryType = "lore:character",
+) {
   return render(ConversationsPanel, {
     props: {
       subjectId: "hero",
       subjectTitle: "Hero",
+      subjectEntryType,
       promptEntries,
       metadataSchema: SCHEMA,
       hostPaneId: "pane-1",

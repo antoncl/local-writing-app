@@ -180,19 +180,20 @@ class LayerQualifiedIdentityTests(unittest.TestCase):
         self.assertTrue(any("Duplicate front matter id seren" in error for error in index.errors))
 
     def test_cross_kind_collision_stays_an_error(self) -> None:
-        # `kind` partitions identity, so a chat and a lore entry sharing an id
-        # are two things colliding, not one shadowing the other.
+        # A chat and a lore entry are both root-layer nodes now (ADR-0051 S1),
+        # so a shared id is a same-layer duplicate — an error, never a silent
+        # shadow. Lore is collected before chat, so lore wins and chat is rejected.
         self._write_lore(self.root, "shared_id", "A lore entry")
         (self.root / "chats").mkdir(parents=True, exist_ok=True)
-        self.service._write_yaml(
-            self.root / "chats" / "shared.yaml", {"id": "shared_id", "title": "A chat"}
+        self.service._write_node_entry_file(
+            self.root / "chats" / "shared.md", "shared_id", "A chat", "chat:chat_session", {}, ""
         )
 
         index = self.service._build_node_index(self.root)
 
         self.assertEqual(len(index.candidates["shared_id"]), 1)
         self.assertEqual(index.by_id["shared_id"].kind, "lore")
-        self.assertTrue(any("collides with an existing entry" in error for error in index.errors))
+        self.assertTrue(any("Duplicate front matter id shared_id" in error for error in index.errors))
 
 
     # --- the project node ------------------------------------------------

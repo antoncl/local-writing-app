@@ -305,14 +305,24 @@ class PurgeCoversEveryReferenceBearingKindTests(ReferencePurgeTestCase):
         self.assertNotIn("seren", assistant.read_text(encoding="utf-8"))
 
     def test_a_chat_session_is_untouched(self) -> None:
-        """Chats are in the index but no collector draws edges from them — they
-        are YAML sessions, not front-matter nodes. Widening the purge must not
-        start rewriting them."""
+        """Chats are ordinary Node files now (ADR-0051 S1) and reference-bearing,
+        but `chat:chat_session` declares no entity_ref field — so the purge finds
+        nothing to change and must leave the file (transcript and all) byte-
+        identical. The safety rests on the `if not changed: continue` guard, so
+        this locks it: adding a chat entity_ref later would trip this test first."""
         self._write_lore(self.root, "seren", "Seren")
         chats = self.root / "chats"
         chats.mkdir(parents=True, exist_ok=True)
-        chat_path = chats / "chat_1.yaml"
-        self.service._write_yaml(chat_path, {"id": "chat_1", "title": "Talk", "messages": [{"body": "seren"}]})
+        chat_path = chats / "chat_1.md"
+        self.service._write_node_entry_file(
+            chat_path,
+            "chat_1",
+            "Talk",
+            "chat:chat_session",
+            {},
+            "",
+            extra={"messages": [{"role": "user", "body": "seren"}]},
+        )
         before = chat_path.read_text(encoding="utf-8")
 
         self.service.delete_lore_entry("seren")

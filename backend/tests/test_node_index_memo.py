@@ -271,22 +271,25 @@ class ChangeGateEfficiencyTests(MemoTestCase):
         first = self.service.create_chat_session(CreateChatSessionRequest(title="First"))
         second = self.service.create_chat_session(CreateChatSessionRequest(title="Second"))
         self.service._build_node_index(self.root)  # warm the memo
-        other_path = str((self.root / "chats" / f"{second.id}.yaml").resolve())
+        other_path = str((self.root / "chats" / f"{second.id}.md").resolve())
 
+        # Chats are Node files now (ADR-0051 S1): the change-gate signatures the
+        # single written .md via the generic per-file collector, which reads
+        # through `_read_front_matter_only` — so spy on that, not `_read_yaml`.
         read_paths: list[str] = []
-        original = self.service._read_yaml
+        original = self.service._read_front_matter_only
 
-        def recording(path: object) -> object:
+        def recording(path: object, *args: object, **kwargs: object) -> object:
             read_paths.append(str(Path(str(path)).resolve()))
-            return original(path)
+            return original(path, *args, **kwargs)
 
-        self.service._read_yaml = recording  # type: ignore[method-assign]
+        self.service._read_front_matter_only = recording  # type: ignore[method-assign]
         try:
             self.service.save_chat_session(
                 first.id, SaveChatSessionRequest(title="First")  # title unchanged → change-gate no-op
             )
         finally:
-            self.service._read_yaml = original  # type: ignore[method-assign]
+            self.service._read_front_matter_only = original  # type: ignore[method-assign]
 
         self.assertNotIn(other_path, read_paths, "saving one chat re-parsed another chat's file")
 

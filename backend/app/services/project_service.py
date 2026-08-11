@@ -268,13 +268,14 @@ class ProjectService(
                 422,
             )
 
-    # --- Chat sessions (Phase 3) ---
+    # --- Chat sessions ---
     #
-    # Persistent chat sessions live in `<project>/chats/<chat_id>.yaml` —
-    # a sidecar store, not a Node kind. Their CRUD lives in
-    # ChatSessionsMixin (services/project/chats.py). `_utcnow_iso` stays here
-    # as a generic timestamp utility that both the chat writer and the
-    # AiInvocationsMixin (services/project/ai_invocations.py) consume.
+    # Persistent chat sessions are body-less Node files at
+    # `<project>/chats/<chat_id>.md` (ADR-0051 S1) — an ordinary Node family,
+    # not a sidecar store. Their CRUD lives in ChatSessionsMixin
+    # (services/project/chats.py). `_utcnow_iso` stays here as a generic
+    # timestamp utility that both the chat writer and the AiInvocationsMixin
+    # (services/project/ai_invocations.py) consume.
 
     @staticmethod
     def _utcnow_iso() -> str:
@@ -427,7 +428,13 @@ class ProjectService(
                 return {}
             lines: list[str] = []
             for line in handle:
-                if line.strip() == "---":
+                # The closing delimiter is a `---` alone on a line at column 0
+                # (what the writer emits and what `_read_markdown_with_front_matter`
+                # splits on). Match `rstrip()`, not `strip()`: a front-matter
+                # scalar carrying a `---` line — a chat message body, ADR-0051 S1 —
+                # is indented under its key, and stripping the indent would read it
+                # as the terminator and truncate the front matter mid-value.
+                if line.rstrip() == "---":
                     break
                 lines.append(line)
             else:

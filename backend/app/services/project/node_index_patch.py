@@ -186,8 +186,6 @@ class NodeIndexPatchMixin:
             for family in self._families_for_layer(layer):
                 if path.parent == layer.folder / family.folder_name and path.suffix == ".md":
                     return _PatchUnit(layer, kind="family", family=family, path=path)
-            if layer.is_root and path.parent == layer.folder / "chats" and path.suffix == ".yaml":
-                return _PatchUnit(layer, kind="chat")
         raise PatchNotApplicable(f"no layer owns {path}")
 
     def _collect_patch_unit(
@@ -210,8 +208,6 @@ class NodeIndexPatchMixin:
         """
         if unit.kind == "project_node":
             self._collect_project_node_entry(layer=unit.layer, index=index, schema=schema)
-        elif unit.kind == "chat":
-            self._collect_chat_entries(layer=unit.layer, index=index)
         else:
             assert unit.family is not None and unit.path is not None
             if unit.path.exists():
@@ -277,13 +273,7 @@ class NodeIndexPatchMixin:
         doubled. Targets exactly the files each collector re-reads, so it never
         touches the chain-level schema diagnostic that shares the root folder.
         """
-        if unit.kind == "chat":
-            doomed = [
-                key
-                for key in index.diagnostics_by_source
-                if key[0] == unit.layer.id and key[1].parent == unit.folder and key[1].suffix == ".yaml"
-            ]
-        elif unit.kind == "project_node":
+        if unit.kind == "project_node":
             doomed = [(unit.layer.id, unit.layer.folder / PROJECT_NODE_FILENAME)]
         else:  # family — one file
             assert unit.path is not None
@@ -313,8 +303,8 @@ class _PatchUnit:
         self.layer = layer
         self.kind = kind
         self.family = family
-        # Set for node files, which are collected one at a time. Chats and the
-        # project node are collected by their whole (small, fixed) folder.
+        # Set for node files, which are collected one at a time. The project
+        # node is collected by its whole (single-file) layer folder.
         self.path = path
 
     def owns(self, candidate: Path) -> bool:
@@ -329,8 +319,6 @@ class _PatchUnit:
         if self.kind == "family":
             assert self.family is not None
             return self.layer.folder / self.family.folder_name
-        if self.kind == "chat":
-            return self.layer.folder / "chats"
         return self.layer.folder
 
     @property

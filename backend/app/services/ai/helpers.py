@@ -33,6 +33,7 @@ from app.services.ai.entry_patch import (
 )
 from app.services.ai.plot_prompt_context import render_plot_context
 from app.services.ai.sessions import AISession
+from app.services.error_log import append_error_line
 
 if TYPE_CHECKING:
     from app.services.project_service import ProjectService
@@ -435,11 +436,22 @@ def _plot_context(project: ProjectService, as_of: Any) -> str:
     `as_of` is a card or scene node id (a plot-card brainstorm passes the card's
     own id, so the model sees the board up to and including that card's reveal
     position). A non-id / unknown anchor gates nothing (the whole board). Degrades
-    to "" rather than raising, so a context helper never breaks the render."""
+    to "" rather than raising, so a context helper never breaks the render — but
+    the failure is recorded to the project error log (#386) instead of vanishing,
+    so a silently-empty plot context is diagnosable rather than a mystery."""
     try:
         anchor = as_of if isinstance(as_of, str) and as_of else None
         return render_plot_context(project.read_plot_context(anchor))
-    except Exception:
+    except Exception as exc:
+        root = project.root_path  # None when no project is open; append_error_line never raises
+        if root is not None:
+            append_error_line(
+                root,
+                origin="backend",
+                message=f"plot_context helper failed: {exc}",
+                context="plot_context",
+                level="warning",
+            )
         return ""
 
 

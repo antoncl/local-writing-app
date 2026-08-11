@@ -91,6 +91,35 @@ class PlotContextHelperTests(_PlotAiContextBase):
         )
         self.assertIn('completeness="whole_board"', out)  # no crash, no gate
 
+    def test_the_block_renders_plotline_causal_and_beat_guidance(self) -> None:
+        from app.models import (
+            CreatePlotlineRequest,
+            CreateTemplateInstanceRequest,
+            SaveTemplateInstanceRequest,
+        )
+
+        # An ad-hoc arc with a beat carrying GUIDANCE (shipped template beats carry
+        # only `function`), so the guidance-as-element branch is exercised.
+        arc = self.service.create_template_instance(CreateTemplateInstanceRequest(title="Custom"))
+        self.service.save_template_instance(
+            arc.id,
+            SaveTemplateInstanceRequest(
+                title="Custom",
+                body="",
+                metadata={"instance_beats": [{"title": "Spark", "function": "ignite", "guidance": "GUIDANCE_TEXT"}]},
+            ),
+        )
+        plotline = self.service.create_plotline(CreatePlotlineRequest(title="Romance"))
+        chapter = self._chapter()
+        s0, s1 = self._scene("s0", chapter), self._scene("s1", chapter)
+        effect = self._card("Effect", scene=s1)
+        self._card("Cause", scene=s0, plotline=plotline.id, causal_links=[{"target": effect}])
+        out = self._render('{% role "system" %}{{ plot_context() }}{% endrole %}')
+        self.assertIn('plotline="Romance"', out)  # the card carries its plotline title
+        self.assertIn('<leads_to card="Effect"', out)  # the causal edge, title-resolved
+        self.assertIn("GUIDANCE_TEXT", out)  # beat guidance renders as element text
+        self.assertIn("</beat>", out)  # a beat with guidance is an element, not self-closing
+
 
 class RevisePlotCardPromptTests(_PlotAiContextBase):
     def test_the_prompt_ships_in_the_library_as_an_entry_patch_brainstorm(self) -> None:

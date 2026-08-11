@@ -77,6 +77,38 @@ describe("PlotArcRail", () => {
     expect(screen.getByTitle("Linked to a card")).toBeInTheDocument();
   });
 
+  it("shows placed/total coverage and marks only the next unplaced beat (Slice 7)", async () => {
+    renderRail({
+      instances: [
+        arc({
+          id: "i1",
+          title: "Arc",
+          metadata: { instance_beats: [{ id: "b1", title: "One" }, { id: "b2", title: "Two" }, { id: "b3", title: "Three" }] },
+        }),
+      ],
+      usedBeatKeys: new Set(["i1:b1"]),
+    });
+    // Collapsed coverage chip: 1 of 3 placed → a gap.
+    expect(screen.getByTitle("1 of 3 beats placed on a card")).toBeInTheDocument();
+    await fireEvent.click(screen.getByLabelText("Expand beats"));
+    // Only the first unplaced beat (b2) is flagged the next gap; b3 stays quiet.
+    expect(screen.getAllByTitle(/Next unplaced beat/i)).toHaveLength(1);
+    const two = screen.getByText("Two").closest("li") as HTMLElement;
+    expect(two.classList.contains("next-gap")).toBe(true);
+    const three = screen.getByText("Three").closest("li") as HTMLElement;
+    expect(three.classList.contains("next-gap")).toBe(false);
+  });
+
+  it("shows no gap treatment when every beat is placed (Slice 7)", async () => {
+    renderRail({
+      instances: [arc({ id: "i1", title: "Arc", metadata: { instance_beats: [{ id: "b1", title: "One" }] } })],
+      usedBeatKeys: new Set(["i1:b1"]),
+    });
+    expect(screen.getByTitle("1 of 1 beats placed on a card")).toBeInTheDocument();
+    await fireEvent.click(screen.getByLabelText("Expand beats"));
+    expect(screen.queryByTitle(/Next unplaced beat/i)).toBeNull();
+  });
+
   it("opens an arc via its id", async () => {
     const props = renderRail({ instances: [arc({ id: "i9", title: "Open me" })] });
     await fireEvent.click(screen.getByRole("button", { name: "Open me" }));

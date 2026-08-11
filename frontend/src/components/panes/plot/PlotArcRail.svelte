@@ -113,6 +113,13 @@
       {#each instances as instance (instance.id)}
         {@const beats = instanceBeats(instance)}
         {@const isOpen = expandedId === instance.id}
+        <!-- Beat-coverage diagnostic (Slice 7): a beat can only be placed if it has an
+             id, so coverage is over the placeable beats. `nextGapId` is the first one no
+             card fulfils yet — the writer's next thing to place. -->
+        {@const placeable = beats.filter((b) => !!b.id)}
+        {@const placedCount = placeable.filter((b) => usedBeatKeys.has(beatKey(instance.id, b.id!))).length}
+        {@const nextGapId = placeable.find((b) => !usedBeatKeys.has(beatKey(instance.id, b.id!)))?.id}
+        {@const hasGaps = placedCount < placeable.length}
         <li class="arc" class:expanded={isOpen}>
           <div class="arc-row">
             <button
@@ -127,7 +134,15 @@
             <button class="arc-name" title="Open this arc" onclick={() => onOpen(instance.id)}>
               {instance.title || "Untitled arc"}
             </button>
-            <span class="arc-count" title="{beats.length} beats">{beats.length}</span>
+            {#if placeable.length}
+              <span
+                class="arc-count"
+                class:has-gaps={hasGaps}
+                title="{placedCount} of {placeable.length} beats placed on a card"
+              >{placedCount}/{placeable.length}</span>
+            {:else}
+              <span class="arc-count" title="{beats.length} beats">{beats.length}</span>
+            {/if}
             <button class="arc-remove" aria-label="Remove this arc" onclick={() => onRemove(instance.id)}>
               <i class="ti ti-x" aria-hidden="true"></i>
             </button>
@@ -136,17 +151,28 @@
             <ol class="beat-list">
               {#each beats as beat, i (beat.id ?? i)}
                 {@const linked = !!beat.id && usedBeatKeys.has(beatKey(instance.id, beat.id))}
+                {@const isNextGap = !!beat.id && beat.id === nextGapId}
                 <li
                   class="beat"
                   class:draggable={!!beat.id}
                   class:linked
+                  class:next-gap={isNextGap}
                   draggable={!!beat.id}
                   ondragstart={(e) => beat.id && setPlotBeatDrag(e, instance.id, beat.id)}
                   title={beat.id ? "Drag onto a card to link this beat" : beat.title || "Untitled beat"}
                 >
                   {#if beat.id}<i class="ti ti-grip-vertical beat-grip" aria-hidden="true"></i>{/if}
                   <span class="beat-title">{beat.title || "Untitled beat"}</span>
-                  {#if linked}<i class="ti ti-check beat-check" aria-hidden="true" title="Linked to a card"></i>{/if}
+                  {#if linked}
+                    <i class="ti ti-check beat-check" aria-hidden="true" title="Linked to a card"></i>
+                  {:else if isNextGap}
+                    <i
+                      class="ti ti-alert-circle beat-next"
+                      role="img"
+                      aria-label="Next unplaced beat — no card fulfils it yet. Drag it onto the card where it happens."
+                      title="Next unplaced beat — no card fulfils it yet. Drag it onto the card where it happens."
+                    ></i>
+                  {/if}
                 </li>
               {/each}
             </ol>
@@ -310,6 +336,13 @@
     background: var(--surface);
     border-radius: var(--r-pill);
     padding: 0 5px;
+    font-variant-numeric: tabular-nums;
+  }
+  /* Coverage gap (Slice 7): the arc has beats no card fulfils yet — a quiet amber
+     tint on the placed/total count so the shortfall reads even while collapsed. */
+  .arc-count.has-gaps {
+    color: var(--warn);
+    background: var(--warn-soft);
   }
   .arc-remove {
     flex: 0 0 auto;
@@ -381,5 +414,17 @@
   }
   .beat.linked .beat-title {
     color: var(--text-3);
+  }
+  /* The next unplaced beat (Slice 7): an amber left bar + ⚠ marks the writer's next
+     thing to place, without noising up the other still-unplaced beats. The bar is an
+     inset shadow so it never shifts the row's content. */
+  .beat.next-gap {
+    box-shadow: inset 2px 0 0 var(--warn);
+  }
+  .beat-next {
+    flex: 0 0 auto;
+    color: var(--warn);
+    font-size: var(--fs-xs);
+    cursor: help;
   }
 </style>

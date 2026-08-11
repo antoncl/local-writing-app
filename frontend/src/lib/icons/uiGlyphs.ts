@@ -19,6 +19,7 @@
 // palette; they are listed here too so this stays a self-contained record of
 // what the chrome depends on regardless of picker curation.
 export const UI_GLYPHS: string[] = [
+  "alert-circle",
   "alert-triangle",
   "arrow-back-up",
   "arrow-bar-to-right",

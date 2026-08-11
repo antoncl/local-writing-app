@@ -24,6 +24,8 @@
   import CountPill from "@/components/widgets/CountPill.svelte";
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import Popover from "@/components/chrome/Popover.svelte";
+  import PromptMenu from "@/components/editor/PromptMenu.svelte";
+  import { buildPromptMenuTree } from "@/lib/editor-core/promptMenuTree";
   import { nodeSet } from "@/lib/views/viewResult";
   import { chatSessions } from "@/lib/stores/chatSessions.svelte";
   import { chatSessionsStore } from "@/lib/stores/chats";
@@ -77,6 +79,9 @@
   // The brainstorm prompts applicable to this node — the ＋New menu. (Broader
   // conversation kinds join when `subject` generalizes `target_scene_id`, S5.)
   let newPrompts = $derived(promptEntriesForSurface(ctx, "entry_patch"));
+  // Prompt titles with "/" fold into a navigable submenu (#832); a flat list of
+  // slashless titles yields a flat menu, unchanged.
+  let newMenu = $derived(buildPromptMenuTree(newPrompts));
 
   // Per-instance so two lore entries open in separate panes don't collide on a
   // shared DOM id (aria-controls / the Popover panel id).
@@ -137,14 +142,7 @@
             minWidth="200px"
             maxWidth="320px"
           >
-            {#each newPrompts as prompt (prompt.id)}
-              <button
-                type="button"
-                class="conv-new-item"
-                role="menuitem"
-                onclick={() => void startNew(prompt)}
-              >{prompt.title}</button>
-            {/each}
+            <PromptMenu nodes={newMenu} onSelect={(prompt) => void startNew(prompt)} />
           </Popover>
         </div>
       {/if}
@@ -242,23 +240,6 @@
   .conv-new:hover {
     color: var(--text);
     border-color: var(--accent);
-  }
-
-  .conv-new-item {
-    display: block;
-    width: 100%;
-    padding: 8px 10px;
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: 4px;
-    text-align: left;
-    font-size: var(--fs-md);
-    color: var(--text);
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .conv-new-item:hover {
-    background: var(--panel);
   }
 
   /* Tier panel behind the rows — matches NodeRow's grouped-children tint so the

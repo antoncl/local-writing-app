@@ -13,6 +13,7 @@ import { chatSessionsStore } from "@/lib/stores/chats";
 import { referenceIndexStore } from "@/lib/stores/references";
 import { editorPanes } from "@/lib/stores/editorPanes.svelte";
 import { chatSessions } from "@/lib/stores/chatSessions.svelte";
+import type { PromptSurface } from "@/lib/editor-core/promptResolution";
 import type { ChatSessionSummary, MetadataSchema, PromptEntrySummary } from "@/lib/types";
 
 // A schema whose `prompt:revise` type resolves as the entry_patch (brainstorm)
@@ -22,6 +23,11 @@ const SCHEMA = {
     "prompt:revise": {
       name: "Revise",
       prompt: { context_strategy: { output: { kind: "entry_patch" } } },
+    },
+    // A chat-surface prompt — the set a scene's ＋New offers (ADR-0051 S5).
+    "prompt:scenechat": {
+      name: "Scene chat",
+      prompt: { context_strategy: { output: { kind: "chat_panel" } } },
     },
   },
   fields: {},
@@ -52,8 +58,20 @@ function revisePrompt(id: string, title: string): PromptEntrySummary {
   } as unknown as PromptEntrySummary;
 }
 
+function chatPanelPrompt(id: string, title: string): PromptEntrySummary {
+  return {
+    id,
+    title,
+    body: "",
+    entry_type: "prompt:scenechat",
+    metadata: {},
+    inputs: [],
+  } as unknown as PromptEntrySummary;
+}
+
 function renderPanel(
   promptEntries: PromptEntrySummary[] = [],
+  newSurface?: PromptSurface,
   subjectEntryType = "lore:character",
 ) {
   return render(ConversationsPanel, {
@@ -64,6 +82,7 @@ function renderPanel(
       promptEntries,
       metadataSchema: SCHEMA,
       hostPaneId: "pane-1",
+      ...(newSurface ? { newSurface } : {}),
     },
   });
 }
@@ -173,6 +192,29 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
     await fireEvent.keyDown(screen.getByRole("menuitem", { name: "Length" }), { key: "Escape" });
     await tick();
     expect(screen.getByRole("menuitem", { name: "Revise" })).toBeInTheDocument();
+  });
+
+  it("offers the surface for the subject kind: chat_panel for a scene (#842)", async () => {
+    // A scene's ＋New offers chat prompts (chat_panel), not the lore brainstorm
+    // set (entry_patch). Both prompt kinds are present; only the scene surface
+    // one appears when newSurface="chat_panel".
+    renderPanel(
+      [revisePrompt("p-revise", "Brainstorm a revision"), chatPanelPrompt("p-chat", "Chat here")],
+      "chat_panel",
+    );
+    await fireEvent.click(screen.getByRole("button", { name: /New/ }));
+    await tick();
+    expect(screen.getByRole("menuitem", { name: "Chat here" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Brainstorm a revision" })).toBeNull();
+  });
+
+  it("hides ＋New when no prompt resolves to the subject's surface (#842)", () => {
+    // A scene with only an entry_patch prompt available and the chat_panel
+    // surface → nothing to start, so ＋New does not render (resume list only).
+    const { container } = renderPanel([revisePrompt("p-revise", "Brainstorm a revision")], "chat_panel");
+    expect(container.querySelector(".conv-new")).toBeNull();
+    // The panel still renders — there are chats to resume.
+    expect(container.querySelector(".entry-conversations")).not.toBeNull();
   });
 
   it("does not render when there is nothing to resume and no prompt to start", () => {

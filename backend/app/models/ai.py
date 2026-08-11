@@ -190,6 +190,11 @@ class AIPreviewRequest(BaseModel):
     # Explicit mutation resolution scene from a `scene_ref` input (ADR-0012);
     # the frontend resolves the input value here. Overrides target_scene_id.
     resolution_scene_id: str = ""
+    # ADR-0051 S5: the bound chat's `subject`. A scene subject is the chat's
+    # anchored scene (the old target_scene_id), used as the lowest-priority
+    # scene binding so a resumed chat renders `{{ scene }}` without the frontend
+    # needing to know which subjects are scenes. Empty for non-chat previews.
+    subject: str = ""
     # When set, the cost estimate uses this assistant's provider/model.
     # Omit for previews that aren't bound to an assistant (e.g. the
     # prompt-editor preview pane) — token counts still come back, only
@@ -430,16 +435,14 @@ class ChatSession(BaseModel):
     prompt_entry_id: str = ""
     assistant_id: str = ""
     system_prompt: str = ""
-    # Scene this chat was opened against (e.g. "invoke chat prompt" from a
-    # prose scene). The first-send template render passes it as the `scene`
-    # binding so prompts that reference scene body/metadata resolve it.
-    # Empty for freeform chats and chats started from the Chats pane.
-    target_scene_id: str = ""
-    # ADR-0051 S2: the node this chat is *about* — a lore entry, character, or
+    # ADR-0051 S2/S5: the node this chat is *about* — a lore entry, character, or
     # scene. Persisted as the `subject` entity_ref in the node's front-matter
     # `metadata`, so the index extracts a chat→subject edge and the subject
     # surfaces its conversations through the ordinary backlink machinery. Empty
-    # for freeform chats. (Generalizes `target_scene_id`; the fold is S5.)
+    # for freeform chats. **A scene subject IS the chat's anchored scene** — S5
+    # folded the old `target_scene_id` field into this one: the render/journal
+    # scene is derived from `subject` (via `_subject_scene_id`), so `{{ scene }}`
+    # and the as-of-scene name resolution keep working with no separate field.
     subject: str = ""
     pinned: bool = False
     created_at: str
@@ -490,9 +493,9 @@ class CreateChatSessionRequest(BaseModel):
     prompt_entry_id: str = ""
     assistant_id: str = ""
     system_prompt: str = ""
-    target_scene_id: str = ""
-    # ADR-0051 S2: the node this chat is about (a brainstorm launch stamps the
-    # originating lore entry / scene here). Persisted into `metadata.subject`.
+    # ADR-0051 S2/S5: the node this chat is about (a brainstorm launch stamps the
+    # originating lore entry; a scene launch stamps the scene). Persisted into
+    # `metadata.subject`; a scene subject is the chat's anchored scene.
     subject: str = ""
 
 
@@ -501,10 +504,9 @@ class SaveChatSessionRequest(BaseModel):
     prompt_entry_id: str = ""
     assistant_id: str = ""
     system_prompt: str = ""
-    target_scene_id: str = ""
-    # ADR-0051 S2: echoed back on every save so the subject survives per-turn
-    # writes (like target_scene_id). Falls back to the persisted value when a
-    # caller omits it, so it is never silently dropped.
+    # ADR-0051 S2/S5: echoed back on every save so the subject survives per-turn
+    # writes. Falls back to the persisted value when a caller omits it, so it is
+    # never silently dropped. (Absorbed the old `target_scene_id` echo.)
     subject: str = ""
     pinned: bool = False
     context_items: list[ChatSessionContextItem] = Field(default_factory=list)

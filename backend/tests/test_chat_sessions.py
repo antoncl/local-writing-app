@@ -432,6 +432,19 @@ class ChatSubjectAndBodyTests(unittest.TestCase):
         index = self.service._build_node_index(self.root)
         self.assertIn(chat.id, [edge.src for edge in index.edges_by_dst.get("sc1", [])])
 
+    def test_subject_scene_id_derives_the_anchored_scene(self) -> None:
+        # S5: a scene subject IS the chat's anchored scene (the old
+        # target_scene_id) — the render/journal scene derives from `subject`.
+        # A lore subject or an empty subject yields no scene.
+        (self.root / "scenes").mkdir(parents=True, exist_ok=True)
+        self.service._write_node_entry_file(
+            self.root / "scenes" / "sc1.md", "sc1", "Opening", "scene:scene", {}, ""
+        )
+        self._write_lore("aurora", "Aurora")
+        self.assertEqual(self.service._subject_scene_id("sc1", self.root), "sc1")
+        self.assertEqual(self.service._subject_scene_id("aurora", self.root), "")
+        self.assertEqual(self.service._subject_scene_id("", self.root), "")
+
 
 if __name__ == "__main__":
     unittest.main()

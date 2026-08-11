@@ -330,6 +330,7 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
                 selection=request.selection,
                 commit=request.commit,
                 resolution_scene_id=request.resolution_scene_id,
+                subject=request.subject,
             )
         except PreviewError as exc:
             return AIPreviewResponse(
@@ -508,8 +509,10 @@ def _prepare_chat_send_payload(
         source="user_message",
         turn=turn,
         # The chat's anchored scene is its mutation resolution scene (#60/#61),
-        # so a renamed entity is detected under its as-of-scene name.
-        scene=chat.target_scene_id or None,
+        # so a renamed entity is detected under its as-of-scene name. The anchor
+        # is derived from the chat's `subject` when that subject is a scene
+        # (ADR-0051 S5 folded the old `target_scene_id` field into `subject`).
+        scene=project._subject_scene_id(chat.subject) or None,
     )
     if new_entries:
         extended_journal = list(chat.journal) + new_entries

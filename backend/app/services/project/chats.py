@@ -43,6 +43,21 @@ class ChatSessionsMixin:
             raise ProjectServiceError(f"Invalid chat id {chat_id!r}.", 422)
         return self._chats_dir() / f"{chat_id}.md"
 
+    def _subject_scene_id(self, subject: str, root: Path | None = None) -> str:
+        """A chat's anchored scene, derived from its `subject` (ADR-0051 S5).
+
+        A scene subject IS the chat's render/journal scene — the old
+        `target_scene_id` field folded into `subject`. Returns the subject id
+        when it names a scene node (so `{{ scene }}` binds and the #60/#61
+        as-of-scene name resolution runs), else "" for a lore/character subject
+        or a freeform chat. Uses the node index (kind lookup), not a file read;
+        `root` defaults to the current project (tests pass it explicitly).
+        """
+        if not subject:
+            return ""
+        entry = self._build_node_index(root).by_id.get(subject)
+        return subject if entry is not None and entry.kind == "scene" else ""
+
     def _write_chat_session(self, path: Path, session: ChatSession) -> None:
         """Persist a chat as a Node file (ADR-0051 S2).
 
@@ -173,7 +188,6 @@ class ChatSessionsMixin:
             prompt_entry_id=request.prompt_entry_id,
             assistant_id=request.assistant_id,
             system_prompt=request.system_prompt,
-            target_scene_id=request.target_scene_id,
             subject=request.subject,
             pinned=False,
             created_at=now,
@@ -266,7 +280,7 @@ class ChatSessionsMixin:
                 CreateAIInvocationRequest(
                     prompt_entry_id=request.prompt_entry_id,
                     prompt_entry_type="chat:chat_session",
-                    scene_id=existing.target_scene_id,
+                    scene_id=self._subject_scene_id(existing.subject),
                     chat_session_id=existing.id,
                     provider=provider,
                     model=model,
@@ -288,13 +302,10 @@ class ChatSessionsMixin:
             prompt_entry_id=request.prompt_entry_id,
             assistant_id=request.assistant_id,
             system_prompt=request.system_prompt,
-            # target_scene_id only matters before first-send (the render
-            # binding); callers echo the loaded value so it survives
-            # per-turn saves. Fall back to the persisted value when a
-            # caller omits it, so it's never silently dropped.
-            target_scene_id=request.target_scene_id or existing.target_scene_id,
             # Echoed on every save; fall back to the persisted value so a caller
-            # that omits it never silently drops the subject (ADR-0051 S2).
+            # that omits it never silently drops the subject (ADR-0051 S2). A
+            # scene subject also carries the render/journal anchor (S5), so this
+            # one echo covers both what-it's-about and the as-of scene.
             subject=request.subject or existing.subject,
             pinned=request.pinned,
             created_at=existing.created_at,

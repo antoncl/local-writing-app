@@ -440,6 +440,65 @@ class PreviewEndpointTests(unittest.TestCase):
         text = "".join(b["text"] for b in response.json()["messages"][0]["blocks"])
         self.assertEqual(text, "no scene")
 
+    def test_subject_scene_binds_when_target_scene_absent(self) -> None:
+        # ADR-0051 S5: a resumed chat sends its `subject`, not a stored
+        # target_scene_id. A scene subject IS the anchored scene, so the
+        # lowest-priority binding resolves `{{ scene }}` from it.
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": (
+                    '{% role "user" %}'
+                    "{% if scene %}has scene{% else %}no scene{% endif %}"
+                    "{% endrole %}"
+                ),
+                "target_scene_id": "",
+                "subject": self.scene_id,
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        text = "".join(b["text"] for b in response.json()["messages"][0]["blocks"])
+        self.assertEqual(text, "has scene")
+
+    def test_lore_subject_is_not_an_anchored_scene(self) -> None:
+        # A non-scene subject (lore/character) is not a scene anchor → no bind.
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": (
+                    '{% role "user" %}'
+                    "{% if scene %}has scene{% else %}no scene{% endif %}"
+                    "{% endrole %}"
+                ),
+                "target_scene_id": "",
+                "subject": "definitely_not_a_scene",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        text = "".join(b["text"] for b in response.json()["messages"][0]["blocks"])
+        self.assertEqual(text, "no scene")
+
+    def test_resolution_scene_id_still_outranks_subject_scene(self) -> None:
+        # Precedence unchanged: an explicit resolution_scene_id (ADR-0012)
+        # resolves the scene even when the subject is a non-scene node, so the
+        # subject-derived scene is only the lowest-priority fallback.
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": (
+                    '{% role "user" %}'
+                    "{% if scene %}has scene{% else %}no scene{% endif %}"
+                    "{% endrole %}"
+                ),
+                "target_scene_id": "",
+                "subject": "definitely_not_a_scene",
+                "resolution_scene_id": self.scene_id,
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        text = "".join(b["text"] for b in response.json()["messages"][0]["blocks"])
+        self.assertEqual(text, "has scene")
+
     def test_warnings_are_surfaced(self) -> None:
         response = self.client.post(
             "/api/ai/preview",

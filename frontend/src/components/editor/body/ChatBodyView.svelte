@@ -130,10 +130,11 @@
   let chatPromptEntryId = $state("");
   let chatAssistantId = $state("");
   // Scene this chat was opened against (e.g. "invoke chat prompt" from a
-  // prose scene). Passed as the target scene when rendering the template
-  // at first-send so prompts that reference `scene` resolve it. "" for
-  // freeform / Chats-pane chats.
-  let chatTargetSceneId = "";
+  // ADR-0051 S5: the node this chat is about. Sent to the render as `subject`;
+  // a scene subject IS the chat's anchored scene, so the backend derives the
+  // `{{ scene }}` binding from it (the old target_scene_id folded into subject).
+  // "" for freeform / Chats-pane chats.
+  let chatSubject = "";
   let activeChatTitle = "Untitled chat";
   let activeChatPinned = false;
   let activeChatJournal: ChatSessionJournalEntry[] = $state([]);
@@ -233,7 +234,7 @@
     chatSystemPrompt = "";
     chatPromptEntryId = "";
     chatAssistantId = "";
-    chatTargetSceneId = "";
+    chatSubject = "";
     activeChatTitle = "Untitled chat";
     activeChatPinned = false;
     activeChatJournal = [];
@@ -257,7 +258,7 @@
     activeChatCacheWriteTimes = { ...(session.cache_write_times ?? {}) };
     chatPromptEntryId = session.prompt_entry_id || "";
     chatAssistantId = session.assistant_id || "";
-    chatTargetSceneId = session.target_scene_id || "";
+    chatSubject = session.subject || "";
     chatSystemPrompt = session.system_prompt || "";
     chatHistory = (session.messages || []).map((m: ChatSessionMessage) => ({
       role: m.role,
@@ -425,7 +426,9 @@
       prompt_entry_id: chatPromptEntryId,
       assistant_id: chatAssistantId,
       system_prompt: chatSystemPrompt,
-      target_scene_id: chatTargetSceneId,
+      // ADR-0051 S5: echo the subject so per-turn saves never drop it (the scene
+      // anchor rides here too, since a scene subject IS the anchored scene).
+      subject: chatSubject,
       pinned: activeChatPinned,
       context_items: [],
       messages: chatHistory.map((m) => ({
@@ -783,7 +786,10 @@
     try {
       const preview = await api.aiPreview({
         template_source: entry.body,
-        target_scene_id: chatTargetSceneId,
+        // ADR-0051 S5: the chat's scene comes from its subject (backend-derived),
+        // not a stored target_scene_id. An explicit scene_ref input still wins.
+        target_scene_id: "",
+        subject: chatSubject,
         inputs,
         resolution_scene_id: resolutionSceneIdFromInputs(entry, inputs),
         commit: false,
@@ -860,7 +866,9 @@
     try {
       const preview = await api.aiPreview({
         template_source: entry.body,
-        target_scene_id: chatTargetSceneId,
+        // ADR-0051 S5: scene derives from the chat's subject (see first-send).
+        target_scene_id: "",
+        subject: chatSubject,
         inputs,
         resolution_scene_id: resolutionSceneIdFromInputs(entry, inputs),
         commit: false,

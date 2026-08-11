@@ -398,10 +398,14 @@ class EditorPanesController {
   // host's job — this store owns the document lifecycle), so the review registers
   // its commit hooks here rather than saving from inside the component.
 
-  /** The open pane holding lore entry `entryId`, if any. One predicate for the
-   *  review-lock methods (and the fork/reset-override paths) to share. */
-  #lorePaneFor(entryId: string): EditorPaneState | undefined {
-    return this.panes.find((p) => p.document?.type === "lore" && p.document.id === entryId);
+  /** The open editor pane holding node `entryId`, if any — the pane the review-lock
+   *  methods freeze / flush / thaw. Matches by id across ANY document kind: a review
+   *  lock is only ever registered for a node the host admits into the entry-patch loop
+   *  (`patchLoopKind` in NodeEditor — lore + plot cards, ADR-0048 §5), so the id alone
+   *  identifies the right pane and no kind filter is needed. Generalized off lore-only
+   *  in ADR-0048 S8b so a plot-card brainstorm freezes + flushes like a lore one. */
+  #reviewPaneFor(entryId: string): EditorPaneState | undefined {
+    return this.panes.find((p) => p.document?.id === entryId);
   }
 
   /** Freeze the lore pane holding `entryId` for review. Flushes any pending
@@ -409,7 +413,7 @@ class EditorPanesController {
    *  Idempotent: re-registration while already frozen just refreshes the hooks —
    *  the flush is a one-time entry gesture, not something to repeat each render. */
   async beginReviewLock(entryId: string, committer: ReviewCommitter): Promise<void> {
-    const pane = this.#lorePaneFor(entryId);
+    const pane = this.#reviewPaneFor(entryId);
     if (!pane) return;
     const firstLock = !this.#reviewLocks.has(pane.id);
     this.#reviewLocks.set(pane.id, committer);
@@ -422,7 +426,7 @@ class EditorPanesController {
   /** Thaw the pane holding `entryId` — on commit, discard, or a superseded
    *  proposal. Autosave resumes for its normal edits again. */
   endReviewLock(entryId: string): void {
-    const pane = this.#lorePaneFor(entryId);
+    const pane = this.#reviewPaneFor(entryId);
     if (pane) this.#reviewLocks.delete(pane.id);
   }
 
@@ -430,7 +434,7 @@ class EditorPanesController {
    *  and PUT the pane once, so the adopted body + fields land in a single write.
    *  Called by the review controller after it has applied the patch to the buffer. */
   async flushReviewCommit(entryId: string): Promise<boolean> {
-    const pane = this.#lorePaneFor(entryId);
+    const pane = this.#reviewPaneFor(entryId);
     if (!pane) return true;
     this.#autosave.cancel(pane.id);
     // `run` returns false when the save threw (a changed-on-disk 409 surfaces to

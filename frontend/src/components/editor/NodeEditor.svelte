@@ -461,15 +461,21 @@
   // ADR-0048 §5 — the host's SINGLE gate for which kinds take part in the
   // entry-patch loop: the freeze, launcher, and review overlay below all read it,
   // so they can't drift (a review over an un-frozen pane moves the diff base,
-  // #634). Controller/store are kind-agnostic; widen per-kind here (lore only).
-  const patchLoopKind = $derived(documentKind === "lore");
+  // #634). Controller/store are kind-agnostic; widen per-kind here. Plot cards
+  // join lore (ADR-0048 S8b): a card brainstorm on the `revise:plot_card` prompt
+  // commits an EntryPatch through the same loop, and the Conversations ＋New menu
+  // filters to the prompts each kind's node admits (see ConversationsPanel).
+  const patchLoopKind = $derived(documentKind === "lore" || documentKind === "plot_card");
   // ADR-0051 S3/S5 — which kinds show the Conversations surface. Broader than the
   // patch loop: a chat's `subject` is kind-neutral, so a scene lists its chats
   // (subject → scene) the same way a lore entry does, even though scenes have no
-  // entry-patch review yet (that is S5-next). The ＋New menu offers the prompts
-  // applicable to the kind — brainstorm (`entry_patch`) for lore, chat prompts
-  // (`chat_panel`) for a scene; the panel hides ＋New when none apply.
-  const conversationsKind = $derived(documentKind === "lore" || documentKind === "scene");
+  // entry-patch review yet (that is S5-next). Plot cards show it too (ADR-0048
+  // S8b) — they run the full brainstorm loop. The ＋New menu offers the prompts
+  // applicable to the kind — brainstorm (`entry_patch`) for lore / plot card, chat
+  // prompts (`chat_panel`) for a scene; the panel hides ＋New when none apply.
+  const conversationsKind = $derived(
+    documentKind === "lore" || documentKind === "scene" || documentKind === "plot_card",
+  );
   const conversationsSurface = $derived(documentKind === "scene" ? "chat_panel" : "entry_patch");
   // A node under an open brainstorm review is a frozen transaction (#634): the
   // rail/title go read-only and the host suppresses autosave, so the diff's
@@ -760,6 +766,7 @@
         <ConversationsPanel
           subjectId={scene.id}
           subjectTitle={title}
+          subjectEntryType={entryType}
           newSurface={conversationsSurface}
           {promptEntries}
           {metadataSchema}

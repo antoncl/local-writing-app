@@ -35,6 +35,23 @@ function lorePane(id: string, entryId: string): void {
   editorPanes.panes = [...editorPanes.panes, pane];
 }
 
+function plotCardPane(id: string, entryId: string): void {
+  const scene = {
+    id: entryId,
+    title: "Card",
+    body: "Synopsis\n",
+    entry_type: "plot:card",
+    metadata: {},
+  } as unknown as EditableDocument;
+  const pane = createEmptyEditorPane(id);
+  pane.document = { type: "plot_card", id: entryId } as DocumentRef;
+  pane.scene = scene;
+  pane.draftTitle = "Card";
+  pane.draftMarkdown = "Synopsis";
+  pane.draftEntryType = "plot:card";
+  editorPanes.panes = [...editorPanes.panes, pane];
+}
+
 function committer(hasChanges: boolean): ReviewCommitter & { commit: ReturnType<typeof vi.fn>; discard: ReturnType<typeof vi.fn> } {
   return { hasChanges: () => hasChanges, commit: vi.fn().mockResolvedValue(undefined), discard: vi.fn() };
 }
@@ -92,6 +109,22 @@ describe("editorPanes review freeze (#634)", () => {
     lorePane("editor_1", "e1");
     await editorPanes.flushReviewCommit("e1");
     expect(saveSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("freezes and flushes a plot_card pane too (ADR-0048 S8b)", async () => {
+    // The review-lock pane finder is kind-neutral, so a plot-card brainstorm
+    // freezes + flushes exactly like a lore one. Before S8b the lore-only finder
+    // returned undefined for a card pane, so both silently no-op'd — the adopted
+    // patch would never have saved.
+    plotCardPane("editor_1", "card1");
+    editorPanes.updateEditorPaneDraft("editor_1", "Edited", "Synopsis", "draft", "plot:card", {});
+    saveSpy.mockClear();
+    await editorPanes.beginReviewLock("card1", committer(false));
+    expect(saveSpy).toHaveBeenCalledTimes(1); // frozen == disk: the dirty card flushed on entry
+
+    saveSpy.mockClear();
+    await editorPanes.flushReviewCommit("card1");
+    expect(saveSpy).toHaveBeenCalledTimes(1); // the single explicit commit write lands on the card pane
   });
 
   it("closing with adopted changes raises the three-way Save guard", async () => {

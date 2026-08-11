@@ -35,6 +35,7 @@
   import { conversationsFor } from "@/lib/views/conversations";
   import {
     promptEntriesForSurface,
+    promptTargetsEntryType,
     type PromptResolutionContext,
     type PromptSurface,
   } from "@/lib/editor-core/promptResolution";
@@ -43,6 +44,7 @@
   let {
     subjectId,
     subjectTitle = "",
+    subjectEntryType = "",
     newSurface = "entry_patch",
     promptEntries,
     metadataSchema,
@@ -52,9 +54,15 @@
     // The subject's display title — names a launched chat "<subject> — <prompt>"
     // (ADR-0051 S2), so two brainstorms of the same entry don't collide.
     subjectTitle?: string;
+    // The subject node's schema entry_type (e.g. lore:character, plot:card). On the
+    // entry_patch surface it scopes the ＋New menu to the brainstorm prompts THIS
+    // node can be the subject of (ADR-0048 S8b) — a lore entry offers the lore
+    // revise prompt, a plot card the plot-card one, not cross. Empty until resolved
+    // ⇒ no brainstorm prompts shown.
+    subjectEntryType?: string;
     // The prompt surface the ＋New menu offers, per subject kind (ADR-0051 S5):
-    // `entry_patch` (brainstorm) for a lore entry, `chat_panel` for a scene. The
-    // ＋New menu hides itself when no prompt resolves to this surface.
+    // `entry_patch` (brainstorm) for a lore entry / plot card, `chat_panel` for a
+    // scene. The ＋New menu hides itself when no prompt resolves to this surface.
     newSurface?: PromptSurface;
     promptEntries: PromptEntrySummary[];
     metadataSchema: MetadataSchema | null;
@@ -83,9 +91,17 @@
     hiddenPromptIds: $hiddenLibraryStore,
   });
   // The prompts applicable to this node — the ＋New menu. The surface varies by
-  // subject kind (ADR-0051 S5): brainstorm (`entry_patch`) for a lore entry,
-  // chat prompts (`chat_panel`) for a scene.
-  let newPrompts = $derived(promptEntriesForSurface(ctx, newSurface));
+  // subject kind (ADR-0051 S5): brainstorm (`entry_patch`) for a lore entry / plot
+  // card, chat prompts (`chat_panel`) for a scene. On the entry_patch surface the
+  // set is further scoped to the prompts whose entry-input target admits THIS
+  // node's type (ADR-0048 S8b) — a lore entry offers the lore revise prompt, a plot
+  // card the plot-card one, not cross; the chat_panel surface is not so filtered.
+  let surfacePrompts = $derived(promptEntriesForSurface(ctx, newSurface));
+  let newPrompts = $derived(
+    newSurface === "entry_patch"
+      ? surfacePrompts.filter((prompt) => promptTargetsEntryType(ctx, prompt, subjectEntryType))
+      : surfacePrompts,
+  );
   // Prompt titles with "/" fold into a navigable submenu (#832); a flat list of
   // slashless titles yields a flat menu, unchanged.
   let newMenu = $derived(buildPromptMenuTree(newPrompts));

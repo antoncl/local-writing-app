@@ -1,8 +1,7 @@
-// Shared reader for a plot arc's specialized beats (ADR-0048 S7). Both the arc rail
-// (5a, PlotArcRail) and the card's beat picker (5b, PlotBeatPicker) list an
-// instance's `instance_beats`, so the metadata-shape read lives here in one place —
-// a change (a renamed member, a stricter guard) is made once, and the two surfaces
-// can't drift on what a beat row looks like.
+// Shared reader for a plot arc's specialized beats (ADR-0048 S7). The arc rail
+// (5a/#824, PlotArcRail) lists an instance's `instance_beats` as the drag palette, so
+// the metadata-shape read lives here in one place — a change (a renamed member, a
+// stricter guard) is made once, and every surface reads a beat row the same way.
 
 import type { TemplateInstanceSummary } from "@/lib/types";
 

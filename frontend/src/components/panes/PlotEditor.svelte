@@ -36,8 +36,10 @@
     detachCardScene,
     saveCardSynopsis,
     reassignCardPlotline,
-    setCardBeatLinks,
-    setCardCausalLinks,
+    linkCardBeat,
+    unlinkCardBeat,
+    linkCardCausal,
+    unlinkCardCausal,
     setCardPageStatus,
     seedCardsFromManuscript,
     createCard,
@@ -115,29 +117,16 @@
     // so the submenu reads the current plotlines fresh from the projection (the
     // designerContext pattern).
     onSetPlotline: (cardId, plotlineId) => void reassignCardPlotline(cardId, plotlineId),
-    // Set the card's whole beat-link set (Slice 5b). A content op → the projection's
-    // data-key changes (it now folds each card's beats) → the board rebuilds and the
-    // badges refresh.
-    onSetBeats: (cardId, links) => void setCardBeatLinks(cardId, links),
-    // Set the card's whole causal-link set (Slice 6b). A content op → the projection's
-    // data-key changes (it now folds each card's causal targets) → the board rebuilds
-    // and the causal edge layer redraws.
-    onSetCausal: (cardId, targets) => void setCardCausalLinks(cardId, targets),
+    // Link a beat dropped from the Arcs palette (#824); unlink via the badge ×. Content
+    // ops → the projection's data-key folds each card's beats → the board rebuilds and
+    // the badges refresh.
+    onLinkBeat: (cardId, instance, beatId) => void linkCardBeat(cardId, instance, beatId),
+    onUnlinkBeat: (cardId, instance, beatId) => void unlinkCardBeat(cardId, instance, beatId),
     // Declare an unattached card off_page vs unwritten (Slice 5b). on_page is derived
     // from the scene, so it is never set here.
     onSetPageStatus: (cardId, status) => void setCardPageStatus(cardId, status),
     get plotlines() {
       return projection?.plotlines ?? [];
-    },
-    // The book's arcs + their beats, for the card's beat picker — the same live
-    // roster the rail shows (loaded on project open).
-    get arcs() {
-      return arcs;
-    },
-    // Every card's id + title, for the "Leads to…" picker (Slice 6b) — read fresh from
-    // the projection so a just-added card is immediately a link target.
-    get cards() {
-      return projection?.cards.map((c) => ({ id: c.id, title: c.title })) ?? [];
     },
   });
 
@@ -270,6 +259,24 @@
     flowEdges = projection ? buildBoardEdges(projection, activeLayers) : [];
   });
 
+  // Which beats are already placed on some card — the Arcs palette marks these (#824).
+  let usedBeatKeys = $derived(
+    new Set((projection?.cards ?? []).flatMap((c) => c.beats.map((b) => `${b.instance_id}:${b.beat_id}`))),
+  );
+
+  // Causal ("leads to") edges are authored by dragging a wire between card handles
+  // (#824). onconnect adds the link (source leads to target); refetch → the derived
+  // edge $effect above redraws it. Only causal edges are selectable/deletable
+  // (buildBoardEdges marks them), so a Delete on a selected edge removes just that link.
+  function onConnectCausal(connection: { source: string; target: string }): void {
+    if (connection.source && connection.target) void linkCardCausal(connection.source, connection.target);
+  }
+  function onDeleteCausal(params: { edges: Edge[] }): void {
+    for (const edge of params.edges) {
+      if (edge.source && edge.target) void unlinkCardCausal(edge.source, edge.target);
+    }
+  }
+
   // Autosave the layout: skip while dragging (coalesce the gesture) and when nothing
   // changed, else debounce a PUT. The projection/dragging guard runs FIRST so a drag
   // doesn't re-serialize the whole board every frame (ViewBodyView's pattern). Only
@@ -397,6 +404,7 @@
         <PlotArcRail
           instances={arcs}
           {templates}
+          {usedBeatKeys}
           onOpen={(id) => void editorPanes.openPlotTemplateInstance(id)}
           onInstantiate={(id) => void editorPanes.instantiatePlotTemplate(id)}
           onCreateBlank={() => void editorPanes.createBlankPlotArc()}
@@ -413,8 +421,10 @@
         bind:edges={flowEdges}
         {nodeTypes}
         {colorMode}
-        nodesConnectable={false}
-        elementsSelectable={false}
+        nodesConnectable={true}
+        elementsSelectable={true}
+        onconnect={onConnectCausal}
+        ondelete={onDeleteCausal}
         onnodedragstart={({ nodes }) => {
           dragging = true;
           undoCtl.dragStart(nodes);

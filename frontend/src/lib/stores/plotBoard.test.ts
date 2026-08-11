@@ -16,7 +16,10 @@ import {
   saveCardSynopsis,
   savePlotBoardLayout,
   seedCardsFromManuscript,
-  setCardBeatLinks,
+  linkCardBeat,
+  unlinkCardBeat,
+  linkCardCausal,
+  unlinkCardCausal,
   setCardPageStatus,
 } from "./plotBoard";
 import type { CardEntry, PlotBoard, PlotBoardProjection } from "@/lib/types";
@@ -192,11 +195,11 @@ describe("card content ops", () => {
     expect(save.mock.calls[0][0].metadata).toEqual({ scene: "sc" });
   });
 
-  it("setCardBeatLinks writes the whole link set as canonical pairs, then refetches", async () => {
-    vi.spyOn(api, "getCard").mockResolvedValue(card({ plotline: "p1" }));
+  it("linkCardBeat appends a dropped beat to the card's existing links, then refetches", async () => {
+    vi.spyOn(api, "getCard").mockResolvedValue(card({ plotline: "p1", beat_links: [{ instance: "i1", beat_id: "b1" }] }));
     const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
     const refresh = vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
-    await setCardBeatLinks("c1", [{ instance: "i1", beat_id: "b1" }, { instance: "i1", beat_id: "b2" }]);
+    await linkCardBeat("c1", "i1", "b2");
     expect(save.mock.calls[0][0].metadata).toEqual({
       plotline: "p1",
       beat_links: [{ instance: "i1", beat_id: "b1" }, { instance: "i1", beat_id: "b2" }],
@@ -204,12 +207,38 @@ describe("card content ops", () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("setCardBeatLinks with an empty set drops the key (sparse)", async () => {
+  it("linkCardBeat is a no-op-dedup when the beat is already linked", async () => {
+    vi.spyOn(api, "getCard").mockResolvedValue(card({ beat_links: [{ instance: "i1", beat_id: "b1" }] }));
+    const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
+    vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    await linkCardBeat("c1", "i1", "b1");
+    expect(save.mock.calls[0][0].metadata.beat_links).toEqual([{ instance: "i1", beat_id: "b1" }]);
+  });
+
+  it("unlinkCardBeat removes one link; emptying it drops the key (sparse)", async () => {
     vi.spyOn(api, "getCard").mockResolvedValue(card({ plotline: "p1", beat_links: [{ instance: "i1", beat_id: "b1" }] }));
     const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
     vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
-    await setCardBeatLinks("c1", []);
+    await unlinkCardBeat("c1", "i1", "b1");
     expect(save.mock.calls[0][0].metadata).toEqual({ plotline: "p1" });
+  });
+
+  it("linkCardCausal appends a target (dedup), refuses a self-link", async () => {
+    vi.spyOn(api, "getCard").mockResolvedValue(card({ causal_links: [{ target: "c2" }] }));
+    const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
+    vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    await linkCardCausal("c1", "c3");
+    expect(save.mock.calls[0][0].metadata.causal_links).toEqual([{ target: "c2" }, { target: "c3" }]);
+    await linkCardCausal("c1", "c1"); // self → no save
+    expect(save).toHaveBeenCalledTimes(1);
+  });
+
+  it("unlinkCardCausal removes a target; emptying it drops the key (sparse)", async () => {
+    vi.spyOn(api, "getCard").mockResolvedValue(card({ causal_links: [{ target: "c2" }] }));
+    const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
+    vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    await unlinkCardCausal("c1", "c2");
+    expect(save.mock.calls[0][0].metadata).toEqual({});
   });
 
   it("setCardPageStatus off_page sets the value; unwritten drops it (the sparse default)", async () => {

@@ -136,23 +136,63 @@ export function detachCardScene(cardId: string): Promise<void> {
 // `beat_links` item (both plain text, healed plot-locally on save; ADR-0048 S7 5b).
 export type PlotBeatLink = { instance: string; beat_id: string };
 
-// Set the card's whole beat-link list (ADR-0048 S7 Slice 5b) — the beat picker owns
-// the desired set and writes it here. `saveCard` heals dangling links, so passing the
-// picker's live selection is always canonical; an empty set drops the key (sparse).
-export function setCardBeatLinks(cardId: string, links: PlotBeatLink[]): Promise<void> {
+// Beat links are authored by DRAGGING a beat from the Arcs palette onto a card (#824),
+// so these are incremental add/remove ops over the card's current `beat_links`, not a
+// whole-set write. Each reads the card's live metadata (via mutateCardMetadata's
+// get→mutate→save) so a concurrent change never gets clobbered; the backend heals
+// dangling links regardless.
+function beatLinksOf(metadata: CardEntry["metadata"]): PlotBeatLink[] {
+  const raw = metadata.beat_links;
+  return Array.isArray(raw)
+    ? raw.filter((l): l is PlotBeatLink => !!l && typeof l === "object" && "instance" in l && "beat_id" in l)
+    : [];
+}
+
+// Drop a beat onto a card → add the link (deduped; a card fulfils a beat once).
+export function linkCardBeat(cardId: string, instance: string, beat_id: string): Promise<void> {
   return mutateCardMetadata(cardId, (metadata) => {
-    if (links.length) metadata.beat_links = links.map((l) => ({ instance: l.instance, beat_id: l.beat_id }));
+    const links = beatLinksOf(metadata);
+    if (!links.some((l) => l.instance === instance && l.beat_id === beat_id)) {
+      links.push({ instance, beat_id });
+    }
+    metadata.beat_links = links;
+  });
+}
+
+// Remove a beat from a card (the badge's × on the card). An empty result drops the key
+// (sparse), matching the backend's all-dangling→sparse heal.
+export function unlinkCardBeat(cardId: string, instance: string, beat_id: string): Promise<void> {
+  return mutateCardMetadata(cardId, (metadata) => {
+    const links = beatLinksOf(metadata).filter((l) => !(l.instance === instance && l.beat_id === beat_id));
+    if (links.length) metadata.beat_links = links;
     else delete metadata.beat_links;
   });
 }
 
-// Set the card's authored causal links (ADR-0048 S7 Slice 6b) — the "Leads to…"
-// picker owns the desired target set (ids of the cards this card leads to) and writes
-// it here. `saveCard` heals dangling / self / duplicate targets, so the picker's live
-// selection is always canonical; an empty set drops the key (sparse).
-export function setCardCausalLinks(cardId: string, targets: string[]): Promise<void> {
+// Causal ("leads to") edges are authored by DRAGGING a wire from one card's handle to
+// another (#824, SvelteFlow onconnect), and removed by deleting the edge — so these are
+// incremental over the source card's `causal_links`. Self-links are refused (the
+// backend heals them anyway); dedup keeps one edge per pair.
+function causalTargetsOf(metadata: CardEntry["metadata"]): { target: string }[] {
+  const raw = metadata.causal_links;
+  return Array.isArray(raw)
+    ? raw.filter((l): l is { target: string } => !!l && typeof l === "object" && typeof (l as { target?: unknown }).target === "string")
+    : [];
+}
+
+export function linkCardCausal(cardId: string, targetId: string): Promise<void> {
+  if (cardId === targetId) return Promise.resolve(); // a card does not lead to itself
   return mutateCardMetadata(cardId, (metadata) => {
-    if (targets.length) metadata.causal_links = targets.map((target) => ({ target }));
+    const links = causalTargetsOf(metadata);
+    if (!links.some((l) => l.target === targetId)) links.push({ target: targetId });
+    metadata.causal_links = links;
+  });
+}
+
+export function unlinkCardCausal(cardId: string, targetId: string): Promise<void> {
+  return mutateCardMetadata(cardId, (metadata) => {
+    const links = causalTargetsOf(metadata).filter((l) => l.target !== targetId);
+    if (links.length) metadata.causal_links = links;
     else delete metadata.causal_links;
   });
 }

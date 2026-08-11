@@ -4,18 +4,21 @@
   instances): add one from a shipped template (snapshotting its beat roster) or a
   blank ad-hoc arc, see each arc's beats, open one to specialize them, or remove it.
 
-  Purely presentational — it imports NOTHING from @xyflow/svelte, so it mounts in
-  happy-dom for its render test ([[reference_component_test_harness]]). All data +
-  actions arrive as props; PlotEditor wires them to the templateInstances store and
-  editorPanes (open / instantiate / create-blank / remove).
+  Doubles as the board's DRAG PALETTE (#824): each beat is draggable onto a card to
+  link it. Still imports nothing from @xyflow/svelte (the drag is plain HTML5
+  dataTransfer), so it mounts in happy-dom for its render test
+  ([[reference_component_test_harness]]). All data + actions arrive as props; PlotEditor
+  wires them to the templateInstances store and editorPanes.
 -->
 <script lang="ts">
   import type { TemplateInstanceSummary, PlotTemplateSummary } from "@/lib/types";
   import { instanceBeats } from "@/lib/plot/instanceBeats";
+  import { setPlotBeatDrag } from "@/lib/plot/plotDnd";
 
   let {
     instances,
     templates,
+    usedBeatKeys = new Set<string>(),
     onOpen,
     onInstantiate,
     onCreateBlank,
@@ -23,11 +26,16 @@
   }: {
     instances: TemplateInstanceSummary[];
     templates: PlotTemplateSummary[];
+    // Composite `${instance}:${beatId}` keys of beats already linked to some card, so
+    // the palette can mark them "placed" — the coverage-at-a-glance the prototype had.
+    usedBeatKeys?: Set<string>;
     onOpen: (id: string) => void;
     onInstantiate: (templateId: string) => void;
     onCreateBlank: () => void;
     onRemove: (id: string) => void;
   } = $props();
+
+  const beatKey = (instance: string, beatId: string) => `${instance}:${beatId}`;
 
   // One arc's beats expand at a time — a glance-first rail; the full editor is a click away.
   let expandedId = $state<string | null>(null);
@@ -127,7 +135,19 @@
           {#if isOpen && beats.length}
             <ol class="beat-list">
               {#each beats as beat, i (beat.id ?? i)}
-                <li class="beat">{beat.title || "Untitled beat"}</li>
+                {@const linked = !!beat.id && usedBeatKeys.has(beatKey(instance.id, beat.id))}
+                <li
+                  class="beat"
+                  class:draggable={!!beat.id}
+                  class:linked
+                  draggable={!!beat.id}
+                  ondragstart={(e) => beat.id && setPlotBeatDrag(e, instance.id, beat.id)}
+                  title={beat.id ? "Drag onto a card to link this beat" : beat.title || "Untitled beat"}
+                >
+                  {#if beat.id}<i class="ti ti-grip-vertical beat-grip" aria-hidden="true"></i>{/if}
+                  <span class="beat-title">{beat.title || "Untitled beat"}</span>
+                  {#if linked}<i class="ti ti-check beat-check" aria-hidden="true" title="Linked to a card"></i>{/if}
+                </li>
               {/each}
             </ol>
           {/if}
@@ -315,14 +335,51 @@
   .beat-list {
     list-style: none;
     margin: 0 0 4px;
-    padding: 0 4px 0 26px;
+    padding: 0 4px 0 22px;
   }
   .beat {
+    display: flex;
+    align-items: center;
+    gap: 4px;
     font-size: var(--fs-xs);
     color: var(--text-2);
-    padding: 2px 0;
+    padding: 3px 4px;
+    border-radius: var(--r-sm);
+  }
+  /* A draggable beat is a palette chip — grab cursor, grip visible on hover, and it
+     lifts on hover so it reads as pick-up-able (#824). */
+  .beat.draggable {
+    cursor: grab;
+  }
+  .beat.draggable:hover {
+    background: var(--surface);
+    color: var(--text);
+  }
+  .beat.draggable:active {
+    cursor: grabbing;
+  }
+  .beat-grip {
+    flex: 0 0 auto;
+    color: var(--text-3);
+    opacity: 0;
+  }
+  .beat.draggable:hover .beat-grip {
+    opacity: 1;
+  }
+  .beat-title {
+    flex: 1;
+    min-width: 0;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  /* Already linked to a card — a quiet check so coverage reads at a glance. */
+  .beat-check {
+    flex: 0 0 auto;
+    color: var(--accent);
+    font-size: var(--fs-xs);
+  }
+  .beat.linked .beat-title {
+    color: var(--text-3);
   }
 </style>

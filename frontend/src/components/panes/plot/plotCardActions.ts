@@ -7,8 +7,7 @@
 // Content ops (realize/detach/set-plotline) are intentful backend mutations OUTSIDE
 // the ADR-0050 layout caretaker (binding decision 1) — they never join the Ctrl+Z
 // history.
-import type { PlotBoardPlotline, TemplateInstanceSummary } from "@/lib/types";
-import type { PlotBeatLink } from "@/lib/stores/plotBoard";
+import type { PlotBoardPlotline } from "@/lib/types";
 
 export type PlotCardActions = {
   // Open the card as a NodeEditor document (full fields: plotline / scene / synopsis).
@@ -23,28 +22,17 @@ export type PlotCardActions = {
   onEditSynopsis: (cardId: string, synopsis: string) => void;
   // Reassign the card's plotline ("" → Unassigned) — the reflow trigger.
   onSetPlotline: (cardId: string, plotlineId: string) => void;
-  // Set the card's whole beat-link set (Slice 5b) — the beat picker owns the desired
-  // selection and writes it here.
-  onSetBeats: (cardId: string, links: PlotBeatLink[]) => void;
-  // Set the card's whole causal-link set (Slice 6b) — the "Leads to…" picker owns the
-  // desired target ids (the cards this card leads to) and writes them here.
-  onSetCausal: (cardId: string, targets: string[]) => void;
+  // Link a beat DROPPED from the Arcs palette onto the card (#824); deduped downstream.
+  onLinkBeat: (cardId: string, instance: string, beatId: string) => void;
+  // Remove a linked beat via the × on its badge (#824).
+  onUnlinkBeat: (cardId: string, instance: string, beatId: string) => void;
   // Set an unattached card's page status (Slice 5b) — off_page vs unwritten; on_page
   // is derived from the scene, so it is never authored here.
   onSetPageStatus: (cardId: string, status: "off_page" | "unwritten") => void;
   // The current lanes, for the "Set plotline" submenu. A getter on the provider so
   // the card reads them fresh from the projection.
   readonly plotlines: PlotBoardPlotline[];
-  // The book's arcs (template instances) + their beats, for the beat picker. A getter
-  // so the picker reads the live roster fresh (the plotlines precedent).
-  readonly arcs: TemplateInstanceSummary[];
-  // Every card's id + title, for the "Leads to…" picker (the card filters out itself).
-  // A getter so the picker reads the live card set fresh (the plotlines precedent).
-  readonly cards: PlotCardChoice[];
 };
-
-// The minimal shape the "Leads to…" picker needs per candidate target card.
-export type PlotCardChoice = { id: string; title: string };
 
 // Symbol key so the context can't collide with a string-keyed one.
 export const PLOT_CARD_ACTIONS = Symbol("plotCardActions");

@@ -3,7 +3,7 @@
 // controller — the shape `LoreScrubController` / `SnapshotStripController` use,
 // and NodeEditor already composes.
 //
-// A `revise:entry` brainstorm (launched from EntryBrainstormBar) commits an
+// A `revise:entry` brainstorm (launched from ConversationsPanel's ＋New menu) commits an
 // `EntryPatch` into the `entryBrainstorm` cross-pane store. This controller
 // derives the proposed-vs-current flips for the open node — the body plus
 // each changed `long_text` field as prose run-diffs (`fields`), and each changed

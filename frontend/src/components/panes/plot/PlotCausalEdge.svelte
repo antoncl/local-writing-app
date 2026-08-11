@@ -17,7 +17,7 @@
   import { BaseEdge, EdgeLabel, getBezierPath, type EdgeProps } from "@xyflow/svelte";
   import { getContext } from "svelte";
   import { PLOT_EDGE_ACTIONS, type PlotEdgeActions } from "./plotCardActions";
-  import type { CausalEdgeData } from "@/lib/plot/plotBoardEdges";
+  import { causalWarnMessage, type CausalEdgeData } from "@/lib/plot/plotBoardEdges";
 
   let {
     id,
@@ -38,13 +38,10 @@
   // The diagnostic payload the edge builder attached (undefined on a legacy/derived edge).
   let diag = $derived(data as CausalEdgeData | undefined);
 
-  // WHY it's an issue + WHAT to do — the tooltip on the amber ⚠. Names both cards so the
-  // warning is concrete, not a generic colour (fork 3: the decoration must explain).
-  let warnMessage = $derived(
-    diag
-      ? `Out of reveal order: “${diag.sourceTitle}” leads to “${diag.targetTitle}”, but its scene is read later — the cause lands after its effect. Move “${diag.sourceTitle}” earlier in the manuscript, or reconsider the link.`
-      : "",
-  );
+  // WHY it's an issue + WHAT to do — the tooltip on the amber ⚠ (only an out-of-order
+  // edge shows it, so it's composed only then). The copy lives in the pure edge module
+  // where it's unit-tested — the edge can't mount headlessly to check it here.
+  let warnMessage = $derived(diag?.outOfOrder ? causalWarnMessage(diag.sourceTitle, diag.targetTitle) : "");
 
   // [path, labelX, labelY, ...] — the label coords put the marker(s) at the curve's midpoint.
   let bezier = $derived(getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition }));

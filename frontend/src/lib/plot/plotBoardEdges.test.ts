@@ -9,6 +9,7 @@ import {
   CARD_TARGET_HANDLE,
   CAUSAL_MARKER_COLOR,
   CAUSAL_WARN_COLOR,
+  causalWarnMessage,
   type CausalEdgeData,
   type EdgeLayer,
 } from "./plotBoardEdges";
@@ -224,6 +225,23 @@ describe("buildBoardEdges", () => {
       // Only the causal layer is on; the warning still resolves from the cards' sequences.
       const [edge] = buildBoardEdges(p, layers("causal"));
       expect(dataOf(edge).outOfOrder).toBe(true);
+    });
+  });
+
+  describe("causalWarnMessage (the copy the reader sees — un-headless-testable in the edge)", () => {
+    it("names both cards and states why + what to do", () => {
+      const msg = causalWarnMessage("Cause", "Effect");
+      // Both cards, so the warning is concrete, not a generic colour.
+      expect(msg).toContain("“Cause”");
+      expect(msg).toContain("“Effect”");
+      // WHY (revealed later / cause after effect) + WHAT to do (move the source earlier).
+      expect(msg).toMatch(/read later/);
+      expect(msg).toMatch(/Move “Cause” earlier/);
+    });
+
+    it("interpolates the source (not the target) into the fix", () => {
+      // The action names the card to MOVE — the source (cause), not the effect.
+      expect(causalWarnMessage("Setup", "Payoff")).toContain("Move “Setup” earlier");
     });
   });
 

@@ -56,6 +56,15 @@ export type CausalEdgeData = {
   targetTitle: string;
 };
 
+// The why + what-to-do copy an out-of-order causal edge shows (Slice 7). Pure and
+// exported so the sentence the reader actually sees is unit-testable — the edge can't
+// mount headlessly ([[reference_svelteflow_headless_limits]]), so this is the only
+// place the copy is covered. Names both cards so the warning is concrete, not a
+// generic colour (the decoration-must-explain decision).
+export function causalWarnMessage(sourceTitle: string, targetTitle: string): string {
+  return `Out of reveal order: “${sourceTitle}” leads to “${targetTitle}”, but its scene is read later — the cause lands after its effect. Move “${sourceTitle}” earlier in the manuscript, or reconsider the link.`;
+}
+
 // Order cards along a chain: by manuscript reading order (`sequence`), with the
 // scene-less cards (no sequence — off-page / unwritten) after every ranked one, in
 // their projection order. `order` is the card's index in `projection.cards`, the

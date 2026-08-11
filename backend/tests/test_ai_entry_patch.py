@@ -25,6 +25,7 @@ from app.models import (
     CreateSceneRequest,
     CreateStructureNodeRequest,
     SaveLoreEntryRequest,
+    SaveSceneRequest,
 )
 from app.services.ai.entry_patch import parse_entry_patch_json
 from app.services.ai.helpers import (
@@ -517,6 +518,94 @@ class EntryPatchRoutesTests(unittest.TestCase):
             ).status_code,
             405,
         )
+
+
+class SceneSummaryPromptTests(unittest.TestCase):
+    """ADR-0051 S5-next — the "Summarize scene" brainstorm: the `revise:entry`
+    entry_patch loop pointed at a scene's `summary` field, reviewed in `replace`
+    mode (a whole-field swap, no run-diff). Pins the shipped entry_type shape, the
+    fields-only template, and that a summary patch validates on a scene."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.service = open_test_project(self.root, "Scene summary")
+        structure = self.service.read_structure()
+        doc = self.service.create_structure_node(
+            CreateStructureNodeRequest(
+                title="Chapter", entry_type="scene:chapter", parent_id=structure.root.id
+            )
+        )
+        chapter_id = next(c.id for c in doc.root.children if c.type == "scene:chapter")
+        created = self.service.create_scene(
+            CreateSceneRequest(title="Storm", parent_id=chapter_id)
+        )
+        self.scene_id = created.id
+        scene = self.service.read_scene(self.scene_id)
+        self.service.save_scene(
+            self.scene_id,
+            SaveSceneRequest(
+                title=scene.title,
+                body="Seren rides into the storm, chasing the thief who took the relic.",
+                base_revision=scene.revision,
+                status="draft",
+                entry_type="scene:scene",
+                metadata={"summary": "Old synopsis."},
+            ),
+        )
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_entry_type_declares_replace_review_and_targets_a_scene(self) -> None:
+        schema = self.service.read_metadata_schema()
+        etype = schema.entry_types["prompt:revise:scene_summary"]
+        self.assertFalse(etype.abstract)
+        self.assertEqual(etype.parent, "prompt:revise")
+        assert etype.prompt is not None and etype.prompt.context_strategy is not None
+        # The first non-default `review` value — `replace`, not `visual_diff` —
+        # is the signal that flips the review off the run-diff engine (S5-next).
+        self.assertEqual(
+            etype.prompt.context_strategy.output,
+            {"kind": "entry_patch", "review": "replace"},
+        )
+        # REVISE-ONLY: a required `entry` input targeting a scene (no create mode).
+        inputs = {i.name: i for i in etype.default_inputs}
+        self.assertEqual(list(inputs), ["entry"])
+        self.assertTrue(inputs["entry"].required)
+        self.assertEqual(inputs["entry"].type, "context_pick")
+        sources = (inputs["entry"].target or {}).get("sources") or [{}]
+        self.assertEqual(sources[0].get("kind"), "scene")
+
+    def test_shipped_prompt_resolves_with_the_type(self) -> None:
+        prompt = self.service.read_prompt_entry("builtin-summarize-scene")
+        self.assertEqual(prompt.entry_type, "prompt:revise:scene_summary")
+
+    def test_template_emits_fields_only_summary_and_never_a_body(self) -> None:
+        prompt = self.service.read_prompt_entry("builtin-summarize-scene")
+        env = create_environment_for_project(self.service)
+        rendered = env.from_string(prompt.body).render(input={"entry": self.scene_id})
+        # The exact commit shape: only the `summary` field, no `body` key.
+        self.assertIn('{"fields": {"summary"', rendered)
+        # The revise:entry-style `{"body": "<...>", ...}` shape must NOT appear —
+        # a scene's prose body is never rewritten by a summary regenerate.
+        self.assertNotIn('"body": "<', rendered)
+        # The scene's prose and current summary are handed to the model to work from.
+        self.assertIn("chasing the thief", rendered)
+        self.assertIn("Old synopsis.", rendered)
+
+    def test_summary_patch_validates_on_a_scene(self) -> None:
+        # `summary` is a scene:base long_text field → proposable, so a summary
+        # patch on a scene is kept end to end (the commit target of S5-next).
+        patch = self.service.validate_ai_entry_patch(
+            self.scene_id,
+            '{"fields": {"summary": "Seren pursues the relic-thief through a storm."}}',
+        )
+        self.assertFalse(patch.garbled)
+        self.assertEqual(
+            patch.fields, {"summary": "Seren pursues the relic-thief through a storm."}
+        )
+        self.assertEqual(patch.dropped, [])
 
 
 if __name__ == "__main__":

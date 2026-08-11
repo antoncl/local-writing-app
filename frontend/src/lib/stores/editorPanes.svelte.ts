@@ -401,14 +401,14 @@ class EditorPanesController {
   /** The open editor pane holding node `entryId`, if any — the pane the review-lock
    *  methods freeze / flush / thaw. Matches by id across ANY document kind: a review
    *  lock is only ever registered for a node the host admits into the entry-patch loop
-   *  (`patchLoopKind` in NodeEditor — lore + plot cards, ADR-0048 §5), so the id alone
-   *  identifies the right pane and no kind filter is needed. Generalized off lore-only
-   *  in ADR-0048 S8b so a plot-card brainstorm freezes + flushes like a lore one. */
+   *  (`patchLoopKind` in NodeEditor — lore, plot cards (ADR-0048 §5), and scenes
+   *  (ADR-0051 S5-next)), so the id alone identifies the right pane and no kind filter
+   *  is needed. Generalized off lore-only in ADR-0048 S8b. */
   #reviewPaneFor(entryId: string): EditorPaneState | undefined {
     return this.panes.find((p) => p.document?.id === entryId);
   }
 
-  /** Freeze the lore pane holding `entryId` for review. Flushes any pending
+  /** Freeze the pane holding `entryId` for review. Flushes any pending
    *  autosave first (frozen == disk, closing the #614 race), then locks.
    *  Idempotent: re-registration while already frozen just refreshes the hooks —
    *  the flush is a one-time entry gesture, not something to repeat each render. */

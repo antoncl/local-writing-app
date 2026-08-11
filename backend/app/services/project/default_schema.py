@@ -435,6 +435,49 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 },
             },
         },
+        "prompt:revise:scene_summary": {
+            # The scene-summary brainstorm (ADR-0051 S5-next): an ideation chat
+            # that, on a commit turn, returns a JSON `entry_patch` proposing the
+            # scene's `summary` field from its prose body — the SAME loop as
+            # `revise:entry`, on a `scene` (the loop is entry_type-keyed, not
+            # lore-shaped; ADR-0048 §5). Two things set it apart from `revise:entry`:
+            #   • It is FIELD-SCOPED: the template names only `summary` and the
+            #     patch carries no `body`. A scene's body is its manuscript prose,
+            #     which a summary regenerate must never rewrite — the client also
+            #     drops any stray `body` from a `replace` patch, so the invariant is
+            #     held structurally, not by prompt compliance.
+            #   • `output.review = "replace"` (not `visual_diff`): a synopsis
+            #     regenerated from scratch has no meaningful run-diff against the old
+            #     one, so the review is a plain current→proposed replace card, not a
+            #     per-run adopt. `review` is the long-declared output axis; this is
+            #     its first non-`visual_diff` value (ADR-0051 S5-next).
+            # REVISE-ONLY (a scene exists before it is summarized — no create mode);
+            # the `entry` input is required and targets a scene, exactly as
+            # `revise:plot_card` targets a `plot:card`.
+            "name": "Summarize scene",
+            "kind": "prompt",
+            "parent": "prompt:revise",
+            "fields": [],
+            "has_body": True,
+            "default_inputs": [
+                {
+                    "name": "entry",
+                    "type": "context_pick",
+                    "label": "Scene",
+                    "required": True,
+                    "target": {
+                        "sources": [{"kind": "scene", "expr": {"type": "scene:scene"}}],
+                        "multiple": False,
+                        "presets": [],
+                    },
+                },
+            ],
+            "prompt": {
+                "context_strategy": {
+                    "output": {"kind": "entry_patch", "review": "replace"},
+                },
+            },
+        },
         "prompt:general": {
             "name": "General",
             "kind": "prompt",

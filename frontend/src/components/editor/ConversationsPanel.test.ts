@@ -24,7 +24,8 @@ const SCHEMA = {
       name: "Revise",
       prompt: { context_strategy: { output: { kind: "entry_patch" } } },
     },
-    // A chat-surface prompt — the set a scene's ＋New offers (ADR-0051 S5).
+    // A chat-surface prompt — a different surface, so the panel's surface filter
+    // must partition it out of an entry_patch ＋New (and vice versa).
     "prompt:scenechat": {
       name: "Scene chat",
       prompt: { context_strategy: { output: { kind: "chat_panel" } } },
@@ -209,10 +210,11 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
     expect(screen.getByRole("menuitem", { name: "Revise" })).toBeInTheDocument();
   });
 
-  it("offers the surface for the subject kind: chat_panel for a scene (#842)", async () => {
-    // A scene's ＋New offers chat prompts (chat_panel), not the lore brainstorm
-    // set (entry_patch). Both prompt kinds are present; only the scene surface
-    // one appears when newSurface="chat_panel".
+  it("offers exactly the prompts matching the requested surface (#842)", async () => {
+    // The panel is surface-generic: it shows only prompts whose output kind
+    // matches `newSurface`, and drops the rest. (Which surface a given subject
+    // kind uses lives in NodeEditor — lore and scene both take entry_patch as of
+    // S5-next; here we prove the filter itself, using chat_panel as the foil.)
     renderPanel(
       [revisePrompt("p-revise", "Brainstorm a revision"), chatPanelPrompt("p-chat", "Chat here")],
       "chat_panel",
@@ -223,9 +225,9 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
     expect(screen.queryByRole("menuitem", { name: "Brainstorm a revision" })).toBeNull();
   });
 
-  it("hides ＋New when no prompt resolves to the subject's surface (#842)", () => {
-    // A scene with only an entry_patch prompt available and the chat_panel
-    // surface → nothing to start, so ＋New does not render (resume list only).
+  it("hides ＋New when no prompt resolves to the requested surface (#842)", () => {
+    // Only an entry_patch prompt is available but the requested surface is
+    // chat_panel → nothing to start, so ＋New does not render (resume list only).
     const { container } = renderPanel([revisePrompt("p-revise", "Brainstorm a revision")], "chat_panel");
     expect(container.querySelector(".conv-new")).toBeNull();
     // The panel still renders — there are chats to resume.
@@ -250,6 +252,24 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
     await fireEvent.click(screen.getByRole("button", { name: /New/ }));
     await tick();
     expect(screen.getByRole("menuitem", { name: "Revise plot card" })).toBeInTheDocument();
+  });
+
+  it("scopes a scene subject to scene-targeted brainstorms (ADR-0051 S5-next)", async () => {
+    // A scene's entry_patch ＋New offers a scene-targeted prompt ("Summarize
+    // scene") but not a lore-targeted one — scenes joined the loop at S5-next and
+    // the same target filter keeps the lore prompts off the scene menu.
+    renderPanel(
+      [
+        targetedPrompt("p-sum", "Summarize scene", "scene:scene"),
+        targetedPrompt("p-lore", "Revise entry", "lore:base"),
+      ],
+      undefined,
+      "scene:scene",
+    );
+    await fireEvent.click(screen.getByRole("button", { name: /New/ }));
+    await tick();
+    expect(screen.getByRole("menuitem", { name: "Summarize scene" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Revise entry" })).toBeNull();
   });
 
   it("does not render when there is nothing to resume and no prompt to start", () => {

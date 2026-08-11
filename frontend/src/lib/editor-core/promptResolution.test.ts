@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  effectiveReviewMode,
   hidePromptEntries,
   promptEntriesForSurface,
   promptTargetsEntryType,
@@ -13,11 +14,18 @@ function prompt(id: string, entryType: string): PromptEntrySummary {
 
 // prompt:a / prompt:b emit to append_to_body; prompt:chat routes to the chat
 // panel, so the surface filter partitions them and the hidden filter removes one.
+// prompt:summary / prompt:revise are the two entry_patch review modes (S5-next).
 const schema = {
   entry_types: {
     "prompt:a": { prompt: { context_strategy: { output: { kind: "append_to_body" } } } },
     "prompt:b": { prompt: { context_strategy: { output: { kind: "append_to_body" } } } },
     "prompt:chat": { prompt: { context_strategy: { output: { kind: "chat_panel" } } } },
+    "prompt:summary": {
+      prompt: { context_strategy: { output: { kind: "entry_patch", review: "replace" } } },
+    },
+    "prompt:revise": {
+      prompt: { context_strategy: { output: { kind: "entry_patch", review: "visual_diff" } } },
+    },
   },
 } as unknown as MetadataSchema;
 
@@ -65,6 +73,22 @@ describe("promptEntriesForSurface — hidden filter (ADR-0049 slice 3)", () => {
       hiddenPromptIds: new Set(["p-chat"]),
     });
     expect(promptEntriesForSurface(hidden, "chat_panel")).toEqual([]);
+  });
+});
+
+describe("effectiveReviewMode (ADR-0051 S5-next)", () => {
+  it("reads 'replace' from output.review", () => {
+    expect(effectiveReviewMode(ctx(), prompt("p", "prompt:summary"))).toBe("replace");
+  });
+
+  it("returns 'visual_diff' for an explicit visual_diff", () => {
+    expect(effectiveReviewMode(ctx(), prompt("p", "prompt:revise"))).toBe("visual_diff");
+  });
+
+  it("defaults to 'visual_diff' when review is absent", () => {
+    // Every non-entry_patch prompt (and any legacy entry_patch with no `review`)
+    // takes the per-run flip — only `replace` opts out.
+    expect(effectiveReviewMode(ctx(), prompt("p", "prompt:a"))).toBe("visual_diff");
   });
 });
 

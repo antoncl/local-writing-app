@@ -25,7 +25,7 @@ suggestion protocol, is how the AI writes back (Slice 8b).
 
 Composed onto `ProjectService` beside `PlotMixin`, whose resolve helpers it reuses
 through the MRO (`read_plot_board`, `list_cards` / `list_plotlines` /
-`list_template_instances`, `_board_container_map`, `_iter_valid_beat_link_pairs`,
+`list_template_instances`, `_board_container_map`, `_resolve_card_beats`,
 `_resolve_card_causal`, `_board_page_status`).
 """
 
@@ -34,7 +34,6 @@ from __future__ import annotations
 from typing import Any
 
 from app.models import (
-    PlotBoardBeat,
     PlotContext,
     PlotContextArc,
     PlotContextBeat,
@@ -42,12 +41,14 @@ from app.models import (
     PlotContextPlotline,
 )
 
-# Card / arc metadata field names. These mirror the private constants on
-# PlotMixin's module; the few this mixin reads are re-declared here rather than
-# imported across the slice boundary.
+# On-disk metadata field keys this mixin reads a card / arc / plotline's metadata
+# by — the same schema field-name literals plot.py reads them by; named here for
+# legibility. The card→beat and card→causal resolutions, which key off plot.py's
+# own `beat_links` / `causal_links` constants, are delegated to its
+# `_resolve_card_beats` / `_resolve_card_causal`, so those keys are not restated
+# here (no shared-constant drift seam to keep in sync).
 _SCENE_FIELD = "scene"
 _PLOTLINE_FIELD = "plotline"
-_BEAT_LINK_FIELD = "beat_links"
 _INSTANCE_BEATS_FIELD = "instance_beats"
 _SOURCE_TEMPLATE_NAME_FIELD = "source_template_name"
 _COLOR_FIELD = "color"
@@ -183,29 +184,12 @@ class PlotContextMixin:
     ) -> PlotContextCard:
         """Project one admitted card for the AI: synopsis + plotline + reveal rank
         + page status + the beats it fulfils + the cards it leads to. Beat links
-        resolve against `beat_catalog` (dropping a link whose arc or beat is gone),
-        and `causal_out` is filtered to `admitted_ids` so a withheld card never
-        leaks through an edge (the same drop the board's display-side heal applies
-        to dangling targets)."""
+        resolve through PlotMixin's `_resolve_card_beats` against `beat_catalog`
+        (dropping a link whose arc or beat is gone — the same display-side heal the
+        board projection applies), and `causal_out` is filtered to `admitted_ids`
+        via `_resolve_card_causal` so a withheld card never leaks through an edge."""
         scene = card.metadata.get(_SCENE_FIELD) or None
         plotline_id = card.metadata.get(_PLOTLINE_FIELD) or None
-        beats: list[PlotBoardBeat] = []
-        for instance_id, beat_id in self._iter_valid_beat_link_pairs(card.metadata.get(_BEAT_LINK_FIELD)):
-            entry = beat_catalog.get(instance_id)
-            if entry is None:
-                continue  # arc gone → drop (display-side heal)
-            arc_title, beat_titles = entry
-            title = beat_titles.get(beat_id)
-            if title is None:
-                continue  # beat left the roster → drop
-            beats.append(
-                PlotBoardBeat(
-                    instance_id=instance_id,
-                    instance_title=arc_title,
-                    beat_id=beat_id,
-                    title=title,
-                )
-            )
         return PlotContextCard(
             id=card.id,
             title=card.title,
@@ -215,6 +199,6 @@ class PlotContextMixin:
             scene_id=scene,
             sequence=scene_to_order.get(scene) if scene else None,
             page_status=self._board_page_status(card.metadata, scene),
-            beats=beats,
+            beats=self._resolve_card_beats(card.metadata, beat_catalog),
             causal_out=self._resolve_card_causal(card.metadata, admitted_ids, card.id),
         )

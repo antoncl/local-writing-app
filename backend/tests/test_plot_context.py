@@ -20,6 +20,7 @@ from app.models import (
     CreateStructureNodeRequest,
     SaveCardRequest,
     SavePlotlineRequest,
+    SaveTemplateInstanceRequest,
 )
 
 _THREE_ACT = "builtin-plot-three-act-story-arc"
@@ -163,6 +164,40 @@ class ArcRosterTests(PlotContextTestCase):
         arc = self._arc()
         context_arc = next(a for a in self.service.read_plot_context().arcs if a.id == arc.id)
         self.assertEqual(context_arc.source_template_name, arc.metadata.get("source_template_name"))
+
+    def test_a_card_link_to_a_departed_beat_is_dropped(self) -> None:
+        arc = self._arc()
+        roster = arc.metadata["instance_beats"]
+        gone_beat = roster[0]["id"]
+        card_id = self._card("Links a beat", beat_links=[{"instance": arc.id, "beat_id": gone_beat}])
+        # Remove that beat from the arc's roster — the card's stored link now points
+        # at a beat that no longer exists.
+        trimmed = [b for b in roster if b["id"] != gone_beat]
+        self.service.save_template_instance(
+            arc.id,
+            SaveTemplateInstanceRequest(
+                title=arc.title, body="", metadata={**arc.metadata, "instance_beats": trimmed}
+            ),
+        )
+        context = self.service.read_plot_context()
+        card = next(c for c in context.cards if c.id == card_id)
+        self.assertEqual(card.beats, [])  # the link to the departed beat is dropped display-side
+        context_arc = next(a for a in context.arcs if a.id == arc.id)
+        self.assertNotIn(gone_beat, [b.beat_id for b in context_arc.beats])
+
+    def test_arcs_stay_present_when_the_gate_hides_all_their_cards(self) -> None:
+        arc = self._arc()
+        first_beat = arc.metadata["instance_beats"][0]["id"]
+        chapter = self._chapter()
+        early, late = self._scene("early", chapter), self._scene("late", chapter)
+        # The only card fulfilling the arc sits on a later scene, so the gate below
+        # withholds it — but the arc is scaffolding and must stay fully present.
+        self._card("Fulfils", scene=late, beat_links=[{"instance": arc.id, "beat_id": first_beat}])
+        context = self.service.read_plot_context(as_of=early)
+        self.assertEqual(context.cards, [])  # the fulfilling card is withheld
+        self.assertEqual(context.omitted_cards, 1)
+        context_arc = next(a for a in context.arcs if a.id == arc.id)
+        self.assertEqual(len(context_arc.beats), len(arc.metadata["instance_beats"]))  # ungated
 
 
 class CausalEdgeTests(PlotContextTestCase):

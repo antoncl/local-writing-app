@@ -146,6 +146,17 @@ export function setCardBeatLinks(cardId: string, links: PlotBeatLink[]): Promise
   });
 }
 
+// Set the card's authored causal links (ADR-0048 S7 Slice 6b) — the "Leads to…"
+// picker owns the desired target set (ids of the cards this card leads to) and writes
+// it here. `saveCard` heals dangling / self / duplicate targets, so the picker's live
+// selection is always canonical; an empty set drops the key (sparse).
+export function setCardCausalLinks(cardId: string, targets: string[]): Promise<void> {
+  return mutateCardMetadata(cardId, (metadata) => {
+    if (targets.length) metadata.causal_links = targets.map((target) => ({ target }));
+    else delete metadata.causal_links;
+  });
+}
+
 // Set the card's authored page status (ADR-0048 S7 Slice 5b) — only off_page vs
 // unwritten; on_page is derived by the backend from the scene, so this is offered
 // only for an unattached card. `unwritten` is the sparse default, so it drops the

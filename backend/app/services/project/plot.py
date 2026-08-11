@@ -91,6 +91,10 @@ PLOT_CARD_ENTRY_TYPE = "plot:card"
 # plot-locally because v1 bars refs from list-item shapes. `page_status` is the
 # on/off-page vs unwritten marker, with `on_page` derived from the scene link.
 _BEAT_LINK_FIELD = "beat_links"
+# The authored card→card causal edges (ADR-0048 S7 Slice 6b) — each a single
+# `target` card node id as text, healed plot-locally (drop dangling / self /
+# duplicate) for the same v1-bars-refs-from-item-shapes reason as `beat_links`.
+_CAUSAL_LINK_FIELD = "causal_links"
 _PAGE_STATUS_FIELD = "page_status"
 
 
@@ -256,7 +260,7 @@ class PlotMixin:
         metadata = self._strip_unknown_metadata_fields(metadata, raw_entry_type, schema)
         metadata = self._strip_dangling_references(metadata, schema, index)
         if raw_entry_type == PLOT_CARD_ENTRY_TYPE:
-            metadata = self._normalise_card_metadata(metadata, index)
+            metadata = self._normalise_card_metadata(metadata, index, node_id)
         metadata_errors = self._validate_entry_metadata(
             label=f"{noun.capitalize()} {node_id}",
             entry_type=raw_entry_type,
@@ -336,7 +340,7 @@ class PlotMixin:
         # save and read agree in every case. plot:card is a leaf here (the module
         # lists cards by exact type), so both consistently skip any subtype.
         if request.entry_type == PLOT_CARD_ENTRY_TYPE:
-            metadata = self._normalise_card_metadata(metadata, index)
+            metadata = self._normalise_card_metadata(metadata, index, node_id)
         metadata_errors = self._validate_entry_metadata(
             label=f"{noun.capitalize()} {node_id}",
             entry_type=request.entry_type,
@@ -398,16 +402,20 @@ class PlotMixin:
             if candidate not in taken:
                 return candidate
 
-    def _normalise_card_metadata(self, metadata: dict[str, Any], index: Any) -> dict[str, Any]:
-        """Card-only metadata normalization (ADR-0048 S7 Slice 3b).
+    def _normalise_card_metadata(
+        self, metadata: dict[str, Any], index: Any, card_id: str
+    ) -> dict[str, Any]:
+        """Card-only metadata normalization (ADR-0048 S7 Slice 3b/6b).
 
         Runs on every card save AND read — the same two-path symmetry the `scene`
         ref already has (purge-on-delete + heal-on-read). Heals the card→beat links
-        (drops any that no longer resolve), then derives `page_status` from the scene
-        attachment. `plot:card` is the only plot node carrying either field, so the
-        save/read callers gate this to cards.
+        and the authored card→card causal links (drops any that no longer resolve),
+        then derives `page_status` from the scene attachment. `plot:card` is the only
+        plot node carrying these fields, so the save/read callers gate this to cards;
+        `card_id` is the healing card's own node id, needed to drop a self-link.
         """
         self._heal_beat_links(metadata, index)
+        self._heal_causal_links(metadata, index, card_id)
         self._derive_card_page_status(metadata)
         return metadata
 
@@ -483,6 +491,58 @@ class PlotMixin:
             for beat in beats
             if isinstance(beat, dict) and isinstance(beat.get("id"), str) and beat["id"]
         }
+
+    @staticmethod
+    def _iter_valid_causal_targets(links: Any) -> Iterator[str]:
+        """Yield each well-formed, unique `target` card id from a stored `causal_links`
+        value (ADR-0048 S7 Slice 6b), skipping non-dict items, a blank target (points
+        nowhere), and duplicate targets (a card leads to another once). The shared front
+        half of `_heal_causal_links` (which then filters to live, non-self cards) and
+        `_resolve_card_causal` (which surfaces the ids in the projection) — one place
+        decides what a valid link *is*, so the two can't drift on it."""
+        if not isinstance(links, list):
+            return
+        seen: set[str] = set()
+        for link in links:
+            if not isinstance(link, dict):
+                continue
+            target = link.get("target")
+            if not (isinstance(target, str) and target):
+                continue
+            if target in seen:
+                continue
+            seen.add(target)
+            yield target
+
+    def _heal_causal_links(self, metadata: dict[str, Any], index: Any, card_id: str) -> None:
+        """Keep only authored causal links that still resolve (ADR-0048 S7 Slice 6b).
+
+        A `causal_links` item is a single `target` card node id stored as plain text —
+        v1 keeps refs out of list-item shapes, so the top-level reference purge/heal
+        never reaches these. This is that healing, plot-local: a link survives only if
+        its `target` is a live `plot:card` **and** is not the healing card itself (a
+        card does not lead to itself). A link to a deleted card, a non-card node, or a
+        self-reference is dropped — the board can only draw edges that mean something.
+        Well-formedness + dedup are the shared `_iter_valid_causal_targets`; this adds
+        the live-card + non-self filter and re-emits each survivor as a canonical
+        `{target}` dict. When nothing survives the key is removed, so an all-dangling
+        list heals to sparse rather than `[]`.
+        """
+        links = metadata.get(_CAUSAL_LINK_FIELD)
+        if not isinstance(links, list):
+            return
+        healed: list[Any] = []
+        for target in self._iter_valid_causal_targets(links):
+            if target == card_id:
+                continue  # a card does not lead to itself
+            entry = index.by_id.get(target)
+            if entry is None or entry.entry_type != PLOT_CARD_ENTRY_TYPE:
+                continue  # target card gone / not a card
+            healed.append({"target": target})
+        if healed:
+            metadata[_CAUSAL_LINK_FIELD] = healed
+        else:
+            metadata.pop(_CAUSAL_LINK_FIELD, None)
 
     @staticmethod
     def _page_status_from_scene(scene: Any) -> str | None:
@@ -876,6 +936,10 @@ class PlotMixin:
             for instance_id, _beat_id in self._iter_valid_beat_link_pairs(card.metadata.get(_BEAT_LINK_FIELD))
         }
         beat_catalog = self._instance_beat_catalog(self._build_node_index(), referenced_arcs)
+        # The live card ids, so authored causal links resolve to real edge endpoints
+        # (Slice 6b) — the display side of `_heal_causal_links`, symmetric with the
+        # beat catalog above.
+        card_ids = {card.id for card in card_entries}
         cards: list[PlotBoardCard] = []
         used_containers: set[str] = set()
         for card in card_entries:
@@ -898,6 +962,7 @@ class PlotMixin:
                     page_status=self._board_page_status(card.metadata, scene),
                     beats=self._resolve_card_beats(card.metadata, beat_catalog),
                     sequence=scene_to_order.get(scene) if scene else None,
+                    causal_links=self._resolve_card_causal(card.metadata, card_ids, card.id),
                 )
             )
         # Reading order (containers is already ordered), used-only — an empty
@@ -1028,6 +1093,21 @@ class PlotMixin:
                 )
             )
         return resolved
+
+    def _resolve_card_causal(
+        self, metadata: dict[str, Any], card_ids: set[str], self_id: str
+    ) -> list[str]:
+        """Resolve a card's stored `causal_links` into the target card ids the board
+        draws edges to (ADR-0048 S7 Slice 6b), dropping any target that is gone, is a
+        self-reference, or isn't a live card (the display side of `_heal_causal_links`).
+        Well-formedness + dedup are the shared `_iter_valid_causal_targets`; this adds
+        the live-card + non-self filter. Order follows the stored list, so it is stable
+        across reads."""
+        return [
+            target
+            for target in self._iter_valid_causal_targets(metadata.get(_CAUSAL_LINK_FIELD))
+            if target != self_id and target in card_ids
+        ]
 
     # ----- Templates (plot:template) — an ADR-0049 Library tenant ---------
     #

@@ -206,7 +206,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Card",
             "kind": "plot",
             "parent": "plot:base",
-            "fields": ["plotline", "scene", "page_status", "beat_links"],
+            "fields": ["plotline", "scene", "page_status", "beat_links", "causal_links"],
             "has_body": True,
         },
         "plot:template": {
@@ -551,6 +551,19 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 {"key": "beat_id", "name": "Beat", "type": "text"},
             ],
         },
+        "plot_causal_link": {
+            # An authored card->card causal edge (ADR-0048 S7 Slice 6b): "this card
+            # leads to that card". The single member `target` holds the destination
+            # card's node id as plain `text` (v1 bars refs from item shapes, same as
+            # `plot_beat_link`), so plot.py heals these by hand on card save + read —
+            # dropping a link whose target card is gone, points at the card itself, or
+            # duplicates another. v1 is UNTYPED: one directed edge, no label; a `type`
+            # member is a later slice, added when a workflow first demands it.
+            "name": "Causal link",
+            "members": [
+                {"key": "target", "name": "Target", "type": "text"},
+            ],
+        },
     },
     "fields": {
         # Intrinsic identity triple (#116). Every node carries `id`, `title`,
@@ -732,6 +745,20 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Beat links",
             "type": "list",
             "item_group": "plot_beat_link",
+            "hidden": True,
+        },
+        "causal_links": {
+            # A card's authored causal edges (ADR-0048 S7 Slice 6b): the cards this
+            # card *leads to*, each a `plot_causal_link` (a target card node id). An
+            # ordered `list` so one card can lead to several. Its consumer is
+            # `plot:card`. Integrity is plot-local: the item shape is plain text (v1
+            # bars refs from item shapes), so plot.py heals dangling / self / duplicate
+            # links on card save + read, not the top-level reference machinery. Hidden
+            # by default, like `beat_links`: the members are raw ids meant for the
+            # board's "Leads to…" link editor, not hand-entry in the generic panel.
+            "name": "Causal links",
+            "type": "list",
+            "item_group": "plot_causal_link",
             "hidden": True,
         },
         "word_count": {

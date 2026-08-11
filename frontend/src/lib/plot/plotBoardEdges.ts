@@ -14,17 +14,17 @@
 // already carries direction); the authored causal layer (Slice 6b) reads stronger.
 // Both layers can be on at once — holding ≥2 is what the Slice 7 diagnostics need.
 
-import type { Edge } from "@xyflow/svelte";
+import { MarkerType, type Edge } from "@xyflow/svelte";
 import type { PlotBoardCard, PlotBoardProjection } from "@/lib/types";
 
-// The edge layers a writer can toggle. Slice 6a ships the two derived ones; the
-// authored "causal" layer arrives in 6b.
-export type EdgeLayer = "manuscript" | "beats";
+// The edge layers a writer can toggle. Slice 6a shipped the two DERIVED ones;
+// Slice 6b adds the AUTHORED "causal" layer (the "leads to" edges a writer draws).
+export type EdgeLayer = "manuscript" | "beats" | "causal";
 
 // The canonical layer list — the toggle UI iterates it, and the pref loader uses
 // it as the whitelist so a stale stored layer name (e.g. a future one, on a
 // downgrade) is dropped rather than trusted.
-export const EDGE_LAYERS: readonly EdgeLayer[] = ["manuscript", "beats"];
+export const EDGE_LAYERS: readonly EdgeLayer[] = ["manuscript", "beats", "causal"];
 
 // The card node's anchor-handle ids. xyflow will not render an edge unless its
 // `sourceHandle`/`targetHandle` resolve to real Handles on the endpoint nodes, so
@@ -33,6 +33,13 @@ export const EDGE_LAYERS: readonly EdgeLayer[] = ["manuscript", "beats"];
 // silently kills every edge and can't be caught headlessly.
 export const CARD_SOURCE_HANDLE = "out";
 export const CARD_TARGET_HANDLE = "in";
+
+// The causal arrowhead's colour. xyflow renders an ArrowClosed marker with an
+// inline `style:fill`, so a CSS var resolves here (it cascades from `:root`); the
+// marker defaults to `fill: none` (invisible) when no colour is passed, so this
+// MUST be set. A design token, not a literal — the accent, matching the causal
+// edge's stroke so head and line read as one stroke.
+export const CAUSAL_MARKER_COLOR = "var(--accent)";
 
 // Order cards along a chain: by manuscript reading order (`sequence`), with the
 // scene-less cards (no sequence — off-page / unwritten) after every ranked one, in
@@ -106,6 +113,31 @@ export function buildBoardEdges(projection: PlotBoardProjection, layers: Set<Edg
     for (const { members, instance, beat } of groups.values()) {
       members.sort(bySequenceThenOrder);
       edges.push(...chain(members, `beat:${instance}:${beat}`, "beat-edge"));
+    }
+  }
+
+  // Authored causal layer: one DIRECTED edge per "leads to" target. Unlike the
+  // derived layers this is not a chain — each link stands alone — and it reads
+  // STRONGER (solid, accent, arrow-headed) because the direction is the author's
+  // assertion, not an artefact of layout, so the edge carries a `markerEnd`
+  // arrowhead the derived layers omit. Skip a target that isn't a live card or is
+  // the card itself (defensive; the backend heals these) so a stale projection can
+  // never emit a dangling or self edge.
+  if (layers.has("causal")) {
+    const cardIds = new Set(projection.cards.map((c) => c.id));
+    for (const card of projection.cards) {
+      for (const target of card.causal_links) {
+        if (target === card.id || !cardIds.has(target)) continue;
+        edges.push({
+          id: `causal:${card.id}->${target}`,
+          source: card.id,
+          target,
+          sourceHandle: CARD_SOURCE_HANDLE,
+          targetHandle: CARD_TARGET_HANDLE,
+          class: "causal-edge",
+          markerEnd: { type: MarkerType.ArrowClosed, color: CAUSAL_MARKER_COLOR },
+        });
+      }
     }
   }
 

@@ -53,6 +53,10 @@ export type PlotBoardBeat = {
 // (0-based), or null when it has no scene — an off-page / unwritten card holds no
 // reveal-order position. The manuscript-order edge layer chains cards by this
 // rank; the beat-sequence layer orders a beat's cards by it.
+//
+// `causal_links` (Slice 6b) are the ids of the cards this card *leads to* — the
+// author-drawn causal edges (each a live card id; self / gone targets already
+// dropped backend-side). The causal edge layer draws one directed edge per id.
 export type PlotBoardCard = {
   id: string;
   title: string;
@@ -63,6 +67,7 @@ export type PlotBoardCard = {
   page_status: string | null;
   beats: PlotBoardBeat[];
   sequence: number | null;
+  causal_links: string[];
 };
 
 // The whole board in one read: the plotlines (colour threads), the manuscript

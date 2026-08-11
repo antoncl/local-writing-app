@@ -30,6 +30,7 @@ const card = (
   page_status: null,
   beats: [],
   sequence: null,
+  causal_links: [],
   ...over,
 });
 
@@ -134,16 +135,46 @@ describe("buildBoardEdges", () => {
     });
   });
 
+  describe("causal layer", () => {
+    it("draws one directed edge per authored target", () => {
+      const p = projection([
+        card("a", { causal_links: ["b", "c"] }),
+        card("b"),
+        card("c"),
+      ]);
+      expect(pairs(buildBoardEdges(p, layers("causal"))).sort()).toEqual(["a->b", "a->c"]);
+    });
+
+    it("carries an arrowhead + distinct class + id namespace (direction is authored)", () => {
+      const p = projection([card("a", { causal_links: ["b"] }), card("b")]);
+      const edges = buildBoardEdges(p, layers("causal"));
+      expect(edges).toHaveLength(1);
+      expect(edges[0].class).toBe("causal-edge");
+      expect(edges[0].id).toBe("causal:a->b");
+      expect(edges[0].markerEnd).toBeTruthy(); // the derived layers omit this
+    });
+
+    it("skips a self-link and a target that isn't a live card (defensive)", () => {
+      const p = projection([card("a", { causal_links: ["a", "ghost", "b"] }), card("b")]);
+      expect(pairs(buildBoardEdges(p, layers("causal")))).toEqual(["a->b"]);
+    });
+
+    it("is silent unless the causal layer is on", () => {
+      const p = projection([card("a", { causal_links: ["b"] }), card("b")]);
+      expect(buildBoardEdges(p, layers("manuscript", "beats"))).toEqual([]);
+    });
+  });
+
   it("anchors every edge to the card node's source/target handles", () => {
     // Load-bearing + un-headless-testable: xyflow renders nothing unless these
     // resolve to PlotCardNodeFlow's Handle ids. Pin them so a rename on either
     // side (the wrapper reads the SAME constants) fails here instead of silently
     // dropping every edge in the real browser.
     const p = projection([
-      card("a", { sequence: 0, beats: [beat("arc", "b1")] }),
+      card("a", { sequence: 0, beats: [beat("arc", "b1")], causal_links: ["b"] }),
       card("b", { sequence: 1, beats: [beat("arc", "b1")] }),
     ]);
-    const edges = buildBoardEdges(p, layers("manuscript", "beats"));
+    const edges = buildBoardEdges(p, layers("manuscript", "beats", "causal"));
     expect(edges.length).toBeGreaterThan(0);
     for (const e of edges) {
       expect(e.sourceHandle).toBe(CARD_SOURCE_HANDLE);
@@ -151,14 +182,14 @@ describe("buildBoardEdges", () => {
     }
   });
 
-  it("emits both layers together with disjoint ids (Slice 7 needs ≥2 at once)", () => {
+  it("emits all three layers together with disjoint ids (Slice 7 needs ≥2 at once)", () => {
     const p = projection([
-      card("a", { sequence: 0, beats: [beat("arc", "b1")] }),
+      card("a", { sequence: 0, beats: [beat("arc", "b1")], causal_links: ["b"] }),
       card("b", { sequence: 1, beats: [beat("arc", "b1")] }),
     ]);
-    const edges = buildBoardEdges(p, layers("manuscript", "beats"));
-    expect(edges).toHaveLength(2);
-    expect(new Set(edges.map((e) => e.id)).size).toBe(2);
-    expect(edges.map((e) => e.class).sort()).toEqual(["beat-edge", "manuscript-edge"]);
+    const edges = buildBoardEdges(p, layers("manuscript", "beats", "causal"));
+    expect(edges).toHaveLength(3);
+    expect(new Set(edges.map((e) => e.id)).size).toBe(3);
+    expect(edges.map((e) => e.class).sort()).toEqual(["beat-edge", "causal-edge", "manuscript-edge"]);
   });
 });

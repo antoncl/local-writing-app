@@ -148,3 +148,14 @@ class RevisePlotCardPromptTests(_PlotAiContextBase):
         patch = self.service.validate_ai_entry_patch(card, raw)
         self.assertFalse(patch.garbled)
         self.assertEqual(patch.body, "A sharper synopsis.")
+
+    def test_the_brainstorm_can_populate_follow_ups(self) -> None:
+        # follow_ups (S8c) is a plain, non-hidden list field, so it is proposable —
+        # a commit that sets it validates rather than being dropped, which is how the
+        # brainstorm adds follow-ups through the same entry-patch it already commits.
+        card = self._card("Draft")
+        raw = '{"body": "", "fields": {"follow_ups": ["tighten the ending", "name the inn"]}}'
+        patch = self.service.validate_ai_entry_patch(card, raw)
+        self.assertFalse(patch.garbled)
+        self.assertEqual(patch.fields.get("follow_ups"), ["tighten the ending", "name the inn"])
+        self.assertNotIn("follow_ups", patch.dropped)

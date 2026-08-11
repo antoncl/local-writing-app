@@ -31,6 +31,7 @@ from jinja2.sandbox import SandboxedEnvironment
 from app.services.ai.entry_patch import (
     is_proposable_field,
 )
+from app.services.ai.plot_prompt_context import render_plot_context
 from app.services.ai.sessions import AISession
 
 if TYPE_CHECKING:
@@ -428,6 +429,20 @@ def _entry_type_label(schema: Any, entry_type: Any) -> str:
 # ----- Project-bound helpers ----------------------------------------------
 
 
+def _plot_context(project: ProjectService, as_of: Any) -> str:
+    """Render the spoiler-gated plot-board context for a prompt (ADR-0048 S8b).
+
+    `as_of` is a card or scene node id (a plot-card brainstorm passes the card's
+    own id, so the model sees the board up to and including that card's reveal
+    position). A non-id / unknown anchor gates nothing (the whole board). Degrades
+    to "" rather than raising, so a context helper never breaks the render."""
+    try:
+        anchor = as_of if isinstance(as_of, str) and as_of else None
+        return render_plot_context(project.read_plot_context(anchor))
+    except Exception:
+        return ""
+
+
 def register_helpers(
     env: SandboxedEnvironment,
     project: ProjectService,
@@ -492,6 +507,10 @@ def register_helpers(
         lambda scene, character: _character_thread(project, schema, scene, character)
     )
     env.globals["is_a"] = lambda node, entry_type: _is_a(project, schema, node, entry_type)
+    # The spoiler-gated plot-board context (ADR-0048 S8b) — a plot-card brainstorm
+    # renders `{{ plot_context(as_of=e.id) }}` so the model reasons over the board
+    # up to and including the card's reveal position, no future scenes leaked.
+    env.globals["plot_context"] = lambda as_of=None: _plot_context(project, as_of)
     # Plain JSON for values quoted to the model (#698). Jinja's `| tojson`
     # is htmlsafe_json_dumps: it escapes ' & < > to \uXXXX and sorts keys —
     # the model imitates both (escapes persist into adopted values, and the

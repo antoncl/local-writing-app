@@ -88,4 +88,24 @@ describe("Chats pane — designable view (ADR-0051 S6)", () => {
     expect(screen.getByText("Chat Alpha")).toBeInTheDocument();
     expect(screen.queryByText("Freeform Chat")).toBeNull();
   });
+
+  it("groups by subject — the marquee, partitioning rows into per-subject buckets", () => {
+    // Two chats with distinct subjects land in two buckets keyed by the subject
+    // value; the bucket headers carry those values. If `subject` were not on the
+    // node's metadata, both would collapse into one empty bucket and neither
+    // subject label would render.
+    const spec: ViewSpec = {
+      kind: "chat",
+      expr: { descendants_of: "chat:chat_session" },
+      sort: { by: "manual" },
+      group_by: [{ field: "subject" }],
+    };
+    renderPane([chat("chat_a", "Chat Alpha", "lore-a"), chat("chat_b", "Chat Beta", "lore-b")], spec);
+    // Both rows still render (grouping never drops members)...
+    expect(screen.getByText("Chat Alpha")).toBeInTheDocument();
+    expect(screen.getByText("Chat Beta")).toBeInTheDocument();
+    // ...under two distinct subject-keyed bucket headers.
+    expect(screen.getByText("lore-a")).toBeInTheDocument();
+    expect(screen.getByText("lore-b")).toBeInTheDocument();
+  });
 });

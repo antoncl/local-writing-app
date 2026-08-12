@@ -371,6 +371,7 @@
     view: "view",
     plot_template: "template",
     plot_card: "card",
+    plotline: "plotline",
     plot_template_instance: "arc",
   };
   const paneDeleteNoun = (type: string | undefined) => (type && PANE_DELETE_NOUN[type]) || "scene";

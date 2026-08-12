@@ -61,6 +61,7 @@ import type {
   PlotBoardLayout,
   CardEntry,
   CardList,
+  PlotlineEntry,
   PlotlineList,
   TemplateInstanceEntry,
   TemplateInstanceList,
@@ -977,6 +978,27 @@ export const api = {
   // board's lanes both draw from this.
   listPlotlines() {
     return request<PlotlineList>("/plot/plotlines");
+  },
+  // Single plotline read/save/delete — the plotline document opener (#735): a
+  // plotline backlink (a card's `plotline` ref) opens the thread in the editor to
+  // rename / recolour / describe it. Book-local, so always editable (no Library
+  // lock). Mirrors the card twins; delete returns the refreshed roster.
+  getPlotline(entryId: string) {
+    return request<PlotlineEntry>(`/plot/plotlines/${entryId}`);
+  },
+  savePlotline(entry: PlotlineEntry, body: string) {
+    return request<PlotlineEntry>(`/plot/plotlines/${entry.id}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        title: entry.title,
+        body,
+        metadata: entry.metadata,
+        base_revision: entry.revision,
+      }),
+    });
+  },
+  deletePlotline(entryId: string) {
+    return request<PlotlineList>(`/plot/plotlines/${entryId}`, { method: "DELETE" });
   },
   // Template instances (ADR-0048 §3, wired to the board's arc palette in S7 Slice
   // 5a) — the plotter's arcs. Book-local layered `plot/` nodes sharing the card's

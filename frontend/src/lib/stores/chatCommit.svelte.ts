@@ -1,15 +1,16 @@
 // The chat-pane end of the entry-patch brainstorm loop (ADR-0046 slice 2/3;
-// generalized to any schema-typed node, ADR-0048 §5 / ADR-0051 S5-next), as a
-// per-instance rune controller — the shape `EntryProposalController` uses, and
-// ChatBodyView composes.
+// generalized to any schema-typed node, ADR-0048 §5 / ADR-0051 S5-next; the
+// commit is a fresh extraction, ADR-0051 S4), as a per-instance rune controller
+// — the shape `EntryProposalController` uses, and ChatBodyView composes.
 //
-// A `revise:entry` brainstorm is a conversation; the *commit* asks the model for
-// one final state. This controller owns that finalize-and-hand-off orchestration:
-// it runs the out-of-band finalize turn, validates the reply into an `EntryPatch`
-// (or, in create mode, a whole draft), and either publishes the patch to the
-// cross-pane `entryBrainstorm` store for review on the entry's pane, or holds a
-// from-scratch draft for the create card. The *entry* pane's `EntryProposalController`
-// is the other half; `entryBrainstorm` bridges them.
+// A `revise:entry` brainstorm is a conversation; the *commit* asks for the final
+// structured state. This controller owns that commit-and-hand-off orchestration:
+// it posts the transcript to the fresh-extraction endpoint (which rebuilds the
+// format contract server-side and runs it as its own pass — S4, replacing the old
+// client-side finalize replay), and either publishes the returned `EntryPatch` to
+// the cross-pane `entryBrainstorm` store for review on the entry's pane, or holds
+// a from-scratch draft for the create card. The *entry* pane's
+// `EntryProposalController` is the other half; `entryBrainstorm` bridges them.
 //
 // It is kind-agnostic: it keys off the fed `output` (which prompt surface is
 // bound) and `inputDrafts` (which entry / entry_type the launch seeded), never a
@@ -20,17 +21,17 @@
 // session, cost accounting (`pendingTurnCost`), and the status lines — the
 // controller reaches those through the wired `deps`, so `persistActiveChat` and
 // `chatError`/`chatNotice` stay component-owned.
-import type { ChatMessage, EntryPatch, MetadataValue, ReviewMode } from "@/lib/types";
+import type {
+  AIEntryPatch,
+  ChatMessage,
+  EntryPatch,
+  EntryPatchExtraction,
+  MetadataValue,
+  ReviewMode,
+} from "@/lib/types";
 import { api } from "@/lib/api";
 import { entryBrainstorm } from "@/lib/stores/entryBrainstorm.svelte";
 import { treeActions } from "@/lib/stores/treeActions.svelte";
-
-// The finalize turn (ADR-0046 §5): the JSON patch shape is described in the
-// system prompt (the pre-rolled `revise:entry` template); this user turn only
-// triggers it.
-const FINALIZE_INSTRUCTION =
-  "Finalize now: reply with ONLY the JSON patch, exactly as instructed — " +
-  "no preamble, no commentary, no code fences.";
 
 /** The live chat state + status/cost sinks the controller reaches into. Stable
  *  for the controller's life (wired once at construction) — the reactive inputs
@@ -38,11 +39,10 @@ const FINALIZE_INSTRUCTION =
 export interface ChatCommitDeps {
   /** Assistant bound to the chat, or "" for the machine default. */
   getAssistantId: () => string;
-  /** The rendered/locked system prompt the finalize turn ships. */
-  getSystemPrompt: () => string;
-  /** The visible conversation, mapped to the finalize request's message shape. */
+  /** The visible transcript, mapped to the extraction request's message shape —
+   *  the extraction reads it as pure input (ADR-0051 S4). */
   getHistory: () => Pick<ChatMessage, "role" | "content">[];
-  /** Attribute the (always-billed) finalize turn's cost to the session and
+  /** Attribute the (always-billed) extraction turn's cost to the session and
    *  persist — the host owns `pendingTurnCost`, so the delta rides its next save. */
   addTurnCost: (usd: number) => Promise<void>;
   /** Set / clear the chat error line (component-owned). */
@@ -89,40 +89,42 @@ export class ChatCommitController {
   isCreateBrainstorm = $derived(
     this.isEntryPatchChat && !this.commitTargetEntryId && !!this.draftEntryType,
   );
+  /** The prompt's `output.extract` override, sent to the extraction endpoint so
+   *  the server renders it in place of the default generated contract (ADR-0051
+   *  S4). Null → the default (body + all proposable fields). */
+  extractTemplate = $derived(
+    typeof this.output?.extract === "string" ? this.output.extract : null,
+  );
 
-  // Run the out-of-band finalize turn and return its raw text, or null (with the
-  // error line set) on failure. Shared by both commit modes so cost attribution
-  // and the "returned nothing" guard live in one place. The finalize call runs
-  // OUT OF BAND — it is NOT appended to the visible conversation — so the raw
-  // JSON never shows in the pane (the author asked for it hidden).
-  private async runFinalizeTurn(): Promise<string | null> {
-    const reply = await api.aiChat({
-      assistant_id: this.deps.getAssistantId() || null,
-      system_prompt: this.deps.getSystemPrompt(),
-      messages: [
-        ...this.deps.getHistory(),
-        { role: "user", content: FINALIZE_INSTRUCTION },
-      ],
-      chat_id: null,
-    });
-    // Billed regardless of the patch outcome — attribute it like a streamed turn
-    // (the hidden finalize turn isn't in the history, so it stays out of the
-    // persisted messages).
-    if (typeof reply.cost_usd === "number") {
-      await this.deps.addTurnCost(reply.cost_usd);
-    }
-    if (!reply.ok || !reply.content?.trim()) {
-      this.deps.setError(reply.error || "The model returned nothing to commit.");
+  // The commit preamble both modes share: run the extraction, attribute the
+  // (always-billed) turn's cost like a streamed one, and surface the two failure
+  // shapes — the turn returned nothing (ok=false / no patch), or the reply
+  // couldn't be read as a patch (garbled). Returns the validated patch, or null
+  // when the caller should stop (a message was already set). This is the seam the
+  // deleted `runFinalizeTurn` held, so the two modes can't drift on cost/failure
+  // handling. The per-mode tail (propose vs hold a draft) stays in each method.
+  private async runExtraction(
+    extract: () => Promise<EntryPatchExtraction>,
+    garbledMessage: string,
+  ): Promise<AIEntryPatch | null> {
+    const result = await extract();
+    if (typeof result.cost_usd === "number") await this.deps.addTurnCost(result.cost_usd);
+    if (!result.ok || !result.patch) {
+      this.deps.setError(result.error || "The model returned nothing to commit.");
       return null;
     }
-    return reply.content;
+    if (result.patch.garbled) {
+      this.deps.setError(garbledMessage);
+      return null;
+    }
+    return result.patch;
   }
 
-  // Commit the brainstorm to its target entry (ADR-0046 slice 3). The finalize
-  // reply is validated server-side into an EntryPatch and handed to the entry's
-  // pane for the proposed-vs-current review; nothing is written from here. A reply
-  // that can't be read as a patch (garbled) or one that proposes nothing is
-  // surfaced, never a silent no-op.
+  // Commit the brainstorm to its target entry (ADR-0046 slice 3 / ADR-0051 S4).
+  // The extraction runs a fresh, server-rebuilt contract over the transcript and
+  // returns a validated EntryPatch, handed to the entry's pane for the
+  // proposed-vs-current review; nothing is written from here. A patch that
+  // proposes nothing is surfaced, never a silent no-op.
   async commitToEntry(): Promise<void> {
     if (this.running || this.committing || !this.isEntryPatchChat) return;
     const entryId = this.commitTargetEntryId;
@@ -134,15 +136,16 @@ export class ChatCommitController {
     this.deps.setNotice(null);
     this.committing = true;
     try {
-      const content = await this.runFinalizeTurn();
-      if (content == null) return;
-      const patch = await api.validateAiEntryPatch(entryId, content);
-      if (patch.garbled) {
-        this.deps.setError(
-          "Couldn't read the model's response as a patch — ask it to finalize again.",
-        );
-        return;
-      }
+      const patch = await this.runExtraction(
+        () =>
+          api.extractEntryPatch(entryId, {
+            messages: this.deps.getHistory(),
+            assistant_id: this.deps.getAssistantId() || null,
+            extract_template: this.extractTemplate,
+          }),
+        "Couldn't read the model's response as a patch — ask it to finalize again.",
+      );
+      if (!patch) return;
       // `replace` (a scene summary) swaps one field whole; strip any body the
       // model returned so the stored proposal stays fields-only (the commit-side
       // guarantee that prose is never rewritten lives in `acceptFields`).
@@ -171,9 +174,9 @@ export class ChatCommitController {
     }
   }
 
-  // Create mode (ADR-0046 §6.4): finalize a from-scratch brainstorm, validate it
-  // against the target entry_type (no entry read), and hold it as a whole draft
-  // for the review card. Nothing is written until the author clicks Create.
+  // Create mode (ADR-0046 §6.4 / ADR-0051 S4): a fresh extraction against the
+  // target entry_type (no entry read), held as a whole draft for the review card.
+  // Nothing is written until the author clicks Create.
   async commitDraft(): Promise<void> {
     if (this.running || this.committing || !this.isCreateBrainstorm) return;
     const entryType = this.draftEntryType;
@@ -181,15 +184,16 @@ export class ChatCommitController {
     this.deps.setNotice(null);
     this.committing = true;
     try {
-      const content = await this.runFinalizeTurn();
-      if (content == null) return;
-      const patch = await api.validateAiEntryDraft(entryType, content);
-      if (patch.garbled) {
-        this.deps.setError(
-          "Couldn't read the model's response as an entry — ask it to finalize again.",
-        );
-        return;
-      }
+      const patch = await this.runExtraction(
+        () =>
+          api.extractEntryDraft(entryType, {
+            messages: this.deps.getHistory(),
+            assistant_id: this.deps.getAssistantId() || null,
+            extract_template: this.extractTemplate,
+          }),
+        "Couldn't read the model's response as an entry — ask it to finalize again.",
+      );
+      if (!patch) return;
       const hasBody = patch.body != null;
       const hasFields = Object.keys(patch.fields).length > 0;
       if (!hasBody && !hasFields) {

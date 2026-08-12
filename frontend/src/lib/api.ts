@@ -2,7 +2,7 @@ import type {
   AIChatRequest,
   AIChatResponse,
   AIContextPresetResponse,
-  AIEntryPatch,
+  EntryPatchExtraction,
   AIGenerateRequest,
   AIHealthResponse,
   AIProviderList,
@@ -819,25 +819,29 @@ export const api = {
       method: "DELETE",
     });
   },
-  // ADR-0046 §4/§6.3: validate a brainstorm-commit reply into a review-ready
-  // patch. The raw model text is sent server-side (never shown), parsed, and
-  // validated per-field against the node's schema; illegal fields are dropped
-  // and a garbled reply is flagged. Kind-neutral (ADR-0048 §5): the node's
-  // `entry_type` is resolved by id server-side, so any schema-typed node works.
-  validateAiEntryPatch(nodeId: string, raw: string) {
-    return request<AIEntryPatch>(`/ai/entry-patch/${encodeURIComponent(nodeId)}`, {
+  // ADR-0051 S4: the fresh-extraction commit. Instead of the client replaying the
+  // frozen seed prompt + transcript + a finalize cue, the server rebuilds the
+  // format contract from the target's schema and runs it as its own pass over the
+  // transcript, then validates — one call in place of finalize-turn + validate.
+  // `extractTemplate` is the prompt's `output.extract` override (null → the
+  // default generated contract). Returns the patch + the extraction turn's cost.
+  extractEntryPatch(
+    nodeId: string,
+    body: { messages: { role: string; content: string }[]; assistant_id: string | null; extract_template: string | null },
+  ) {
+    return request<EntryPatchExtraction>(`/ai/entry-patch/${encodeURIComponent(nodeId)}/extract`, {
       method: "POST",
-      body: JSON.stringify({ raw }),
+      body: JSON.stringify(body),
     });
   },
-  // ADR-0046 §6.4: the create-mode sibling — validate a from-scratch brainstorm
-  // commit against a target entry_type (no node exists yet; the entry_type FQN
-  // carries the kind). Same review-ready AIEntryPatch and garbled handling; the
-  // adopted draft is created through the kind's own create + save endpoints.
-  validateAiEntryDraft(entryType: string, raw: string) {
-    return request<AIEntryPatch>("/ai/entry-draft", {
+  // Create-mode sibling — no node yet, so the target entry_type rides in the body.
+  extractEntryDraft(
+    entryType: string,
+    body: { messages: { role: string; content: string }[]; assistant_id: string | null; extract_template: string | null },
+  ) {
+    return request<EntryPatchExtraction>("/ai/entry-draft/extract", {
       method: "POST",
-      body: JSON.stringify({ entry_type: entryType, raw }),
+      body: JSON.stringify({ entry_type: entryType, ...body }),
     });
   },
   // Migrate a lore_note to a research/note (slice 5). Drops aliases /

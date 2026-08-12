@@ -4,20 +4,21 @@ import { ChatCommitController, type ChatCommitDeps } from "./chatCommit.svelte";
 import { entryBrainstorm } from "./entryBrainstorm.svelte";
 import { api } from "@/lib/api";
 import { treeActions } from "@/lib/stores/treeActions.svelte";
-import type { AIChatResponse, AIEntryPatch } from "@/lib/types";
+import type { AIEntryPatch, EntryPatchExtraction } from "@/lib/types";
 
-// The chat-pane end of the ADR-0046 loop (#849 extracted it from ChatBodyView):
-// it runs the out-of-band finalize turn, validates the reply into a patch, and
-// either publishes it to the cross-pane `entryBrainstorm` store (revise) or holds
-// a whole draft (create). These tests pin what the extraction could silently
-// break: the launch-mode derivations, the `replace` body strip (the producer-side
-// half of the S5-next prose-safety guarantee), cost attribution, and the guards.
+// The chat-pane end of the ADR-0046 loop (#849 extracted it from ChatBodyView;
+// ADR-0051 S4 made the commit a fresh server-side extraction): it posts the
+// transcript to the extraction endpoint, then publishes the returned patch to the
+// cross-pane `entryBrainstorm` store (revise) or holds a whole draft (create).
+// These tests pin what the wiring could silently break: the launch-mode
+// derivations, what's posted to the endpoint (assistant / history / the
+// `output.extract` override), the `replace` body strip (the producer-side half of
+// the S5-next prose-safety guarantee), cost attribution, and the guards.
 
 vi.mock("@/lib/api", () => ({
   api: {
-    aiChat: vi.fn(),
-    validateAiEntryPatch: vi.fn(),
-    validateAiEntryDraft: vi.fn(),
+    extractEntryPatch: vi.fn(),
+    extractEntryDraft: vi.fn(),
   },
 }));
 
@@ -25,24 +26,9 @@ vi.mock("@/lib/stores/treeActions.svelte", () => ({
   treeActions: { createLoreEntryFromDraft: vi.fn() },
 }));
 
-const aiChat = vi.mocked(api.aiChat);
-const validatePatch = vi.mocked(api.validateAiEntryPatch);
-const validateDraft = vi.mocked(api.validateAiEntryDraft);
+const extractPatch = vi.mocked(api.extractEntryPatch);
+const extractDraft = vi.mocked(api.extractEntryDraft);
 const createFromDraft = vi.mocked(treeActions.createLoreEntryFromDraft);
-
-// A minimal successful finalize reply. `cost` null models a provider that
-// returned no usage (the cost-attribution branch must skip it).
-const reply = (content: string, cost: number | null = 0.02): AIChatResponse =>
-  ({
-    role: "assistant",
-    content,
-    provider: "p",
-    model: "m",
-    latency_ms: 1,
-    ok: true,
-    truncated: false,
-    cost_usd: cost,
-  }) as AIChatResponse;
 
 const patch = (over: Partial<AIEntryPatch> = {}): AIEntryPatch => ({
   body: null,
@@ -52,10 +38,24 @@ const patch = (over: Partial<AIEntryPatch> = {}): AIEntryPatch => ({
   ...over,
 });
 
+// A successful extraction. `cost` null models a provider that returned no usage
+// (the cost-attribution branch must skip it).
+const okResult = (
+  patchOver: Partial<AIEntryPatch> = {},
+  cost: number | null = 0.02,
+): EntryPatchExtraction => ({ patch: patch(patchOver), cost_usd: cost, ok: true, error: null });
+
+// A failed extraction — the turn itself errored or returned nothing.
+const failResult = (error: string, cost: number | null = 0): EntryPatchExtraction => ({
+  patch: null,
+  cost_usd: cost,
+  ok: false,
+  error,
+});
+
 function makeDeps(over: Partial<ChatCommitDeps> = {}): ChatCommitDeps {
   return {
     getAssistantId: () => "asst-1",
-    getSystemPrompt: () => "SYSTEM",
     getHistory: () => [{ role: "user", content: "brainstorm turn" }],
     addTurnCost: vi.fn(async () => {}),
     setError: vi.fn(),
@@ -97,6 +97,13 @@ describe("ChatCommitController — launch-mode derivations", () => {
     c.inputDrafts = { entry_type: "lore:character", entry: "lore-1" };
     expect(c.isCreateBrainstorm).toBe(false);
   });
+
+  it("extractTemplate is the output.extract override, else null", () => {
+    const { c } = makeController();
+    expect(c.extractTemplate).toBeNull();
+    c.output = { kind: "entry_patch", extract: "OVERRIDE" };
+    expect(c.extractTemplate).toBe("OVERRIDE");
+  });
 });
 
 describe("ChatCommitController — commitToEntry", () => {
@@ -116,7 +123,7 @@ describe("ChatCommitController — commitToEntry", () => {
     const { c, deps } = reviseController();
     c.running = true;
     await c.commitToEntry();
-    expect(aiChat).not.toHaveBeenCalled();
+    expect(extractPatch).not.toHaveBeenCalled();
     expect(deps.setError).not.toHaveBeenCalled();
   });
 
@@ -127,40 +134,37 @@ describe("ChatCommitController — commitToEntry", () => {
     expect(deps.setError).toHaveBeenCalledWith(
       "This brainstorm has no target entry to commit to.",
     );
-    expect(aiChat).not.toHaveBeenCalled();
+    expect(extractPatch).not.toHaveBeenCalled();
   });
 
-  it("threads assistant, system prompt, and history into the out-of-band finalize turn", async () => {
+  it("posts the transcript, assistant, and output.extract override to the extraction endpoint", async () => {
     const { c } = reviseController();
-    aiChat.mockResolvedValue(reply("{json}"));
-    validatePatch.mockResolvedValue(patch({ fields: { bio: "x" } }));
+    c.output = { kind: "entry_patch", extract: "OVERRIDE-TMPL" };
+    extractPatch.mockResolvedValue(okResult({ fields: { bio: "x" } }));
 
     await c.commitToEntry();
 
-    // The deps getters must reach the request verbatim, plus the appended finalize
-    // instruction; chat_id is null so the turn stays out of band (not persisted).
-    // Without this the whole point of the #849 extraction — that the wiring
-    // survived — goes unchecked.
-    expect(aiChat).toHaveBeenCalledWith(
-      expect.objectContaining({
-        assistant_id: "asst-1",
-        system_prompt: "SYSTEM",
-        chat_id: null,
-        messages: [
-          { role: "user", content: "brainstorm turn" },
-          expect.objectContaining({ role: "user", content: expect.stringContaining("Finalize now") }),
-        ],
-      }),
-    );
+    // The whole point of S4: the commit is one call to the extraction endpoint,
+    // carrying the transcript (pure input), the assistant, and the prompt's
+    // extract override (null → the server's default generated contract).
+    expect(extractPatch).toHaveBeenCalledWith("lore-1", {
+      messages: [{ role: "user", content: "brainstorm turn" }],
+      assistant_id: "asst-1",
+      extract_template: "OVERRIDE-TMPL",
+    });
   });
 
-  it("publishes a visual_diff proposal and names the review target", async () => {
+  it("publishes a visual_diff proposal (default contract, no override) and names the target", async () => {
     const { c, deps } = reviseController({ entryTitle: () => "Captain Vale" });
-    aiChat.mockResolvedValue(reply("{json}"));
-    validatePatch.mockResolvedValue(patch({ body: "revised prose", fields: { bio: "new" } }));
+    extractPatch.mockResolvedValue(okResult({ body: "revised prose", fields: { bio: "new" } }));
 
     await c.commitToEntry();
 
+    // No override on a plain revise → extract_template is null (server default).
+    expect(extractPatch).toHaveBeenCalledWith(
+      "lore-1",
+      expect.objectContaining({ extract_template: null }),
+    );
     expect(entryBrainstorm.proposalFor("lore-1")).toEqual({
       body: "revised prose",
       fields: { bio: "new" },
@@ -176,8 +180,7 @@ describe("ChatCommitController — commitToEntry", () => {
     // regenerate can never carry a scene's manuscript prose to the review.
     const { c } = reviseController();
     c.output = { kind: "entry_patch", review: "replace" };
-    aiChat.mockResolvedValue(reply("{json}"));
-    validatePatch.mockResolvedValue(patch({ body: "REWRITTEN PROSE", fields: { summary: "a synopsis" } }));
+    extractPatch.mockResolvedValue(okResult({ body: "REWRITTEN PROSE", fields: { summary: "a synopsis" } }));
 
     await c.commitToEntry();
 
@@ -190,8 +193,7 @@ describe("ChatCommitController — commitToEntry", () => {
 
   it("surfaces a garbled reply and proposes nothing", async () => {
     const { c, deps } = reviseController();
-    aiChat.mockResolvedValue(reply("not json"));
-    validatePatch.mockResolvedValue(patch({ garbled: true }));
+    extractPatch.mockResolvedValue(okResult({ garbled: true }));
 
     await c.commitToEntry();
 
@@ -203,8 +205,7 @@ describe("ChatCommitController — commitToEntry", () => {
 
   it("notices an empty patch instead of a silent no-op", async () => {
     const { c, deps } = reviseController();
-    aiChat.mockResolvedValue(reply("{}"));
-    validatePatch.mockResolvedValue(patch({ body: null, fields: {} }));
+    extractPatch.mockResolvedValue(okResult({ body: null, fields: {} }));
 
     await c.commitToEntry();
 
@@ -214,8 +215,7 @@ describe("ChatCommitController — commitToEntry", () => {
 
   it("reports dropped fields in the hand-off notice", async () => {
     const { c, deps } = reviseController({ entryTitle: () => "Vale" });
-    aiChat.mockResolvedValue(reply("{json}"));
-    validatePatch.mockResolvedValue(patch({ fields: { bio: "x" }, dropped: ["id", "score"] }));
+    extractPatch.mockResolvedValue(okResult({ fields: { bio: "x" }, dropped: ["id", "score"] }));
 
     await c.commitToEntry();
 
@@ -226,36 +226,34 @@ describe("ChatCommitController — commitToEntry", () => {
 
   it("falls back to \"the scene\" when the target isn't in the roster", async () => {
     const { c, deps } = reviseController(); // entryTitle → null (a scene subject)
-    aiChat.mockResolvedValue(reply("{json}"));
-    validatePatch.mockResolvedValue(patch({ fields: { summary: "s" } }));
+    extractPatch.mockResolvedValue(okResult({ fields: { summary: "s" } }));
 
     await c.commitToEntry();
 
     expect(deps.setNotice).toHaveBeenLastCalledWith("Committed — review it on the scene.");
   });
 
-  it("attributes the billed finalize turn's cost, and skips it when unbilled", async () => {
+  it("attributes the billed extraction turn's cost, and skips it when unbilled", async () => {
     const { c, deps } = reviseController();
-    aiChat.mockResolvedValue(reply("{json}", 0.05));
-    validatePatch.mockResolvedValue(patch({ fields: { bio: "x" } }));
+    extractPatch.mockResolvedValue(okResult({ fields: { bio: "x" } }, 0.05));
     await c.commitToEntry();
     expect(deps.addTurnCost).toHaveBeenCalledWith(0.05);
 
     vi.mocked(deps.addTurnCost).mockClear();
     entryBrainstorm.clear("lore-1");
-    aiChat.mockResolvedValue(reply("{json}", null)); // no usage returned
+    extractPatch.mockResolvedValue(okResult({ fields: { bio: "x" } }, null)); // no usage returned
     await c.commitToEntry();
     expect(deps.addTurnCost).not.toHaveBeenCalled();
   });
 
-  it("surfaces a finalize turn that returned nothing", async () => {
+  it("surfaces an extraction that returned nothing", async () => {
     const { c, deps } = reviseController();
-    aiChat.mockResolvedValue({ ...reply(""), ok: false, error: "boom" } as AIChatResponse);
+    extractPatch.mockResolvedValue(failResult("boom"));
 
     await c.commitToEntry();
 
     expect(deps.setError).toHaveBeenCalledWith("boom");
-    expect(validatePatch).not.toHaveBeenCalled();
+    expect(entryBrainstorm.proposalFor("lore-1")).toBeNull();
   });
 });
 
@@ -271,20 +269,22 @@ describe("ChatCommitController — create mode", () => {
 
   it("holds a validated draft for the review card", async () => {
     const { c } = createController();
-    aiChat.mockResolvedValue(reply("{json}"));
-    validateDraft.mockResolvedValue(patch({ body: "a life", fields: { name: "Vale" }, dropped: ["id"] }));
+    extractDraft.mockResolvedValue(okResult({ body: "a life", fields: { name: "Vale" }, dropped: ["id"] }));
 
     await c.commitDraft();
 
-    expect(validateDraft).toHaveBeenCalledWith("lore:character", "{json}");
+    expect(extractDraft).toHaveBeenCalledWith("lore:character", {
+      messages: [{ role: "user", content: "brainstorm turn" }],
+      assistant_id: "asst-1",
+      extract_template: null,
+    });
     expect(c.draftProposal).toEqual({ body: "a life", fields: { name: "Vale" } });
     expect(c.draftDropped).toEqual(["id"]);
   });
 
   it("notices an empty draft and holds nothing", async () => {
     const { c, deps } = createController();
-    aiChat.mockResolvedValue(reply("{}"));
-    validateDraft.mockResolvedValue(patch({ body: null, fields: {} }));
+    extractDraft.mockResolvedValue(okResult({ body: null, fields: {} }));
 
     await c.commitDraft();
 

@@ -167,7 +167,9 @@ class BuiltinLibraryTests(unittest.TestCase):
         Roleplay must still read the #317 project-metadata triple out of the box;
         revise:entry must still carry both of its modes (revise via
         `field_catalog(e)`, create via `field_catalog(draft_type)` /
-        `entry_type_label(draft_type)`) and ask for the JSON `body` + `fields`.
+        `entry_type_label(draft_type)`). Since ADR-0051 S4 the seed no longer
+        carries the JSON commit contract — it is a goal-directed brainstorm and
+        the structured result is extracted separately at commit.
         """
         roleplay = self.service.read_prompt_entry("builtin-roleplay").body
         for marker in (
@@ -184,10 +186,12 @@ class BuiltinLibraryTests(unittest.TestCase):
             "field_catalog(e)",
             "field_catalog(draft_type)",
             "entry_type_label(draft_type)",
-            '"fields"',
-            '"body"',
+            "ready to commit",
         ):
             self.assertIn(marker, revise)
+        # The JSON format contract moved to the extraction endpoint (S4) — the
+        # seed must NOT emit it, or the model would dump JSON mid-conversation.
+        self.assertNotIn('"fields"', revise)
 
     def test_clone_a_library_prompt_into_the_project(self) -> None:
         """Clone (§5): a shipped prompt is lifted into the project under a NEW id

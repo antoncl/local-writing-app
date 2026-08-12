@@ -590,6 +590,42 @@ class AIEntryPatch(BaseModel):
     garbled: bool = False
 
 
+class ExtractEntryPatchRequest(BaseModel):
+    """POST /api/ai/entry-patch/{node_id}/extract body — ADR-0051 S4.
+
+    A fresh, self-instructed extraction over the transcript, replacing the
+    finalize-replay: the server rebuilds the format contract from the target's
+    schema and runs it as its own pass, so the contract no longer rides a frozen
+    seed prompt up a growing context. `messages` is the visible transcript;
+    `extract_template` overrides the generated contract when the prompt declares
+    `output.extract` (else the default body + field-catalog contract is used)."""
+
+    messages: list[ChatMessage] = Field(default_factory=list)
+    assistant_id: str | None = None
+    extract_template: str | None = None
+
+
+class ExtractEntryDraftRequest(ExtractEntryPatchRequest):
+    """Create-mode sibling — no node exists yet, so the target `entry_type`
+    rides in the body (ADR-0046 §6.4 / ADR-0051 S4)."""
+
+    entry_type: str = Field(min_length=1)
+
+
+class EntryPatchExtraction(BaseModel):
+    """Result of a fresh extraction (ADR-0051 S4): the validated, review-ready
+    `patch` plus the `cost_usd` of the extraction turn, which the caller
+    attributes to the session the same way a streamed turn's cost is. `patch` is
+    null and `ok` false when the extraction model call itself failed or returned
+    nothing (distinct from a `garbled` patch, which still round-trips as a patch
+    so the author is told to finalize again)."""
+
+    patch: AIEntryPatch | None = None
+    cost_usd: float | None = None
+    ok: bool = True
+    error: str | None = None
+
+
 class CreateAIInvocationRequest(BaseModel):
     """POST /api/ai/invocations body. Server assigns id + ts; everything
     else flows from the prior generate response and the accept context.

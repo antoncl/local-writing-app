@@ -362,10 +362,18 @@ class MetadataValuesMixin:
         so nothing here re-implements the save path.
         """
 
-        entry = self._build_node_index().by_id.get(entry_id)
+        return self.validate_ai_entry_patch_for_type(self.entry_type_for_node(entry_id), raw)
+
+    def entry_type_for_node(self, node_id: str) -> str:
+        """The `entry_type` FQN of a node by id, from the index (which carries it
+        for every kind), or a 404 if it does not exist. The shared resolve for
+        the revise-mode brainstorm paths (validate + the S4 fresh extraction), so
+        both agree on what "the node's type" is and the 404 is raised once."""
+
+        entry = self._build_node_index().by_id.get(node_id)
         if entry is None:
-            raise ProjectServiceError(f"Node {entry_id} does not exist.", 404)
-        return self._validate_ai_entry_patch_for_type(entry.entry_type, raw)
+            raise ProjectServiceError(f"Node {node_id} does not exist.", 404)
+        return entry.entry_type
 
     def validate_ai_entry_draft(self, entry_type: str, raw: str) -> AIEntryPatch:
         """Create-mode sibling of `validate_ai_entry_patch` (ADR-0046 §6.4).
@@ -380,12 +388,14 @@ class MetadataValuesMixin:
         for lore), not a diff, so this too only produces the review-ready patch.
         """
 
-        return self._validate_ai_entry_patch_for_type(entry_type, raw)
+        return self.validate_ai_entry_patch_for_type(entry_type, raw)
 
-    def _validate_ai_entry_patch_for_type(self, entry_type: str, raw: str) -> AIEntryPatch:
+    def validate_ai_entry_patch_for_type(self, entry_type: str, raw: str) -> AIEntryPatch:
         """Validate a brainstorm-commit reply against ``entry_type``'s resolved
         schema. Shared by the revise (existing entry) and create (from-scratch)
-        paths so the two never diverge on what is proposable or legal."""
+        paths — and the S4 fresh-extraction routes, which resolve the type once
+        and validate here directly — so they never diverge on what is proposable
+        or legal."""
 
         schema = self.read_metadata_schema()
 

@@ -983,6 +983,16 @@ export const api = {
   listPlotlines() {
     return request<PlotlineList>("/plot/plotlines");
   },
+  // Create a plotline — the Plotlines rail's "New plotline" entry point (#737).
+  // Title only (colour is set afterward via savePlotline / the editor's swatch
+  // picker); mirrors createCard / createTemplateInstance. Returns the new node so
+  // the caller can open it to name + colour it.
+  createPlotline(title: string) {
+    return request<PlotlineEntry>("/plot/plotlines", {
+      method: "POST",
+      body: JSON.stringify({ title }),
+    });
+  },
   // Single plotline read/save/delete — the plotline document opener (#735): a
   // plotline backlink (a card's `plotline` ref) opens the thread in the editor to
   // rename / recolour / describe it. Book-local, so always editable (no Library

@@ -889,7 +889,8 @@ class PlotKindRegistrationTests(PlotTestCase):
         self.assertIsNotNone(inst)
         self.assertEqual(inst.kind, "plot")
         self.assertTrue(inst.has_body)
-        for field_id in ("instance_beats", "source_template_id", "source_template_name"):
+        # `color` (built-in swatch, #737) lets an arc carry its own colour.
+        for field_id in ("instance_beats", "color", "source_template_id", "source_template_name"):
             self.assertIn(field_id, inst.fields)
         group = schema.groups.get("plot_instance_beat")
         self.assertIsNotNone(group)

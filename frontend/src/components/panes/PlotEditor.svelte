@@ -49,6 +49,7 @@
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
   import { templateInstancesStore, deleteTemplateInstance } from "@/lib/stores/templateInstances";
+  import { plotlineEntriesStore, deletePlotline } from "@/lib/stores/plotlines";
   import { plotTemplatesStore } from "@/lib/stores/plotTemplates";
   import UndoRedoControls from "@/components/UndoRedoControls.svelte";
   import ViewportFit from "@/components/editor/body/view/ViewportFit.svelte";
@@ -56,6 +57,7 @@
   import PlotContainerNode from "./plot/PlotContainerNode.svelte";
   import PlotCausalEdge from "./plot/PlotCausalEdge.svelte";
   import PlotArcRail from "./plot/PlotArcRail.svelte";
+  import PlotPlotlineRail from "./plot/PlotPlotlineRail.svelte";
   import Popover from "@/components/chrome/Popover.svelte";
   import {
     PLOT_CARD_ACTIONS,
@@ -199,6 +201,31 @@
   let railOpen = $state(false);
   let arcs = $derived($templateInstancesStore);
   let templates = $derived($plotTemplatesStore);
+
+  // The plotlines rail (#737) — the always-loaded plotline roster + a card count per
+  // thread (from the projection) for its count pill, and a swatch dot per row that
+  // doubles as the board's colour legend. Actions route to editorPanes (create / open)
+  // and the store's delete (which also refreshes the board so recoloured cards update).
+  let plotlineRailOpen = $state(false);
+  let plotlines = $derived($plotlineEntriesStore);
+  let plotlineCardCounts = $derived(
+    (projection?.cards ?? []).reduce<Record<string, number>>((acc, card) => {
+      if (card.plotline) acc[card.plotline] = (acc[card.plotline] ?? 0) + 1;
+      return acc;
+    }, {}),
+  );
+  function removePlotline(id: string): void {
+    const line = plotlines.find((p) => p.id === id);
+    confirmService.request({
+      title: "Remove plotline",
+      message: `Remove ${line?.title ? `“${line.title}”` : "this plotline"}? Cards on it become Unassigned (their tint clears); their prose is untouched.`,
+      confirmLabel: "Remove plotline",
+      destructive: true,
+      onConfirm: async () => {
+        await deletePlotline(id);
+      },
+    });
+  }
 
   // Edge layers (ADR-0048 S7 Slice 6a): the board's other dimensions, drawn as
   // toggleable card→card edges. Which layers are on is a viewing mode → localStorage
@@ -408,6 +435,15 @@
           <i class="ti ti-route" aria-hidden="true"></i>
           Arcs{arcs.length ? ` (${arcs.length})` : ""}
         </button>
+        <button
+          class="board-btn"
+          class:active={plotlineRailOpen}
+          aria-pressed={plotlineRailOpen}
+          onclick={() => (plotlineRailOpen = !plotlineRailOpen)}
+        >
+          <i class="ti ti-palette" aria-hidden="true"></i>
+          Plotlines{plotlines.length ? ` (${plotlines.length})` : ""}
+        </button>
         <!-- Edge layers (Slice 6a): a popover of the board's toggleable dimensions.
              `layers-wrap` is the position:relative anchor Popover drops from. -->
         <div class="layers-wrap">
@@ -481,6 +517,15 @@
       {/if}
     </div>
     <div class="board-main">
+      {#if plotlineRailOpen}
+        <PlotPlotlineRail
+          {plotlines}
+          cardCounts={plotlineCardCounts}
+          onCreate={() => void editorPanes.createBlankPlotline()}
+          onOpen={(id) => void editorPanes.openPlotline(id)}
+          onRemove={removePlotline}
+        />
+      {/if}
       {#if railOpen}
         <PlotArcRail
           instances={arcs}

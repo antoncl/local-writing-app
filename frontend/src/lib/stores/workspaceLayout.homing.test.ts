@@ -19,6 +19,40 @@ describe("workspaceLayout region homing (#757)", () => {
     workspaceLayout.ensureVisible("lore");
     expect(workspaceLayout.groupOf("lore")?.id).toBe(G_SIDE);
   });
+
+  it("homes the Plot templates shelf to the side column", () => {
+    // A Library shelf like prompts — side column, and a KNOWN region so it
+    // survives a reload (#756). Was absent from HOMES, so it docked narrow and
+    // was dropped on restore.
+    workspaceLayout.ensureVisible("plotTemplates");
+    expect(workspaceLayout.groupOf("plotTemplates")?.id).toBe(G_SIDE);
+  });
+});
+
+// #756: the Plot templates tab is a known region now, so a persisted layout that
+// names it must be RESTORED (not dropped like the retired `project` region below).
+describe("Plot templates region survives a reload (#756)", () => {
+  it("keeps a persisted `plotTemplates` tab on load", () => {
+    const saved = JSON.stringify({
+      version: 1,
+      root: {
+        kind: "split",
+        id: "s-left",
+        dir: "col",
+        children: [
+          { kind: "group", id: "g-side", tabs: ["plotTemplates"], active: "plotTemplates" },
+          { kind: "group", id: "g-draft", tabs: ["outline"], active: "outline" },
+        ],
+        sizes: [0.4, 0.6],
+      },
+      activeEditorGroupId: G_EDITOR,
+      activePreset: "writing",
+    });
+
+    const restored = deserialize(saved);
+    expect(restored).not.toBeNull();
+    expect(flattenPanels(restored!.root)).toContain("plotTemplates");
+  });
 });
 
 // The Project pane was deleted (#417 slice 6), so `project` is no longer a known

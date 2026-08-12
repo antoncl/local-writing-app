@@ -32,6 +32,11 @@ export const HOMES: Record<string, string> = {
   schema: G_SIDE,
   schema_type: G_SIDE,
   prompts: G_SIDE,
+  // A Library shelf like `prompts` (browse / clone read-only templates), so it
+  // homes to the side column and — being a known region — survives a reload. Its
+  // roster is loaded on project open (loadProjectData), so no refetch-on-restore
+  // hook is needed; without this entry a restored tab was silently dropped (#756).
+  plotTemplates: G_SIDE,
   mutations: G_SIDE,
   assistants: G_SIDE,
   chats: G_SIDE,
@@ -271,6 +276,7 @@ const MIN_WIDTHS: Record<string, number> = {
   schema: 260,
   schema_type: 260,
   prompts: 260,
+  plotTemplates: 260,
   mutations: 260,
   assistants: 260,
   chats: 240,

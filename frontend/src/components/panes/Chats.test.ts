@@ -12,8 +12,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { render, screen } from "@/lib/test/component";
 import Chats from "./Chats.svelte";
 import { defaultView } from "@/lib/views/evaluateView";
+import { builtinViews } from "@/lib/views/builtinViews";
 import { metadataSchemaStore } from "@/lib/stores/schema";
-import type { ChatSessionSummary, MetadataSchema, ViewSpec } from "@/lib/types";
+import type { ChatSessionSummary, MetadataSchema, PromptEntrySummary, ViewSpec } from "@/lib/types";
 
 // The chat kind's root type + its `subject` field. `defaultView("chat", …)`
 // resolves the roster to `descendants_of chat:chat_session` off this root; drop
@@ -45,13 +46,13 @@ function chat(id: string, title: string, subject = ""): ChatSessionSummary {
 
 const noop = () => {};
 
-function renderPane(sessions: ChatSessionSummary[], viewSpec: ViewSpec) {
+function renderPane(sessions: ChatSessionSummary[], viewSpec: ViewSpec, promptEntries: PromptEntrySummary[] = []) {
   return render(Chats, {
     props: {
       sessions,
       viewSpec,
       activeChatId: null,
-      promptEntries: [],
+      promptEntries,
       assistantEntries: [],
       onOpenChat: noop,
       onDeleteChat: noop,
@@ -107,5 +108,57 @@ describe("Chats pane — designable view (ADR-0051 S6)", () => {
     // ...under two distinct subject-keyed bucket headers.
     expect(screen.getByText("lore-a")).toBeInTheDocument();
     expect(screen.getByText("lore-b")).toBeInTheDocument();
+  });
+});
+
+describe("Chats pane — Openable built-in view (ADR-0051 S6 follow-up)", () => {
+  // Extend the schema with the two prompt types that decide openability.
+  const OPENABLE_SCHEMA = {
+    entry_types: {
+      "chat:chat_session": { name: "Chat", kind: "chat" },
+      "prompt:general": { name: "General", kind: "prompt", prompt: { context_strategy: { output: { kind: "chat_panel" } } } },
+      "prompt:revise:entry": {
+        name: "Revise entry",
+        kind: "prompt",
+        prompt: { context_strategy: { output: { kind: "entry_patch" } } },
+      },
+    },
+    fields: {},
+  } as unknown as MetadataSchema;
+
+  function prompt(id: string, entryType: string): PromptEntrySummary {
+    return {
+      id,
+      title: id,
+      body: "",
+      entry_type: entryType,
+      metadata: {},
+      inputs: [],
+      source_layer_id: "layer_project",
+      source_layer_label: "Project",
+      is_library: false,
+    } as unknown as PromptEntrySummary;
+  }
+
+  function seededChat(id: string, title: string, promptId: string): ChatSessionSummary {
+    return { ...chat(id, title), prompt_entry_id: promptId };
+  }
+
+  it("hides the brainstorm (entry_patch) chat, keeps General + freeform", () => {
+    metadataSchemaStore.set(OPENABLE_SCHEMA);
+    const spec = builtinViews("chat", OPENABLE_SCHEMA)[1].spec; // "Openable chats"
+    renderPane(
+      [
+        seededChat("c_general", "General Chat", "p_general"),
+        seededChat("c_brainstorm", "Brainstorm Chat", "p_revise"),
+        chat("c_free", "Freeform Chat"), // no seeding prompt
+      ],
+      spec,
+      [prompt("p_general", "prompt:general"), prompt("p_revise", "prompt:revise:entry")],
+    );
+    expect(screen.getByText("General Chat")).toBeInTheDocument();
+    expect(screen.getByText("Freeform Chat")).toBeInTheDocument();
+    // The brainstorm chat (output kind entry_patch) is filtered out.
+    expect(screen.queryByText("Brainstorm Chat")).toBeNull();
   });
 });

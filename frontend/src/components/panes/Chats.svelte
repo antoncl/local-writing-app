@@ -3,6 +3,7 @@
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import { defaultView } from "@/lib/views/evaluateView";
+  import { chatSummariesToEvalNodes, type ChatEvalNode } from "@/lib/views/chatNodes";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { formatCostEur } from "@/lib/utils/money";
@@ -14,28 +15,24 @@
   // order (ADR-0037 §7). A chat is now a real node (ADR-0051 S1/S6), so the pane
   // stops being a `nodeSet()` bypass and becomes designable like Lore/Assistants.
   export let viewSpec: ViewSpec = defaultView("chat");
-  $: schema = $metadataSchemaStore;
-
-  // Lift each roster summary to an EvalNode. `entry_type` is now carried on the
-  // summary (its real `chat:chat_session`), so it is no longer hand-stamped — the
-  // designed view's `descendants_of: chat:chat_session` membership matches. The
-  // `metadata.subject` placement is where field access reads a non-intrinsic
-  // field (ADR-0029 §D), so a view can group / filter by subject.
-  type ChatNode = ChatSessionSummary & { metadata: { subject: string } };
-  $: chatNodes = sessions.map((session): ChatNode => ({
-    ...session,
-    metadata: { subject: session.subject ?? "" },
-  }));
-  $: view = { spec: viewSpec, universe: chatNodes, schema, referenceIndex: $referenceIndexStore };
   export let activeChatId: string | null = null;
   // Passed so the per-session preset line resolves prompt/assistant names
   // reactively (App owns both lists); resolving via props rather than a
-  // callback keeps the lookups tracking their inputs.
+  // callback keeps the lookups tracking their inputs. `promptEntries` also
+  // resolves each chat's seeding-prompt output kind for the "Openable" view.
   export let promptEntries: PromptEntrySummary[];
   export let assistantEntries: AssistantEntrySummary[];
   // App owns the editor pane set + error wrapper, so open/delete are callbacks.
   export let onOpenChat: (chatId: string) => void;
   export let onDeleteChat: (chatId: string) => void;
+
+  $: schema = $metadataSchemaStore;
+  // Lift each roster summary to an EvalNode: `subject` and the seeding prompt's
+  // derived `seed_output_kind` go in metadata (ADR-0029 §D), so a designed or
+  // built-in view can group/filter by subject and hide the brainstorm
+  // (`entry_patch`) chats. The lift is shared with the view-designer preview.
+  $: chatNodes = chatSummariesToEvalNodes(sessions, promptEntries, schema);
+  $: view = { spec: viewSpec, universe: chatNodes, schema, referenceIndex: $referenceIndexStore };
 
   function chatSessionPromptTitle(session: ChatSessionSummary): string {
     if (!session.prompt_entry_id) return "";
@@ -64,7 +61,7 @@
   {/snippet}
 </ViewNodeList>
 
-{#snippet chatRow(session: ChatNode, ctx: RowCtx<ChatNode>)}
+{#snippet chatRow(session: ChatEvalNode, ctx: RowCtx<ChatEvalNode>)}
   <NodeRow
     title={session.title || "Untitled chat"}
     depth={ctx.depth}

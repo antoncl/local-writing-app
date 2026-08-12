@@ -281,14 +281,25 @@
       </div>
     {/if}
 
-    <span
-      class="card-status"
-      class:hollow={pageStatus === "unwritten"}
-      style={statusColor ? `--status-color: ${statusColor}` : undefined}
-    >
-      <span class="status-dot" aria-hidden="true"></span>
-      {statusInfo.label}
-    </span>
+    <div class="card-foot">
+      {#if data.plotlineName}
+        <!-- Names the plotline the tint + band already colour, so it's legible by
+             more than colour (#863). The dot echoes the plotline colour; a colourless
+             plotline shows a hollow dot. -->
+        <span class="card-plotline" class:uncoloured={!accent} title={data.plotlineName}>
+          <span class="plotline-dot" aria-hidden="true"></span>
+          <span class="plotline-name">{data.plotlineName}</span>
+        </span>
+      {/if}
+      <span
+        class="card-status"
+        class:hollow={pageStatus === "unwritten"}
+        style={statusColor ? `--status-color: ${statusColor}` : undefined}
+      >
+        <span class="status-dot" aria-hidden="true"></span>
+        {statusInfo.label}
+      </span>
+    </div>
   </article>
 
   {#if menuOpen && actions}
@@ -332,11 +343,25 @@
         </button>
         <div class="menu-scroll" role="group" aria-label="Plotlines">
           {#each actions.plotlines as line (line.id)}
-            <button role="menuitem" class="menu-item" onclick={() => setPlotline(line.id)}>
+            <button
+              role="menuitem"
+              class="menu-item"
+              class:current={line.id === data.plotlineId}
+              aria-current={line.id === data.plotlineId || undefined}
+              onclick={() => setPlotline(line.id)}
+            >
+              <i class="ti ti-check menu-check" aria-hidden="true"></i>
               {line.title}
             </button>
           {/each}
-          <button role="menuitem" class="menu-item menu-unassigned" onclick={() => setPlotline("")}>
+          <button
+            role="menuitem"
+            class="menu-item menu-unassigned"
+            class:current={!data.plotlineId}
+            aria-current={!data.plotlineId || undefined}
+            onclick={() => setPlotline("")}
+          >
+            <i class="ti ti-check menu-check" aria-hidden="true"></i>
             Unassigned
           </button>
         </div>
@@ -369,9 +394,13 @@
     overflow: hidden;
   }
   /* The plotline stripe down the left edge — an inset shadow so it hugs the
-     rounded corners, the same signature NodeRow / ViewFlowNode use for kind. */
+     rounded corners, the same signature NodeRow / ViewFlowNode use for kind. Plus a
+     soft plotline tint over the whole card (#863): ~8% of the plotline colour mixed
+     into the panel token, so groupings read by colour while staying calm + theme-
+     aware. The tint is the card's one colour system; status/beats stay neutral. */
   .plot-card.accented {
     box-shadow: inset 4px 0 0 0 var(--card-accent), var(--elev-1);
+    background: color-mix(in srgb, var(--card-accent) 8%, var(--panel));
   }
   /* Accept-highlight while a beat is dragged over the card (#824). */
   .plot-card.drag-over {
@@ -547,6 +576,7 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
+    flex: none;
     font-size: var(--fs-xs);
     color: var(--text-2);
   }
@@ -563,6 +593,39 @@
   .card-status.hollow .status-dot {
     background: transparent;
     border-color: var(--text-3);
+  }
+  /* Footer row (#863): the named plotline chip (left, elides) beside the status
+     (right), pinned to the card's bottom edge. */
+  .card-foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: auto;
+  }
+  .card-plotline {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    flex: 1;
+    min-width: 0;
+    font-size: var(--fs-xs);
+    color: var(--text-2);
+  }
+  .plotline-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex: none;
+    background: var(--card-accent, var(--text-3));
+  }
+  .card-plotline.uncoloured .plotline-dot {
+    background: transparent;
+    border: 1px solid var(--text-3);
+  }
+  .plotline-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   /* Rendered outside .plot-card so the card's overflow:hidden can't clip it. */
   .card-menu {
@@ -597,6 +660,19 @@
   }
   .menu-item i {
     color: var(--text-3);
+  }
+  /* Current-plotline marker (#863): a check that keeps its slot when hidden, so the
+     labels stay aligned whether or not a row is the selected one. */
+  .menu-check {
+    visibility: hidden;
+    font-size: var(--fs-sm);
+  }
+  .menu-item.current {
+    font-weight: 600;
+  }
+  .menu-item.current .menu-check {
+    visibility: visible;
+    color: var(--accent);
   }
   .chevron {
     margin-left: auto;

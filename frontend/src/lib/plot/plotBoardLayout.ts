@@ -37,6 +37,11 @@ export type PlotCardData = {
   synopsis: string;
   attached: boolean;
   color: string | null;
+  // The owning plotline's id + name (#863). id lets the card's "Set plotline" menu
+  // mark the current selection; name is shown on the card so the plotline is legible
+  // by more than its colour. Both null for the Unassigned lane.
+  plotlineId: string | null;
+  plotlineName: string | null;
   // Page status (Slice 5b): on_page (scene attached) / off_page / unwritten. null =
   // the sparse default, rendered as unwritten. Drives the card's 3-state marker.
   pageStatus: string | null;
@@ -237,6 +242,8 @@ export function buildBoardNodes(
         synopsis: card.synopsis,
         attached: card.scene != null,
         color: line?.color ?? null,
+        plotlineId: line?.id ?? null,
+        plotlineName: line?.title ?? null,
         pageStatus: card.page_status,
         beats: card.beats,
         causalLinks: card.causal_links,

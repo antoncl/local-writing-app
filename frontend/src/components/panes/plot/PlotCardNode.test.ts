@@ -25,6 +25,8 @@ const data = (over: Partial<PlotCardData> = {}): PlotCardData => ({
   synopsis: "The heroine packs a bag and walks out.",
   attached: false,
   color: null,
+  plotlineId: null,
+  plotlineName: null,
   pageStatus: null,
   beats: [],
   causalLinks: [],
@@ -70,6 +72,14 @@ describe("PlotCardNode", () => {
     render(PlotCardNode, { props: { data: data() } });
     expect(screen.getByText("She leaves home")).toBeInTheDocument();
     expect(screen.getByText("The heroine packs a bag and walks out.")).toBeInTheDocument();
+  });
+
+  it("names the plotline on the card, and omits the chip when unassigned (#863)", () => {
+    const { unmount } = render(PlotCardNode, { props: { data: data({ plotlineName: "Romance" }) } });
+    expect(screen.getByText("Romance")).toBeInTheDocument();
+    unmount();
+    render(PlotCardNode, { props: { data: data({ plotlineName: null }) } });
+    expect(screen.queryByText("Romance")).toBeNull();
   });
 
   it("shows the on-page marker for an attached card", () => {
@@ -218,6 +228,26 @@ describe("PlotCardNode — content-op menu (S7d)", () => {
     await fireEvent.click(screen.getByRole("menuitem", { name: "Set plotline" }));
     await fireEvent.click(screen.getByRole("menuitem", { name: "Unassigned" }));
     expect(acts.onSetPlotline).toHaveBeenCalledWith("card_5", "");
+  });
+
+  it("marks the card's current plotline in the submenu (#863)", async () => {
+    const acts = actions([
+      { id: "pl_a", title: "Main plot", color: null },
+      { id: "pl_b", title: "Romance", color: null },
+    ]);
+    renderWithActions({ attached: false, plotlineId: "pl_b", plotlineName: "Romance" }, acts, "card_6");
+    await fireEvent.click(screen.getByLabelText("Card actions"));
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Set plotline" }));
+    expect(screen.getByRole("menuitem", { name: "Romance", current: true })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Main plot" })).not.toHaveAttribute("aria-current", "true");
+  });
+
+  it("marks Unassigned as current when the card has no plotline (#863)", async () => {
+    const acts = actions([{ id: "pl_a", title: "Main plot", color: null }]);
+    renderWithActions({ attached: false, plotlineId: null }, acts, "card_7");
+    await fireEvent.click(screen.getByLabelText("Card actions"));
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Set plotline" }));
+    expect(screen.getByRole("menuitem", { name: "Unassigned", current: true })).toBeInTheDocument();
   });
 });
 

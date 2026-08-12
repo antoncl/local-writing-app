@@ -185,9 +185,10 @@ describe("buildBoardNodes", () => {
     );
     const attached = dataOf(nodes, "attached") as PlotCardData;
     const loose = dataOf(nodes, "loose") as PlotCardData;
-    // Colour comes from the plotline whether the card is in a container or homeless.
-    expect(attached).toMatchObject({ synopsis: "she leaves", attached: true, color: "forest" });
-    expect(loose).toMatchObject({ attached: false, color: "forest" });
+    // Colour + the plotline's id/name (#863) come from the plotline whether the card
+    // is in a container or homeless.
+    expect(attached).toMatchObject({ synopsis: "she leaves", attached: true, color: "forest", plotlineId: "plot_a", plotlineName: "A" });
+    expect(loose).toMatchObject({ attached: false, color: "forest", plotlineId: "plot_a", plotlineName: "A" });
   });
 
   it("gives a card with no plotline a null colour", () => {

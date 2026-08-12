@@ -38,6 +38,7 @@ function chat(over: Partial<ChatSessionSummary>): ChatSessionSummary {
   return {
     id: "c",
     title: "Chat",
+    entry_type: "chat:chat_session",
     prompt_entry_id: "",
     assistant_id: "",
     pinned: false,

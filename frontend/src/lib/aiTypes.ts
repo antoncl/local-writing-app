@@ -290,6 +290,12 @@ export type ChatSession = {
 export type ChatSessionSummary = {
   id: string;
   title: string;
+  // ADR-0051 S6: the node identity type (`chat:chat_session`) + what the chat is
+  // about, so the roster is a real EvalNode the Chats pane can flow through
+  // `evaluateView` — the default chat view is `descendants_of: chat:chat_session`,
+  // and `subject` is the marquee group/filter key. `subject` is empty for freeform.
+  entry_type: string;
+  subject?: string;
   prompt_entry_id: string;
   assistant_id: string;
   pinned: boolean;

@@ -1,19 +1,32 @@
 <script lang="ts">
-  import type { AssistantEntrySummary, ChatSessionSummary, PromptEntrySummary } from "@/lib/types";
+  import type { AssistantEntrySummary, ChatSessionSummary, PromptEntrySummary, ViewSpec } from "@/lib/types";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
-  import { nodeSet } from "@/lib/views/viewResult";
+  import { defaultView } from "@/lib/views/evaluateView";
+  import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { referenceIndexStore } from "@/lib/stores/references";
   import { formatCostEur } from "@/lib/utils/money";
 
   export let sessions: ChatSessionSummary[];
+  // The view to render through, resolved by App from the pane's selected view
+  // (paneViews.specFor("chat", …)); the standalone default is the kind's honest
+  // default view — the whole roster in the backend's pinned-first / last-active
+  // order (ADR-0037 §7). A chat is now a real node (ADR-0051 S1/S6), so the pane
+  // stops being a `nodeSet()` bypass and becomes designable like Lore/Assistants.
+  export let viewSpec: ViewSpec = defaultView("chat");
+  $: schema = $metadataSchemaStore;
 
-  // A non-view pane (ADR-0035 §3, #253): a pre-computed roster with no view to
-  // evaluate. It lifts its array to the degenerate ViewResult via `nodeSet()` and
-  // renders through the same ViewNodeList wrapper as the view panes — one render
-  // path, no bespoke NodeList. A ChatSessionSummary has no `entry_type`, so we
-  // stamp a constant to satisfy EvalNode; it is never grouped on (nodeSet ⇒ flat).
-  type ChatNode = ChatSessionSummary & { entry_type: string };
-  $: chatNodes = sessions.map((session): ChatNode => ({ ...session, entry_type: "chat" }));
+  // Lift each roster summary to an EvalNode. `entry_type` is now carried on the
+  // summary (its real `chat:chat_session`), so it is no longer hand-stamped — the
+  // designed view's `descendants_of: chat:chat_session` membership matches. The
+  // `metadata.subject` placement is where field access reads a non-intrinsic
+  // field (ADR-0029 §D), so a view can group / filter by subject.
+  type ChatNode = ChatSessionSummary & { metadata: { subject: string } };
+  $: chatNodes = sessions.map((session): ChatNode => ({
+    ...session,
+    metadata: { subject: session.subject ?? "" },
+  }));
+  $: view = { spec: viewSpec, universe: chatNodes, schema, referenceIndex: $referenceIndexStore };
   export let activeChatId: string | null = null;
   // Passed so the per-session preset line resolves prompt/assistant names
   // reactively (App owns both lists); resolving via props rather than a
@@ -37,13 +50,17 @@
 </script>
 
 <ViewNodeList
-  result={nodeSet(chatNodes)}
+  {view}
   active={(node) => activeChatId === node.id}
   onClick={(node) => onOpenChat(node.id)}
   row={chatRow}
 >
   {#snippet whenEmpty()}
-    <p class="muted">No chats yet. Click + to start one.</p>
+    {#if sessions.length === 0}
+      <p class="muted">No chats yet. Click + to start one.</p>
+    {:else}
+      <p class="muted">No chats match this view.</p>
+    {/if}
   {/snippet}
 </ViewNodeList>
 

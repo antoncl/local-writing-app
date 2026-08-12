@@ -13,14 +13,30 @@ import type { CardEntry, PlotBoardLayout, PlotBoardProjection } from "@/lib/type
 
 export const plotBoardStore = writable<PlotBoardProjection | null>(null);
 
+// The last load's failure message, or null. Distinguishes a load ERROR from a
+// not-yet-loaded null (#756): PlotBoardPane surfaces it as a retryable inline
+// state instead of the permanent "Loading…" a failed fetch used to leave behind.
+// Only meaningful while the projection is still null (an initial load / restore) —
+// once the board is shown, a failed background refresh keeps the last-good board
+// and the error is ignored. Cleared when a fresh load starts or succeeds.
+export const plotBoardError = writable<string | null>(null);
+
 let inFlight: Promise<void> | null = null;
 
 export function refreshPlotBoard(): Promise<void> {
   if (inFlight) return inFlight;
+  plotBoardError.set(null);
   inFlight = api
     .getPlotBoardProjection()
     .then((projection) => {
       plotBoardStore.set(projection);
+    })
+    .catch((error: unknown) => {
+      // Record the failure for the inline error state and SWALLOW it: the sole
+      // read callers are `void refreshPlotBoard()` (PlotBoardPane mount/restore) and
+      // the menu opener — neither should raise an unhandled rejection, and the pane
+      // now shows the error itself rather than relying on a transient banner.
+      plotBoardError.set(error instanceof Error ? error.message : String(error));
     })
     .finally(() => {
       inFlight = null;
@@ -34,16 +50,10 @@ export function refreshPlotBoard(): Promise<void> {
 // resolves with a pre-mutation projection and the new state never lands. Drain any
 // such in-flight read first, then run one fresh fetch whose (post-mutation) result
 // sets the store last. A fetch that starts here is post-mutation, so coalescing with
-// it is fine.
+// it is fine. `refreshPlotBoard` records its own errors and never rejects, so the
+// drain needs no catch.
 async function refreshAfterMutation(): Promise<void> {
-  const pending = inFlight;
-  if (pending) {
-    try {
-      await pending;
-    } catch {
-      // A failed read-refresh is retried by the fresh fetch below.
-    }
-  }
+  if (inFlight) await inFlight;
   await refreshPlotBoard();
 }
 
@@ -219,4 +229,5 @@ export function setCardPageStatus(cardId: string, status: "off_page" | "unwritte
 // (called from the project-clear fan-out).
 export function clearPlotBoard(): void {
   plotBoardStore.set(null);
+  plotBoardError.set(null);
 }

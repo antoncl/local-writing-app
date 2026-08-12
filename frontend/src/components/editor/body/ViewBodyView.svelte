@@ -1161,39 +1161,16 @@
     /* Clip the flow so a node can never paint over the toolbar/preview. */
     overflow: hidden;
   }
-  /* Svelte Flow needs an explicitly sized parent. §G: the stock skin is retuned
-     onto the token layer through the library's own `--xy-*` custom-property seam
-     (cleaner than fighting :global specificity, and it themes both modes at once
-     since the tokens are already theme-aware). The stock stylesheet stays
-     imported for layout/behavior only. */
+  /* Svelte Flow needs an explicitly sized parent. §G: the shared chrome (background,
+     node reset, handles, controls, selection, attribution) is themed ONCE, globally,
+     via the `--xy-*` seam in styles.css (#756). Only the view designer's own wire
+     colours stay scoped here — node-set wires take the accent (kind-tinted, §240),
+     softened via opacity on the path below so they read as calm pipes, not hard
+     rules. The stock stylesheet stays imported for layout/behavior only. */
   .canvas :global(.svelte-flow) {
     height: 100%;
-    /* flat writing-desk board, no dot grid (§1.3) */
-    --xy-background-color: var(--board);
-    /* the node wrapper paints nothing — each .vnode owns its own surface */
-    --xy-node-background-color: transparent;
-    --xy-node-border: none;
-    --xy-node-boxshadow-hover: none;
-    --xy-node-boxshadow-selected: none;
-    /* wires */
-    /* node-set wires take the accent (kind-tinted, §240), softened via opacity
-       on the path below so they read as calm pipes, not hard rules */
     --xy-edge-stroke: var(--accent);
     --xy-edge-stroke-selected: var(--accent);
-    /* ports (the generic `.port` rule paints the hollow ring on top of this) */
-    --xy-handle-background-color: var(--surface);
-    --xy-handle-border-color: var(--accent);
-    /* zoom/fit controls */
-    --xy-controls-button-background-color: var(--panel);
-    --xy-controls-button-background-color-hover: var(--inset);
-    --xy-controls-button-border-color: var(--border);
-    --xy-controls-button-color: var(--text-2);
-    --xy-controls-button-color-hover: var(--text);
-    --xy-controls-box-shadow: var(--elev-1);
-    /* rubber-band selection box + the low-key attribution chip */
-    --xy-selection-background-color: var(--accent-soft);
-    --xy-selection-border: 1px dashed var(--accent);
-    --xy-attribution-background-color: transparent;
   }
   /* Edges a touch heavier than the 1px default so wiring reads clearly, incl.
      the in-progress connection line and the custom self-loop (BaseEdge). */

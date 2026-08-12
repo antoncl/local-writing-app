@@ -10,7 +10,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import PlotEditor from "./PlotEditor.svelte";
-  import { plotBoardStore, refreshPlotBoard } from "@/lib/stores/plotBoard";
+  import { plotBoardStore, plotBoardError, refreshPlotBoard } from "@/lib/stores/plotBoard";
   import { structureStore } from "@/lib/stores/structure";
 
   onMount(() => {
@@ -36,4 +36,4 @@
   });
 </script>
 
-<PlotEditor projection={$plotBoardStore} />
+<PlotEditor projection={$plotBoardStore} error={$plotBoardError} onRetry={() => void refreshPlotBoard()} />

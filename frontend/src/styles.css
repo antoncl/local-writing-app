@@ -1269,3 +1269,35 @@ button.row-action-add.active {
   white-space: nowrap;
   border: 0;
 }
+
+/* Svelte Flow CHROME, retuned onto the app token layer via the library's own
+   `--xy-*` custom-property seam (cleaner than fighting :global specificity, and it
+   themes light + dark at once since the tokens are already theme-aware). GLOBAL so
+   every SvelteFlow board consumes ONE source (#756): the view designer
+   (ViewBodyView) and the plot board (PlotEditor). The library's stock stylesheet
+   stays imported for layout/behaviour; each canvas keeps only its own edge/wire
+   colours scoped. Plain CSS, so a bare `.svelte-flow` selector — `:global()` is
+   silently invalid in styles.css. */
+.svelte-flow {
+  /* flat writing-desk board, no dot grid (§1.3) */
+  --xy-background-color: var(--board);
+  /* the node wrapper paints nothing — each node component owns its own surface */
+  --xy-node-background-color: transparent;
+  --xy-node-border: none;
+  --xy-node-boxshadow-hover: none;
+  --xy-node-boxshadow-selected: none;
+  /* ports / connect handles */
+  --xy-handle-background-color: var(--surface);
+  --xy-handle-border-color: var(--accent);
+  /* zoom / fit controls */
+  --xy-controls-button-background-color: var(--panel);
+  --xy-controls-button-background-color-hover: var(--inset);
+  --xy-controls-button-border-color: var(--border);
+  --xy-controls-button-color: var(--text-2);
+  --xy-controls-button-color-hover: var(--text);
+  --xy-controls-box-shadow: var(--elev-1);
+  /* rubber-band selection box + the low-key attribution chip */
+  --xy-selection-background-color: var(--accent-soft);
+  --xy-selection-border: 1px dashed var(--accent);
+  --xy-attribution-background-color: transparent;
+}

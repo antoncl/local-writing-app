@@ -65,8 +65,19 @@
   import type { BoardXY, PlotBoardProjection } from "@/lib/types";
 
   // The board's read model, fetched by the opener / PlotBoardPane into the store.
-  // Null until the first refresh resolves; the pane shows a neutral loading blank.
-  let { projection }: { projection: PlotBoardProjection | null } = $props();
+  // Null until the first refresh resolves. `error` distinguishes a FAILED initial
+  // load from a still-loading one (#756) — with a projection null and an error set,
+  // the pane shows a retryable error state instead of a permanent "Loading…";
+  // `onRetry` re-runs the fetch. Both are inert once a projection is present.
+  let {
+    projection,
+    error = null,
+    onRetry,
+  }: {
+    projection: PlotBoardProjection | null;
+    error?: string | null;
+    onRetry?: () => void;
+  } = $props();
 
   // Coalesce a drag's position churn into one save on release.
   const SAVE_DEBOUNCE_MS = 600;
@@ -334,8 +345,33 @@
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <section class="plot-board" aria-label="Plot board" onkeydown={undoCtl.handleKeydown}>
   {#if !projection}
-    <p class="board-hint muted">Loading the board…</p>
+    {#if error}
+      <!-- A failed initial load / restore. Distinct from the loading blank so a
+           fetch error isn't a permanent "Loading…" (#756); Retry re-runs it. -->
+      <div class="board-status" role="alert">
+        <p class="board-hint muted">Couldn't load the board.</p>
+        <p class="board-error-detail">{error}</p>
+        {#if onRetry}
+          <button class="board-btn" onclick={onRetry}>Retry</button>
+        {/if}
+      </div>
+    {:else}
+      <p class="board-hint muted">Loading the board…</p>
+    {/if}
   {:else}
+    {#if error}
+      <!-- A background / post-mutation refresh failed while the board is already
+           shown (#756). Don't blank the board — keep the (possibly stale) view — but
+           don't leave the failure silent either: a slim strip surfaces it with Retry.
+           `refreshPlotBoard` clears the error on its next attempt, so a successful
+           Retry (or any later refresh) removes this. -->
+      <div class="board-refresh-error" role="alert">
+        <span>Couldn't refresh the board — it may be out of date.</span>
+        {#if onRetry}
+          <button class="board-btn" onclick={onRetry}>Retry</button>
+        {/if}
+      </div>
+    {/if}
     <div class="board-toolbar">
       <!-- Both stay reachable on an empty board — they are how you populate one:
            New card authors one directly; Seed bulk-mints from the manuscript. -->
@@ -537,6 +573,38 @@
   }
   .muted {
     color: var(--text-3);
+    font-size: var(--fs-sm);
+  }
+  /* The failed-load state (#756): the hint, the error detail, and a Retry button
+     stacked at the top-left, matching the loading blank's placement. */
+  .board-status {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 16px;
+  }
+  .board-status .board-hint {
+    padding: 0;
+  }
+  .board-error-detail {
+    margin: 0;
+    max-width: 60ch;
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+  }
+  /* The stale-refresh strip (#756): a quiet full-width bar above a still-shown board
+     when a background / post-mutation refresh failed. Neutral, not alarming — the
+     board is usable, just possibly out of date. */
+  .board-refresh-error {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 12px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    color: var(--text-2);
     font-size: var(--fs-sm);
   }
 

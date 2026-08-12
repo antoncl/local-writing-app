@@ -20,6 +20,7 @@
     announcement,
     onUndo,
     onRedo,
+    scope,
   }: {
     canUndo: boolean;
     canRedo: boolean;
@@ -28,13 +29,20 @@
     announcement: string;
     onUndo: () => void;
     onRedo: () => void;
+    // Optional scope word folded into the button aria-labels + group label, so a
+    // screen reader hears e.g. "Undo layout" where the history is narrower than the
+    // whole surface (#860). Omitted → the plain "Undo"/"Redo"/"History".
+    scope?: string;
   } = $props();
+  let undoLabel = $derived(scope ? `Undo ${scope}` : "Undo");
+  let redoLabel = $derived(scope ? `Redo ${scope}` : "Redo");
+  let groupLabel = $derived(scope ? `${scope} history` : "History");
 </script>
 
-<div class="undo-cluster" role="group" aria-label="History">
-  <button type="button" class="undo-btn" disabled={!canUndo} aria-label="Undo" title={undoTitle} onclick={onUndo}
+<div class="undo-cluster" role="group" aria-label={groupLabel}>
+  <button type="button" class="undo-btn" disabled={!canUndo} aria-label={undoLabel} title={undoTitle} onclick={onUndo}
     ><i class="ti ti-arrow-back-up" aria-hidden="true"></i></button>
-  <button type="button" class="undo-btn" disabled={!canRedo} aria-label="Redo" title={redoTitle} onclick={onRedo}
+  <button type="button" class="undo-btn" disabled={!canRedo} aria-label={redoLabel} title={redoTitle} onclick={onRedo}
     ><i class="ti ti-arrow-forward-up" aria-hidden="true"></i></button>
 </div>
 <!-- What just reversed, for screen readers (§7): "Undid delete node". -->

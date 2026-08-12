@@ -8,6 +8,7 @@ import {
   clearPlotBoard,
   createCard,
   detachCardScene,
+  deleteCard,
   plotBoardStore,
   plotBoardError,
   realizeCard,
@@ -136,6 +137,14 @@ describe("card content ops", () => {
     const refresh = vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
     await realizeCard("c1", "chap1");
     expect(realize).toHaveBeenCalledWith("c1", "chap1");
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("deleteCard deletes via the endpoint, then refetches the projection (#860)", async () => {
+    const del = vi.spyOn(api, "deleteCard").mockResolvedValue({ entries: [] });
+    const refresh = vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    await deleteCard("c1");
+    expect(del).toHaveBeenCalledWith("c1");
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 

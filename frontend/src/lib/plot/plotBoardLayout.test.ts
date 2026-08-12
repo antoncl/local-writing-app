@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildBoardNodes,
   cardPositionsFromNodes,
+  containerExtent,
   overriddenCardPositions,
   projectionDataKey,
   readBoardPositions,
@@ -342,5 +343,62 @@ describe("projectionDataKey (rebuild-on-data-change)", () => {
       cards: [card("c1", { plotline: "p1", synopsis: "different", container: "chap" })],
     });
     expect(projectionDataKey(edited)).not.toBe(projectionDataKey(base()));
+  });
+});
+
+describe("container lock (#873)", () => {
+  // The extent is the box's INNER content region (inside the side padding, below the
+  // header band) in absolute coords — xyflow clamps the card's drag into it and
+  // subtracts the card's own size, so we do NOT pre-shrink here.
+  it("containerExtent returns the box's inner content region", () => {
+    expect(containerExtent({ x: 500, y: 300, w: 1000, h: 400 })).toEqual([
+      [500 + CONTAINER_PAD, 300 + CONTAINER_HEADER + CONTAINER_PAD],
+      [500 + 1000 - CONTAINER_PAD, 300 + 400 - CONTAINER_PAD],
+    ]);
+  });
+
+  it("gives a chapter card the chapter box's extent (nested, not the act's)", () => {
+    const nodes = buildBoardNodes(
+      projection({
+        containers: [container("act", "Act I"), container("chap", "Chapter 1", "act")],
+        cards: [card("c1", { container: "chap" })],
+      }),
+    );
+    const chapBox = containerNodes(nodes).find((n) => n.id === "container:chap")!;
+    const cardNode = cardNodes(nodes)[0];
+    expect(cardNode.extent).toEqual(
+      containerExtent({ x: chapBox.position.x, y: chapBox.position.y, w: chapBox.width!, h: chapBox.height! }),
+    );
+  });
+
+  it("clamps the extent to the innermost box even for a card directly in an act", () => {
+    const nodes = buildBoardNodes(
+      projection({ containers: [container("act", "Act I")], cards: [card("c1", { container: "act", scene: "s1" })] }),
+    );
+    const actBox = containerNodes(nodes)[0];
+    expect(cardNodes(nodes)[0].extent).toEqual(
+      containerExtent({ x: actBox.position.x, y: actBox.position.y, w: actBox.width!, h: actBox.height! }),
+    );
+  });
+
+  it("leaves a homeless card free (no extent → no lock)", () => {
+    const nodes = buildBoardNodes(projection({ cards: [card("loose", { container: null })] }));
+    expect(cardNodes(nodes)[0].extent).toBeUndefined();
+  });
+
+  it("treats a card pointing at an unknown container as homeless (no extent)", () => {
+    const nodes = buildBoardNodes(projection({ cards: [card("ghost", { container: "gone" })] }));
+    expect(cardNodes(nodes)[0].extent).toBeUndefined();
+  });
+
+  it("pins a single-card box: the extent leaves exactly the card's own footprint", () => {
+    // A chapter with one card — its box hugs the card, so the content region is the
+    // card's own footprint: xyflow subtracts CARD_WIDTH/HEIGHT → min == max → pinned.
+    const nodes = buildBoardNodes(
+      projection({ containers: [container("chap", "Chapter 1")], cards: [card("solo", { container: "chap" })] }),
+    );
+    const [[minX, minY], [maxX, maxY]] = cardNodes(nodes)[0].extent as [[number, number], [number, number]];
+    expect(maxX - minX).toBe(CARD_WIDTH); // exactly the card's width of travel, all consumed by the size subtraction
+    expect(maxY - minY).toBe(CARD_HEIGHT);
   });
 });

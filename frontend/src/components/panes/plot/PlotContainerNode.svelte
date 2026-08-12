@@ -19,7 +19,7 @@
   let isAct = $derived(data.level === 0);
 </script>
 
-<div class="plot-container" class:act={isAct} class:nested={!isAct}>
+<div class="plot-container" class:act={isAct}>
   <div class="container-head">
     <span class="container-title" title={data.title}>{data.title}</span>
     <span class="container-count">{data.count}</span>
@@ -37,16 +37,16 @@
     pointer-events: none;
     border: 1px solid var(--border);
     border-radius: var(--r-lg);
-  }
-  /* A top-level act: a faint surface fill and a firmer edge, so it reads as the
-     outer frame the chapter boxes sit inside. */
-  .plot-container.act {
-    background: var(--surface);
-    border-color: var(--border-strong);
-  }
-  /* A nested chapter: no fill (the act's shows through) and a hairline edge. */
-  .plot-container.nested {
+    /* NO fill — a container is structural scaffolding, and an opaque box would paint
+       over the edge layers (manuscript / beat / causal) that pass behind it, hiding
+       the very connections the board exists to show (#833). Both act and chapter
+       interiors stay transparent so edges beneath read through. */
     background: transparent;
+  }
+  /* A top-level act reads as the outer frame the chapter boxes sit inside by its
+     firmer edge alone (no fill); a nested chapter by the hairline default border. */
+  .plot-container.act {
+    border-color: var(--border-strong);
   }
   .container-head {
     box-sizing: border-box;

@@ -323,7 +323,7 @@
           </button>
         {/if}
         <div class="menu-sep" role="separator"></div>
-        <button role="menuitem" class="menu-item menu-danger" onclick={() => run(actions?.onDelete)}>
+        <button role="menuitem" class="menu-item menu-danger" onclick={() => run(actions.onDelete)}>
           <i class="ti ti-trash" aria-hidden="true"></i> Delete card
         </button>
       {:else}

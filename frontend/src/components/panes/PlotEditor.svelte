@@ -161,6 +161,11 @@
       destructive: true,
       onConfirm: async () => {
         await deleteCard(id);
+        // Close a NodeEditor pane open on this card ("Open card"): the node is gone,
+        // so the pane would 404 on its next save. Mirrors editorPaneDelete's own
+        // post-delete tearDown — find by document id, force-close (no save prompt).
+        const openPane = editorPanes.panes.find((p) => p.document?.id === id);
+        if (openPane) editorPanes.tearDown(openPane.id);
       },
     });
   }
@@ -458,7 +463,10 @@
              content ops (realize/detach/plotline/beats/causal) are intentful and
              outside the caretaker. The label stops the cluster implying otherwise. -->
         <div class="undo-group">
-          <span class="undo-scope">Layout</span>
+          <!-- Visible cue for sighted users; the scope reaches screen readers via
+               the UndoRedoControls `scope` prop (aria-label "Undo layout"), so this
+               span is decorative to avoid a doubled "layout layout" announcement. -->
+          <span class="undo-scope" aria-hidden="true">Layout</span>
           <UndoRedoControls
             canUndo={undoCtl.canUndo}
             canRedo={undoCtl.canRedo}
@@ -467,6 +475,7 @@
             announcement={undoCtl.announcement}
             onUndo={() => undoCtl.undo()}
             onRedo={() => undoCtl.redo()}
+            scope="layout"
           />
         </div>
       {/if}

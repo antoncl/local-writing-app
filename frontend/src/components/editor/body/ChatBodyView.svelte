@@ -195,7 +195,6 @@
   // component-owned.
   const commit = new ChatCommitController({
     getAssistantId: () => chatAssistantId,
-    getSystemPrompt: () => chatSystemPrompt,
     getHistory: () => chatHistory.map(({ role, content }) => ({ role, content })),
     addTurnCost: async (usd) => {
       pendingTurnCost = (pendingTurnCost ?? 0) + usd;

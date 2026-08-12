@@ -361,6 +361,19 @@ export type AIEntryPatch = EntryPatch & {
   garbled: boolean;
 };
 
+// The result of a fresh-extraction commit (ADR-0051 S4): the server rebuilt the
+// format contract from the target's schema and ran it as its own pass over the
+// transcript, then validated the reply. `patch` is null and `ok` false when the
+// extraction turn itself failed or returned nothing (distinct from a `garbled`
+// patch, which round-trips so the author is told to finalize again). `cost_usd`
+// is the extraction turn's cost, attributed to the session by the caller.
+export type EntryPatchExtraction = {
+  patch: AIEntryPatch | null;
+  cost_usd: number | null;
+  ok: boolean;
+  error: string | null;
+};
+
 export type MetadataFieldType =
   | "text"
   | "long_text"

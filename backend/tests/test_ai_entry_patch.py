@@ -343,9 +343,13 @@ class FieldCatalogFromTypeTests(unittest.TestCase):
         create_mode = template.render(input={"entry": "", "entry_type": "lore:character"})
         self.assertIn("create a new", create_mode)
         self.assertIn(label, create_mode)
-        self.assertIn("allegiance", create_mode)  # full catalog offered
-        self.assertIn("title", create_mode)  # title required in create mode
+        self.assertIn("allegiance", create_mode)  # fields to develop listed
         self.assertNotIn("entry under revision", create_mode)
+        # ADR-0051 S4: goal-directed seed — it drives toward a committable result
+        # and the structured result is extracted separately, so the seed no longer
+        # carries the JSON format contract.
+        self.assertIn("ready to commit", create_mode)
+        self.assertNotIn('"fields"', create_mode)
 
         hero = self.service.create_lore_entry(
             CreateLoreEntryRequest(title="Seren", entry_type="lore:character")
@@ -353,14 +357,13 @@ class FieldCatalogFromTypeTests(unittest.TestCase):
         revise_mode = template.render(input={"entry": hero.id, "entry_type": ""})
         self.assertIn("entry under revision", revise_mode)
         self.assertNotIn("create a new", revise_mode)
-        # The revise branch now offers the full proposable catalog, not just
-        # long-text fields (#653): a `select` is listed with its options and
-        # the instruction covers list/select shapes, so slice 3b's structured
-        # flips are actually reachable end-to-end.
+        # The revise branch shows the fields to develop as the north-star (the
+        # current-values appendix), but no format contract — that's the extraction
+        # endpoint's job now (S4).
         self.assertIn("allegiance", revise_mode)
-        self.assertIn("one of: order, chaos", revise_mode)
-        self.assertIn("listed options exactly", revise_mode)
-        self.assertIn("Current field values", revise_mode)
+        self.assertIn("Fields to develop", revise_mode)
+        self.assertIn("ready to commit", revise_mode)
+        self.assertNotIn('"fields"', revise_mode)
 
     def test_revise_appendix_shows_current_structured_values(self) -> None:
         # So a genuine revise is informed, the appendix now lists the entry's
@@ -565,10 +568,13 @@ class SceneSummaryPromptTests(unittest.TestCase):
         assert etype.prompt is not None and etype.prompt.context_strategy is not None
         # The first non-default `review` value — `replace`, not `visual_diff` —
         # is the signal that flips the review off the run-diff engine (S5-next).
-        self.assertEqual(
-            etype.prompt.context_strategy.output,
-            {"kind": "entry_patch", "review": "replace"},
-        )
+        output = etype.prompt.context_strategy.output
+        assert output is not None
+        self.assertEqual(output.get("kind"), "entry_patch")
+        self.assertEqual(output.get("review"), "replace")
+        # ADR-0051 S4: a fields-only `extract` override — the reference user of
+        # the seam (a scene summary is `summary` only, never the manuscript body).
+        self.assertIsInstance(output.get("extract"), str)
         # REVISE-ONLY: a required `entry` input targeting a scene (no create mode).
         inputs = {i.name: i for i in etype.default_inputs}
         self.assertEqual(list(inputs), ["entry"])
@@ -581,18 +587,17 @@ class SceneSummaryPromptTests(unittest.TestCase):
         prompt = self.service.read_prompt_entry("builtin-summarize-scene")
         self.assertEqual(prompt.entry_type, "prompt:revise:scene_summary")
 
-    def test_template_emits_fields_only_summary_and_never_a_body(self) -> None:
+    def test_template_hands_the_scene_prose_but_carries_no_contract(self) -> None:
+        # ADR-0051 S4: the goal-directed seed hands the model the scene's prose and
+        # current summary to work from, but the JSON format contract is NOT in the
+        # seed anymore — it moved to the prompt's `output.extract`, rendered fresh
+        # at commit (the fields-only shape is asserted in test_ai_extraction).
         prompt = self.service.read_prompt_entry("builtin-summarize-scene")
         env = create_environment_for_project(self.service)
         rendered = env.from_string(prompt.body).render(input={"entry": self.scene_id})
-        # The exact commit shape: only the `summary` field, no `body` key.
-        self.assertIn('{"fields": {"summary"', rendered)
-        # The revise:entry-style `{"body": "<...>", ...}` shape must NOT appear —
-        # a scene's prose body is never rewritten by a summary regenerate.
-        self.assertNotIn('"body": "<', rendered)
-        # The scene's prose and current summary are handed to the model to work from.
         self.assertIn("chasing the thief", rendered)
         self.assertIn("Old synopsis.", rendered)
+        self.assertNotIn('{"fields"', rendered)
 
     def test_summary_patch_validates_on_a_scene(self) -> None:
         # `summary` is a scene:base long_text field → proposable, so a summary

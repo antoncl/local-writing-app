@@ -3,6 +3,7 @@ import type {
   AIChatResponse,
   AIContextPresetResponse,
   AIEntryPatch,
+  EntryPatchExtraction,
   AIGenerateRequest,
   AIHealthResponse,
   AIProviderList,
@@ -838,6 +839,31 @@ export const api = {
     return request<AIEntryPatch>("/ai/entry-draft", {
       method: "POST",
       body: JSON.stringify({ entry_type: entryType, raw }),
+    });
+  },
+  // ADR-0051 S4: the fresh-extraction commit. Instead of the client replaying the
+  // frozen seed prompt + transcript + a finalize cue, the server rebuilds the
+  // format contract from the target's schema and runs it as its own pass over the
+  // transcript, then validates — one call in place of finalize-turn + validate.
+  // `extractTemplate` is the prompt's `output.extract` override (null → the
+  // default generated contract). Returns the patch + the extraction turn's cost.
+  extractEntryPatch(
+    nodeId: string,
+    body: { messages: { role: string; content: string }[]; assistant_id: string | null; extract_template: string | null },
+  ) {
+    return request<EntryPatchExtraction>(`/ai/entry-patch/${encodeURIComponent(nodeId)}/extract`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+  // Create-mode sibling — no node yet, so the target entry_type rides in the body.
+  extractEntryDraft(
+    entryType: string,
+    body: { messages: { role: string; content: string }[]; assistant_id: string | null; extract_template: string | null },
+  ) {
+    return request<EntryPatchExtraction>("/ai/entry-draft/extract", {
+      method: "POST",
+      body: JSON.stringify({ entry_type: entryType, ...body }),
     });
   },
   // Migrate a lore_note to a research/note (slice 5). Drops aliases /

@@ -474,7 +474,30 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             ],
             "prompt": {
                 "context_strategy": {
-                    "output": {"kind": "entry_patch", "review": "replace"},
+                    # ADR-0051 S4: `extract` overrides the default generated
+                    # commit contract (which would offer *all* proposable scene
+                    # fields, body included). A scene summary is narrower — only
+                    # `summary`, never the body (the body is manuscript prose) —
+                    # so it carries its own fields-only extraction contract. The
+                    # reference user of the override seam; prose-safety is still
+                    # held independently at the commit path (`acceptFields`).
+                    "output": {
+                        "kind": "entry_patch",
+                        "review": "replace",
+                        "extract": (
+                            '{% role "system" %}\n'
+                            "Extract the scene synopsis the conversation settled on. "
+                            "Reply with ONLY a JSON object, with no preamble, no commentary, "
+                            "and no code fences, of exactly this shape:\n\n"
+                            '{"fields": {"summary": "<the synopsis>"}}\n\n'
+                            '- Set ONLY the "summary" field. Do NOT include a "body" key — '
+                            "the scene's prose body is the manuscript text and must not be touched.\n"
+                            "- Write the synopsis in the third person, present tense, a few "
+                            "sentences at most, with no commentary about the writing itself.\n\n"
+                            "Output only that JSON object.\n"
+                            "{% endrole %}"
+                        ),
+                    },
                 },
             },
         },

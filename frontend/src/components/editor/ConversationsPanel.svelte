@@ -72,15 +72,12 @@
   } = $props();
 
   // The chats about this node, resume-first (roster order = pinned, then most
-  // recently updated). ViewNodeList wants an `entry_type`; a ChatSessionSummary
-  // has none, so stamp the constant (as the Chats pane does) — it is never
-  // grouped on (nodeSet ⇒ flat).
-  type ConversationNode = ChatSessionSummary & { entry_type: string };
+  // recently updated). A ChatSessionSummary now carries its `entry_type`
+  // (ADR-0051 S6), so it already satisfies EvalNode — no stamp. This surface
+  // stays a plain resume-first list (nodeSet ⇒ flat, ungrouped); the designable
+  // view is the global Chats pane's, not this per-entry one.
   let conversations = $derived(
     conversationsFor(subjectId, $referenceIndexStore, $chatSessionsStore),
-  );
-  let conversationNodes = $derived(
-    conversations.map((session): ConversationNode => ({ ...session, entry_type: "chat" })),
   );
 
   let ctx = $derived<PromptResolutionContext>({
@@ -173,7 +170,7 @@
     {#if expanded}
       <div class="conv-list">
         <ViewNodeList
-          result={nodeSet(conversationNodes)}
+          result={nodeSet(conversations)}
           mode="tree"
           onClick={(node) => void editorPanes.openChat(node.id)}
           row={conversationRow}
@@ -187,7 +184,7 @@
   </section>
 {/if}
 
-{#snippet conversationRow(session: ConversationNode, rowCtx: RowCtx<ConversationNode>)}
+{#snippet conversationRow(session: ChatSessionSummary, rowCtx: RowCtx<ChatSessionSummary>)}
   <NodeRow title={session.title || "Untitled chat"} depth={rowCtx.depth} onClick={rowCtx.onClick}>
     {#snippet detailSlot()}
       <small>

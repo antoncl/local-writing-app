@@ -122,10 +122,17 @@ class ChatSessionsMixin:
                 cost_usd_total = float(raw_cost) if raw_cost is not None else 0.0
             except (TypeError, ValueError):
                 cost_usd_total = 0.0
+            metadata = data.get("metadata")
+            subject = str((metadata or {}).get("subject", "") or "")
             summaries.append(
                 ChatSessionSummary(
                     id=str(data.get("id", "")),
                     title=str(data.get("title", "")) or "Untitled chat",
+                    # The node identity type the writer stamps (`chat:chat_session`);
+                    # carried through so the roster is a real EvalNode for the
+                    # designable Chats view (ADR-0051 S6).
+                    entry_type=str(data.get("entry_type", "") or "chat:chat_session"),
+                    subject=subject,
                     prompt_entry_id=str(data.get("prompt_entry_id", "") or ""),
                     assistant_id=str(data.get("assistant_id", "") or ""),
                     pinned=bool(data.get("pinned", False)),

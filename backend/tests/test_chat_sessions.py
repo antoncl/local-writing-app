@@ -352,6 +352,25 @@ class ChatSubjectAndBodyTests(unittest.TestCase):
         index = self.service._build_node_index(self.root)
         self.assertEqual(index.edges_by_src.get(chat.id, []), [])
 
+    def test_summary_carries_entry_type_and_subject(self) -> None:
+        # ADR-0051 S6: the roster must be a real EvalNode so the Chats pane can
+        # flow through `evaluateView`. Its identity type is the schema root
+        # `chat:chat_session` — a bare "chat" would not descend from the default
+        # view's `descendants_of chat:chat_session` roster and the pane would
+        # render empty. `subject` rides the summary so a designed view can group /
+        # filter by it (the marquee "group by subject").
+        self._write_lore("aurora", "Aurora")
+        self.service.create_chat_session(
+            CreateChatSessionRequest(title="Aurora — Revise entry", subject="aurora")
+        )
+        self.service.create_chat_session(CreateChatSessionRequest(title="Freeform"))
+        by_title = {s.title: s for s in self.service.list_chat_sessions().sessions}
+        self.assertEqual(by_title["Aurora — Revise entry"].entry_type, "chat:chat_session")
+        self.assertEqual(by_title["Aurora — Revise entry"].subject, "aurora")
+        # A freeform chat still declares its type; its subject is simply empty.
+        self.assertEqual(by_title["Freeform"].entry_type, "chat:chat_session")
+        self.assertEqual(by_title["Freeform"].subject, "")
+
     def test_subject_survives_a_save_that_omits_it(self) -> None:
         self._write_lore("aurora", "Aurora")
         chat = self.service.create_chat_session(

@@ -473,6 +473,17 @@ class ChatSession(BaseModel):
 class ChatSessionSummary(BaseModel):
     id: str
     title: str
+    # ADR-0051 S6: the node's identity type (`chat:chat_session`) so the roster
+    # is a real EvalNode. The Chats pane flows through `evaluateView`, whose
+    # default chat view membership is `descendants_of: chat:chat_session`; a bare
+    # `"chat"` stamp would not descend from it and the designed view would filter
+    # to empty. Carried from the file the roster already reads, not hand-stamped
+    # in the frontend.
+    entry_type: str = "chat:chat_session"
+    # ADR-0051 S6: what the chat is about (`metadata.subject`), surfaced so a
+    # designed view can group / filter by it — the marquee "group by subject".
+    # Empty for freeform chats.
+    subject: str = ""
     prompt_entry_id: str = ""
     assistant_id: str = ""
     pinned: bool = False

@@ -807,7 +807,7 @@
       plotEditor: { title: "Plot board", body: plotEditorBody, closable: true, onClose: closeRegion("plotEditor") },
       mutations: { title: "Reusable mutations", body: mutationsBody, actions: mutationsActions, closable: true, onClose: closeRegion("mutations") },
       assistants: { title: "Assistants", body: assistantsBody, actions: assistantsActions, view: { kind: "assistant", switcher: true }, closable: true, onClose: closeRegion("assistants") },
-      chats: { title: "Chats", body: chatsBody, actions: chatsActions, closable: true, onClose: closeRegion("chats") },
+      chats: { title: "Chats", body: chatsBody, actions: chatsActions, view: { kind: "chat", switcher: true }, closable: true, onClose: closeRegion("chats") },
       todo: { title: "TODO", body: todoBody, actions: todoBarActions },
       search: { title: "Search", body: searchBody },
     }}
@@ -955,10 +955,11 @@
   {#snippet chatsActions()}
     <button class="pin-button" type="button" title="Start a new chat" aria-label="Start a new chat" onmousedown={(event) => event.stopPropagation()} onclick={() => chatSessions.createNewChatSession()}>+</button>
   {/snippet}
-  {#snippet chatsBody()}
+  {#snippet chatsBody(viewSpec: ViewSpec | undefined)}
     <div class="pane-content schema-list">
       <Chats
         sessions={chatSessionList}
+        {viewSpec}
         activeChatId={editorPanes.activeChatId}
         promptEntries={promptEntries}
         assistantEntries={assistantEntries}

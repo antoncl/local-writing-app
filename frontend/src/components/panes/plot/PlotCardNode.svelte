@@ -262,7 +262,13 @@
            beated card can unlink any of them. Read-only keeps the compact cap + "+N". -->
       <div class="card-beats" class:editable={actions} class:nowheel={actions} aria-label="Beats">
         {#each actions ? data.beats : visibleBeats as beat (beat.instance_id + ":" + beat.beat_id)}
-          <span class="beat-badge" title={`${beat.instance_title} · ${beat.title}`}>
+          {@const beatHex = getSwatch(beat.instance_color)?.hex ?? null}
+          <span
+            class="beat-badge"
+            class:coloured={beatHex}
+            style={beatHex ? `--beat-accent: ${beatHex}` : undefined}
+            title={`${beat.instance_title} · ${beat.title}`}
+          >
             <span class="beat-badge-label">{beat.title}</span>
             {#if actions}
               <button
@@ -508,9 +514,11 @@
     padding: 3px 5px;
   }
   /* Beat badges (Slice 5b): the beats this card fulfils, a wrapping chip row.
-     Neutral — plotline is the colour axis (the left stripe), beats are a distinct
-     axis, so a chip carries no plotline colour. The arc name rides in the tooltip.
-     Each badge carries an × to unlink (#824), revealed on hover. */
+     A badge is tinted by its OWNING ARC's colour (usability pass), a colour axis
+     distinct from the plotline tint (the card's left stripe + soft ground): beats of
+     one arc share a tint, so same-named beats of different arcs never collide. An arc
+     with no colour keeps the neutral chip. The arc name rides in the tooltip; each
+     badge carries an × to unlink (#824), revealed on hover. */
   .card-beats {
     display: flex;
     flex-wrap: wrap;
@@ -535,6 +543,14 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--r-pill);
+  }
+  /* Arc-coloured badge: a soft tint of the arc's swatch over the surface, with a
+     stronger border in the same hue so the grouping reads at a glance without
+     shouting (the "quiet writing desk" — kept low like the card's plotline tint). */
+  .beat-badge.coloured {
+    color: var(--text);
+    background: color-mix(in srgb, var(--beat-accent) 14%, var(--surface));
+    border-color: color-mix(in srgb, var(--beat-accent) 45%, var(--border));
   }
   .beat-badge-label {
     min-width: 0;

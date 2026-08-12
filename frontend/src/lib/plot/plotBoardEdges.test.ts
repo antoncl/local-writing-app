@@ -22,6 +22,7 @@ function projection(cards: PlotBoardProjection["cards"]): PlotBoardProjection {
 const beat = (instance_id: string, beat_id: string): PlotBoardBeat => ({
   instance_id,
   instance_title: instance_id,
+  instance_color: null,
   beat_id,
   title: beat_id,
 });

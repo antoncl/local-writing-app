@@ -53,8 +53,12 @@ export async function refreshAfterSave(host: SaveRefreshHost, args: SaveRefreshA
     await refreshPlotBoard();
     await refreshPlotlines();
   } else if (documentKind === "plot_template_instance") {
-    // A rename / beat edit changes the arc roster the palette shows.
+    // A rename / beat edit changes the arc roster the palette shows; a rename,
+    // beat-roster edit or recolour also changes the board (badge titles, which
+    // badges show, and the arc-colour tint on beat badges — #871), so refresh it
+    // too. In-flight-guarded, so it is cheap when the board is closed.
     await refreshTemplateInstances();
+    await refreshPlotBoard();
   } else if (documentKind === "assistant") {
     await refreshAssistantEntries();
   } else if (documentKind === "project") {

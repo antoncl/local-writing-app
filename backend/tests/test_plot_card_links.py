@@ -247,6 +247,24 @@ class CardBeatBadgeProjectionTests(_CardLinkTestCase):
         self.assertEqual(beats[0]["title"], beat["title"])
         self.assertEqual(beats[0]["instance_id"], instance["id"])
         self.assertEqual(beats[0]["instance_title"], instance["title"])
+        # An arc with no colour resolves a null badge colour (the neutral chip).
+        self.assertIsNone(beats[0]["instance_color"])
+
+    def test_a_beat_badge_carries_its_arcs_colour(self) -> None:
+        # The board tints a card's beat badges by their owning arc's colour so
+        # same-named beats of different arcs are told apart (usability pass).
+        instance = self._instance()
+        beat = instance["metadata"]["instance_beats"][0]
+        self.assertEqual(
+            self.client.put(
+                f"/api/plot/instances/{instance['id']}",
+                json={"title": instance["title"], "body": "", "metadata": {**instance["metadata"], "color": "rose"}},
+            ).status_code,
+            200,
+        )
+        card = self._new_card()
+        self._save_card(card, {"beat_links": [{"instance": instance["id"], "beat_id": beat["id"]}]})
+        self.assertEqual(self._projected_card(card)["beats"][0]["instance_color"], "rose")
 
     def test_badges_follow_the_stored_link_order(self) -> None:
         instance = self._instance()

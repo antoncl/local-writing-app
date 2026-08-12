@@ -313,7 +313,7 @@ export function projectionDataKey(p: PlotBoardProjection): string {
       c.scene,
       c.container,
       c.page_status,
-      c.beats.map((b) => [b.instance_id, b.beat_id, b.title]),
+      c.beats.map((b) => [b.instance_id, b.beat_id, b.title, b.instance_color]),
       c.causal_links,
     ]),
     p.plotlines.map((l) => [l.id, l.title, l.color]),

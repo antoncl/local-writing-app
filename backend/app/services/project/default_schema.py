@@ -206,7 +206,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Card",
             "kind": "plot",
             "parent": "plot:base",
-            "fields": ["plotline", "scene", "page_status", "beat_links", "causal_links"],
+            "fields": ["plotline", "scene", "page_status", "beat_links", "causal_links", "follow_ups"],
             "has_body": True,
         },
         "plot:template": {
@@ -805,6 +805,20 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "type": "list",
             "item_group": "plot_causal_link",
             "hidden": True,
+        },
+        "follow_ups": {
+            # A light per-card follow-up list (ADR-0048 S8c): loose "still to do on
+            # this card" notes — the dissolved remains of the quarry's claims/evidence
+            # apparatus (migration principle 2), NOT the scene-scoped todo subsystem.
+            # A flat text `list` (the `item_type` sugar → a plain scalar sequence,
+            # stored like multi_select): deleting an item IS the "done" gesture, so
+            # there is no per-item done flag. Unlike the raw-id link lists above it is
+            # visible + hand-editable in the generic panel, and (being a plain,
+            # non-hidden `list`) proposable — so the plot-card brainstorm (S8b) can
+            # add follow-ups through the same entry-patch it already commits.
+            "name": "Follow-ups",
+            "type": "list",
+            "item_type": "text",
         },
         "word_count": {
             "name": "Word Count",

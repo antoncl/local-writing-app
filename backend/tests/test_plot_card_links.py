@@ -307,3 +307,25 @@ class CardBeatBadgeProjectionTests(_CardLinkTestCase):
         projected = self._projected_card(card)
         self.assertIsNone(projected["scene"])
         self.assertIsNone(projected["page_status"])
+
+
+class CardFollowUpsTests(_CardLinkTestCase):
+    """The follow-up list (ADR-0048 S8c): a flat text `list` the writer hand-edits
+    — loose "still to do on this card" notes, the light remains of the quarry's
+    claims/evidence apparatus. Deleting an item is the "done" gesture, so there is
+    no per-item state; these pin that the list round-trips and re-saves shorter."""
+
+    def test_follow_ups_round_trips_as_a_flat_text_list(self) -> None:
+        card = self._new_card()
+        self._save_card(card, {"follow_ups": ["name the tavern", "check the timeline"]})
+        self.assertEqual(
+            self._read_card(card)["metadata"]["follow_ups"],
+            ["name the tavern", "check the timeline"],
+        )
+
+    def test_deleting_an_item_is_the_done_gesture(self) -> None:
+        card = self._new_card()
+        self._save_card(card, {"follow_ups": ["a", "b", "c"]})
+        # Marking one "done" = re-saving the shorter list (no per-item flag).
+        self._save_card(card, {"follow_ups": ["a", "c"]})
+        self.assertEqual(self._read_card(card)["metadata"]["follow_ups"], ["a", "c"])

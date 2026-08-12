@@ -186,6 +186,26 @@
   // resolutions are common when the user types fast.
   let chatEstimateToken = 0;
 
+  // ADR-0046 entry-patch commit orchestration lives in its own per-instance rune
+  // controller (#849); this view keeps the chat session + cost accounting and
+  // feeds the controller its reactive inputs (further down, next to activeOutput).
+  // Declared here — above the functions that call commit.reset() — so it is
+  // defined before first use. The controller reaches back through `deps` for
+  // history/cost/status, so `pendingTurnCost` and the chat status lines stay
+  // component-owned.
+  const commit = new ChatCommitController({
+    getAssistantId: () => chatAssistantId,
+    getSystemPrompt: () => chatSystemPrompt,
+    getHistory: () => chatHistory.map(({ role, content }) => ({ role, content })),
+    addTurnCost: async (usd) => {
+      pendingTurnCost = (pendingTurnCost ?? 0) + usd;
+      await persistActiveChat();
+    },
+    setError: (message) => (chatError = message),
+    setNotice: (message) => (chatNotice = message),
+    entryTitle: (entryId) => loreEntries.find((entry) => entry.id === entryId)?.title ?? null,
+  });
+
 
   async function maybeLoadChat(chatId: string | null): Promise<void> {
     if (!chatId) {
@@ -779,23 +799,8 @@
     metadataSchema?.entry_types[activePromptEntry?.entry_type ?? ""]?.prompt?.context_strategy
       ?.output ?? null,
   );
-  // ADR-0046 entry-patch commit orchestration lives in its own per-instance rune
-  // controller (#849); this view keeps the chat session + cost accounting and
-  // feeds the controller its reactive inputs each render. The controller reaches
-  // back through `deps` for history/cost/status, so `pendingTurnCost` and the
-  // chat status lines stay component-owned.
-  const commit = new ChatCommitController({
-    getAssistantId: () => chatAssistantId,
-    getSystemPrompt: () => chatSystemPrompt,
-    getHistory: () => chatHistory.map(({ role, content }) => ({ role, content })),
-    addTurnCost: async (usd) => {
-      pendingTurnCost = (pendingTurnCost ?? 0) + usd;
-      await persistActiveChat();
-    },
-    setError: (message) => (chatError = message),
-    setNotice: (message) => (chatNotice = message),
-    entryTitle: (entryId) => loreEntries.find((entry) => entry.id === entryId)?.title ?? null,
-  });
+  // Feed the commit controller (declared up by the state block) its reactive
+  // inputs each render — kept next to activeOutput, the derived it consumes.
   $effect.pre(() => {
     commit.output = activeOutput;
     commit.inputDrafts = chatInputDrafts;

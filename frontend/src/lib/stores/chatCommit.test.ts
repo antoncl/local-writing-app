@@ -130,6 +130,30 @@ describe("ChatCommitController — commitToEntry", () => {
     expect(aiChat).not.toHaveBeenCalled();
   });
 
+  it("threads assistant, system prompt, and history into the out-of-band finalize turn", async () => {
+    const { c } = reviseController();
+    aiChat.mockResolvedValue(reply("{json}"));
+    validatePatch.mockResolvedValue(patch({ fields: { bio: "x" } }));
+
+    await c.commitToEntry();
+
+    // The deps getters must reach the request verbatim, plus the appended finalize
+    // instruction; chat_id is null so the turn stays out of band (not persisted).
+    // Without this the whole point of the #849 extraction — that the wiring
+    // survived — goes unchecked.
+    expect(aiChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistant_id: "asst-1",
+        system_prompt: "SYSTEM",
+        chat_id: null,
+        messages: [
+          { role: "user", content: "brainstorm turn" },
+          expect.objectContaining({ role: "user", content: expect.stringContaining("Finalize now") }),
+        ],
+      }),
+    );
+  });
+
   it("publishes a visual_diff proposal and names the review target", async () => {
     const { c, deps } = reviseController({ entryTitle: () => "Captain Vale" });
     aiChat.mockResolvedValue(reply("{json}"));

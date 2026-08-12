@@ -289,6 +289,18 @@ describe("PlotCardNode — beats + page marker (S7 Slice 5b)", () => {
     expect(badges[1].classList.contains("coloured")).toBe(false);
   });
 
+  it("falls back to a neutral badge when the arc's swatch is no longer in the palette", () => {
+    // A swatch the writer deleted after colouring the arc: getSwatch returns null,
+    // so the badge degrades to neutral rather than throwing or emitting an accent.
+    setPalette([{ id: "rose", label: "Rose", hex: "#b0567a" }]);
+    const { container } = render(PlotCardNode, {
+      props: { data: data({ beats: [beat({ beat_id: "b1", title: "Setup", instance_color: "ghost" })] }) },
+    });
+    const badge = container.querySelector(".beat-badge") as HTMLElement;
+    expect(badge.classList.contains("coloured")).toBe(false);
+    expect(badge.style.getPropertyValue("--beat-accent")).toBe("");
+  });
+
   it("shows the on-page marker when page_status is on_page", () => {
     render(PlotCardNode, { props: { data: data({ pageStatus: "on_page" }) } });
     expect(screen.getByText("On the page")).toBeInTheDocument();

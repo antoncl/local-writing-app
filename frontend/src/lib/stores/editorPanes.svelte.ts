@@ -126,6 +126,21 @@ export type ReviewCommitter = {
   discard: () => void;
 };
 
+// Per-document-kind refetch for the metadata-reload pass — a lookup (the
+// editorPaneDelete label-map convention) rather than a deepening nested ternary; an
+// unlisted kind falls back to the scene endpoint. Bare `api.*` refs are safe: the
+// methods close over the module-level `request`, not `this`. The reloadable kinds
+// are the narrow subset with a required `metadata` (NOT the whole EditableDocument
+// union — ViewNode et al. never reach this pass and carry optional metadata).
+type ReloadableDocument = Scene | LoreEntry | PromptEntry | PlotTemplate | CardEntry | PlotlineEntry;
+const RELOAD_GETTERS: Record<string, (id: string) => Promise<ReloadableDocument>> = {
+  lore: api.getLoreEntry,
+  prompt: api.getPromptEntry,
+  plot_template: api.getPlotTemplate,
+  plot_card: api.getCard,
+  plotline: api.getPlotline,
+};
+
 class EditorPanesController {
   // The open editor panes. Reassigned (not deep-mutated) to trigger reactivity —
   // the drafts ARE the pending buffer, no separate queue.
@@ -274,19 +289,7 @@ class EditorPanesController {
     );
     if (documentRefs.length === 0) return;
     const refreshedDocuments = await Promise.all(
-      documentRefs.map((document) =>
-        document.type === "lore"
-          ? api.getLoreEntry(document.id)
-          : document.type === "prompt"
-            ? api.getPromptEntry(document.id)
-            : document.type === "plot_template"
-              ? api.getPlotTemplate(document.id)
-              : document.type === "plot_card"
-                ? api.getCard(document.id)
-                : document.type === "plotline"
-                  ? api.getPlotline(document.id)
-                  : api.getScene(document.id),
-      ),
+      documentRefs.map((document) => (RELOAD_GETTERS[document.type] ?? api.getScene)(document.id)),
     );
     const refreshedByKey = new Map(refreshedDocuments.map((document, index) => [`${documentRefs[index].type}:${document.id}`, document]));
     const nextReloads: Record<string, MetadataReloadSignal> = {};

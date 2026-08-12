@@ -120,8 +120,11 @@ async function deleteScene(host: DeletePaneHost, id: string): Promise<void> {
     await refreshPlotBoard();
   } else if (documentKind === "plot_template_instance") {
     // A book-local plot arc deletes via its own endpoint (a `plot` node — deleteScene
-    // would 404); the delete returns the refreshed roster for the palette.
+    // would 404); the delete returns the refreshed roster for the palette. Refresh the
+    // board too, so cards linked to this arc's beats drop their now-dangling badges
+    // (the projection re-resolves beats; the backend heals the stale links on read).
     setTemplateInstances((await api.deleteTemplateInstance(pane.scene.id)).entries);
+    await refreshPlotBoard();
   } else if (documentKind === "assistant") {
     setAssistantEntries((await api.deleteAssistantEntry(pane.scene.id)).entries);
   } else if (documentKind === "chat") {

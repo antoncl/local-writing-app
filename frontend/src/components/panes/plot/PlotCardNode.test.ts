@@ -11,10 +11,12 @@ import { PLOT_CARD_ACTIONS, type PlotCardActions } from "./plotCardActions";
 import type { PlotCardData } from "@/lib/plot/plotBoardLayout";
 import type { PlotBoardBeat } from "@/lib/types";
 import { PLOT_DND_MIME } from "@/lib/plot/plotDnd";
+import { setPalette } from "@/lib/utils/colors";
 
 const beat = (over: Partial<PlotBoardBeat> = {}): PlotBoardBeat => ({
   instance_id: "i1",
   instance_title: "Hero's Journey",
+  instance_color: null,
   beat_id: "b1",
   title: "Call to Adventure",
   ...over,
@@ -267,6 +269,24 @@ describe("PlotCardNode — beats + page marker (S7 Slice 5b)", () => {
     expect(screen.getByText("Beat 3")).toBeInTheDocument(); // first 4 shown
     expect(screen.queryByText("Beat 4")).toBeNull(); // capped
     expect(screen.getByText("+2")).toBeInTheDocument(); // the overflow is visible
+  });
+
+  it("tints a beat badge by its arc's colour and leaves a colourless arc neutral", () => {
+    setPalette([{ id: "rose", label: "Rose", hex: "#b0567a" }]);
+    const { container } = render(PlotCardNode, {
+      props: {
+        data: data({
+          beats: [
+            beat({ beat_id: "b1", title: "Call to Adventure", instance_color: "rose" }),
+            beat({ beat_id: "b2", title: "Refusal", instance_color: null }),
+          ],
+        }),
+      },
+    });
+    const badges = container.querySelectorAll(".beat-badge");
+    expect(badges[0].classList.contains("coloured")).toBe(true);
+    expect((badges[0] as HTMLElement).style.getPropertyValue("--beat-accent")).toBe("#b0567a");
+    expect(badges[1].classList.contains("coloured")).toBe(false);
   });
 
   it("shows the on-page marker when page_status is on_page", () => {

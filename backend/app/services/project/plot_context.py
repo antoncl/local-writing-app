@@ -134,14 +134,16 @@ class PlotContextMixin:
 
     def _context_arcs(
         self,
-    ) -> tuple[list[PlotContextArc], dict[str, tuple[str, dict[str, str]]]]:
+    ) -> tuple[list[PlotContextArc], dict[str, tuple[str, str | None, dict[str, str]]]]:
         """All arcs (template instances) with their FULL beat rosters — ungated
         scaffolding, so a beat no card fulfils still appears (a gap for the AI to
-        name). Returns the arcs plus a `{instance_id: (arc_title, {beat_id: beat
-        title})}` catalog so a card's beat links resolve to titled badges by a map
-        lookup rather than a re-read."""
+        name). Returns the arcs plus a `{instance_id: (arc_title, arc_colour,
+        {beat_id: beat title})}` catalog (the shape `_resolve_card_beats` consumes —
+        the colour is unused here but keeps the two callers' catalogs identical) so a
+        card's beat links resolve to titled badges by a map lookup rather than a
+        re-read."""
         arcs: list[PlotContextArc] = []
-        catalog: dict[str, tuple[str, dict[str, str]]] = {}
+        catalog: dict[str, tuple[str, str | None, dict[str, str]]] = {}
         for arc in self.list_template_instances().entries:
             beats: list[PlotContextBeat] = []
             titles: dict[str, str] = {}
@@ -171,7 +173,7 @@ class PlotContextMixin:
                     beats=beats,
                 )
             )
-            catalog[arc.id] = (arc.title, titles)
+            catalog[arc.id] = (arc.title, arc.metadata.get("color") or None, titles)
         return arcs, catalog
 
     def _context_card(
@@ -179,7 +181,7 @@ class PlotContextMixin:
         card: Any,
         scene_to_order: dict[str, int],
         plotline_titles: dict[str, str],
-        beat_catalog: dict[str, tuple[str, dict[str, str]]],
+        beat_catalog: dict[str, tuple[str, str | None, dict[str, str]]],
         admitted_ids: set[str],
     ) -> PlotContextCard:
         """Project one admitted card for the AI: synopsis + plotline + reveal rank

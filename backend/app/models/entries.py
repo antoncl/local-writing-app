@@ -284,10 +284,16 @@ class PlotBoardBeat(BaseModel):
     (`instance` + `beat_id`); the projection resolves the titles against the live
     instances so the frontend renders labels without its own join. A link whose
     instance or beat no longer exists is dropped, never projected (the display side
-    of `_heal_beat_links`)."""
+    of `_heal_beat_links`).
+
+    `instance_color` is the owning arc's colour swatch id (None when the arc has
+    none), resolved here so the board can tint a card's beat badges by their arc —
+    beats sharing an arc share a colour, disambiguating collisions between same-named
+    beats of different arcs (ADR-0048 usability pass)."""
 
     instance_id: str
     instance_title: str
+    instance_color: str | None = None
     beat_id: str
     title: str
 

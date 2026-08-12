@@ -1039,14 +1039,15 @@ class PlotMixin:
 
     def _instance_beat_catalog(
         self, index: Any, referenced: set[str]
-    ) -> dict[str, tuple[str, dict[str, str]]]:
-        """`instance_id -> (arc title, {beat_id: beat title})` for each `referenced`
-        live `plot:template_instance` (ADR-0048 S7 Slice 5b) — the arcs some card
-        actually links, so an arc no card points at costs no read. One front-matter
-        read per referenced arc, built once per projection so a card's beat badges
-        resolve by map lookup rather than a read per link. An unreadable arc is skipped
-        — it resolves no beats, so its links drop, matching `_heal_beat_links`."""
-        catalog: dict[str, tuple[str, dict[str, str]]] = {}
+    ) -> dict[str, tuple[str, str | None, dict[str, str]]]:
+        """`instance_id -> (arc title, arc colour, {beat_id: beat title})` for each
+        `referenced` live `plot:template_instance` (ADR-0048 S7 Slice 5b) — the arcs
+        some card actually links, so an arc no card points at costs no read. One
+        front-matter read per referenced arc, built once per projection so a card's
+        beat badges resolve by map lookup rather than a read per link. The colour lets
+        the board tint a card's badges by arc (usability pass). An unreadable arc is
+        skipped — it resolves no beats, so its links drop, matching `_heal_beat_links`."""
+        catalog: dict[str, tuple[str, str | None, dict[str, str]]] = {}
         for entry in index.by_id.values():
             if entry.entry_type != PLOT_TEMPLATE_INSTANCE_ENTRY_TYPE:
                 continue
@@ -1063,11 +1064,12 @@ class PlotMixin:
                 for beat in beats:
                     if isinstance(beat, dict) and isinstance(beat.get("id"), str) and beat["id"]:
                         titles[beat["id"]] = str(beat.get("title") or "")
-            catalog[entry.id] = (str(front_matter.get("title") or entry.id), titles)
+            color = metadata.get("color") or None
+            catalog[entry.id] = (str(front_matter.get("title") or entry.id), color, titles)
         return catalog
 
     def _resolve_card_beats(
-        self, metadata: dict[str, Any], catalog: dict[str, tuple[str, dict[str, str]]]
+        self, metadata: dict[str, Any], catalog: dict[str, tuple[str, str | None, dict[str, str]]]
     ) -> list[PlotBoardBeat]:
         """Resolve a card's stored `beat_links` (id pairs) into board badges (ADR-0048
         S7 Slice 5b), dropping any link whose arc or beat is gone (the display side of
@@ -1080,7 +1082,7 @@ class PlotMixin:
             entry = catalog.get(instance_id)
             if entry is None:
                 continue  # arc gone / not referenced → drop (display-side heal)
-            instance_title, beat_titles = entry
+            instance_title, instance_color, beat_titles = entry
             title = beat_titles.get(beat_id)
             if title is None:
                 continue  # beat left the roster → drop
@@ -1088,6 +1090,7 @@ class PlotMixin:
                 PlotBoardBeat(
                     instance_id=instance_id,
                     instance_title=instance_title,
+                    instance_color=instance_color,
                     beat_id=beat_id,
                     title=title,
                 )

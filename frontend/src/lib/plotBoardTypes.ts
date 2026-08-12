@@ -28,9 +28,13 @@ export type PlotBoardContainer = {
 // fulfils, with its title + owning arc (template instance) title for the badge +
 // tooltip. The stored link is only ids; the projection resolves the titles, so the
 // board renders labels directly. A link whose arc/beat is gone is never projected.
+// `instance_color` is the owning arc's swatch id (null when the arc has none), so a
+// card can tint each beat badge by its arc — same-arc beats share a colour, which
+// disambiguates collisions between same-named beats of different arcs (usability pass).
 export type PlotBoardBeat = {
   instance_id: string;
   instance_title: string;
+  instance_color: string | null;
   beat_id: string;
   title: string;
 };

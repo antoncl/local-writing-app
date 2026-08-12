@@ -8,6 +8,7 @@
 <script lang="ts">
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
+  import { builtinViews, type BuiltinView } from "@/lib/views/builtinViews";
   import type { MetadataSchema } from "@/lib/types";
 
   interface Props {
@@ -21,15 +22,20 @@
   let open = $state(false);
 
   let saved = $derived(paneViews.viewsFor(kind));
-  // The pane's system default (ADR-0036 §5) is presented AS the default entry
-  // (read-only, Duplicate-not-Edit) rather than a pickable saved view — selecting
-  // it via id would break the pane's intrinsic default presentation (Lore/
-  // Assistants group vs. the default view's flat spec). Only user views are
-  // pickable rows below.
+  // The kind's built-in views (ADR-0036 §5 / ADR-0051 S6 follow-up): [0] is the
+  // roster default (selected when nothing is chosen), then read-only curated
+  // extras (chat ships "Openable chats"). All are Duplicate-not-Edit; the
+  // materialized system default node, if any, is not re-listed (it duplicates
+  // builtins[0]). Only user views below are Edit/Delete-able.
+  let builtins = $derived(builtinViews(kind, schema));
   let userViews = $derived(saved.filter((v) => !v.system));
   let selectedId = $derived(paneViews.selectedId(kind));
   let currentLabel = $derived(
-    selectedId ? (saved.find((v) => v.id === selectedId)?.title ?? "View") : "Default view",
+    selectedId
+      ? (builtins.find((b) => b.id === selectedId)?.title ??
+        saved.find((v) => v.id === selectedId)?.title ??
+        "View")
+      : builtins[0].title,
   );
 
   function toggle(): void {
@@ -52,9 +58,9 @@
     void editorPanes.openView(id);
   }
 
-  function duplicateDefault(): void {
+  function duplicate(view: BuiltinView): void {
     open = false;
-    void editorPanes.duplicateDefaultView(kind, schema);
+    void editorPanes.duplicateView(view.spec, `${view.title} (copy)`);
   }
 
   function deleteView(id: string, title: string): void {
@@ -91,30 +97,34 @@
   </button>
   {#if open}
     <div class="view-switcher-popover" role="listbox">
-      <!-- The default entry is read-only (ADR-0036 §5): no Edit/Delete, only
+      <!-- Built-in views are read-only (ADR-0036 §5): no Edit/Delete, only
            Duplicate (⧉ — fork into an editable copy, design-language §glyphs).
-           Picking it selects the pane's default. -->
-      <div class="view-switcher-item" class:selected={!selectedId}>
-        <button
-          class="view-switcher-pick"
-          type="button"
-          role="option"
-          aria-selected={!selectedId}
-          onclick={() => pick(null)}
-        >
-          <span class="view-switcher-check">{!selectedId ? "✓" : ""}</span>
-          <span class="view-switcher-item-label">Default view</span>
-        </button>
-        <span class="view-switcher-actions">
+           [0] is the pane's default (picked as the unselected state); any extras
+           (e.g. "Openable chats") are picked by their own id. -->
+      {#each builtins as view, i (view.id)}
+        {@const active = i === 0 ? !selectedId : selectedId === view.id}
+        <div class="view-switcher-item" class:selected={active}>
           <button
-            class="vsa"
+            class="view-switcher-pick"
             type="button"
-            title="Duplicate view"
-            aria-label="Duplicate default view"
-            onclick={duplicateDefault}>⧉</button
+            role="option"
+            aria-selected={active}
+            onclick={() => pick(i === 0 ? null : view.id)}
           >
-        </span>
-      </div>
+            <span class="view-switcher-check">{active ? "✓" : ""}</span>
+            <span class="view-switcher-item-label">{view.title}</span>
+          </button>
+          <span class="view-switcher-actions">
+            <button
+              class="vsa"
+              type="button"
+              title="Duplicate view"
+              aria-label={`Duplicate ${view.title}`}
+              onclick={() => duplicate(view)}>⧉</button
+            >
+          </span>
+        </div>
+      {/each}
       {#each userViews as view (view.id)}
         <div class="view-switcher-item" class:selected={selectedId === view.id}>
           <button

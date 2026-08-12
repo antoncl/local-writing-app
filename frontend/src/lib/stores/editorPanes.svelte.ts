@@ -51,7 +51,6 @@ import { refreshAfterSave } from "@/lib/stores/editorPaneSave";
 import { refreshKnownTags } from "@/lib/stores/tags";
 import { refreshReferenceIndexInBackground } from "@/lib/stores/references";
 import { forwardRefsOf, sameRefSet } from "@/lib/views/referenceIndex";
-import { defaultView } from "@/lib/views/evaluateView";
 import { paneViews } from "@/lib/stores/paneViews.svelte";
 import { subordinatePanes } from "@/lib/stores/subordinatePanes";
 import { chatSessionsStore, refreshChatSessions } from "@/lib/stores/chats";
@@ -61,7 +60,6 @@ import type {
   EditableDocument,
   EntryMetadata,
   LoreEntry,
-  MetadataSchema,
   PlotTemplate,
   PlotlineEntry,
   TemplateInstanceEntry,
@@ -70,6 +68,7 @@ import type {
   ProjectNode,
   ResearchNote,
   Scene,
+  ViewSpec,
 } from "@/lib/types";
 
 // Signal that tells a pane's MetadataPanel/title to re-seed from a refreshed
@@ -1083,19 +1082,15 @@ class EditorPanesController {
     await this.openView(node.id);
   }
 
-  // Fork a pane's read-only system default view into a new editable view and
-  // open the designer on it (ADR-0036 §5: the default is copyable, not editable
-  // — the switcher offers "Duplicate" where a user view offers Edit). Sources
-  // the spec from the materialized system default when it exists, else the
-  // frontend's canonical `defaultView(kind)` — so the copy starts from the real
-  // default whether or not the pane's default has been folded (materialized on
-  // disk) yet. The default's shape (incl. the scene containment Nest) lives in
-  // the spec now, so nothing else needs carrying (ADR-0037 §3). `schema` resolves
-  // the kind's root type for the fallback (without it `assistant` has no `:base`).
-  async duplicateDefaultView(kind: string, schema?: MetadataSchema | null): Promise<void> {
-    const system = paneViews.viewsFor(kind).find((v) => v.system);
-    const spec = system?.spec ?? defaultView(kind, schema);
-    const node = await api.createView({ title: "Default (copy)", spec });
+  // Fork a read-only built-in view into a new editable copy and open the designer
+  // on it (ADR-0036 §5: built-ins are copyable, not editable — the switcher
+  // offers "Duplicate" where a user view offers Edit). The spec is passed in; the
+  // switcher sources it from `builtinViews(kind)`, so a copy starts from the real
+  // built-in whether or not it has been materialized on disk. The view's shape
+  // (incl. the scene containment Nest / the chat filter) lives entirely in the
+  // spec, so nothing else needs carrying (ADR-0037 §3).
+  async duplicateView(spec: ViewSpec, title: string): Promise<void> {
+    const node = await api.createView({ title, spec });
     await paneViews.reload();
     await this.openView(node.id);
   }

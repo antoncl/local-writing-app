@@ -14,6 +14,7 @@
 
 import { api } from "@/lib/api";
 import { defaultView } from "@/lib/views/evaluateView";
+import { builtinSpecFor, isBuiltinExtraViewId } from "@/lib/views/builtinViews";
 import type { MetadataSchema, ViewNodeSummary, ViewSpec } from "@/lib/types";
 
 const STORAGE_PREFIX = "paneView.selected."; // + kind
@@ -35,6 +36,22 @@ function saveSelection(kind: string, id: string | null): void {
   }
 }
 
+// Kinds with a persisted selection, so restoration also covers a kind whose only
+// non-default selection is a frontend-synthesized built-in (e.g. "Openable
+// chats" when the project has no saved chat views to enumerate).
+function storedSelectionKinds(): string[] {
+  try {
+    const kinds: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(STORAGE_PREFIX)) kinds.push(key.slice(STORAGE_PREFIX.length));
+    }
+    return kinds;
+  } catch {
+    return [];
+  }
+}
+
 class PaneViewsController {
   // Saved-view summaries grouped by anchor kind (`view_kind`).
   views = $state<Record<string, ViewNodeSummary[]>>({});
@@ -52,9 +69,12 @@ class PaneViewsController {
     this.#loadedPath = path;
     await this.reload();
     const restored: Record<string, string | null> = {};
-    for (const kind of Object.keys(this.views)) {
+    for (const kind of new Set([...Object.keys(this.views), ...storedSelectionKinds()])) {
       const saved = loadSelection(kind);
-      restored[kind] = saved && this.views[kind].some((v) => v.id === saved) ? saved : null;
+      // A built-in extra (e.g. "Openable chats") is a valid selection even though
+      // it is not a saved node — it is frontend-synthesized (builtinViews).
+      const valid = saved && ((this.views[kind] ?? []).some((v) => v.id === saved) || isBuiltinExtraViewId(saved));
+      restored[kind] = valid ? saved : null;
     }
     this.selected = restored;
   }
@@ -83,9 +103,10 @@ class PaneViewsController {
     for (const v of entries) if (v.spec) map.set(v.id, v.spec);
     this.specs = map;
 
-    // Drop any selection that no longer resolves.
+    // Drop any selection that no longer resolves — but keep frontend-synthesized
+    // built-in extras, which are never in the backend spec map.
     for (const [kind, id] of Object.entries(this.selected)) {
-      if (id && !map.has(id)) this.select(kind, null);
+      if (id && !map.has(id) && !isBuiltinExtraViewId(id)) this.select(kind, null);
     }
   }
 
@@ -124,7 +145,8 @@ class PaneViewsController {
   specFor(kind: string, schema?: MetadataSchema | null): ViewSpec {
     const id = this.selected[kind];
     if (id) {
-      const spec = this.specs.get(id);
+      // A saved view's spec, else a built-in extra's synthesized spec.
+      const spec = this.specs.get(id) ?? builtinSpecFor(kind, id, schema);
       if (spec) return spec;
     }
     return defaultView(kind, schema);

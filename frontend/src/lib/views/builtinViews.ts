@@ -8,7 +8,7 @@
 // state to persist). Only `chat` ships an extra today; every other kind keeps
 // its single default, so `defaultView` parity with the backend is untouched.
 
-import { defaultView } from "@/lib/views/evaluateView";
+import { defaultView, kindUniverseExpr } from "@/lib/views/evaluateView";
 import { SEED_OUTPUT_KIND_FIELD } from "@/lib/views/chatNodes";
 import type { MetadataSchema, ViewSpec } from "@/lib/types";
 
@@ -26,13 +26,16 @@ export function isBuiltinExtraViewId(id: string): boolean {
 // whose output is `entry_patch` — keeping General (`chat_panel`) and freeform
 // chats. Blacklist, not whitelist: a freeform chat has no seeding prompt and so
 // no output kind, and must stay openable (a `chat_panel` whitelist would drop
-// it). `disjoint` is the grammar's set-exclusion op (no `eq`/`in`).
-function openableChatsSpec(): ViewSpec {
+// it). `disjoint` is the grammar's set-exclusion op (no `eq`/`in`). The roster
+// comes from `kindUniverseExpr` (the same seam `defaultView` uses), not a
+// hardcoded FQN — so both chat built-ins resolve the root identically, including
+// the schema-less `chat:base` fallback during the schema-load window.
+function openableChatsSpec(schema?: MetadataSchema | null): ViewSpec {
   return {
     kind: "chat",
     expr: {
       filter: {
-        of: { descendants_of: "chat:chat_session" },
+        of: kindUniverseExpr("chat", schema),
         pred: { field: { key: SEED_OUTPUT_KIND_FIELD, op: "disjoint", value: ["entry_patch"] } },
       },
     },
@@ -47,7 +50,7 @@ export function builtinViews(kind: string, schema?: MetadataSchema | null): Buil
     spec: defaultView(kind, schema),
   };
   if (kind === "chat") {
-    return [base, { id: `${BUILTIN_EXTRA_PREFIX}chat_openable`, title: "Openable chats", spec: openableChatsSpec() }];
+    return [base, { id: `${BUILTIN_EXTRA_PREFIX}chat_openable`, title: "Openable chats", spec: openableChatsSpec(schema) }];
   }
   return [base];
 }

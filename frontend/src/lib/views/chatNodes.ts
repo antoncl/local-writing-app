@@ -38,6 +38,9 @@ export function chatSummariesToEvalNodes(
     // Unresolved (freeform, or a prompt whose output kind can't be read) → "",
     // which the blacklist treats as openable — the safe default.
     const seed = prompt ? effectiveOutputKind(ctx, prompt) ?? "" : "";
-    return { ...session, metadata: { subject: session.subject ?? "", seed_output_kind: seed } };
+    // Computed key ties the written metadata key to the same constant the
+    // Openable view's predicate reads — the type below must stay a literal (TS),
+    // but the runtime key can't drift from the filter.
+    return { ...session, metadata: { subject: session.subject ?? "", [SEED_OUTPUT_KIND_FIELD]: seed } };
   });
 }

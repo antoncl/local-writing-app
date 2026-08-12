@@ -7,6 +7,7 @@
 
 import { writable } from "svelte/store";
 import { api } from "@/lib/api";
+import { refreshPlotBoard } from "@/lib/stores/plotBoard";
 import type { PlotlineSummary } from "@/lib/types";
 
 export const plotlineEntriesStore = writable<PlotlineSummary[]>([]);
@@ -20,6 +21,15 @@ export async function refreshPlotlines(): Promise<void> {
 // setPromptEntries / setTemplateInstances convention.
 export function setPlotlines(entries: PlotlineSummary[]): void {
   plotlineEntriesStore.set(entries);
+}
+
+// Delete a plotline from the rail (#737) — the delete returns the refreshed roster.
+// Also refresh the board so any card that was on this thread loses its colour axis
+// (the backend blanks the cards' now-dangling plotline ref). Mirrors the arc rail's
+// deleteTemplateInstance; the editor-pane delete path (editorPaneDelete) is separate.
+export async function deletePlotline(id: string): Promise<void> {
+  setPlotlines((await api.deletePlotline(id)).entries);
+  await refreshPlotBoard();
 }
 
 export function clearPlotlines(): void {

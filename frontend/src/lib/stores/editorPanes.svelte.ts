@@ -47,6 +47,7 @@ import { refreshLoreEntries } from "@/lib/stores/lore";
 import { refreshPromptEntries } from "@/lib/stores/prompts";
 import { refreshPlotTemplates } from "@/lib/stores/plotTemplates";
 import { refreshTemplateInstances } from "@/lib/stores/templateInstances";
+import { refreshPlotlines } from "@/lib/stores/plotlines";
 import { refreshAfterSave } from "@/lib/stores/editorPaneSave";
 import { refreshKnownTags } from "@/lib/stores/tags";
 import { refreshReferenceIndexInBackground } from "@/lib/stores/references";
@@ -1220,6 +1221,16 @@ class EditorPanesController {
     await refreshTemplateInstances();
     await this.openPlotTemplateInstance(arc.id);
     this.setStatus(`Created ${arc.title}`);
+  }
+
+  // Create a plotline from the Plotlines rail (#737) — the thread create gesture.
+  // Mint → refresh the roster → open the new plotline so the writer names it, picks
+  // its swatch colour, and describes it. Mirrors createBlankPlotArc.
+  async createBlankPlotline(): Promise<void> {
+    const line = await api.createPlotline("New plotline");
+    await refreshPlotlines();
+    await this.openPlotline(line.id);
+    this.setStatus(`Created ${line.title}`);
   }
 
   // Clear-to-inherit (#517 / create-project-wizard.md §8): drop one field's

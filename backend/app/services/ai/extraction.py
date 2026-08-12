@@ -41,14 +41,14 @@ EXTRACT_CUE = (
 # always was. `input.entry_type` is the target FQN; `input.creating` distinguishes
 # a from-scratch draft (title required) from a revise (title optional).
 DEFAULT_EXTRACTION_TEMPLATE = """{% role "system" %}
-You are extracting the final result of the brainstorm above into a structured patch. The conversation is your only input — read it and produce the result the author and you converged on.
+You are extracting the final result of a brainstorm into a structured patch. The conversation that follows is your only input — read it and produce the result the author and you converged on.
 
 Reply with ONLY a JSON object, with no preamble, no commentary, and no code fences, of exactly this shape:
 
 {"body": "<the complete revised markdown body>", "fields": {"<field id>": <value>}}
 
-- "body": the complete revised markdown body{% if input.creating %} for the new entry{% endif %}.
-- "fields": {% if input.creating %}ALWAYS include "title". Add any other field the conversation set, {% else %}include a field ONLY when the conversation changed it, {% endif %}keyed by its field id. For tags / multi_select give a JSON array of strings; for a select field use one of its listed options exactly; for an ordered-list field give the complete new list in its stated item shape (the whole list, in order).{% if not input.creating %} You may also propose a new "title". Use {} if nothing changed.{% endif %}
+- "body": {% if input.creating %}the complete markdown body for the new entry.{% else %}include the "body" key ONLY if the conversation actually revised the body; then give the complete revised markdown body. OMIT the "body" key entirely if the body was not discussed or changed — never reconstruct it from nothing.{% endif %}
+- "fields": {% if input.creating %}ALWAYS include "title". Add any other field the conversation set, {% else %}include a field ONLY when the conversation changed it, {% endif %}keyed by its field id. For tags / multi_select give a JSON array of strings; for a select field use one of its listed options exactly; for an ordered-list field give the complete new list in its stated item shape (the whole list, in order); otherwise give the field's complete new value.{% if not input.creating %} You may also propose a new "title". Use {} if nothing changed.{% endif %}
 
 The fields you may set:
 {% for f in field_catalog(input.entry_type) %}

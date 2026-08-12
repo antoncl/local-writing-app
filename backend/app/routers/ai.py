@@ -1076,6 +1076,25 @@ def validate_ai_entry_draft(
 # changes.
 
 
+def _messages_with_extract_cue(transcript: list[ChatMessage]) -> list[ChatMessage]:
+    """Append the extract cue to the transcript, coalescing consecutive same-role
+    turns and dropping whitespace-only ones — the sanitization `build_chat_payload`
+    does for rendered templates, which the raw transcript would otherwise skip.
+    Without it a transcript ending on a user turn (e.g. the author committed right
+    after a failed reply left the last turn a user one) would put two user turns
+    back to back, and the provider rejects that outright."""
+
+    out: list[ChatMessage] = []
+    for msg in [*transcript, ChatMessage(role="user", content=EXTRACT_CUE)]:
+        if not msg.content.strip():
+            continue
+        if out and out[-1].role == msg.role:
+            out[-1] = ChatMessage(role=msg.role, content=f"{out[-1].content}\n\n{msg.content}")
+        else:
+            out.append(msg)
+    return out
+
+
 async def _run_entry_patch_extraction(
     project: ProjectService,
     *,
@@ -1091,18 +1110,30 @@ async def _run_entry_patch_extraction(
     §5). The extraction turn's cost rides back on `cost_usd` for the caller to
     attribute to the session, exactly as a streamed turn's delta is."""
 
-    contract = render_extraction_contract(
-        project,
-        entry_type=entry_type,
-        creating=creating,
-        override_template=request.extract_template,
-    )
+    try:
+        contract = render_extraction_contract(
+            project,
+            entry_type=entry_type,
+            creating=creating,
+            override_template=request.extract_template,
+        )
+    except PreviewError as exc:
+        # A broken contract template — almost always a hand-authored
+        # `output.extract` override with a Jinja error. Surface it as a clean
+        # failure the pane shows, not an unhandled 500 (mirrors how `ai_preview`
+        # and `ai_generate` handle a PreviewError from the same renderer).
+        return EntryPatchExtraction(
+            patch=None,
+            cost_usd=None,
+            ok=False,
+            error=f"Couldn't render the extraction prompt: {exc.message}",
+        )
     chat = await ai_chat(
         project,
         AIChatRequest(
             assistant_id=request.assistant_id,
             system_prompt=contract,
-            messages=[*request.messages, ChatMessage(role="user", content=EXTRACT_CUE)],
+            messages=_messages_with_extract_cue(request.messages),
             chat_id=None,
         ),
     )

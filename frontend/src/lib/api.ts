@@ -2,7 +2,6 @@ import type {
   AIChatRequest,
   AIChatResponse,
   AIContextPresetResponse,
-  AIEntryPatch,
   EntryPatchExtraction,
   AIGenerateRequest,
   AIHealthResponse,
@@ -818,27 +817,6 @@ export const api = {
   deleteLoreEntry(entryId: string) {
     return request<LoreEntryList>(`/lore/${entryId}`, {
       method: "DELETE",
-    });
-  },
-  // ADR-0046 §4/§6.3: validate a brainstorm-commit reply into a review-ready
-  // patch. The raw model text is sent server-side (never shown), parsed, and
-  // validated per-field against the node's schema; illegal fields are dropped
-  // and a garbled reply is flagged. Kind-neutral (ADR-0048 §5): the node's
-  // `entry_type` is resolved by id server-side, so any schema-typed node works.
-  validateAiEntryPatch(nodeId: string, raw: string) {
-    return request<AIEntryPatch>(`/ai/entry-patch/${encodeURIComponent(nodeId)}`, {
-      method: "POST",
-      body: JSON.stringify({ raw }),
-    });
-  },
-  // ADR-0046 §6.4: the create-mode sibling — validate a from-scratch brainstorm
-  // commit against a target entry_type (no node exists yet; the entry_type FQN
-  // carries the kind). Same review-ready AIEntryPatch and garbled handling; the
-  // adopted draft is created through the kind's own create + save endpoints.
-  validateAiEntryDraft(entryType: string, raw: string) {
-    return request<AIEntryPatch>("/ai/entry-draft", {
-      method: "POST",
-      body: JSON.stringify({ entry_type: entryType, raw }),
     });
   },
   // ADR-0051 S4: the fresh-extraction commit. Instead of the client replaying the

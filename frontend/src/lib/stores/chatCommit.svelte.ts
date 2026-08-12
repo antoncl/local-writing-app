@@ -21,7 +21,14 @@
 // session, cost accounting (`pendingTurnCost`), and the status lines — the
 // controller reaches those through the wired `deps`, so `persistActiveChat` and
 // `chatError`/`chatNotice` stay component-owned.
-import type { ChatMessage, EntryPatch, MetadataValue, ReviewMode } from "@/lib/types";
+import type {
+  AIEntryPatch,
+  ChatMessage,
+  EntryPatch,
+  EntryPatchExtraction,
+  MetadataValue,
+  ReviewMode,
+} from "@/lib/types";
 import { api } from "@/lib/api";
 import { entryBrainstorm } from "@/lib/stores/entryBrainstorm.svelte";
 import { treeActions } from "@/lib/stores/treeActions.svelte";
@@ -89,12 +96,35 @@ export class ChatCommitController {
     typeof this.output?.extract === "string" ? this.output.extract : null,
   );
 
+  // The commit preamble both modes share: run the extraction, attribute the
+  // (always-billed) turn's cost like a streamed one, and surface the two failure
+  // shapes — the turn returned nothing (ok=false / no patch), or the reply
+  // couldn't be read as a patch (garbled). Returns the validated patch, or null
+  // when the caller should stop (a message was already set). This is the seam the
+  // deleted `runFinalizeTurn` held, so the two modes can't drift on cost/failure
+  // handling. The per-mode tail (propose vs hold a draft) stays in each method.
+  private async runExtraction(
+    extract: () => Promise<EntryPatchExtraction>,
+    garbledMessage: string,
+  ): Promise<AIEntryPatch | null> {
+    const result = await extract();
+    if (typeof result.cost_usd === "number") await this.deps.addTurnCost(result.cost_usd);
+    if (!result.ok || !result.patch) {
+      this.deps.setError(result.error || "The model returned nothing to commit.");
+      return null;
+    }
+    if (result.patch.garbled) {
+      this.deps.setError(garbledMessage);
+      return null;
+    }
+    return result.patch;
+  }
+
   // Commit the brainstorm to its target entry (ADR-0046 slice 3 / ADR-0051 S4).
   // The extraction runs a fresh, server-rebuilt contract over the transcript and
   // returns a validated EntryPatch, handed to the entry's pane for the
-  // proposed-vs-current review; nothing is written from here. A reply that can't
-  // be read as a patch (garbled) or one that proposes nothing is surfaced, never
-  // a silent no-op. Collapses the old finalize-turn + validate into one call.
+  // proposed-vs-current review; nothing is written from here. A patch that
+  // proposes nothing is surfaced, never a silent no-op.
   async commitToEntry(): Promise<void> {
     if (this.running || this.committing || !this.isEntryPatchChat) return;
     const entryId = this.commitTargetEntryId;
@@ -106,25 +136,16 @@ export class ChatCommitController {
     this.deps.setNotice(null);
     this.committing = true;
     try {
-      const result = await api.extractEntryPatch(entryId, {
-        messages: this.deps.getHistory(),
-        assistant_id: this.deps.getAssistantId() || null,
-        extract_template: this.extractTemplate,
-      });
-      // The extraction turn is billed regardless of the patch outcome —
-      // attribute it like a streamed turn (it isn't in the persisted messages).
-      if (typeof result.cost_usd === "number") await this.deps.addTurnCost(result.cost_usd);
-      if (!result.ok || !result.patch) {
-        this.deps.setError(result.error || "The model returned nothing to commit.");
-        return;
-      }
-      const patch = result.patch;
-      if (patch.garbled) {
-        this.deps.setError(
-          "Couldn't read the model's response as a patch — ask it to finalize again.",
-        );
-        return;
-      }
+      const patch = await this.runExtraction(
+        () =>
+          api.extractEntryPatch(entryId, {
+            messages: this.deps.getHistory(),
+            assistant_id: this.deps.getAssistantId() || null,
+            extract_template: this.extractTemplate,
+          }),
+        "Couldn't read the model's response as a patch — ask it to finalize again.",
+      );
+      if (!patch) return;
       // `replace` (a scene summary) swaps one field whole; strip any body the
       // model returned so the stored proposal stays fields-only (the commit-side
       // guarantee that prose is never rewritten lives in `acceptFields`).
@@ -163,23 +184,16 @@ export class ChatCommitController {
     this.deps.setNotice(null);
     this.committing = true;
     try {
-      const result = await api.extractEntryDraft(entryType, {
-        messages: this.deps.getHistory(),
-        assistant_id: this.deps.getAssistantId() || null,
-        extract_template: this.extractTemplate,
-      });
-      if (typeof result.cost_usd === "number") await this.deps.addTurnCost(result.cost_usd);
-      if (!result.ok || !result.patch) {
-        this.deps.setError(result.error || "The model returned nothing to commit.");
-        return;
-      }
-      const patch = result.patch;
-      if (patch.garbled) {
-        this.deps.setError(
-          "Couldn't read the model's response as an entry — ask it to finalize again.",
-        );
-        return;
-      }
+      const patch = await this.runExtraction(
+        () =>
+          api.extractEntryDraft(entryType, {
+            messages: this.deps.getHistory(),
+            assistant_id: this.deps.getAssistantId() || null,
+            extract_template: this.extractTemplate,
+          }),
+        "Couldn't read the model's response as an entry — ask it to finalize again.",
+      );
+      if (!patch) return;
       const hasBody = patch.body != null;
       const hasFields = Object.keys(patch.fields).length > 0;
       if (!hasBody && !hasFields) {

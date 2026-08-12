@@ -26,7 +26,8 @@ from project_fixtures import open_test_project
 from test_ai_entry_patch import add_character_patch_fields
 
 from app.main import app
-from app.models import AIChatResponse, CreateLoreEntryRequest
+from app.models import AIChatResponse, ChatMessage, CreateLoreEntryRequest
+from app.routers.ai import _messages_with_extract_cue
 from app.services.ai.extraction import render_extraction_contract
 from app.services.project.errors import ProjectServiceError
 
@@ -73,12 +74,23 @@ class ExtractionContractTests(unittest.TestCase):
         self.assertIn("You may also propose a new", contract)
         self.assertNotIn("ALWAYS include", contract)
 
+    def test_revise_contract_makes_the_body_conditional(self) -> None:
+        # ADR-0051 S4 review fix: the extraction is blind to the current body, so
+        # a revise must OMIT the body key unless the conversation revised it —
+        # else the model reconstructs a truncated body from nothing and a
+        # careless accept-all overwrites the entry's prose.
+        contract = render_extraction_contract(
+            self.service, entry_type="lore:character", creating=False
+        )
+        self.assertIn('OMIT the "body" key', contract)
+        self.assertIn("ONLY if the conversation actually revised the body", contract)
+
     def test_default_create_contract_requires_title(self) -> None:
         contract = render_extraction_contract(
             self.service, entry_type="lore:character", creating=True
         )
         self.assertIn("ALWAYS include", contract)
-        self.assertIn("for the new entry", contract)
+        self.assertIn("for the new entry", contract)  # a new entry does get a body
         self.assertIn("allegiance", contract)  # full catalog offered
 
     def test_override_is_rendered_verbatim_not_the_default(self) -> None:
@@ -136,7 +148,14 @@ class ExtractEndpointTests(unittest.TestCase):
         with self._mock_chat(reply) as mock_chat:
             resp = self.client.post(
                 f"/api/ai/entry-patch/{self.hero.id}/extract",
-                json={"messages": [{"role": "user", "content": "make it grand"}], "assistant_id": None, "extract_template": None},
+                json={
+                    "messages": [
+                        {"role": "user", "content": "make it grand"},
+                        {"role": "assistant", "content": "Here's a draft."},
+                    ],
+                    "assistant_id": None,
+                    "extract_template": None,
+                },
             )
         self.assertEqual(resp.status_code, 200, resp.text)
         body = resp.json()
@@ -145,7 +164,8 @@ class ExtractEndpointTests(unittest.TestCase):
         self.assertEqual(body["patch"]["fields"], {"bio": "New bio."})
         self.assertEqual(body["cost_usd"], 0.03)
         # The extraction turn ships the freshly-rendered contract as its system
-        # prompt (built from field_catalog), the transcript, then the extract cue.
+        # prompt (built from field_catalog), the transcript, then the extract cue
+        # (a distinct trailing user turn since the transcript ends on assistant).
         sent = mock_chat.call_args.args[1]
         self.assertIn("allegiance", sent.system_prompt)
         self.assertEqual(sent.messages[0].content, "make it grand")
@@ -190,6 +210,23 @@ class ExtractEndpointTests(unittest.TestCase):
             )
         self.assertEqual(resp.status_code, 404)
 
+    def test_broken_override_template_is_a_clean_failure_not_500(self) -> None:
+        # A hand-authored `output.extract` override with a Jinja error (here an
+        # undefined name under StrictUndefined) must surface as a clean ok=False,
+        # not an unhandled 500 — the renderer's PreviewError has to be caught.
+        override = '{% role "system" %}Extract: {{ definitely_undefined_name }}{% endrole %}'
+        with self._mock_chat(_chat_reply("{}")) as mock_chat:
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.hero.id}/extract",
+                json={"messages": [], "assistant_id": None, "extract_template": override},
+            )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        body = resp.json()
+        self.assertFalse(body["ok"])
+        self.assertIsNone(body["patch"])
+        self.assertIn("render", body["error"].lower())
+        mock_chat.assert_not_called()  # render failed before the model turn
+
 
 class EntryTypeForNodeTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -210,6 +247,39 @@ class EntryTypeForNodeTests(unittest.TestCase):
         with self.assertRaises(ProjectServiceError) as ctx:
             self.service.entry_type_for_node("nope")
         self.assertEqual(ctx.exception.status_code, 404)
+
+
+class ExtractCueSanitizationTests(unittest.TestCase):
+    """The extract cue is appended to the raw transcript, so it must coalesce the
+    same way `build_chat_payload` does for rendered templates — else a transcript
+    ending on a user turn puts two user turns back to back and the provider 400s."""
+
+    def test_trailing_user_turn_merges_with_the_cue(self) -> None:
+        msgs = _messages_with_extract_cue(
+            [
+                ChatMessage(role="user", content="a"),
+                ChatMessage(role="assistant", content="b"),
+                ChatMessage(role="user", content="c"),  # unanswered user turn
+            ]
+        )
+        # The trailing user turn + the user cue collapse into ONE user turn.
+        self.assertEqual([m.role for m in msgs], ["user", "assistant", "user"])
+        self.assertTrue(msgs[-1].content.startswith("c"))
+        self.assertIn("Extract", msgs[-1].content)
+
+    def test_whitespace_only_turns_are_dropped(self) -> None:
+        msgs = _messages_with_extract_cue(
+            [ChatMessage(role="user", content="   "), ChatMessage(role="assistant", content="b")]
+        )
+        # The empty user turn is dropped; assistant + the appended user cue remain.
+        self.assertEqual([m.role for m in msgs], ["assistant", "user"])
+
+    def test_normal_transcript_just_gets_the_cue_appended(self) -> None:
+        msgs = _messages_with_extract_cue(
+            [ChatMessage(role="user", content="a"), ChatMessage(role="assistant", content="b")]
+        )
+        self.assertEqual([m.role for m in msgs], ["user", "assistant", "user"])
+        self.assertIn("Extract", msgs[-1].content)
 
 
 if __name__ == "__main__":

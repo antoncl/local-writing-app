@@ -7,6 +7,7 @@
   import EditorRail from "@/components/editor/EditorRail.svelte";
   import ReadOnlyBodyOverlay from "@/components/editor/body/ReadOnlyBodyOverlay.svelte";
   import EntryRevisionReview from "@/components/editor/body/EntryRevisionReview.svelte";
+  import ReplaceReviewCard from "@/components/editor/body/ReplaceReviewCard.svelte";
   import ConversationsPanel from "@/components/editor/ConversationsPanel.svelte";
   import { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
   import { EntryProposalController } from "@/lib/stores/entryProposal.svelte";
@@ -461,22 +462,25 @@
   // ADR-0048 §5 — the host's SINGLE gate for which kinds take part in the
   // entry-patch loop: the freeze, launcher, and review overlay below all read it,
   // so they can't drift (a review over an un-frozen pane moves the diff base,
-  // #634). Controller/store are kind-agnostic; widen per-kind here. Plot cards
-  // join lore (ADR-0048 S8b): a card brainstorm on the `revise:plot_card` prompt
-  // commits an EntryPatch through the same loop, and the Conversations ＋New menu
-  // filters to the prompts each kind's node admits (see ConversationsPanel).
-  const patchLoopKind = $derived(documentKind === "lore" || documentKind === "plot_card");
-  // ADR-0051 S3/S5 — which kinds show the Conversations surface. Broader than the
-  // patch loop: a chat's `subject` is kind-neutral, so a scene lists its chats
-  // (subject → scene) the same way a lore entry does, even though scenes have no
-  // entry-patch review yet (that is S5-next). Plot cards show it too (ADR-0048
-  // S8b) — they run the full brainstorm loop. The ＋New menu offers the prompts
-  // applicable to the kind — brainstorm (`entry_patch`) for lore / plot card, chat
-  // prompts (`chat_panel`) for a scene; the panel hides ＋New when none apply.
+  // #634). Controller/store are kind-agnostic; widen per-kind here. Lore, plot
+  // cards (ADR-0048 S8b), and scenes (ADR-0051 S5-next) all run the entry-patch
+  // loop: a card brainstorm patches its `plot:card`, a scene's "Summarize scene"
+  // patches its `summary` field (review in `replace` mode; see the overlay). The
+  // Conversations ＋New menu filters to the prompts each kind's node admits (see
+  // ConversationsPanel).
+  const patchLoopKind = $derived(
+    documentKind === "lore" || documentKind === "scene" || documentKind === "plot_card",
+  );
+  // ADR-0051 S3/S5 — which kinds show the Conversations surface, and which prompt
+  // surface the ＋New menu offers. A chat's `subject` is kind-neutral, so a scene
+  // lists its chats (subject → scene) the same way a lore entry or plot card does.
+  // All three now offer the `entry_patch` brainstorm surface (S5-next flipped
+  // scenes off the empty `chat_panel` placeholder S5 shipped). The panel hides ＋New
+  // when no prompt resolves to the surface AND admits this node's kind.
   const conversationsKind = $derived(
     documentKind === "lore" || documentKind === "scene" || documentKind === "plot_card",
   );
-  const conversationsSurface = $derived(documentKind === "scene" ? "chat_panel" : "entry_patch");
+  const conversationsSurface = "entry_patch";
   // A node under an open brainstorm review is a frozen transaction (#634): the
   // rail/title go read-only and the host suppresses autosave, so the diff's
   // "current" side cannot move under the review.
@@ -931,28 +935,48 @@
         onRunClick={(regionId, kind) => snapshots.adopt(regionId, kind)}
       />
     {:else if patchLoopKind && entryReview.hasReview && entryReview.proposal}
-      <!-- ADR-0046 slice 3: the brainstorm commit reviewed as flips (body + each
-           long_text field). Like the snapshot overlay, the live buffer stays
-           mounted and hidden beneath; adopting writes through the same
-           emitChange autosave (body + metadata in one PUT). -->
+      <!-- The brainstorm commit reviewed on the (frozen) node. Like the snapshot
+           overlay, the live buffer stays mounted and hidden beneath; adopting
+           writes through the same emitChange autosave (body + metadata in one
+           PUT). Two review presentations, chosen by the launching prompt's
+           `output.review` carried on the proposal (ADR-0051 S5-next). -->
       {#key entryReview.proposal}
-        <EntryRevisionReview
-          currentBody={entryReview.currentBody()}
-          proposedBody={entryReview.proposal.body}
-          fields={entryReview.fields}
-          hasChanges={entryReview.hasPendingChanges}
-          view={entryReview.view}
-          onView={(v) => entryReview.setView(v)}
-          onToggleView={(v) => entryReview.toggleView(v)}
-          onBodyResolved={(v) => entryReview.setBodyResolution(v)}
-          onFieldResolved={(id, v) => entryReview.setFieldResolution(id, v)}
-          onAcceptAll={() => {
-            entryReview.acceptAll();
-            void entryReview.commit();
-          }}
-          onDone={() => entryReview.commit()}
-          onDiscard={() => entryReview.abandon()}
-        />
+        {#if entryReview.proposal.reviewMode === "replace"}
+          <!-- `replace`: a whole-field swap (a scene summary regenerated from the
+               body) — a plain current→proposed card, no run-diff (a regenerated
+               value has no meaningful per-run diff). Replace adopts ONLY the shown
+               long_text fields via `acceptFields` — never the body or a structured
+               flip — so the write set equals what the card displays and a scene's
+               prose can't be rewritten. -->
+          <ReplaceReviewCard
+            fields={entryReview.fields}
+            onReplace={() => {
+              entryReview.acceptFields();
+              void entryReview.commit();
+            }}
+            onDiscard={() => entryReview.abandon()}
+          />
+        {:else}
+          <!-- ADR-0046 slice 3: the per-run adopt flip (body + each long_text
+               field), plus the structured rail flips and the A/S/B judge axis. -->
+          <EntryRevisionReview
+            currentBody={entryReview.currentBody()}
+            proposedBody={entryReview.proposal.body}
+            fields={entryReview.fields}
+            hasChanges={entryReview.hasPendingChanges}
+            view={entryReview.view}
+            onView={(v) => entryReview.setView(v)}
+            onToggleView={(v) => entryReview.toggleView(v)}
+            onBodyResolved={(v) => entryReview.setBodyResolution(v)}
+            onFieldResolved={(id, v) => entryReview.setFieldResolution(id, v)}
+            onAcceptAll={() => {
+              entryReview.acceptAll();
+              void entryReview.commit();
+            }}
+            onDone={() => entryReview.commit()}
+            onDiscard={() => entryReview.abandon()}
+          />
+        {/if}
       {/key}
     {/if}
     <div

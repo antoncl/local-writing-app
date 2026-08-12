@@ -246,6 +246,22 @@ export class EntryProposalController {
     this.adoptedStructured = structured;
   }
 
+  /** Adopt ONLY the long_text field flips (`fields`) — never the body, never the
+   *  structured flips. The write set then equals EXACTLY what a `replace` review
+   *  renders (ReplaceReviewCard shows only `fields`, ADR-0051 S5-next), so a
+   *  whole-field replace can't commit a value the author didn't see — not an
+   *  unshown structured field, and not a body (a scene's manuscript prose). The
+   *  prose-safety guarantee lives here, at the commit path, not only at the
+   *  producer that strips the body. Like `acceptAll`, it only ACCUMULATES; the
+   *  host follows with `commit()`. */
+  acceptFields(): void {
+    const text: Record<string, string | null> = {};
+    for (const flip of this.fields) text[flip.fieldId] = flip.proposedValue;
+    this.resolvedText = text;
+    this.resolvedBody = null;
+    this.adoptedStructured = {};
+  }
+
   /** Whether the author has adopted anything — the "you have changes" signal the
    *  close guard reads to decide between a silent discard and the Save prompt. */
   hasPendingChanges = $derived(

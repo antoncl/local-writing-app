@@ -41,6 +41,7 @@
     EntryPatch,
     LoreEntrySummary,
     PromptEntrySummary,
+    ReviewMode,
     SaveChatSessionRequest,
     StructureDocument,
   } from "@/lib/types";
@@ -682,18 +683,23 @@
           "Couldn't read the model's response as a patch — ask it to finalize again.";
         return;
       }
-      const hasBody = patch.body != null;
+      // `replace` (a scene summary) swaps one field whole; strip any body the
+      // model returned so the stored proposal stays fields-only (the commit-side
+      // guarantee that prose is never rewritten lives in `acceptFields`).
+      const reviewMode: ReviewMode = activeOutput?.review === "replace" ? "replace" : "visual_diff";
+      const body = reviewMode === "replace" ? null : patch.body;
+      const hasBody = body != null;
       const hasFields = Object.keys(patch.fields).length > 0;
       if (!hasBody && !hasFields) {
         chatNotice = "The model proposed no changes to commit.";
         return;
       }
-      entryBrainstorm.propose(entryId, { body: patch.body, fields: patch.fields });
+      entryBrainstorm.propose(entryId, { body, fields: patch.fields, reviewMode });
       // Hand-off cue (#710 slice 3): the commit lands here in the chat pane but
       // the review renders on the entry pane. Name where it went so the author
-      // knows to flip over — the entry's tab and roster row now carry a dot too.
+      // knows to flip over. A scene subject isn't in `loreEntries` → "the scene".
       const target = loreEntries.find((entry) => entry.id === entryId);
-      const reviewOn = target ? target.title : "the entry";
+      const reviewOn = target ? target.title : "the scene";
       const dropped =
         patch.dropped.length > 0
           ? ` Ignored ${patch.dropped.length} field(s) the model couldn't set legally: ${patch.dropped.join(", ")}.`
@@ -933,16 +939,13 @@
   let activePromptEntry = $derived(chatPromptEntryId
     ? promptEntries.find((p) => p.id === chatPromptEntryId) ?? null
     : null);
-  // The active prompt's assistant scope + the dynamic default it implies:
-  // topmost assistant matching the scope, else topmost overall (ADR-0024).
-  // ADR-0046 slice 2: a `revise:entry` chat (output.kind `entry_patch`) commits
-  // its conversation to the target entry. The target is the `entry` input seeded
-  // at launch; the commit button surfaces only for such a chat.
-  let isEntryPatchChat = $derived(
-    activePromptEntry != null &&
-      metadataSchema?.entry_types[activePromptEntry.entry_type]?.prompt?.context_strategy?.output
-        ?.kind === "entry_patch",
+  // The active prompt's `output`: `.kind` is the surface (`entry_patch` chats
+  // commit to their `entry` target), `.review` how it's reviewed (S5-next).
+  let activeOutput = $derived(
+    metadataSchema?.entry_types[activePromptEntry?.entry_type ?? ""]?.prompt?.context_strategy
+      ?.output ?? null,
   );
+  let isEntryPatchChat = $derived(activeOutput?.kind === "entry_patch");
   let commitTargetEntryId = $derived((chatInputDrafts["entry"] ?? "").trim());
   // ADR-0046 §6.4: the target entry_type for a create-mode brainstorm (no entry
   // seeded). Mutually exclusive with commitTargetEntryId by how the chat was

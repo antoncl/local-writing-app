@@ -335,9 +335,21 @@ export type EntryMetadata = Record<string, MetadataValue>;
 // revised body (optional) plus proposed field values. The cross-pane store
 // carries this; the review dispatches by field type (body + long_text as
 // run-diff flips in slice 3a, structured fields as atomic flips in 3b).
+// How an entry-patch proposal should be REVIEWED before it commits — the
+// `output.review` axis declared on the launching prompt's entry_type (ADR-0051
+// S5-next). `visual_diff` is the per-run adopt flip (ADR-0046 default); `replace`
+// is a plain current→proposed swap of the whole field, for a value regenerated
+// from scratch (a scene summary) where a run-diff would be noise.
+export type ReviewMode = "visual_diff" | "replace";
+
 export type EntryPatch = {
   body: string | null;
   fields: Record<string, MetadataValue>;
+  // Set client-side at propose time from the launching prompt's `output.review`
+  // (ChatBodyView); the backend patch response never carries it. Absent ⇒ the
+  // default `visual_diff` review. The `replace` path also strips `body` so a
+  // whole-field regenerate can never rewrite a scene's prose.
+  reviewMode?: ReviewMode;
 };
 
 // The validated patch returned by POST /api/ai/entry-patch/{id}. `dropped` names

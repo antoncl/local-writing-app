@@ -174,6 +174,35 @@ describe("EntryProposalController", () => {
     expect(onFlush).toHaveBeenCalledTimes(1);
   });
 
+  it("acceptFields adopts only the shown long_text fields — never body or structured (S5-next replace)", async () => {
+    // The `replace` review (ReplaceReviewCard) renders only the long_text `fields`.
+    // acceptFields is what its Replace button drives, and it must commit EXACTLY
+    // those — so a whole-field replace can't write a value the author never saw:
+    // not the body (a scene's manuscript prose), not an unshown structured flip.
+    const c = entryController("e1");
+    c.metadata = { bio: "old bio", allegiance: "order" };
+    const onAdoptFields = vi.fn();
+    const onAdoptBody = vi.fn();
+    const onFlush = vi.fn().mockResolvedValue(true);
+    c.onAdoptFields = onAdoptFields;
+    c.onAdoptBody = onAdoptBody;
+    c.onEmitChange = vi.fn();
+    c.onFlush = onFlush;
+    // A patch proposing a body, a long_text field, AND a structured field — the
+    // shape a non-compliant `replace` model could return.
+    entryBrainstorm.propose("e1", patch("REWRITTEN PROSE", { bio: "new bio", allegiance: "chaos" }));
+
+    c.acceptFields();
+    await c.commit();
+
+    // Only the long_text `bio` (shown in the card) is written; the body and the
+    // structured `allegiance` are dropped.
+    expect(onAdoptFields).toHaveBeenCalledWith({ bio: "new bio" });
+    expect(onAdoptBody).not.toHaveBeenCalled();
+    expect(onFlush).toHaveBeenCalledTimes(1);
+    expect(c.proposal).toBeNull();
+  });
+
   it("commit with nothing adopted is a plain dismiss — no write, no post", async () => {
     const c = entryController("e1");
     const onAdoptFields = vi.fn();

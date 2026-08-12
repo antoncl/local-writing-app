@@ -96,6 +96,15 @@ export async function createCard(title: string): Promise<string> {
   return card.id;
 }
 
+// Delete a card outright (the board kebab's "Delete card", #860) — book-local, the
+// board re-projects without it. Distinct from Detach, which only clears the scene
+// ref; the scene:scene node (if any) is untouched. Uses the same endpoint the card
+// editor pane's Delete does.
+export async function deleteCard(cardId: string): Promise<void> {
+  await api.deleteCard(cardId);
+  await refreshAfterMutation();
+}
+
 // Rename a card in place (#798) — the title is intrinsic, not metadata. Fetch first
 // so the save carries the card's live revision + body + metadata unchanged. The card
 // UI drops empty titles before calling, matching the backend's non-empty requirement.

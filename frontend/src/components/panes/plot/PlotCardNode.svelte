@@ -322,6 +322,10 @@
             {pageStatus === "off_page" ? "Mark unwritten" : "Mark off-page"}
           </button>
         {/if}
+        <div class="menu-sep" role="separator"></div>
+        <button role="menuitem" class="menu-item menu-danger" onclick={() => run(actions?.onDelete)}>
+          <i class="ti ti-trash" aria-hidden="true"></i> Delete card
+        </button>
       {:else}
         <button class="menu-item menu-back" onclick={() => (menuView = "main")}>
           <i class="ti ti-chevron-left" aria-hidden="true"></i> Set plotline
@@ -600,6 +604,21 @@
   .menu-back {
     color: var(--text-2);
     font-weight: 600;
+  }
+  .menu-sep {
+    height: 1px;
+    margin: 4px 2px;
+    background: var(--divider);
+  }
+  /* Destructive item (Delete card, #860): danger text + a danger-tinted hover. */
+  .menu-danger {
+    color: var(--danger);
+  }
+  .menu-danger:hover {
+    background: var(--danger-soft);
+  }
+  .menu-danger i {
+    color: var(--danger);
   }
   .menu-scroll {
     display: flex;

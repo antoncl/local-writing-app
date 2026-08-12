@@ -42,6 +42,7 @@ function actions(plotlines: PlotCardActions["plotlines"] = []): PlotCardActions 
     onLinkBeat: vi.fn(),
     onUnlinkBeat: vi.fn(),
     onSetPageStatus: vi.fn(),
+    onDelete: vi.fn(),
     plotlines,
   };
 }
@@ -116,6 +117,14 @@ describe("PlotCardNode — content-op menu (S7d)", () => {
     await fireEvent.click(screen.getByLabelText("Card actions"));
     await fireEvent.click(screen.getByRole("menuitem", { name: "Realize scene" }));
     expect(acts.onRealize).toHaveBeenCalledWith("card_9");
+  });
+
+  it("deletes the card via the card id (#860)", async () => {
+    const acts = actions();
+    renderWithActions({ attached: false }, acts, "card_9");
+    await fireEvent.click(screen.getByLabelText("Card actions"));
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Delete card" }));
+    expect(acts.onDelete).toHaveBeenCalledWith("card_9");
   });
 
   it("opens the card editor via the card id", async () => {

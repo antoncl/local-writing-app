@@ -44,6 +44,7 @@
     seedCardsFromManuscript,
     createCard,
     renameCard,
+    deleteCard,
   } from "@/lib/stores/plotBoard";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
@@ -142,10 +143,27 @@
     // Declare an unattached card off_page vs unwritten (Slice 5b). on_page is derived
     // from the scene, so it is never set here.
     onSetPageStatus: (cardId, status) => void setCardPageStatus(cardId, status),
+    onDelete: (cardId) => removeCard(cardId),
     get plotlines() {
       return projection?.plotlines ?? [];
     },
   });
+
+  // Delete a card from the board (#860). Confirmed (destructive, app dialog) — the
+  // card is gone from the project; its scene, if any, is left untouched (a scene can
+  // outlive its card). Distinct from Detach, which only clears the scene ref.
+  function removeCard(id: string): void {
+    const card = projection?.cards.find((c) => c.id === id);
+    confirmService.request({
+      title: "Delete card",
+      message: `Delete ${card?.title ? `“${card.title}”` : "this card"}? This removes the card from the project. Its scene, if any, is left untouched.`,
+      confirmLabel: "Delete card",
+      destructive: true,
+      onConfirm: async () => {
+        await deleteCard(id);
+      },
+    });
+  }
 
   // New card (#793): the board's direct-authoring entry point — create an unattached
   // card that appears on the board (homeless) where the writer names + describes it
@@ -436,15 +454,21 @@
         </button>
       </div>
       {#if !isEmpty}
-        <UndoRedoControls
-          canUndo={undoCtl.canUndo}
-          canRedo={undoCtl.canRedo}
-          undoTitle={undoCtl.undoTitle}
-          redoTitle={undoCtl.redoTitle}
-          announcement={undoCtl.announcement}
-          onUndo={() => undoCtl.undo()}
-          onRedo={() => undoCtl.redo()}
-        />
+        <!-- Scope label (#860): undo/redo cover the board LAYOUT only (card drags) —
+             content ops (realize/detach/plotline/beats/causal) are intentful and
+             outside the caretaker. The label stops the cluster implying otherwise. -->
+        <div class="undo-group">
+          <span class="undo-scope">Layout</span>
+          <UndoRedoControls
+            canUndo={undoCtl.canUndo}
+            canRedo={undoCtl.canRedo}
+            undoTitle={undoCtl.undoTitle}
+            redoTitle={undoCtl.redoTitle}
+            announcement={undoCtl.announcement}
+            onUndo={() => undoCtl.undo()}
+            onRedo={() => undoCtl.redo()}
+          />
+        </div>
       {/if}
     </div>
     <div class="board-main">
@@ -523,6 +547,18 @@
     display: flex;
     align-items: center;
     gap: var(--sp-2);
+  }
+  .undo-group {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-1);
+  }
+  /* Scopes the undo cluster to layout (#860): a quiet caps label, not a control. */
+  .undo-scope {
+    font-size: var(--fs-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-3);
   }
   .board-btn {
     display: inline-flex;

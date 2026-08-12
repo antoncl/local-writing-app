@@ -29,6 +29,9 @@ export type PlotCardActions = {
   // Set an unattached card's page status (Slice 5b) — off_page vs unwritten; on_page
   // is derived from the scene, so it is never authored here.
   onSetPageStatus: (cardId: string, status: "off_page" | "unwritten") => void;
+  // Delete the card outright (the kebab's "Delete card", #860). Distinct from Detach,
+  // which only clears the scene ref. The provider confirms before the backend delete.
+  onDelete: (cardId: string) => void;
   // The current lanes, for the "Set plotline" submenu. A getter on the provider so
   // the card reads them fresh from the projection.
   readonly plotlines: PlotBoardPlotline[];

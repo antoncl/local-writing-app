@@ -51,6 +51,7 @@ export const UI_GLYPHS: string[] = [
   "settings",
   "stack-2",
   "tag",
+  "trash",
   "unlink",
   "versions",
   "x",

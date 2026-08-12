@@ -65,8 +65,19 @@
   import type { BoardXY, PlotBoardProjection } from "@/lib/types";
 
   // The board's read model, fetched by the opener / PlotBoardPane into the store.
-  // Null until the first refresh resolves; the pane shows a neutral loading blank.
-  let { projection }: { projection: PlotBoardProjection | null } = $props();
+  // Null until the first refresh resolves. `error` distinguishes a FAILED initial
+  // load from a still-loading one (#756) — with a projection null and an error set,
+  // the pane shows a retryable error state instead of a permanent "Loading…";
+  // `onRetry` re-runs the fetch. Both are inert once a projection is present.
+  let {
+    projection,
+    error = null,
+    onRetry,
+  }: {
+    projection: PlotBoardProjection | null;
+    error?: string | null;
+    onRetry?: () => void;
+  } = $props();
 
   // Coalesce a drag's position churn into one save on release.
   const SAVE_DEBOUNCE_MS = 600;
@@ -334,7 +345,19 @@
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <section class="plot-board" aria-label="Plot board" onkeydown={undoCtl.handleKeydown}>
   {#if !projection}
-    <p class="board-hint muted">Loading the board…</p>
+    {#if error}
+      <!-- A failed initial load / restore. Distinct from the loading blank so a
+           fetch error isn't a permanent "Loading…" (#756); Retry re-runs it. -->
+      <div class="board-status" role="alert">
+        <p class="board-hint muted">Couldn't load the board.</p>
+        <p class="board-error-detail">{error}</p>
+        {#if onRetry}
+          <button class="board-btn" onclick={onRetry}>Retry</button>
+        {/if}
+      </div>
+    {:else}
+      <p class="board-hint muted">Loading the board…</p>
+    {/if}
   {:else}
     <div class="board-toolbar">
       <!-- Both stay reachable on an empty board — they are how you populate one:
@@ -537,6 +560,24 @@
   }
   .muted {
     color: var(--text-3);
+    font-size: var(--fs-sm);
+  }
+  /* The failed-load state (#756): the hint, the error detail, and a Retry button
+     stacked at the top-left, matching the loading blank's placement. */
+  .board-status {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 16px;
+  }
+  .board-status .board-hint {
+    padding: 0;
+  }
+  .board-error-detail {
+    margin: 0;
+    max-width: 60ch;
+    color: var(--text-2);
     font-size: var(--fs-sm);
   }
 

@@ -9,6 +9,7 @@ import {
   createCard,
   detachCardScene,
   plotBoardStore,
+  plotBoardError,
   realizeCard,
   reassignCardPlotline,
   refreshPlotBoard,
@@ -64,6 +65,35 @@ describe("refreshPlotBoard", () => {
     await refreshPlotBoard();
     await refreshPlotBoard();
     expect(spy).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("refreshPlotBoard load-error state (#756)", () => {
+  it("records the failure message and leaves the projection null, without rejecting", async () => {
+    vi.spyOn(api, "getPlotBoardProjection").mockRejectedValue(new Error("boom"));
+    // Must not reject — the callers are `void refreshPlotBoard()`, so a rejection
+    // would be an unhandled promise; the pane reads the error from the store.
+    await expect(refreshPlotBoard()).resolves.toBeUndefined();
+    expect(get(plotBoardStore)).toBeNull();
+    expect(get(plotBoardError)).toBe("boom");
+  });
+
+  it("clears the error on a successful retry and loads the board", async () => {
+    vi.spyOn(api, "getPlotBoardProjection").mockRejectedValueOnce(new Error("boom")).mockResolvedValue(projection());
+    await refreshPlotBoard();
+    expect(get(plotBoardError)).toBe("boom");
+    await refreshPlotBoard(); // Retry
+    expect(get(plotBoardError)).toBeNull();
+    expect(get(plotBoardStore)).not.toBeNull();
+  });
+
+  it("clearPlotBoard resets both the projection and the error", async () => {
+    vi.spyOn(api, "getPlotBoardProjection").mockRejectedValue(new Error("boom"));
+    await refreshPlotBoard();
+    expect(get(plotBoardError)).toBe("boom");
+    clearPlotBoard();
+    expect(get(plotBoardError)).toBeNull();
+    expect(get(plotBoardStore)).toBeNull();
   });
 });
 

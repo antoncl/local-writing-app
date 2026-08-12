@@ -17,6 +17,7 @@ import { setPromptEntries } from "@/lib/stores/prompts";
 import { setPlotTemplates } from "@/lib/stores/plotTemplates";
 import { setTemplateInstances } from "@/lib/stores/templateInstances";
 import { refreshPlotBoard } from "@/lib/stores/plotBoard";
+import { setPlotlines } from "@/lib/stores/plotlines";
 import { setAssistantEntries } from "@/lib/stores/assistants";
 import { setChatSessions } from "@/lib/stores/chats";
 import { researchStructureStore, setResearchStructure, setStructure } from "@/lib/stores/structure";
@@ -59,11 +60,11 @@ export async function requestDeleteScene(host: DeletePaneHost, id: string): Prom
   // wording, as before). Maps rather than nested ternaries so a new kind is one
   // line in each place, not another ternary rung.
   const fileLabel =
-    ({ scene: "scene", lore: "entry", research: "note", view: "view", plot_template: "template", plot_card: "card" } as Record<string, string>)[
+    ({ scene: "scene", lore: "entry", research: "note", view: "view", plot_template: "template", plot_card: "card", plotline: "plotline" } as Record<string, string>)[
       documentKind
     ] ?? "prompt";
   const titleLabel =
-    ({ scene: "Delete Scene", lore: "Delete Entry", research: "Delete Note", view: "Delete View", plot_template: "Delete Template", plot_card: "Delete Card" } as Record<string, string>)[
+    ({ scene: "Delete Scene", lore: "Delete Entry", research: "Delete Note", view: "Delete View", plot_template: "Delete Template", plot_card: "Delete Card", plotline: "Delete Plotline" } as Record<string, string>)[
       documentKind
     ] ?? "Delete Prompt";
   const baseMessage = `Delete "${sceneTitle}"? This removes the ${fileLabel} file from the project.`;
@@ -110,10 +111,20 @@ async function deleteScene(host: DeletePaneHost, id: string): Promise<void> {
     // No card list store to update; refresh the board so it drops the card.
     await api.deleteCard(pane.scene.id);
     await refreshPlotBoard();
+  } else if (documentKind === "plotline") {
+    // A book-local plotline deletes via its own endpoint (a `plot` node — deleteScene
+    // would 404); the delete returns the refreshed roster for the ReferencePicker's
+    // `plot` source. Refresh the board too, so any card that referenced this thread
+    // loses its colour axis.
+    setPlotlines((await api.deletePlotline(pane.scene.id)).entries);
+    await refreshPlotBoard();
   } else if (documentKind === "plot_template_instance") {
     // A book-local plot arc deletes via its own endpoint (a `plot` node — deleteScene
-    // would 404); the delete returns the refreshed roster for the palette.
+    // would 404); the delete returns the refreshed roster for the palette. Refresh the
+    // board too, so cards linked to this arc's beats drop their now-dangling badges
+    // (the projection re-resolves beats; the backend heals the stale links on read).
     setTemplateInstances((await api.deleteTemplateInstance(pane.scene.id)).entries);
+    await refreshPlotBoard();
   } else if (documentKind === "assistant") {
     setAssistantEntries((await api.deleteAssistantEntry(pane.scene.id)).entries);
   } else if (documentKind === "chat") {

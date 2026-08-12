@@ -29,6 +29,10 @@ const ROUTES = [
   ["view", "openView"],
   ["chat", "openChat"],
   ["project", "openProjectNode"],
+  // The `plot` kind resolves to a plotline — the only plot sub-type that is a
+  // reference target (a card's `plotline` ref). Before #735 it fell to the
+  // `default:` throw, so a plotline backlink errored instead of opening.
+  ["plot", "openPlotline"],
 ] as const;
 
 const LOCAL_PROJECT_NODE: ProjectNode = {

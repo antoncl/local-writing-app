@@ -42,26 +42,19 @@ import { clearImplicitContext, implicitContextFor } from "@/lib/stores/implicitC
 import { findStructureNodeById } from "@/lib/utils/treeHelpers";
 import { metadataSchemaStore, projectSchemaLayerId } from "@/lib/stores/schema";
 import { authoringDefaultLayerId } from "@/lib/utils/layerAuthoring";
-import {
-  structureStore,
-  refreshStructure,
-  refreshResearchStructure,
-} from "@/lib/stores/structure";
+import { structureStore } from "@/lib/stores/structure";
 import { refreshLoreEntries } from "@/lib/stores/lore";
 import { refreshPromptEntries } from "@/lib/stores/prompts";
 import { refreshPlotTemplates } from "@/lib/stores/plotTemplates";
 import { refreshTemplateInstances } from "@/lib/stores/templateInstances";
-import { refreshPlotBoard } from "@/lib/stores/plotBoard";
-import { refreshAssistantEntries } from "@/lib/stores/assistants";
+import { refreshAfterSave } from "@/lib/stores/editorPaneSave";
 import { refreshKnownTags } from "@/lib/stores/tags";
 import { refreshReferenceIndexInBackground } from "@/lib/stores/references";
 import { forwardRefsOf, sameRefSet } from "@/lib/views/referenceIndex";
 import { defaultView } from "@/lib/views/evaluateView";
-import { refreshTodos, refreshEmbeddedTodos } from "@/lib/stores/todos";
 import { paneViews } from "@/lib/stores/paneViews.svelte";
 import { subordinatePanes } from "@/lib/stores/subordinatePanes";
 import { chatSessionsStore, refreshChatSessions } from "@/lib/stores/chats";
-import { bodyHasMutationMarkers, mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
 import type {
   AssistantEntry,
   CardEntry,
@@ -70,6 +63,7 @@ import type {
   LoreEntry,
   MetadataSchema,
   PlotTemplate,
+  PlotlineEntry,
   TemplateInstanceEntry,
   PromptEntry,
   PromptInputDefinition,
@@ -130,6 +124,21 @@ export type ReviewCommitter = {
   // 409), so the close guard can keep the pane open instead of dropping the patch.
   commit: () => Promise<boolean>;
   discard: () => void;
+};
+
+// Per-document-kind refetch for the metadata-reload pass — a lookup (the
+// editorPaneDelete label-map convention) rather than a deepening nested ternary; an
+// unlisted kind falls back to the scene endpoint. Bare `api.*` refs are safe: the
+// methods close over the module-level `request`, not `this`. The reloadable kinds
+// are the narrow subset with a required `metadata` (NOT the whole EditableDocument
+// union — ViewNode et al. never reach this pass and carry optional metadata).
+type ReloadableDocument = Scene | LoreEntry | PromptEntry | PlotTemplate | CardEntry | PlotlineEntry;
+const RELOAD_GETTERS: Record<string, (id: string) => Promise<ReloadableDocument>> = {
+  lore: api.getLoreEntry,
+  prompt: api.getPromptEntry,
+  plot_template: api.getPlotTemplate,
+  plot_card: api.getCard,
+  plotline: api.getPlotline,
 };
 
 class EditorPanesController {
@@ -280,17 +289,7 @@ class EditorPanesController {
     );
     if (documentRefs.length === 0) return;
     const refreshedDocuments = await Promise.all(
-      documentRefs.map((document) =>
-        document.type === "lore"
-          ? api.getLoreEntry(document.id)
-          : document.type === "prompt"
-            ? api.getPromptEntry(document.id)
-            : document.type === "plot_template"
-              ? api.getPlotTemplate(document.id)
-              : document.type === "plot_card"
-                ? api.getCard(document.id)
-                : api.getScene(document.id),
-      ),
+      documentRefs.map((document) => (RELOAD_GETTERS[document.type] ?? api.getScene)(document.id)),
     );
     const refreshedByKey = new Map(refreshedDocuments.map((document, index) => [`${documentRefs[index].type}:${document.id}`, document]));
     const nextReloads: Record<string, MetadataReloadSignal> = {};
@@ -593,6 +592,10 @@ class EditorPanesController {
         // (realize/attach/detach) mutate the scene ref through their own paths;
         // this save carries whatever the editor changed.
         savedDocument = await api.saveCard(draftDocument as CardEntry, pane.draftMarkdown);
+      } else if (documentKind === "plotline") {
+        // A book-local plotline (#735): name (title) + colour (metadata) +
+        // description (body) round-trip via the plotline endpoint.
+        savedDocument = await api.savePlotline(draftDocument as PlotlineEntry, pane.draftMarkdown);
       } else if (documentKind === "plot_template_instance") {
         // A book-local plot arc (ADR-0048 S7 Slice 5a): title + description (body) +
         // metadata (the specialized `instance_beats` roster + lineage) round-trip via
@@ -609,8 +612,8 @@ class EditorPanesController {
       } else if (documentKind === "structure_node") {
         // Acts/Chapters are scenes with a non-"scene" entry_type — their
         // metadata + body + status round-trip via the scene endpoints.
-        // The structure tree's per-node title is a projection of the
-        // scene title, so refreshStructure below will pick up renames.
+        // The structure tree's per-node title is a projection of the scene
+        // title, so refreshAfterSave's structure refresh picks up renames.
         savedDocument = await api.saveScene(draftDocument as Scene, pane.draftMarkdown);
       } else {
         // The dynamic context rides on the scene save so the automatic capture
@@ -672,44 +675,14 @@ class EditorPanesController {
           forwardRefsOf(draftDocument.metadata, draftDocument.entry_type, schema),
         );
       if (!refsUnchanged) refreshReferenceIndexInBackground();
-      if (documentKind === "lore") {
-        await refreshLoreEntries();
-      } else if (documentKind === "research") {
-        // save_research_note already syncs the title into the research tree
-        // server-side; refresh so the pane reflects it.
-        await refreshResearchStructure();
-      } else if (documentKind === "prompt") {
-        await refreshPromptEntries();
-      } else if (documentKind === "plot_template") {
-        await refreshPlotTemplates();
-      } else if (documentKind === "plot_card") {
-        // Reflect a card edit (plotline / scene / synopsis) on the board if it is
-        // open. In-flight-guarded, so it is cheap when the board is closed.
-        await refreshPlotBoard();
-      } else if (documentKind === "plot_template_instance") {
-        // A rename / beat edit changes the arc roster the palette shows.
-        await refreshTemplateInstances();
-      } else if (documentKind === "assistant") {
-        await refreshAssistantEntries();
-      } else if (documentKind === "project") {
-        // Title may have changed; reflect it on the top bar and pane.
-        this.onProjectNodeSaved(savedDocument.title);
-      } else {
-        await refreshStructure();
-        await refreshTodos();
-        // Embedded (in-prose) todos are a rebuildable index over scene bodies;
-        // a scene save may add/remove/edit markers, so re-scan (GH #45).
-        if (documentKind === "scene" || documentKind === "structure_node") {
-          await refreshEmbeddedTodos();
-          // Mutations are likewise an index over scene bodies (#63, ADR-0014):
-          // a save that touches a marker-bearing scene (before or after the
-          // edit — covers add, remove, edit, and offset shifts) invalidates
-          // every open mutations reader.
-          if (bodyHasMutationMarkers(baselineBody) || bodyHasMutationMarkers(pane.draftMarkdown)) {
-            mutationsVersion.bump();
-          }
-        }
-      }
+      // The per-kind index / roster refreshes a save can trigger live in a sibling
+      // (editorPaneSave.ts) so this file stays under the size guard.
+      await refreshAfterSave(this, {
+        documentKind,
+        savedTitle: savedDocument.title,
+        baselineBody,
+        draftMarkdown: pane.draftMarkdown,
+      });
       // Fire-and-forget (like refreshAssistantTags above): any saved node can register
       // tag vocabulary, but a roster-fetch blip must not fail an already-saved node (#247).
       void refreshKnownTags();
@@ -1072,6 +1045,14 @@ class EditorPanesController {
     });
   }
 
+  // Open a plotline (ADR-0048 §2 / #735) — the route a plotline backlink (a card's
+  // `plotline` ref) resolves to. Book-local, like the card/instance openers above.
+  async openPlotline(entryId: string): Promise<void> {
+    return this.#openEntryDocument("plotline", entryId, "open plotline", (id) => api.getPlotline(id), {
+      body: true,
+    });
+  }
+
   // Open a plot arc / template instance (ADR-0048 S7 Slice 5a) as a NodeEditor
   // document — the "open" route from the board's arc palette. Its description is the
   // prose body; the specialized beats (`instance_beats`) render + edit as a metadata
@@ -1355,6 +1336,11 @@ class EditorPanesController {
         return this.openView(nodeId);
       case "chat":
         return this.openChat(nodeId);
+      case "plot":
+        // Only plot:plotline is ever a reference target (a card's `plotline` ref is
+        // the sole plot entity_ref in the schema), so a `plot` backlink is always a
+        // plotline (#735). A future plot ref target would need its entry_type here.
+        return this.openPlotline(nodeId);
       case "project":
         // Singleton per layer, so the id is checked rather than assumed —
         // an ancestor's project.md is a legitimate source with no surface.

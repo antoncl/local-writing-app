@@ -15,6 +15,13 @@ export async function refreshPlotlines(): Promise<void> {
   plotlineEntriesStore.set((await api.listPlotlines()).entries);
 }
 
+// Set the roster directly from a mutation that already returns it (a plotline
+// delete returns the refreshed list), avoiding a second round-trip — the
+// setPromptEntries / setTemplateInstances convention.
+export function setPlotlines(entries: PlotlineSummary[]): void {
+  plotlineEntriesStore.set(entries);
+}
+
 export function clearPlotlines(): void {
   plotlineEntriesStore.set([]);
 }

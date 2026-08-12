@@ -639,7 +639,27 @@
   $effect.pre(() => {
     promptDrafts.reseed(scene, documentKind);
   });
-  let documentLabel = $derived(documentKind === "lore" ? "Entry" : documentKind === "structure_node" ? "Node" : documentKind === "chat" ? "Chat" : "Scene");
+  // Friendly noun for this document kind — the type-header label ("<label> type"), the
+  // rail's aria-label, the title aria-labels. A map, not a scene-defaulting ternary, so
+  // every kind reads correctly: the plot kinds (card / plotline / arc / template) were
+  // all mislabelled "Scene type" (#737 follow-on).
+  const DOCUMENT_LABELS: Record<string, string> = {
+    scene: "Scene",
+    lore: "Entry",
+    structure_node: "Node",
+    chat: "Chat",
+    research: "Note",
+    prompt: "Prompt",
+    assistant: "Assistant",
+    view: "View",
+    project: "Project",
+    snippet: "Snippet",
+    plot_card: "Card",
+    plotline: "Plotline",
+    plot_template_instance: "Arc",
+    plot_template: "Template",
+  };
+  let documentLabel = $derived(DOCUMENT_LABELS[documentKind] ?? "Scene");
 
   // Fields whose value comes from a layer override (#314), passed to the rail so
   // it can lead them with the `ti-versions` mark. The picker itself lives in
@@ -666,8 +686,15 @@
   // entry_types (plotline, board) are DISTINCT node classes, not interchangeable
   // variants, so a template offers only its own type (never a reclassify), and
   // showing it also fixes the otherwise-blank select (S4c finding #2).
+  // The plot document kinds are synthetic shapes whose schema `kind` is "plot", not
+  // their documentKind — so the kind-filter below finds nothing and the type select
+  // falls back to the raw entry_type id ("plot:template_instance") instead of a name.
+  // List just the node's own type: the plot classes (card / plotline / arc / template)
+  // are distinct, so a cross-class reclassify is never offered (the #720 call, now
+  // generalized past plot_template).
+  const OWN_TYPE_ONLY = new Set(["plot_template", "plot_card", "plotline", "plot_template_instance"]);
   let documentEntryTypes = $derived(
-    documentKind === "plot_template"
+    OWN_TYPE_ONLY.has(documentKind)
       ? Object.entries(metadataSchema?.entry_types ?? {}).filter(([typeId]) => typeId === entryType)
       : Object.entries(metadataSchema?.entry_types ?? {}).filter(
           ([, definition]) => definition.kind === (documentKind === "structure_node" ? "scene" : documentKind) && !definition.abstract,

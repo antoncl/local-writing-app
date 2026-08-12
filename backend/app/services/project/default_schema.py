@@ -242,9 +242,10 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "kind": "plot",
             "parent": "plot:base",
             # `color` (built-in swatch field) so an arc carries its own colour — the
-            # writer sets it in the arc editor, and it disambiguates beat badges by arc
-            # on the board (the colour axis distinct from plotline; #737 follow-on).
-            "fields": ["instance_beats", "color", "source_template_id", "source_template_name"],
+            # writer sets it in the arc editor (first, right under the type header, so
+            # it isn't buried below the beat list), and it disambiguates beat badges by
+            # arc on the board (the colour axis distinct from plotline; #737 follow-on).
+            "fields": ["color", "instance_beats", "source_template_id", "source_template_name"],
             "has_body": True,
         },
         "plot:board": {

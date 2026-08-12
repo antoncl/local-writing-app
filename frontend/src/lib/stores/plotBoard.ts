@@ -50,16 +50,10 @@ export function refreshPlotBoard(): Promise<void> {
 // resolves with a pre-mutation projection and the new state never lands. Drain any
 // such in-flight read first, then run one fresh fetch whose (post-mutation) result
 // sets the store last. A fetch that starts here is post-mutation, so coalescing with
-// it is fine.
+// it is fine. `refreshPlotBoard` records its own errors and never rejects, so the
+// drain needs no catch.
 async function refreshAfterMutation(): Promise<void> {
-  const pending = inFlight;
-  if (pending) {
-    try {
-      await pending;
-    } catch {
-      // A failed read-refresh is retried by the fresh fetch below.
-    }
-  }
+  if (inFlight) await inFlight;
   await refreshPlotBoard();
 }
 

@@ -359,6 +359,19 @@
       <p class="board-hint muted">Loading the board…</p>
     {/if}
   {:else}
+    {#if error}
+      <!-- A background / post-mutation refresh failed while the board is already
+           shown (#756). Don't blank the board — keep the (possibly stale) view — but
+           don't leave the failure silent either: a slim strip surfaces it with Retry.
+           `refreshPlotBoard` clears the error on its next attempt, so a successful
+           Retry (or any later refresh) removes this. -->
+      <div class="board-refresh-error" role="alert">
+        <span>Couldn't refresh the board — it may be out of date.</span>
+        {#if onRetry}
+          <button class="board-btn" onclick={onRetry}>Retry</button>
+        {/if}
+      </div>
+    {/if}
     <div class="board-toolbar">
       <!-- Both stay reachable on an empty board — they are how you populate one:
            New card authors one directly; Seed bulk-mints from the manuscript. -->
@@ -577,6 +590,20 @@
   .board-error-detail {
     margin: 0;
     max-width: 60ch;
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+  }
+  /* The stale-refresh strip (#756): a quiet full-width bar above a still-shown board
+     when a background / post-mutation refresh failed. Neutral, not alarming — the
+     board is usable, just possibly out of date. */
+  .board-refresh-error {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 12px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
     color: var(--text-2);
     font-size: var(--fs-sm);
   }

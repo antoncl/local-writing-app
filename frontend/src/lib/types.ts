@@ -334,7 +334,7 @@ export type EntryMetadata = Record<string, MetadataValue>;
 // carries this; the review dispatches by field type (body + long_text as
 // run-diff flips in slice 3a, structured fields as atomic flips in 3b).
 // How an entry-patch proposal should be REVIEWED before it commits — the
-// `output.review` axis declared on the launching prompt's entry_type (ADR-0051
+// `commit.review` axis declared on the launching prompt (ADR-0054 §2; ADR-0051
 // S5-next). `visual_diff` is the per-run adopt flip (ADR-0046 default); `replace`
 // is a plain current→proposed swap of the whole field, for a value regenerated
 // from scratch (a scene summary) where a run-diff would be noise.
@@ -343,7 +343,7 @@ export type ReviewMode = "visual_diff" | "replace";
 export type EntryPatch = {
   body: string | null;
   fields: Record<string, MetadataValue>;
-  // Set client-side at propose time from the launching prompt's `output.review`
+  // Set client-side at propose time from the launching prompt's `commit.review`
   // (ChatBodyView); the backend patch response never carries it. Absent ⇒ the
   // default `visual_diff` review. The `replace` path also strips `body` so a
   // whole-field regenerate can never rewrite a scene's prose.
@@ -703,10 +703,28 @@ export type PromptInputDefinition = {
   target?: Record<string, MetadataValue> | null;
 };
 
+// The optional commit capability of a `chat_panel` prompt (ADR-0054 §2): the
+// conversation gains a Commit button that extracts its result to a target node as
+// a reviewable patch. `review` is how it's reviewed; `fields` is the optional
+// allow-list of what the commit extracts (`body` counts as a field, so its absence
+// is fields-only; omit `fields` for the default body + every proposable field).
+export type PromptCommit = {
+  review?: string;
+  fields?: string[] | null;
+};
+
+// Where a prompt's output lands (ADR-0054 §1) + its optional commit (§2). `kind`
+// is the disposition (`append_to_body` / `replace_selection` / `chat_panel`, or
+// unset for no output); `commit` only rides on `chat_panel`.
+export type PromptOutput = {
+  kind?: string;
+  commit?: PromptCommit | null;
+};
+
 export type PromptContextStrategy = {
   target?: Record<string, MetadataValue> | null;
   scan_surface?: string[];
-  output?: Record<string, MetadataValue> | null;
+  output?: PromptOutput | null;
 };
 
 export type PromptEntryTypeExtras = {

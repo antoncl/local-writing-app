@@ -12,7 +12,7 @@ import type { AIEntryPatch, EntryPatchExtraction } from "@/lib/types";
 // cross-pane `entryBrainstorm` store (revise) or holds a whole draft (create).
 // These tests pin what the wiring could silently break: the launch-mode
 // derivations, what's posted to the endpoint (assistant / history / the
-// `output.extract` override), the `replace` body strip (the producer-side half of
+// `commit.fields` allow-list), the `replace` body strip (the producer-side half of
 // the S5-next prose-safety guarantee), cost attribution, and the guards.
 
 vi.mock("@/lib/api", () => ({
@@ -71,13 +71,13 @@ function makeController(over: Partial<ChatCommitDeps> = {}) {
 }
 
 describe("ChatCommitController — launch-mode derivations", () => {
-  it("isEntryPatchChat tracks the fed output surface", () => {
+  it("isCommitChat tracks whether the fed output declares a commit", () => {
     const { c } = makeController();
-    expect(c.isEntryPatchChat).toBe(false);
-    c.output = { kind: "chat_panel" };
-    expect(c.isEntryPatchChat).toBe(false);
-    c.output = { kind: "entry_patch" };
-    expect(c.isEntryPatchChat).toBe(true);
+    expect(c.isCommitChat).toBe(false);
+    c.output = { kind: "chat_panel" }; // a plain chat, no commit
+    expect(c.isCommitChat).toBe(false);
+    c.output = { kind: "chat_panel", commit: { review: "visual_diff" } };
+    expect(c.isCommitChat).toBe(true);
   });
 
   it("reads the revise target from the `entry` input draft (trimmed)", () => {
@@ -87,9 +87,9 @@ describe("ChatCommitController — launch-mode derivations", () => {
     expect(c.commitTargetEntryId).toBe("lore-42");
   });
 
-  it("isCreateBrainstorm = entry_patch + no entry + an entry_type", () => {
+  it("isCreateBrainstorm = a commit + no entry + an entry_type", () => {
     const { c } = makeController();
-    c.output = { kind: "entry_patch" };
+    c.output = { kind: "chat_panel", commit: { review: "visual_diff" } };
     c.inputDrafts = { entry_type: "lore:character" };
     expect(c.draftEntryType).toBe("lore:character");
     expect(c.isCreateBrainstorm).toBe(true);
@@ -98,11 +98,11 @@ describe("ChatCommitController — launch-mode derivations", () => {
     expect(c.isCreateBrainstorm).toBe(false);
   });
 
-  it("extractTemplate is the output.extract override, else null", () => {
+  it("commitFields is the output.commit.fields allow-list, else null", () => {
     const { c } = makeController();
-    expect(c.extractTemplate).toBeNull();
-    c.output = { kind: "entry_patch", extract: "OVERRIDE" };
-    expect(c.extractTemplate).toBe("OVERRIDE");
+    expect(c.commitFields).toBeNull();
+    c.output = { kind: "chat_panel", commit: { review: "replace", fields: ["summary"] } };
+    expect(c.commitFields).toEqual(["summary"]);
   });
 });
 
@@ -114,7 +114,7 @@ describe("ChatCommitController — commitToEntry", () => {
 
   function reviseController(over: Partial<ChatCommitDeps> = {}) {
     const made = makeController(over);
-    made.c.output = { kind: "entry_patch" };
+    made.c.output = { kind: "chat_panel", commit: { review: "visual_diff" } };
     made.c.inputDrafts = { entry: "lore-1" };
     return made;
   }
@@ -129,7 +129,7 @@ describe("ChatCommitController — commitToEntry", () => {
 
   it("errors when there is no target entry", async () => {
     const { c, deps } = makeController();
-    c.output = { kind: "entry_patch" }; // entry_patch but no `entry` draft
+    c.output = { kind: "chat_panel", commit: { review: "visual_diff" } }; // commit but no `entry` draft
     await c.commitToEntry();
     expect(deps.setError).toHaveBeenCalledWith(
       "This brainstorm has no target entry to commit to.",
@@ -137,33 +137,33 @@ describe("ChatCommitController — commitToEntry", () => {
     expect(extractPatch).not.toHaveBeenCalled();
   });
 
-  it("posts the transcript, assistant, and output.extract override to the extraction endpoint", async () => {
+  it("posts the transcript, assistant, and commit.fields allow-list to the extraction endpoint", async () => {
     const { c } = reviseController();
-    c.output = { kind: "entry_patch", extract: "OVERRIDE-TMPL" };
+    c.output = { kind: "chat_panel", commit: { review: "replace", fields: ["summary"] } };
     extractPatch.mockResolvedValue(okResult({ fields: { bio: "x" } }));
 
     await c.commitToEntry();
 
     // The whole point of S4: the commit is one call to the extraction endpoint,
     // carrying the transcript (pure input), the assistant, and the prompt's
-    // extract override (null → the server's default generated contract).
+    // commit.fields allow-list (null → the server's default full contract).
     expect(extractPatch).toHaveBeenCalledWith("lore-1", {
       messages: [{ role: "user", content: "brainstorm turn" }],
       assistant_id: "asst-1",
-      extract_template: "OVERRIDE-TMPL",
+      commit_fields: ["summary"],
     });
   });
 
-  it("publishes a visual_diff proposal (default contract, no override) and names the target", async () => {
+  it("publishes a visual_diff proposal (default contract, no allow-list) and names the target", async () => {
     const { c, deps } = reviseController({ entryTitle: () => "Captain Vale" });
     extractPatch.mockResolvedValue(okResult({ body: "revised prose", fields: { bio: "new" } }));
 
     await c.commitToEntry();
 
-    // No override on a plain revise → extract_template is null (server default).
+    // No allow-list on a plain revise → commit_fields is null (server default).
     expect(extractPatch).toHaveBeenCalledWith(
       "lore-1",
-      expect.objectContaining({ extract_template: null }),
+      expect.objectContaining({ commit_fields: null }),
     );
     expect(entryBrainstorm.proposalFor("lore-1")).toEqual({
       body: "revised prose",
@@ -179,7 +179,7 @@ describe("ChatCommitController — commitToEntry", () => {
     // returns a body, the stored proposal must be fields-only so a summary
     // regenerate can never carry a scene's manuscript prose to the review.
     const { c } = reviseController();
-    c.output = { kind: "entry_patch", review: "replace" };
+    c.output = { kind: "chat_panel", commit: { review: "replace" } };
     extractPatch.mockResolvedValue(okResult({ body: "REWRITTEN PROSE", fields: { summary: "a synopsis" } }));
 
     await c.commitToEntry();
@@ -262,7 +262,7 @@ describe("ChatCommitController — create mode", () => {
 
   function createController(over: Partial<ChatCommitDeps> = {}) {
     const made = makeController(over);
-    made.c.output = { kind: "entry_patch" };
+    made.c.output = { kind: "chat_panel", commit: { review: "visual_diff" } };
     made.c.inputDrafts = { entry_type: "lore:character" };
     return made;
   }
@@ -276,7 +276,7 @@ describe("ChatCommitController — create mode", () => {
     expect(extractDraft).toHaveBeenCalledWith("lore:character", {
       messages: [{ role: "user", content: "brainstorm turn" }],
       assistant_id: "asst-1",
-      extract_template: null,
+      commit_fields: null,
     });
     expect(c.draftProposal).toEqual({ body: "a life", fields: { name: "Vale" } });
     expect(c.draftDropped).toEqual(["id"]);

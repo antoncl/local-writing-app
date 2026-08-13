@@ -74,10 +74,10 @@ class MetadataValidationTests(unittest.TestCase):
             data["entry_types"]["lore:character"] = character
         self.service._write_yaml(schema_path, data)
 
-    def _schema_with_output_kind(self, kind: object) -> MetadataSchema:
+    def _schema_with_output(self, output: object) -> MetadataSchema:
         prompt: dict[str, object] = {"name": "Custom", "kind": "prompt", "parent": "prompt:base"}
-        if kind is not None:
-            prompt["prompt"] = {"context_strategy": {"output": {"kind": kind}}}
+        if output is not None:
+            prompt["prompt"] = {"context_strategy": {"output": output}}
         else:
             prompt["prompt"] = {"context_strategy": {"scan_surface": []}}
         return MetadataSchema.model_validate(
@@ -90,18 +90,45 @@ class MetadataValidationTests(unittest.TestCase):
             }
         )
 
+    def _schema_with_output_kind(self, kind: object) -> MetadataSchema:
+        return self._schema_with_output(None if kind is None else {"kind": kind})
+
     def test_output_kind_must_be_a_known_disposition(self) -> None:
-        # ADR-0054 S1: `context_strategy.output.kind` is a closed vocabulary,
+        # ADR-0054: `context_strategy.output.kind` is a closed vocabulary,
         # validated on save. A bogus kind is a (soft) schema error.
         errors = self.service._validate_metadata_schema_definition(self._schema_with_output_kind("not_a_kind"))
         self.assertTrue(any("not_a_kind" in e for e in errors), errors)
 
+    def test_retired_entry_patch_kind_is_now_rejected(self) -> None:
+        # ADR-0054 S2 retired `entry_patch` into `chat_panel` + `commit`, so the
+        # old value is no longer a known disposition.
+        errors = self.service._validate_metadata_schema_definition(self._schema_with_output_kind("entry_patch"))
+        self.assertTrue(any("entry_patch" in e for e in errors), errors)
+
     def test_known_output_kinds_validate(self) -> None:
-        # Every current disposition passes, including `entry_patch` (kept
-        # transitionally until ADR-0054 S2 retires it into chat_panel + commit).
-        for kind in ("append_to_body", "replace_selection", "chat_panel", "entry_patch"):
+        # Every disposition in the (post-S2) closed set passes.
+        for kind in ("append_to_body", "replace_selection", "chat_panel"):
             errors = self.service._validate_metadata_schema_definition(self._schema_with_output_kind(kind))
             self.assertFalse(any("output kind" in e for e in errors), (kind, errors))
+
+    def test_commit_only_rides_on_chat_panel(self) -> None:
+        # ADR-0054 §2: a commit is meaningful only under `chat_panel` — append /
+        # replace target the body directly, so a commit on them is a (soft) error.
+        output = {"kind": "append_to_body", "commit": {"review": "visual_diff"}}
+        errors = self.service._validate_metadata_schema_definition(self._schema_with_output(output))
+        self.assertTrue(any("only chat_panel" in e for e in errors), errors)
+
+    def test_commit_review_must_be_a_known_mode(self) -> None:
+        output = {"kind": "chat_panel", "commit": {"review": "sideways"}}
+        errors = self.service._validate_metadata_schema_definition(self._schema_with_output(output))
+        self.assertTrue(any("commit review" in e for e in errors), errors)
+
+    def test_chat_panel_with_a_valid_commit_validates(self) -> None:
+        output = {"kind": "chat_panel", "commit": {"review": "replace", "fields": ["summary"]}}
+        errors = self.service._validate_metadata_schema_definition(self._schema_with_output(output))
+        self.assertFalse(
+            any("output kind" in e or "commit" in e for e in errors), errors
+        )
 
     def test_unset_output_kind_is_allowed(self) -> None:
         # No output disposition (a snippet, or a prompt that produces none) is
@@ -2241,7 +2268,7 @@ class MetadataValidationTests(unittest.TestCase):
             context_strategy=PromptContextStrategy(
                 target={"required": True, "kind": "scene"},
                 scan_surface=["_text_before", "_selection"],
-                output={"kind": "append_to_body", "review": "visual_diff"},
+                output={"kind": "append_to_body"},
             ),
         )
         schema = self.service.upsert_metadata_entry_type(
@@ -2355,8 +2382,9 @@ class MetadataValidationTests(unittest.TestCase):
         kinds; users instantiate them directly or sub-type them to add
         personality. `revise` is abstract (ADR-0046 §5) and splits symmetrically
         into `revise:scene` (today's scene revise) + `revise:entry` (the lore
-        brainstorm commit) — the two output kinds differ, so nothing is hoisted
-        onto the base. Inputs live on the instance (not the type)."""
+        brainstorm commit) — the dispositions differ (`revise:scene` is
+        `replace_selection`; `revise:entry` is `chat_panel` + a `commit`), so
+        nothing is hoisted onto the base. Inputs live on the instance (not the type)."""
         schema = self.service.read_metadata_schema()
         for type_id in ("prompt:continuation", "prompt:general", "prompt:snippet"):
             self.assertIn(type_id, schema.entry_types)
@@ -2367,7 +2395,10 @@ class MetadataValidationTests(unittest.TestCase):
         continuation_prompt = schema.entry_types["prompt:continuation"].prompt
         assert continuation_prompt is not None
         assert continuation_prompt.context_strategy is not None
-        self.assertEqual(continuation_prompt.context_strategy.output, {"kind": "append_to_body", "review": "visual_diff"})
+        continuation_output = continuation_prompt.context_strategy.output
+        assert continuation_output is not None
+        self.assertEqual(continuation_output.kind, "append_to_body")
+        self.assertIsNone(continuation_output.commit)  # an inline disposition carries no commit
 
         # `revise` is now the abstract parent of the two concrete flavours.
         revise = schema.entry_types["prompt:revise"]
@@ -2379,14 +2410,20 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertFalse(revise_scene.abstract)
         self.assertEqual(revise_scene.parent, "prompt:revise")
         assert revise_scene.prompt is not None and revise_scene.prompt.context_strategy is not None
-        self.assertEqual(revise_scene.prompt.context_strategy.output, {"kind": "replace_selection", "review": "visual_diff"})
+        revise_scene_output = revise_scene.prompt.context_strategy.output
+        assert revise_scene_output is not None
+        self.assertEqual(revise_scene_output.kind, "replace_selection")
+        self.assertIsNone(revise_scene_output.commit)
         self.assertEqual(revise_scene.prompt.context_strategy.target, {"required": True, "kind": "scene"})
 
         revise_entry = schema.entry_types["prompt:revise:entry"]
         self.assertFalse(revise_entry.abstract)
         self.assertEqual(revise_entry.parent, "prompt:revise")
         assert revise_entry.prompt is not None and revise_entry.prompt.context_strategy is not None
-        self.assertEqual(revise_entry.prompt.context_strategy.output, {"kind": "entry_patch", "review": "visual_diff"})
+        revise_entry_output = revise_entry.prompt.context_strategy.output
+        assert revise_entry_output is not None and revise_entry_output.commit is not None
+        self.assertEqual(revise_entry_output.kind, "chat_panel")
+        self.assertEqual(revise_entry_output.commit.review, "visual_diff")
         # The entry rides in as an `entry` input (loaded via entry(input.entry)),
         # NOT as context_strategy.target — a lore id there would drive a scene
         # resolution (read_scene) and 404. The shipped body itself lives in the
@@ -2406,7 +2443,10 @@ class MetadataValidationTests(unittest.TestCase):
         general_prompt = schema.entry_types["prompt:general"].prompt
         assert general_prompt is not None
         assert general_prompt.context_strategy is not None
-        self.assertEqual(general_prompt.context_strategy.output, {"kind": "chat_panel"})
+        general_output = general_prompt.context_strategy.output
+        assert general_output is not None
+        self.assertEqual(general_output.kind, "chat_panel")
+        self.assertIsNone(general_output.commit)  # a plain chat, no commit
 
         self.assertIsNone(schema.entry_types["prompt:snippet"].prompt)
 
@@ -2429,7 +2469,9 @@ class MetadataValidationTests(unittest.TestCase):
         bob_prompt = schema.entry_types["prompt:bob"].prompt
         assert bob_prompt is not None
         assert bob_prompt.context_strategy is not None
-        self.assertEqual(bob_prompt.context_strategy.output, {"kind": "chat_panel"})
+        bob_output = bob_prompt.context_strategy.output
+        assert bob_output is not None
+        self.assertEqual(bob_output.kind, "chat_panel")
         self.assertEqual(bob_prompt.system_prompt, "You are Bob.")
 
     def test_snippet_subtype_inherits_from_prompt_kind(self) -> None:

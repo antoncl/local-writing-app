@@ -11,10 +11,13 @@
 # The contract is a Jinja template rendered through the ordinary preview pipeline,
 # so it reuses `field_catalog` and the entry helpers rather than re-deriving the
 # field descriptors in Python (the seed templates' item-shape logic is non-trivial
-# — one source of it, not two). `DEFAULT_EXTRACTION_TEMPLATE` is the generated
-# contract for the common case (body + all proposable fields); a prompt that needs
-# a narrower shape supplies its own via `output.extract` (e.g. the scene-summary
-# prompt, fields-only) and it is rendered here verbatim in its place.
+# — one source of it, not two). `DEFAULT_EXTRACTION_TEMPLATE` is the ONE generated
+# contract (body + all proposable fields); a prompt that needs a narrower shape sets
+# `commit.fields`, an allow-list that filters which descriptors the template
+# enumerates (ADR-0054 §2). `body` is just another field in that list, so its absence
+# makes the contract fields-only (e.g. the scene-summary prompt, `["summary"]`). This
+# replaces ADR-0051 S4's arbitrary-Jinja `output.extract` override — one contract, a
+# declarative filter, no escape hatch.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -33,28 +36,31 @@ EXTRACT_CUE = (
     "no code fences."
 )
 
-# The default generated contract (ADR-0051 S4). Body + every proposable field of
-# the target type, straight from `field_catalog` — correct for the revise-entry
-# and revise-plot-card prompts, which no longer carry the contract themselves. The
+# The generated contract (ADR-0051 S4; filtered by ADR-0054 §2). By default it names
+# the body + every proposable field of the target type, straight from `field_catalog`.
+# `commit.fields` (passed in as `input.commit_fields`) narrows it: the field loop
+# enumerates only allow-listed descriptors, and `input.body_allowed` /
+# `input.title_allowed` gate the body and title clauses (both are `true` when no
+# allow-list is given, so the unfiltered contract renders exactly as before). The
 # field-descriptor / item-shape rendering is intentionally identical to the seed
-# templates it replaces, so a `list`/`select` field is described the same way it
-# always was. `input.entry_type` is the target FQN; `input.creating` distinguishes
-# a from-scratch draft (title required) from a revise (title optional).
+# templates it replaces, so a `list`/`select` field is described the same way it always
+# was. `input.entry_type` is the target FQN; `input.creating` distinguishes a
+# from-scratch draft (title required) from a revise (title optional).
 DEFAULT_EXTRACTION_TEMPLATE = """{% role "system" %}
 You are extracting the final result of a brainstorm into a structured patch. The conversation that follows is your only input — read it and produce the result the author and you converged on.
 
 Reply with ONLY a JSON object, with no preamble, no commentary, and no code fences, of exactly this shape:
 
-{"body": "<the complete revised markdown body>", "fields": {"<field id>": <value>}}
+{% if input.body_allowed %}{"body": "<the complete revised markdown body>", "fields": {"<field id>": <value>}}{% else %}{"fields": {"<field id>": <value>}}{% endif %}
 
-- "body": {% if input.creating %}the complete markdown body for the new entry.{% else %}include the "body" key ONLY if the conversation actually revised the body; then give the complete revised markdown body. OMIT the "body" key entirely if the body was not discussed or changed — never reconstruct it from nothing.{% endif %}
-- "fields": {% if input.creating %}ALWAYS include "title". Add any other field the conversation set, {% else %}include a field ONLY when the conversation changed it, {% endif %}keyed by its field id. For tags / multi_select give a JSON array of strings; for a select field use one of its listed options exactly; for an ordered-list field give the complete new list in its stated item shape (the whole list, in order); otherwise give the field's complete new value.{% if not input.creating %} You may also propose a new "title". Use {} if nothing changed.{% endif %}
+{% if input.body_allowed %}- "body": {% if input.creating %}the complete markdown body for the new entry.{% else %}include the "body" key ONLY if the conversation actually revised the body; then give the complete revised markdown body. OMIT the "body" key entirely if the body was not discussed or changed — never reconstruct it from nothing.{% endif %}
+{% endif %}- "fields": {% if input.creating %}{% if input.title_allowed %}ALWAYS include "title". {% endif %}Add any other field the conversation set, {% else %}include a field ONLY when the conversation changed it, {% endif %}keyed by its field id. For tags / multi_select give a JSON array of strings; for a select field use one of its listed options exactly; for an ordered-list field give the complete new list in its stated item shape (the whole list, in order); otherwise give the field's complete new value.{% if not input.creating %}{% if input.title_allowed %} You may also propose a new "title".{% endif %} Use {} if nothing changed.{% endif %}
 
 The fields you may set:
-{% for f in field_catalog(input.entry_type) %}
+{% for f in field_catalog(input.entry_type) if input.commit_fields is none or f.id in input.commit_fields %}
 - {{ f.id }} ({{ f.label }}) — {{ f.type }}{% if f.options %}; one of: {{ f.options | join(", ") }}{% endif %}{% if f.get("items") %}{% if f.item_scalar %}; a JSON array of {{ f["items"][0].type }} values{% if f["items"][0].options %}, each one of: {{ f["items"][0].options | join(", ") }}{% endif %}{% else %}; a JSON array of objects, each with keys: {% for m in f["items"] %}{{ m.key }} ({{ m.type }}{% if m.options %}; one of: {{ m.options | join(", ") }}{% endif %}){% if not loop.last %}, {% endif %}{% endfor %}{% endif %}{% endif %}
 {% else %}
-- (none beyond title/body)
+- (none{% if input.body_allowed %} beyond title/body{% endif %})
 {% endfor %}
 
 Output only that JSON object. It is parsed, validated against the entry's schema, and reviewed against the current entry before anything is saved.
@@ -66,24 +72,32 @@ def render_extraction_contract(
     *,
     entry_type: str,
     creating: bool,
-    override_template: str | None = None,
+    commit_fields: list[str] | None = None,
 ) -> str:
     """Render the extraction contract (the system prompt) for ``entry_type``.
 
-    Uses the prompt's ``output.extract`` override verbatim when supplied, else the
-    default generated contract. Rendered through `build_preview` so `field_catalog`
-    and the entry helpers are available exactly as in the seed templates; the
-    system block is the contract. Raises `PreviewError` on a broken template (the
-    route surfaces it).
+    ``commit_fields`` is the prompt's ``commit.fields`` allow-list (ADR-0054 §2):
+    None ⇒ the full contract (body + every proposable field); a list ⇒ only those
+    targets, with ``body`` counted as a field (so its absence yields a fields-only
+    contract). Rendered through `build_preview` so `field_catalog` and the entry
+    helpers are available exactly as in the seed templates; the system block is the
+    contract. Raises `PreviewError` on a broken template (the route surfaces it).
     """
 
-    template_source = override_template if override_template else DEFAULT_EXTRACTION_TEMPLATE
+    body_allowed = commit_fields is None or "body" in commit_fields
+    title_allowed = commit_fields is None or "title" in commit_fields
     rendered, _ = build_preview(
         project_service=project_service,
-        template_source=template_source,
+        template_source=DEFAULT_EXTRACTION_TEMPLATE,
         target_scene_id="",
         session_id=None,
-        inputs={"entry_type": entry_type, "creating": creating},
+        inputs={
+            "entry_type": entry_type,
+            "creating": creating,
+            "commit_fields": commit_fields,
+            "body_allowed": body_allowed,
+            "title_allowed": title_allowed,
+        },
         text_before="",
         text_after="",
         commit=False,

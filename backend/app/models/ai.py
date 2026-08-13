@@ -608,12 +608,13 @@ class ExtractEntryPatchRequest(BaseModel):
     finalize-replay: the server rebuilds the format contract from the target's
     schema and runs it as its own pass, so the contract no longer rides a frozen
     seed prompt up a growing context. `messages` is the visible transcript;
-    `extract_template` overrides the generated contract when the prompt declares
-    `output.extract` (else the default body + field-catalog contract is used)."""
+    `commit_fields` is the prompt's `commit.fields` allow-list (ADR-0054 §2) that
+    narrows the generated contract — None uses the full body + field-catalog
+    contract, a list restricts it to those targets (`body` counts as a field)."""
 
     messages: list[ChatMessage] = Field(default_factory=list)
     assistant_id: str | None = None
-    extract_template: str | None = None
+    commit_fields: list[str] | None = None
 
 
 class ExtractEntryDraftRequest(ExtractEntryPatchRequest):

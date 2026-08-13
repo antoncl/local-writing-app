@@ -18,12 +18,12 @@ describe("builtinViews (ADR-0051 S6 follow-up)", () => {
     expect(isBuiltinExtraViewId(views[0].id)).toBe(false);
   });
 
-  it("Openable filters out the entry_patch (brainstorm) chats via disjoint", () => {
+  it("Openable filters out the committing (brainstorm) chats via disjoint", () => {
     const openable = builtinViews("chat", CHAT_SCHEMA)[1].spec;
     const pred = openable.expr?.filter?.pred?.field;
-    expect(pred?.key).toBe("seed_output_kind");
+    expect(pred?.key).toBe("seed_committing");
     expect(pred?.op).toBe("disjoint");
-    expect(pred?.value).toEqual(["entry_patch"]);
+    expect(pred?.value).toEqual(["commit"]);
   });
 
   it("every other kind ships a single default view (defaultView parity untouched)", () => {

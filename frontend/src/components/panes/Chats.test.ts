@@ -120,7 +120,7 @@ describe("Chats pane — Openable built-in view (ADR-0051 S6 follow-up)", () => 
       "prompt:revise:entry": {
         name: "Revise entry",
         kind: "prompt",
-        prompt: { context_strategy: { output: { kind: "entry_patch" } } },
+        prompt: { context_strategy: { output: { kind: "chat_panel", commit: { review: "visual_diff" } } } },
       },
     },
     fields: {},
@@ -144,7 +144,7 @@ describe("Chats pane — Openable built-in view (ADR-0051 S6 follow-up)", () => 
     return { ...chat(id, title), prompt_entry_id: promptId };
   }
 
-  it("hides the brainstorm (entry_patch) chat, keeps General + freeform", () => {
+  it("hides the brainstorm (committing) chat, keeps General + freeform", () => {
     metadataSchemaStore.set(OPENABLE_SCHEMA);
     const spec = builtinViews("chat", OPENABLE_SCHEMA)[1].spec; // "Openable chats"
     renderPane(
@@ -158,7 +158,7 @@ describe("Chats pane — Openable built-in view (ADR-0051 S6 follow-up)", () => 
     );
     expect(screen.getByText("General Chat")).toBeInTheDocument();
     expect(screen.getByText("Freeform Chat")).toBeInTheDocument();
-    // The brainstorm chat (output kind entry_patch) is filtered out.
+    // The brainstorm chat (its prompt declares a commit) is filtered out.
     expect(screen.queryByText("Brainstorm Chat")).toBeNull();
   });
 });

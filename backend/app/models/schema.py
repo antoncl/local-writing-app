@@ -160,10 +160,40 @@ class PromptInputDefinition(BaseModel):
     target: dict[str, Any] | None = None
 
 
+class PromptCommit(BaseModel):
+    """The optional commit capability of a `chat_panel` prompt (ADR-0054 §2).
+
+    Present ⇒ the conversation gains a Commit button that extracts its result to
+    the target node as a reviewable patch. `review` is how that result is reviewed
+    (`visual_diff` = per-run adopt against the current entry; `replace` = a plain
+    current→proposed swap). `fields` is an optional allow-list of what the commit
+    extracts — `body` counts as a field, so its absence means fields-only; omit
+    `fields` entirely for the default (body + every proposable field). Kept lenient
+    (`str`, not a `Literal`) so a hand-edited layer stays readable; the save paths
+    validate the values (`_validate_metadata_schema_definition`)."""
+
+    review: str = "visual_diff"
+    fields: list[str] | None = None
+
+
+class PromptOutput(BaseModel):
+    """Where a prompt's output lands (ADR-0054 §1), plus its optional commit (§2).
+
+    `kind` is the disposition — `append_to_body` / `replace_selection` /
+    `chat_panel`, or unset for no output (e.g. `snippet`). The set is closed and
+    backend-owned (`OUTPUT_KINDS`), validated on save; kept `str` here so an
+    unknown value is a soft validation error, not an unreadable layer. `commit` is
+    meaningful only under `chat_panel` — the validator rejects it on any other
+    disposition."""
+
+    kind: str = ""
+    commit: PromptCommit | None = None
+
+
 class PromptContextStrategy(BaseModel):
     target: dict[str, Any] | None = None
     scan_surface: list[str] = Field(default_factory=list)
-    output: dict[str, Any] | None = None
+    output: PromptOutput | None = None
 
 
 class PromptEntryTypeExtras(BaseModel):

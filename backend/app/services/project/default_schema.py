@@ -49,22 +49,26 @@ COMPUTED_FUNCTIONS: tuple[str, ...] = AUTHORABLE_COMPUTED_FUNCTIONS + BUILTIN_CO
 
 # The closed vocabulary of prompt output dispositions — `context_strategy.output.kind`,
 # i.e. WHERE a prompt's output lands (ADR-0054). This is the single source of truth the
-# whole app should derive from; today the set is re-listed in the frontend
-# `PromptSurface` union and the schema-editor dropdown, which disagree. The backend
-# validates a saved prompt type's `output.kind` against this list
-# (`_validate_metadata_schema_definition`), closing the free-dict gap.
+# whole app derives from; the frontend `PromptSurface` union derives from it rather than
+# re-listing values. The backend validates a saved prompt type's `output.kind` against
+# this list (`_validate_metadata_schema_definition`), closing the free-dict gap.
 #
-# `entry_patch` is here TRANSITIONALLY. ADR-0054 retires it in S2 into `chat_panel` +
-# an optional `commit` capability; until that slice re-authors the built-in brainstorm
-# prompts, it remains a valid kind so they keep validating. An empty/unset `output.kind`
-# is legitimate (the `snippet` base and any prompt with no output disposition) and is
-# not checked here.
+# The old `entry_patch` value is GONE (ADR-0054 S2): a brainstorm is not a fifth
+# disposition but `chat_panel` + an optional `commit` capability (`PromptCommit`), so the
+# built-in brainstorm prompts below are `chat_panel` with a `commit` block. An empty/unset
+# `output.kind` is legitimate (the `snippet` base and any prompt with no output
+# disposition) and is not checked here.
 OUTPUT_KINDS: tuple[str, ...] = (
     "append_to_body",
     "replace_selection",
     "chat_panel",
-    "entry_patch",
 )
+
+# The closed set of commit review modes (ADR-0054 §2 `commit.review`): `visual_diff`
+# is the per-run adopt against the current entry; `replace` is a plain
+# current→proposed swap (a from-scratch regenerate with no meaningful run-diff, e.g.
+# a scene summary). Validated on save alongside `OUTPUT_KINDS`.
+COMMIT_REVIEW_MODES: tuple[str, ...] = ("visual_diff", "replace")
 
 DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
     "version": 1,
@@ -283,7 +287,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "context_strategy": {
                     "target": {"required": True, "kind": "scene"},
                     "scan_surface": ["_text_before"],
-                    "output": {"kind": "append_to_body", "review": "visual_diff"},
+                    "output": {"kind": "append_to_body"},
                 },
             },
         },
@@ -315,13 +319,14 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             ],
         },
         "prompt:revise": {
-            # Abstract base for the two revise flavours. Split symmetrically
+            # Abstract base for the revise flavours. Split symmetrically
             # (ADR-0046 §5): sub-typing the lore case (`revise:entry`) while
             # leaving the scene case bare would leave the taxonomy lopsided, and
             # the TipTap editor filters its prompts by type — both flavours must
             # sit at the same depth. The concrete children carry the disposition;
-            # the two `output.kind`s differ (replace_selection vs entry_patch),
-            # so there is nothing shared to hoist onto the base.
+            # they differ (`revise:scene` is `replace_selection`; the brainstorm
+            # children are `chat_panel` + a `commit`), so there is nothing shared
+            # to hoist onto the base.
             "name": "Revise",
             "kind": "prompt",
             "parent": "prompt:base",
@@ -341,15 +346,16 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "context_strategy": {
                     "target": {"required": True, "kind": "scene"},
                     "scan_surface": ["_text_before", "_selection", "_text_after"],
-                    "output": {"kind": "replace_selection", "review": "visual_diff"},
+                    "output": {"kind": "replace_selection"},
                 },
             },
         },
         "prompt:revise:entry": {
             # The lore brainstorm (ADR-0046 §5/§6.3/§6.4), a pre-rolled prompt
-            # like `roleplay`: an ideation *chat* that, on a commit turn, returns
-            # a JSON `entry_patch`. It has TWO modes, chosen by how it was
-            # launched, not by a separate prompt (ADR-0046 §6.4 — one vehicle):
+            # like `roleplay`: an ideation *chat* (`output.kind = chat_panel`) that
+            # carries a `commit` — the Commit button that, on a commit turn, extracts
+            # a JSON patch for review (ADR-0054 §2). It has TWO modes, chosen by how
+            # it was launched, not by a separate prompt (ADR-0046 §6.4 — one vehicle):
             #   • REVISE — an existing entry rides in the `entry` input; the
             #     commit is the entry's revised body plus any changed proposable
             #     fields — long-text and structured alike (#653) — reviewed as a
@@ -358,9 +364,9 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             #     names the kind to draft from scratch; the commit is a whole new
             #     entry (title + fields + body), reviewed whole (no flip) and
             #     created via `POST /api/lore` + `PUT` (§6.4).
-            # `output.kind = entry_patch` routes invocation to a chat and the
-            # committed patch to review, not the scene aiSuggestion streaming
-            # mark. The patch is validated server-side (`validate_ai_entry_patch`
+            # `output.kind = chat_panel` + a `commit` routes invocation to a chat
+            # and the committed patch to review, not the scene aiSuggestion
+            # streaming mark. The patch is validated server-side (`validate_ai_entry_patch`
             # / `validate_ai_entry_draft`) before review — the safety guarantee is
             # validate-on-return, not constrained decoding. The entry rides in as
             # an `entry` input loaded with `entry(input.entry)` — exactly how
@@ -400,13 +406,13 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             ],
             "prompt": {
                 "context_strategy": {
-                    "output": {"kind": "entry_patch", "review": "visual_diff"},
+                    "output": {"kind": "chat_panel", "commit": {"review": "visual_diff"}},
                 },
             },
         },
         "prompt:revise:plot_card": {
             # The plot-card brainstorm (ADR-0048 S8b): an ideation chat that, on a
-            # commit turn, returns a JSON `entry_patch` for the card — the SAME loop
+            # commit turn, returns a JSON patch for the card — the SAME loop
             # as `revise:entry`, on a `plot:card` instead of a lore entry (the loop
             # is entry_type-keyed, not lore-shaped; ADR-0048 §5). It differs from
             # `revise:entry` in two ways: it is REVISE-ONLY (a card is created on the
@@ -414,8 +420,8 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # input is required), and its body drops in the spoiler-gated
             # `plot_context(as_of=e.id)` block so the model reasons over the whole
             # board (arcs' beat rosters + the other cards' synopses) while patching
-            # this one card. `output.kind = entry_patch` routes it through the chat +
-            # patch-review commit, validated server-side before review.
+            # this one card. `output.kind = chat_panel` + a `commit` routes it through
+            # the chat + patch-review commit, validated server-side before review.
             "name": "Revise plot card",
             "kind": "prompt",
             "parent": "prompt:revise",
@@ -436,25 +442,27 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             ],
             "prompt": {
                 "context_strategy": {
-                    "output": {"kind": "entry_patch", "review": "visual_diff"},
+                    "output": {"kind": "chat_panel", "commit": {"review": "visual_diff"}},
                 },
             },
         },
         "prompt:revise:scene_summary": {
             # The scene-summary brainstorm (ADR-0051 S5-next): an ideation chat
-            # that, on a commit turn, returns a JSON `entry_patch` proposing the
+            # that, on a commit turn, returns a JSON patch proposing the
             # scene's `summary` field from its prose body — the SAME loop as
             # `revise:entry`, on a `scene` (the loop is entry_type-keyed, not
             # lore-shaped; ADR-0048 §5). Two things set it apart from `revise:entry`:
-            #   • It is FIELD-SCOPED: the template names only `summary` and the
-            #     patch carries no `body`. A scene's body is its manuscript prose,
-            #     which a summary regenerate must never rewrite — the client also
+            #   • It is FIELD-SCOPED via `commit.fields: [summary]` (ADR-0054 §2):
+            #     the generated contract names only `summary` and carries no `body`
+            #     (`body` is just another field in the allow-list, and it is absent).
+            #     A scene's body is its manuscript prose, which a summary regenerate
+            #     must never rewrite — prose-safe by construction, and the client also
             #     drops any stray `body` from a `replace` patch, so the invariant is
-            #     held structurally, not by prompt compliance.
-            #   • `output.review = "replace"` (not `visual_diff`): a synopsis
+            #     doubly held.
+            #   • `commit.review = "replace"` (not `visual_diff`): a synopsis
             #     regenerated from scratch has no meaningful run-diff against the old
             #     one, so the review is a plain current→proposed replace card, not a
-            #     per-run adopt. `review` is the long-declared output axis; this is
+            #     per-run adopt. `review` is the long-declared review axis; this is
             #     its first non-`visual_diff` value (ADR-0051 S5-next).
             # REVISE-ONLY (a scene exists before it is summarized — no create mode);
             # the `entry` input is required and targets a scene, exactly as
@@ -479,29 +487,17 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             ],
             "prompt": {
                 "context_strategy": {
-                    # ADR-0051 S4: `extract` overrides the default generated
-                    # commit contract (which would offer *all* proposable scene
-                    # fields, body included). A scene summary is narrower — only
-                    # `summary`, never the body (the body is manuscript prose) —
-                    # so it carries its own fields-only extraction contract. The
-                    # reference user of the override seam; prose-safety is still
-                    # held independently at the commit path (`acceptFields`).
+                    # ADR-0054 §2: `commit.fields` restricts the generated contract
+                    # to exactly these targets. A scene summary is narrow — only
+                    # `summary`, never the body (the body is manuscript prose) — so
+                    # the list is `["summary"]`. `body` is treated as just another
+                    # field, so its absence is what makes the contract fields-only;
+                    # this replaces the old arbitrary-Jinja `output.extract` override
+                    # (#859). Prose-safety is thus held by the contract itself and
+                    # again at the commit path (`acceptFields`).
                     "output": {
-                        "kind": "entry_patch",
-                        "review": "replace",
-                        "extract": (
-                            '{% role "system" %}\n'
-                            "Extract the scene synopsis the conversation settled on. "
-                            "Reply with ONLY a JSON object, with no preamble, no commentary, "
-                            "and no code fences, of exactly this shape:\n\n"
-                            '{"fields": {"summary": "<the synopsis>"}}\n\n'
-                            '- Set ONLY the "summary" field. Do NOT include a "body" key — '
-                            "the scene's prose body is the manuscript text and must not be touched.\n"
-                            "- Write the synopsis in the third person, present tense, a few "
-                            "sentences at most, with no commentary about the writing itself.\n\n"
-                            "Output only that JSON object.\n"
-                            "{% endrole %}"
-                        ),
+                        "kind": "chat_panel",
+                        "commit": {"review": "replace", "fields": ["summary"]},
                     },
                 },
             },

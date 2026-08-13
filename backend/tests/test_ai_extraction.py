@@ -4,8 +4,8 @@ The commit of a brainstorm chat is no longer a client-side finalize replay: the
 server rebuilds the format contract from the target's schema and runs it as its
 own pass over the transcript, then validates the reply. These cover the new
 pieces:
-- `render_extraction_contract` — the default generated contract (body + the
-  target type's proposable fields) and the `output.extract` override;
+- `render_extraction_contract` — the generated contract (body + the target
+  type's proposable fields) and its `commit.fields` filtering (ADR-0054 §2);
 - the `/extract` endpoints — the render → one turn → validate → EntryPatch
   orchestration, and its failure surfaces (garbled, model returned nothing, 404);
 - `entry_type_for_node` — the shared revise-mode type resolve.
@@ -51,7 +51,7 @@ def _chat_reply(content: str, *, ok: bool = True, cost_usd: float | None = 0.01)
 
 class ExtractionContractTests(unittest.TestCase):
     """The generated contract is built from `field_catalog`, so it names real
-    field ids / option values; an `output.extract` override replaces it whole."""
+    field ids / option values; `commit.fields` narrows which it enumerates."""
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
@@ -93,32 +93,30 @@ class ExtractionContractTests(unittest.TestCase):
         self.assertIn("for the new entry", contract)  # a new entry does get a body
         self.assertIn("allegiance", contract)  # full catalog offered
 
-    def test_override_is_rendered_verbatim_not_the_default(self) -> None:
-        # A prompt's `output.extract` replaces the generated contract whole — the
-        # default field catalog is NOT consulted (a scene summary is fields-only).
-        override = (
-            '{% role "system" %}\nEXTRACT ONLY THE SUMMARY: '
-            '{"fields": {"summary": "<x>"}}\n{% endrole %}'
-        )
+    def test_commit_fields_filters_the_contract_to_the_allow_list(self) -> None:
+        # ADR-0054 §2: `commit.fields` restricts the generated contract to the
+        # named targets; a field outside the list is not offered. `body` is just a
+        # field, so its absence from the list makes the contract fields-only.
         contract = render_extraction_contract(
-            self.service, entry_type="lore:character", creating=False, override_template=override
+            self.service, entry_type="lore:character", creating=False, commit_fields=["bio"]
         )
-        self.assertIn("EXTRACT ONLY THE SUMMARY", contract)
-        self.assertNotIn("allegiance", contract)
+        self.assertIn("bio", contract)
+        self.assertNotIn("allegiance", contract)  # outside the allow-list
+        self.assertNotIn('"body"', contract)  # body not allow-listed → fields-only
 
-    def test_shipped_scene_summary_override_is_fields_only(self) -> None:
-        # The built-in scene-summary prompt carries a fields-only override (the
-        # reference user of the seam): summary only, and an explicit "no body".
+    def test_shipped_scene_summary_commit_is_fields_only(self) -> None:
+        # The built-in scene-summary prompt carries `commit.fields: ["summary"]`
+        # (ADR-0054 §2) — summary only, never the manuscript body.
         schema = self.service.read_metadata_schema()
         output = schema.entry_types["prompt:revise:scene_summary"].prompt.context_strategy.output
         self.assertIsNotNone(output)
-        override = output.get("extract")
-        self.assertIsInstance(override, str)
+        assert output.commit is not None
+        self.assertEqual(output.commit.fields, ["summary"])
         contract = render_extraction_contract(
-            self.service, entry_type="scene:scene", creating=False, override_template=override
+            self.service, entry_type="scene:scene", creating=False, commit_fields=output.commit.fields
         )
-        self.assertIn('"summary"', contract)
-        self.assertIn('Do NOT include a "body" key', contract)
+        self.assertIn("summary", contract)  # the one allow-listed field is offered
+        self.assertNotIn('"body"', contract)  # body absent → fields-only, prose-safe
 
 
 class ExtractEndpointTests(unittest.TestCase):
@@ -154,7 +152,7 @@ class ExtractEndpointTests(unittest.TestCase):
                         {"role": "assistant", "content": "Here's a draft."},
                     ],
                     "assistant_id": None,
-                    "extract_template": None,
+                    "commit_fields": None,
                 },
             )
         self.assertEqual(resp.status_code, 200, resp.text)
@@ -175,7 +173,7 @@ class ExtractEndpointTests(unittest.TestCase):
         with self._mock_chat(_chat_reply("not json at all")):
             resp = self.client.post(
                 f"/api/ai/entry-patch/{self.hero.id}/extract",
-                json={"messages": [], "assistant_id": None, "extract_template": None},
+                json={"messages": [], "assistant_id": None, "commit_fields": None},
             )
         body = resp.json()
         self.assertTrue(body["ok"])  # the turn succeeded; the reply was unreadable
@@ -185,7 +183,7 @@ class ExtractEndpointTests(unittest.TestCase):
         with self._mock_chat(_chat_reply("", ok=False, cost_usd=0.0)):
             resp = self.client.post(
                 f"/api/ai/entry-patch/{self.hero.id}/extract",
-                json={"messages": [], "assistant_id": None, "extract_template": None},
+                json={"messages": [], "assistant_id": None, "commit_fields": None},
             )
         body = resp.json()
         self.assertFalse(body["ok"])
@@ -197,7 +195,7 @@ class ExtractEndpointTests(unittest.TestCase):
         with self._mock_chat(reply):
             resp = self.client.post(
                 "/api/ai/entry-draft/extract",
-                json={"entry_type": "lore:character", "messages": [], "assistant_id": None, "extract_template": None},
+                json={"entry_type": "lore:character", "messages": [], "assistant_id": None, "commit_fields": None},
             )
         self.assertEqual(resp.status_code, 200, resp.text)
         self.assertEqual(resp.json()["patch"]["fields"], {"title": "Kestrel", "bio": "Drafted."})
@@ -206,26 +204,9 @@ class ExtractEndpointTests(unittest.TestCase):
         with self._mock_chat(_chat_reply("{}")):
             resp = self.client.post(
                 "/api/ai/entry-patch/does-not-exist/extract",
-                json={"messages": [], "assistant_id": None, "extract_template": None},
+                json={"messages": [], "assistant_id": None, "commit_fields": None},
             )
         self.assertEqual(resp.status_code, 404)
-
-    def test_broken_override_template_is_a_clean_failure_not_500(self) -> None:
-        # A hand-authored `output.extract` override with a Jinja error (here an
-        # undefined name under StrictUndefined) must surface as a clean ok=False,
-        # not an unhandled 500 — the renderer's PreviewError has to be caught.
-        override = '{% role "system" %}Extract: {{ definitely_undefined_name }}{% endrole %}'
-        with self._mock_chat(_chat_reply("{}")) as mock_chat:
-            resp = self.client.post(
-                f"/api/ai/entry-patch/{self.hero.id}/extract",
-                json={"messages": [], "assistant_id": None, "extract_template": override},
-            )
-        self.assertEqual(resp.status_code, 200, resp.text)
-        body = resp.json()
-        self.assertFalse(body["ok"])
-        self.assertIsNone(body["patch"])
-        self.assertIn("render", body["error"].lower())
-        mock_chat.assert_not_called()  # render failed before the model turn
 
 
 class EntryTypeForNodeTests(unittest.TestCase):

@@ -1115,13 +1115,13 @@ async def _run_entry_patch_extraction(
             project,
             entry_type=entry_type,
             creating=creating,
-            override_template=request.extract_template,
+            commit_fields=request.commit_fields,
         )
     except PreviewError as exc:
-        # A broken contract template — almost always a hand-authored
-        # `output.extract` override with a Jinja error. Surface it as a clean
-        # failure the pane shows, not an unhandled 500 (mirrors how `ai_preview`
-        # and `ai_generate` handle a PreviewError from the same renderer).
+        # A broken contract template — the generated contract failing to render
+        # (e.g. a schema the field-catalog helper can't walk). Surface it as a
+        # clean failure the pane shows, not an unhandled 500 (mirrors how
+        # `ai_preview` and `ai_generate` handle a PreviewError from the same renderer).
         return EntryPatchExtraction(
             patch=None,
             cost_usd=None,

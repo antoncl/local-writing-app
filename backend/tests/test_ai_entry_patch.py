@@ -566,15 +566,17 @@ class SceneSummaryPromptTests(unittest.TestCase):
         self.assertFalse(etype.abstract)
         self.assertEqual(etype.parent, "prompt:revise")
         assert etype.prompt is not None and etype.prompt.context_strategy is not None
-        # The first non-default `review` value — `replace`, not `visual_diff` —
-        # is the signal that flips the review off the run-diff engine (S5-next).
+        # A brainstorm chat with a commit (ADR-0054 §2): the disposition is
+        # `chat_panel` and the review + extraction ride on the `commit`. The first
+        # non-default `review` value — `replace`, not `visual_diff` — is the signal
+        # that flips the review off the run-diff engine (S5-next).
         output = etype.prompt.context_strategy.output
-        assert output is not None
-        self.assertEqual(output.get("kind"), "entry_patch")
-        self.assertEqual(output.get("review"), "replace")
-        # ADR-0051 S4: a fields-only `extract` override — the reference user of
-        # the seam (a scene summary is `summary` only, never the manuscript body).
-        self.assertIsInstance(output.get("extract"), str)
+        assert output is not None and output.commit is not None
+        self.assertEqual(output.kind, "chat_panel")
+        self.assertEqual(output.commit.review, "replace")
+        # ADR-0054 §2: `commit.fields: ["summary"]` — a fields-only contract (a
+        # scene summary is `summary` only, never the manuscript body).
+        self.assertEqual(output.commit.fields, ["summary"])
         # REVISE-ONLY: a required `entry` input targeting a scene (no create mode).
         inputs = {i.name: i for i in etype.default_inputs}
         self.assertEqual(list(inputs), ["entry"])
@@ -590,8 +592,8 @@ class SceneSummaryPromptTests(unittest.TestCase):
     def test_template_hands_the_scene_prose_but_carries_no_contract(self) -> None:
         # ADR-0051 S4: the goal-directed seed hands the model the scene's prose and
         # current summary to work from, but the JSON format contract is NOT in the
-        # seed anymore — it moved to the prompt's `output.extract`, rendered fresh
-        # at commit (the fields-only shape is asserted in test_ai_extraction).
+        # seed anymore — it is generated at commit and filtered by `commit.fields`
+        # (the fields-only shape is asserted in test_ai_extraction).
         prompt = self.service.read_prompt_entry("builtin-summarize-scene")
         env = create_environment_for_project(self.service)
         rendered = env.from_string(prompt.body).render(input={"entry": self.scene_id})

@@ -471,16 +471,14 @@
   const patchLoopKind = $derived(
     documentKind === "lore" || documentKind === "scene" || documentKind === "plot_card",
   );
-  // ADR-0051 S3/S5 — which kinds show the Conversations surface, and which prompt
-  // surface the ＋New menu offers. A chat's `subject` is kind-neutral, so a scene
-  // lists its chats (subject → scene) the same way a lore entry or plot card does.
-  // All three now offer the `entry_patch` brainstorm surface (S5-next flipped
-  // scenes off the empty `chat_panel` placeholder S5 shipped). The panel hides ＋New
-  // when no prompt resolves to the surface AND admits this node's kind.
+  // ADR-0051 S3/S5 — which kinds show the Conversations surface. A chat's
+  // `subject` is kind-neutral, so a scene lists its chats (subject → scene) the
+  // same way a lore entry or plot card does. All three offer the brainstorm ＋New
+  // menu; ConversationsPanel scopes it to the commit prompts (ADR-0054 §2) that
+  // admit this node's kind, and hides ＋New when none resolves.
   const conversationsKind = $derived(
     documentKind === "lore" || documentKind === "scene" || documentKind === "plot_card",
   );
-  const conversationsSurface = "entry_patch";
   // A node under an open brainstorm review is a frozen transaction (#634): the
   // rail/title go read-only and the host suppresses autosave, so the diff's
   // "current" side cannot move under the review.
@@ -797,7 +795,6 @@
           subjectId={scene.id}
           subjectTitle={title}
           subjectEntryType={entryType}
-          newSurface={conversationsSurface}
           {promptEntries}
           {metadataSchema}
           {hostPaneId}
@@ -965,7 +962,7 @@
            overlay, the live buffer stays mounted and hidden beneath; adopting
            writes through the same emitChange autosave (body + metadata in one
            PUT). Two review presentations, chosen by the launching prompt's
-           `output.review` carried on the proposal (ADR-0051 S5-next). -->
+           `commit.review` carried on the proposal (ADR-0054 §2). -->
       {#key entryReview.proposal}
         {#if entryReview.proposal.reviewMode === "replace"}
           <!-- `replace`: a whole-field swap (a scene summary regenerated from the

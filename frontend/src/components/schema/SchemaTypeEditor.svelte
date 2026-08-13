@@ -57,6 +57,7 @@
     MetadataSchema,
     MetadataSchemaLayer,
     MetadataSchemaOverview,
+    PromptCommit,
     PromptContextStrategy,
   } from "@/lib/types";
 
@@ -232,6 +233,12 @@
   let promptContextTargetRequired = $state(seed.contextTargetRequired);
   let promptScanSurface = $state(seed.scanSurface);
   let promptOutputKind = $state(seed.outputKind);
+  // ADR-0054 S2: the commit block (review + fields) has no authoring UI yet (that
+  // is S3), but it must survive a save through this editor — otherwise editing any
+  // other field of a brainstorm prompt type would silently strip its commit. Read
+  // once and carry it verbatim; it is not editable, so it never affects dirtiness.
+  const promptOutputCommit: PromptCommit | null =
+    untrack(() => initialPrompt?.context_strategy?.output?.commit) ?? null;
 
   // --- Unsaved-changes tracking (#68) --------------------------------------
   // Field + group edits persist immediately through the parent; only the
@@ -277,8 +284,9 @@
       .filter(Boolean);
     const hasTarget = Boolean(promptContextTargetKind) || promptContextTargetRequired;
     // ADR-0054 S2: the editor authors only the disposition (`kind`) for now; the
-    // commit block (review + fields) is S3. `review` no longer round-trips here.
-    const hasOutput = Boolean(promptOutputKind);
+    // commit block (review + fields) is S3. It has no control here but is carried
+    // through verbatim (`promptOutputCommit`) so saving does not strip it.
+    const hasOutput = Boolean(promptOutputKind) || promptOutputCommit !== null;
     const contextStrategy: PromptContextStrategy | null = scanSurface.length || hasTarget || hasOutput
       ? {
           ...(hasTarget
@@ -294,6 +302,7 @@
             ? {
                 output: {
                   ...(promptOutputKind ? { kind: promptOutputKind } : {}),
+                  ...(promptOutputCommit !== null ? { commit: promptOutputCommit } : {}),
                 },
               }
             : {}),

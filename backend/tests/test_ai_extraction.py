@@ -104,6 +104,17 @@ class ExtractionContractTests(unittest.TestCase):
         self.assertNotIn("allegiance", contract)  # outside the allow-list
         self.assertNotIn('"body"', contract)  # body not allow-listed → fields-only
 
+    def test_create_contract_requires_title_even_with_a_fields_allowlist(self) -> None:
+        # Create mode ALWAYS needs a title (validate_ai_entry_draft rejects a
+        # draft without one), so a `commit.fields` allow-list that omits "title"
+        # must NOT suppress the title clause — only a revise's allow-list can.
+        contract = render_extraction_contract(
+            self.service, entry_type="lore:character", creating=True, commit_fields=["bio"]
+        )
+        self.assertIn("ALWAYS include", contract)  # title still demanded
+        self.assertIn("bio", contract)
+        self.assertNotIn("allegiance", contract)  # the allow-list still filters other fields
+
     def test_shipped_scene_summary_commit_is_fields_only(self) -> None:
         # The built-in scene-summary prompt carries `commit.fields: ["summary"]`
         # (ADR-0054 §2) — summary only, never the manuscript body.

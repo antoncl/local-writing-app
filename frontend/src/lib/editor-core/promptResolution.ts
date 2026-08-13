@@ -76,25 +76,33 @@ export function hidePromptEntries(
   return entries.filter((entry) => !hiddenPromptIds.has(entry.id));
 }
 
+// The shared discovery-roster skeleton: no schema → empty; else drop the writer's
+// hidden built-ins, keep the entries matching `predicate`, sort by title. Both
+// rosters below route through it so hidden-prompt handling and sort collation
+// can't drift between surface-discovery and brainstorm-discovery.
+function filterPromptRoster(
+  ctx: PromptResolutionContext,
+  predicate: (entry: PromptEntrySummary) => boolean,
+): PromptEntrySummary[] {
+  if (!ctx.metadataSchema) return [];
+  return hidePromptEntries(ctx.promptEntries, ctx.hiddenPromptIds)
+    .filter(predicate)
+    .sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }));
+}
+
 export function promptEntriesForSurface(
   ctx: PromptResolutionContext,
   surface: PromptSurface,
 ): PromptEntrySummary[] {
-  if (!ctx.metadataSchema) return [];
-  return hidePromptEntries(ctx.promptEntries, ctx.hiddenPromptIds)
-    .filter((entry) => effectiveOutputKind(ctx, entry) === surface)
-    .sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }));
+  return filterPromptRoster(ctx, (entry) => effectiveOutputKind(ctx, entry) === surface);
 }
 
 // The brainstorm prompts — those declaring a `commit` (ADR-0054 §2) — as a
-// discovery roster (hidden built-ins dropped, sorted), the commit-era replacement
-// for `promptEntriesForSurface(ctx, "entry_patch")`. Callers that need the ones a
+// discovery roster, the commit-era replacement for
+// `promptEntriesForSurface(ctx, "entry_patch")`. Callers that need the ones a
 // given node admits narrow further with `promptTargetsEntryType`.
 export function promptEntriesWithCommit(ctx: PromptResolutionContext): PromptEntrySummary[] {
-  if (!ctx.metadataSchema) return [];
-  return hidePromptEntries(ctx.promptEntries, ctx.hiddenPromptIds)
-    .filter((entry) => promptDeclaresCommit(ctx, entry))
-    .sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }));
+  return filterPromptRoster(ctx, (entry) => promptDeclaresCommit(ctx, entry));
 }
 
 export function promptEntryDescription(

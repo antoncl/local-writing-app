@@ -22,6 +22,7 @@
 <script lang="ts">
   import { getContext } from "svelte";
   import { getSwatch } from "@/lib/utils/colors";
+  import { setPlotBeatDrag } from "@/lib/plot/plotDnd";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import type { PlotPlotlineData } from "@/lib/plot/plotBoardLayout";
   import type { MetadataValue, PlotlineEntry } from "@/lib/types";
@@ -41,6 +42,10 @@
   // Expanded iff the board says THIS node is the one open (independent of Svelte Flow
   // selection — plotline nodes are not selectable). Never expands without a context.
   let isExpanded = $derived(!!actions && actions.expandedId === id);
+
+  // A beat is a drag source only once the plotline exists (has a node id): the mount-
+  // test degrade has none, and there's nothing to link a beat of before it's created.
+  let canDrag = $derived(!!id);
 
   // A locally-keyed beat while editing. The backend stamps a stable `id` on save; a
   // just-added beat has none yet, so `key` (a local monotonic id) keys the {#each} and
@@ -348,9 +353,19 @@
       {/if}
     </div>
   {:else if data.beats.length}
+    <!-- The at-rest roster is the drag SOURCE (ADR-0053 §4): drag a beat onto a story
+         card to link it (#824, re-homed from the retired Arcs rail). `nodrag nopan`
+         (the board's interactive-control convention) keeps grabbing a beat from moving
+         the node or panning the canvas; the drag writes the (plotline id, beat id)
+         payload. Draggable only once the plotline exists (canDrag). -->
     <ul class="plotline-beats">
       {#each data.beats as beat (beat.beat_id)}
-        <li class="plotline-beat">
+        <li
+          class="plotline-beat nodrag nopan"
+          class:draggable={canDrag}
+          draggable={canDrag}
+          ondragstart={(e) => id && setPlotBeatDrag(e, id, beat.beat_id)}
+        >
           <span class="beat-dot" class:hollow={!accent}></span>
           <span class="beat-title" title={beat.title}>{beat.title}</span>
         </li>
@@ -448,6 +463,13 @@
     align-items: center;
     gap: 6px;
     min-width: 0;
+  }
+  /* A draggable beat grabs onto a card (ADR-0053 §4). */
+  .plotline-beat.draggable {
+    cursor: grab;
+  }
+  .plotline-beat.draggable:active {
+    cursor: grabbing;
   }
   .beat-dot {
     flex: none;

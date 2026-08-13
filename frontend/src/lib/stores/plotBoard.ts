@@ -175,12 +175,21 @@ function beatLinksOf(metadata: CardEntry["metadata"]): PlotBeatLink[] {
 
 // Drop a beat onto a card → add the link (deduped; a card fulfils a beat once).
 // Already linked → no change, so skip the save + board rebuild.
+//
+// The first beat dropped onto a card with no PRIMARY plotline adopts that beat's
+// plotline as the card's primary — its tint/stripe (#863) — so the drop visibly
+// lights the card in that thread's colour (ADR-0053 §4 resolves "how is the primary
+// chosen?" as first-dragged). Sticky: a card that already has a primary keeps it, and
+// later beats from other plotlines show only as badges (#871); the writer can still
+// re-pick via the kebab. This runs only in the add-a-new-link branch, so a redundant
+// re-drop of an already-linked beat stays a no-op (never resurrecting a cleared primary).
 export function linkCardBeat(cardId: string, plotline: string, beat_id: string): Promise<void> {
   return mutateCardMetadata(cardId, (metadata) => {
     const links = beatLinksOf(metadata);
     if (links.some((l) => l.plotline === plotline && l.beat_id === beat_id)) return false;
     links.push({ plotline, beat_id });
     metadata.beat_links = links;
+    if (!metadata.plotline) metadata.plotline = plotline;
   });
 }
 

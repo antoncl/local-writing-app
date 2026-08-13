@@ -3,12 +3,13 @@
 // that must DISPLAY its beat roster, so — like PlotCardNode — a mount test asserts the
 // content renders ([[reference_component_test_harness]]). The node imports nothing from
 // @xyflow/svelte, so it mounts here on its own (the SvelteFlow canvas is not headless).
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import { waitFor } from "@testing-library/svelte";
 import PlotPlotlineNode from "./PlotPlotlineNode.svelte";
 import type { PlotPlotlineData } from "@/lib/plot/plotBoardLayout";
 import { PLOT_PLOTLINE_ACTIONS, type PlotPlotlineActions } from "./plotPlotlineActions";
+import { PLOT_DND_MIME } from "@/lib/plot/plotDnd";
 import type { PlotlineEntry } from "@/lib/types";
 
 const data = (over: Partial<PlotPlotlineData> = {}): PlotPlotlineData => ({
@@ -100,6 +101,32 @@ describe("PlotPlotlineNode", () => {
     // No editor: the roster shows as text, not inputs, and there's no Add-beat control.
     expect(screen.queryByPlaceholderText("Plotline name")).toBeNull();
     expect(screen.queryByRole("button", { name: "Add beat" })).toBeNull();
+  });
+});
+
+describe("PlotPlotlineNode beat drag source (ADR-0053 §4)", () => {
+  it("makes each read-only beat draggable and writes the (plotline, beat) payload on dragstart", async () => {
+    render(PlotPlotlineNode, { props: { id: "line_1", data: data() } });
+    const beats = screen.getAllByRole("listitem");
+    expect(beats.every((li) => li.getAttribute("draggable") === "true")).toBe(true);
+    // dragstart writes the beat-drag payload under the shared plot-DnD MIME so a card
+    // can accept it (the drop side is unchanged). Each carries the SvelteFlow node's
+    // reposition off via `nodrag` so grabbing a beat doesn't move the plotline.
+    expect(beats.every((li) => li.classList.contains("nodrag"))).toBe(true);
+
+    const setData = vi.fn();
+    const dataTransfer = { setData, effectAllowed: "none" } as unknown as DataTransfer;
+    await fireEvent.dragStart(beats[0], { dataTransfer });
+    expect(setData).toHaveBeenCalledWith(
+      PLOT_DND_MIME,
+      JSON.stringify({ kind: "beat", plotline: "line_1", beat_id: "b1" }),
+    );
+  });
+
+  it("does not make beats draggable without a node id (the mount-test degrade)", () => {
+    render(PlotPlotlineNode, { props: { data: data() } }); // no id
+    const beats = screen.getAllByRole("listitem");
+    expect(beats.every((li) => li.getAttribute("draggable") !== "true")).toBe(true);
   });
 });
 

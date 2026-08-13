@@ -47,6 +47,25 @@ BUILTIN_COMPUTED_FUNCTIONS: tuple[str, ...] = (
 )
 COMPUTED_FUNCTIONS: tuple[str, ...] = AUTHORABLE_COMPUTED_FUNCTIONS + BUILTIN_COMPUTED_FUNCTIONS
 
+# The closed vocabulary of prompt output dispositions — `context_strategy.output.kind`,
+# i.e. WHERE a prompt's output lands (ADR-0052). This is the single source of truth the
+# whole app should derive from; today the set is re-listed in the frontend
+# `PromptSurface` union and the schema-editor dropdown, which disagree. The backend
+# validates a saved prompt type's `output.kind` against this list
+# (`_validate_metadata_schema_definition`), closing the free-dict gap.
+#
+# `entry_patch` is here TRANSITIONALLY. ADR-0052 retires it in S2 into `chat_panel` +
+# an optional `commit` capability; until that slice re-authors the built-in brainstorm
+# prompts, it remains a valid kind so they keep validating. An empty/unset `output.kind`
+# is legitimate (the `snippet` base and any prompt with no output disposition) and is
+# not checked here.
+OUTPUT_KINDS: tuple[str, ...] = (
+    "append_to_body",
+    "replace_selection",
+    "chat_panel",
+    "entry_patch",
+)
+
 DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
     "version": 1,
     "entry_types": {

@@ -74,6 +74,42 @@ class MetadataValidationTests(unittest.TestCase):
             data["entry_types"]["lore:character"] = character
         self.service._write_yaml(schema_path, data)
 
+    def _schema_with_output_kind(self, kind: object) -> MetadataSchema:
+        prompt: dict[str, object] = {"name": "Custom", "kind": "prompt", "parent": "prompt:base"}
+        if kind is not None:
+            prompt["prompt"] = {"context_strategy": {"output": {"kind": kind}}}
+        else:
+            prompt["prompt"] = {"context_strategy": {"scan_surface": []}}
+        return MetadataSchema.model_validate(
+            {
+                "entry_types": {
+                    "prompt:base": {"name": "Prompt", "kind": "prompt"},
+                    "prompt:custom": prompt,
+                },
+                "fields": {},
+            }
+        )
+
+    def test_output_kind_must_be_a_known_disposition(self) -> None:
+        # ADR-0052 S1: `context_strategy.output.kind` is a closed vocabulary,
+        # validated on save. A bogus kind is a (soft) schema error.
+        errors = self.service._validate_metadata_schema_definition(self._schema_with_output_kind("not_a_kind"))
+        self.assertTrue(any("not_a_kind" in e for e in errors), errors)
+
+    def test_known_output_kinds_validate(self) -> None:
+        # Every current disposition passes, including `entry_patch` (kept
+        # transitionally until ADR-0052 S2 retires it into chat_panel + commit).
+        for kind in ("append_to_body", "replace_selection", "chat_panel", "entry_patch"):
+            errors = self.service._validate_metadata_schema_definition(self._schema_with_output_kind(kind))
+            self.assertFalse(any("output kind" in e for e in errors), (kind, errors))
+
+    def test_unset_output_kind_is_allowed(self) -> None:
+        # No output disposition (a snippet, or a prompt that produces none) is
+        # legitimate — the check only fires on a non-empty unknown kind.
+        for empty in (None, ""):
+            errors = self.service._validate_metadata_schema_definition(self._schema_with_output_kind(empty))
+            self.assertFalse(any("output kind" in e for e in errors), (empty, errors))
+
     def test_default_schema_seeds_act_and_chapter(self) -> None:
         schema = self.service.read_metadata_schema()
         self.assertIn("scene:act", schema.entry_types)

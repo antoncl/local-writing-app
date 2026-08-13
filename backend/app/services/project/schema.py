@@ -47,6 +47,7 @@ from app.services.project.default_schema import (
     AUTHORABLE_COMPUTED_FUNCTIONS,
     DEFAULT_METADATA_SCHEMA,
     INTRINSIC_FIELD_KEYS,
+    OUTPUT_KINDS,
 )
 from app.services.project.errors import ProjectServiceError
 from app.services.project.layers import SCHEMA_FILENAME
@@ -1417,6 +1418,19 @@ class MetadataSchemaMixin:
                 seen_inputs.add(input_def.name)
                 if input_def.type == "select" and not input_def.options:
                     errors.append(f"Entry type {entry_type_id} input '{input_def.name}' is type select but has no options.")
+            # ADR-0052: `output.kind` (where the prompt's output lands) is a closed
+            # vocabulary. An unset/empty kind is legitimate (snippet, or a prompt with
+            # no output disposition); a non-empty one must be a known disposition. A
+            # soft error like the rest here — a hand-edited layer stays readable, and
+            # the save paths surface it (they raise on any returned error).
+            strategy = entry_type.prompt.context_strategy
+            output = strategy.output if strategy else None
+            output_kind = output.get("kind") if isinstance(output, dict) else None
+            if output_kind and output_kind not in OUTPUT_KINDS:
+                errors.append(
+                    f"Entry type {entry_type_id} declares output kind '{output_kind}', "
+                    f"not one of the known dispositions ({', '.join(OUTPUT_KINDS)})."
+                )
 
         for field_id, field in schema.fields.items():
             if field.type == "computed":

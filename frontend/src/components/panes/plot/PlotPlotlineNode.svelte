@@ -86,8 +86,11 @@
   // picks up any external change. A load that resolves after a collapse is dropped.
   $effect(() => {
     if (!actions || !isExpanded) {
-      draft = null;
-      beats = [];
+      // Keep `draft` / `beats` across a collapse. A field blur queues its save a beat
+      // before a pane-background click collapses the node; nulling the draft here would
+      // make that queued save a no-op and silently drop the edit. They're invisible
+      // while collapsed and overwritten by the next expand's reload — only the transient
+      // UI state resets.
       detailsOpen = new Set();
       loadError = null;
       return;
@@ -144,20 +147,23 @@
   }
   async function doCommit(): Promise<void> {
     if (!draft || !actions) return;
+    const target = draft;
     const entry = buildEntry();
     saving = true;
     try {
       const saved = await actions.save(entry);
-      if (!draft) return;
-      // Advance the local revision for the next save, and capture the backend-stamped
-      // beat ids positionally (same order we sent) so an id-less new beat isn't re-minted
-      // on every subsequent save.
-      draft.revision = saved.revision;
-      const savedBeats = Array.isArray(saved.metadata.instance_beats) ? saved.metadata.instance_beats : [];
-      beats.forEach((b, i) => {
-        const sid = (savedBeats[i] as { id?: unknown } | undefined)?.id;
-        if (typeof sid === "string") b.id = sid;
-      });
+      // Only reconcile if we're still editing the SAME loaded draft — a re-expand may
+      // have reloaded a fresh one while this save was in flight. Advance the local
+      // revision for the next save, and capture the backend-stamped beat ids positionally
+      // (same order we sent) so an id-less new beat isn't re-minted on every save.
+      if (draft === target) {
+        draft.revision = saved.revision;
+        const savedBeats = Array.isArray(saved.metadata.instance_beats) ? saved.metadata.instance_beats : [];
+        beats.forEach((b, i) => {
+          const sid = (savedBeats[i] as { id?: unknown } | undefined)?.id;
+          if (typeof sid === "string") b.id = sid;
+        });
+      }
     } catch {
       // The save failed (the provider surfaces it). Resync from the server so the next
       // edit starts from a valid revision instead of looping 409s — this reverts the

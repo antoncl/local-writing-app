@@ -20,6 +20,7 @@
   import { SvelteFlow, Controls, type ColorMode, type Edge } from "@xyflow/svelte";
   import { themePreference } from "@/lib/utils/theme";
   import {
+    boardIsEmpty,
     buildBoardNodes,
     overriddenNodePositions,
     projectionDataKey,
@@ -52,17 +53,19 @@
     plotlineEntriesStore,
     deletePlotline,
     createPlotlineOnBoard,
+    instantiateTemplateOnBoard,
     savePlotlineEntry,
     getPlotlineEntry,
     plotlineReveal,
   } from "@/lib/stores/plotlines";
+  import { plotTemplatesStore, deletePlotTemplateEntry } from "@/lib/stores/plotTemplates";
   import UndoRedoControls from "@/components/UndoRedoControls.svelte";
   import ViewportFit from "@/components/editor/body/view/ViewportFit.svelte";
   import PlotCardNodeFlow from "./plot/PlotCardNodeFlow.svelte";
   import PlotContainerNode from "./plot/PlotContainerNode.svelte";
   import PlotPlotlineNode from "./plot/PlotPlotlineNode.svelte";
   import PlotCausalEdge from "./plot/PlotCausalEdge.svelte";
-  import PlotPlotlineRail from "./plot/PlotPlotlineRail.svelte";
+  import PlotTemplatePalette from "./plot/PlotTemplatePalette.svelte";
   import Popover from "@/components/chrome/Popover.svelte";
   import {
     PLOT_CARD_ACTIONS,
@@ -182,6 +185,7 @@
         throw e;
       }
     },
+    onDelete: (id) => removePlotline(id),
   });
 
   // A card's `plotline` backlink no longer opens an editor pane — it reveals the
@@ -262,18 +266,61 @@
     }
   }
 
-  // The plotlines rail (#737) — the always-loaded plotline roster + a card count per
-  // thread (from the projection) for its count pill, and a swatch dot per row that
-  // doubles as the board's colour legend. Actions route to editorPanes (create / open)
-  // and the store's delete (which also refreshes the board so recoloured cards update).
-  let plotlineRailOpen = $state(false);
+  // The template palette (ADR-0053 §2) — the board's rail is now the SOURCE you spawn
+  // plotlines from (the Plotlines rail is retired: a plotline is a node on the canvas).
+  // `plotTemplatesStore` is loaded on project open (the fan-out), so the palette has its
+  // roster whether or not the TopBar Plot-templates pane was ever opened.
+  let paletteOpen = $state(false);
+  let templates = $derived($plotTemplatesStore);
   let plotlines = $derived($plotlineEntriesStore);
-  let plotlineCardCounts = $derived(
-    (projection?.cards ?? []).reduce<Record<string, number>>((acc, card) => {
-      if (card.plotline) acc[card.plotline] = (acc[card.plotline] ?? 0) + 1;
-      return acc;
-    }, {}),
-  );
+
+  // Instantiate a template → a plotline node, expanded for editing (the createPlotlineOnBoard
+  // shape). The Empty tile is `newPlotline` (an ad-hoc, beat-less plotline).
+  async function instantiateTemplate(id: string): Promise<void> {
+    if (creatingPlotline) return; // shares newPlotline's guard — one mint per gesture
+    creatingPlotline = true;
+    try {
+      expandedPlotlineId = await instantiateTemplateOnBoard(id);
+      editorPanes.setStatus("Created plotline from template");
+    } catch (e) {
+      editorPanes.setError(e instanceof Error ? e.message : "Could not instantiate the template.");
+    } finally {
+      creatingPlotline = false;
+    }
+  }
+
+  // Clone a Library template into the project (ADR-0049) and open it to author its beats.
+  // forkPlotTemplate refreshes the roster + opens the clone; it can throw, so surface a
+  // failure in the banner (App wraps the same call in its own error sink).
+  async function cloneTemplate(id: string): Promise<void> {
+    try {
+      await editorPanes.forkPlotTemplate(id);
+    } catch (e) {
+      editorPanes.setError(e instanceof Error ? e.message : "Could not clone the template.");
+    }
+  }
+
+  // Delete an owned template clone from the palette (destructive → confirm). A plotline
+  // already instantiated from it is unaffected (its beats were snapshotted, not linked).
+  function removeTemplate(id: string): void {
+    const tpl = templates.find((t) => t.id === id);
+    confirmService.request({
+      title: "Delete template",
+      message: `Delete ${tpl?.title ? `“${tpl.title}”` : "this template"}? Plotlines already made from it keep their beats.`,
+      confirmLabel: "Delete template",
+      destructive: true,
+      onConfirm: async () => {
+        await deletePlotTemplateEntry(id);
+        // Close a NodeEditor pane open on this template ("Edit"): the node is gone, so a
+        // save would 404. Mirrors removeCard's post-delete tearDown.
+        const openPane = editorPanes.panes.find((p) => p.document?.id === id);
+        if (openPane) editorPanes.tearDown(openPane.id);
+      },
+    });
+  }
+
+  // Delete a plotline — the node's "Delete plotline" (the retired rail used to own this).
+  // Confirmed; cards on the thread revert to Unassigned. Collapse the editor if it was open.
   function removePlotline(id: string): void {
     const line = plotlines.find((p) => p.id === id);
     confirmService.request({
@@ -282,6 +329,7 @@
       confirmLabel: "Remove plotline",
       destructive: true,
       onConfirm: async () => {
+        if (expandedPlotlineId === id) expandedPlotlineId = null;
         await deletePlotline(id);
       },
     });
@@ -331,10 +379,10 @@
   // Svelte Flow ships light-only chrome; drive its theme from the app's.
   let colorMode = $derived($themePreference as ColorMode);
 
-  // Empty = the singleton exists but holds no cards yet. The board lays out CARDS
-  // (in their containers); plotlines are only a colour axis and never render alone,
-  // so a board with plotlines but no cards is still an empty canvas — hint, not blank.
-  let isEmpty = $derived(!!projection && projection.cards.length === 0);
+  // Empty (show the hint, hide the canvas) only when the board has neither cards nor
+  // plotlines — a plotline is a first-class node now (ADR-0053), so a plotline-only board
+  // must still render. Pure predicate (unit-tested) since the canvas isn't headless.
+  let isEmpty = $derived(!!projection && boardIsEmpty(projection));
 
   // (Re)hydrate from a fetched projection. Guarded on the DATA-key so it fires once
   // per data change, not per projection reference: a layout save doesn't touch the
@@ -475,12 +523,12 @@
       <div class="toolbar-actions">
         <button
           class="board-btn"
-          class:active={plotlineRailOpen}
-          aria-pressed={plotlineRailOpen}
-          onclick={() => (plotlineRailOpen = !plotlineRailOpen)}
+          class:active={paletteOpen}
+          aria-pressed={paletteOpen}
+          onclick={() => (paletteOpen = !paletteOpen)}
         >
           <i class="ti ti-palette" aria-hidden="true"></i>
-          Plotlines{plotlines.length ? ` (${plotlines.length})` : ""}
+          Templates{templates.length ? ` (${templates.length})` : ""}
         </button>
         <!-- Edge layers (Slice 6a): a popover of the board's toggleable dimensions.
              `layers-wrap` is the position:relative anchor Popover drops from. -->
@@ -527,10 +575,6 @@
           <i class="ti ti-plus" aria-hidden="true"></i>
           New card
         </button>
-        <button class="board-btn" onclick={newPlotline} disabled={creatingPlotline}>
-          <i class="ti ti-plus" aria-hidden="true"></i>
-          New plotline
-        </button>
         <button class="board-btn" onclick={seed}>
           <i class="ti ti-seedling" aria-hidden="true"></i>
           Seed from manuscript
@@ -559,18 +603,19 @@
       {/if}
     </div>
     <div class="board-main">
-      {#if plotlineRailOpen}
-        <PlotPlotlineRail
-          {plotlines}
-          cardCounts={plotlineCardCounts}
-          onCreate={() => void newPlotline()}
-          onOpen={(id) => (expandedPlotlineId = id)}
-          onRemove={removePlotline}
+      {#if paletteOpen}
+        <PlotTemplatePalette
+          entries={templates}
+          onInstantiate={(id) => void instantiateTemplate(id)}
+          onEmpty={() => void newPlotline()}
+          onClone={(id) => void cloneTemplate(id)}
+          onEdit={(id) => void editorPanes.openPlotTemplate(id)}
+          onDelete={removeTemplate}
         />
       {/if}
       <div class="board-body">
     {#if isEmpty}
-      <p class="board-hint muted">No cards yet. Seed cards from the manuscript, or add one, to begin.</p>
+      <p class="board-hint muted">Nothing here yet. Seed cards from the manuscript or add one, or open Templates to start a plotline.</p>
     {:else}
       <div class="board-canvas">
       <SvelteFlow

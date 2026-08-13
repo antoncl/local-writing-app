@@ -29,6 +29,10 @@ export type PlotPlotlineActions = {
   // ids. The provider surfaces a failure in the app banner AND rethrows, so the node
   // resyncs from the server rather than looping stale-revision saves.
   save: (entry: PlotlineEntry) => Promise<PlotlineEntry>;
+  // Delete the plotline (ADR-0053 §3 — the Plotlines rail that used to own delete is
+  // retired). The provider confirms (destructive) before the backend delete; cards on
+  // the thread revert to Unassigned. Fire-and-forget from the node's perspective.
+  onDelete: (id: string) => void;
 };
 
 // Symbol key so the context can't collide with a string-keyed one.

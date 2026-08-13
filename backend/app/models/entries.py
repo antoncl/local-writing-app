@@ -328,11 +328,11 @@ class PlotBoardCard(BaseModel):
 
 
 class PlotBoardProjection(BaseModel):
-    """The read model the PlotEditor board renders from (ADR-0048 S7a): the
-    plotlines, the manuscript containers (Slice 4), the cards with their refs,
-    and the board's opaque `layout` payload (card positions — its shape is the
-    canvas's, S7c). Computed and read-only; defined over card + plotline +
-    structure + board data only, never templates or beats (those arrive in S8)."""
+    """The read model the PlotEditor board renders from (ADR-0048 S7a; ADR-0053): the
+    plotlines (with their beat rosters), the manuscript containers (Slice 4), the
+    cards with their refs, and the board's opaque `layout` payload (card positions —
+    its shape is the canvas's, S7c). Computed and read-only; defined over card +
+    plotline + structure + board data only, never the read-only Library templates."""
 
     board_id: str = ""
     board_revision: str = ""

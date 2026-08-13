@@ -873,6 +873,7 @@ class PlotMixin:
         onto the cards in memory, so the projection adds no per-card structure I/O.
         """
         board = self.read_plot_board()
+        plotline_entries = self.list_plotlines().entries
         plotlines = [
             PlotBoardPlotline(
                 id=line.id,
@@ -880,21 +881,21 @@ class PlotMixin:
                 color=line.metadata.get("color") or None,
                 beats=self._plotline_board_beats(line.metadata),
             )
-            for line in self.list_plotlines().entries
+            for line in plotline_entries
         ]
         containers, scene_to_container, scene_to_order = self._board_container_map()
         # Resolve card→beat badges against the live plotlines once per projection
         # (Slice 5b; ADR-0053): the stored links carry only ids, so this catalog turns
-        # each into a titled badge with a map lookup instead of a read per link. Read
-        # only the plotlines some card actually links — a plotline no card points at
-        # costs no front-matter read (and a board with no beat links reads none).
+        # each into a titled badge with a map lookup instead of a read per link. Built
+        # from the plotlines already listed above — no second front-matter read — and
+        # limited to the plotlines some card actually links.
         card_entries = self.list_cards().entries
         referenced_plotlines = {
             plotline_id
             for card in card_entries
             for plotline_id, _beat_id in self._iter_valid_beat_link_pairs(card.metadata.get(_BEAT_LINK_FIELD))
         }
-        beat_catalog = self._plotline_beat_catalog(self._build_node_index(), referenced_plotlines)
+        beat_catalog = self._plotline_beat_catalog(plotline_entries, referenced_plotlines)
         # The live card ids, so authored causal links resolve to real edge endpoints
         # (Slice 6b) — the display side of `_heal_causal_links`, symmetric with the
         # beat catalog above.
@@ -997,48 +998,42 @@ class PlotMixin:
         return stored if stored in ("off_page", "unwritten") else None
 
     @staticmethod
-    def _plotline_board_beats(metadata: dict[str, Any]) -> list[PlotBoardPlotlineBeat]:
-        """A plotline's beat roster as the board node renders it (ADR-0053 §3): each
-        beat's stable id + title, in stored order. Beats without an id are skipped
-        (the plotline's own writes id-heal the roster, so this is belt-and-braces)."""
+    def _iter_roster_beats(metadata: dict[str, Any]) -> Iterator[dict[str, Any]]:
+        """Yield each well-formed beat dict — one carrying a non-empty string `id` —
+        from a plotline's `instance_beats` roster, in stored order (ADR-0053). One
+        place decides what a valid roster beat is, so the board-node roster, the
+        card-badge catalog, and the AI context can't drift on it. A plotline's own
+        writes id-heal the roster, so a beat lacking an id is a belt-and-braces skip."""
         raw = metadata.get("instance_beats")
-        beats: list[PlotBoardPlotlineBeat] = []
-        if isinstance(raw, list):
-            for beat in raw:
-                if isinstance(beat, dict) and isinstance(beat.get("id"), str) and beat["id"]:
-                    beats.append(PlotBoardPlotlineBeat(beat_id=beat["id"], title=str(beat.get("title") or "")))
-        return beats
+        if not isinstance(raw, list):
+            return
+        for beat in raw:
+            if isinstance(beat, dict) and isinstance(beat.get("id"), str) and beat["id"]:
+                yield beat
+
+    def _plotline_board_beats(self, metadata: dict[str, Any]) -> list[PlotBoardPlotlineBeat]:
+        """A plotline's beat roster as the board node renders it (ADR-0053 §3): each
+        beat's stable id + title, in stored order."""
+        return [
+            PlotBoardPlotlineBeat(beat_id=beat["id"], title=str(beat.get("title") or ""))
+            for beat in self._iter_roster_beats(metadata)
+        ]
 
     def _plotline_beat_catalog(
-        self, index: Any, referenced: set[str]
+        self, plotline_entries, referenced: set[str]
     ) -> dict[str, tuple[str, str | None, dict[str, str]]]:
         """`plotline_id -> (plotline title, plotline colour, {beat_id: beat title})` for
-        each `referenced` live `plot:plotline` (ADR-0048 S7 Slice 5b; ADR-0053) — the
-        plotlines some card actually links, so a plotline no card points at costs no
-        read. One front-matter read per referenced plotline, built once per projection
-        so a card's beat badges resolve by map lookup rather than a read per link. The
-        colour lets the board tint a card's badges by their plotline (usability pass).
-        An unreadable plotline is skipped — it resolves no beats, so its links drop,
-        matching `_heal_beat_links`."""
+        each `referenced` plotline (ADR-0048 S7 Slice 5b; ADR-0053), so a card's beat
+        badges resolve by map lookup rather than a read per link. Built from the
+        plotline summaries the projection already listed — no second front-matter read;
+        an unreadable plotline never enters that list, so its links drop, matching
+        `_heal_beat_links`. The colour lets the board tint a card's badges by plotline."""
         catalog: dict[str, tuple[str, str | None, dict[str, str]]] = {}
-        for entry in index.by_id.values():
-            if entry.entry_type != PLOT_PLOTLINE_ENTRY_TYPE:
-                continue
+        for entry in plotline_entries:
             if entry.id not in referenced:
                 continue
-            try:
-                front_matter = self._read_front_matter_only(entry.path, strict=True)
-            except ProjectServiceError:
-                continue
-            metadata = self._normalise_metadata(front_matter.get("metadata"), entry.path)
-            beats = metadata.get("instance_beats")
-            titles: dict[str, str] = {}
-            if isinstance(beats, list):
-                for beat in beats:
-                    if isinstance(beat, dict) and isinstance(beat.get("id"), str) and beat["id"]:
-                        titles[beat["id"]] = str(beat.get("title") or "")
-            color = metadata.get("color") or None
-            catalog[entry.id] = (str(front_matter.get("title") or entry.id), color, titles)
+            titles = {beat["id"]: str(beat.get("title") or "") for beat in self._iter_roster_beats(entry.metadata)}
+            catalog[entry.id] = (entry.title, entry.metadata.get("color") or None, titles)
         return catalog
 
     def _resolve_card_beats(

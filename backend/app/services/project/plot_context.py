@@ -46,11 +46,10 @@ from app.models import (
 # same schema field-name literals plot.py reads them by; named here for legibility.
 # The card→beat and card→causal resolutions, which key off plot.py's own
 # `beat_links` / `causal_links` constants, are delegated to its `_resolve_card_beats`
-# / `_resolve_card_causal`, so those keys are not restated here (no shared-constant
-# drift seam to keep in sync).
+# / `_resolve_card_causal`; the plotline beat roster is walked via PlotMixin's shared
+# `_iter_roster_beats`, so those keys are not restated here (no drift seam to sync).
 _SCENE_FIELD = "scene"
 _PLOTLINE_FIELD = "plotline"
-_INSTANCE_BEATS_FIELD = "instance_beats"
 _SOURCE_TEMPLATE_NAME_FIELD = "source_template_name"
 _COLOR_FIELD = "color"
 
@@ -140,24 +139,17 @@ class PlotContextMixin:
             plotline_titles[line.id] = line.title
             beats: list[PlotContextBeat] = []
             titles: dict[str, str] = {}
-            raw = line.metadata.get(_INSTANCE_BEATS_FIELD)
-            if isinstance(raw, list):
-                for beat in raw:
-                    if not isinstance(beat, dict):
-                        continue
-                    beat_id = beat.get("id")
-                    if not isinstance(beat_id, str) or not beat_id:
-                        continue
-                    title = str(beat.get("title") or "")
-                    beats.append(
-                        PlotContextBeat(
-                            beat_id=beat_id,
-                            title=title,
-                            function=str(beat.get("function") or ""),
-                            guidance=str(beat.get("guidance") or ""),
-                        )
+            for beat in self._iter_roster_beats(line.metadata):
+                title = str(beat.get("title") or "")
+                beats.append(
+                    PlotContextBeat(
+                        beat_id=beat["id"],
+                        title=title,
+                        function=str(beat.get("function") or ""),
+                        guidance=str(beat.get("guidance") or ""),
                     )
-                    titles[beat_id] = title
+                )
+                titles[beat["id"]] = title
             plotlines.append(
                 PlotContextPlotline(
                     id=line.id,

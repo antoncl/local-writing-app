@@ -118,6 +118,9 @@ class PlotContextHelperTests(_PlotAiContextBase):
         self.assertIn('<leads_to card="Effect"', out)  # the causal edge, title-resolved
         self.assertIn("GUIDANCE_TEXT", out)  # beat guidance renders as element text
         self.assertIn("</beat>", out)  # a beat with guidance is an element, not self-closing
+        # The beatless "Romance" plotline is a self-closed element (ad-hoc / no beats),
+        # still present so the AI sees the thread even before it is beaten out.
+        self.assertIn('<plotline title="Romance" />', out)
 
 
 class RevisePlotCardPromptTests(_PlotAiContextBase):

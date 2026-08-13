@@ -21,7 +21,7 @@
   import { themePreference } from "@/lib/utils/theme";
   import {
     buildBoardNodes,
-    overriddenCardPositions,
+    overriddenNodePositions,
     projectionDataKey,
     readBoardPositions,
     type PlotBoardNode,
@@ -293,7 +293,7 @@
     revision = projection.board_revision;
     // Snapshot from the local `nodes` (not reactive flowNodes) so a never-touched
     // board doesn't save on open and this effect stays subscribed to `projection` only.
-    lastSavedPositions = JSON.stringify(overriddenCardPositions(nodes, overriddenIds));
+    lastSavedPositions = JSON.stringify(overriddenNodePositions(nodes, overriddenIds));
     dragging = false;
     undoCtl.reset();
   });
@@ -333,7 +333,7 @@
   // never writes.
   $effect(() => {
     if (!projection || dragging) return;
-    const positions = overriddenCardPositions(flowNodes, overriddenIds);
+    const positions = overriddenNodePositions(flowNodes, overriddenIds);
     const serialized = JSON.stringify(positions);
     if (serialized === lastSavedPositions) return;
     const handle = setTimeout(() => void persist(positions, serialized), SAVE_DEBOUNCE_MS);
@@ -346,7 +346,7 @@
   // the deferred save-state machine (#756).
   onDestroy(() => {
     if (!projection || dragging) return;
-    const positions = overriddenCardPositions(flowNodes, overriddenIds);
+    const positions = overriddenNodePositions(flowNodes, overriddenIds);
     const serialized = JSON.stringify(positions);
     if (serialized !== lastSavedPositions) void persist(positions, serialized);
   });

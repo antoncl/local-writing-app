@@ -13,9 +13,10 @@
 // chapter box sits inside its act box. Cards drag and their positions persist
 // (S7c), exactly as before — a container carries no position and is never stored.
 //
-// `readBoardPositions` / `cardPositionsFromNodes` / `overriddenCardPositions` are
+// `readBoardPositions` / `movableNodePositions` / `overriddenNodePositions` are
 // the read/write ends of the board's opaque `layout` dict the PlotEditor round-trips;
-// they key on the `plotCard` node type, so container boxes never enter the layout.
+// they key on the draggable node types (`plotCard` + `plotPlotline`), so the derived
+// container boxes never enter the layout.
 
 import type { CoordinateExtent, Node } from "@xyflow/svelte";
 import type { BoardXY, PlotBoardBeat, PlotBoardLayout, PlotBoardPlotlineBeat, PlotBoardProjection } from "@/lib/types";
@@ -328,7 +329,7 @@ export function readBoardPositions(layout: Record<string, unknown>): Record<stri
 // are stored raw (not rounded) so the persist threshold matches moveNodesCommand's
 // raw-inequality drag record: rounding here would let a sub-pixel drag record an undo
 // step that saved nothing, so a later Ctrl+Z would reverse an invisible move.
-export function cardPositionsFromNodes(nodes: PlotBoardNode[]): Record<string, BoardXY> {
+export function movableNodePositions(nodes: PlotBoardNode[]): Record<string, BoardXY> {
   const out: Record<string, BoardXY> = {};
   for (const n of nodes) {
     if (n.type === "plotCard" || n.type === "plotPlotline") out[n.id] = { x: n.position.x, y: n.position.y };
@@ -341,8 +342,8 @@ export function cardPositionsFromNodes(nodes: PlotBoardNode[]): Record<string, B
 // un-placed card is absent, so it derives from its container — which is what lets a
 // re-attachment reflow it into its new container. Pinning every card (the S7c
 // behaviour) would strand a re-homed card in its old container's band.
-export function overriddenCardPositions(nodes: PlotBoardNode[], overridden: Set<string>): Record<string, BoardXY> {
-  const all = cardPositionsFromNodes(nodes);
+export function overriddenNodePositions(nodes: PlotBoardNode[], overridden: Set<string>): Record<string, BoardXY> {
+  const all = movableNodePositions(nodes);
   const out: Record<string, BoardXY> = {};
   for (const id of Object.keys(all)) {
     if (overridden.has(id)) out[id] = all[id];

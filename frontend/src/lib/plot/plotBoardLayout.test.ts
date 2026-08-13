@@ -6,9 +6,9 @@
 import { describe, expect, it } from "vitest";
 import {
   buildBoardNodes,
-  cardPositionsFromNodes,
+  movableNodePositions,
   containerExtent,
-  overriddenCardPositions,
+  overriddenNodePositions,
   projectionDataKey,
   readBoardPositions,
   CARD_GAP_X,
@@ -258,13 +258,13 @@ describe("readBoardPositions", () => {
   });
 });
 
-describe("cardPositionsFromNodes", () => {
+describe("movableNodePositions", () => {
   it("serializes only card positions raw (unrounded), excluding container boxes", () => {
     const nodes = buildBoardNodes(
       projection({ containers: [container("chap", "Chapter 1")], cards: [card("c1", { container: "chap" })] }),
       { c1: { x: 12.4, y: 7.6 } },
     );
-    const positions = cardPositionsFromNodes(nodes);
+    const positions = movableNodePositions(nodes);
     // Raw, not rounded — the persist threshold must match moveNodesCommand's raw
     // drag record, else a sub-pixel move records an undo step that saves nothing.
     expect(positions).toEqual({ c1: { x: 12.4, y: 7.6 } });
@@ -277,12 +277,12 @@ describe("cardPositionsFromNodes", () => {
       projection({ containers: [container("chap", "Chapter 1")], cards: [card("c1", { container: "chap" })] }),
       { c1: { x: 5, y: 6 } },
     );
-    const serialized = { positions: cardPositionsFromNodes(nodes) };
+    const serialized = { positions: movableNodePositions(nodes) };
     expect(readBoardPositions(serialized)).toEqual({ c1: { x: 5, y: 6 } });
   });
 });
 
-describe("overriddenCardPositions (sparse persist)", () => {
+describe("overriddenNodePositions (sparse persist)", () => {
   const proj = () =>
     projection({
       containers: [container("chap", "Chapter 1")],
@@ -292,13 +292,13 @@ describe("overriddenCardPositions (sparse persist)", () => {
   it("keeps only the cards in the override set", () => {
     const nodes = buildBoardNodes(proj());
     // Only c1 is pinned; c2 derives from its container and must not be persisted.
-    expect(overriddenCardPositions(nodes, new Set(["c1"]))).toHaveProperty("c1");
-    expect(overriddenCardPositions(nodes, new Set(["c1"]))).not.toHaveProperty("c2");
+    expect(overriddenNodePositions(nodes, new Set(["c1"]))).toHaveProperty("c1");
+    expect(overriddenNodePositions(nodes, new Set(["c1"]))).not.toHaveProperty("c2");
   });
 
   it("is empty when nothing is overridden (a never-dragged board saves nothing)", () => {
     const nodes = buildBoardNodes(proj());
-    expect(overriddenCardPositions(nodes, new Set())).toEqual({});
+    expect(overriddenNodePositions(nodes, new Set())).toEqual({});
   });
 });
 
@@ -474,10 +474,10 @@ describe("plotline nodes (ADR-0053 §3)", () => {
       }),
     );
     // A plotline node's position is collected by the shared serializer…
-    expect(cardPositionsFromNodes(nodes)).toHaveProperty("p1");
+    expect(movableNodePositions(nodes)).toHaveProperty("p1");
     // …and persists only when overridden (dragged this session / already saved).
-    expect(overriddenCardPositions(nodes, new Set(["p1"]))).toHaveProperty("p1");
-    expect(overriddenCardPositions(nodes, new Set(["c1"]))).not.toHaveProperty("p1");
+    expect(overriddenNodePositions(nodes, new Set(["p1"]))).toHaveProperty("p1");
+    expect(overriddenNodePositions(nodes, new Set(["c1"]))).not.toHaveProperty("p1");
   });
 
   it("changes the data-key when a plotline's beat roster changes (→ reflow)", () => {

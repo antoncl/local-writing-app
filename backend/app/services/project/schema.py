@@ -45,6 +45,7 @@ from app.models import (
 from app.services.project import schema_cache
 from app.services.project.default_schema import (
     AUTHORABLE_COMPUTED_FUNCTIONS,
+    COMMIT_REVIEW_MODES,
     DEFAULT_METADATA_SCHEMA,
     INTRINSIC_FIELD_KEYS,
     OUTPUT_KINDS,
@@ -1418,19 +1419,32 @@ class MetadataSchemaMixin:
                 seen_inputs.add(input_def.name)
                 if input_def.type == "select" and not input_def.options:
                     errors.append(f"Entry type {entry_type_id} input '{input_def.name}' is type select but has no options.")
-            # ADR-0054: `output.kind` (where the prompt's output lands) is a closed
-            # vocabulary. An unset/empty kind is legitimate (snippet, or a prompt with
-            # no output disposition); a non-empty one must be a known disposition. A
-            # soft error like the rest here — a hand-edited layer stays readable, and
-            # the save paths surface it (they raise on any returned error).
+            # ADR-0054: `output` is two things — a disposition (`kind`, where the
+            # prompt's output lands, a closed vocabulary) and an optional `commit`
+            # (only meaningful under `chat_panel`). An unset/empty kind is legitimate
+            # (snippet, or a prompt with no output disposition); a non-empty one must
+            # be a known disposition, a `commit` may ride only on `chat_panel`, and a
+            # commit's `review` must be a known mode. Soft errors like the rest here —
+            # a hand-edited layer stays readable, and the save paths surface them.
             strategy = entry_type.prompt.context_strategy
             output = strategy.output if strategy else None
-            output_kind = output.get("kind") if output else None
-            if output_kind and output_kind not in OUTPUT_KINDS:
-                errors.append(
-                    f"Entry type {entry_type_id} declares output kind '{output_kind}', "
-                    f"not one of the known dispositions ({', '.join(OUTPUT_KINDS)})."
-                )
+            if output:
+                if output.kind and output.kind not in OUTPUT_KINDS:
+                    errors.append(
+                        f"Entry type {entry_type_id} declares output kind '{output.kind}', "
+                        f"not one of the known dispositions ({', '.join(OUTPUT_KINDS)})."
+                    )
+                if output.commit is not None:
+                    if output.kind != "chat_panel":
+                        errors.append(
+                            f"Entry type {entry_type_id} declares a commit but its output kind is "
+                            f"'{output.kind or 'unset'}'; only chat_panel output can carry a commit."
+                        )
+                    if output.commit.review not in COMMIT_REVIEW_MODES:
+                        errors.append(
+                            f"Entry type {entry_type_id} declares commit review '{output.commit.review}', "
+                            f"not one of the known modes ({', '.join(COMMIT_REVIEW_MODES)})."
+                        )
 
         for field_id, field in schema.fields.items():
             if field.type == "computed":

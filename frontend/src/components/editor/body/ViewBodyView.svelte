@@ -311,7 +311,7 @@
   });
 
   // ---- preview universe for the anchor kind ----
-  // The chat roster lifted to EvalNodes (subject + derived seed_output_kind),
+  // The chat roster lifted to EvalNodes (subject + derived seed_committing),
   // the same lift the Chats pane uses — so designing a chat view previews the
   // real chats instead of "No chat nodes to preview" (ADR-0051 S6 follow-up).
   let chatUniverse = $derived<EvalNode[]>(chatSummariesToEvalNodes($chatSessionsStore, promptEntries, schema));

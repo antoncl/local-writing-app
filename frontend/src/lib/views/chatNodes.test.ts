@@ -2,14 +2,15 @@ import { describe, expect, it } from "vitest";
 import { chatSummariesToEvalNodes } from "./chatNodes";
 import type { ChatSessionSummary, MetadataSchema, PromptEntrySummary } from "@/lib/types";
 
-// A schema whose prompt types carry the output kinds that decide openability.
+// A schema whose prompt types decide openability: the brainstorm declares a
+// `commit` (ADR-0054 §2), the plain chat does not.
 const SCHEMA = {
   entry_types: {
     "prompt:general": { name: "General", kind: "prompt", prompt: { context_strategy: { output: { kind: "chat_panel" } } } },
     "prompt:revise:entry": {
       name: "Revise entry",
       kind: "prompt",
-      prompt: { context_strategy: { output: { kind: "entry_patch" } } },
+      prompt: { context_strategy: { output: { kind: "chat_panel", commit: { review: "visual_diff" } } } },
     },
   },
   fields: {},
@@ -48,23 +49,23 @@ function chat(id: string, promptId: string, subject = ""): ChatSessionSummary {
 describe("chatSummariesToEvalNodes (ADR-0051 S6 follow-up)", () => {
   const prompts = [prompt("p_general", "prompt:general"), prompt("p_revise", "prompt:revise:entry")];
 
-  it("derives seed_output_kind from the seeding prompt's output kind", () => {
+  it("derives seed_committing from whether the seeding prompt declares a commit", () => {
     const nodes = chatSummariesToEvalNodes(
       [chat("c_general", "p_general"), chat("c_brainstorm", "p_revise")],
       prompts,
       SCHEMA,
     );
     const byId = new Map(nodes.map((n) => [n.id, n]));
-    expect(byId.get("c_general")?.metadata.seed_output_kind).toBe("chat_panel");
-    expect(byId.get("c_brainstorm")?.metadata.seed_output_kind).toBe("entry_patch");
+    expect(byId.get("c_general")?.metadata.seed_committing).toBe(""); // plain chat, no commit
+    expect(byId.get("c_brainstorm")?.metadata.seed_committing).toBe("commit");
   });
 
   it("leaves a freeform chat (no prompt) empty — the openable default", () => {
     const [node] = chatSummariesToEvalNodes([chat("c_free", "")], prompts, SCHEMA);
-    expect(node.metadata.seed_output_kind).toBe("");
+    expect(node.metadata.seed_committing).toBe("");
   });
 
-  it("places subject in metadata alongside the derived kind", () => {
+  it("places subject in metadata alongside the derived marker", () => {
     const [node] = chatSummariesToEvalNodes([chat("c", "p_general", "lore-a")], prompts, SCHEMA);
     expect(node.metadata.subject).toBe("lore-a");
     expect(node.entry_type).toBe("chat:chat_session");

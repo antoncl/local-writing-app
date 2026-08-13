@@ -14,7 +14,10 @@ import type {
   PromptInputDefinition,
 } from "@/lib/types";
 
-export type PromptSurface = "append_to_body" | "replace_selection" | "chat_panel" | "entry_patch";
+// The output dispositions a prompt can select (ADR-0054 §1), mirroring the
+// backend `OUTPUT_KINDS`. A brainstorm is no longer a fifth surface — it is
+// `chat_panel` + a `commit`, asked via `promptDeclaresCommit` below.
+export type PromptSurface = "append_to_body" | "replace_selection" | "chat_panel";
 
 // A snapshot of the reactive data the resolvers read. ProseBodyView builds
 // this as a `$derived` and passes it (or a getter onto it) at each call.
@@ -38,6 +41,19 @@ export function effectiveOutputKind(
   const output = definition?.prompt?.context_strategy?.output;
   if (!output || typeof output.kind !== "string") return null;
   return output.kind;
+}
+
+// True iff the prompt declares a `commit` (ADR-0054 §2) — i.e. it is a brainstorm
+// whose chat-panel output can be extracted to a target node as a reviewable patch.
+// This is the routing question dispatch asks now, in place of the retired
+// `output.kind === "entry_patch"`. A commit only rides on `chat_panel`, so the
+// presence of the object is the whole test.
+export function promptDeclaresCommit(
+  ctx: PromptResolutionContext,
+  entry: PromptEntrySummary,
+): boolean {
+  const definition = ctx.metadataSchema?.entry_types[entry.entry_type];
+  return !!definition?.prompt?.context_strategy?.output?.commit;
 }
 
 // Drop the writer's hidden built-in Library prompts (ADR-0049 slice 3) from a
@@ -70,6 +86,17 @@ export function promptEntriesForSurface(
     .sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }));
 }
 
+// The brainstorm prompts — those declaring a `commit` (ADR-0054 §2) — as a
+// discovery roster (hidden built-ins dropped, sorted), the commit-era replacement
+// for `promptEntriesForSurface(ctx, "entry_patch")`. Callers that need the ones a
+// given node admits narrow further with `promptTargetsEntryType`.
+export function promptEntriesWithCommit(ctx: PromptResolutionContext): PromptEntrySummary[] {
+  if (!ctx.metadataSchema) return [];
+  return hidePromptEntries(ctx.promptEntries, ctx.hiddenPromptIds)
+    .filter((entry) => promptDeclaresCommit(ctx, entry))
+    .sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }));
+}
+
 export function promptEntryDescription(
   ctx: PromptResolutionContext,
   entry: PromptEntrySummary,
@@ -77,7 +104,7 @@ export function promptEntryDescription(
   return ctx.metadataSchema?.entry_types[entry.entry_type]?.name ?? entry.entry_type;
 }
 
-// The entry_type an entry_patch prompt operates on — the `expr.type`s named by
+// The entry_type a commit-carrying prompt operates on — the `expr.type`s named by
 // its context_pick inputs' targets (e.g. `revise:entry` → lore:base,
 // `revise:plot_card` → plot:card).
 function promptTargetEntryTypes(entry: PromptEntrySummary): string[] {

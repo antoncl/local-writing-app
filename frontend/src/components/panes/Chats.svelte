@@ -28,9 +28,9 @@
 
   $: schema = $metadataSchemaStore;
   // Lift each roster summary to an EvalNode: `subject` and the seeding prompt's
-  // derived `seed_output_kind` go in metadata (ADR-0029 §D), so a designed or
-  // built-in view can group/filter by subject and hide the brainstorm
-  // (`entry_patch`) chats. The lift is shared with the view-designer preview.
+  // derived `seed_committing` go in metadata (ADR-0029 §D), so a designed or
+  // built-in view can group/filter by subject and hide the brainstorm (committing)
+  // chats. The lift is shared with the view-designer preview.
   $: chatNodes = chatSummariesToEvalNodes(sessions, promptEntries, schema);
   $: view = { spec: viewSpec, universe: chatNodes, schema, referenceIndex: $referenceIndexStore };
 

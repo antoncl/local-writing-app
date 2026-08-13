@@ -9,7 +9,7 @@
 // its single default, so `defaultView` parity with the backend is untouched.
 
 import { defaultView, kindUniverseExpr } from "@/lib/views/evaluateView";
-import { SEED_OUTPUT_KIND_FIELD } from "@/lib/views/chatNodes";
+import { SEED_COMMITTING_FIELD, SEED_COMMITTING_MARKER } from "@/lib/views/chatNodes";
 import type { MetadataSchema, ViewSpec } from "@/lib/types";
 
 export type BuiltinView = { id: string; title: string; spec: ViewSpec };
@@ -22,21 +22,22 @@ export function isBuiltinExtraViewId(id: string): boolean {
   return id.startsWith(BUILTIN_EXTRA_PREFIX);
 }
 
-// "Openable chats": hides the brainstorm/commit chats — those seeded by a prompt
-// whose output is `entry_patch` — keeping General (`chat_panel`) and freeform
-// chats. Blacklist, not whitelist: a freeform chat has no seeding prompt and so
-// no output kind, and must stay openable (a `chat_panel` whitelist would drop
-// it). `disjoint` is the grammar's set-exclusion op (no `eq`/`in`). The roster
-// comes from `kindUniverseExpr` (the same seam `defaultView` uses), not a
-// hardcoded FQN — so both chat built-ins resolve the root identically, including
-// the schema-less `chat:base` fallback during the schema-load window.
+// "Openable chats": hides the brainstorm chats — those seeded by a prompt that
+// declares a `commit` (ADR-0054 §2) — keeping plain chats (General) and freeform
+// ones. It asks "does this chat's prompt declare a commit?", not the retired
+// `entry_patch` literal. Blacklist, not whitelist: a freeform chat has no seeding
+// prompt and so no marker, and must stay openable (a whitelist would drop it).
+// `disjoint` is the grammar's set-exclusion op (no `eq`/`in`). The roster comes
+// from `kindUniverseExpr` (the same seam `defaultView` uses), not a hardcoded FQN
+// — so both chat built-ins resolve the root identically, including the schema-less
+// `chat:base` fallback during the schema-load window.
 function openableChatsSpec(schema?: MetadataSchema | null): ViewSpec {
   return {
     kind: "chat",
     expr: {
       filter: {
         of: kindUniverseExpr("chat", schema),
-        pred: { field: { key: SEED_OUTPUT_KIND_FIELD, op: "disjoint", value: ["entry_patch"] } },
+        pred: { field: { key: SEED_COMMITTING_FIELD, op: "disjoint", value: [SEED_COMMITTING_MARKER] } },
       },
     },
     sort: { by: "manual" },

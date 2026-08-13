@@ -823,11 +823,11 @@ export const api = {
   // frozen seed prompt + transcript + a finalize cue, the server rebuilds the
   // format contract from the target's schema and runs it as its own pass over the
   // transcript, then validates — one call in place of finalize-turn + validate.
-  // `extractTemplate` is the prompt's `output.extract` override (null → the
-  // default generated contract). Returns the patch + the extraction turn's cost.
+  // `commit_fields` is the prompt's `commit.fields` allow-list (ADR-0054 §2;
+  // null → the default body + every proposable field). Returns the patch + cost.
   extractEntryPatch(
     nodeId: string,
-    body: { messages: { role: string; content: string }[]; assistant_id: string | null; extract_template: string | null },
+    body: { messages: { role: string; content: string }[]; assistant_id: string | null; commit_fields: string[] | null },
   ) {
     return request<EntryPatchExtraction>(`/ai/entry-patch/${encodeURIComponent(nodeId)}/extract`, {
       method: "POST",
@@ -837,7 +837,7 @@ export const api = {
   // Create-mode sibling — no node yet, so the target entry_type rides in the body.
   extractEntryDraft(
     entryType: string,
-    body: { messages: { role: string; content: string }[]; assistant_id: string | null; extract_template: string | null },
+    body: { messages: { role: string; content: string }[]; assistant_id: string | null; commit_fields: string[] | null },
   ) {
     return request<EntryPatchExtraction>("/ai/entry-draft/extract", {
       method: "POST",

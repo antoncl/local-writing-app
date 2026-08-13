@@ -13,19 +13,18 @@ import { chatSessionsStore } from "@/lib/stores/chats";
 import { referenceIndexStore } from "@/lib/stores/references";
 import { editorPanes } from "@/lib/stores/editorPanes.svelte";
 import { chatSessions } from "@/lib/stores/chatSessions.svelte";
-import type { PromptSurface } from "@/lib/editor-core/promptResolution";
 import type { ChatSessionSummary, MetadataSchema, PromptEntrySummary } from "@/lib/types";
 
-// A schema whose `prompt:revise` type resolves as the entry_patch (brainstorm)
-// surface — the set the ＋New menu offers.
+// A schema whose `prompt:revise` type carries a `commit` (ADR-0054 §2) — a
+// brainstorm, the set the ＋New menu offers.
 const SCHEMA = {
   entry_types: {
     "prompt:revise": {
       name: "Revise",
-      prompt: { context_strategy: { output: { kind: "entry_patch" } } },
+      prompt: { context_strategy: { output: { kind: "chat_panel", commit: { review: "visual_diff" } } } },
     },
-    // A chat-surface prompt — a different surface, so the panel's surface filter
-    // must partition it out of an entry_patch ＋New (and vice versa).
+    // A plain chat prompt — `chat_panel` with NO commit, so the ＋New's
+    // commit-only filter must partition it out (it is not a brainstorm).
     "prompt:scenechat": {
       name: "Scene chat",
       prompt: { context_strategy: { output: { kind: "chat_panel" } } },
@@ -60,8 +59,8 @@ function revisePrompt(id: string, title: string): PromptEntrySummary {
   } as unknown as PromptEntrySummary;
 }
 
-// An entry_patch (brainstorm) prompt whose `entry` input targets `targetType` —
-// the per-node filter (ADR-0048 S8b) shows it only on a subject that is-a it.
+// A brainstorm (commit-carrying) prompt whose `entry` input targets `targetType`
+// — the per-node filter (ADR-0048 S8b) shows it only on a subject that is-a it.
 function targetedPrompt(id: string, title: string, targetType: string): PromptEntrySummary {
   return {
     id,
@@ -88,7 +87,6 @@ function chatPanelPrompt(id: string, title: string): PromptEntrySummary {
 
 function renderPanel(
   promptEntries: PromptEntrySummary[] = [],
-  newSurface?: PromptSurface,
   subjectEntryType = "lore:character",
 ) {
   return render(ConversationsPanel, {
@@ -99,7 +97,6 @@ function renderPanel(
       promptEntries,
       metadataSchema: SCHEMA,
       hostPaneId: "pane-1",
-      ...(newSurface ? { newSurface } : {}),
     },
   });
 }
@@ -211,52 +208,49 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
     expect(screen.getByRole("menuitem", { name: "Revise" })).toBeInTheDocument();
   });
 
-  it("offers exactly the prompts matching the requested surface (#842)", async () => {
-    // The panel is surface-generic: it shows only prompts whose output kind
-    // matches `newSurface`, and drops the rest. (Which surface a given subject
-    // kind uses lives in NodeEditor — lore and scene both take entry_patch as of
-    // S5-next; here we prove the filter itself, using chat_panel as the foil.)
-    renderPanel(
-      [revisePrompt("p-revise", "Brainstorm a revision"), chatPanelPrompt("p-chat", "Chat here")],
-      "chat_panel",
-    );
+  it("offers only the brainstorm (commit) prompts, dropping plain chats (#842)", async () => {
+    // The ＋New shows only prompts declaring a `commit` (ADR-0054 §2); a plain
+    // `chat_panel` prompt (no commit) is not a brainstorm and is dropped.
+    renderPanel([
+      revisePrompt("p-revise", "Brainstorm a revision"),
+      chatPanelPrompt("p-chat", "Chat here"),
+    ]);
     await fireEvent.click(screen.getByRole("button", { name: /New/ }));
     await tick();
-    expect(screen.getByRole("menuitem", { name: "Chat here" })).toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", { name: "Brainstorm a revision" })).toBeNull();
+    expect(screen.getByRole("menuitem", { name: "Brainstorm a revision" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Chat here" })).toBeNull();
   });
 
-  it("hides ＋New when no prompt resolves to the requested surface (#842)", () => {
-    // Only an entry_patch prompt is available but the requested surface is
-    // chat_panel → nothing to start, so ＋New does not render (resume list only).
-    const { container } = renderPanel([revisePrompt("p-revise", "Brainstorm a revision")], "chat_panel");
+  it("hides ＋New when no brainstorm (commit) prompt is available (#842)", () => {
+    // Only a plain chat prompt (no commit) is available → nothing to start, so
+    // ＋New does not render (resume list only).
+    const { container } = renderPanel([chatPanelPrompt("p-chat", "Chat here")]);
     expect(container.querySelector(".conv-new")).toBeNull();
     // The panel still renders — there are chats to resume.
     expect(container.querySelector(".entry-conversations")).not.toBeNull();
   });
 
-  it("hides an entry_patch prompt whose target the subject is not (ADR-0048 S8b)", () => {
+  it("hides a brainstorm prompt whose target the subject is not (ADR-0048 S8b)", () => {
     // A plot-card-targeting brainstorm prompt on a LORE subject → excluded, so
     // ＋New has nothing to start (the resume list still renders).
     const { container } = renderPanel(
       [targetedPrompt("p-card", "Revise plot card", "plot:card")],
-      undefined,
       "lore:character",
     );
     expect(container.querySelector(".conv-new")).toBeNull();
     expect(container.querySelector(".entry-conversations")).not.toBeNull();
   });
 
-  it("shows an entry_patch prompt for a subject that is its target type (ADR-0048 S8b)", async () => {
+  it("shows a brainstorm prompt for a subject that is its target type (ADR-0048 S8b)", async () => {
     // The same prompt on a plot:card subject → offered.
-    renderPanel([targetedPrompt("p-card", "Revise plot card", "plot:card")], undefined, "plot:card");
+    renderPanel([targetedPrompt("p-card", "Revise plot card", "plot:card")], "plot:card");
     await fireEvent.click(screen.getByRole("button", { name: /New/ }));
     await tick();
     expect(screen.getByRole("menuitem", { name: "Revise plot card" })).toBeInTheDocument();
   });
 
   it("scopes a scene subject to scene-targeted brainstorms (ADR-0051 S5-next)", async () => {
-    // A scene's entry_patch ＋New offers a scene-targeted prompt ("Summarize
+    // A scene's brainstorm ＋New offers a scene-targeted prompt ("Summarize
     // scene") but not a lore-targeted one — scenes joined the loop at S5-next and
     // the same target filter keeps the lore prompts off the scene menu.
     renderPanel(
@@ -264,7 +258,6 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
         targetedPrompt("p-sum", "Summarize scene", "scene:scene"),
         targetedPrompt("p-lore", "Revise entry", "lore:base"),
       ],
-      undefined,
       "scene:scene",
     );
     await fireEvent.click(screen.getByRole("button", { name: /New/ }));

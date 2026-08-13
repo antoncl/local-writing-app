@@ -21,6 +21,7 @@
   import { onMount, tick } from "svelte";
   import { api } from "@/lib/api";
   import {
+    promptDeclaresCommit,
     promptEntriesForSurface,
     resolutionSceneIdFromInputs,
     type PromptResolutionContext,
@@ -304,7 +305,13 @@
   }
 
   function chatRoutedPromptEntries(): PromptEntrySummary[] {
-    return promptEntriesForSurface(promptDiscoveryCtx, "chat_panel");
+    // Plain chat prompts only. A brainstorm is now a `chat_panel` prompt with a
+    // `commit` (ADR-0054 §2), but it is launched contextually against a subject
+    // via Conversations ＋New — free-picking it in a chat gives a Commit button
+    // with no target entry, so it is excluded from this general picker.
+    return promptEntriesForSurface(promptDiscoveryCtx, "chat_panel").filter(
+      (entry) => !promptDeclaresCommit(promptDiscoveryCtx, entry),
+    );
   }
 
   function filteredChatPromptEntries(): PromptEntrySummary[] {
@@ -792,8 +799,9 @@
   let activePromptEntry = $derived(chatPromptEntryId
     ? promptEntries.find((p) => p.id === chatPromptEntryId) ?? null
     : null);
-  // The active prompt's `output`: `.kind` is the surface (`entry_patch` chats
-  // commit to their `entry` target), `.review` how it's reviewed (S5-next).
+  // The active prompt's `output` (ADR-0054): `.kind` is the disposition; a
+  // `.commit` marks a brainstorm that extracts to its `entry` target
+  // (`.commit.review` how it's reviewed, `.commit.fields` what it extracts).
   let activeOutput = $derived(
     metadataSchema?.entry_types[activePromptEntry?.entry_type ?? ""]?.prompt?.context_strategy
       ?.output ?? null,
@@ -1078,7 +1086,7 @@
         >
           {commit.committing ? "Drafting…" : "Propose new entry"}
         </button>
-      {:else if commit.isEntryPatchChat}
+      {:else if commit.isCommitChat}
         <!-- ADR-0046 slice 3: finalize the brainstorm into a validated patch
              (out of band, hidden), reviewed on the target entry's pane. -->
         <button

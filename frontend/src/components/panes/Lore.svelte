@@ -12,7 +12,7 @@
   import { treeActions } from "@/lib/stores/treeActions.svelte";
   import { chatSessions } from "@/lib/stores/chatSessions.svelte";
   import {
-    promptEntriesForSurface,
+    promptEntriesWithCommit,
     type PromptResolutionContext,
   } from "@/lib/editor-core/promptResolution";
   import { getSwatch, resolveColorForType } from "@/lib/utils/colors";
@@ -64,11 +64,11 @@
   // collapse is ephemeral and owned by ViewNodeList (phase 1; not persisted).
   let searchQuery = "";
 
-  // ADR-0046 §6.4: "Brainstorm a new <type>…" — launch the entry_patch
-  // brainstorm with NO entry (create mode), seeding the target entry_type as a
-  // hidden input. The prompt is the same one the entry-pane revise launcher
-  // uses (output.kind `entry_patch`); hidden when no such instance exists yet
-  // (#606). A temporary home until ADR-0047 contextual actions land.
+  // ADR-0046 §6.4: "Brainstorm a new <type>…" — launch the lore brainstorm with
+  // NO entry (create mode), seeding the target entry_type as a hidden input. The
+  // prompt is the same one the entry-pane revise launcher uses (a `chat_panel`
+  // prompt carrying a `commit`, ADR-0054 §2); hidden when no such instance exists
+  // yet (#606). A temporary home until ADR-0047 contextual actions land.
   $: brainstormCtx = {
     metadataSchema: schema,
     promptEntries: $promptEntriesStore,
@@ -76,7 +76,7 @@
     availableScenes: [],
     hiddenPromptIds: $hiddenLibraryStore,
   } satisfies PromptResolutionContext;
-  $: brainstormPrompt = promptEntriesForSurface(brainstormCtx, "entry_patch")[0] ?? null;
+  $: brainstormPrompt = promptEntriesWithCommit(brainstormCtx)[0] ?? null;
 
   function launchBrainstorm(entryType: string): void {
     if (!brainstormPrompt) return;

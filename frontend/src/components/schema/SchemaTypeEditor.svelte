@@ -178,7 +178,6 @@
       contextTargetRequired: Boolean(cs?.target?.required),
       scanSurface: (cs?.scan_surface ?? []).join(", "),
       outputKind: typeof cs?.output?.kind === "string" ? (cs.output.kind as string) : "",
-      outputReview: typeof cs?.output?.review === "string" ? (cs.output.review as string) : "",
     };
   });
 
@@ -233,7 +232,6 @@
   let promptContextTargetRequired = $state(seed.contextTargetRequired);
   let promptScanSurface = $state(seed.scanSurface);
   let promptOutputKind = $state(seed.outputKind);
-  let promptOutputReview = $state(seed.outputReview);
 
   // --- Unsaved-changes tracking (#68) --------------------------------------
   // Field + group edits persist immediately through the parent; only the
@@ -254,7 +252,6 @@
       contextTargetRequired: promptContextTargetRequired,
       scanSurface: promptScanSurface,
       outputKind: promptOutputKind,
-      outputReview: promptOutputReview,
     };
   }
   const isDirty = $derived(
@@ -267,8 +264,7 @@
       promptContextTargetKind !== baseline.contextTargetKind ||
       promptContextTargetRequired !== baseline.contextTargetRequired ||
       promptScanSurface !== baseline.scanSurface ||
-      promptOutputKind !== baseline.outputKind ||
-      promptOutputReview !== baseline.outputReview,
+      promptOutputKind !== baseline.outputKind,
   );
   $effect(() => {
     dirty = isDirty;
@@ -280,7 +276,9 @@
       .map((token) => token.trim())
       .filter(Boolean);
     const hasTarget = Boolean(promptContextTargetKind) || promptContextTargetRequired;
-    const hasOutput = Boolean(promptOutputKind) || Boolean(promptOutputReview);
+    // ADR-0054 S2: the editor authors only the disposition (`kind`) for now; the
+    // commit block (review + fields) is S3. `review` no longer round-trips here.
+    const hasOutput = Boolean(promptOutputKind);
     const contextStrategy: PromptContextStrategy | null = scanSurface.length || hasTarget || hasOutput
       ? {
           ...(hasTarget
@@ -296,7 +294,6 @@
             ? {
                 output: {
                   ...(promptOutputKind ? { kind: promptOutputKind } : {}),
-                  ...(promptOutputReview ? { review: promptOutputReview } : {}),
                 },
               }
             : {}),

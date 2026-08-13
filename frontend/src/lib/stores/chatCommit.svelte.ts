@@ -26,7 +26,7 @@ import type {
   ChatMessage,
   EntryPatch,
   EntryPatchExtraction,
-  MetadataValue,
+  PromptOutput,
   ReviewMode,
 } from "@/lib/types";
 import { api } from "@/lib/api";
@@ -56,9 +56,11 @@ export interface ChatCommitDeps {
 
 export class ChatCommitController {
   // ---- fed each render by the host (the derivations below track these) -------
-  /** The active prompt's `output` config: `.kind` is the surface (`entry_patch`
-   *  chats commit to their `entry` target), `.review` how it's reviewed. */
-  output = $state<Record<string, MetadataValue> | null>(null);
+  /** The active prompt's `output` config (ADR-0054): `.kind` is the disposition;
+   *  a `.commit` marks a brainstorm whose result is extracted to its `entry`
+   *  target (`.commit.review` = how it's reviewed, `.commit.fields` = what it
+   *  extracts). */
+  output = $state<PromptOutput | null>(null);
   /** The chat's per-input drafts — `entry` (revise target) / `entry_type`
    *  (create target) are seeded here at launch (ADR-0046 §6.4). */
   inputDrafts = $state<Record<string, string>>({});
@@ -77,8 +79,10 @@ export class ChatCommitController {
 
   constructor(private readonly deps: ChatCommitDeps) {}
 
-  /** An `entry_patch`-surfaced chat commits to a schema-typed node. */
-  isEntryPatchChat = $derived(this.output?.kind === "entry_patch");
+  /** A chat carrying a `commit` (ADR-0054 §2) extracts its result to a
+   *  schema-typed node — the routing question that was `output.kind ===
+   *  "entry_patch"`. */
+  isCommitChat = $derived(!!this.output?.commit);
   /** The revise target — the `entry` input the launch seeded (empty in create
    *  mode). */
   commitTargetEntryId = $derived((this.inputDrafts["entry"] ?? "").trim());
@@ -87,14 +91,12 @@ export class ChatCommitController {
   // launched — revise seeds `entry`, create seeds `entry_type`.
   draftEntryType = $derived((this.inputDrafts["entry_type"] ?? "").trim());
   isCreateBrainstorm = $derived(
-    this.isEntryPatchChat && !this.commitTargetEntryId && !!this.draftEntryType,
+    this.isCommitChat && !this.commitTargetEntryId && !!this.draftEntryType,
   );
-  /** The prompt's `output.extract` override, sent to the extraction endpoint so
-   *  the server renders it in place of the default generated contract (ADR-0051
-   *  S4). Null → the default (body + all proposable fields). */
-  extractTemplate = $derived(
-    typeof this.output?.extract === "string" ? this.output.extract : null,
-  );
+  /** The prompt's `commit.fields` allow-list (ADR-0054 §2), sent to the extraction
+   *  endpoint so the server narrows the generated contract to those targets. Null
+   *  → the default (body + all proposable fields). */
+  commitFields = $derived(this.output?.commit?.fields ?? null);
 
   // The commit preamble both modes share: run the extraction, attribute the
   // (always-billed) turn's cost like a streamed one, and surface the two failure
@@ -126,7 +128,7 @@ export class ChatCommitController {
   // proposed-vs-current review; nothing is written from here. A patch that
   // proposes nothing is surfaced, never a silent no-op.
   async commitToEntry(): Promise<void> {
-    if (this.running || this.committing || !this.isEntryPatchChat) return;
+    if (this.running || this.committing || !this.isCommitChat) return;
     const entryId = this.commitTargetEntryId;
     if (!entryId) {
       this.deps.setError("This brainstorm has no target entry to commit to.");
@@ -141,7 +143,7 @@ export class ChatCommitController {
           api.extractEntryPatch(entryId, {
             messages: this.deps.getHistory(),
             assistant_id: this.deps.getAssistantId() || null,
-            extract_template: this.extractTemplate,
+            commit_fields: this.commitFields,
           }),
         "Couldn't read the model's response as a patch — ask it to finalize again.",
       );
@@ -149,7 +151,8 @@ export class ChatCommitController {
       // `replace` (a scene summary) swaps one field whole; strip any body the
       // model returned so the stored proposal stays fields-only (the commit-side
       // guarantee that prose is never rewritten lives in `acceptFields`).
-      const reviewMode: ReviewMode = this.output?.review === "replace" ? "replace" : "visual_diff";
+      const reviewMode: ReviewMode =
+        this.output?.commit?.review === "replace" ? "replace" : "visual_diff";
       const body = reviewMode === "replace" ? null : patch.body;
       const hasBody = body != null;
       const hasFields = Object.keys(patch.fields).length > 0;
@@ -189,7 +192,7 @@ export class ChatCommitController {
           api.extractEntryDraft(entryType, {
             messages: this.deps.getHistory(),
             assistant_id: this.deps.getAssistantId() || null,
-            extract_template: this.extractTemplate,
+            commit_fields: this.commitFields,
           }),
         "Couldn't read the model's response as an entry — ask it to finalize again.",
       );

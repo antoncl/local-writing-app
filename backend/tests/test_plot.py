@@ -1,16 +1,15 @@
-"""Backend tests for the `plot` kind (ADR-0048 S4a + S4b + S5a + S7 Slice 2).
+"""Backend tests for the `plot` kind (ADR-0048 S4a + S4b + S5a + S7 Slice 2; ADR-0053).
 
-Node types under the new kind: plotlines (`plot:plotline`, a flat layered entry),
-cards (`plot:card`), the board (`plot:board`, a per-project layout singleton),
-templates (`plot:template`, S4b — the ADR-0049 Library's second tenant), and
-template instances (`plot:template_instance`, S7 Slice 2 / #776 — the book-local,
-specialized copy of a template's beat roster). These prove the wiring end-to-end
-through FastAPI plus the registration facts (family, schema, folder, whitelist,
-Library membership) and the design invariants — a plotline is indexed and
-reference-bearing, the board is a directly-addressed singleton kept out of the
-node index, templates ship read-only from the Library and clone into the project
-on demand, and an instance snapshots a template's beats into an editable,
-book-local node whose lineage survives the source template being deleted.
+Node types under the kind: plotlines (`plot:plotline`, a flat layered entry that IS
+a plot-template instance — beats + colour + lineage), cards (`plot:card`), the board
+(`plot:board`, a per-project layout singleton), and templates (`plot:template`, S4b —
+the ADR-0049 Library's second tenant). These prove the wiring end-to-end through
+FastAPI plus the registration facts (family, schema, folder, whitelist, Library
+membership) and the design invariants — a plotline is indexed and reference-bearing,
+the board is a directly-addressed singleton kept out of the node index, templates ship
+read-only from the Library and clone into the project on demand, and instantiating a
+template snapshots its beats into an editable, book-local plotline whose lineage
+survives the source template being deleted (`test_plot_beats.py`).
 """
 
 from __future__ import annotations
@@ -531,18 +530,14 @@ class PlotCrossFamilyGuardTests(PlotTestCase):
         self.assertEqual(response.status_code, 404, response.text)
         self.assertEqual(self.client.get(f"/api/plot/cards/{card['id']}").json()["entry_type"], "plot:card")
 
-    def test_creating_a_foreign_plot_type_via_the_instances_endpoint_is_refused(self) -> None:
-        for foreign in ("plot:plotline", "plot:card", "plot:template", "plot:board"):
-            response = self.client.post("/api/plot/instances", json={"title": "X", "entry_type": foreign})
+    def test_creating_a_foreign_plot_type_via_the_plotlines_endpoint_is_refused(self) -> None:
+        for foreign in ("plot:card", "plot:template", "plot:board"):
+            response = self.client.post("/api/plot/plotlines", json={"title": "X", "entry_type": foreign})
             self.assertEqual(response.status_code, 422, f"{foreign}: {response.text}")
 
-    def test_reading_a_card_via_the_instances_endpoint_404s(self) -> None:
+    def test_reading_a_card_via_the_plotlines_endpoint_404s(self) -> None:
         card = self.client.post("/api/plot/cards", json={"title": "Card"}).json()
-        self.assertEqual(self.client.get(f"/api/plot/instances/{card['id']}").status_code, 404)
-
-    def test_reading_an_instance_via_the_cards_endpoint_404s(self) -> None:
-        instance = self.client.post("/api/plot/instances", json={"title": "Inst"}).json()
-        self.assertEqual(self.client.get(f"/api/plot/cards/{instance['id']}").status_code, 404)
+        self.assertEqual(self.client.get(f"/api/plot/plotlines/{card['id']}").status_code, 404)
 
     def test_saving_an_owned_template_via_the_cards_endpoint_keeps_its_beat_roster(self) -> None:
         # The worst case: a card-endpoint write over an owned template would drop
@@ -592,11 +587,11 @@ class PlotBoardHttpTests(PlotTestCase):
 
 
 class PlotBoardProjectionTests(PlotTestCase):
-    """The board projection (ADR-0048 S7a): one read model — plotlines, cards with
-    their plotline/scene refs, and the board's opaque layout. A deleted scene
-    purges the card ref, so a gone scene projects as an unattached card, never a
-    dangling pointer. Computed and read-only; card + plotline + board data only,
-    never templates or beats (S8)."""
+    """The board projection (ADR-0048 S7a; ADR-0053): one read model — plotlines
+    (with their beat rosters), cards with their plotline/scene refs, and the board's
+    opaque layout. A deleted scene purges the card ref, so a gone scene projects as
+    an unattached card, never a dangling pointer. Computed and read-only; card +
+    plotline + board data only, never the read-only Library templates."""
 
     def _scene(self, title: str) -> str:
         structure = self.service.read_structure()
@@ -641,6 +636,23 @@ class PlotBoardProjectionTests(PlotTestCase):
         self.assertEqual(projected["synopsis"], "She spills his coffee.\n")
         self.assertEqual(projected["plotline"], romance.id)
         self.assertEqual(projected["scene"], scene_id)
+
+    def test_projection_carries_a_plotlines_beat_roster(self) -> None:
+        # ADR-0053 §1/§3: a plotline IS a template instance, so the board node needs
+        # its beats — the projection surfaces the roster (beat_id + title, in order).
+        plotline = self.service.instantiate_plot_template("builtin-plot-three-act-story-arc")
+        roster = plotline.metadata["instance_beats"]
+        projected = next(
+            p for p in self.service.read_plot_board_projection().plotlines if p.id == plotline.id
+        )
+        self.assertEqual([b.beat_id for b in projected.beats], [b["id"] for b in roster])
+        self.assertEqual(projected.beats[0].title, roster[0]["title"])
+        # A plain / ad-hoc plotline carries an empty roster, not a missing field.
+        plain = self.service.create_plotline(CreatePlotlineRequest(title="Ad-hoc"))
+        projected_plain = next(
+            p for p in self.service.read_plot_board_projection().plotlines if p.id == plain.id
+        )
+        self.assertEqual(projected_plain.beats, [])
 
     def test_unattached_card_projects_null_refs(self) -> None:
         card = self.service.create_card(CreateCardRequest(title="Floating"))
@@ -873,25 +885,26 @@ class PlotKindRegistrationTests(PlotTestCase):
         self.assertIsNotNone(base)
         self.assertTrue(base.abstract)
         self.assertEqual(base.kind, "plot")
-        for concrete in ("plot:plotline", "plot:template", "plot:template_instance", "plot:board", "plot:card"):
+        for concrete in ("plot:plotline", "plot:template", "plot:board", "plot:card"):
             self.assertEqual(
                 schema.entry_types[concrete].parent,
                 "plot:base",
                 f"{concrete} must hang off plot:base so the whole-kind roster resolves",
             )
 
-    def test_template_instance_type_and_group_registered(self) -> None:
-        # ADR-0048 S7 Slice 2 (#776): the instance is a `plot`-kind concrete type
-        # with the specialized-beat + lineage fields, and its beats bind to a
+    def test_plotline_carries_beats_and_lineage_fields(self) -> None:
+        # ADR-0053 §1: a plotline IS a plot-template instance — the `plot:plotline`
+        # type carries the specialized-beat + lineage fields (folded in from the
+        # retired `plot:template_instance`), and its beats bind to a
         # `plot_instance_beat` group that adds `specifics` to the `plot_beat` shape.
         schema = self.service.read_metadata_schema()
-        inst = schema.entry_types.get("plot:template_instance")
-        self.assertIsNotNone(inst)
-        self.assertEqual(inst.kind, "plot")
-        self.assertTrue(inst.has_body)
-        # `color` (built-in swatch, #737) lets an arc carry its own colour.
+        plotline = schema.entry_types.get("plot:plotline")
+        self.assertIsNotNone(plotline)
+        self.assertEqual(plotline.kind, "plot")
+        self.assertTrue(plotline.has_body)
+        # `color` (built-in swatch, #737) lets a plotline carry its own colour.
         for field_id in ("instance_beats", "color", "source_template_id", "source_template_name"):
-            self.assertIn(field_id, inst.fields)
+            self.assertIn(field_id, plotline.fields)
         group = schema.groups.get("plot_instance_beat")
         self.assertIsNotNone(group)
         member_keys = {member.key for member in group.members}

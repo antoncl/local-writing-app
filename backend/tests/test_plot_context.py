@@ -1,12 +1,12 @@
-"""Backend tests for the spoiler-gated plot context engine (ADR-0048 S8a).
+"""Backend tests for the spoiler-gated plot context engine (ADR-0048 S8a; ADR-0053).
 
 `read_plot_context(as_of=...)` assembles the board's plot state into one packet a
 prompt reasons over, gated by manuscript reveal order: cards up to and including
 the `as_of` anchor's reveal `sequence` are shown, later cards are withheld and only
-counted. Arcs (with their FULL beat rosters) and plotlines are the writer's
-scaffolding and are never gated. These prove the gate, the withheld-but-counted
-tally, the no-leak filtering of causal edges, and the full-roster arcs, through
-both the service method and the HTTP preview endpoint.
+counted. Plotlines (with their FULL beat rosters) are the writer's scaffolding and
+are never gated. These prove the gate, the withheld-but-counted tally, the no-leak
+filtering of causal edges, and the full-roster plotlines, through both the service
+method and the HTTP preview endpoint.
 """
 
 from __future__ import annotations
@@ -20,7 +20,6 @@ from app.models import (
     CreateStructureNodeRequest,
     SaveCardRequest,
     SavePlotlineRequest,
-    SaveTemplateInstanceRequest,
 )
 
 _THREE_ACT = "builtin-plot-three-act-story-arc"
@@ -46,8 +45,8 @@ class PlotContextTestCase(PlotTestCase):
         self.service.save_card(card.id, SaveCardRequest(title=title, body=body, metadata=dict(metadata)))
         return card.id
 
-    def _arc(self):
-        """An instantiated three-act arc — 7 beats, each with a stable id."""
+    def _plotline(self):
+        """An instantiated three-act plotline — 7 beats, each with a stable id."""
         return self.service.instantiate_plot_template(_THREE_ACT)
 
 
@@ -137,67 +136,67 @@ class SpoilerGateTests(PlotContextTestCase):
         self.assertEqual(len(context.cards), 3)
 
 
-class ArcRosterTests(PlotContextTestCase):
-    def test_arcs_carry_the_full_beat_roster_including_unfulfilled_beats(self) -> None:
-        arc = self._arc()
-        roster = arc.metadata["instance_beats"]
+class PlotlineRosterTests(PlotContextTestCase):
+    def test_plotlines_carry_the_full_beat_roster_including_unfulfilled_beats(self) -> None:
+        plotline = self._plotline()
+        roster = plotline.metadata["instance_beats"]
         self.assertGreater(len(roster), 1)
         first_beat = roster[0]["id"]
         card_id = self._card(
             "Fulfils one beat",
-            beat_links=[{"instance": arc.id, "beat_id": first_beat}],
+            beat_links=[{"plotline": plotline.id, "beat_id": first_beat}],
         )
 
         context = self.service.read_plot_context()
-        context_arc = next(a for a in context.arcs if a.id == arc.id)
+        context_line = next(p for p in context.plotlines if p.id == plotline.id)
         # The whole roster is present — a beat no card fulfils is still shown (a gap).
-        self.assertEqual(len(context_arc.beats), len(roster))
-        self.assertEqual(context_arc.beats[0].beat_id, first_beat)
-        self.assertTrue(context_arc.beats[0].title)
-        # The card names the one beat it fulfils, title-resolved against the arc.
+        self.assertEqual(len(context_line.beats), len(roster))
+        self.assertEqual(context_line.beats[0].beat_id, first_beat)
+        self.assertTrue(context_line.beats[0].title)
+        # The card names the one beat it fulfils, title-resolved against the plotline.
         card = next(c for c in context.cards if c.id == card_id)
         self.assertEqual([b.beat_id for b in card.beats], [first_beat])
-        self.assertEqual(card.beats[0].instance_id, arc.id)
-        self.assertEqual(card.beats[0].instance_title, arc.title)
+        self.assertEqual(card.beats[0].plotline_id, plotline.id)
+        self.assertEqual(card.beats[0].plotline_title, plotline.title)
 
-    def test_ad_hoc_arc_source_name_is_the_template_it_was_rolled_from(self) -> None:
-        arc = self._arc()
-        context_arc = next(a for a in self.service.read_plot_context().arcs if a.id == arc.id)
-        self.assertEqual(context_arc.source_template_name, arc.metadata.get("source_template_name"))
+    def test_plotline_source_name_is_the_template_it_was_rolled_from(self) -> None:
+        plotline = self._plotline()
+        context_line = next(p for p in self.service.read_plot_context().plotlines if p.id == plotline.id)
+        self.assertEqual(context_line.source_template_name, plotline.metadata.get("source_template_name"))
 
     def test_a_card_link_to_a_departed_beat_is_dropped(self) -> None:
-        arc = self._arc()
-        roster = arc.metadata["instance_beats"]
+        plotline = self._plotline()
+        roster = plotline.metadata["instance_beats"]
         gone_beat = roster[0]["id"]
-        card_id = self._card("Links a beat", beat_links=[{"instance": arc.id, "beat_id": gone_beat}])
-        # Remove that beat from the arc's roster — the card's stored link now points
-        # at a beat that no longer exists.
+        card_id = self._card("Links a beat", beat_links=[{"plotline": plotline.id, "beat_id": gone_beat}])
+        # Remove that beat from the plotline's roster — the card's stored link now
+        # points at a beat that no longer exists.
         trimmed = [b for b in roster if b["id"] != gone_beat]
-        self.service.save_template_instance(
-            arc.id,
-            SaveTemplateInstanceRequest(
-                title=arc.title, body="", metadata={**arc.metadata, "instance_beats": trimmed}
+        self.service.save_plotline(
+            plotline.id,
+            SavePlotlineRequest(
+                title=plotline.title, body="", metadata={**plotline.metadata, "instance_beats": trimmed}
             ),
         )
         context = self.service.read_plot_context()
         card = next(c for c in context.cards if c.id == card_id)
         self.assertEqual(card.beats, [])  # the link to the departed beat is dropped display-side
-        context_arc = next(a for a in context.arcs if a.id == arc.id)
-        self.assertNotIn(gone_beat, [b.beat_id for b in context_arc.beats])
+        context_line = next(p for p in context.plotlines if p.id == plotline.id)
+        self.assertNotIn(gone_beat, [b.beat_id for b in context_line.beats])
 
-    def test_arcs_stay_present_when_the_gate_hides_all_their_cards(self) -> None:
-        arc = self._arc()
-        first_beat = arc.metadata["instance_beats"][0]["id"]
+    def test_plotlines_stay_present_when_the_gate_hides_all_their_cards(self) -> None:
+        plotline = self._plotline()
+        first_beat = plotline.metadata["instance_beats"][0]["id"]
         chapter = self._chapter()
         early, late = self._scene("early", chapter), self._scene("late", chapter)
-        # The only card fulfilling the arc sits on a later scene, so the gate below
-        # withholds it — but the arc is scaffolding and must stay fully present.
-        self._card("Fulfils", scene=late, beat_links=[{"instance": arc.id, "beat_id": first_beat}])
+        # The only card fulfilling the plotline sits on a later scene, so the gate
+        # below withholds it — but the plotline is scaffolding and stays fully present.
+        self._card("Fulfils", scene=late, beat_links=[{"plotline": plotline.id, "beat_id": first_beat}])
         context = self.service.read_plot_context(as_of=early)
         self.assertEqual(context.cards, [])  # the fulfilling card is withheld
         self.assertEqual(context.omitted_cards, 1)
-        context_arc = next(a for a in context.arcs if a.id == arc.id)
-        self.assertEqual(len(context_arc.beats), len(arc.metadata["instance_beats"]))  # ungated
+        context_line = next(p for p in context.plotlines if p.id == plotline.id)
+        self.assertEqual(len(context_line.beats), len(plotline.metadata["instance_beats"]))  # ungated
 
 
 class CausalEdgeTests(PlotContextTestCase):

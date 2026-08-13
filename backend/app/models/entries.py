@@ -144,9 +144,12 @@ class PlotlineSummary(_PlotFolderSummary):
 
 
 class PlotlineEntry(_PlotFolderEntry):
-    """A plotline (ADR-0048 §2): a story thread the writer creates at will — a
-    name (the title), a color (metadata, for the board's chips/tints), and a
-    description (the body). Cards reference one as their primary plotline."""
+    """A plotline (ADR-0048 §2; ADR-0053 §1): a story thread that IS a plot-template
+    instance — a name (the title), a color (metadata), a description (the body), and
+    an ordered beat roster (`instance_beats` metadata) copied from a template at
+    instantiate then specialized per book, or empty for an ad-hoc thread.
+    `source_template_id` / `source_template_name` metadata snapshot its lineage (empty
+    for ad-hoc). Cards reference one as their primary plotline and fulfil its beats."""
 
     entry_type: str = "plot:plotline"
 
@@ -221,44 +224,27 @@ class RealizeCardRequest(BaseModel):
     parent_id: str | None = None
 
 
-class TemplateInstanceSummary(_PlotFolderSummary):
-    entry_type: str = "plot:template_instance"
+class PlotBoardPlotlineBeat(BaseModel):
+    """A beat on a plotline node as the board renders it (ADR-0053 §3): its stable
+    `beat_id` (the card→beat link target) + `title`. The plotline node lists these
+    to render its roster and to drag beats onto cards; richer per-beat fields
+    (function / guidance / specifics) and the use-count arrive with on-node editing
+    and the focus toggle (S2/S5) — this is the minimal shape the board draws from."""
 
-
-class TemplateInstanceEntry(_PlotFolderEntry):
-    """A template instance (ADR-0048 §3): the book-local, specialized copy of a
-    template's beat roster — where a generic requirement is made concrete to this
-    book, and where an ad-hoc plot lives. The plotline's / card's third structural
-    twin: a book-local layered `plot/` Node, freely editable. Its `instance_beats`
-    metadata field holds the specialized roster; `source_template_id` /
-    `source_template_name` metadata carry the lineage snapshot ("which arc is
-    this?"). Only the `entry_type` default distinguishes the model — the extra
-    data rides through `metadata` like any field."""
-
-    entry_type: str = "plot:template_instance"
-
-
-class TemplateInstanceList(BaseModel):
-    entries: list[TemplateInstanceSummary] = Field(default_factory=list)
-
-
-class CreateTemplateInstanceRequest(_PlotFolderCreateRequest):
-    entry_type: str = "plot:template_instance"
-
-
-class SaveTemplateInstanceRequest(_PlotFolderSaveRequest):
-    entry_type: str = "plot:template_instance"
+    beat_id: str
+    title: str = ""
 
 
 class PlotBoardPlotline(BaseModel):
-    """A plotline as the board sees it (ADR-0048 S7a): a thread — id, title, and
-    a colour for its chip/tint. A plotline is NOT a template instance and carries
-    no beats (ADR §2); the board renders it as a thread, nothing more, so an S8
-    template-instance link can be added later without changing this shape."""
+    """A plotline as the board sees it (ADR-0048 S7a; ADR-0053 §1): a thread that is
+    a plot-template instance — id, title, a colour for its chip/tint, and its ordered
+    beat roster. The board renders the plotline as a node holding these beats (S2),
+    and a card's beat badges resolve against them."""
 
     id: str
     title: str
     color: str | None = None
+    beats: list[PlotBoardPlotlineBeat] = Field(default_factory=list)
 
 
 class PlotBoardContainer(BaseModel):
@@ -278,22 +264,21 @@ class PlotBoardContainer(BaseModel):
 
 
 class PlotBoardBeat(BaseModel):
-    """A card→beat link resolved for the board (ADR-0048 S7 Slice 5b): a beat the
-    card fulfils, with its title and owning arc (template instance) title for the
-    badge + tooltip. The stored link (`beat_links`) carries only ids
-    (`instance` + `beat_id`); the projection resolves the titles against the live
-    instances so the frontend renders labels without its own join. A link whose
-    instance or beat no longer exists is dropped, never projected (the display side
-    of `_heal_beat_links`).
+    """A card→beat link resolved for the board (ADR-0048 S7 Slice 5b; ADR-0053): a
+    beat the card fulfils, with its title and owning plotline title for the badge +
+    tooltip. The stored link (`beat_links`) carries only ids (`plotline` + `beat_id`);
+    the projection resolves the titles against the live plotlines so the frontend
+    renders labels without its own join. A link whose plotline or beat no longer
+    exists is dropped, never projected (the display side of `_heal_beat_links`).
 
-    `instance_color` is the owning arc's colour swatch id (None when the arc has
-    none), resolved here so the board can tint a card's beat badges by their arc —
-    beats sharing an arc share a colour, disambiguating collisions between same-named
-    beats of different arcs (ADR-0048 usability pass)."""
+    `plotline_color` is the owning plotline's colour swatch id (None when it has none),
+    resolved here so the board can tint a card's beat badges by their plotline — beats
+    sharing a plotline share a colour, disambiguating collisions between same-named
+    beats of different plotlines (ADR-0048 usability pass)."""
 
-    instance_id: str
-    instance_title: str
-    instance_color: str | None = None
+    plotline_id: str
+    plotline_title: str
+    plotline_color: str | None = None
     beat_id: str
     title: str
 
@@ -343,11 +328,11 @@ class PlotBoardCard(BaseModel):
 
 
 class PlotBoardProjection(BaseModel):
-    """The read model the PlotEditor board renders from (ADR-0048 S7a): the
-    plotlines, the manuscript containers (Slice 4), the cards with their refs,
-    and the board's opaque `layout` payload (card positions — its shape is the
-    canvas's, S7c). Computed and read-only; defined over card + plotline +
-    structure + board data only, never templates or beats (those arrive in S8)."""
+    """The read model the PlotEditor board renders from (ADR-0048 S7a; ADR-0053): the
+    plotlines (with their beat rosters), the manuscript containers (Slice 4), the
+    cards with their refs, and the board's opaque `layout` payload (card positions —
+    its shape is the canvas's, S7c). Computed and read-only; defined over card +
+    plotline + structure + board data only, never the read-only Library templates."""
 
     board_id: str = ""
     board_revision: str = ""
@@ -358,7 +343,7 @@ class PlotBoardProjection(BaseModel):
 
 
 class PlotContextBeat(BaseModel):
-    """A beat in an arc's roster as the AI reads it (ADR-0048 S8a): the
+    """A beat in a plotline's roster as the AI reads it (ADR-0048 S8a): the
     requirement a card is measured against — its title, the story `function` it
     serves, and the writer's `guidance`. Carried for EVERY beat in the roster,
     including beats no card fulfils yet, so the AI can name the gaps."""
@@ -369,26 +354,19 @@ class PlotContextBeat(BaseModel):
     guidance: str = ""
 
 
-class PlotContextArc(BaseModel):
-    """A template instance (an "arc") as the AI reads it (ADR-0048 S8a): the plot
-    structure the cards are measured against. NOT gated by reveal order — an arc
-    is the writer's own scaffolding, not manuscript content — so its full beat
-    roster is always present. `source_template_name` is the lineage snapshot (the
-    named structure it was rolled from), blank for an ad-hoc arc."""
-
-    id: str
-    title: str
-    source_template_name: str = ""
-    beats: list[PlotContextBeat] = Field(default_factory=list)
-
-
 class PlotContextPlotline(BaseModel):
-    """A plotline (thread) as the AI reads it (ADR-0048 S8a): id, title, colour —
-    the same thread the board colours cards by. Never gated."""
+    """A plotline as the AI reads it (ADR-0048 S8a; ADR-0053 §1): the thread the
+    board colours cards by AND the plot structure the cards are measured against —
+    one concept. Never gated by reveal order (it is the writer's own scaffolding, not
+    manuscript content), so its full beat roster is always present, including beats no
+    card fulfils yet (the gaps). `source_template_name` is the lineage snapshot (the
+    named structure it was rolled from), blank for an ad-hoc plotline."""
 
     id: str
     title: str
     color: str | None = None
+    source_template_name: str = ""
+    beats: list[PlotContextBeat] = Field(default_factory=list)
 
 
 class PlotContextCard(BaseModel):
@@ -421,15 +399,15 @@ class PlotContext(BaseModel):
     (`omitted_cards`), so the AI knows more exists without seeing it — a pantser
     can ask "what's next" without the model reading ahead and railroading them.
     With no anchor the whole board is present (`completeness == "whole_board"`):
-    plotter mode, nothing to spoil. Arcs and plotlines are never gated — they are
-    the writer's own scaffolding, not manuscript content, and the full beat roster
-    is what lets the AI name a beat no card fulfils yet.
+    plotter mode, nothing to spoil. Plotlines are never gated — they are the writer's
+    own scaffolding, not manuscript content, and the full beat roster is what lets the
+    AI name a beat no card fulfils yet.
 
-    Assembled read-only from card + plotline + arc + structure data (ADR-0048
-    S4–S6), reusing the board projection's resolve helpers. This is context
-    assembly (prompt INPUT); none of the quarry's claims/evidence apparatus is
-    carried (migration principle 2), and the AI writes back through the JSON
-    node-patch loop, not an XML suggestion protocol (Slice 8b)."""
+    Assembled read-only from card + plotline + structure data (ADR-0048 S4–S6; ADR-0053),
+    reusing the board projection's resolve helpers. This is context assembly (prompt
+    INPUT); none of the quarry's claims/evidence apparatus is carried (migration
+    principle 2), and the AI writes back through the JSON node-patch loop, not an XML
+    suggestion protocol (Slice 8b)."""
 
     board_id: str = ""
     completeness: str = "whole_board"
@@ -437,7 +415,6 @@ class PlotContext(BaseModel):
     as_of_sequence: int | None = None
     omitted_cards: int = 0
     plotlines: list[PlotContextPlotline] = Field(default_factory=list)
-    arcs: list[PlotContextArc] = Field(default_factory=list)
     cards: list[PlotContextCard] = Field(default_factory=list)
 
 

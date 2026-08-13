@@ -110,6 +110,47 @@ class MetadataValidationTests(unittest.TestCase):
             errors = self.service._validate_metadata_schema_definition(self._schema_with_output_kind(empty))
             self.assertFalse(any("output kind" in e for e in errors), (empty, errors))
 
+    def test_saving_a_prompt_type_with_an_unknown_output_kind_is_rejected(self) -> None:
+        # End-to-end: a save resolves + validates, and an unknown disposition
+        # blocks it (the validator's errors are raised by the save path).
+        layer_id = self.service._metadata_schema_layer_id(self.root)
+        with self.assertRaises(ProjectServiceError) as ctx:
+            self.service.upsert_metadata_entry_type(
+                UpsertMetadataEntryTypeRequest(
+                    layer_id=layer_id,
+                    entry_type_id="prompt:custom",
+                    entry_type=EntryTypeDefinition(
+                        name="Custom",
+                        kind="prompt",
+                        parent="prompt:base",
+                        prompt=PromptEntryTypeExtras(
+                            context_strategy=PromptContextStrategy(output={"kind": "not_a_kind"})
+                        ),
+                    ),
+                    allow_existing=False,
+                )
+            )
+        self.assertIn("not_a_kind", str(ctx.exception))
+
+    def test_output_kind_inherited_by_a_subtype_validates(self) -> None:
+        # The validator runs on the RESOLVED schema, so a subtype that inherits
+        # its disposition from a base (the common shape) is validated through the
+        # inherited value — a valid inherited kind must not be flagged.
+        data = {
+            "entry_types": {
+                "prompt:base": {
+                    "name": "Prompt",
+                    "kind": "prompt",
+                    "prompt": {"context_strategy": {"output": {"kind": "chat_panel"}}},
+                },
+                "prompt:child": {"name": "Child", "kind": "prompt", "parent": "prompt:base"},
+            },
+            "fields": {},
+        }
+        resolved = MetadataSchema.model_validate(self.service._resolve_metadata_schema_inheritance(data))
+        errors = self.service._validate_metadata_schema_definition(resolved)
+        self.assertFalse(any("output kind" in e for e in errors), errors)
+
     def test_default_schema_seeds_act_and_chapter(self) -> None:
         schema = self.service.read_metadata_schema()
         self.assertIn("scene:act", schema.entry_types)

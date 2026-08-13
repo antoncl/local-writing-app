@@ -1425,7 +1425,7 @@ class MetadataSchemaMixin:
             # the save paths surface it (they raise on any returned error).
             strategy = entry_type.prompt.context_strategy
             output = strategy.output if strategy else None
-            output_kind = output.get("kind") if isinstance(output, dict) else None
+            output_kind = output.get("kind") if output else None
             if output_kind and output_kind not in OUTPUT_KINDS:
                 errors.append(
                     f"Entry type {entry_type_id} declares output kind '{output_kind}', "

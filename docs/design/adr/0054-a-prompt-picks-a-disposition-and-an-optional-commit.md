@@ -207,12 +207,17 @@ this chat's prompt declare a commit?"*, not because it hardcodes a magic string.
 
 ## Slice plan — one lane, disjoint, vertical (reorderable)
 
-- **S1 — the registry + backend validation.** The output-disposition registry (single source),
-  the `output` model shape, save-time validation. No user-visible change.
-- **S2 — retire `entry_patch` + `output.extract`.** Re-author the three built-in brainstorm prompts
-  to `chat_panel` + `commit` (`scene_summary` → `commit.fields: [summary]`); filter the extraction
-  contract by `commit.fields` and drop the `override_template` branch; flip every dispatch predicate
-  to "has commit"; the Openable filter with it. Behaviour identical; the value and the seam are gone.
+- **S1 — the vocabulary + backend validation.** The output-disposition vocabulary as the single
+  source, and save-time validation of `output.kind` against it. `output` stays a free dict for now;
+  its Pydantic shape (with `commit`) arrives with the reshape in S2, since it is the `commit`
+  addition that makes the shape worth pinning. No user-visible change; `entry_patch` kept valid.
+  *(Shipped.)*
+- **S2 — reshape: retire `entry_patch` + `output.extract`, give `output` a shape.** Model `output`
+  as a Pydantic type (`kind` + optional `commit{review, fields}`); re-author the three built-in
+  brainstorm prompts to `chat_panel` + `commit` (`scene_summary` → `commit.fields: [summary]`);
+  filter the extraction contract by `commit.fields` and drop the `override_template` branch; flip
+  every dispatch predicate to "has commit"; the Openable filter with it. Behaviour identical; the
+  value and the seam are gone.
 - **S3 — authoring UI.** Expose the full disposition set + the optional commit block (`review`, the
   `commit.fields` field-picker) in "Prompt defaults" — the capability to author a brainstorm prompt.
 - **S4 — the `impersonate` prompt** — a `chat_panel` Library prompt with a character-locked brief;

@@ -5,6 +5,7 @@
 // their own mount tests, and the composition is browser-checked.
 import { describe, expect, it } from "vitest";
 import {
+  boardIsEmpty,
   buildBoardNodes,
   movableNodePositions,
   containerExtent,
@@ -229,6 +230,22 @@ describe("buildBoardNodes", () => {
     expect(cardNodes(nodes)[0].position).toEqual({ x: 500, y: 500 });
     // The chapter box re-wraps the card at its pinned spot (pad + header offset).
     expect(containerNodes(nodes)[0].position).toEqual({ x: 500 - CONTAINER_PAD, y: 500 - CONTAINER_PAD - CONTAINER_HEADER });
+  });
+});
+
+describe("boardIsEmpty", () => {
+  it("is empty with no cards and no plotlines", () => {
+    expect(boardIsEmpty(projection())).toBe(true);
+  });
+
+  it("is NOT empty when it has cards", () => {
+    expect(boardIsEmpty(projection({ cards: [card("c1")] }))).toBe(false);
+  });
+
+  it("is NOT empty when it has plotlines but no cards (ADR-0053: plotlines are nodes)", () => {
+    // The S3 regression guard: an instantiated plotline on a card-less board must keep
+    // the canvas rendered, not fall back to the empty hint.
+    expect(boardIsEmpty(projection({ plotlines: [line("l1", "Romance")] }))).toBe(false);
   });
 });
 

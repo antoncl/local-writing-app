@@ -20,6 +20,7 @@
   import { SvelteFlow, Controls, type ColorMode, type Edge } from "@xyflow/svelte";
   import { themePreference } from "@/lib/utils/theme";
   import {
+    boardIsEmpty,
     buildBoardNodes,
     overriddenNodePositions,
     projectionDataKey,
@@ -378,12 +379,10 @@
   // Svelte Flow ships light-only chrome; drive its theme from the app's.
   let colorMode = $derived($themePreference as ColorMode);
 
-  // Empty = the singleton exists but holds neither cards NOR plotlines. Since ADR-0053
-  // a plotline is a first-class board NODE (not just a colour axis), so a card-less board
-  // with plotlines has content to render — hiding the canvas there would make an
-  // instantiated plotline (the S3 palette gesture) invisible. Only a truly bare board
-  // shows the hint.
-  let isEmpty = $derived(!!projection && projection.cards.length === 0 && projection.plotlines.length === 0);
+  // Empty (show the hint, hide the canvas) only when the board has neither cards nor
+  // plotlines — a plotline is a first-class node now (ADR-0053), so a plotline-only board
+  // must still render. Pure predicate (unit-tested) since the canvas isn't headless.
+  let isEmpty = $derived(!!projection && boardIsEmpty(projection));
 
   // (Re)hydrate from a fetched projection. Guarded on the DATA-key so it fires once
   // per data change, not per projection reference: a layout save doesn't touch the

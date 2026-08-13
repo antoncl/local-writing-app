@@ -56,9 +56,11 @@
   let visibleEntries = $derived(showHidden ? entries : entries.filter((e) => !hiddenSet.has(e.id)));
 
   // Every NodeList is backed by a view (ADR-0022). The `plot` default is a flat roster
-  // (every template shares plot:template, so a group header would be redundant).
+  // (every template shares plot:template, so a group header would be redundant). The spec
+  // is constant — build it once, not on every roster/hide recompute.
+  const viewSpec = defaultView("plot");
   let view = $derived({
-    spec: defaultView("plot"),
+    spec: viewSpec,
     universe: visibleEntries,
     schema,
     referenceIndex: $referenceIndexStore,

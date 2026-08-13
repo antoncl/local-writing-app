@@ -64,6 +64,15 @@ export type PlotPlotlineData = {
 
 export type PlotBoardNode = Node<PlotContainerData | PlotCardData | PlotPlotlineData>;
 
+// A board is empty (show the hint, hide the canvas) only when it has NEITHER cards NOR
+// plotlines. Since ADR-0053 a plotline is a first-class board node, so a card-less board
+// with plotlines still has something to render — treating it as empty would hide an
+// instantiated plotline (the S3 palette gesture). Pure + exported so the render decision
+// is unit-tested against the SvelteFlow-gated PlotEditor.
+export function boardIsEmpty(projection: PlotBoardProjection): boolean {
+  return projection.cards.length === 0 && projection.plotlines.length === 0;
+}
+
 // Geometry (px). Exported so the unit test asserts against the same constants the
 // layout uses rather than hard-coding magic numbers that could silently drift.
 export const CARD_WIDTH = 210;

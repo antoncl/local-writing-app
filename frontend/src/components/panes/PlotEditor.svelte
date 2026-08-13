@@ -48,7 +48,14 @@
   } from "@/lib/stores/plotBoard";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
-  import { plotlineEntriesStore, deletePlotline } from "@/lib/stores/plotlines";
+  import {
+    plotlineEntriesStore,
+    deletePlotline,
+    createPlotlineOnBoard,
+    savePlotlineEntry,
+    getPlotlineEntry,
+    plotlineReveal,
+  } from "@/lib/stores/plotlines";
   import UndoRedoControls from "@/components/UndoRedoControls.svelte";
   import ViewportFit from "@/components/editor/body/view/ViewportFit.svelte";
   import PlotCardNodeFlow from "./plot/PlotCardNodeFlow.svelte";
@@ -63,6 +70,7 @@
     PLOT_EDGE_ACTIONS,
     type PlotEdgeActions,
   } from "./plot/plotCardActions";
+  import { PLOT_PLOTLINE_ACTIONS, type PlotPlotlineActions } from "./plot/plotPlotlineActions";
   import type { BoardXY, PlotBoardProjection } from "@/lib/types";
 
   // The board's read model, fetched by the opener / PlotBoardPane into the store.
@@ -149,6 +157,51 @@
     },
   });
 
+  // On-node plotline editing (ADR-0053 §3). The board owns the ephemeral "which
+  // plotline is expanded" — only one at a time, cleared on a canvas-background click
+  // (onpaneclick below). NOT cleared on a board rebuild: a save refreshes the board,
+  // and collapsing the editor on every save would make editing impossible. A getter so
+  // the node reads it fresh (the plotCardActions.plotlines idiom).
+  let expandedPlotlineId = $state<string | null>(null);
+  setContext<PlotPlotlineActions>(PLOT_PLOTLINE_ACTIONS, {
+    get expandedId() {
+      return expandedPlotlineId;
+    },
+    toggleExpanded: (id) => {
+      expandedPlotlineId = expandedPlotlineId === id ? null : id;
+    },
+    loadPlotline: (id) => getPlotlineEntry(id),
+    // Persist an edit and refresh the board + rail. Surface a failure in the app banner
+    // (the node stays usable) AND rethrow so the node resyncs its revision from the
+    // server rather than looping 409s.
+    save: async (entry) => {
+      try {
+        return await savePlotlineEntry(entry);
+      } catch (e) {
+        editorPanes.setError(e instanceof Error ? e.message : "Couldn't save the plotline.");
+        throw e;
+      }
+    },
+  });
+
+  // A card's `plotline` backlink no longer opens an editor pane — it reveals the
+  // plotline on the board (plotlineReveal signal). When one arrives, expand that node
+  // if it's on this board, then clear the one-shot. Reading the signal first means a
+  // drag frame (flowNodes churn) can't retrigger this once the signal is null.
+  $effect(() => {
+    const revealId = $plotlineReveal;
+    if (!revealId) return;
+    // Wait for the board to load before deciding — a reveal that arrives while the
+    // board is still opening (its pane was closed) must not be dropped. Once the
+    // projection is in, expand the node if it's here; either way the one-shot clears
+    // (a stale id — a plotline on another project — is simply not on this board).
+    if (!projection) return;
+    if (flowNodes.some((n) => n.type === "plotPlotline" && n.id === revealId)) {
+      expandedPlotlineId = revealId;
+    }
+    plotlineReveal.set(null);
+  });
+
   // Delete a card from the board (#860). Confirmed (destructive, app dialog) — the
   // card is gone from the project; its scene, if any, is left untouched (a scene can
   // outlive its card). Distinct from Detach, which only clears the scene ref.
@@ -187,6 +240,25 @@
       editorPanes.setError(e instanceof Error ? e.message : "Could not create the card.");
     } finally {
       creating = false;
+    }
+  }
+
+  // Board-native plotline create (ADR-0053 §3): mint an empty plotline and expand its
+  // new node so the writer names + beats it out in place — no editor pane. `creatingPlotline`
+  // guards a double-click, and surfaces a failure in the banner.
+  let creatingPlotline = $state(false);
+  async function newPlotline(): Promise<void> {
+    if (creatingPlotline) return;
+    creatingPlotline = true;
+    try {
+      expandedPlotlineId = await createPlotlineOnBoard();
+      // Confirm the create — the new node may land off-screen (viewport unchanged),
+      // where the expand alone would read as nothing happening.
+      editorPanes.setStatus("Created plotline");
+    } catch (e) {
+      editorPanes.setError(e instanceof Error ? e.message : "Could not create the plotline.");
+    } finally {
+      creatingPlotline = false;
     }
   }
 
@@ -455,6 +527,10 @@
           <i class="ti ti-plus" aria-hidden="true"></i>
           New card
         </button>
+        <button class="board-btn" onclick={newPlotline} disabled={creatingPlotline}>
+          <i class="ti ti-plus" aria-hidden="true"></i>
+          New plotline
+        </button>
         <button class="board-btn" onclick={seed}>
           <i class="ti ti-seedling" aria-hidden="true"></i>
           Seed from manuscript
@@ -487,8 +563,8 @@
         <PlotPlotlineRail
           {plotlines}
           cardCounts={plotlineCardCounts}
-          onCreate={() => void editorPanes.createBlankPlotline()}
-          onOpen={(id) => void editorPanes.openPlotline(id)}
+          onCreate={() => void newPlotline()}
+          onOpen={(id) => (expandedPlotlineId = id)}
           onRemove={removePlotline}
         />
       {/if}
@@ -507,6 +583,7 @@
         elementsSelectable={true}
         onconnect={onConnectCausal}
         ondelete={onDeleteCausal}
+        onpaneclick={() => (expandedPlotlineId = null)}
         onnodedragstart={({ nodes }) => {
           dragging = true;
           undoCtl.dragStart(nodes);

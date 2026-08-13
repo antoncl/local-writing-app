@@ -13,7 +13,9 @@
 // What these tests pin is the property the `else` violated: a kind is either
 // routed to ITS OWN opener or refused out loud. Never guessed.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { get } from "svelte/store";
 import { FOREIGN_PROJECT_NODE, editorPanes } from "./editorPanes.svelte";
+import { plotlineReveal } from "./plotlines";
 import { api } from "@/lib/api";
 import type { ProjectNode } from "@/lib/types";
 
@@ -29,10 +31,8 @@ const ROUTES = [
   ["view", "openView"],
   ["chat", "openChat"],
   ["project", "openProjectNode"],
-  // The `plot` kind resolves to a plotline — the only plot sub-type that is a
-  // reference target (a card's `plotline` ref). Before #735 it fell to the
-  // `default:` throw, so a plotline backlink errored instead of opening.
-  ["plot", "openPlotline"],
+  // The `plot` kind (always a plotline — the only plot ref target) is NOT in this
+  // opener table: it no longer opens a pane. See the reveal test below.
 ] as const;
 
 const LOCAL_PROJECT_NODE: ProjectNode = {
@@ -64,6 +64,20 @@ describe("editorPanes.openNodeOfKind (#344)", () => {
       }
     });
   }
+
+  it("reveals a plotline on the board instead of opening a pane", async () => {
+    // A plotline is edited on its board node now (ADR-0053 §3), so a `plot` backlink
+    // signals a board reveal (plotlineReveal) rather than opening an editor pane. Pin
+    // both halves: the signal is set to the id, and no pane opener fired.
+    plotlineReveal.set(null);
+    const spies = ROUTES.map(([, name]) => vi.spyOn(editorPanes, name).mockResolvedValue(undefined));
+
+    await editorPanes.openNodeOfKind("line_1", "plot");
+
+    expect(get(plotlineReveal)).toBe("line_1");
+    for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+    plotlineReveal.set(null);
+  });
 
   it("refuses an unknown kind instead of falling back to openScene", async () => {
     // The regression itself. A kind nobody wired up must NOT silently become a

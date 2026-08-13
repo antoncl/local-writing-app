@@ -46,7 +46,7 @@ import { structureStore } from "@/lib/stores/structure";
 import { refreshLoreEntries } from "@/lib/stores/lore";
 import { refreshPromptEntries } from "@/lib/stores/prompts";
 import { refreshPlotTemplates } from "@/lib/stores/plotTemplates";
-import { refreshPlotlines } from "@/lib/stores/plotlines";
+import { revealPlotline } from "@/lib/stores/plotlines";
 import { refreshAfterSave } from "@/lib/stores/editorPaneSave";
 import { refreshKnownTags } from "@/lib/stores/tags";
 import { refreshReferenceIndexInBackground } from "@/lib/stores/references";
@@ -61,7 +61,6 @@ import type {
   EntryMetadata,
   LoreEntry,
   PlotTemplate,
-  PlotlineEntry,
   PromptEntry,
   PromptInputDefinition,
   ProjectNode,
@@ -130,13 +129,12 @@ export type ReviewCommitter = {
 // methods close over the module-level `request`, not `this`. The reloadable kinds
 // are the narrow subset with a required `metadata` (NOT the whole EditableDocument
 // union — ViewNode et al. never reach this pass and carry optional metadata).
-type ReloadableDocument = Scene | LoreEntry | PromptEntry | PlotTemplate | CardEntry | PlotlineEntry;
+type ReloadableDocument = Scene | LoreEntry | PromptEntry | PlotTemplate | CardEntry;
 const RELOAD_GETTERS: Record<string, (id: string) => Promise<ReloadableDocument>> = {
   lore: api.getLoreEntry,
   prompt: api.getPromptEntry,
   plot_template: api.getPlotTemplate,
   plot_card: api.getCard,
-  plotline: api.getPlotline,
 };
 
 class EditorPanesController {
@@ -590,10 +588,6 @@ class EditorPanesController {
         // (realize/attach/detach) mutate the scene ref through their own paths;
         // this save carries whatever the editor changed.
         savedDocument = await api.saveCard(draftDocument as CardEntry, pane.draftMarkdown);
-      } else if (documentKind === "plotline") {
-        // A book-local plotline (#735): name (title) + colour (metadata) +
-        // description (body) round-trip via the plotline endpoint.
-        savedDocument = await api.savePlotline(draftDocument as PlotlineEntry, pane.draftMarkdown);
       } else if (documentKind === "assistant") {
         savedDocument = await api.saveAssistantEntry(draftDocument as AssistantEntry);
         void refreshAssistantTags();
@@ -1038,14 +1032,6 @@ class EditorPanesController {
     });
   }
 
-  // Open a plotline (ADR-0048 §2 / #735) — the route a plotline backlink (a card's
-  // `plotline` ref) resolves to. Book-local, like the card/instance openers above.
-  async openPlotline(entryId: string): Promise<void> {
-    return this.#openEntryDocument("plotline", entryId, "open plotline", (id) => api.getPlotline(id), {
-      body: true,
-    });
-  }
-
   async openAssistant(entryId: string): Promise<void> {
     return this.#openEntryDocument("assistant", entryId, "open assistant", (id) => api.getAssistantEntry(id));
   }
@@ -1181,16 +1167,6 @@ class EditorPanesController {
     this.setStatus(`Cloned ${clone.title} into this project`);
   }
 
-  // Create a plotline from the Plotlines rail (#737) — the thread create gesture.
-  // Mint → refresh the roster → open the new plotline so the writer names it, picks
-  // its swatch colour, and describes it.
-  async createBlankPlotline(): Promise<void> {
-    const line = await api.createPlotline("New plotline");
-    await refreshPlotlines();
-    await this.openPlotline(line.id);
-    this.setStatus(`Created ${line.title}`);
-  }
-
   // Clear-to-inherit (#517 / create-project-wizard.md §8): drop one field's
   // override at L so it reverts to the inherited value. The save carries the
   // current draft (so any pending edits persist) plus the explicit
@@ -1308,8 +1284,11 @@ class EditorPanesController {
       case "plot":
         // Only plot:plotline is ever a reference target (a card's `plotline` ref is
         // the sole plot entity_ref in the schema), so a `plot` backlink is always a
-        // plotline (#735). A future plot ref target would need its entry_type here.
-        return this.openPlotline(nodeId);
+        // plotline. A plotline is edited on its board node now (ADR-0053 §3), not in a
+        // pane, so the backlink REVEALS it on the board rather than opening an editor.
+        // A future plot ref target would need its entry_type here.
+        revealPlotline(nodeId);
+        return;
       case "project":
         // Singleton per layer, so the id is checked rather than assumed —
         // an ancestor's project.md is a legitimate source with no surface.

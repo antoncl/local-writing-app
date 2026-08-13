@@ -16,7 +16,6 @@ import { setLoreEntries } from "@/lib/stores/lore";
 import { setPromptEntries } from "@/lib/stores/prompts";
 import { setPlotTemplates } from "@/lib/stores/plotTemplates";
 import { refreshPlotBoard } from "@/lib/stores/plotBoard";
-import { setPlotlines } from "@/lib/stores/plotlines";
 import { setAssistantEntries } from "@/lib/stores/assistants";
 import { setChatSessions } from "@/lib/stores/chats";
 import { researchStructureStore, setResearchStructure, setStructure } from "@/lib/stores/structure";
@@ -109,13 +108,6 @@ async function deleteScene(host: DeletePaneHost, id: string): Promise<void> {
     // so api.deleteScene would 404 — same hazard as the template/view branches).
     // No card list store to update; refresh the board so it drops the card.
     await api.deleteCard(pane.scene.id);
-    await refreshPlotBoard();
-  } else if (documentKind === "plotline") {
-    // A book-local plotline deletes via its own endpoint (a `plot` node — deleteScene
-    // would 404); the delete returns the refreshed roster for the ReferencePicker's
-    // `plot` source. Refresh the board too, so any card that referenced this thread
-    // loses its colour axis.
-    setPlotlines((await api.deletePlotline(pane.scene.id)).entries);
     await refreshPlotBoard();
   } else if (documentKind === "assistant") {
     setAssistantEntries((await api.deleteAssistantEntry(pane.scene.id)).entries);

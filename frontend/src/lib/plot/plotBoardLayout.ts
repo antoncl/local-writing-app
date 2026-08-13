@@ -17,7 +17,7 @@
 // the read/write ends of the board's opaque `layout` dict the PlotEditor round-trips;
 // they key on the `plotCard` node type, so container boxes never enter the layout.
 
-import type { Node } from "@xyflow/svelte";
+import type { CoordinateExtent, Node } from "@xyflow/svelte";
 import type { BoardXY, PlotBoardBeat, PlotBoardLayout, PlotBoardProjection } from "@/lib/types";
 
 // A container box: an act/chapter's title, how many cards it (transitively) holds,
@@ -68,7 +68,7 @@ export const CONTAINER_GAP = 24; // between sibling boxes / rows / acts
 const containerNodeId = (id: string) => `container:${id}`;
 
 type Rect = { minX: number; minY: number; maxX: number; maxY: number };
-type Box = { x: number; y: number; w: number; h: number };
+export type Box = { x: number; y: number; w: number; h: number };
 
 const cardRect = (p: BoardXY): Rect => ({ minX: p.x, minY: p.y, maxX: p.x + CARD_WIDTH, maxY: p.y + CARD_HEIGHT });
 
@@ -91,6 +91,21 @@ const boxFromContent = (r: Rect): Box => ({
 });
 
 const rectOfBox = (b: Box): Rect => ({ minX: b.x, minY: b.y, maxX: b.x + b.w, maxY: b.y + b.h });
+
+// --- Container lock (#873): the drag extent a card is confined to. Kept pure +
+// exported so it is unit-tested (the SvelteFlow drag that consumes it is not
+// headless-testable). Set as each card node's `extent` in buildBoardNodes; xyflow
+// clamps the drag into it every frame (a hard wall, no snap-back), subtracting the
+// card's own size itself — so this returns the box's INNER CONTENT REGION (inside the
+// side padding, below the header band), NOT pre-shrunk by the card. A container that
+// hugs a single card yields a region the card exactly fills → xyflow pins it. Homeless
+// cards get no extent and drag free.
+export function containerExtent(box: Box): CoordinateExtent {
+  return [
+    [box.x + CONTAINER_PAD, box.y + CONTAINER_HEADER + CONTAINER_PAD],
+    [box.x + box.w - CONTAINER_PAD, box.y + box.h - CONTAINER_PAD],
+  ];
+}
 
 // Build the board layout. Cards group by their innermost manuscript container
 // (`card.container`); a container with direct cards renders as a box nested in its
@@ -222,6 +237,13 @@ export function buildBoardNodes(
   }
   for (const card of projection.cards) {
     const line = card.plotline ? plotlineById.get(card.plotline) : undefined;
+    // Container lock (#873): confine the card's drag to its innermost container box
+    // (the same box the card lays out in), so it can be rearranged inside its act/
+    // chapter but never dragged out. Homeless cards (no rendered box) get no extent
+    // and drag free. The box is looked up where it was computed — inner box for a
+    // chapter card, act box for a card directly in an act.
+    const cid = card.container != null && containerById.has(card.container) ? card.container : null;
+    const box = cid ? (innerBox.get(cid) ?? actBox.get(cid)) : undefined;
     nodes.push({
       id: card.id,
       type: "plotCard",
@@ -236,6 +258,7 @@ export function buildBoardNodes(
       measured: { width: CARD_WIDTH, height: CARD_HEIGHT },
       draggable: true,
       selectable: false,
+      extent: box ? containerExtent(box) : undefined,
       zIndex: 2,
       data: {
         title: card.title,

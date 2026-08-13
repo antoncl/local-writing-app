@@ -252,6 +252,9 @@
     creatingPlotline = true;
     try {
       expandedPlotlineId = await createPlotlineOnBoard();
+      // Confirm the create — the new node may land off-screen (viewport unchanged),
+      // where the expand alone would read as nothing happening.
+      editorPanes.setStatus("Created plotline");
     } catch (e) {
       editorPanes.setError(e instanceof Error ? e.message : "Could not create the plotline.");
     } finally {

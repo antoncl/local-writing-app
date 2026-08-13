@@ -59,8 +59,8 @@ export function getPlotlineEntry(id: string): Promise<PlotlineEntry> {
 // the coalescing read, so the new state always lands.
 export async function savePlotlineEntry(entry: PlotlineEntry): Promise<PlotlineEntry> {
   const saved = await api.savePlotline(entry, entry.body);
-  await refreshPlotlines();
-  await refreshAfterMutation();
+  // Independent reads (roster GET + board GET) — run them together, not chained.
+  await Promise.all([refreshPlotlines(), refreshAfterMutation()]);
   return saved;
 }
 

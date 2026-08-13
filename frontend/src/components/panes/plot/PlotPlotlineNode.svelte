@@ -76,7 +76,6 @@
   let draft = $state<PlotlineEntry | null>(null);
   let beats = $state<BeatDraft[]>([]);
   let detailsOpen = $state<Set<number>>(new Set());
-  let loading = $state(false);
   let loadError = $state<string | null>(null);
   let saving = $state(false);
 
@@ -100,7 +99,6 @@
 
   async function reload(): Promise<void> {
     if (!actions) return;
-    loading = true;
     loadError = null;
     try {
       const entry = await actions.loadPlotline(id!);
@@ -109,8 +107,6 @@
       beats = toBeats(entry);
     } catch (e) {
       loadError = e instanceof Error ? e.message : String(e);
-    } finally {
-      loading = false;
     }
   }
 
@@ -197,7 +193,13 @@
 
   function removeBeat(index: number): void {
     const [gone] = beats.splice(index, 1);
-    if (gone) detailsOpen.delete(gone.key);
+    // Reassign (not .delete()) — a plain $state Set doesn't track native mutations,
+    // only reassignment, matching toggleDetails.
+    if (gone && detailsOpen.has(gone.key)) {
+      const next = new Set(detailsOpen);
+      next.delete(gone.key);
+      detailsOpen = next;
+    }
     commit();
   }
 

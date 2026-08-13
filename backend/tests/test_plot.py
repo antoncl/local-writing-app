@@ -647,12 +647,44 @@ class PlotBoardProjectionTests(PlotTestCase):
         )
         self.assertEqual([b.beat_id for b in projected.beats], [b["id"] for b in roster])
         self.assertEqual(projected.beats[0].title, roster[0]["title"])
+        # With no cards linking anything, every beat is a gap (use_count 0; ADR-0053 §6).
+        self.assertTrue(all(b.use_count == 0 for b in projected.beats))
         # A plain / ad-hoc plotline carries an empty roster, not a missing field.
         plain = self.service.create_plotline(CreatePlotlineRequest(title="Ad-hoc"))
         projected_plain = next(
             p for p in self.service.read_plot_board_projection().plotlines if p.id == plain.id
         )
         self.assertEqual(projected_plain.beats, [])
+
+    def test_projection_counts_how_many_cards_fulfil_each_beat(self) -> None:
+        # ADR-0053 §6 / S5a: each beat's use_count = how many cards fulfil it (0 = a gap).
+        plotline = self.service.instantiate_plot_template("builtin-plot-three-act-story-arc")
+        roster = plotline.metadata["instance_beats"]
+        first, second = roster[0]["id"], roster[1]["id"]
+        # Two cards fulfil the first beat, one the second — the rest stay gaps.
+        for title in ("Card A", "Card B"):
+            card = self.service.create_card(CreateCardRequest(title=title))
+            self.service.save_card(
+                card.id,
+                SaveCardRequest(
+                    title=title, body="", metadata={"beat_links": [{"plotline": plotline.id, "beat_id": first}]}
+                ),
+            )
+        card_c = self.service.create_card(CreateCardRequest(title="Card C"))
+        self.service.save_card(
+            card_c.id,
+            SaveCardRequest(
+                title="Card C", body="", metadata={"beat_links": [{"plotline": plotline.id, "beat_id": second}]}
+            ),
+        )
+        projected = next(
+            p for p in self.service.read_plot_board_projection().plotlines if p.id == plotline.id
+        )
+        counts = {b.beat_id: b.use_count for b in projected.beats}
+        self.assertEqual(counts[first], 2)
+        self.assertEqual(counts[second], 1)
+        # Only those two beats are fulfilled; every other beat of the roster is a 0.
+        self.assertEqual(sum(counts.values()), 3)
 
     def test_unattached_card_projects_null_refs(self) -> None:
         card = self.service.create_card(CreateCardRequest(title="Floating"))

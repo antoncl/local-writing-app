@@ -226,13 +226,14 @@ class RealizeCardRequest(BaseModel):
 
 class PlotBoardPlotlineBeat(BaseModel):
     """A beat on a plotline node as the board renders it (ADR-0053 §3): its stable
-    `beat_id` (the card→beat link target) + `title`. The plotline node lists these
-    to render its roster and to drag beats onto cards; richer per-beat fields
-    (function / guidance / specifics) and the use-count arrive with on-node editing
-    and the focus toggle (S2/S5) — this is the minimal shape the board draws from."""
+    `beat_id` (the card→beat link target), `title`, and `use_count` — how many story
+    cards fulfil this beat (ADR-0053 §6 / S5a). A `0` count is a gap the structure
+    exposes; a high one an over-loaded beat. The plotline node lists these to render
+    its roster (with the count) and to drag beats onto cards."""
 
     beat_id: str
     title: str = ""
+    use_count: int = 0
 
 
 class PlotBoardPlotline(BaseModel):

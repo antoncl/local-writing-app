@@ -16,9 +16,9 @@ const data = (over: Partial<PlotPlotlineData> = {}): PlotPlotlineData => ({
   title: "Main plot",
   color: null,
   beats: [
-    { beat_id: "b1", title: "Setup" },
-    { beat_id: "b2", title: "Confrontation" },
-    { beat_id: "b3", title: "Resolution" },
+    { beat_id: "b1", title: "Setup", use_count: 2 },
+    { beat_id: "b2", title: "Confrontation", use_count: 0 },
+    { beat_id: "b3", title: "Resolution", use_count: 1 },
   ],
   ...over,
 });
@@ -75,13 +75,21 @@ describe("PlotPlotlineNode", () => {
   it("renders the plotline title and its whole beat roster in order", () => {
     render(PlotPlotlineNode, { props: { data: data() } });
     expect(screen.getByText("Main plot")).toBeTruthy();
-    const beats = screen.getAllByRole("listitem").map((li) => li.textContent?.trim());
+    const beats = screen.getAllByRole("listitem").map((li) => li.querySelector(".beat-title")?.textContent);
     expect(beats).toEqual(["Setup", "Confrontation", "Resolution"]);
   });
 
   it("shows the beat count", () => {
     render(PlotPlotlineNode, { props: { data: data() } });
     expect(screen.getByTitle("Beats").textContent).toBe("3");
+  });
+
+  it("shows each beat's use-count, flagging a 0 as a gap (ADR-0053 §6 / S5a)", () => {
+    render(PlotPlotlineNode, { props: { id: "line_1", data: data() } });
+    const counts = screen.getAllByRole("listitem").map((li) => li.querySelector(".beat-use"));
+    expect(counts.map((c) => c?.textContent)).toEqual(["2", "0", "1"]);
+    // Only the unfulfilled beat is flagged as a gap.
+    expect(counts.map((c) => c?.classList.contains("gap"))).toEqual([false, true, false]);
   });
 
   it("shows an empty hint and no list when the plotline has no beats (ad-hoc)", () => {

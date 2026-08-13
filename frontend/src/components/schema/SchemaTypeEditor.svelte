@@ -179,6 +179,11 @@
       contextTargetRequired: Boolean(cs?.target?.required),
       scanSurface: (cs?.scan_surface ?? []).join(", "),
       outputKind: typeof cs?.output?.kind === "string" ? (cs.output.kind as string) : "",
+      // ADR-0054 S3: a `chat_panel` prompt may declare a `commit` (turns it into a
+      // brainstorm). We author its presence + review mode; the `fields` allow-list
+      // has no UI and is preserved verbatim below.
+      commitEnabled: cs?.output?.commit != null,
+      commitReview: typeof cs?.output?.commit?.review === "string" ? (cs.output.commit.review as string) : "visual_diff",
     };
   });
 
@@ -233,12 +238,17 @@
   let promptContextTargetRequired = $state(seed.contextTargetRequired);
   let promptScanSurface = $state(seed.scanSurface);
   let promptOutputKind = $state(seed.outputKind);
-  // ADR-0054 S2: the commit block (review + fields) has no authoring UI yet (that
-  // is S3), but it must survive a save through this editor — otherwise editing any
-  // other field of a brainstorm prompt type would silently strip its commit. Read
-  // once and carry it verbatim; it is not editable, so it never affects dirtiness.
-  const promptOutputCommit: PromptCommit | null =
-    untrack(() => initialPrompt?.context_strategy?.output?.commit) ?? null;
+  // ADR-0054 S3: a `chat_panel` prompt's commit is authorable — its presence (does
+  // this chat offer a Commit button → is it a brainstorm) and its review mode. Its
+  // other properties have no UI: `commit.fields` (the built-in scene-summary's
+  // `[summary]`) today, and a deferred `commit.target` tomorrow (the ADR models
+  // `commit` as a growable object). We capture the whole initial commit and, on
+  // rebuild, override only what we author — so an edit here never strips a sub-key
+  // this editor doesn't yet surface (the invariant S2's review restored).
+  let promptCommitEnabled = $state(seed.commitEnabled);
+  let promptCommitReview = $state(seed.commitReview);
+  const promptCommitInitial: PromptCommit =
+    untrack(() => initialPrompt?.context_strategy?.output?.commit) ?? {};
 
   // --- Unsaved-changes tracking (#68) --------------------------------------
   // Field + group edits persist immediately through the parent; only the
@@ -259,6 +269,8 @@
       contextTargetRequired: promptContextTargetRequired,
       scanSurface: promptScanSurface,
       outputKind: promptOutputKind,
+      commitEnabled: promptCommitEnabled,
+      commitReview: promptCommitReview,
     };
   }
   const isDirty = $derived(
@@ -271,7 +283,9 @@
       promptContextTargetKind !== baseline.contextTargetKind ||
       promptContextTargetRequired !== baseline.contextTargetRequired ||
       promptScanSurface !== baseline.scanSurface ||
-      promptOutputKind !== baseline.outputKind,
+      promptOutputKind !== baseline.outputKind ||
+      promptCommitEnabled !== baseline.commitEnabled ||
+      promptCommitReview !== baseline.commitReview,
   );
   $effect(() => {
     dirty = isDirty;
@@ -283,10 +297,15 @@
       .map((token) => token.trim())
       .filter(Boolean);
     const hasTarget = Boolean(promptContextTargetKind) || promptContextTargetRequired;
-    // ADR-0054 S2: the editor authors only the disposition (`kind`) for now; the
-    // commit block (review + fields) is S3. It has no control here but is carried
-    // through verbatim (`promptOutputCommit`) so saving does not strip it.
-    const hasOutput = Boolean(promptOutputKind) || promptOutputCommit !== null;
+    // ADR-0054 S3: a commit rides only on `chat_panel` (the backend rejects it on any
+    // other disposition), so switching the disposition away drops it. Spread the
+    // captured initial commit first, then override the one property we author, so
+    // `fields` (and any future sub-key) survive verbatim.
+    const commit: PromptCommit | null =
+      promptOutputKind === "chat_panel" && promptCommitEnabled
+        ? { ...promptCommitInitial, review: promptCommitReview }
+        : null;
+    const hasOutput = Boolean(promptOutputKind) || commit !== null;
     const contextStrategy: PromptContextStrategy | null = scanSurface.length || hasTarget || hasOutput
       ? {
           ...(hasTarget
@@ -302,7 +321,7 @@
             ? {
                 output: {
                   ...(promptOutputKind ? { kind: promptOutputKind } : {}),
-                  ...(promptOutputCommit !== null ? { commit: promptOutputCommit } : {}),
+                  ...(commit !== null ? { commit } : {}),
                 },
               }
             : {}),
@@ -677,6 +696,22 @@
         </select>
         <small>Where AI responses for this prompt type land. Inherited from parent (Continuation / Revise / General) when set there — only override for a top-level sub-type that doesn't inherit one of the bases.</small>
       </label>
+      {#if promptOutputKind === "chat_panel"}
+        <label class="commit-toggle">
+          <input type="checkbox" bind:checked={promptCommitEnabled} />
+          Commit results back to the subject
+        </label>
+        {#if promptCommitEnabled}
+          <label class="commit-review">
+            Review as
+            <select bind:value={promptCommitReview}>
+              <option value="visual_diff">Visual diff</option>
+              <option value="replace">Replace</option>
+            </select>
+            <small>How the committed result is reviewed: a per-run diff against the current entry, or a plain current-to-proposed replacement.</small>
+          </label>
+        {/if}
+      {/if}
     </fieldset>
   {/if}
 
@@ -973,5 +1008,14 @@
     box-sizing: border-box;
     font-family: inherit;
     min-height: 64px;
+  }
+  /* Commit block (ADR-0054 S3) — only shown under a chat_panel disposition. */
+  .prompt-fieldset .commit-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .prompt-fieldset .commit-review {
+    margin-left: 22px;
   }
 </style>

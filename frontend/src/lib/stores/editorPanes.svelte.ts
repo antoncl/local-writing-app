@@ -46,7 +46,6 @@ import { structureStore } from "@/lib/stores/structure";
 import { refreshLoreEntries } from "@/lib/stores/lore";
 import { refreshPromptEntries } from "@/lib/stores/prompts";
 import { refreshPlotTemplates } from "@/lib/stores/plotTemplates";
-import { refreshTemplateInstances } from "@/lib/stores/templateInstances";
 import { refreshPlotlines } from "@/lib/stores/plotlines";
 import { refreshAfterSave } from "@/lib/stores/editorPaneSave";
 import { refreshKnownTags } from "@/lib/stores/tags";
@@ -63,7 +62,6 @@ import type {
   LoreEntry,
   PlotTemplate,
   PlotlineEntry,
-  TemplateInstanceEntry,
   PromptEntry,
   PromptInputDefinition,
   ProjectNode,
@@ -596,11 +594,6 @@ class EditorPanesController {
         // A book-local plotline (#735): name (title) + colour (metadata) +
         // description (body) round-trip via the plotline endpoint.
         savedDocument = await api.savePlotline(draftDocument as PlotlineEntry, pane.draftMarkdown);
-      } else if (documentKind === "plot_template_instance") {
-        // A book-local plot arc (ADR-0048 S7 Slice 5a): title + description (body) +
-        // metadata (the specialized `instance_beats` roster + lineage) round-trip via
-        // the instance endpoint. Book-local — always editable, no Library lock.
-        savedDocument = await api.saveTemplateInstance(draftDocument as TemplateInstanceEntry, pane.draftMarkdown);
       } else if (documentKind === "assistant") {
         savedDocument = await api.saveAssistantEntry(draftDocument as AssistantEntry);
         void refreshAssistantTags();
@@ -1053,16 +1046,6 @@ class EditorPanesController {
     });
   }
 
-  // Open a plot arc / template instance (ADR-0048 S7 Slice 5a) as a NodeEditor
-  // document — the "open" route from the board's arc palette. Its description is the
-  // prose body; the specialized beats (`instance_beats`) render + edit as a metadata
-  // field. Book-local, so no Library provenance / read-only lock applies.
-  async openPlotTemplateInstance(entryId: string): Promise<void> {
-    return this.#openEntryDocument("plot_template_instance", entryId, "open plot arc", (id) => api.getTemplateInstance(id), {
-      body: true,
-    });
-  }
-
   async openAssistant(entryId: string): Promise<void> {
     return this.#openEntryDocument("assistant", entryId, "open assistant", (id) => api.getAssistantEntry(id));
   }
@@ -1198,29 +1181,9 @@ class EditorPanesController {
     this.setStatus(`Cloned ${clone.title} into this project`);
   }
 
-  // Instantiate a Library template into this book as a new arc (ADR-0048 S7 Slice
-  // 5a), the arc-palette's "add from template" gesture: snapshot its beat roster
-  // into an owned instance, refresh the palette, then open the arc so the writer can
-  // specialize the beats. Mirrors forkPlotTemplate (mint → refresh → open).
-  async instantiatePlotTemplate(templateId: string): Promise<void> {
-    const arc = await api.instantiatePlotTemplate(templateId);
-    await refreshTemplateInstances();
-    await this.openPlotTemplateInstance(arc.id);
-    this.setStatus(`Added ${arc.title} to this book`);
-  }
-
-  // Roll a blank ad-hoc arc (ADR-0048 §3) — the palette's "blank arc" gesture, for a
-  // custom plot not derived from a shipped template. Mint → refresh → open to fill in.
-  async createBlankPlotArc(): Promise<void> {
-    const arc = await api.createTemplateInstance("New arc");
-    await refreshTemplateInstances();
-    await this.openPlotTemplateInstance(arc.id);
-    this.setStatus(`Created ${arc.title}`);
-  }
-
   // Create a plotline from the Plotlines rail (#737) — the thread create gesture.
   // Mint → refresh the roster → open the new plotline so the writer names it, picks
-  // its swatch colour, and describes it. Mirrors createBlankPlotArc.
+  // its swatch colour, and describes it.
   async createBlankPlotline(): Promise<void> {
     const line = await api.createPlotline("New plotline");
     await refreshPlotlines();

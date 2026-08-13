@@ -19,10 +19,10 @@ function projection(cards: PlotBoardProjection["cards"]): PlotBoardProjection {
   return { board_id: "b", board_revision: "r", layout: {}, plotlines: [], containers: [], cards };
 }
 
-const beat = (instance_id: string, beat_id: string): PlotBoardBeat => ({
-  instance_id,
-  instance_title: instance_id,
-  instance_color: null,
+const beat = (plotline_id: string, beat_id: string): PlotBoardBeat => ({
+  plotline_id,
+  plotline_title: plotline_id,
+  plotline_color: null,
   beat_id,
   title: beat_id,
 });

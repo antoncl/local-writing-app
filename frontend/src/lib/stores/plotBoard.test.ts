@@ -235,19 +235,19 @@ describe("card content ops", () => {
   });
 
   it("linkCardBeat appends a dropped beat to the card's existing links, then refetches", async () => {
-    vi.spyOn(api, "getCard").mockResolvedValue(card({ plotline: "p1", beat_links: [{ instance: "i1", beat_id: "b1" }] }));
+    vi.spyOn(api, "getCard").mockResolvedValue(card({ plotline: "p1", beat_links: [{ plotline: "i1", beat_id: "b1" }] }));
     const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
     const refresh = vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
     await linkCardBeat("c1", "i1", "b2");
     expect(save.mock.calls[0][0].metadata).toEqual({
       plotline: "p1",
-      beat_links: [{ instance: "i1", beat_id: "b1" }, { instance: "i1", beat_id: "b2" }],
+      beat_links: [{ plotline: "i1", beat_id: "b1" }, { plotline: "i1", beat_id: "b2" }],
     });
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
   it("linkCardBeat skips the save + refetch when the beat is already linked (no-op)", async () => {
-    vi.spyOn(api, "getCard").mockResolvedValue(card({ beat_links: [{ instance: "i1", beat_id: "b1" }] }));
+    vi.spyOn(api, "getCard").mockResolvedValue(card({ beat_links: [{ plotline: "i1", beat_id: "b1" }] }));
     const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
     const refresh = vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
     await linkCardBeat("c1", "i1", "b1");
@@ -256,7 +256,7 @@ describe("card content ops", () => {
   });
 
   it("unlinkCardBeat removes one link; emptying it drops the key (sparse)", async () => {
-    vi.spyOn(api, "getCard").mockResolvedValue(card({ plotline: "p1", beat_links: [{ instance: "i1", beat_id: "b1" }] }));
+    vi.spyOn(api, "getCard").mockResolvedValue(card({ plotline: "p1", beat_links: [{ plotline: "i1", beat_id: "b1" }] }));
     const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
     vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
     await unlinkCardBeat("c1", "i1", "b1");

@@ -6,9 +6,9 @@
 import { describe, expect, it } from "vitest";
 import {
   buildBoardNodes,
-  cardPositionsFromNodes,
+  movableNodePositions,
   containerExtent,
-  overriddenCardPositions,
+  overriddenNodePositions,
   projectionDataKey,
   readBoardPositions,
   CARD_GAP_X,
@@ -33,7 +33,12 @@ function projection(over: Partial<PlotBoardProjection> = {}): PlotBoardProjectio
   };
 }
 
-const line = (id: string, title: string, color: string | null = null) => ({ id, title, color });
+const line = (
+  id: string,
+  title: string,
+  color: string | null = null,
+  beats: { beat_id: string; title: string }[] = [],
+) => ({ id, title, color, beats });
 const container = (id: string, title: string, parent: string | null = null) => ({ id, title, parent });
 const card = (
   id: string,
@@ -53,6 +58,7 @@ const card = (
 });
 
 const containerNodes = (nodes: ReturnType<typeof buildBoardNodes>) => nodes.filter((n) => n.type === "plotContainer");
+const plotlineNodes = (nodes: ReturnType<typeof buildBoardNodes>) => nodes.filter((n) => n.type === "plotPlotline");
 const cardNodes = (nodes: ReturnType<typeof buildBoardNodes>) => nodes.filter((n) => n.type === "plotCard");
 const dataOf = (nodes: ReturnType<typeof buildBoardNodes>, id: string) => nodes.find((n) => n.id === id)!.data;
 
@@ -252,13 +258,13 @@ describe("readBoardPositions", () => {
   });
 });
 
-describe("cardPositionsFromNodes", () => {
+describe("movableNodePositions", () => {
   it("serializes only card positions raw (unrounded), excluding container boxes", () => {
     const nodes = buildBoardNodes(
       projection({ containers: [container("chap", "Chapter 1")], cards: [card("c1", { container: "chap" })] }),
       { c1: { x: 12.4, y: 7.6 } },
     );
-    const positions = cardPositionsFromNodes(nodes);
+    const positions = movableNodePositions(nodes);
     // Raw, not rounded — the persist threshold must match moveNodesCommand's raw
     // drag record, else a sub-pixel move records an undo step that saves nothing.
     expect(positions).toEqual({ c1: { x: 12.4, y: 7.6 } });
@@ -271,12 +277,12 @@ describe("cardPositionsFromNodes", () => {
       projection({ containers: [container("chap", "Chapter 1")], cards: [card("c1", { container: "chap" })] }),
       { c1: { x: 5, y: 6 } },
     );
-    const serialized = { positions: cardPositionsFromNodes(nodes) };
+    const serialized = { positions: movableNodePositions(nodes) };
     expect(readBoardPositions(serialized)).toEqual({ c1: { x: 5, y: 6 } });
   });
 });
 
-describe("overriddenCardPositions (sparse persist)", () => {
+describe("overriddenNodePositions (sparse persist)", () => {
   const proj = () =>
     projection({
       containers: [container("chap", "Chapter 1")],
@@ -286,13 +292,13 @@ describe("overriddenCardPositions (sparse persist)", () => {
   it("keeps only the cards in the override set", () => {
     const nodes = buildBoardNodes(proj());
     // Only c1 is pinned; c2 derives from its container and must not be persisted.
-    expect(overriddenCardPositions(nodes, new Set(["c1"]))).toHaveProperty("c1");
-    expect(overriddenCardPositions(nodes, new Set(["c1"]))).not.toHaveProperty("c2");
+    expect(overriddenNodePositions(nodes, new Set(["c1"]))).toHaveProperty("c1");
+    expect(overriddenNodePositions(nodes, new Set(["c1"]))).not.toHaveProperty("c2");
   });
 
   it("is empty when nothing is overridden (a never-dragged board saves nothing)", () => {
     const nodes = buildBoardNodes(proj());
-    expect(overriddenCardPositions(nodes, new Set())).toEqual({});
+    expect(overriddenNodePositions(nodes, new Set())).toEqual({});
   });
 });
 
@@ -421,5 +427,62 @@ describe("container lock (#873)", () => {
     // pin, so there is genuine horizontal travel once the card size is subtracted).
     expect(maxX - minX).toBe(2 * CARD_WIDTH + CARD_GAP_X);
     expect(maxX - minX).toBeGreaterThan(CARD_WIDTH);
+  });
+});
+
+describe("plotline nodes (ADR-0053 §3)", () => {
+  it("emits one draggable plotPlotline node per plotline, carrying its beats", () => {
+    const nodes = buildBoardNodes(
+      projection({
+        plotlines: [
+          line("p1", "Main", "blue", [{ beat_id: "b1", title: "Setup" }]),
+          line("p2", "Romance", "rose", []),
+        ],
+      }),
+    );
+    const lines = plotlineNodes(nodes);
+    expect(lines.map((n) => n.id)).toEqual(["p1", "p2"]);
+    expect(lines[0].draggable).toBe(true);
+    expect(lines[0].data).toEqual({ title: "Main", color: "blue", beats: [{ beat_id: "b1", title: "Setup" }] });
+    expect(lines[1].data).toEqual({ title: "Romance", color: "rose", beats: [] });
+  });
+
+  it("lays plotline nodes out in a band below every card + container", () => {
+    const nodes = buildBoardNodes(
+      projection({
+        plotlines: [line("p1", "Main")],
+        containers: [container("chap", "Chapter 1")],
+        cards: [card("c1", { container: "chap" }), card("loose", { container: null })],
+      }),
+    );
+    const plY = plotlineNodes(nodes)[0].position.y;
+    const others = nodes.filter((n) => n.type !== "plotPlotline");
+    for (const n of others) expect(plY).toBeGreaterThan(n.position.y);
+  });
+
+  it("a saved override wins over the derived band slot", () => {
+    const nodes = buildBoardNodes(projection({ plotlines: [line("p1", "Main")] }), { p1: { x: 42, y: 99 } });
+    expect(plotlineNodes(nodes)[0].position).toEqual({ x: 42, y: 99 });
+  });
+
+  it("persists plotline positions (dragged) alongside cards, sparse by override", () => {
+    const nodes = buildBoardNodes(
+      projection({
+        plotlines: [line("p1", "Main")],
+        containers: [container("chap", "Chapter 1")],
+        cards: [card("c1", { container: "chap" })],
+      }),
+    );
+    // A plotline node's position is collected by the shared serializer…
+    expect(movableNodePositions(nodes)).toHaveProperty("p1");
+    // …and persists only when overridden (dragged this session / already saved).
+    expect(overriddenNodePositions(nodes, new Set(["p1"]))).toHaveProperty("p1");
+    expect(overriddenNodePositions(nodes, new Set(["c1"]))).not.toHaveProperty("p1");
+  });
+
+  it("changes the data-key when a plotline's beat roster changes (→ reflow)", () => {
+    const withBeat = projection({ plotlines: [line("p1", "Main", "blue", [{ beat_id: "b1", title: "Setup" }])] });
+    const renamedBeat = projection({ plotlines: [line("p1", "Main", "blue", [{ beat_id: "b1", title: "Opening" }])] });
+    expect(projectionDataKey(withBeat)).not.toBe(projectionDataKey(renamedBeat));
   });
 });

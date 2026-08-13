@@ -127,7 +127,7 @@
     const payload = readPlotBeatDrag(e);
     if (!payload) return;
     e.preventDefault();
-    actions.onLinkBeat(id, payload.instance, payload.beat_id);
+    actions.onLinkBeat(id, payload.plotline, payload.beat_id);
   }
   function unlinkBeat(instanceId: string, beatId: string) {
     if (actions && id) actions.onUnlinkBeat(id, instanceId, beatId);
@@ -261,20 +261,20 @@
            (`nowheel`, so the canvas doesn't zoom) bounded scroll so even a heavily-
            beated card can unlink any of them. Read-only keeps the compact cap + "+N". -->
       <div class="card-beats" class:editable={actions} class:nowheel={actions} aria-label="Beats">
-        {#each actions ? data.beats : visibleBeats as beat (beat.instance_id + ":" + beat.beat_id)}
-          {@const beatHex = getSwatch(beat.instance_color)?.hex ?? null}
+        {#each actions ? data.beats : visibleBeats as beat (beat.plotline_id + ":" + beat.beat_id)}
+          {@const beatHex = getSwatch(beat.plotline_color)?.hex ?? null}
           <span
             class="beat-badge"
             class:coloured={beatHex}
             style={beatHex ? `--beat-accent: ${beatHex}` : undefined}
-            title={`${beat.instance_title} · ${beat.title}`}
+            title={`${beat.plotline_title} · ${beat.title}`}
           >
             <span class="beat-badge-label">{beat.title}</span>
             {#if actions}
               <button
                 class="beat-badge-x nodrag nopan"
                 aria-label={`Unlink beat ${beat.title}`}
-                onclick={() => unlinkBeat(beat.instance_id, beat.beat_id)}
+                onclick={() => unlinkBeat(beat.plotline_id, beat.beat_id)}
               >
                 <i class="ti ti-x" aria-hidden="true"></i>
               </button>

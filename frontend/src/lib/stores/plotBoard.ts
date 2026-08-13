@@ -156,38 +156,39 @@ export function detachCardScene(cardId: string): Promise<void> {
   });
 }
 
-// One card→beat link: an (arc instance id, beat id) pair — the stored shape of a
-// `beat_links` item (both plain text, healed plot-locally on save; ADR-0048 S7 5b).
-export type PlotBeatLink = { instance: string; beat_id: string };
+// One card→beat link: a (plotline id, beat id) pair — the stored shape of a
+// `beat_links` item (both plain text, healed plot-locally on save; ADR-0048 S7 5b;
+// ADR-0053 renamed the plotline half from `instance`).
+export type PlotBeatLink = { plotline: string; beat_id: string };
 
-// Beat links are authored by DRAGGING a beat from the Arcs palette onto a card (#824),
-// so these are incremental add/remove ops over the card's current `beat_links`, not a
-// whole-set write. Each reads the card's live metadata (via mutateCardMetadata's
+// Beat links are authored by DRAGGING a beat onto a card (#824), so these are
+// incremental add/remove ops over the card's current `beat_links`, not a whole-set
+// write. Each reads the card's live metadata (via mutateCardMetadata's
 // get→mutate→save) so a concurrent change never gets clobbered; the backend heals
 // dangling links regardless.
 function beatLinksOf(metadata: CardEntry["metadata"]): PlotBeatLink[] {
   const raw = metadata.beat_links;
   return Array.isArray(raw)
-    ? raw.filter((l): l is PlotBeatLink => !!l && typeof l === "object" && "instance" in l && "beat_id" in l)
+    ? raw.filter((l): l is PlotBeatLink => !!l && typeof l === "object" && "plotline" in l && "beat_id" in l)
     : [];
 }
 
 // Drop a beat onto a card → add the link (deduped; a card fulfils a beat once).
 // Already linked → no change, so skip the save + board rebuild.
-export function linkCardBeat(cardId: string, instance: string, beat_id: string): Promise<void> {
+export function linkCardBeat(cardId: string, plotline: string, beat_id: string): Promise<void> {
   return mutateCardMetadata(cardId, (metadata) => {
     const links = beatLinksOf(metadata);
-    if (links.some((l) => l.instance === instance && l.beat_id === beat_id)) return false;
-    links.push({ instance, beat_id });
+    if (links.some((l) => l.plotline === plotline && l.beat_id === beat_id)) return false;
+    links.push({ plotline, beat_id });
     metadata.beat_links = links;
   });
 }
 
 // Remove a beat from a card (the badge's × on the card). An empty result drops the key
 // (sparse), matching the backend's all-dangling→sparse heal.
-export function unlinkCardBeat(cardId: string, instance: string, beat_id: string): Promise<void> {
+export function unlinkCardBeat(cardId: string, plotline: string, beat_id: string): Promise<void> {
   return mutateCardMetadata(cardId, (metadata) => {
-    const links = beatLinksOf(metadata).filter((l) => !(l.instance === instance && l.beat_id === beat_id));
+    const links = beatLinksOf(metadata).filter((l) => !(l.plotline === plotline && l.beat_id === beat_id));
     if (links.length) metadata.beat_links = links;
     else delete metadata.beat_links;
   });

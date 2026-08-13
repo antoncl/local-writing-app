@@ -1,8 +1,8 @@
-// Plot-board drag-and-drop payloads (#824). Linking a beat to a card is a drag from
-// the Arcs rail (the palette) onto the card — the origin/plotting prototype's gesture,
-// ported to the current SvelteFlow board. The payload rides HTML5 `dataTransfer` under
-// a custom MIME so the board can tell a beat-drag from any other drag, with a
-// `text/plain` fallback for good measure.
+// Plot-board drag-and-drop payloads (#824; ADR-0053). Linking a beat to a card is a
+// drag of a beat from its plotline onto the card — the origin/plotting prototype's
+// gesture, ported to the current SvelteFlow board (S4 sources the drag from the
+// plotline node). The payload rides HTML5 `dataTransfer` under a custom MIME so the
+// board can tell a beat-drag from any other drag, with a `text/plain` fallback.
 //
 // Why a custom MIME and not just text/plain: during `dragover` the browser withholds
 // the DATA (only `types` is readable, for security), so the drop target checks
@@ -12,15 +12,15 @@
 
 export const PLOT_DND_MIME = "application/x-local-writing-plot";
 
-// A beat dragged from the Arcs rail: which beat of which arc (template instance).
-export type PlotBeatDrag = { kind: "beat"; instance: string; beat_id: string };
+// A dragged beat: which beat of which plotline.
+export type PlotBeatDrag = { kind: "beat"; plotline: string; beat_id: string };
 
-export function setPlotBeatDrag(event: DragEvent, instance: string, beat_id: string): void {
+export function setPlotBeatDrag(event: DragEvent, plotline: string, beat_id: string): void {
   const dt = event.dataTransfer;
   if (!dt) return;
-  const payload: PlotBeatDrag = { kind: "beat", instance, beat_id };
+  const payload: PlotBeatDrag = { kind: "beat", plotline, beat_id };
   dt.setData(PLOT_DND_MIME, JSON.stringify(payload));
-  dt.setData("text/plain", `${instance}:${beat_id}`);
+  dt.setData("text/plain", `${plotline}:${beat_id}`);
   dt.effectAllowed = "copy"; // a beat drop CREATES a link (copy), never moves the source
 }
 
@@ -41,9 +41,9 @@ export function readPlotBeatDrag(event: DragEvent): PlotBeatDrag | null {
       payload &&
       typeof payload === "object" &&
       (payload as PlotBeatDrag).kind === "beat" &&
-      typeof (payload as PlotBeatDrag).instance === "string" &&
+      typeof (payload as PlotBeatDrag).plotline === "string" &&
       typeof (payload as PlotBeatDrag).beat_id === "string" &&
-      (payload as PlotBeatDrag).instance &&
+      (payload as PlotBeatDrag).plotline &&
       (payload as PlotBeatDrag).beat_id
     ) {
       return payload as PlotBeatDrag;

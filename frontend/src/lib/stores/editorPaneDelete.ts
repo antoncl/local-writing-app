@@ -15,7 +15,6 @@ import { referenceIndexStore, refreshReferenceIndexInBackground } from "@/lib/st
 import { setLoreEntries } from "@/lib/stores/lore";
 import { setPromptEntries } from "@/lib/stores/prompts";
 import { setPlotTemplates } from "@/lib/stores/plotTemplates";
-import { setTemplateInstances } from "@/lib/stores/templateInstances";
 import { refreshPlotBoard } from "@/lib/stores/plotBoard";
 import { setPlotlines } from "@/lib/stores/plotlines";
 import { setAssistantEntries } from "@/lib/stores/assistants";
@@ -117,13 +116,6 @@ async function deleteScene(host: DeletePaneHost, id: string): Promise<void> {
     // `plot` source. Refresh the board too, so any card that referenced this thread
     // loses its colour axis.
     setPlotlines((await api.deletePlotline(pane.scene.id)).entries);
-    await refreshPlotBoard();
-  } else if (documentKind === "plot_template_instance") {
-    // A book-local plot arc deletes via its own endpoint (a `plot` node — deleteScene
-    // would 404); the delete returns the refreshed roster for the palette. Refresh the
-    // board too, so cards linked to this arc's beats drop their now-dangling badges
-    // (the projection re-resolves beats; the backend heals the stale links on read).
-    setTemplateInstances((await api.deleteTemplateInstance(pane.scene.id)).entries);
     await refreshPlotBoard();
   } else if (documentKind === "assistant") {
     setAssistantEntries((await api.deleteAssistantEntry(pane.scene.id)).entries);

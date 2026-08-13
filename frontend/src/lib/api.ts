@@ -63,8 +63,6 @@ import type {
   CardList,
   PlotlineEntry,
   PlotlineList,
-  TemplateInstanceEntry,
-  TemplateInstanceList,
   MutationSetEntry,
   MutationSetEntryList,
   MutationSetRow,
@@ -983,10 +981,10 @@ export const api = {
   listPlotlines() {
     return request<PlotlineList>("/plot/plotlines");
   },
-  // Create a plotline — the Plotlines rail's "New plotline" entry point (#737).
-  // Title only (colour is set afterward via savePlotline / the editor's swatch
-  // picker); mirrors createCard / createTemplateInstance. Returns the new node so
-  // the caller can open it to name + colour it.
+  // Create an ad-hoc plotline (no template behind it) — the "New plotline" entry
+  // point. Title only (colour + beats are authored afterward via savePlotline / the
+  // board node); mirrors createCard. Returns the new node so the caller can place +
+  // name it.
   createPlotline(title: string) {
     return request<PlotlineEntry>("/plot/plotlines", {
       method: "POST",
@@ -1014,42 +1012,13 @@ export const api = {
   deletePlotline(entryId: string) {
     return request<PlotlineList>(`/plot/plotlines/${entryId}`, { method: "DELETE" });
   },
-  // Template instances (ADR-0048 §3, wired to the board's arc palette in S7 Slice
-  // 5a) — the plotter's arcs. Book-local layered `plot/` nodes sharing the card's
-  // CRUD shape; the specialized beats + lineage ride through `metadata`. `instantiate`
-  // is the only bespoke op: it snapshots a Library template's beat roster into a new
-  // owned arc (lives among the template routes backend-side); ad-hoc arcs are a plain
-  // create. Delete returns the refreshed roster (write-through, like plotline delete).
-  listTemplateInstances() {
-    return request<TemplateInstanceList>("/plot/instances");
-  },
-  getTemplateInstance(entryId: string) {
-    return request<TemplateInstanceEntry>(`/plot/instances/${entryId}`);
-  },
-  createTemplateInstance(title: string) {
-    return request<TemplateInstanceEntry>("/plot/instances", {
-      method: "POST",
-      body: JSON.stringify({ title }),
-    });
-  },
-  saveTemplateInstance(entry: TemplateInstanceEntry, body: string) {
-    return request<TemplateInstanceEntry>(`/plot/instances/${entry.id}`, {
-      method: "PUT",
-      body: JSON.stringify({
-        title: entry.title,
-        body,
-        metadata: entry.metadata,
-        base_revision: entry.revision,
-      }),
-    });
-  },
-  deleteTemplateInstance(entryId: string) {
-    return request<TemplateInstanceList>(`/plot/instances/${entryId}`, { method: "DELETE" });
-  },
-  // Snapshot a Library template's beats into a new owned arc (ADR-0048 §3). Returns
-  // the created instance so the caller can open it to specialize the beats.
+  // Snapshot a Library template's beats into a new owned plotline (ADR-0048 §3;
+  // ADR-0053 §1/§2 — a plotline IS a template instance). Lives among the template
+  // routes backend-side; returns the created plotline so the caller can place + edit
+  // it on the board (the S3 palette's instantiate gesture). An ad-hoc plotline is a
+  // plain createPlotline (no template behind it).
   instantiatePlotTemplate(templateId: string) {
-    return request<TemplateInstanceEntry>(`/plot/templates/${templateId}/instantiate`, { method: "POST" });
+    return request<PlotlineEntry>(`/plot/templates/${templateId}/instantiate`, { method: "POST" });
   },
   // Reusable mutation sets (#62).
   listMutationSetEntries() {

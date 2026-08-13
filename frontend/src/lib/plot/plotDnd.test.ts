@@ -24,10 +24,10 @@ describe("plotDnd", () => {
   it("round-trips a beat payload through the custom MIME channel", () => {
     const dt = fakeDataTransfer();
     setPlotBeatDrag(dragEvent(dt), "i1", "b1");
-    expect(dt.getData(PLOT_DND_MIME)).toBe(JSON.stringify({ kind: "beat", instance: "i1", beat_id: "b1" }));
+    expect(dt.getData(PLOT_DND_MIME)).toBe(JSON.stringify({ kind: "beat", plotline: "i1", beat_id: "b1" }));
     expect(dt.getData("text/plain")).toBe("i1:b1"); // the fallback
     expect(dt.effectAllowed).toBe("copy"); // a drop CREATES a link
-    expect(readPlotBeatDrag(dragEvent(dt))).toEqual({ kind: "beat", instance: "i1", beat_id: "b1" });
+    expect(readPlotBeatDrag(dragEvent(dt))).toEqual({ kind: "beat", plotline: "i1", beat_id: "b1" });
   });
 
   it("hasPlotBeatDrag reads `types` (available during dragover), true only for a beat drag", () => {
@@ -47,7 +47,7 @@ describe("plotDnd", () => {
     expect(readPlotBeatDrag(dragEvent(malformed))).toBeNull();
 
     const wrongKind = fakeDataTransfer();
-    wrongKind.setData(PLOT_DND_MIME, JSON.stringify({ kind: "other", instance: "i", beat_id: "b" }));
+    wrongKind.setData(PLOT_DND_MIME, JSON.stringify({ kind: "other", plotline: "i", beat_id: "b" }));
     expect(readPlotBeatDrag(dragEvent(wrongKind))).toBeNull();
   });
 

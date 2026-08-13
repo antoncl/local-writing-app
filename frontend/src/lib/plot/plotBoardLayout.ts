@@ -13,12 +13,13 @@
 // chapter box sits inside its act box. Cards drag and their positions persist
 // (S7c), exactly as before — a container carries no position and is never stored.
 //
-// `readBoardPositions` / `cardPositionsFromNodes` / `overriddenCardPositions` are
+// `readBoardPositions` / `movableNodePositions` / `overriddenNodePositions` are
 // the read/write ends of the board's opaque `layout` dict the PlotEditor round-trips;
-// they key on the `plotCard` node type, so container boxes never enter the layout.
+// they key on the draggable node types (`plotCard` + `plotPlotline`), so the derived
+// container boxes never enter the layout.
 
 import type { CoordinateExtent, Node } from "@xyflow/svelte";
-import type { BoardXY, PlotBoardBeat, PlotBoardLayout, PlotBoardProjection } from "@/lib/types";
+import type { BoardXY, PlotBoardBeat, PlotBoardLayout, PlotBoardPlotlineBeat, PlotBoardProjection } from "@/lib/types";
 
 // A container box: an act/chapter's title, how many cards it (transitively) holds,
 // and its nesting level (0 = a top-level act, 1 = a box nested inside one). The box
@@ -52,13 +53,23 @@ export type PlotCardData = {
   causalLinks: string[];
 };
 
-export type PlotBoardNode = Node<PlotContainerData | PlotCardData>;
+// A plotline node (ADR-0053 §3): a plotline IS a plot-template instance, drawn as a
+// free-floating board node holding its beat roster. `color` tints it (the #863
+// swatch); `beats` render as its read-only roster in S2a (on-node editing is S2b).
+export type PlotPlotlineData = {
+  title: string;
+  color: string | null;
+  beats: PlotBoardPlotlineBeat[];
+};
+
+export type PlotBoardNode = Node<PlotContainerData | PlotCardData | PlotPlotlineData>;
 
 // Geometry (px). Exported so the unit test asserts against the same constants the
 // layout uses rather than hard-coding magic numbers that could silently drift.
 export const CARD_WIDTH = 210;
 export const CARD_HEIGHT = 110;
 export const CARD_GAP_X = 24; // between cards in a row
+export const PLOTLINE_WIDTH = 240; // a plotline node is a touch wider than a card
 export const CONTAINER_PAD = 20; // inner padding between a box edge and its content
 export const CONTAINER_HEADER = 32; // the title-bar band at the top of a box
 export const CONTAINER_GAP = 24; // between sibling boxes / rows / acts
@@ -273,6 +284,27 @@ export function buildBoardNodes(
       },
     });
   }
+
+  // Plotline nodes (ADR-0053 §3): a plotline is a first-class board node holding its
+  // beat roster, NOT a lane the cards sit in — so it floats free (draggable anywhere),
+  // laid out by default in a loose row in a band below every act + the homeless cards.
+  // Once dragged its position persists like a card's (same saved-override model). The
+  // node id IS the plotline id; card + plotline ids are distinct, so one `saved` map
+  // (keyed by node id) holds both without collision.
+  const plotlineBandY =
+    actY + CONTAINER_HEADER + (homeless.length ? CARD_HEIGHT + CONTAINER_GAP : 0) + CONTAINER_GAP;
+  projection.plotlines.forEach((line, i) => {
+    nodes.push({
+      id: line.id,
+      type: "plotPlotline",
+      position: saved[line.id] ?? { x: i * (PLOTLINE_WIDTH + CARD_GAP_X), y: plotlineBandY },
+      width: PLOTLINE_WIDTH,
+      draggable: true,
+      selectable: false,
+      zIndex: 2,
+      data: { title: line.title, color: line.color, beats: line.beats },
+    });
+  });
   return nodes;
 }
 
@@ -291,15 +323,16 @@ export function readBoardPositions(layout: Record<string, unknown>): Record<stri
   return out;
 }
 
-// Serialize the current card positions for persistence (S7c). Only plotCard nodes —
-// container boxes are derived (never stored). Positions are stored raw (not rounded)
-// so the persist threshold matches moveNodesCommand's raw-inequality drag record:
-// rounding here would let a sub-pixel drag record an undo step that saved nothing, so
-// a later Ctrl+Z would reverse an invisible move.
-export function cardPositionsFromNodes(nodes: PlotBoardNode[]): Record<string, BoardXY> {
+// Serialize the current movable-node positions for persistence (S7c; ADR-0053): the
+// draggable node types — plotCard AND plotPlotline (both keyed by their own id in the
+// shared `positions` map) — but never container boxes, which are derived. Positions
+// are stored raw (not rounded) so the persist threshold matches moveNodesCommand's
+// raw-inequality drag record: rounding here would let a sub-pixel drag record an undo
+// step that saved nothing, so a later Ctrl+Z would reverse an invisible move.
+export function movableNodePositions(nodes: PlotBoardNode[]): Record<string, BoardXY> {
   const out: Record<string, BoardXY> = {};
   for (const n of nodes) {
-    if (n.type === "plotCard") out[n.id] = { x: n.position.x, y: n.position.y };
+    if (n.type === "plotCard" || n.type === "plotPlotline") out[n.id] = { x: n.position.x, y: n.position.y };
   }
   return out;
 }
@@ -309,8 +342,8 @@ export function cardPositionsFromNodes(nodes: PlotBoardNode[]): Record<string, B
 // un-placed card is absent, so it derives from its container — which is what lets a
 // re-attachment reflow it into its new container. Pinning every card (the S7c
 // behaviour) would strand a re-homed card in its old container's band.
-export function overriddenCardPositions(nodes: PlotBoardNode[], overridden: Set<string>): Record<string, BoardXY> {
-  const all = cardPositionsFromNodes(nodes);
+export function overriddenNodePositions(nodes: PlotBoardNode[], overridden: Set<string>): Record<string, BoardXY> {
+  const all = movableNodePositions(nodes);
   const out: Record<string, BoardXY> = {};
   for (const id of Object.keys(all)) {
     if (overridden.has(id)) out[id] = all[id];
@@ -336,10 +369,10 @@ export function projectionDataKey(p: PlotBoardProjection): string {
       c.scene,
       c.container,
       c.page_status,
-      c.beats.map((b) => [b.instance_id, b.beat_id, b.title, b.instance_color]),
+      c.beats.map((b) => [b.plotline_id, b.beat_id, b.title, b.plotline_color]),
       c.causal_links,
     ]),
-    p.plotlines.map((l) => [l.id, l.title, l.color]),
+    p.plotlines.map((l) => [l.id, l.title, l.color, l.beats.map((b) => [b.beat_id, b.title])]),
     p.containers.map((c) => [c.id, c.title, c.parent]),
   ]);
 }

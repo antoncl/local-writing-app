@@ -3,13 +3,23 @@
 // re-exported from there so `@/lib/types` stays the single import barrel. Mirrors
 // the backend `PlotBoardProjection` (models/entries.py) field-for-field.
 
-// A plotline as the board sees it: a thread — id, title, and a colour swatch id
-// for its lane accent / card stripe (null when unset). Never a template link
-// (plotline ≠ template_instance — the board renders a thread, not an instance).
+// A beat on a plotline node (ADR-0053 §3): its stable id (the card→beat link target)
+// and title, in stored order. The plotline node renders these as its roster; richer
+// per-beat fields + the use-count arrive with on-node editing (S2b) and focus (S5).
+export type PlotBoardPlotlineBeat = {
+  beat_id: string;
+  title: string;
+};
+
+// A plotline as the board sees it (ADR-0053 §1): a thread that IS a plot-template
+// instance — id, title, a colour swatch id (null when unset), and its ordered beat
+// roster. The board renders the plotline as a node holding these beats (S2), and a
+// card's beat badges resolve against them.
 export type PlotBoardPlotline = {
   id: string;
   title: string;
   color: string | null;
+  beats: PlotBoardPlotlineBeat[];
 };
 
 // A manuscript container (an act, a chapter — whatever the project declares) as a
@@ -24,17 +34,17 @@ export type PlotBoardContainer = {
   parent: string | null;
 };
 
-// A card→beat link resolved for the board (ADR-0048 S7 Slice 5b): a beat the card
-// fulfils, with its title + owning arc (template instance) title for the badge +
-// tooltip. The stored link is only ids; the projection resolves the titles, so the
-// board renders labels directly. A link whose arc/beat is gone is never projected.
-// `instance_color` is the owning arc's swatch id (null when the arc has none), so a
-// card can tint each beat badge by its arc — same-arc beats share a colour, which
-// disambiguates collisions between same-named beats of different arcs (usability pass).
+// A card→beat link resolved for the board (ADR-0048 S7 Slice 5b; ADR-0053): a beat
+// the card fulfils, with its title + owning plotline title for the badge + tooltip.
+// The stored link is only ids; the projection resolves the titles, so the board
+// renders labels directly. A link whose plotline/beat is gone is never projected.
+// `plotline_color` is the owning plotline's swatch id (null when it has none), so a
+// card can tint each beat badge by its plotline — same-plotline beats share a colour,
+// disambiguating collisions between same-named beats of different plotlines.
 export type PlotBoardBeat = {
-  instance_id: string;
-  instance_title: string;
-  instance_color: string | null;
+  plotline_id: string;
+  plotline_title: string;
+  plotline_color: string | null;
   beat_id: string;
   title: string;
 };
@@ -90,10 +100,10 @@ export type PlotBoardProjection = {
 // A point on the board canvas.
 export type BoardXY = { x: number; y: number };
 
-// The board's opaque `layout` payload, as S7c shapes it: per-card position
-// overrides keyed by card id. A card absent from `positions` falls back to its
-// derived lane-grid default; once the layout is saved, every card is pinned
-// here. Lane headers are always derived (fixed), so they never appear.
+// The board's opaque `layout` payload: per-node position overrides keyed by node id
+// — cards and plotline nodes alike (their ids are distinct, so one map holds both).
+// A node absent from `positions` falls back to its derived slot; once dragged and
+// saved, it is pinned here. Container boxes are always derived, so they never appear.
 export type PlotBoardLayout = {
   positions?: Record<string, BoardXY>;
 };

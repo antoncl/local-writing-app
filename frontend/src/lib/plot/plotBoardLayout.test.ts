@@ -511,4 +511,10 @@ describe("plotline nodes (ADR-0053 §3)", () => {
     const renamedBeat = projection({ plotlines: [line("p1", "Main", "blue", [{ beat_id: "b1", title: "Opening" }])] });
     expect(projectionDataKey(withBeat)).not.toBe(projectionDataKey(renamedBeat));
   });
+
+  it("changes the data-key when a beat's use-count changes (→ the node re-renders the count; S5a)", () => {
+    const zero = projection({ plotlines: [line("p1", "Main", "blue", [{ beat_id: "b1", title: "Setup", use_count: 0 }])] });
+    const one = projection({ plotlines: [line("p1", "Main", "blue", [{ beat_id: "b1", title: "Setup", use_count: 1 }])] });
+    expect(projectionDataKey(zero)).not.toBe(projectionDataKey(one));
+  });
 });

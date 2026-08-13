@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Plot board — unified model mockup</title>
+<style>
+  :root {
+    --board: #17181a;
+    --panel: #1f2124;
+    --panel-2: #24272b;
+    --surface: #2a2e33;
+    --border: #34383d;
+    --border-strong: #444a51;
+    --text: #e8e6e1;
+    --text-2: #b6b2aa;
+    --text-3: #83807a;
+    --divider: #2c2f33;
+    --accent: #7c9fb0;
+    --accent-soft: #24343b;
+    --r-sm: 4px; --r-md: 7px; --r-lg: 10px; --r-pill: 999px;
+    --elev-1: 0 1px 2px rgba(0,0,0,.4);
+    --elev-2: 0 6px 20px rgba(0,0,0,.5);
+    /* plotline swatches (from the app palette) */
+    --moss: #5b7a3a;
+    --rose: #b0567a;
+    --slate: #4f7390;
+    --amber: #c08a3a;
+    --stone: #8a867d;
+    --fs-xs: 11px; --fs-sm: 13px; --fs-md: 15px;
+    font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--board); color: var(--text); font-size: var(--fs-sm); line-height: 1.4; }
+
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 22px; }
+  header h1 { font-size: 20px; margin: 0 0 4px; font-weight: 600; letter-spacing: -.01em; }
+  header p { margin: 0 0 6px; color: var(--text-2); max-width: 78ch; }
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; margin: 10px 0 18px; font-size: var(--fs-xs); color: var(--text-3); }
+  .legend b { color: var(--text-2); font-weight: 600; }
+  .legend .k { display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+
+  .stage { display: grid; grid-template-columns: 190px 1fr; gap: 16px; align-items: start; }
+
+  /* ---- template palette ---- */
+  .palette { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 10px; position: sticky; top: 12px; }
+  .palette h2 { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .08em; color: var(--text-3); margin: 2px 2px 10px; font-weight: 600; }
+  .tmpl { border: 1px solid var(--border); border-radius: var(--r-md); padding: 8px 9px; margin-bottom: 7px; background: var(--panel-2); cursor: grab; transition: border-color .12s, background .12s; }
+  .tmpl:hover { border-color: var(--border-strong); background: var(--surface); }
+  .tmpl .t { font-weight: 600; font-size: var(--fs-sm); }
+  .tmpl .b { color: var(--text-3); font-size: var(--fs-xs); margin-top: 2px; }
+  .tmpl.builtin .t::before { content: "◆"; color: var(--text-3); margin-right: 5px; font-size: 9px; vertical-align: 1px; }
+  .tmpl.owned .t::before { content: "✎"; color: var(--amber); margin-right: 5px; font-size: 10px; }
+  .tmpl.empty { border-style: dashed; }
+  .tmpl.empty .t { color: var(--text-2); }
+  .tmpl.newbtn { border-style: dashed; text-align: center; color: var(--accent); font-weight: 600; cursor: pointer; }
+  .tmpl.newbtn:hover { background: var(--accent-soft); border-color: var(--accent); }
+  .palette .hint { font-size: 10px; color: var(--text-3); margin: 8px 2px 0; line-height: 1.4; }
+
+  /* ---- board canvas ---- */
+  .canvas { background: var(--board); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 16px; min-height: 620px; position: relative; overflow: hidden; }
+
+  /* structure container boxes */
+  .actbox { border: 1px solid var(--border); border-radius: var(--r-lg); background: rgba(255,255,255,.012); padding: 0 0 14px; margin-bottom: 16px; }
+  .actbox > .hd { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .07em; color: var(--text-3); padding: 8px 12px; border-bottom: 1px solid var(--divider); }
+  .chapbox { border: 1px solid var(--border); border-radius: var(--r-md); margin: 12px; background: rgba(255,255,255,.015); }
+  .chapbox > .hd { font-size: var(--fs-xs); color: var(--text-3); padding: 6px 10px; letter-spacing: .04em; }
+  .row { display: flex; gap: 12px; padding: 0 12px 12px; flex-wrap: wrap; }
+
+  /* story card */
+  .card { width: 196px; background: var(--panel); border: 1px solid var(--border-strong); border-radius: var(--r-lg); box-shadow: var(--elev-1); padding: 8px 10px 8px 12px; display: flex; flex-direction: column; gap: 6px; position: relative; }
+  .card.tint-moss { box-shadow: inset 4px 0 0 0 var(--moss), var(--elev-1); background: color-mix(in srgb, var(--moss) 8%, var(--panel)); }
+  .card.tint-rose { box-shadow: inset 4px 0 0 0 var(--rose), var(--elev-1); background: color-mix(in srgb, var(--rose) 8%, var(--panel)); }
+  .card.tint-slate { box-shadow: inset 4px 0 0 0 var(--slate), var(--elev-1); background: color-mix(in srgb, var(--slate) 8%, var(--panel)); }
+  .card .ttl { font-weight: 600; font-size: var(--fs-sm); }
+  .card .syn { color: var(--text-2); font-size: var(--fs-xs); line-height: 1.35; }
+  .beats { display: flex; flex-wrap: wrap; gap: 4px; }
+  .badge { font-size: var(--fs-xs); padding: 1px 7px; border-radius: var(--r-pill); border: 1px solid var(--border); color: var(--text-2); background: var(--surface); white-space: nowrap; }
+  .badge.moss { background: color-mix(in srgb, var(--moss) 14%, var(--surface)); border-color: color-mix(in srgb, var(--moss) 45%, var(--border)); color: var(--text); }
+  .badge.rose { background: color-mix(in srgb, var(--rose) 14%, var(--surface)); border-color: color-mix(in srgb, var(--rose) 45%, var(--border)); color: var(--text); }
+  .badge.slate { background: color-mix(in srgb, var(--slate) 14%, var(--surface)); border-color: color-mix(in srgb, var(--slate) 45%, var(--border)); color: var(--text); }
+  .foot { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: var(--fs-xs); color: var(--text-3); }
+  .foot .sd { width: 7px; height: 7px; border-radius: 50%; background: var(--moss); }
+  .foot .sd.off { background: transparent; border: 1px solid var(--text-3); }
+
+  .homeless { margin-top: 4px; }
+  .homeless .hd { font-size: var(--fs-xs); color: var(--text-3); font-style: italic; margin: 0 2px 8px; }
+
+  /* ---- plotline nodes (= template instances) ---- */
+  .plotlanes { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px; padding-top: 14px; border-top: 1px dashed var(--border); }
+  .plotlanes .lanelabel { position: absolute; }
+  .pl { width: 230px; border-radius: var(--r-lg); background: var(--panel); border: 1px solid var(--border-strong); box-shadow: var(--elev-1); overflow: hidden; align-self: flex-start; }
+  .pl .plhd { padding: 8px 10px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--divider); }
+  .pl .plhd .sw { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+  .pl .plhd .nm { font-weight: 600; font-size: var(--fs-sm); flex: 1; }
+  .pl .plhd .src { font-size: 10px; color: var(--text-3); }
+  .pl .beatlist { padding: 6px; display: flex; flex-direction: column; gap: 4px; }
+  .beat { display: flex; align-items: center; gap: 7px; padding: 5px 7px; border-radius: var(--r-sm); background: var(--panel-2); border: 1px solid var(--border); cursor: grab; }
+  .beat .grip { color: var(--text-3); font-size: 12px; cursor: grab; }
+  .beat .bn { flex: 1; font-size: var(--fs-xs); }
+  /* use-count: how many cards fulfil this beat. 0 = a gap the structure exposes. */
+  .beat .cnt { font-size: 10px; min-width: 18px; text-align: center; padding: 0 5px; border-radius: var(--r-pill); background: var(--surface); border: 1px solid var(--border); color: var(--text-2); }
+  .beat .cnt.hot { background: color-mix(in srgb, var(--moss) 22%, var(--surface)); border-color: var(--moss); color: var(--text); }
+  .beat .cnt.zero { color: var(--text-3); border-style: dashed; }
+  /* per-plotline focus toggle */
+  .focusbtn { font-size: 10px; border: 1px solid var(--border); border-radius: var(--r-pill); padding: 1px 7px; color: var(--text-3); cursor: pointer; background: transparent; }
+  .focusbtn.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+  .pl.focused { box-shadow: 0 0 0 1px var(--slate), var(--elev-2); }
+  .pl.focused .plhd { background: color-mix(in srgb, var(--slate) 14%, var(--panel)); }
+  /* a story card lit by the focused thread */
+  .card.lit { outline: 2px solid var(--slate); outline-offset: 2px; }
+  .card.dim { opacity: .4; }
+  .beat.moss { border-left: 3px solid var(--moss); }
+  .beat.rose { border-left: 3px solid var(--rose); }
+  .beat.slate { border-left: 3px solid var(--slate); }
+  .addbeat { text-align: center; font-size: var(--fs-xs); color: var(--accent); padding: 5px; border: 1px dashed var(--border); border-radius: var(--r-sm); margin: 2px 1px 1px; cursor: pointer; }
+
+  /* editing (view-designer §A: expands in place) */
+  .pl.editing { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--elev-2); }
+  .pl.editing .plhd { background: var(--accent-soft); }
+  .pl.editing .plhd .nm { border: 1px solid var(--border-strong); border-radius: var(--r-sm); padding: 1px 5px; background: var(--panel); }
+  .pl .swrow { display: flex; gap: 5px; padding: 6px 8px 2px; }
+  .pl .swrow .s { width: 15px; height: 15px; border-radius: 3px; cursor: pointer; border: 1px solid transparent; }
+  .pl .swrow .s.sel { border-color: var(--text); }
+  .pl.empty-pl .plhd .nm { color: var(--text-2); }
+  .pl.empty-pl .emptybeat { color: var(--text-3); font-size: var(--fs-xs); font-style: italic; padding: 8px; text-align: center; }
+
+  /* callouts */
+  .callout { position: relative; }
+  .tag { display: inline-block; font-size: 10px; background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent); border-radius: var(--r-pill); padding: 1px 8px; margin-bottom: 6px; font-weight: 600; letter-spacing: .02em; }
+
+  /* drag ghost */
+  .draggingbeat { position: relative; }
+  .ghost { position: absolute; left: 250px; top: 6px; width: 150px; padding: 5px 8px; border-radius: var(--r-sm); background: var(--panel); border: 1px solid var(--rose); box-shadow: var(--elev-2); font-size: var(--fs-xs); opacity: .95; transform: rotate(-2deg); }
+  .ghost::before { content: "↗ dragging beat onto a card"; position: absolute; top: -16px; left: 0; font-size: 9px; color: var(--rose); white-space: nowrap; }
+  .droptarget { outline: 2px dashed var(--rose); outline-offset: 2px; }
+
+  .note { margin-top: 20px; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--panel); color: var(--text-2); font-size: var(--fs-sm); }
+  .note h3 { margin: 0 0 8px; font-size: var(--fs-sm); color: var(--text); }
+  .note ul { margin: 0; padding-left: 18px; }
+  .note li { margin: 4px 0; }
+  .note code { background: var(--surface); padding: 1px 5px; border-radius: var(--r-sm); font-size: var(--fs-xs); }
+  .colhd { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .07em; color: var(--text-3); margin: 2px 0 8px; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Plot board — unified model</h1>
+    <p>A <b>plotline is a plot-template instance</b> — one concept. Templates are a <b>palette</b> (built-in, your own, or empty/ad-hoc); instantiating one spawns a <b>plotline card</b> that holds its beats. You <b>drag a beat off a plotline card onto a story card</b>; the story card wears that plotline's colour. Plotline cards are edited <b>in place</b> (view-designer §A). Everything here is a first-class board node → all of it is undoable.</p>
+    <div class="legend">
+      <span class="k"><span class="dot" style="background:var(--border-strong)"></span> <b>Container</b> — act/chapter (where in the manuscript · #874 lock)</span>
+      <span class="k"><span class="dot" style="background:var(--rose)"></span> <b>Plotline</b> — which thread/structure (colour + its beats)</span>
+      <span class="k"><span class="dot" style="background:var(--moss)"></span> <b>Beat</b> — the story function a card fulfils</span>
+    </div>
+  </header>
+
+  <div class="stage">
+    <!-- ============ TEMPLATE PALETTE ============ -->
+    <aside class="palette">
+      <h2>Template palette</h2>
+      <div class="tmpl builtin"><div class="t">Three-Act</div><div class="b">7 beats · setup → turn → resolve</div></div>
+      <div class="tmpl builtin"><div class="t">Hero's Journey</div><div class="b">12 beats</div></div>
+      <div class="tmpl builtin"><div class="t">Save the Cat</div><div class="b">15 beats</div></div>
+      <div class="tmpl owned"><div class="t">Heist beats</div><div class="b">your template · 6 beats</div></div>
+      <div class="tmpl empty"><div class="t">Empty / ad-hoc</div><div class="b">a thread with no preset beats</div></div>
+      <div class="tmpl newbtn">+ New template</div>
+      <div class="hint">Drag a template onto the board (or click) to spawn a <b>plotline card</b>. The <code>+</code> authors your own (a Library clone/create, ADR-0049).</div>
+    </aside>
+
+    <!-- ============ BOARD CANVAS ============ -->
+    <main class="canvas draggingbeat">
+      <div class="colhd">Story cards — grouped by manuscript structure (locked to their box, #874)</div>
+
+      <!-- ACT I -->
+      <div class="actbox">
+        <div class="hd">Act I</div>
+        <div class="chapbox">
+          <div class="hd">Chapter 1</div>
+          <div class="row">
+            <div class="card tint-slate lit">
+              <div class="ttl">She leaves home</div>
+              <div class="syn">The heroine packs a bag and walks out before dawn.</div>
+              <div class="beats"><span class="badge slate">Setup</span><span class="badge moss">Ordinary World</span></div>
+              <div class="foot"><span class="sd"></span> On the page · <span style="color:var(--slate)">Main plot</span></div>
+            </div>
+            <div class="card tint-rose droptarget">
+              <div class="ttl">A letter arrives</div>
+              <div class="syn">A stranger's note reopens an old wound.</div>
+              <div class="beats"><span class="badge rose">Inciting change</span></div>
+              <div class="foot"><span class="sd"></span> On the page · <span style="color:var(--rose)">Romance</span></div>
+              <div class="ghost">Refusal of the Call</div>
+            </div>
+          </div>
+        </div>
+        <div class="chapbox">
+          <div class="hd">Chapter 2</div>
+          <div class="row">
+            <div class="card tint-slate lit">
+              <div class="ttl">The bridge</div>
+              <div class="syn">She hesitates at the county line.</div>
+              <div class="beats"><span class="badge slate">First turn</span></div>
+              <div class="foot"><span class="sd off"></span> Off the page · <span style="color:var(--slate)">Main plot</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ACT II -->
+      <div class="actbox">
+        <div class="hd">Act II</div>
+        <div class="chapbox">
+          <div class="hd">Chapter 3</div>
+          <div class="row">
+            <div class="card tint-slate lit">
+              <div class="ttl">Midpoint reversal</div>
+              <div class="syn">What she wanted turns out to cost more than she'll pay.</div>
+              <div class="beats"><span class="badge slate">Midpoint</span><span class="badge rose">First kiss</span></div>
+              <div class="foot"><span class="sd"></span> On the page · <span style="color:var(--slate)">Main plot</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- HOMELESS -->
+      <div class="homeless">
+        <div class="hd">Unplaced cards (no scene yet — free on the board)</div>
+        <div class="row" style="padding-left:0">
+          <div class="card">
+            <div class="ttl">Backstory: the fire</div>
+            <div class="syn">Off-page event that explains the letter.</div>
+            <div class="beats"><span class="badge rose">Backstory</span></div>
+            <div class="foot"><span class="sd off"></span> Off the page</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ PLOTLINE CARDS (= template instances) ============ -->
+      <div class="colhd" style="margin-top:18px">Plotline cards — each an instance of a template, holding its beats. Drag a beat onto a story card.</div>
+      <div class="plotlanes">
+
+        <!-- templated, FOCUS ON — lights the thread across the board -->
+        <div class="pl focused callout">
+          <span class="tag">plotline · focus ON (lights its card-chain)</span>
+          <div class="plhd"><span class="sw" style="background:var(--slate)"></span><span class="nm">Main plot</span><button class="focusbtn on">◎ focus</button></div>
+          <div class="beatlist">
+            <div class="beat slate"><span class="grip">⋮⋮</span><span class="bn">Setup</span><span class="cnt hot">1</span></div>
+            <div class="beat slate"><span class="grip">⋮⋮</span><span class="bn">Inciting change</span><span class="cnt zero">0</span></div>
+            <div class="beat slate"><span class="grip">⋮⋮</span><span class="bn">First turn</span><span class="cnt hot">1</span></div>
+            <div class="beat slate"><span class="grip">⋮⋮</span><span class="bn">Midpoint</span><span class="cnt hot">2</span></div>
+            <div class="beat slate"><span class="grip">⋮⋮</span><span class="bn">Second turn</span><span class="cnt zero">0</span></div>
+          </div>
+        </div>
+
+        <!-- templated, editing in place -->
+        <div class="pl editing callout">
+          <span class="tag">plotline · editing in place (view-designer §A)</span>
+          <div class="plhd"><span class="sw" style="background:var(--rose)"></span><span class="nm">Romance</span><button class="focusbtn">◎ focus</button></div>
+          <div class="swrow">
+            <span class="s" style="background:var(--moss)"></span>
+            <span class="s sel" style="background:var(--rose)"></span>
+            <span class="s" style="background:var(--slate)"></span>
+            <span class="s" style="background:var(--amber)"></span>
+            <span class="s" style="background:var(--stone)"></span>
+          </div>
+          <div class="beatlist">
+            <div class="beat rose"><span class="grip">⋮⋮</span><span class="bn">Meet</span><span class="cnt hot">1</span></div>
+            <div class="beat rose"><span class="grip">⋮⋮</span><span class="bn">First kiss</span><span class="cnt hot">1</span></div>
+            <div class="beat rose"><span class="grip">⋮⋮</span><span class="bn">Refusal of the Call</span><span class="cnt zero">0</span></div>
+            <div class="beat rose"><span class="grip">⋮⋮</span><span class="bn">Dark moment</span><span class="cnt zero">0</span></div>
+          </div>
+          <div class="addbeat">+ add beat</div>
+        </div>
+
+        <!-- empty / ad-hoc -->
+        <div class="pl empty-pl callout">
+          <span class="tag">plotline · empty / ad-hoc (no template)</span>
+          <div class="plhd"><span class="sw" style="background:var(--moss)"></span><span class="nm">Grandpa's secret</span><button class="focusbtn">◎ focus</button></div>
+          <div class="emptybeat">No preset beats — add your own as the thread takes shape.</div>
+          <div class="addbeat">+ add beat</div>
+        </div>
+
+      </div>
+    </main>
+  </div>
+
+  <div class="note">
+    <h3>What this mockup is asserting (react to any of it)</h3>
+    <ul>
+      <li><b>One concept.</b> "Template instance" and "arc" are gone — there is a <b>plotline</b>, which is an instance of a plot <b>template</b>. The template list gains a <code>+ New template</code> (roll-your-own), and an <b>Empty</b> tile for ad-hoc threads.</li>
+      <li><b>Plotline is a board node.</b> A plotline card holds its beat list and is edited in place (rename, recolour, add/remove/reorder beats — no separate editor pane). Because it's a board node, its create / delete / edit are board commands → <b>undoable for free</b> (this is what dissolves the messy part of the undo design).</li>
+      <li><b>Two axes, not two homes.</b> Story cards still live in their <b>manuscript boxes</b> (#874 lock); the plotline is the orthogonal <b>colour + beats</b> axis. You assign by <b>dragging a beat from a plotline card onto a story card</b> — the card then wears that plotline's colour and shows the beat badge.</li>
+      <li><b>See the threads (the payoff).</b> Each beat shows a <b>use-count</b> — how many cards fulfil it (<code>0</code> = a gap the structure exposes). And each plotline has a <b>focus toggle</b>: turned on for "Main plot" here, it <b>lights the chain of cards</b> fulfilling that thread's beats (the slate-outlined cards) and lets the rest recede. This is the "isolate one thread across the book" that neither the original nor master ever built.</li>
+      <li><b>Freely arranged.</b> Everything is draggable — cards within their box (#874), plotline nodes anywhere. A columnar layout is a sensible default, not a rule. A card may carry beats from <b>several</b> plotlines ("Midpoint reversal" wears Main-plot + Romance); it keeps a <i>primary</i> for its own tint, the badges carry each beat's plotline colour.</li>
+    </ul>
+  </div>
+</div>
+</body>
+</html>

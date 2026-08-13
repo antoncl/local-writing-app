@@ -48,15 +48,13 @@
   } from "@/lib/stores/plotBoard";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
-  import { templateInstancesStore, deleteTemplateInstance } from "@/lib/stores/templateInstances";
   import { plotlineEntriesStore, deletePlotline } from "@/lib/stores/plotlines";
-  import { plotTemplatesStore } from "@/lib/stores/plotTemplates";
   import UndoRedoControls from "@/components/UndoRedoControls.svelte";
   import ViewportFit from "@/components/editor/body/view/ViewportFit.svelte";
   import PlotCardNodeFlow from "./plot/PlotCardNodeFlow.svelte";
   import PlotContainerNode from "./plot/PlotContainerNode.svelte";
+  import PlotPlotlineNode from "./plot/PlotPlotlineNode.svelte";
   import PlotCausalEdge from "./plot/PlotCausalEdge.svelte";
-  import PlotArcRail from "./plot/PlotArcRail.svelte";
   import PlotPlotlineRail from "./plot/PlotPlotlineRail.svelte";
   import Popover from "@/components/chrome/Popover.svelte";
   import {
@@ -192,16 +190,6 @@
     }
   }
 
-  // The arc palette (ADR-0048 S7 Slice 5a): a collapsible rail listing the book's
-  // plot arcs (template instances) + their beats. Collapsed by default so the
-  // read-only / pantser flow is undisturbed; the toolbar toggle opens it. Its data
-  // is the always-loaded instance roster + the template shelf (for "add from
-  // template"); actions route to editorPanes (open / instantiate / blank) and the
-  // store's delete. Removing an arc discards its specialized beats → confirm first.
-  let railOpen = $state(false);
-  let arcs = $derived($templateInstancesStore);
-  let templates = $derived($plotTemplatesStore);
-
   // The plotlines rail (#737) — the always-loaded plotline roster + a card count per
   // thread (from the projection) for its count pill, and a swatch dot per row that
   // doubles as the board's colour legend. Actions route to editorPanes (create / open)
@@ -247,19 +235,6 @@
     saveEdgeLayers(activeLayers);
   }
 
-  function removeArc(id: string): void {
-    const arc = arcs.find((a) => a.id === id);
-    confirmService.request({
-      title: "Remove arc",
-      message: `Remove ${arc?.title ? `“${arc.title}”` : "this arc"}? Its specialized beats are discarded. Cards that referenced its beats keep their links until re-saved.`,
-      confirmLabel: "Remove arc",
-      destructive: true,
-      onConfirm: async () => {
-        await deleteTemplateInstance(id);
-      },
-    });
-  }
-
   // Seed-from-manuscript (ADR-0048 §S5): bulk, idempotent. Confirmed because it can
   // mint many cards at once, though re-running it is safe (already-carded scenes skip).
   function seed(): void {
@@ -274,7 +249,7 @@
     });
   }
 
-  const nodeTypes = { plotCard: PlotCardNodeFlow, plotContainer: PlotContainerNode };
+  const nodeTypes = { plotCard: PlotCardNodeFlow, plotContainer: PlotContainerNode, plotPlotline: PlotPlotlineNode };
   // Authored causal edges render via PlotCausalEdge (a hover-× to remove the link);
   // derived edges keep the default renderer.
   const edgeTypes = { causal: PlotCausalEdge };
@@ -332,9 +307,9 @@
     flowEdges = projection ? buildBoardEdges(projection, activeLayers) : [];
   });
 
-  // Which beats are already placed on some card — the Arcs palette marks these (#824).
+  // Which beats are already placed on some card — the beat palette marks these (#824).
   let usedBeatKeys = $derived(
-    new Set((projection?.cards ?? []).flatMap((c) => c.beats.map((b) => `${b.instance_id}:${b.beat_id}`))),
+    new Set((projection?.cards ?? []).flatMap((c) => c.beats.map((b) => `${b.plotline_id}:${b.beat_id}`))),
   );
 
   // Causal ("leads to") edges are authored by dragging a wire between card handles
@@ -428,15 +403,6 @@
       <div class="toolbar-actions">
         <button
           class="board-btn"
-          class:active={railOpen}
-          aria-pressed={railOpen}
-          onclick={() => (railOpen = !railOpen)}
-        >
-          <i class="ti ti-route" aria-hidden="true"></i>
-          Arcs{arcs.length ? ` (${arcs.length})` : ""}
-        </button>
-        <button
-          class="board-btn"
           class:active={plotlineRailOpen}
           aria-pressed={plotlineRailOpen}
           onclick={() => (plotlineRailOpen = !plotlineRailOpen)}
@@ -526,17 +492,6 @@
           onRemove={removePlotline}
         />
       {/if}
-      {#if railOpen}
-        <PlotArcRail
-          instances={arcs}
-          {templates}
-          {usedBeatKeys}
-          onOpen={(id) => void editorPanes.openPlotTemplateInstance(id)}
-          onInstantiate={(id) => void editorPanes.instantiatePlotTemplate(id)}
-          onCreateBlank={() => void editorPanes.createBlankPlotArc()}
-          onRemove={removeArc}
-        />
-      {/if}
       <div class="board-body">
     {#if isEmpty}
       <p class="board-hint muted">No cards yet. Seed cards from the manuscript, or add one, to begin.</p>
@@ -559,9 +514,11 @@
         onnodedragstop={({ nodes }) => {
           dragging = false;
           undoCtl.dragStop(nodes);
-          // A dragged card becomes overridden (pinned): it now persists and keeps its
-          // spot across a reassignment instead of reflowing.
-          for (const node of nodes) if (node.type === "plotCard") overriddenIds.add(node.id);
+          // A dragged card or plotline node becomes overridden (pinned): it now
+          // persists and keeps its spot instead of reflowing to its derived slot.
+          for (const node of nodes) {
+            if (node.type === "plotCard" || node.type === "plotPlotline") overriddenIds.add(node.id);
+          }
         }}
         minZoom={0.2}
       >

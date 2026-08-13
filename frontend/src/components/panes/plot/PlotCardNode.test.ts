@@ -14,9 +14,9 @@ import { PLOT_DND_MIME } from "@/lib/plot/plotDnd";
 import { setPalette } from "@/lib/utils/colors";
 
 const beat = (over: Partial<PlotBoardBeat> = {}): PlotBoardBeat => ({
-  instance_id: "i1",
-  instance_title: "Hero's Journey",
-  instance_color: null,
+  plotline_id: "i1",
+  plotline_title: "Hero's Journey",
+  plotline_color: null,
   beat_id: "b1",
   title: "Call to Adventure",
   ...over,
@@ -52,9 +52,9 @@ function actions(plotlines: PlotCardActions["plotlines"] = []): PlotCardActions 
 }
 
 // A stand-in DataTransfer carrying a beat drag (or, with mime="", a foreign drag).
-function beatDataTransfer(instance: string, beatId: string): DataTransfer {
+function beatDataTransfer(plotline: string, beatId: string): DataTransfer {
   const store: Record<string, string> = {
-    [PLOT_DND_MIME]: JSON.stringify({ kind: "beat", instance, beat_id: beatId }),
+    [PLOT_DND_MIME]: JSON.stringify({ kind: "beat", plotline, beat_id: beatId }),
   };
   return {
     types: Object.keys(store),
@@ -212,8 +212,8 @@ describe("PlotCardNode — content-op menu (S7d)", () => {
 
   it("reassigns the plotline from the Set-plotline submenu", async () => {
     const acts = actions([
-      { id: "pl_a", title: "Main plot", color: null },
-      { id: "pl_b", title: "Romance", color: null },
+      { id: "pl_a", title: "Main plot", color: null, beats: [] },
+      { id: "pl_b", title: "Romance", color: null, beats: [] },
     ]);
     renderWithActions({ attached: false }, acts, "card_4");
     await fireEvent.click(screen.getByLabelText("Card actions"));
@@ -224,7 +224,7 @@ describe("PlotCardNode — content-op menu (S7d)", () => {
   });
 
   it("clears the plotline via Unassigned", async () => {
-    const acts = actions([{ id: "pl_a", title: "Main plot", color: null }]);
+    const acts = actions([{ id: "pl_a", title: "Main plot", color: null, beats: [] }]);
     renderWithActions({ attached: false }, acts, "card_5");
     await fireEvent.click(screen.getByLabelText("Card actions"));
     await fireEvent.click(screen.getByRole("menuitem", { name: "Set plotline" }));
@@ -234,8 +234,8 @@ describe("PlotCardNode — content-op menu (S7d)", () => {
 
   it("marks the card's current plotline in the submenu (#863)", async () => {
     const acts = actions([
-      { id: "pl_a", title: "Main plot", color: null },
-      { id: "pl_b", title: "Romance", color: null },
+      { id: "pl_a", title: "Main plot", color: null, beats: [] },
+      { id: "pl_b", title: "Romance", color: null, beats: [] },
     ]);
     renderWithActions({ attached: false, plotlineId: "pl_b", plotlineName: "Romance" }, acts, "card_6");
     await fireEvent.click(screen.getByLabelText("Card actions"));
@@ -245,7 +245,7 @@ describe("PlotCardNode — content-op menu (S7d)", () => {
   });
 
   it("marks Unassigned as current when the card has no plotline (#863)", async () => {
-    const acts = actions([{ id: "pl_a", title: "Main plot", color: null }]);
+    const acts = actions([{ id: "pl_a", title: "Main plot", color: null, beats: [] }]);
     renderWithActions({ attached: false, plotlineId: null }, acts, "card_7");
     await fireEvent.click(screen.getByLabelText("Card actions"));
     await fireEvent.click(screen.getByRole("menuitem", { name: "Set plotline" }));
@@ -277,8 +277,8 @@ describe("PlotCardNode — beats + page marker (S7 Slice 5b)", () => {
       props: {
         data: data({
           beats: [
-            beat({ beat_id: "b1", title: "Call to Adventure", instance_color: "rose" }),
-            beat({ beat_id: "b2", title: "Refusal", instance_color: null }),
+            beat({ beat_id: "b1", title: "Call to Adventure", plotline_color: "rose" }),
+            beat({ beat_id: "b2", title: "Refusal", plotline_color: null }),
           ],
         }),
       },
@@ -294,7 +294,7 @@ describe("PlotCardNode — beats + page marker (S7 Slice 5b)", () => {
     // so the badge degrades to neutral rather than throwing or emitting an accent.
     setPalette([{ id: "rose", label: "Rose", hex: "#b0567a" }]);
     const { container } = render(PlotCardNode, {
-      props: { data: data({ beats: [beat({ beat_id: "b1", title: "Setup", instance_color: "ghost" })] }) },
+      props: { data: data({ beats: [beat({ beat_id: "b1", title: "Setup", plotline_color: "ghost" })] }) },
     });
     const badge = container.querySelector(".beat-badge") as HTMLElement;
     expect(badge.classList.contains("coloured")).toBe(false);

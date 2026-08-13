@@ -8,7 +8,6 @@ import { refreshStructure, refreshResearchStructure } from "@/lib/stores/structu
 import { refreshLoreEntries } from "@/lib/stores/lore";
 import { refreshPromptEntries } from "@/lib/stores/prompts";
 import { refreshPlotTemplates } from "@/lib/stores/plotTemplates";
-import { refreshTemplateInstances } from "@/lib/stores/templateInstances";
 import { refreshPlotBoard } from "@/lib/stores/plotBoard";
 import { refreshPlotlines } from "@/lib/stores/plotlines";
 import { refreshAssistantEntries } from "@/lib/stores/assistants";
@@ -52,13 +51,6 @@ export async function refreshAfterSave(host: SaveRefreshHost, args: SaveRefreshA
     // roster the ReferencePicker's `plot` source draws from (#742).
     await refreshPlotBoard();
     await refreshPlotlines();
-  } else if (documentKind === "plot_template_instance") {
-    // A rename / beat edit changes the arc roster the palette shows; a rename,
-    // beat-roster edit or recolour also changes the board (badge titles, which
-    // badges show, and the arc-colour tint on beat badges — #871), so refresh it
-    // too. In-flight-guarded, so it is cheap when the board is closed.
-    await refreshTemplateInstances();
-    await refreshPlotBoard();
   } else if (documentKind === "assistant") {
     await refreshAssistantEntries();
   } else if (documentKind === "project") {

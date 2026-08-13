@@ -126,21 +126,21 @@ export function buildBoardEdges(projection: PlotBoardProjection, layers: Set<Edg
 
   // Beat sequence: one chain per beat, over the cards fulfilling it, ordered by
   // reading order (scene-less cards after). A card in several beats joins each
-  // chain. The beat key is the composite (instance, beat_id) a card→beat link is,
+  // chain. The beat key is the composite (plotline, beat_id) a card→beat link is,
   // JSON-encoded so the two ids can never run together into a false match.
   if (layers.has("beats")) {
-    const groups = new Map<string, { members: Ranked[]; instance: string; beat: string }>();
+    const groups = new Map<string, { members: Ranked[]; plotline: string; beat: string }>();
     for (const r of ranked) {
       for (const beat of r.card.beats) {
-        const key = JSON.stringify([beat.instance_id, beat.beat_id]);
-        const group = groups.get(key) ?? { members: [], instance: beat.instance_id, beat: beat.beat_id };
+        const key = JSON.stringify([beat.plotline_id, beat.beat_id]);
+        const group = groups.get(key) ?? { members: [], plotline: beat.plotline_id, beat: beat.beat_id };
         group.members.push(r);
         groups.set(key, group);
       }
     }
-    for (const { members, instance, beat } of groups.values()) {
+    for (const { members, plotline, beat } of groups.values()) {
       members.sort(bySequenceThenOrder);
-      edges.push(...chain(members, `beat:${instance}:${beat}`, "beat-edge"));
+      edges.push(...chain(members, `beat:${plotline}:${beat}`, "beat-edge"));
     }
   }
 

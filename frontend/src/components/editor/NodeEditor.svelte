@@ -656,7 +656,6 @@
     snippet: "Snippet",
     plot_card: "Card",
     plotline: "Plotline",
-    plot_template_instance: "Arc",
     plot_template: "Template",
   };
   let documentLabel = $derived(DOCUMENT_LABELS[documentKind] ?? "Scene");
@@ -692,7 +691,7 @@
   // List just the node's own type: the plot classes (card / plotline / arc / template)
   // are distinct, so a cross-class reclassify is never offered (the #720 call, now
   // generalized past plot_template).
-  const OWN_TYPE_ONLY = new Set(["plot_template", "plot_card", "plotline", "plot_template_instance"]);
+  const OWN_TYPE_ONLY = new Set(["plot_template", "plot_card", "plotline"]);
   let documentEntryTypes = $derived(
     OWN_TYPE_ONLY.has(documentKind)
       ? Object.entries(metadataSchema?.entry_types ?? {}).filter(([typeId]) => typeId === entryType)

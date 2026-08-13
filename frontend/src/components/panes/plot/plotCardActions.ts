@@ -22,10 +22,10 @@ export type PlotCardActions = {
   onEditSynopsis: (cardId: string, synopsis: string) => void;
   // Reassign the card's plotline ("" → Unassigned) — the reflow trigger.
   onSetPlotline: (cardId: string, plotlineId: string) => void;
-  // Link a beat DROPPED from the Arcs palette onto the card (#824); deduped downstream.
-  onLinkBeat: (cardId: string, instance: string, beatId: string) => void;
+  // Link a beat DROPPED onto the card (#824; from its plotline node in S4); deduped downstream.
+  onLinkBeat: (cardId: string, plotline: string, beatId: string) => void;
   // Remove a linked beat via the × on its badge (#824).
-  onUnlinkBeat: (cardId: string, instance: string, beatId: string) => void;
+  onUnlinkBeat: (cardId: string, plotline: string, beatId: string) => void;
   // Set an unattached card's page status (Slice 5b) — off_page vs unwritten; on_page
   // is derived from the scene, so it is never authored here.
   onSetPageStatus: (cardId: string, status: "off_page" | "unwritten") => void;

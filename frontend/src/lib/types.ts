@@ -9,7 +9,7 @@
 // Imported here so `EditableDocument` can name PlotTemplate; also re-exported
 // below so `@/lib/types` stays the single barrel.
 import type { PlotTemplate } from "./plotTemplateTypes";
-import type { CardEntry, PlotlineEntry, TemplateInstanceEntry } from "./plotCardTypes";
+import type { CardEntry, PlotlineEntry } from "./plotCardTypes";
 import type { AIPolicy } from "./aiTypes";
 
 export type PanelId = string;
@@ -133,9 +133,9 @@ export type ResearchNote = {
   source_layer_label?: string;
 };
 
-export type EditableDocument = Scene | LoreEntry | PromptEntry | AssistantEntry | ResearchNote | ViewNode | PlotTemplate | CardEntry | PlotlineEntry | TemplateInstanceEntry;
+export type EditableDocument = Scene | LoreEntry | PromptEntry | AssistantEntry | ResearchNote | ViewNode | PlotTemplate | CardEntry | PlotlineEntry;
 
-// Document-kind discriminator: schema kinds plus synthetic editor shapes (chat / snippet / structure_node / plot_card / plotline / plot_template_instance).
+// Document-kind discriminator: schema kinds plus synthetic editor shapes (chat / snippet / structure_node / plot_card / plotline).
 export type DocumentKind =
   | "scene"
   | "lore"
@@ -149,7 +149,6 @@ export type DocumentKind =
   | "plot_template"
   | "plot_card"
   | "plotline"
-  | "plot_template_instance"
   | "view";
 
 export type LoreEntryList = {
@@ -218,6 +217,7 @@ export type {
   PlotBoardBeat,
   PlotBoardContainer,
   PlotBoardPlotline,
+  PlotBoardPlotlineBeat,
   PlotBoardLayout,
   PlotBoard,
   BoardXY,
@@ -229,9 +229,6 @@ export type {
   PlotlineEntry,
   PlotlineSummary,
   PlotlineList,
-  TemplateInstanceEntry,
-  TemplateInstanceSummary,
-  TemplateInstanceList,
 } from "./plotCardTypes";
 
 export type AssistantEntrySummary = {

@@ -18,15 +18,15 @@ export async function refreshPlotlines(): Promise<void> {
 
 // Set the roster directly from a mutation that already returns it (a plotline
 // delete returns the refreshed list), avoiding a second round-trip — the
-// setPromptEntries / setTemplateInstances convention.
+// setPromptEntries convention.
 export function setPlotlines(entries: PlotlineSummary[]): void {
   plotlineEntriesStore.set(entries);
 }
 
 // Delete a plotline from the rail (#737) — the delete returns the refreshed roster.
 // Also refresh the board so any card that was on this thread loses its colour axis
-// (the backend blanks the cards' now-dangling plotline ref). Mirrors the arc rail's
-// deleteTemplateInstance; the editor-pane delete path (editorPaneDelete) is separate.
+// (the backend blanks the cards' now-dangling plotline ref). The editor-pane delete
+// path (editorPaneDelete) is separate.
 export async function deletePlotline(id: string): Promise<void> {
   setPlotlines((await api.deletePlotline(id)).entries);
   await refreshPlotBoard();

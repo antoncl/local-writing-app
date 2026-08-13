@@ -1418,7 +1418,7 @@ class MetadataSchemaMixin:
                 seen_inputs.add(input_def.name)
                 if input_def.type == "select" and not input_def.options:
                     errors.append(f"Entry type {entry_type_id} input '{input_def.name}' is type select but has no options.")
-            # ADR-0052: `output.kind` (where the prompt's output lands) is a closed
+            # ADR-0054: `output.kind` (where the prompt's output lands) is a closed
             # vocabulary. An unset/empty kind is legitimate (snippet, or a prompt with
             # no output disposition); a non-empty one must be a known disposition. A
             # soft error like the rest here — a hand-edited layer stays readable, and

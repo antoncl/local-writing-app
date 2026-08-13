@@ -1,4 +1,4 @@
-# ADR-0052: A prompt picks an output disposition, plus an optional commit
+# ADR-0054: A prompt picks an output disposition, plus an optional commit
 
 - Status: **Accepted** — 2026-08-13 (Anton). Designed with him over the output-kind unification thread.
 - Issue: #881 (umbrella) · Pre-1.0 (no release milestone)

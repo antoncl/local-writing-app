@@ -91,14 +91,14 @@ class MetadataValidationTests(unittest.TestCase):
         )
 
     def test_output_kind_must_be_a_known_disposition(self) -> None:
-        # ADR-0052 S1: `context_strategy.output.kind` is a closed vocabulary,
+        # ADR-0054 S1: `context_strategy.output.kind` is a closed vocabulary,
         # validated on save. A bogus kind is a (soft) schema error.
         errors = self.service._validate_metadata_schema_definition(self._schema_with_output_kind("not_a_kind"))
         self.assertTrue(any("not_a_kind" in e for e in errors), errors)
 
     def test_known_output_kinds_validate(self) -> None:
         # Every current disposition passes, including `entry_patch` (kept
-        # transitionally until ADR-0052 S2 retires it into chat_panel + commit).
+        # transitionally until ADR-0054 S2 retires it into chat_panel + commit).
         for kind in ("append_to_body", "replace_selection", "chat_panel", "entry_patch"):
             errors = self.service._validate_metadata_schema_definition(self._schema_with_output_kind(kind))
             self.assertFalse(any("output kind" in e for e in errors), (kind, errors))

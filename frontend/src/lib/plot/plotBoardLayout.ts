@@ -17,7 +17,7 @@
 // the read/write ends of the board's opaque `layout` dict the PlotEditor round-trips;
 // they key on the `plotCard` node type, so container boxes never enter the layout.
 
-import type { Node } from "@xyflow/svelte";
+import type { CoordinateExtent, Node } from "@xyflow/svelte";
 import type { BoardXY, PlotBoardBeat, PlotBoardLayout, PlotBoardProjection } from "@/lib/types";
 
 // A container box: an act/chapter's title, how many cards it (transitively) holds,
@@ -69,10 +69,6 @@ const containerNodeId = (id: string) => `container:${id}`;
 
 type Rect = { minX: number; minY: number; maxX: number; maxY: number };
 export type Box = { x: number; y: number; w: number; h: number };
-
-// A SvelteFlow coordinate extent — the [[minX, minY], [maxX, maxY]] box a node's
-// drag is clamped into. Named locally so the layout owns the container-lock geometry.
-export type CoordinateExtent = [[number, number], [number, number]];
 
 const cardRect = (p: BoardXY): Rect => ({ minX: p.x, minY: p.y, maxX: p.x + CARD_WIDTH, maxY: p.y + CARD_HEIGHT });
 

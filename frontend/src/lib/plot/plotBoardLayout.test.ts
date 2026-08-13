@@ -401,4 +401,25 @@ describe("container lock (#873)", () => {
     expect(maxX - minX).toBe(CARD_WIDTH); // exactly the card's width of travel, all consumed by the size subtraction
     expect(maxY - minY).toBe(CARD_HEIGHT);
   });
+
+  it("a multi-card box gives real drag room spanning its cards (the feature's point)", () => {
+    // Two cards in a chapter → the box wraps both, so the extent spans the sibling
+    // row: after xyflow subtracts CARD_WIDTH the card can travel CARD_GAP_X + a card
+    // width. Guards against a too-tight extent (clamping to one card, or off-by-PAD)
+    // that would pin every card — which the single-card test alone wouldn't catch.
+    const nodes = buildBoardNodes(
+      projection({
+        containers: [container("chap", "Chapter 1")],
+        cards: [card("a", { container: "chap" }), card("b", { container: "chap" })],
+      }),
+    );
+    const extents = cardNodes(nodes).map((n) => n.extent as [[number, number], [number, number]]);
+    // Both cards clamp to the SAME chapter box.
+    expect(extents[0]).toEqual(extents[1]);
+    const [[minX], [maxX]] = extents[0];
+    // The extent spans two cards + the inter-card gap (well beyond the single-card
+    // pin, so there is genuine horizontal travel once the card size is subtracted).
+    expect(maxX - minX).toBe(2 * CARD_WIDTH + CARD_GAP_X);
+    expect(maxX - minX).toBeGreaterThan(CARD_WIDTH);
+  });
 });

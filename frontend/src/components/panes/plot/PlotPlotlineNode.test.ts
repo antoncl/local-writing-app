@@ -44,6 +44,7 @@ const entry = (): PlotlineEntry => ({
 // loadPlotline feeds the draft; save records what was flushed and advances the revision.
 function fakeActions(over: Partial<PlotPlotlineActions> = {}) {
   const saved: PlotlineEntry[] = [];
+  const deleted: string[] = [];
   const actions: PlotPlotlineActions = {
     expandedId: "line_1",
     toggleExpanded: () => {},
@@ -52,17 +53,19 @@ function fakeActions(over: Partial<PlotPlotlineActions> = {}) {
       saved.push(e);
       return { ...e, revision: "r2" };
     },
+    onDelete: (id) => deleted.push(id),
     ...over,
   };
   return {
     actions,
     saved,
+    deleted,
     mount: (props: Record<string, unknown> = {}) => {
       const result = render(PlotPlotlineNode, {
         props: { id: "line_1", data: data(), ...props },
         context: new Map<symbol, unknown>([[PLOT_PLOTLINE_ACTIONS, actions]]),
       });
-      return { ...result, saved };
+      return { ...result, saved, deleted };
     },
   };
 }
@@ -144,6 +147,13 @@ describe("PlotPlotlineNode on-node editing (ADR-0053 §3)", () => {
     // Reverted to the last-good title (data.title); nothing saved.
     await waitFor(() => expect(name.value).toBe("Main plot"));
     expect(saved).toHaveLength(0);
+  });
+
+  it("the expanded editor offers Delete plotline, which calls onDelete", async () => {
+    const { deleted } = fakeActions().mount();
+    const del = await screen.findByRole("button", { name: "Delete plotline" });
+    await fireEvent.click(del);
+    expect(deleted).toEqual(["line_1"]);
   });
 
   it("removing a beat saves the shortened roster", async () => {

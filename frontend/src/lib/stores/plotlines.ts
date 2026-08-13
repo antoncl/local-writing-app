@@ -69,8 +69,17 @@ export async function savePlotlineEntry(entry: PlotlineEntry): Promise<PlotlineE
 // the rail's create-then-open-a-pane gesture — a plotline is authored on the board now.
 export async function createPlotlineOnBoard(): Promise<string> {
   const line = await api.createPlotline("New plotline");
-  await refreshPlotlines();
-  await refreshAfterMutation();
+  await Promise.all([refreshPlotlines(), refreshAfterMutation()]);
+  return line.id;
+}
+
+// Instantiate a plot template into a plotline node (ADR-0053 §2, the S3 palette
+// gesture): the backend snapshots the template's beats into a new owned `plot:plotline`
+// and returns it. Same refresh shape as createPlotlineOnBoard; returns the new id so the
+// palette can expand the node for editing.
+export async function instantiateTemplateOnBoard(templateId: string): Promise<string> {
+  const line = await api.instantiatePlotTemplate(templateId);
+  await Promise.all([refreshPlotlines(), refreshAfterMutation()]);
   return line.id;
 }
 

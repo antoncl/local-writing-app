@@ -338,7 +338,13 @@
             <p class="muted beats-empty">No beats yet — add one.</p>
           {/if}
         </div>
-        <p class="saving-hint muted" class:visible={saving} aria-live="polite">{saving ? "Saving…" : ""}</p>
+        <div class="editor-foot">
+          <p class="saving-hint muted" class:visible={saving} aria-live="polite">{saving ? "Saving…" : ""}</p>
+          <!-- Delete moved off the retired Plotlines rail onto the node (ADR-0053 §3). -->
+          <button class="delete-plotline" onclick={() => actions?.onDelete(id!)}>
+            <i class="ti ti-trash" aria-hidden="true"></i> Delete plotline
+          </button>
+        </div>
       {/if}
     </div>
   {:else if data.beats.length}
@@ -611,6 +617,12 @@
     flex-direction: column;
     gap: 2px;
   }
+  .editor-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
   .saving-hint {
     margin: 0;
     min-height: 1em;
@@ -621,6 +633,24 @@
   }
   .saving-hint.visible {
     opacity: 1;
+  }
+  .delete-plotline {
+    appearance: none;
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    padding: 3px 8px;
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+    cursor: pointer;
+  }
+  .delete-plotline:hover {
+    color: var(--danger, var(--text));
+    border-color: var(--danger, var(--border));
   }
   .link-btn {
     appearance: none;

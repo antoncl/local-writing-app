@@ -19,6 +19,14 @@ export function setPlotTemplates(entries: PlotTemplateSummary[]): void {
   plotTemplatesStore.set(entries);
 }
 
+// Delete an owned template clone from the board palette (ADR-0053 §2). The delete
+// returns the refreshed roster (a Library default can't be deleted — the backend
+// 409s / the palette only offers this on owned rows). A plotline instantiated from it
+// is unaffected: its beats + lineage were SNAPSHOTTED at instantiate (S1), not linked.
+export async function deletePlotTemplateEntry(id: string): Promise<void> {
+  setPlotTemplates((await api.deletePlotTemplate(id)).entries);
+}
+
 export function clearPlotTemplates(): void {
   plotTemplatesStore.set([]);
 }

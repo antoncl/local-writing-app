@@ -44,7 +44,7 @@ class _PlotAiContextBase(PlotTestCase):
         self.service.save_card(card.id, SaveCardRequest(title=title, body=body, metadata=dict(metadata)))
         return card.id
 
-    def _arc(self):
+    def _plotline(self):
         return self.service.instantiate_plot_template(_THREE_ACT)
 
     def _render(self, template: str, **context: object) -> str:
@@ -53,21 +53,21 @@ class _PlotAiContextBase(PlotTestCase):
 
 
 class PlotContextHelperTests(_PlotAiContextBase):
-    def test_the_block_carries_arcs_cards_and_synopsis(self) -> None:
-        arc = self._arc()
-        first_beat = arc.metadata["instance_beats"][0]["id"]
+    def test_the_block_carries_plotlines_cards_and_synopsis(self) -> None:
+        plotline = self._plotline()
+        first_beat = plotline.metadata["instance_beats"][0]["id"]
         chapter = self._chapter()
         scene = self._scene("Opening", chapter)
         self._card(
             "They Meet",
             body="She spills his coffee.",
             scene=scene,
-            beat_links=[{"instance": arc.id, "beat_id": first_beat}],
+            beat_links=[{"plotline": plotline.id, "beat_id": first_beat}],
         )
         out = self._render('{% role "system" %}{{ plot_context() }}{% endrole %}')
         self.assertIn("<plot_context", out)
         self.assertIn('completeness="whole_board"', out)
-        self.assertIn(arc.title, out)  # the arc appears with its roster
+        self.assertIn(plotline.title, out)  # the plotline appears with its roster
         self.assertIn("They Meet", out)
         self.assertIn("She spills his coffee.", out)  # the synopsis is the reasoning stand-in
         self.assertIn("<fulfils", out)  # the card names the beat it fulfils
@@ -94,16 +94,15 @@ class PlotContextHelperTests(_PlotAiContextBase):
     def test_the_block_renders_plotline_causal_and_beat_guidance(self) -> None:
         from app.models import (
             CreatePlotlineRequest,
-            CreateTemplateInstanceRequest,
-            SaveTemplateInstanceRequest,
+            SavePlotlineRequest,
         )
 
-        # An ad-hoc arc with a beat carrying GUIDANCE (shipped template beats carry
-        # only `function`), so the guidance-as-element branch is exercised.
-        arc = self.service.create_template_instance(CreateTemplateInstanceRequest(title="Custom"))
-        self.service.save_template_instance(
-            arc.id,
-            SaveTemplateInstanceRequest(
+        # An ad-hoc plotline with a beat carrying GUIDANCE (shipped template beats
+        # carry only `function`), so the guidance-as-element branch is exercised.
+        structure = self.service.create_plotline(CreatePlotlineRequest(title="Custom"))
+        self.service.save_plotline(
+            structure.id,
+            SavePlotlineRequest(
                 title="Custom",
                 body="",
                 metadata={"instance_beats": [{"title": "Spark", "function": "ignite", "guidance": "GUIDANCE_TEXT"}]},

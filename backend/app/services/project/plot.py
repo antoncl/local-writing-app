@@ -45,12 +45,12 @@ from app.models import (
     CreateCardRequest,
     CreatePlotlineRequest,
     CreateSceneRequest,
-    CreateTemplateInstanceRequest,
     PlotBoard,
     PlotBoardBeat,
     PlotBoardCard,
     PlotBoardContainer,
     PlotBoardPlotline,
+    PlotBoardPlotlineBeat,
     PlotBoardProjection,
     PlotlineEntry,
     PlotlineList,
@@ -64,30 +64,30 @@ from app.models import (
     SavePlotBoardRequest,
     SavePlotlineRequest,
     SavePlotTemplateRequest,
-    SaveTemplateInstanceRequest,
     StructureNode,
-    TemplateInstanceEntry,
-    TemplateInstanceList,
-    TemplateInstanceSummary,
 )
 from app.services.markdown_validation import validate_scene_markdown
 from app.services.project.errors import ProjectServiceError
 
 PLOT_BOARD_FILENAME = "plot-board.md"
 PLOT_TEMPLATE_ENTRY_TYPE = "plot:template"
-PLOT_TEMPLATE_INSTANCE_ENTRY_TYPE = "plot:template_instance"
-# The `plot_beat` members carried verbatim into a `plot_instance_beat` when a
-# template is instantiated (ADR-0048 S7 Slice 2, #776). `specifics` is left for
-# the writer, so it is not in this snapshot set.
+# A plotline is a plot-template instance (ADR-0053 §1): one node kind carrying the
+# beat roster + colour + lineage. The former `plot:template_instance` / "arc" kind
+# is retired into this one.
+PLOT_PLOTLINE_ENTRY_TYPE = "plot:plotline"
+# The `plot_beat` members carried verbatim into a plotline's `plot_instance_beat`
+# when a template is instantiated (ADR-0048 S7 Slice 2, #776). `specifics` is left
+# for the writer, so it is not in this snapshot set.
 _INSTANCE_BEAT_SNAPSHOT_KEYS = ("title", "function", "guidance", "required", "id")
 # The metadata list-fields whose items are beats carrying a stable `id` member
 # (ADR-0048 S7 Slice 3a, #779). Every write of one of these mints an id for any
 # beat that lacks one and re-salts a within-list collision, so a card→beat link
-# (Slice 3b) always has a stable, list-unique target to point at.
+# (Slice 3b) always has a stable, list-unique target to point at. `beats` is the
+# template's roster; `instance_beats` is a plotline's (ADR-0053).
 _BEAT_LIST_FIELDS = ("beats", "instance_beats")
 PLOT_CARD_ENTRY_TYPE = "plot:card"
 # Card-only metadata fields (ADR-0048 S7 Slice 3b). `beat_links` is the list of
-# card→beat links — each a *(instance node id, beat id)* text pair, healed
+# card→beat links — each a *(plotline node id, beat id)* text pair, healed
 # plot-locally because v1 bars refs from list-item shapes. `page_status` is the
 # on/off-page vs unwritten marker, with `on_page` derived from the scene link.
 _BEAT_LINK_FIELD = "beat_links"
@@ -421,40 +421,40 @@ class PlotMixin:
 
     @staticmethod
     def _iter_valid_beat_link_pairs(links: Any) -> Iterator[tuple[str, str]]:
-        """Yield each well-formed, unique *(instance id, beat id)* pair from a stored
-        `beat_links` value (ADR-0048 S7 3b/5b), skipping non-dict items, incomplete
-        pairs (a blank half points nowhere), and duplicate pairs (a card fulfils a beat
-        once). The shared front half of `_heal_beat_links` (which then filters by live
-        roster) and `_resolve_card_beats` (which resolves titles) — one place decides
-        what a valid link *is*, so the two can't drift on it."""
+        """Yield each well-formed, unique *(plotline id, beat id)* pair from a stored
+        `beat_links` value (ADR-0048 S7 3b/5b; ADR-0053), skipping non-dict items,
+        incomplete pairs (a blank half points nowhere), and duplicate pairs (a card
+        fulfils a beat once). The shared front half of `_heal_beat_links` (which then
+        filters by live roster) and `_resolve_card_beats` (which resolves titles) — one
+        place decides what a valid link *is*, so the two can't drift on it."""
         if not isinstance(links, list):
             return
         seen: set[tuple[str, str]] = set()
         for link in links:
             if not isinstance(link, dict):
                 continue
-            instance_id = link.get("instance")
+            plotline_id = link.get("plotline")
             beat_id = link.get("beat_id")
-            if not (isinstance(instance_id, str) and instance_id and isinstance(beat_id, str) and beat_id):
+            if not (isinstance(plotline_id, str) and plotline_id and isinstance(beat_id, str) and beat_id):
                 continue
-            key = (instance_id, beat_id)
+            key = (plotline_id, beat_id)
             if key in seen:
                 continue
             seen.add(key)
             yield key
 
     def _heal_beat_links(self, metadata: dict[str, Any], index: Any) -> None:
-        """Keep only card→beat links that still resolve (ADR-0048 S7 Slice 3b).
+        """Keep only card→beat links that still resolve (ADR-0048 S7 Slice 3b; ADR-0053).
 
-        A `beat_links` item is a *(instance node id, beat id)* pair stored as plain
+        A `beat_links` item is a *(plotline node id, beat id)* pair stored as plain
         text — v1 keeps refs out of list-item shapes, so the top-level reference
         purge/heal never reaches these. This is that healing, plot-local: a link
-        survives only if its `instance` is a live `plot:template_instance` **and** its
-        `beat_id` is in that instance's current roster. A link to a deleted instance,
-        or to a beat since removed from the roster, is dropped — the board can only
-        draw links that mean something. Well-formedness + dedup are the shared
+        survives only if its `plotline` is a live `plot:plotline` **and** its `beat_id`
+        is in that plotline's current roster. A link to a deleted plotline, or to a
+        beat since removed from the roster, is dropped — the board can only draw links
+        that mean something. Well-formedness + dedup are the shared
         `_iter_valid_beat_link_pairs`; this adds the roster filter and re-emits each
-        surviving pair as a canonical `{instance, beat_id}` dict. When nothing survives
+        surviving pair as a canonical `{plotline, beat_id}` dict. When nothing survives
         the key is removed, so an all-dangling list heals to sparse rather than `[]`.
         """
         links = metadata.get(_BEAT_LINK_FIELD)
@@ -462,24 +462,24 @@ class PlotMixin:
             return
         rosters: dict[str, set[str] | None] = {}
         healed: list[Any] = []
-        for instance_id, beat_id in self._iter_valid_beat_link_pairs(links):
-            if instance_id not in rosters:
-                rosters[instance_id] = self._instance_beat_ids(instance_id, index)
-            roster = rosters[instance_id]
+        for plotline_id, beat_id in self._iter_valid_beat_link_pairs(links):
+            if plotline_id not in rosters:
+                rosters[plotline_id] = self._plotline_beat_ids(plotline_id, index)
+            roster = rosters[plotline_id]
             if roster is None or beat_id not in roster:
-                continue  # instance gone / not an instance / beat left the roster
-            healed.append({"instance": instance_id, "beat_id": beat_id})
+                continue  # plotline gone / not a plotline / beat left the roster
+            healed.append({"plotline": plotline_id, "beat_id": beat_id})
         if healed:
             metadata[_BEAT_LINK_FIELD] = healed
         else:
             metadata.pop(_BEAT_LINK_FIELD, None)
 
-    def _instance_beat_ids(self, instance_id: str, index: Any) -> set[str] | None:
-        """The beat ids in a `plot:template_instance`'s roster, or None when the id is
-        not a live instance. Reads just the front matter (the lightest node read); the
-        instance's own writes guarantee its beats are id-healed."""
-        entry = index.by_id.get(instance_id)
-        if entry is None or entry.entry_type != PLOT_TEMPLATE_INSTANCE_ENTRY_TYPE:
+    def _plotline_beat_ids(self, plotline_id: str, index: Any) -> set[str] | None:
+        """The beat ids in a `plot:plotline`'s roster, or None when the id is not a live
+        plotline. Reads just the front matter (the lightest node read); the plotline's
+        own writes guarantee its beats are id-healed."""
+        entry = index.by_id.get(plotline_id)
+        if entry is None or entry.entry_type != PLOT_PLOTLINE_ENTRY_TYPE:
             return None
         front_matter = self._read_front_matter_only(entry.path, strict=True)
         metadata = self._normalise_metadata(front_matter.get("metadata"), entry.path)
@@ -758,70 +758,24 @@ class PlotMixin:
         walk(self.read_structure().root)
         return ordered
 
-    # ----- Template instances (plot:template_instance) -------------------
+    # ----- Template instantiation (a plotline IS an instance, ADR-0053) ----
     #
-    # The book-local, specialized copy of a template's beat roster (ADR-0048 §3):
-    # where a generic template requirement becomes concrete to this book, and
-    # where an ad-hoc plot with no template behind it lives. The plotline's /
-    # card's third structural twin, so list / create / read / save / delete are
-    # thin wrappers over the shared `_*_plot_folder_node` CRUD — the specialized
-    # `instance_beats` and the `source_template_*` lineage ride through `metadata`
-    # like any field, so no bespoke read/write is needed. `instantiate_plot_template`
-    # is the one bespoke op: it snapshots a template's beats into a fresh instance.
+    # A plotline is a plot-template instance (ADR-0053 §1): there is no separate
+    # "instance" kind. A plain / ad-hoc plotline is just `create_plotline` with no
+    # beats (the empty case); `instantiate_plot_template` is the one bespoke op —
+    # it mints a plotline seeded with a snapshot of the template's beat roster.
 
-    def list_template_instances(self) -> TemplateInstanceList:
-        return TemplateInstanceList(
-            entries=self._list_plot_folder_nodes(
-                entry_type=PLOT_TEMPLATE_INSTANCE_ENTRY_TYPE, summary_cls=TemplateInstanceSummary
-            )
-        )
-
-    def create_template_instance(self, request: CreateTemplateInstanceRequest) -> TemplateInstanceEntry:
-        # Ad-hoc: an empty instance the writer authors beats on directly. No
-        # template behind it, so no lineage and no snapshot — a plain create.
-        return self.read_template_instance(
-            self._create_plot_folder_node(
-                title=request.title,
-                requested_entry_type=request.entry_type,
-                default_entry_type=PLOT_TEMPLATE_INSTANCE_ENTRY_TYPE,
-                noun="plot instance",
-            )
-        )
-
-    def read_template_instance(self, entry_id: str) -> TemplateInstanceEntry:
-        return self._build_plot_folder_entry(
-            self._read_plot_folder_node(
-                entry_id, expected_entry_type=PLOT_TEMPLATE_INSTANCE_ENTRY_TYPE, noun="plot instance"
-            ),
-            TemplateInstanceEntry,
-        )
-
-    def save_template_instance(
-        self, entry_id: str, request: SaveTemplateInstanceRequest
-    ) -> TemplateInstanceEntry:
-        return self.read_template_instance(
-            self._save_plot_folder_node(
-                entry_id, request, expected_entry_type=PLOT_TEMPLATE_INSTANCE_ENTRY_TYPE, noun="plot instance"
-            )
-        )
-
-    def delete_template_instance(self, entry_id: str) -> TemplateInstanceList:
-        self._delete_plot_folder_node(
-            entry_id, expected_entry_type=PLOT_TEMPLATE_INSTANCE_ENTRY_TYPE, noun="plot instance"
-        )
-        return self.list_template_instances()
-
-    def instantiate_plot_template(self, template_id: str) -> TemplateInstanceEntry:
-        """Apply a template to this book (ADR-0048 §3): snapshot its beats into a
-        new, book-local `plot:template_instance` the writer then specializes.
+    def instantiate_plot_template(self, template_id: str) -> PlotlineEntry:
+        """Apply a template to this book (ADR-0048 §3; ADR-0053 §2): snapshot its
+        beats into a new, book-local `plot:plotline` the writer then specializes.
 
         The template stays pristine (it may be an inherited, read-only Library
-        node); the instance is a book-local editable copy. The beat roster is
-        *copied*, not linked — an instance must stand alone (an ad-hoc one has no
+        node); the plotline is a book-local editable copy. The beat roster is
+        *copied*, not linked — a plotline must stand alone (an ad-hoc one has no
         template at all), and snapshotting is what lets the writer diverge from the
         generic beats freely. `source_template_id` / `source_template_name` record
-        the lineage, so the instance can still name its arc after it diverges or
-        the source template is gone.
+        the lineage, so the plotline can still name the structure it was rolled from
+        after it diverges or the source template is gone.
         """
         source = self.read_plot_template(template_id)
         # read_plot_template validated the beats field, so every item is a member
@@ -834,15 +788,15 @@ class PlotMixin:
         new_id = self._create_plot_folder_node(
             title=source.title,
             requested_entry_type="",
-            default_entry_type=PLOT_TEMPLATE_INSTANCE_ENTRY_TYPE,
-            noun="plot instance",
+            default_entry_type=PLOT_PLOTLINE_ENTRY_TYPE,
+            noun="plotline",
             seed_metadata={
                 "instance_beats": instance_beats,
                 "source_template_id": source.id,
                 "source_template_name": source.title,
             },
         )
-        return self.read_template_instance(new_id)
+        return self.read_plotline(new_id)
 
     # ----- The board (plot:board) — a per-project layout singleton --------
 
@@ -902,11 +856,11 @@ class PlotMixin:
         self._atomic_write(path, f"---\n{front_matter}\n---\n")
 
     def read_plot_board_projection(self) -> PlotBoardProjection:
-        """The board's render model in one read (ADR-0048 S7a + Slice 4): the
-        plotlines, the manuscript containers a card lays out inside, the cards with
-        their plotline/scene refs + resolved container, and the board's opaque
-        layout. Read-only and computed — card + plotline + structure + board data
-        only, never templates or beats (S8).
+        """The board's render model in one read (ADR-0048 S7a + Slice 4; ADR-0053):
+        the plotlines with their beat rosters, the manuscript containers a card lays
+        out inside, the cards with their plotline/scene refs + resolved container, and
+        the board's opaque layout. Read-only and computed — card + plotline + structure
+        + board data only, never the read-only Library templates.
 
         Card refs need no dangling-resolution here: deleting a scene or a plotline
         purges the referencing cards (delete_scene / delete_plotline →
@@ -920,22 +874,27 @@ class PlotMixin:
         """
         board = self.read_plot_board()
         plotlines = [
-            PlotBoardPlotline(id=line.id, title=line.title, color=line.metadata.get("color") or None)
+            PlotBoardPlotline(
+                id=line.id,
+                title=line.title,
+                color=line.metadata.get("color") or None,
+                beats=self._plotline_board_beats(line.metadata),
+            )
             for line in self.list_plotlines().entries
         ]
         containers, scene_to_container, scene_to_order = self._board_container_map()
-        # Resolve card→beat badges against the live arcs once per projection (Slice
-        # 5b): the stored links carry only ids, so this catalog turns each into a
-        # titled badge with a map lookup instead of a read per link. Read only the arcs
-        # some card actually links — an arc no card points at costs no front-matter
-        # read (and a board with no beat links reads no arcs at all).
+        # Resolve card→beat badges against the live plotlines once per projection
+        # (Slice 5b; ADR-0053): the stored links carry only ids, so this catalog turns
+        # each into a titled badge with a map lookup instead of a read per link. Read
+        # only the plotlines some card actually links — a plotline no card points at
+        # costs no front-matter read (and a board with no beat links reads none).
         card_entries = self.list_cards().entries
-        referenced_arcs = {
-            instance_id
+        referenced_plotlines = {
+            plotline_id
             for card in card_entries
-            for instance_id, _beat_id in self._iter_valid_beat_link_pairs(card.metadata.get(_BEAT_LINK_FIELD))
+            for plotline_id, _beat_id in self._iter_valid_beat_link_pairs(card.metadata.get(_BEAT_LINK_FIELD))
         }
-        beat_catalog = self._instance_beat_catalog(self._build_node_index(), referenced_arcs)
+        beat_catalog = self._plotline_beat_catalog(self._build_node_index(), referenced_plotlines)
         # The live card ids, so authored causal links resolve to real edge endpoints
         # (Slice 6b) — the display side of `_heal_causal_links`, symmetric with the
         # beat catalog above.
@@ -1037,19 +996,33 @@ class PlotMixin:
         stored = metadata.get(_PAGE_STATUS_FIELD)
         return stored if stored in ("off_page", "unwritten") else None
 
-    def _instance_beat_catalog(
+    @staticmethod
+    def _plotline_board_beats(metadata: dict[str, Any]) -> list[PlotBoardPlotlineBeat]:
+        """A plotline's beat roster as the board node renders it (ADR-0053 §3): each
+        beat's stable id + title, in stored order. Beats without an id are skipped
+        (the plotline's own writes id-heal the roster, so this is belt-and-braces)."""
+        raw = metadata.get("instance_beats")
+        beats: list[PlotBoardPlotlineBeat] = []
+        if isinstance(raw, list):
+            for beat in raw:
+                if isinstance(beat, dict) and isinstance(beat.get("id"), str) and beat["id"]:
+                    beats.append(PlotBoardPlotlineBeat(beat_id=beat["id"], title=str(beat.get("title") or "")))
+        return beats
+
+    def _plotline_beat_catalog(
         self, index: Any, referenced: set[str]
     ) -> dict[str, tuple[str, str | None, dict[str, str]]]:
-        """`instance_id -> (arc title, arc colour, {beat_id: beat title})` for each
-        `referenced` live `plot:template_instance` (ADR-0048 S7 Slice 5b) — the arcs
-        some card actually links, so an arc no card points at costs no read. One
-        front-matter read per referenced arc, built once per projection so a card's
-        beat badges resolve by map lookup rather than a read per link. The colour lets
-        the board tint a card's badges by arc (usability pass). An unreadable arc is
-        skipped — it resolves no beats, so its links drop, matching `_heal_beat_links`."""
+        """`plotline_id -> (plotline title, plotline colour, {beat_id: beat title})` for
+        each `referenced` live `plot:plotline` (ADR-0048 S7 Slice 5b; ADR-0053) — the
+        plotlines some card actually links, so a plotline no card points at costs no
+        read. One front-matter read per referenced plotline, built once per projection
+        so a card's beat badges resolve by map lookup rather than a read per link. The
+        colour lets the board tint a card's badges by their plotline (usability pass).
+        An unreadable plotline is skipped — it resolves no beats, so its links drop,
+        matching `_heal_beat_links`."""
         catalog: dict[str, tuple[str, str | None, dict[str, str]]] = {}
         for entry in index.by_id.values():
-            if entry.entry_type != PLOT_TEMPLATE_INSTANCE_ENTRY_TYPE:
+            if entry.entry_type != PLOT_PLOTLINE_ENTRY_TYPE:
                 continue
             if entry.id not in referenced:
                 continue
@@ -1072,25 +1045,25 @@ class PlotMixin:
         self, metadata: dict[str, Any], catalog: dict[str, tuple[str, str | None, dict[str, str]]]
     ) -> list[PlotBoardBeat]:
         """Resolve a card's stored `beat_links` (id pairs) into board badges (ADR-0048
-        S7 Slice 5b), dropping any link whose arc or beat is gone (the display side of
-        `_heal_beat_links`). Well-formedness + dedup are the shared
+        S7 Slice 5b; ADR-0053), dropping any link whose plotline or beat is gone (the
+        display side of `_heal_beat_links`). Well-formedness + dedup are the shared
         `_iter_valid_beat_link_pairs`; this adds the catalog lookup + title resolution.
         Badge order follows the stored list, so it is stable across reads and the
         writer's arrangement holds."""
         resolved: list[PlotBoardBeat] = []
-        for instance_id, beat_id in self._iter_valid_beat_link_pairs(metadata.get(_BEAT_LINK_FIELD)):
-            entry = catalog.get(instance_id)
+        for plotline_id, beat_id in self._iter_valid_beat_link_pairs(metadata.get(_BEAT_LINK_FIELD)):
+            entry = catalog.get(plotline_id)
             if entry is None:
-                continue  # arc gone / not referenced → drop (display-side heal)
-            instance_title, instance_color, beat_titles = entry
+                continue  # plotline gone / not referenced → drop (display-side heal)
+            plotline_title, plotline_color, beat_titles = entry
             title = beat_titles.get(beat_id)
             if title is None:
                 continue  # beat left the roster → drop
             resolved.append(
                 PlotBoardBeat(
-                    instance_id=instance_id,
-                    instance_title=instance_title,
-                    instance_color=instance_color,
+                    plotline_id=plotline_id,
+                    plotline_title=plotline_title,
+                    plotline_color=plotline_color,
                     beat_id=beat_id,
                     title=title,
                 )

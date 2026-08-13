@@ -1,14 +1,15 @@
-"""Backend tests for card→beat links + the page-status marker (ADR-0048 S7 Slice 3b).
+"""Backend tests for card→beat links + the page-status marker (ADR-0048 S7 Slice 3b; ADR-0053).
 
 A `plot:card` can name which beats it fulfils — a `beat_links` list, each item a
-*(template-instance id, beat id)* pair — and declares whether its beat is realized
-in prose (`page_status` = on_page / off_page / unwritten). Both are plot-local:
-the link members are plain text (v1 bars refs from list-item shapes), so plot.py
-heals dangling links itself, on card save AND read, the same two-path symmetry the
-`scene` ref has. `on_page` is derived from the scene attachment, not authored.
+*(plotline id, beat id)* pair — and declares whether its beat is realized in prose
+(`page_status` = on_page / off_page / unwritten). Both are plot-local: the link
+members are plain text (v1 bars refs from list-item shapes), so plot.py heals
+dangling links itself, on card save AND read, the same two-path symmetry the `scene`
+ref has. `on_page` is derived from the scene attachment, not authored.
 
 These prove the healing and the derivation end-to-end through the HTTP surface,
-building on the stable beat ids of Slice 3a (#779).
+building on the stable beat ids of Slice 3a (#779). A plotline is a plot-template
+instance (ADR-0053 §1), so a card's beats link to plotlines.
 """
 
 from __future__ import annotations
@@ -42,8 +43,8 @@ class _CardLinkTestCase(PlotTestCase):
         self.assertEqual(got.status_code, 200, got.text)
         return got.json()
 
-    def _instance(self) -> dict:
-        """An instantiated three-act instance — 7 beats, each with a stable id."""
+    def _plotline(self) -> dict:
+        """An instantiated three-act plotline — 7 beats, each with a stable id."""
         response = self.client.post(f"/api/plot/templates/{_THREE_ACT}/instantiate")
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
@@ -61,49 +62,50 @@ class _CardLinkTestCase(PlotTestCase):
 
 class CardBeatLinkTests(_CardLinkTestCase):
     def test_a_link_to_a_live_beat_round_trips(self) -> None:
-        instance = self._instance()
-        beat_id = instance["metadata"]["instance_beats"][0]["id"]
+        plotline = self._plotline()
+        beat_id = plotline["metadata"]["instance_beats"][0]["id"]
         card = self._new_card()
-        self._save_card(card, {"beat_links": [{"instance": instance["id"], "beat_id": beat_id}]})
+        self._save_card(card, {"beat_links": [{"plotline": plotline["id"], "beat_id": beat_id}]})
         links = self._read_card(card)["metadata"]["beat_links"]
-        self.assertEqual(links, [{"instance": instance["id"], "beat_id": beat_id}])
+        self.assertEqual(links, [{"plotline": plotline["id"], "beat_id": beat_id}])
 
-    def test_a_card_can_link_several_beats_across_instances(self) -> None:
-        # The headline of 3b (Anton): multiple beats per card. Two beats of one
-        # instance plus a beat of a second prove the list + the composite key.
-        a = self._instance()
-        b = self._instance()
+    def test_a_card_can_link_several_beats_across_plotlines(self) -> None:
+        # The headline of 3b (Anton): multiple beats per card, across plotlines. Two
+        # beats of one plotline plus a beat of a second prove the list + the composite
+        # key (ADR-0053 §4: a card fulfils beats from several plotlines).
+        a = self._plotline()
+        b = self._plotline()
         a_beats = a["metadata"]["instance_beats"]
         b_beats = b["metadata"]["instance_beats"]
         wanted = [
-            {"instance": a["id"], "beat_id": a_beats[0]["id"]},
-            {"instance": a["id"], "beat_id": a_beats[3]["id"]},
-            {"instance": b["id"], "beat_id": b_beats[1]["id"]},
+            {"plotline": a["id"], "beat_id": a_beats[0]["id"]},
+            {"plotline": a["id"], "beat_id": a_beats[3]["id"]},
+            {"plotline": b["id"], "beat_id": b_beats[1]["id"]},
         ]
         card = self._new_card()
         self._save_card(card, {"beat_links": wanted})
         self.assertEqual(self._read_card(card)["metadata"]["beat_links"], wanted)
 
-    def test_a_link_to_a_deleted_instance_is_dropped_on_read(self) -> None:
-        # The read-side heal: the link is fine at save time, then the instance is
+    def test_a_link_to_a_deleted_plotline_is_dropped_on_read(self) -> None:
+        # The read-side heal: the link is fine at save time, then the plotline is
         # deleted out from under it. Because the link is text (not an entity_ref),
         # the delete's reference purge never touches it — plot.py's read heal must.
-        instance = self._instance()
-        beat_id = instance["metadata"]["instance_beats"][0]["id"]
+        plotline = self._plotline()
+        beat_id = plotline["metadata"]["instance_beats"][0]["id"]
         card = self._new_card()
-        self._save_card(card, {"beat_links": [{"instance": instance["id"], "beat_id": beat_id}]})
+        self._save_card(card, {"beat_links": [{"plotline": plotline["id"], "beat_id": beat_id}]})
         self.assertEqual(len(self._read_card(card)["metadata"]["beat_links"]), 1)
-        deleted = self.client.delete(f"/api/plot/instances/{instance['id']}")
+        deleted = self.client.delete(f"/api/plot/plotlines/{plotline['id']}")
         self.assertEqual(deleted.status_code, 200, deleted.text)
-        # Instance gone → the link resolves to nothing → dropped, and an all-dropped
+        # Plotline gone → the link resolves to nothing → dropped, and an all-dropped
         # list heals to sparse (key absent), not an empty [].
         self.assertNotIn("beat_links", self._read_card(card)["metadata"])
 
     def test_a_link_to_a_removed_beat_is_dropped_on_read(self) -> None:
-        # The instance survives but the specific beat leaves its roster — the other
+        # The plotline survives but the specific beat leaves its roster — the other
         # half of the healing the map says 3b owns.
-        instance = self._instance()
-        beats = instance["metadata"]["instance_beats"]
+        plotline = self._plotline()
+        beats = plotline["metadata"]["instance_beats"]
         doomed = beats[-1]["id"]
         survivor = beats[0]["id"]
         card = self._new_card()
@@ -111,64 +113,64 @@ class CardBeatLinkTests(_CardLinkTestCase):
             card,
             {
                 "beat_links": [
-                    {"instance": instance["id"], "beat_id": survivor},
-                    {"instance": instance["id"], "beat_id": doomed},
+                    {"plotline": plotline["id"], "beat_id": survivor},
+                    {"plotline": plotline["id"], "beat_id": doomed},
                 ]
             },
         )
-        # Drop the last beat from the instance's roster and save the instance.
+        # Drop the last beat from the plotline's roster and save the plotline.
         trimmed = beats[:-1]
         saved = self.client.put(
-            f"/api/plot/instances/{instance['id']}",
-            json={"title": instance["title"], "body": "", "metadata": {**instance["metadata"], "instance_beats": trimmed}},
+            f"/api/plot/plotlines/{plotline['id']}",
+            json={"title": plotline["title"], "body": "", "metadata": {**plotline["metadata"], "instance_beats": trimmed}},
         )
         self.assertEqual(saved.status_code, 200, saved.text)
         links = self._read_card(card)["metadata"]["beat_links"]
-        self.assertEqual(links, [{"instance": instance["id"], "beat_id": survivor}])
+        self.assertEqual(links, [{"plotline": plotline["id"], "beat_id": survivor}])
 
     def test_save_drops_a_dangling_link_without_422(self) -> None:
-        # The save-side heal (independent of read): a link to a ghost instance must
+        # The save-side heal (independent of read): a link to a ghost plotline must
         # not 422 the save (the members are text — nothing to validate against) and
         # must not reach disk; a valid sibling link is kept.
-        instance = self._instance()
-        beat_id = instance["metadata"]["instance_beats"][0]["id"]
+        plotline = self._plotline()
+        beat_id = plotline["metadata"]["instance_beats"][0]["id"]
         card = self._new_card()
         self._save_card(
             card,
             {
                 "beat_links": [
-                    {"instance": "plot_ghost", "beat_id": "beat_deadbeef"},
-                    {"instance": instance["id"], "beat_id": beat_id},
+                    {"plotline": "plot_ghost", "beat_id": "beat_deadbeef"},
+                    {"plotline": plotline["id"], "beat_id": beat_id},
                 ]
             },
         )
         self.assertEqual(
             self._read_card(card)["metadata"]["beat_links"],
-            [{"instance": instance["id"], "beat_id": beat_id}],
+            [{"plotline": plotline["id"], "beat_id": beat_id}],
         )
 
     def test_an_incomplete_link_is_dropped(self) -> None:
-        # Half a pair points nowhere — a blank instance or a blank beat_id is dropped.
-        instance = self._instance()
-        beat_id = instance["metadata"]["instance_beats"][0]["id"]
+        # Half a pair points nowhere — a blank plotline or a blank beat_id is dropped.
+        plotline = self._plotline()
+        beat_id = plotline["metadata"]["instance_beats"][0]["id"]
         card = self._new_card()
         self._save_card(
             card,
             {
                 "beat_links": [
-                    {"instance": instance["id"], "beat_id": ""},
-                    {"instance": "", "beat_id": beat_id},
+                    {"plotline": plotline["id"], "beat_id": ""},
+                    {"plotline": "", "beat_id": beat_id},
                 ]
             },
         )
         self.assertNotIn("beat_links", self._read_card(card)["metadata"])
 
     def test_duplicate_links_are_collapsed(self) -> None:
-        # A card fulfils a beat once — a repeated (instance, beat_id) pair is deduped
+        # A card fulfils a beat once — a repeated (plotline, beat_id) pair is deduped
         # so the stored list stays canonical for the edge/diagnostic consumers later.
-        instance = self._instance()
-        beat_id = instance["metadata"]["instance_beats"][0]["id"]
-        link = {"instance": instance["id"], "beat_id": beat_id}
+        plotline = self._plotline()
+        beat_id = plotline["metadata"]["instance_beats"][0]["id"]
+        link = {"plotline": plotline["id"], "beat_id": beat_id}
         card = self._new_card()
         self._save_card(card, {"beat_links": [link, dict(link)]})
         self.assertEqual(self._read_card(card)["metadata"]["beat_links"], [link])
@@ -227,9 +229,9 @@ class CardPageStatusTests(_CardLinkTestCase):
 
 
 class CardBeatBadgeProjectionTests(_CardLinkTestCase):
-    """The board projection (ADR-0048 S7 Slice 5b) resolves a card's beat links into
-    titled badges and carries the derived page_status — display over the stored id
-    pairs, so the frontend renders labels + the marker without its own join."""
+    """The board projection (ADR-0048 S7 Slice 5b; ADR-0053) resolves a card's beat
+    links into titled badges and carries the derived page_status — display over the
+    stored id pairs, so the frontend renders labels + the marker without its own join."""
 
     def _projected_card(self, card_id: str) -> dict:
         projection = self.client.get("/api/plot/board/projection")
@@ -237,60 +239,60 @@ class CardBeatBadgeProjectionTests(_CardLinkTestCase):
         return next(c for c in projection.json()["cards"] if c["id"] == card_id)
 
     def test_a_linked_beat_projects_as_a_titled_badge(self) -> None:
-        instance = self._instance()
-        beat = instance["metadata"]["instance_beats"][0]
+        plotline = self._plotline()
+        beat = plotline["metadata"]["instance_beats"][0]
         card = self._new_card()
-        self._save_card(card, {"beat_links": [{"instance": instance["id"], "beat_id": beat["id"]}]})
+        self._save_card(card, {"beat_links": [{"plotline": plotline["id"], "beat_id": beat["id"]}]})
         beats = self._projected_card(card)["beats"]
         self.assertEqual(len(beats), 1)
         self.assertEqual(beats[0]["beat_id"], beat["id"])
         self.assertEqual(beats[0]["title"], beat["title"])
-        self.assertEqual(beats[0]["instance_id"], instance["id"])
-        self.assertEqual(beats[0]["instance_title"], instance["title"])
-        # An arc with no colour resolves a null badge colour (the neutral chip).
-        self.assertIsNone(beats[0]["instance_color"])
+        self.assertEqual(beats[0]["plotline_id"], plotline["id"])
+        self.assertEqual(beats[0]["plotline_title"], plotline["title"])
+        # A plotline with no colour resolves a null badge colour (the neutral chip).
+        self.assertIsNone(beats[0]["plotline_color"])
 
-    def test_a_beat_badge_carries_its_arcs_colour(self) -> None:
-        # The board tints a card's beat badges by their owning arc's colour so
-        # same-named beats of different arcs are told apart (usability pass).
-        instance = self._instance()
-        beat = instance["metadata"]["instance_beats"][0]
+    def test_a_beat_badge_carries_its_plotlines_colour(self) -> None:
+        # The board tints a card's beat badges by their owning plotline's colour so
+        # same-named beats of different plotlines are told apart (usability pass).
+        plotline = self._plotline()
+        beat = plotline["metadata"]["instance_beats"][0]
         self.assertEqual(
             self.client.put(
-                f"/api/plot/instances/{instance['id']}",
-                json={"title": instance["title"], "body": "", "metadata": {**instance["metadata"], "color": "rose"}},
+                f"/api/plot/plotlines/{plotline['id']}",
+                json={"title": plotline["title"], "body": "", "metadata": {**plotline["metadata"], "color": "rose"}},
             ).status_code,
             200,
         )
         card = self._new_card()
-        self._save_card(card, {"beat_links": [{"instance": instance["id"], "beat_id": beat["id"]}]})
-        self.assertEqual(self._projected_card(card)["beats"][0]["instance_color"], "rose")
+        self._save_card(card, {"beat_links": [{"plotline": plotline["id"], "beat_id": beat["id"]}]})
+        self.assertEqual(self._projected_card(card)["beats"][0]["plotline_color"], "rose")
 
     def test_badges_follow_the_stored_link_order(self) -> None:
-        instance = self._instance()
-        b = instance["metadata"]["instance_beats"]
+        plotline = self._plotline()
+        b = plotline["metadata"]["instance_beats"]
         card = self._new_card()
         self._save_card(
             card,
             {
                 "beat_links": [
-                    {"instance": instance["id"], "beat_id": b[2]["id"]},
-                    {"instance": instance["id"], "beat_id": b[0]["id"]},
+                    {"plotline": plotline["id"], "beat_id": b[2]["id"]},
+                    {"plotline": plotline["id"], "beat_id": b[0]["id"]},
                 ]
             },
         )
         titles = [beat["title"] for beat in self._projected_card(card)["beats"]]
         self.assertEqual(titles, [b[2]["title"], b[0]["title"]])
 
-    def test_a_badge_is_dropped_when_its_arc_is_deleted(self) -> None:
-        # Deleting the instance never rewrites the card (a link heals only on the
+    def test_a_badge_is_dropped_when_its_plotline_is_deleted(self) -> None:
+        # Deleting the plotline never rewrites the card (a link heals only on the
         # card's own read/save, and beat_links is plain text so the ref purge skips
         # it), so the projection drops the badge display-side against the live catalog.
-        instance = self._instance()
-        beat = instance["metadata"]["instance_beats"][0]
+        plotline = self._plotline()
+        beat = plotline["metadata"]["instance_beats"][0]
         card = self._new_card()
-        self._save_card(card, {"beat_links": [{"instance": instance["id"], "beat_id": beat["id"]}]})
-        self.assertEqual(self.client.delete(f"/api/plot/instances/{instance['id']}").status_code, 200)
+        self._save_card(card, {"beat_links": [{"plotline": plotline["id"], "beat_id": beat["id"]}]})
+        self.assertEqual(self.client.delete(f"/api/plot/plotlines/{plotline['id']}").status_code, 200)
         self.assertEqual(self._projected_card(card)["beats"], [])
 
     def test_an_unlinked_card_projects_no_badges(self) -> None:

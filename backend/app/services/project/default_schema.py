@@ -180,15 +180,23 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "fields": [],
         },
         "plot:plotline": {
-            # A story thread the writer creates at will (ADR-0048 §2). The
-            # intrinsic title is its name; `color` tints its chips and card
-            # tints on the board; the prose body is its description. Cards
-            # reference one as their primary plotline (S5). An ordinary flat
-            # Node under `plot/`, layered like lore.
+            # A story thread — and, per ADR-0053, an instance of a plot template:
+            # one node kind, no separate "arc". The intrinsic title is its name;
+            # `color` tints its chips + the cards it is primary on; the prose body
+            # is its description. `instance_beats` is its ordered beat roster —
+            # copied from a template at instantiate and then specialized per book,
+            # or empty for an ad-hoc thread the writer beats out by hand (the ADR
+            # §1 empty/ad-hoc case). `source_template_id` / `source_template_name`
+            # snapshot which template it was rolled from (both empty for ad-hoc).
+            # Cards reference one as their primary plotline and fulfil its beats
+            # (card `beat_links`). An ordinary flat Node under `plot/`, layered
+            # like lore.
             "name": "Plotline",
             "kind": "plot",
             "parent": "plot:base",
-            "fields": ["color"],
+            # `color` first so the swatch sits under the type header, not below the
+            # beat list, when the plotline is edited.
+            "fields": ["color", "instance_beats", "source_template_id", "source_template_name"],
             "has_body": True,
             "color": "plum",
         },
@@ -220,32 +228,6 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "kind": "plot",
             "parent": "plot:base",
             "fields": ["beats"],
-            "has_body": True,
-        },
-        "plot:template_instance": {
-            # The book-local, specialized copy of a template's beat roster
-            # (ADR-0048 §3, S7 Slice 2, #776). A template is generic ("the lovers
-            # have an argument"); the instance is where the writer makes that
-            # concrete to *this* book ("…about her hiding the debt"), and where an
-            # ad-hoc plot with no template behind it lives. The plotline's / card's
-            # third structural twin — a book-local flat Node under `plot/`, layered,
-            # freely editable (never a read-only Library node like the template it
-            # was cloned from). `instance_beats` holds the specialized roster; the
-            # generic beat is snapshot-copied in at instantiate so the instance is
-            # self-contained (an ad-hoc instance has no template to fall back to).
-            # `source_template_id` / `source_template_name` are the lineage
-            # snapshot — "which of the 14 arcs is this?" — captured at instantiate
-            # and durable even after the beats diverge or the source template is
-            # gone (a live ref would heal-to-blank, which for lineage is exactly
-            # wrong); both hidden, both empty for an ad-hoc instance.
-            "name": "Plot instance",
-            "kind": "plot",
-            "parent": "plot:base",
-            # `color` (built-in swatch field) so an arc carries its own colour — the
-            # writer sets it in the arc editor (first, right under the type header, so
-            # it isn't buried below the beat list), and it disambiguates beat badges by
-            # arc on the board (the colour axis distinct from plotline; #737 follow-on).
-            "fields": ["color", "instance_beats", "source_template_id", "source_template_name"],
             "has_body": True,
         },
         "plot:board": {
@@ -641,17 +623,18 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             ],
         },
         "plot_beat_link": {
-            # A card->beat link (ADR-0048 S7 Slice 3b): the card names which beat of
-            # which template instance it fulfils. Consumed nested as the `beat_links`
-            # list field's item shape, so a card carries a LIST of these (multiple
-            # beats per card). Both members are plain `text`, NOT `entity_ref`: v1
-            # keeps refs out of item shapes (the top-level ref-healers walk only
-            # top-level values), so `instance` holds the instance node id as text and
-            # plot.py heals these by hand on card save + read — dropping a link whose
-            # instance is gone or whose `beat_id` has left that instance's roster.
+            # A card->beat link (ADR-0048 S7 Slice 3b; ADR-0053): the card names
+            # which beat of which plotline it fulfils. Consumed nested as the
+            # `beat_links` list field's item shape, so a card carries a LIST of these
+            # (multiple beats, across multiple plotlines, per card). Both members are
+            # plain `text`, NOT `entity_ref`: v1 keeps refs out of item shapes (the
+            # top-level ref-healers walk only top-level values), so `plotline` holds
+            # the plotline node id as text and plot.py heals these by hand on card
+            # save + read — dropping a link whose plotline is gone or whose `beat_id`
+            # has left that plotline's roster.
             "name": "Beat link",
             "members": [
-                {"key": "instance", "name": "Instance", "type": "text"},
+                {"key": "plotline", "name": "Plotline", "type": "text"},
                 {"key": "beat_id", "name": "Beat", "type": "text"},
             ],
         },
@@ -707,34 +690,35 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "item_group": "plot_beat",
         },
         "instance_beats": {
-            # A template instance's specialized beat roster (ADR-0048 S7 Slice 2,
-            # #776). The `beats` field's sibling, bound to `plot_instance_beat`
-            # (which adds the per-beat `specifics` member); `plot:template_instance`
-            # is its consumer. A separate field, not a reuse of `beats`, because a
-            # field binds to exactly one item_group and the instance's beats carry
-            # the extra member. Named distinctly from the template's `beats`
-            # ("Plot beats") so the two are tellable apart in the field catalog.
+            # A plotline's beat roster (ADR-0048 S7 Slice 2, #776; ADR-0053 §1). The
+            # `beats` field's sibling, bound to `plot_instance_beat` (which adds the
+            # per-beat `specifics` member); `plot:plotline` is its consumer. A separate
+            # field, not a reuse of the template's `beats`, because a field binds to
+            # exactly one item_group and a plotline's beats carry the extra `specifics`
+            # member (a read-only template beat has no book-specialization slot). Named
+            # distinctly from the template's `beats` ("Plot beats") so the two are
+            # tellable apart in the field catalog.
             "name": "Specialized beats",
             "type": "list",
             "item_group": "plot_instance_beat",
         },
         "source_template_id": {
-            # Lineage snapshot (ADR-0048 S7 Slice 2, #776): the stable id of the
-            # template a `plot:template_instance` was instantiated from, captured at
-            # instantiate. Empty for an ad-hoc instance. Hidden so it doesn't
-            # clutter the panel; unhide per type to filter/group instances by their
-            # source in a View. A plain text snapshot, not a live `entity_ref` — the
-            # lineage must survive the source template being edited, renamed, or
-            # deleted, which a healing ref would not.
+            # Lineage snapshot (ADR-0048 S7 Slice 2, #776; ADR-0053): the stable id of
+            # the template a `plot:plotline` was instantiated from, captured at
+            # instantiate. Empty for an ad-hoc plotline. Hidden so it doesn't clutter
+            # the panel; unhide per type to filter/group plotlines by their source in a
+            # View. A plain text snapshot, not a live `entity_ref` — the lineage must
+            # survive the source template being edited, renamed, or deleted, which a
+            # healing ref would not.
             "name": "Source template id",
             "type": "text",
             "hidden": True,
         },
         "source_template_name": {
             # The display name of the source template, snapshotted at instantiate so
-            # the instance can show "Mythic Quest Arc" without re-resolving a
+            # the plotline can show "Mythic Quest Arc" without re-resolving a
             # (possibly inherited or since-deleted) template. Empty for an ad-hoc
-            # instance. Hidden, like `source_template_id`.
+            # plotline. Hidden, like `source_template_id`.
             "name": "Source template",
             "type": "text",
             "hidden": True,
@@ -848,15 +832,16 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             ],
         },
         "beat_links": {
-            # A card's beat links (ADR-0048 S7 Slice 3b): the beats this card fulfils,
-            # each a `plot_beat_link` (a template-instance id + a beat id within that
-            # instance's roster). An ordered `list` so one card can serve several beats.
-            # Its consumer is `plot:card`. Integrity is plot-local: the item shape is
-            # plain text (v1 bars refs from item shapes), so plot.py heals dangling
-            # links on card save + read, not the top-level reference machinery.
-            # Hidden by default, like the lineage id fields (`source_template_id` /
-            # `source_template_name`): the members are raw ids meant for the board's
-            # link editor (a later slice), not hand-entry in the generic panel.
+            # A card's beat links (ADR-0048 S7 Slice 3b; ADR-0053): the beats this card
+            # fulfils, each a `plot_beat_link` (a plotline id + a beat id within that
+            # plotline's roster). An ordered `list` so one card can serve several beats,
+            # across several plotlines. Its consumer is `plot:card`. Integrity is
+            # plot-local: the item shape is plain text (v1 bars refs from item shapes),
+            # so plot.py heals dangling links on card save + read, not the top-level
+            # reference machinery. Hidden by default, like the lineage id fields
+            # (`source_template_id` / `source_template_name`): the members are raw ids
+            # meant for the board's link editor (a later slice), not hand-entry in the
+            # generic panel.
             "name": "Beat links",
             "type": "list",
             "item_group": "plot_beat_link",

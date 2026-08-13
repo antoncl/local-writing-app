@@ -1,10 +1,12 @@
-"""Spoiler-gated plot context for AI reasoning (ADR-0048 S8a).
+"""Spoiler-gated plot context for AI reasoning (ADR-0048 S8a; ADR-0053).
 
-`read_plot_context` assembles the board's plot state — plotlines, arcs (template
-instances) with their full beat rosters, and the cards with their synopses, beat
-links and causal edges — into one `PlotContext` packet a prompt can reason over.
-It is the foundation Slice 8b's card brainstorm reasons from, and the read behind
-the "what the AI sees" preview endpoint.
+`read_plot_context` assembles the board's plot state — plotlines with their full
+beat rosters, and the cards with their synopses, beat links and causal edges —
+into one `PlotContext` packet a prompt can reason over. A plotline IS a plot-template
+instance (ADR-0053 §1), so a single plotline set carries both the thread colour and
+the beat structure the cards are measured against. It is the foundation Slice 8b's
+card brainstorm reasons from, and the read behind the "what the AI sees" preview
+endpoint.
 
 The packet is **spoiler-gated by manuscript reveal order.** Every carded scene
 holds a reading-order rank (`_board_container_map`'s `scene_to_order`, the same
@@ -15,18 +17,18 @@ seeing it, so a "what's next / what's missing" question never leaks unwritten-ah
 scenes and railroads the writer. A scene-less card (off-page / unwritten) holds no
 reveal position, so it is never a spoiler and is always admitted.
 
-Arcs and plotlines are the writer's own scaffolding, not manuscript content, so
-they are never gated; the full beat roster is always present so the AI can name a
-beat no card fulfils yet — the gaps.
+Plotlines are the writer's own scaffolding, not manuscript content, so they are
+never gated; the full beat roster is always present so the AI can name a beat no
+card fulfils yet — the gaps.
 
 This is context assembly (prompt INPUT). None of the quarry's claims/evidence
 apparatus survives (migration principle 2); the JSON node-patch loop, not an XML
 suggestion protocol, is how the AI writes back (Slice 8b).
 
 Composed onto `ProjectService` beside `PlotMixin`, whose resolve helpers it reuses
-through the MRO (`read_plot_board`, `list_cards` / `list_plotlines` /
-`list_template_instances`, `_board_container_map`, `_resolve_card_beats`,
-`_resolve_card_causal`, `_board_page_status`).
+through the MRO (`read_plot_board`, `list_cards` / `list_plotlines`,
+`_board_container_map`, `_resolve_card_beats`, `_resolve_card_causal`,
+`_board_page_status`).
 """
 
 from __future__ import annotations
@@ -35,18 +37,17 @@ from typing import Any
 
 from app.models import (
     PlotContext,
-    PlotContextArc,
     PlotContextBeat,
     PlotContextCard,
     PlotContextPlotline,
 )
 
-# On-disk metadata field keys this mixin reads a card / arc / plotline's metadata
-# by — the same schema field-name literals plot.py reads them by; named here for
-# legibility. The card→beat and card→causal resolutions, which key off plot.py's
-# own `beat_links` / `causal_links` constants, are delegated to its
-# `_resolve_card_beats` / `_resolve_card_causal`, so those keys are not restated
-# here (no shared-constant drift seam to keep in sync).
+# On-disk metadata field keys this mixin reads a card / plotline's metadata by — the
+# same schema field-name literals plot.py reads them by; named here for legibility.
+# The card→beat and card→causal resolutions, which key off plot.py's own
+# `beat_links` / `causal_links` constants, are delegated to its `_resolve_card_beats`
+# / `_resolve_card_causal`, so those keys are not restated here (no shared-constant
+# drift seam to keep in sync).
 _SCENE_FIELD = "scene"
 _PLOTLINE_FIELD = "plotline"
 _INSTANCE_BEATS_FIELD = "instance_beats"
@@ -84,19 +85,7 @@ class PlotContextMixin:
             admitted.append(card)
         admitted_ids = {card.id for card in admitted}
 
-        plotline_titles: dict[str, str] = {}
-        plotlines: list[PlotContextPlotline] = []
-        for line in self.list_plotlines().entries:
-            plotline_titles[line.id] = line.title
-            plotlines.append(
-                PlotContextPlotline(
-                    id=line.id,
-                    title=line.title,
-                    color=line.metadata.get(_COLOR_FIELD) or None,
-                )
-            )
-
-        arcs, beat_catalog = self._context_arcs()
+        plotlines, plotline_titles, beat_catalog = self._context_plotlines()
         context_cards = [
             self._context_card(card, scene_to_order, plotline_titles, beat_catalog, admitted_ids)
             for card in admitted
@@ -109,7 +98,6 @@ class PlotContextMixin:
             as_of_sequence=anchor_rank if gated else None,
             omitted_cards=omitted,
             plotlines=plotlines,
-            arcs=arcs,
             cards=context_cards,
         )
 
@@ -132,23 +120,27 @@ class PlotContextMixin:
                 return None, None
         return None, None
 
-    def _context_arcs(
+    def _context_plotlines(
         self,
-    ) -> tuple[list[PlotContextArc], dict[str, tuple[str, str | None, dict[str, str]]]]:
-        """All arcs (template instances) with their FULL beat rosters — ungated
+    ) -> tuple[list[PlotContextPlotline], dict[str, str], dict[str, tuple[str, str | None, dict[str, str]]]]:
+        """All plotlines with their FULL beat rosters (ADR-0053 §1) — ungated
         scaffolding, so a beat no card fulfils still appears (a gap for the AI to
-        name). Returns the arcs plus a `{instance_id: (arc_title, arc_colour,
-        {beat_id: beat title})}` catalog — the shape `_resolve_card_beats` consumes.
-        The board projection fills the colour so a card can tint its badges; the AI
-        context never renders colour, so it holds the slot as None rather than shipping
-        an unused swatch id on every context beat. So a card's beat links resolve to
-        titled badges by a map lookup rather than a re-read."""
-        arcs: list[PlotContextArc] = []
+        name). One traversal of `list_plotlines` builds three things at once: the
+        `PlotContextPlotline` list (thread + beats + lineage), a `{id: title}` map the
+        cards resolve their primary plotline name by, and a `{plotline_id:
+        (title, colour, {beat_id: beat title})}` catalog — the shape
+        `_resolve_card_beats` consumes so a card's beat links resolve to titled badges
+        by a map lookup rather than a re-read. The board projection fills the colour so
+        a card can tint its badges; the AI context never renders colour, so the catalog
+        holds the slot as None rather than shipping an unused swatch id."""
+        plotlines: list[PlotContextPlotline] = []
+        plotline_titles: dict[str, str] = {}
         catalog: dict[str, tuple[str, str | None, dict[str, str]]] = {}
-        for arc in self.list_template_instances().entries:
+        for line in self.list_plotlines().entries:
+            plotline_titles[line.id] = line.title
             beats: list[PlotContextBeat] = []
             titles: dict[str, str] = {}
-            raw = arc.metadata.get(_INSTANCE_BEATS_FIELD)
+            raw = line.metadata.get(_INSTANCE_BEATS_FIELD)
             if isinstance(raw, list):
                 for beat in raw:
                     if not isinstance(beat, dict):
@@ -166,16 +158,17 @@ class PlotContextMixin:
                         )
                     )
                     titles[beat_id] = title
-            arcs.append(
-                PlotContextArc(
-                    id=arc.id,
-                    title=arc.title,
-                    source_template_name=str(arc.metadata.get(_SOURCE_TEMPLATE_NAME_FIELD) or ""),
+            plotlines.append(
+                PlotContextPlotline(
+                    id=line.id,
+                    title=line.title,
+                    color=line.metadata.get(_COLOR_FIELD) or None,
+                    source_template_name=str(line.metadata.get(_SOURCE_TEMPLATE_NAME_FIELD) or ""),
                     beats=beats,
                 )
             )
-            catalog[arc.id] = (arc.title, None, titles)  # colour unused in AI context
-        return arcs, catalog
+            catalog[line.id] = (line.title, None, titles)  # colour unused in AI context
+        return plotlines, plotline_titles, catalog
 
     def _context_card(
         self,

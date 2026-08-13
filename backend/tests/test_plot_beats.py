@@ -1,11 +1,12 @@
-"""Backend tests for the `plot` kind's beat-bearing nodes (ADR-0048 S7).
+"""Backend tests for the `plot` kind's beat-bearing nodes (ADR-0048 S7; ADR-0053).
 
-The template / template-instance / beat-identity suites, split out of
+The template / plotline-instantiation / beat-identity suites, split out of
 `test_plot.py` (which keeps plotline, card, board, and layered-inheritance
-coverage). `plot:template` is the ADR-0049 Library's second tenant (S4b),
-`plot:template_instance` its book-local specialized copy (Slice 2, #776), and
-beat identity (Slice 3a, #779) is the stable per-beat `id` the card->beat links
-of Slice 3b point at.
+coverage). `plot:template` is the ADR-0049 Library's second tenant (S4b); a
+plotline is a plot-template instance (ADR-0053 §1) — instantiating a template
+snapshots its beats into a book-local `plot:plotline` (Slice 2, #776) — and beat
+identity (Slice 3a, #779) is the stable per-beat `id` the card->beat links of
+Slice 3b point at.
 """
 
 from __future__ import annotations
@@ -190,12 +191,13 @@ class PlotTemplateLibraryTests(PlotTestCase):
         self.assertEqual(self.client.get("/api/plot/templates/builtin-plot-nope").status_code, 404)
 
 
-class TemplateInstanceHttpTests(PlotTestCase):
-    """Template instances (ADR-0048 §3 / S7 Slice 2, #776): the book-local,
-    specialized copy of a template's beat roster — where a generic requirement is
-    made concrete to this book, and where an ad-hoc plot lives. The plotline's /
-    card's third structural twin, so the CRUD mirrors them; `instantiate` is the
-    one bespoke op that snapshots a template's beats in."""
+class PlotlineInstantiationTests(PlotTestCase):
+    """A plotline is a plot-template instance (ADR-0053 §1; ADR-0048 §3 / S7 Slice 2,
+    #776): instantiating a template snapshots its beat roster into a book-local
+    `plot:plotline` the writer then specializes. An ad-hoc plotline is just a plotline
+    created with no beats — there is no separate instance kind or `/instances`
+    resource. Plotline CRUD proper lives in `test_plot.py`; this covers `instantiate`
+    (the one bespoke op) and the beats/lineage/specifics it seeds."""
 
     def _instantiate(self, template_id: str = _THREE_ACT) -> dict:
         response = self.client.post(f"/api/plot/templates/{template_id}/instantiate")
@@ -203,67 +205,67 @@ class TemplateInstanceHttpTests(PlotTestCase):
         return response.json()
 
     def test_instantiate_snapshots_beats_and_lineage(self) -> None:
-        instance = self._instantiate()
-        # A book-local editable node of the new type, titled after the template.
-        self.assertTrue(instance["id"].startswith("plot_"))
-        self.assertEqual(instance["entry_type"], "plot:template_instance")
-        self.assertEqual(instance["title"], "Three-Act Story Arc")
+        plotline = self._instantiate()
+        # A book-local editable plotline, titled after the template.
+        self.assertTrue(plotline["id"].startswith("plot_"))
+        self.assertEqual(plotline["entry_type"], "plot:plotline")
+        self.assertEqual(plotline["title"], "Three-Act Story Arc")
         # The 7 beats came across verbatim (title / function / stable id); the
         # per-beat `specifics` is left for the writer, so it is not snapshotted.
-        beats = instance["metadata"]["instance_beats"]
+        beats = plotline["metadata"]["instance_beats"]
         self.assertEqual(len(beats), 7)
         self.assertEqual(beats[0]["id"], "setup_pressure")
         self.assertEqual(beats[0]["title"], "Setup pressure")
         self.assertIn("Establishes", beats[0]["function"])
         self.assertNotIn("specifics", beats[0])
-        # Lineage snapshot — "which of the 14 arcs is this?"
-        self.assertEqual(instance["metadata"]["source_template_id"], _THREE_ACT)
-        self.assertEqual(instance["metadata"]["source_template_name"], "Three-Act Story Arc")
+        # Lineage snapshot — "which of the 14 structures is this?"
+        self.assertEqual(plotline["metadata"]["source_template_id"], _THREE_ACT)
+        self.assertEqual(plotline["metadata"]["source_template_name"], "Three-Act Story Arc")
 
     def test_instantiate_copies_every_snapshot_member_faithfully(self) -> None:
         # Full fidelity across ALL snapshot keys for every beat, compared against
         # the source template — so a regression dropping (say) `guidance` or
         # `required` from _INSTANCE_BEAT_SNAPSHOT_KEYS is caught, not just title/id.
         template_beats = self.client.get(f"/api/plot/templates/{_THREE_ACT}").json()["metadata"]["beats"]
-        instance_beats = self._instantiate()["metadata"]["instance_beats"]
-        self.assertEqual(len(instance_beats), len(template_beats))
-        for src, got in zip(template_beats, instance_beats, strict=True):
+        plotline_beats = self._instantiate()["metadata"]["instance_beats"]
+        self.assertEqual(len(plotline_beats), len(template_beats))
+        for src, got in zip(template_beats, plotline_beats, strict=True):
             for key in ("title", "function", "guidance", "required", "id"):
                 self.assertEqual(got.get(key), src.get(key), f"beat member {key} not copied faithfully")
             self.assertNotIn("specifics", got)  # the one member left for the writer
 
-    def test_instance_is_indexed_book_local_and_the_template_stays_pristine(self) -> None:
+    def test_plotline_is_indexed_book_local_and_the_template_stays_pristine(self) -> None:
         before = _BUILTIN_THREE_ACT.read_bytes()
-        instance = self._instantiate()
-        entry = self.service._build_node_index().by_id.get(instance["id"])
+        plotline = self._instantiate()
+        entry = self.service._build_node_index().by_id.get(plotline["id"])
         self.assertIsNotNone(entry)
         self.assertEqual(entry.kind, "plot")
-        self.assertEqual(entry.entry_type, "plot:template_instance")
+        self.assertEqual(entry.entry_type, "plot:plotline")
         # Instantiate is a pure read of the (inherited, read-only) template — the
         # shipped file is byte-untouched.
         self.assertEqual(_BUILTIN_THREE_ACT.read_bytes(), before)
-        # It appears in the instances listing and reads back on its own endpoint.
-        listed = [e["id"] for e in self.client.get("/api/plot/instances").json()["entries"]]
-        self.assertIn(instance["id"], listed)
-        self.assertEqual(self.client.get(f"/api/plot/instances/{instance['id']}").status_code, 200)
+        # It appears in the plotline listing and reads back on its own endpoint.
+        listed = [e["id"] for e in self.client.get("/api/plot/plotlines").json()["entries"]]
+        self.assertIn(plotline["id"], listed)
+        self.assertEqual(self.client.get(f"/api/plot/plotlines/{plotline['id']}").status_code, 200)
 
     def test_specifics_round_trip_through_the_standard_save(self) -> None:
         # The Slice-2 win: the writer makes a generic beat concrete to this book,
         # and it persists through the ordinary metadata save path (no bespoke editor).
-        instance = self._instantiate()
-        beats = instance["metadata"]["instance_beats"]
+        plotline = self._instantiate()
+        beats = plotline["metadata"]["instance_beats"]
         beats[0]["specifics"] = "The debt Mara hides from Jon."
         saved = self.client.put(
-            f"/api/plot/instances/{instance['id']}",
+            f"/api/plot/plotlines/{plotline['id']}",
             json={
                 "title": "Mara & Jon",
                 "body": "",
-                "metadata": {**instance["metadata"], "instance_beats": beats},
-                "base_revision": instance["revision"],
+                "metadata": {**plotline["metadata"], "instance_beats": beats},
+                "base_revision": plotline["revision"],
             },
         )
         self.assertEqual(saved.status_code, 200, saved.text)
-        reread = self.client.get(f"/api/plot/instances/{instance['id']}").json()
+        reread = self.client.get(f"/api/plot/plotlines/{plotline['id']}").json()
         self.assertEqual(reread["title"], "Mara & Jon")
         got = reread["metadata"]["instance_beats"]
         self.assertEqual(len(got), 7)
@@ -272,70 +274,70 @@ class TemplateInstanceHttpTests(PlotTestCase):
         # Lineage preserved across the save (the hidden fields round-trip in metadata).
         self.assertEqual(reread["metadata"]["source_template_name"], "Three-Act Story Arc")
 
-    def test_ad_hoc_instance_has_empty_beats_and_no_lineage(self) -> None:
-        created = self.client.post("/api/plot/instances", json={"title": "My own plot"})
+    def test_ad_hoc_plotline_has_empty_beats_and_no_lineage(self) -> None:
+        created = self.client.post("/api/plot/plotlines", json={"title": "My own plot"})
         self.assertEqual(created.status_code, 200, created.text)
-        instance = created.json()
-        self.assertEqual(instance["entry_type"], "plot:template_instance")
-        self.assertEqual(instance["title"], "My own plot")
+        plotline = created.json()
+        self.assertEqual(plotline["entry_type"], "plot:plotline")
+        self.assertEqual(plotline["title"], "My own plot")
         # No template behind it → no beats, no lineage.
-        self.assertEqual(instance["metadata"].get("instance_beats", []), [])
-        self.assertFalse(instance["metadata"].get("source_template_id"))
-        self.assertFalse(instance["metadata"].get("source_template_name"))
+        self.assertEqual(plotline["metadata"].get("instance_beats", []), [])
+        self.assertFalse(plotline["metadata"].get("source_template_id"))
+        self.assertFalse(plotline["metadata"].get("source_template_name"))
 
-    def test_ad_hoc_instance_can_author_and_save_beats(self) -> None:
-        # The "roll your own plot" path (Anton): create an empty instance, author
+    def test_ad_hoc_plotline_can_author_and_save_beats(self) -> None:
+        # The "roll your own plot" path (Anton): create an empty plotline, author
         # beats from scratch — including `specifics` — and save through the standard
         # metadata path. Distinct from the specifics round-trip (which starts from an
         # instantiated, pre-filled roster).
-        instance = self.client.post("/api/plot/instances", json={"title": "Custom arc"}).json()
+        plotline = self.client.post("/api/plot/plotlines", json={"title": "Custom arc"}).json()
         beats = [
             {"id": "b1", "title": "Inciting spark", "specifics": "Mara loses the ledger.", "required": True},
             {"id": "b2", "title": "The reckoning", "specifics": "Jon finds the debt.", "required": False},
         ]
         saved = self.client.put(
-            f"/api/plot/instances/{instance['id']}",
+            f"/api/plot/plotlines/{plotline['id']}",
             json={
                 "title": "Custom arc",
                 "body": "",
                 "metadata": {"instance_beats": beats},
-                "base_revision": instance["revision"],
+                "base_revision": plotline["revision"],
             },
         )
         self.assertEqual(saved.status_code, 200, saved.text)
-        got = self.client.get(f"/api/plot/instances/{instance['id']}").json()["metadata"]["instance_beats"]
+        got = self.client.get(f"/api/plot/plotlines/{plotline['id']}").json()["metadata"]["instance_beats"]
         self.assertEqual(len(got), 2)
         self.assertEqual(got[0]["title"], "Inciting spark")
         self.assertEqual(got[0]["specifics"], "Mara loses the ledger.")
         self.assertEqual(got[1]["required"], False)
 
     def test_delete_removes_from_list_and_404s(self) -> None:
-        instance = self._instantiate()
-        deleted = self.client.delete(f"/api/plot/instances/{instance['id']}")
+        plotline = self._instantiate()
+        deleted = self.client.delete(f"/api/plot/plotlines/{plotline['id']}")
         self.assertEqual(deleted.status_code, 200, deleted.text)
-        self.assertNotIn(instance["id"], [e["id"] for e in deleted.json()["entries"]])
-        self.assertEqual(self.client.get(f"/api/plot/instances/{instance['id']}").status_code, 404)
+        self.assertNotIn(plotline["id"], [e["id"] for e in deleted.json()["entries"]])
+        self.assertEqual(self.client.get(f"/api/plot/plotlines/{plotline['id']}").status_code, 404)
 
     def test_lineage_survives_the_source_template_being_deleted(self) -> None:
         # The durability point (Anton): instantiate from an OWNED template, then
         # delete it. `source_template_*` are plain text, not a live ref, so the
-        # reference purge never touches them and the instance still names its arc —
-        # a healing entity_ref would have blanked here.
+        # reference purge never touches them and the plotline still names its
+        # structure — a healing entity_ref would have blanked here.
         clone = self.client.post(f"/api/plot/templates/{_THREE_ACT}/fork").json()
-        instance = self._instantiate(clone["id"])
-        self.assertEqual(instance["metadata"]["source_template_id"], clone["id"])
+        plotline = self._instantiate(clone["id"])
+        self.assertEqual(plotline["metadata"]["source_template_id"], clone["id"])
         self.assertEqual(self.client.delete(f"/api/plot/templates/{clone['id']}").status_code, 200)
-        reread = self.client.get(f"/api/plot/instances/{instance['id']}").json()
+        reread = self.client.get(f"/api/plot/plotlines/{plotline['id']}").json()
         self.assertEqual(reread["metadata"]["source_template_name"], "Three-Act Story Arc")
         self.assertEqual(len(reread["metadata"]["instance_beats"]), 7)
 
     def test_instantiate_from_an_inherited_library_template(self) -> None:
         # The source is a read-only Library node; instantiate reads it fine and the
-        # instance is book-local + editable regardless.
-        instance = self._instantiate(_THREE_ACT)
+        # plotline is book-local + editable regardless.
+        plotline = self._instantiate(_THREE_ACT)
         saved = self.client.put(
-            f"/api/plot/instances/{instance['id']}",
-            json={"title": "Renamed", "body": "", "metadata": instance["metadata"], "base_revision": instance["revision"]},
+            f"/api/plot/plotlines/{plotline['id']}",
+            json={"title": "Renamed", "body": "", "metadata": plotline["metadata"], "base_revision": plotline["revision"]},
         )
         self.assertEqual(saved.status_code, 200, saved.text)
 
@@ -343,24 +345,24 @@ class TemplateInstanceHttpTests(PlotTestCase):
         self.assertEqual(self.client.post("/api/plot/templates/builtin-plot-nope/instantiate").status_code, 404)
 
     def test_instantiating_a_non_template_plot_node_404s(self) -> None:
-        # instantiate resolves the template through the family guard — a plotline id
+        # instantiate resolves the template through the family guard — a card id
         # is not a template, so it 404s rather than snapshotting a bogus roster.
-        plotline = self.client.post("/api/plot/plotlines", json={"title": "Thread"}).json()
+        card = self.client.post("/api/plot/cards", json={"title": "A card"}).json()
         self.assertEqual(
-            self.client.post(f"/api/plot/templates/{plotline['id']}/instantiate").status_code, 404
+            self.client.post(f"/api/plot/templates/{card['id']}/instantiate").status_code, 404
         )
 
 
 class BeatIdentityTests(PlotTestCase):
     """ADR-0048 S7 Slice 3a (#779): every beat carries a stable, list-unique `id`.
 
-    A card→beat link (Slice 3b) points at the composite *(instance node id, beat
+    A card→beat link (Slice 3b) points at the composite *(plotline node id, beat
     id)*, so a beat's id must be present and unique within its own list. The write
     path mints one where it is missing (`beat_<sha256(title+salt)[:12]>`) and
     re-salts a within-list collision. It is auto-fill only — a blank beat still
     saves, matching the sparse-spec principle — and stable once minted, so 3b's
     links survive edits. Both write surfaces are covered: the template `beats`
-    field and the instance `instance_beats` field.
+    field and the plotline `instance_beats` field.
     """
 
     def _fork(self) -> dict:
@@ -430,21 +432,21 @@ class BeatIdentityTests(PlotTestCase):
         self.assertEqual(len(set(ids)), 2)
         self.assertEqual(ids.count("dup"), 1)  # the first kept it; the clash re-salted
 
-    def test_ad_hoc_instance_beats_are_minted(self) -> None:
-        # The instance `instance_beats` write path is hooked too, not only the
-        # template `beats` path — an ad-hoc instance's hand-authored beats get ids.
-        instance = self.client.post("/api/plot/instances", json={"title": "Custom"}).json()
+    def test_ad_hoc_plotline_beats_are_minted(self) -> None:
+        # The plotline `instance_beats` write path is hooked too, not only the
+        # template `beats` path — an ad-hoc plotline's hand-authored beats get ids.
+        plotline = self.client.post("/api/plot/plotlines", json={"title": "Custom"}).json()
         saved = self.client.put(
-            f"/api/plot/instances/{instance['id']}",
+            f"/api/plot/plotlines/{plotline['id']}",
             json={
                 "title": "Custom",
                 "body": "",
                 "metadata": {"instance_beats": [{"title": "Spark"}, {"title": "Spark"}]},
-                "base_revision": instance["revision"],
+                "base_revision": plotline["revision"],
             },
         )
         self.assertEqual(saved.status_code, 200, saved.text)
-        got = self.client.get(f"/api/plot/instances/{instance['id']}").json()["metadata"]["instance_beats"]
+        got = self.client.get(f"/api/plot/plotlines/{plotline['id']}").json()["metadata"]["instance_beats"]
         self.assertTrue(all(b["id"].startswith("beat_") for b in got))
         self.assertNotEqual(got[0]["id"], got[1]["id"])
 
@@ -452,21 +454,21 @@ class BeatIdentityTests(PlotTestCase):
         # Provenance + growth: instantiate copies the template's beat ids verbatim
         # (already list-unique), and a beat added afterwards is minted a fresh id
         # while the copied ones stay put.
-        instance = self.client.post(f"/api/plot/templates/{_THREE_ACT}/instantiate").json()
-        beats = instance["metadata"]["instance_beats"]
+        plotline = self.client.post(f"/api/plot/templates/{_THREE_ACT}/instantiate").json()
+        beats = plotline["metadata"]["instance_beats"]
         self.assertEqual(beats[0]["id"], "setup_pressure")  # copied verbatim
         beats = [*beats, {"title": "An added beat"}]
         saved = self.client.put(
-            f"/api/plot/instances/{instance['id']}",
+            f"/api/plot/plotlines/{plotline['id']}",
             json={
-                "title": instance["title"],
+                "title": plotline["title"],
                 "body": "",
-                "metadata": {**instance["metadata"], "instance_beats": beats},
-                "base_revision": instance["revision"],
+                "metadata": {**plotline["metadata"], "instance_beats": beats},
+                "base_revision": plotline["revision"],
             },
         )
         self.assertEqual(saved.status_code, 200, saved.text)
-        got = self.client.get(f"/api/plot/instances/{instance['id']}").json()["metadata"]["instance_beats"]
+        got = self.client.get(f"/api/plot/plotlines/{plotline['id']}").json()["metadata"]["instance_beats"]
         self.assertEqual(len(got), 8)
         self.assertEqual(got[0]["id"], "setup_pressure")  # copied id untouched
         self.assertTrue(got[-1]["id"].startswith("beat_"))  # added beat minted

@@ -85,7 +85,10 @@ def render_extraction_contract(
     """
 
     body_allowed = commit_fields is None or "body" in commit_fields
-    title_allowed = commit_fields is None or "title" in commit_fields
+    # Create mode ALWAYS requires a title (`validate_ai_entry_draft` rejects a
+    # draft without one), so a `commit.fields` allow-list can never suppress the
+    # title clause there — only a revise's allow-list can (title is optional then).
+    title_allowed = creating or commit_fields is None or "title" in commit_fields
     rendered, _ = build_preview(
         project_service=project_service,
         template_source=DEFAULT_EXTRACTION_TEMPLATE,

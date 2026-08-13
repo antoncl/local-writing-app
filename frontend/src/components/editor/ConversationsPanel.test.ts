@@ -15,19 +15,24 @@ import { editorPanes } from "@/lib/stores/editorPanes.svelte";
 import { chatSessions } from "@/lib/stores/chatSessions.svelte";
 import type { ChatSessionSummary, MetadataSchema, PromptEntrySummary } from "@/lib/types";
 
-// A schema whose `prompt:revise` type carries a `commit` (ADR-0054 §2) — a
-// brainstorm, the set the ＋New menu offers.
+// Two chat_panel prompt types: one carries a `commit` (a brainstorm), one does
+// not (a plain conversation, e.g. impersonate). Under the offer_on model (ADR-0054
+// §4/S4) BOTH are offerable — commit is orthogonal; what gates the ＋New menu is
+// the chat_panel disposition plus an `offer_on` allow-list that admits the
+// subject. A non-chat_panel type is included to prove the eligibility gate.
 const SCHEMA = {
   entry_types: {
     "prompt:revise": {
       name: "Revise",
       prompt: { context_strategy: { output: { kind: "chat_panel", commit: { review: "visual_diff" } } } },
     },
-    // A plain chat prompt — `chat_panel` with NO commit, so the ＋New's
-    // commit-only filter must partition it out (it is not a brainstorm).
     "prompt:scenechat": {
       name: "Scene chat",
       prompt: { context_strategy: { output: { kind: "chat_panel" } } },
+    },
+    "prompt:inline": {
+      name: "Inline",
+      prompt: { context_strategy: { output: { kind: "append_to_body" } } },
     },
   },
   fields: {},
@@ -48,40 +53,24 @@ function chat(over: Partial<ChatSessionSummary>): ChatSessionSummary {
   };
 }
 
-function revisePrompt(id: string, title: string): PromptEntrySummary {
+// A chat_panel prompt declaring which subject types it is offered on (ADR-0054
+// §4/S4). `entry_type` picks the disposition: `prompt:revise` carries a commit,
+// `prompt:scenechat` is a plain conversation, `prompt:inline` is append_to_body
+// (never a conversation). Membership in the ＋New menu is `offer_on` + chat_panel.
+function chatPrompt(
+  id: string,
+  title: string,
+  offerOn: string[],
+  entryType = "prompt:revise",
+): PromptEntrySummary {
   return {
     id,
     title,
     body: "",
-    entry_type: "prompt:revise",
+    entry_type: entryType,
     metadata: {},
     inputs: [],
-  } as unknown as PromptEntrySummary;
-}
-
-// A brainstorm (commit-carrying) prompt whose `entry` input targets `targetType`
-// — the per-node filter (ADR-0048 S8b) shows it only on a subject that is-a it.
-function targetedPrompt(id: string, title: string, targetType: string): PromptEntrySummary {
-  return {
-    id,
-    title,
-    body: "",
-    entry_type: "prompt:revise",
-    metadata: {},
-    inputs: [
-      { name: "entry", type: "context_pick", label: "E", target: { sources: [{ expr: { type: targetType } }] } },
-    ],
-  } as unknown as PromptEntrySummary;
-}
-
-function chatPanelPrompt(id: string, title: string): PromptEntrySummary {
-  return {
-    id,
-    title,
-    body: "",
-    entry_type: "prompt:scenechat",
-    metadata: {},
-    inputs: [],
+    offer_on: offerOn,
   } as unknown as PromptEntrySummary;
 }
 
@@ -136,7 +125,7 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
 
   it("＋New spawns a chat with this node stamped as the subject", async () => {
     const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue(undefined);
-    renderPanel([revisePrompt("p-revise", "Brainstorm a revision")]);
+    renderPanel([chatPrompt("p-revise", "Brainstorm a revision", ["lore:character"])]);
 
     await fireEvent.click(screen.getByRole("button", { name: /New/ }));
     await tick();
@@ -153,8 +142,8 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
   it("folds '/'-titled prompts into a submenu the ＋New menu drills into (#832)", async () => {
     const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue(undefined);
     renderPanel([
-      revisePrompt("p-tone", "Revise/Tone"),
-      revisePrompt("p-length", "Revise/Length"),
+      chatPrompt("p-tone", "Revise/Tone", ["lore:character"]),
+      chatPrompt("p-length", "Revise/Length", ["lore:character"]),
     ]);
 
     await fireEvent.click(screen.getByRole("button", { name: /New/ }));
@@ -176,8 +165,8 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
 
   it("moves focus onto the submenu's first item when drilling in (#832)", async () => {
     renderPanel([
-      revisePrompt("p-tone", "Revise/Tone"),
-      revisePrompt("p-length", "Revise/Length"),
+      chatPrompt("p-tone", "Revise/Tone", ["lore:character"]),
+      chatPrompt("p-length", "Revise/Length", ["lore:character"]),
     ]);
     await fireEvent.click(screen.getByRole("button", { name: /New/ }));
     await tick();
@@ -191,8 +180,8 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
 
   it("ascends one level on Escape while drilled in, keeping the menu open (#832)", async () => {
     renderPanel([
-      revisePrompt("p-tone", "Revise/Tone"),
-      revisePrompt("p-length", "Revise/Length"),
+      chatPrompt("p-tone", "Revise/Tone", ["lore:character"]),
+      chatPrompt("p-length", "Revise/Length", ["lore:character"]),
     ]);
     await fireEvent.click(screen.getByRole("button", { name: /New/ }));
     await tick();
@@ -208,55 +197,65 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
     expect(screen.getByRole("menuitem", { name: "Revise" })).toBeInTheDocument();
   });
 
-  it("offers only the brainstorm (commit) prompts, dropping plain chats (#842)", async () => {
-    // The ＋New shows only prompts declaring a `commit` (ADR-0054 §2); a plain
-    // `chat_panel` prompt (no commit) is not a brainstorm and is dropped.
+  it("offers both committing and plain chat_panel prompts — commit is orthogonal (ADR-0054 §4/S4)", async () => {
+    // The ＋New shows every chat_panel prompt whose offer_on admits the subject;
+    // a plain conversation (no commit, e.g. impersonate) is offered alongside a
+    // committing brainstorm. This is the S4 behaviour change from the old
+    // commit-only filter (#842).
     renderPanel([
-      revisePrompt("p-revise", "Brainstorm a revision"),
-      chatPanelPrompt("p-chat", "Chat here"),
+      chatPrompt("p-revise", "Brainstorm a revision", ["lore:character"]),
+      chatPrompt("p-chat", "Chat here", ["lore:character"], "prompt:scenechat"),
     ]);
     await fireEvent.click(screen.getByRole("button", { name: /New/ }));
     await tick();
     expect(screen.getByRole("menuitem", { name: "Brainstorm a revision" })).toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", { name: "Chat here" })).toBeNull();
+    expect(screen.getByRole("menuitem", { name: "Chat here" })).toBeInTheDocument();
   });
 
-  it("hides ＋New when no brainstorm (commit) prompt is available (#842)", () => {
-    // Only a plain chat prompt (no commit) is available → nothing to start, so
-    // ＋New does not render (resume list only).
-    const { container } = renderPanel([chatPanelPrompt("p-chat", "Chat here")]);
+  it("excludes a non-chat_panel prompt even when its offer_on matches (eligibility axis)", () => {
+    // An append_to_body prompt is launched from the editor, never a card's ＋New;
+    // declaring offer_on on it must not surface it here. Nothing else to start →
+    // ＋New hides (resume list still renders).
+    const { container } = renderPanel([chatPrompt("p-inline", "Inline draft", ["lore:character"], "prompt:inline")]);
+    expect(container.querySelector(".conv-new")).toBeNull();
+    expect(container.querySelector(".entry-conversations")).not.toBeNull();
+  });
+
+  it("hides ＋New when no prompt is offered on this subject (ADR-0054 §4/S4)", () => {
+    // A chat prompt whose offer_on does not admit this subject → nothing to
+    // start, so ＋New does not render (resume list only).
+    const { container } = renderPanel([chatPrompt("p-chat", "Chat here", ["plot:card"], "prompt:scenechat")]);
     expect(container.querySelector(".conv-new")).toBeNull();
     // The panel still renders — there are chats to resume.
     expect(container.querySelector(".entry-conversations")).not.toBeNull();
   });
 
-  it("hides a brainstorm prompt whose target the subject is not (ADR-0048 S8b)", () => {
-    // A plot-card-targeting brainstorm prompt on a LORE subject → excluded, so
-    // ＋New has nothing to start (the resume list still renders).
+  it("hides a prompt whose offer_on the subject is not (ADR-0054 §4/S4)", () => {
+    // A plot-card prompt on a LORE subject → excluded, so ＋New has nothing to
+    // start (the resume list still renders).
     const { container } = renderPanel(
-      [targetedPrompt("p-card", "Revise plot card", "plot:card")],
+      [chatPrompt("p-card", "Revise plot card", ["plot:card"])],
       "lore:character",
     );
     expect(container.querySelector(".conv-new")).toBeNull();
     expect(container.querySelector(".entry-conversations")).not.toBeNull();
   });
 
-  it("shows a brainstorm prompt for a subject that is its target type (ADR-0048 S8b)", async () => {
+  it("shows a prompt for a subject its offer_on admits (ADR-0054 §4/S4)", async () => {
     // The same prompt on a plot:card subject → offered.
-    renderPanel([targetedPrompt("p-card", "Revise plot card", "plot:card")], "plot:card");
+    renderPanel([chatPrompt("p-card", "Revise plot card", ["plot:card"])], "plot:card");
     await fireEvent.click(screen.getByRole("button", { name: /New/ }));
     await tick();
     expect(screen.getByRole("menuitem", { name: "Revise plot card" })).toBeInTheDocument();
   });
 
-  it("scopes a scene subject to scene-targeted brainstorms (ADR-0051 S5-next)", async () => {
-    // A scene's brainstorm ＋New offers a scene-targeted prompt ("Summarize
-    // scene") but not a lore-targeted one — scenes joined the loop at S5-next and
-    // the same target filter keeps the lore prompts off the scene menu.
+  it("scopes a scene subject to scene-offered prompts (ADR-0054 §4/S4)", async () => {
+    // A scene's ＋New offers a scene-scoped prompt ("Summarize scene") but not a
+    // lore-scoped one — offer_on keeps the lore prompts off the scene menu.
     renderPanel(
       [
-        targetedPrompt("p-sum", "Summarize scene", "scene:scene"),
-        targetedPrompt("p-lore", "Revise entry", "lore:base"),
+        chatPrompt("p-sum", "Summarize scene", ["scene:scene"]),
+        chatPrompt("p-lore", "Revise entry", ["lore:base"]),
       ],
       "scene:scene",
     );

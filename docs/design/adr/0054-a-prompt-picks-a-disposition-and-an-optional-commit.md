@@ -220,8 +220,23 @@ this chat's prompt declare a commit?"*, not because it hardcodes a magic string.
   value and the seam are gone.
 - **S3 — authoring UI.** Expose the full disposition set + the optional commit block (`review`, the
   `commit.fields` field-picker) in "Prompt defaults" — the capability to author a brainstorm prompt.
-- **S4 — the `impersonate` prompt** — a `chat_panel` Library prompt with a character-locked brief;
-  surfaces in the character card's Conversations for free (§4). Deferred; the name is reserved now.
+- **S4 — the `impersonate` prompt + `offer_on` targeting.** *(Shipped.)* `impersonate` is a shipped
+  Library prompt with a character-locked brief — reusing the existing `prompt:general` (a `chat_panel`
+  disposition, no commit), **not** a bespoke subtype (§4). It surfaces on the character card's
+  Conversations for free (the subject backlink), but the ＋New **menu membership** needed a real answer:
+  which prompts a node offers. S4 introduces **`offer_on`** — a per-prompt, instance-level allow-list of
+  the subject entry_types a `chat_panel` prompt is offered on, read off the node's front-matter like
+  `inputs` and carried through save/fork verbatim. It **replaces** the pre-S4 inference from context_pick
+  input targets (which coupled *where a prompt is offered* to *what entity it pulls in*, and defaulted a
+  target-less prompt to "everywhere"). Membership is now two orthogonal axes: `chat_panel` disposition
+  (eligibility) **and** `offer_on` admits the subject (applicability); commit is orthogonal, so a plain
+  conversation is offered alongside a committing brainstorm. The four shipped conversation prompts declare
+  their `offer_on`.
+- **S4b — the `offer_on` authoring picker** *(deferred).* A "show this prompt on…" control in "Prompt
+  defaults", shown only for `chat_panel` prompts, so a writer can target their own `general`/`revise`
+  prompts. Today `offer_on` is authored only in the shipped built-ins (and hand-editable YAML); the picker
+  is the visible authoring capability, following S3's field → UI rhythm. **Trigger:** a writer needing to
+  target their own conversation prompt without editing YAML.
 
 ## Deliberately out of scope (deferred, with a named trigger)
 

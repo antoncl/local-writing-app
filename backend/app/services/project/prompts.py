@@ -54,6 +54,7 @@ class PromptEntriesMixin:
                     entry_type=entry_type,
                     metadata=self._normalise_metadata(front_matter.get("metadata"), entry.path),
                     inputs=self._parse_prompt_inputs(front_matter.get("inputs")),
+                    offer_on=self._parse_offer_on(front_matter.get("offer_on")),
                     source_layer_id=entry.source_layer_id,
                     source_layer_label=entry.source_layer_label,
                     is_library=entry.is_library,
@@ -132,6 +133,7 @@ class PromptEntriesMixin:
             entry_type=raw_entry_type,
             metadata=metadata,
             inputs=self._parse_prompt_inputs(front_matter.get("inputs")),
+            offer_on=self._parse_offer_on(front_matter.get("offer_on")),
             computed_metadata={},
             source_layer_id=index_entry.source_layer_id if index_entry else "",
             source_layer_label=index_entry.source_layer_label if index_entry else "",
@@ -186,6 +188,7 @@ class PromptEntriesMixin:
                 entry_type=source.entry_type,
                 metadata=source.metadata,
                 inputs=source.inputs,
+                offer_on=source.offer_on,
                 base_revision=clone.revision,
             ),
         )
@@ -208,7 +211,9 @@ class PromptEntriesMixin:
             request.entry_type,
             metadata,
             request.body,
-            extra={"inputs": inputs_payload},
+            # `offer_on` rides the same `extra` merge as `inputs`; the writer skips
+            # an empty list, so a prompt with none carries no key (ADR-0054 §4/S4).
+            extra={"inputs": inputs_payload, "offer_on": self._parse_offer_on(request.offer_on)},
             omit_empty_metadata=True,
         )
         self._maybe_rename_node_file(path, request.title)
@@ -218,6 +223,17 @@ class PromptEntriesMixin:
 
         ms_service.register_assistant_tags(ms_service.tag_names_from_field(metadata.get("assistant_tags")))
         return self.read_prompt_entry(node_id)
+
+    @staticmethod
+    def _parse_offer_on(raw: Any) -> list[str]:
+        """Normalise a prompt node's `offer_on` front-matter to a list of
+        entry_type strings (ADR-0054 §4/S4). Lenient like `_parse_prompt_inputs`:
+        a non-list, or non-string items, are dropped rather than failing the load
+        — an unknown or malformed id simply never matches a subject.
+        """
+        if not isinstance(raw, list):
+            return []
+        return [item for item in raw if isinstance(item, str) and item]
 
     @staticmethod
     def _parse_prompt_inputs(raw: Any) -> list[PromptInputDefinition]:

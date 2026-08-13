@@ -2,6 +2,8 @@
 id: builtin-revise-plot-card
 title: Revise plot card
 entry_type: prompt:revise:plot_card
+offer_on:
+- plot:card
 inputs:
 - name: entry
   type: context_pick

@@ -99,8 +99,10 @@ export function promptEntriesForSurface(
 
 // The brainstorm prompts — those declaring a `commit` (ADR-0054 §2) — as a
 // discovery roster, the commit-era replacement for
-// `promptEntriesForSurface(ctx, "entry_patch")`. Callers that need the ones a
-// given node admits narrow further with `promptTargetsEntryType`.
+// `promptEntriesForSurface(ctx, "entry_patch")`. Used where "a committing
+// prompt" specifically is wanted (Lore's Brainstorm affordance); the ＋New menu
+// itself keys off `promptEntriesOfferedOn` (offer_on + chat_panel), where commit
+// is orthogonal.
 export function promptEntriesWithCommit(ctx: PromptResolutionContext): PromptEntrySummary[] {
   return filterPromptRoster(ctx, (entry) => promptDeclaresCommit(ctx, entry));
 }
@@ -110,22 +112,6 @@ export function promptEntryDescription(
   entry: PromptEntrySummary,
 ): string {
   return ctx.metadataSchema?.entry_types[entry.entry_type]?.name ?? entry.entry_type;
-}
-
-// The entry_type a commit-carrying prompt operates on — the `expr.type`s named by
-// its context_pick inputs' targets (e.g. `revise:entry` → lore:base,
-// `revise:plot_card` → plot:card).
-function promptTargetEntryTypes(entry: PromptEntrySummary): string[] {
-  const types: string[] = [];
-  for (const input of entry.inputs ?? []) {
-    if (input.type !== "context_pick") continue;
-    const target = input.target as { sources?: Array<{ expr?: { type?: string } }> } | null | undefined;
-    for (const source of target?.sources ?? []) {
-      const type = source.expr?.type;
-      if (typeof type === "string" && type) types.push(type);
-    }
-  }
-  return types;
 }
 
 // Walk `entryType`'s schema parent chain for `ancestor` (is-a). Without a schema,
@@ -146,21 +132,38 @@ function entryTypeIsA(
   return false;
 }
 
-// True iff a node of schema type `entryType` can be the SUBJECT of `entry` — i.e.
-// one of the prompt's context_pick input targets is an ancestor-or-self of
-// `entryType`. Scopes the brainstorm ＋New menu to the prompts a given node admits
-// (ADR-0048 S8b): a lore entry offers the lore revise prompt, a plot card offers
-// the plot-card one, not cross. A prompt that names no target applies anywhere
-// (no entry-input constraint to narrow it), preserving the pre-S8b behaviour.
-export function promptTargetsEntryType(
+// True iff `entry` declares it should be offered on a subject of schema type
+// `entryType` (ADR-0054 §4/S4) — one of its `offer_on` targets is an
+// ancestor-or-self of `entryType`. This is the author's explicit "show this
+// prompt on…" allow-list, and it REPLACES the pre-S4 inference from context_pick
+// input targets: `offer_on` (where a prompt is offered) is now decoupled from the
+// input targets (what entity it pulls in). No declaration ⇒ offered nowhere
+// (opt-in, no implicit everywhere-match), so each conversation prompt names its
+// subjects; a lore entry offers the lore revise prompt, a plot card the plot-card
+// one, a character both the revise prompt and impersonate — never cross.
+export function promptOffersOn(
   ctx: PromptResolutionContext,
   entry: PromptEntrySummary,
   entryType: string | null | undefined,
 ): boolean {
   if (!entryType) return false;
-  const targets = promptTargetEntryTypes(entry);
-  if (targets.length === 0) return true;
-  return targets.some((target) => entryTypeIsA(ctx, entryType, target));
+  return (entry.offer_on ?? []).some((target) => entryTypeIsA(ctx, entryType, target));
+}
+
+// The prompts offered as a "＋New" conversation on a subject of type `entryType`:
+// a `chat_panel` disposition (the only kind that surfaces a conversation, and the
+// only kind that menu launches — the eligibility axis) whose `offer_on` admits
+// this subject (the applicability axis). A committing brainstorm and a plain
+// conversation (e.g. impersonate) both qualify — commit is orthogonal. Callers
+// pass the result to `buildPromptMenuTree` for the "/" grouping.
+export function promptEntriesOfferedOn(
+  ctx: PromptResolutionContext,
+  entryType: string | null | undefined,
+): PromptEntrySummary[] {
+  return filterPromptRoster(
+    ctx,
+    (entry) => effectiveOutputKind(ctx, entry) === "chat_panel" && promptOffersOn(ctx, entry, entryType),
+  );
 }
 
 export function effectivePromptInputs(entry: PromptEntrySummary): PromptInputDefinition[] {

@@ -2,6 +2,8 @@
 id: builtin-revise-entry
 title: Revise entry
 entry_type: prompt:revise:entry
+offer_on:
+- lore:base
 inputs:
 - name: entry
   type: context_pick

@@ -22,6 +22,7 @@
 <script lang="ts">
   import { getContext } from "svelte";
   import { getSwatch } from "@/lib/utils/colors";
+  import { setPlotBeatDrag } from "@/lib/plot/plotDnd";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import type { PlotPlotlineData } from "@/lib/plot/plotBoardLayout";
   import type { MetadataValue, PlotlineEntry } from "@/lib/types";
@@ -348,9 +349,19 @@
       {/if}
     </div>
   {:else if data.beats.length}
+    <!-- The at-rest roster is the drag SOURCE (ADR-0053 §4): drag a beat onto a story
+         card to link it (#824, re-homed from the retired Arcs rail). `nodrag` keeps
+         grabbing a beat from also repositioning the Svelte-Flow node; the drag writes
+         the (plotline id, beat id) payload. Only draggable with a real node id (the
+         mount-test degrade has none, and a plotline can't be dragged before it exists). -->
     <ul class="plotline-beats">
       {#each data.beats as beat (beat.beat_id)}
-        <li class="plotline-beat">
+        <li
+          class="plotline-beat nodrag"
+          class:draggable={!!id}
+          draggable={!!id}
+          ondragstart={(e) => id && setPlotBeatDrag(e, id, beat.beat_id)}
+        >
           <span class="beat-dot" class:hollow={!accent}></span>
           <span class="beat-title" title={beat.title}>{beat.title}</span>
         </li>
@@ -448,6 +459,13 @@
     align-items: center;
     gap: 6px;
     min-width: 0;
+  }
+  /* A draggable beat grabs onto a card (ADR-0053 §4). */
+  .plotline-beat.draggable {
+    cursor: grab;
+  }
+  .plotline-beat.draggable:active {
+    cursor: grabbing;
   }
   .beat-dot {
     flex: none;

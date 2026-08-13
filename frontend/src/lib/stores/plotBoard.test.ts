@@ -255,6 +255,30 @@ describe("card content ops", () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
+  it("linkCardBeat adopts the beat's plotline as the primary when the card has none (ADR-0053 §4)", async () => {
+    vi.spyOn(api, "getCard").mockResolvedValue(card({})); // no primary, no links
+    const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
+    vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    await linkCardBeat("c1", "i1", "b1");
+    // The drop both links the beat AND lights the card in that thread's colour.
+    expect(save.mock.calls[0][0].metadata).toEqual({
+      plotline: "i1",
+      beat_links: [{ plotline: "i1", beat_id: "b1" }],
+    });
+  });
+
+  it("linkCardBeat keeps an existing primary when a beat from another plotline drops (multi-plotline)", async () => {
+    vi.spyOn(api, "getCard").mockResolvedValue(card({ plotline: "p1" }));
+    const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
+    vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    await linkCardBeat("c1", "i2", "b9"); // a different plotline's beat
+    // Primary p1 untouched; the second plotline shows only as a badge.
+    expect(save.mock.calls[0][0].metadata).toEqual({
+      plotline: "p1",
+      beat_links: [{ plotline: "i2", beat_id: "b9" }],
+    });
+  });
+
   it("unlinkCardBeat removes one link; emptying it drops the key (sparse)", async () => {
     vi.spyOn(api, "getCard").mockResolvedValue(card({ plotline: "p1", beat_links: [{ plotline: "i1", beat_id: "b1" }] }));
     const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));

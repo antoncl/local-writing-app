@@ -1020,7 +1020,7 @@ class PlotMixin:
         ]
 
     def _plotline_beat_catalog(
-        self, plotline_entries, referenced: set[str]
+        self, plotline_entries: list[PlotlineSummary], referenced: set[str]
     ) -> dict[str, tuple[str, str | None, dict[str, str]]]:
         """`plotline_id -> (plotline title, plotline colour, {beat_id: beat title})` for
         each `referenced` plotline (ADR-0048 S7 Slice 5b; ADR-0053), so a card's beat

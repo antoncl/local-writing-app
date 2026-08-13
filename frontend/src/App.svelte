@@ -56,6 +56,7 @@
   } from "@/lib/stores/prompts";
   import { plotTemplatesStore } from "@/lib/stores/plotTemplates";
   import { refreshPlotBoard } from "@/lib/stores/plotBoard";
+  import { plotlineReveal } from "@/lib/stores/plotlines";
   import { openProjectHidden } from "@/lib/stores/hiddenLibrary";
   import {
     assistantEntriesStore,
@@ -360,6 +361,13 @@
     if (focusedId && workspaceLayout.isPlaced(focusedId)) workspaceLayout.activate(focusedId);
   });
 
+  // A plotline backlink no longer opens an editor pane — it asks to be revealed on the
+  // board (ADR-0053 §3, plotlineReveal). Bring the board pane into view; PlotEditor
+  // expands the target node and clears the one-shot once its projection is in.
+  $effect(() => {
+    if ($plotlineReveal) openPlotBoardPane();
+  });
+
   // Noun for the pane's delete button, keyed by document kind (was a
   // scene/lore-only ternary that mislabelled view/prompt/chat panes).
   const PANE_DELETE_NOUN: Record<string, string> = {
@@ -371,7 +379,6 @@
     view: "view",
     plot_template: "template",
     plot_card: "card",
-    plotline: "plotline",
   };
   const paneDeleteNoun = (type: string | undefined) => (type && PANE_DELETE_NOUN[type]) || "scene";
 

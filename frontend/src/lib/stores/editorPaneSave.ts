@@ -9,7 +9,6 @@ import { refreshLoreEntries } from "@/lib/stores/lore";
 import { refreshPromptEntries } from "@/lib/stores/prompts";
 import { refreshPlotTemplates } from "@/lib/stores/plotTemplates";
 import { refreshPlotBoard } from "@/lib/stores/plotBoard";
-import { refreshPlotlines } from "@/lib/stores/plotlines";
 import { refreshAssistantEntries } from "@/lib/stores/assistants";
 import { refreshTodos, refreshEmbeddedTodos } from "@/lib/stores/todos";
 import { bodyHasMutationMarkers, mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
@@ -46,11 +45,6 @@ export async function refreshAfterSave(host: SaveRefreshHost, args: SaveRefreshA
     // Reflect a card edit (plotline / scene / synopsis) on the board if it is
     // open. In-flight-guarded, so it is cheap when the board is closed.
     await refreshPlotBoard();
-  } else if (documentKind === "plotline") {
-    // A rename / recolour changes both the card-colour axis on the board and the
-    // roster the ReferencePicker's `plot` source draws from (#742).
-    await refreshPlotBoard();
-    await refreshPlotlines();
   } else if (documentKind === "assistant") {
     await refreshAssistantEntries();
   } else if (documentKind === "project") {

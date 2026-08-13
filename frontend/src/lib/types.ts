@@ -148,7 +148,6 @@ export type DocumentKind =
   | "structure_node"
   | "plot_template"
   | "plot_card"
-  | "plotline"
   | "view";
 
 export type LoreEntryList = {

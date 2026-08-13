@@ -52,7 +52,7 @@ export function refreshPlotBoard(): Promise<void> {
 // sets the store last. A fetch that starts here is post-mutation, so coalescing with
 // it is fine. `refreshPlotBoard` records its own errors and never rejects, so the
 // drain needs no catch.
-async function refreshAfterMutation(): Promise<void> {
+export async function refreshAfterMutation(): Promise<void> {
   if (inFlight) await inFlight;
   await refreshPlotBoard();
 }

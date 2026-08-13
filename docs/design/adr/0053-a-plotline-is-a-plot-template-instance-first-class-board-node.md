@@ -1,6 +1,6 @@
 # ADR-0053: A plotline is a plot-template instance — a first-class board node
 
-- Status: **Proposed** — 2026-08-13. Framed with Anton in conversation after the container-lock work (#874)
+- Status: **Accepted** — 2026-08-13 (Anton, PR #880). Framed with Anton in conversation after the container-lock work (#874)
   exposed how thin the plotline concept had become. His diagnosis: master's terminology streamlining
   **severed two things that were always one**, and the board should say so. This ADR unifies them and makes
   the result a real board node — which, as a free consequence, makes the whole board undoable (subsuming the

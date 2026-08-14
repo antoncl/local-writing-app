@@ -362,6 +362,20 @@ describe("PlotCardNode — beats + page marker (S7 Slice 5b)", () => {
     expect(num?.textContent).toBe("5");
   });
 
+  it("puts the number AFTER the title and a drag grip BEFORE it on an interactive badge (#941 follow-up)", () => {
+    const { container, unmount } = renderWithActions({ beats: [beat({ title: "Midpoint", number: 5 })] }, actions());
+    const badge = container.querySelector(".beat-badge")!;
+    const classesInOrder = [...badge.children].map((c) => c.className.toString().split(" ")[0]);
+    // grip leads, title, then the trailing number (the × follows).
+    expect(classesInOrder.slice(0, 3)).toEqual(["beat-badge-grip", "beat-badge-label", "beat-badge-num"]);
+    expect(badge.querySelector(".beat-badge-grip i.ti-grip-vertical")).not.toBeNull();
+    unmount();
+    // Read-only badge: no grip (not draggable), number still shown.
+    const { container: ro } = render(PlotCardNode, { props: { data: data({ beats: [beat({ number: 5 })] }) } });
+    expect(ro.querySelector(".beat-badge-grip")).toBeNull();
+    expect(ro.querySelector(".beat-badge-num")?.textContent).toBe("5");
+  });
+
   it("caps the badges and shows a +N overflow chip instead of hiding beats silently", () => {
     const many = Array.from({ length: 6 }, (_, i) => beat({ beat_id: `b${i}`, title: `Beat ${i}` }));
     render(PlotCardNode, { props: { data: data({ beats: many }) } });

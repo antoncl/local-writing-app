@@ -9,6 +9,7 @@
   import EntryRevisionReview from "@/components/editor/body/EntryRevisionReview.svelte";
   import ReplaceReviewCard from "@/components/editor/body/ReplaceReviewCard.svelte";
   import ConversationsPanel from "@/components/editor/ConversationsPanel.svelte";
+  import PinnedSetsPanel from "@/components/editor/PinnedSetsPanel.svelte";
   import { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
   import { EntryProposalController } from "@/lib/stores/entryProposal.svelte";
   import { SnapshotStripController } from "@/lib/stores/snapshotStrip.svelte";
@@ -825,6 +826,12 @@
         onSelect={(index) => void scrub.scrubTo(index)}
         onNavigate={(payload) => onNavigate?.(payload)}
       />
+      <!-- Staged changes (ADR-0055 §3): the mutation sets pinned to this entity,
+           + ＋New to author another. The entity-side home for proposing a change
+           the writer later places in a scene. -->
+      {#key scene.id}
+        <PinnedSetsPanel entityId={scene.id} entityEntryType={entryType} />
+      {/key}
     {/if}
   {/if}
 {/snippet}

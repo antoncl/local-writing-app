@@ -15,11 +15,19 @@ export const mutationSetEntriesStore = writable<MutationSetEntrySummary[]>([]);
 // the handle to the body does not survive that snippet → panelRegistry → Region*
 // boundary (it stayed `undefined`, so the "+" was a silent no-op). A shared store
 // drives one dialog from either trigger — the pattern every other pane's "+" uses.
-export type MutationSetEditorRequest = { editing: MutationSetEntry | null };
+// `preset` (ADR-0055 §3) pins a NEW set to an entity by construction — the
+// lore-card "New staged change" affordance seeds it so the set is entity-pinned
+// and type-locked from the start. Absent (the Mutations-pane "+") ⇒ a reusable,
+// type-picked template, unchanged.
+export type MutationSetPinPreset = { target_entity: string; target_entry_type: string };
+export type MutationSetEditorRequest = {
+  editing: MutationSetEntry | null;
+  preset?: MutationSetPinPreset;
+};
 export const mutationSetEditorStore = writable<MutationSetEditorRequest | null>(null);
 
-export function openNewMutationSet(): void {
-  mutationSetEditorStore.set({ editing: null });
+export function openNewMutationSet(preset?: MutationSetPinPreset): void {
+  mutationSetEditorStore.set({ editing: null, preset });
 }
 export function openEditMutationSet(entry: MutationSetEntry): void {
   mutationSetEditorStore.set({ editing: entry });

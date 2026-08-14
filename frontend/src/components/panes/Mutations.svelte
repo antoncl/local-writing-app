@@ -7,39 +7,19 @@
   import CountPill from "@/components/widgets/CountPill.svelte";
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import { nodeSet } from "@/lib/views/viewResult";
-  import MutationSetEditor from "@/components/editor/body/MutationSetEditor.svelte";
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import {
     refreshMutationSetEntries,
     setMutationSetEntries,
     mutationSetEntriesStore,
-    mutationSetEditorStore,
     openEditMutationSet,
-    closeMutationSetEditor,
   } from "@/lib/stores/mutationSets";
-  import type {
-    LoreEntrySummary,
-    PromptEntrySummary,
-    ScopedTag,
-    StructureDocument,
-    MutationSetEntrySummary,
-  } from "@/lib/types";
+  import type { MutationSetEntrySummary } from "@/lib/types";
 
-  let {
-    loreEntries = [],
-    promptEntries = [],
-    structure = null,
-    researchStructure = null,
-    knownTags = [],
-  }: {
-    loreEntries?: LoreEntrySummary[];
-    promptEntries?: PromptEntrySummary[];
-    structure?: StructureDocument | null;
-    researchStructure?: StructureDocument | null;
-    knownTags?: ScopedTag[];
-  } = $props();
-
+  // Browse/curate only: the create/edit dialog is hoisted to App root (ADR-0055
+  // §3) so it also opens from a lore card, and drives through
+  // `mutationSetEditorStore`. This pane just lists sets and opens the editor.
   const schema = $derived($metadataSchemaStore);
 
   const entries = $derived($mutationSetEntriesStore);
@@ -69,10 +49,6 @@
       await refreshMutationSetEntries().catch(() => {});
     }
   }
-  async function onSaved() {
-    closeMutationSetEditor();
-    await refreshMutationSetEntries().catch(() => {});
-  }
 </script>
 
 <div class="mutations-pane">
@@ -90,20 +66,6 @@
     {/snippet}
   </ViewNodeList>
 </div>
-
-{#if $mutationSetEditorStore}
-  <MutationSetEditor
-    initial={$mutationSetEditorStore.editing}
-    schema={schema}
-    loreEntries={loreEntries}
-    promptEntries={promptEntries}
-    structure={structure}
-    researchStructure={researchStructure}
-    knownTags={knownTags}
-    onSaved={onSaved}
-    onCancel={closeMutationSetEditor}
-  />
-{/if}
 
 {#snippet mutationRow(entry: MutationSetEntrySummary, ctx: RowCtx<MutationSetEntrySummary>)}
   <NodeRow

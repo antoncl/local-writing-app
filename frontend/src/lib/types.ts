@@ -944,6 +944,10 @@ export type MutationSetEntrySummary = {
   title: string;
   entry_type: string;
   target_entry_type: string;
+  // ADR-0055 §3: optional entity pin. "" = a reusable template (entity bound at
+  // apply time); set = an entity-pinned one-off (offered only for its own
+  // entity, stamped on apply). Stored as the `target_entity` metadata entity_ref.
+  target_entity: string;
   row_count: number;
   source_layer_id: string;
   source_layer_label: string;
@@ -955,6 +959,8 @@ export type MutationSetEntry = {
   revision: string;
   entry_type: string;
   target_entry_type: string;
+  // ADR-0055 §3 entity pin — see MutationSetEntrySummary.target_entity.
+  target_entity: string;
   rows: MutationSetRow[];
   source_layer_id: string;
   source_layer_label: string;

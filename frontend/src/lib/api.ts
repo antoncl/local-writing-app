@@ -1043,6 +1043,8 @@ export const api = {
   createMutationSetEntry(payload: {
     title: string;
     target_entry_type: string;
+    // ADR-0055 §3: optional entity pin (omit/"" ⇒ reusable template).
+    target_entity?: string;
     rows: MutationSetRow[];
   }) {
     return request<MutationSetEntry>("/mutation-sets", {
@@ -1061,6 +1063,7 @@ export const api = {
         base_revision: entry.revision,
         entry_type: entry.entry_type,
         target_entry_type: entry.target_entry_type,
+        target_entity: entry.target_entity,
         rows: entry.rows,
       }),
     });

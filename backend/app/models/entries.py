@@ -632,6 +632,11 @@ class MutationSetEntrySummary(BaseModel):
     # The lore entry-type the rows target (e.g. "character"); scopes the apply
     # picker so only matching sets are offered for a given entity (#62).
     target_entry_type: str = ""
+    # ADR-0055 §3: the OPTIONAL entity pin. "" = a reusable template; set = an
+    # entity-pinned one-off (offered only for its own entity, stamped on apply).
+    # Stored as the `target_entity` entity_ref in `metadata` so it rides the
+    # kind-neutral edge machinery (§3), unlike top-level `target_entry_type`.
+    target_entity: str = ""
     row_count: int = 0
     source_layer_id: str = ""
     source_layer_label: str = ""
@@ -643,6 +648,8 @@ class MutationSetEntry(BaseModel):
     revision: str
     entry_type: str = "mutation_set:mutation_set"
     target_entry_type: str = ""
+    # ADR-0055 §3 entity pin — see MutationSetEntrySummary.target_entity.
+    target_entity: str = ""
     rows: list[MutationSetRow] = Field(default_factory=list)
     source_layer_id: str = ""
     source_layer_label: str = ""
@@ -656,6 +663,8 @@ class CreateMutationSetEntryRequest(BaseModel):
     title: str = Field(min_length=1)
     entry_type: str = "mutation_set:mutation_set"
     target_entry_type: str = ""
+    # ADR-0055 §3: optional entity pin ("" = reusable template).
+    target_entity: str = ""
     rows: list[MutationSetRow] = Field(default_factory=list)
 
 
@@ -664,6 +673,8 @@ class SaveMutationSetEntryRequest(BaseModel):
     base_revision: str | None = None
     entry_type: str = "mutation_set:mutation_set"
     target_entry_type: str = ""
+    # ADR-0055 §3: optional entity pin ("" = reusable template).
+    target_entity: str = ""
     rows: list[MutationSetRow] = Field(default_factory=list)
 
 

@@ -45,6 +45,11 @@
   // Clone a Library/ancestor template into the project as an editable copy
   // (ADR-0049 §5). Offered only on inherited (Library) rows via a trailing action.
   export let onCloneEntry: (entryId: string) => void;
+  // Blank-create an owned template (#918). This pane is the sole create surface
+  // (the board palette is a spawn source, #916), so the affordance is a labeled
+  // tile at the head of the shelf — discoverable and comfortably clickable —
+  // rather than a small glyph lost in the shared tab-header chrome (#922).
+  export let onNewEntry: () => void;
 
   // Every NodeList is backed by a view (ADR-0022): hand the whole view (spec +
   // roster + data env) to ViewNodeList, which owns evaluation. Grouping (none
@@ -56,6 +61,13 @@
     referenceIndex: $referenceIndexStore,
   };
 </script>
+
+<!-- Create affordance: a labeled tile at the head of the shelf (#922). Its own
+     click target, next to the templates it makes — not a glyph in the tab-bar. -->
+<button class="new-template" type="button" onclick={onNewEntry}>
+  <i class="ti ti-plus" aria-hidden="true"></i>
+  <span>New template</span>
+</button>
 
 <ViewNodeList
   {view}
@@ -149,6 +161,37 @@
 {/snippet}
 
 <style>
+  /* Create affordance — a full-width dashed tile at the head of the shelf, the
+     same "start something new" treatment as the board palette's Empty tile so the
+     two plot-template create surfaces read alike. A comfortable click target with
+     a label, not a bare glyph. */
+  .new-template {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    margin-bottom: 8px;
+    padding: 8px 10px;
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--r-md);
+    background: transparent;
+    color: var(--text);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+    transition: background 120ms ease, border-color 120ms ease;
+  }
+
+  .new-template:hover {
+    border-color: var(--accent);
+    background: var(--inset);
+  }
+
+  .new-template i {
+    color: var(--text-3);
+  }
+
   /* The "Show N hidden" reveal — a quiet, full-width footer affordance under the
      shelf, in the muted register so it never competes with the template rows. */
   .hidden-toggle {

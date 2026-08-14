@@ -151,7 +151,10 @@ describe("PlotPlotlineNode beat drag source (ADR-0053 §4)", () => {
   // header's focus/expand controls stay click-only. Present on an interactive board only.
   it("renders the node drag-handle grip in its header, and omits it read-only (#876)", () => {
     const { container } = fakeActions({ expandedId: null }).mount();
-    expect(container.querySelector(".plotline-head .plotline-drag-handle")).not.toBeNull();
+    const grip = container.querySelector(".plotline-head .plotline-drag-handle");
+    expect(grip).not.toBeNull();
+    // The app's standard grip icon (a generous, hittable handle — not a collapsing glyph).
+    expect(grip!.querySelector("i.ti-grip-vertical")).not.toBeNull();
     // No actions (read-only mount / non-interactive board) → nothing to drag, no handle.
     const { container: ro } = render(PlotPlotlineNode, { props: { id: "line_1", data: data() } });
     expect(ro.querySelector(".plotline-drag-handle")).toBeNull();

@@ -258,7 +258,9 @@
            node drags the same way. Here it also DISENTANGLES drag from the header — the
            title row is a click-to-expand button, so a whole-body drag surface would have
            made a grab and an expand fight over it. SvelteFlow's `dragHandle` targets this grip. -->
-      <span class="plotline-drag-handle {CARD_DRAG_HANDLE_CLASS}" title="Drag to move" aria-hidden="true">⋮⋮</span>
+      <span class="plotline-drag-handle {CARD_DRAG_HANDLE_CLASS}" title="Drag to move" aria-hidden="true">
+        <i class="ti ti-grip-vertical"></i>
+      </span>
       <button
         class="plotline-focus nodrag nopan"
         class:active={isFocused}
@@ -452,24 +454,26 @@
     gap: 8px;
     min-width: 0;
   }
-  /* The drag handle (#876): the same quiet 6-dot grip a card carries, so every card-like
-     node drags identically. Faint at rest, full on node hover; `grab`/`grabbing` cursor.
-     A small negative right margin tightens it to the row's leading edge. */
+  /* The drag handle (#876): the app's standard grip icon a card also carries, so every
+     card-like node drags identically. `align-self: stretch` + side padding make a
+     GENEROUS hit target (full header height, ~16px wide), not a sliver. Quiet at rest,
+     brightening on node hover; `grab`/`grabbing` cursor. */
   .plotline-drag-handle {
     flex: none;
+    align-self: stretch;
     display: inline-flex;
     align-items: center;
-    margin-right: -4px;
+    justify-content: center;
+    margin-left: -4px;
+    padding: 0 4px;
     color: var(--text-3);
-    font-size: var(--fs-xs);
+    font-size: var(--fs-lg);
     line-height: 1;
-    letter-spacing: -3px;
     cursor: grab;
-    opacity: 0.5;
-    transition: opacity 120ms ease;
+    transition: color 120ms ease;
   }
   .plot-plotline:hover .plotline-drag-handle {
-    opacity: 1;
+    color: var(--text);
   }
   .plotline-drag-handle:active {
     cursor: grabbing;

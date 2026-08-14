@@ -164,6 +164,17 @@ class PlotlineRosterTests(PlotContextTestCase):
         context_line = next(p for p in self.service.read_plot_context().plotlines if p.id == plotline.id)
         self.assertEqual(context_line.source_template_name, plotline.metadata.get("source_template_name"))
 
+    def test_plotline_carries_the_templates_structure_guidance(self) -> None:
+        # S2: the template's ai_use_guidance + global_diagnostic_questions, snapshotted
+        # at instantiate, surface in the context so the AI measures cards against the
+        # structure's intent, not just per-beat one-liners.
+        plotline = self._plotline()
+        context_line = next(p for p in self.service.read_plot_context().plotlines if p.id == plotline.id)
+        self.assertEqual(context_line.ai_guidance, plotline.metadata.get("source_ai_guidance"))
+        self.assertTrue(context_line.ai_guidance)  # the three-act fixture actually has guidance
+        self.assertEqual(context_line.diagnostic_questions, plotline.metadata.get("source_diagnostic_questions"))
+        self.assertTrue(context_line.diagnostic_questions)
+
     def test_a_card_link_to_a_departed_beat_is_dropped(self) -> None:
         plotline = self._plotline()
         roster = plotline.metadata["instance_beats"]

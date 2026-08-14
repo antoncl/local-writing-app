@@ -51,6 +51,8 @@ from app.models import (
 _SCENE_FIELD = "scene"
 _PLOTLINE_FIELD = "plotline"
 _SOURCE_TEMPLATE_NAME_FIELD = "source_template_name"
+_SOURCE_AI_GUIDANCE_FIELD = "source_ai_guidance"
+_SOURCE_DIAGNOSTIC_QUESTIONS_FIELD = "source_diagnostic_questions"
 _COLOR_FIELD = "color"
 
 
@@ -150,12 +152,15 @@ class PlotContextMixin:
                     )
                 )
                 titles[beat["id"]] = title
+            questions = line.metadata.get(_SOURCE_DIAGNOSTIC_QUESTIONS_FIELD) or []
             plotlines.append(
                 PlotContextPlotline(
                     id=line.id,
                     title=line.title,
                     color=line.metadata.get(_COLOR_FIELD) or None,
                     source_template_name=str(line.metadata.get(_SOURCE_TEMPLATE_NAME_FIELD) or ""),
+                    ai_guidance=str(line.metadata.get(_SOURCE_AI_GUIDANCE_FIELD) or ""),
+                    diagnostic_questions=[str(q) for q in questions if str(q).strip()],
                     beats=beats,
                 )
             )

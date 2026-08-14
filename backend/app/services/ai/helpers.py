@@ -384,14 +384,23 @@ def _coerce_entry_ref_as_of(
         overrides = {}
     if not overrides:
         return ref
+    updates = _effective_overlay_updates(project, schema, base, overrides)
+    return EntryRef(project, schema, ref.id, loaded=base.model_copy(update=updates))
+
+
+def _effective_overlay_updates(
+    project: ProjectService, schema: Any, base: Any, overrides: dict[str, Any]
+) -> dict[str, Any]:
+    """The `model_copy(update=...)` payload that overlays `effective_state`
+    output onto a base lore entry: intrinsic title/body land on the entry,
+    every other mutated field on a copy of `metadata` (scalars coerced to the
+    field's native type, collections handed through as the list they resolve to)."""
     updates: dict[str, Any] = {}
     metadata = dict(getattr(base, "metadata", {}) or {})
     metadata_changed = False
     for field, raw in overrides.items():
-        if field == "title":
-            updates["title"] = raw if isinstance(raw, str) else str(raw)
-        elif field == "body":
-            updates["body"] = raw if isinstance(raw, str) else str(raw)
+        if field in ("title", "body"):
+            updates[field] = raw if isinstance(raw, str) else str(raw)
         elif isinstance(raw, list):
             metadata[field] = raw
             metadata_changed = True
@@ -402,7 +411,7 @@ def _coerce_entry_ref_as_of(
             metadata_changed = True
     if metadata_changed:
         updates["metadata"] = metadata
-    return EntryRef(project, schema, ref.id, loaded=base.model_copy(update=updates))
+    return updates
 
 
 def _field_catalog(project: ProjectService, schema: Any, value: Any) -> list[dict[str, Any]]:

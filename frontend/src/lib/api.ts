@@ -942,10 +942,13 @@ export const api = {
   // Create a single unattached card — the board's direct-authoring entry point
   // (#793), the per-card inverse of seed. Returns the created card so the caller can
   // open it to name it. No scene → it projects homeless until attached / realized.
-  createCard(title: string) {
+  // `id` is supplied only by undo-of-delete / redo-of-create (ADR-0053 §7), to
+  // restore a card under its original identity so other cards' causal_links
+  // reconnect; a collision 409s. Omitted for a normal create (backend mints).
+  createCard(title: string, id?: string) {
     return request<CardEntry>("/plot/cards", {
       method: "POST",
-      body: JSON.stringify({ title }),
+      body: JSON.stringify(id ? { title, id } : { title }),
     });
   },
   getCard(entryId: string) {
@@ -988,10 +991,12 @@ export const api = {
   // point. Title only (colour + beats are authored afterward via savePlotline / the
   // board node); mirrors createCard. Returns the new node so the caller can place +
   // name it.
-  createPlotline(title: string) {
+  // `id` is supplied only by undo/redo (ADR-0053 §7) to restore a plotline under
+  // its original id so cards' beat_links + primary reconnect; a collision 409s.
+  createPlotline(title: string, id?: string) {
     return request<PlotlineEntry>("/plot/plotlines", {
       method: "POST",
-      body: JSON.stringify({ title }),
+      body: JSON.stringify(id ? { title, id } : { title }),
     });
   },
   // Single plotline read/save/delete — the plotline document opener (#735): a

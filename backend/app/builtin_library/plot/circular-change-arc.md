@@ -1,12 +1,13 @@
 ---
 id: builtin-plot-circular-change-arc
-title: Circular Change Arc
+title: Story Circle
 entry_type: plot:template
 template:
   version: 1
   slug: circular-change-arc
-  display_name: Circular Change Arc
-  aliases: []
+  display_name: Story Circle
+  aliases:
+  - Circular Change Arc
   family: cycle
   description: A generic eight-part change cycle usable at scene, episode, subplot,
     or book scale.
@@ -75,7 +76,7 @@ metadata:
     id: changed
 ---
 
-# Circular Change Arc
+# Story Circle
 
 Use this template for a compact cycle of desire, departure, search, cost, return,
 and change. It scales well: a whole novel, a subplot, an episode, or a single

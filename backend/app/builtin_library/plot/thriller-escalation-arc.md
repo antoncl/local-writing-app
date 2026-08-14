@@ -1,12 +1,13 @@
 ---
 id: builtin-plot-thriller-escalation-arc
-title: Thriller Escalation Arc
+title: Thriller Escalation
 entry_type: plot:template
 template:
   version: 1
   slug: thriller-escalation-arc
-  display_name: Thriller Escalation Arc
-  aliases: []
+  display_name: Thriller Escalation
+  aliases:
+  - Thriller Escalation Arc
   family: genre
   description: A generic thriller lens for threat, time pressure, reversal, exposure,
     and confrontation.
@@ -70,7 +71,7 @@ metadata:
     id: confrontation
 ---
 
-# Thriller Escalation Arc
+# Thriller Escalation
 
 Use this template when the story engine is danger under pressure. A thriller does
 not only need high stakes; it needs visible threat, narrowing time, reversals,

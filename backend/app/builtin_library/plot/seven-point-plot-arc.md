@@ -1,12 +1,13 @@
 ---
 id: builtin-plot-seven-point-plot-arc
-title: Seven-Point Plot Arc
+title: Seven-Point Story Structure
 entry_type: plot:template
 template:
   version: 1
   slug: seven-point-plot-arc
-  display_name: Seven-Point Plot Arc
-  aliases: []
+  display_name: Seven-Point Story Structure
+  aliases:
+  - Seven-Point Plot Arc
   family: act
   description: A generic seven-point plot lens organized around ending contrast, turns,
     pressure points, and resolution.
@@ -71,7 +72,7 @@ metadata:
     id: resolution
 ---
 
-# Seven-Point Plot Arc
+# Seven-Point Story Structure
 
 Use this template when you want a small, scalable structure built around contrast
 between the opening and ending, with turns and pressure points controlling the

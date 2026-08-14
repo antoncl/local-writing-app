@@ -1,12 +1,13 @@
 ---
 id: builtin-plot-positive-character-change-arc
-title: Positive Character Change Arc
+title: Positive Change Arc
 entry_type: plot:template
 template:
   version: 1
   slug: positive-character-change-arc
-  display_name: Positive Character Change Arc
-  aliases: []
+  display_name: Positive Change Arc
+  aliases:
+  - Positive Character Change Arc
   family: character_arc
   description: A generic arc for a character moving from a limiting belief toward
     a harder truth.
@@ -65,7 +66,7 @@ metadata:
     id: changed_self
 ---
 
-# Positive Character Change Arc
+# Positive Change Arc
 
 Use this template to track a character moving from a limiting belief toward a
 harder truth. The arc is strongest when the false belief once protected the

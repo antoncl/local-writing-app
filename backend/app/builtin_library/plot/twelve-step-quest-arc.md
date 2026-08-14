@@ -1,12 +1,13 @@
 ---
 id: builtin-plot-twelve-step-quest-arc
-title: Twelve-Step Quest Arc
+title: The Writer's Journey
 entry_type: plot:template
 template:
   version: 1
   slug: twelve-step-quest-arc
-  display_name: Twelve-Step Quest Arc
-  aliases: []
+  display_name: The Writer's Journey
+  aliases:
+  - Twelve-Step Quest Arc
   family: journey
   description: A generic twelve-step quest structure with rephrased labels and elastic
     placement.
@@ -95,7 +96,7 @@ metadata:
     id: boon_shared
 ---
 
-# Twelve-Step Quest Arc
+# The Writer's Journey
 
 Use this template when you want a quest or adventure spine with more checkpoints
 than the mythic quest lens. It is useful for fantasy, science fiction, adventure,

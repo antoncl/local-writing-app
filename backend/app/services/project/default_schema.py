@@ -739,7 +739,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         },
         "source_template_name": {
             # The display name of the source template, snapshotted at instantiate so
-            # the plotline can show "Mythic Quest Arc" without re-resolving a
+            # the plotline can show "The Hero's Journey" without re-resolving a
             # (possibly inherited or since-deleted) template. Empty for an ad-hoc
             # plotline. Hidden, like `source_template_id`.
             "name": "Source template",

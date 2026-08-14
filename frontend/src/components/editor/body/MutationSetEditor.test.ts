@@ -29,12 +29,13 @@ describe("MutationSetEditor pinned mode (ADR-0055 §3)", () => {
       props: { schema: SCHEMA, onSaved: NOOP, onCancel: NOOP },
     });
     expect(screen.getByText("New mutation set")).toBeInTheDocument();
-    expect(container.querySelector("select")).not.toBeNull();
+    // "Applies to" is the type-picker label; it is present only in reusable mode.
+    expect(screen.getByText("Applies to")).toBeInTheDocument();
     expect(container.querySelector(".tset-pin")).toBeNull();
   });
 
   it("pinned mode (preset) locks to the entity: no type picker, a 'Pinned to' line", () => {
-    const { container } = render(MutationSetEditor, {
+    render(MutationSetEditor, {
       props: {
         schema: SCHEMA,
         loreEntries: [MIRA],
@@ -44,7 +45,8 @@ describe("MutationSetEditor pinned mode (ADR-0055 §3)", () => {
       },
     });
     expect(screen.getByText("New staged change")).toBeInTheDocument();
-    expect(container.querySelector("select")).toBeNull();
+    // The type picker is gone (its "Applies to" label absent); the pin is shown.
+    expect(screen.queryByText("Applies to")).toBeNull();
     expect(screen.getByText(/Mira · Character/)).toBeInTheDocument();
   });
 
@@ -64,6 +66,10 @@ describe("MutationSetEditor pinned mode (ADR-0055 §3)", () => {
     render(MutationSetEditor, {
       props: { schema: SCHEMA, loreEntries: [MIRA], initial, onSaved: NOOP, onCancel: NOOP },
     });
+    // Editing a set that already carries a pin renders pinned mode (no type
+    // picker, a 'Pinned to' line) — not only the preset-driven open path.
+    expect(screen.queryByText("Applies to")).toBeNull();
+    expect(screen.getByText(/Mira · Character/)).toBeInTheDocument();
     // Edit mode seeds the row, so Save is enabled with no further input.
     await fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await tick();

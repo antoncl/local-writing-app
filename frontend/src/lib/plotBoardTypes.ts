@@ -101,12 +101,22 @@ export type PlotBoardProjection = {
 // A point on the board canvas.
 export type BoardXY = { x: number; y: number };
 
+// A container's manual size (#878): its stored width/height in board coords. A
+// container is otherwise a soft backdrop (auto-wraps its cards); a stored size is a
+// MINIMUM the box never shrinks below — content still grows it past this, but it holds
+// the extra room when content is smaller. That is the whole point: a single-card box
+// (and so its member cards' drag extent, #874) gets room to spread. Keyed by container id.
+export type BoardSize = { w: number; h: number };
+
 // The board's opaque `layout` payload: per-node position overrides keyed by node id
 // — cards and plotline nodes alike (their ids are distinct, so one map holds both).
 // A node absent from `positions` falls back to its derived slot; once dragged and
-// saved, it is pinned here. Container boxes are always derived, so they never appear.
+// saved, it is pinned here. Container boxes carry no position (their origin is always
+// derived), so they never appear in `positions` — but a resized container's manual
+// size (#878) is pinned in `sizes`, keyed by container id. Absent → the box auto-wraps.
 export type PlotBoardLayout = {
   positions?: Record<string, BoardXY>;
+  sizes?: Record<string, BoardSize>;
 };
 
 // The board singleton as the save endpoint (`PUT /api/plot/board`) returns it

@@ -229,6 +229,7 @@ export type {
   PlotBoardLayout,
   PlotBoard,
   BoardXY,
+  BoardSize,
 } from "./plotBoardTypes";
 export type {
   CardEntry,

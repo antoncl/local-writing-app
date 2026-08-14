@@ -25,6 +25,7 @@
     overriddenNodePositions,
     projectionDataKey,
     readBoardPositions,
+    readBoardSizes,
     reconcilePlotlineUiState,
     type PlotBoardNode,
   } from "@/lib/plot/plotBoardLayout";
@@ -64,7 +65,7 @@
   import UndoRedoControls from "@/components/UndoRedoControls.svelte";
   import ViewportFit from "@/components/editor/body/view/ViewportFit.svelte";
   import PlotCardNodeFlow from "./plot/PlotCardNodeFlow.svelte";
-  import PlotContainerNode from "./plot/PlotContainerNode.svelte";
+  import PlotContainerNodeFlow from "./plot/PlotContainerNodeFlow.svelte";
   import PlotPlotlineNode from "./plot/PlotPlotlineNode.svelte";
   import PlotCausalEdge from "./plot/PlotCausalEdge.svelte";
   import PlotTemplatePalette from "./plot/PlotTemplatePalette.svelte";
@@ -76,7 +77,8 @@
     type PlotEdgeActions,
   } from "./plot/plotCardActions";
   import { PLOT_PLOTLINE_ACTIONS, type PlotPlotlineActions } from "./plot/plotPlotlineActions";
-  import type { BoardXY, PlotBoardProjection } from "@/lib/types";
+  import { PLOT_CONTAINER_ACTIONS, type PlotContainerActions } from "./plot/plotContainerActions";
+  import type { BoardSize, BoardXY, PlotBoardProjection } from "@/lib/types";
 
   // The board's read model, fetched by the opener / PlotBoardPane into the store.
   // Null until the first refresh resolves. `error` distinguishes a FAILED initial
@@ -101,9 +103,16 @@
   let flowNodes = $state<PlotBoardNode[]>([]);
   let flowEdges = $state<Edge[]>([]);
   // Optimistic base for the next layout save, and a snapshot guard so the persist
-  // effect fires only on a real change — never on the just-loaded state.
+  // effect fires only on a real change — never on the just-loaded state. The snapshot
+  // covers the WHOLE persisted layout (card/plotline positions + container sizes), so a
+  // resize (#878) triggers a save just as a drag does.
   let revision = $state("");
-  let lastSavedPositions = $state("");
+  let lastSavedLayout = $state("");
+  // Per-container manual sizes (#878), keyed by container id: seeded from the saved
+  // layout on each rebuild, updated when a container's resize handle is released.
+  // Reactive so the autosave effect re-runs on a resize, and passed to buildBoardNodes
+  // so the box (and its member cards' extent) grows to at least the stored size.
+  let containerSizes = $state<Record<string, BoardSize>>({});
   // True while a card is dragging, so the debounce waits for release (one save
   // per gesture), mirroring ViewBodyView's autosave.
   let dragging = $state(false);
@@ -237,6 +246,18 @@
     // roomy beat work. Mirrors the card provider's `onOpen`/`openPlotCard` (line above).
     // On-node inline editing stays the default surface.
     onOpenInEditor: (id) => void editorPanes.openPlotline(id),
+  });
+
+  // Container resize (#878). A container box carries no position (its origin is always
+  // derived), but a resize handle gives it a manual SIZE, pinned in `containerSizes`
+  // keyed by container id. A new-object assign (not a mutate) triggers the reactive
+  // autosave effect; the next rebuild reads it back through buildBoardNodes so the box
+  // holds the size. Deliberately outside the undo caretaker (drags are Tier-1, a resize
+  // is a coarser layout tweak) — the same call is the store's only writer of `sizes`.
+  setContext<PlotContainerActions>(PLOT_CONTAINER_ACTIONS, {
+    onResize: (containerId, size) => {
+      containerSizes = { ...containerSizes, [containerId]: size };
+    },
   });
 
   // A card's `plotline` backlink no longer opens an editor pane — it reveals the
@@ -417,7 +438,7 @@
     });
   }
 
-  const nodeTypes = { plotCard: PlotCardNodeFlow, plotContainer: PlotContainerNode, plotPlotline: PlotPlotlineNode };
+  const nodeTypes = { plotCard: PlotCardNodeFlow, plotContainer: PlotContainerNodeFlow, plotPlotline: PlotPlotlineNode };
   // Authored causal edges render via PlotCausalEdge (a hover-× to remove the link);
   // derived edges keep the default renderer.
   const edgeTypes = { causal: PlotCausalEdge };
@@ -457,12 +478,18 @@
     loadedDataKey = key;
     const saved = readBoardPositions(projection.layout);
     overriddenIds = new Set(Object.keys(saved));
-    const nodes = buildBoardNodes(projection, saved);
+    // Seed container sizes from a LOCAL const and pass it straight to buildBoardNodes:
+    // the assign to `containerSizes` doesn't read it back, so this effect never
+    // subscribes to its own resize writes (which would re-run and, guarded by the
+    // data-key, no-op anyway).
+    const savedSizes = readBoardSizes(projection.layout);
+    containerSizes = savedSizes;
+    const nodes = buildBoardNodes(projection, saved, savedSizes);
     flowNodes = nodes;
     revision = projection.board_revision;
     // Snapshot from the local `nodes` (not reactive flowNodes) so a never-touched
     // board doesn't save on open and this effect stays subscribed to `projection` only.
-    lastSavedPositions = JSON.stringify(overriddenNodePositions(nodes, overriddenIds));
+    lastSavedLayout = JSON.stringify({ positions: overriddenNodePositions(nodes, overriddenIds), sizes: savedSizes });
     dragging = false;
     undoCtl.reset();
   });
@@ -514,33 +541,41 @@
   // Autosave the layout: skip while dragging (coalesce the gesture) and when nothing
   // changed, else debounce a PUT. The projection/dragging guard runs FIRST so a drag
   // doesn't re-serialize the whole board every frame (ViewBodyView's pattern). Only
-  // overridden (dragged/pinned) cards persist — the sparse model. Undo/redo mutate the
-  // same positions and persist through here too; a load matches the snapshot, so it
-  // never writes.
+  // overridden (dragged/pinned) cards persist — the sparse model — alongside the
+  // container sizes (#878; a resize updates `containerSizes`, re-running this effect).
+  // Undo/redo mutate the same positions and persist through here too; a load matches
+  // the snapshot, so it never writes. A resize is not `dragging` (that flag is the node
+  // drag), so it flushes without the coalesce wait — one save on handle release.
   $effect(() => {
     if (!projection || dragging) return;
     const positions = overriddenNodePositions(flowNodes, overriddenIds);
-    const serialized = JSON.stringify(positions);
-    if (serialized === lastSavedPositions) return;
-    const handle = setTimeout(() => void persist(positions, serialized), SAVE_DEBOUNCE_MS);
+    const sizes = containerSizes;
+    const serialized = JSON.stringify({ positions, sizes });
+    if (serialized === lastSavedLayout) return;
+    const handle = setTimeout(() => void persist(positions, sizes, serialized), SAVE_DEBOUNCE_MS);
     return () => clearTimeout(handle);
   });
 
   // Flush a pending (debounced) layout change when the pane unmounts, so closing the
-  // board right after a drag doesn't lose it. Best-effort: the PUT is fired, not
-  // awaited (the fetch outlives the component). Project-switch / reload flushing is
+  // board right after a drag / resize doesn't lose it. Best-effort: the PUT is fired,
+  // not awaited (the fetch outlives the component). Project-switch / reload flushing is
   // the deferred save-state machine (#756).
   onDestroy(() => {
     if (!projection || dragging) return;
     const positions = overriddenNodePositions(flowNodes, overriddenIds);
-    const serialized = JSON.stringify(positions);
-    if (serialized !== lastSavedPositions) void persist(positions, serialized);
+    const sizes = containerSizes;
+    const serialized = JSON.stringify({ positions, sizes });
+    if (serialized !== lastSavedLayout) void persist(positions, sizes, serialized);
   });
 
-  async function persist(positions: Record<string, BoardXY>, serialized: string): Promise<void> {
+  async function persist(
+    positions: Record<string, BoardXY>,
+    sizes: Record<string, BoardSize>,
+    serialized: string,
+  ): Promise<void> {
     try {
-      revision = await savePlotBoardLayout({ positions }, revision);
-      lastSavedPositions = serialized;
+      revision = await savePlotBoardLayout({ positions, sizes }, revision);
+      lastSavedLayout = serialized;
     } catch {
       // Leave the guard unadvanced so the next change retries. The surfaced
       // load/error state machine (409 rebase, in-flight guard) is #756.

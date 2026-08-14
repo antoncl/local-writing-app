@@ -11,6 +11,11 @@ const data = (over: Partial<PlotContainerData> = {}): PlotContainerData => ({
   title: "Act I",
   count: 4,
   level: 0,
+  // Carried by the plotContainer node type for the resize handle on the flow wrapper
+  // (#878); the presentational node under test ignores them.
+  containerId: "node_act",
+  minWidth: 250,
+  minHeight: 170,
   ...over,
 });
 

@@ -19,15 +19,24 @@
 // container boxes never enter the layout.
 
 import type { CoordinateExtent, Node } from "@xyflow/svelte";
-import type { BoardXY, PlotBoardBeat, PlotBoardLayout, PlotBoardPlotlineBeat, PlotBoardProjection } from "@/lib/types";
+import type { BoardSize, BoardXY, PlotBoardBeat, PlotBoardLayout, PlotBoardPlotlineBeat, PlotBoardProjection } from "@/lib/types";
 
 // A container box: an act/chapter's title, how many cards it (transitively) holds,
 // and its nesting level (0 = a top-level act, 1 = a box nested inside one). The box
 // is structural, so it carries no colour — plotline is the card's colour axis.
+//
+// The last three fields serve the resize handle (#878), which lives on the flow
+// wrapper (PlotContainerNodeFlow), not the presentational node: `containerId` is the
+// raw container id (the node id is `container:<id>`) the resize callback keys its
+// stored size by, and `minWidth`/`minHeight` are the box's CURRENT auto-wrap size —
+// the floor the handle can't drag below, so a container never shrinks past its content.
 export type PlotContainerData = {
   title: string;
   count: number;
   level: number;
+  containerId: string;
+  minWidth: number;
+  minHeight: number;
 };
 
 // A card node: its synopsis (the body), whether it is attached to a scene, and the
@@ -159,9 +168,13 @@ export function containerExtent(box: Box): CoordinateExtent {
 // top-level act. Homeless cards (no container) lay out loose below every box.
 // `saved` carries per-card position overrides (S7c): a card present there keeps
 // that spot, otherwise it falls to its derived slot inside its container.
+// `savedSizes` carries per-container manual sizes (#878): a container present there
+// grows to at least that size (min-not-override — content still wins if larger), which
+// also widens its member cards' drag extent (#874). Absent → the box auto-wraps.
 export function buildBoardNodes(
   projection: PlotBoardProjection,
   saved: Record<string, BoardXY> = {},
+  savedSizes: Record<string, BoardSize> = {},
 ): PlotBoardNode[] {
   const plotlineById = new Map(projection.plotlines.map((line) => [line.id, line]));
   const containerById = new Map(projection.containers.map((c) => [c.id, c]));
@@ -245,12 +258,24 @@ export function buildBoardNodes(
   const positionOf = (id: string): BoardXY => saved[id] ?? derived.get(id)!;
 
   // --- Box geometry from FINAL positions (pins applied), computed inner-first so an
-  // act box wraps its chapter boxes and its direct cards.
+  // act box wraps its chapter boxes and its direct cards. Each auto-wrap box is then
+  // grown to any stored manual size (#878): min-not-override, so content still wins when
+  // it is larger. The grown box drives BOTH the rendered size AND the member cards' drag
+  // extent (#874) — and an act wraps the GROWN chapter boxes (rectOfBox reads innerBox
+  // post-grow), so enlarging a chapter enlarges its act too. The pre-grow (auto-wrap)
+  // size is retained per container as the resize floor the handle can't drag below.
+  const contentSize = new Map<string, BoardSize>();
+  const grow = (id: string, box: Box): Box => {
+    contentSize.set(id, { w: box.w, h: box.h });
+    const manual = savedSizes[id];
+    if (!manual) return box;
+    return { ...box, w: Math.max(box.w, manual.w), h: Math.max(box.h, manual.h) };
+  };
   const innerBox = new Map<string, Box>();
   for (const boxes of innerBoxesByAct.values()) {
     for (const box of boxes) {
       const cards = cardsByInner.get(box.id)!;
-      innerBox.set(box.id, boxFromContent(unionRects(cards.map((c) => cardRect(positionOf(c.id))))));
+      innerBox.set(box.id, grow(box.id, boxFromContent(unionRects(cards.map((c) => cardRect(positionOf(c.id)))))));
     }
   }
   const actBox = new Map<string, Box>();
@@ -258,13 +283,16 @@ export function buildBoardNodes(
     const rects: Rect[] = [];
     for (const box of innerBoxesByAct.get(act.id) ?? []) rects.push(rectOfBox(innerBox.get(box.id)!));
     for (const card of cardsByInner.get(act.id) ?? []) rects.push(cardRect(positionOf(card.id)));
-    actBox.set(act.id, boxFromContent(unionRects(rects)));
+    actBox.set(act.id, grow(act.id, boxFromContent(unionRects(rects))));
   }
 
   // --- Emit: act boxes behind, then inner boxes, then cards on top (both array
   // order and explicit zIndex, so a card is always clickable above its container).
   const nodes: PlotBoardNode[] = [];
-  const pushContainer = (id: string, title: string, level: number, box: Box) =>
+  const pushContainer = (id: string, title: string, level: number, box: Box) => {
+    // The auto-wrap size is the resize floor (data.minWidth/minHeight); it is always
+    // set for a container that renders a box, since `grow` recorded it just above.
+    const content = contentSize.get(id)!;
     nodes.push({
       id: containerNodeId(id),
       type: "plotContainer",
@@ -275,8 +303,9 @@ export function buildBoardNodes(
       selectable: false,
       connectable: false,
       zIndex: level,
-      data: { title, count: containerCount.get(id) ?? 0, level },
+      data: { title, count: containerCount.get(id) ?? 0, level, containerId: id, minWidth: content.w, minHeight: content.h },
     });
+  };
 
   for (const act of acts) pushContainer(act.id, act.title, 0, actBox.get(act.id)!);
   for (const act of acts) {
@@ -355,6 +384,20 @@ export function readBoardPositions(layout: Record<string, unknown>): Record<stri
     // Number.isFinite (not typeof === "number", which admits NaN/Infinity): a
     // non-finite coordinate can't be placed by SvelteFlow, and the board must render.
     if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) out[id] = { x: p.x, y: p.y };
+  }
+  return out;
+}
+
+// Read the typed per-container manual sizes out of the opaque `layout` dict (#878).
+// Same fail-soft contract as readBoardPositions: an unknown / malformed shape or a
+// non-finite / non-positive dimension is dropped (the box just falls back to auto-wrap)
+// rather than throwing — a bad size must never keep the board from rendering.
+export function readBoardSizes(layout: Record<string, unknown>): Record<string, BoardSize> {
+  const sizes = (layout as PlotBoardLayout).sizes;
+  if (!sizes || typeof sizes !== "object") return {};
+  const out: Record<string, BoardSize> = {};
+  for (const [id, s] of Object.entries(sizes)) {
+    if (s && Number.isFinite(s.w) && Number.isFinite(s.h) && s.w > 0 && s.h > 0) out[id] = { w: s.w, h: s.h };
   }
   return out;
 }

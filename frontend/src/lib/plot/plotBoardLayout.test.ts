@@ -12,6 +12,7 @@ import {
   overriddenNodePositions,
   projectionDataKey,
   readBoardPositions,
+  readBoardSizes,
   reconcilePlotlineUiState,
   CARD_GAP_X,
   CARD_HEIGHT,
@@ -239,6 +240,66 @@ describe("buildBoardNodes", () => {
   });
 });
 
+describe("manual container size (#878)", () => {
+  const chapProj = () =>
+    projection({ containers: [container("chap", "Chapter 1")], cards: [card("c1", { container: "chap" })] });
+  const CONTENT_W = CARD_WIDTH + 2 * CONTAINER_PAD;
+  const CONTENT_H = CARD_HEIGHT + 2 * CONTAINER_PAD + CONTAINER_HEADER;
+
+  it("grows a container to a stored manual size and reports the auto-wrap size as the resize floor", () => {
+    const nodes = buildBoardNodes(chapProj(), {}, { chap: { w: 800, h: 600 } });
+    const box = containerNodes(nodes)[0];
+    expect(box.width).toBe(800);
+    expect(box.height).toBe(600);
+    // A resize changes SIZE, never the derived top-left origin (#877 is separate).
+    expect(box.position).toEqual({ x: 0, y: 0 });
+    const d = box.data as PlotContainerData;
+    // data.minWidth/minHeight = the pre-grow content size, the floor the handle can't cross.
+    expect(d.minWidth).toBe(CONTENT_W);
+    expect(d.minHeight).toBe(CONTENT_H);
+    // The raw container id (the node id is `container:chap`) the resize callback keys by.
+    expect(d.containerId).toBe("chap");
+  });
+
+  it("ignores a stored size smaller than the content (min-not-override: never below content)", () => {
+    const nodes = buildBoardNodes(chapProj(), {}, { chap: { w: 10, h: 10 } });
+    const box = containerNodes(nodes)[0];
+    expect(box.width).toBe(CONTENT_W);
+    expect(box.height).toBe(CONTENT_H);
+  });
+
+  it("grows the act box to wrap a manually enlarged chapter", () => {
+    const nodes = buildBoardNodes(
+      projection({
+        containers: [container("act", "Act I"), container("chap", "Chapter 1", "act")],
+        cards: [card("c1", { container: "chap" })],
+      }),
+      {},
+      { chap: { w: 900, h: 700 } },
+    );
+    const act = nodes.find((n) => n.id === "container:act")!;
+    const chap = nodes.find((n) => n.id === "container:chap")!;
+    expect(chap.width).toBe(900);
+    // The act must still enclose the grown chapter (rectOfBox reads the post-grow box).
+    expect(act.width!).toBeGreaterThanOrEqual(chap.position.x + chap.width!);
+    expect(act.height!).toBeGreaterThanOrEqual(chap.position.y + chap.height!);
+  });
+
+  it("widens a member card's drag extent when its container is resized (#874 synergy)", () => {
+    const grown = buildBoardNodes(chapProj(), {}, { chap: { w: 800, h: 600 } });
+    const box = containerNodes(grown)[0];
+    // The lock follows the GROWN box — the point of resize: a pinned single-card box
+    // gets room for its card to move.
+    expect(cardNodes(grown)[0].extent).toEqual(
+      containerExtent({ x: box.position.x, y: box.position.y, w: box.width!, h: box.height! }),
+    );
+    // Strictly more horizontal travel than the un-resized (pinned) box.
+    const tight = cardNodes(buildBoardNodes(chapProj()))[0].extent as [[number, number], [number, number]];
+    const wide = cardNodes(grown)[0].extent as [[number, number], [number, number]];
+    expect(wide[1][0] - wide[0][0]).toBeGreaterThan(tight[1][0] - tight[0][0]);
+  });
+});
+
 describe("boardIsEmpty", () => {
   it("is empty with no cards and no plotlines", () => {
     expect(boardIsEmpty(projection())).toBe(true);
@@ -308,6 +369,29 @@ describe("readBoardPositions", () => {
         positions: { nan: { x: NaN, y: 0 }, inf: { x: 1, y: Infinity }, ok: { x: 3, y: 4 } },
       } as unknown as Record<string, unknown>),
     ).toEqual({ ok: { x: 3, y: 4 } });
+  });
+});
+
+describe("readBoardSizes (#878)", () => {
+  it("reads well-formed per-container sizes out of the opaque layout", () => {
+    expect(readBoardSizes({ sizes: { a: { w: 300, h: 200 }, b: { w: 50, h: 60 } } })).toEqual({
+      a: { w: 300, h: 200 },
+      b: { w: 50, h: 60 },
+    });
+  });
+
+  it("degrades to no sizes for a missing / malformed layout (the board must render)", () => {
+    expect(readBoardSizes({})).toEqual({});
+    expect(readBoardSizes({ sizes: null } as unknown as Record<string, unknown>)).toEqual({});
+  });
+
+  it("drops non-finite or non-positive dimensions, keeping valid siblings", () => {
+    // A zero/negative/NaN size can't be a valid box; a bad entry must not sink the board.
+    expect(
+      readBoardSizes({
+        sizes: { nan: { w: NaN, h: 10 }, zero: { w: 0, h: 10 }, neg: { w: -5, h: 10 }, ok: { w: 12, h: 34 } },
+      } as unknown as Record<string, unknown>),
+    ).toEqual({ ok: { w: 12, h: 34 } });
   });
 });
 

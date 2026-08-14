@@ -611,6 +611,15 @@
       // load/error state machine (409 rebase, in-flight guard) is #756.
     }
   }
+
+  // Rebuild the board nodes in place from the current layout state (position overrides +
+  // container sizes) WITHOUT a refetch — re-deriving every container box + card extent
+  // around the live positions. Used after a container drag and on its undo/redo (#877),
+  // mirroring the #878 resize rebuild. Without the undo/redo rebuild, reversing a
+  // container move would snap the cards back but leave the boxes at the moved spot.
+  function rebuildLayoutNodes(): void {
+    if (projection) flowNodes = buildBoardNodes(projection, overriddenNodePositions(flowNodes, overriddenIds), containerSizes);
+  }
 </script>
 
 <!-- The keydown is board-scoped (ADR-0050 §3): it rides BUBBLING from whatever
@@ -823,15 +832,28 @@
               const node = flowNodes.find((n) => n.id === id);
               if (from && node) moves.push({ id, from, to: { ...node.position } });
             }
-            const command = moveNodesCommand(graphPort, moves);
-            if (command) {
+            const base = moveNodesCommand(graphPort, moves);
+            if (base) {
               for (const m of moves) overriddenIds.add(m.id);
-              undoCtl.record(command);
+              // Wrap so undo/redo ALSO re-derive the boxes + extents around the restored
+              // card positions — else reversing the move snaps the cards back but leaves
+              // the boxes (rebuilt below) at the moved spot, cards floating outside them.
+              undoCtl.record({
+                ...base,
+                undo: () => {
+                  base.undo();
+                  rebuildLayoutNodes();
+                },
+                redo: () => {
+                  base.redo();
+                  rebuildLayoutNodes();
+                },
+              });
             }
             // Rebuild so every box + its cards' extent re-derive from the moved positions
             // (restoring the extent stripped at dragstart; the #878 resize pattern). Even
             // a no-move click rebuilds, to put those extents back.
-            if (projection) flowNodes = buildBoardNodes(projection, overriddenNodePositions(flowNodes, overriddenIds), containerSizes);
+            rebuildLayoutNodes();
             return;
           }
           undoCtl.dragStop(nodes);

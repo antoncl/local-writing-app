@@ -11,7 +11,7 @@
   colour axis), so the box is a quiet neutral tint, an act reading a touch stronger.
 -->
 <script lang="ts">
-  import type { PlotContainerData } from "@/lib/plot/plotBoardLayout";
+  import { CONTAINER_DRAG_HANDLE_CLASS, type PlotContainerData } from "@/lib/plot/plotBoardLayout";
 
   let { data }: { id?: string; data: PlotContainerData; selected?: boolean } = $props();
 
@@ -20,7 +20,10 @@
 </script>
 
 <div class="plot-container" class:act={isAct}>
-  <div class="container-head">
+  <!-- The header is the drag handle (#877): SvelteFlow's `dragHandle` targets this
+       class, so the box moves ONLY when grabbed here — a window-titlebar affordance —
+       and the transparent interior stays inert (card drags + edges pass through). -->
+  <div class="container-head {CONTAINER_DRAG_HANDLE_CLASS}">
     <span class="container-title" title={data.title}>{data.title}</span>
     <span class="container-count">{data.count}</span>
   </div>
@@ -57,6 +60,14 @@
        with the padding the cards start below. */
     height: 32px;
     padding: 0 12px;
+    /* Re-enable pointer events on JUST the header (the box body stays `none`) so it can
+       be the SvelteFlow drag handle (#877); the grab cursor advertises it. The interior
+       remains inert, so card drags and the edge layers still pass through it (#833). */
+    pointer-events: auto;
+    cursor: grab;
+  }
+  .container-head:active {
+    cursor: grabbing;
   }
   .container-title {
     flex: 1;

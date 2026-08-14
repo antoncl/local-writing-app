@@ -22,17 +22,20 @@
   import {
     boardIsEmpty,
     buildBoardNodes,
+    containerDescendantIds,
+    containerMemberCardIds,
     overriddenNodePositions,
     projectionDataKey,
     readBoardPositions,
     readBoardSizes,
     reconcilePlotlineUiState,
     type PlotBoardNode,
+    type PlotContainerData,
   } from "@/lib/plot/plotBoardLayout";
   import { buildBoardEdges, EDGE_LAYERS, type EdgeLayer } from "@/lib/plot/plotBoardEdges";
   import { loadEdgeLayers, saveEdgeLayers, toggleEdgeLayer } from "@/lib/plot/edgeLayerPrefs";
   import { GraphUndoController } from "@/lib/graph/graphUndoController.svelte";
-  import type { GraphPort } from "@/lib/graph/graphCommands";
+  import { moveNodesCommand, type GraphPort } from "@/lib/graph/graphCommands";
   import { PlotUndoRecorder, defaultPlotCommandPort } from "@/lib/plot/plotCommands";
   import { keepsOwnFocus } from "@/lib/plot/boardFocus";
   import {
@@ -128,6 +131,23 @@
   // non-reactive — read at persist time (the effect already re-runs on flowNodes) and
   // at drag time, never a reactive dep.
   let overriddenIds = new Set<string>();
+
+  // The in-flight container drag (#877), or null. A container drag translates its member
+  // cards, not the box (the box is derived from its cards) — so we capture the member set
+  // + their start positions here: onnodedrag live-translates them by the box's delta, and
+  // onnodedragstop pins + records the move + rebuilds. Plain local (read only inside the
+  // drag handlers, never a reactive dep), mirroring `overriddenIds`.
+  let containerDrag: {
+    startX: number;
+    startY: number;
+    // The member CARD ids (pinned + recorded for undo on drop). Their start positions
+    // live in `translateFrom`.
+    memberCardIds: Set<string>;
+    // Every node translated live during the gesture, → its start position: the member
+    // cards PLUS the dragged container's descendant boxes (a nested act moves as one
+    // piece). Only the cards persist; the boxes re-derive on the drop rebuild.
+    translateFrom: Map<string, BoardXY>;
+  } | null = null;
 
   // The board's undo history (ADR-0050): the shared caretaker via GraphUndoController,
   // its own instance per §3, replaying through a port over our rune arrays. Drags
@@ -591,6 +611,15 @@
       // load/error state machine (409 rebase, in-flight guard) is #756.
     }
   }
+
+  // Rebuild the board nodes in place from the current layout state (position overrides +
+  // container sizes) WITHOUT a refetch — re-deriving every container box + card extent
+  // around the live positions. Used after a container drag and on its undo/redo (#877),
+  // mirroring the #878 resize rebuild. Without the undo/redo rebuild, reversing a
+  // container move would snap the cards back but leave the boxes at the moved spot.
+  function rebuildLayoutNodes(): void {
+    if (projection) flowNodes = buildBoardNodes(projection, overriddenNodePositions(flowNodes, overriddenIds), containerSizes);
+  }
 </script>
 
 <!-- The keydown is board-scoped (ADR-0050 §3): it rides BUBBLING from whatever
@@ -747,15 +776,87 @@
         }}
         onnodedragstart={({ nodes }) => {
           dragging = true;
-          undoCtl.dragStart(nodes);
+          containerDrag = null; // clean slate each gesture (a card drag must never see a stale one)
+          const container = nodes.find((n) => n.type === "plotContainer");
+          if (container && projection) {
+            // A container drag (#877) moves its member cards, not itself. Capture the
+            // transitive member cards (pinned on drop) + the dragged box's descendant
+            // boxes (moved live for cohesion, re-derived on drop) and their start
+            // positions. STRIP the member cards' extent for the gesture so the container
+            // lock (#874) doesn't clamp them back as they leave the old box. The dragged
+            // box itself is left to SvelteFlow, which moves the node it grabbed.
+            const rawId = (container.data as PlotContainerData).containerId;
+            const memberCardIds = new Set(containerMemberCardIds(projection, rawId));
+            const descendantBoxIds = new Set(containerDescendantIds(projection, rawId));
+            const translateFrom = new Map<string, BoardXY>();
+            for (const n of flowNodes) {
+              const isMemberCard = memberCardIds.has(n.id);
+              const isDescendantBox = n.type === "plotContainer" && descendantBoxIds.has((n.data as PlotContainerData).containerId);
+              if (isMemberCard || isDescendantBox) translateFrom.set(n.id, { ...n.position });
+            }
+            containerDrag = { startX: container.position.x, startY: container.position.y, memberCardIds, translateFrom };
+            flowNodes = flowNodes.map((n) => (memberCardIds.has(n.id) ? { ...n, extent: undefined } : n));
+          } else {
+            undoCtl.dragStart(nodes);
+          }
+        }}
+        onnodedrag={({ nodes }) => {
+          // Live-follow: translate every node in the moving set by the box's delta from
+          // its start (absolute, not incremental, so repeated frames can't drift). Only
+          // those nodes change; the dragged box keeps SvelteFlow's own position.
+          if (!containerDrag) return;
+          const container = nodes.find((n) => n.type === "plotContainer");
+          if (!container) return;
+          const dx = container.position.x - containerDrag.startX;
+          const dy = container.position.y - containerDrag.startY;
+          flowNodes = flowNodes.map((n) => {
+            const from = containerDrag!.translateFrom.get(n.id);
+            return from ? { ...n, position: { x: from.x + dx, y: from.y + dy } } : n;
+          });
         }}
         onnodedragstop={({ nodes }) => {
           dragging = false;
-          undoCtl.dragStop(nodes);
           // Return focus to the board (§7): the drag landed it on <body> (cards are
           // selectable:false), so without this the very Ctrl+Z that would undo the
           // drag wouldn't reach the caretaker.
           boardEl?.focus({ preventScroll: true });
+          if (containerDrag) {
+            const ctx = containerDrag;
+            containerDrag = null;
+            // Diff each member CARD's start→final into ONE move command (the caretaker
+            // batches N nodes into a single undo step); pin the moved cards so they
+            // persist. Descendant boxes are NOT persisted — they re-derive on rebuild.
+            const moves: { id: string; from: BoardXY; to: BoardXY }[] = [];
+            for (const id of ctx.memberCardIds) {
+              const from = ctx.translateFrom.get(id);
+              const node = flowNodes.find((n) => n.id === id);
+              if (from && node) moves.push({ id, from, to: { ...node.position } });
+            }
+            const base = moveNodesCommand(graphPort, moves);
+            if (base) {
+              for (const m of moves) overriddenIds.add(m.id);
+              // Wrap so undo/redo ALSO re-derive the boxes + extents around the restored
+              // card positions — else reversing the move snaps the cards back but leaves
+              // the boxes (rebuilt below) at the moved spot, cards floating outside them.
+              undoCtl.record({
+                ...base,
+                undo: () => {
+                  base.undo();
+                  rebuildLayoutNodes();
+                },
+                redo: () => {
+                  base.redo();
+                  rebuildLayoutNodes();
+                },
+              });
+            }
+            // Rebuild so every box + its cards' extent re-derive from the moved positions
+            // (restoring the extent stripped at dragstart; the #878 resize pattern). Even
+            // a no-move click rebuilds, to put those extents back.
+            rebuildLayoutNodes();
+            return;
+          }
+          undoCtl.dragStop(nodes);
           // A dragged card or plotline node becomes overridden (pinned): it now
           // persists and keeps its spot instead of reflowing to its derived slot.
           for (const node of nodes) {

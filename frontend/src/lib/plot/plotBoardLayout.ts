@@ -119,6 +119,13 @@ export const CONTAINER_PAD = 20; // inner padding between a box edge and its con
 export const CONTAINER_HEADER = 32; // the title-bar band at the top of a box
 export const CONTAINER_GAP = 24; // between sibling boxes / rows / acts
 
+// The class SvelteFlow's `dragHandle` targets so a container drags ONLY by its header
+// band (#877), a window-titlebar affordance — the transparent interior stays a
+// non-interactive backdrop, so card drags and the edge layers still pass through it
+// (#833). Shared: the container node's `dragHandle` (buildBoardNodes) and the header
+// element's class (PlotContainerNode) must name the same selector.
+export const CONTAINER_DRAG_HANDLE_CLASS = "plot-container-drag-handle";
+
 // A container node's id is prefixed so it can never collide with a card id (card
 // ids are `plot_…`, container ids are `node_…`), mirroring the old `lane:` prefix.
 const containerNodeId = (id: string) => `container:${id}`;
@@ -299,7 +306,11 @@ export function buildBoardNodes(
       position: { x: box.x, y: box.y },
       width: box.w,
       height: box.h,
-      draggable: false,
+      // Draggable (#877), but ONLY by the header band (`dragHandle`) — the box moves its
+      // member cards, the derived box re-wraps them (PlotEditor's container-drag path).
+      // The transparent interior stays inert so card drags + edges pass through (#833).
+      draggable: true,
+      dragHandle: `.${CONTAINER_DRAG_HANDLE_CLASS}`,
       selectable: false,
       connectable: false,
       zIndex: level,
@@ -400,6 +411,38 @@ export function readBoardSizes(layout: Record<string, unknown>): Record<string, 
     if (s && Number.isFinite(s.w) && Number.isFinite(s.h) && s.w > 0 && s.h > 0) out[id] = { w: s.w, h: s.h };
   }
   return out;
+}
+
+// The ids of every card TRANSITIVELY inside a container (#877): the card itself if the
+// container is its own container or any ancestor of it. Dragging a container translates
+// exactly this set (an act carries its chapters' cards too, a chapter just its own), so
+// the derived box re-wraps them. A homeless card, or one under a different container, is
+// excluded; an unknown container id yields none. Pure + unit-tested — the drag that
+// consumes it lives in PlotEditor and isn't headless-testable.
+export function containerMemberCardIds(projection: PlotBoardProjection, containerId: string): string[] {
+  const byId = new Map(projection.containers.map((c) => [c.id, c]));
+  const isInside = (cid: string | null): boolean => {
+    for (let cur = cid; cur != null; cur = byId.get(cur)?.parent ?? null) {
+      if (cur === containerId) return true;
+    }
+    return false;
+  };
+  return projection.cards.filter((c) => c.container != null && byId.has(c.container) && isInside(c.container)).map((c) => c.id);
+}
+
+// The ids of the containers STRICTLY inside a container (its descendant boxes; #877) —
+// e.g. an act's chapters. A container drag translates these boxes live alongside its
+// member cards so a nested act moves as one piece; they still re-derive on drop, so
+// this is purely visual cohesion during the gesture. Pure + unit-tested.
+export function containerDescendantIds(projection: PlotBoardProjection, containerId: string): string[] {
+  const byId = new Map(projection.containers.map((c) => [c.id, c]));
+  const isInside = (cid: string): boolean => {
+    for (let cur: string | null = cid; cur != null; cur = byId.get(cur)?.parent ?? null) {
+      if (cur === containerId) return true;
+    }
+    return false;
+  };
+  return projection.containers.filter((c) => c.id !== containerId && isInside(c.id)).map((c) => c.id);
 }
 
 // Serialize the current movable-node positions for persistence (S7c; ADR-0053): the

@@ -32,6 +32,17 @@
   // or the Unassigned lane. Applied as a CSS var, so no hex literal lands in style code.
   let accent = $derived(getSwatch(data.color)?.hex ?? null);
 
+  // Per-plotline FOCUS (ADR-0053 §6, S5b): when a thread is focused, a card that is
+  // neither ON that thread (its primary plotline) nor FULFILLING one of its beats
+  // recedes. Reads the focus through the actions getter, so it tracks reactively and
+  // stays inert in the read-only / mount-test case (no context → never dimmed).
+  let dimmed = $derived.by(() => {
+    const focus = actions?.focusedPlotlineId ?? null;
+    if (!focus) return false;
+    if (data.plotlineId === focus) return false;
+    return !data.beats.some((b) => b.plotline_id === focus);
+  });
+
   // The 3-state page marker (Slice 5b): on_page (scene attached) / off_page / unwritten.
   // Null page_status is the sparse default → unwritten. The dot colour comes from the
   // page_status option swatches (moss/graphite/stone), applied as a CSS var (no hex in style).
@@ -189,6 +200,7 @@
     class="plot-card"
     class:accented={accent}
     class:drag-over={dragOver}
+    class:dimmed={dimmed && !dragOver}
     style={accent ? `--card-accent: ${accent}` : undefined}
     ondragover={onCardDragOver}
     ondragleave={onCardDragLeave}
@@ -412,6 +424,13 @@
   .plot-card.drag-over {
     border-color: var(--accent);
     background: var(--accent-soft);
+  }
+  /* Per-plotline FOCUS (ADR-0053 §6, S5b): a card off the focused thread recedes so the
+     thread's cards stand out. A quiet fade + desaturate — the card stays legible and
+     clickable, it just steps back. No token colours change (opacity/filter only). */
+  .plot-card.dimmed {
+    opacity: 0.4;
+    filter: saturate(0.6);
   }
   .card-head {
     display: flex;

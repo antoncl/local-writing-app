@@ -49,6 +49,8 @@ function fakeActions(over: Partial<PlotPlotlineActions> = {}) {
   const actions: PlotPlotlineActions = {
     expandedId: "line_1",
     toggleExpanded: () => {},
+    focusedId: null,
+    toggleFocus: () => {},
     loadPlotline: async () => entry(),
     save: async (e) => {
       saved.push(e);
@@ -135,6 +137,30 @@ describe("PlotPlotlineNode beat drag source (ADR-0053 §4)", () => {
     render(PlotPlotlineNode, { props: { data: data() } }); // no id
     const beats = screen.getAllByRole("listitem");
     expect(beats.every((li) => li.getAttribute("draggable") !== "true")).toBe(true);
+  });
+});
+
+describe("PlotPlotlineNode focus toggle (ADR-0053 §6)", () => {
+  it("toggles focus for this thread when the eye is pressed", async () => {
+    const focused: string[] = [];
+    fakeActions({ expandedId: null, toggleFocus: (id) => focused.push(id) }).mount();
+    const eye = screen.getByRole("button", { name: "Focus this thread" });
+    expect(eye.getAttribute("aria-pressed")).toBe("false");
+    await fireEvent.click(eye);
+    expect(focused).toEqual(["line_1"]);
+  });
+
+  it("shows the eye as active when this thread is the focused one", () => {
+    fakeActions({ expandedId: null, focusedId: "line_1" }).mount();
+    const eye = screen.getByRole("button", { name: "Clear focus" });
+    expect(eye.getAttribute("aria-pressed")).toBe("true");
+    expect(eye.classList.contains("active")).toBe(true);
+  });
+
+  it("offers no focus control without an actions context (the mount-test degrade)", () => {
+    render(PlotPlotlineNode, { props: { id: "line_1", data: data() } });
+    expect(screen.queryByRole("button", { name: "Focus this thread" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Clear focus" })).toBeNull();
   });
 });
 

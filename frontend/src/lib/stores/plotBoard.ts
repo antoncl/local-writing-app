@@ -112,9 +112,11 @@ export async function createCard(title: string, id?: string): Promise<string> {
 // board re-projects without it. Distinct from Detach, which only clears the scene
 // ref; the scene:scene node (if any) is untouched. Uses the same endpoint the card
 // editor pane's Delete does.
-export async function deleteCard(cardId: string): Promise<void> {
+// `refresh` is false only inside a batched undo (a seed-undo deletes N cards) — the
+// caller does ONE trailing refresh instead of N (the refetch-storm fix, #909).
+export async function deleteCard(cardId: string, refresh = true): Promise<void> {
   await api.deleteCard(cardId);
-  await refreshAfterMutation();
+  if (refresh) await refreshAfterMutation();
 }
 
 // Rename a card in place (#798) — the title is intrinsic, not metadata. Fetch first
@@ -306,20 +308,21 @@ export async function getCardState(cardId: string): Promise<CardState> {
 
 // Restore a captured state onto a card that still exists (a field-edit reversal).
 // Fetch-fresh for the live revision so the save can't conflict; refetch rebuilds
-// the board.
-export async function restoreCardState(cardId: string, state: CardState): Promise<void> {
+// the board. `refresh` is false inside a batched delete-undo, where N referrer
+// restores run in parallel and the caller does ONE trailing refresh (#909).
+export async function restoreCardState(cardId: string, state: CardState, refresh = true): Promise<void> {
   const card = await api.getCard(cardId);
   await api.saveCard({ ...card, title: state.title, metadata: state.metadata }, state.body);
-  await refreshAfterMutation();
+  if (refresh) await refreshAfterMutation();
 }
 
 // Recreate a deleted card under its ORIGINAL id, then restore its content
 // (create-then-PUT — the create sets only title, the PUT lands metadata + body).
 // The one refetch is the restore's; the create is a plain api call to avoid a
 // redundant board rebuild between the two writes.
-export async function recreateCard(cardId: string, state: CardState): Promise<void> {
+export async function recreateCard(cardId: string, state: CardState, refresh = true): Promise<void> {
   await api.createCard(state.title, cardId);
-  await restoreCardState(cardId, state);
+  await restoreCardState(cardId, state, refresh);
 }
 
 // Drop the previous project's board so it can't flash on the next project's pane

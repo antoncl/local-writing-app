@@ -247,4 +247,27 @@ describe("GraphUndoController", () => {
     await first;
     expect(ctl.busy).toBe(false);
   });
+
+  it("whenIdle passes the caretaker's idle state through (the queue-behind-undo wire, #909)", async () => {
+    const { ctl } = makeSurface();
+    await expect(ctl.whenIdle()).resolves.toBeUndefined(); // nothing in flight
+
+    const gate: { release?: () => void } = {};
+    ctl.record({
+      undo: () => new Promise<void>((resolve) => (gate.release = resolve)),
+      redo: () => {},
+    });
+    const undoing = ctl.undo();
+    await Promise.resolve();
+
+    let released = false;
+    void ctl.whenIdle().then(() => (released = true));
+    await Promise.resolve();
+    expect(released).toBe(false); // parked while the undo is in flight
+
+    gate.release!();
+    await undoing;
+    await Promise.resolve();
+    expect(released).toBe(true);
+  });
 });

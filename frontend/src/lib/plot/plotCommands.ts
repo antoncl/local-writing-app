@@ -32,6 +32,7 @@ import {
   readScene,
   realizeCard,
   recreateCard,
+  refreshAfterMutation,
   restoreCardState,
   sceneReferents,
 } from "@/lib/stores/plotBoard";
@@ -40,6 +41,7 @@ import {
   deletePlotline,
   getPlotlineState,
   recreatePlotline,
+  refreshRoster,
   restorePlotlineState,
 } from "@/lib/stores/plotlines";
 import { confirmService } from "@/lib/stores/confirmService.svelte";
@@ -48,14 +50,19 @@ import { confirmService } from "@/lib/stores/confirmService.svelte";
 // round-trip); the builders never touch a store directly, so a test drives them with
 // a fake port and asserts the calls.
 export interface PlotCommandPort {
-  deleteCard(id: string): Promise<void>;
+  // `refresh` (default true) is passed false inside a batched delete/seed undo, so
+  // N restores skip their per-item board refetch and the command does ONE at the
+  // end (refreshBoard / refreshRoster) — the refetch-storm fix (#909).
+  deleteCard(id: string, refresh?: boolean): Promise<void>;
   getCardState(id: string): Promise<CardState>;
-  restoreCardState(id: string, state: CardState): Promise<void>;
-  recreateCard(id: string, state: CardState): Promise<void>;
+  restoreCardState(id: string, state: CardState, refresh?: boolean): Promise<void>;
+  recreateCard(id: string, state: CardState, refresh?: boolean): Promise<void>;
   deletePlotline(id: string): Promise<void>;
   getPlotlineState(id: string): Promise<PlotlineState>;
-  restorePlotlineState(id: string, state: PlotlineState): Promise<void>;
-  recreatePlotline(id: string, state: PlotlineState): Promise<void>;
+  restorePlotlineState(id: string, state: PlotlineState, refresh?: boolean): Promise<void>;
+  recreatePlotline(id: string, state: PlotlineState, refresh?: boolean): Promise<void>;
+  refreshBoard(): Promise<void>;
+  refreshRoster(): Promise<void>;
   // Realize (S6b): mint a scene → returns its id; the undo/redo scene ops.
   realizeCard(cardId: string, parentId: string | null): Promise<string>;
   sceneReferents(sceneId: string): string[];
@@ -105,11 +112,13 @@ export function deleteCardCommand(
 ): Command {
   return {
     label,
-    // Node back under its id FIRST, then referrers — restoring a ref before its
-    // target exists would let the save's dangling-heal drop it again.
+    // Node back under its id FIRST (awaited — a ref restored before its target
+    // exists would be dangling-healed away), THEN the referrers in parallel with
+    // their board refetch suppressed, and ONE refresh at the end (#909).
     undo: async () => {
-      await port.recreateCard(id, state);
-      for (const r of referrers) await port.restoreCardState(r.id, r.state);
+      await port.recreateCard(id, state, false);
+      await Promise.all(referrers.map((r) => port.restoreCardState(r.id, r.state, false)));
+      await port.refreshBoard();
     },
     redo: () => port.deleteCard(id),
   };
@@ -152,8 +161,10 @@ export function deletePlotlineCommand(
   return {
     label,
     undo: async () => {
-      await port.recreatePlotline(id, state);
-      for (const r of referrers) await port.restoreCardState(r.id, r.state);
+      await port.recreatePlotline(id, state, false);
+      await Promise.all(referrers.map((r) => port.restoreCardState(r.id, r.state, false)));
+      // One trailing refresh of BOTH the roster (the plotline is back) and the board.
+      await Promise.all([port.refreshRoster(), port.refreshBoard()]);
     },
     redo: () => port.deletePlotline(id),
   };
@@ -179,11 +190,15 @@ export function plotlineEditCommand(
 export function seedCommand(port: PlotCommandPort, created: CardRef[], label = "seed cards"): Command {
   return {
     label,
+    // The whole batch in parallel with per-item refetch suppressed, one refresh at
+    // the end — a 40-card seed reverses in ~1 board refetch, not 40 (#909).
     undo: async () => {
-      for (const c of created) await port.deleteCard(c.id);
+      await Promise.all(created.map((c) => port.deleteCard(c.id, false)));
+      await port.refreshBoard();
     },
     redo: async () => {
-      for (const c of created) await port.recreateCard(c.id, c.state);
+      await Promise.all(created.map((c) => port.recreateCard(c.id, c.state, false)));
+      await port.refreshBoard();
     },
   };
 }
@@ -241,15 +256,24 @@ export class PlotUndoRecorder {
   readonly #port: PlotCommandPort;
   readonly #record: (command: Command) => void;
   readonly #getProjection: () => PlotBoardProjection | null;
+  // Resolves once no undo/redo is in flight (#909). Awaited at the START of every
+  // op so a gesture fired during a still-running undo QUEUES behind it and records
+  // cleanly, instead of hitting `record()` mid-replay (which throws). Defaults to a
+  // resolved promise so a caller that doesn't wire it (tests, a layout-only surface)
+  // is unaffected. Residual: an op already in flight when an undo STARTS isn't
+  // gated — rare, same non-corrupting throw.
+  readonly #whenIdle: () => Promise<void>;
 
   constructor(
     port: PlotCommandPort,
     record: (command: Command) => void,
     getProjection: () => PlotBoardProjection | null,
+    whenIdle: () => Promise<void> = () => Promise.resolve(),
   ) {
     this.#port = port;
     this.#record = record;
     this.#getProjection = getProjection;
+    this.#whenIdle = whenIdle;
   }
 
   async #captureCards(ids: string[]): Promise<CardRef[]> {
@@ -260,6 +284,7 @@ export class PlotUndoRecorder {
    *  causal link/unlink, rename, detach): capture the whole card before + after the
    *  forward op; record only a real change. Returns the op's own result. */
   async cardEdit<T>(id: string, label: string, op: () => Promise<T>): Promise<T> {
+    await this.#whenIdle();
     const before = await this.#port.getCardState(id);
     const result = await op();
     const after = await this.#port.getCardState(id);
@@ -272,6 +297,7 @@ export class PlotUndoRecorder {
   /** A plotline rename / recolour / beat-roster edit. Returns the op's own result
    *  (the saved entry the node resyncs its revision from). */
   async plotlineEdit<T>(id: string, label: string, op: () => Promise<T>): Promise<T> {
+    await this.#whenIdle();
     const before = await this.#port.getPlotlineState(id);
     const result = await op();
     const after = await this.#port.getPlotlineState(id);
@@ -283,6 +309,7 @@ export class PlotUndoRecorder {
 
   /** Create a card via the given forward op (returns the new id); record it. */
   async createCard(create: () => Promise<string>, label?: string): Promise<string> {
+    await this.#whenIdle();
     const id = await create();
     const state = await this.#port.getCardState(id);
     this.#record(createCardCommand(this.#port, id, state, label));
@@ -293,6 +320,7 @@ export class PlotUndoRecorder {
    *  record it. Undo/redo restore the whole plotline (beats + lineage), so the
    *  template behind it is irrelevant to the reversal. */
   async createPlotline(create: () => Promise<string>, label?: string): Promise<string> {
+    await this.#whenIdle();
     const id = await create();
     const state = await this.#port.getPlotlineState(id);
     this.#record(createPlotlineCommand(this.#port, id, state, label));
@@ -302,6 +330,7 @@ export class PlotUndoRecorder {
   /** Delete a card. Called AFTER the user confirmed — captures the card + its
    *  inbound referrers, runs the delete, records. */
   async deleteCard(id: string, del: () => Promise<void>): Promise<void> {
+    await this.#whenIdle();
     const state = await this.#port.getCardState(id);
     const projection = this.#getProjection();
     const referrers = projection ? await this.#captureCards(cardsReferencingCard(projection, id)) : [];
@@ -310,6 +339,7 @@ export class PlotUndoRecorder {
   }
 
   async deletePlotline(id: string, del: () => Promise<void>): Promise<void> {
+    await this.#whenIdle();
     const state = await this.#port.getPlotlineState(id);
     const projection = this.#getProjection();
     const referrers = projection ? await this.#captureCards(cardsReferencingPlotline(projection, id)) : [];
@@ -322,6 +352,7 @@ export class PlotUndoRecorder {
    *  never depends on a lagging projection prop; capture their state + record one step.
    *  Nothing created (an idempotent re-run) records nothing. */
   async seed(seedOp: () => Promise<string[]>): Promise<void> {
+    await this.#whenIdle();
     const created = await seedOp();
     if (created.length === 0) return;
     this.#record(seedCommand(this.#port, await this.#captureCards(created)));
@@ -332,6 +363,7 @@ export class PlotUndoRecorder {
    *  A realize that produced no scene (a 409 already-attached, or an error) records
    *  nothing. */
   async realize(cardId: string, parentId: string | null): Promise<void> {
+    await this.#whenIdle();
     const sceneId = await this.#port.realizeCard(cardId, parentId);
     if (!sceneId) return;
     this.#record(realizeCommand(this.#port, cardId, parentId, sceneId));
@@ -349,6 +381,8 @@ export function defaultPlotCommandPort(): PlotCommandPort {
     getPlotlineState,
     restorePlotlineState,
     recreatePlotline,
+    refreshBoard: refreshAfterMutation,
+    refreshRoster,
     realizeCard,
     sceneReferents,
     readScene,

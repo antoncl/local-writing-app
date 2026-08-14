@@ -375,6 +375,18 @@ describe("card content ops", () => {
     expect(save.mock.calls[0][1]).toBe("Back.");
   });
 
+  it("restore/recreate/deleteCard with refresh:false skip the board refetch (batched undo, #909)", async () => {
+    vi.spyOn(api, "getCard").mockResolvedValue(card());
+    vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
+    vi.spyOn(api, "createCard").mockResolvedValue(card());
+    vi.spyOn(api, "deleteCard").mockResolvedValue({ entries: [] });
+    const refresh = vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    await restoreCardState("c1", { title: "X", body: "", metadata: {} }, false);
+    await recreateCard("c1", { title: "X", body: "", metadata: {} }, false);
+    await deleteCard("c1", false);
+    expect(refresh).not.toHaveBeenCalled(); // the batch does one refresh itself, later
+  });
+
   // ── Realize-undo substrate (S6b) ──────────────────────────────────────────
 
   it("sceneReferents lists the cards referencing a scene, read off the live board", () => {

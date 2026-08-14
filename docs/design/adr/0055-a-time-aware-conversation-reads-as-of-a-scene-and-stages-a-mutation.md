@@ -7,8 +7,9 @@
   gesture — **§5, new mutation points are authored in prose only**), ADR-0046 (a brainstorm chat
   commits a change back to an entry), ADR-0051 (a node owns its conversations; a chat references its
   subject), ADR-0054 (a prompt picks a disposition and an optional commit — impersonate + `offer_on`),
-  ADR-0001 (the scene is authoritative; narrative position *is* file position), ADR-0016 (the mutation
-  unit + row shape), #62 (reusable mutation sets).
+  ADR-0001 (the scene is authoritative; narrative position *is* file position), ADR-0011 (a mutation
+  set is a stamp, not a live link), ADR-0016 (the mutation unit + row shape), #62 (reusable mutation
+  sets).
 - Governed by: `docs/design/design-language.md` (consumes the settled `⤳` mutation mark).
 - Citations pinned to `master@490dcc8`.
 
@@ -41,15 +42,18 @@ update/delete of *existing* rows (`lore_mutations.py`), and new points are born 
 dialog inserting a pill at a real cursor in a scene.
 
 So the loop is not just missing a feature; it silently lies about the timeline, and the naive fix
-violates a foundational ADR. This ADR settles both halves without touching that foundation.
+violates a foundational ADR. This ADR settles both halves without touching that foundation, and it
+reuses the object the project already has for a position-free bundle of field changes — the **mutation
+set** (#62) — rather than inventing a parallel one.
 
 ## Intent
 
 Make a conversation tell the truth about the timeline:
 
 1. it **reads** its subject as the subject was *at a chosen point in the story*, and
-2. when it produces a timeline change, it **stages** that change as a position-free artifact the writer
-   later **places** in a scene — so the change becomes real exactly where the writer says it happens.
+2. when it produces a timeline change, it **stages** that change as a position-free **mutation set** the
+   writer later **places** in a scene — so the change becomes real exactly where the writer says it
+   happens.
 
 The unifying rule, which both halves obey:
 
@@ -59,13 +63,11 @@ The unifying rule, which both halves obey:
 
 - **No card-side position invention.** The AI never writes a `<!-- mutate: -->` marker. ADR-0042 §5 /
   ADR-0001 stand untouched; the marker is still born in prose, at a real cursor, by the writer.
-- **No overloading reusable mutation sets.** A staged change is a *one-off, entity-specific* proposal;
-  a mutation set (#62) is a *reusable, type-scoped* template. They are different nouns and must not
-  share a container, or the sets pane fills with un-reusable AI one-offs and forgets which character a
-  change is for.
-- **No new mutation storage grammar.** The staged artifact reuses the existing row shape
-  (`MutationSetRow{field, op, value}`) and the existing apply-into-scene flow. Placement mints an
-  ordinary carrier.
+- **No second variant of a mutation set.** A staged change is a *mutation set* — the same noun a writer
+  already curates — distinguished only by an **optional entity pin**, never a parallel "staged
+  mutation" kind with its own storage, pane, and apply flow.
+- **No new mutation storage grammar.** The set already carries `MutationSetRow{field, op, value}` rows
+  and already has an apply-into-scene flow. Placement mints an ordinary carrier.
 - **The read side never writes.** Resolving a subject as-of a scene is a pure read; it does not create
   or move a marker.
 - **Base/canon commits are unchanged.** Correcting a character's canonical (atemporal) definition still
@@ -80,17 +82,17 @@ The unifying rule, which both halves obey:
    that voice. Impersonating her here does not leak the werewolf she has not yet become.
 2. Later, the writer starts a **committing brainstorm** on Mira: "how does her lycanthropy manifest?"
    They shape it with the AI over several turns.
-3. **Commit** does not touch a scene. It **stages a mutation**: `Mira → {condition: werewolf; body +=
-   transformation notes}`, pinned to Mira, with *no* position. It appears in the Mutations pane as a
-   *proposed* change for Mira, and the **chat now owns it** — the conversation references the staged
-   mutation.
-4. A week of writing later, the writer **reopens that brainstorm**. It does not start blank: the staged
-   mutation is resolved from the chat's reference, shown, and seeded into the prompt context, so the AI
+3. **Commit** does not touch a scene. It **stages a mutation set pinned to Mira**: `{condition:
+   werewolf; body += transformation notes}`, with *no* position — the same object the writer could have
+   hand-authored from Mira's card. It appears as a *pending* set on Mira's card (and in the Mutations
+   pane), and the **chat now owns it**.
+4. A week of writing later, the writer **reopens that brainstorm**. It does not start blank: the pinned
+   set is resolved from the chat's reference, shown, and seeded into the prompt context, so the AI
    continues — "we established Mira turns at the blood moon; let's tighten the first change" — instead
    of relitigating.
-5. The writer reaches the transformation scene. In prose, `/mutate` offers the staged Mira mutation
-   (already pinned to Mira); the writer **places it** at the moment of transformation. The carrier
-   marker is born there, in the scene, at a real cursor.
+5. The writer reaches the transformation scene. In prose, `/mutate` offers Mira's pending set (already
+   pinned to Mira); the writer **places it** at the moment of transformation. The carrier marker is born
+   there, in the scene, at a real cursor.
 6. From that scene onward Mira *is* a werewolf everywhere the effective state is read — a later
    impersonate speaks as the werewolf; one anchored before it still speaks as human. The loop told the
    truth.
@@ -111,47 +113,61 @@ subject) resolves the subject through `effective_state(entity, scene, position)`
 
 This is a pure read and reuses ADR-0013 machinery the lore card already drives.
 
-### 2. A committing conversation writes only a *staged mutation*
+### 2. A committing conversation stages a mutation set pinned to its subject
 
 When a conversation's commit expresses a **timeline** change (as opposed to a canonical correction —
-§6), it produces a **staged mutation**: a position-free, entity-pinned artifact carrying
-`MutationSetRow{field, op, value}` rows — the same row shape the in-scene `/mutate` dialog authors.
+§6), it produces a **mutation set** carrying `MutationSetRow{field, op, value}` rows, **pinned to the
+conversation's subject**.
 
 - It has **no scene and no position**. The AI proposes *what* changes and *to whom*, never *where*.
-- It is **pinned to a specific entity** (the conversation's subject), unlike a reusable set.
-- The commit persists it via a create call; nothing in that path references the manuscript.
+- It is an ordinary mutation set — created through the same path a writer's set uses — with the entity
+  pin set. The commit persists it via `create_mutation_set_entry`; nothing in that path references the
+  manuscript.
 
-### 3. The staged mutation is a distinct artifact, not a reusable set
+### 3. One mutation set, entity binding optional, authored from the entity
 
-A reusable mutation set (#62) is type-scoped (`target_entry_type`) and reusable by design — it
-deliberately drops the entity, to be bound at apply time. A staged mutation is the opposite: **a
-one-off pinned to one entity**. It is therefore a **distinct node kind**, surfaced in the Mutations
-pane as *proposed* (separate from reusable templates), reusing the set's row shape and its
-apply-into-scene flow but not its identity.
+There is **one** mutation-set model, not two. A mutation set gains an **optional `target_entity`**
+alongside its existing `target_entry_type` (`models/entries.py: MutationSetEntry`):
 
-### 4. The chat owns its staged mutation as a durable, resumable work-product
+- **Unset** → the reusable, type-scoped template of today (#62): applicable to any entity of
+  `target_entry_type`, entity chosen at apply time. Unchanged.
+- **Set** → an *entity-pinned* set: this change, about this character. On apply it pre-fills its entity
+  rather than asking, and it is not offered as a generic template for other entities.
 
-The chat references its staged mutation the same way it already references its `subject` — a second
-`entity_ref` field on `chat:chat_session` (fields today: `["subject", "color"]`,
-`default_schema.py`), which the id-keyed reference graph extracts as an ordinary edge (ADR-0051, #194).
+A staged commit is simply the pinned mode; a hand-authored "change to Mira" is the same object. The
+row shape, storage kind (`mutation_set:mutation_set`), pane, and apply flow are all shared — the pin is
+a set-level field, not a new grammar.
+
+**The natural authoring home for a set is the lore entity.** Creating or editing a set *from* the
+character card pins it to that entity by construction, so the "author from the entity" gesture and the
+"entity pin" are one fact. The card thereby becomes the coherent home for the subject's whole timeline
+story: **read** effective state as-of (the ADR-0013 scrubber), **author** proposed changes (pinned
+sets), and **see what is pending** (pinned sets not yet placed). The Mutations pane remains the
+management surface and the home for reusable, un-pinned templates.
+
+### 4. The chat owns its pinned set as a durable, resumable work-product
+
+The chat references its pinned set the same way it already references its `subject` — a second
+`entity_ref` on `chat:chat_session` (fields today: `["subject", "color"]`, `default_schema.py`), which
+the id-keyed reference graph extracts as an ordinary edge (ADR-0051, #194).
 
 - **Durable, not ephemeral.** Unlike today's in-memory commit proposal
-  (`stores/entryProposal.svelte.ts`, discarded on abandon), the staged mutation is a persisted node,
-  so it survives closing the chat.
-- **Resume, not restart.** Reopening the conversation resolves the referenced staged mutation, surfaces
-  it in the UI, and **seeds it into the prompt context**, so the AI continues refining the same change.
-- A conversation may own more than one staged mutation over its life; each is an edge.
+  (`stores/entryProposal.svelte.ts`, discarded on abandon), the set is a persisted node, so it survives
+  closing the chat.
+- **Resume, not restart.** Reopening the conversation resolves the referenced set, surfaces it, and
+  **seeds it into the prompt context**, so the AI continues refining the same change.
+- A conversation may own more than one pinned set over its life; each is an edge.
 
-### 5. The writer places the staged mutation into a scene
+### 5. The writer places the pinned set into a scene
 
 Placement is the terminal, prose-side step and reuses the existing "apply a saved set" flow
 (`MutationAuthoringForm` → `applyMutationUnitDraft` → `insertContent`, `lib/editor-core/mutationNodes.ts`):
-the staged mutation's rows stamp as one mutation unit at the writer's cursor, and an ordinary carrier
-marker is born there. Because it is entity-pinned, the entity is pre-filled rather than re-chosen.
+the set's rows stamp as one mutation unit at the writer's cursor, and an ordinary carrier marker is born
+there. Because the set is entity-pinned, the entity is pre-filled rather than re-chosen.
 
-Placing a staged mutation **marks it placed** (it becomes provenance of the now-real marker); it is no
-longer a pending proposal. Until placed, it changes nothing — the subject's effective state is
-untouched, so a conversation anchored after the intended point does not yet see it.
+Placing a pinned set **marks it placed** (it becomes provenance of the now-real marker); it is no longer
+pending. Until placed, it changes nothing — the subject's effective state is untouched, so a
+conversation anchored after the intended point does not yet see it.
 
 ### 6. Canonical (atemporal) commits keep the direct-to-entry path
 
@@ -172,34 +188,37 @@ UI; it is the same content, two destinations.
   this ADR exists. Rejected: it is precisely the card-side position invention ADR-0042 §5 forbids —
   `END_OF_SCENE` is a *resolution* default, not an authoring position, and inventing a manuscript point
   without a cursor is what the scene-authoritative model (ADR-0001) was chosen to avoid.
-- **Stage the change as a reusable mutation set.** The plumbing fits (a set is position-free and has an
-  apply flow), and it is the tempting zero-model option. Rejected: a set is *type-scoped and reusable*;
-  forcing a one-off entity-specific proposal into it loses the entity (the artifact forgets it is about
-  Mira), invites applying it to the wrong character, and clutters the reusable-templates pane. §3 keeps
-  the noun honest.
+- **A distinct "staged mutation" kind, separate from mutation sets.** Tempting, to keep one-off entity
+  proposals from cluttering the reusable-templates pane. Rejected: it forks the same noun into two
+  variants with duplicate storage, pane, and apply paths. A set already *is* a position-free bundle of
+  field-change rows; the only thing it lacked was an entity pin, which §3 adds as one optional field.
+- **Stage the change in a *type-scoped* set (no entity pin).** The zero-model option. Rejected: it loses
+  the entity (the artifact forgets it is about Mira), invites applying it to the wrong character, and
+  cannot be the resumable work-product a chat owns for a specific subject.
 - **Give impersonate a `scene_ref` input and resolve `entry()` against it.** Solves only the read half,
-  and by extending the flat `entry()` accessor to thread a scene — duplicating the `effective_state`
+  by extending the flat `entry()` accessor to thread a scene — duplicating the `effective_state`
   resolution the lore card already owns. §1 reuses that path instead.
 - **Keep the commit's proposal ephemeral (today's in-memory patch).** Rejected by the Mira journey: a
-  conversation that forgets the mutation it authored the moment it closes cannot be resumed, and the
-  writer loses the work between the brainstorm and the scene where it belongs.
+  conversation that forgets the set it authored the moment it closes cannot be resumed.
 - **A conversation always commits at "current" (end-of-book).** Rejected: it collapses the timeline the
   whole feature exists to respect — a change authored at Chapter 40 is not the same as one that takes
   effect from Chapter 2.
 
 ## Consequences
 
-- **New:** a staged-mutation node kind (entity-pinned, position-free, row-shaped) with create/read/list
-  and a "placed" transition; a second `entity_ref` on `chat:chat_session` for the chat→staged-mutation
-  edge; an "as of" anchor on a conversation; context seeding of a resumed conversation's staged
-  mutation.
-- **Reused, not rebuilt:** `effective_state` (read), the `MutationSetRow` row shape and the
-  apply-into-scene flow (`mutationNodes.ts`), the reference graph (edge extraction + `conversationsFor`
-  neighbours), and the ADR-0046 commit/review scaffold.
-- **Untouched:** the mutation carrier grammar and scene-authoritative model (ADR-0001/0042 §5); reusable
-  mutation sets (#62); base/canon commits (ADR-0046); read-side hierarchy scrubbing (deferred).
-- **The Mutations pane grows a second section** — *proposed* (entity-pinned, one-off) alongside
-  *reusable sets* — or the proposed items live on their subject card. Which surface is §-open (below).
+- **New:** an optional `target_entity` on `MutationSetEntry` (pin) + its apply-time pre-fill; a second
+  `entity_ref` on `chat:chat_session` for the chat→set edge; an entity-side "new/edit set" authoring
+  affordance on the lore card; an "as of" anchor on a conversation; context seeding of a resumed
+  conversation's pinned set; the commit's timeline branch creating a pinned set.
+- **Reused, not rebuilt:** the entire mutation-set model and its CRUD (`mutation_sets.py`),
+  `effective_state` (read), the `MutationSetRow` row shape and the apply-into-scene flow
+  (`mutationNodes.ts`), the reference graph (edge extraction + `conversationsFor` neighbours), and the
+  ADR-0046 commit/review scaffold.
+- **Untouched:** the mutation carrier grammar and scene-authoritative model (ADR-0001/0042 §5); the
+  reusable (un-pinned) behaviour of existing sets (#62); base/canon commits (ADR-0046); read-side
+  hierarchy scrubbing (deferred).
+- **The Mutations pane and the lore card both surface pinned sets** — pending changes for a character —
+  while the pane keeps reusable templates. Placement removes a set from "pending."
 - **Impersonate's `.md` changes** from a flat `entry(input.entry)` read to an as-of resolution; the
   built-in prompt and the `offer_on` machinery (ADR-0054) are otherwise unchanged.
 
@@ -207,20 +226,19 @@ UI; it is the same content, two destinations.
 
 - **Default anchor for a card-launched conversation** with no current scene: end-of-book (current self)
   is proposed; confirm, and confirm the override affordance's home on the Conversations surface.
-- **Surface for a staged mutation:** the Mutations pane's *proposed* section, the subject card, or
-  both. It has two natural homes (the mutation system and the entity it targets).
-- **Field coverage:** whether a staged mutation may carry intrinsic `title`/`body` rows
+- **Reference-graph reach:** confirm a `mutation_set` node participates in edge extraction as an
+  `entity_ref` target, so the chat→set edge resolves like chat→subject (or what the minimal addition is).
+- **Field coverage:** whether a pinned set may carry intrinsic `title`/`body` rows
   (`INTRINSIC_MUTABLE_FIELDS`) and collection ops, matching the in-scene authoring surface, or a subset
   first.
-- **Whether placement retires or keeps** the staged node (provenance vs. cleanup), and what happens to a
-  staged mutation whose subject or target field is later deleted.
+- **Whether placement retires or keeps** the set (provenance vs. cleanup), and what happens to a pending
+  pinned set whose subject or target field is later deleted.
 
 ## Suggested slicing (indicative, not decided here)
 
 1. **Read half** — the as-of anchor + `effective_state` resolution for impersonate. Self-contained,
    independently valuable, no new storage.
-2. **Staged-mutation artifact** — the node kind + create/list + the chat edge (no placement UI yet).
-3. **Commit → stage** — the timeline branch of the ADR-0046 commit produces a staged mutation; resume
-   seeds it into context.
-4. **Placement** — the staged mutation offered in the scene `/mutate` flow, entity pre-pinned; "placed"
-   transition.
+2. **Entity pin + entity-side authoring** — `target_entity` on the set, apply-time pre-fill, and the
+   "new/edit set" affordance on the lore card. Useful on its own (hand-authored pinned sets), no AI.
+3. **Chat owns the set** — the chat→set edge + resume seeding into context.
+4. **Commit → stage** — the timeline branch of the ADR-0046 commit produces a pinned set the chat owns.

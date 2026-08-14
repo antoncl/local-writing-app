@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { MetadataSchema, PromptEntrySummary } from "@/lib/types";
 import type { PromptResolutionContext } from "@/lib/editor-core/promptResolution";
-import { DISPOSITION_FIELD, dispositionFor, promptSummariesToGroupNodes } from "@/lib/views/promptNodes";
+import {
+  CHAT_DISPOSITION_LABEL,
+  DISPOSITION_FIELD,
+  DISPOSITION_LABELS,
+  dispositionFieldDef,
+  dispositionFor,
+  promptSummariesToGroupNodes,
+  REVISE_ENTITIES_DISPOSITION_LABEL,
+} from "@/lib/views/promptNodes";
 
 // Each prompt sub-type carries a `context_strategy.output` (ADR-0054 §1/§2); the
 // disposition is read off it. A type with no output is a snippet (no invocation
@@ -89,5 +97,32 @@ describe("promptSummariesToGroupNodes — the pane lift", () => {
     const original = prompt("a", "prompt:continuation");
     promptSummariesToGroupNodes([original], SCHEMA);
     expect(original.metadata).toEqual({});
+  });
+});
+
+describe("dispositionFieldDef — the designer computed field (#960)", () => {
+  it("is a computed select whose choices are the five shelf labels", () => {
+    const def = dispositionFieldDef();
+    expect(def.type).toBe("select");
+    expect(def.category).toBe("computed");
+    expect(def.options.map((o) => o.value)).toEqual([
+      "Continue",
+      "Revise prose",
+      "Chat",
+      "Revise entities",
+      "Snippets",
+    ]);
+    // The value set is exactly the labels the lift stamps, so a filter/group on
+    // this field matches the buckets `promptSummariesToGroupNodes` produces.
+    expect(def.options.map((o) => o.value)).toEqual(DISPOSITION_LABELS);
+  });
+
+  it("exports the two chat-reachable labels bound to the same disposition strings", () => {
+    // chatNodes' seed-disposition descriptor and the Openable predicate reuse these,
+    // so a rename of the shelf labels can't drift them out of sync.
+    expect(CHAT_DISPOSITION_LABEL).toBe(dispositionFor(ctx, prompt("c", "prompt:general")).label);
+    expect(REVISE_ENTITIES_DISPOSITION_LABEL).toBe(
+      dispositionFor(ctx, prompt("d", "prompt:revise:entry")).label,
+    );
   });
 });

@@ -7,11 +7,11 @@
 //
 // `disposition` is DERIVED at render from the entry_type's context_strategy
 // (effectiveOutputKind + promptDeclaresCommit), never stored — the same pattern
-// as chatNodes' `seed_committing` and the Assistants default's `listed`. It goes
+// as chatNodes' `seed_disposition` and the Assistants default's `listed`. It goes
 // in `metadata` so the prompt default view's `group_by: [{ field: "disposition" }]`
 // can bucket on it through ordinary field access.
 
-import type { EntryMetadata, MetadataSchema, PromptEntrySummary } from "@/lib/types";
+import type { EntryMetadata, MetadataFieldDefinition, MetadataSchema, PromptEntrySummary } from "@/lib/types";
 import type { EvalNode } from "@/lib/views/evaluateView";
 import {
   effectiveOutputKind,
@@ -52,6 +52,31 @@ export function dispositionFor(ctx: PromptResolutionContext, entry: PromptEntryS
     default:
       return SNIPPETS;
   }
+}
+
+// The two dispositions a chat_panel seed can carry, exported so chatNodes' chat
+// seed-disposition descriptor and the "Openable chats" predicate bind to the same
+// label strings this module stamps (a rename here can't drift them).
+export const CHAT_DISPOSITION_LABEL = CHAT.label;
+export const REVISE_ENTITIES_DISPOSITION_LABEL = REVISE_ENTITIES.label;
+
+// The five disposition labels in shelf order — the value set the view designer
+// offers when a user filters or groups a prompt view on `disposition`.
+export const DISPOSITION_LABELS = [CONTINUE, REVISE_PROSE, CHAT, REVISE_ENTITIES, SNIPPETS].map(
+  (disp) => disp.label,
+);
+
+// `disposition` as a computed field the view designer offers (computedFields
+// registry) — the lift stamps the value, this declares the field exists and its
+// choices so the filter/group pickers can select it. Not a schema field; values
+// are the labels above, matched by `segmentForField`/set-overlap on the raw label.
+export function dispositionFieldDef(): MetadataFieldDefinition {
+  return {
+    name: "Disposition",
+    type: "select",
+    category: "computed",
+    options: DISPOSITION_LABELS.map((value) => ({ value })),
+  };
 }
 
 export type PromptGroupNode = PromptEntrySummary & EvalNode & { metadata: EntryMetadata };

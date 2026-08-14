@@ -59,7 +59,7 @@
     getPlotlineEntry,
     plotlineReveal,
   } from "@/lib/stores/plotlines";
-  import { plotTemplatesStore, deletePlotTemplateEntry } from "@/lib/stores/plotTemplates";
+  import { plotTemplatesStore } from "@/lib/stores/plotTemplates";
   import UndoRedoControls from "@/components/UndoRedoControls.svelte";
   import ViewportFit from "@/components/editor/body/view/ViewportFit.svelte";
   import PlotCardNodeFlow from "./plot/PlotCardNodeFlow.svelte";
@@ -337,35 +337,9 @@
     }
   }
 
-  // Clone a Library template into the project (ADR-0049) and open it to author its beats.
-  // forkPlotTemplate refreshes the roster + opens the clone; it can throw, so surface a
-  // failure in the banner (App wraps the same call in its own error sink).
-  async function cloneTemplate(id: string): Promise<void> {
-    try {
-      await editorPanes.forkPlotTemplate(id);
-    } catch (e) {
-      editorPanes.setError(e instanceof Error ? e.message : "Could not clone the template.");
-    }
-  }
-
-  // Delete an owned template clone from the palette (destructive → confirm). A plotline
-  // already instantiated from it is unaffected (its beats were snapshotted, not linked).
-  function removeTemplate(id: string): void {
-    const tpl = templates.find((t) => t.id === id);
-    confirmService.request({
-      title: "Delete template",
-      message: `Delete ${tpl?.title ? `“${tpl.title}”` : "this template"}? Plotlines already made from it keep their beats.`,
-      confirmLabel: "Delete template",
-      destructive: true,
-      onConfirm: async () => {
-        await deletePlotTemplateEntry(id);
-        // Close a NodeEditor pane open on this template ("Edit"): the node is gone, so a
-        // save would 404. Mirrors removeCard's post-delete tearDown.
-        const openPane = editorPanes.panes.find((p) => p.document?.id === id);
-        if (openPane) editorPanes.tearDown(openPane.id);
-      },
-    });
-  }
+  // Cloning a Library template, and editing / deleting an owned clone, live on the Plot
+  // Templates pane (#916), not the board palette — the palette is a spawn source. Its
+  // former cloneTemplate / removeTemplate handlers went with that chrome.
 
   // Delete a plotline — the node's "Delete plotline" (the retired rail used to own this).
   // Confirmed; cards on the thread revert to Unassigned. Collapse the editor if it was open.
@@ -688,9 +662,6 @@
           entries={templates}
           onInstantiate={(id) => void instantiateTemplate(id)}
           onEmpty={() => void newPlotline()}
-          onClone={(id) => void cloneTemplate(id)}
-          onEdit={(id) => void editorPanes.openPlotTemplate(id)}
-          onDelete={removeTemplate}
         />
       {/if}
       <div class="board-body">

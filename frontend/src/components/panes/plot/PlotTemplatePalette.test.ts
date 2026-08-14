@@ -44,9 +44,6 @@ function mount(over: Partial<Record<string, unknown>> = {}) {
   const handlers = {
     onInstantiate: vi.fn(),
     onEmpty: vi.fn(),
-    onClone: vi.fn(),
-    onEdit: vi.fn(),
-    onDelete: vi.fn(),
   };
   render(PlotTemplatePalette, {
     props: {
@@ -104,7 +101,7 @@ describe("PlotTemplatePalette", () => {
 
   it("does not claim ownership of an ancestor-inherited (non-owned) template", async () => {
     // is_library:false but editable:false — owned by an ancestor project, inherited
-    // here. It is NOT "your template"; provenance rides the ◆ glyph + the layer pill.
+    // here. It is NOT "your template"; provenance rides the ◆ glyph alone.
     mount({ entries: [tpl({ id: "tpl_x", title: "Series arc", is_library: false, editable: false, beat_count: 5 })] });
     await tick();
     expect(screen.getByText("5 beats")).toBeTruthy();
@@ -119,17 +116,27 @@ describe("PlotTemplatePalette", () => {
     expect(h.onInstantiate).toHaveBeenCalledWith("tpl_1");
   });
 
-  it("a Library row offers Clone; an owned row offers Edit + Delete", async () => {
-    const h = mount();
+  it("carries no template-management chrome — that lives on the Plot Templates pane (#916)", async () => {
+    // The palette is a spawn source: no clone/hide (Library rows) or edit/delete (owned
+    // rows) buttons, and no "Library" provenance pill crowding the narrow rail.
+    mount();
     await tick();
-    await fireEvent.click(screen.getByRole("button", { name: "Clone Three-Act into this project" }));
-    expect(h.onClone).toHaveBeenCalledWith("tpl_1");
+    for (const name of [/Clone /i, /Hide /i, /Edit /i, /Delete /i, /again/i]) {
+      expect(screen.queryByRole("button", { name })).toBeNull();
+    }
+    expect(screen.queryByText("Library")).toBeNull();
+  });
 
-    await fireEvent.click(screen.getByRole("button", { name: "Edit Heist beats" }));
-    expect(h.onEdit).toHaveBeenCalledWith("tpl_2");
-
-    await fireEvent.click(screen.getByRole("button", { name: "Delete Heist beats" }));
-    expect(h.onDelete).toHaveBeenCalledWith("tpl_2");
+  it("drops a template hidden on the pane from the spawn list", async () => {
+    // Hiding is the pane's job; the palette just respects it (no un-hide affordance).
+    const { hideLibraryEntry } = await import("@/lib/stores/hiddenLibrary");
+    mount();
+    await tick();
+    expect(screen.getByText("Three-Act")).toBeTruthy();
+    hideLibraryEntry("tpl_1");
+    await tick();
+    expect(screen.queryByText("Three-Act")).toBeNull();
+    expect(screen.getByText("Heist beats")).toBeTruthy();
   });
 
   it("shows an empty hint but keeps the Empty tile when there are no templates", async () => {

@@ -320,9 +320,15 @@
             draggable={!!actions}
             ondragstart={(e) => onBeatDragStart(e, beat.plotline_id, beat.beat_id)}
           >
-            <!-- The beat's roster number (#941) so two same-titled beats are tellable apart. -->
-            <span class="beat-badge-num" aria-hidden="true">{beat.number}</span>
+            {#if actions}
+              <!-- A leading grip signals the badge drags card→card (#941 follow-up), the
+                   same affordance the plotline roster + card grip use. Only interactive. -->
+              <span class="beat-badge-grip" aria-hidden="true"><i class="ti ti-grip-vertical"></i></span>
+            {/if}
             <span class="beat-badge-label">{beat.title}</span>
+            <!-- The beat's roster number (#941), POSTFIXED so the title leads, so two
+                 same-titled beats are still tellable apart. -->
+            <span class="beat-badge-num" aria-hidden="true">{beat.number}</span>
             {#if actions}
               <button
                 class="beat-badge-x nodrag nopan"
@@ -676,6 +682,8 @@
   }
   /* The beat's roster number (#941): a quiet leading ordinal, tabular so widths line
      up down a column of badges. Never shrinks — the title ellipsises, the number stays. */
+  /* The number now trails the title (#941 follow-up); tabular so a column of badges
+     lines up, and never shrinks — the title ellipsises, the number holds. */
   .beat-badge-num {
     flex: 0 0 auto;
     font-variant-numeric: tabular-nums;
@@ -684,6 +692,20 @@
   }
   .beat-badge.coloured .beat-badge-num {
     color: color-mix(in srgb, var(--beat-accent) 70%, var(--text-3));
+  }
+  /* A leading grip that advertises the card→card drag (#941 follow-up), matching the
+     plotline roster's beat grip; quiet at rest, brighter on hover, and it never shrinks. */
+  .beat-badge-grip {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    margin-left: -2px;
+    color: var(--text-3);
+    font-size: var(--fs-sm);
+    line-height: 1;
+  }
+  .beat-badge:hover .beat-badge-grip {
+    color: var(--text-2);
   }
   /* An interactive badge drags (card→card move, #941): a grab cursor advertises it. */
   .beat-badge.draggable {

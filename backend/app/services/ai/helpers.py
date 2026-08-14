@@ -382,10 +382,11 @@ def _coerce_entry_ref_as_of(
         overrides = project.effective_state(ref.id, scene_id, index=index)
     except Exception:
         overrides = {}
-    if not overrides:
-        return ref
-    updates = _effective_overlay_updates(project, schema, base, overrides)
-    return EntryRef(project, schema, ref.id, loaded=base.model_copy(update=updates))
+    # Read base once: hand it to the EntryRef as `loaded=` even with no overrides,
+    # so a non-mutated subject (the common case) isn't re-read on attribute access.
+    updates = _effective_overlay_updates(project, schema, base, overrides) if overrides else {}
+    loaded = base.model_copy(update=updates) if updates else base
+    return EntryRef(project, schema, ref.id, loaded=loaded)
 
 
 def _effective_overlay_updates(
@@ -401,17 +402,24 @@ def _effective_overlay_updates(
     for field, raw in overrides.items():
         if field in ("title", "body"):
             updates[field] = raw if isinstance(raw, str) else str(raw)
-        elif isinstance(raw, list):
-            metadata[field] = raw
-            metadata_changed = True
         else:
-            field_def = getattr(schema, "fields", {}).get(field) if schema is not None else None
-            field_type = getattr(field_def, "type", "") if field_def is not None else ""
-            metadata[field] = project._coerce_mutation_value(raw, field_type)
+            metadata[field] = _coerce_effective_value(project, schema, field, raw)
             metadata_changed = True
     if metadata_changed:
         updates["metadata"] = metadata
     return updates
+
+
+def _coerce_effective_value(project: ProjectService, schema: Any, field: str, raw: Any) -> Any:
+    """Coerce one `effective_state` value to its field's native type: a collection
+    already resolves to the list to hand back as-is (ADR-0009); a scalar marker is
+    a string that `_coerce_mutation_value` turns back into a number/bool/etc. so an
+    as-of value matches a base value. Shared by `effective()` and `entry_as_of()`."""
+    if isinstance(raw, list):
+        return raw
+    field_def = getattr(schema, "fields", {}).get(field) if schema is not None else None
+    field_type = getattr(field_def, "type", "") if field_def is not None else ""
+    return project._coerce_mutation_value(raw, field_type)
 
 
 def _field_catalog(project: ProjectService, schema: Any, value: Any) -> list[dict[str, Any]]:
@@ -749,16 +757,10 @@ def _effective_field(
     except Exception:
         overrides = {}
     if field in overrides:
-        value = overrides[field]
-        # Collection fields already resolve to a list (ADR-0009) — hand it back
-        # as-is. Scalar markers store strings; coerce to the field's native type
-        # so `effective(...)` matches `base(...)` (a number stays a number, a bool
-        # a bool) and template comparisons don't break in mutated scenes.
-        if isinstance(value, list):
-            return value
-        field_def = getattr(schema, "fields", {}).get(field) if schema is not None else None
-        field_type = getattr(field_def, "type", "") if field_def is not None else ""
-        return project._coerce_mutation_value(value, field_type)
+        # Collection → the resolved list as-is; scalar → coerced to the field's
+        # native type so `effective(...)` matches `base(...)` (shared with the
+        # `entry_as_of` overlay so the two helpers can't drift).
+        return _coerce_effective_value(project, schema, field, overrides[field])
     return _get_field(_safe_read_lore(project, entity_id), field)
 
 

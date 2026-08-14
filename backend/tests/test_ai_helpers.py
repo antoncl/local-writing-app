@@ -389,11 +389,39 @@ class EntryAsOfHelperTests(_HelperFixtureBase):
             "Honor Harrington|Captain of the Fearless. Treecat-adopted.",
         )
 
+    def test_overlays_mutated_metadata_fields_not_just_title_body(self) -> None:
+        # Collection (aliases, multi_select) and scalar entity_ref (home_place)
+        # mutations must ride the metadata overlay, not only intrinsic title/body.
+        self._update_scene(
+            self.scene_two_node.scene_id,
+            title="The Arrival",
+            entry_type="scene:scene",
+            metadata={"summary": "x", "characters": [], "pov": self.honor["id"]},
+            body=(
+                f"<!-- mutate:entity={self.honor['id']};field=aliases;op=add;value=Steadholder;id=m1 -->"
+                f"<!-- mutate:entity={self.honor['id']};field=home_place;value={self.manticore['id']};id=m2 -->"
+            ),
+        )
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "system" %}{% set c = entry_as_of(who, as_of) %}'
+            "{{ c.aliases | join(',') }}|{{ c.home_place.title if c.home_place else 'none' }}"
+            "{% endrole %}",
+            context={"who": self.honor["id"], "as_of": self.scene_two_node.scene_id},
+            env=env,
+        )
+        text = out.messages[0].text
+        # aliases = base ∪ live add; home_place resolves + wraps to an EntryRef.
+        self.assertIn("The Salamander", text)
+        self.assertIn("Steadholder", text)
+        self.assertTrue(text.endswith("|Manticore"))
+
 
 class ImpersonateAsOfPreviewTests(_HelperFixtureBase):
-    """The `as_of_scene` request param threads build_preview → the `as_of`
-    binding → `entry_as_of`, so an impersonate render reads its subject as-of
-    the anchor scene (ADR-0055 §1). Mirrors impersonate.md's two key lines."""
+    """The anchor rides the prompt's hidden `as_of` input (launch-seeded,
+    persisted with the chat's inputs) → `input.as_of` → `entry_as_of`, so an
+    impersonate render reads its subject as-of the anchor scene (ADR-0055 §1).
+    Mirrors impersonate.md's two key lines; the render takes no as-of param."""
 
     IMPERSONATE = (
         '{% set as_of = input.as_of if input.as_of is defined else "" %}'

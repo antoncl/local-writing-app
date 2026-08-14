@@ -38,6 +38,7 @@ function summary(over: Partial<MutationSetEntrySummary> = {}): MutationSetEntryS
     target_entry_type: "lore:character",
     target_entity: "",
     row_count: 2,
+    placed: false,
     source_layer_id: "",
     source_layer_label: "",
     ...over,

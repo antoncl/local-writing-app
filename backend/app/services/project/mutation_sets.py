@@ -54,6 +54,7 @@ class MutationSetEntriesMixin:
                     target_entry_type=str(front_matter.get("target_entry_type") or ""),
                     target_entity=self._mutation_set_target_entity(front_matter),
                     row_count=len(rows),
+                    placed=bool(front_matter.get("placed")),
                     source_layer_id=entry.source_layer_id,
                     source_layer_label=entry.source_layer_label,
                 )
@@ -94,6 +95,7 @@ class MutationSetEntriesMixin:
             target_entry_type=str(front_matter.get("target_entry_type") or ""),
             target_entity=self._mutation_set_target_entity(front_matter),
             rows=self._parse_mutation_set_rows(front_matter.get("rows")),
+            placed=bool(front_matter.get("placed")),
             source_layer_id=index_entry.source_layer_id if index_entry else "",
             source_layer_label=index_entry.source_layer_label if index_entry else "",
         )
@@ -116,9 +118,37 @@ class MutationSetEntriesMixin:
             request.target_entry_type,
             request.target_entity,
             request.rows,
+            # ADR-0055 §5: `placed` is server-managed (create=False, `place`=True);
+            # the save wire never carries it, so preserve the on-disk value — a
+            # re-stage refine (S4a) must not silently clear a placement.
+            placed=bool(front_matter.get("placed")),
         )
         self._maybe_rename_node_file(path, request.title)
         return self.read_mutation_set_entry(node_id)
+
+    def place_mutation_set_entry(self, entry_id: str) -> MutationSetEntry:
+        """Mark a PINNED set placed (ADR-0055 §5) — the single write-back apply
+        gains. The writer has stamped its rows into a scene; the set drops from
+        the card's *pending* list but is kept as the chat's provenance. A reusable
+        (un-pinned) set is never placed — apply leaves it a pure read, as today."""
+        path = self._path_for_node_id(entry_id, "mutation_set")
+        entry = self.read_mutation_set_entry(entry_id)  # one extraction, reused
+        if not entry.target_entity:
+            raise ProjectServiceError(
+                "Only an entity-pinned mutation set can be placed; a reusable set is applied, not consumed.",
+                400,
+            )
+        self._write_mutation_set_file(
+            path,
+            entry.id,
+            entry.title,
+            entry.entry_type,
+            entry.target_entry_type,
+            entry.target_entity,
+            entry.rows,
+            placed=True,
+        )
+        return self.read_mutation_set_entry(entry.id)
 
     def delete_mutation_set_entry(self, entry_id: str) -> MutationSetEntryList:
         path = self._path_for_node_id(entry_id, "mutation_set")
@@ -136,6 +166,7 @@ class MutationSetEntriesMixin:
         target_entry_type: str,
         target_entity: str,
         rows: list[MutationSetRow],
+        placed: bool = False,
     ) -> None:
         rows_payload = [row.model_dump() for row in rows]
         # ADR-0055 §3: the entity pin is a `metadata` entity_ref (so it earns a
@@ -143,6 +174,12 @@ class MutationSetEntriesMixin:
         # target_entry_type/rows. Empty ⇒ no metadata block (omit_empty_metadata),
         # so a reusable set's file is byte-identical to today's.
         metadata = {"target_entity": target_entity} if target_entity else {}
+        # ADR-0055 §5: `placed` is a top-level lifecycle flag (not a reference, so
+        # it stays out of the edge graph). Written ONLY when True, so an unplaced
+        # set — the common case — keeps a file byte-identical to today's.
+        extra: dict[str, Any] = {"target_entry_type": target_entry_type, "rows": rows_payload}
+        if placed:
+            extra["placed"] = True
         self._write_node_entry_file(
             path,
             node_id,
@@ -150,7 +187,7 @@ class MutationSetEntriesMixin:
             entry_type,
             metadata,
             "",  # body-less: rows live in front matter, not a prose body
-            extra={"target_entry_type": target_entry_type, "rows": rows_payload},
+            extra=extra,
             omit_empty_metadata=True,
         )
 

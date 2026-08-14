@@ -177,6 +177,14 @@ def save_mutation_set_entry(project: CurrentProject, entry_id: str, request: Sav
         return project.save_mutation_set_entry(entry_id, request)
 
 
+@router.post("/api/mutation-sets/{entry_id}/place", response_model=MutationSetEntry)
+def place_mutation_set_entry(project: CurrentProject, entry_id: str) -> MutationSetEntry:
+    """ADR-0055 §5: mark a pinned set placed — the write-back apply gains when the
+    writer stamps a one-off into a scene (rejected for a reusable set)."""
+    with translate_errors():
+        return project.place_mutation_set_entry(entry_id)
+
+
 @router.delete("/api/mutation-sets/{entry_id}", response_model=MutationSetEntryList)
 def delete_mutation_set_entry(project: CurrentProject, entry_id: str) -> MutationSetEntryList:
     with translate_errors():

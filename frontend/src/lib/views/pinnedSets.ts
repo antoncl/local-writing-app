@@ -26,5 +26,7 @@ export function pinnedSetsFor(
   if (!entityId) return [];
   const referrers = projectReferences([entityId], referenceIndex);
   if (referrers.size === 0) return [];
-  return roster.filter((set) => referrers.has(set.id));
+  // ADR-0055 §5: a placed set drops out of the card's *pending* list (it is real
+  // in the manuscript now, kept only as the chat's provenance).
+  return roster.filter((set) => referrers.has(set.id) && !set.placed);
 }

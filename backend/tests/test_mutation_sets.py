@@ -206,5 +206,98 @@ class MutationSetEntityPinTests(unittest.TestCase):
         self.assertNotIn("mira", set_path.read_text(encoding="utf-8"))
 
 
+class MutationSetPlacementTests(unittest.TestCase):
+    """The `placed` state (ADR-0055 §5): placing a PINNED set into a scene marks
+    it placed so it drops from the card's pending list (kept, not deleted — the
+    chat→set edge must not dangle). A reusable set is never placed; apply leaves
+    it a pure read. `placed` is server-managed — create=False, `place`=True, save
+    preserves — and written only when True so an unplaced file is unchanged."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.service = open_test_project(self.root, "Placement Tests")
+        self.client = TestClient(app)
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _write_character(self, node_id: str = "mira") -> None:
+        (self.root / "lore").mkdir(parents=True, exist_ok=True)
+        self.service._write_markdown_with_front_matter(
+            self.root / "lore" / f"{node_id}.md",
+            {"id": node_id, "title": "Mira", "entry_type": "lore:character", "metadata": {}},
+            "Body.",
+        )
+
+    def _create_pinned(self) -> dict:
+        self._write_character("mira")
+        return self.client.post(
+            "/api/mutation-sets",
+            json={
+                "title": "Becomes a werewolf",
+                "target_entry_type": "lore:character",
+                "target_entity": "mira",
+                "rows": [{"field": "title", "value": "The Wolf"}],
+            },
+        ).json()
+
+    def _set_file(self) -> Path:
+        files = list((self.root / "mutation-sets").glob("*.md"))
+        self.assertEqual(len(files), 1)
+        return files[0]
+
+    def test_create_defaults_placed_false_and_writes_no_key(self) -> None:
+        created = self._create_pinned()
+        self.assertFalse(created["placed"])
+        # Written only when True — an unplaced set's file carries no `placed` key.
+        self.assertNotIn("placed", self._set_file().read_text(encoding="utf-8"))
+
+    def test_place_flips_placed_and_roundtrips(self) -> None:
+        created = self._create_pinned()
+        placed = self.client.post(f"/api/mutation-sets/{created['id']}/place")
+        self.assertEqual(placed.status_code, 200, placed.text)
+        self.assertTrue(placed.json()["placed"])
+        # Survives a read and shows in the list summary.
+        self.assertTrue(self.client.get(f"/api/mutation-sets/{created['id']}").json()["placed"])
+        self.assertTrue(self.client.get("/api/mutation-sets").json()["entries"][0]["placed"])
+        self.assertIn("placed: true", self._set_file().read_text(encoding="utf-8"))
+        # Placement keeps the rows + pin — it flips one flag, nothing else.
+        self.assertEqual([r["field"] for r in placed.json()["rows"]], ["title"])
+        self.assertEqual(placed.json()["target_entity"], "mira")
+
+    def test_place_rejects_a_reusable_set(self) -> None:
+        created = self.client.post(
+            "/api/mutation-sets",
+            json={
+                "title": "Any promotion",
+                "target_entry_type": "lore:character",
+                "rows": [{"field": "rank", "value": "Captain"}],
+            },
+        ).json()
+        res = self.client.post(f"/api/mutation-sets/{created['id']}/place")
+        self.assertEqual(res.status_code, 400, res.text)
+        # Unchanged: still not placed, no key written.
+        self.assertFalse(self.client.get(f"/api/mutation-sets/{created['id']}").json()["placed"])
+
+    def test_save_preserves_placed(self) -> None:
+        # A re-stage refine (S4a) PUTs the set without carrying `placed`; the
+        # service must keep the on-disk placement rather than silently clearing it.
+        created = self._create_pinned()
+        self.client.post(f"/api/mutation-sets/{created['id']}/place")
+        res = self.client.put(
+            f"/api/mutation-sets/{created['id']}",
+            json={
+                "title": "Becomes a werewolf",
+                "target_entry_type": "lore:character",
+                "target_entity": "mira",
+                "rows": [{"field": "title", "value": "The Grey Wolf"}],
+            },
+        )
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertTrue(res.json()["placed"])
+        self.assertEqual(res.json()["rows"][0]["value"], "The Grey Wolf")
+
+
 if __name__ == "__main__":
     unittest.main()

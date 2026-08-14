@@ -19,6 +19,10 @@ template:
   - Which story state changes because of this beat?
   - Which cards or scenes provide evidence for the function marker?
   - Does the set of claimed cards make the beat feel earned?
+  common_weak_spots:
+  - "Stakes are large but emotionally generic."
+  - "Escalation only adds more danger without changing options."
+  - "The final confrontation could have happened earlier with the same effect."
   source_refs:
   - id: local_writing_app_generic
     title: Local Writing App generic plotting rubric

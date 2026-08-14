@@ -19,6 +19,10 @@ template:
   - Which story state changes because of this beat?
   - Which cards or scenes provide evidence for the function marker?
   - Does the set of claimed cards make the beat feel earned?
+  common_weak_spots:
+  - "The adaptation strategy is only bad, so losing it costs nothing."
+  - "Support arrives as rescue instead of changing what the protagonist can choose."
+  - "Integration is stated as self-knowledge but not shown through behavior."
   source_refs:
   - id: local_writing_app_generic
     title: Local Writing App generic plotting rubric

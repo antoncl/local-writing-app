@@ -19,6 +19,10 @@ template:
   - Which story state changes because of this beat?
   - Which cards or scenes provide evidence for the function marker?
   - Does the set of claimed cards make the beat feel earned?
+  common_weak_spots:
+  - "The opening has many facts but no pressure."
+  - "The middle has incidents without a clear change in tactic, knowledge, or cost."
+  - "The final test does not require anything learned earlier."
   source_refs:
   - id: local_writing_app_generic
     title: Local Writing App generic plotting rubric

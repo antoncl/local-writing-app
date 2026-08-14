@@ -221,10 +221,10 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # or empty for an ad-hoc thread the writer beats out by hand (the ADR
             # §1 empty/ad-hoc case). `source_template_id` / `source_template_name`
             # snapshot which template it was rolled from, and `source_ai_guidance` /
-            # `source_diagnostic_questions` snapshot its template-level guidance at
-            # instantiate — the structural intent the diagnostic reasons with, kept
-            # coherent with the (specializable) beats rather than re-read live (all
-            # empty for ad-hoc). Cards reference one as their primary plotline and
+            # `source_diagnostic_questions` / `source_weak_spots` snapshot its
+            # template-level guidance at instantiate — the structural intent the
+            # diagnostic reasons with, kept coherent with the (specializable) beats
+            # rather than re-read live (all empty for ad-hoc). Cards reference one as their primary plotline and
             # fulfil its beats (card `beat_links`). An ordinary flat Node under
             # `plot/`, layered like lore.
             "name": "Plotline",
@@ -239,6 +239,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "source_template_name",
                 "source_ai_guidance",
                 "source_diagnostic_questions",
+                "source_weak_spots",
             ],
             "has_body": True,
             "color": "plum",
@@ -761,6 +762,18 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # flat text `list` (`item_type` scalar sugar, like `follow_ups`). Empty for
             # an ad-hoc plotline. Hidden, like the lineage fields.
             "name": "Diagnostic questions",
+            "type": "list",
+            "item_type": "text",
+            "hidden": True,
+        },
+        "source_weak_spots": {
+            # Guidance snapshot (ADR-0048 S7 item 7, #948): the source template's
+            # `common_weak_spots` — the structure's characteristic failure modes, the
+            # things the diagnostic checks the draft against — captured at instantiate
+            # beside the other guidance snapshots. A flat text `list` (`item_type`
+            # scalar, like `source_diagnostic_questions`). Empty for an ad-hoc plotline.
+            # Hidden, like the lineage fields.
+            "name": "Common weak spots",
             "type": "list",
             "item_type": "text",
             "hidden": True,

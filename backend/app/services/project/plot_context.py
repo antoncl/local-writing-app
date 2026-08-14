@@ -53,6 +53,7 @@ _PLOTLINE_FIELD = "plotline"
 _SOURCE_TEMPLATE_NAME_FIELD = "source_template_name"
 _SOURCE_AI_GUIDANCE_FIELD = "source_ai_guidance"
 _SOURCE_DIAGNOSTIC_QUESTIONS_FIELD = "source_diagnostic_questions"
+_SOURCE_WEAK_SPOTS_FIELD = "source_weak_spots"
 _COLOR_FIELD = "color"
 
 
@@ -153,6 +154,7 @@ class PlotContextMixin:
                 )
                 titles[beat["id"]] = title
             questions = line.metadata.get(_SOURCE_DIAGNOSTIC_QUESTIONS_FIELD) or []
+            weak_spots = line.metadata.get(_SOURCE_WEAK_SPOTS_FIELD) or []
             plotlines.append(
                 PlotContextPlotline(
                     id=line.id,
@@ -161,6 +163,7 @@ class PlotContextMixin:
                     source_template_name=str(line.metadata.get(_SOURCE_TEMPLATE_NAME_FIELD) or ""),
                     ai_guidance=str(line.metadata.get(_SOURCE_AI_GUIDANCE_FIELD) or ""),
                     diagnostic_questions=[str(q) for q in questions if str(q).strip()],
+                    weak_spots=[str(w) for w in weak_spots if str(w).strip()],
                     beats=beats,
                 )
             )

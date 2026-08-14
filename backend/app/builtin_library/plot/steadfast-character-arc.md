@@ -19,6 +19,10 @@ template:
   - Which story state changes because of this beat?
   - Which cards or scenes provide evidence for the function marker?
   - Does the set of claimed cards make the beat feel earned?
+  common_weak_spots:
+  - "The core truth is vague, so pressure cannot test it."
+  - "The character is passive while the world changes by coincidence."
+  - "The ending validates the value without showing external consequence."
   source_refs:
   - id: local_writing_app_generic
     title: Local Writing App generic plotting rubric

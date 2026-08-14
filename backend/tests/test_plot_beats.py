@@ -251,10 +251,15 @@ class PlotlineInstantiationTests(PlotTestCase):
         template = self.client.get(f"/api/plot/templates/{_THREE_ACT}").json()["template"]
         self.assertTrue(template["ai_use_guidance"])  # guard: the fixture actually has guidance
         self.assertTrue(template["global_diagnostic_questions"])
+        self.assertTrue(template["common_weak_spots"])
         self.assertEqual(plotline["metadata"]["source_ai_guidance"], template["ai_use_guidance"])
         self.assertEqual(
             plotline["metadata"]["source_diagnostic_questions"],
             template["global_diagnostic_questions"],
+        )
+        self.assertEqual(
+            plotline["metadata"]["source_weak_spots"],
+            template["common_weak_spots"],
         )
 
     def test_instantiate_copies_every_snapshot_member_faithfully(self) -> None:
@@ -321,6 +326,7 @@ class PlotlineInstantiationTests(PlotTestCase):
         self.assertFalse(plotline["metadata"].get("source_template_name"))
         self.assertFalse(plotline["metadata"].get("source_ai_guidance"))
         self.assertFalse(plotline["metadata"].get("source_diagnostic_questions"))
+        self.assertFalse(plotline["metadata"].get("source_weak_spots"))
 
     def test_ad_hoc_plotline_can_author_and_save_beats(self) -> None:
         # The "roll your own plot" path (Anton): create an empty plotline, author

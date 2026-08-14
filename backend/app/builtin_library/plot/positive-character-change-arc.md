@@ -19,6 +19,10 @@ template:
   - Which story state changes because of this beat?
   - Which cards or scenes provide evidence for the function marker?
   - Does the set of claimed cards make the beat feel earned?
+  common_weak_spots:
+  - "The lie is obviously wrong from the start and never tempting."
+  - "The truth is preached rather than dramatized."
+  - "The ending says the character changed but shows the same behavior."
   source_refs:
   - id: local_writing_app_generic
     title: Local Writing App generic plotting rubric

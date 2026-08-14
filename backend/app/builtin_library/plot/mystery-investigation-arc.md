@@ -19,6 +19,10 @@ template:
   - Which story state changes because of this beat?
   - Which cards or scenes provide evidence for the function marker?
   - Does the set of claimed cards make the beat feel earned?
+  common_weak_spots:
+  - "Clues are hidden from the reader until the reveal."
+  - "Red herrings are decorative rather than plausible alternatives."
+  - "The solution depends on late information that was never planted."
   source_refs:
   - id: local_writing_app_generic
     title: Local Writing App generic plotting rubric

@@ -62,6 +62,11 @@ class PlotTemplateSpec(BaseModel):
     prescriptiveness: PlotTemplatePrescriptiveness = "diagnostic"
     ai_use_guidance: str = ""
     global_diagnostic_questions: list[str] = Field(default_factory=list)
+    # The structure's characteristic failure modes (its `## Common Weak Spots`),
+    # fed to the diagnostic as things to check the draft against (ADR-0048 S7 item 7,
+    # #948). The distilled, AI-facing counterpart to the body's prose weak-spots
+    # section; snapshotted onto a plotline at instantiate like the guidance above.
+    common_weak_spots: list[str] = Field(default_factory=list)
     source_refs: list[SourceRef] = Field(default_factory=list)
     ip_risk: PlotTemplateIPRisk = "unknown"
     builtin_policy: PlotTemplateBuiltinPolicy = "user_authored"

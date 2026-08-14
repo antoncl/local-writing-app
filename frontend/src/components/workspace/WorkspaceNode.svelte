@@ -444,6 +444,14 @@
     display: flex;
     flex-wrap: wrap;
     align-items: stretch;
+    /* Never let the column shrink the bar below its content: in a narrow pane the
+       actions rail wraps to a second line, and without this the bar stays at its
+       min-height while that wrapped line (the + / zoom affordances) spills DOWN
+       over the body — where the list's first row occludes the +, so a click on the
+       glyph lands on a row button instead (#922/#925). flex-shrink:0 grows the bar
+       to hold both lines; align-content packs them from the top. */
+    flex-shrink: 0;
+    align-content: flex-start;
     gap: var(--sp-2);
     min-height: var(--sp-5);
     padding-right: var(--sp-2);

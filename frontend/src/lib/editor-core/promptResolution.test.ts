@@ -132,6 +132,7 @@ describe("offer_on filter (ADR-0054 §4/S4)", () => {
       "lore:character": { parent: "lore:base" },
       "plot:base": {},
       "plot:card": { parent: "plot:base" },
+      "plot:plotline": { parent: "plot:base" },
       "prompt:chat": { prompt: { context_strategy: { output: { kind: "chat_panel" } } } },
       "prompt:append": { prompt: { context_strategy: { output: { kind: "append_to_body" } } } },
     },
@@ -154,6 +155,7 @@ describe("offer_on filter (ADR-0054 §4/S4)", () => {
   // Chat prompts differing only by their offer_on allow-list.
   const reviseP = offered("p-lore", "prompt:chat", ["lore:base"]);
   const cardP = offered("p-card", "prompt:chat", ["plot:card"]);
+  const plotlineP = offered("p-plotline", "prompt:chat", ["plot:plotline"]);
   const impersonateP = offered("p-imp", "prompt:chat", ["lore:character"]);
 
   describe("promptOffersOn", () => {
@@ -189,6 +191,13 @@ describe("offer_on filter (ADR-0054 §4/S4)", () => {
         "p-imp",
         "p-lore",
       ]);
+      expect(promptEntriesOfferedOn(c, "plot:card").map((e) => e.id)).toEqual(["p-card"]);
+    });
+
+    it("offers the plotline prompt on a plotline subject, not the card one (S7b)", () => {
+      const c = isaCtx({ promptEntries: [cardP, plotlineP] });
+      // revise-plotline is offered on plot:plotline; the plot-card prompt is not.
+      expect(promptEntriesOfferedOn(c, "plot:plotline").map((e) => e.id)).toEqual(["p-plotline"]);
       expect(promptEntriesOfferedOn(c, "plot:card").map((e) => e.id)).toEqual(["p-card"]);
     });
 

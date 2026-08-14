@@ -40,6 +40,7 @@ class ImpersonateAndOfferOnTests(unittest.TestCase):
     OFFER_ON = {
         "builtin-revise-entry": ["lore:base"],
         "builtin-revise-plot-card": ["plot:card"],
+        "builtin-revise-plotline": ["plot:plotline"],
         "builtin-summarize-scene": ["scene:scene"],
         "builtin-impersonate": ["lore:character"],
     }

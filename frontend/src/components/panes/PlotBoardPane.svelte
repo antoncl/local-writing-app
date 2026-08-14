@@ -13,10 +13,28 @@
   import { plotBoardStore, plotBoardError, refreshPlotBoard } from "@/lib/stores/plotBoard";
   import { structureStore } from "@/lib/stores/structure";
   import { realizeLocations } from "@/lib/plot/realizeLocations";
+  import { chatSessions } from "@/lib/stores/chatSessions.svelte";
+  import { promptEntriesStore } from "@/lib/stores/prompts";
 
   onMount(() => {
     void refreshPlotBoard();
   });
+
+  // The whole-board AI diagnostic (ADR-0048 S7b): a board-level launch (not a
+  // subject's ＋New menu — the board isn't an offer_on host), resolved by id like
+  // Lore's brainstorm launcher and started with no subject binding — the prompt
+  // reads the entire board via the `plot_context()` Jinja helper. Resolved from the
+  // full roster (not the hidden-filtered discovery one) so a writer who hid the
+  // built-in can still reach it from the board; null only if it's genuinely absent,
+  // which hides the toolbar button.
+  const DIAGNOSE_PLOT_PROMPT_ID = "builtin-diagnose-plot";
+  let diagnosePrompt = $derived(
+    $promptEntriesStore.find((p) => p.id === DIAGNOSE_PLOT_PROMPT_ID) ?? null,
+  );
+  function launchDiagnosis(): void {
+    if (!diagnosePrompt) return;
+    void chatSessions.openChatFromPromptEntry(diagnosePrompt, {}, null);
+  }
 
   // Keep the board truthful when the manuscript structure changes while it's open
   // (#834). Card `sequence` (reveal order) and the container boxes are backend-DERIVED
@@ -48,4 +66,5 @@
   error={$plotBoardError}
   {locations}
   onRetry={() => void refreshPlotBoard()}
+  onDiagnose={diagnosePrompt ? launchDiagnosis : undefined}
 />

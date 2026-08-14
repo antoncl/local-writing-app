@@ -473,13 +473,17 @@
   // entry-patch loop: the freeze, launcher, and review overlay below all read it,
   // so they can't drift (a review over an un-frozen pane moves the diff base,
   // #634). Controller/store are kind-agnostic; widen per-kind here. Lore, plot
-  // cards (ADR-0048 S8b), and scenes (ADR-0051 S5-next) all run the entry-patch
-  // loop: a card brainstorm patches its `plot:card`, a scene's "Summarize scene"
-  // patches its `summary` field (review in `replace` mode; see the overlay). The
-  // Conversations ＋New menu filters to the prompts each kind's node admits (see
-  // ConversationsPanel).
+  // cards (ADR-0048 S8b), plotlines (ADR-0048 S7b), and scenes (ADR-0051 S5-next)
+  // all run the entry-patch loop: a card brainstorm patches its `plot:card`, a
+  // plotline brainstorm its `plot:plotline` (beat roster + description), a scene's
+  // "Summarize scene" its `summary` field (review in `replace` mode; see the
+  // overlay). The Conversations ＋New menu filters to the prompts each kind's node
+  // admits (see ConversationsPanel).
   const patchLoopKind = $derived(
-    documentKind === "lore" || documentKind === "scene" || documentKind === "plot_card",
+    documentKind === "lore" ||
+      documentKind === "scene" ||
+      documentKind === "plot_card" ||
+      documentKind === "plotline",
   );
   // ADR-0051 S3/S5 — which kinds show the Conversations surface. A chat's
   // `subject` is kind-neutral, so a scene lists its chats (subject → scene) the
@@ -487,7 +491,10 @@
   // menu; ConversationsPanel scopes it to the commit prompts (ADR-0054 §2) that
   // admit this node's kind, and hides ＋New when none resolves.
   const conversationsKind = $derived(
-    documentKind === "lore" || documentKind === "scene" || documentKind === "plot_card",
+    documentKind === "lore" ||
+      documentKind === "scene" ||
+      documentKind === "plot_card" ||
+      documentKind === "plotline",
   );
   // A node under an open brainstorm review is a frozen transaction (#634): the
   // rail/title go read-only and the host suppresses autosave, so the diff's

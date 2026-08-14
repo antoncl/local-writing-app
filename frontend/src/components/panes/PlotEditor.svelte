@@ -96,6 +96,7 @@
     error = null,
     onRetry,
     locations = [],
+    onDiagnose,
   }: {
     projection: PlotBoardProjection | null;
     error?: string | null;
@@ -103,6 +104,10 @@
     // The manuscript containers a card can be realized into (#879), derived from
     // the structure store by PlotBoardPane so this stays a pure prop-driven renderer.
     locations?: PlotRealizeLocation[];
+    // Launch the whole-board AI diagnostic chat (ADR-0048 S7b). Owned by
+    // PlotBoardPane (it resolves the prompt + calls chatSessions) so this stays a
+    // pure renderer; absent ⇒ the toolbar hides the "AI review" button.
+    onDiagnose?: () => void;
   } = $props();
 
   // Coalesce a drag's position churn into one save on release.
@@ -796,6 +801,16 @@
           <i class="ti ti-alert-triangle" aria-hidden="true"></i>
           Diagnostics{diagnostics.length ? ` (${diagnostics.length})` : ""}
         </button>
+        {#if onDiagnose}
+          <!-- AI plot review (ADR-0048 S7b): launches the whole-board diagnostic
+               chat — the SEMANTIC complement to the structural findings rail beside
+               it (hollow beats, unset payoffs, abandoned threads). It reads the plot
+               and reports; the writer acts through a card / plotline revise. -->
+          <button class="board-btn" onclick={onDiagnose} title="Review the whole plot with AI">
+            <i class="ti ti-sparkles" aria-hidden="true"></i>
+            AI review
+          </button>
+        {/if}
         <button class="board-btn" onclick={newCard} disabled={creating}>
           <i class="ti ti-plus" aria-hidden="true"></i>
           New card

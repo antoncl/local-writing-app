@@ -243,8 +243,17 @@ export function defaultView(kind: string, schema?: MetadataSchema | null): ViewS
       sort,
     };
   }
-  if (kind === "lore" || kind === "prompt") {
+  if (kind === "lore") {
     return { kind, expr: roster, sort, group_by: [{ field: "entry_type", order: "label" }] };
+  }
+  if (kind === "prompt") {
+    // The prompt shelf groups by DISPOSITION, not leaf entry_type (#951) — what the
+    // prompt does to the document, of which there are only five, instead of a bucket
+    // per sub-type. `disposition` is a synthesized field (the Prompts pane's
+    // promptSummariesToGroupNodes lift stamps it; key = promptNodes.DISPOSITION_FIELD),
+    // grouped first-seen so the lift's rank pre-clustering fixes shelf order — the
+    // same shape as the Assistants default grouping on the synthesized `listed`.
+    return { kind, expr: roster, sort, group_by: [{ field: "disposition" }] };
   }
   if (kind === "assistant") {
     // #333 — mirrors `_default_view_spec`; see there for why `listed` replaces

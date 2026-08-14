@@ -242,8 +242,16 @@ class ViewsMixin:
                     )
                 ),
             )
-        if kind in ("lore", "prompt"):
+        if kind == "lore":
             return ViewSpec(kind=kind, expr=roster, group_by=[ViewGroupByLevel(field="entry_type", order="label")])
+        if kind == "prompt":
+            # The prompt shelf groups by DISPOSITION, not leaf entry_type (#951) —
+            # what the prompt does to the document (five buckets), rather than one
+            # bucket per sub-type. `disposition` is a synthesized field the frontend
+            # Prompts pane supplies at render (promptNodes lift); this static spec only
+            # names the group_by key. First-seen (no `order`): shelf order comes from
+            # the lift's rank pre-clustering. Mirrors Assistants' `listed`.
+            return ViewSpec(kind=kind, expr=roster, group_by=[ViewGroupByLevel(field="disposition")])
         if kind == "assistant":
             # #333. Two changes, both consequences of #332 making priority ONE
             # merged sequence:

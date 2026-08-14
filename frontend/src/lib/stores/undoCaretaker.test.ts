@@ -406,6 +406,31 @@ describe("UndoCaretaker", () => {
     await first;
   });
 
+  it("whenIdle resolves at once when idle, and only after an in-flight replay finishes", async () => {
+    const caretaker = new UndoCaretaker();
+    await expect(caretaker.whenIdle()).resolves.toBeUndefined(); // nothing in flight
+
+    const gate: { release?: () => void } = {};
+    caretaker.record({
+      undo: () => new Promise<void>((resolve) => (gate.release = resolve)),
+      redo: () => {},
+    });
+    const undoing = caretaker.undo();
+    await Promise.resolve();
+
+    // A content op awaiting idle stays parked while the undo is in flight …
+    let released = false;
+    void caretaker.whenIdle().then(() => (released = true));
+    await Promise.resolve();
+    expect(released).toBe(false);
+
+    // … and releases once the replay completes.
+    gate.release!();
+    await undoing;
+    await Promise.resolve();
+    expect(released).toBe(true);
+  });
+
   it("imports nothing from the canvas or any node/edge module (§2)", () => {
     // The load-bearing acceptance of #678: the caretaker's ignorance is what
     // lets a second surface reuse it. Scoped to import statements so a future

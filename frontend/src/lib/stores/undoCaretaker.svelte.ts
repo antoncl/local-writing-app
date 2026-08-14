@@ -109,6 +109,11 @@ export class UndoCaretaker {
    *  so a surface can disable the affordance while an inverse call is in
    *  flight. */
   #replaying = $state(false);
+  /** Resolves when the current replay finishes — backs `whenIdle()`. One shared
+   *  promise (only ever one replay in flight, since undo/redo re-entry no-ops),
+   *  so every concurrent waiter releases together. Null when idle. */
+  #idle: Promise<void> | null = null;
+  #resolveIdle: (() => void) | null = null;
 
   /** Drive a disabled undo/redo button (§7) — the availability of undo is
    *  perceivable, not hidden behind a keystroke that silently no-ops. */
@@ -118,6 +123,28 @@ export class UndoCaretaker {
    *  in flight (§7). A surface disables its controls on it so the reversal
    *  order stays deterministic. */
   busy = $derived(this.#replaying);
+
+  /** Resolves once no replay is in flight — resolved immediately when idle. A
+   *  backend-backed surface's committer awaits this before a fresh content op so
+   *  the op queues BEHIND an in-flight undo instead of racing `record()` (which
+   *  throws under replay). Closes the common "gesture during a slow undo" case;
+   *  a gesture already in flight when an undo *starts* is not covered (rare). */
+  whenIdle(): Promise<void> {
+    return this.#idle ?? Promise.resolve();
+  }
+
+  #enterReplay(): void {
+    this.#replaying = true;
+    this.#idle = new Promise<void>((resolve) => (this.#resolveIdle = resolve));
+  }
+
+  #exitReplay(): void {
+    this.#replaying = false;
+    const resolve = this.#resolveIdle;
+    this.#idle = null;
+    this.#resolveIdle = null;
+    resolve?.();
+  }
 
   /** The label of the step `undo()` would reverse next, without consuming it —
    *  for the affordance tooltip (§7: "Undo delete node"). `null` when there is
@@ -191,16 +218,16 @@ export class UndoCaretaker {
     const end = this.#cursor - 1;
     const { start } = this.#stepBounds(this.#log, end);
     let i = end;
-    this.#replaying = true;
+    this.#enterReplay();
     try {
       for (; i >= start; i--) {
         await this.#log[i].command.undo();
       }
     } finally {
-      this.#replaying = false;
       // On success i has walked past start; on a throw at i, everything
       // above i is undone and i itself still counts as applied.
       this.#cursor = i + 1;
+      this.#exitReplay();
     }
     return { label: this.#stepLabel(start, end) };
   }
@@ -214,16 +241,16 @@ export class UndoCaretaker {
     const start = this.#cursor;
     const { end } = this.#stepBounds(this.#log, start);
     let i = start;
-    this.#replaying = true;
+    this.#enterReplay();
     try {
       for (; i <= end; i++) {
         await this.#log[i].command.redo();
       }
     } finally {
-      this.#replaying = false;
       // On success i has walked past end; on a throw at i, everything below
       // i is applied and i itself is not.
       this.#cursor = i;
+      this.#exitReplay();
     }
     return { label: this.#stepLabel(start, end) };
   }

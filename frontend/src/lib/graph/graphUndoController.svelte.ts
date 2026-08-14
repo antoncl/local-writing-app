@@ -67,6 +67,12 @@ export class GraphUndoController<N extends NodeLike, E extends EdgeLike> {
   get busy(): boolean {
     return this.#caretaker.busy;
   }
+  /** Resolves once no undo/redo is in flight (ADR-0053 §7). A backend-backed
+   *  surface's committer awaits this before a fresh content op so the op queues
+   *  behind an in-flight reversal instead of racing `record()`. */
+  whenIdle(): Promise<void> {
+    return this.#caretaker.whenIdle();
+  }
   /** Button tooltips: "Undo <label>" when a step is peekable. */
   get undoTitle(): string {
     const label = this.#caretaker.undoLabel;

@@ -73,6 +73,12 @@ function fakePort() {
       calls.push(`recreatePlotline:${id}`);
       plotlines.set(id, structuredClone(s));
     },
+    refreshBoard: async () => {
+      calls.push("refreshBoard");
+    },
+    refreshRoster: async () => {
+      calls.push("refreshRoster");
+    },
     realizeCard: async (cardId, _parentId) => {
       const id = `scene_${++sceneCounter}`;
       calls.push(`realize:${cardId}->${id}`);
@@ -159,8 +165,9 @@ describe("create / delete card commands", () => {
     ];
     const cmd = deleteCardCommand(port, "gone", cardState("Gone"), referrers);
     await cmd.undo();
-    // Node first (so the referrers' refs are not dangling-healed), then each referrer.
-    expect(calls).toEqual(["recreateCard:gone", "restoreCard:refA", "restoreCard:refB"]);
+    // Node first (so the referrers' refs are not dangling-healed), then the referrers
+    // (their per-item refetch suppressed), then ONE board refresh (#909 batch).
+    expect(calls).toEqual(["recreateCard:gone", "restoreCard:refA", "restoreCard:refB", "refreshBoard"]);
     calls.length = 0;
     await cmd.redo();
     expect(calls).toEqual(["deleteCard:gone"]);
@@ -198,7 +205,9 @@ describe("plotline commands", () => {
     const referrers: CardRef[] = [{ id: "card1", state: cardState("On thread", { plotline: "p1" }) }];
     const cmd = deletePlotlineCommand(port, "p1", plotlineState("Thread"), referrers);
     await cmd.undo();
-    expect(calls).toEqual(["recreatePlotline:p1", "restoreCard:card1"]);
+    // Plotline first, then its cards (refetch suppressed), then ONE roster+board
+    // refresh at the end (#909 batch).
+    expect(calls).toEqual(["recreatePlotline:p1", "restoreCard:card1", "refreshRoster", "refreshBoard"]);
   });
 
   it("edit: flips whole plotline state", async () => {
@@ -225,7 +234,15 @@ describe("seed command", () => {
     expect(cards.size).toBe(0);
     await cmd.redo();
     expect(cards.size).toBe(2);
-    expect(calls).toEqual(["deleteCard:s1", "deleteCard:s2", "recreateCard:s1", "recreateCard:s2"]);
+    // The whole batch in parallel + ONE refresh per direction (#909), not N.
+    expect(calls).toEqual([
+      "deleteCard:s1",
+      "deleteCard:s2",
+      "refreshBoard",
+      "recreateCard:s1",
+      "recreateCard:s2",
+      "refreshBoard",
+    ]);
   });
 });
 
@@ -387,5 +404,24 @@ describe("PlotUndoRecorder", () => {
     const recorder = new PlotUndoRecorder(noScenePort, (c) => recorded.push(c), () => null);
     await recorder.realize("c1", null);
     expect(recorded).toEqual([]);
+  });
+
+  it("awaits whenIdle before running an op — queues behind an in-flight undo (#909)", async () => {
+    const { port, cards } = fakePort();
+    cards.set("c1", cardState("Card", { plotline: "P1" }));
+    const gate: { release?: () => void } = {};
+    const whenIdle = () => new Promise<void>((resolve) => (gate.release = resolve));
+    const recorder = new PlotUndoRecorder(port, () => {}, () => null, whenIdle);
+
+    let opRan = false;
+    const done = recorder.cardEdit("c1", "reassign", async () => {
+      opRan = true;
+    });
+    await Promise.resolve();
+    expect(opRan).toBe(false); // parked on whenIdle — not racing the in-flight undo
+
+    gate.release!();
+    await done;
+    expect(opRan).toBe(true); // ran once idle
   });
 });

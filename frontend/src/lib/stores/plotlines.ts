@@ -101,17 +101,26 @@ export async function getPlotlineState(id: string): Promise<PlotlineState> {
 
 // Restore a captured state onto a plotline that still exists (a field/beat-edit
 // reversal). Fetch-fresh for the live revision, then refresh roster + board.
-export async function restorePlotlineState(id: string, state: PlotlineState): Promise<void> {
+// `refresh` is false inside a batched plotline-delete-undo, where the caller does
+// ONE trailing roster+board refresh after restoring the plotline + its cards (#909).
+export async function restorePlotlineState(id: string, state: PlotlineState, refresh = true): Promise<void> {
   const entry = await api.getPlotline(id);
   await api.savePlotline({ ...entry, title: state.title, metadata: state.metadata }, state.body);
-  await Promise.all([refreshPlotlines(), refreshAfterMutation()]);
+  if (refresh) await Promise.all([refreshPlotlines(), refreshAfterMutation()]);
 }
 
 // Recreate a deleted plotline under its ORIGINAL id, then restore its content
 // (create-then-PUT) — so an instantiated plotline returns with its beats + lineage.
-export async function recreatePlotline(id: string, state: PlotlineState): Promise<void> {
+export async function recreatePlotline(id: string, state: PlotlineState, refresh = true): Promise<void> {
   await api.createPlotline(state.title, id);
-  await restorePlotlineState(id, state);
+  await restorePlotlineState(id, state, refresh);
+}
+
+// Refresh just the plotline roster — the batched delete-undo's trailing roster
+// refresh (paired with the board refresh). A thin passthrough so the command layer
+// need not import the store's read directly.
+export function refreshRoster(): Promise<void> {
+  return refreshPlotlines();
 }
 
 export function clearPlotlines(): void {

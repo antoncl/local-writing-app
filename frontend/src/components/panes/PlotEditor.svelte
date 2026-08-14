@@ -32,6 +32,7 @@
   import { GraphUndoController } from "@/lib/graph/graphUndoController.svelte";
   import type { GraphPort } from "@/lib/graph/graphCommands";
   import { PlotUndoRecorder, defaultPlotCommandPort } from "@/lib/plot/plotCommands";
+  import { keepsOwnFocus } from "@/lib/plot/boardFocus";
   import {
     savePlotBoardLayout,
     detachCardScene,
@@ -138,6 +139,9 @@
     defaultPlotCommandPort(),
     (command) => undoCtl.record(command),
     () => projection,
+    // Queue a fresh content op behind an in-flight undo/redo (#909) so it can't
+    // hit record() mid-replay; near-instant once the batched undo is fast.
+    () => undoCtl.whenIdle(),
   );
 
   // Per-card actions handed to PlotCardNode via context (ADR-0048 S7d). Content ops
@@ -499,12 +503,7 @@
   // focus for typing (and native Ctrl+Z stays with that input).
   let boardEl = $state<HTMLElement | null>(null);
   function focusBoardForUndo(event: PointerEvent): void {
-    const target = event.target;
-    if (
-      target instanceof HTMLElement &&
-      target.closest("input, textarea, select, button, a, [contenteditable='true']")
-    )
-      return;
+    if (keepsOwnFocus(event.target)) return; // an input/control keeps focus for typing
     boardEl?.focus({ preventScroll: true });
   }
 

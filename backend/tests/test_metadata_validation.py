@@ -130,6 +130,23 @@ class MetadataValidationTests(unittest.TestCase):
             any("output kind" in e or "commit" in e for e in errors), errors
         )
 
+    def test_on_accept_only_rides_on_an_inline_disposition(self) -> None:
+        # #954 (Lever 2): on_accept stamps a mark on an accepted INLINE suggestion, so
+        # it is a (soft) error on chat_panel, which has no accept gesture.
+        output = {"kind": "chat_panel", "on_accept": {"mark": "character", "from_input": "character"}}
+        errors = self.service._validate_metadata_schema_definition(self._schema_with_output(output))
+        self.assertTrue(any("inline disposition" in e for e in errors), errors)
+
+    def test_on_accept_requires_a_mark_and_from_input(self) -> None:
+        output = {"kind": "append_to_body", "on_accept": {"mark": "character"}}
+        errors = self.service._validate_metadata_schema_definition(self._schema_with_output(output))
+        self.assertTrue(any("on_accept" in e and "from_input" in e for e in errors), errors)
+
+    def test_inline_disposition_with_a_valid_on_accept_validates(self) -> None:
+        output = {"kind": "append_to_body", "on_accept": {"mark": "character", "from_input": "character"}}
+        errors = self.service._validate_metadata_schema_definition(self._schema_with_output(output))
+        self.assertFalse(any("on_accept" in e or "output kind" in e for e in errors), errors)
+
     def test_unset_output_kind_is_allowed(self) -> None:
         # No output disposition (a snippet, or a prompt that produces none) is
         # legitimate — the check only fires on a non-empty unknown kind.
@@ -2449,6 +2466,20 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertIsNone(general_output.commit)  # a plain chat, no commit
 
         self.assertIsNone(schema.entry_types["prompt:snippet"].prompt)
+
+        # `roleplay` (#954, Lever 2) is a continuation that DECLARES its accept-time
+        # character-stamp as a capability (`output.on_accept`), not an
+        # `entry_type == roleplay` code branch. It redeclares its full context
+        # strategy (the parent-merge is shallow), so it stays append_to_body.
+        roleplay = schema.entry_types["prompt:roleplay"]
+        self.assertFalse(roleplay.abstract)
+        self.assertEqual(roleplay.parent, "prompt:continuation")
+        assert roleplay.prompt is not None and roleplay.prompt.context_strategy is not None
+        roleplay_output = roleplay.prompt.context_strategy.output
+        assert roleplay_output is not None and roleplay_output.on_accept is not None
+        self.assertEqual(roleplay_output.kind, "append_to_body")
+        self.assertEqual(roleplay_output.on_accept.mark, "character")
+        self.assertEqual(roleplay_output.on_accept.from_input, "character")
 
     def test_concrete_subtype_inherits_output_kind_from_abstract_base(self) -> None:
         """A user creates `bob extends general`; the output disposition is inherited."""

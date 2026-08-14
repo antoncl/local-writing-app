@@ -64,6 +64,11 @@ OUTPUT_KINDS: tuple[str, ...] = (
     "chat_panel",
 )
 
+# The inline dispositions — those that stream a suggestion into the prose editor
+# (as opposed to `chat_panel`, which routes to a conversation). Only these carry
+# an `output.on_accept` mark-stamp (#954, Lever 2), validated alongside OUTPUT_KINDS.
+INLINE_OUTPUT_KINDS: tuple[str, ...] = ("append_to_body", "replace_selection")
+
 # The closed set of commit review modes (ADR-0054 §2 `commit.review`): `visual_diff`
 # is the per-run adopt against the current entry; `replace` is a plain
 # current→proposed swap (a from-scratch regenerate with no meaningful run-diff, e.g.
@@ -307,13 +312,20 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             },
         },
         "prompt:roleplay": {
-            # Continuation sub-type for two-character roleplay in one scene.
-            # The shipped prompt body lives in the built-in Library
-            # (`builtin-roleplay`), not a `default_body` here — the Library is
-            # its home now that a real node stores it (ADR-0049 §7). Clone that
-            # node to get an editable copy. `default_inputs` still declares the
-            # `character: context_pick` input the template assumes. The context
-            # strategy is inherited from `continuation`.
+            # Continuation sub-type for two-character roleplay in one scene. It is a
+            # `continuation` (append_to_body, scans `_text_before`) that additionally
+            # STAMPS a `character` mark on the accepted text, keyed to its `character`
+            # input — the mark `character_thread` later reads to reconstruct
+            # per-character turns, and the id per-character cost attributes to. That
+            # stamp is a DECLARED capability (`output.on_accept`, #954 Lever 2), NOT an
+            # `entry_type == prompt:roleplay` code branch: roleplay earns its sub-type
+            # by carrying a capability no instance can, exactly as `revise:entry` earns
+            # its by carrying a `commit`. It redeclares the full context strategy (the
+            # parent-chain merge is shallow at `context_strategy`), which also makes it
+            # uniform with every other concrete prompt type. The shipped prompt body
+            # lives in the built-in Library (`builtin-roleplay`, ADR-0049 §7); clone
+            # that node to get an editable copy. `default_inputs` declares the
+            # `character: context_pick` input the template — and `on_accept` — assume.
             "name": "Roleplay",
             "kind": "prompt",
             "parent": "prompt:continuation",
@@ -332,6 +344,16 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                     },
                 },
             ],
+            "prompt": {
+                "context_strategy": {
+                    "target": {"required": True, "kind": "scene"},
+                    "scan_surface": ["_text_before"],
+                    "output": {
+                        "kind": "append_to_body",
+                        "on_accept": {"mark": "character", "from_input": "character"},
+                    },
+                },
+            },
         },
         "prompt:revise": {
             # Abstract base for the revise flavours. Split symmetrically

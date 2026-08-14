@@ -4,6 +4,7 @@ import {
   promptEntriesForSurface,
   promptEntriesOfferedOn,
   promptOffersOn,
+  promptOnAccept,
   type PromptResolutionContext,
 } from "@/lib/editor-core/promptResolution";
 import type { MetadataSchema, PromptEntrySummary } from "@/lib/types";
@@ -31,6 +32,41 @@ function ctx(over: Partial<PromptResolutionContext> = {}): PromptResolutionConte
     ...over,
   };
 }
+
+describe("promptOnAccept — the declared accept-time mark-stamp (#954)", () => {
+  // roleplay declares the capability; a roleplay sub-type inherits it (resolved
+  // schema carries it); continuation declares none.
+  const onAcceptSchema = {
+    entry_types: {
+      "prompt:continuation": { prompt: { context_strategy: { output: { kind: "append_to_body" } } } },
+      "prompt:roleplay": {
+        prompt: {
+          context_strategy: {
+            output: { kind: "append_to_body", on_accept: { mark: "character", from_input: "character" } },
+          },
+        },
+      },
+    },
+  } as unknown as MetadataSchema;
+  const rpCtx = (): PromptResolutionContext => ({
+    metadataSchema: onAcceptSchema,
+    promptEntries: [],
+    loreEntries: [],
+    availableScenes: [],
+  });
+
+  it("returns the declared mark + fromInput for a prompt whose type declares on_accept", () => {
+    expect(promptOnAccept(rpCtx(), prompt("p", "prompt:roleplay"))).toEqual({
+      mark: "character",
+      fromInput: "character",
+    });
+  });
+
+  it("returns null for a prompt whose type declares no on_accept", () => {
+    expect(promptOnAccept(rpCtx(), prompt("p", "prompt:continuation"))).toBeNull();
+    expect(promptOnAccept(rpCtx(), null)).toBeNull();
+  });
+});
 
 describe("promptEntriesForSurface — hidden filter (ADR-0049 slice 3)", () => {
   it("returns every matching prompt when nothing is hidden", () => {

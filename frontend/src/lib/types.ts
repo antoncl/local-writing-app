@@ -722,12 +722,23 @@ export type PromptCommit = {
   fields?: string[] | null;
 };
 
-// Where a prompt's output lands (ADR-0054 §1) + its optional commit (§2). `kind`
-// is the disposition (`append_to_body` / `replace_selection` / `chat_panel`, or
-// unset for no output); `commit` only rides on `chat_panel`.
+// The accept-time mark-stamp of an inline prompt (#954, Lever 2). Present ⇒
+// accepting the streamed suggestion wraps it in the named TipTap `mark`, keyed to
+// the lore id in the context_pick input `from_input`. Makes roleplay a declared
+// capability instead of an `entry_type == prompt:roleplay` branch.
+export type PromptOnAccept = {
+  mark?: string;
+  from_input?: string;
+};
+
+// Where a prompt's output lands (ADR-0054 §1) + its optional commit (§2) or
+// accept-time mark-stamp (`on_accept`). `kind` is the disposition (`append_to_body`
+// / `replace_selection` / `chat_panel`, or unset for no output); `commit` only
+// rides on `chat_panel`, `on_accept` only on an inline disposition.
 export type PromptOutput = {
   kind?: string;
   commit?: PromptCommit | null;
+  on_accept?: PromptOnAccept | null;
 };
 
 export type PromptContextStrategy = {

@@ -273,16 +273,22 @@ export function resolvePromptPositionalArgs(
   };
 }
 
-// True iff the prompt entry-type chain includes `roleplay` (so any future
-// sub-type of roleplay still gets character-tagged on Accept). Shares the one
-// parent-chain walk (`entryTypeIsA`); the explicit schema guard keeps the
-// historical "no schema ⇒ not roleplay" behaviour (entryTypeIsA would otherwise
-// exact-match without one).
-export function isRoleplayPromptEntry(
+// The accept-time mark-stamp a prompt's type declares (#954, Lever 2), or null.
+// Present ⇒ accepting an inline suggestion from this prompt wraps it in `mark`,
+// keyed to the lore id in the context_pick input `fromInput`. This REPLACES the
+// `entry_type == "prompt:roleplay"` branch: the behaviour is read off the type's
+// declared capability, exactly as `promptDeclaresCommit` reads `output.commit` —
+// so a roleplay sub-type still stamps (it inherits the type's `on_accept`) without
+// any name being special-cased in code.
+export function promptOnAccept(
   ctx: PromptResolutionContext,
   entry: PromptEntrySummary | null | undefined,
-): boolean {
-  return !!entry && !!ctx.metadataSchema && entryTypeIsA(ctx, entry.entry_type, "prompt:roleplay");
+): { mark: string; fromInput: string } | null {
+  if (!entry) return null;
+  const onAccept =
+    ctx.metadataSchema?.entry_types[entry.entry_type]?.prompt?.context_strategy?.output?.on_accept;
+  if (!onAccept?.mark || !onAccept.from_input) return null;
+  return { mark: onAccept.mark, fromInput: onAccept.from_input };
 }
 
 // The mutation resolution scene from a `scene_ref` input (ADR-0012): the first

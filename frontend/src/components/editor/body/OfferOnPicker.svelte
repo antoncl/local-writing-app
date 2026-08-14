@@ -1,21 +1,24 @@
 <!--
   OfferOnPicker — the "Show in ＋New on…" authoring control for a chat_panel
-  prompt (ADR-0054 §4 / S4b). Writes the instance-level `offer_on` allow-list:
-  the subject entry_types on which this prompt is offered as a ＋New conversation
-  in a node's Conversations panel (read back by `promptEntriesOfferedOn`).
+  prompt (ADR-0054 §4 / S4b, reworked in #903). Writes the instance-level
+  `offer_on` allow-list: the subject entry_types on which this prompt is offered
+  as a ＋New conversation in a node's Conversations panel (read back by
+  `promptEntriesOfferedOn`).
 
-  A plain multi-select of concrete entry_types grouped by kind — no is-a
-  expansion here, since offer_on is stored as exact ids and the is-a match
-  happens at read time (`promptOffersOn`). Mounted by CodeBodyView ONLY when the
-  open prompt resolves to a `chat_panel` disposition (the only kind ＋New lists),
-  so a control that would do nothing is never shown. The picker itself is
-  disposition-agnostic; the gate lives in the host.
+  A thin shell over the shared schema→is-a-tree traversal (`buildTree`, via
+  `offerOnTree.ts`) — the same engine the context picker uses — but with offer_on's
+  own model: it stores EXACT ids and matches is-a at read time, so checking a
+  parent (e.g. lore's root) covers its descendants, which then render disabled as
+  "covered." Only conversation-host subjects are offered (all lore; the scene and
+  plot-card subtrees), so no dead targets. Mounted by CodeBodyView ONLY for a
+  chat_panel prompt (the gate lives in the host).
 
   `offer_on` is bind:'d to the parent (NodeEditor's offerOnDraft) so the parent's
   save logic owns serialization; `onChange` fires the pane's emitChange.
 -->
 <script lang="ts">
   import type { MetadataSchema } from "@/lib/types";
+  import { offerOnRows, selectTarget, deselectTarget, type OfferOnRow } from "./offerOnTree";
 
   interface Props {
     metadataSchema: MetadataSchema | null;
@@ -34,81 +37,61 @@
     onChange,
   }: Props = $props();
 
-  // The kinds whose nodes actually mount a Conversations ＋New menu — the only
-  // subjects an offer_on target can ever reach. Mirrors NodeEditor's
-  // `conversationsKind` gate (document kinds lore / scene / plot_card) at the
-  // schema-kind granularity (plot_card ∈ kind "plot"). Offering any other kind
-  // (view / assistant / research / project / mutation_set) would be dead config:
-  // the write succeeds but no such node ever shows the prompt.
-  const HOST_KINDS = new Set(["lore", "scene", "plot"]);
+  const rows = $derived(offerOnRows(metadataSchema, offerOn));
+  // Count the directly-chosen host targets, not the raw array — so a stale
+  // non-host id left by an older picker (which renders no row) can't inflate the
+  // badge, and a parent "all" target counts as one, not once per covered child.
+  const selectedCount = $derived(rows.filter((row) => row.state === "checked").length);
 
-  // Concrete, offerable subject types grouped by kind. Abstract and deprecated
-  // types are dropped (never offered for new work); so is any kind that doesn't
-  // host a conversation. A writer leaves unrelated ones unchecked.
-  const groups = $derived.by(() => {
-    const schema = metadataSchema;
-    if (!schema) return [] as { kind: string; items: { id: string; name: string }[] }[];
-    const byKind = new Map<string, { id: string; name: string }[]>();
-    for (const [id, def] of Object.entries(schema.entry_types)) {
-      if (def.abstract || def.deprecated) continue;
-      if (!HOST_KINDS.has(def.kind)) continue;
-      const list = byKind.get(def.kind) ?? [];
-      list.push({ id, name: def.name || id });
-      byKind.set(def.kind, list);
-    }
-    return [...byKind.entries()]
-      .map(([kind, items]) => ({
-        kind,
-        items: items.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })),
-      }))
-      .sort((a, b) => a.kind.localeCompare(b.kind, undefined, { sensitivity: "base" }));
-  });
-
-  function isChecked(id: string): boolean {
-    return offerOn.includes(id);
+  // Native checkboxes have no `indeterminate` attribute — set it imperatively.
+  // Mirrors NodePickerConfigEditor's action so the tri-state parent reads right.
+  function indeterminateBinding(node: HTMLInputElement, value: boolean) {
+    node.indeterminate = value;
+    return {
+      update(next: boolean) {
+        node.indeterminate = next;
+      },
+    };
   }
 
-  function toggle(id: string, checked: boolean): void {
-    if (readOnly) return;
-    if (checked) {
-      if (!offerOn.includes(id)) offerOn = [...offerOn, id];
-    } else {
-      offerOn = offerOn.filter((target) => target !== id);
-    }
+  function toggle(row: OfferOnRow): void {
+    // "covered" rows are offered via an ancestor — not independently editable.
+    if (readOnly || row.state === "covered") return;
+    offerOn =
+      row.state === "checked"
+        ? deselectTarget(offerOn, row.id)
+        : selectTarget(offerOn, metadataSchema, row.id);
     onChange?.();
-  }
-
-  // Capitalise a kind slug for its group heading ("lore" → "Lore").
-  function kindLabel(kind: string): string {
-    return kind.charAt(0).toUpperCase() + kind.slice(1);
   }
 </script>
 
 <details class="offer-on-editor">
   <summary>
-    Show in ＋New <small>{offerOn.length}</small>
-    <small class="offer-on-hint">this conversation is offered on the checked subjects · a subtype matches its parent</small>
+    Show in ＋New <small>{selectedCount}</small>
+    <small class="offer-on-hint">the subjects this conversation is offered on · checking a group covers its types</small>
   </summary>
-  {#if groups.length === 0}
+  {#if rows.length === 0}
     <p class="muted offer-on-empty">No subject types defined yet.</p>
   {:else}
-    {#each groups as group (group.kind)}
-      <div class="offer-on-group" role="group" aria-label={kindLabel(group.kind)}>
-        <h5 class="offer-on-group-title">{kindLabel(group.kind)}</h5>
-        {#each group.items as item (item.id)}
-          <label class="offer-on-option">
-            <input
-              type="checkbox"
-              checked={isChecked(item.id)}
-              disabled={readOnly}
-              onchange={(e) => toggle(item.id, (e.currentTarget as HTMLInputElement).checked)}
-            />
-            <span class="offer-on-option-name">{item.name}</span>
-            <code class="offer-on-option-id">{item.id}</code>
-          </label>
-        {/each}
-      </div>
-    {/each}
+    <div class="offer-on-tree" role="group" aria-label="Show in ＋New on">
+      {#each rows as row (row.id)}
+        <label
+          class="offer-on-row"
+          class:covered={row.state === "covered"}
+          style="--depth: {row.depth}"
+          title={row.id}
+        >
+          <input
+            type="checkbox"
+            checked={row.state === "checked" || row.state === "covered"}
+            use:indeterminateBinding={row.state === "indeterminate"}
+            disabled={readOnly || row.state === "covered"}
+            onchange={() => toggle(row)}
+          />
+          <span class="offer-on-row-name" class:root={row.depth === 0}>{row.name}</span>
+        </label>
+      {/each}
+    </div>
   {/if}
 </details>
 
@@ -147,45 +130,39 @@
     margin: 6px 0;
     font-size: var(--fs-sm);
   }
-  .offer-on-group {
-    margin: 8px 0 4px;
+  .offer-on-tree {
+    margin: 6px 0 2px;
   }
-  .offer-on-group-title {
-    margin: 0 0 4px;
-    font-size: var(--fs-xs);
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--text-2);
-  }
-  .offer-on-option {
+  /* Left-aligned, scannable rows; hierarchy shown by indent (depth). The raw
+     entry_type id lives in the row `title`, not a chip — the human name carries
+     the row. */
+  .offer-on-row {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: 8px;
     padding: 3px 6px;
+    padding-left: calc(6px + var(--depth) * 18px);
     border-radius: 4px;
     cursor: pointer;
     font-size: var(--fs-sm);
     color: var(--text);
   }
-  .offer-on-option:hover {
+  .offer-on-row:hover {
     background: var(--surface);
   }
-  .offer-on-option > input {
+  .offer-on-row > input {
     margin: 0;
-    align-self: center;
+    flex: none;
   }
-  .offer-on-option-name {
-    font-weight: 500;
+  .offer-on-row-name.root {
+    font-weight: 600;
   }
-  .offer-on-option-id {
-    margin-left: auto;
-    font-family: var(--mono);
-    font-size: var(--fs-xs);
+  /* A type covered by a checked ancestor: on, but not independently editable. */
+  .offer-on-row.covered {
+    cursor: default;
     color: var(--text-3);
-    background: var(--surface);
-    border: 1px solid var(--divider);
-    border-radius: 4px;
-    padding: 0 6px;
+  }
+  .offer-on-row.covered:hover {
+    background: transparent;
   }
 </style>

@@ -22,6 +22,7 @@ function set(over: Partial<MutationSetEntrySummary>): MutationSetEntrySummary {
     target_entry_type: "lore:character",
     target_entity: "",
     row_count: 1,
+    placed: false,
     source_layer_id: "",
     source_layer_label: "",
     ...over,
@@ -50,6 +51,18 @@ describe("PinnedSetsPanel (ADR-0055 §3)", () => {
     expect(screen.getByRole("button", { name: /Becomes a werewolf/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Gains a scar/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Any promotion/ })).toBeNull();
+  });
+
+  it("excludes a placed set from the pending list (ADR-0055 §5)", () => {
+    // "scar" has been placed into a scene — it drops out of the card's pending
+    // list (kept only as the chat's provenance).
+    mutationSetEntriesStore.set([
+      set({ id: "wolf", title: "Becomes a werewolf", target_entity: "mira" }),
+      set({ id: "scar", title: "Gains a scar", target_entity: "mira", placed: true }),
+    ]);
+    render(PinnedSetsPanel, { props: { entityId: "mira", entityEntryType: "lore:character" } });
+    expect(screen.getByRole("button", { name: /Becomes a werewolf/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Gains a scar/ })).toBeNull();
   });
 
   it("＋New opens the editor pinned to this entity + its type", async () => {

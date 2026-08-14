@@ -1055,6 +1055,12 @@ export const api = {
   getMutationSetEntry(entryId: string) {
     return request<MutationSetEntry>(`/mutation-sets/${entryId}`);
   },
+  // ADR-0055 §5: mark a pinned set placed — the single write-back apply gains
+  // when the writer stamps a one-off into a scene. Rejected (400) for a reusable
+  // set, which apply leaves untouched.
+  placeMutationSet(entryId: string) {
+    return request<MutationSetEntry>(`/mutation-sets/${entryId}/place`, { method: "POST" });
+  },
   saveMutationSetEntry(entry: MutationSetEntry) {
     return request<MutationSetEntry>(`/mutation-sets/${entry.id}`, {
       method: "PUT",

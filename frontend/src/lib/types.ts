@@ -949,6 +949,10 @@ export type MutationSetEntrySummary = {
   // entity, stamped on apply). Stored as the `target_entity` metadata entity_ref.
   target_entity: string;
   row_count: number;
+  // ADR-0055 §5: a pinned set is a one-off — once placed in a scene it drops
+  // from the card's pending list (kept as the chat's provenance). Always false
+  // for a reusable set; apply never marks it.
+  placed: boolean;
   source_layer_id: string;
   source_layer_label: string;
 };
@@ -962,6 +966,8 @@ export type MutationSetEntry = {
   // ADR-0055 §3 entity pin — see MutationSetEntrySummary.target_entity.
   target_entity: string;
   rows: MutationSetRow[];
+  // ADR-0055 §5 placement state — see MutationSetEntrySummary.placed.
+  placed: boolean;
   source_layer_id: string;
   source_layer_label: string;
 };

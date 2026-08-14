@@ -12,6 +12,7 @@ function set(over: Partial<MutationSetEntrySummary>): MutationSetEntrySummary {
     target_entry_type: "lore:character",
     target_entity: "",
     row_count: 1,
+    placed: false,
     source_layer_id: "",
     source_layer_label: "",
     ...over,
@@ -41,6 +42,17 @@ describe("pinnedSetsFor (ADR-0055 §3)", () => {
     const roster = [set({ id: "set-1", target_entity: "mira" })];
     const index = reverse({ mira: ["set-1", "chat-9", "another-entry"] });
     expect(pinnedSetsFor("mira", index, roster).map((s) => s.id)).toEqual(["set-1"]);
+  });
+
+  it("drops a placed set from the pending list (ADR-0055 §5)", () => {
+    // Once placed in a scene, a one-off is real in the manuscript and leaves the
+    // card's pending list — kept only as the chat's provenance.
+    const roster = [
+      set({ id: "a", title: "Aardvark", target_entity: "mira" }),
+      set({ id: "b", title: "Zebra", target_entity: "mira", placed: true }),
+    ];
+    const index = reverse({ mira: ["a", "b"] });
+    expect(pinnedSetsFor("mira", index, roster).map((s) => s.id)).toEqual(["a"]);
   });
 
   it("returns [] for an entity nothing is pinned to", () => {

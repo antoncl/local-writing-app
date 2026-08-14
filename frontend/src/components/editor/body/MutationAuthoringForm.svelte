@@ -19,6 +19,7 @@
     type MutationRow,
   } from "@/components/editor/body/MutationFieldRows.svelte";
   import { api } from "@/lib/api";
+  import { refreshMutationSetEntries } from "@/lib/stores/mutationSets";
   import {
     asMembershipList,
     collectionRowsFromEdit,
@@ -189,7 +190,9 @@
       ? allSets.filter(
           (s) =>
             s.target_entry_type === entity.entry_type &&
-            (!s.target_entity || s.target_entity === entity.id),
+            (!s.target_entity || s.target_entity === entity.id) &&
+            // ADR-0055 §5: a placed one-off is consumed — never re-offer it.
+            !s.placed,
         )
       : [],
   );
@@ -225,7 +228,19 @@
       op: row.op || "replace",
       value: row.value,
     }));
-    if (unitRows.length > 0) onSubmit({ entity: entity.id, name: full.title, rows: unitRows });
+    if (unitRows.length === 0) return;
+    onSubmit({ entity: entity.id, name: full.title, rows: unitRows });
+    // ADR-0055 §5: a PINNED one-off is *consumed* by placement — mark it placed
+    // so it drops from the card's pending list (via the roster refresh) and is
+    // never re-offered. A reusable (un-pinned) set is untouched — apply stays a
+    // pure read for it. Fire-and-forget: a failed flip just leaves the set
+    // pending (recoverable), so it must never block the marker that already went in.
+    if (full.target_entity) {
+      void api
+        .placeMutationSet(setId)
+        .then(() => refreshMutationSetEntries())
+        .catch(() => {});
+    }
   }
 
   // Fields scope to the entity's resolved entry type (edit mode included — the

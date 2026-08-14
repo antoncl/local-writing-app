@@ -641,6 +641,11 @@ class MutationSetEntrySummary(BaseModel):
     # kind-neutral edge machinery (§3), unlike top-level `target_entry_type`.
     target_entity: str = ""
     row_count: int = 0
+    # ADR-0055 §5: a PINNED set is a one-off — once the writer places it in a
+    # scene it is marked `placed` and drops from the card's *pending* list (kept,
+    # not deleted, so the chat→set edge is never stranded). Always False for a
+    # reusable (un-pinned) set, which apply never marks.
+    placed: bool = False
     source_layer_id: str = ""
     source_layer_label: str = ""
 
@@ -654,6 +659,8 @@ class MutationSetEntry(BaseModel):
     # ADR-0055 §3 entity pin — see MutationSetEntrySummary.target_entity.
     target_entity: str = ""
     rows: list[MutationSetRow] = Field(default_factory=list)
+    # ADR-0055 §5 placement state — see MutationSetEntrySummary.placed.
+    placed: bool = False
     source_layer_id: str = ""
     source_layer_label: str = ""
 

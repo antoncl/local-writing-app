@@ -59,6 +59,7 @@ const madeSet = (id: string): MutationSetEntry => ({
   target_entry_type: "lore:character",
   target_entity: "lore-1",
   rows: [],
+  placed: false,
   source_layer_id: "",
   source_layer_label: "",
 });

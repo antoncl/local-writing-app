@@ -249,6 +249,11 @@
   let promptCommitReview = $state(seed.commitReview);
   const promptCommitInitial: PromptCommit =
     untrack(() => initialPrompt?.context_strategy?.output?.commit) ?? {};
+  // #957: on_accept (the roleplay character-stamp) has no authoring control yet, so
+  // capture it verbatim and re-emit it on save — the same round-trip that keeps
+  // commit's `fields` alive. Without this, editing a type that declares on_accept
+  // (roleplay) would silently drop the stamp.
+  const promptOnAcceptInitial = untrack(() => initialPrompt?.context_strategy?.output?.on_accept) ?? null;
 
   // --- Unsaved-changes tracking (#68) --------------------------------------
   // Field + group edits persist immediately through the parent; only the
@@ -305,7 +310,13 @@
       promptOutputKind === "chat_panel" && promptCommitEnabled
         ? { ...promptCommitInitial, review: promptCommitReview }
         : null;
-    const hasOutput = Boolean(promptOutputKind) || commit !== null;
+    // on_accept rides only on an inline disposition (#957), so switching away from
+    // one drops it — mirroring how a commit drops off a non-chat_panel disposition.
+    const onAccept =
+      promptOutputKind === "append_to_body" || promptOutputKind === "replace_selection"
+        ? promptOnAcceptInitial
+        : null;
+    const hasOutput = Boolean(promptOutputKind) || commit !== null || onAccept !== null;
     const contextStrategy: PromptContextStrategy | null = scanSurface.length || hasTarget || hasOutput
       ? {
           ...(hasTarget
@@ -322,6 +333,7 @@
                 output: {
                   ...(promptOutputKind ? { kind: promptOutputKind } : {}),
                   ...(commit !== null ? { commit } : {}),
+                  ...(onAccept !== null ? { on_accept: onAccept } : {}),
                 },
               }
             : {}),

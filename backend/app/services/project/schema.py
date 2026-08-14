@@ -45,14 +45,13 @@ from app.models import (
 from app.services.project import schema_cache
 from app.services.project.default_schema import (
     AUTHORABLE_COMPUTED_FUNCTIONS,
-    COMMIT_REVIEW_MODES,
     DEFAULT_METADATA_SCHEMA,
     INTRINSIC_FIELD_KEYS,
-    OUTPUT_KINDS,
 )
 from app.services.project.errors import ProjectServiceError
 from app.services.project.layers import SCHEMA_FILENAME
 from app.services.project.node_index import IndexLayer
+from app.services.project.schema_validation import validate_prompt_output
 
 # Entry-type identity is the kind-qualified FQN `kind:key` (#77). The key may nest
 # (`kind:seg:seg…`, e.g. `prompt:revise:scene`) — the extra colons are a pure naming
@@ -1419,32 +1418,12 @@ class MetadataSchemaMixin:
                 seen_inputs.add(input_def.name)
                 if input_def.type == "select" and not input_def.options:
                     errors.append(f"Entry type {entry_type_id} input '{input_def.name}' is type select but has no options.")
-            # ADR-0054: `output` is two things — a disposition (`kind`, where the
-            # prompt's output lands, a closed vocabulary) and an optional `commit`
-            # (only meaningful under `chat_panel`). An unset/empty kind is legitimate
-            # (snippet, or a prompt with no output disposition); a non-empty one must
-            # be a known disposition, a `commit` may ride only on `chat_panel`, and a
-            # commit's `review` must be a known mode. Soft errors like the rest here —
-            # a hand-edited layer stays readable, and the save paths surface them.
+            # ADR-0054 §1/§2 + #954: the prompt's `output` — its disposition `kind`,
+            # optional `commit` (chat_panel only), and optional `on_accept` mark-stamp
+            # (inline only). Soft-validated in `schema_validation` (co-located with the
+            # closed vocabularies), which keeps this file under the size cap.
             strategy = entry_type.prompt.context_strategy
-            output = strategy.output if strategy else None
-            if output:
-                if output.kind and output.kind not in OUTPUT_KINDS:
-                    errors.append(
-                        f"Entry type {entry_type_id} declares output kind '{output.kind}', "
-                        f"not one of the known dispositions ({', '.join(OUTPUT_KINDS)})."
-                    )
-                if output.commit is not None:
-                    if output.kind != "chat_panel":
-                        errors.append(
-                            f"Entry type {entry_type_id} declares a commit but its output kind is "
-                            f"'{output.kind or 'unset'}'; only chat_panel output can carry a commit."
-                        )
-                    if output.commit.review not in COMMIT_REVIEW_MODES:
-                        errors.append(
-                            f"Entry type {entry_type_id} declares commit review '{output.commit.review}', "
-                            f"not one of the known modes ({', '.join(COMMIT_REVIEW_MODES)})."
-                        )
+            errors.extend(validate_prompt_output(entry_type_id, strategy.output if strategy else None))
 
         for field_id, field in schema.fields.items():
             if field.type == "computed":

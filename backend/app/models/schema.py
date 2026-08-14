@@ -176,18 +176,37 @@ class PromptCommit(BaseModel):
     fields: list[str] | None = None
 
 
+class PromptOnAccept(BaseModel):
+    """The accept-time mark-stamp of an inline prompt (#954, Lever 2).
+
+    Present ⇒ accepting the streamed suggestion wraps it in the named TipTap
+    `mark`, keyed to the lore id pulled from the context_pick input named by
+    `from_input`. This is what makes `roleplay` a *declared* capability rather
+    than a hardcoded `entry_type == prompt:roleplay` branch: the mark it stamps
+    (`character`) and the input it reads (`character`) are named here, on the
+    type, exactly as `commit` names its capability. Meaningful only under an
+    inline disposition (`append_to_body` / `replace_selection`) — the validator
+    rejects it elsewhere. Kept lenient (`str`) like the rest; the save paths
+    validate it."""
+
+    mark: str = ""
+    from_input: str = ""
+
+
 class PromptOutput(BaseModel):
-    """Where a prompt's output lands (ADR-0054 §1), plus its optional commit (§2).
+    """Where a prompt's output lands (ADR-0054 §1), plus its optional commit (§2)
+    or accept-time mark-stamp (`on_accept`).
 
     `kind` is the disposition — `append_to_body` / `replace_selection` /
     `chat_panel`, or unset for no output (e.g. `snippet`). The set is closed and
     backend-owned (`OUTPUT_KINDS`), validated on save; kept `str` here so an
     unknown value is a soft validation error, not an unreadable layer. `commit` is
-    meaningful only under `chat_panel` — the validator rejects it on any other
-    disposition."""
+    meaningful only under `chat_panel`, and `on_accept` only under an inline
+    disposition — the validator rejects each on any other."""
 
     kind: str = ""
     commit: PromptCommit | None = None
+    on_accept: PromptOnAccept | None = None
 
 
 class PromptContextStrategy(BaseModel):

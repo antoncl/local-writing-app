@@ -20,7 +20,7 @@ import {
   effectiveOutputKind,
   effectivePromptInputs,
   findPromptEntry,
-  isRoleplayPromptEntry,
+  promptOnAccept,
   characterIdFromInputValue,
   resolutionSceneIdFromInputs,
 } from "@/lib/editor-core/promptResolution";
@@ -187,14 +187,18 @@ export class AiSuggestionController {
     const promptCtx = this.#deps.getPromptCtx();
     const range = this.#findSuggestionRange(this.suggestionId);
     const lastEntry = findPromptEntry(promptCtx, this.#lastInvokedEntryId);
+    // The prompt's type may DECLARE an accept-time mark-stamp (#954): roleplay
+    // stamps the `character` mark from its `character` input. Read off the declared
+    // capability, not an `entry_type == roleplay` branch.
+    const onAccept = promptOnAccept(promptCtx, lastEntry);
     const characterId =
-      range && isRoleplayPromptEntry(promptCtx, lastEntry)
-        ? characterIdFromInputValue(this.#lastInvokedInputs.character)
+      range && onAccept
+        ? characterIdFromInputValue(this.#lastInvokedInputs[onAccept.fromInput])
         : null;
     if (range) {
       let chain = editor.chain().focus().setTextSelection(range).unsetMark("aiSuggestion");
-      if (characterId) {
-        chain = chain.setMark("character", { characterId });
+      if (characterId && onAccept) {
+        chain = chain.setMark(onAccept.mark, { characterId });
       }
       chain.setTextSelection(range.to).run();
     }

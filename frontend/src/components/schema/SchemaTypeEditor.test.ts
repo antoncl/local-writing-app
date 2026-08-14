@@ -88,3 +88,22 @@ describe("SchemaTypeEditor commit authoring (ADR-0054 S3)", () => {
     expect(await savedOutput(onSaveType)).toEqual({ kind: "chat_panel" });
   });
 });
+
+describe("SchemaTypeEditor on_accept round-trip (#957)", () => {
+  const onAccept = { mark: "character", from_input: "character" } as const;
+
+  it("preserves an inline prompt's on_accept mark-stamp through a save", async () => {
+    // on_accept (the roleplay character-stamp) has no authoring control, so it must
+    // ride through a save verbatim — the same guarantee as commit.fields. Without
+    // this, editing roleplay's type would silently drop the stamp.
+    const onSaveType = vi.fn();
+    mount(promptWith({ kind: "append_to_body", on_accept: { ...onAccept } }), onSaveType);
+    expect(await savedOutput(onSaveType)).toEqual({ kind: "append_to_body", on_accept: { ...onAccept } });
+  });
+
+  it("drops on_accept when the disposition is not inline (it rides only on inline)", async () => {
+    const onSaveType = vi.fn();
+    mount(promptWith({ kind: "chat_panel", on_accept: { ...onAccept } }), onSaveType);
+    expect(await savedOutput(onSaveType)).toEqual({ kind: "chat_panel" });
+  });
+});

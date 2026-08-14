@@ -137,6 +137,21 @@ class PlotContextHelperTests(_PlotAiContextBase):
             out.count("<question>"), len(plotline.metadata["source_diagnostic_questions"])
         )
 
+    def test_a_plotline_with_guidance_but_no_beats_still_opens(self) -> None:
+        # The self-close guard is "no guidance AND no beats", not "no beats": a plotline
+        # carrying structure guidance but not yet beaten out must still emit its
+        # <use_guidance>, not collapse to a self-closed tag that silently drops it.
+        from app.models import CreatePlotlineRequest, SavePlotlineRequest
+
+        line = self.service.create_plotline(CreatePlotlineRequest(title="Guided"))
+        self.service.save_plotline(
+            line.id,
+            SavePlotlineRequest(title="Guided", body="", metadata={"source_ai_guidance": "LENS_TEXT"}),
+        )
+        out = self._render('{% role "system" %}{{ plot_context() }}{% endrole %}')
+        self.assertIn("<use_guidance>LENS_TEXT</use_guidance>", out)
+        self.assertNotIn('<plotline title="Guided" />', out)  # opened, not self-closed
+
 
 class RevisePlotCardPromptTests(_PlotAiContextBase):
     def test_the_prompt_ships_in_the_library_as_a_commit_brainstorm(self) -> None:

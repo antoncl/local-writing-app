@@ -215,8 +215,11 @@
         <!-- The drag handle (#876): the card drags ONLY by this grip (SvelteFlow's
              `dragHandle` targets it), leaving the whole body free for its inline-edit
              controls. Present only on an interactive board (actions) — the read-only
-             mount case never drags. Decorative + pointer-only, like every board drag. -->
-        <span class="card-drag-handle {CARD_DRAG_HANDLE_CLASS}" title="Drag to move" aria-hidden="true">⋮⋮</span>
+             mount case never drags. The app's standard grip icon (as SchemaFieldRow's
+             "Drag to reorder"); decorative + pointer-only, like every board drag. -->
+        <span class="card-drag-handle {CARD_DRAG_HANDLE_CLASS}" title="Drag to move" aria-hidden="true">
+          <i class="ti ti-grip-vertical"></i>
+        </span>
       {/if}
       {#if titleEditing}
         <input
@@ -454,26 +457,27 @@
     align-items: flex-start;
     gap: 4px;
   }
-  /* The drag handle (#876): a quiet leading grip — the same 6-dot ⋮⋮ idiom the plotline
-     beats use (#911), tightened into one grip. `align-self: stretch` gives it the full
-     header height so it's an easy target, not a fiddly sliver. Faint at rest, full on
-     card hover; `grab`/`grabbing` cursor advertises the gesture. */
+  /* The drag handle (#876): the app's standard grip icon (matching SchemaFieldRow's
+     "Drag to reorder"). `align-self: stretch` + side padding make a GENEROUS hit target
+     — the full header height and ~16px wide, not a fiddly sliver (an earlier ⋮⋮ glyph
+     collapsed to 3px, near-ungrabbable). Quiet at rest, brightening on card hover;
+     `grab`/`grabbing` cursor advertises the gesture. */
   .card-drag-handle {
     flex: none;
     align-self: stretch;
     display: inline-flex;
     align-items: center;
-    padding: 0 1px;
+    justify-content: center;
+    margin-left: -3px;
+    padding: 0 4px;
     color: var(--text-3);
-    font-size: var(--fs-xs);
+    font-size: var(--fs-lg);
     line-height: 1;
-    letter-spacing: -3px;
     cursor: grab;
-    opacity: 0.5;
-    transition: opacity 120ms ease;
+    transition: color 120ms ease;
   }
   .card-root:hover .card-drag-handle {
-    opacity: 1;
+    color: var(--text);
   }
   .card-drag-handle:active {
     cursor: grabbing;

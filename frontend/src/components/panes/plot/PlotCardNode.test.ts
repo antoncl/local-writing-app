@@ -114,7 +114,10 @@ describe("PlotCardNode", () => {
   // (SvelteFlow's dragHandle targets it), so its control-dense body stays edit-only.
   it("renders the drag-handle grip on an interactive card, and omits it read-only (#876)", () => {
     const { container, unmount } = renderWithActions({}, actions());
-    expect(container.querySelector(".plot-card-drag-handle")).not.toBeNull();
+    const grip = container.querySelector(".plot-card-drag-handle");
+    expect(grip).not.toBeNull();
+    // The app's standard grip icon (a generous, hittable handle — not a collapsing glyph).
+    expect(grip!.querySelector("i.ti-grip-vertical")).not.toBeNull();
     unmount();
     // No actions (read-only mount / non-interactive board) → nothing to drag, no grip.
     const { container: ro } = render(PlotCardNode, { props: { data: data() } });

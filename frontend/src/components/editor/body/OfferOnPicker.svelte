@@ -96,7 +96,7 @@
       <div class="offer-on-group" role="group" aria-label={kindLabel(group.kind)}>
         <h5 class="offer-on-group-title">{kindLabel(group.kind)}</h5>
         {#each group.items as item (item.id)}
-          <label class="offer-on-option" class:checked={isChecked(item.id)}>
+          <label class="offer-on-option">
             <input
               type="checkbox"
               checked={isChecked(item.id)}

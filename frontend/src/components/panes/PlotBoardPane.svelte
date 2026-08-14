@@ -12,6 +12,7 @@
   import PlotEditor from "./PlotEditor.svelte";
   import { plotBoardStore, plotBoardError, refreshPlotBoard } from "@/lib/stores/plotBoard";
   import { structureStore } from "@/lib/stores/structure";
+  import { realizeLocations } from "@/lib/plot/realizeLocations";
 
   onMount(() => {
     void refreshPlotBoard();
@@ -34,6 +35,17 @@
     }
     void refreshPlotBoard();
   });
+
+  // The manuscript containers a card can be realized into (#879) — the "Realize scene"
+  // location picker's roster. Derived here (this pane owns the structure store) so
+  // PlotEditor stays a pure prop-driven renderer; tracks the same store the refetch
+  // effect above watches, so a container added while the board is open appears at once.
+  let locations = $derived(realizeLocations($structureStore));
 </script>
 
-<PlotEditor projection={$plotBoardStore} error={$plotBoardError} onRetry={() => void refreshPlotBoard()} />
+<PlotEditor
+  projection={$plotBoardStore}
+  error={$plotBoardError}
+  {locations}
+  onRetry={() => void refreshPlotBoard()}
+/>

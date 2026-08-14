@@ -40,6 +40,11 @@ export type PlotPlotlineActions = {
   // retired). The provider confirms (destructive) before the backend delete; cards on
   // the thread revert to Unassigned. Fire-and-forget from the node's perspective.
   onDelete: (id: string) => void;
+  // Open the plotline in a full NodeEditor pane (ADR-0053 §3, the escape hatch): the
+  // roomier surface for beat work that is crowded on the card. Optional — the render
+  // test mounts the node with the context absent, and the collapsed read-only path
+  // never calls it. On-node editing stays the default; this is an alternative.
+  onOpenInEditor?: (id: string) => void;
 };
 
 // Symbol key so the context can't collide with a string-keyed one.

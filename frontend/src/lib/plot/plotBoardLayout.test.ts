@@ -12,6 +12,7 @@ import {
   overriddenNodePositions,
   projectionDataKey,
   readBoardPositions,
+  reconcilePlotlineUiState,
   CARD_GAP_X,
   CARD_HEIGHT,
   CARD_WIDTH,
@@ -251,6 +252,36 @@ describe("boardIsEmpty", () => {
     // The S3 regression guard: an instantiated plotline on a card-less board must keep
     // the canvas rendered, not fall back to the empty hint.
     expect(boardIsEmpty(projection({ plotlines: [line("l1", "Romance")] }))).toBe(false);
+  });
+});
+
+describe("reconcilePlotlineUiState (#928 — full-pane delete strands focus)", () => {
+  const proj = projection({ plotlines: [line("l1", "Romance"), line("l2", "Mystery")] });
+
+  it("keeps a focused/expanded id that still exists on the board", () => {
+    const state = { focusedPlotlineId: "l1", expandedPlotlineId: "l2" };
+    // Unchanged → returns the SAME object so the caller skips a no-op write.
+    expect(reconcilePlotlineUiState(proj, state)).toBe(state);
+  });
+
+  it("drops a focused id whose plotline was deleted (the escape-hatch pane delete)", () => {
+    const healed = reconcilePlotlineUiState(proj, { focusedPlotlineId: "gone", expandedPlotlineId: "l1" });
+    expect(healed).toEqual({ focusedPlotlineId: null, expandedPlotlineId: "l1" });
+  });
+
+  it("drops an expanded id whose plotline was deleted", () => {
+    const healed = reconcilePlotlineUiState(proj, { focusedPlotlineId: null, expandedPlotlineId: "gone" });
+    expect(healed).toEqual({ focusedPlotlineId: null, expandedPlotlineId: null });
+  });
+
+  it("leaves a null (loading / failed) projection untouched — no transient clear", () => {
+    const state = { focusedPlotlineId: "l1", expandedPlotlineId: "l2" };
+    expect(reconcilePlotlineUiState(null, state)).toBe(state);
+  });
+
+  it("is a no-op when both ids are already null", () => {
+    const state = { focusedPlotlineId: null, expandedPlotlineId: null };
+    expect(reconcilePlotlineUiState(proj, state)).toBe(state);
   });
 });
 

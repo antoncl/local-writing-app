@@ -60,6 +60,7 @@ import type {
   EditableDocument,
   EntryMetadata,
   LoreEntry,
+  PlotlineEntry,
   PlotTemplate,
   PromptEntry,
   PromptInputDefinition,
@@ -129,12 +130,13 @@ export type ReviewCommitter = {
 // methods close over the module-level `request`, not `this`. The reloadable kinds
 // are the narrow subset with a required `metadata` (NOT the whole EditableDocument
 // union — ViewNode et al. never reach this pass and carry optional metadata).
-type ReloadableDocument = Scene | LoreEntry | PromptEntry | PlotTemplate | CardEntry;
+type ReloadableDocument = Scene | LoreEntry | PromptEntry | PlotTemplate | CardEntry | PlotlineEntry;
 const RELOAD_GETTERS: Record<string, (id: string) => Promise<ReloadableDocument>> = {
   lore: api.getLoreEntry,
   prompt: api.getPromptEntry,
   plot_template: api.getPlotTemplate,
   plot_card: api.getCard,
+  plotline: api.getPlotline,
 };
 
 class EditorPanesController {
@@ -597,6 +599,12 @@ class EditorPanesController {
         // (realize/attach/detach) mutate the scene ref through their own paths;
         // this save carries whatever the editor changed.
         savedDocument = await api.saveCard(draftDocument as CardEntry, pane.draftMarkdown);
+      } else if (documentKind === "plotline") {
+        // A book-local plotline opened as a full pane (ADR-0053 §3, the escape
+        // hatch for heavy beat work): name (title) + colour + beats (metadata) +
+        // description (body) round-trip via the plotline endpoint. The on-node
+        // inline editor is the default surface; this is the roomier alternative.
+        savedDocument = await api.savePlotline(draftDocument as PlotlineEntry, pane.draftMarkdown);
       } else if (documentKind === "assistant") {
         savedDocument = await api.saveAssistantEntry(draftDocument as AssistantEntry);
         void refreshAssistantTags();
@@ -1043,6 +1051,19 @@ class EditorPanesController {
   // A book-local node, so no Library provenance / read-only lock applies.
   async openPlotCard(entryId: string): Promise<void> {
     return this.#openEntryDocument("plot_card", entryId, "open plot card", (id) => api.getCard(id), {
+      body: true,
+    });
+  }
+
+  // Open a plotline (ADR-0053 §3) as a full NodeEditor document — the "Open in
+  // editor" escape hatch from the plotline board node, for beat work that is
+  // crowded on the card. The on-node inline editor stays the DEFAULT surface;
+  // this is the roomier alternative, not a replacement, and NOT a create surface
+  // (plotlines are minted board-native — the palette / New plotline). A book-local
+  // `plot` node, so no Library provenance / read-only lock applies. The card's
+  // `plotline` backlink still REVEALS on the board (revealPlotline), not here.
+  async openPlotline(entryId: string): Promise<void> {
+    return this.#openEntryDocument("plotline", entryId, "open plotline", (id) => api.getPlotline(id), {
       body: true,
     });
   }

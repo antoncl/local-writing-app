@@ -20,6 +20,13 @@ export type PlotPlotlineActions = {
   // board) collapses. Independent of Svelte Flow selection — plotline nodes are not
   // selectable, so selection can't drive this.
   toggleExpanded: (id: string) => void;
+  // Which plotline's thread is FOCUSED across the board (ADR-0053 §6), or null. The
+  // node's eye toggle reflects it; the edge builder emphasises this thread's beat-
+  // sequence chain and dims the rest, and cards off it recede. A getter (fresh read).
+  readonly focusedId: string | null;
+  // The eye toggles focus for this plotline; a second toggle (or a pane-background
+  // click) clears it. Only one thread is focused at a time.
+  toggleFocus: (id: string) => void;
   // Load the full plotline entry when the node expands — the editable source of truth
   // (title + metadata.color + metadata.instance_beats + the hidden lineage fields).
   loadPlotline: (id: string) => Promise<PlotlineEntry>;

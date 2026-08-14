@@ -43,6 +43,11 @@
   // selection — plotline nodes are not selectable). Never expands without a context.
   let isExpanded = $derived(!!actions && actions.expandedId === id);
 
+  // Focused iff this is the thread lit across the board (ADR-0053 §6). The focus toggle
+  // (the eye) reflects it; the actual edge emphasis + card dimming happen in the edge
+  // builder / card node. Never focused without a context (the read-only mount case).
+  let isFocused = $derived(!!actions && actions.focusedId === id);
+
   // A beat is a drag source only once the plotline exists (has a node id): the mount-
   // test degrade has none, and there's nothing to link a beat of before it's created.
   let canDrag = $derived(!!id);
@@ -244,12 +249,29 @@
   style={accent ? `--plotline-accent: ${accent}` : undefined}
 >
   {#if actions}
-    <button class="plotline-head as-toggle" aria-expanded={isExpanded} onclick={() => actions.toggleExpanded(id!)}>
-      <span class="plotline-dot" class:hollow={!accent}></span>
-      <span class="plotline-title" title={data.title}>{data.title || "Untitled plotline"}</span>
-      <span class="plotline-count" title="Beats">{data.beats.length}</span>
-      <i class="ti ti-chevron-{isExpanded ? 'up' : 'down'} plotline-caret" aria-hidden="true"></i>
-    </button>
+    <!-- The header row: an eye toggle that FOCUSES this thread across the board (ADR-0053
+         §6), then the expand toggle (dot + title + beat count + caret). Two sibling
+         buttons, not nested. The eye carries `nodrag nopan` so pressing it never starts a
+         node drag; the expand button stays drag-enabled so the node still drags by its
+         header. -->
+    <div class="plotline-head">
+      <button
+        class="plotline-focus nodrag nopan"
+        class:active={isFocused}
+        aria-pressed={isFocused}
+        title={isFocused ? "Clear focus — show all threads" : "Focus this thread across the board"}
+        aria-label={isFocused ? "Clear focus" : "Focus this thread"}
+        onclick={() => actions.toggleFocus(id!)}
+      >
+        <i class="ti ti-eye" aria-hidden="true"></i>
+      </button>
+      <button class="plotline-head-main as-toggle" aria-expanded={isExpanded} onclick={() => actions.toggleExpanded(id!)}>
+        <span class="plotline-dot" class:hollow={!accent}></span>
+        <span class="plotline-title" title={data.title}>{data.title || "Untitled plotline"}</span>
+        <span class="plotline-count" title="Beats">{data.beats.length}</span>
+        <i class="ti ti-chevron-{isExpanded ? 'up' : 'down'} plotline-caret" aria-hidden="true"></i>
+      </button>
+    </div>
   {:else}
     <div class="plotline-head">
       <span class="plotline-dot" class:hollow={!accent}></span>
@@ -412,18 +434,48 @@
     gap: 8px;
     min-width: 0;
   }
-  /* The header doubles as the expand toggle — reset button chrome to look like the
-     read-only header, with a pointer cue. */
-  .plotline-head.as-toggle {
+  /* The title area doubles as the expand toggle — reset button chrome to look like the
+     read-only header, with a pointer cue. Takes the row's remaining width beside the
+     eye. */
+  .plotline-head-main.as-toggle {
     appearance: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
     background: transparent;
     border: none;
     padding: 0;
-    width: 100%;
     font: inherit;
     color: inherit;
     text-align: left;
     cursor: pointer;
+  }
+  /* The focus (eye) toggle: a quiet icon button that lights this thread across the
+     board. Reads muted at rest, accent when this thread is the focused one. */
+  .plotline-focus {
+    appearance: none;
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    color: var(--text-3);
+    cursor: pointer;
+    font-size: var(--fs-sm);
+  }
+  .plotline-focus:hover {
+    color: var(--text);
+    border-color: var(--border);
+  }
+  .plotline-focus.active {
+    color: var(--accent);
+    border-color: var(--accent);
   }
   .plotline-dot {
     flex: none;

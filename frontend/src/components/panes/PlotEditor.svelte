@@ -134,6 +134,13 @@
   // — realize/detach never enter the Ctrl+Z history. Each store helper refetches the
   // projection so the board re-projects the changed card (visible reflow is the
   // rehydrate-on-content-op wiring in the reflow slice).
+  // Per-plotline FOCUS (ADR-0053 §6): which plotline's thread is lit across the whole
+  // board (its beat-sequence edges emphasised, every other edge + non-participating card
+  // dimmed), or null. Owned here like `expandedPlotlineId`; toggled from a plotline node,
+  // cleared on a canvas-background click. A card reads it through the actions getter to
+  // decide whether it recedes (a getter so it tracks this reactive state fresh).
+  let focusedPlotlineId = $state<string | null>(null);
+
   setContext<PlotCardActions>(PLOT_CARD_ACTIONS, {
     onOpen: (cardId) => void editorPanes.openPlotCard(cardId),
     onRealize: (cardId) => void realizeCard(cardId),
@@ -158,6 +165,11 @@
     get plotlines() {
       return projection?.plotlines ?? [];
     },
+    // The focused plotline (S5b) — a card that is neither on this thread nor fulfilling
+    // one of its beats dims. A getter so the card tracks it reactively.
+    get focusedPlotlineId() {
+      return focusedPlotlineId;
+    },
   });
 
   // On-node plotline editing (ADR-0053 §3). The board owns the ephemeral "which
@@ -172,6 +184,12 @@
     },
     toggleExpanded: (id) => {
       expandedPlotlineId = expandedPlotlineId === id ? null : id;
+    },
+    get focusedId() {
+      return focusedPlotlineId;
+    },
+    toggleFocus: (id) => {
+      focusedPlotlineId = focusedPlotlineId === id ? null : id;
     },
     loadPlotline: (id) => getPlotlineEntry(id),
     // Persist an edit and refresh the board + rail. Surface a failure in the app banner
@@ -424,7 +442,7 @@
   // undo caretaker (only card drags do). Reads projection + activeLayers only (never
   // flowEdges back), so it can't loop with SvelteFlow's own writes.
   $effect(() => {
-    flowEdges = projection ? buildBoardEdges(projection, activeLayers) : [];
+    flowEdges = projection ? buildBoardEdges(projection, activeLayers, focusedPlotlineId) : [];
   });
 
   // Which beats are already placed on some card — the beat palette marks these (#824).
@@ -628,7 +646,10 @@
         elementsSelectable={true}
         onconnect={onConnectCausal}
         ondelete={onDeleteCausal}
-        onpaneclick={() => (expandedPlotlineId = null)}
+        onpaneclick={() => {
+          expandedPlotlineId = null;
+          focusedPlotlineId = null;
+        }}
         onnodedragstart={({ nodes }) => {
           dragging = true;
           undoCtl.dragStart(nodes);
@@ -849,5 +870,22 @@
      ⚠ with the why/what-to-do tooltip. Declared after `.causal-edge` so it wins. */
   .plot-board :global(.svelte-flow__edge.causal-warn .svelte-flow__edge-path) {
     stroke: var(--warn);
+  }
+
+  /* Per-plotline FOCUS (ADR-0053 §6, S5b). buildBoardEdges tags every edge when a
+     plotline is focused: `edge-focused` on the focused thread's beat-sequence chain,
+     `edge-dimmed` on everything else. The focused thread reads LOUD — a solid accent
+     stroke, thicker, full opacity, no dash — so it pops over the quiet derived layers;
+     the rest recede to a faint trace. Declared AFTER the layer rules so the same-
+     specificity focus rules win by source order (they override beat-edge's dash + the
+     causal accent). Token colours only. */
+  .plot-board :global(.svelte-flow__edge.edge-dimmed .svelte-flow__edge-path) {
+    stroke-opacity: 0.12;
+  }
+  .plot-board :global(.svelte-flow__edge.edge-focused .svelte-flow__edge-path) {
+    stroke: var(--accent);
+    stroke-opacity: 1;
+    stroke-width: 2.5;
+    stroke-dasharray: none;
   }
 </style>

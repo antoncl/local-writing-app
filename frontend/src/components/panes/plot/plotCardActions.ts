@@ -35,6 +35,10 @@ export type PlotCardActions = {
   // The current lanes, for the "Set plotline" submenu. A getter on the provider so
   // the card reads them fresh from the projection.
   readonly plotlines: PlotBoardPlotline[];
+  // The focused plotline (ADR-0053 §6, S5b), or null. A card dims when a thread is
+  // focused and this card is neither on it (its primary plotline) nor fulfilling one
+  // of its beats. A getter so the card tracks it reactively (the `plotlines` idiom).
+  readonly focusedPlotlineId: string | null;
 };
 
 // Symbol key so the context can't collide with a string-keyed one.

@@ -12,7 +12,7 @@
 // during a replay). A surface uses only the recorders its gestures need — the
 // plot board (S7c) records only drags; connect/config stay for edge-and-config
 // canvases like the view designer.
-import { UndoCaretaker, type Command } from "@/lib/stores/undoCaretaker.svelte";
+import { UndoCaretaker, UndoCancelled, type Command } from "@/lib/stores/undoCaretaker.svelte";
 import {
   addNodeCommand,
   configCommands,
@@ -167,17 +167,29 @@ export class GraphUndoController<N extends NodeLike, E extends EdgeLike> {
   /** Async so a backend-backed inverse completes before the announcement (§7);
    *  a no-op for sync layout surfaces (the awaited closures resolve at once).
    *  Short-circuits while busy so a mashed chord doesn't announce a misleading
-   *  "Nothing to undo" over an in-flight step. */
+   *  "Nothing to undo" over an in-flight step. A closure that throws
+   *  `UndoCancelled` (a declined destructive reversal, S6b) is announced as
+   *  cancelled, not surfaced as an error — the caretaker left the step undoable. */
   async undo(): Promise<void> {
     if (this.#caretaker.busy) return;
-    const step = await this.#caretaker.undo();
-    this.#announce(step === null ? "Nothing to undo" : `Undid ${step.label || "change"}`);
+    try {
+      const step = await this.#caretaker.undo();
+      this.#announce(step === null ? "Nothing to undo" : `Undid ${step.label || "change"}`);
+    } catch (error) {
+      if (error instanceof UndoCancelled) return void this.#announce("Undo cancelled");
+      throw error;
+    }
   }
 
   async redo(): Promise<void> {
     if (this.#caretaker.busy) return;
-    const step = await this.#caretaker.redo();
-    this.#announce(step === null ? "Nothing to redo" : `Redid ${step.label || "change"}`);
+    try {
+      const step = await this.#caretaker.redo();
+      this.#announce(step === null ? "Nothing to redo" : `Redid ${step.label || "change"}`);
+    } catch (error) {
+      if (error instanceof UndoCancelled) return void this.#announce("Redo cancelled");
+      throw error;
+    }
   }
 
   /** A repeat of the same message toggles a trailing no-break space —

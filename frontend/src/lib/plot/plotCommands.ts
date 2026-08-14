@@ -21,14 +21,19 @@
 // they unit-test with a fake); `PlotUndoRecorder` wraps capture-op-record for the
 // PlotEditor handlers; `defaultPlotCommandPort` wires the real store ops.
 
-import type { Command } from "@/lib/stores/undoCaretaker.svelte";
+import { type Command, UndoCancelled } from "@/lib/stores/undoCaretaker.svelte";
 import type { PlotBoardProjection } from "@/lib/types";
 import {
   type CardState,
   deleteCard,
+  detachCardScene,
+  deleteScene,
   getCardState,
+  readScene,
+  realizeCard,
   recreateCard,
   restoreCardState,
+  sceneReferents,
 } from "@/lib/stores/plotBoard";
 import {
   type PlotlineState,
@@ -37,6 +42,7 @@ import {
   recreatePlotline,
   restorePlotlineState,
 } from "@/lib/stores/plotlines";
+import { confirmService } from "@/lib/stores/confirmService.svelte";
 
 // The backend inverses the commands replay through. Every method is async (a server
 // round-trip); the builders never touch a store directly, so a test drives them with
@@ -50,6 +56,14 @@ export interface PlotCommandPort {
   getPlotlineState(id: string): Promise<PlotlineState>;
   restorePlotlineState(id: string, state: PlotlineState): Promise<void>;
   recreatePlotline(id: string, state: PlotlineState): Promise<void>;
+  // Realize (S6b): mint a scene → returns its id; the undo/redo scene ops.
+  realizeCard(cardId: string, parentId: string | null): Promise<string>;
+  sceneReferents(sceneId: string): string[];
+  readScene(sceneId: string): Promise<{ title: string; body: string }>;
+  deleteScene(sceneId: string): Promise<void>;
+  detachCardScene(cardId: string): Promise<void>;
+  // Suppressible confirm before deleting a written scene; resolves false on cancel.
+  confirmSceneDelete(scene: { title: string; body: string }): Promise<boolean>;
 }
 
 // A captured card (id + whole state) — a deleted node, or a referrer restored
@@ -174,6 +188,43 @@ export function seedCommand(port: PlotCommandPort, created: CardRef[], label = "
   };
 }
 
+// Realize minted a scene FILE and attached it (S6b) — the one op with a file side
+// effect. Undo deletes that scene ONLY when the card is its sole referent (0..n cards
+// per scene), behind a suppressible confirm when the scene holds prose; a shared scene
+// is kept (this card detached). Redo re-mints — capturing the NEW scene id (mutable
+// closure state) so the next undo targets it. The sole-referent check reads the LIVE
+// board at undo time, since another card may have attached since the realize.
+export function realizeCommand(
+  port: PlotCommandPort,
+  cardId: string,
+  parentId: string | null,
+  sceneId: string,
+  label = "realize card",
+): Command {
+  let scene = sceneId;
+  return {
+    label,
+    undo: async () => {
+      const referents = port.sceneReferents(scene);
+      if (!referents.includes(cardId)) return; // realize already reversed elsewhere — no-op
+      if (referents.length > 1) {
+        await port.detachCardScene(cardId); // shared scene — keep it, detach this card only
+        return;
+      }
+      const read = await port.readScene(scene); // sole referent → the scene will be deleted
+      if (read.body.trim().length > 0 && !(await port.confirmSceneDelete(read))) {
+        // Declined a written scene's deletion: throw BEFORE mutating so the caretaker
+        // leaves this single-command step undoable (UndoCancelled → "Undo cancelled").
+        throw new UndoCancelled();
+      }
+      await port.deleteScene(scene); // deletes the scene + purges the card's ref (detaches)
+    },
+    redo: async () => {
+      scene = await port.realizeCard(cardId, parentId); // re-mint; track the new scene id
+    },
+  };
+}
+
 // ── Recorder ─────────────────────────────────────────────────────────────────
 // Wraps the capture → run-forward-op → record pattern for the PlotEditor handlers,
 // so the component stays thin and the orchestration is unit-testable with a fake
@@ -275,6 +326,16 @@ export class PlotUndoRecorder {
     if (created.length === 0) return;
     this.#record(seedCommand(this.#port, await this.#captureCards(created)));
   }
+
+  /** Realize a card into a scene, recorded (S6b). Mints the scene via the port,
+   *  records a command whose undo deletes it (sole referent, suppressible confirm).
+   *  A realize that produced no scene (a 409 already-attached, or an error) records
+   *  nothing. */
+  async realize(cardId: string, parentId: string | null): Promise<void> {
+    const sceneId = await this.#port.realizeCard(cardId, parentId);
+    if (!sceneId) return;
+    this.#record(realizeCommand(this.#port, cardId, parentId, sceneId));
+  }
 }
 
 // The real port: the plotBoard / plotlines store ops behind the interface.
@@ -288,5 +349,26 @@ export function defaultPlotCommandPort(): PlotCommandPort {
     getPlotlineState,
     restorePlotlineState,
     recreatePlotline,
+    realizeCard,
+    sceneReferents,
+    readScene,
+    deleteScene,
+    detachCardScene,
+    // The suppressible confirm before deleting a written scene, as a Promise<boolean>:
+    // confirm → true, cancel/backdrop → false (via the confirmService onCancel added
+    // for this), and a suppressed prior "don't show again" resolves true immediately.
+    confirmSceneDelete: (scene) =>
+      new Promise<boolean>((resolve) => {
+        confirmService.request({
+          title: "Delete scene?",
+          message: `Undoing realize will delete the scene “${scene.title || "Untitled"}” and its prose.`,
+          confirmLabel: "Delete scene",
+          destructive: true,
+          cannotBeUndone: true,
+          dontShowAgainKey: "plot-realize-undo-delete-scene",
+          onConfirm: async () => resolve(true),
+          onCancel: () => resolve(false),
+        });
+      }),
   };
 }

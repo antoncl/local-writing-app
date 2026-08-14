@@ -17,8 +17,10 @@ import {
   deleteCardCommand,
   deletePlotlineCommand,
   plotlineEditCommand,
+  realizeCommand,
   seedCommand,
 } from "./plotCommands";
+import { UndoCancelled } from "@/lib/stores/undoCaretaker.svelte";
 import type { CardState } from "@/lib/stores/plotBoard";
 import type { PlotlineState } from "@/lib/stores/plotlines";
 import type { PlotBoardCard, PlotBoardProjection } from "@/lib/types";
@@ -37,6 +39,12 @@ const plotlineState = (title: string, metadata: PlotlineState["metadata"] = {}, 
 function fakePort() {
   const cards = new Map<string, CardState>();
   const plotlines = new Map<string, PlotlineState>();
+  // Scene model for the realize tests: body per scene + which cards reference each.
+  const scenes = new Map<string, { title: string; body: string }>();
+  const sceneRefs = new Map<string, Set<string>>();
+  let sceneCounter = 0;
+  // What the (mocked) suppressible confirm resolves; flip per test.
+  const confirm = { result: true };
   const calls: string[] = [];
   const port: PlotCommandPort = {
     deleteCard: async (id) => {
@@ -65,8 +73,30 @@ function fakePort() {
       calls.push(`recreatePlotline:${id}`);
       plotlines.set(id, structuredClone(s));
     },
+    realizeCard: async (cardId, _parentId) => {
+      const id = `scene_${++sceneCounter}`;
+      calls.push(`realize:${cardId}->${id}`);
+      scenes.set(id, { title: `Scene for ${cardId}`, body: "" });
+      sceneRefs.set(id, new Set([cardId]));
+      return id;
+    },
+    sceneReferents: (sceneId) => [...(sceneRefs.get(sceneId) ?? [])],
+    readScene: async (sceneId) => structuredClone(scenes.get(sceneId)!),
+    deleteScene: async (sceneId) => {
+      calls.push(`deleteScene:${sceneId}`);
+      scenes.delete(sceneId);
+      sceneRefs.delete(sceneId);
+    },
+    detachCardScene: async (cardId) => {
+      calls.push(`detach:${cardId}`);
+      for (const refs of sceneRefs.values()) refs.delete(cardId);
+    },
+    confirmSceneDelete: async () => {
+      calls.push("confirm");
+      return confirm.result;
+    },
   };
-  return { port, cards, plotlines, calls };
+  return { port, cards, plotlines, scenes, sceneRefs, confirm, calls };
 }
 
 // A projection with just the fields the finders / recorder read.
@@ -199,6 +229,68 @@ describe("seed command", () => {
   });
 });
 
+describe("realize command (S6b)", () => {
+  it("undo deletes a sole-referent EMPTY scene silently (no confirm)", async () => {
+    const { port, scenes, sceneRefs, calls } = fakePort();
+    scenes.set("sc1", { title: "S", body: "" });
+    sceneRefs.set("sc1", new Set(["c1"]));
+    const cmd = realizeCommand(port, "c1", null, "sc1");
+    await cmd.undo();
+    expect(calls).toEqual(["deleteScene:sc1"]); // no "confirm" — empty scene
+    expect(scenes.has("sc1")).toBe(false);
+  });
+
+  it("undo confirms before deleting a sole-referent scene that holds prose", async () => {
+    const { port, scenes, sceneRefs, confirm, calls } = fakePort();
+    scenes.set("sc1", { title: "S", body: "She admits it." });
+    sceneRefs.set("sc1", new Set(["c1"]));
+    confirm.result = true;
+    await realizeCommand(port, "c1", null, "sc1").undo();
+    expect(calls).toEqual(["confirm", "deleteScene:sc1"]);
+    expect(scenes.has("sc1")).toBe(false);
+  });
+
+  it("undo of a written scene ABORTS (throws UndoCancelled, nothing mutated) when declined", async () => {
+    const { port, scenes, sceneRefs, confirm, calls } = fakePort();
+    scenes.set("sc1", { title: "S", body: "Precious prose." });
+    sceneRefs.set("sc1", new Set(["c1"]));
+    confirm.result = false;
+    await expect(realizeCommand(port, "c1", null, "sc1").undo()).rejects.toBeInstanceOf(UndoCancelled);
+    expect(calls).toEqual(["confirm"]); // no delete — the scene (and the realize) survive
+    expect(scenes.has("sc1")).toBe(true);
+  });
+
+  it("undo of a SHARED scene keeps it and detaches only this card", async () => {
+    const { port, scenes, sceneRefs, calls } = fakePort();
+    scenes.set("sc1", { title: "S", body: "prose" });
+    sceneRefs.set("sc1", new Set(["c1", "c2"])); // another card attached since realize
+    await realizeCommand(port, "c1", null, "sc1").undo();
+    expect(calls).toEqual(["detach:c1"]); // no confirm, no delete — the scene is shared
+    expect(scenes.has("sc1")).toBe(true);
+  });
+
+  it("undo is a no-op when this card no longer references the scene", async () => {
+    const { port, scenes, sceneRefs, calls } = fakePort();
+    scenes.set("sc1", { title: "S", body: "" });
+    sceneRefs.set("sc1", new Set(["other"])); // c1 was detached/re-realized elsewhere
+    await realizeCommand(port, "c1", null, "sc1").undo();
+    expect(calls).toEqual([]); // nothing to reverse
+    expect(scenes.has("sc1")).toBe(true);
+  });
+
+  it("redo re-mints a fresh scene, and the next undo targets THAT scene", async () => {
+    const { port, scenes, sceneRefs, calls } = fakePort();
+    scenes.set("sc1", { title: "S", body: "" });
+    sceneRefs.set("sc1", new Set(["c1"]));
+    const cmd = realizeCommand(port, "c1", null, "sc1");
+    await cmd.undo(); // deletes sc1
+    await cmd.redo(); // re-mints → scene_1 (fake counter), attached to c1
+    expect(calls).toEqual(["deleteScene:sc1", "realize:c1->scene_1"]);
+    await cmd.undo(); // must delete the NEW scene, not the gone sc1
+    expect(calls).toEqual(["deleteScene:sc1", "realize:c1->scene_1", "deleteScene:scene_1"]);
+  });
+});
+
 describe("PlotUndoRecorder", () => {
   it("cardEdit records a command only when the op actually changed the card", async () => {
     const { port, cards } = fakePort();
@@ -272,6 +364,28 @@ describe("PlotUndoRecorder", () => {
     const recorded: unknown[] = [];
     const recorder = new PlotUndoRecorder(port, (c) => recorded.push(c), () => null);
     await recorder.seed(async () => []);
+    expect(recorded).toEqual([]);
+  });
+
+  it("realize mints the scene and records a command; its undo deletes that scene", async () => {
+    const { port, scenes, calls } = fakePort();
+    const recorded: Array<{ undo: () => Promise<void> }> = [];
+    const recorder = new PlotUndoRecorder(port, (c) => recorded.push(c as { undo: () => Promise<void> }), () => null);
+
+    await recorder.realize("c1", null);
+    expect(calls).toEqual(["realize:c1->scene_1"]);
+    expect(scenes.has("scene_1")).toBe(true);
+    await recorded[0].undo(); // the just-minted empty scene deletes silently
+    expect(scenes.has("scene_1")).toBe(false);
+  });
+
+  it("realize records nothing when the op mints no scene (e.g. a 409 already-attached)", async () => {
+    const { port } = fakePort();
+    const recorded: unknown[] = [];
+    // A port whose realizeCard yields no scene id (the 409 / error case).
+    const noScenePort = { ...port, realizeCard: async () => "" };
+    const recorder = new PlotUndoRecorder(noScenePort, (c) => recorded.push(c), () => null);
+    await recorder.realize("c1", null);
     expect(recorded).toEqual([]);
   });
 });

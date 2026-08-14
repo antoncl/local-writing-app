@@ -9,7 +9,8 @@
 
 import { get, writable } from "svelte/store";
 import { api } from "@/lib/api";
-import type { CardEntry, PlotBoardLayout, PlotBoardProjection } from "@/lib/types";
+import { setStructure } from "@/lib/stores/structure";
+import type { CardEntry, PlotBoardLayout, PlotBoardProjection, Scene } from "@/lib/types";
 
 export const plotBoardStore = writable<PlotBoardProjection | null>(null);
 
@@ -75,9 +76,12 @@ export async function savePlotBoardLayout(layout: PlotBoardLayout, baseRevision:
 // (get the current card first, so the save carries its live revision + metadata).
 
 // Realize: mint a scene from the card and attach it. 409 if already attached.
-export async function realizeCard(cardId: string, parentId: string | null = null): Promise<void> {
-  await api.realizeCard(cardId, parentId);
+// Returns the minted scene's id (from the card's `metadata.scene`) so realize can be
+// recorded as an undoable command (ADR-0053 §7 / S6b) — undo deletes that scene.
+export async function realizeCard(cardId: string, parentId: string | null = null): Promise<string> {
+  const card = await api.realizeCard(cardId, parentId);
   await refreshAfterMutation();
+  return typeof card.metadata.scene === "string" ? card.metadata.scene : "";
 }
 
 // Seed: one attached card per un-carded leaf scene, in manuscript order (idempotent).
@@ -162,6 +166,33 @@ export function detachCardScene(cardId: string): Promise<void> {
   return mutateCardMetadata(cardId, (metadata) => {
     delete metadata.scene;
   });
+}
+
+// ── Realize-undo substrate (ADR-0053 §7 / S6b) ──────────────────────────────
+// Realize mints a scene FILE; its undo deletes that scene when the card is its sole
+// referent. These helpers back the realize command's undo (see plotCommands.ts).
+
+// The card ids that currently reference a scene — read synchronously off the live
+// board store (reliable, not a lagging prop). One = a sole referent (safe to delete
+// the scene); more = shared (detach this card only); the realize command reads it at
+// UNDO time, since another card may have attached since the realize.
+export function sceneReferents(sceneId: string): string[] {
+  return (get(plotBoardStore)?.cards ?? []).filter((c) => c.scene === sceneId).map((c) => c.id);
+}
+
+// Read a scene (title + body) — the realize-undo confirm gates on whether the scene
+// it is about to delete holds prose, and names it.
+export function readScene(sceneId: string): Promise<Scene> {
+  return api.getScene(sceneId);
+}
+
+// Delete a scene (realize-undo of a sole-referent scene). `delete_scene` purges the
+// referencing card's `scene` ref backend-side, so this also detaches the card — no
+// separate detach needed. Updates the manuscript structure store (the scene leaves
+// the tree, mirroring editorPaneDelete) AND the board (the card projects homeless).
+export async function deleteScene(sceneId: string): Promise<void> {
+  setStructure(await api.deleteScene(sceneId));
+  await refreshAfterMutation();
 }
 
 // One card→beat link: a (plotline id, beat id) pair — the stored shape of a

@@ -348,6 +348,63 @@ def _coerce_entry_ref(
     return None
 
 
+def _coerce_entry_ref_as_of(
+    project: ProjectService,
+    schema: Any,
+    value: Any,
+    scene: Any,
+    index: Any = None,
+) -> EntryRef | None:
+    """Backs the `entry_as_of()` Jinja global (ADR-0055 §1): like `entry()`, but
+    the returned EntryRef's fields are resolved **as of** a scene rather than at
+    book-start. Every field the entry carries a live mutation for (title/body and
+    any metadata field) is overlaid with its effective value at end-of-`scene`;
+    unmutated fields keep their base value.
+
+    Degrades to a plain base read (exactly `entry()`) when there is no anchor —
+    no/empty scene, a scene outside the manuscript, a non-lore or unmutated
+    entry — so a subject-anchored prompt with no anchor set behaves as before.
+
+    Scene granularity only (`position=END_OF_SCENE`, the `effective_state`
+    default): every marker in the scene counts as live. A sub-scene cursor
+    anchor is a deferred refinement (ADR-0055 §1, "optionally a prose position").
+    """
+    ref = _coerce_entry_ref(project, schema, value)
+    if ref is None:
+        return None
+    scene_id = _scene_id_of(scene)
+    if not scene_id:
+        return ref
+    base = _safe_read_lore(project, ref.id)
+    if base is None:
+        return ref
+    try:
+        overrides = project.effective_state(ref.id, scene_id, index=index)
+    except Exception:
+        overrides = {}
+    if not overrides:
+        return ref
+    updates: dict[str, Any] = {}
+    metadata = dict(getattr(base, "metadata", {}) or {})
+    metadata_changed = False
+    for field, raw in overrides.items():
+        if field == "title":
+            updates["title"] = raw if isinstance(raw, str) else str(raw)
+        elif field == "body":
+            updates["body"] = raw if isinstance(raw, str) else str(raw)
+        elif isinstance(raw, list):
+            metadata[field] = raw
+            metadata_changed = True
+        else:
+            field_def = getattr(schema, "fields", {}).get(field) if schema is not None else None
+            field_type = getattr(field_def, "type", "") if field_def is not None else ""
+            metadata[field] = project._coerce_mutation_value(raw, field_type)
+            metadata_changed = True
+    if metadata_changed:
+        updates["metadata"] = metadata
+    return EntryRef(project, schema, ref.id, loaded=base.model_copy(update=updates))
+
+
 def _field_catalog(project: ProjectService, schema: Any, value: Any) -> list[dict[str, Any]]:
     """Backing the `field_catalog()` Jinja global.
 
@@ -505,6 +562,11 @@ def register_helpers(
         )
     )
     env.globals["entry"] = lambda value: _coerce_entry_ref(project, schema, value)
+    # As-of read (ADR-0055 §1): the same entry, resolved through `effective_state`
+    # at `scene` instead of book-start. `scene` empty/None → a plain base read.
+    env.globals["entry_as_of"] = lambda value, scene: _coerce_entry_ref_as_of(
+        project, schema, value, scene, index=_mutations_index()
+    )
     env.globals["field_catalog"] = lambda value: _field_catalog(project, schema, value)
     env.globals["entry_type_label"] = lambda value: _entry_type_label(schema, value)
     env.globals["base"] = lambda entity, field: _base_field(project, schema, entity, field)

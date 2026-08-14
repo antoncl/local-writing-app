@@ -336,6 +336,116 @@ class ScenesBeforeHelperTests(_HelperFixtureBase):
         self.assertEqual(out.messages, [])
 
 
+class EntryAsOfHelperTests(_HelperFixtureBase):
+    """ADR-0055 §1: `entry_as_of(entry, scene)` resolves the subject through
+    `effective_state` at the anchor scene; no anchor degrades to a base read."""
+
+    def _mutate_honor_in_scene_two(self) -> None:
+        from urllib.parse import quote
+
+        new_body = quote("Admiral of the Fleet. Battle-hardened.")
+        self._update_scene(
+            self.scene_two_node.scene_id,
+            title="The Arrival",
+            entry_type="scene:scene",
+            metadata={"summary": "The fleet returns.", "characters": [], "pov": self.honor["id"]},
+            body=(
+                "Honor is promoted. "
+                f"<!-- mutate:entity={self.honor['id']};field=title;value=Admiral%20Harrington;id=m1 -->"
+                f"<!-- mutate:entity={self.honor['id']};field=body;value={new_body};id=m2 -->"
+            ),
+        )
+
+    def _render_as_of(self, scene_id: str) -> str:
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "system" %}{% set c = entry_as_of(who, as_of) %}'
+            "{{ c.title }}|{{ c.body }}{% endrole %}",
+            context={"who": self.honor["id"], "as_of": scene_id},
+            env=env,
+        )
+        # A stored lore body keeps a trailing newline; the value resolved from a
+        # marker does not. Strip so the assertions compare content, not storage.
+        return out.messages[0].text.strip()
+
+    def test_reads_mutated_state_at_or_after_the_change(self) -> None:
+        self._mutate_honor_in_scene_two()
+        text = self._render_as_of(self.scene_two_node.scene_id)
+        self.assertEqual(text, "Admiral Harrington|Admiral of the Fleet. Battle-hardened.")
+
+    def test_reads_base_state_before_the_change(self) -> None:
+        self._mutate_honor_in_scene_two()
+        # scene_one precedes scene_two in the manuscript, so the marker is not
+        # yet live there — the subject reads at its book-start self.
+        text = self._render_as_of(self.scene_one_node.scene_id)
+        self.assertEqual(text, "Honor Harrington|Captain of the Fearless. Treecat-adopted.")
+
+    def test_no_anchor_is_a_base_read(self) -> None:
+        self._mutate_honor_in_scene_two()
+        # Empty anchor → exactly `entry()` (today's behaviour), even though a
+        # mutation exists downstream.
+        self.assertEqual(
+            self._render_as_of(""),
+            "Honor Harrington|Captain of the Fearless. Treecat-adopted.",
+        )
+
+
+class ImpersonateAsOfPreviewTests(_HelperFixtureBase):
+    """The `as_of_scene` request param threads build_preview → the `as_of`
+    binding → `entry_as_of`, so an impersonate render reads its subject as-of
+    the anchor scene (ADR-0055 §1). Mirrors impersonate.md's two key lines."""
+
+    IMPERSONATE = (
+        "{% set char = entry_as_of(input.entry, as_of) %}"
+        '{% role "system" %}You ARE {{ char.title }}.\n'
+        "{% if char.body %}{{ char.body }}{% endif %}{% endrole %}"
+    )
+
+    def _mutate(self) -> None:
+        from urllib.parse import quote
+
+        new_body = quote("Admiral of the Fleet.")
+        self._update_scene(
+            self.scene_two_node.scene_id,
+            title="The Arrival",
+            entry_type="scene:scene",
+            metadata={"summary": "x", "characters": [], "pov": self.honor["id"]},
+            body=(
+                f"<!-- mutate:entity={self.honor['id']};field=title;value=Admiral%20Harrington;id=m1 -->"
+                f"<!-- mutate:entity={self.honor['id']};field=body;value={new_body};id=m2 -->"
+            ),
+        )
+
+    def _preview(self, as_of_scene: str) -> str:
+        from app.services.ai.preview import build_preview
+
+        rendered, _ = build_preview(
+            project_service=self.service,
+            template_source=self.IMPERSONATE,
+            target_scene_id="",
+            session_id=None,
+            inputs={"entry": self.honor["id"]},
+            text_before="",
+            text_after="",
+            commit=False,
+            subject=self.honor["id"],
+            as_of_scene=as_of_scene,
+        )
+        return "\n".join(m.text for m in rendered.messages)
+
+    def test_render_reads_as_of_anchor(self) -> None:
+        self._mutate()
+        text = self._preview(self.scene_two_node.scene_id)
+        self.assertIn("You ARE Admiral Harrington.", text)
+        self.assertIn("Admiral of the Fleet.", text)
+
+    def test_render_without_anchor_is_base(self) -> None:
+        self._mutate()
+        text = self._preview("")
+        self.assertIn("You ARE Honor Harrington.", text)
+        self.assertIn("Captain of the Fearless.", text)
+
+
 class RelevantLoreHelperTests(_HelperFixtureBase):
     def test_implicit_finds_alias_match_and_one_hop(self) -> None:
         scene_one = self.service.read_scene(self.scene_one_node.scene_id)

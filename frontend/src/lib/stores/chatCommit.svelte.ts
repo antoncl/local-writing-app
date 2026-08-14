@@ -26,10 +26,12 @@ import type {
   ChatMessage,
   EntryPatch,
   EntryPatchExtraction,
+  MutationSetEntry,
+  MutationSetRow,
   PromptOutput,
   ReviewMode,
 } from "@/lib/types";
-import { api } from "@/lib/api";
+import { api, HttpError } from "@/lib/api";
 import { entryBrainstorm } from "@/lib/stores/entryBrainstorm.svelte";
 import { treeActions } from "@/lib/stores/treeActions.svelte";
 
@@ -52,6 +54,38 @@ export interface ChatCommitDeps {
   /** Title of the entry a patch was committed to, for the hand-off cue — null
    *  when it isn't in the caller's roster (e.g. a scene subject). */
   entryTitle: (entryId: string) => string | null;
+  /** The id of the set the chat already owns (its `staged_set` edge), or "" —
+   *  read at stage time so a re-stage refines the SAME set in place rather than
+   *  minting an orphan (the edge is singular, ADR-0055 §4). */
+  getStagedSetId: () => string;
+  /** Persist a newly-staged pinned set's id onto the chat's `staged_set` edge
+   *  (ADR-0055 §4). The host owns the chat session + persist, so the write-back
+   *  rides its save path — the controller never touches the chat node. Only
+   *  called when the chat didn't already own the set (a first stage). */
+  onStaged: (setId: string) => Promise<void>;
+}
+
+// ADR-0055 §2/§4a: a staged mutation set carries the same content as an entry
+// commit, re-expressed as rows. The extracted patch's field values are already
+// validated against the subject's type (the commit endpoint runs
+// `validate_ai_entry_patch_for_type`, dropping anything illegal), and every row
+// is `op: "replace"` — always op-legal for any field, title, or body
+// (`lore_mutations` gates only add/remove) — so a staged set can never carry a
+// field/op a placed marker would reject. This is the §2 "validate AI rows at
+// stage time" guarantee, met by reusing the commit's own validator rather than
+// re-running the marker validator. A value is serialized exactly as the set
+// editor's `toMarkerString` does — null → "" (not the literal "null"), and a
+// collection comma-joined (mirroring the marker's whole-collection `replace` /
+// `_split_collection_value`) — so a staged row and a hand-authored one match.
+export function patchToRows(patch: EntryPatch): MutationSetRow[] {
+  const rows: MutationSetRow[] = [];
+  if (patch.body != null) rows.push({ field: "body", op: "replace", value: patch.body });
+  for (const [field, value] of Object.entries(patch.fields)) {
+    const str =
+      value == null ? "" : Array.isArray(value) ? value.map(String).join(",") : String(value);
+    rows.push({ field, op: "replace", value: str });
+  }
+  return rows;
 }
 
 export class ChatCommitController {
@@ -66,6 +100,12 @@ export class ChatCommitController {
   inputDrafts = $state<Record<string, string>>({});
   /** Whether a chat turn is streaming — a commit must not race it. */
   running = $state(false);
+  /** The subject's `entry_type` when it is a time-travel-aware lore entity, else
+   *  "" — fed by the host from the lore roster (ADR-0055 §2). It gates staging:
+   *  only a lore subject carries a timeline, so only a lore commit may stage a
+   *  mutation set (§4a/§6). A scene or plot-card subject leaves this "" and sees
+   *  the canonical commit path alone. */
+  subjectEntryType = $state<string>("");
 
   // ---- commit / draft review state (owned here) ------------------------------
   committing = $state(false);
@@ -98,6 +138,14 @@ export class ChatCommitController {
    *  → the default (body + all proposable fields). */
   commitFields = $derived(this.output?.commit?.fields ?? null);
 
+  /** ADR-0055 §4a/§6: a committing brainstorm on a time-travel-aware lore subject
+   *  may stage its result as a subject-pinned mutation set (the timeline branch)
+   *  instead of writing the entry's base (the canonical branch). Offered only
+   *  when there is a revise target that is a lore entity. */
+  canStage = $derived(
+    this.isCommitChat && !!this.commitTargetEntryId && !!this.subjectEntryType,
+  );
+
   // The commit preamble both modes share: run the extraction, attribute the
   // (always-billed) turn's cost like a streamed one, and surface the two failure
   // shapes — the turn returned nothing (ok=false / no patch), or the reply
@@ -122,6 +170,22 @@ export class ChatCommitController {
     return result.patch;
   }
 
+  // The one extraction call `commitToEntry` and `stageToPendingSet` share (same
+  // transcript, assistant, and commit.fields allow-list) — kept in one place so
+  // the two destinations can never drift on what's posted. The garbled message
+  // is per-caller (an entry "patch" vs a staged "change").
+  private extractPatch(entryId: string, garbledMessage: string): Promise<AIEntryPatch | null> {
+    return this.runExtraction(
+      () =>
+        api.extractEntryPatch(entryId, {
+          messages: this.deps.getHistory(),
+          assistant_id: this.deps.getAssistantId() || null,
+          commit_fields: this.commitFields,
+        }),
+      garbledMessage,
+    );
+  }
+
   // Commit the brainstorm to its target entry (ADR-0046 slice 3 / ADR-0051 S4).
   // The extraction runs a fresh, server-rebuilt contract over the transcript and
   // returns a validated EntryPatch, handed to the entry's pane for the
@@ -138,13 +202,8 @@ export class ChatCommitController {
     this.deps.setNotice(null);
     this.committing = true;
     try {
-      const patch = await this.runExtraction(
-        () =>
-          api.extractEntryPatch(entryId, {
-            messages: this.deps.getHistory(),
-            assistant_id: this.deps.getAssistantId() || null,
-            commit_fields: this.commitFields,
-          }),
+      const patch = await this.extractPatch(
+        entryId,
         "Couldn't read the model's response as a patch — ask it to finalize again.",
       );
       if (!patch) return;
@@ -170,6 +229,82 @@ export class ChatCommitController {
           ? ` Ignored ${patch.dropped.length} field(s) the model couldn't set legally: ${patch.dropped.join(", ")}.`
           : "";
       this.deps.setNotice(`Committed — review it on ${reviewOn}.${dropped}`);
+    } catch (e) {
+      this.deps.setError((e as Error).message);
+    } finally {
+      this.committing = false;
+    }
+  }
+
+  // Stage the brainstorm as a subject-pinned mutation set (ADR-0055 §4a/§6 — the
+  // timeline branch of the commit). Same fresh extraction as `commitToEntry`; the
+  // only difference is the destination — instead of proposing a base-write to the
+  // entry's pane, it mints a mutation set pinned to the subject and points the
+  // chat's `staged_set` edge at it (via `onStaged`). The AI authors *what*
+  // changes and *to whom*, never *where*: the set has no scene and no position;
+  // the writer later PLACES it in prose (§5, S4b). Nothing overwrites the entry.
+  async stageToPendingSet(): Promise<void> {
+    if (this.running || this.committing || !this.canStage) return;
+    const entryId = this.commitTargetEntryId;
+    const entryType = this.subjectEntryType;
+    this.deps.setError(null);
+    this.deps.setNotice(null);
+    this.committing = true;
+    try {
+      const patch = await this.extractPatch(
+        entryId,
+        "Couldn't read the model's response as a change — ask it to finalize again.",
+      );
+      if (!patch) return;
+      const rows = patchToRows(patch);
+      if (rows.length === 0) {
+        this.deps.setNotice("The model proposed no changes to stage.");
+        return;
+      }
+      const subject = this.deps.entryTitle(entryId) ?? "the entry";
+      // The edge is singular (§4): if the chat already owns a set, refine THAT
+      // set in place — a whole re-extraction replaces its rows — rather than
+      // minting a second, orphaned one. Only a *deleted* owned set (404) falls
+      // through to a fresh mint; any other load failure (transient, 5xx) aborts
+      // via the outer catch rather than silently minting a duplicate. `onStaged`
+      // runs only on a first stage, so a refine never rewrites the correct edge.
+      const ownedId = this.deps.getStagedSetId();
+      let existing: MutationSetEntry | null = null;
+      if (ownedId) {
+        try {
+          existing = await api.getMutationSetEntry(ownedId);
+        } catch (e) {
+          if (!(e instanceof HttpError && e.status === 404)) throw e;
+          existing = null; // the owned set was deleted — stage a fresh one below
+        }
+      }
+      let updated = false;
+      if (existing) {
+        await api.saveMutationSetEntry({
+          ...existing,
+          target_entry_type: entryType,
+          target_entity: entryId,
+          rows,
+        });
+        updated = true;
+      } else {
+        const set = await api.createMutationSetEntry({
+          title: `Staged change — ${subject}`,
+          target_entry_type: entryType,
+          target_entity: entryId,
+          rows,
+        });
+        await this.deps.onStaged(set.id);
+      }
+      const dropped =
+        patch.dropped.length > 0
+          ? ` Ignored ${patch.dropped.length} field(s) the model couldn't set legally: ${patch.dropped.join(", ")}.`
+          : "";
+      const count = `${rows.length} change${rows.length > 1 ? "s" : ""}`;
+      this.deps.setNotice(
+        `${updated ? "Updated the staged change" : "Staged"} to ${subject} (${count}) — ` +
+          `review it under pending changes on the card, then place it from a scene.${dropped}`,
+      );
     } catch (e) {
       this.deps.setError((e as Error).message);
     } finally {

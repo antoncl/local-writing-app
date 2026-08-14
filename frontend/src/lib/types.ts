@@ -228,6 +228,9 @@ export type {
   PlotBoardPlotlineBeat,
   PlotBoardLayout,
   PlotBoard,
+  PlotDiagnostic,
+  PlotDiagnosticCard,
+  PlotDiagnosticEdge,
   BoardXY,
   BoardSize,
 } from "./plotBoardTypes";

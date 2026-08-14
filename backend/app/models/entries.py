@@ -337,6 +337,56 @@ class PlotBoardCard(BaseModel):
     causal_links: list[str] = Field(default_factory=list)
 
 
+class PlotDiagnosticEdge(BaseModel):
+    """The directed causal edge a `causal_inversion` finding points at — `source`
+    *leads to* `target`. The board highlights this exact edge (matched against the id
+    `buildBoardEdges` mints per causal link)."""
+
+    source: str
+    target: str
+
+
+class PlotDiagnosticCard(BaseModel):
+    """A card a diagnostic names: its id (to light on the canvas) and title (for the
+    finding's prose). Denormalised so the panel renders the message and drives the
+    highlight without re-joining against the card list."""
+
+    id: str
+    title: str
+
+
+class PlotDiagnostic(BaseModel):
+    """One cross-dimension finding (ADR-0048 S7 — the payoff): a place where two plot
+    layers disagree, or a beat the structure leaves unfilled. Deterministic — derived
+    from the projection's reveal order, beat rosters, and causal edges, with no LLM
+    (the AI diagnostic pass is S7b). A finding reports the disagreement and the nodes
+    it involves; it never prescribes a fix (the writer acts on it or dismisses it), and
+    it never nags — off-page and unwritten cards are legitimate, so an off-page card is
+    never asked to become a scene and a merely-unwritten beat tail is never a gap.
+
+    `kind` is one of:
+      - `causal_inversion` — a card sets up (`causal_links`) a card revealed *earlier*:
+        the payoff is read before its setup. `cards` = [setup, payoff]; `edge` = that
+        causal edge (both cards on-page, or there is no reveal order to invert).
+      - `beat_inversion` — within one plotline, a later beat is *fully* revealed before
+        an earlier beat *begins* (strict — braided beats do not flag). `cards` = the
+        cards involved; `plotline_id` + `beat_ids` name the two beats.
+      - `beat_gap` — an interior beat no card fulfils, with a fulfilled beat still after
+        it (a hole, not the merely-unwritten tail). `plotline_id` + `beat_ids` name it;
+        `cards` is empty — a gap has no card.
+
+    `id` is a stable key derived from the finding's participants (kind + ids) so the
+    frontend keys the list and keeps a selection across refetches."""
+
+    id: str
+    kind: str
+    message: str
+    cards: list[PlotDiagnosticCard] = Field(default_factory=list)
+    edge: PlotDiagnosticEdge | None = None
+    plotline_id: str | None = None
+    beat_ids: list[str] = Field(default_factory=list)
+
+
 class PlotBoardProjection(BaseModel):
     """The read model the PlotEditor board renders from (ADR-0048 S7a; ADR-0053): the
     plotlines (with their beat rosters), the manuscript containers (Slice 4), the
@@ -350,6 +400,10 @@ class PlotBoardProjection(BaseModel):
     plotlines: list[PlotBoardPlotline] = Field(default_factory=list)
     containers: list[PlotBoardContainer] = Field(default_factory=list)
     cards: list[PlotBoardCard] = Field(default_factory=list)
+    # Cross-dimension findings (ADR-0048 S7) — a derived facet of the board, computed
+    # over the fields above (no extra I/O) and refreshed with every projection read, so
+    # the diagnostics panel is live. Empty when the layers agree.
+    diagnostics: list[PlotDiagnostic] = Field(default_factory=list)
 
 
 class PlotContextBeat(BaseModel):

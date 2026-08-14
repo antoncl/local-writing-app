@@ -43,8 +43,17 @@
     return data.plotlineId === focus || data.beats.some((b) => b.plotline_id === focus);
   });
   let focusActive = $derived((actions?.focusedPlotlineId ?? null) !== null);
-  let lit = $derived(focusActive && onFocusedThread);
-  let dimmed = $derived(focusActive && !onFocusedThread);
+  // A selected diagnostic finding (ADR-0048 S7) lights its own cards and dims the rest
+  // — the same treatment as thread focus, keyed on a card-id set. It takes precedence
+  // (the two are never active together). Null/empty ⇒ fall back to plotline focus.
+  let highlightSet = $derived(actions?.highlightedCardIds ?? null);
+  let highlightActive = $derived((highlightSet?.size ?? 0) > 0);
+  let lit = $derived(
+    highlightActive ? !!id && highlightSet!.has(id) : focusActive && onFocusedThread,
+  );
+  let dimmed = $derived(
+    highlightActive ? !(!!id && highlightSet!.has(id)) : focusActive && !onFocusedThread,
+  );
 
   // The 3-state page marker (Slice 5b): on_page (scene attached) / off_page / unwritten.
   // Null page_status is the sparse default → unwritten. The dot colour comes from the

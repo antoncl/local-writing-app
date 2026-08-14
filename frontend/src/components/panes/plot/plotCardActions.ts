@@ -50,6 +50,12 @@ export type PlotCardActions = {
   // focused and this card is neither on it (its primary plotline) nor fulfilling one
   // of its beats. A getter so the card tracks it reactively (the `plotlines` idiom).
   readonly focusedPlotlineId: string | null;
+  // The cards a selected diagnostic finding lights (ADR-0048 S7): when a finding is
+  // selected in the diagnostics panel, its cards are LIT and every other card recedes
+  // — the same lit/dimmed treatment as plotline focus, keyed on a card-id set instead
+  // of a thread. Null (or empty) ⇒ no finding selected. Takes precedence over
+  // `focusedPlotlineId` (only one is ever active — selecting a finding clears focus).
+  readonly highlightedCardIds: ReadonlySet<string> | null;
 };
 
 // Symbol key so the context can't collide with a string-keyed one.

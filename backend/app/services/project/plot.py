@@ -70,6 +70,7 @@ from app.models import (
 )
 from app.services.markdown_validation import validate_scene_markdown
 from app.services.project.errors import ProjectServiceError
+from app.services.project.plot_diagnostics import compute_plot_diagnostics
 
 PLOT_BOARD_FILENAME = "plot-board.md"
 PLOT_TEMPLATE_ENTRY_TYPE = "plot:template"
@@ -952,7 +953,7 @@ class PlotMixin:
         # Reading order (containers is already ordered), used-only — an empty
         # container is not a board concern.
         board_containers = [c for cid, c in containers.items() if cid in used_containers]
-        return PlotBoardProjection(
+        projection = PlotBoardProjection(
             board_id=board.id,
             board_revision=board.revision,
             layout=board.layout,
@@ -960,6 +961,10 @@ class PlotMixin:
             containers=board_containers,
             cards=cards,
         )
+        # Cross-dimension findings (ADR-0048 S7) derive purely from the projection just
+        # built — no further reads — and ride along so the panel is live per refetch.
+        projection.diagnostics = compute_plot_diagnostics(projection)
+        return projection
 
     def _board_container_map(
         self,

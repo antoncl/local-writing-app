@@ -40,6 +40,7 @@ function actions(
   plotlines: PlotCardActions["plotlines"] = [],
   focusedPlotlineId: string | null = null,
   locations: PlotCardActions["locations"] = [],
+  highlightedCardIds: ReadonlySet<string> | null = null,
 ): PlotCardActions {
   return {
     onOpen: vi.fn(),
@@ -56,6 +57,7 @@ function actions(
     plotlines,
     focusedPlotlineId,
     locations,
+    highlightedCardIds,
   };
 }
 
@@ -181,6 +183,38 @@ describe("PlotCardNode — per-plotline focus (ADR-0053 §6, S5b; #911 lit outli
     const { container } = render(PlotCardNode, { props: { data: data({ plotlineId: "Q" }) } });
     expect(cardEl(container).classList.contains("dimmed")).toBe(false);
     expect(cardEl(container).classList.contains("lit")).toBe(false);
+  });
+});
+
+describe("PlotCardNode — diagnostic highlight (ADR-0048 S7 lit set)", () => {
+  const cardEl = (c: HTMLElement) => c.querySelector(".plot-card")!;
+
+  it("LITS a card whose id is in the highlighted set", () => {
+    const { container } = renderWithActions({}, actions([], null, [], new Set(["card_1"])), "card_1");
+    expect(cardEl(container).classList.contains("lit")).toBe(true);
+    expect(cardEl(container).classList.contains("dimmed")).toBe(false);
+  });
+
+  it("DIMS a card outside the highlighted set", () => {
+    const { container } = renderWithActions({}, actions([], null, [], new Set(["other"])), "card_1");
+    expect(cardEl(container).classList.contains("dimmed")).toBe(true);
+    expect(cardEl(container).classList.contains("lit")).toBe(false);
+  });
+
+  it("takes precedence over plotline focus (a finding is selected AND a thread was focused)", () => {
+    // On thread P (would be lit by focus) but outside the highlight set → the finding wins → dimmed.
+    const { container } = renderWithActions(
+      { plotlineId: "P" },
+      actions([], "P", [], new Set(["other"])),
+      "card_1",
+    );
+    expect(cardEl(container).classList.contains("dimmed")).toBe(true);
+    expect(cardEl(container).classList.contains("lit")).toBe(false);
+  });
+
+  it("an empty highlight set falls back to plotline focus", () => {
+    const { container } = renderWithActions({ plotlineId: "P" }, actions([], "P", [], new Set()), "card_1");
+    expect(cardEl(container).classList.contains("lit")).toBe(true);
   });
 });
 

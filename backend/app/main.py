@@ -48,7 +48,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     node_index_gate.flush()
 
 
-app = FastAPI(title="Local Writing Service", version="0.7.0", lifespan=lifespan)
+app = FastAPI(title="Local Writing Service", version="0.8.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     # Local-first: the backend only ever binds 127.0.0.1 (never network-exposed),

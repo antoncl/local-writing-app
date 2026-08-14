@@ -60,9 +60,17 @@
   // scene body; per-item mutation ops for lists are a follow-up).
   export function buildFieldOptions(schema: MetadataSchema | null, entryType: string): FieldOption[] {
     const opts = INTRINSIC_FIELDS.map((f) => ({ id: f.id, label: f.def.name, def: f.def }));
+    const seen = new Set(opts.map((o) => o.id));
     for (const id of schema?.entry_types[entryType]?.fields ?? []) {
       const def = schema?.fields[id];
       if (!def || def.type === "computed" || def.type === "list") continue;
+      // The resolver injects the intrinsic identity triple (title/entry_type/id)
+      // into every type's resolved membership (schema.py). title is already
+      // seeded above and entry_type/id aren't author-mutable, so skip anything
+      // intrinsic; the seen-guard then keeps any duplicate id out of the keyed
+      // {#each} (a duplicate `title` key crashes the whole editor render).
+      if (def.category === "intrinsic" || seen.has(id)) continue;
+      seen.add(id);
       opts.push({ id, label: def.name ?? id, def });
     }
     return opts;

@@ -388,6 +388,11 @@
           draggable={canDrag}
           ondragstart={(e) => id && setPlotBeatDrag(e, id, beat.beat_id)}
         >
+          <!-- Drag handle (#911): the grip signals "drag me onto a card" the way the
+               mockup does; shown only when the beat is actually draggable. Decorative. -->
+          {#if canDrag}
+            <span class="beat-grip" aria-hidden="true">⋮⋮</span>
+          {/if}
           <span class="beat-dot" class:hollow={!accent}></span>
           <span class="beat-title" title={beat.title}>{beat.title}</span>
           <!-- Use-count (ADR-0053 §6 / S5a): how many cards fulfil this beat. A 0 reads
@@ -523,12 +528,33 @@
     gap: 6px;
     min-width: 0;
   }
-  /* A draggable beat grabs onto a card (ADR-0053 §4). */
+  /* A draggable beat grabs onto a card (ADR-0053 §4). A chip-ish hover + a leading
+     grip (#911) telegraph "grab me onto a card" the way the mockup does. The padding
+     insets the row content (never widens the li), so the hover fill can't overflow the
+     node's rounded box. */
   .plotline-beat.draggable {
     cursor: grab;
+    padding: 2px 4px;
+    border-radius: var(--r-sm);
+  }
+  .plotline-beat.draggable:hover {
+    background: var(--inset);
   }
   .plotline-beat.draggable:active {
     cursor: grabbing;
+  }
+  /* The drag handle — a quiet grip, the two glyphs tightened so they read as one
+     6-dot grip. Only rendered on a draggable beat. */
+  .beat-grip {
+    flex: none;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    line-height: 1;
+    letter-spacing: -3px;
+    cursor: grab;
+  }
+  .plotline-beat.draggable:hover .beat-grip {
+    color: var(--text-2);
   }
   .beat-dot {
     flex: none;

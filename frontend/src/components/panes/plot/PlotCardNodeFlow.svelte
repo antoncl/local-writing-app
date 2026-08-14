@@ -9,8 +9,8 @@
   PlotCardNode itself stays free of any @xyflow/svelte import and mountable in happy-dom
   ([[reference_component_test_harness]]).
 
-  The handles are quiet — hidden until the card is hovered, then a small accent port —
-  so the board stays calm (§ design language) but the connect affordance is discoverable.
+  The handles are quiet — always a faint accent port, brightening to full on hover (#911)
+  — so the connect affordance is discoverable at rest without shouting on the board.
 -->
 <script lang="ts">
   import { Handle, Position } from "@xyflow/svelte";
@@ -35,15 +35,16 @@
     height: 100%;
   }
   /* The causal-edge ports (#824): the derived edges attach here, and a drag from one
-     authors a "leads to" edge. Hidden until the card is hovered so a resting board
-     shows no ports; interactive throughout (xyflow default) so a connection dragged
-     ONTO a card still finds its target handle. Token colours only. */
+     authors a "leads to" edge. Faintly visible at rest so the connect affordance is
+     discoverable (#911), brightening to full on card hover; interactive throughout
+     (xyflow default) so a connection dragged ONTO a card still finds its target handle.
+     Token colours only. */
   .card-flow :global(.edge-anchor) {
     width: 10px;
     height: 10px;
     background: var(--surface);
     border: 1.5px solid var(--accent);
-    opacity: 0;
+    opacity: 0.4;
     transition: opacity 120ms ease;
   }
   .card-flow:hover :global(.edge-anchor),

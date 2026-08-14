@@ -215,16 +215,26 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # copied from a template at instantiate and then specialized per book,
             # or empty for an ad-hoc thread the writer beats out by hand (the ADR
             # §1 empty/ad-hoc case). `source_template_id` / `source_template_name`
-            # snapshot which template it was rolled from (both empty for ad-hoc).
-            # Cards reference one as their primary plotline and fulfil its beats
-            # (card `beat_links`). An ordinary flat Node under `plot/`, layered
-            # like lore.
+            # snapshot which template it was rolled from, and `source_ai_guidance` /
+            # `source_diagnostic_questions` snapshot its template-level guidance at
+            # instantiate — the structural intent the diagnostic reasons with, kept
+            # coherent with the (specializable) beats rather than re-read live (all
+            # empty for ad-hoc). Cards reference one as their primary plotline and
+            # fulfil its beats (card `beat_links`). An ordinary flat Node under
+            # `plot/`, layered like lore.
             "name": "Plotline",
             "kind": "plot",
             "parent": "plot:base",
             # `color` first so the swatch sits under the type header, not below the
             # beat list, when the plotline is edited.
-            "fields": ["color", "instance_beats", "source_template_id", "source_template_name"],
+            "fields": [
+                "color",
+                "instance_beats",
+                "source_template_id",
+                "source_template_name",
+                "source_ai_guidance",
+                "source_diagnostic_questions",
+            ],
             "has_body": True,
             "color": "plum",
         },
@@ -744,6 +754,30 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # plotline. Hidden, like `source_template_id`.
             "name": "Source template",
             "type": "text",
+            "hidden": True,
+        },
+        "source_ai_guidance": {
+            # Guidance snapshot (ADR-0053; ADR-0048 S7 item 7): the source template's
+            # `ai_use_guidance` — how to use this structure as a diagnostic lens —
+            # copied onto the plotline at instantiate so `read_plot_context` feeds the
+            # AI the structural intent, not just per-beat one-liners. A snapshot (not a
+            # live read of the source template) for the same reason the beats are: the
+            # writer can specialize the beats, so guidance read live would describe the
+            # ORIGINAL structure while the plotline shows a diverged one. Empty for an
+            # ad-hoc plotline. Hidden, like the lineage fields.
+            "name": "Structure guidance",
+            "type": "text",
+            "hidden": True,
+        },
+        "source_diagnostic_questions": {
+            # Guidance snapshot (ADR-0053): the source template's
+            # `global_diagnostic_questions` — the questions to ask of the draft against
+            # this structure — captured at instantiate beside `source_ai_guidance`. A
+            # flat text `list` (`item_type` scalar sugar, like `follow_ups`). Empty for
+            # an ad-hoc plotline. Hidden, like the lineage fields.
+            "name": "Diagnostic questions",
+            "type": "list",
+            "item_type": "text",
             "hidden": True,
         },
         "dynamics": {

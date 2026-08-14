@@ -370,12 +370,18 @@ class PlotContextPlotline(BaseModel):
     one concept. Never gated by reveal order (it is the writer's own scaffolding, not
     manuscript content), so its full beat roster is always present, including beats no
     card fulfils yet (the gaps). `source_template_name` is the lineage snapshot (the
-    named structure it was rolled from), blank for an ad-hoc plotline."""
+    named structure it was rolled from), blank for an ad-hoc plotline. `ai_guidance`
+    (how to use this structure as a diagnostic lens) and `diagnostic_questions` (what
+    to ask of the draft) are the template's guidance, snapshotted at instantiate — the
+    structural intent the AI reasons with beyond per-beat one-liners; blank/empty for
+    an ad-hoc plotline."""
 
     id: str
     title: str
     color: str | None = None
     source_template_name: str = ""
+    ai_guidance: str = ""
+    diagnostic_questions: list[str] = Field(default_factory=list)
     beats: list[PlotContextBeat] = Field(default_factory=list)
 
 

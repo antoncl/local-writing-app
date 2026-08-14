@@ -123,6 +123,20 @@ class PlotContextHelperTests(_PlotAiContextBase):
         # still present so the AI sees the thread even before it is beaten out.
         self.assertIn('<plotline title="Romance" />', out)
 
+    def test_the_block_carries_a_plotlines_structure_guidance(self) -> None:
+        # S2: an instantiated plotline renders the template's structural guidance —
+        # how to use the lens (`<use_guidance>`) and the questions to ask
+        # (`<diagnostic_questions>`) — so the model measures cards against the
+        # structure's intent, not just per-beat one-liners.
+        plotline = self._plotline()  # three-act ships ai_use_guidance + diagnostic questions
+        out = self._render('{% role "system" %}{{ plot_context() }}{% endrole %}')
+        self.assertIn("<use_guidance>", out)
+        self.assertIn(plotline.metadata["source_ai_guidance"], out)  # the actual snapshot text
+        self.assertIn("<diagnostic_questions>", out)
+        self.assertEqual(
+            out.count("<question>"), len(plotline.metadata["source_diagnostic_questions"])
+        )
+
 
 class RevisePlotCardPromptTests(_PlotAiContextBase):
     def test_the_prompt_ships_in_the_library_as_a_commit_brainstorm(self) -> None:

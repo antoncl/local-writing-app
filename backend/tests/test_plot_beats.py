@@ -245,6 +245,17 @@ class PlotlineInstantiationTests(PlotTestCase):
         # Lineage snapshot — "which of the 14 structures is this?"
         self.assertEqual(plotline["metadata"]["source_template_id"], _THREE_ACT)
         self.assertEqual(plotline["metadata"]["source_template_name"], "Three-Act Structure")
+        # Structure-guidance snapshot (S2): the template's ai_use_guidance +
+        # global_diagnostic_questions ride onto the plotline so the diagnostic reads
+        # them without re-resolving a possibly-inherited/since-deleted template.
+        template = self.client.get(f"/api/plot/templates/{_THREE_ACT}").json()["template"]
+        self.assertTrue(template["ai_use_guidance"])  # guard: the fixture actually has guidance
+        self.assertTrue(template["global_diagnostic_questions"])
+        self.assertEqual(plotline["metadata"]["source_ai_guidance"], template["ai_use_guidance"])
+        self.assertEqual(
+            plotline["metadata"]["source_diagnostic_questions"],
+            template["global_diagnostic_questions"],
+        )
 
     def test_instantiate_copies_every_snapshot_member_faithfully(self) -> None:
         # Full fidelity across ALL snapshot keys for every beat, compared against
@@ -304,10 +315,12 @@ class PlotlineInstantiationTests(PlotTestCase):
         plotline = created.json()
         self.assertEqual(plotline["entry_type"], "plot:plotline")
         self.assertEqual(plotline["title"], "My own plot")
-        # No template behind it → no beats, no lineage.
+        # No template behind it → no beats, no lineage, no guidance snapshot.
         self.assertEqual(plotline["metadata"].get("instance_beats", []), [])
         self.assertFalse(plotline["metadata"].get("source_template_id"))
         self.assertFalse(plotline["metadata"].get("source_template_name"))
+        self.assertFalse(plotline["metadata"].get("source_ai_guidance"))
+        self.assertFalse(plotline["metadata"].get("source_diagnostic_questions"))
 
     def test_ad_hoc_plotline_can_author_and_save_beats(self) -> None:
         # The "roll your own plot" path (Anton): create an empty plotline, author

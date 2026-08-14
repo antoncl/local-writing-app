@@ -37,25 +37,34 @@ def _plot_context_header(packet: PlotContext) -> str:
 
 
 def _render_plotline(plotline) -> list[str]:
-    """One `<plotline>` element with its beat roster (ADR-0053 §1). A plotline with
+    """One `<plotline>` element: its structural guidance then its beat roster
+    (ADR-0053 §1). `<use_guidance>` (how to use the structure as a diagnostic lens)
+    and `<diagnostic_questions>` (what to ask of the draft) are the template's
+    guidance, snapshotted at instantiate — so the model measures cards against the
+    structure's intent, not just per-beat one-liners. A plotline with no guidance and
     no beats (ad-hoc / empty) self-closes; otherwise each beat is a `<beat>` element,
     with guidance as element text when present, self-closing when not."""
     attrs = f"title={quoteattr(plotline.title)}"
     if plotline.source_template_name:
         attrs += f" structure={quoteattr(plotline.source_template_name)}"
-    if not plotline.beats:
-        return [f"    <plotline {attrs} />"]
-    lines = [f"    <plotline {attrs}>"]
+    body: list[str] = []
+    if plotline.ai_guidance.strip():
+        body.append(f"      <use_guidance>{escape(plotline.ai_guidance.strip())}</use_guidance>")
+    if plotline.diagnostic_questions:
+        body.append("      <diagnostic_questions>")
+        body.extend(f"        <question>{escape(q)}</question>" for q in plotline.diagnostic_questions)
+        body.append("      </diagnostic_questions>")
     for beat in plotline.beats:
         battrs = f"title={quoteattr(beat.title)}"
         if beat.function:
             battrs += f" function={quoteattr(beat.function)}"
         if beat.guidance.strip():
-            lines.append(f"      <beat {battrs}>{escape(beat.guidance.strip())}</beat>")
+            body.append(f"      <beat {battrs}>{escape(beat.guidance.strip())}</beat>")
         else:
-            lines.append(f"      <beat {battrs} />")
-    lines.append("    </plotline>")
-    return lines
+            body.append(f"      <beat {battrs} />")
+    if not body:
+        return [f"    <plotline {attrs} />"]
+    return [f"    <plotline {attrs}>", *body, "    </plotline>"]
 
 
 def _render_card(card, card_titles: dict[str, str]) -> list[str]:

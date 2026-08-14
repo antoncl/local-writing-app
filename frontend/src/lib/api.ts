@@ -97,12 +97,47 @@ const baseUrl = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8787/api";
 // and overwritten on a switch (which is just another open); null before any
 // project is open, so the machine-level surfaces run unbound. URL-encoded into
 // the header so a non-ASCII folder name survives a latin-1 HTTP header.
-let projectScopeRoot: string | null = null;
+//
+// It is mirrored in `sessionStorage` (per browser tab) so the scope survives a
+// re-instantiation of THIS module while the app stays mounted — a Vite hot update,
+// or any other dev module re-eval — which would otherwise reset a bare module
+// variable back to null while a project is still open and 409 "No project is open."
+// the next project-scoped fetch (#965). sessionStorage is not module state, so a
+// fresh instance recovers it. This is NOT the ambient current-project #413 removed:
+// that was a backend process global answering "what did SOME request open"; this is
+// per-tab frontend state answering "what did THIS tab open" — exactly the request's
+// own scope (ADR-0045). Per-tab means a new tab correctly starts unscoped until it
+// opens a project, and since the app never returns to a no-project state after the
+// first open (a switch just overwrites), the stored value always names the tab's
+// currently-open project.
+const SCOPE_STORAGE_KEY = "lwa.projectScopeRoot";
+
+function readStoredScopeRoot(): string | null {
+  try {
+    return sessionStorage.getItem(SCOPE_STORAGE_KEY);
+  } catch {
+    return null; // sessionStorage unavailable (some test / SSR environments)
+  }
+}
+
+let projectScopeRoot: string | null = readStoredScopeRoot();
+
+function setProjectScopeRoot(root: string | null): void {
+  projectScopeRoot = root;
+  try {
+    if (root === null) sessionStorage.removeItem(SCOPE_STORAGE_KEY);
+    else sessionStorage.setItem(SCOPE_STORAGE_KEY, root);
+  } catch {
+    // sessionStorage unavailable — the module variable still carries scope for
+    // this instance's lifetime; only cross-re-instantiation recovery is lost.
+  }
+}
 
 function scopeHeaders(): Record<string, string> {
-  return projectScopeRoot === null
-    ? {}
-    : { "X-Project-Root": encodeURIComponent(projectScopeRoot) };
+  // Fall back to the stored value when the module variable was reset out from
+  // under us (module re-eval) but the tab still has a project open (#965).
+  const root = projectScopeRoot ?? readStoredScopeRoot();
+  return root === null ? {} : { "X-Project-Root": encodeURIComponent(root) };
 }
 
 /** Error subclass that carries the raw response detail so structured callers
@@ -274,7 +309,7 @@ export const api = {
       body: JSON.stringify({ root_path: rootPath, title, inherits }),
     });
     // The wire scope for every subsequent request is this project's root (#413).
-    projectScopeRoot = info.root_path;
+    setProjectScopeRoot(info.root_path);
     return info;
   },
   // The inheritable ancestors of a *prospective* project path — the wizard's
@@ -301,7 +336,7 @@ export const api = {
       body: JSON.stringify({ root_path: rootPath }),
     });
     // Switching projects is just another open; overwrite the wire scope (#413).
-    projectScopeRoot = info.root_path;
+    setProjectScopeRoot(info.root_path);
     return info;
   },
   // Ship a caught client-side error to the backend so it lands in the open

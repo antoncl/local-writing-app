@@ -38,10 +38,13 @@ on-disk layout is `research/topics/<slug>/notes/<slug>.md`, mirroring
 the act/scene folder layout. Topics nest (a topic can contain
 sub-topics), the same way acts can nest.
 
-The existing `lore_note` entry_type is **deprecated** but kept readable
-for a migration window. Existing entries get an automatic
-"Move to Research" affordance in the Lore pane. After migration, the
-`lore_note` entry_type retires.
+The `lore:note` entry_type is **retained** as a distinct thing: a plain,
+typeless *in-world* lore entry that lives in the flat Lore collection beside
+characters and locations and joins lore references + AI context. Research is
+the *out-of-world* reference tree; the two are not substitutes. A note carries
+an optional "Move to Research" affordance for the cases where a lore note has
+outgrown the Lore pane and belongs in the topic tree — a promotion, not a
+migration off a deprecated type.
 
 ## Why this shape
 
@@ -145,18 +148,18 @@ problem.
 4. **Context-policy + matcher integration.** Confirm the alias matcher
    and explicit picker pick up `research/note` entries as matchable.
    Add `research` to the kind list in the implicit-context plumbing.
-5. **Migration: lore_note → research/note.** Provide a one-shot
-   "Move to research" action on each existing `lore_note` in the lore
-   pane. Drop the `lore_note` entry_type from the seed schema after
-   the user's project migrates.
-6. **Lore-pane polish.** Once `lore_note` is gone, the lore pane is
-   purely entities (character / place / item / organization /
-   custom-kinds). Surface treatment can lean further into the
-   "entity card" shape without notes diluting it.
+5. **Move-to-Research promotion.** Provide a one-shot "Move to research"
+   action on a `lore:note` in the lore pane, for a note that has outgrown
+   the flat collection and belongs in the topic tree. The `lore:note`
+   entry_type is retained — the action is an optional promotion, not a
+   forced migration off a deprecated type.
+6. **Lore-pane polish.** Lean the surface treatment into the "entity card"
+   shape for the typed entries (character / place / item / organization /
+   custom-kinds); the plain Note coexists as the typeless in-world entry.
 
 ## Follow-up issues to file
 
 - `research` kind + structure tree backend (slice 1)
 - Research pane + tree UI (slice 2-3)
-- Migration tool for existing `lore_note` entries (slice 5)
-- Lore pane purification post-migration (slice 6)
+- Move-to-Research promotion action (slice 5)
+- Lore-pane entity-card polish (slice 6)

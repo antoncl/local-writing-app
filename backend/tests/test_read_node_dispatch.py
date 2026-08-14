@@ -47,7 +47,7 @@ class ReadNodeDispatchTests(unittest.TestCase):
 
     def test_dispatches_to_lore_reader(self) -> None:
         created = self.service.create_lore_entry(
-            from_request_or_kwargs(title="Test Character", entry_type="lore:lore_note")
+            from_request_or_kwargs(title="Test Character", entry_type="lore:note")
         )
         result = self.service.read_node(created.id)
         self.assertIsInstance(result, LoreEntry)
@@ -119,7 +119,7 @@ class SaveNodeDispatchTests(unittest.TestCase):
         )
         bogus = SaveLoreEntryRequest(
             title="Lore-shape on a chat",
-            entry_type="lore:lore_note",
+            entry_type="lore:note",
             metadata={},
             body="",
             base_revision="",
@@ -163,7 +163,7 @@ class DeleteNodeDispatchTests(unittest.TestCase):
 
     def test_dispatches_to_lore_deleter(self) -> None:
         created = self.service.create_lore_entry(
-            from_request_or_kwargs(title="Doomed", entry_type="lore:lore_note")
+            from_request_or_kwargs(title="Doomed", entry_type="lore:note")
         )
         before = {e.id for e in self.service.list_lore_entries().entries}
         self.assertIn(created.id, before)
@@ -188,7 +188,7 @@ def from_request_or_kwargs(**kwargs):
     # Lore + prompt requests have very similar shapes; pick by caller-
     # supplied entry_type hint.
     et = kwargs.get("entry_type", "")
-    if et in {"lore:lore_note", "lore:character", "lore:location", "lore:item", "lore:base"}:
+    if et in {"lore:note", "lore:character", "lore:location", "lore:item", "lore:base"}:
         return CreateLoreEntryRequest(**kwargs)
     return CreatePromptEntryRequest(**kwargs)
 

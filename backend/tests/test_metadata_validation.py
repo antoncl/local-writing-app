@@ -1902,12 +1902,12 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual(schema.entry_types["lore:location"].kind, "lore")
         self.assertTrue(schema.entry_types["lore:base"].abstract)
         self.assertEqual(schema.entry_types["lore:character"].parent, "lore:base")
-        self.assertEqual(schema.entry_types["lore:lore_note"].parent, "lore:base")
+        self.assertEqual(schema.entry_types["lore:note"].parent, "lore:base")
         self.assertNotIn("summary", schema.entry_types["lore:character"].fields)
-        self.assertNotIn("summary", schema.entry_types["lore:lore_note"].fields)
-        self.assertNotIn("appears_in_scenes", schema.entry_types["lore:lore_note"].fields)
-        self.assertIn("aliases", schema.entry_types["lore:lore_note"].fields)
-        self.assertIn("tags", schema.entry_types["lore:lore_note"].fields)
+        self.assertNotIn("summary", schema.entry_types["lore:note"].fields)
+        self.assertNotIn("appears_in_scenes", schema.entry_types["lore:note"].fields)
+        self.assertIn("aliases", schema.entry_types["lore:note"].fields)
+        self.assertIn("tags", schema.entry_types["lore:note"].fields)
         self.assertEqual(schema.entry_types["lore:base"].own_fields, ["aliases", "tags", "related_entries", "color", "context_policy"])
         # Test fixture adds home_place to character (see _add_home_place_to_character_schema).
         # The seed ships character with `character_cost` (Phase C2 cross-kind
@@ -1945,14 +1945,18 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertNotIn("related_entries", schema.entry_types["research:note"].fields)
         self.assertNotIn("context_policy", schema.entry_types["research:note"].fields)
 
-    def test_lore_note_is_marked_deprecated(self) -> None:
-        # lore_note stays readable for legacy projects but is soft-deprecated
-        # in favor of research/note. UI hides deprecated types from creation
-        # menus; reads keep working.
+    def test_lore_note_is_creatable_not_deprecated(self) -> None:
+        # The Note lore type was reinstated (#963) after an overeager research-era
+        # deprecation. It must NOT be flagged deprecated (the create menus filter
+        # that flag) and must be instantiable like any other concrete lore type.
         schema = self.service.read_metadata_schema()
-        self.assertTrue(schema.entry_types["lore:lore_note"].deprecated)
+        self.assertFalse(schema.entry_types["lore:note"].deprecated)
+        self.assertFalse(schema.entry_types["lore:note"].abstract)
         self.assertFalse(schema.entry_types["lore:character"].deprecated)
         self.assertFalse(schema.entry_types["research:note"].deprecated)
+
+        entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Nimitz", entry_type="lore:note"))
+        self.assertEqual(self.service.read_lore_entry(entry.id).entry_type, "lore:note")
 
     def test_metadata_rejects_fields_not_bound_to_entry_type(self) -> None:
         entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="lore:character"))
@@ -1984,7 +1988,7 @@ class MetadataValidationTests(unittest.TestCase):
             )
         )
         self.assertIn("importance", schema.entry_types["lore:character"].fields)
-        self.assertIn("importance", schema.entry_types["lore:lore_note"].fields)
+        self.assertIn("importance", schema.entry_types["lore:note"].fields)
 
         entry = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="lore:character"))
         saved = self.service.save_lore_entry(
@@ -2751,7 +2755,7 @@ class MetadataValidationTests(unittest.TestCase):
                 path,
                 node_id="scratch_001",
                 title="Round-trip scratch",
-                entry_type="lore:lore_note",
+                entry_type="lore:note",
                 metadata={},
                 body=self.service._read_markdown_with_front_matter(path)[1] if path.exists() else "hello",
             )
@@ -3068,7 +3072,7 @@ class LayeredEntryIndexTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
-    def _write_lore_at(self, layer_folder: Path, entry_id: str, title: str, entry_type: str = "lore:lore_note") -> None:
+    def _write_lore_at(self, layer_folder: Path, entry_id: str, title: str, entry_type: str = "lore:note") -> None:
         from app.models import LoreEntry
 
         (layer_folder / "lore").mkdir(parents=True, exist_ok=True)
@@ -3094,9 +3098,9 @@ class LayeredEntryIndexTests(unittest.TestCase):
         )
 
     def test_lore_index_includes_ancestor_entries(self) -> None:
-        self._write_lore_at(self.universe, "manticore", "Manticore", entry_type="lore:lore_note")
-        self._write_lore_at(self.series, "honor", "Honor Harrington", entry_type="lore:lore_note")
-        self._write_lore_at(self.root, "nimitz", "Nimitz", entry_type="lore:lore_note")
+        self._write_lore_at(self.universe, "manticore", "Manticore", entry_type="lore:note")
+        self._write_lore_at(self.series, "honor", "Honor Harrington", entry_type="lore:note")
+        self._write_lore_at(self.root, "nimitz", "Nimitz", entry_type="lore:note")
 
         entries = self.service.list_lore_entries().entries
         ids_by = {entry.id: entry for entry in entries}

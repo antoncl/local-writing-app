@@ -532,7 +532,7 @@ class LoreEntrySummary(BaseModel):
     id: str
     title: str
     body: str = ""
-    entry_type: str = "lore:lore_note"
+    entry_type: str = "lore:note"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     source_layer_id: str = ""
     source_layer_label: str = ""
@@ -543,7 +543,7 @@ class LoreEntry(BaseModel):
     title: str
     body: str
     revision: str
-    entry_type: str = "lore:lore_note"
+    entry_type: str = "lore:note"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     source_layer_id: str = ""
@@ -567,14 +567,14 @@ class LoreEntryList(BaseModel):
 
 class CreateLoreEntryRequest(BaseModel):
     title: str = Field(min_length=1)
-    entry_type: str = "lore:lore_note"
+    entry_type: str = "lore:note"
 
 
 class SaveLoreEntryRequest(BaseModel):
     title: str = Field(min_length=1)
     body: str
     base_revision: str | None = None
-    entry_type: str = "lore:lore_note"
+    entry_type: str = "lore:note"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     # ADR-0042's authoring layer L, as a layer id (#314 / ADR-0045). The save
     # *is* the 0042 edit unit, so L rides its request body rather than an ambient

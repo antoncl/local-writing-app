@@ -102,7 +102,7 @@ export interface SchemaKindMeta {
 }
 export const SCHEMA_KIND_META: Record<SchemaKind, SchemaKindMeta> = {
   scene: { label: "Scene", heading: "Scene Types", defaultType: "scene:scene" },
-  lore: { label: "Lore", heading: "Lore Entry Types", defaultType: "lore:lore_note" },
+  lore: { label: "Lore", heading: "Lore Entry Types", defaultType: "lore:note" },
   research: { label: "Research", heading: "Research Types", defaultType: "research:note" },
   prompt: { label: "Prompt", heading: "Prompt Types", defaultType: "prompt:base" },
   assistant: { label: "Assistant", heading: "Assistant Types", defaultType: "assistant:assistant" },

@@ -68,7 +68,7 @@ NODE_FAMILIES = [
     # rather than scenes (book-scoped) — universe- or series-level research
     # notes are a natural use case.
     NodeFamily("research", "research/notes", "research:note"),
-    NodeFamily("lore", "lore", "lore:lore_note"),
+    NodeFamily("lore", "lore", "lore:note"),
     NodeFamily("prompt", "prompts", "prompt:base"),
     NodeFamily("assistant", "assistants", "assistant:assistant"),
     # Reusable mutation sets (#62): body-less Node files under `mutation-sets/`.

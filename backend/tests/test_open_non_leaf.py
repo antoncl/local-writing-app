@@ -86,7 +86,7 @@ class OpenANonLeafLevelTests(unittest.TestCase):
     def test_a_non_leaf_merges_its_own_ancestors_canon(self) -> None:
         base_service = ProjectService.opened_at(self.universe)
         base_service.create_lore_entry(
-            CreateLoreEntryRequest(title="Manticore", entry_type="lore:lore_note")
+            CreateLoreEntryRequest(title="Manticore", entry_type="lore:note")
         )
         series_service = ProjectService.opened_at(self.series)
         series_service.create_lore_entry(
@@ -103,7 +103,7 @@ class OpenANonLeafLevelTests(unittest.TestCase):
             CreateLoreEntryRequest(title="Nimitz", entry_type="lore:character")
         )
         ProjectService.opened_at(self.universe).create_lore_entry(
-            CreateLoreEntryRequest(title="Manticore", entry_type="lore:lore_note")
+            CreateLoreEntryRequest(title="Manticore", entry_type="lore:note")
         )
 
         universe_lore = self._lore_titles(ProjectService.opened_at(self.universe))

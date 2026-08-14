@@ -222,11 +222,15 @@ describe("buildBoardNodes", () => {
     expect(cardNodes(nodes)[0]).toMatchObject({ width: CARD_WIDTH, height: CARD_HEIGHT });
   });
 
-  it("makes cards draggable, and containers draggable only by their header handle (#877)", () => {
+  it("makes cards draggable, but only by their grip handle (#876), and containers only by their header handle (#877)", () => {
     const nodes = buildBoardNodes(
       projection({ containers: [container("chap", "Chapter 1")], cards: [card("c1", { container: "chap" })] }),
     );
-    expect(cardNodes(nodes)[0].draggable).toBe(true);
+    // A card drags ONLY by its leading grip (dragHandle), so its control-dense body stays
+    // free for inline edits (#876) — the whole-body drag surface was near-ungrabbable.
+    const cardNode = cardNodes(nodes)[0];
+    expect(cardNode.draggable).toBe(true);
+    expect(cardNode.dragHandle).toBe(".plot-card-drag-handle");
     // The box is draggable now, but grabbable ONLY via its header (dragHandle) so its
     // transparent interior still passes card drags + edges through (#877/#833).
     const box = containerNodes(nodes)[0];
@@ -648,7 +652,10 @@ describe("plotline nodes (ADR-0053 §3)", () => {
     );
     const lines = plotlineNodes(nodes);
     expect(lines.map((n) => n.id)).toEqual(["p1", "p2"]);
+    // Draggable, but only by its grip handle — the same one a card uses (#876), so every
+    // card-like node drags identically and the header's expand/focus controls stay click-only.
     expect(lines[0].draggable).toBe(true);
+    expect(lines[0].dragHandle).toBe(".plot-card-drag-handle");
     expect(lines[0].data).toEqual({
       title: "Main",
       color: "blue",

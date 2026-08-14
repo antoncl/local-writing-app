@@ -17,7 +17,7 @@
 <script lang="ts">
   import { getContext, tick } from "svelte";
   import { getSwatch } from "@/lib/utils/colors";
-  import type { PlotCardData } from "@/lib/plot/plotBoardLayout";
+  import { CARD_DRAG_HANDLE_CLASS, type PlotCardData } from "@/lib/plot/plotBoardLayout";
   import { PLOT_CARD_ACTIONS, type PlotCardActions } from "./plotCardActions";
   import { hasPlotBeatDrag, readPlotBeatDrag } from "@/lib/plot/plotDnd";
 
@@ -211,6 +211,13 @@
     ondrop={onCardDrop}
   >
     <div class="card-head">
+      {#if actions}
+        <!-- The drag handle (#876): the card drags ONLY by this grip (SvelteFlow's
+             `dragHandle` targets it), leaving the whole body free for its inline-edit
+             controls. Present only on an interactive board (actions) — the read-only
+             mount case never drags. Decorative + pointer-only, like every board drag. -->
+        <span class="card-drag-handle {CARD_DRAG_HANDLE_CLASS}" title="Drag to move" aria-hidden="true">⋮⋮</span>
+      {/if}
       {#if titleEditing}
         <input
           bind:this={titleInput}
@@ -446,6 +453,30 @@
     display: flex;
     align-items: flex-start;
     gap: 4px;
+  }
+  /* The drag handle (#876): a quiet leading grip — the same 6-dot ⋮⋮ idiom the plotline
+     beats use (#911), tightened into one grip. `align-self: stretch` gives it the full
+     header height so it's an easy target, not a fiddly sliver. Faint at rest, full on
+     card hover; `grab`/`grabbing` cursor advertises the gesture. */
+  .card-drag-handle {
+    flex: none;
+    align-self: stretch;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 1px;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    line-height: 1;
+    letter-spacing: -3px;
+    cursor: grab;
+    opacity: 0.5;
+    transition: opacity 120ms ease;
+  }
+  .card-root:hover .card-drag-handle {
+    opacity: 1;
+  }
+  .card-drag-handle:active {
+    cursor: grabbing;
   }
   .card-title {
     flex: 1;

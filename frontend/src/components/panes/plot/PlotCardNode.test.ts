@@ -109,6 +109,17 @@ describe("PlotCardNode", () => {
     render(PlotCardNode, { props: { data: data() } });
     expect(screen.queryByLabelText("Card actions")).toBeNull();
   });
+
+  // The drag handle (#876): an interactive board grips the card by a leading handle
+  // (SvelteFlow's dragHandle targets it), so its control-dense body stays edit-only.
+  it("renders the drag-handle grip on an interactive card, and omits it read-only (#876)", () => {
+    const { container, unmount } = renderWithActions({}, actions());
+    expect(container.querySelector(".plot-card-drag-handle")).not.toBeNull();
+    unmount();
+    // No actions (read-only mount / non-interactive board) → nothing to drag, no grip.
+    const { container: ro } = render(PlotCardNode, { props: { data: data() } });
+    expect(ro.querySelector(".plot-card-drag-handle")).toBeNull();
+  });
 });
 
 describe("PlotCardNode — per-plotline focus (ADR-0053 §6, S5b; #911 lit outline + dim)", () => {

@@ -24,7 +24,7 @@
   import { getSwatch } from "@/lib/utils/colors";
   import { setPlotBeatDrag } from "@/lib/plot/plotDnd";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
-  import type { PlotPlotlineData } from "@/lib/plot/plotBoardLayout";
+  import { CARD_DRAG_HANDLE_CLASS, type PlotPlotlineData } from "@/lib/plot/plotBoardLayout";
   import type { MetadataValue, PlotlineEntry } from "@/lib/types";
   import { PLOT_PLOTLINE_ACTIONS, type PlotPlotlineActions } from "./plotPlotlineActions";
 
@@ -255,6 +255,11 @@
          node drag; the expand button stays drag-enabled so the node still drags by its
          header. -->
     <div class="plotline-head">
+      <!-- The drag handle (#876): the same leading grip a card uses, so every card-like
+           node drags the same way. Here it also DISENTANGLES drag from the header — the
+           title row is a click-to-expand button, so without a grip a grab and an expand
+           fought over the same surface. SvelteFlow's `dragHandle` targets this grip. -->
+      <span class="plotline-drag-handle {CARD_DRAG_HANDLE_CLASS}" title="Drag to move" aria-hidden="true">⋮⋮</span>
       <button
         class="plotline-focus nodrag nopan"
         class:active={isFocused}
@@ -447,6 +452,28 @@
     align-items: center;
     gap: 8px;
     min-width: 0;
+  }
+  /* The drag handle (#876): the same quiet 6-dot grip a card carries, so every card-like
+     node drags identically. Faint at rest, full on node hover; `grab`/`grabbing` cursor.
+     A small negative right margin tightens it to the row's leading edge. */
+  .plotline-drag-handle {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    margin-right: -4px;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    line-height: 1;
+    letter-spacing: -3px;
+    cursor: grab;
+    opacity: 0.5;
+    transition: opacity 120ms ease;
+  }
+  .plot-plotline:hover .plotline-drag-handle {
+    opacity: 1;
+  }
+  .plotline-drag-handle:active {
+    cursor: grabbing;
   }
   /* The title area doubles as the expand toggle — reset button chrome to look like the
      read-only header, with a pointer cue. Takes the row's remaining width beside the

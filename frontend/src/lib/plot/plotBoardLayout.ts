@@ -126,6 +126,15 @@ export const CONTAINER_GAP = 24; // between sibling boxes / rows / acts
 // element's class (PlotContainerNode) must name the same selector.
 export const CONTAINER_DRAG_HANDLE_CLASS = "plot-container-drag-handle";
 
+// The class SvelteFlow's `dragHandle` targets on the CARD-like nodes — story cards
+// (plotCard) AND plotline nodes (plotPlotline) — so each drags ONLY by a small leading
+// grip, not by its whole body (#876). Their bodies are dense with inline-edit controls
+// (title, synopsis, kebab, focus, beats), so a whole-body drag surface left only slivers
+// between the controls to grab; a dedicated grip is a clear, fixed handle. Shared by both
+// card-like node types and both node components, exactly as the container handle above —
+// the node's `dragHandle` selector and the grip element's class must never drift apart.
+export const CARD_DRAG_HANDLE_CLASS = "plot-card-drag-handle";
+
 // A container node's id is prefixed so it can never collide with a card id (card
 // ids are `plot_…`, container ids are `node_…`), mirroring the old `lane:` prefix.
 const containerNodeId = (id: string) => `container:${id}`;
@@ -343,7 +352,10 @@ export function buildBoardNodes(
       // 0-size / headless pane) — so without this the edge layers render nothing.
       // Only card nodes carry it: the edge layers connect cards, never containers.
       measured: { width: CARD_WIDTH, height: CARD_HEIGHT },
+      // Draggable, but ONLY by the leading grip (`dragHandle`, #876) — the card body is
+      // full of inline-edit controls, so a whole-body drag surface was near-ungrabbable.
       draggable: true,
+      dragHandle: `.${CARD_DRAG_HANDLE_CLASS}`,
       selectable: false,
       extent: box ? containerExtent(box) : undefined,
       zIndex: 2,
@@ -375,7 +387,10 @@ export function buildBoardNodes(
       type: "plotPlotline",
       position: saved[line.id] ?? { x: i * (PLOTLINE_WIDTH + CARD_GAP_X), y: plotlineBandY },
       width: PLOTLINE_WIDTH,
+      // Same leading-grip handle as a card (#876): a plotline node's header carries a
+      // focus toggle + a click-to-expand title, so it drags by the grip, never the header.
       draggable: true,
+      dragHandle: `.${CARD_DRAG_HANDLE_CLASS}`,
       selectable: false,
       zIndex: 2,
       data: { title: line.title, color: line.color, beats: line.beats },

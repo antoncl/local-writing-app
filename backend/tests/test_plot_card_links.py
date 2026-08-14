@@ -251,6 +251,27 @@ class CardBeatBadgeProjectionTests(_CardLinkTestCase):
         self.assertEqual(beats[0]["plotline_title"], plotline["title"])
         # A plotline with no colour resolves a null badge colour (the neutral chip).
         self.assertIsNone(beats[0]["plotline_color"])
+        # The badge carries the beat's 1-based roster position (#941).
+        self.assertEqual(beats[0]["number"], 1)
+
+    def test_a_badge_carries_its_1based_roster_number(self) -> None:
+        # The badge shows the beat's position in its plotline's roster (#941) so two
+        # same-titled beats are tellable apart. b[2] is beat 3, b[0] is beat 1 — the
+        # number follows the roster, not the (reversed) stored link order.
+        plotline = self._plotline()
+        b = plotline["metadata"]["instance_beats"]
+        card = self._new_card()
+        self._save_card(
+            card,
+            {
+                "beat_links": [
+                    {"plotline": plotline["id"], "beat_id": b[2]["id"]},
+                    {"plotline": plotline["id"], "beat_id": b[0]["id"]},
+                ]
+            },
+        )
+        numbers = [beat["number"] for beat in self._projected_card(card)["beats"]]
+        self.assertEqual(numbers, [3, 1])
 
     def test_a_beat_badge_carries_its_plotlines_colour(self) -> None:
         # The board tints a card's beat badges by their owning plotline's colour so

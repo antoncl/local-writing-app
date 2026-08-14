@@ -138,6 +138,28 @@ export function cardEditCommand(
   };
 }
 
+// An edit that touches SEVERAL cards as ONE undo step (a beat MOVE card→card, #941:
+// unlink off the source + link on the target). Restores every card's before/after,
+// suppressing the per-restore board refetch on all but the last so the step rebuilds
+// the board ONCE (the #909 storm fix, as deleteCardCommand does for its referrers).
+export function cardEditManyCommand(
+  port: PlotCommandPort,
+  before: CardRef[],
+  after: CardRef[],
+  label: string,
+): Command {
+  const restoreAll = async (refs: CardRef[]): Promise<void> => {
+    for (let i = 0; i < refs.length; i++) {
+      await port.restoreCardState(refs[i].id, refs[i].state, i === refs.length - 1);
+    }
+  };
+  return {
+    label,
+    undo: () => restoreAll(before),
+    redo: () => restoreAll(after),
+  };
+}
+
 export function createPlotlineCommand(
   port: PlotCommandPort,
   id: string,
@@ -292,6 +314,19 @@ export class PlotUndoRecorder {
       this.#record(cardEditCommand(this.#port, id, before, after, label));
     }
     return result;
+  }
+
+  /** An edit spanning several cards recorded as ONE step (a beat MOVE card→card, #941).
+   *  Captures every id's before + after around the op; records only if something
+   *  changed. Ids should be distinct (the move passes [from, to]). */
+  async cardEditMany(ids: string[], label: string, op: () => Promise<void>): Promise<void> {
+    await this.#whenIdle();
+    const before = await this.#captureCards(ids);
+    await op();
+    const after = await this.#captureCards(ids);
+    if (before.some((b, i) => !statesEqual(b.state, after[i].state))) {
+      this.#record(cardEditManyCommand(this.#port, before, after, label));
+    }
   }
 
   /** A plotline rename / recolour / beat-roster edit. Returns the op's own result

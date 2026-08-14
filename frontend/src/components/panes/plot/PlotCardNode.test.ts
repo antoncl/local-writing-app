@@ -19,6 +19,7 @@ const beat = (over: Partial<PlotBoardBeat> = {}): PlotBoardBeat => ({
   plotline_color: null,
   beat_id: "b1",
   title: "Call to Adventure",
+  number: 1,
   ...over,
 });
 
@@ -49,6 +50,7 @@ function actions(
     onSetPlotline: vi.fn(),
     onLinkBeat: vi.fn(),
     onUnlinkBeat: vi.fn(),
+    onMoveBeat: vi.fn(),
     onSetPageStatus: vi.fn(),
     onDelete: vi.fn(),
     plotlines,
@@ -57,18 +59,32 @@ function actions(
   };
 }
 
-// A stand-in DataTransfer carrying a beat drag (or, with mime="", a foreign drag).
-function beatDataTransfer(plotline: string, beatId: string): DataTransfer {
-  const store: Record<string, string> = {
-    [PLOT_DND_MIME]: JSON.stringify({ kind: "beat", plotline, beat_id: beatId }),
-  };
+// A stand-in DataTransfer carrying a beat drag. `from` (a source card id) marks a
+// badge drag moving card→card (#941); omitted, it's a plotline-node link drag (#824).
+function beatDataTransfer(plotline: string, beatId: string, from?: string): DataTransfer {
+  const payload = from ? { kind: "beat", plotline, beat_id: beatId, from } : { kind: "beat", plotline, beat_id: beatId };
+  const store: Record<string, string> = { [PLOT_DND_MIME]: JSON.stringify(payload) };
   return {
     types: Object.keys(store),
     getData: (t: string) => store[t] ?? "",
     setData: (t: string, v: string) => void (store[t] = v),
     dropEffect: "none",
-    effectAllowed: "all",
+    effectAllowed: from ? "move" : "all",
   } as unknown as DataTransfer;
+}
+
+// A stand-in DataTransfer that records setData calls — for asserting what a badge's
+// dragstart writes into the drag channel.
+function recordingDataTransfer(): { dt: DataTransfer; store: Record<string, string> } {
+  const store: Record<string, string> = {};
+  const dt = {
+    setData: (t: string, v: string) => void (store[t] = v),
+    getData: (t: string) => store[t] ?? "",
+    types: [] as string[],
+    dropEffect: "none",
+    effectAllowed: "none",
+  } as unknown as DataTransfer;
+  return { dt, store };
 }
 
 function renderWithActions(over: Partial<PlotCardData>, acts: PlotCardActions, id = "card_1") {
@@ -338,6 +354,14 @@ describe("PlotCardNode — beats + page marker (S7 Slice 5b)", () => {
     expect(screen.getByText("Refusal")).toBeInTheDocument();
   });
 
+  it("shows the beat's roster number on its badge (#941)", () => {
+    const { container } = render(PlotCardNode, {
+      props: { data: data({ beats: [beat({ title: "Midpoint", number: 5 })] }) },
+    });
+    const num = container.querySelector(".beat-badge-num");
+    expect(num?.textContent).toBe("5");
+  });
+
   it("caps the badges and shows a +N overflow chip instead of hiding beats silently", () => {
     const many = Array.from({ length: 6 }, (_, i) => beat({ beat_id: `b${i}`, title: `Beat ${i}` }));
     render(PlotCardNode, { props: { data: data({ beats: many }) } });
@@ -441,6 +465,41 @@ describe("PlotCardNode — beat linking by drag (S7 #824)", () => {
     const foreign = { types: ["text/plain"], getData: () => "", setData: () => {} } as unknown as DataTransfer;
     await fireEvent.drop(card, { dataTransfer: foreign });
     expect(acts.onLinkBeat).not.toHaveBeenCalled();
+  });
+
+  it("MOVES a beat here when a badge dragged from another card is dropped (#941)", async () => {
+    const acts = actions();
+    const { container } = renderWithActions({ beats: [] }, acts, "card_to");
+    const card = container.querySelector(".plot-card") as HTMLElement;
+    const dataTransfer = beatDataTransfer("i1", "b1", "card_from");
+    await fireEvent.dragOver(card, { dataTransfer });
+    await fireEvent.drop(card, { dataTransfer });
+    expect(acts.onMoveBeat).toHaveBeenCalledWith("card_from", "card_to", "i1", "b1");
+    expect(acts.onLinkBeat).not.toHaveBeenCalled();
+  });
+
+  it("LINKS (does not move) a badge dropped back on its own card (#941)", async () => {
+    const acts = actions();
+    const { container } = renderWithActions({ beats: [beat()] }, acts, "card_self");
+    const card = container.querySelector(".plot-card") as HTMLElement;
+    const dataTransfer = beatDataTransfer("i1", "b1", "card_self"); // from === this card
+    await fireEvent.drop(card, { dataTransfer });
+    expect(acts.onMoveBeat).not.toHaveBeenCalled();
+    expect(acts.onLinkBeat).toHaveBeenCalledWith("card_self", "i1", "b1");
+  });
+
+  it("a badge drag carries its source card id so the drop can move it (#941)", async () => {
+    const acts = actions();
+    const { container } = renderWithActions({ beats: [beat({ beat_id: "b9" })] }, acts, "card_src");
+    const badge = container.querySelector(".beat-badge") as HTMLElement;
+    const { dt, store } = recordingDataTransfer();
+    await fireEvent.dragStart(badge, { dataTransfer: dt });
+    expect(JSON.parse(store[PLOT_DND_MIME])).toMatchObject({
+      kind: "beat",
+      plotline: "i1",
+      beat_id: "b9",
+      from: "card_src",
+    });
   });
 
   it("unlinks a beat via the × on its badge", async () => {

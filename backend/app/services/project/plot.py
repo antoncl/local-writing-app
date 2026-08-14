@@ -1088,6 +1088,10 @@ class PlotMixin:
                     plotline_color=plotline_color,
                     beat_id=beat_id,
                     title=title,
+                    # 1-based position in the plotline's roster (#941). `beat_titles` is
+                    # built from `_iter_roster_beats` in order, so its key order IS the
+                    # roster order; the pair is already validated present above.
+                    number=list(beat_titles).index(beat_id) + 1,
                 )
             )
         return resolved

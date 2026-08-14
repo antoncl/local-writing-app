@@ -288,6 +288,9 @@ class PlotBoardBeat(BaseModel):
     plotline_color: str | None = None
     beat_id: str
     title: str
+    # The beat's 1-based position in its plotline's roster (#941) — a stable per-plotline
+    # number the board shows on the badge, so two same-titled beats are tellable apart.
+    number: int
 
 
 class PlotBoardCard(BaseModel):

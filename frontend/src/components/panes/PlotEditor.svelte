@@ -46,6 +46,7 @@
     reassignCardPlotline,
     linkCardBeat,
     unlinkCardBeat,
+    moveCardBeat,
     linkCardCausal,
     unlinkCardCausal,
     setCardPageStatus,
@@ -219,6 +220,12 @@
       void undoRecorder.cardEdit(cardId, "link beat", () => linkCardBeat(cardId, instance, beatId)),
     onUnlinkBeat: (cardId, instance, beatId) =>
       void undoRecorder.cardEdit(cardId, "unlink beat", () => unlinkCardBeat(cardId, instance, beatId)),
+    // Move a beat badge from one card to another (#941): a two-card edit (unlink source +
+    // link target) recorded as ONE undo step, so a single Ctrl+Z restores both.
+    onMoveBeat: (fromCard, toCard, instance, beatId) =>
+      void undoRecorder.cardEditMany([fromCard, toCard], "move beat", () =>
+        moveCardBeat(fromCard, toCard, instance, beatId),
+      ),
     // Declare an unattached card off_page vs unwritten (Slice 5b). on_page is derived
     // from the scene, so it is never set here.
     onSetPageStatus: (cardId, status) =>

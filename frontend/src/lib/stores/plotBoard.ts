@@ -214,34 +214,68 @@ function beatLinksOf(metadata: CardEntry["metadata"]): PlotBeatLink[] {
     : [];
 }
 
-// Drop a beat onto a card → add the link (deduped; a card fulfils a beat once).
-// Already linked → no change, so skip the save + board rebuild.
+// The two beat-link mutations, as PURE metadata edits so link / unlink / move share
+// one definition of what a link is and how the primary + sparse-delete rules behave
+// (#941 — a move is unlink-here + link-there, and must not re-implement either). Each
+// mutates `metadata` in place and returns whether it changed anything.
 //
-// The first beat dropped onto a card with no PRIMARY plotline adopts that beat's
-// plotline as the card's primary — its tint/stripe (#863) — so the drop visibly
-// lights the card in that thread's colour (ADR-0053 §4 resolves "how is the primary
-// chosen?" as first-dragged). Sticky: a card that already has a primary keeps it, and
-// later beats from other plotlines show only as badges (#871); the writer can still
-// re-pick via the kebab. This runs only in the add-a-new-link branch, so a redundant
-// re-drop of an already-linked beat stays a no-op (never resurrecting a cleared primary).
-export function linkCardBeat(cardId: string, plotline: string, beat_id: string): Promise<void> {
-  return mutateCardMetadata(cardId, (metadata) => {
-    const links = beatLinksOf(metadata);
-    if (links.some((l) => l.plotline === plotline && l.beat_id === beat_id)) return false;
-    links.push({ plotline, beat_id });
-    metadata.beat_links = links;
-    if (!metadata.plotline) metadata.plotline = plotline;
-  });
+// The first beat added to a card with no PRIMARY plotline adopts that beat's plotline as
+// the card's primary — its tint/stripe (#863; ADR-0053 §4 "first-dragged"). Sticky: a
+// card that already has a primary keeps it, and later beats from other plotlines show
+// only as badges (#871); the writer re-picks via the kebab. A re-add of an already-linked
+// beat is a no-op, so it never resurrects a cleared primary.
+function linkBeatInMetadata(metadata: CardEntry["metadata"], plotline: string, beat_id: string): boolean {
+  const links = beatLinksOf(metadata);
+  if (links.some((l) => l.plotline === plotline && l.beat_id === beat_id)) return false;
+  links.push({ plotline, beat_id });
+  metadata.beat_links = links;
+  if (!metadata.plotline) metadata.plotline = plotline;
+  return true;
 }
 
-// Remove a beat from a card (the badge's × on the card). An empty result drops the key
-// (sparse), matching the backend's all-dangling→sparse heal.
+// An empty result drops the key (sparse), matching the backend's all-dangling→sparse heal.
+function unlinkBeatInMetadata(metadata: CardEntry["metadata"], plotline: string, beat_id: string): boolean {
+  const before = beatLinksOf(metadata);
+  const links = before.filter((l) => !(l.plotline === plotline && l.beat_id === beat_id));
+  if (links.length === before.length) return false; // nothing removed
+  if (links.length) metadata.beat_links = links;
+  else delete metadata.beat_links;
+  return true;
+}
+
+// Drop a beat onto a card → add the link (deduped; a card fulfils a beat once).
+// Already linked → no change, so mutateCardMetadata skips the save + board rebuild.
+export function linkCardBeat(cardId: string, plotline: string, beat_id: string): Promise<void> {
+  return mutateCardMetadata(cardId, (metadata) => linkBeatInMetadata(metadata, plotline, beat_id));
+}
+
+// Remove a beat from a card (the badge's × on the card).
 export function unlinkCardBeat(cardId: string, plotline: string, beat_id: string): Promise<void> {
-  return mutateCardMetadata(cardId, (metadata) => {
-    const links = beatLinksOf(metadata).filter((l) => !(l.plotline === plotline && l.beat_id === beat_id));
-    if (links.length) metadata.beat_links = links;
-    else delete metadata.beat_links;
-  });
+  return mutateCardMetadata(cardId, (metadata) => unlinkBeatInMetadata(metadata, plotline, beat_id));
+}
+
+// Move a beat link from one card to another (drag a badge card→card, #941): unlink it
+// off the source, link it on the target (adopting the target's primary if unset, like a
+// fresh drop). Two saves, ONE refetch (calling link+unlink would refetch twice). A drop
+// back on the same card is a no-op; a target that already holds the beat still loses the
+// source's link (idempotent target).
+export async function moveCardBeat(
+  fromId: string,
+  toId: string,
+  plotline: string,
+  beat_id: string,
+): Promise<void> {
+  if (fromId === toId) return;
+  const from = await api.getCard(fromId);
+  const fromMeta = { ...from.metadata };
+  unlinkBeatInMetadata(fromMeta, plotline, beat_id);
+  await api.saveCard({ ...from, metadata: fromMeta }, from.body);
+
+  const to = await api.getCard(toId);
+  const toMeta = { ...to.metadata };
+  linkBeatInMetadata(toMeta, plotline, beat_id);
+  await api.saveCard({ ...to, metadata: toMeta }, to.body);
+  await refreshAfterMutation();
 }
 
 // Causal ("leads to") edges are authored by DRAGGING a wire from one card's handle to

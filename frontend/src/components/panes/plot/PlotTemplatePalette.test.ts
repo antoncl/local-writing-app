@@ -23,15 +23,22 @@ const schema = () =>
     fields: {},
   }) as unknown as MetadataSchema;
 
-const tpl = (over: Partial<PlotTemplateSummary> = {}): PlotTemplateSummary => ({
-  id: "tpl_1",
-  title: "Three-Act",
-  body: "",
-  entry_type: "plot:template",
-  template: { slug: "three-act", display_name: "Three-Act" },
-  is_library: true,
-  ...over,
-});
+const tpl = (over: Partial<PlotTemplateSummary> = {}): PlotTemplateSummary => {
+  // `editable` defaults to the realistic pairing: a Library template is read-only,
+  // an owned clone is editable. A test can still override it explicitly (e.g. an
+  // ancestor-inherited non-Library template: is_library:false, editable:false).
+  const is_library = over.is_library ?? true;
+  return {
+    id: "tpl_1",
+    title: "Three-Act",
+    body: "",
+    entry_type: "plot:template",
+    template: { slug: "three-act", display_name: "Three-Act" },
+    is_library,
+    editable: !is_library,
+    ...over,
+  };
+};
 
 function mount(over: Partial<Record<string, unknown>> = {}) {
   const handlers = {
@@ -93,6 +100,16 @@ describe("PlotTemplatePalette", () => {
     // Kind glyphs: ◆ built-in, ✎ owned.
     expect(screen.getByText("◆")).toBeTruthy();
     expect(screen.getAllByText("✎")).toHaveLength(2);
+  });
+
+  it("does not claim ownership of an ancestor-inherited (non-owned) template", async () => {
+    // is_library:false but editable:false — owned by an ancestor project, inherited
+    // here. It is NOT "your template"; provenance rides the ◆ glyph + the layer pill.
+    mount({ entries: [tpl({ id: "tpl_x", title: "Series arc", is_library: false, editable: false, beat_count: 5 })] });
+    await tick();
+    expect(screen.getByText("5 beats")).toBeTruthy();
+    expect(screen.queryByText(/Your template/)).toBeNull();
+    expect(screen.getByText("◆")).toBeTruthy();
   });
 
   it("clicking a template instantiates it", async () => {

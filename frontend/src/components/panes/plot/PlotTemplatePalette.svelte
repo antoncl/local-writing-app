@@ -44,12 +44,14 @@
   } = $props();
 
   // The muted sub-line under a template's title: its beat-roster size, prefixed
-  // with "Your template" on an owned clone so provenance reads at a glance without
-  // the level pill (an owned node carries no pill). Mirrors the mockup's `.tmpl .b`.
+  // with "Your template" only when this project genuinely OWNS it (`editable`, the
+  // fail-closed owned-here verdict — #689). A Library template or one inherited from
+  // an ancestor project is not "yours"; its provenance is carried by the glyph + the
+  // layer pill instead. Mirrors the mockup's `.tmpl .b`.
   function templateDetail(entry: PlotTemplateSummary): string {
     const n = entry.beat_count ?? 0;
     const beats = `${n} ${n === 1 ? "beat" : "beats"}`;
-    return entry.is_library ? beats : `Your template · ${beats}`;
+    return entry.editable ? `Your template · ${beats}` : beats;
   }
 
   let schema = $derived($metadataSchemaStore);
@@ -120,9 +122,10 @@
     onmousedown={(event) => event.stopPropagation()}
   >
     {#snippet leading()}
-      <!-- Kind glyph (mockup `.tmpl.builtin`/`.tmpl.owned` ::before): a muted ◆
-           marks a shipped Library template, an amber ✎ an owned clone. -->
-      <span class="tmpl-glyph" class:owned={!entry.is_library} aria-hidden="true">{entry.is_library ? "◆" : "✎"}</span>
+      <!-- Kind glyph (mockup `.tmpl.builtin`/`.tmpl.owned` ::before): an amber ✎
+           marks a template this project owns (`editable`), a muted ◆ a shipped
+           Library or ancestor-inherited one. -->
+      <span class="tmpl-glyph" class:owned={entry.editable} aria-hidden="true">{entry.editable ? "✎" : "◆"}</span>
     {/snippet}
     {#snippet trailing()}
       {#if entry.is_library}

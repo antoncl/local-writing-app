@@ -40,6 +40,23 @@ function libraryPrompt(id: string, title: string): PromptEntrySummary {
 
 const noop = () => {};
 
+// A schema whose prompt sub-types carry the four output dispositions, so the pane
+// buckets them onto their shelves (#951). Snippet declares no output contract.
+const DISPOSITION_SCHEMA = {
+  entry_types: {
+    "prompt:base": { name: "Prompt" },
+    "prompt:continuation": { name: "Continuation", parent: "prompt:base", prompt: { context_strategy: { output: { kind: "append_to_body" } } } },
+    "prompt:general": { name: "General", parent: "prompt:base", prompt: { context_strategy: { output: { kind: "chat_panel" } } } },
+    "prompt:revise:entry": { name: "Revise entry", parent: "prompt:base", prompt: { context_strategy: { output: { kind: "chat_panel", commit: { review: "visual_diff" } } } } },
+    "prompt:snippet": { name: "Snippet", parent: "prompt:base", prompt: { context_strategy: {} } },
+  },
+  fields: {},
+} as unknown as MetadataSchema;
+
+function promptOf(id: string, title: string, entry_type: string): PromptEntrySummary {
+  return { id, title, body: "", entry_type, metadata: {}, inputs: [] };
+}
+
 function renderPane() {
   return render(Prompts, {
     props: {
@@ -60,6 +77,37 @@ afterEach(() => {
   openProjectHidden(null);
   localStorage.clear();
   vi.restoreAllMocks();
+});
+
+describe("Prompts pane — disposition shelves (#951)", () => {
+  it("groups the roster onto its disposition shelves, in shelf order", () => {
+    metadataSchemaStore.set(DISPOSITION_SCHEMA);
+    const { container } = render(Prompts, {
+      props: {
+        entries: [
+          // Deliberately out of shelf order to prove the pane clusters them.
+          promptOf("s", "A snippet", "prompt:snippet"),
+          promptOf("g", "Free chat", "prompt:general"),
+          promptOf("c", "Continue scene", "prompt:continuation"),
+          promptOf("b", "Revise a character", "prompt:revise:entry"),
+        ],
+        onOpenEntry: noop,
+        onNewEntry: noop,
+        onCloneEntry: noop,
+      },
+    });
+    // The label sits in `.node-row-text`; the header also carries a disclosure caret
+    // (leading) and a count pill (trailing), so read the label element, not the row.
+    const headings = Array.from(container.querySelectorAll(".node-row.group-header")).map((el) =>
+      el.querySelector(".node-row-text")?.textContent?.trim(),
+    );
+    // Only populated shelves appear (no replace_selection prompt → no "Revise prose"),
+    // and they appear in shelf order regardless of input order.
+    expect(headings).toEqual(["Continue", "Chat", "Revise entities", "Snippets"]);
+    // The rows themselves still render under their shelves.
+    expect(screen.getByText("Continue scene")).toBeInTheDocument();
+    expect(screen.getByText("Revise a character")).toBeInTheDocument();
+  });
 });
 
 describe("Prompts pane — Library hide (ADR-0049 slice 3)", () => {

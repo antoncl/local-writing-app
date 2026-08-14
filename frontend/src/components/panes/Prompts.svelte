@@ -8,6 +8,7 @@
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import { entryTypeChoicesByKind } from "@/lib/utils/treeHelpers";
   import { defaultView } from "@/lib/views/evaluateView";
+  import { promptSummariesToGroupNodes, type PromptGroupNode } from "@/lib/views/promptNodes";
   import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
   import { inheritedLayerLabel } from "@/lib/utils/provenance";
   import { referenceIndexStore } from "@/lib/stores/references";
@@ -21,10 +22,11 @@
 
   export let entries: PromptEntrySummary[];
   // Prompts is a real view like Lore (ADR-0022/0036): the whole prompt roster
-  // grouped by entry_type, evaluated by evaluateView — the subtype buckets ARE the
-  // view's grouping (`group_by: entry_type`, defaultView("prompt")), not a hand-
-  // built schema tree. Membership is the whole roster, so an entry never "falls
-  // off" for having an unexpected type — it just lands in its own bucket.
+  // evaluated by evaluateView. The default view groups by DISPOSITION — what the
+  // prompt does to the document, of which there are only five — not by leaf
+  // entry_type, which was a bucket per sub-type (#951). Disposition is a synthesized
+  // field the lift below stamps; membership is the whole roster, so an entry never
+  // "falls off" — an unrecognised one just shelves under Snippets.
   export let viewSpec: ViewSpec = defaultView("prompt");
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
   $: schema = $metadataSchemaStore;
@@ -71,10 +73,13 @@
 
   // Every NodeList is backed by a view (ADR-0022): the pane hands the whole view
   // (spec + roster + data env) to ViewNodeList, which owns evaluation + grouping.
-  // Grouping comes from the spec, never synthesized here.
+  // The lift stamps each roster node with its derived `disposition` (metadata) and
+  // pre-clusters by shelf order, so the default view's `group_by: [disposition]`
+  // buckets on it — the same shape as the Chats pane lifting `seed_committing`.
+  $: promptNodes = promptSummariesToGroupNodes(visibleEntries, schema);
   $: view = {
     spec: viewSpec,
-    universe: visibleEntries,
+    universe: promptNodes,
     schema,
     referenceIndex: $referenceIndexStore,
   };
@@ -125,7 +130,7 @@
   </NodeList>
 {/snippet}
 
-{#snippet entryRow(entry: PromptEntrySummary, ctx: RowCtx<PromptEntrySummary>)}
+{#snippet entryRow(entry: PromptGroupNode, ctx: RowCtx<PromptGroupNode>)}
   <!-- A prompt whose source layer differs from the open project's is inherited
        and gets the level pill. For a built-in Library prompt (ADR-0049) that
        pill reads "Library", marking it as shipped read-only material, distinct

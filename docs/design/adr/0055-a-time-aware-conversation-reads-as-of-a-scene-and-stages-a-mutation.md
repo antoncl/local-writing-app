@@ -101,15 +101,20 @@ The unifying rule, which both halves obey:
 
 ### 1. A conversation reads its subject as-of a scene
 
-A subject-anchored prompt (impersonate, and any `chat_panel` prompt offered on a time-travel-aware
-subject) resolves the subject through `effective_state(entity, scene, position)`, not the flat
-`entry()` base read. The resolution point is an **"as of" scene** carried on the conversation.
+The **as-of anchor** is the point in the manuscript at which a conversation reads its subject — the
+lore card's scrubber position, attached to a conversation instead of the card. A subject is
+time-travel-aware (ADR-0013): who Mira *is* differs across the story, and `effective_state(entity,
+scene, position)` computes her title/body/fields as of any point. A subject-anchored prompt
+(impersonate, and any `chat_panel` prompt offered on a time-travel-aware subject) resolves the subject
+through `effective_state` **at its anchor**, not the flat `entry()` base read — which is always
+book-start (stop 0). The anchor is a scene (optionally a prose position), carried on the conversation.
 
-- **Default anchor** is the writer's current manuscript position if the conversation is launched from a
-  scene, else **end-of-book (the subject's current self)** — never stop 0 (book-start), which is
-  today's silent-wrong default.
-- The writer may **override** the anchor ("as of …") from the Conversations surface. The anchor is a
-  property of the conversation, resolved at send time.
+- **The anchor is the subject's time-travel slider.** The character card already carries the ADR-0013
+  scrubber; a conversation reads the subject at the slider's current stop, and moving the slider
+  re-anchors — the writer picks the version with the same control they already use to *view* it. No
+  separate "as of" picker. (A scene-launched conversation defaults its anchor to that scene.)
+- The anchor is a property of the conversation, resolved at send time. Its rest value is the slider's
+  position — never stop 0 (book-start), which is today's silent-wrong default.
 
 This is a pure read and reuses ADR-0013 machinery the lore card already drives.
 
@@ -140,13 +145,20 @@ alongside its existing `target_entry_type` (`models/entries.py: MutationSetEntry
 
 A staged commit is simply the pinned mode; a hand-authored "change to Mira" is the same object. The
 row shape, storage kind (`mutation_set:mutation_set`), pane, and apply flow are all shared — the pin is
-a set-level field, not a new grammar.
+one field, not a new grammar.
+
+**The pin is a `metadata` `entity_ref`, not a top-level field like `target_entry_type`.** That choice
+does double duty for free: edge extraction emits a **set→subject edge** (kind-neutral, §Resolved), so
+the subject's reverse index lists its pending sets the same way it lists its chats — and the set enters
+the reference-integrity machinery, so deleting the subject *purges* the pin rather than leaving it
+silently dangling (§Resolved contrasts this with `target_entry_type`, which is top-level and does go
+stale).
 
 **The natural authoring home for a set is the lore entity.** Creating or editing a set *from* the
 character card pins it to that entity by construction, so the "author from the entity" gesture and the
 "entity pin" are one fact. The card thereby becomes the coherent home for the subject's whole timeline
 story: **read** effective state as-of (the ADR-0013 scrubber), **author** proposed changes (pinned
-sets), and **see what is pending** (pinned sets not yet placed). The Mutations pane remains the
+sets), and **see what is pending** via that set→subject reverse edge. The Mutations pane remains the
 management surface and the home for reusable, un-pinned templates.
 
 ### 4. The chat owns its pinned set as a durable, resumable work-product
@@ -227,8 +239,9 @@ UI; it is the same content, two destinations.
 - **Untouched:** the mutation carrier grammar and scene-authoritative model (ADR-0001/0042 §5); the
   reusable (un-pinned) behaviour of existing sets (#62); base/canon commits (ADR-0046); read-side
   hierarchy scrubbing (deferred).
-- **The Mutations pane and the lore card both surface pinned sets** — pending changes for a character —
-  while the pane keeps reusable templates. Placement removes a set from "pending."
+- **The lore card surfaces its pending pinned sets** via the set→subject reverse edge (§3), the same
+  reverse-index mechanism that already lists a node's chats; the Mutations pane keeps reusable
+  templates. Placement removes a set from "pending."
 - **Impersonate's `.md` changes** from a flat `entry(input.entry)` read to an as-of resolution; the
   built-in prompt and the `offer_on` machinery (ADR-0054) are otherwise unchanged.
 
@@ -257,14 +270,28 @@ Three mechanics that were open in the first draft, verified against `master@490d
   pinned set (§4), so deleting it on placement would strand that edge and erase the resume history ("we
   staged this; it's real at Chapter 30"). A placed pinned set therefore gains a `placed` state (drops
   from *pending*, stays as provenance); a reusable set is untouched, as today.
+- **A stale target-type or field is silent staleness — and pinned sets inherit exactly that; only the
+  subject pin does better.** This lifecycle edge is not new — it already applies to every set. For any
+  set today, deleting its `target_entry_type` or a row's `field` cascades nothing: a set's target/rows
+  live in top-level front-matter (not `metadata`), so schema-delete propagation, reference purge (#345),
+  and `validate_project` — all of which touch only `metadata` `entity_ref` fields — structurally never
+  see them. The only effects are deferred: a stale-target set silently drops from the `/mutate` picker
+  (a harmless orphan), and a stale-field row is carried verbatim into the marker on apply, then draws an
+  advisory *scene* warning (`_validate_scene_mutations`), never a set warning. A pinned set inherits this
+  unchanged for its `target_entry_type` and rows. Its **subject** pin is the one exception that behaves
+  *better*: as a `metadata` `entity_ref` (§3), deleting the subject *purges* the pin like any other
+  reference rather than leaving it silently dangling.
 
 ## Still open (to settle before slicing)
 
-- **Default anchor for a card-launched conversation** with no current scene: end-of-book (current self)
-  is proposed; confirm, and confirm the override affordance's home on the Conversations surface.
-- **Lifecycle edges:** whether a placed set records the *scene* it was placed into (a nice-to-have for
-  "placed at ‹scene›"), and what happens to a *pending* pinned set whose subject or a target field is
-  later deleted — drop the affected row, or surface a warning.
+- **Nice-to-haves, deferred:** whether a placed set records the *scene* it was placed into (for a
+  "placed at ‹scene›" tell), and whether a stale-*field* row in a pending pinned set is actively
+  surfaced on the card rather than only warned at apply — both are refinements over the existing
+  silent-staleness behaviour, not blockers.
+- **A legible change-point list on the card** (a named "became a werewolf / lost an arm" list, plus the
+  reusable sets applicable to this type) as an *alternative* to the positional slider for both anchoring
+  and applying — a new card surface, deferred and evaluated on its own; the slider (§1) covers the
+  anchor for v1.
 
 ## Suggested slicing (indicative, not decided here)
 

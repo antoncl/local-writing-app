@@ -14,13 +14,15 @@
     refreshMutationSetEntries,
     setMutationSetEntries,
     mutationSetEntriesStore,
+    mutationSetEditorStore,
+    openEditMutationSet,
+    closeMutationSetEditor,
   } from "@/lib/stores/mutationSets";
   import type {
     LoreEntrySummary,
     PromptEntrySummary,
     ScopedTag,
     StructureDocument,
-    MutationSetEntry,
     MutationSetEntrySummary,
   } from "@/lib/types";
 
@@ -41,26 +43,20 @@
   const schema = $derived($metadataSchemaStore);
 
   const entries = $derived($mutationSetEntriesStore);
-  let editorOpen = $state(false);
-  let editing = $state<MutationSetEntry | null>(null);
   let error = $state("");
 
   function typeLabel(id: string): string {
     return schema?.entry_types[id]?.name || id || "any type";
   }
 
-  // Called from App's pane handle bar ("+ New set") via bind:this.
-  export function openNew() {
-    editing = null;
-    editorOpen = true;
-  }
+  // The "+ New set" trigger lives in the pane handle bar (App's mutationsActions)
+  // and drives the dialog through `mutationSetEditorStore` — a cross-tree store,
+  // not a bind:this ref, which does not survive the handle→RegionBody boundary.
   async function openEdit(id: string) {
     error = "";
     try {
-      editing = await api.getMutationSetEntry(id);
-      editorOpen = true;
+      openEditMutationSet(await api.getMutationSetEntry(id));
     } catch (err) {
-      editing = null;
       error = `Could not open the set: ${err instanceof Error ? err.message : err}`;
     }
   }
@@ -74,7 +70,7 @@
     }
   }
   async function onSaved() {
-    editorOpen = false;
+    closeMutationSetEditor();
     await refreshMutationSetEntries().catch(() => {});
   }
 </script>
@@ -95,9 +91,9 @@
   </ViewNodeList>
 </div>
 
-{#if editorOpen}
+{#if $mutationSetEditorStore}
   <MutationSetEditor
-    initial={editing}
+    initial={$mutationSetEditorStore.editing}
     schema={schema}
     loreEntries={loreEntries}
     promptEntries={promptEntries}
@@ -105,7 +101,7 @@
     researchStructure={researchStructure}
     knownTags={knownTags}
     onSaved={onSaved}
-    onCancel={() => (editorOpen = false)}
+    onCancel={closeMutationSetEditor}
   />
 {/if}
 

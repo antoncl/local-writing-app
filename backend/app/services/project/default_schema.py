@@ -425,42 +425,6 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 },
             },
         },
-        "prompt:revise:plot_card": {
-            # The plot-card brainstorm (ADR-0048 S8b): an ideation chat that, on a
-            # commit turn, returns a JSON patch for the card — the SAME loop
-            # as `revise:entry`, on a `plot:card` instead of a lore entry (the loop
-            # is entry_type-keyed, not lore-shaped; ADR-0048 §5). It differs from
-            # `revise:entry` in two ways: it is REVISE-ONLY (a card is created on the
-            # board first, so there is no create-from-scratch mode — the `entry`
-            # input is required), and its body drops in the spoiler-gated
-            # `plot_context(as_of=e.id)` block so the model reasons over the whole
-            # board (arcs' beat rosters + the other cards' synopses) while patching
-            # this one card. `output.kind = chat_panel` + a `commit` routes it through
-            # the chat + patch-review commit, validated server-side before review.
-            "name": "Revise plot card",
-            "kind": "prompt",
-            "parent": "prompt:revise",
-            "fields": [],
-            "has_body": True,
-            "default_inputs": [
-                {
-                    "name": "entry",
-                    "type": "context_pick",
-                    "label": "Card",
-                    "required": True,
-                    "target": {
-                        "sources": [{"kind": "plot", "expr": {"type": "plot:card"}}],
-                        "multiple": False,
-                        "presets": [],
-                    },
-                },
-            ],
-            "prompt": {
-                "context_strategy": {
-                    "output": {"kind": "chat_panel", "commit": {"review": "visual_diff"}},
-                },
-            },
-        },
         "prompt:revise:scene_summary": {
             # The scene-summary brainstorm (ADR-0051 S5-next): an ideation chat
             # that, on a commit turn, returns a JSON patch proposing the
@@ -480,8 +444,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             #     per-run adopt. `review` is the long-declared review axis; this is
             #     its first non-`visual_diff` value (ADR-0051 S5-next).
             # REVISE-ONLY (a scene exists before it is summarized — no create mode);
-            # the `entry` input is required and targets a scene, exactly as
-            # `revise:plot_card` targets a `plot:card`.
+            # the `entry` input is required and targets a scene.
             "name": "Summarize scene",
             "kind": "prompt",
             "parent": "prompt:revise",

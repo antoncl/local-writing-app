@@ -1,7 +1,7 @@
 ---
 id: builtin-revise-plot-card
 title: Revise plot card
-entry_type: prompt:revise:plot_card
+entry_type: prompt:revise:entry
 offer_on:
 - plot:card
 inputs:

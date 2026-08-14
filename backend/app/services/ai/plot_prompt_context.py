@@ -36,6 +36,16 @@ def _plot_context_header(packet: PlotContext) -> str:
     return header + ">"
 
 
+def _list_block(tag: str, item_tag: str, items: list[str]) -> list[str]:
+    """A `<tag>` wrapping one escaped `<item_tag>` per item — the shape a plotline's
+    diagnostic questions and its weak spots both take."""
+    return [
+        f"      <{tag}>",
+        *(f"        <{item_tag}>{escape(x)}</{item_tag}>" for x in items),
+        f"      </{tag}>",
+    ]
+
+
 def _render_plotline(plotline) -> list[str]:
     """One `<plotline>` element: its structural guidance then its beat roster
     (ADR-0053 §1). `<use_guidance>` (how to use the structure as a diagnostic lens),
@@ -52,13 +62,9 @@ def _render_plotline(plotline) -> list[str]:
     if plotline.ai_guidance.strip():
         body.append(f"      <use_guidance>{escape(plotline.ai_guidance.strip())}</use_guidance>")
     if plotline.diagnostic_questions:
-        body.append("      <diagnostic_questions>")
-        body.extend(f"        <question>{escape(q)}</question>" for q in plotline.diagnostic_questions)
-        body.append("      </diagnostic_questions>")
+        body.extend(_list_block("diagnostic_questions", "question", plotline.diagnostic_questions))
     if plotline.weak_spots:
-        body.append("      <weak_spots>")
-        body.extend(f"        <spot>{escape(w)}</spot>" for w in plotline.weak_spots)
-        body.append("      </weak_spots>")
+        body.extend(_list_block("weak_spots", "spot", plotline.weak_spots))
     for beat in plotline.beats:
         battrs = f"title={quoteattr(beat.title)}"
         if beat.function:

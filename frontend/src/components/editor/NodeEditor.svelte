@@ -162,6 +162,19 @@
   let chatBodyView: ChatBodyView | null = $state(null);
   let viewBodyView: ViewBodyView | null = $state(null);
   let loadedSceneId: string | null = $state(null);
+  // A memoized PRIMITIVE id. Reading the object prop `scene` inside an effect
+  // subscribes that effect to the `scene` prop signal, which Svelte re-fires on
+  // every parent re-render — and the pane re-renders on every keystroke (the draft
+  // update reassigns the panes array, re-setting this object prop; an object is
+  // never `safe_not_equal`-equal, so the signal fires even when the reference is
+  // unchanged). Depending on this derived STRING instead gates the id-keyed fetch
+  // effects (the lore mutations timeline and the backlinks/reference-resolve) so
+  // they re-run only when the id actually changes, not on content edits (#969). Cf.
+  // the body-hydration guard below, which sidesteps the same churn with
+  // `scene.id !== loadedSceneId`. (The scenes-only snapshot-strip effect reads the
+  // object prop too, but its `load()` also resets the parked notch and the strip
+  // self-refreshes on its own mutations, so it is left to a separate follow-up.)
+  const sceneId = $derived(scene?.id ?? null);
   let rawBody = $state("");
   let lastEmittedRawBody = $state("");
   let title = $state("");
@@ -187,7 +200,7 @@
   let scrubbed = $derived(documentKind === "lore" && scrub.index > 0);
 
   $effect(() => {
-    const id = documentKind === "lore" ? (scene?.id ?? null) : null;
+    const id = documentKind === "lore" ? sceneId : null;
     void mutationsVersion.value;
     return scrub.load(id);
   });
@@ -751,7 +764,7 @@
   // (a referrer was saved/deleted) — reading the index also closes the open-during
   // -initial-load race the old one-shot fetch had.
   $effect.pre(() => {
-    const anchorId = scene?.id ?? null;
+    const anchorId = sceneId;
     const referenceIndex = $referenceIndexStore;
     if (anchorId) {
       void refreshBacklinks(anchorId, referenceIndex);

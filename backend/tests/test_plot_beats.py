@@ -43,6 +43,9 @@ class PlotTemplateLibraryTests(PlotTestCase):
         self.assertTrue(all(e["is_library"] for e in entries))
         self.assertTrue(all(e["editable"] is False for e in entries))
         self.assertIn(_THREE_ACT, [e["id"] for e in entries])
+        # The summary carries the beat-roster size the palette shows as "7 beats".
+        three_act = next(e for e in entries if e["id"] == _THREE_ACT)
+        self.assertEqual(three_act["beat_count"], 7)
 
     def test_read_round_trips_the_spec_and_guide(self) -> None:
         got = self.client.get(f"/api/plot/templates/{_THREE_ACT}")

@@ -43,6 +43,17 @@
     onDelete: (id: string) => void;
   } = $props();
 
+  // The muted sub-line under a template's title: its beat-roster size, prefixed
+  // with "Your template" only when this project genuinely OWNS it (`editable`, the
+  // fail-closed owned-here verdict — #689). A Library template or one inherited from
+  // an ancestor project is not "yours"; its provenance is carried by the glyph + the
+  // layer pill instead. Mirrors the mockup's `.tmpl .b`.
+  function templateDetail(entry: PlotTemplateSummary): string {
+    const n = entry.beat_count ?? 0;
+    const beats = `${n} ${n === 1 ? "beat" : "beats"}`;
+    return entry.editable ? `Your template · ${beats}` : beats;
+  }
+
   let schema = $derived($metadataSchemaStore);
   let hiddenSet = $derived($hiddenLibraryStore);
   let hiddenCount = $derived(entries.filter((e) => hiddenSet.has(e.id)).length);
@@ -102,6 +113,7 @@
 {#snippet templateRow(entry: PlotTemplateSummary, ctx: RowCtx<PlotTemplateSummary>)}
   <NodeRow
     title={entry.title}
+    detail={templateDetail(entry)}
     layerLabel={inheritedLayerLabel(entry, $projectLayerIdStore)}
     depth={ctx.depth}
     active={ctx.active}
@@ -109,6 +121,12 @@
     onClick={ctx.onClick}
     onmousedown={(event) => event.stopPropagation()}
   >
+    {#snippet leading()}
+      <!-- Kind glyph (mockup `.tmpl.builtin`/`.tmpl.owned` ::before): an amber ✎
+           marks a template this project owns (`editable`), a muted ◆ a shipped
+           Library or ancestor-inherited one. -->
+      <span class="tmpl-glyph" class:owned={entry.editable} aria-hidden="true">{entry.editable ? "✎" : "◆"}</span>
+    {/snippet}
     {#snippet trailing()}
       {#if entry.is_library}
         <!-- Library (shipped, read-only): clone to own, or hide from this shelf. -->
@@ -229,6 +247,20 @@
   .empty-sub {
     font-size: var(--fs-xs);
     color: var(--text-3);
+  }
+  /* Kind glyph in the row's leading slot. Built-in ◆ is muted (shipped, quiet);
+     owned ✎ carries the warm --star (the app's amber) to mark hand-authored work,
+     matching the mockup. Fixed box keeps the two titles left-aligned. */
+  .tmpl-glyph {
+    flex: none;
+    width: 12px;
+    text-align: center;
+    font-size: var(--fs-xs);
+    line-height: 1;
+    color: var(--text-3);
+  }
+  .tmpl-glyph.owned {
+    color: var(--star);
   }
   .palette-list {
     min-height: 0;

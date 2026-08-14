@@ -79,6 +79,10 @@ class PlotTemplateSummary(BaseModel):
     body: str = ""
     entry_type: str = "plot:template"
     template: PlotTemplateSpec = Field(default_factory=PlotTemplateSpec)
+    # The size of the template's beat roster — what the palette shows as "7 beats"
+    # so the writer can size a structure before instantiating it. The roster itself
+    # (the `beats` metadata list) is not carried on the summary; only its count is.
+    beat_count: int = 0
     source_layer_id: str = ""
     source_layer_label: str = ""
     is_library: bool = False

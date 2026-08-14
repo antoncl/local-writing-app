@@ -7,6 +7,8 @@ import { describe, expect, it } from "vitest";
 import {
   boardIsEmpty,
   buildBoardNodes,
+  containerDescendantIds,
+  containerMemberCardIds,
   movableNodePositions,
   containerExtent,
   overriddenNodePositions,
@@ -220,12 +222,16 @@ describe("buildBoardNodes", () => {
     expect(cardNodes(nodes)[0]).toMatchObject({ width: CARD_WIDTH, height: CARD_HEIGHT });
   });
 
-  it("makes cards draggable (S7c layout editing) and keeps container boxes fixed", () => {
+  it("makes cards draggable, and containers draggable only by their header handle (#877)", () => {
     const nodes = buildBoardNodes(
       projection({ containers: [container("chap", "Chapter 1")], cards: [card("c1", { container: "chap" })] }),
     );
     expect(cardNodes(nodes)[0].draggable).toBe(true);
-    expect(containerNodes(nodes)[0].draggable).toBe(false);
+    // The box is draggable now, but grabbable ONLY via its header (dragHandle) so its
+    // transparent interior still passes card drags + edges through (#877/#833).
+    const box = containerNodes(nodes)[0];
+    expect(box.draggable).toBe(true);
+    expect(box.dragHandle).toBe(".plot-container-drag-handle");
   });
 
   it("applies a saved override and lets the soft box follow the moved card", () => {
@@ -392,6 +398,69 @@ describe("readBoardSizes (#878)", () => {
         sizes: { nan: { w: NaN, h: 10 }, zero: { w: 0, h: 10 }, neg: { w: -5, h: 10 }, ok: { w: 12, h: 34 } },
       } as unknown as Record<string, unknown>),
     ).toEqual({ ok: { w: 12, h: 34 } });
+  });
+});
+
+describe("containerMemberCardIds (#877 — a container drag translates these)", () => {
+  const nested = () =>
+    projection({
+      containers: [
+        container("act1", "Act I"),
+        container("chap1", "Chapter 1", "act1"),
+        container("chap2", "Chapter 2", "act1"),
+        container("act2", "Act II"),
+      ],
+      cards: [
+        card("inChap1", { container: "chap1" }),
+        card("inChap2", { container: "chap2" }),
+        card("inAct1", { container: "act1" }), // a card directly in the act, not a chapter
+        card("inAct2", { container: "act2" }),
+        card("loose", { container: null }),
+      ],
+    });
+
+  it("returns every card TRANSITIVELY inside an act (its chapters' cards + its direct cards)", () => {
+    expect(new Set(containerMemberCardIds(nested(), "act1"))).toEqual(new Set(["inChap1", "inChap2", "inAct1"]));
+  });
+
+  it("returns only a chapter's own cards, not its siblings' or the act's direct card", () => {
+    expect(containerMemberCardIds(nested(), "chap1")).toEqual(["inChap1"]);
+  });
+
+  it("excludes homeless cards and cards of other acts", () => {
+    const members = containerMemberCardIds(nested(), "act1");
+    expect(members).not.toContain("loose");
+    expect(members).not.toContain("inAct2");
+  });
+
+  it("returns none for an unknown container id (defensive)", () => {
+    expect(containerMemberCardIds(nested(), "ghost")).toEqual([]);
+  });
+
+  it("skips a card pointing at an unknown container", () => {
+    const proj = projection({ containers: [container("act1", "Act I")], cards: [card("c1", { container: "gone" })] });
+    expect(containerMemberCardIds(proj, "act1")).toEqual([]);
+  });
+});
+
+describe("containerDescendantIds (#877 — a container drag moves these boxes live)", () => {
+  const tree = () =>
+    projection({
+      containers: [
+        container("act1", "Act I"),
+        container("chap1", "Chapter 1", "act1"),
+        container("chap2", "Chapter 2", "act1"),
+        container("act2", "Act II"),
+      ],
+    });
+
+  it("returns an act's chapter boxes (strict descendants, excluding the act itself)", () => {
+    expect(new Set(containerDescendantIds(tree(), "act1"))).toEqual(new Set(["chap1", "chap2"]));
+  });
+
+  it("returns none for a leaf chapter or another act", () => {
+    expect(containerDescendantIds(tree(), "chap1")).toEqual([]);
+    expect(containerDescendantIds(tree(), "act2")).toEqual([]);
   });
 });
 

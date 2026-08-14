@@ -3,12 +3,13 @@
 // re-exported from there so `@/lib/types` stays the single import barrel. Mirrors
 // the backend `PlotBoardProjection` (models/entries.py) field-for-field.
 
-// A beat on a plotline node (ADR-0053 §3): its stable id (the card→beat link target)
-// and title, in stored order. The plotline node renders these as its roster; richer
-// per-beat fields + the use-count arrive with on-node editing (S2b) and focus (S5).
+// A beat on a plotline node (ADR-0053 §3): its stable id (the card→beat link target),
+// title, and `use_count` — how many story cards fulfil it (ADR-0053 §6 / S5a; a 0 is a
+// gap the structure exposes). The plotline node renders these as its roster with the count.
 export type PlotBoardPlotlineBeat = {
   beat_id: string;
   title: string;
+  use_count: number;
 };
 
 // A plotline as the board sees it (ADR-0053 §1): a thread that IS a plot-template

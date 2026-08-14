@@ -381,7 +381,7 @@ export function projectionDataKey(p: PlotBoardProjection): string {
       c.beats.map((b) => [b.plotline_id, b.beat_id, b.title, b.plotline_color]),
       c.causal_links,
     ]),
-    p.plotlines.map((l) => [l.id, l.title, l.color, l.beats.map((b) => [b.beat_id, b.title])]),
+    p.plotlines.map((l) => [l.id, l.title, l.color, l.beats.map((b) => [b.beat_id, b.title, b.use_count])]),
     p.containers.map((c) => [c.id, c.title, c.parent]),
   ]);
 }

@@ -32,7 +32,8 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from collections.abc import Iterator
+from collections import Counter
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -874,12 +875,22 @@ class PlotMixin:
         """
         board = self.read_plot_board()
         plotline_entries = self.list_plotlines().entries
+        card_entries = self.list_cards().entries
+        # One pass over every card's beat links yields two things with no extra I/O:
+        # the per-(plotline, beat) USE-COUNT a plotline node shows (0 = a gap the
+        # structure exposes; ADR-0053 §6 / S5a), and the set of plotlines some card
+        # links. A plotline lands in `use_counts` iff a card links a beat of it, so its
+        # keys ARE the referenced set the badge catalog resolves from.
+        use_counts: dict[str, Counter[str]] = {}
+        for card in card_entries:
+            for plotline_id, beat_id in self._iter_valid_beat_link_pairs(card.metadata.get(_BEAT_LINK_FIELD)):
+                use_counts.setdefault(plotline_id, Counter())[beat_id] += 1
         plotlines = [
             PlotBoardPlotline(
                 id=line.id,
                 title=line.title,
                 color=line.metadata.get("color") or None,
-                beats=self._plotline_board_beats(line.metadata),
+                beats=self._plotline_board_beats(line.metadata, use_counts.get(line.id)),
             )
             for line in plotline_entries
         ]
@@ -888,14 +899,8 @@ class PlotMixin:
         # (Slice 5b; ADR-0053): the stored links carry only ids, so this catalog turns
         # each into a titled badge with a map lookup instead of a read per link. Built
         # from the plotlines already listed above — no second front-matter read — and
-        # limited to the plotlines some card actually links.
-        card_entries = self.list_cards().entries
-        referenced_plotlines = {
-            plotline_id
-            for card in card_entries
-            for plotline_id, _beat_id in self._iter_valid_beat_link_pairs(card.metadata.get(_BEAT_LINK_FIELD))
-        }
-        beat_catalog = self._plotline_beat_catalog(plotline_entries, referenced_plotlines)
+        # limited to the plotlines some card links (the use_counts keys).
+        beat_catalog = self._plotline_beat_catalog(plotline_entries, set(use_counts))
         # The live card ids, so authored causal links resolve to real edge endpoints
         # (Slice 6b) — the display side of `_heal_causal_links`, symmetric with the
         # beat catalog above.
@@ -1011,11 +1016,20 @@ class PlotMixin:
             if isinstance(beat, dict) and isinstance(beat.get("id"), str) and beat["id"]:
                 yield beat
 
-    def _plotline_board_beats(self, metadata: dict[str, Any]) -> list[PlotBoardPlotlineBeat]:
+    def _plotline_board_beats(
+        self, metadata: dict[str, Any], use_counts: Mapping[str, int] | None = None
+    ) -> list[PlotBoardPlotlineBeat]:
         """A plotline's beat roster as the board node renders it (ADR-0053 §3): each
-        beat's stable id + title, in stored order."""
+        beat's stable id + title, in stored order, with its `use_count` (how many cards
+        fulfil it; ADR-0053 §6 / S5a). `use_counts` maps this plotline's beat ids to
+        their counts — a beat absent from it (nothing links it) is a 0."""
+        counts = use_counts or {}
         return [
-            PlotBoardPlotlineBeat(beat_id=beat["id"], title=str(beat.get("title") or ""))
+            PlotBoardPlotlineBeat(
+                beat_id=beat["id"],
+                title=str(beat.get("title") or ""),
+                use_count=counts.get(beat["id"], 0),
+            )
             for beat in self._iter_roster_beats(metadata)
         ]
 

@@ -38,8 +38,13 @@ const line = (
   id: string,
   title: string,
   color: string | null = null,
-  beats: { beat_id: string; title: string }[] = [],
-) => ({ id, title, color, beats });
+  beats: { beat_id: string; title: string; use_count?: number }[] = [],
+): PlotBoardProjection["plotlines"][number] => ({
+  id,
+  title,
+  color,
+  beats: beats.map((b) => ({ use_count: 0, ...b })),
+});
 const container = (id: string, title: string, parent: string | null = null) => ({ id, title, parent });
 const card = (
   id: string,
@@ -460,7 +465,11 @@ describe("plotline nodes (ADR-0053 §3)", () => {
     const lines = plotlineNodes(nodes);
     expect(lines.map((n) => n.id)).toEqual(["p1", "p2"]);
     expect(lines[0].draggable).toBe(true);
-    expect(lines[0].data).toEqual({ title: "Main", color: "blue", beats: [{ beat_id: "b1", title: "Setup" }] });
+    expect(lines[0].data).toEqual({
+      title: "Main",
+      color: "blue",
+      beats: [{ beat_id: "b1", title: "Setup", use_count: 0 }],
+    });
     expect(lines[1].data).toEqual({ title: "Romance", color: "rose", beats: [] });
   });
 
@@ -501,5 +510,11 @@ describe("plotline nodes (ADR-0053 §3)", () => {
     const withBeat = projection({ plotlines: [line("p1", "Main", "blue", [{ beat_id: "b1", title: "Setup" }])] });
     const renamedBeat = projection({ plotlines: [line("p1", "Main", "blue", [{ beat_id: "b1", title: "Opening" }])] });
     expect(projectionDataKey(withBeat)).not.toBe(projectionDataKey(renamedBeat));
+  });
+
+  it("changes the data-key when a beat's use-count changes (→ the node re-renders the count; S5a)", () => {
+    const zero = projection({ plotlines: [line("p1", "Main", "blue", [{ beat_id: "b1", title: "Setup", use_count: 0 }])] });
+    const one = projection({ plotlines: [line("p1", "Main", "blue", [{ beat_id: "b1", title: "Setup", use_count: 1 }])] });
+    expect(projectionDataKey(zero)).not.toBe(projectionDataKey(one));
   });
 });

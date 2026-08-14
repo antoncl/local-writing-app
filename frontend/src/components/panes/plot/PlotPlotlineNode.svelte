@@ -368,6 +368,13 @@
         >
           <span class="beat-dot" class:hollow={!accent}></span>
           <span class="beat-title" title={beat.title}>{beat.title}</span>
+          <!-- Use-count (ADR-0053 §6 / S5a): how many cards fulfil this beat. A 0 reads
+               as a gap the structure exposes. -->
+          <span
+            class="beat-use"
+            class:gap={beat.use_count === 0}
+            title={beat.use_count === 1 ? "1 card fulfils this beat" : `${beat.use_count} cards fulfil this beat`}
+          >{beat.use_count}</span>
         </li>
       {/each}
     </ul>
@@ -490,6 +497,22 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  /* Per-beat use-count (S5a): a quiet number at the row's end. A 0 is a gap, flagged
+     with a hollow outline (echoing the hollow beat-dot) rather than a loud colour. */
+  .beat-use {
+    flex: none;
+    min-width: 1.4em;
+    padding: 0 4px;
+    text-align: center;
+    font-size: var(--fs-xs);
+    font-variant-numeric: tabular-nums;
+    color: var(--text-3);
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+  }
+  .beat-use.gap {
+    border-color: var(--border-strong);
   }
   .plotline-empty {
     margin: 0;

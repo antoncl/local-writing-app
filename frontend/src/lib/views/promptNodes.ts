@@ -58,9 +58,9 @@ export type PromptGroupNode = PromptEntrySummary & EvalNode & { metadata: EntryM
 
 // The Prompts pane's view universe: each roster summary with its disposition label
 // stamped in `metadata`, clustered by disposition rank. The sort is stable, so a
-// shelf keeps the caller's intra-shelf order (the roster arrives title-sorted); it
-// only guarantees shelves appear in rank order, which the default view's first-seen
-// grouping then renders.
+// shelf keeps the caller's intra-shelf order (the roster arrives title-sorted today);
+// it only guarantees shelves appear in rank order, which the default view's
+// first-seen grouping then renders.
 export function promptSummariesToGroupNodes(
   entries: PromptEntrySummary[],
   schema: MetadataSchema | null,

@@ -36,6 +36,7 @@
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { evaluateView, nestWarnings, type EvalNode, type EvalBindings } from "@/lib/views/evaluateView";
   import { chatSummariesToEvalNodes } from "@/lib/views/chatNodes";
+  import { promptSummariesToGroupNodes } from "@/lib/views/promptNodes";
   import { chatSessionsStore } from "@/lib/stores/chats";
   import { buildBindings, resolveParamControls } from "@/lib/views/viewParams";
   import ParamStrip from "./view/ParamStrip.svelte";
@@ -315,11 +316,15 @@
   // the same lift the Chats pane uses — so designing a chat view previews the
   // real chats instead of "No chat nodes to preview" (ADR-0051 S6 follow-up).
   let chatUniverse = $derived<EvalNode[]>(chatSummariesToEvalNodes($chatSessionsStore, promptEntries, schema));
+  // The prompt roster lifted with its derived `disposition` (the same lift the
+  // Prompts pane uses) — the default prompt view groups on `disposition` (#951), so
+  // the preview must stamp it too or a designed prompt view previews ungrouped.
+  let promptUniverse = $derived<EvalNode[]>(promptSummariesToGroupNodes(promptEntries, schema));
   let universe = $derived<EvalNode[]>(universeFor(kind));
   function universeFor(k: string): EvalNode[] {
     if (k === "lore") return loreEntries;
     if (k === "assistant") return assistantEntries;
-    if (k === "prompt") return promptEntries;
+    if (k === "prompt") return promptUniverse;
     if (k === "scene") return structureToEvalNodes(structure);
     if (k === "chat") return chatUniverse;
     return [];

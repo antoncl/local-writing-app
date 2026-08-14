@@ -17,13 +17,20 @@ inputs:
     multiple: false
     presets: []
 # As-of read anchor (ADR-0055 §1): the scene the conversation reads its subject
-# as-of. Launch-set from the lore card's time-travel slider, so it is `hidden`
-# (no widget) — empty resolves the character at book-start, exactly as before.
+# as-of. Seeded from the lore card's time-travel slider at launch, but shown (not
+# hidden) so the writer sees which version they're talking to and can change it,
+# and so a derived prompt can preview the effect. Empty = book-start, as before.
 - name: as_of
-  type: text
-  label: As of scene
+  type: context_pick
+  label: Read as of scene
   required: false
-  hidden: true
+  target:
+    sources:
+    - kind: scene
+      expr:
+        type: scene:scene
+    multiple: false
+    presets: []
 ---
 
 {% set as_of = input.as_of if input.as_of is defined else "" %}

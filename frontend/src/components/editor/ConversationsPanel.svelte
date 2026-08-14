@@ -60,7 +60,7 @@
     // resolved ⇒ no brainstorm prompts shown.
     subjectEntryType?: string;
     // The scene the subject's time-travel slider is currently at (ADR-0055 §1).
-    // Launch seeds it onto the prompt's hidden `as_of` input so a subject-anchored
+    // Launch seeds it onto the prompt's `as_of` scene input so a subject-anchored
     // conversation (impersonate) reads its subject as-of here. "" = book-start.
     asOfScene?: string;
     promptEntries: PromptEntrySummary[];
@@ -112,7 +112,7 @@
     if (!prompt || !subjectId) return;
     // This node IS the subject (ADR-0051 S2): stamp it so the new chat surfaces
     // here and is named after this node. Seed the read anchor onto the prompt's
-    // hidden `as_of` input (ADR-0055 §1) so impersonate reads the subject as-of
+    // `as_of` scene input (ADR-0055 §1) so impersonate reads the subject as-of
     // the slider's scene; omitted when at book-start (a prompt without an `as_of`
     // input simply ignores the extra seed, exactly as with `entry`).
     const seededInputs: Record<string, string> = { entry: subjectId };

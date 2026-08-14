@@ -361,6 +361,10 @@ def _coerce_entry_ref_as_of(
     any metadata field) is overlaid with its effective value at end-of-`scene`;
     unmutated fields keep their base value.
 
+    `scene` accepts any form a `context_pick` / entity input carries — a bare
+    scene id (the launch seed), the picker's JSON list (the writer's choice), a
+    dict/EntryRef — resolved through `_coerce_entry_ref` like `entry()`'s own arg.
+
     Degrades to a plain base read (exactly `entry()`) when there is no anchor —
     no/empty scene, a scene outside the manuscript, a non-lore or unmutated
     entry — so a subject-anchored prompt with no anchor set behaves as before.
@@ -372,9 +376,10 @@ def _coerce_entry_ref_as_of(
     ref = _coerce_entry_ref(project, schema, value)
     if ref is None:
         return None
-    scene_id = _scene_id_of(scene)
-    if not scene_id:
+    scene_ref = _coerce_entry_ref(project, schema, scene)
+    if scene_ref is None:
         return ref
+    scene_id = scene_ref.id
     base = _safe_read_lore(project, ref.id)
     if base is None:
         return ref

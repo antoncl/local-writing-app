@@ -389,6 +389,19 @@ class EntryAsOfHelperTests(_HelperFixtureBase):
             "Honor Harrington|Captain of the Fearless. Treecat-adopted.",
         )
 
+    def test_resolves_a_context_pick_scene_value(self) -> None:
+        # The anchor input is a scene `context_pick`; when the writer picks in the
+        # widget the value is a JSON ref list, not a bare id. It must resolve the
+        # same as the bare-id launch seed (ADR-0055 §1).
+        import json
+
+        self._mutate_honor_in_scene_two()
+        picked = json.dumps([{"id": self.scene_two_node.scene_id, "kind": "scene"}])
+        self.assertEqual(
+            self._render_as_of(picked),
+            "Admiral Harrington|Admiral of the Fleet. Battle-hardened.",
+        )
+
     def test_overlays_mutated_metadata_fields_not_just_title_body(self) -> None:
         # Collection (aliases, multi_select) and scalar entity_ref (home_place)
         # mutations must ride the metadata overlay, not only intrinsic title/body.
@@ -418,7 +431,7 @@ class EntryAsOfHelperTests(_HelperFixtureBase):
 
 
 class ImpersonateAsOfPreviewTests(_HelperFixtureBase):
-    """The anchor rides the prompt's hidden `as_of` input (launch-seeded,
+    """The anchor rides the prompt's `as_of` scene input (slider-seeded at launch,
     persisted with the chat's inputs) → `input.as_of` → `entry_as_of`, so an
     impersonate render reads its subject as-of the anchor scene (ADR-0055 §1).
     Mirrors impersonate.md's two key lines; the render takes no as-of param."""

@@ -2467,10 +2467,12 @@ class MetadataValidationTests(unittest.TestCase):
 
         self.assertIsNone(schema.entry_types["prompt:snippet"].prompt)
 
-        # `roleplay` (#954, Lever 2) is a continuation that DECLARES its accept-time
+    def test_roleplay_declares_its_character_stamp_as_an_on_accept_capability(self) -> None:
+        # #957 (Lever 2): roleplay is a continuation that DECLARES its accept-time
         # character-stamp as a capability (`output.on_accept`), not an
         # `entry_type == roleplay` code branch. It redeclares its full context
         # strategy (the parent-merge is shallow), so it stays append_to_body.
+        schema = self.service.read_metadata_schema()
         roleplay = schema.entry_types["prompt:roleplay"]
         self.assertFalse(roleplay.abstract)
         self.assertEqual(roleplay.parent, "prompt:continuation")

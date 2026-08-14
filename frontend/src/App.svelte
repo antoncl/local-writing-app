@@ -13,6 +13,7 @@
   import PlotTemplates from "@/components/panes/PlotTemplates.svelte";
   import PlotBoardPane from "@/components/panes/PlotBoardPane.svelte";
   import Mutations from "@/components/panes/Mutations.svelte";
+  import { openNewMutationSet } from "@/lib/stores/mutationSets";
   import Chats from "@/components/panes/Chats.svelte";
   import Search from "@/components/panes/Search.svelte";
   import Todo from "@/components/panes/Todo.svelte";
@@ -156,8 +157,6 @@
   // all persistence handlers) lives in SchemaPanes.svelte (#14 P0). App holds
   // only the instance ref so it can drive the three entry points.
   let schemaPanes: SchemaPanes | undefined = $state();
-  // Instance ref so the pane handle bar's "+ New set" can open the editor.
-  let mutationsPane: Mutations | undefined = $state();
   let error = $state("");
   let status = "No project open";
   // The editor-pane MDI surface (open panes, drafts, autosave lifecycle, the
@@ -928,12 +927,11 @@
   {/snippet}
 
   {#snippet mutationsActions()}
-    <button class="pin-button" type="button" title="New mutation set" aria-label="New mutation set" onmousedown={(event) => event.stopPropagation()} onclick={() => mutationsPane?.openNew()}>+</button>
+    <button class="pin-button" type="button" title="New mutation set" aria-label="New mutation set" onmousedown={(event) => event.stopPropagation()} onclick={() => openNewMutationSet()}>+</button>
   {/snippet}
   {#snippet mutationsBody()}
     <div class="pane-content schema-list">
       <Mutations
-        bind:this={mutationsPane}
         loreEntries={loreEntries}
         promptEntries={promptEntries}
         structure={structure}

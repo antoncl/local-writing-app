@@ -1,12 +1,13 @@
 ---
 id: builtin-plot-romance-relationship-arc
-title: Romance Relationship Arc
+title: Romancing the Beat
 entry_type: plot:template
 template:
   version: 1
   slug: romance-relationship-arc
-  display_name: Romance Relationship Arc
-  aliases: []
+  display_name: Romancing the Beat
+  aliases:
+  - Romance Relationship Arc
   family: relationship
   description: A generic relationship arc for attraction, vulnerability, rupture,
     repair, and emotionally satisfying closure.
@@ -70,7 +71,7 @@ metadata:
     id: satisfying_ending
 ---
 
-# Romance Relationship Arc
+# Romancing the Beat
 
 Use this template to track the emotional movement of a central relationship. It
 is not only a sequence of events between two people. Each beat should change the

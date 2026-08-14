@@ -1,12 +1,13 @@
 ---
 id: builtin-plot-three-act-story-arc
-title: Three-Act Story Arc
+title: Three-Act Structure
 entry_type: plot:template
 template:
   version: 1
   slug: three-act-story-arc
-  display_name: Three-Act Story Arc
-  aliases: []
+  display_name: Three-Act Structure
+  aliases:
+  - Three-Act Story Arc
   family: act
   description: A generic three-part structure template for broad story pressure, commitment,
     reversal, choice, and consequence.
@@ -71,7 +72,7 @@ metadata:
     id: resolution
 ---
 
-# Three-Act Story Arc
+# Three-Act Structure
 
 Use this template as a broad pressure map for a complete story. It is not a
 chapter plan. A single beat can be earned by several cards, and one strong card

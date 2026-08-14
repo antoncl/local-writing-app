@@ -1,12 +1,13 @@
 ---
 id: builtin-plot-negative-character-change-arc
-title: Negative Character Change Arc
+title: Negative Change Arc
 entry_type: plot:template
 template:
   version: 1
   slug: negative-character-change-arc
-  display_name: Negative Character Change Arc
-  aliases: []
+  display_name: Negative Change Arc
+  aliases:
+  - Negative Character Change Arc
   family: character_arc
   description: A generic arc for a character rejecting truth, deepening a lie, or
     choosing corruption.
@@ -60,7 +61,7 @@ metadata:
     id: collapse_or_coronation
 ---
 
-# Negative Character Change Arc
+# Negative Change Arc
 
 Use this template for tragedy, corruption, obsession, downfall, or any story
 where a character rejects truth and commits more deeply to a destructive belief.

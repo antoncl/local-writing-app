@@ -1,12 +1,13 @@
 ---
 id: builtin-plot-integration-journey
-title: Integration Journey
+title: The Heroine's Journey
 entry_type: plot:template
 template:
   version: 1
   slug: integration-journey
-  display_name: Integration Journey
-  aliases: []
+  display_name: The Heroine's Journey
+  aliases:
+  - Integration Journey
   family: journey
   description: A generic integration and connection journey template for identity
     pressure, failed coping, support, reconnection, and changed action.
@@ -67,7 +68,7 @@ metadata:
     id: integration
 ---
 
-# Integration Journey
+# The Heroine's Journey
 
 Use this template for a journey where the central movement is not conquest but a
 more workable relationship with self, support, belonging, and action. It is

@@ -62,7 +62,7 @@ class PlotTemplateLibraryTests(PlotTestCase):
         self.assertEqual(beats[0]["title"], "Setup pressure")
         self.assertIn("Establishes", beats[0]["function"])
         # The prose guide is the node body.
-        self.assertIn("# Three-Act Story Arc", body["body"])
+        self.assertIn("# Three-Act Structure", body["body"])
 
     def test_saving_an_inherited_template_is_refused(self) -> None:
         before = _BUILTIN_THREE_ACT.read_bytes()
@@ -75,7 +75,7 @@ class PlotTemplateLibraryTests(PlotTestCase):
         self.assertEqual(_BUILTIN_THREE_ACT.read_bytes(), before)
         self.assertNotIn(b"Hijacked", before)
         # And a re-read still shows the original.
-        self.assertEqual(self.client.get(f"/api/plot/templates/{_THREE_ACT}").json()["title"], "Three-Act Story Arc")
+        self.assertEqual(self.client.get(f"/api/plot/templates/{_THREE_ACT}").json()["title"], "Three-Act Structure")
 
     def test_deleting_an_inherited_template_is_refused(self) -> None:
         refused = self.client.delete(f"/api/plot/templates/{_THREE_ACT}")
@@ -91,7 +91,7 @@ class PlotTemplateLibraryTests(PlotTestCase):
         self.assertNotEqual(clone["id"], _THREE_ACT)
         self.assertTrue(clone["editable"])
         self.assertFalse(clone["is_library"])
-        self.assertEqual(clone["title"], "Three-Act Story Arc")
+        self.assertEqual(clone["title"], "Three-Act Structure")
         # The whole entry came across (not just title/body) — beats included.
         self.assertEqual(len(clone["metadata"]["beats"]), 7)
         # The owned clone is a plot/ family node — indexed like a plotline.
@@ -233,7 +233,7 @@ class PlotlineInstantiationTests(PlotTestCase):
         # A book-local editable plotline, titled after the template.
         self.assertTrue(plotline["id"].startswith("plot_"))
         self.assertEqual(plotline["entry_type"], "plot:plotline")
-        self.assertEqual(plotline["title"], "Three-Act Story Arc")
+        self.assertEqual(plotline["title"], "Three-Act Structure")
         # The 7 beats came across verbatim (title / function / stable id); the
         # per-beat `specifics` is left for the writer, so it is not snapshotted.
         beats = plotline["metadata"]["instance_beats"]
@@ -244,7 +244,7 @@ class PlotlineInstantiationTests(PlotTestCase):
         self.assertNotIn("specifics", beats[0])
         # Lineage snapshot — "which of the 14 structures is this?"
         self.assertEqual(plotline["metadata"]["source_template_id"], _THREE_ACT)
-        self.assertEqual(plotline["metadata"]["source_template_name"], "Three-Act Story Arc")
+        self.assertEqual(plotline["metadata"]["source_template_name"], "Three-Act Structure")
 
     def test_instantiate_copies_every_snapshot_member_faithfully(self) -> None:
         # Full fidelity across ALL snapshot keys for every beat, compared against
@@ -296,7 +296,7 @@ class PlotlineInstantiationTests(PlotTestCase):
         self.assertEqual(got[0]["specifics"], "The debt Mara hides from Jon.")
         self.assertEqual(got[0]["title"], "Setup pressure")  # generic context rode along
         # Lineage preserved across the save (the hidden fields round-trip in metadata).
-        self.assertEqual(reread["metadata"]["source_template_name"], "Three-Act Story Arc")
+        self.assertEqual(reread["metadata"]["source_template_name"], "Three-Act Structure")
 
     def test_ad_hoc_plotline_has_empty_beats_and_no_lineage(self) -> None:
         created = self.client.post("/api/plot/plotlines", json={"title": "My own plot"})
@@ -352,7 +352,7 @@ class PlotlineInstantiationTests(PlotTestCase):
         self.assertEqual(plotline["metadata"]["source_template_id"], clone["id"])
         self.assertEqual(self.client.delete(f"/api/plot/templates/{clone['id']}").status_code, 200)
         reread = self.client.get(f"/api/plot/plotlines/{plotline['id']}").json()
-        self.assertEqual(reread["metadata"]["source_template_name"], "Three-Act Story Arc")
+        self.assertEqual(reread["metadata"]["source_template_name"], "Three-Act Structure")
         self.assertEqual(len(reread["metadata"]["instance_beats"]), 7)
 
     def test_instantiate_from_an_inherited_library_template(self) -> None:

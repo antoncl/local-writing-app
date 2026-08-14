@@ -1,12 +1,13 @@
 ---
 id: builtin-plot-kishotenketsu-four-part-arc
-title: Kishotenketsu Four-Part Arc
+title: Kishōtenketsu
 entry_type: plot:template
 template:
   version: 1
   slug: kishotenketsu-four-part-arc
-  display_name: Kishotenketsu Four-Part Arc
-  aliases: []
+  display_name: Kishōtenketsu
+  aliases:
+  - Kishotenketsu Four-Part Arc
   family: act
   description: A four-part structure where development, contrast, and reconciliation
     can matter more than direct conflict.
@@ -58,7 +59,7 @@ metadata:
     id: ketsu_reconciliation
 ---
 
-# Kishotenketsu Four-Part Arc
+# Kishōtenketsu
 
 Use this template when contrast, juxtaposition, and reconciliation matter more
 than direct antagonist escalation. It can still contain conflict, but conflict is

@@ -1,12 +1,13 @@
 ---
 id: builtin-plot-mystery-investigation-arc
-title: Mystery Investigation Arc
+title: Mystery / Fair-Play Investigation
 entry_type: plot:template
 template:
   version: 1
   slug: mystery-investigation-arc
-  display_name: Mystery Investigation Arc
-  aliases: []
+  display_name: Mystery / Fair-Play Investigation
+  aliases:
+  - Mystery Investigation Arc
   family: puzzle
   description: A generic fair-play mystery spine for puzzle, evidence, suspects, false
     interpretations, and earned solution.
@@ -70,7 +71,7 @@ metadata:
     id: solution
 ---
 
-# Mystery Investigation Arc
+# Mystery / Fair-Play Investigation
 
 Use this template to track a fair-play puzzle: what question is being solved,
 what evidence is available, how false interpretations are supported, and why the

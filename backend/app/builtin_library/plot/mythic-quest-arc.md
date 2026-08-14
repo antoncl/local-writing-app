@@ -1,12 +1,13 @@
 ---
 id: builtin-plot-mythic-quest-arc
-title: Mythic Quest Arc
+title: The Hero's Journey
 entry_type: plot:template
 template:
   version: 1
   slug: mythic-quest-arc
-  display_name: Mythic Quest Arc
-  aliases: []
+  display_name: The Hero's Journey
+  aliases:
+  - Mythic Quest Arc
   family: journey
   description: A generic mythic journey lens for departure, ordeal, return, and integration.
   cultural_context: ''
@@ -74,7 +75,7 @@ metadata:
     id: integrated_return
 ---
 
-# Mythic Quest Arc
+# The Hero's Journey
 
 Use this template when the story feels like a movement out of a known order,
 through an ordeal, and back into consequence. The journey can be literal,

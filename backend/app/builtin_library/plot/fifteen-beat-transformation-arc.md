@@ -1,12 +1,13 @@
 ---
 id: builtin-plot-fifteen-beat-transformation-arc
-title: Fifteen-Beat Transformation Arc
+title: Save the Cat! Beat Sheet
 entry_type: plot:template
 template:
   version: 1
   slug: fifteen-beat-transformation-arc
-  display_name: Fifteen-Beat Transformation Arc
-  aliases: []
+  display_name: Save the Cat! Beat Sheet
+  aliases:
+  - Fifteen-Beat Transformation Arc
   family: act
   description: A generic fifteen-beat transformation lens with original labels and
     wording.
@@ -110,7 +111,7 @@ metadata:
     id: final_state
 ---
 
-# Fifteen-Beat Transformation Arc
+# Save the Cat! Beat Sheet
 
 Use this template when you want a finer-grained diagnostic than a three-act map.
 It tracks the pressure that moves a character or world from an opening state to

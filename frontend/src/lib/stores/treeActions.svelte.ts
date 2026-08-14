@@ -28,6 +28,7 @@ import {
 import { refreshLoreEntries, setLoreEntries } from "@/lib/stores/lore";
 import { refreshPromptEntries } from "@/lib/stores/prompts";
 import { refreshAssistantEntries } from "@/lib/stores/assistants";
+import { refreshPlotTemplates } from "@/lib/stores/plotTemplates";
 import { refreshTodos } from "@/lib/stores/todos";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import {
@@ -104,6 +105,16 @@ class TreeActions {
       const created = await api.createAssistantEntry("Untitled assistant");
       await refreshAssistantEntries();
       await editorPanes.openAssistant(created.id);
+    });
+  }
+
+  // Blank-create an owned plot template (#918) and open it to author its beats — the
+  // non-fork twin of forkPlotTemplate, mirroring newAssistantEntry (a flat roster).
+  async newPlotTemplate(): Promise<void> {
+    await this.run(async () => {
+      const created = await api.createPlotTemplate();
+      await refreshPlotTemplates();
+      await editorPanes.openPlotTemplate(created.id);
     });
   }
 

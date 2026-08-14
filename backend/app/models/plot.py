@@ -130,3 +130,10 @@ class SavePlotTemplateRequest(BaseModel):
     # persist it, or a schema-editor-added field would be wiped on the first save.
     metadata: dict[str, Any] = Field(default_factory=dict)
     base_revision: str = ""
+
+
+class CreatePlotTemplateRequest(BaseModel):
+    """Blank-create an owned `plot:template` (the non-fork path, #918). Title is
+    optional — a blank one gets a sensible default the writer then renames."""
+
+    title: str = ""

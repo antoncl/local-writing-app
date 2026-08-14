@@ -897,6 +897,14 @@ export const api = {
   listPlotTemplates() {
     return request<PlotTemplateList>("/plot/templates");
   },
+  // Blank-create an owned template (#918) — the non-fork path. The backend defaults
+  // a blank title, so callers may omit it and let the writer rename in the editor.
+  createPlotTemplate(title = "") {
+    return request<PlotTemplate>("/plot/templates", {
+      method: "POST",
+      body: JSON.stringify({ title }),
+    });
+  },
   getPlotTemplate(entryId: string) {
     return request<PlotTemplate>(`/plot/templates/${entryId}`);
   },

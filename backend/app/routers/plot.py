@@ -17,6 +17,7 @@ from app.models import (
     CardList,
     CreateCardRequest,
     CreatePlotlineRequest,
+    CreatePlotTemplateRequest,
     PlotBoard,
     PlotBoardProjection,
     PlotContext,
@@ -148,6 +149,13 @@ def seed_cards_from_manuscript(project: CurrentProject) -> CardList:
 def list_plot_templates(project: CurrentProject) -> PlotTemplateList:
     with translate_errors():
         return project.list_plot_templates()
+
+
+@router.post("/api/plot/templates", response_model=PlotTemplate)
+def create_plot_template(project: CurrentProject, request: CreatePlotTemplateRequest) -> PlotTemplate:
+    """Blank-create an owned `plot:template` (the non-fork path, #918)."""
+    with translate_errors():
+        return project.create_plot_template(request)
 
 
 @router.get("/api/plot/templates/{entry_id}", response_model=PlotTemplate)

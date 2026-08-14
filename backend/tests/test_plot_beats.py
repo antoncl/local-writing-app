@@ -103,6 +103,27 @@ class PlotTemplateLibraryTests(PlotTestCase):
         self.assertIn(_THREE_ACT, ids)
         self.assertIn(clone["id"], ids)
 
+    def test_create_mints_a_blank_owned_editable_template(self) -> None:
+        # The non-fork entry point (#918): a brand-new owned template, not a copy.
+        created = self.client.post("/api/plot/templates", json={"title": "My structure"})
+        self.assertEqual(created.status_code, 200, created.text)
+        body = created.json()
+        self.assertTrue(body["id"].startswith("plot_"))
+        self.assertNotEqual(body["id"], _THREE_ACT)
+        self.assertTrue(body["editable"])
+        self.assertFalse(body["is_library"])
+        self.assertEqual(body["title"], "My structure")
+        # Blank roster to author from scratch.
+        self.assertEqual(len(body["metadata"].get("beats") or []), 0)
+        # It joins the listing as an owned, zero-beat template.
+        listing = self.client.get("/api/plot/templates").json()["entries"]
+        match = next(e for e in listing if e["id"] == body["id"])
+        self.assertEqual(match["beat_count"], 0)
+        self.assertTrue(match["editable"])
+        # A blank title falls back to a sensible default the writer renames.
+        blank = self.client.post("/api/plot/templates", json={}).json()
+        self.assertEqual(blank["title"], "New template")
+
     def test_owned_clone_is_editable_and_deletable(self) -> None:
         clone = self.client.post(f"/api/plot/templates/{_THREE_ACT}/fork").json()
         spec = clone["template"]

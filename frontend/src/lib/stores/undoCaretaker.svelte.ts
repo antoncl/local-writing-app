@@ -62,6 +62,21 @@ export type Command = {
  *  can never be conflated by a truthiness check. */
 export type ReversedStep = { label: string };
 
+/** A reversal closure throws this to DECLINE its reversal cleanly — e.g. the
+ *  user cancelled the suppressible confirm that guards a destructive undo (a
+ *  realize-undo that would delete a written scene, ADR-0053 §7 / S6b). Only safe
+ *  from a **single-command step whose closure throws BEFORE it mutates**: on a
+ *  first-command throw the caretaker's `finally` leaves the cursor where it was,
+ *  so the declined step is neither consumed nor half-applied and stays undoable.
+ *  The caretaker just propagates it (it never special-cases a throw); a surface's
+ *  controller catches it and announces "cancelled" instead of surfacing an error. */
+export class UndoCancelled extends Error {
+  constructor(message = "Reversal cancelled") {
+    super(message);
+    this.name = "UndoCancelled";
+  }
+}
+
 /** Memory backstop (§ Open). Counts commands, not steps, because commands are
  *  what hold captured state; generous because a command is small (closures
  *  over one node's worth of state) and the designer's graphs are tens of

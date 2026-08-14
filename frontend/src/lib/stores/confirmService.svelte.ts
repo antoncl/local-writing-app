@@ -24,6 +24,11 @@ export type ConfirmationRequest = {
   // "Overwrite and close"). Cancel/backdrop still means "do neither".
   secondaryLabel?: string;
   onSecondary?: () => Promise<void> | void;
+  // Optional cancel/backdrop notification — lets a caller that wraps `request`
+  // in a Promise resolve `false` on dismissal (a definitive "declined", vs the
+  // onConfirm-only model where a cancel silently resolves nothing). Not run when
+  // suppressed (that path is a confirm). Used by realize-undo's abort (S6b).
+  onCancel?: () => void;
 };
 
 const SUPPRESS_PREFIX = "confirmSuppress:";
@@ -89,9 +94,12 @@ class ConfirmService {
     });
   }
 
-  // Dismiss without running the action (cancel / backdrop).
+  // Dismiss without running the action (cancel / backdrop). Notifies an
+  // `onCancel` caller so a Promise-wrapped confirm can resolve `false`.
   dismiss() {
+    const current = this.active;
     this.active = null;
+    current?.onCancel?.();
   }
 }
 

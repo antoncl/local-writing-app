@@ -9,6 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { GraphUndoController } from "./graphUndoController.svelte";
+import { UndoCancelled } from "@/lib/stores/undoCaretaker.svelte";
 import type { GraphPort, XY } from "@/lib/graph/graphCommands";
 
 type TestNode = { id: string; position: XY; data: { kind: string; cfg: Record<string, unknown> } };
@@ -204,6 +205,24 @@ describe("GraphUndoController", () => {
     expect(ctl.announcement).toBe("Undid delete card");
     await ctl.redo();
     expect(trace).toEqual(["undo", "redo"]);
+  });
+
+  it("announces a cancelled reversal instead of surfacing it, leaving the step undoable", async () => {
+    // A destructive undo (realize-undo, S6b) whose confirm the user declined:
+    // the closure throws UndoCancelled BEFORE mutating, so the caretaker leaves
+    // the single-command step's cursor put and the controller swallows it.
+    const { ctl } = makeSurface();
+    ctl.record({
+      undo: () => {
+        throw new UndoCancelled();
+      },
+      redo: () => {},
+      label: "realize",
+    });
+    await ctl.undo();
+    expect(ctl.announcement).toBe("Undo cancelled");
+    expect(ctl.canUndo).toBe(true); // declined — the realize is still undoable
+    expect(ctl.canRedo).toBe(false); // and nothing moved to the redo stack
   });
 
   it("busy-gates the control while an async command is in flight", async () => {

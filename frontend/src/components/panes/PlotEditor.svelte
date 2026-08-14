@@ -34,7 +34,6 @@
   import { PlotUndoRecorder, defaultPlotCommandPort } from "@/lib/plot/plotCommands";
   import {
     savePlotBoardLayout,
-    realizeCard,
     detachCardScene,
     saveCardSynopsis,
     reassignCardPlotline,
@@ -155,8 +154,10 @@
 
   setContext<PlotCardActions>(PLOT_CARD_ACTIONS, {
     onOpen: (cardId) => void editorPanes.openPlotCard(cardId),
-    // Realize mints a scene FILE — not recorded here (its undo deletes the scene; S6b).
-    onRealize: (cardId) => void realizeCard(cardId),
+    // Realize mints a scene FILE, recorded via the recorder (S6b): undo deletes that
+    // scene when the card is its sole referent (suppressible confirm if it holds prose),
+    // redo re-mints. Default placement (parentId null → the backend's first container).
+    onRealize: (cardId) => void undoRecorder.realize(cardId, null),
     // Every other card op is a whole-card before/after edit recorded onto the shared
     // caretaker (§7). Detach only toggles the `scene` ref (no file touched), so it IS
     // undoable as a plain field edit. Each store helper still refetches the projection,

@@ -27,7 +27,12 @@ import {
   getCardState,
   restoreCardState,
   recreateCard,
+  sceneReferents,
+  readScene,
+  deleteScene,
 } from "./plotBoard";
+import { structureStore } from "@/lib/stores/structure";
+import type { Scene, StructureDocument } from "@/lib/types";
 import type { CardEntry, PlotBoard, PlotBoardProjection } from "@/lib/types";
 
 const projection = (): PlotBoardProjection => ({
@@ -136,12 +141,13 @@ describe("card content ops", () => {
     computed_metadata: {},
   });
 
-  it("realizeCard mints/attaches, then refetches the projection", async () => {
-    const realize = vi.spyOn(api, "realizeCard").mockResolvedValue(card());
+  it("realizeCard mints/attaches, refetches, and returns the minted scene id (S6b)", async () => {
+    const realize = vi.spyOn(api, "realizeCard").mockResolvedValue(card({ scene: "sc9" }));
     const refresh = vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
-    await realizeCard("c1", "chap1");
+    const sceneId = await realizeCard("c1", "chap1");
     expect(realize).toHaveBeenCalledWith("c1", "chap1");
     expect(refresh).toHaveBeenCalledTimes(1);
+    expect(sceneId).toBe("sc9"); // the undo command needs this to delete the right scene
   });
 
   it("deleteCard deletes via the endpoint, then refetches the projection (#860)", async () => {
@@ -367,5 +373,34 @@ describe("card content ops", () => {
     expect(create).toHaveBeenCalledWith("Restored", "c1"); // id supplied → same identity
     expect(save.mock.calls[0][0].metadata).toEqual({ plotline: "p1" });
     expect(save.mock.calls[0][1]).toBe("Back.");
+  });
+
+  // ── Realize-undo substrate (S6b) ──────────────────────────────────────────
+
+  it("sceneReferents lists the cards referencing a scene, read off the live board", () => {
+    const boardCard = (id: string, scene: string | null): PlotBoardProjection["cards"][number] =>
+      ({ id, scene }) as PlotBoardProjection["cards"][number];
+    plotBoardStore.set({
+      ...projection(),
+      cards: [boardCard("c1", "sc1"), boardCard("c2", "sc1"), boardCard("c3", "other"), boardCard("c4", null)],
+    });
+    expect(sceneReferents("sc1")).toEqual(["c1", "c2"]);
+    expect(sceneReferents("gone")).toEqual([]);
+  });
+
+  it("readScene passes through to api.getScene", async () => {
+    const scene = { id: "sc1", title: "The letter", body: "prose" } as Scene;
+    vi.spyOn(api, "getScene").mockResolvedValue(scene);
+    expect(await readScene("sc1")).toBe(scene);
+  });
+
+  it("deleteScene deletes the scene, updates the structure store, and refetches the board", async () => {
+    const doc = { root: { id: "root", title: "Book" } } as unknown as StructureDocument;
+    const del = vi.spyOn(api, "deleteScene").mockResolvedValue(doc);
+    const refresh = vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    await deleteScene("sc1");
+    expect(del).toHaveBeenCalledWith("sc1");
+    expect(get(structureStore)).toBe(doc); // scene left the manuscript tree
+    expect(refresh).toHaveBeenCalledTimes(1); // card projects homeless
   });
 });

@@ -156,6 +156,7 @@ from app.models.entries import (
     UnlistAssistantRequest,
 )
 from app.models.plot import (
+    CreatePlotTemplateRequest,
     PlotTemplate,
     PlotTemplateList,
     PlotTemplateSpec,
@@ -359,6 +360,7 @@ __all__ = [
     "CardSummary",
     "CreateCardRequest",
     "CreatePlotlineRequest",
+    "CreatePlotTemplateRequest",
     "PlotBoard",
     "PlotBoardBeat",
     "PlotBoardCard",

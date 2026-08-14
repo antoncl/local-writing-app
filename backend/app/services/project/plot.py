@@ -45,6 +45,7 @@ from app.models import (
     CardSummary,
     CreateCardRequest,
     CreatePlotlineRequest,
+    CreatePlotTemplateRequest,
     CreateSceneRequest,
     PlotBoard,
     PlotBoardBeat,
@@ -1178,6 +1179,20 @@ class PlotMixin:
             # owned clone, editable. Mirrors `_reject_inherited_library_write`.
             editable=self._node_is_owned_here(read.index_entry, root) if read.index_entry else True,
         )
+
+    def create_plot_template(self, request: CreatePlotTemplateRequest) -> PlotTemplate:
+        """Blank-create an owned `plot:template` in this project — the non-fork entry
+        point (#918). Mints a new id and writes a minimal spec with an empty beat
+        roster; the writer names it and authors beats in the editor. The owned twin of
+        fork_plot_template (which copies a Library / ancestor original). Owned + editable
+        from birth, so it saves and deletes like any clone."""
+        root = self._require_project()
+        title = request.title.strip() or "New template"
+        new_id = self._new_id("plot")
+        spec = PlotTemplateSpec(display_name=title)
+        path = self._filepath_for_new_node(root / "plot", title)
+        self._write_plot_template_file(path, new_id, title, spec, body="")
+        return self.read_plot_template(new_id)
 
     def fork_plot_template(self, entry_id: str) -> PlotTemplate:
         """Clone an inherited template into this project as an editable copy

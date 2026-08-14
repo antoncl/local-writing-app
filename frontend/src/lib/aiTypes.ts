@@ -274,6 +274,11 @@ export type ChatSession = {
   // subject IS the chat's anchored scene** (S5 folded the old target_scene_id):
   // the backend derives the render/journal scene from it. Empty for freeform.
   subject?: string;
+  // ADR-0055 S4: the mutation set this chat OWNS — its staged, position-free
+  // change. A `staged_set` entity_ref in metadata (chat→set edge); the backend
+  // seeds its rows into the AI context so a resumed brainstorm keeps refining
+  // the same change. Singular, empty for impersonate / freeform chats.
+  staged_set?: string;
   pinned: boolean;
   created_at: string;
   updated_at: string;
@@ -296,6 +301,9 @@ export type ChatSessionSummary = {
   // and `subject` is the marquee group/filter key. `subject` is empty for freeform.
   entry_type: string;
   subject?: string;
+  // ADR-0055 S4: the mutation set this chat owns (metadata.staged_set), so a
+  // designed view can group / filter chats by whether they carry a staged change.
+  staged_set?: string;
   prompt_entry_id: string;
   assistant_id: string;
   pinned: boolean;
@@ -318,6 +326,9 @@ export type CreateChatSessionRequest = {
   // into the chat's metadata.subject so the index extracts a chat→subject edge.
   // A scene subject is also the chat's anchored scene (folded target_scene_id).
   subject?: string;
+  // ADR-0055 S4: an entity-pinned set this chat owns from the outset, if the
+  // launch already staged one (usually empty — a brainstorm stages later).
+  staged_set?: string;
 };
 
 export type SaveChatSessionRequest = {
@@ -329,6 +340,9 @@ export type SaveChatSessionRequest = {
   // backend falls back to the persisted value when omitted. Carries the scene
   // anchor for scene chats (folded target_scene_id).
   subject?: string;
+  // ADR-0055 S4: echoed on save like `subject`, with the same persisted-value
+  // fallback, so a per-turn write never drops the chat's staged set.
+  staged_set?: string;
   pinned: boolean;
   context_items: ChatSessionContextItem[];
   messages: ChatSessionMessage[];

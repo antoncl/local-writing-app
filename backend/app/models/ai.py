@@ -444,6 +444,14 @@ class ChatSession(BaseModel):
     # scene is derived from `subject` (via `_subject_scene_id`), so `{{ scene }}`
     # and the as-of-scene name resolution keep working with no separate field.
     subject: str = ""
+    # ADR-0055 S4: the mutation set this chat OWNS — its staged, position-free
+    # change (a committing brainstorm's work-product). Persisted as a `staged_set`
+    # entity_ref in the node's front-matter `metadata`, so the index extracts a
+    # chat->set edge and the set survives closing the chat. Singular: a distinct
+    # staged change is a new chat with its own context. Empty for impersonate /
+    # freeform chats. Seeded into the AI context on send so a resumed conversation
+    # continues refining the same change instead of restarting.
+    staged_set: str = ""
     pinned: bool = False
     created_at: str
     updated_at: str
@@ -484,6 +492,10 @@ class ChatSessionSummary(BaseModel):
     # designed view can group / filter by it — the marquee "group by subject".
     # Empty for freeform chats.
     subject: str = ""
+    # ADR-0055 S4: the mutation set this chat owns (`metadata.staged_set`),
+    # surfaced on the roster so a designed view can group / filter chats by
+    # whether they carry a staged change. Empty for impersonate / freeform chats.
+    staged_set: str = ""
     prompt_entry_id: str = ""
     assistant_id: str = ""
     pinned: bool = False
@@ -508,6 +520,10 @@ class CreateChatSessionRequest(BaseModel):
     # originating lore entry; a scene launch stamps the scene). Persisted into
     # `metadata.subject`; a scene subject is the chat's anchored scene.
     subject: str = ""
+    # ADR-0055 S4: an entity-pinned set this chat owns from the outset, if the
+    # launch already staged one. Persisted into `metadata.staged_set`. Usually
+    # empty at create (a brainstorm stages its set later, via save).
+    staged_set: str = ""
 
 
 class SaveChatSessionRequest(BaseModel):
@@ -519,6 +535,10 @@ class SaveChatSessionRequest(BaseModel):
     # writes. Falls back to the persisted value when a caller omits it, so it is
     # never silently dropped. (Absorbed the old `target_scene_id` echo.)
     subject: str = ""
+    # ADR-0055 S4: echoed on every save like `subject`, with the same persisted-
+    # value fallback, so a per-turn write never drops the chat's staged set. The
+    # commit path (S4) is what first sets it; general saves just carry it through.
+    staged_set: str = ""
     pinned: bool = False
     context_items: list[ChatSessionContextItem] = Field(default_factory=list)
     messages: list[ChatSessionMessage] = Field(default_factory=list)

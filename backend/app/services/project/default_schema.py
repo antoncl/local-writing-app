@@ -582,7 +582,10 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # `subject` is what makes the chat→subject edge extract.
             "name": "Chat",
             "kind": "chat",
-            "fields": ["subject", "color"],
+            # `staged_set` (ADR-0055 S4): the mutation set a committing brainstorm
+            # OWNS — a second entity_ref, into the mutation_set kind, earning the
+            # chat->set edge exactly as `subject` earns chat->subject.
+            "fields": ["subject", "staged_set", "color"],
             "has_body": False,
             "body_shape": "chat",
             "color": "graphite",
@@ -810,6 +813,20 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Subject",
             "type": "entity_ref",
             "picker_config": {"sources": [{"kind": "lore"}, {"kind": "scene"}]},
+        },
+        "staged_set": {
+            # ADR-0055 S4: the mutation set a chat OWNS — the staged, position-
+            # free change a committing brainstorm is shaping (its work-product).
+            # A live `entity_ref` into the mutation_set kind, mirroring `subject`:
+            # it lives in `metadata`, so the index extracts a chat->set edge (the
+            # set surfaces the chats refining it) and deleting the set purges the
+            # chat's pin. Singular — a chat owns one staged change; a distinct
+            # change is a new chat with its own context. Empty for impersonate /
+            # freeform chats. On send the set's rows are seeded into the AI context
+            # so a resumed conversation continues refining the same change.
+            "name": "Staged change",
+            "type": "entity_ref",
+            "picker_config": {"sources": [{"kind": "mutation_set"}]},
         },
         "target_entity": {
             # ADR-0055 §3: the OPTIONAL entity a mutation set is pinned to — the

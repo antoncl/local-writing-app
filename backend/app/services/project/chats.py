@@ -73,10 +73,18 @@ class ChatSessionsMixin:
         """
         dumped = session.model_dump()
         messages = dumped.pop("messages", None) or []
-        # `session` is a validated ChatSession, so `subject` is always a `str`
-        # here (the sparseness lives on the read side, which guards for it).
+        # `session` is a validated ChatSession, so `subject`/`staged_set` are
+        # always `str` here (the sparseness lives on the read side, which guards
+        # for it). Both are entity_refs, so they live in `metadata`, where the
+        # edge extractor finds them (chat->subject and chat->set). Empty values
+        # are omitted so a chat with no staged set is byte-identical to today's.
         subject = dumped.pop("subject", "")
-        metadata: dict = {"subject": subject} if subject else {}
+        staged_set = dumped.pop("staged_set", "")
+        metadata: dict = {}
+        if subject:
+            metadata["subject"] = subject
+        if staged_set:
+            metadata["staged_set"] = staged_set
         extra = {key: value for key, value in dumped.items() if key not in ("id", "title")}
         extra["message_count"] = len(messages)
         body = (
@@ -127,7 +135,9 @@ class ChatSessionsMixin:
             # it — a non-dict value yields no subject instead of raising here,
             # outside the loop's `_read_front_matter_only` guard.
             metadata = data.get("metadata")
-            subject = str(metadata.get("subject", "") or "") if isinstance(metadata, dict) else ""
+            is_meta = isinstance(metadata, dict)
+            subject = str(metadata.get("subject", "") or "") if is_meta else ""
+            staged_set = str(metadata.get("staged_set", "") or "") if is_meta else ""
             summaries.append(
                 ChatSessionSummary(
                     id=str(data.get("id", "")),
@@ -137,6 +147,7 @@ class ChatSessionsMixin:
                     # designable Chats view (ADR-0051 S6).
                     entry_type=str(data.get("entry_type", "")),
                     subject=subject,
+                    staged_set=staged_set,
                     prompt_entry_id=str(data.get("prompt_entry_id", "") or ""),
                     assistant_id=str(data.get("assistant_id", "") or ""),
                     pinned=bool(data.get("pinned", False)),
@@ -165,11 +176,14 @@ class ChatSessionsMixin:
         # `strict=True` already guarantees a dict-or-raise, so `front` is a map.
         data = dict(front)
         data.pop("message_count", None)  # denormalized roster hint; not a model field
-        # `subject` is stored as an entity_ref in `metadata` (so the index
-        # extracts the edge); the model carries it top-level. Lift it back out.
+        # `subject`/`staged_set` are stored as entity_refs in `metadata` (so the
+        # index extracts the edges); the model carries them top-level. Lift back.
         meta = data.pop("metadata", None)
-        if isinstance(meta, dict) and meta.get("subject"):
-            data["subject"] = str(meta.get("subject") or "")
+        if isinstance(meta, dict):
+            if meta.get("subject"):
+                data["subject"] = str(meta.get("subject") or "")
+            if meta.get("staged_set"):
+                data["staged_set"] = str(meta.get("staged_set") or "")
         # The transcript lives in the body (ADR-0051 S2), serialized as YAML.
         if body.strip():
             parsed = yaml.safe_load(body)
@@ -200,6 +214,7 @@ class ChatSessionsMixin:
             assistant_id=request.assistant_id,
             system_prompt=request.system_prompt,
             subject=request.subject,
+            staged_set=request.staged_set,
             pinned=False,
             created_at=now,
             updated_at=now,
@@ -318,6 +333,9 @@ class ChatSessionsMixin:
             # scene subject also carries the render/journal anchor (S5), so this
             # one echo covers both what-it's-about and the as-of scene.
             subject=request.subject or existing.subject,
+            # Echoed with the same persisted-value fallback so a per-turn save
+            # that omits it never drops the chat's staged set (ADR-0055 S4).
+            staged_set=request.staged_set or existing.staged_set,
             pinned=request.pinned,
             created_at=existing.created_at,
             updated_at=self._utcnow_iso(),

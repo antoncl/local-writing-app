@@ -33,6 +33,7 @@
     type PlotContainerData,
   } from "@/lib/plot/plotBoardLayout";
   import { buildBoardEdges, EDGE_LAYERS, type EdgeLayer } from "@/lib/plot/plotBoardEdges";
+  import type { PlotRealizeLocation } from "@/lib/plot/realizeLocations";
   import { loadEdgeLayers, saveEdgeLayers, toggleEdgeLayer } from "@/lib/plot/edgeLayerPrefs";
   import { GraphUndoController } from "@/lib/graph/graphUndoController.svelte";
   import { moveNodesCommand, type GraphPort } from "@/lib/graph/graphCommands";
@@ -92,10 +93,14 @@
     projection,
     error = null,
     onRetry,
+    locations = [],
   }: {
     projection: PlotBoardProjection | null;
     error?: string | null;
     onRetry?: () => void;
+    // The manuscript containers a card can be realized into (#879), derived from
+    // the structure store by PlotBoardPane so this stays a pure prop-driven renderer.
+    locations?: PlotRealizeLocation[];
   } = $props();
 
   // Coalesce a drag's position churn into one save on release.
@@ -190,8 +195,9 @@
     onOpen: (cardId) => void editorPanes.openPlotCard(cardId),
     // Realize mints a scene FILE, recorded via the recorder (S6b): undo deletes that
     // scene when the card is its sole referent (suppressible confirm if it holds prose),
-    // redo re-mints. Default placement (parentId null → the backend's first container).
-    onRealize: (cardId) => void undoRecorder.realize(cardId, null),
+    // redo re-mints. The card's location submenu chooses `parentId` (#879); null defers
+    // to the backend's first-container default (a project with no containers to offer).
+    onRealize: (cardId, parentId) => void undoRecorder.realize(cardId, parentId),
     // Every other card op is a whole-card before/after edit recorded onto the shared
     // caretaker (§7). Detach only toggles the `scene` ref (no file touched), so it IS
     // undoable as a plain field edit. Each store helper still refetches the projection,
@@ -220,6 +226,11 @@
     onDelete: (cardId) => removeCard(cardId),
     get plotlines() {
       return projection?.plotlines ?? [];
+    },
+    // The manuscript containers for the realize location submenu (#879). A getter so
+    // the card reads the live tree — a container added while the board is open shows up.
+    get locations() {
+      return locations;
     },
     // The focused plotline (S5b) — a card that is neither on this thread nor fulfilling
     // one of its beats dims. A getter so the card tracks it reactively.

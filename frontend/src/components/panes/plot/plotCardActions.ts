@@ -8,12 +8,16 @@
 // the ADR-0050 layout caretaker (binding decision 1) — they never join the Ctrl+Z
 // history.
 import type { PlotBoardPlotline } from "@/lib/types";
+import type { PlotRealizeLocation } from "@/lib/plot/realizeLocations";
 
 export type PlotCardActions = {
   // Open the card as a NodeEditor document (full fields: plotline / scene / synopsis).
   onOpen: (cardId: string) => void;
-  // Mint a scene from the card and attach it (unattached cards only).
-  onRealize: (cardId: string) => void;
+  // Mint a scene from the card and attach it (unattached cards only). `parentId`
+  // is the manuscript container the new scene lands under (#879); null defers to
+  // the backend's first-container default (offered when the project has no
+  // containers to choose from).
+  onRealize: (cardId: string, parentId: string | null) => void;
   // Clear the card's scene ref (attached cards only).
   onDetach: (cardId: string) => void;
   // Persist an in-place title (name) edit. Empty titles are dropped by the card.
@@ -35,6 +39,10 @@ export type PlotCardActions = {
   // The current lanes, for the "Set plotline" submenu. A getter on the provider so
   // the card reads them fresh from the projection.
   readonly plotlines: PlotBoardPlotline[];
+  // The manuscript containers, for the "Realize scene" location submenu (#879). A
+  // getter so the card reads the live manuscript tree (containers can be added while
+  // the board is open). Empty ⇒ realize takes the backend default (no picker shown).
+  readonly locations: PlotRealizeLocation[];
   // The focused plotline (ADR-0053 §6, S5b), or null. A card dims when a thread is
   // focused and this card is neither on it (its primary plotline) nor fulfilling one
   // of its beats. A getter so the card tracks it reactively (the `plotlines` idiom).

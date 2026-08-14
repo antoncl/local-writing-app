@@ -66,9 +66,10 @@
   let hiddenBeatsLabel = $derived(hiddenBeats.map((b) => b.title).join(", "));
 
   let menuOpen = $state(false);
-  // Two pages: the actions and the "Set plotline" lane list. Beats + causal are no
-  // longer menu pages — they're drag gestures now (#824).
-  let menuView = $state<"main" | "plotline">("main");
+  // Three pages: the actions, the "Set plotline" lane list, and the "Realize scene"
+  // location list (#879). Beats + causal are no longer menu pages — they're drag
+  // gestures now (#824).
+  let menuView = $state<"main" | "plotline" | "location">("main");
 
   let editing = $state(false);
   let draft = $state("");
@@ -113,6 +114,12 @@
   function setPlotline(plotlineId: string) {
     closeMenu();
     if (actions && id) actions.onSetPlotline(id, plotlineId);
+  }
+  // Realize into a chosen manuscript container (#879). null defers to the backend's
+  // first-container default — used when the project has no containers to pick from.
+  function realizeAt(parentId: string | null) {
+    closeMenu();
+    if (actions && id) actions.onRealize(id, parentId);
   }
   function setPageStatus(status: "off_page" | "unwritten") {
     closeMenu();
@@ -344,8 +351,16 @@
           <button role="menuitem" class="menu-item" onclick={() => run(actions.onDetach)}>
             <i class="ti ti-unlink" aria-hidden="true"></i> Detach scene
           </button>
+        {:else if actions.locations.length}
+          <!-- Realize into a chosen act/chapter (#879): the location list is a submenu,
+               mirroring "Set plotline". Without containers to offer we fall through to a
+               direct realize (the backend's first-container default). -->
+          <button role="menuitem" class="menu-item" onclick={() => (menuView = "location")}>
+            <i class="ti ti-wand" aria-hidden="true"></i> Realize scene
+            <i class="ti ti-chevron-right chevron" aria-hidden="true"></i>
+          </button>
         {:else}
-          <button role="menuitem" class="menu-item" onclick={() => run(actions.onRealize)}>
+          <button role="menuitem" class="menu-item" onclick={() => realizeAt(null)}>
             <i class="ti ti-wand" aria-hidden="true"></i> Realize scene
           </button>
         {/if}
@@ -369,6 +384,23 @@
         <button role="menuitem" class="menu-item menu-danger" onclick={() => run(actions.onDelete)}>
           <i class="ti ti-trash" aria-hidden="true"></i> Delete card
         </button>
+      {:else if menuView === "location"}
+        <button class="menu-item menu-back" onclick={() => (menuView = "main")}>
+          <i class="ti ti-chevron-left" aria-hidden="true"></i> Realize into…
+        </button>
+        <div class="menu-scroll" role="group" aria-label="Realize location">
+          {#each actions.locations as loc (loc.id)}
+            <button
+              role="menuitem"
+              class="menu-item menu-location"
+              style={`--menu-depth: ${loc.depth}`}
+              onclick={() => realizeAt(loc.id)}
+            >
+              <i class="ti ti-book" aria-hidden="true"></i>
+              {loc.title || "Untitled"}
+            </button>
+          {/each}
+        </div>
       {:else}
         <button class="menu-item menu-back" onclick={() => (menuView = "main")}>
           <i class="ti ti-chevron-left" aria-hidden="true"></i> Set plotline
@@ -785,5 +817,10 @@
   .menu-unassigned {
     color: var(--text-2);
     font-style: italic;
+  }
+  /* Realize location rows (#879): indent by manuscript depth so the act/chapter
+     nesting reads as a tree, not a flat list. --menu-depth is the node's depth. */
+  .menu-location {
+    padding-left: calc(8px + var(--menu-depth, 0) * 14px);
   }
 </style>

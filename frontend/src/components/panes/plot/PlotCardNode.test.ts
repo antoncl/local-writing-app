@@ -38,6 +38,7 @@ const data = (over: Partial<PlotCardData> = {}): PlotCardData => ({
 function actions(
   plotlines: PlotCardActions["plotlines"] = [],
   focusedPlotlineId: string | null = null,
+  locations: PlotCardActions["locations"] = [],
 ): PlotCardActions {
   return {
     onOpen: vi.fn(),
@@ -52,6 +53,7 @@ function actions(
     onDelete: vi.fn(),
     plotlines,
     focusedPlotlineId,
+    locations,
   };
 }
 
@@ -182,12 +184,27 @@ describe("PlotCardNode — content-op menu (S7d)", () => {
     expect(screen.queryByRole("menuitem", { name: "Realize scene" })).toBeNull();
   });
 
-  it("realizes via the card id", async () => {
-    const acts = actions();
+  it("realizes with the backend default (null parent) when there are no containers to offer (#879)", async () => {
+    const acts = actions(); // no locations → "Realize scene" fires directly
     renderWithActions({ attached: false }, acts, "card_9");
     await fireEvent.click(screen.getByLabelText("Card actions"));
     await fireEvent.click(screen.getByRole("menuitem", { name: "Realize scene" }));
-    expect(acts.onRealize).toHaveBeenCalledWith("card_9");
+    expect(acts.onRealize).toHaveBeenCalledWith("card_9", null);
+  });
+
+  it("realizes into a chosen manuscript location from the submenu (#879)", async () => {
+    const acts = actions([], null, [
+      { id: "act_1", title: "Act One", depth: 0 },
+      { id: "ch_2", title: "Chapter Two", depth: 1 },
+    ]);
+    renderWithActions({ attached: false }, acts, "card_r");
+    await fireEvent.click(screen.getByLabelText("Card actions"));
+    // With containers present, "Realize scene" opens a location submenu rather than
+    // firing straight away (mirrors "Set plotline").
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Realize scene" }));
+    expect(acts.onRealize).not.toHaveBeenCalled();
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Chapter Two" }));
+    expect(acts.onRealize).toHaveBeenCalledWith("card_r", "ch_2");
   });
 
   it("deletes the card via the card id (#860)", async () => {

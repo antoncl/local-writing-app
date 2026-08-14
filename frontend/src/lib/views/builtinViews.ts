@@ -9,7 +9,8 @@
 // its single default, so `defaultView` parity with the backend is untouched.
 
 import { defaultView, kindUniverseExpr } from "@/lib/views/evaluateView";
-import { SEED_COMMITTING_FIELD, SEED_COMMITTING_MARKER } from "@/lib/views/chatNodes";
+import { SEED_DISPOSITION_FIELD } from "@/lib/views/chatNodes";
+import { REVISE_ENTITIES_DISPOSITION_LABEL } from "@/lib/views/promptNodes";
 import type { MetadataSchema, ViewSpec } from "@/lib/types";
 
 export type BuiltinView = { id: string; title: string; spec: ViewSpec };
@@ -22,22 +23,25 @@ export function isBuiltinExtraViewId(id: string): boolean {
   return id.startsWith(BUILTIN_EXTRA_PREFIX);
 }
 
-// "Openable chats": hides the brainstorm chats — those seeded by a prompt that
-// declares a `commit` (ADR-0054 §2) — keeping plain chats (General) and freeform
-// ones. It asks "does this chat's prompt declare a commit?", not the retired
-// `entry_patch` literal. Blacklist, not whitelist: a freeform chat has no seeding
-// prompt and so no marker, and must stay openable (a whitelist would drop it).
-// `disjoint` is the grammar's set-exclusion op (no `eq`/`in`). The roster comes
-// from `kindUniverseExpr` (the same seam `defaultView` uses), not a hardcoded FQN
-// — so both chat built-ins resolve the root identically, including the schema-less
-// `chat:base` fallback during the schema-load window.
+// "Openable chats": hides the brainstorm chats — those whose seed prompt has the
+// "Revise entities" disposition (a chat_panel prompt that declares a `commit`,
+// ADR-0054 §2) — keeping plain chats ("Chat") and freeform ones. It filters on the
+// seed's disposition label, the same vocabulary the Prompts shelf uses, so a user
+// can rebuild or invert this view in the designer (#960). Blacklist, not whitelist:
+// a freeform chat has no seeding prompt and so carries "", and must stay openable (a
+// whitelist would drop it). `disjoint` is the grammar's set-exclusion op (no
+// `eq`/`in`). The roster comes from `kindUniverseExpr` (the same seam `defaultView`
+// uses), not a hardcoded FQN — so both chat built-ins resolve the root identically,
+// including the schema-less `chat:base` fallback during the schema-load window.
 function openableChatsSpec(schema?: MetadataSchema | null): ViewSpec {
   return {
     kind: "chat",
     expr: {
       filter: {
         of: kindUniverseExpr("chat", schema),
-        pred: { field: { key: SEED_COMMITTING_FIELD, op: "disjoint", value: [SEED_COMMITTING_MARKER] } },
+        pred: {
+          field: { key: SEED_DISPOSITION_FIELD, op: "disjoint", value: [REVISE_ENTITIES_DISPOSITION_LABEL] },
+        },
       },
     },
     sort: { by: "manual" },

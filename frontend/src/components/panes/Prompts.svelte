@@ -75,7 +75,7 @@
   // (spec + roster + data env) to ViewNodeList, which owns evaluation + grouping.
   // The lift stamps each roster node with its derived `disposition` (metadata) and
   // pre-clusters by shelf order, so the default view's `group_by: [disposition]`
-  // buckets on it — the same shape as the Chats pane lifting `seed_committing`.
+  // buckets on it — the same shape as the Chats pane lifting `seed_disposition`.
   $: promptNodes = promptSummariesToGroupNodes(visibleEntries, schema);
   $: view = {
     spec: viewSpec,

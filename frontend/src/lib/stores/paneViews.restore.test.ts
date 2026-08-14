@@ -36,9 +36,9 @@ describe("paneViews — built-in extra selection (#867)", () => {
     localStorage.setItem(KEY, OPENABLE_ID);
     await paneViews.loadForProject("/proj");
     expect(paneViews.selectedId("chat")).toBe(OPENABLE_ID);
-    // …and resolves to the openable spec (its predicate filters seed_committing).
+    // …and resolves to the openable spec (its predicate filters seed_disposition).
     const spec = paneViews.specFor("chat", CHAT_SCHEMA);
-    expect(spec.expr?.filter?.pred?.field?.key).toBe("seed_committing");
+    expect(spec.expr?.filter?.pred?.field?.key).toBe("seed_disposition");
     expect(spec.expr?.filter?.pred?.field?.op).toBe("disjoint");
   });
 

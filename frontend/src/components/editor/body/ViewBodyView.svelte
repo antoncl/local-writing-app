@@ -37,6 +37,7 @@
   import { evaluateView, nestWarnings, type EvalNode, type EvalBindings } from "@/lib/views/evaluateView";
   import { chatSummariesToEvalNodes } from "@/lib/views/chatNodes";
   import { promptSummariesToGroupNodes } from "@/lib/views/promptNodes";
+  import { liftFieldByKey, liftFieldsForKind } from "@/lib/views/computedFields";
   import { chatSessionsStore } from "@/lib/stores/chats";
   import { buildBindings, resolveParamControls } from "@/lib/views/viewParams";
   import ParamStrip from "./view/ParamStrip.svelte";
@@ -312,7 +313,7 @@
   });
 
   // ---- preview universe for the anchor kind ----
-  // The chat roster lifted to EvalNodes (subject + derived seed_committing),
+  // The chat roster lifted to EvalNodes (subject + derived seed_disposition),
   // the same lift the Chats pane uses — so designing a chat view previews the
   // real chats instead of "No chat nodes to preview" (ADR-0051 S6 follow-up).
   let chatUniverse = $derived<EvalNode[]>(chatSummariesToEvalNodes($chatSessionsStore, promptEntries, schema));
@@ -401,18 +402,36 @@
   function parentFieldDef(k: string): MetadataFieldDefinition {
     return { name: "Parent", type: "entity_ref", options: [], category: "computed", picker_config: { sources: [{ kind: k }] } };
   }
-  // The structural field options for a set of kinds — `parent` when any is a
-  // structural (tree) kind, else none. Prepended to a roster, not merged into the
-  // schema-key set, since it has no entry_type membership to intersect over. A
-  // user-declared metadata field literally keyed `parent` (rare) takes precedence:
+  // The computed field options for a set of kinds — fields a kind's universe carries
+  // in `metadata` but the schema never declares, so they have no entry_type
+  // membership to intersect over and are PREPENDED to a roster rather than merged
+  // into the schema-key set. Two sources: the structural `parent` ref (when any kind
+  // is a tree kind, kind-scoped picker) and the lift-synthesized fields registered
+  // in `computedFields` (`disposition` on prompts, `seed_disposition` on chats,
+  // #960). A user-declared metadata field with the same key (rare) takes precedence —
   // the real field is already in the roster, so skip the synthetic to avoid a
-  // duplicate option (`fieldByKey` likewise resolves the schema field first).
-  function structuralFieldOptions(kinds: Iterable<string>): FieldOption[] {
-    if (schema?.fields?.parent) return [];
+  // duplicate option (`computedFieldByKey` likewise resolves the schema field first).
+  function computedFieldOptions(kinds: Iterable<string>): FieldOption[] {
+    const out: FieldOption[] = [];
+    const seen = new Set<string>();
     for (const k of kinds) {
-      if (STRUCTURAL_KINDS.has(k)) return [{ key: "parent", name: "Parent", def: parentFieldDef(k) }];
+      if (!seen.has("parent") && !schema?.fields?.parent && STRUCTURAL_KINDS.has(k)) {
+        out.push({ key: "parent", name: "Parent", def: parentFieldDef(k) });
+        seen.add("parent");
+      }
+      for (const cf of liftFieldsForKind(k)) {
+        if (seen.has(cf.key) || schema?.fields?.[cf.key]) continue;
+        out.push({ key: cf.key, name: cf.def.name, def: cf.def });
+        seen.add(cf.key);
+      }
     }
-    return [];
+    return out;
+  }
+  // The descriptor for a computed field key on a kind (the `fieldByKey` counterpart
+  // of `computedFieldOptions`): structural `parent` or a registered lift field.
+  function computedFieldByKey(k: string, key: string): MetadataFieldDefinition | null {
+    if (key === "parent" && STRUCTURAL_KINDS.has(k)) return parentFieldDef(k);
+    return liftFieldByKey(k, key);
   }
   // The anchor-kind roster (union of the kind's fields over its entry_types) — the
   // fallback when a node's input type is indeterminate. Per-node rosters come from
@@ -423,7 +442,7 @@
       if (def.kind !== forKind) continue;
       for (const fk of def.fields ?? []) keys.add(fk);
     }
-    return [...structuralFieldOptions([forKind]), ...fieldOptionsFromKeys(keys, kindRootEntryTypeId(schema, forKind))];
+    return [...computedFieldOptions([forKind]), ...fieldOptionsFromKeys(keys, kindRootEntryTypeId(schema, forKind))];
   }
   let fieldOptions = $derived(buildFieldOptions(kind));
   // Authoring-time TYPE inference (ADR-0031 §F): the entry_type-set of a node's
@@ -473,11 +492,12 @@
     // §F: the fields present on EVERY member — a group-aware set-intersection over
     // the input's concrete types (vertical inheritance AND shared field-groups). A
     // cross-kind set has no single root → resolve labels against the bare def. The
-    // structural `parent` (prepended) isn't an entry_type member, so it survives
-    // the intersection only by being added here — offered whenever a structural
-    // kind is in play (the indeterminate branch above inherits it via `fieldOptions`).
+    // computed fields (structural `parent`, and the lift-synthesized disposition /
+    // seed_disposition) aren't entry_type members, so they survive the intersection
+    // only by being prepended here — offered whenever their kind is in the input set
+    // (the indeterminate branch above inherits them via `fieldOptions`).
     const anchor = ts.size === 1 ? kindRootEntryTypeId(schema, [...ts.keys()][0]) : null;
-    return [...structuralFieldOptions(ts.keys()), ...fieldOptionsFromKeys(intersectFieldKeysOverTypes(schema, fqns), anchor)];
+    return [...computedFieldOptions(ts.keys()), ...fieldOptionsFromKeys(intersectFieldKeysOverTypes(schema, fqns), anchor)];
   }
   // The authoring warning ADR-0031 §F asks for (Slice B, #215): when a picker
   // node's inferred INPUT set is cross-kind, its roster is a degraded intersection,
@@ -523,8 +543,7 @@
       fields: fieldOptions,
       fieldsFor: fieldsForNode,
       rosterWarningFor,
-      fieldByKey: (key: string) =>
-        schema?.fields?.[key] ?? (key === "parent" && STRUCTURAL_KINDS.has(kind) ? parentFieldDef(kind) : null),
+      fieldByKey: (key: string) => schema?.fields?.[key] ?? computedFieldByKey(kind, key),
       valueWired: (nodeId: string) => connectedHandleKeys.has(`${nodeId}:${FILTER_VALUE_HANDLE}`),
       handleConnected: (nodeId: string, handleId: string) => connectedHandleKeys.has(`${nodeId}:${handleId}`),
       knownTagsFor,

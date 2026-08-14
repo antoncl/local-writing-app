@@ -145,6 +145,17 @@ describe("PlotPlotlineNode beat drag source (ADR-0053 §4)", () => {
     expect(beats.every((li) => li.getAttribute("draggable") !== "true")).toBe(true);
     expect(container.querySelectorAll(".beat-grip").length).toBe(0); // no grip when not draggable
   });
+
+  // The node drag handle (#876) — distinct from the per-beat grips above: the whole
+  // plotline drags by this one leading handle, the same affordance a card uses, so its
+  // header's focus/expand controls stay click-only. Present on an interactive board only.
+  it("renders the node drag-handle grip in its header, and omits it read-only (#876)", () => {
+    const { container } = fakeActions({ expandedId: null }).mount();
+    expect(container.querySelector(".plotline-head .plotline-drag-handle")).not.toBeNull();
+    // No actions (read-only mount / non-interactive board) → nothing to drag, no handle.
+    const { container: ro } = render(PlotPlotlineNode, { props: { id: "line_1", data: data() } });
+    expect(ro.querySelector(".plotline-drag-handle")).toBeNull();
+  });
 });
 
 describe("PlotPlotlineNode focus toggle (ADR-0053 §6)", () => {

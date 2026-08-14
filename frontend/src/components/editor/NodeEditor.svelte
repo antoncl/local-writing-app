@@ -93,7 +93,7 @@
     // with it). Null when the host isn't a tiled pane (e.g. a test mount).
     hostPaneId?: string | null;
     // INTERNAL on: listeners (to still-legacy MetadataPanel/*BodyView) are unchanged.
-    onChange?: ((payload: { title: string; body: string; status: string; entryType: string; metadata: EntryMetadata; inputs?: PromptInputDefinition[] }) => void) | undefined;
+    onChange?: ((payload: { title: string; body: string; status: string; entryType: string; metadata: EntryMetadata; inputs?: PromptInputDefinition[]; offer_on?: string[] }) => void) | undefined;
     onFocus?: (() => void) | undefined;
     onCustomData?: ((payload: { entryType: string; kind: DocumentKind }) => void) | undefined;
     onNavigate?: ((payload: { id: string; kind: string }) => void) | undefined;
@@ -322,6 +322,14 @@
   // `toCanonical()` inside `emitChange` (#631).
   const promptDrafts = new PromptInputDraftsController();
 
+  // The offer_on targeting draft (ADR-0054 §4 / S4b) — the ＋New subject allow-
+  // list authored in CodeBodyView's picker. A plain string[] (unlike the inputs
+  // controller), reseeded from the open prompt on a scene switch and emitted in
+  // `emitChange` alongside inputs. Guarded by scene id (below) so a picker edit
+  // isn't clobbered when the pre-effect re-runs for an unrelated scene mutation.
+  let offerOnDraft = $state<string[]>([]);
+  let lastOfferOnSceneId: string | null = null;
+
 
   let backlinksReq = 0;
   // Backlinks = the open node's referrers (#194): membership from the in-memory
@@ -365,6 +373,7 @@
       entryType,
       metadata: cloneMetadata(metadata),
       inputs: documentKind === "prompt" ? promptDrafts.toCanonical() : undefined,
+      offer_on: documentKind === "prompt" ? [...offerOnDraft] : undefined,
     });
   }
 
@@ -636,6 +645,12 @@
   })());
   $effect.pre(() => {
     promptDrafts.reseed(scene, documentKind);
+    if (documentKind !== "prompt" || !scene) {
+      lastOfferOnSceneId = null;
+    } else if (scene.id !== lastOfferOnSceneId) {
+      offerOnDraft = [...((scene as unknown as { offer_on?: string[] }).offer_on ?? [])];
+      lastOfferOnSceneId = scene.id;
+    }
   });
   // Friendly noun for this document kind — the type-header label ("<label> type"), the
   // rail's aria-label, the title aria-labels. A map, not a scene-defaulting ternary, so
@@ -936,6 +951,8 @@
       entrySlugify={promptDrafts.slugify}
       readOnly={inheritedReadOnly}
       onInputsChange={emitChange}
+      bind:offerOn={offerOnDraft}
+      onOfferOnChange={emitChange}
     />
   {/if}
   {#if bodyShape === "prose"}

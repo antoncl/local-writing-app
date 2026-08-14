@@ -144,15 +144,17 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "parent": "lore:base",
             "fields": [],
         },
-        "lore:lore_note": {
+        "lore:note": {
+            # The generic in-world lore entry: a typeless note (a loose canon
+            # fact, a concept, a faction blurb) and the default lore entry_type.
+            # Distinct from the `research` kind — that is the author's
+            # out-of-world reference *tree* (docs/research-strategy.md); a note
+            # lives in the flat Lore collection and joins lore references + AI
+            # context. Reinstated after an overeager research-era deprecation (#963).
             "name": "Note",
             "kind": "lore",
             "parent": "lore:base",
             "fields": [],
-            # Deprecated by the research kind (docs/research-strategy.md
-            # slice 5). Kept readable for legacy projects; UI filters this
-            # flag so new entries can't be created as `lore:lore_note`.
-            "deprecated": True,
         },
         "research:base": {
             # Abstract parent for the research-kind tree. Mirrors

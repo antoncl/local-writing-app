@@ -51,7 +51,7 @@ class ForkLoreTests(unittest.TestCase):
         node_id: str,
         title: str,
         metadata: dict | None = None,
-        entry_type: str = "lore:lore_note",
+        entry_type: str = "lore:note",
     ) -> None:
         # The lore/ folder is what makes this a lore node; entry_type is the
         # sub-kind stored in front matter.
@@ -103,7 +103,7 @@ class ForkLoreTests(unittest.TestCase):
 
         self.service.save_lore_entry(
             "honor",
-            SaveLoreEntryRequest(title="Honor Harrington", body="Edited.", entry_type="lore:lore_note", metadata={}),
+            SaveLoreEntryRequest(title="Honor Harrington", body="Edited.", entry_type="lore:note", metadata={}),
         )
 
         reread = self.service.read_lore_entry("honor")

@@ -353,7 +353,7 @@ class ResearchNotesMixin:
         if index_entry is None or index_entry.kind != "lore":
             raise ProjectServiceError(f"Lore entry {lore_id} does not exist.", 404)
         source = self.read_lore_entry(lore_id)
-        if source.entry_type != "lore:lore_note":
+        if source.entry_type != "lore:note":
             raise ProjectServiceError(
                 f"Only lore_note entries can be moved to research; got {source.entry_type}.",
                 422,

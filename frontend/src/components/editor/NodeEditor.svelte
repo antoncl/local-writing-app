@@ -397,7 +397,7 @@
   }
 
   function defaultEntryType() {
-    if (documentKind === "lore") return "lore:lore_note";
+    if (documentKind === "lore") return "lore:note";
     if (documentKind === "chat") return "chat:chat_session";
     return "scene:scene";
   }

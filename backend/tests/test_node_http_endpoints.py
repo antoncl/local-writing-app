@@ -34,7 +34,7 @@ class NodeHttpEndpointTests(unittest.TestCase):
 
     def _create_lore(self, title: str = "Test Lore") -> dict:
         response = self.client.post(
-            "/api/lore", json={"title": title, "entry_type": "lore:lore_note"}
+            "/api/lore", json={"title": title, "entry_type": "lore:note"}
         )
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()

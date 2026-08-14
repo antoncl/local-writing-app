@@ -38,7 +38,7 @@ class MoveLoreNoteToResearchTests(unittest.TestCase):
         metadata: dict | None = None,
     ) -> str:
         entry = self.service.create_lore_entry(
-            CreateLoreEntryRequest(title=title, entry_type="lore:lore_note")
+            CreateLoreEntryRequest(title=title, entry_type="lore:note")
         )
         # The service.read_lore_entry pulls the current revision.
         current = self.service.read_lore_entry(entry.id)
@@ -48,7 +48,7 @@ class MoveLoreNoteToResearchTests(unittest.TestCase):
                 title=title,
                 body=body,
                 base_revision=current.revision,
-                entry_type="lore:lore_note",
+                entry_type="lore:note",
                 metadata=metadata or {},
             ),
         )

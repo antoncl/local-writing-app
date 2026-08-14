@@ -113,9 +113,8 @@ export function entryTypeName(typeId: string, schema: MetadataSchema | null): st
 }
 
 // Entry-type choices for a kind's "+ Add child" menu. Drops abstract parents
-// (they can't be instantiated) and deprecated types (e.g. `lore:lore_note`,
-// superseded by the research kind — readable but no longer creatable, #67),
-// and sorts by name.
+// (they can't be instantiated) and any type flagged `deprecated` (readable for
+// legacy projects but no longer offered for creation), and sorts by name.
 export function entryTypeChoicesByKind(
   schema: MetadataSchema | null,
   kind: string,

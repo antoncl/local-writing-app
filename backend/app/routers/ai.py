@@ -336,7 +336,6 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
                 commit=request.commit,
                 resolution_scene_id=request.resolution_scene_id,
                 subject=request.subject,
-                as_of_scene=request.as_of_scene,
             )
         except PreviewError as exc:
             return AIPreviewResponse(

@@ -195,11 +195,6 @@ class AIPreviewRequest(BaseModel):
     # scene binding so a resumed chat renders `{{ scene }}` without the frontend
     # needing to know which subjects are scenes. Empty for non-chat previews.
     subject: str = ""
-    # As-of read anchor (ADR-0055 §1): the scene at which a subject-anchored
-    # prompt (e.g. impersonate) reads its subject via `effective_state`, bound
-    # into the template as `as_of`. Distinct from the scene bindings above (which
-    # resolve markers in the scene being written). Empty → base/book-start read.
-    as_of_scene: str = ""
     # When set, the cost estimate uses this assistant's provider/model.
     # Omit for previews that aren't bound to an assistant (e.g. the
     # prompt-editor preview pane) — token counts still come back, only

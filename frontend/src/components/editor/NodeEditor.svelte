@@ -810,6 +810,7 @@
           subjectId={scene.id}
           subjectTitle={title}
           subjectEntryType={entryType}
+          asOfScene={scrub.anchorSceneId}
           {promptEntries}
           {metadataSchema}
           {hostPaneId}

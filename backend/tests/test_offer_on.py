@@ -77,7 +77,8 @@ class ImpersonateAndOfferOnTests(unittest.TestCase):
             self.assertEqual(self.service.read_prompt_entry(entry_id).offer_on, expected, entry_id)
 
     def test_impersonate_body_locks_into_the_character(self) -> None:
-        body = self.service.read_prompt_entry("builtin-impersonate").body
+        entry = self.service.read_prompt_entry("builtin-impersonate")
+        body = entry.body
         # Pulls the character in via the seeded `entry` input, resolved AS-OF the
         # conversation's anchor scene (ADR-0055 §1) rather than at book-start.
         self.assertIn("entry_as_of(input.entry, as_of)", body)
@@ -86,6 +87,14 @@ class ImpersonateAndOfferOnTests(unittest.TestCase):
         self.assertIn("char.body", body)
         # A plain conversation — no commit-extraction JSON contract in the seed.
         self.assertNotIn('"fields"', body)
+
+    def test_impersonate_declares_a_hidden_as_of_anchor_input(self) -> None:
+        # The read anchor rides a hidden, launch-set input (ADR-0055 §1) — the
+        # slider seeds it, no widget is shown, and it forwards into `input.as_of`.
+        inputs = {i.name: i for i in self.service.read_prompt_entry("builtin-impersonate").inputs}
+        self.assertIn("as_of", inputs)
+        self.assertTrue(inputs["as_of"].hidden)
+        self.assertFalse(inputs["as_of"].required)
 
     def test_clone_carries_offer_on_and_a_save_round_trips_it(self) -> None:
         clone = self.service.fork_prompt_entry("builtin-impersonate")

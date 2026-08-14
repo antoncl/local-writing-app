@@ -396,6 +396,7 @@ class ImpersonateAsOfPreviewTests(_HelperFixtureBase):
     the anchor scene (ADR-0055 §1). Mirrors impersonate.md's two key lines."""
 
     IMPERSONATE = (
+        '{% set as_of = input.as_of if input.as_of is defined else "" %}'
         "{% set char = entry_as_of(input.entry, as_of) %}"
         '{% role "system" %}You ARE {{ char.title }}.\n'
         "{% if char.body %}{{ char.body }}{% endif %}{% endrole %}"
@@ -419,17 +420,18 @@ class ImpersonateAsOfPreviewTests(_HelperFixtureBase):
     def _preview(self, as_of_scene: str) -> str:
         from app.services.ai.preview import build_preview
 
+        # The anchor rides the prompt's hidden `as_of` input (launch-seeded),
+        # persisted with the chat's inputs — not a build_preview parameter.
         rendered, _ = build_preview(
             project_service=self.service,
             template_source=self.IMPERSONATE,
             target_scene_id="",
             session_id=None,
-            inputs={"entry": self.honor["id"]},
+            inputs={"entry": self.honor["id"], "as_of": as_of_scene},
             text_before="",
             text_after="",
             commit=False,
             subject=self.honor["id"],
-            as_of_scene=as_of_scene,
         )
         return "\n".join(m.text for m in rendered.messages)
 

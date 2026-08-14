@@ -140,7 +140,6 @@ def build_preview(
     selection: str = "",
     resolution_scene_id: str = "",
     subject: str = "",
-    as_of_scene: str = "",
 ) -> tuple[RenderedTemplate, str | None]:
     """Render the template and return (output, session_id_used).
 
@@ -209,10 +208,6 @@ def build_preview(
         "text_after": text_after,
         "selection": selection,
         "date": _DateProxy(_date_cls.today()),
-        # As-of read anchor (ADR-0055 §1): where a subject-anchored prompt reads
-        # its subject from — distinct from `scene` (the scene being written, None
-        # for a card-launched chat). Empty → `entry_as_of` degrades to a base read.
-        "as_of": as_of_scene or None,
     }
 
     try:

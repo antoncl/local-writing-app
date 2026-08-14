@@ -1,6 +1,6 @@
 # ADR-0055: A time-aware conversation reads its subject as-of a scene and stages a mutation the writer places
 
-- Status: **Proposed** — 2026-08-14 (Claude, for Anton's review). Grew out of the ADR-0054
+- Status: **Accepted** — 2026-08-14 (approved by Anton; authored by Claude). Grew out of the ADR-0054
   conversations/impersonate work when the question "how well does this hold up against inheritance,
   overrides, mutations and time-awareness?" exposed that the loop is timeline-blind.
 - Follows: ADR-0013 (time-travel-aware lore — the subject *has* a timeline), ADR-0042 (the edit
@@ -282,7 +282,7 @@ Three mechanics that were open in the first draft, verified against `master@490d
   *better*: as a `metadata` `entity_ref` (§3), deleting the subject *purges* the pin like any other
   reference rather than leaving it silently dangling.
 
-## Still open (to settle before slicing)
+## Deferred (post-v1, not blockers)
 
 - **Nice-to-haves, deferred:** whether a placed set records the *scene* it was placed into (for a
   "placed at ‹scene›" tell), and whether a stale-*field* row in a pending pinned set is actively

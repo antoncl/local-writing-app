@@ -13,7 +13,14 @@
   import PlotTemplates from "@/components/panes/PlotTemplates.svelte";
   import PlotBoardPane from "@/components/panes/PlotBoardPane.svelte";
   import Mutations from "@/components/panes/Mutations.svelte";
-  import { openNewMutationSet } from "@/lib/stores/mutationSets";
+  import MutationSetEditor from "@/components/editor/body/MutationSetEditor.svelte";
+  import {
+    openNewMutationSet,
+    mutationSetEditorStore,
+    closeMutationSetEditor,
+    refreshMutationSetEntries,
+  } from "@/lib/stores/mutationSets";
+  import { refreshReferenceIndexInBackground } from "@/lib/stores/references";
   import Chats from "@/components/panes/Chats.svelte";
   import Search from "@/components/panes/Search.svelte";
   import Todo from "@/components/panes/Todo.svelte";
@@ -712,6 +719,17 @@
   let validation = $derived($validationStore);
   let metadataSchema = $derived($metadataSchemaStore);
   let promptEntries = $derived($promptEntriesStore);
+
+  // The mutation-set editor dialog is hoisted here (ADR-0055 §3) so it opens
+  // from EITHER trigger — the Mutations-pane "+" or a lore card's "New staged
+  // change" — through the shared `mutationSetEditorStore`. (It used to mount
+  // inside the Mutations pane, which only rendered when that pane was open.)
+  // A pinned set adds a set→subject edge, so refresh the reverse index too.
+  async function onMutationSetSaved() {
+    closeMutationSetEditor();
+    await refreshMutationSetEntries().catch(() => {});
+    refreshReferenceIndexInBackground();
+  }
   let plotTemplates = $derived($plotTemplatesStore);
   let assistantEntries = $derived($assistantEntriesStore);
   // The per-pane selected-view spec is no longer derived here: an explicit-view
@@ -935,13 +953,7 @@
   {/snippet}
   {#snippet mutationsBody()}
     <div class="pane-content schema-list">
-      <Mutations
-        loreEntries={loreEntries}
-        promptEntries={promptEntries}
-        structure={structure}
-        researchStructure={researchStructure}
-        knownTags={knownTags}
-      />
+      <Mutations />
     </div>
   {/snippet}
 
@@ -1238,6 +1250,21 @@
 
   {#if tagsManagerOpen}
     <TagManagerDialog onClose={() => (tagsManagerOpen = false)} />
+  {/if}
+
+  {#if $mutationSetEditorStore}
+    <MutationSetEditor
+      initial={$mutationSetEditorStore.editing}
+      preset={$mutationSetEditorStore.preset ?? null}
+      schema={metadataSchema}
+      loreEntries={loreEntries}
+      promptEntries={promptEntries}
+      structure={structure}
+      researchStructure={researchStructure}
+      knownTags={knownTags}
+      onSaved={onMutationSetSaved}
+      onCancel={closeMutationSetEditor}
+    />
   {/if}
 
   {#if error}

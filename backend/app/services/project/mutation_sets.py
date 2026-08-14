@@ -3,9 +3,14 @@
 A mutation set is a reusable, body-less Node kind (`mutation_set`): an
 ordered list of `(field, op, value)` rows plus a `target_entry_type` (the lore
 entry-type its rows apply to). It expands to ordinary inline Model-A markers when
-applied to a chosen entity (the entity is bound at apply time, not stored — the
-set is a template). It is a **stamp, not a live link**: applied markers are
-independent; edit-once-propagate is the deferred v2 (#66).
+applied to a chosen entity. It is a **stamp, not a live link**: applied markers
+are independent; edit-once-propagate is the deferred v2 (#66).
+
+The entity binding is **optional** (ADR-0055 §3): unset ⇒ a reusable template,
+entity chosen at apply time; set (`target_entity`) ⇒ an entity-*pinned* one-off,
+offered only for its own entity and stamped on apply. The pin is a `metadata`
+entity_ref (edge + reference-integrity), distinct from the top-level
+`target_entry_type`/`rows`.
 
 Storage mirrors prompt entries — layered Node markdown files under
 `<project>/mutation-sets/`, but with **no prose body**: the rows + target
@@ -47,6 +52,7 @@ class MutationSetEntriesMixin:
                     title=str(front_matter.get("title") or entry.id),
                     entry_type=self._mutation_set_entry_type(front_matter),
                     target_entry_type=str(front_matter.get("target_entry_type") or ""),
+                    target_entity=self._mutation_set_target_entity(front_matter),
                     row_count=len(rows),
                     source_layer_id=entry.source_layer_id,
                     source_layer_label=entry.source_layer_label,
@@ -67,6 +73,7 @@ class MutationSetEntriesMixin:
             request.title,
             request.entry_type,
             request.target_entry_type,
+            request.target_entity,
             request.rows,
         )
         return self.read_mutation_set_entry(entry_id)
@@ -85,6 +92,7 @@ class MutationSetEntriesMixin:
             revision=self._revision(path),
             entry_type=self._mutation_set_entry_type(front_matter),
             target_entry_type=str(front_matter.get("target_entry_type") or ""),
+            target_entity=self._mutation_set_target_entity(front_matter),
             rows=self._parse_mutation_set_rows(front_matter.get("rows")),
             source_layer_id=index_entry.source_layer_id if index_entry else "",
             source_layer_label=index_entry.source_layer_label if index_entry else "",
@@ -106,6 +114,7 @@ class MutationSetEntriesMixin:
             request.title,
             request.entry_type,
             request.target_entry_type,
+            request.target_entity,
             request.rows,
         )
         self._maybe_rename_node_file(path, request.title)
@@ -125,15 +134,21 @@ class MutationSetEntriesMixin:
         title: str,
         entry_type: str,
         target_entry_type: str,
+        target_entity: str,
         rows: list[MutationSetRow],
     ) -> None:
         rows_payload = [row.model_dump() for row in rows]
+        # ADR-0055 §3: the entity pin is a `metadata` entity_ref (so it earns a
+        # set→subject edge + reference-integrity), NOT top-level front-matter like
+        # target_entry_type/rows. Empty ⇒ no metadata block (omit_empty_metadata),
+        # so a reusable set's file is byte-identical to today's.
+        metadata = {"target_entity": target_entity} if target_entity else {}
         self._write_node_entry_file(
             path,
             node_id,
             title,
             entry_type,
-            {},
+            metadata,
             "",  # body-less: rows live in front matter, not a prose body
             extra={"target_entry_type": target_entry_type, "rows": rows_payload},
             omit_empty_metadata=True,
@@ -143,6 +158,15 @@ class MutationSetEntriesMixin:
     def _mutation_set_entry_type(front_matter: dict[str, Any]) -> str:
         raw = front_matter.get("entry_type") or "mutation_set:mutation_set"
         return raw if isinstance(raw, str) else "mutation_set:mutation_set"
+
+    @staticmethod
+    def _mutation_set_target_entity(front_matter: dict[str, Any]) -> str:
+        # The entity pin round-trips through `metadata.target_entity` — the same
+        # top-level-field ↔ metadata projection chat sessions use for `subject`.
+        metadata = front_matter.get("metadata")
+        if not isinstance(metadata, dict):
+            return ""
+        return str(metadata.get("target_entity", "") or "")
 
     @staticmethod
     def _parse_mutation_set_rows(raw: Any) -> list[MutationSetRow]:

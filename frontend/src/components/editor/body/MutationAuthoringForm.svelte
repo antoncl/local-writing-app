@@ -180,8 +180,18 @@
   let saveAsSet = $state(false);
   let allSets = $state<MutationSetEntrySummary[]>([]);
   // Type-scoped picker: only sets whose target matches the picked entity's type.
+  // A pinned set (ADR-0055 §3, `target_entity` set) is offered ONLY for its own
+  // entity — never for a different character of the same type — so applying it
+  // pre-fills the pinned entity rather than mis-targeting; reusable (un-pinned)
+  // sets stay offered for every matching entity, unchanged.
   const applicableSets = $derived(
-    entity ? allSets.filter((s) => s.target_entry_type === entity.entry_type) : [],
+    entity
+      ? allSets.filter(
+          (s) =>
+            s.target_entry_type === entity.entry_type &&
+            (!s.target_entity || s.target_entity === entity.id),
+        )
+      : [],
   );
 
   $effect(() => {

@@ -186,7 +186,12 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # (e.g. shapeshift vs promotion families) stays available but unused.
             "name": "Mutation set",
             "kind": "mutation_set",
-            "fields": [],
+            # ADR-0055 §3: `target_entity` is the OPTIONAL entity pin. Declaring
+            # it as a schema `entity_ref` (stored in `metadata`, not the top-level
+            # front-matter that carries `target_entry_type`/`rows`) is what earns
+            # the set→subject edge and reference-integrity for free — the same
+            # deal `subject` gets on chat:chat_session. Unset ⇒ reusable template.
+            "fields": ["target_entity"],
             "has_body": False,
         },
         "plot:base": {
@@ -805,6 +810,18 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Subject",
             "type": "entity_ref",
             "picker_config": {"sources": [{"kind": "lore"}, {"kind": "scene"}]},
+        },
+        "target_entity": {
+            # ADR-0055 §3: the OPTIONAL entity a mutation set is pinned to — the
+            # character this staged change is *about*. Unset ⇒ the reusable,
+            # type-scoped template of #62 (entity bound at apply time); set ⇒ an
+            # entity-pinned one-off, offered only for its own entity and stamping
+            # it on apply. A live `entity_ref` so it rides the same kind-neutral
+            # edge machinery as `subject`: the pinned entity lists its staged
+            # changes through the reverse index, and deleting it purges the pin.
+            "name": "Pinned to",
+            "type": "entity_ref",
+            "picker_config": {"sources": [{"kind": "lore"}]},
         },
         "plotline": {
             # A single reference to a `plot:plotline` thread. A shared catalog

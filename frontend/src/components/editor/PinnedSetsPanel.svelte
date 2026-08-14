@@ -1,0 +1,189 @@
+<script lang="ts">
+  // The Staged-changes surface on a lore card (ADR-0055 §3). A mutation set can
+  // be *pinned* to an entity (`target_entity`); this panel lists the sets pinned
+  // to THIS entity and offers ＋New to author another. It is the entity-side home
+  // for "propose a change about this character" — position-free bundles the
+  // writer later PLACES in a scene (§5), which is where they become real.
+  //
+  // Not a bespoke widget (the smell ADR-0051 names): membership is the same
+  // reverse-reference lookup the Conversations panel runs (`pinnedSetsFor` over
+  // the in-memory reverse index), and the rows render through NodeRow /
+  // ViewNodeList like every other node list. The header mirrors
+  // ConversationsPanel's disclosure row (a NodeRow trailing slot would flatten
+  // the ＋New button into an icon tile).
+  import NodeRow from "@/components/widgets/NodeRow.svelte";
+  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
+  import CountPill from "@/components/widgets/CountPill.svelte";
+  import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
+  import { nodeSet } from "@/lib/views/viewResult";
+  import { api } from "@/lib/api";
+  import { referenceIndexStore } from "@/lib/stores/references";
+  import { mutationSetEntriesStore, openNewMutationSet, openEditMutationSet } from "@/lib/stores/mutationSets";
+  import { pinnedSetsFor } from "@/lib/views/pinnedSets";
+  import type { MutationSetEntrySummary } from "@/lib/types";
+
+  let {
+    entityId,
+    entityEntryType = "",
+  }: {
+    entityId: string;
+    // The entity's schema entry_type (e.g. lore:character): a New set is pinned
+    // to this entity and type-locked to it (ADR-0055 §3). Empty ⇒ ＋New hidden.
+    entityEntryType?: string;
+  } = $props();
+
+  // The sets pinned to this entity, in roster order (title-sorted). A
+  // MutationSetEntrySummary carries its `entry_type`, so it satisfies EvalNode —
+  // a flat resume-first list via nodeSet (no grouping).
+  let pinned = $derived(
+    pinnedSetsFor(entityId, $referenceIndexStore, $mutationSetEntriesStore),
+  );
+
+  let expanded = $state(true);
+  let error = $state("");
+
+  function startNew(): void {
+    if (!entityId || !entityEntryType) return;
+    // Pin by construction (ADR-0055 §3): the card seeds the entity + its type,
+    // so the resulting set is entity-pinned and type-locked from the start.
+    openNewMutationSet({ target_entity: entityId, target_entry_type: entityEntryType });
+  }
+
+  async function openSet(id: string): Promise<void> {
+    error = "";
+    try {
+      openEditMutationSet(await api.getMutationSetEntry(id));
+    } catch (err) {
+      error = `Could not open the set: ${err instanceof Error ? err.message : err}`;
+    }
+  }
+</script>
+
+{#if entityEntryType}
+  <section class="entry-pinned-sets" aria-label="Staged changes">
+    <div class="ps-header">
+      <button
+        type="button"
+        class="ps-toggle"
+        aria-expanded={expanded}
+        onclick={() => (expanded = !expanded)}
+      >
+        <GroupCaret collapsed={!expanded} />
+        <span class="ps-title">Staged changes</span>
+        <CountPill count={pinned.length} />
+      </button>
+      <button
+        type="button"
+        class="ps-new"
+        title="Stage a new change for this entry"
+        onclick={startNew}
+      >＋ New</button>
+    </div>
+    {#if error}
+      <p class="ps-error" role="alert">{error}</p>
+    {/if}
+    {#if expanded}
+      <div class="ps-list">
+        <ViewNodeList
+          result={nodeSet(pinned)}
+          mode="tree"
+          onClick={(node) => void openSet(node.id)}
+          row={pinnedRow}
+        >
+          {#snippet whenEmpty()}
+            <p class="muted">No staged changes yet — stage one with ＋New, then place it in a scene.</p>
+          {/snippet}
+        </ViewNodeList>
+      </div>
+    {/if}
+  </section>
+{/if}
+
+{#snippet pinnedRow(set: MutationSetEntrySummary, rowCtx: RowCtx<MutationSetEntrySummary>)}
+  <NodeRow title={set.title || "Untitled change"} depth={rowCtx.depth} onClick={rowCtx.onClick}>
+    {#snippet trailing()}
+      <CountPill count={set.row_count} />
+    {/snippet}
+  </NodeRow>
+{/snippet}
+
+<style>
+  .entry-pinned-sets {
+    padding-top: 8px;
+  }
+
+  /* Disclosure header — mirrors ConversationsPanel's (serif title + hairline
+     rule), so the two entry-card surfaces read as siblings. */
+  .ps-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 1px solid var(--divider);
+    padding-bottom: 4px;
+    margin-bottom: 6px;
+  }
+
+  .ps-toggle {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 6px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .ps-toggle:hover {
+    background: var(--accent-soft);
+  }
+
+  .ps-title {
+    font-family: var(--serif);
+    font-size: var(--fs-md);
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  /* A quiet text button, matching ConversationsPanel's ＋New. */
+  .ps-new {
+    font: inherit;
+    font-size: var(--fs-xs);
+    padding: 2px 8px;
+    border-radius: var(--r-sm);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-2);
+    cursor: pointer;
+    white-space: nowrap;
+    flex: none;
+  }
+  .ps-new:hover {
+    color: var(--text);
+    border-color: var(--accent);
+  }
+
+  .ps-list {
+    padding: 8px;
+    background: var(--tier1);
+    border-radius: 10px;
+  }
+
+  .ps-error {
+    margin: 0 0 6px;
+    padding: 2px 4px;
+    color: var(--danger);
+    font-size: var(--fs-sm);
+  }
+
+  .muted {
+    margin: 0;
+    padding: 2px 4px;
+    color: var(--text-3);
+    font-size: var(--fs-sm);
+  }
+</style>

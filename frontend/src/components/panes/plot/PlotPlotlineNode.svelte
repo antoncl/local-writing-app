@@ -367,10 +367,19 @@
         </div>
         <div class="editor-foot">
           <p class="saving-hint muted" class:visible={saving} aria-live="polite">{saving ? "Saving…" : ""}</p>
-          <!-- Delete moved off the retired Plotlines rail onto the node (ADR-0053 §3). -->
-          <button class="delete-plotline" onclick={() => actions?.onDelete(id!)}>
-            <i class="ti ti-trash" aria-hidden="true"></i> Delete plotline
-          </button>
+          <div class="foot-actions">
+            {#if actions?.onOpenInEditor}
+              <!-- Escape hatch (ADR-0053 §3): the roomier full-pane editor for beat work
+                   that is crowded on the card. On-node editing stays the default. -->
+              <button class="open-in-editor" onclick={() => actions?.onOpenInEditor?.(id!)}>
+                <i class="ti ti-pencil" aria-hidden="true"></i> Open in editor
+              </button>
+            {/if}
+            <!-- Delete moved off the retired Plotlines rail onto the node (ADR-0053 §3). -->
+            <button class="delete-plotline" onclick={() => actions?.onDelete(id!)}>
+              <i class="ti ti-trash" aria-hidden="true"></i> Delete plotline
+            </button>
+          </div>
         </div>
       {/if}
     </div>
@@ -757,6 +766,12 @@
   .saving-hint.visible {
     opacity: 1;
   }
+  .foot-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .open-in-editor,
   .delete-plotline {
     appearance: none;
     flex: none;
@@ -770,6 +785,10 @@
     font-size: var(--fs-xs);
     color: var(--text-3);
     cursor: pointer;
+  }
+  .open-in-editor:hover {
+    color: var(--text);
+    border-color: var(--border);
   }
   .delete-plotline:hover {
     color: var(--danger, var(--text));

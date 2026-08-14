@@ -25,6 +25,7 @@
     overriddenNodePositions,
     projectionDataKey,
     readBoardPositions,
+    reconcilePlotlineUiState,
     type PlotBoardNode,
   } from "@/lib/plot/plotBoardLayout";
   import { buildBoardEdges, EDGE_LAYERS, type EdgeLayer } from "@/lib/plot/plotBoardEdges";
@@ -232,6 +233,10 @@
       }
     },
     onDelete: (id) => removePlotline(id),
+    // The escape hatch (ADR-0053 §3): open the plotline in a full NodeEditor pane for
+    // roomy beat work. Mirrors the card provider's `onOpen`/`openPlotCard` (line above).
+    // On-node inline editing stays the default surface.
+    onOpenInEditor: (id) => void editorPanes.openPlotline(id),
   });
 
   // A card's `plotline` backlink no longer opens an editor pane — it reveals the
@@ -250,6 +255,18 @@
       expandedPlotlineId = revealId;
     }
     plotlineReveal.set(null);
+  });
+
+  // Self-heal the ephemeral focus/expand state against the live board (#928). A plotline
+  // can be deleted from its node's Delete OR the full-pane escape hatch's tab; only the
+  // node path clears these ids directly, so a pane delete could leave a focused/expanded
+  // id dangling on a thread that's gone — the board stays dimmed with no eye left to clear
+  // it. Reconcile against the refreshed projection (which changes per refetch, not per
+  // drag frame like flowNodes); a null (loading) projection is left untouched.
+  $effect(() => {
+    const healed = reconcilePlotlineUiState(projection, { focusedPlotlineId, expandedPlotlineId });
+    if (healed.focusedPlotlineId !== focusedPlotlineId) focusedPlotlineId = healed.focusedPlotlineId;
+    if (healed.expandedPlotlineId !== expandedPlotlineId) expandedPlotlineId = healed.expandedPlotlineId;
   });
 
   // Delete a card from the board (#860). Confirmed (destructive, app dialog) — the

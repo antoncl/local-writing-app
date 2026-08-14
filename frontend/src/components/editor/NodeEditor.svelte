@@ -701,10 +701,11 @@
   // The plot document kinds are synthetic shapes whose schema `kind` is "plot", not
   // their documentKind — so the kind-filter below finds nothing and the type select
   // falls back to the raw entry_type id ("plot:template_instance") instead of a name.
-  // List just the node's own type: the plot classes (card / template) are distinct, so
-  // a cross-class reclassify is never offered (the #720 call, now generalized past
-  // plot_template). Plotlines are edited on the board node, not in a pane (ADR-0053 §3).
-  const OWN_TYPE_ONLY = new Set(["plot_template", "plot_card"]);
+  // List just the node's own type: the plot classes (card / template / plotline) are
+  // distinct, so a cross-class reclassify is never offered (the #720 call, now
+  // generalized past plot_template). A plotline is edited on its board node by default,
+  // but can also be opened in a full pane (ADR-0053 §3, the escape hatch) — same rule.
+  const OWN_TYPE_ONLY = new Set(["plot_template", "plot_card", "plotline"]);
   let documentEntryTypes = $derived(
     OWN_TYPE_ONLY.has(documentKind)
       ? Object.entries(metadataSchema?.entry_types ?? {}).filter(([typeId]) => typeId === entryType)

@@ -224,6 +224,20 @@ describe("PlotPlotlineNode on-node editing (ADR-0053 §3)", () => {
     expect(deleted).toEqual(["line_1"]);
   });
 
+  it("the expanded editor offers Open in editor (the escape hatch), which calls onOpenInEditor", async () => {
+    const opened: string[] = [];
+    fakeActions({ onOpenInEditor: (id) => opened.push(id) }).mount();
+    const open = await screen.findByRole("button", { name: "Open in editor" });
+    await fireEvent.click(open);
+    expect(opened).toEqual(["line_1"]);
+  });
+
+  it("hides Open in editor when the host provides no onOpenInEditor (optional action)", async () => {
+    fakeActions().mount(); // default fakeActions omits onOpenInEditor
+    await screen.findByPlaceholderText("Plotline name"); // wait for the editor to expand
+    expect(screen.queryByRole("button", { name: "Open in editor" })).toBeNull();
+  });
+
   it("removing a beat saves the shortened roster", async () => {
     const { saved } = fakeActions().mount();
     await screen.findByPlaceholderText("Plotline name");

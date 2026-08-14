@@ -73,6 +73,33 @@ export function boardIsEmpty(projection: PlotBoardProjection): boolean {
   return projection.cards.length === 0 && projection.plotlines.length === 0;
 }
 
+// The board's ephemeral per-plotline UI state: which thread is FOCUSED (S5b — its card
+// chain lit, the rest dimmed) and which node is EXPANDED into its inline editor. Held on
+// PlotEditor, not the projection, so it survives a board rebuild.
+export type PlotlineUiState = { focusedPlotlineId: string | null; expandedPlotlineId: string | null };
+
+// Reconcile that ephemeral state against the live projection (#928). A plotline can now
+// be deleted from more than one place — its node's Delete AND the full-pane escape hatch's
+// tab — and only the node path clears these ids directly. A delete from the pane just
+// refreshes the board, so a focused/expanded id would dangle on a plotline that's gone,
+// leaving the board dimmed (or logically expanded) with no node left to clear it. This is
+// the path-independent backstop: after any refetch, drop an id the projection no longer
+// contains. A NULL projection (loading / failed board) is left untouched so a transient
+// refetch can't drop a still-live focus; and an unchanged state returns the SAME object so
+// the caller can skip a no-op write.
+export function reconcilePlotlineUiState(
+  projection: PlotBoardProjection | null,
+  state: PlotlineUiState,
+): PlotlineUiState {
+  if (!projection) return state;
+  const live = new Set(projection.plotlines.map((plotline) => plotline.id));
+  const focusedPlotlineId = state.focusedPlotlineId && live.has(state.focusedPlotlineId) ? state.focusedPlotlineId : null;
+  const expandedPlotlineId =
+    state.expandedPlotlineId && live.has(state.expandedPlotlineId) ? state.expandedPlotlineId : null;
+  if (focusedPlotlineId === state.focusedPlotlineId && expandedPlotlineId === state.expandedPlotlineId) return state;
+  return { focusedPlotlineId, expandedPlotlineId };
+}
+
 // Geometry (px). Exported so the unit test asserts against the same constants the
 // layout uses rather than hard-coding magic numbers that could silently drift.
 export const CARD_WIDTH = 210;

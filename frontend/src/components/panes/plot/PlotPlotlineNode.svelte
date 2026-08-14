@@ -694,6 +694,12 @@
   .beat-details textarea {
     resize: vertical;
   }
+  /* In the beat-main flex row the title input must be free to shrink below its content
+     width (a long beat title would otherwise push the row past the narrow node). */
+  .beat-title-input {
+    flex: 1;
+    min-width: 0;
+  }
   .name-input:focus,
   .beat-title-input:focus,
   .beat-details textarea:focus {
@@ -796,6 +802,10 @@
     align-items: center;
     justify-content: space-between;
     gap: 8px;
+    /* The node is a fixed, narrow PLOTLINE_WIDTH; the saving hint + two labelled action
+       buttons don't fit on one line, so let the actions wrap below rather than push a
+       horizontal scrollbar into the node (#945 — expanded-plotline overflow). */
+    flex-wrap: wrap;
   }
   .saving-hint {
     margin: 0;
@@ -811,7 +821,10 @@
   .foot-actions {
     display: inline-flex;
     align-items: center;
+    justify-content: flex-end;
     gap: 4px;
+    /* Stack the two buttons if even alone they exceed the narrow node width. */
+    flex-wrap: wrap;
   }
   .open-in-editor,
   .delete-plotline {

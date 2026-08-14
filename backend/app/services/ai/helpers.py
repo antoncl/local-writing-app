@@ -36,6 +36,7 @@ from app.services.ai.sessions import AISession
 from app.services.error_log import append_error_line
 
 if TYPE_CHECKING:
+    from app.models import MutationSetRow
     from app.services.project_service import ProjectService
 
 VALID_PARTITIONS = {"all", "stable", "volatile"}
@@ -1166,6 +1167,40 @@ def _format_lore_block(
     if not chunks:
         return ""
     return "<lore>\n" + "\n\n".join(chunks) + "\n</lore>"
+
+
+def _format_staged_set_block(
+    label: str,
+    target_entry_type: str,
+    rows: list[MutationSetRow],
+) -> str:
+    """Render a chat's OWNED staged mutation set as an XML context block (ADR-0055 S4).
+
+    A committing brainstorm stages a position-free mutation set pinned to its
+    subject and OWNS it (the chat->set edge). That set is seeded here into the AI
+    context on every send, so reopening the conversation continues refining the
+    SAME change instead of restarting. The block names the change and lists its
+    `(field, op, value)` rows; the writer still authors WHERE it lands
+    (placement) — the AI proposes the content, never the position.
+
+    Returns "" when there is nothing to seed (no rows, or every row is
+    field-less), so the caller appends no empty block.
+    """
+    clean = [row for row in rows if getattr(row, "field", "")]
+    if not clean:
+        return ""
+    attrs: list[str] = []
+    if label:
+        attrs.append(f"label={quoteattr(label)}")
+    if target_entry_type:
+        attrs.append(f"target_type={quoteattr(target_entry_type)}")
+    attr_str = (" " + " ".join(attrs)) if attrs else ""
+    lines = "\n".join(
+        f"  <mutation field={quoteattr(row.field)} op={quoteattr(row.op or 'replace')}>"
+        f"{xml_escape(str(row.value or ''))}</mutation>"
+        for row in clean
+    )
+    return f"<staged_change{attr_str}>\n{lines}\n</staged_change>"
 
 
 def _effective_aliases(entry: Any, overrides: dict[str, str | list[str]]) -> list[str]:

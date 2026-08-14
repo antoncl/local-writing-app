@@ -472,6 +472,24 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
 # --- AI: chat completion (first real model call) ---
 
 
+def _staged_set_block(project: ProjectService, staged_set_id: str) -> str:
+    """Resolve a chat's OWNED mutation set and render its seed block (ADR-0055 §4).
+
+    Returns "" when the id is empty or no longer resolves (e.g. a deleted set),
+    so the send path stays a thin `if block: append`. Lives here rather than in
+    `helpers.py` (which is at its size cap) since it is the send path's own step.
+    """
+    if not staged_set_id:
+        return ""
+    from app.services.ai.helpers import _format_staged_set_block
+
+    try:
+        staged = project.read_mutation_set_entry(staged_set_id)
+    except ProjectServiceError:
+        return ""
+    return _format_staged_set_block(staged.title, staged.target_entry_type, staged.rows)
+
+
 def _prepare_chat_send_payload(
     project: ProjectService,
     chat_id: str | None,
@@ -481,7 +499,10 @@ def _prepare_chat_send_payload(
     """When chat_id is bound, run the implicit-context expander on the last
     user message, append new detections to ChatSession.journal, save the
     chat, and return:
-      - system_blocks: [{system_prompt, 1h ttl}, {journal_xml, 5m ttl}]
+      - system_blocks, in stable→volatile order so longer TTLs stay ahead of
+        shorter: [{system_prompt, 1h}, {staged_change, 1h}?, {journal_xml, 5m}]
+        — the staged_change block (ADR-0055 S4) is present only when the chat
+        owns a resolvable mutation set
       - session_id for OpenRouter provider stickiness
       - journal_added: lore IDs newly detected on THIS turn (for audit UI)
 
@@ -545,6 +566,13 @@ def _prepare_chat_send_payload(
         # 1h TTL because this only changes when the chat is locked at first
         # send; multi-turn sessions reuse this for hours.
         blocks.append({"text": system_prompt, "cache_break_after": True, "ttl": "1h"})
+    # Slot 1b (ADR-0055 S4): the mutation set this chat OWNS, seeded so a resumed
+    # brainstorm continues refining the same staged change. Stable per chat (it
+    # changes only when the writer re-stages), so it sits above the turn-by-turn
+    # journal with a matching 1h TTL. Empty / dangling ref → "" → no block.
+    staged_xml = _staged_set_block(project, chat.staged_set)
+    if staged_xml:
+        blocks.append({"text": staged_xml, "cache_break_after": True, "ttl": "1h"})
     if journal_for_send:
         journal_xml = _format_lore_block(
             project, [e.entry_id for e in journal_for_send]

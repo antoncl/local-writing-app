@@ -128,7 +128,7 @@ class PlotContextHelperTests(_PlotAiContextBase):
         # how to use the lens (`<use_guidance>`) and the questions to ask
         # (`<diagnostic_questions>`) — so the model measures cards against the
         # structure's intent, not just per-beat one-liners.
-        plotline = self._plotline()  # three-act ships ai_use_guidance + diagnostic questions
+        plotline = self._plotline()  # three-act ships ai_use_guidance + questions + weak spots
         out = self._render('{% role "system" %}{{ plot_context() }}{% endrole %}')
         self.assertIn("<use_guidance>", out)
         self.assertIn(plotline.metadata["source_ai_guidance"], out)  # the actual snapshot text
@@ -136,6 +136,8 @@ class PlotContextHelperTests(_PlotAiContextBase):
         self.assertEqual(
             out.count("<question>"), len(plotline.metadata["source_diagnostic_questions"])
         )
+        self.assertIn("<weak_spots>", out)
+        self.assertEqual(out.count("<spot>"), len(plotline.metadata["source_weak_spots"]))
 
     def test_a_plotline_with_guidance_but_no_beats_still_opens(self) -> None:
         # The self-close guard is "no guidance AND no beats", not "no beats": a plotline

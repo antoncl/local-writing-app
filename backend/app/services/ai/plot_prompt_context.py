@@ -38,12 +38,13 @@ def _plot_context_header(packet: PlotContext) -> str:
 
 def _render_plotline(plotline) -> list[str]:
     """One `<plotline>` element: its structural guidance then its beat roster
-    (ADR-0053 §1). `<use_guidance>` (how to use the structure as a diagnostic lens)
-    and `<diagnostic_questions>` (what to ask of the draft) are the template's
-    guidance, snapshotted at instantiate — so the model measures cards against the
-    structure's intent, not just per-beat one-liners. A plotline with no guidance and
-    no beats (ad-hoc / empty) self-closes; otherwise each beat is a `<beat>` element,
-    with guidance as element text when present, self-closing when not."""
+    (ADR-0053 §1). `<use_guidance>` (how to use the structure as a diagnostic lens),
+    `<diagnostic_questions>` (what to ask of the draft), and `<weak_spots>` (the
+    structure's characteristic failure modes, to check the draft against) are the
+    template's guidance, snapshotted at instantiate — so the model measures cards
+    against the structure's intent, not just per-beat one-liners. A plotline with no
+    guidance and no beats (ad-hoc / empty) self-closes; otherwise each beat is a
+    `<beat>` element, with guidance as element text when present, self-closing when not."""
     attrs = f"title={quoteattr(plotline.title)}"
     if plotline.source_template_name:
         attrs += f" structure={quoteattr(plotline.source_template_name)}"
@@ -54,6 +55,10 @@ def _render_plotline(plotline) -> list[str]:
         body.append("      <diagnostic_questions>")
         body.extend(f"        <question>{escape(q)}</question>" for q in plotline.diagnostic_questions)
         body.append("      </diagnostic_questions>")
+    if plotline.weak_spots:
+        body.append("      <weak_spots>")
+        body.extend(f"        <spot>{escape(w)}</spot>" for w in plotline.weak_spots)
+        body.append("      </weak_spots>")
     for beat in plotline.beats:
         battrs = f"title={quoteattr(beat.title)}"
         if beat.function:

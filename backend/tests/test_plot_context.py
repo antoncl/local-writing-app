@@ -174,6 +174,8 @@ class PlotlineRosterTests(PlotContextTestCase):
         self.assertTrue(context_line.ai_guidance)  # the three-act fixture actually has guidance
         self.assertEqual(context_line.diagnostic_questions, plotline.metadata.get("source_diagnostic_questions"))
         self.assertTrue(context_line.diagnostic_questions)
+        self.assertEqual(context_line.weak_spots, plotline.metadata.get("source_weak_spots"))
+        self.assertTrue(context_line.weak_spots)  # the three-act fixture ships weak spots
 
     def test_a_card_link_to_a_departed_beat_is_dropped(self) -> None:
         plotline = self._plotline()

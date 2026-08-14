@@ -788,9 +788,10 @@ class PlotMixin:
         *copied*, not linked — a plotline must stand alone (an ad-hoc one has no
         template at all), and snapshotting is what lets the writer diverge from the
         generic beats freely. `source_template_id` / `source_template_name` record the
-        lineage, and `source_ai_guidance` / `source_diagnostic_questions` snapshot the
-        template's structural guidance (how to use the lens + the questions to ask of
-        the draft) so the diagnostic reasons with it — all snapshots, so the plotline
+        lineage, and `source_ai_guidance` / `source_diagnostic_questions` /
+        `source_weak_spots` snapshot the template's structural guidance (how to use the
+        lens + the questions to ask + the characteristic failure modes) so the
+        diagnostic reasons with it — all snapshots, so the plotline
         stays coherent and self-contained after it diverges or the source is gone.
         """
         source = self.read_plot_template(template_id)
@@ -812,6 +813,7 @@ class PlotMixin:
                 "source_template_name": source.title,
                 "source_ai_guidance": source.template.ai_use_guidance,
                 "source_diagnostic_questions": list(source.template.global_diagnostic_questions),
+                "source_weak_spots": list(source.template.common_weak_spots),
             },
         )
         return self.read_plotline(new_id)

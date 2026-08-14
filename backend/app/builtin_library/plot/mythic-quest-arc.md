@@ -18,6 +18,10 @@ template:
   - Which story state changes because of this beat?
   - Which cards or scenes provide evidence for the function marker?
   - Does the set of claimed cards make the beat feel earned?
+  common_weak_spots:
+  - "The known world is thin, so departure has no weight."
+  - "Trials test only skill and never belief, loyalty, or identity."
+  - "The return is skipped, so the journey has no social or internal consequence."
   source_refs:
   - id: local_writing_app_generic
     title: Local Writing App generic plotting rubric

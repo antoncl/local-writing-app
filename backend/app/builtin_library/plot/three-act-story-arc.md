@@ -19,6 +19,10 @@ template:
   - Which story state changes because of this beat?
   - Which cards or scenes provide evidence for the function marker?
   - Does the set of claimed cards make the beat feel earned?
+  common_weak_spots:
+  - "The first turn is only a new event, not a commitment."
+  - "The midpoint raises stakes without changing what the protagonist understands or does."
+  - "The resolution explains consequences instead of showing changed behavior."
   source_refs:
   - id: local_writing_app_generic
     title: Local Writing App generic plotting rubric

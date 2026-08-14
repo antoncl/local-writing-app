@@ -374,7 +374,8 @@ class PlotContextPlotline(BaseModel):
     (how to use this structure as a diagnostic lens) and `diagnostic_questions` (what
     to ask of the draft) are the template's guidance, snapshotted at instantiate — the
     structural intent the AI reasons with beyond per-beat one-liners; blank/empty for
-    an ad-hoc plotline."""
+    an ad-hoc plotline. `weak_spots` are the structure's characteristic failure modes,
+    fed as things to check the draft against."""
 
     id: str
     title: str
@@ -382,6 +383,7 @@ class PlotContextPlotline(BaseModel):
     source_template_name: str = ""
     ai_guidance: str = ""
     diagnostic_questions: list[str] = Field(default_factory=list)
+    weak_spots: list[str] = Field(default_factory=list)
     beats: list[PlotContextBeat] = Field(default_factory=list)
 
 

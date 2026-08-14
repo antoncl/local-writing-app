@@ -19,6 +19,10 @@ template:
   - Which story state changes because of this beat?
   - Which cards or scenes provide evidence for the function marker?
   - Does the set of claimed cards make the beat feel earned?
+  common_weak_spots:
+  - "Attraction is asserted but not dramatized."
+  - "The rupture depends only on an easily fixed misunderstanding."
+  - "The ending promises commitment without showing changed behavior."
   source_refs:
   - id: local_writing_app_generic
     title: Local Writing App generic plotting rubric

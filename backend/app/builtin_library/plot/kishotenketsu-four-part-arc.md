@@ -20,6 +20,10 @@ template:
   - Which story state changes because of this beat?
   - Which cards or scenes provide evidence for the function marker?
   - Does the set of claimed cards make the beat feel earned?
+  common_weak_spots:
+  - "The development repeats the introduction instead of deepening it."
+  - "The turn is treated as a mandatory combat climax."
+  - "The ending resolves events without integrating the contrast."
   source_refs:
   - id: local_writing_app_generic
     title: Local Writing App generic plotting rubric

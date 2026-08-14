@@ -83,6 +83,37 @@ export async function instantiateTemplateOnBoard(templateId: string): Promise<st
   return line.id;
 }
 
+// ── Undo substrate (ADR-0053 §7) ────────────────────────────────────────────
+// The plotline twins of the card capture/restore/recreate helpers (plotBoard.ts).
+// A plotline's whole authored state = title + description body + metadata (colour +
+// instance_beats + the hidden source_template_* lineage), so a restore keeps the
+// lineage a per-field diff would forget.
+
+export type PlotlineState = { title: string; body: string; metadata: PlotlineEntry["metadata"] };
+
+export function plotlineStateOf(entry: PlotlineEntry): PlotlineState {
+  return { title: entry.title, body: entry.body, metadata: structuredClone(entry.metadata) };
+}
+
+export async function getPlotlineState(id: string): Promise<PlotlineState> {
+  return plotlineStateOf(await api.getPlotline(id));
+}
+
+// Restore a captured state onto a plotline that still exists (a field/beat-edit
+// reversal). Fetch-fresh for the live revision, then refresh roster + board.
+export async function restorePlotlineState(id: string, state: PlotlineState): Promise<void> {
+  const entry = await api.getPlotline(id);
+  await api.savePlotline({ ...entry, title: state.title, metadata: state.metadata }, state.body);
+  await Promise.all([refreshPlotlines(), refreshAfterMutation()]);
+}
+
+// Recreate a deleted plotline under its ORIGINAL id, then restore its content
+// (create-then-PUT) — so an instantiated plotline returns with its beats + lineage.
+export async function recreatePlotline(id: string, state: PlotlineState): Promise<void> {
+  await api.createPlotline(state.title, id);
+  await restorePlotlineState(id, state);
+}
+
 export function clearPlotlines(): void {
   plotlineEntriesStore.set([]);
 }

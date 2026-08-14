@@ -31,6 +31,7 @@
   import { loadEdgeLayers, saveEdgeLayers, toggleEdgeLayer } from "@/lib/plot/edgeLayerPrefs";
   import { GraphUndoController } from "@/lib/graph/graphUndoController.svelte";
   import type { GraphPort } from "@/lib/graph/graphCommands";
+  import { PlotUndoRecorder, defaultPlotCommandPort } from "@/lib/plot/plotCommands";
   import {
     savePlotBoardLayout,
     realizeCard,
@@ -119,8 +120,10 @@
   let overriddenIds = new Set<string>();
 
   // The board's undo history (ADR-0050): the shared caretaker via GraphUndoController,
-  // its own instance per §3, replaying through a port over our rune arrays. In S7c
-  // it records only drags — content ops are intentful and outside undo.
+  // its own instance per §3, replaying through a port over our rune arrays. Drags
+  // record through the graph port (in-memory position swaps); content ops record
+  // through the recorder below onto the SAME caretaker (ADR-0053 §7) — one stack, one
+  // Ctrl+Z, one button, whole-board undo.
   const graphPort: GraphPort<PlotBoardNode, Edge> = {
     getNodes: () => flowNodes,
     setNodes: (n) => (flowNodes = n),
@@ -128,6 +131,15 @@
     setEdges: (e) => (flowEdges = e),
   };
   const undoCtl = new GraphUndoController<PlotBoardNode, Edge>(graphPort);
+  // Records the async content commands (create/delete/edit of cards + plotlines,
+  // seed) onto the shared caretaker. It captures whole-entry before/after snapshots
+  // around each forward op and reads the live projection to find a delete's referrers
+  // (ADR-0053 §7). Realize is NOT recorded here — its scene-file mint is S6b.
+  const undoRecorder = new PlotUndoRecorder(
+    defaultPlotCommandPort(),
+    (command) => undoCtl.record(command),
+    () => projection,
+  );
 
   // Per-card actions handed to PlotCardNode via context (ADR-0048 S7d). Content ops
   // are intentful backend mutations OUTSIDE the layout caretaker (binding decision 1)
@@ -143,24 +155,33 @@
 
   setContext<PlotCardActions>(PLOT_CARD_ACTIONS, {
     onOpen: (cardId) => void editorPanes.openPlotCard(cardId),
+    // Realize mints a scene FILE — not recorded here (its undo deletes the scene; S6b).
     onRealize: (cardId) => void realizeCard(cardId),
-    onDetach: (cardId) => void detachCardScene(cardId),
-    onEditTitle: (cardId, title) => void renameCard(cardId, title),
-    onEditSynopsis: (cardId, synopsis) => void saveCardSynopsis(cardId, synopsis),
+    // Every other card op is a whole-card before/after edit recorded onto the shared
+    // caretaker (§7). Detach only toggles the `scene` ref (no file touched), so it IS
+    // undoable as a plain field edit. Each store helper still refetches the projection,
+    // so the board re-projects the changed card.
+    onDetach: (cardId) => void undoRecorder.cardEdit(cardId, "detach scene", () => detachCardScene(cardId)),
+    onEditTitle: (cardId, title) => void undoRecorder.cardEdit(cardId, "rename card", () => renameCard(cardId, title)),
+    onEditSynopsis: (cardId, synopsis) =>
+      void undoRecorder.cardEdit(cardId, "edit synopsis", () => saveCardSynopsis(cardId, synopsis)),
     // Reassign the card's plotline ("" → Unassigned). A content op → the projection's
-    // data-key changes → the board rebuilds and the card re-colours (its container, and
-    // so its position, are unchanged — plotline is now colour, not grouping). A getter
-    // so the submenu reads the current plotlines fresh from the projection (the
-    // designerContext pattern).
-    onSetPlotline: (cardId, plotlineId) => void reassignCardPlotline(cardId, plotlineId),
-    // Link a beat dropped from the Arcs palette (#824); unlink via the badge ×. Content
-    // ops → the projection's data-key folds each card's beats → the board rebuilds and
-    // the badges refresh.
-    onLinkBeat: (cardId, instance, beatId) => void linkCardBeat(cardId, instance, beatId),
-    onUnlinkBeat: (cardId, instance, beatId) => void unlinkCardBeat(cardId, instance, beatId),
+    // data-key changes → the board rebuilds and the card re-colours. A getter so the
+    // submenu reads the current plotlines fresh from the projection (the designerContext
+    // pattern).
+    onSetPlotline: (cardId, plotlineId) =>
+      void undoRecorder.cardEdit(cardId, "reassign plotline", () => reassignCardPlotline(cardId, plotlineId)),
+    // Link a beat dropped from a plotline node (#824); unlink via the badge ×. A beat
+    // drop can also adopt the card's primary (#863), which the whole-card before/after
+    // flip reverses along with the link.
+    onLinkBeat: (cardId, instance, beatId) =>
+      void undoRecorder.cardEdit(cardId, "link beat", () => linkCardBeat(cardId, instance, beatId)),
+    onUnlinkBeat: (cardId, instance, beatId) =>
+      void undoRecorder.cardEdit(cardId, "unlink beat", () => unlinkCardBeat(cardId, instance, beatId)),
     // Declare an unattached card off_page vs unwritten (Slice 5b). on_page is derived
     // from the scene, so it is never set here.
-    onSetPageStatus: (cardId, status) => void setCardPageStatus(cardId, status),
+    onSetPageStatus: (cardId, status) =>
+      void undoRecorder.cardEdit(cardId, "set page status", () => setCardPageStatus(cardId, status)),
     onDelete: (cardId) => removeCard(cardId),
     get plotlines() {
       return projection?.plotlines ?? [];
@@ -197,7 +218,9 @@
     // server rather than looping 409s.
     save: async (entry) => {
       try {
-        return await savePlotlineEntry(entry);
+        // Record a whole-plotline before/after edit onto the shared caretaker (§7);
+        // returns the saved entry so the node resyncs its revision.
+        return await undoRecorder.plotlineEdit(entry.id, "edit plotline", () => savePlotlineEntry(entry));
       } catch (e) {
         editorPanes.setError(e instanceof Error ? e.message : "Couldn't save the plotline.");
         throw e;
@@ -235,7 +258,9 @@
       confirmLabel: "Delete card",
       destructive: true,
       onConfirm: async () => {
-        await deleteCard(id);
+        // Recorded onto the caretaker (§7): captures the card + its inbound causal
+        // referrers, deletes, so Ctrl+Z restores the card and reconnects those edges.
+        await undoRecorder.deleteCard(id, () => deleteCard(id));
         // Close a NodeEditor pane open on this card ("Open card"): the node is gone,
         // so the pane would 404 on its next save. Mirrors editorPaneDelete's own
         // post-delete tearDown — find by document id, force-close (no save prompt).
@@ -257,7 +282,7 @@
     if (creating) return;
     creating = true;
     try {
-      await createCard("New card");
+      await undoRecorder.createCard(() => createCard("New card"));
     } catch (e) {
       editorPanes.setError(e instanceof Error ? e.message : "Could not create the card.");
     } finally {
@@ -273,7 +298,7 @@
     if (creatingPlotline) return;
     creatingPlotline = true;
     try {
-      expandedPlotlineId = await createPlotlineOnBoard();
+      expandedPlotlineId = await undoRecorder.createPlotline(() => createPlotlineOnBoard());
       // Confirm the create — the new node may land off-screen (viewport unchanged),
       // where the expand alone would read as nothing happening.
       editorPanes.setStatus("Created plotline");
@@ -298,7 +323,7 @@
     if (creatingPlotline) return; // shares newPlotline's guard — one mint per gesture
     creatingPlotline = true;
     try {
-      expandedPlotlineId = await instantiateTemplateOnBoard(id);
+      expandedPlotlineId = await undoRecorder.createPlotline(() => instantiateTemplateOnBoard(id));
       editorPanes.setStatus("Created plotline from template");
     } catch (e) {
       editorPanes.setError(e instanceof Error ? e.message : "Could not instantiate the template.");
@@ -352,7 +377,10 @@
         // id and the whole board dims (no beat:<id>: edges, its cards now Unassigned)
         // with the eye that would toggle it off gone with the node.
         if (focusedPlotlineId === id) focusedPlotlineId = null;
-        await deletePlotline(id);
+        // Recorded (§7): captures the plotline + every card on its thread (primary or a
+        // beat), deletes, so Ctrl+Z restores it "with its beats and every card badge
+        // that pointed at it."
+        await undoRecorder.deletePlotline(id, () => deletePlotline(id));
       },
     });
   }
@@ -386,7 +414,9 @@
       confirmLabel: "Seed cards",
       destructive: false,
       onConfirm: async () => {
-        await seedCardsFromManuscript();
+        // Recorded as one step (§7): undo deletes the whole seeded batch, redo re-mints
+        // it under the same ids. Re-running seed with nothing new records nothing.
+        await undoRecorder.seed(() => seedCardsFromManuscript());
       },
     });
   }
@@ -396,7 +426,8 @@
   // derived edges keep the default renderer.
   const edgeTypes = { causal: PlotCausalEdge };
   setContext<PlotEdgeActions>(PLOT_EDGE_ACTIONS, {
-    onUnlinkCausal: (source, target) => void unlinkCardCausal(source, target),
+    onUnlinkCausal: (source, target) =>
+      void undoRecorder.cardEdit(source, "unlink causal", () => unlinkCardCausal(source, target)),
   });
   // Svelte Flow ships light-only chrome; drive its theme from the app's.
   let colorMode = $derived($themePreference as ColorMode);
@@ -458,12 +489,34 @@
   // (#824). onconnect adds the link (source leads to target); refetch → the derived
   // edge $effect above redraws it. Only causal edges are selectable/deletable
   // (buildBoardEdges marks them), so a Delete on a selected edge removes just that link.
+  // Keyboard-reach fix (ADR-0053 §7): plot cards are `selectable:false`, so a drag or
+  // a card click lands focus on <body>, never inside `.plot-board`, and the board's
+  // bubbling Ctrl+Z (below) never fires (the Undo BUTTON, calling undo() directly, has
+  // always worked). `tabindex="-1"` makes the section programmatically focusable; we
+  // focus it on a board pointerdown and on drag release — SKIPPING pointerdowns on an
+  // editable / interactive target so an inline title / synopsis / plotline input keeps
+  // focus for typing (and native Ctrl+Z stays with that input).
+  let boardEl = $state<HTMLElement | null>(null);
+  function focusBoardForUndo(event: PointerEvent): void {
+    const target = event.target;
+    if (
+      target instanceof HTMLElement &&
+      target.closest("input, textarea, select, button, a, [contenteditable='true']")
+    )
+      return;
+    boardEl?.focus({ preventScroll: true });
+  }
+
   function onConnectCausal(connection: { source: string; target: string }): void {
-    if (connection.source && connection.target) void linkCardCausal(connection.source, connection.target);
+    if (connection.source && connection.target)
+      void undoRecorder.cardEdit(connection.source, "link causal", () =>
+        linkCardCausal(connection.source, connection.target),
+      );
   }
   function onDeleteCausal(params: { edges: Edge[] }): void {
     for (const edge of params.edges) {
-      if (edge.source && edge.target) void unlinkCardCausal(edge.source, edge.target);
+      if (edge.source && edge.target)
+        void undoRecorder.cardEdit(edge.source, "unlink causal", () => unlinkCardCausal(edge.source, edge.target));
     }
   }
 
@@ -505,12 +558,21 @@
 </script>
 
 <!-- The keydown is board-scoped (ADR-0050 §3): it rides BUBBLING from whatever
-     focusable element inside has focus (canvas, controls), so a chord in another
-     pane can never reach this caretaker. Same sanctioned delegation exception as
-     the view designer — the labelled section is an implicit region, and making it
-     a tab stop would add a ghost stop for keyboard users. -->
+     focusable element inside has focus (canvas, controls, the section itself), so a
+     chord in another pane can never reach this caretaker. `tabindex="-1"` (ADR-0053
+     §7) makes the section a programmatic focus target — NOT a tab stop (negative
+     index), so no ghost stop — reached via focusBoardForUndo on pointerdown + on
+     drag release, since cards are `selectable:false` and never focus the board
+     themselves. -->
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<section class="plot-board" aria-label="Plot board" onkeydown={undoCtl.handleKeydown}>
+<section
+  class="plot-board"
+  aria-label="Plot board"
+  tabindex="-1"
+  bind:this={boardEl}
+  onkeydown={undoCtl.handleKeydown}
+  onpointerdown={focusBoardForUndo}
+>
   {#if !projection}
     {#if error}
       <!-- A failed initial load / restore. Distinct from the loading blank so a
@@ -603,23 +665,19 @@
         </button>
       </div>
       {#if !isEmpty}
-        <!-- Scope label (#860): undo/redo cover the board LAYOUT only (card drags) —
-             content ops (realize/detach/plotline/beats/causal) are intentful and
-             outside the caretaker. The label stops the cluster implying otherwise. -->
+        <!-- Whole-board undo (ADR-0053 §7): the caretaker now covers content ops as
+             well as drags, so the layout-only scope label is gone — it is a plain
+             "Undo". Disabled while an async inverse call is in flight (busy) so a
+             mashed control can't race two reversals. -->
         <div class="undo-group">
-          <!-- Visible cue for sighted users; the scope reaches screen readers via
-               the UndoRedoControls `scope` prop (aria-label "Undo layout"), so this
-               span is decorative to avoid a doubled "layout layout" announcement. -->
-          <span class="undo-scope" aria-hidden="true">Layout</span>
           <UndoRedoControls
-            canUndo={undoCtl.canUndo}
-            canRedo={undoCtl.canRedo}
+            canUndo={undoCtl.canUndo && !undoCtl.busy}
+            canRedo={undoCtl.canRedo && !undoCtl.busy}
             undoTitle={undoCtl.undoTitle}
             redoTitle={undoCtl.redoTitle}
             announcement={undoCtl.announcement}
             onUndo={() => undoCtl.undo()}
             onRedo={() => undoCtl.redo()}
-            scope="layout"
           />
         </div>
       {/if}
@@ -661,6 +719,10 @@
         onnodedragstop={({ nodes }) => {
           dragging = false;
           undoCtl.dragStop(nodes);
+          // Return focus to the board (§7): the drag landed it on <body> (cards are
+          // selectable:false), so without this the very Ctrl+Z that would undo the
+          // drag wouldn't reach the caretaker.
+          boardEl?.focus({ preventScroll: true });
           // A dragged card or plotline node becomes overridden (pinned): it now
           // persists and keeps its spot instead of reflowing to its derived slot.
           for (const node of nodes) {
@@ -694,6 +756,11 @@
     min-height: 0;
     background: var(--board);
   }
+  /* The section is a programmatic focus target for keyboard undo (§7), not a
+     user-operable control — so no focus ring around the whole board. */
+  .plot-board:focus {
+    outline: none;
+  }
   .board-toolbar {
     display: flex;
     align-items: center;
@@ -710,13 +777,6 @@
     display: flex;
     align-items: center;
     gap: var(--sp-1);
-  }
-  /* Scopes the undo cluster to layout (#860): a quiet caps label, not a control. */
-  .undo-scope {
-    font-size: var(--fs-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--text-3);
   }
   .board-btn {
     display: inline-flex;

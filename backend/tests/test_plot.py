@@ -109,6 +109,22 @@ class PlotlineHttpTests(PlotTestCase):
         )
         self.assertEqual(response.status_code, 422, response.text)
 
+    def test_create_with_supplied_id_restores_that_id(self) -> None:
+        # Undo-of-delete / redo-of-create (ADR-0053 §7) recreates a plotline
+        # under its original id so other cards' beat_links reconnect.
+        response = self.client.post(
+            "/api/plot/plotlines", json={"title": "Restored", "id": "plot_restored01"}
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["id"], "plot_restored01")
+
+    def test_create_with_colliding_id_409s(self) -> None:
+        created = self._create()
+        collision = self.client.post(
+            "/api/plot/plotlines", json={"title": "Clash", "id": created["id"]}
+        )
+        self.assertEqual(collision.status_code, 409, collision.text)
+
 
 class CardHttpTests(PlotTestCase):
     """Cards (ADR-0048 §1 / S5a) — the plotline's structural twin, so the CRUD
@@ -197,6 +213,18 @@ class CardHttpTests(PlotTestCase):
             json={"title": "X", "body": "", "entry_type": "plot:board"},
         )
         self.assertEqual(response.status_code, 422, response.text)
+
+    def test_create_with_supplied_id_restores_that_id(self) -> None:
+        # Undo-of-delete recreates a card under its original id so 0..n other
+        # cards' causal_links pointing at it reconnect (ADR-0053 §7).
+        response = self.client.post("/api/plot/cards", json={"title": "Back", "id": "plot_card_back1"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["id"], "plot_card_back1")
+
+    def test_create_with_colliding_id_409s(self) -> None:
+        created = self._create()
+        collision = self.client.post("/api/plot/cards", json={"title": "Clash", "id": created["id"]})
+        self.assertEqual(collision.status_code, 409, collision.text)
 
 
 class CardReferenceTests(PlotTestCase):

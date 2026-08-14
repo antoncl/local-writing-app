@@ -129,6 +129,12 @@ class _PlotFolderEntry(BaseModel):
 class _PlotFolderCreateRequest(BaseModel):
     title: str = Field(min_length=1)
     entry_type: str = ""
+    # A caller-supplied id (ADR-0053 §7): undo-of-delete / redo-of-create
+    # recreate a node under its *original* id so refs in other cards'
+    # beat_links / causal_links reconnect instead of dangling. Empty = mint a
+    # fresh id (the normal create). A collision with an existing node is
+    # rejected (409), so this can only ever restore an id, never overwrite one.
+    id: str = ""
 
 
 class _PlotFolderSaveRequest(BaseModel):

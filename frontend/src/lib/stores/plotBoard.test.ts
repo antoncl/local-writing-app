@@ -23,6 +23,10 @@ import {
   linkCardCausal,
   unlinkCardCausal,
   setCardPageStatus,
+  cardStateOf,
+  getCardState,
+  restoreCardState,
+  recreateCard,
 } from "./plotBoard";
 import type { CardEntry, PlotBoard, PlotBoardProjection } from "@/lib/types";
 
@@ -152,7 +156,8 @@ describe("card content ops", () => {
     const create = vi.spyOn(api, "createCard").mockResolvedValue(card());
     const refresh = vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
     const id = await createCard("New card");
-    expect(create).toHaveBeenCalledWith("New card");
+    // `id` is undefined for a plain create (mint fresh); supplied only by redo (§7).
+    expect(create).toHaveBeenCalledWith("New card", undefined);
     expect(refresh).toHaveBeenCalledTimes(1);
     expect(id).toBe("c1");
   });
@@ -178,12 +183,19 @@ describe("card content ops", () => {
     expect(get(plotBoardStore)?.cards.length).toBe(1);
   });
 
-  it("seedCardsFromManuscript seeds, then refetches", async () => {
-    const seed = vi.spyOn(api, "seedFromManuscript").mockResolvedValue({ entries: [] });
+  it("seedCardsFromManuscript seeds, refetches, and returns only the newly created ids", async () => {
+    // The board already holds c1; the seed endpoint returns c1 + the new c2, so the
+    // created-id diff (against plotBoardStore) yields just c2 for the undo command (§7).
+    // Only `.id` is read off each, so a minimal cast keeps the fixture honest + small.
+    plotBoardStore.set({ ...projection(), cards: [{ id: "c1" } as PlotBoardProjection["cards"][number]] });
+    const seed = vi.spyOn(api, "seedFromManuscript").mockResolvedValue({
+      entries: [{ id: "c1" }, { id: "c2" }] as Awaited<ReturnType<typeof api.seedFromManuscript>>["entries"],
+    });
     const refresh = vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
-    await seedCardsFromManuscript();
+    const created = await seedCardsFromManuscript();
     expect(seed).toHaveBeenCalledTimes(1);
     expect(refresh).toHaveBeenCalledTimes(1);
+    expect(created).toEqual(["c2"]);
   });
 
   it("detachCardScene saves the card with the scene ref dropped", async () => {
@@ -315,5 +327,45 @@ describe("card content ops", () => {
     vi.spyOn(api, "getCard").mockResolvedValue(card({ page_status: "off_page" }));
     await setCardPageStatus("c1", "unwritten");
     expect(save.mock.calls[1][0].metadata).toEqual({});
+  });
+
+  // ── Undo substrate (ADR-0053 §7) ──────────────────────────────────────────
+
+  it("cardStateOf deep-copies metadata so a later live mutation can't reach the snapshot", () => {
+    const live = card({ beat_links: [{ plotline: "p1", beat_id: "b1" }] });
+    const snap = cardStateOf(live);
+    (live.metadata.beat_links as unknown[]).push({ plotline: "p1", beat_id: "b2" });
+    expect(snap.metadata.beat_links).toEqual([{ plotline: "p1", beat_id: "b1" }]);
+  });
+
+  it("getCardState reads the card's whole authored state", async () => {
+    vi.spyOn(api, "getCard").mockResolvedValue({ ...card({ plotline: "p1" }), body: "A synopsis." });
+    expect(await getCardState("c1")).toEqual({ title: "The letter", body: "A synopsis.", metadata: { plotline: "p1" } });
+  });
+
+  it("restoreCardState fetches fresh (for the live revision) then saves the captured state", async () => {
+    // The live card advanced to revision cr9 since capture — the restore must ride
+    // THAT, not the stale revision baked into the snapshot, or it would 409.
+    const getCard = vi.spyOn(api, "getCard").mockResolvedValue({ ...card({ plotline: "p9" }), revision: "cr9" });
+    const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
+    const refresh = vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    await restoreCardState("c1", { title: "Old title", body: "Old synopsis.", metadata: { plotline: "p1" } });
+    expect(getCard).toHaveBeenCalledWith("c1");
+    expect(save.mock.calls[0][0].revision).toBe("cr9"); // fresh revision
+    expect(save.mock.calls[0][0].title).toBe("Old title");
+    expect(save.mock.calls[0][0].metadata).toEqual({ plotline: "p1" });
+    expect(save.mock.calls[0][1]).toBe("Old synopsis."); // body
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("recreateCard creates under the supplied id, then restores content (create-then-PUT)", async () => {
+    const create = vi.spyOn(api, "createCard").mockResolvedValue(card());
+    vi.spyOn(api, "getCard").mockResolvedValue(card());
+    const save = vi.spyOn(api, "saveCard").mockImplementation((e) => Promise.resolve(e));
+    vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    await recreateCard("c1", { title: "Restored", body: "Back.", metadata: { plotline: "p1" } });
+    expect(create).toHaveBeenCalledWith("Restored", "c1"); // id supplied → same identity
+    expect(save.mock.calls[0][0].metadata).toEqual({ plotline: "p1" });
+    expect(save.mock.calls[0][1]).toBe("Back.");
   });
 });

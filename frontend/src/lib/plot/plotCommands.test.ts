@@ -1,0 +1,277 @@
+/**
+ * Plot content commands (ADR-0053 §7, #902) — the undoable board ops. Driven
+ * through a fake `PlotCommandPort` (an in-memory card/plotline store + a call log),
+ * so the builders and the recorder are exercised exactly as the caretaker + PlotEditor
+ * drive them, without a backend. The pure referrer finders take a plain projection.
+ */
+import { describe, expect, it } from "vitest";
+import {
+  type CardRef,
+  type PlotCommandPort,
+  PlotUndoRecorder,
+  cardEditCommand,
+  cardsReferencingCard,
+  cardsReferencingPlotline,
+  createCardCommand,
+  createPlotlineCommand,
+  deleteCardCommand,
+  deletePlotlineCommand,
+  plotlineEditCommand,
+  seedCommand,
+} from "./plotCommands";
+import type { CardState } from "@/lib/stores/plotBoard";
+import type { PlotlineState } from "@/lib/stores/plotlines";
+import type { PlotBoardCard, PlotBoardProjection } from "@/lib/types";
+
+const cardState = (title: string, metadata: CardState["metadata"] = {}, body = ""): CardState => ({
+  title,
+  body,
+  metadata,
+});
+const plotlineState = (title: string, metadata: PlotlineState["metadata"] = {}, body = ""): PlotlineState => ({
+  title,
+  body,
+  metadata,
+});
+
+function fakePort() {
+  const cards = new Map<string, CardState>();
+  const plotlines = new Map<string, PlotlineState>();
+  const calls: string[] = [];
+  const port: PlotCommandPort = {
+    deleteCard: async (id) => {
+      calls.push(`deleteCard:${id}`);
+      cards.delete(id);
+    },
+    getCardState: async (id) => structuredClone(cards.get(id)!),
+    restoreCardState: async (id, s) => {
+      calls.push(`restoreCard:${id}`);
+      cards.set(id, structuredClone(s));
+    },
+    recreateCard: async (id, s) => {
+      calls.push(`recreateCard:${id}`);
+      cards.set(id, structuredClone(s));
+    },
+    deletePlotline: async (id) => {
+      calls.push(`deletePlotline:${id}`);
+      plotlines.delete(id);
+    },
+    getPlotlineState: async (id) => structuredClone(plotlines.get(id)!),
+    restorePlotlineState: async (id, s) => {
+      calls.push(`restorePlotline:${id}`);
+      plotlines.set(id, structuredClone(s));
+    },
+    recreatePlotline: async (id, s) => {
+      calls.push(`recreatePlotline:${id}`);
+      plotlines.set(id, structuredClone(s));
+    },
+  };
+  return { port, cards, plotlines, calls };
+}
+
+// A projection with just the fields the finders / recorder read.
+function card(id: string, extra: Partial<PlotBoardCard> = {}): PlotBoardCard {
+  return {
+    id,
+    title: id,
+    synopsis: "",
+    plotline: null,
+    scene: null,
+    container: null,
+    page_status: null,
+    beats: [],
+    sequence: null,
+    causal_links: [],
+    ...extra,
+  };
+}
+function projection(cards: PlotBoardCard[]): PlotBoardProjection {
+  return { board_id: "b", board_revision: "r", layout: {}, plotlines: [], containers: [], cards };
+}
+
+describe("referrer finders", () => {
+  it("finds cards whose causal_links point at a card", () => {
+    const proj = projection([
+      card("a", { causal_links: ["target"] }),
+      card("b", { causal_links: ["other"] }),
+      card("target"),
+    ]);
+    expect(cardsReferencingCard(proj, "target")).toEqual(["a"]);
+  });
+
+  it("finds cards whose primary plotline OR a beat points at a plotline", () => {
+    const proj = projection([
+      card("primary", { plotline: "P" }),
+      card("beat-only", { beats: [{ plotline_id: "P", plotline_title: "", plotline_color: null, beat_id: "b1", title: "" }] }),
+      card("elsewhere", { plotline: "Q" }),
+    ]);
+    expect(cardsReferencingPlotline(proj, "P")).toEqual(["primary", "beat-only"]);
+  });
+});
+
+describe("create / delete card commands", () => {
+  it("createCard: undo deletes, redo recreates under the id", async () => {
+    const { port, cards, calls } = fakePort();
+    cards.set("c1", cardState("Card"));
+    const cmd = createCardCommand(port, "c1", cardState("Card"));
+    await cmd.undo();
+    expect(cards.has("c1")).toBe(false);
+    await cmd.redo();
+    expect(cards.get("c1")).toEqual(cardState("Card"));
+    expect(calls).toEqual(["deleteCard:c1", "recreateCard:c1"]);
+  });
+
+  it("deleteCard: undo recreates the node THEN restores referrers, redo re-deletes", async () => {
+    const { port, calls } = fakePort();
+    const referrers: CardRef[] = [
+      { id: "refA", state: cardState("A", { causal_links: [{ target: "gone" }] }) },
+      { id: "refB", state: cardState("B", { causal_links: [{ target: "gone" }] }) },
+    ];
+    const cmd = deleteCardCommand(port, "gone", cardState("Gone"), referrers);
+    await cmd.undo();
+    // Node first (so the referrers' refs are not dangling-healed), then each referrer.
+    expect(calls).toEqual(["recreateCard:gone", "restoreCard:refA", "restoreCard:refB"]);
+    calls.length = 0;
+    await cmd.redo();
+    expect(calls).toEqual(["deleteCard:gone"]);
+  });
+});
+
+describe("card edit command", () => {
+  it("flips whole card state before/after", async () => {
+    const { port, cards, calls } = fakePort();
+    cards.set("c1", cardState("after", { plotline: "P2" }));
+    const cmd = cardEditCommand(port, "c1", cardState("before", { plotline: "P1" }), cardState("after", { plotline: "P2" }), "reassign plotline");
+    await cmd.undo();
+    expect(cards.get("c1")).toEqual(cardState("before", { plotline: "P1" }));
+    await cmd.redo();
+    expect(cards.get("c1")).toEqual(cardState("after", { plotline: "P2" }));
+    expect(cmd.label).toBe("reassign plotline");
+    expect(calls).toEqual(["restoreCard:c1", "restoreCard:c1"]);
+  });
+});
+
+describe("plotline commands", () => {
+  it("create: undo deletes, redo recreates with beats + lineage", async () => {
+    const { port, plotlines } = fakePort();
+    const state = plotlineState("Thread", { color: "rose", instance_beats: [{ beat_id: "b1", title: "Meet" }] });
+    plotlines.set("p1", state);
+    const cmd = createPlotlineCommand(port, "p1", state);
+    await cmd.undo();
+    expect(plotlines.has("p1")).toBe(false);
+    await cmd.redo();
+    expect(plotlines.get("p1")).toEqual(state);
+  });
+
+  it("delete: undo recreates the plotline then restores its cards", async () => {
+    const { port, calls } = fakePort();
+    const referrers: CardRef[] = [{ id: "card1", state: cardState("On thread", { plotline: "p1" }) }];
+    const cmd = deletePlotlineCommand(port, "p1", plotlineState("Thread"), referrers);
+    await cmd.undo();
+    expect(calls).toEqual(["recreatePlotline:p1", "restoreCard:card1"]);
+  });
+
+  it("edit: flips whole plotline state", async () => {
+    const { port, plotlines } = fakePort();
+    plotlines.set("p1", plotlineState("Renamed", { color: "moss" }));
+    const cmd = plotlineEditCommand(port, "p1", plotlineState("Old", { color: "rose" }), plotlineState("Renamed", { color: "moss" }), "recolour plotline");
+    await cmd.undo();
+    expect(plotlines.get("p1")).toEqual(plotlineState("Old", { color: "rose" }));
+    await cmd.redo();
+    expect(plotlines.get("p1")).toEqual(plotlineState("Renamed", { color: "moss" }));
+  });
+});
+
+describe("seed command", () => {
+  it("undo deletes every seeded card, redo recreates them all", async () => {
+    const { port, cards, calls } = fakePort();
+    const created: CardRef[] = [
+      { id: "s1", state: cardState("Scene 1", { scene: "sc1" }) },
+      { id: "s2", state: cardState("Scene 2", { scene: "sc2" }) },
+    ];
+    created.forEach((c) => cards.set(c.id, c.state));
+    const cmd = seedCommand(port, created);
+    await cmd.undo();
+    expect(cards.size).toBe(0);
+    await cmd.redo();
+    expect(cards.size).toBe(2);
+    expect(calls).toEqual(["deleteCard:s1", "deleteCard:s2", "recreateCard:s1", "recreateCard:s2"]);
+  });
+});
+
+describe("PlotUndoRecorder", () => {
+  it("cardEdit records a command only when the op actually changed the card", async () => {
+    const { port, cards } = fakePort();
+    cards.set("c1", cardState("Card", { plotline: "P1" }));
+    const recorded: { label?: string }[] = [];
+    const recorder = new PlotUndoRecorder(port, (c) => recorded.push(c), () => projection([]));
+
+    // No-op: the op leaves the card unchanged → nothing recorded.
+    await recorder.cardEdit("c1", "reassign plotline", async () => {});
+    expect(recorded).toEqual([]);
+
+    // Real change: the op mutates the fake's stored state → one command.
+    await recorder.cardEdit("c1", "reassign plotline", async () => {
+      cards.set("c1", cardState("Card", { plotline: "P2" }));
+    });
+    expect(recorded.map((c) => c.label)).toEqual(["reassign plotline"]);
+  });
+
+  it("createCard runs the forward op and records the new id + captured state", async () => {
+    const { port, cards, calls } = fakePort();
+    const recorded: Array<{ undo: () => unknown; redo: () => unknown }> = [];
+    const recorder = new PlotUndoRecorder(port, (c) => recorded.push(c), () => projection([]));
+
+    const id = await recorder.createCard(async () => {
+      cards.set("new1", cardState("Fresh"));
+      return "new1";
+    });
+    expect(id).toBe("new1");
+    // The recorded command's undo deletes the just-created card.
+    await recorded[0].undo();
+    expect(cards.has("new1")).toBe(false);
+    expect(calls).toContain("deleteCard:new1");
+  });
+
+  it("deleteCard captures the projection's referrers before deleting", async () => {
+    const { port, cards } = fakePort();
+    cards.set("gone", cardState("Gone"));
+    cards.set("refA", cardState("A", { causal_links: [{ target: "gone" }] }));
+    const proj = projection([card("gone"), card("refA", { causal_links: ["gone"] })]);
+    const recorded: Array<{ undo: () => Promise<void> }> = [];
+    const recorder = new PlotUndoRecorder(port, (c) => recorded.push(c as { undo: () => Promise<void> }), () => proj);
+
+    await recorder.deleteCard("gone", async () => {
+      cards.delete("gone");
+    });
+    // Undo the recorded delete: node back, then the captured referrer restored.
+    cards.set("refA", cardState("A", {})); // simulate the backend having purged the ref
+    await recorded[0].undo();
+    expect(cards.get("gone")).toEqual(cardState("Gone"));
+    expect(cards.get("refA")).toEqual(cardState("A", { causal_links: [{ target: "gone" }] }));
+  });
+
+  it("seed captures the ids the op reports as created, and undo deletes just them", async () => {
+    const { port, cards } = fakePort();
+    cards.set("existing", cardState("Existing"));
+    const recorded: Array<{ undo: () => Promise<void> }> = [];
+    const recorder = new PlotUndoRecorder(port, (c) => recorded.push(c as { undo: () => Promise<void> }), () => null);
+
+    await recorder.seed(async () => {
+      cards.set("seed1", cardState("Seed 1", { scene: "sc1" }));
+      return ["seed1"]; // the store reports the created id
+    });
+    expect(recorded).toHaveLength(1);
+    await recorded[0].undo();
+    expect(cards.has("seed1")).toBe(false);
+    expect(cards.has("existing")).toBe(true); // the pre-existing card is untouched
+  });
+
+  it("seed records nothing when the op reports no created cards (idempotent re-seed)", async () => {
+    const { port } = fakePort();
+    const recorded: unknown[] = [];
+    const recorder = new PlotUndoRecorder(port, (c) => recorded.push(c), () => null);
+    await recorder.seed(async () => []);
+    expect(recorded).toEqual([]);
+  });
+});

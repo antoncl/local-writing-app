@@ -12,7 +12,7 @@
 // during a replay). A surface uses only the recorders its gestures need — the
 // plot board (S7c) records only drags; connect/config stay for edge-and-config
 // canvases like the view designer.
-import { UndoCaretaker } from "@/lib/stores/undoCaretaker.svelte";
+import { UndoCaretaker, type Command } from "@/lib/stores/undoCaretaker.svelte";
 import {
   addNodeCommand,
   configCommands,
@@ -61,6 +61,12 @@ export class GraphUndoController<N extends NodeLike, E extends EdgeLike> {
   get canRedo(): boolean {
     return this.#caretaker.canRedo;
   }
+  /** True while an async inverse call is in flight (ADR-0053 §7) — a
+   *  backend-backed surface folds this into its control's disabled state so a
+   *  second reversal can't start mid-flight. Layout-only surfaces never set it. */
+  get busy(): boolean {
+    return this.#caretaker.busy;
+  }
   /** Button tooltips: "Undo <label>" when a step is peekable. */
   get undoTitle(): string {
     const label = this.#caretaker.undoLabel;
@@ -78,6 +84,16 @@ export class GraphUndoController<N extends NodeLike, E extends EdgeLike> {
     this.#caretaker = new UndoCaretaker();
     this.#dragStart = null;
     this.#preConnectIds = null;
+  }
+
+  /** Record a command the surface built itself — the escape hatch for ops that
+   *  don't reduce to the graph-port vocabulary (add/delete/connect/config/move).
+   *  A backend-backed surface (the plot board, ADR-0053 §7) builds its own
+   *  async content commands and records them here so they share the one
+   *  caretaker — one stack, one Ctrl+Z, one button, no second surface. The
+   *  caretaker stays domain-agnostic; the command carries its own inverse. */
+  record(command: Command): void {
+    this.#caretaker.record(command);
   }
 
   /** The palette created a node (record AFTER appending — §1 self-report). */
@@ -148,13 +164,19 @@ export class GraphUndoController<N extends NodeLike, E extends EdgeLike> {
     if (command) this.#caretaker.record(command);
   }
 
-  undo(): void {
-    const step = this.#caretaker.undo();
+  /** Async so a backend-backed inverse completes before the announcement (§7);
+   *  a no-op for sync layout surfaces (the awaited closures resolve at once).
+   *  Short-circuits while busy so a mashed chord doesn't announce a misleading
+   *  "Nothing to undo" over an in-flight step. */
+  async undo(): Promise<void> {
+    if (this.#caretaker.busy) return;
+    const step = await this.#caretaker.undo();
     this.#announce(step === null ? "Nothing to undo" : `Undid ${step.label || "change"}`);
   }
 
-  redo(): void {
-    const step = this.#caretaker.redo();
+  async redo(): Promise<void> {
+    if (this.#caretaker.busy) return;
+    const step = await this.#caretaker.redo();
     this.#announce(step === null ? "Nothing to redo" : `Redid ${step.label || "change"}`);
   }
 
@@ -179,8 +201,10 @@ export class GraphUndoController<N extends NodeLike, E extends EdgeLike> {
     if (isEditableTarget(event.target)) return;
     event.preventDefault();
     event.stopPropagation();
-    if (key === "z" && !event.shiftKey) this.undo();
-    else this.redo();
+    // Fire-and-forget: the chord is handled (preventDefault above); the async
+    // reversal settles on its own and the caretaker's busy gate absorbs a mash.
+    if (key === "z" && !event.shiftKey) void this.undo();
+    else void this.redo();
   };
 }
 

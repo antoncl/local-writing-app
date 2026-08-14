@@ -7,7 +7,7 @@
 // after reload) — so the fetch is in-flight-guarded to collapse the redundant
 // pair into one request.
 
-import { writable } from "svelte/store";
+import { get, writable } from "svelte/store";
 import { api } from "@/lib/api";
 import type { CardEntry, PlotBoardLayout, PlotBoardProjection } from "@/lib/types";
 
@@ -81,17 +81,25 @@ export async function realizeCard(cardId: string, parentId: string | null = null
 }
 
 // Seed: one attached card per un-carded leaf scene, in manuscript order (idempotent).
-export async function seedCardsFromManuscript(): Promise<void> {
-  await api.seedFromManuscript();
+// Returns the ids of the cards this run CREATED (for the undo command, §7) — the seed
+// endpoint returns the whole card set, so we diff it against the ids the board already
+// held. Reads plotBoardStore directly (synchronous, reliable) rather than a lagging
+// projection prop, and uses the endpoint's own returned set as "after" (no extra list
+// round-trip). Empty when nothing new was seeded (a re-run).
+export async function seedCardsFromManuscript(): Promise<string[]> {
+  const before = new Set((get(plotBoardStore)?.cards ?? []).map((c) => c.id));
+  const after = await api.seedFromManuscript();
   await refreshAfterMutation();
+  return after.entries.filter((c) => !before.has(c.id)).map((c) => c.id);
 }
 
 // Create a single unattached card — the board's direct-authoring entry point (#793,
 // the plotter's construction surface). No scene, so it projects homeless until the
 // writer attaches / realizes it. Refetches the projection, and returns the new id so
-// the caller can open the card to name it.
-export async function createCard(title: string): Promise<string> {
-  const card = await api.createCard(title);
+// the caller can open the card to name it. `id` is supplied only by redo-of-create
+// (ADR-0053 §7) to restore the card's original identity.
+export async function createCard(title: string, id?: string): Promise<string> {
+  const card = await api.createCard(title, id);
   await refreshAfterMutation();
   return card.id;
 }
@@ -242,6 +250,45 @@ export function setCardPageStatus(cardId: string, status: "off_page" | "unwritte
     if (status === "off_page") metadata.page_status = "off_page";
     else delete metadata.page_status;
   });
+}
+
+// ── Undo substrate (ADR-0053 §7) ────────────────────────────────────────────
+//
+// Content-op undo/redo captures a card's WHOLE authored state (title + synopsis
+// body + metadata) rather than a per-field diff: a single op can touch several
+// fields at once (dropping a beat also adopts a primary, #863), and a whole-state
+// flip reverses every side-effect uniformly. undo/redo then re-fetch the live card
+// for its current revision before saving the captured state, so a reversal can't
+// 409 on a stale base_revision the way replaying an old entry verbatim would.
+
+export type CardState = { title: string; body: string; metadata: CardEntry["metadata"] };
+
+// A card's authored state, deep-copied so a later live mutation can't reach back
+// into a captured snapshot the undo stack still holds.
+export function cardStateOf(card: CardEntry): CardState {
+  return { title: card.title, body: card.body, metadata: structuredClone(card.metadata) };
+}
+
+export async function getCardState(cardId: string): Promise<CardState> {
+  return cardStateOf(await api.getCard(cardId));
+}
+
+// Restore a captured state onto a card that still exists (a field-edit reversal).
+// Fetch-fresh for the live revision so the save can't conflict; refetch rebuilds
+// the board.
+export async function restoreCardState(cardId: string, state: CardState): Promise<void> {
+  const card = await api.getCard(cardId);
+  await api.saveCard({ ...card, title: state.title, metadata: state.metadata }, state.body);
+  await refreshAfterMutation();
+}
+
+// Recreate a deleted card under its ORIGINAL id, then restore its content
+// (create-then-PUT — the create sets only title, the PUT lands metadata + body).
+// The one refetch is the restore's; the create is a plain api call to avoid a
+// redundant board rebuild between the two writes.
+export async function recreateCard(cardId: string, state: CardState): Promise<void> {
+  await api.createCard(state.title, cardId);
+  await restoreCardState(cardId, state);
 }
 
 // Drop the previous project's board so it can't flash on the next project's pane

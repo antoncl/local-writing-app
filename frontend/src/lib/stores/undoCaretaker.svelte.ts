@@ -23,6 +23,12 @@
  *  instant of death, full state in hand — §1), and the caretaker stays
  *  oblivious to what they touch.
  *
+ *  A closure may be **async** (ADR-0053 §7): a backend-backed surface reverses
+ *  by calling the server inverse, not just an in-memory array swap. The
+ *  caretaker `await`s each closure and blocks re-entry while one is in flight
+ *  (the busy gate), so a mashed Ctrl+Z can't race two inverse calls. Sync
+ *  closures (a pure canvas's array swaps) return `void` and stay synchronous.
+ *
  *  Two rules the closures' author must honour, because the caretaker cannot:
  *  - A recreated node returns with its **same id**, so edges re-added
  *    alongside it reconnect instead of dangling (§6).
@@ -30,8 +36,8 @@
  *    `record`s. Recording from inside a replay would corrupt the log, so the
  *    caretaker throws on it rather than corrupt silently. */
 export type Command = {
-  undo: () => void;
-  redo: () => void;
+  undo: () => void | Promise<void>;
+  redo: () => void | Promise<void>;
   /** Short human phrase — "delete node", "move node" — for the affordance
    *  tooltip and the `aria-live` announcement (§7). Omitting it degrades the
    *  announcement to a generic Undo/Redo, so it is encouraged, not required.
@@ -83,13 +89,20 @@ export class UndoCaretaker {
    *  closure state the `transaction` doc describes. */
   #openId: string | undefined;
   #openStep = 0;
-  /** True while undo/redo executes closures; `record` throws under it. */
-  #replaying = false;
+  /** True while undo/redo executes closures; `record` throws under it, and a
+   *  re-entrant undo/redo no-ops (the busy gate — §7 async support). Reactive
+   *  so a surface can disable the affordance while an inverse call is in
+   *  flight. */
+  #replaying = $state(false);
 
   /** Drive a disabled undo/redo button (§7) — the availability of undo is
    *  perceivable, not hidden behind a keystroke that silently no-ops. */
   canUndo = $derived(this.#cursor > 0);
   canRedo = $derived(this.#cursor < this.#log.length);
+  /** True while an undo/redo step is replaying — an async inverse call may be
+   *  in flight (§7). A surface disables its controls on it so the reversal
+   *  order stays deterministic. */
+  busy = $derived(this.#replaying);
 
   /** The label of the step `undo()` would reverse next, without consuming it —
    *  for the affordance tooltip (§7: "Undo delete node"). `null` when there is
@@ -149,12 +162,15 @@ export class UndoCaretaker {
   /** Reverse one step — a lone command, or a whole shared-step run LIFO (§4:
    *  recreate self → re-add edge b → re-add edge a). Returns the reversed
    *  step for the `aria-live` announcement, or `null` when there was nothing
-   *  to undo.
+   *  to undo (empty stack, **or** a replay already in flight — the busy gate,
+   *  §7). Awaits each closure, so an async backend inverse completes before
+   *  the next command in the run runs and before the caretaker reports done.
    *
-   *  If a closure throws, the exception propagates, but the cursor stays
-   *  consistent with the closures that actually ran — a retry continues the
-   *  step from where it broke instead of double-executing what succeeded. */
-  undo(): ReversedStep | null {
+   *  If a closure throws or rejects, the exception propagates, but the cursor
+   *  stays consistent with the closures that actually ran — a retry continues
+   *  the step from where it broke instead of double-executing what succeeded. */
+  async undo(): Promise<ReversedStep | null> {
+    if (this.#replaying) return null;
     if (this.#cursor === 0) return null;
     this.#openId = undefined;
     const end = this.#cursor - 1;
@@ -163,7 +179,7 @@ export class UndoCaretaker {
     this.#replaying = true;
     try {
       for (; i >= start; i--) {
-        this.#log[i].command.undo();
+        await this.#log[i].command.undo();
       }
     } finally {
       this.#replaying = false;
@@ -176,7 +192,8 @@ export class UndoCaretaker {
 
   /** Replay one step forward — the same run `undo` reversed, in record order.
    *  Returns and errs like `undo`. */
-  redo(): ReversedStep | null {
+  async redo(): Promise<ReversedStep | null> {
+    if (this.#replaying) return null;
     if (this.#cursor >= this.#log.length) return null;
     this.#openId = undefined;
     const start = this.#cursor;
@@ -185,7 +202,7 @@ export class UndoCaretaker {
     this.#replaying = true;
     try {
       for (; i <= end; i++) {
-        this.#log[i].command.redo();
+        await this.#log[i].command.redo();
       }
     } finally {
       this.#replaying = false;

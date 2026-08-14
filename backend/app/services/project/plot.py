@@ -204,6 +204,7 @@ class PlotMixin:
         default_entry_type: str,
         noun: str,
         seed_metadata: dict[str, Any] | None = None,
+        node_id: str | None = None,
     ) -> str:
         root = self._require_project()
         entry_type = requested_entry_type or default_entry_type
@@ -228,7 +229,16 @@ class PlotMixin:
         )
         if metadata_errors:
             raise ProjectServiceError(" ".join(metadata_errors), 422)
-        new_id = self._new_id("plot")
+        # A supplied id restores a node under its original identity (ADR-0053
+        # §7 undo). Collision-rejected against the whole node index, so a
+        # restore can never clobber a live node — only reoccupy the id its own
+        # delete freed. Empty/None mints fresh, the normal create.
+        if node_id:
+            if node_id in self._build_node_index().by_id:
+                raise ProjectServiceError(f"{noun.capitalize()} id {node_id} already exists.", 409)
+            new_id = node_id
+        else:
+            new_id = self._new_id("plot")
         self._write_node_entry_file(
             self._filepath_for_new_node(root / "plot", title),
             new_id,
@@ -610,6 +620,7 @@ class PlotMixin:
                 requested_entry_type=request.entry_type,
                 default_entry_type="plot:plotline",
                 noun="plotline",
+                node_id=request.id or None,
             )
         )
 
@@ -647,6 +658,7 @@ class PlotMixin:
                 requested_entry_type=request.entry_type,
                 default_entry_type="plot:card",
                 noun="card",
+                node_id=request.id or None,
             )
         )
 

@@ -39,7 +39,7 @@ const node = (id: string, x = 0, y = 0, cfg: Record<string, unknown> = {}): Test
 const edge = (id: string, source: string, target: string): TestEdge => ({ id, source, target });
 
 describe("graphCommands", () => {
-  it("round-trips an add through the caretaker", () => {
+  it("round-trips an add through the caretaker", async () => {
     const { graph, port } = makeGraph([node("out")]);
     const caretaker = new UndoCaretaker();
 
@@ -47,14 +47,14 @@ describe("graphCommands", () => {
     graph.nodes = [...graph.nodes, added]; // the committer mutates first (§1)
     caretaker.record(addNodeCommand(port, added));
 
-    expect(caretaker.undo()).toEqual({ label: "add node" });
+    expect(await caretaker.undo()).toEqual({ label: "add node" });
     expect(graph.nodes.map((n) => n.id)).toEqual(["out"]);
-    caretaker.redo();
+    await caretaker.redo();
     expect(graph.nodes.map((n) => n.id)).toEqual(["out", "a0"]);
     expect(graph.nodes[1].position).toEqual({ x: 10, y: 20 });
   });
 
-  it("captures an add's birth position even if the live node is later mutated in place", () => {
+  it("captures an add's birth position even if the live node is later mutated in place", async () => {
     const { graph, port } = makeGraph([]);
     const caretaker = new UndoCaretaker();
     const added = node("a0", 10, 20);
@@ -62,12 +62,12 @@ describe("graphCommands", () => {
     caretaker.record(addNodeCommand(port, added));
 
     added.position.x = 999; // what a SvelteFlow drag does through the $state proxy
-    caretaker.undo();
-    caretaker.redo();
+    await caretaker.undo();
+    await caretaker.redo();
     expect(graph.nodes[0].position).toEqual({ x: 10, y: 20 }); // the memento, not the drift
   });
 
-  it("undoes a delete as one step, restoring the node with its original id and its edges (§6)", () => {
+  it("undoes a delete as one step, restoring the node with its original id and its edges (§6)", async () => {
     const doomed = node("a1", 5, 5, { field: "tags" });
     const { graph, port } = makeGraph([node("out"), doomed], [edge("e1", "a1", "out"), edge("e2", "src", "a1")]);
     const caretaker = new UndoCaretaker();
@@ -80,7 +80,7 @@ describe("graphCommands", () => {
     for (const c of commands) caretaker.record(c);
 
     // ONE undo step (the shared transaction), announcing the gesture.
-    expect(caretaker.undo()).toEqual({ label: "delete node" });
+    expect(await caretaker.undo()).toEqual({ label: "delete node" });
     expect(caretaker.canUndo).toBe(false);
     expect(graph.nodes.map((n) => n.id)).toContain("a1"); // same id — edges reconnect
     expect(graph.edges.map((e) => e.id).sort()).toEqual(["e1", "e2"]);
@@ -89,12 +89,12 @@ describe("graphCommands", () => {
     expect(restored?.position).toEqual({ x: 5, y: 5 });
 
     // One redo re-deletes everything.
-    caretaker.redo();
+    await caretaker.redo();
     expect(graph.nodes.map((n) => n.id)).toEqual(["out"]);
     expect(graph.edges).toEqual([]);
   });
 
-  it("labels a multi-node deletion by count", () => {
+  it("labels a multi-node deletion by count", async () => {
     const a = node("a1");
     const b = node("a2");
     const { graph, port } = makeGraph([node("out"), a, b], []);
@@ -104,11 +104,11 @@ describe("graphCommands", () => {
     for (const c of commands) caretaker.record(c);
 
     expect(caretaker.undoLabel).toBe("delete 2 nodes");
-    expect(caretaker.undo()).toEqual({ label: "delete 2 nodes" });
+    expect(await caretaker.undo()).toEqual({ label: "delete 2 nodes" });
     expect(graph.nodes.map((n) => n.id).sort()).toEqual(["a1", "a2", "out"]);
   });
 
-  it("mints a fresh transaction per deletion so two deletes stay two steps", () => {
+  it("mints a fresh transaction per deletion so two deletes stay two steps", async () => {
     const a = node("a1");
     const b = node("a2");
     const { graph, port } = makeGraph([a, b], []);
@@ -119,13 +119,13 @@ describe("graphCommands", () => {
       graph.nodes = graph.nodes.filter((n) => n.id !== doomed.id);
       for (const c of commands) caretaker.record(c);
     }
-    caretaker.undo();
+    await caretaker.undo();
     expect(graph.nodes.map((n) => n.id)).toEqual(["a2"]); // only the second delete reversed
-    caretaker.undo();
+    await caretaker.undo();
     expect(graph.nodes.map((n) => n.id).sort()).toEqual(["a1", "a2"]);
   });
 
-  it("round-trips a config edit, restoring dropped edges with the old config in one step", () => {
+  it("round-trips a config edit, restoring dropped edges with the old config in one step", async () => {
     const target = node("a1", 0, 0, { field: "tags" });
     const { graph, port } = makeGraph([node("out"), target], [edge("e1", "a1", "out")]);
     const caretaker = new UndoCaretaker();
@@ -138,12 +138,12 @@ describe("graphCommands", () => {
     graph.edges = [];
     for (const c of configCommands(port, "a1", before, after, dropped)) caretaker.record(c);
 
-    expect(caretaker.undo()).toEqual({ label: "edit node" }); // one step, edit's label
+    expect(await caretaker.undo()).toEqual({ label: "edit node" }); // one step, edit's label
     expect(graph.nodes.find((n) => n.id === "a1")?.data.cfg).toEqual({ field: "tags" });
     expect(graph.edges.map((e) => e.id)).toEqual(["e1"]);
     expect(caretaker.canUndo).toBe(false);
 
-    caretaker.redo();
+    await caretaker.redo();
     expect(graph.nodes.find((n) => n.id === "a1")?.data.cfg).toEqual({ field: "status" });
     expect(graph.edges).toEqual([]);
   });
@@ -185,7 +185,7 @@ describe("graphCommands", () => {
     expect(graph.nodes[0].data.cfg).toEqual({ mode: "drop" });
   });
 
-  it("mints a fresh transaction per config gesture so two edge-dropping edits stay two steps", () => {
+  it("mints a fresh transaction per config gesture so two edge-dropping edits stay two steps", async () => {
     const target = node("a1", 0, 0, { field: "tags" });
     const { graph, port } = makeGraph([target], [edge("e1", "a1", "out"), edge("e2", "src", "a1")]);
     const caretaker = new UndoCaretaker();
@@ -199,15 +199,15 @@ describe("graphCommands", () => {
       graph.edges = graph.edges.filter((e) => e.id !== droppedId);
       for (const c of configCommands(port, "a1", before, after, dropped)) caretaker.record(c);
     }
-    caretaker.undo();
+    await caretaker.undo();
     expect(graph.edges.map((e) => e.id)).toEqual(["e2"]); // only the second gesture reversed
     expect(graph.nodes[0].data.cfg).toEqual({ field: "status" });
-    caretaker.undo();
+    await caretaker.undo();
     expect(graph.edges.map((e) => e.id).sort()).toEqual(["e1", "e2"]);
     expect(graph.nodes[0].data.cfg).toEqual({ field: "tags" });
   });
 
-  it("round-trips a connect that displaced a superseded edge", () => {
+  it("round-trips a connect that displaced a superseded edge", async () => {
     const { graph, port } = makeGraph(
       [node("out"), node("a1"), node("a2")],
       [edge("new", "a2", "out")], // post-normalize: the old wire was displaced
@@ -216,9 +216,9 @@ describe("graphCommands", () => {
     const displaced = edge("old", "a1", "out");
     caretaker.record(connectCommand(port, [graph.edges[0]], [displaced]));
 
-    expect(caretaker.undo()).toEqual({ label: "connect" });
+    expect(await caretaker.undo()).toEqual({ label: "connect" });
     expect(graph.edges.map((e) => e.id)).toEqual(["old"]);
-    caretaker.redo();
+    await caretaker.redo();
     expect(graph.edges.map((e) => e.id)).toEqual(["new"]);
   });
 

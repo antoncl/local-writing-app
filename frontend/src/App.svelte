@@ -808,7 +808,7 @@
       lore: { title: "Lore", body: loreBody, actions: loreActions, view: { kind: "lore", switcher: true } },
       research: { title: "Research", body: researchBody, view: { kind: "research" } },
       prompts: { title: "Prompts", body: promptsBody, actions: promptsActions, view: { kind: "prompt" }, closable: true, onClose: closeRegion("prompts") },
-      plotTemplates: { title: "Plot templates", body: plotTemplatesBody, view: { kind: "plot" }, closable: true, onClose: closeRegion("plotTemplates") },
+      plotTemplates: { title: "Plot templates", body: plotTemplatesBody, actions: plotTemplatesActions, view: { kind: "plot" }, closable: true, onClose: closeRegion("plotTemplates") },
       plotEditor: { title: "Plot board", body: plotEditorBody, closable: true, onClose: closeRegion("plotEditor") },
       mutations: { title: "Reusable mutations", body: mutationsBody, actions: mutationsActions, closable: true, onClose: closeRegion("mutations") },
       assistants: { title: "Assistants", body: assistantsBody, actions: assistantsActions, view: { kind: "assistant", switcher: true }, closable: true, onClose: closeRegion("assistants") },
@@ -906,6 +906,9 @@
     </div>
   {/snippet}
 
+  {#snippet plotTemplatesActions()}
+    <button class="pin-button" type="button" title="New template" aria-label="New template" onmousedown={(event) => event.stopPropagation()} onclick={() => treeActions.newPlotTemplate()}>+</button>
+  {/snippet}
   {#snippet plotTemplatesBody(viewSpec: ViewSpec | undefined)}
     <div class="pane-content schema-list">
       <PlotTemplates
@@ -913,7 +916,6 @@
         {viewSpec}
         onOpenEntry={(id) => editorPanes.openPlotTemplate(id)}
         onCloneEntry={(id) => run(() => editorPanes.forkPlotTemplate(id))}
-        onNewEntry={() => treeActions.newPlotTemplate()}
       />
     </div>
   {/snippet}

@@ -8,7 +8,7 @@
 // or an evaluateView-only test does not.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { tick } from "svelte";
-import { render, screen, fireEvent } from "@/lib/test/component";
+import { render, screen } from "@/lib/test/component";
 import PlotTemplates from "./PlotTemplates.svelte";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import { openProjectHidden } from "@/lib/stores/hiddenLibrary";
@@ -41,13 +41,12 @@ function libraryTemplate(id: string, title: string): PlotTemplateSummary {
 
 const noop = () => {};
 
-function renderPane(onNewEntry: () => void = noop) {
+function renderPane() {
   return render(PlotTemplates, {
     props: {
       entries: [libraryTemplate("t-three-act", "Three-Act Story Arc"), libraryTemplate("t-kisho", "Kishotenketsu")],
       onOpenEntry: noop,
       onCloneEntry: noop,
-      onNewEntry,
     },
   });
 }
@@ -71,16 +70,6 @@ describe("PlotTemplates pane render (#724)", () => {
     expect(screen.getByText("Kishotenketsu")).toBeInTheDocument();
     // is_library rows carry the clone-to-own action.
     expect(screen.getByLabelText("Clone Three-Act Story Arc into this project")).toBeInTheDocument();
-  });
-
-  it("offers a labeled New template affordance in the pane body (#922)", async () => {
-    const onNew = vi.fn();
-    renderPane(onNew);
-    await tick();
-    const btn = screen.getByRole("button", { name: "New template" });
-    expect(btn).toBeInTheDocument();
-    await fireEvent.click(btn);
-    expect(onNew).toHaveBeenCalledTimes(1);
   });
 
   it("renders NOTHING when plot has no abstract base — the #724 regression", async () => {

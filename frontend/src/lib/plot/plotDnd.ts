@@ -12,16 +12,19 @@
 
 export const PLOT_DND_MIME = "application/x-local-writing-plot";
 
-// A dragged beat: which beat of which plotline.
-export type PlotBeatDrag = { kind: "beat"; plotline: string; beat_id: string };
+// A dragged beat: which beat of which plotline. `from` is the SOURCE card id when the
+// drag started on a card's badge (#941) — dropping on another card MOVES the link off
+// `from`; it is absent when the drag started on the plotline node (a fresh LINK, #824).
+export type PlotBeatDrag = { kind: "beat"; plotline: string; beat_id: string; from?: string };
 
-export function setPlotBeatDrag(event: DragEvent, plotline: string, beat_id: string): void {
+export function setPlotBeatDrag(event: DragEvent, plotline: string, beat_id: string, from?: string): void {
   const dt = event.dataTransfer;
   if (!dt) return;
-  const payload: PlotBeatDrag = { kind: "beat", plotline, beat_id };
+  const payload: PlotBeatDrag = from ? { kind: "beat", plotline, beat_id, from } : { kind: "beat", plotline, beat_id };
   dt.setData(PLOT_DND_MIME, JSON.stringify(payload));
   dt.setData("text/plain", `${plotline}:${beat_id}`);
-  dt.effectAllowed = "copy"; // a beat drop CREATES a link (copy), never moves the source
+  // A badge drag MOVES the link off its source card; a plotline-node drag COPIES (links).
+  dt.effectAllowed = from ? "move" : "copy";
 }
 
 // True when the current drag carries a plot-beat payload. Safe to call during
@@ -46,7 +49,9 @@ export function readPlotBeatDrag(event: DragEvent): PlotBeatDrag | null {
       (payload as PlotBeatDrag).plotline &&
       (payload as PlotBeatDrag).beat_id
     ) {
-      return payload as PlotBeatDrag;
+      const p = payload as PlotBeatDrag;
+      // `from` is optional; keep it only when it's a non-empty string (a card-badge drag).
+      return typeof p.from === "string" && p.from ? p : { kind: "beat", plotline: p.plotline, beat_id: p.beat_id };
     }
   } catch {
     // Malformed JSON in the drag channel — not one of ours; ignore.

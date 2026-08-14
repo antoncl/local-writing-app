@@ -25,6 +25,7 @@ const beat = (plotline_id: string, beat_id: string): PlotBoardBeat => ({
   plotline_color: null,
   beat_id,
   title: beat_id,
+  number: 1,
 });
 
 const card = (

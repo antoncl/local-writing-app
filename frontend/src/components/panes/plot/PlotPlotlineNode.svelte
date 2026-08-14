@@ -396,7 +396,7 @@
          the node or panning the canvas; the drag writes the (plotline id, beat id)
          payload. Draggable only once the plotline exists (canDrag). -->
     <ul class="plotline-beats">
-      {#each data.beats as beat (beat.beat_id)}
+      {#each data.beats as beat, i (beat.beat_id)}
         <li
           class="plotline-beat nodrag nopan"
           class:draggable={canDrag}
@@ -409,6 +409,8 @@
             <span class="beat-grip" aria-hidden="true">⋮⋮</span>
           {/if}
           <span class="beat-dot" class:hollow={!accent}></span>
+          <!-- The beat's roster number (#941), matching the badge shown on cards. -->
+          <span class="beat-num" aria-hidden="true">{i + 1}</span>
           <span class="beat-title" title={beat.title}>{beat.title}</span>
           <!-- Use-count (ADR-0053 §6 / S5a): how many cards fulfil this beat. A 0 reads
                as a gap the structure exposes. -->
@@ -605,6 +607,16 @@
   .beat-dot.hollow {
     background: transparent;
     border: 1px solid var(--border-strong);
+  }
+  /* The beat's roster number (#941), matching the card badge; tabular so a column of
+     rows aligns, quiet so the title still leads. */
+  .beat-num {
+    flex: none;
+    min-width: 1.1em;
+    font-size: var(--fs-xs);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    color: var(--text-3);
   }
   .beat-title {
     flex: 1;

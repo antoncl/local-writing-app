@@ -10,6 +10,7 @@ import {
   type PlotCommandPort,
   PlotUndoRecorder,
   cardEditCommand,
+  cardEditManyCommand,
   cardsReferencingCard,
   cardsReferencingPlotline,
   createCardCommand,
@@ -138,7 +139,7 @@ describe("referrer finders", () => {
   it("finds cards whose primary plotline OR a beat points at a plotline", () => {
     const proj = projection([
       card("primary", { plotline: "P" }),
-      card("beat-only", { beats: [{ plotline_id: "P", plotline_title: "", plotline_color: null, beat_id: "b1", title: "" }] }),
+      card("beat-only", { beats: [{ plotline_id: "P", plotline_title: "", plotline_color: null, beat_id: "b1", title: "", number: 1 }] }),
       card("elsewhere", { plotline: "Q" }),
     ]);
     expect(cardsReferencingPlotline(proj, "P")).toEqual(["primary", "beat-only"]);
@@ -185,6 +186,27 @@ describe("card edit command", () => {
     expect(cards.get("c1")).toEqual(cardState("after", { plotline: "P2" }));
     expect(cmd.label).toBe("reassign plotline");
     expect(calls).toEqual(["restoreCard:c1", "restoreCard:c1"]);
+  });
+
+  it("restores SEVERAL cards as one step (a beat move card→card, #941)", async () => {
+    const { port, cards, calls } = fakePort();
+    const before: CardRef[] = [
+      { id: "from", state: cardState("From", { beat_links: [{ plotline: "P", beat_id: "b1" }] }) },
+      { id: "to", state: cardState("To", { beat_links: [] }) },
+    ];
+    const after: CardRef[] = [
+      { id: "from", state: cardState("From", { beat_links: [] }) },
+      { id: "to", state: cardState("To", { beat_links: [{ plotline: "P", beat_id: "b1" }] }) },
+    ];
+    const cmd = cardEditManyCommand(port, before, after, "move beat");
+    await cmd.undo();
+    expect(cards.get("from")).toEqual(before[0].state);
+    expect(cards.get("to")).toEqual(before[1].state);
+    await cmd.redo();
+    expect(cards.get("from")).toEqual(after[0].state);
+    expect(cards.get("to")).toEqual(after[1].state);
+    // One step touches both cards on undo and again on redo (two restores each).
+    expect(calls).toEqual(["restoreCard:from", "restoreCard:to", "restoreCard:from", "restoreCard:to"]);
   });
 });
 

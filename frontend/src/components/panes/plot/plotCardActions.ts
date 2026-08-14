@@ -30,6 +30,9 @@ export type PlotCardActions = {
   onLinkBeat: (cardId: string, plotline: string, beatId: string) => void;
   // Remove a linked beat via the × on its badge (#824).
   onUnlinkBeat: (cardId: string, plotline: string, beatId: string) => void;
+  // Move a beat link from one card to another (#941) — drag a badge from card A onto
+  // card B. Unlinks off `fromCard`, links on `toCard`, recorded as one undo step.
+  onMoveBeat: (fromCard: string, toCard: string, plotline: string, beatId: string) => void;
   // Set an unattached card's page status (Slice 5b) — off_page vs unwritten; on_page
   // is derived from the scene, so it is never authored here.
   onSetPageStatus: (cardId: string, status: "off_page" | "unwritten") => void;

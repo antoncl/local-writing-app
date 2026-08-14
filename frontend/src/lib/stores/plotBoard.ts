@@ -244,6 +244,37 @@ export function unlinkCardBeat(cardId: string, plotline: string, beat_id: string
   });
 }
 
+// Move a beat link from one card to another (drag a badge card→card, #941): unlink it
+// off the source, link it on the target — the target adopts the beat's plotline as its
+// primary if it has none, exactly like a fresh drop (#863). Two saves, ONE refetch (not
+// the per-op refresh of link+unlink). A drop back on the same card is a no-op; a target
+// that already holds the beat still loses the source's link (idempotent target).
+export async function moveCardBeat(
+  fromId: string,
+  toId: string,
+  plotline: string,
+  beat_id: string,
+): Promise<void> {
+  if (fromId === toId) return;
+  const from = await api.getCard(fromId);
+  const fromMeta = { ...from.metadata };
+  const fromLinks = beatLinksOf(fromMeta).filter((l) => !(l.plotline === plotline && l.beat_id === beat_id));
+  if (fromLinks.length) fromMeta.beat_links = fromLinks;
+  else delete fromMeta.beat_links;
+  await api.saveCard({ ...from, metadata: fromMeta }, from.body);
+
+  const to = await api.getCard(toId);
+  const toMeta = { ...to.metadata };
+  const toLinks = beatLinksOf(toMeta);
+  if (!toLinks.some((l) => l.plotline === plotline && l.beat_id === beat_id)) {
+    toLinks.push({ plotline, beat_id });
+    toMeta.beat_links = toLinks;
+    if (!toMeta.plotline) toMeta.plotline = plotline;
+  }
+  await api.saveCard({ ...to, metadata: toMeta }, to.body);
+  await refreshAfterMutation();
+}
+
 // Causal ("leads to") edges are authored by DRAGGING a wire from one card's handle to
 // another (#824, SvelteFlow onconnect), and removed by deleting the edge — so these are
 // incremental over the source card's `causal_links`. Self-links are refused (the

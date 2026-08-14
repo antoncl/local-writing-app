@@ -30,6 +30,20 @@ describe("plotDnd", () => {
     expect(readPlotBeatDrag(dragEvent(dt))).toEqual({ kind: "beat", plotline: "i1", beat_id: "b1" });
   });
 
+  it("carries the source card id and effectAllowed=move for a badge drag (#941)", () => {
+    const dt = fakeDataTransfer();
+    setPlotBeatDrag(dragEvent(dt), "i1", "b1", "card_from");
+    expect(dt.effectAllowed).toBe("move"); // a badge drag MOVES the link off its card
+    expect(readPlotBeatDrag(dragEvent(dt))).toEqual({ kind: "beat", plotline: "i1", beat_id: "b1", from: "card_from" });
+  });
+
+  it("drops an empty `from` (a plotline-node link drag stays a plain link, #941)", () => {
+    const dt = fakeDataTransfer();
+    // A malformed payload with a blank `from` must read back as a link, never a move.
+    dt.setData(PLOT_DND_MIME, JSON.stringify({ kind: "beat", plotline: "i1", beat_id: "b1", from: "" }));
+    expect(readPlotBeatDrag(dragEvent(dt))).toEqual({ kind: "beat", plotline: "i1", beat_id: "b1" });
+  });
+
   it("hasPlotBeatDrag reads `types` (available during dragover), true only for a beat drag", () => {
     const beatDt = fakeDataTransfer();
     setPlotBeatDrag(dragEvent(beatDt), "i1", "b1");

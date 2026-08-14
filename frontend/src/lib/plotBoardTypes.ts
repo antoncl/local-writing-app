@@ -48,6 +48,9 @@ export type PlotBoardBeat = {
   plotline_color: string | null;
   beat_id: string;
   title: string;
+  // The beat's 1-based position in its plotline roster (#941), resolved by the
+  // backend so the badge shows a stable number that disambiguates same-titled beats.
+  number: number;
 };
 
 // A card as the board renders it: identity, the synopsis (the card body), the

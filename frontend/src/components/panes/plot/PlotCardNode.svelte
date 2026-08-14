@@ -19,7 +19,7 @@
   import { getSwatch } from "@/lib/utils/colors";
   import { CARD_DRAG_HANDLE_CLASS, type PlotCardData } from "@/lib/plot/plotBoardLayout";
   import { PLOT_CARD_ACTIONS, type PlotCardActions } from "./plotCardActions";
-  import { hasPlotBeatDrag, readPlotBeatDrag } from "@/lib/plot/plotDnd";
+  import { hasPlotBeatDrag, readPlotBeatDrag, setPlotBeatDrag } from "@/lib/plot/plotDnd";
 
   // Svelte Flow passes the node's id/data/selection state as props.
   let { id, data }: { id?: string; data: PlotCardData; selected?: boolean } = $props();
@@ -133,7 +133,9 @@
   function onCardDragOver(e: DragEvent) {
     if (!actions || !hasPlotBeatDrag(e)) return;
     e.preventDefault(); // allow the drop
-    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+    // A badge drag carries effectAllowed="move" (from another card); a plotline-node
+    // drag is "copy" (a fresh link). Mirror it so the cursor reads move vs copy.
+    if (e.dataTransfer) e.dataTransfer.dropEffect = e.dataTransfer.effectAllowed === "move" ? "move" : "copy";
     dragOver = true;
   }
   function onCardDragLeave(e: DragEvent) {
@@ -148,10 +150,21 @@
     const payload = readPlotBeatDrag(e);
     if (!payload) return;
     e.preventDefault();
-    actions.onLinkBeat(id, payload.plotline, payload.beat_id);
+    // A badge dragged from ANOTHER card (`from`) MOVES the link here (#941); a drag from
+    // the plotline node (no `from`), or a badge dropped back on its own card, just links.
+    if (payload.from && payload.from !== id) {
+      actions.onMoveBeat(payload.from, id, payload.plotline, payload.beat_id);
+    } else {
+      actions.onLinkBeat(id, payload.plotline, payload.beat_id);
+    }
   }
   function unlinkBeat(instanceId: string, beatId: string) {
     if (actions && id) actions.onUnlinkBeat(id, instanceId, beatId);
+  }
+  // Start dragging a beat badge OFF this card (#941): carry the source card id so the
+  // drop target moves the link rather than duplicating it. Only on an interactive card.
+  function onBeatDragStart(e: DragEvent, plotline: string, beatId: string) {
+    if (actions && id) setPlotBeatDrag(e, plotline, beatId, id);
   }
 
   async function startEdit() {
@@ -299,9 +312,16 @@
           <span
             class="beat-badge"
             class:coloured={beatHex}
+            class:draggable={actions}
             style={beatHex ? `--beat-accent: ${beatHex}` : undefined}
-            title={`${beat.plotline_title} · ${beat.title}`}
+            title={`${beat.plotline_title} · ${beat.number}. ${beat.title}`}
+            class:nodrag={actions}
+            class:nopan={actions}
+            draggable={!!actions}
+            ondragstart={(e) => onBeatDragStart(e, beat.plotline_id, beat.beat_id)}
           >
+            <!-- The beat's roster number (#941) so two same-titled beats are tellable apart. -->
+            <span class="beat-badge-num" aria-hidden="true">{beat.number}</span>
             <span class="beat-badge-label">{beat.title}</span>
             {#if actions}
               <button
@@ -653,6 +673,24 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  /* The beat's roster number (#941): a quiet leading ordinal, tabular so widths line
+     up down a column of badges. Never shrinks — the title ellipsises, the number stays. */
+  .beat-badge-num {
+    flex: 0 0 auto;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    color: var(--text-3);
+  }
+  .beat-badge.coloured .beat-badge-num {
+    color: color-mix(in srgb, var(--beat-accent) 70%, var(--text-3));
+  }
+  /* An interactive badge drags (card→card move, #941): a grab cursor advertises it. */
+  .beat-badge.draggable {
+    cursor: grab;
+  }
+  .beat-badge.draggable:active {
+    cursor: grabbing;
   }
   .beat-badge-x {
     flex: 0 0 auto;

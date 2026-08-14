@@ -123,6 +123,10 @@ conversation's subject**.
 - It is an ordinary mutation set — created through the same path a writer's set uses — with the entity
   pin set. The commit persists it via `create_mutation_set_entry`; nothing in that path references the
   manuscript.
+- Because set-save validates no rows (§Resolved), the commit **validates the AI-proposed rows against
+  the subject's type** — the field/op rules the marker validator already defines — so a set can never
+  carry a field or op that would be rejected when the writer later places it. This reuses ADR-0046's
+  "validate a structured AI result" role.
 
 ### 3. One mutation set, entity binding optional, authored from the entity
 
@@ -165,9 +169,13 @@ Placement is the terminal, prose-side step and reuses the existing "apply a save
 the set's rows stamp as one mutation unit at the writer's cursor, and an ordinary carrier marker is born
 there. Because the set is entity-pinned, the entity is pre-filled rather than re-chosen.
 
-Placing a pinned set **marks it placed** (it becomes provenance of the now-real marker); it is no longer
-pending. Until placed, it changes nothing — the subject's effective state is untouched, so a
-conversation anchored after the intended point does not yet see it.
+A **pinned** set is a one-off: placing it **marks it placed** — it drops out of the card's *pending*
+list and is retained as the chat's provenance, never deleted (§Resolved explains why the chat's edge
+forbids deletion). A **reusable** (un-pinned) set is untouched by apply, exactly as today. This is the
+one behaviour apply gains: today it is a pure read of the set, so the pinned path adds a single
+write-back to flip the set's state; reusable application keeps zero writes. Until placed, a pinned set
+changes nothing — the subject's effective state is untouched, so a conversation anchored after the
+intended point does not yet see it.
 
 ### 6. Canonical (atemporal) commits keep the direct-to-entry path
 
@@ -206,10 +214,12 @@ UI; it is the same content, two destinations.
 
 ## Consequences
 
-- **New:** an optional `target_entity` on `MutationSetEntry` (pin) + its apply-time pre-fill; a second
-  `entity_ref` on `chat:chat_session` for the chat→set edge; an entity-side "new/edit set" authoring
-  affordance on the lore card; an "as of" anchor on a conversation; context seeding of a resumed
-  conversation's pinned set; the commit's timeline branch creating a pinned set.
+- **New:** an optional `target_entity` on `MutationSetEntry` (pin) + its apply-time pre-fill; a `placed`
+  state on a pinned set + the single write-back on apply that sets it; a second `entity_ref` on
+  `chat:chat_session` for the chat→set edge; an entity-side "new/edit set" authoring affordance on the
+  lore card; an "as of" anchor on a conversation; context seeding of a resumed conversation's pinned
+  set; the commit's timeline branch, which creates a pinned set and validates its AI-proposed rows
+  against the subject's type.
 - **Reused, not rebuilt:** the entire mutation-set model and its CRUD (`mutation_sets.py`),
   `effective_state` (read), the `MutationSetRow` row shape and the apply-into-scene flow
   (`mutationNodes.ts`), the reference graph (edge extraction + `conversationsFor` neighbours), and the
@@ -222,17 +232,39 @@ UI; it is the same content, two destinations.
 - **Impersonate's `.md` changes** from a flat `entry(input.entry)` read to an as-of resolution; the
   built-in prompt and the `offer_on` machinery (ADR-0054) are otherwise unchanged.
 
-## Open questions (to settle before slicing, not in this ADR)
+## Resolved on review
+
+Three mechanics that were open in the first draft, verified against `master@490dcc8`:
+
+- **The chat→set edge is an existing shape — one schema field, no graph work.** `mutation_set` is
+  already a first-class graph node (`references.py`: `NodeFamily("mutation_set", …)`, in `by_id` and
+  `REFERENCE_BEARING_KINDS`), and both edge extraction (`_edges_from_field`) and the reverse map
+  (`rebuild_reverse_edges`) are **kind-neutral** — they key on the target id, never its kind, which is
+  exactly how the chat→lore `subject` edge already works. So §4 needs no index or graph change: add one
+  `entity_ref` field to `chat:chat_session`'s field list, precisely as `subject` was added (#89).
+- **A pinned set is a full peer of an in-scene mutation, and the AI's rows are validated at stage
+  time.** The set editor and the `/mutate` marker dialog build their field roster from the **same**
+  `buildFieldOptions` (intrinsic `title`/`body` + the type's schema fields; collection add/remove) — so
+  a set row already represents everything a marker can. There is no coverage gap and no "subset first".
+  The real catch is the reverse: set-save runs **no** row validation (`mutation_sets.py`), and
+  `save_scene` doesn't validate markers either — only `validate_project` does. Because a staged set is
+  AI-authored, the commit validates its rows at stage time (see §2), reusing the field/op rules the
+  marker validator (`_validate_scene_mutations`, which explicitly permits `title`/`body`) already
+  defines — so a placed marker can never be born invalid.
+- **Placement keeps the set, marked placed — it does not delete it.** Apply is a pure read today (no
+  `placed`/`used` state on `MutationSetEntry`, no back-link from a placed marker to its set), so *both*
+  "retire" and "keep" are net-new. Keep wins on the chat-ownership ground: a chat *references* its
+  pinned set (§4), so deleting it on placement would strand that edge and erase the resume history ("we
+  staged this; it's real at Chapter 30"). A placed pinned set therefore gains a `placed` state (drops
+  from *pending*, stays as provenance); a reusable set is untouched, as today.
+
+## Still open (to settle before slicing)
 
 - **Default anchor for a card-launched conversation** with no current scene: end-of-book (current self)
   is proposed; confirm, and confirm the override affordance's home on the Conversations surface.
-- **Reference-graph reach:** confirm a `mutation_set` node participates in edge extraction as an
-  `entity_ref` target, so the chat→set edge resolves like chat→subject (or what the minimal addition is).
-- **Field coverage:** whether a pinned set may carry intrinsic `title`/`body` rows
-  (`INTRINSIC_MUTABLE_FIELDS`) and collection ops, matching the in-scene authoring surface, or a subset
-  first.
-- **Whether placement retires or keeps** the set (provenance vs. cleanup), and what happens to a pending
-  pinned set whose subject or target field is later deleted.
+- **Lifecycle edges:** whether a placed set records the *scene* it was placed into (a nice-to-have for
+  "placed at ‹scene›"), and what happens to a *pending* pinned set whose subject or a target field is
+  later deleted — drop the affected row, or surface a warning.
 
 ## Suggested slicing (indicative, not decided here)
 

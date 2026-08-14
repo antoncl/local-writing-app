@@ -936,20 +936,12 @@
     stroke: var(--warn);
   }
 
-  /* Per-plotline FOCUS (ADR-0053 §6, S5b). buildBoardEdges tags every edge when a
-     plotline is focused: `edge-focused` on the focused thread's beat-sequence chain,
-     `edge-dimmed` on everything else. The focused thread reads LOUD — a solid accent
-     stroke, thicker, full opacity, no dash — so it pops over the quiet derived layers;
-     the rest recede to a faint trace. Declared AFTER the layer rules so the same-
-     specificity focus rules win by source order (they override beat-edge's dash + the
-     causal accent). Token colours only. */
+  /* Per-plotline FOCUS (ADR-0053 §6, S5b; #911). Focus is a CARD treatment — the
+     thread's cards are outlined (lit) in PlotCardNode and the rest dimmed; every EDGE
+     just recedes so the outlined thread pops. buildBoardEdges tags every edge
+     `edge-dimmed` when a plotline is focused. Declared AFTER the layer rules so the
+     same-specificity dim wins by source order. Token colours only. */
   .plot-board :global(.svelte-flow__edge.edge-dimmed .svelte-flow__edge-path) {
     stroke-opacity: 0.12;
-  }
-  .plot-board :global(.svelte-flow__edge.edge-focused .svelte-flow__edge-path) {
-    stroke: var(--accent);
-    stroke-opacity: 1;
-    stroke-width: 2.5;
-    stroke-dasharray: none;
   }
 </style>

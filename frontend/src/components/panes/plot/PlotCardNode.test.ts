@@ -111,39 +111,44 @@ describe("PlotCardNode", () => {
   });
 });
 
-describe("PlotCardNode — per-plotline focus dimming (ADR-0053 §6, S5b)", () => {
+describe("PlotCardNode — per-plotline focus (ADR-0053 §6, S5b; #911 lit outline + dim)", () => {
   const cardEl = (c: HTMLElement) => c.querySelector(".plot-card")!;
 
-  it("does not dim any card when nothing is focused", () => {
+  it("neither lits nor dims any card when nothing is focused", () => {
     const { container } = renderWithActions({ plotlineId: "Q" }, actions([], null));
     expect(cardEl(container).classList.contains("dimmed")).toBe(false);
+    expect(cardEl(container).classList.contains("lit")).toBe(false);
   });
 
-  it("dims a card that is neither on the focused thread nor fulfilling its beats", () => {
+  it("dims (not lits) a card that is neither on the focused thread nor fulfilling its beats", () => {
     // Focus P; this card is on Q and only fulfils an R beat → it recedes.
     const { container } = renderWithActions(
       { plotlineId: "Q", beats: [beat({ plotline_id: "R" })] },
       actions([], "P"),
     );
     expect(cardEl(container).classList.contains("dimmed")).toBe(true);
+    expect(cardEl(container).classList.contains("lit")).toBe(false);
   });
 
-  it("keeps a card whose PRIMARY plotline is the focused one", () => {
+  it("LITS (not dims) a card whose PRIMARY plotline is the focused one", () => {
     const { container } = renderWithActions({ plotlineId: "P" }, actions([], "P"));
+    expect(cardEl(container).classList.contains("lit")).toBe(true);
     expect(cardEl(container).classList.contains("dimmed")).toBe(false);
   });
 
-  it("keeps a card that fulfils one of the focused plotline's beats, even off its primary", () => {
+  it("LITS a card that fulfils one of the focused plotline's beats, even off its primary", () => {
     const { container } = renderWithActions(
       { plotlineId: "Q", beats: [beat({ plotline_id: "P", beat_id: "b7" })] },
       actions([], "P"),
     );
+    expect(cardEl(container).classList.contains("lit")).toBe(true);
     expect(cardEl(container).classList.contains("dimmed")).toBe(false);
   });
 
-  it("never dims without an actions context (read-only board)", () => {
+  it("neither lits nor dims without an actions context (read-only board)", () => {
     const { container } = render(PlotCardNode, { props: { data: data({ plotlineId: "Q" }) } });
     expect(cardEl(container).classList.contains("dimmed")).toBe(false);
+    expect(cardEl(container).classList.contains("lit")).toBe(false);
   });
 });
 

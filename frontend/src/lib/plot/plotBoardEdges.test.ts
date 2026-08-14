@@ -274,51 +274,34 @@ describe("buildBoardEdges", () => {
     expect(edges.map((e) => e.class).sort()).toEqual(["beat-edge", "causal-edge", "manuscript-edge"]);
   });
 
-  describe("per-plotline focus (Slice 5b)", () => {
-    // A board with two threads (P focused, Q not) plus a manuscript spine over all four.
+  describe("per-plotline focus (Slice 5b; #911 — cards outlined, edges recede)", () => {
+    // A board with two threads plus a manuscript spine over all four.
     const twoThreads = () =>
       projection([
         card("p1", { sequence: 0, beats: [beat("P", "b1")] }),
-        card("p2", { sequence: 1, beats: [beat("P", "b1")] }), // P:b1 chain p1->p2
+        card("p2", { sequence: 1, beats: [beat("P", "b1")] }),
         card("q1", { sequence: 2, beats: [beat("Q", "b1")] }),
-        card("q2", { sequence: 3, beats: [beat("Q", "b1")] }), // Q:b1 chain q1->q2
+        card("q2", { sequence: 3, beats: [beat("Q", "b1")] }),
       ]);
-    const classOf = (edges: { id: unknown; class?: unknown }[], id: string) =>
-      String(edges.find((e) => e.id === id)?.class ?? "");
+    const cls = (e: { class?: unknown }) => String(e.class ?? "");
 
     it("tags no edge when nothing is focused", () => {
       const edges = buildBoardEdges(twoThreads(), layers("manuscript", "beats"));
-      const cls = (e: { class?: unknown }) => String(e.class ?? "");
-      expect(edges.every((e) => !cls(e).includes("edge-focused") && !cls(e).includes("edge-dimmed"))).toBe(true);
+      expect(edges.every((e) => !cls(e).includes("edge-dimmed"))).toBe(true);
     });
 
-    it("lights the focused thread and dims every other edge", () => {
+    it("dims EVERY edge when a plotline is focused — the thread is shown by outlining its CARDS", () => {
       const edges = buildBoardEdges(twoThreads(), layers("manuscript", "beats"), "P");
-      // The focused plotline's beat chain reads LOUD.
-      expect(classOf(edges, "beat:P:b1:p1->p2")).toContain("edge-focused");
-      // Another thread's beats + the manuscript spine recede.
-      expect(classOf(edges, "beat:Q:b1:q1->q2")).toContain("edge-dimmed");
-      expect(classOf(edges, "ms:p1->p2")).toContain("edge-dimmed");
-      expect(classOf(edges, "ms:q1->q2")).toContain("edge-dimmed");
-      // Focused edges are never also dimmed.
-      expect(classOf(edges, "beat:P:b1:p1->p2")).not.toContain("edge-dimmed");
+      expect(edges.length).toBeGreaterThan(0);
+      // Every edge recedes; none is a special 'lit' focus edge (that lived only where a
+      // beat had 2+ cards — the "first beat only" artefact this replaced).
+      expect(edges.every((e) => cls(e).includes("edge-dimmed"))).toBe(true);
+      expect(edges.every((e) => !cls(e).includes("edge-focused"))).toBe(true);
     });
 
-    it("draws the focused thread's chain even with the beats layer off (self-contained)", () => {
-      // No layers toggled: focus alone lights the thread — the 'see the threads' payoff.
+    it("draws NO edges of its own — focus adds no chain when no layer is toggled", () => {
       const edges = buildBoardEdges(twoThreads(), layers(), "P");
-      expect(pairs(edges)).toEqual(["p1->p2"]);
-      expect(edges[0].class).toContain("beat-edge");
-      expect(edges[0].class).toContain("edge-focused");
-    });
-
-    it("does not duplicate the focused chain when the beats layer is also on", () => {
-      const edges = buildBoardEdges(twoThreads(), layers("beats"), "P");
-      // Both beat chains present, each once — the focus chain reuses the layer's edge id.
-      expect(new Set(edges.map((e) => e.id)).size).toBe(edges.length);
-      expect(edges.filter((e) => e.id === "beat:P:b1:p1->p2")).toHaveLength(1);
-      expect(classOf(edges, "beat:P:b1:p1->p2")).toContain("edge-focused");
-      expect(classOf(edges, "beat:Q:b1:q1->q2")).toContain("edge-dimmed");
+      expect(edges).toEqual([]);
     });
   });
 });

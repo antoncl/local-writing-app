@@ -108,18 +108,15 @@ function chain(sorted: Ranked[], prefix: string, className: string): Edge[] {
   return edges;
 }
 
-// Beat-sequence chains: one chain per (plotline, beat_id) group, over the cards
-// fulfilling that beat, in reading order (scene-less cards after). A card fulfilling
-// several beats joins each chain. The beat key is the composite (plotline, beat_id) a
-// card→beat link is, JSON-encoded so the two ids can never run together into a false
-// match. `only` restricts to one plotline's beats — the S5b focus thread; omitted =
-// every plotline's beats, the "beats" layer. Shared so the layer and the focus
-// highlight can't drift in how they chain the same beats.
-function beatChains(ranked: Ranked[], only?: string): Edge[] {
+// Beat-sequence chains (the "beats" layer): one chain per (plotline, beat_id) group,
+// over the cards fulfilling that beat, in reading order (scene-less cards after). A card
+// fulfilling several beats joins each chain. The beat key is the composite (plotline,
+// beat_id) a card→beat link is, JSON-encoded so the two ids can never run together into
+// a false match.
+function beatChains(ranked: Ranked[]): Edge[] {
   const groups = new Map<string, { members: Ranked[]; plotline: string; beat: string }>();
   for (const r of ranked) {
     for (const beat of r.card.beats) {
-      if (only != null && beat.plotline_id !== only) continue;
       const key = JSON.stringify([beat.plotline_id, beat.beat_id]);
       const group = groups.get(key) ?? { members: [], plotline: beat.plotline_id, beat: beat.beat_id };
       group.members.push(r);
@@ -137,9 +134,9 @@ function beatChains(ranked: Ranked[], only?: string): Edge[] {
 // Build the active edge layers for the board. `layers` is the set the writer has
 // toggled on (empty → no edges, the quiet default). Deterministic and total: an
 // unknown layer contributes nothing; a card missing from a layer's basis is simply
-// absent from that chain. `focusedPlotlineId` (S5b) is the per-plotline FOCUS: when
-// set, the focused plotline's beat-sequence chain is lit (`edge-focused`) — drawn even
-// with the beats layer off — and every other edge is dimmed (`edge-dimmed`).
+// absent from that chain. `focusedPlotlineId` (S5b; #911) is the per-plotline FOCUS:
+// when set, every edge is dimmed (`edge-dimmed`) so the thread's outlined cards (lit in
+// PlotCardNode) pop — focus draws no edges of its own.
 export function buildBoardEdges(
   projection: PlotBoardProjection,
   layers: Set<EdgeLayer>,
@@ -215,26 +212,15 @@ export function buildBoardEdges(
     }
   }
 
-  // Per-plotline FOCUS (ADR-0053 §6): light one thread's card-chain, the rest receding.
-  // Focus LIGHTS the focused plotline's beat-sequence chain regardless of the "beats"
-  // layer toggle (the "see the threads" affordance is self-contained), EMPHASISES those
-  // edges (`edge-focused`), and DIMS every other edge (`edge-dimmed`) — including the
-  // other dimensions (manuscript / causal / other plotlines' beats), so the focused
-  // thread pops. Card dimming is done reactively in PlotCardNode; here we only tag edges.
+  // Per-plotline FOCUS (ADR-0053 §6; #911): focus is a CARD treatment — PlotCardNode
+  // OUTLINES the thread's cards (lit) and dims the rest, matching the mockup. Focus draws
+  // NO edges of its own: the earlier per-beat focus chain lit an edge only where a beat
+  // had 2+ cards, so one-card-per-beat threads showed nothing but a lone "first beat"
+  // segment. Here every existing edge (any toggled layer) simply RECEDES so the outlined
+  // thread pops.
   if (focusedPlotlineId) {
-    const focusPrefix = `beat:${focusedPlotlineId}:`;
-    // Draw the focused thread's chain even if the beats layer is off — but never twice:
-    // when the layer is on those edges already exist (same ids), so add only the missing.
-    const present = new Set(edges.map((e) => e.id));
-    for (const fe of beatChains(ranked, focusedPlotlineId)) {
-      if (!present.has(fe.id)) {
-        edges.push(fe);
-        present.add(fe.id);
-      }
-    }
     for (const e of edges) {
-      const onThread = typeof e.id === "string" && e.id.startsWith(focusPrefix);
-      e.class = `${e.class ?? ""} ${onThread ? "edge-focused" : "edge-dimmed"}`.trim();
+      e.class = `${e.class ?? ""} edge-dimmed`.trim();
     }
   }
 

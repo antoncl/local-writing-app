@@ -32,16 +32,19 @@
   // or the Unassigned lane. Applied as a CSS var, so no hex literal lands in style code.
   let accent = $derived(getSwatch(data.color)?.hex ?? null);
 
-  // Per-plotline FOCUS (ADR-0053 §6, S5b): when a thread is focused, a card that is
-  // neither ON that thread (its primary plotline) nor FULFILLING one of its beats
-  // recedes. Reads the focus through the actions getter, so it tracks reactively and
-  // stays inert in the read-only / mount-test case (no context → never dimmed).
-  let dimmed = $derived.by(() => {
+  // Per-plotline FOCUS (ADR-0053 §6, S5b; #911): when a thread is focused, its cards
+  // are LIT (outlined so they pop) and every other card recedes (dimmed) — the mockup's
+  // focus treatment. A card is ON the thread when the focused plotline is its primary OR
+  // one of the beats it fulfils. Reads the focus through the actions getter, so it tracks
+  // reactively and stays inert with no context (mount test → never lit/dimmed).
+  let onFocusedThread = $derived.by(() => {
     const focus = actions?.focusedPlotlineId ?? null;
     if (!focus) return false;
-    if (data.plotlineId === focus) return false;
-    return !data.beats.some((b) => b.plotline_id === focus);
+    return data.plotlineId === focus || data.beats.some((b) => b.plotline_id === focus);
   });
+  let focusActive = $derived((actions?.focusedPlotlineId ?? null) !== null);
+  let lit = $derived(focusActive && onFocusedThread);
+  let dimmed = $derived(focusActive && !onFocusedThread);
 
   // The 3-state page marker (Slice 5b): on_page (scene attached) / off_page / unwritten.
   // Null page_status is the sparse default → unwritten. The dot colour comes from the
@@ -200,6 +203,7 @@
     class="plot-card"
     class:accented={accent}
     class:drag-over={dragOver}
+    class:lit={lit}
     class:dimmed={dimmed && !dragOver}
     style={accent ? `--card-accent: ${accent}` : undefined}
     ondragover={onCardDragOver}
@@ -425,9 +429,15 @@
     border-color: var(--accent);
     background: var(--accent-soft);
   }
-  /* Per-plotline FOCUS (ADR-0053 §6, S5b): a card off the focused thread recedes so the
-     thread's cards stand out. A quiet fade + desaturate — the card stays legible and
-     clickable, it just steps back. No token colours change (opacity/filter only). */
+  /* Per-plotline FOCUS (ADR-0053 §6, S5b; #911): the focused thread's cards are LIT —
+     an accent outline so they pop (the mockup's treatment; drawn as an outline, not a
+     border, so it sits outside the card and isn't clipped by overflow:hidden) — and
+     every other card recedes (dimmed: a quiet fade + desaturate, still legible +
+     clickable). No token colours change on the dim (opacity/filter only). */
+  .plot-card.lit {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
   .plot-card.dimmed {
     opacity: 0.4;
     filter: saturate(0.6);

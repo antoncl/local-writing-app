@@ -133,10 +133,17 @@ describe("PlotPlotlineNode beat drag source (ADR-0053 §4)", () => {
     );
   });
 
-  it("does not make beats draggable without a node id (the mount-test degrade)", () => {
-    render(PlotPlotlineNode, { props: { data: data() } }); // no id
+  it("shows a drag-handle grip on each draggable beat (#911)", () => {
+    const { container } = render(PlotPlotlineNode, { props: { id: "line_1", data: data() } });
+    const grips = container.querySelectorAll(".plotline-beat .beat-grip");
+    expect(grips.length).toBe(screen.getAllByRole("listitem").length);
+  });
+
+  it("does not make beats draggable (or grip them) without a node id (the mount-test degrade)", () => {
+    const { container } = render(PlotPlotlineNode, { props: { data: data() } }); // no id
     const beats = screen.getAllByRole("listitem");
     expect(beats.every((li) => li.getAttribute("draggable") !== "true")).toBe(true);
+    expect(container.querySelectorAll(".beat-grip").length).toBe(0); // no grip when not draggable
   });
 });
 

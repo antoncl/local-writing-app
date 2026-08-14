@@ -24,6 +24,7 @@ const projection = (): PlotBoardProjection => ({
   plotlines: [],
   containers: [],
   cards: [],
+  diagnostics: [],
 });
 
 afterEach(() => vi.restoreAllMocks());

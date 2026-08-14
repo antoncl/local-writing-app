@@ -74,6 +74,7 @@
   import PlotPlotlineNode from "./plot/PlotPlotlineNode.svelte";
   import PlotCausalEdge from "./plot/PlotCausalEdge.svelte";
   import PlotTemplatePalette from "./plot/PlotTemplatePalette.svelte";
+  import PlotDiagnosticsPanel from "./plot/PlotDiagnosticsPanel.svelte";
   import Popover from "@/components/chrome/Popover.svelte";
   import {
     PLOT_CARD_ACTIONS,
@@ -192,6 +193,43 @@
   // decide whether it recedes (a getter so it tracks this reactive state fresh).
   let focusedPlotlineId = $state<string | null>(null);
 
+  // Cross-dimension diagnostics (ADR-0048 S7): whether the findings rail is open, and
+  // which finding is selected. A selected finding lights its cards across the board;
+  // selecting a finding and focusing a plotline are mutually-exclusive highlight modes,
+  // so each clears the other (below + in toggleFocus). The findings themselves ride on
+  // the projection, so they refresh with every board fetch — nothing to fetch here.
+  let diagnosticsOpen = $state(false);
+  let selectedDiagnosticId = $state<string | null>(null);
+  let diagnostics = $derived(projection?.diagnostics ?? []);
+  let selectedDiagnostic = $derived(diagnostics.find((d) => d.id === selectedDiagnosticId) ?? null);
+  // The cards a selected finding lights: its own named cards, or — for a beat_gap, which
+  // names no card — the plotline's existing cards, so the writer sees the thread the
+  // missing beat belongs to. Null when nothing is selected (no board dimming).
+  let highlightedCardIds = $derived.by<ReadonlySet<string> | null>(() => {
+    const finding = selectedDiagnostic;
+    if (!finding) return null;
+    if (finding.cards.length > 0) return new Set(finding.cards.map((c) => c.id));
+    if (finding.plotline_id) {
+      const thread = finding.plotline_id;
+      // "On the thread" is the SAME predicate the plotline-focus highlight uses (a
+      // card's primary plotline is this thread, OR it fulfils one of the thread's
+      // beats) — a card can fulfil a plotline's beats without adopting it as primary,
+      // so a primary-only filter would light nothing exactly in the gap case.
+      return new Set(
+        (projection?.cards ?? [])
+          .filter((c) => c.plotline === thread || c.beats.some((b) => b.plotline_id === thread))
+          .map((c) => c.id),
+      );
+    }
+    return null;
+  });
+  // Select a finding (toggle off if it is already selected). Clears any plotline focus
+  // so only one highlight mode is ever lit.
+  function selectDiagnostic(id: string): void {
+    selectedDiagnosticId = selectedDiagnosticId === id ? null : id;
+    if (selectedDiagnosticId !== null) focusedPlotlineId = null;
+  }
+
   setContext<PlotCardActions>(PLOT_CARD_ACTIONS, {
     onOpen: (cardId) => void editorPanes.openPlotCard(cardId),
     // Realize mints a scene FILE, recorded via the recorder (S6b): undo deletes that
@@ -244,6 +282,11 @@
     get focusedPlotlineId() {
       return focusedPlotlineId;
     },
+    // The cards a selected diagnostic finding lights (S7). A getter so the card tracks
+    // the selection reactively, same as the focus above.
+    get highlightedCardIds() {
+      return highlightedCardIds;
+    },
   });
 
   // On-node plotline editing (ADR-0053 §3). The board owns the ephemeral "which
@@ -264,6 +307,8 @@
     },
     toggleFocus: (id) => {
       focusedPlotlineId = focusedPlotlineId === id ? null : id;
+      // One highlight mode at a time — focusing a thread drops any selected finding.
+      if (focusedPlotlineId !== null) selectedDiagnosticId = null;
     },
     loadPlotline: (id) => getPlotlineEntry(id),
     // Persist an edit and refresh the board + rail. Surface a failure in the app banner
@@ -738,6 +783,19 @@
             {/each}
           </Popover>
         </div>
+        <!-- Cross-dimension diagnostics (ADR-0048 S7): a toggle for the findings rail.
+             The count is the live number of layer disagreements + gaps the projection
+             carries. Grouped with Layers as the board's two analysis toggles. -->
+        <button
+          class="board-btn"
+          class:active={diagnosticsOpen}
+          aria-pressed={diagnosticsOpen}
+          onclick={() => (diagnosticsOpen = !diagnosticsOpen)}
+          title="Cross-dimension diagnostics"
+        >
+          <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+          Diagnostics{diagnostics.length ? ` (${diagnostics.length})` : ""}
+        </button>
         <button class="board-btn" onclick={newCard} disabled={creating}>
           <i class="ti ti-plus" aria-hidden="true"></i>
           New card
@@ -791,6 +849,7 @@
         onpaneclick={() => {
           expandedPlotlineId = null;
           focusedPlotlineId = null;
+          selectedDiagnosticId = null;
         }}
         onnodedragstart={({ nodes }) => {
           dragging = true;
@@ -895,6 +954,14 @@
       </div>
     {/if}
       </div>
+      {#if diagnosticsOpen}
+        <PlotDiagnosticsPanel
+          {diagnostics}
+          selectedId={selectedDiagnosticId}
+          onSelect={selectDiagnostic}
+          onClose={() => (diagnosticsOpen = false)}
+        />
+      {/if}
     </div>
   {/if}
 </section>

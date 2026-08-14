@@ -123,7 +123,7 @@ function card(id: string, extra: Partial<PlotBoardCard> = {}): PlotBoardCard {
   };
 }
 function projection(cards: PlotBoardCard[]): PlotBoardProjection {
-  return { board_id: "b", board_revision: "r", layout: {}, plotlines: [], containers: [], cards };
+  return { board_id: "b", board_revision: "r", layout: {}, plotlines: [], containers: [], cards, diagnostics: [] };
 }
 
 describe("referrer finders", () => {

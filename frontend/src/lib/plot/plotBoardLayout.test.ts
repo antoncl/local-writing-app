@@ -34,6 +34,7 @@ function projection(over: Partial<PlotBoardProjection> = {}): PlotBoardProjectio
     plotlines: [],
     containers: [],
     cards: [],
+    diagnostics: [],
     ...over,
   };
 }

@@ -88,10 +88,47 @@ export type PlotBoardCard = {
   causal_links: string[];
 };
 
+// The directed causal edge a `causal_inversion` finding points at — `source` *leads
+// to* `target`. The board highlights this exact edge (matched against the causal
+// edge id `buildBoardEdges` mints per link).
+export type PlotDiagnosticEdge = {
+  source: string;
+  target: string;
+};
+
+// A card a diagnostic names: its id (to light on the canvas) and title (for the
+// finding's prose). Denormalised so the panel renders + drives the highlight without
+// re-joining against the card list.
+export type PlotDiagnosticCard = {
+  id: string;
+  title: string;
+};
+
+// One cross-dimension finding (ADR-0048 S7 — the payoff): a place where two plot
+// layers disagree, or a beat the structure leaves unfilled. Deterministic, derived
+// backend-side from reveal order, beat rosters, and causal edges (no LLM — that is
+// S7b). `kind` is `causal_inversion` (a card sets up a card revealed earlier — `edge`
+// + `cards` = [setup, payoff]), `beat_inversion` (within one plotline a later beat is
+// fully revealed before an earlier begins — `plotline_id` + `beat_ids` name the two),
+// or `beat_gap` (an interior beat no card fulfils — `plotline_id` + `beat_ids`, `cards`
+// empty). `id` is a stable key (kind + participant ids) so the panel keeps a selection
+// across refetches.
+export type PlotDiagnostic = {
+  id: string;
+  kind: 'causal_inversion' | 'beat_inversion' | 'beat_gap';
+  message: string;
+  cards: PlotDiagnosticCard[];
+  edge: PlotDiagnosticEdge | null;
+  plotline_id: string | null;
+  beat_ids: string[];
+};
+
 // The whole board in one read: the plotlines (colour threads), the manuscript
 // containers (the structural boxes), the cards, and the board's opaque `layout`
 // payload (card positions — S7c makes it interactive) plus the board id +
 // revision, so a later layout save round-trips without a second request.
+// `diagnostics` (S7) is the derived cross-dimension findings — a facet of this same
+// read, refreshed with every projection fetch so the panel is live.
 export type PlotBoardProjection = {
   board_id: string;
   board_revision: string;
@@ -99,6 +136,7 @@ export type PlotBoardProjection = {
   plotlines: PlotBoardPlotline[];
   containers: PlotBoardContainer[];
   cards: PlotBoardCard[];
+  diagnostics: PlotDiagnostic[];
 };
 
 // A point on the board canvas.

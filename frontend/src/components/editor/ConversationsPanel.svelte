@@ -112,9 +112,9 @@
     if (!prompt || !subjectId) return;
     // This node IS the subject (ADR-0051 S2): stamp it so the new chat surfaces
     // here and is named after this node. Seed the read anchor onto the prompt's
-    // `as_of` scene input (ADR-0055 §1) so impersonate reads the subject as-of
-    // the slider's scene; omitted when at book-start (a prompt without an `as_of`
-    // input simply ignores the extra seed, exactly as with `entry`).
+    // `as_of` scene input (ADR-0055 §1) — hidden from the chat strip but persisted,
+    // so impersonate reads the subject as-of the slider's scene; omitted at
+    // book-start (a prompt without an `as_of` input ignores the seed, as with `entry`).
     const seededInputs: Record<string, string> = { entry: subjectId };
     if (asOfScene) seededInputs.as_of = asOfScene;
     await chatSessions.openChatFromPromptEntry(prompt, seededInputs, null, {

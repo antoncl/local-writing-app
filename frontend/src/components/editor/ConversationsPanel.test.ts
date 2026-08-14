@@ -139,7 +139,7 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
     );
   });
 
-  it("seeds the slider's scene onto the prompt's as_of scene input (ADR-0055 §1)", async () => {
+  it("seeds the slider's scene onto the prompt's as_of input (ADR-0055 §1)", async () => {
     const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue(undefined);
     render(ConversationsPanel, {
       props: {

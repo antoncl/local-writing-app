@@ -17,13 +17,15 @@ inputs:
     multiple: false
     presets: []
 # As-of read anchor (ADR-0055 §1): the scene the conversation reads its subject
-# as-of. Seeded from the lore card's time-travel slider at launch, but shown (not
-# hidden) so the writer sees which version they're talking to and can change it,
-# and so a derived prompt can preview the effect. Empty = book-start, as before.
+# as-of. Seeded from the lore card's time-travel slider at launch and `hidden`
+# from the running chat strip (the slider is the anchor control, per ADR §1) —
+# but still a `context_pick`, so the prompt-editor preview offers a scene picker
+# to exercise the as-of path when deriving a prompt. Empty = book-start, as before.
 - name: as_of
   type: context_pick
   label: Read as of scene
   required: false
+  hidden: true
   target:
     sources:
     - kind: scene

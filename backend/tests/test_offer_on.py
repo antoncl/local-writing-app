@@ -88,13 +88,13 @@ class ImpersonateAndOfferOnTests(unittest.TestCase):
         # A plain conversation — no commit-extraction JSON contract in the seed.
         self.assertNotIn('"fields"', body)
 
-    def test_impersonate_declares_a_visible_as_of_scene_input(self) -> None:
-        # The read anchor is a shown (not hidden) optional scene pick (ADR-0055 §1):
-        # the slider seeds it at launch, but it stays visible so the writer can see
-        # / change the version and a derived prompt can preview the effect.
+    def test_impersonate_declares_an_as_of_scene_anchor_input(self) -> None:
+        # The read anchor (ADR-0055 §1): slider-seeded at launch, `hidden` from the
+        # running chat strip (the slider is the control), but a scene `context_pick`
+        # so the prompt-editor preview still offers a picker to exercise the path.
         inputs = {i.name: i for i in self.service.read_prompt_entry("builtin-impersonate").inputs}
         self.assertIn("as_of", inputs)
-        self.assertFalse(inputs["as_of"].hidden)
+        self.assertTrue(inputs["as_of"].hidden)
         self.assertFalse(inputs["as_of"].required)
         self.assertEqual(inputs["as_of"].type, "context_pick")
         kinds = [s.get("kind") for s in (inputs["as_of"].target or {}).get("sources", [])]

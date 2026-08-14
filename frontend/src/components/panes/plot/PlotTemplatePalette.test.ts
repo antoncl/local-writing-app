@@ -77,6 +77,24 @@ describe("PlotTemplatePalette", () => {
     expect(screen.getByText("Heist beats")).toBeTruthy();
   });
 
+  it("shows each template's beat count, glyph, and owned-provenance prefix", async () => {
+    mount({
+      entries: [
+        tpl({ beat_count: 7 }),
+        tpl({ id: "tpl_2", title: "Heist beats", is_library: false, beat_count: 6 }),
+        tpl({ id: "tpl_3", title: "One-beater", is_library: false, beat_count: 1 }),
+      ],
+    });
+    await tick();
+    // Library row: bare count. Owned rows: "Your template · N beats", singular-aware.
+    expect(screen.getByText("7 beats")).toBeTruthy();
+    expect(screen.getByText("Your template · 6 beats")).toBeTruthy();
+    expect(screen.getByText("Your template · 1 beat")).toBeTruthy();
+    // Kind glyphs: ◆ built-in, ✎ owned.
+    expect(screen.getByText("◆")).toBeTruthy();
+    expect(screen.getAllByText("✎")).toHaveLength(2);
+  });
+
   it("clicking a template instantiates it", async () => {
     const h = mount();
     await tick();

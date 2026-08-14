@@ -46,6 +46,9 @@ export type PlotTemplateSummary = {
   body: string;
   entry_type: string;
   template: PlotTemplateSpec;
+  // The size of the beat roster — what the palette shows as "7 beats". The roster
+  // itself is not on the summary (the picker only needs the count).
+  beat_count?: number;
   source_layer_id?: string;
   source_layer_label?: string;
   // True when shipped by the app-owned built-in Library (ADR-0049). Clone/hide

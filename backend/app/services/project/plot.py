@@ -1133,6 +1133,8 @@ class PlotMixin:
                 # skipped from the list (the single-entry read still 422s), exactly
                 # as list_prompt_entries / list_plotlines skip unreadable entries.
                 continue
+            raw_metadata = front_matter.get("metadata")
+            roster = raw_metadata.get("beats") if isinstance(raw_metadata, dict) else None
             entries.append(
                 PlotTemplateSummary(
                     id=entry.id,
@@ -1140,6 +1142,7 @@ class PlotMixin:
                     body=body,
                     entry_type=PLOT_TEMPLATE_ENTRY_TYPE,
                     template=template,
+                    beat_count=len(roster) if isinstance(roster, list) else 0,
                     source_layer_id=entry.source_layer_id,
                     source_layer_label=entry.source_layer_label,
                     is_library=entry.is_library,

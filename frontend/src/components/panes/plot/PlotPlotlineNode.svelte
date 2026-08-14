@@ -249,16 +249,15 @@
   style={accent ? `--plotline-accent: ${accent}` : undefined}
 >
   {#if actions}
-    <!-- The header row: an eye toggle that FOCUSES this thread across the board (ADR-0053
-         §6), then the expand toggle (dot + title + beat count + caret). Two sibling
-         buttons, not nested. The eye carries `nodrag nopan` so pressing it never starts a
-         node drag; the expand button stays drag-enabled so the node still drags by its
-         header. -->
+    <!-- The header row: a leading drag grip, then an eye toggle that FOCUSES this thread
+         across the board (ADR-0053 §6), then the expand toggle (dot + title + beat count +
+         caret). The node drags ONLY by the grip (#876, `dragHandle`), so the eye + expand
+         buttons are pure clicks; they keep `nodrag nopan` as belt-and-suspenders. -->
     <div class="plotline-head">
       <!-- The drag handle (#876): the same leading grip a card uses, so every card-like
            node drags the same way. Here it also DISENTANGLES drag from the header — the
-           title row is a click-to-expand button, so without a grip a grab and an expand
-           fought over the same surface. SvelteFlow's `dragHandle` targets this grip. -->
+           title row is a click-to-expand button, so a whole-body drag surface would have
+           made a grab and an expand fight over it. SvelteFlow's `dragHandle` targets this grip. -->
       <span class="plotline-drag-handle {CARD_DRAG_HANDLE_CLASS}" title="Drag to move" aria-hidden="true">⋮⋮</span>
       <button
         class="plotline-focus nodrag nopan"

@@ -2,52 +2,44 @@
   PlotTemplatePalette — the plot board's template palette (ADR-0053 §2). Replaces the
   Plotlines rail: a plotline lives on the canvas as a node now, so the board's rail
   becomes the SOURCE you spawn plotlines from. It lists an "Empty" tile (an ad-hoc
-  plotline, no preset beats), the built-in Library plot templates, and the writer's own
-  templates. Clicking a template INSTANTIATES it — the backend snapshots its beats into
-  a new plotline node, which the board then expands for editing.
+  plotline, no preset beats) and the template roster (built-in Library + the writer's
+  own). Clicking a template INSTANTIATES it — the backend snapshots its beats into a new
+  plotline node, which the board then expands for editing.
+
+  The palette is a spawn source, NOT a management surface: cloning a Library template,
+  hiding it from the shelf, and editing/deleting an owned clone all live on the Plot
+  Templates pane (#916). Duplicating that chrome here only crowded the narrow rail until
+  the title collapsed to a single letter, so each row is just glyph + title + beat count.
+  A template hidden on the pane is filtered out here too (un-hide from the pane).
 
   Composes ViewNodeList + NodeRow (CLAUDE.md: a list UI composes those, not a bespoke
-  list) — the same shape as the PlotTemplates pane, but its primary row action is
-  instantiate (not open), plus the Empty tile and an owned-row edit/delete. Library rows
-  offer clone (ADR-0049) + hide; owned rows offer edit + delete. Imports nothing from
-  @xyflow/svelte so it mounts in happy-dom for its test.
+  list). Imports nothing from @xyflow/svelte so it mounts in happy-dom for its test.
 -->
 <script lang="ts">
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import { defaultView } from "@/lib/views/evaluateView";
-  import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
-  import { inheritedLayerLabel } from "@/lib/utils/provenance";
+  import { metadataSchemaStore } from "@/lib/stores/schema";
   import { referenceIndexStore } from "@/lib/stores/references";
-  import { hiddenLibraryStore, hideLibraryEntry, unhideLibraryEntry } from "@/lib/stores/hiddenLibrary";
+  import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
   import type { PlotTemplateSummary } from "@/lib/types";
 
   let {
     entries,
     onInstantiate,
     onEmpty,
-    onClone,
-    onEdit,
-    onDelete,
   }: {
     entries: PlotTemplateSummary[];
     // Spawn a plotline from a template (snapshots its beats).
     onInstantiate: (id: string) => void;
     // Spawn an ad-hoc plotline with no preset beats.
     onEmpty: () => void;
-    // Clone a Library template into the project as an owned editable copy (ADR-0049).
-    onClone: (id: string) => void;
-    // Open an owned template to author its beats.
-    onEdit: (id: string) => void;
-    // Delete an owned template clone.
-    onDelete: (id: string) => void;
   } = $props();
 
-  // The muted sub-line under a template's title: its beat-roster size, prefixed
-  // with "Your template" only when this project genuinely OWNS it (`editable`, the
-  // fail-closed owned-here verdict — #689). A Library template or one inherited from
-  // an ancestor project is not "yours"; its provenance is carried by the glyph + the
-  // layer pill instead. Mirrors the mockup's `.tmpl .b`.
+  // The muted sub-line under a template's title: its beat-roster size, prefixed with
+  // "Your template" only when this project genuinely OWNS it (`editable`, the fail-closed
+  // owned-here verdict — #689). A Library or ancestor-inherited template is not "yours";
+  // the glyph carries that. Mirrors the mockup's `.tmpl .b`.
   function templateDetail(entry: PlotTemplateSummary): string {
     const n = entry.beat_count ?? 0;
     const beats = `${n} ${n === 1 ? "beat" : "beats"}`;
@@ -55,16 +47,10 @@
   }
 
   let schema = $derived($metadataSchemaStore);
+  // A template hidden from this project's Library shelf (on the Plot Templates pane) is
+  // dropped from the spawn list too — un-hiding is the pane's job, not the palette's.
   let hiddenSet = $derived($hiddenLibraryStore);
-  let hiddenCount = $derived(entries.filter((e) => hiddenSet.has(e.id)).length);
-
-  // "Show hidden" reveals curated-away Library rows dimmed to un-hide; drops itself
-  // once nothing is hidden (else it latches, mirroring the Prompts/PlotTemplates shelf).
-  let showHidden = $state(false);
-  $effect(() => {
-    if (hiddenCount === 0 && showHidden) showHidden = false;
-  });
-  let visibleEntries = $derived(showHidden ? entries : entries.filter((e) => !hiddenSet.has(e.id)));
+  let visibleEntries = $derived(entries.filter((e) => !hiddenSet.has(e.id)));
 
   // Every NodeList is backed by a view (ADR-0022). The `plot` default is a flat roster
   // (every template shares plot:template, so a group header would be redundant). The spec
@@ -100,96 +86,22 @@
       {/snippet}
     </ViewNodeList>
   </div>
-
-  {#if hiddenCount > 0}
-    <button class="hidden-toggle" type="button" aria-pressed={showHidden} onclick={() => (showHidden = !showHidden)}>
-      <i class={showHidden ? "ti ti-eye" : "ti ti-eye-off"} aria-hidden="true"></i>
-      {showHidden ? "Hide" : "Show"}
-      {hiddenCount} hidden
-    </button>
-  {/if}
 </aside>
 
 {#snippet templateRow(entry: PlotTemplateSummary, ctx: RowCtx<PlotTemplateSummary>)}
   <NodeRow
     title={entry.title}
     detail={templateDetail(entry)}
-    layerLabel={inheritedLayerLabel(entry, $projectLayerIdStore)}
     depth={ctx.depth}
     active={ctx.active}
-    dimmed={hiddenSet.has(entry.id)}
     onClick={ctx.onClick}
     onmousedown={(event) => event.stopPropagation()}
   >
     {#snippet leading()}
-      <!-- Kind glyph (mockup `.tmpl.builtin`/`.tmpl.owned` ::before): an amber ✎
-           marks a template this project owns (`editable`), a muted ◆ a shipped
-           Library or ancestor-inherited one. -->
+      <!-- Kind glyph: an amber ✎ marks a template this project owns (`editable`), a
+           muted ◆ a shipped Library or ancestor-inherited one. The one-character
+           provenance cue that stands in for the old "Library" pill. -->
       <span class="tmpl-glyph" class:owned={entry.editable} aria-hidden="true">{entry.editable ? "✎" : "◆"}</span>
-    {/snippet}
-    {#snippet trailing()}
-      {#if entry.is_library}
-        <!-- Library (shipped, read-only): clone to own, or hide from this shelf. -->
-        {#if hiddenSet.has(entry.id)}
-          <button
-            type="button"
-            title={`Show “${entry.title}” on this project's Library shelf again`}
-            aria-label={`Show ${entry.title} again`}
-            onmousedown={(event) => event.stopPropagation()}
-            onclick={(event) => {
-              event.stopPropagation();
-              unhideLibraryEntry(entry.id);
-            }}
-          ><i class="ti ti-eye-off" aria-hidden="true"></i></button>
-        {:else}
-          <button
-            class="reveal-on-hover"
-            type="button"
-            title="Clone this shipped template into an editable copy in this project"
-            aria-label={`Clone ${entry.title} into this project`}
-            onmousedown={(event) => event.stopPropagation()}
-            onclick={(event) => {
-              event.stopPropagation();
-              onClone(entry.id);
-            }}
-          >⧉</button>
-          <button
-            class="reveal-on-hover"
-            type="button"
-            title={`Hide “${entry.title}” from this project's Library shelf`}
-            aria-label={`Hide ${entry.title} from this project`}
-            onmousedown={(event) => event.stopPropagation()}
-            onclick={(event) => {
-              event.stopPropagation();
-              hideLibraryEntry(entry.id);
-            }}
-          ><i class="ti ti-eye" aria-hidden="true"></i></button>
-        {/if}
-      {:else}
-        <!-- Owned clone: author its beats, or delete it. -->
-        <button
-          class="reveal-on-hover"
-          type="button"
-          title={`Edit “${entry.title}”`}
-          aria-label={`Edit ${entry.title}`}
-          onmousedown={(event) => event.stopPropagation()}
-          onclick={(event) => {
-            event.stopPropagation();
-            onEdit(entry.id);
-          }}
-        ><i class="ti ti-pencil" aria-hidden="true"></i></button>
-        <button
-          class="reveal-on-hover"
-          type="button"
-          title={`Delete “${entry.title}”`}
-          aria-label={`Delete ${entry.title}`}
-          onmousedown={(event) => event.stopPropagation()}
-          onclick={(event) => {
-            event.stopPropagation();
-            onDelete(entry.id);
-          }}
-        ><i class="ti ti-trash" aria-hidden="true"></i></button>
-      {/if}
     {/snippet}
   </NodeRow>
 {/snippet}
@@ -248,9 +160,9 @@
     font-size: var(--fs-xs);
     color: var(--text-3);
   }
-  /* Kind glyph in the row's leading slot. Built-in ◆ is muted (shipped, quiet);
-     owned ✎ carries the warm --star (the app's amber) to mark hand-authored work,
-     matching the mockup. Fixed box keeps the two titles left-aligned. */
+  /* Kind glyph in the row's leading slot. Shipped ◆ is muted (quiet); an owned ✎
+     carries the warm --star (the app's amber) to mark hand-authored work. Fixed box
+     keeps titles left-aligned. */
   .tmpl-glyph {
     flex: none;
     width: 12px;
@@ -268,24 +180,5 @@
   .palette-empty {
     padding: 6px 4px;
     font-size: var(--fs-sm);
-  }
-  .hidden-toggle {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    width: 100%;
-    margin-top: auto;
-    padding: 6px 8px;
-    border: none;
-    border-radius: 7px;
-    background: transparent;
-    color: var(--text-3);
-    font-size: var(--fs-sm);
-    text-align: left;
-    cursor: pointer;
-  }
-  .hidden-toggle:hover {
-    background: var(--inset);
-    color: var(--text-2);
   }
 </style>

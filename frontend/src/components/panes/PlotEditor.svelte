@@ -211,8 +211,14 @@
     if (finding.cards.length > 0) return new Set(finding.cards.map((c) => c.id));
     if (finding.plotline_id) {
       const thread = finding.plotline_id;
+      // "On the thread" is the SAME predicate the plotline-focus highlight uses (a
+      // card's primary plotline is this thread, OR it fulfils one of the thread's
+      // beats) — a card can fulfil a plotline's beats without adopting it as primary,
+      // so a primary-only filter would light nothing exactly in the gap case.
       return new Set(
-        (projection?.cards ?? []).filter((c) => c.plotline === thread).map((c) => c.id),
+        (projection?.cards ?? [])
+          .filter((c) => c.plotline === thread || c.beats.some((b) => b.plotline_id === thread))
+          .map((c) => c.id),
       );
     }
     return null;

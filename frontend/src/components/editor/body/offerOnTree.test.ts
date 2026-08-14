@@ -7,9 +7,10 @@ import { offerOnRows, selectTarget, deselectTarget } from "./offerOnTree";
 import type { MetadataSchema } from "@/lib/types";
 
 // A realistic host schema: lore has an abstract root + concrete leaves + a
-// deprecated one; scene and plot each have their host type (scene:scene /
-// plot:card) alongside NON-host siblings (act/chapter, board/plotline/template)
-// that must never surface. Plus non-host kinds (prompt/view).
+// deprecated one; scene and plot each have their host types (scene:scene /
+// plot:card / plot:plotline — plotlines joined the hosts in S7b) alongside
+// NON-host siblings (act/chapter, board/template) that must never surface. Plus
+// non-host kinds (prompt/view).
 const SCHEMA = {
   version: 1,
   entry_types: {
@@ -36,9 +37,10 @@ const stateOf = (offerOn: string[], id: string) =>
   offerOnRows(SCHEMA, offerOn).find((r) => r.id === id)?.state;
 
 describe("offerOnRows — host filter (#903)", () => {
-  it("offers all lore plus only the scene:scene / plot:card subtrees", () => {
+  it("offers all lore plus only the scene:scene / plot:card / plot:plotline subtrees", () => {
     // The abstract lore root is kept (the natural 'all lore' target); the
-    // deprecated lore type and every non-host sibling / kind are gone.
+    // deprecated lore type and every non-host sibling / kind are gone. plot:plotline
+    // joined the hosts in S7b (revise-plotline), a sibling section after plot:card.
     expect(ids([])).toEqual([
       "lore:base",
       "lore:character",
@@ -46,14 +48,22 @@ describe("offerOnRows — host filter (#903)", () => {
       "lore:location",
       "scene:scene",
       "plot:card",
+      "plot:plotline",
     ]);
   });
 
   it("drops the dead targets that the coarse kind filter used to show", () => {
     const shown = new Set(ids([]));
-    for (const dead of ["scene:act", "scene:chapter", "plot:board", "plot:plotline", "plot:template", "lore:old"]) {
+    for (const dead of ["scene:act", "scene:chapter", "plot:board", "plot:template", "lore:old"]) {
       expect(shown.has(dead)).toBe(false);
     }
+  });
+
+  it("offers plot:plotline as a selectable host (S7b)", () => {
+    expect(stateOf([], "plot:plotline")).toBe("unchecked");
+    expect(stateOf(["plot:plotline"], "plot:plotline")).toBe("checked");
+    // A depth-0 section root like the other plot host, not nested under plot:card.
+    expect(offerOnRows(SCHEMA, []).find((r) => r.id === "plot:plotline")?.depth).toBe(0);
   });
 
   it("nests lore leaves one level under the root", () => {

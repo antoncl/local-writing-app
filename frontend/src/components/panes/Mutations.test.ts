@@ -8,6 +8,7 @@
 // the "+" (which sets the store) can never be a no-op again.
 import { afterEach, describe, expect, it } from "vitest";
 import { tick } from "svelte";
+import { get } from "svelte/store";
 import { render, screen } from "@/lib/test/component";
 import Mutations from "./Mutations.svelte";
 import { metadataSchemaStore } from "@/lib/stores/schema";
@@ -43,7 +44,7 @@ describe("Mutations pane — New-set opens via the store, not a cross-tree ref",
     await tick();
 
     expect(screen.getByText("New mutation set")).toBeInTheDocument();
-    expect(mutationSetEditorStore).toBeTruthy();
+    expect(get(mutationSetEditorStore)).toEqual({ editing: null });
   });
 
   it("closing the store tears the editor back down", async () => {

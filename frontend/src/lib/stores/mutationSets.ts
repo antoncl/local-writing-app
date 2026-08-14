@@ -40,4 +40,5 @@ export function setMutationSetEntries(entries: MutationSetEntrySummary[]): void 
 
 export function clearMutationSets(): void {
   mutationSetEntriesStore.set([]);
+  mutationSetEditorStore.set(null);
 }

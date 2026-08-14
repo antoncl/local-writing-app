@@ -15,6 +15,12 @@ export class LoreScrubController {
    *  the intrinsic `title` / `body`). Membership = "changed by here". */
   overrides = $state<Record<string, string | string[]> | null>(null);
   units = $derived(groupMutationUnits(this.markers));
+  /** The scene the card is currently scrubbed to — the anchor a conversation
+   *  reads its subject as-of (ADR-0055 §1). Base (index 0) → "" = book-start.
+   *  Same (unit → last record) resolution `scrubTo` uses. */
+  anchorSceneId = $derived(
+    this.index > 0 ? (this.units[this.index - 1]?.records.at(-1)?.scene_id ?? "") : "",
+  );
 
   // The entity the markers belong to, and a monotonic token so out-of-order
   // responses from rapid scrubbing (or an entity switch mid-flight) can't

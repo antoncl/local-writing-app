@@ -139,6 +139,47 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
     );
   });
 
+  it("seeds the slider's scene onto the prompt's as_of input (ADR-0055 §1)", async () => {
+    const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue(undefined);
+    render(ConversationsPanel, {
+      props: {
+        subjectId: "hero",
+        subjectTitle: "Hero",
+        subjectEntryType: "lore:character",
+        asOfScene: "scene_ch12",
+        promptEntries: [chatPrompt("p-imp", "Impersonate", ["lore:character"], "prompt:scenechat")],
+        metadataSchema: SCHEMA,
+        hostPaneId: "pane-1",
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: /New/ }));
+    await tick();
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Impersonate" }));
+
+    expect(spawn).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "p-imp" }),
+      { entry: "hero", as_of: "scene_ch12" },
+      null,
+      expect.objectContaining({ subject: "hero" }),
+    );
+  });
+
+  it("omits as_of when the slider is at book-start, keeping inputs clean", async () => {
+    const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue(undefined);
+    // renderPanel leaves asOfScene at its "" default (base / book-start).
+    renderPanel([chatPrompt("p-imp", "Impersonate", ["lore:character"], "prompt:scenechat")]);
+    await fireEvent.click(screen.getByRole("button", { name: /New/ }));
+    await tick();
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Impersonate" }));
+
+    expect(spawn).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "p-imp" }),
+      { entry: "hero" },
+      null,
+      expect.anything(),
+    );
+  });
+
   it("folds '/'-titled prompts into a submenu the ＋New menu drills into (#832)", async () => {
     const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue(undefined);
     renderPanel([

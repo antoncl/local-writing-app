@@ -77,15 +77,28 @@ class ImpersonateAndOfferOnTests(unittest.TestCase):
             self.assertEqual(self.service.read_prompt_entry(entry_id).offer_on, expected, entry_id)
 
     def test_impersonate_body_locks_into_the_character(self) -> None:
-        body = self.service.read_prompt_entry("builtin-impersonate").body
-        # Pulls the character in via the seeded `entry` input, exactly as the
-        # revise prompt does (the ＋New launcher hard-codes the `entry` seed key).
-        self.assertIn("entry(input.entry)", body)
+        entry = self.service.read_prompt_entry("builtin-impersonate")
+        body = entry.body
+        # Pulls the character in via the seeded `entry` input, resolved AS-OF the
+        # conversation's anchor scene (ADR-0055 §1) rather than at book-start.
+        self.assertIn("entry_as_of(input.entry, as_of)", body)
         # A first-person, in-character lock that reads the character's own body.
         self.assertIn("first person", body)
         self.assertIn("char.body", body)
         # A plain conversation — no commit-extraction JSON contract in the seed.
         self.assertNotIn('"fields"', body)
+
+    def test_impersonate_declares_an_as_of_scene_anchor_input(self) -> None:
+        # The read anchor (ADR-0055 §1): slider-seeded at launch, `hidden` from the
+        # running chat strip (the slider is the control), but a scene `context_pick`
+        # so the prompt-editor preview still offers a picker to exercise the path.
+        inputs = {i.name: i for i in self.service.read_prompt_entry("builtin-impersonate").inputs}
+        self.assertIn("as_of", inputs)
+        self.assertTrue(inputs["as_of"].hidden)
+        self.assertFalse(inputs["as_of"].required)
+        self.assertEqual(inputs["as_of"].type, "context_pick")
+        kinds = [s.get("kind") for s in (inputs["as_of"].target or {}).get("sources", [])]
+        self.assertIn("scene", kinds)
 
     def test_clone_carries_offer_on_and_a_save_round_trips_it(self) -> None:
         clone = self.service.fork_prompt_entry("builtin-impersonate")

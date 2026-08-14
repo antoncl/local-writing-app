@@ -44,6 +44,7 @@
     subjectId,
     subjectTitle = "",
     subjectEntryType = "",
+    asOfScene = "",
     promptEntries,
     metadataSchema,
     hostPaneId = null,
@@ -58,6 +59,10 @@
     // the plot-card one, a scene the scene-summary one, not cross. Empty until
     // resolved ⇒ no brainstorm prompts shown.
     subjectEntryType?: string;
+    // The scene the subject's time-travel slider is currently at (ADR-0055 §1).
+    // Launch seeds it onto the prompt's `as_of` scene input so a subject-anchored
+    // conversation (impersonate) reads its subject as-of here. "" = book-start.
+    asOfScene?: string;
     promptEntries: PromptEntrySummary[];
     metadataSchema: MetadataSchema | null;
     // The editor pane hosting this panel; a launched chat registers as its
@@ -106,8 +111,13 @@
     menuOpen = false;
     if (!prompt || !subjectId) return;
     // This node IS the subject (ADR-0051 S2): stamp it so the new chat surfaces
-    // here and is named after this node.
-    await chatSessions.openChatFromPromptEntry(prompt, { entry: subjectId }, null, {
+    // here and is named after this node. Seed the read anchor onto the prompt's
+    // `as_of` scene input (ADR-0055 §1) — hidden from the chat strip but persisted,
+    // so impersonate reads the subject as-of the slider's scene; omitted at
+    // book-start (a prompt without an `as_of` input ignores the seed, as with `entry`).
+    const seededInputs: Record<string, string> = { entry: subjectId };
+    if (asOfScene) seededInputs.as_of = asOfScene;
+    await chatSessions.openChatFromPromptEntry(prompt, seededInputs, null, {
       parentPaneId: hostPaneId,
       subject: subjectId,
       subjectTitle,

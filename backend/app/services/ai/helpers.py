@@ -348,6 +348,85 @@ def _coerce_entry_ref(
     return None
 
 
+def _coerce_entry_ref_as_of(
+    project: ProjectService,
+    schema: Any,
+    value: Any,
+    scene: Any,
+    index: Any = None,
+) -> EntryRef | None:
+    """Backs the `entry_as_of()` Jinja global (ADR-0055 §1): like `entry()`, but
+    the returned EntryRef's fields are resolved **as of** a scene rather than at
+    book-start. Every field the entry carries a live mutation for (title/body and
+    any metadata field) is overlaid with its effective value at end-of-`scene`;
+    unmutated fields keep their base value.
+
+    `scene` accepts any form a `context_pick` / entity input carries — a bare
+    scene id (the launch seed), the picker's JSON list (the writer's choice), a
+    dict/EntryRef — resolved through `_coerce_entry_ref` like `entry()`'s own arg.
+
+    Degrades to a plain base read (exactly `entry()`) when there is no anchor —
+    no/empty scene, a scene outside the manuscript, a non-lore or unmutated
+    entry — so a subject-anchored prompt with no anchor set behaves as before.
+
+    Scene granularity only (`position=END_OF_SCENE`, the `effective_state`
+    default): every marker in the scene counts as live. A sub-scene cursor
+    anchor is a deferred refinement (ADR-0055 §1, "optionally a prose position").
+    """
+    ref = _coerce_entry_ref(project, schema, value)
+    if ref is None:
+        return None
+    scene_ref = _coerce_entry_ref(project, schema, scene)
+    if scene_ref is None:
+        return ref
+    scene_id = scene_ref.id
+    base = _safe_read_lore(project, ref.id)
+    if base is None:
+        return ref
+    try:
+        overrides = project.effective_state(ref.id, scene_id, index=index)
+    except Exception:
+        overrides = {}
+    # Read base once: hand it to the EntryRef as `loaded=` even with no overrides,
+    # so a non-mutated subject (the common case) isn't re-read on attribute access.
+    updates = _effective_overlay_updates(project, schema, base, overrides) if overrides else {}
+    loaded = base.model_copy(update=updates) if updates else base
+    return EntryRef(project, schema, ref.id, loaded=loaded)
+
+
+def _effective_overlay_updates(
+    project: ProjectService, schema: Any, base: Any, overrides: dict[str, Any]
+) -> dict[str, Any]:
+    """The `model_copy(update=...)` payload that overlays `effective_state`
+    output onto a base lore entry: intrinsic title/body land on the entry,
+    every other mutated field on a copy of `metadata` (scalars coerced to the
+    field's native type, collections handed through as the list they resolve to)."""
+    updates: dict[str, Any] = {}
+    metadata = dict(getattr(base, "metadata", {}) or {})
+    metadata_changed = False
+    for field, raw in overrides.items():
+        if field in ("title", "body"):
+            updates[field] = raw if isinstance(raw, str) else str(raw)
+        else:
+            metadata[field] = _coerce_effective_value(project, schema, field, raw)
+            metadata_changed = True
+    if metadata_changed:
+        updates["metadata"] = metadata
+    return updates
+
+
+def _coerce_effective_value(project: ProjectService, schema: Any, field: str, raw: Any) -> Any:
+    """Coerce one `effective_state` value to its field's native type: a collection
+    already resolves to the list to hand back as-is (ADR-0009); a scalar marker is
+    a string that `_coerce_mutation_value` turns back into a number/bool/etc. so an
+    as-of value matches a base value. Shared by `effective()` and `entry_as_of()`."""
+    if isinstance(raw, list):
+        return raw
+    field_def = getattr(schema, "fields", {}).get(field) if schema is not None else None
+    field_type = getattr(field_def, "type", "") if field_def is not None else ""
+    return project._coerce_mutation_value(raw, field_type)
+
+
 def _field_catalog(project: ProjectService, schema: Any, value: Any) -> list[dict[str, Any]]:
     """Backing the `field_catalog()` Jinja global.
 
@@ -505,6 +584,11 @@ def register_helpers(
         )
     )
     env.globals["entry"] = lambda value: _coerce_entry_ref(project, schema, value)
+    # As-of read (ADR-0055 §1): the same entry, resolved through `effective_state`
+    # at `scene` instead of book-start. `scene` empty/None → a plain base read.
+    env.globals["entry_as_of"] = lambda value, scene: _coerce_entry_ref_as_of(
+        project, schema, value, scene, index=_mutations_index()
+    )
     env.globals["field_catalog"] = lambda value: _field_catalog(project, schema, value)
     env.globals["entry_type_label"] = lambda value: _entry_type_label(schema, value)
     env.globals["base"] = lambda entity, field: _base_field(project, schema, entity, field)
@@ -678,16 +762,10 @@ def _effective_field(
     except Exception:
         overrides = {}
     if field in overrides:
-        value = overrides[field]
-        # Collection fields already resolve to a list (ADR-0009) — hand it back
-        # as-is. Scalar markers store strings; coerce to the field's native type
-        # so `effective(...)` matches `base(...)` (a number stays a number, a bool
-        # a bool) and template comparisons don't break in mutated scenes.
-        if isinstance(value, list):
-            return value
-        field_def = getattr(schema, "fields", {}).get(field) if schema is not None else None
-        field_type = getattr(field_def, "type", "") if field_def is not None else ""
-        return project._coerce_mutation_value(value, field_type)
+        # Collection → the resolved list as-is; scalar → coerced to the field's
+        # native type so `effective(...)` matches `base(...)` (shared with the
+        # `entry_as_of` overlay so the two helpers can't drift).
+        return _coerce_effective_value(project, schema, field, overrides[field])
     return _get_field(_safe_read_lore(project, entity_id), field)
 
 

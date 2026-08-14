@@ -348,6 +348,10 @@
       destructive: true,
       onConfirm: async () => {
         if (expandedPlotlineId === id) expandedPlotlineId = null;
+        // Clear focus too if this was the focused thread — else focus strands on a dead
+        // id and the whole board dims (no beat:<id>: edges, its cards now Unassigned)
+        // with the eye that would toggle it off gone with the node.
+        if (focusedPlotlineId === id) focusedPlotlineId = null;
         await deletePlotline(id);
       },
     });

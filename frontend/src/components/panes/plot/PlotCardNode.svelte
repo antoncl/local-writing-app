@@ -200,7 +200,7 @@
     class="plot-card"
     class:accented={accent}
     class:drag-over={dragOver}
-    class:dimmed
+    class:dimmed={dimmed && !dragOver}
     style={accent ? `--card-accent: ${accent}` : undefined}
     ondragover={onCardDragOver}
     ondragleave={onCardDragLeave}

@@ -168,6 +168,11 @@ export type PromptEntrySummary = {
   entry_type: string;
   metadata: EntryMetadata;
   inputs: PromptInputDefinition[];
+  // Subject entry_types this prompt is offered on as a "＋New" conversation in a
+  // node's Conversations panel (ADR-0054 §4/S4) — the author's explicit "show
+  // this prompt on…" allow-list, read off the node like `inputs`. Empty/absent =
+  // offered nowhere (opt-in). Consumed by `promptEntriesOfferedOn`.
+  offer_on?: string[];
   source_layer_id?: string;
   source_layer_label?: string;
   // True when this prompt is shipped by the app-owned built-in Library
@@ -188,6 +193,9 @@ export type PromptEntry = {
   entry_type: string;
   metadata: EntryMetadata;
   inputs: PromptInputDefinition[];
+  // See PromptEntrySummary.offer_on — carried on the open document so a save
+  // round-trips it verbatim (no authoring UI yet; S4b).
+  offer_on?: string[];
   computed_metadata: EntryMetadata;
   source_layer_id?: string;
   source_layer_label?: string;

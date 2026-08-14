@@ -534,6 +534,16 @@ class PromptEntrySummary(BaseModel):
     # uses it lives. The Type-level inputs field stays in the model for
     # backwards-compatibility on read but is no longer consulted at runtime.
     inputs: list[PromptInputDefinition] = Field(default_factory=list)
+    # Subject entry_types this prompt is offered on as a "＋New" conversation in a
+    # node's Conversations panel (ADR-0054 §4/S4). A per-prompt, instance-level
+    # allow-list — the author's explicit "show this prompt on…" declaration, read
+    # off the node's front-matter exactly like `inputs`. A prompt is offered on a
+    # subject iff one of these is an ancestor-or-self of the subject's entry_type;
+    # an empty list means "offered nowhere" (opt-in, no implicit everywhere-match).
+    # Only meaningful on `chat_panel` prompts (the only disposition launched from
+    # that menu); inert on the others. Intentionally lenient — unknown ids simply
+    # never match, like `commit.fields`.
+    offer_on: list[str] = Field(default_factory=list)
     source_layer_id: str = ""
     source_layer_label: str = ""
     # Whether this prompt is shipped by the app-owned built-in Library (#674 /
@@ -564,6 +574,9 @@ class PromptEntry(BaseModel):
     entry_type: str = "prompt:base"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     inputs: list[PromptInputDefinition] = Field(default_factory=list)
+    # See PromptEntrySummary.offer_on (ADR-0054 §4/S4) — carried on the open
+    # document so a clone/save round-trips it verbatim.
+    offer_on: list[str] = Field(default_factory=list)
     computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     source_layer_id: str = ""
     source_layer_label: str = ""
@@ -590,6 +603,9 @@ class SavePromptEntryRequest(BaseModel):
     entry_type: str = "prompt:base"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     inputs: list[PromptInputDefinition] = Field(default_factory=list)
+    # ADR-0054 §4/S4: carried on save so an edit does not strip the prompt's
+    # "show this prompt on…" allow-list (a field with no authoring UI yet, S4b).
+    offer_on: list[str] = Field(default_factory=list)
 
 
 class MutationSetRow(BaseModel):

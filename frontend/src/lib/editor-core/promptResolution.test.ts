@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   hidePromptEntries,
   promptEntriesForSurface,
-  promptTargetsEntryType,
+  promptEntriesOfferedOn,
+  promptOffersOn,
   type PromptResolutionContext,
 } from "@/lib/editor-core/promptResolution";
 import type { MetadataSchema, PromptEntrySummary } from "@/lib/types";
@@ -83,56 +84,82 @@ describe("hidePromptEntries (ADR-0049 #682)", () => {
   });
 });
 
-// The per-node brainstorm filter (ADR-0048 S8b): the ＋New menu shows only the
-// entry_patch prompts whose entry-input target admits the open node's type, so a
-// lore entry offers the lore revise prompt and a plot card the plot-card one.
-describe("promptTargetsEntryType (ADR-0048 S8b)", () => {
+// The per-node conversation filter (ADR-0054 §4/S4): the ＋New menu shows the
+// chat_panel prompts whose `offer_on` allow-list admits the open node's type, so
+// a lore entry offers the lore revise prompt, a plot card the plot-card one, and
+// a character both the revise prompt and impersonate. `offer_on` (where a prompt
+// is offered) replaces the old inference from context_pick input targets.
+describe("offer_on filter (ADR-0054 §4/S4)", () => {
   const isaSchema = {
     entry_types: {
       "lore:base": {},
       "lore:character": { parent: "lore:base" },
       "plot:base": {},
       "plot:card": { parent: "plot:base" },
+      "prompt:chat": { prompt: { context_strategy: { output: { kind: "chat_panel" } } } },
+      "prompt:append": { prompt: { context_strategy: { output: { kind: "append_to_body" } } } },
     },
   } as unknown as MetadataSchema;
 
-  function isaCtx(): PromptResolutionContext {
-    return { metadataSchema: isaSchema, promptEntries: [], loreEntries: [], availableScenes: [] };
-  }
-
-  function targeted(id: string, targetType: string): PromptEntrySummary {
+  function isaCtx(over: Partial<PromptResolutionContext> = {}): PromptResolutionContext {
     return {
-      id,
-      title: id,
-      body: "",
-      entry_type: "prompt:revise",
-      metadata: {},
-      inputs: [
-        { name: "entry", type: "context_pick", label: "E", target: { sources: [{ expr: { type: targetType } }] } },
-      ],
-    } as unknown as PromptEntrySummary;
+      metadataSchema: isaSchema,
+      promptEntries: [],
+      loreEntries: [],
+      availableScenes: [],
+      ...over,
+    };
   }
 
-  const lorePrompt = targeted("p-lore", "lore:base");
-  const cardPrompt = targeted("p-card", "plot:card");
+  function offered(id: string, entryType: string, offerOn: string[]): PromptEntrySummary {
+    return { id, title: id, body: "", entry_type: entryType, metadata: {}, inputs: [], offer_on: offerOn };
+  }
 
-  it("admits a subject that is-a the prompt's target type", () => {
-    expect(promptTargetsEntryType(isaCtx(), lorePrompt, "lore:character")).toBe(true); // descendant
-    expect(promptTargetsEntryType(isaCtx(), cardPrompt, "plot:card")).toBe(true); // exact
+  // Chat prompts differing only by their offer_on allow-list.
+  const reviseP = offered("p-lore", "prompt:chat", ["lore:base"]);
+  const cardP = offered("p-card", "prompt:chat", ["plot:card"]);
+  const impersonateP = offered("p-imp", "prompt:chat", ["lore:character"]);
+
+  describe("promptOffersOn", () => {
+    it("admits a subject that is-a a declared offer_on type", () => {
+      expect(promptOffersOn(isaCtx(), reviseP, "lore:character")).toBe(true); // descendant
+      expect(promptOffersOn(isaCtx(), cardP, "plot:card")).toBe(true); // exact
+    });
+
+    it("rejects a subject outside the allow-list", () => {
+      expect(promptOffersOn(isaCtx(), reviseP, "plot:card")).toBe(false);
+      // offer_on is descendant-inclusive, not ancestor: a character prompt is
+      // not offered on a bare lore:base subject.
+      expect(promptOffersOn(isaCtx(), impersonateP, "lore:base")).toBe(false);
+    });
+
+    it("a prompt with no offer_on is offered nowhere (opt-in, no everywhere-match)", () => {
+      const none = prompt("p-none", "prompt:chat"); // offer_on undefined
+      expect(promptOffersOn(isaCtx(), none, "lore:character")).toBe(false);
+    });
+
+    it("shows nothing until the subject type resolves", () => {
+      expect(promptOffersOn(isaCtx(), reviseP, "")).toBe(false);
+      expect(promptOffersOn(isaCtx(), reviseP, null)).toBe(false);
+    });
   });
 
-  it("rejects a cross-kind subject", () => {
-    expect(promptTargetsEntryType(isaCtx(), lorePrompt, "plot:card")).toBe(false);
-    expect(promptTargetsEntryType(isaCtx(), cardPrompt, "lore:character")).toBe(false);
-  });
+  describe("promptEntriesOfferedOn", () => {
+    it("offers the chat_panel prompts whose offer_on admits the subject", () => {
+      const c = isaCtx({ promptEntries: [reviseP, cardP, impersonateP] });
+      // A character card offers both the revise prompt (lore:base ⊇ character)
+      // and impersonate (lore:character exact) — not the plot-card one.
+      expect([...promptEntriesOfferedOn(c, "lore:character")].map((e) => e.id).sort()).toEqual([
+        "p-imp",
+        "p-lore",
+      ]);
+      expect(promptEntriesOfferedOn(c, "plot:card").map((e) => e.id)).toEqual(["p-card"]);
+    });
 
-  it("an untargeted prompt applies to any resolved subject", () => {
-    const untargeted = prompt("p-any", "prompt:revise"); // inputs: []
-    expect(promptTargetsEntryType(isaCtx(), untargeted, "plot:card")).toBe(true);
-  });
-
-  it("shows nothing until the subject type resolves", () => {
-    expect(promptTargetsEntryType(isaCtx(), lorePrompt, "")).toBe(false);
-    expect(promptTargetsEntryType(isaCtx(), lorePrompt, null)).toBe(false);
+    it("excludes a non-chat_panel prompt even when its offer_on matches (eligibility axis)", () => {
+      const appendP = offered("p-app", "prompt:append", ["lore:character"]);
+      const c = isaCtx({ promptEntries: [appendP, impersonateP] });
+      expect(promptEntriesOfferedOn(c, "lore:character").map((e) => e.id)).toEqual(["p-imp"]);
+    });
   });
 });

@@ -2,6 +2,8 @@
 id: builtin-summarize-scene
 title: Summarize scene
 entry_type: prompt:revise:scene_summary
+offer_on:
+- scene:scene
 inputs:
 - name: entry
   type: context_pick

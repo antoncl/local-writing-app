@@ -873,6 +873,9 @@ export const api = {
         entry_type: entry.entry_type,
         metadata: entry.metadata,
         inputs: entry.inputs ?? [],
+        // Round-trip the "show this prompt on…" allow-list so a body/inputs edit
+        // never strips it (ADR-0054 §4/S4; no authoring UI yet).
+        offer_on: entry.offer_on ?? [],
       }),
     });
   },

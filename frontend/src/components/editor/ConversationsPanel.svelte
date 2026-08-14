@@ -35,8 +35,7 @@
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
   import { conversationsFor } from "@/lib/views/conversations";
   import {
-    promptEntriesWithCommit,
-    promptTargetsEntryType,
+    promptEntriesOfferedOn,
     type PromptResolutionContext,
   } from "@/lib/editor-core/promptResolution";
   import type { ChatSessionSummary, MetadataSchema, PromptEntrySummary } from "@/lib/types";
@@ -82,16 +81,13 @@
     availableScenes: [],
     hiddenPromptIds: $hiddenLibraryStore,
   });
-  // The prompts applicable to this node — the ＋New menu. These are the brainstorm
-  // prompts (those declaring a `commit`, ADR-0054 §2), scoped to the ones whose
-  // entry-input target admits THIS node's type (ADR-0048 S8b) — a lore entry
-  // offers the lore revise prompt, a plot card the plot-card one, a scene the
-  // scene-summary one, not cross. The menu hides itself when none resolves.
-  let newPrompts = $derived(
-    promptEntriesWithCommit(ctx).filter((prompt) =>
-      promptTargetsEntryType(ctx, prompt, subjectEntryType),
-    ),
-  );
+  // The prompts applicable to this node — the ＋New menu. The chat_panel
+  // conversation prompts whose `offer_on` allow-list admits THIS node's type
+  // (ADR-0054 §4/S4) — a lore entry offers the lore revise prompt, a plot card
+  // the plot-card one, a scene the scene-summary one, a character both the revise
+  // prompt and impersonate, never cross. Both committing brainstorms and plain
+  // conversations qualify. The menu hides itself when none resolves.
+  let newPrompts = $derived(promptEntriesOfferedOn(ctx, subjectEntryType));
   // Prompt titles with "/" fold into a navigable submenu (#832); a flat list of
   // slashless titles yields a flat menu, unchanged.
   let newMenu = $derived(buildPromptMenuTree(newPrompts));

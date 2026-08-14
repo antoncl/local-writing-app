@@ -126,6 +126,11 @@
   // `{{ scene }}` binding from it (the old target_scene_id folded into subject).
   // "" for freeform / Chats-pane chats.
   let chatSubject = "";
+  // ADR-0055 §4: the mutation set this brainstorm owns (its `staged_set` edge),
+  // set when a commit stages a timeline change (§4a). Echoed on every save so a
+  // per-turn persist never drops it; seeded into the prompt context on resume
+  // (backend, S3). "" until the chat stages a set.
+  let chatStagedSet = "";
   let activeChatTitle = "Untitled chat";
   let activeChatPinned = false;
   let activeChatJournal: ChatSessionJournalEntry[] = $state([]);
@@ -204,6 +209,16 @@
     setError: (message) => (chatError = message),
     setNotice: (message) => (chatNotice = message),
     entryTitle: (entryId) => loreEntries.find((entry) => entry.id === entryId)?.title ?? null,
+    // The set this chat already owns, read at stage time so a re-stage refines it
+    // in place (singular edge, §4) instead of minting an orphan.
+    getStagedSetId: () => chatStagedSet,
+    // ADR-0055 §4: a first stage points the chat's `staged_set` edge at the new
+    // pinned set and persists — the chat owns it durably (resumable via the
+    // backend's context seeding, S3).
+    onStaged: async (setId) => {
+      chatStagedSet = setId;
+      await persistActiveChat();
+    },
   });
 
 
@@ -245,6 +260,7 @@
     chatPromptEntryId = "";
     chatAssistantId = "";
     chatSubject = "";
+    chatStagedSet = "";
     activeChatTitle = "Untitled chat";
     activeChatPinned = false;
     activeChatJournal = [];
@@ -269,6 +285,7 @@
     chatPromptEntryId = session.prompt_entry_id || "";
     chatAssistantId = session.assistant_id || "";
     chatSubject = session.subject || "";
+    chatStagedSet = session.staged_set || "";
     chatSystemPrompt = session.system_prompt || "";
     chatHistory = (session.messages || []).map((m: ChatSessionMessage) => ({
       role: m.role,
@@ -445,6 +462,9 @@
       // ADR-0051 S5: echo the subject so per-turn saves never drop it (the scene
       // anchor rides here too, since a scene subject IS the anchored scene).
       subject: chatSubject,
+      // ADR-0055 §4: echo the owned mutation set so a per-turn save never drops
+      // the edge (mirrors subject; the backend seeds it into context on resume).
+      staged_set: chatStagedSet,
       pinned: activeChatPinned,
       context_items: [],
       messages: chatHistory.map((m) => ({
@@ -806,12 +826,22 @@
     metadataSchema?.entry_types[activePromptEntry?.entry_type ?? ""]?.prompt?.context_strategy
       ?.output ?? null,
   );
+  // The subject's entry_type when the revise target is a lore entity, else ""
+  // (ADR-0055 §4a). A lore subject is time-travel-aware (ADR-0013), so only it
+  // may stage a timeline mutation set; a scene / plot-card subject isn't in the
+  // lore roster and leaves this "", gating staging off. Doubles as the staged
+  // set's target_entry_type.
+  let subjectLoreEntryType = $derived(
+    loreEntries.find((entry) => entry.id === (chatInputDrafts["entry"] ?? "").trim())?.entry_type ??
+      "",
+  );
   // Feed the commit controller (declared up by the state block) its reactive
   // inputs each render — kept next to activeOutput, the derived it consumes.
   $effect.pre(() => {
     commit.output = activeOutput;
     commit.inputDrafts = chatInputDrafts;
     commit.running = chatRunning;
+    commit.subjectEntryType = subjectLoreEntryType;
   });
   let assistantScope = $derived(assistantScopeTags(activePromptEntry));
   let scopedDefaultId = $derived(scopedDefaultAssistantId(assistantEntries, assistantScope, defaultAssistantId));
@@ -1100,6 +1130,20 @@
         >
           {commit.committing ? "Committing…" : "Commit to entry"}
         </button>
+        {#if commit.canStage}
+          <!-- ADR-0055 §4a/§6: the timeline branch — same content, staged as a
+               subject-pinned mutation set the writer later places in a scene,
+               instead of overwriting the entry's base. Lore subject only. -->
+          <button
+            type="button"
+            class="cbv-commit"
+            disabled={chatRunning || commit.committing || chatHistory.length === 0}
+            title="Stage this as a pending change pinned to the entry — place it from a scene later (it doesn't overwrite the entry)"
+            onclick={() => void commit.stageToPendingSet()}
+          >
+            {commit.committing ? "Staging…" : "Stage as pending change"}
+          </button>
+        {/if}
       {/if}
       <button
         type="button"

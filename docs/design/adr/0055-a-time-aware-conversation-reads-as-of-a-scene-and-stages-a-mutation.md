@@ -172,7 +172,9 @@ the id-keyed reference graph extracts as an ordinary edge (ADR-0051, #194).
   closing the chat.
 - **Resume, not restart.** Reopening the conversation resolves the referenced set, surfaces it, and
   **seeds it into the prompt context**, so the AI continues refining the same change.
-- A conversation may own more than one pinned set over its life; each is an edge.
+- The edge is **singular** — a conversation owns at most one staged set. A distinct staged change is a
+  new conversation with its own context, not a second set on the same one. (Settled singular in
+  implementation, #940 / S3; an earlier draft of this section read "more than one … each is an edge.")
 
 ### 5. The writer places the pinned set into a scene
 

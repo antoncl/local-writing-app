@@ -251,12 +251,22 @@
   // Container resize (#878). A container box carries no position (its origin is always
   // derived), but a resize handle gives it a manual SIZE, pinned in `containerSizes`
   // keyed by container id. A new-object assign (not a mutate) triggers the reactive
-  // autosave effect; the next rebuild reads it back through buildBoardNodes so the box
-  // holds the size. Deliberately outside the undo caretaker (drags are Tier-1, a resize
-  // is a coarser layout tweak) — the same call is the store's only writer of `sizes`.
+  // autosave effect. Deliberately outside the undo caretaker (drags are Tier-1, a resize
+  // is a coarser layout tweak) — this callback is the store's only writer of `sizes`.
+  //
+  // We rebuild flowNodes right here rather than wait for a refetch: a card's drag
+  // `extent` is baked into its node by buildBoardNodes, and a resize doesn't change the
+  // projection DATA-key (sizes live in the layout, which the key excludes), so the
+  // rebuild effect won't fire — the member cards' extent would stay the pre-resize
+  // region and the box's new room would be unreachable (the #874 synergy is the whole
+  // point). Rebuild from the SAME sparse overrides the effect uses, so an un-persisted
+  // drag survives and a never-dragged card keeps deriving; the grown box then widens its
+  // cards' extent at once. onResizeEnd fires after the gesture, so this can't fight it.
   setContext<PlotContainerActions>(PLOT_CONTAINER_ACTIONS, {
     onResize: (containerId, size) => {
-      containerSizes = { ...containerSizes, [containerId]: size };
+      const sizes = { ...containerSizes, [containerId]: size };
+      containerSizes = sizes;
+      if (projection) flowNodes = buildBoardNodes(projection, overriddenNodePositions(flowNodes, overriddenIds), sizes);
     },
   });
 

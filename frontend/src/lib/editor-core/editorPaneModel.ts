@@ -35,6 +35,10 @@ export type EditorPaneState = {
   // Per-entry prompt inputs. Only meaningful when document.type === "prompt";
   // ignored for other kinds. Persisted in the entry's YAML on save.
   draftInputs: PromptInputDefinition[];
+  // The subject entry_types this prompt is offered on in a node's Conversations
+  // ＋New menu (ADR-0054 §4 / S4b `offer_on`). Prompt-only, like draftInputs;
+  // ignored for other kinds. Persisted in the entry's YAML on save.
+  draftOfferOn: string[];
   saving: boolean;
   // True for ~2s after a successful save so the pane chip can briefly show
   // "Saved". Reset whenever the pane becomes dirty again.
@@ -71,6 +75,7 @@ export function createEmptyEditorPane(id: string): EditorPaneState {
     draftEntryType: "scene",
     draftMetadata: {},
     draftInputs: [],
+    draftOfferOn: [],
     saving: false,
     recentlySaved: false,
     saveError: false,
@@ -114,6 +119,7 @@ export function isEditorPaneDirty(
   entryType: string,
   metadata: EntryMetadata,
   inputs?: PromptInputDefinition[],
+  offerOn?: string[],
 ): boolean {
   if (!scene) return false;
   if (title !== scene.title) return true;
@@ -126,6 +132,13 @@ export function isEditorPaneDirty(
   const sceneInputs = (scene as { inputs?: PromptInputDefinition[] }).inputs;
   if (inputs !== undefined && sceneInputs !== undefined) {
     if (JSON.stringify(inputs) !== JSON.stringify(sceneInputs)) return true;
+  }
+  // Prompt-only: offer_on is the ＋New targeting allow-list (S4b). Same guarded
+  // compare as inputs — a non-prompt scene has no offer_on baseline, so editing
+  // this draft can never mark such a pane dirty.
+  const sceneOfferOn = (scene as { offer_on?: string[] }).offer_on;
+  if (offerOn !== undefined && sceneOfferOn !== undefined) {
+    if (JSON.stringify(offerOn) !== JSON.stringify(sceneOfferOn)) return true;
   }
   return false;
 }

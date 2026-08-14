@@ -242,6 +242,7 @@ class EditorPanesController {
     entryType: string,
     metadata: EntryMetadata,
     inputs?: PromptInputDefinition[],
+    offerOn?: string[],
   ): void {
     // View panes self-persist (ViewBodyView owns a debounced PUT /api/views/{id})
     // and drive their save-state flags via `setViewSaveState`. Their draft-* fields
@@ -253,7 +254,8 @@ class EditorPanesController {
     this.panes = this.panes.map((pane) => {
       if (pane.id !== id) return pane;
       const nextInputs = inputs ?? pane.draftInputs;
-      const nextDirty = isView ? pane.dirty : isEditorPaneDirty(pane.scene, title, body, status, entryType, metadata, nextInputs);
+      const nextOfferOn = offerOn ?? pane.draftOfferOn;
+      const nextDirty = isView ? pane.dirty : isEditorPaneDirty(pane.scene, title, body, status, entryType, metadata, nextInputs, nextOfferOn);
       return {
         ...pane,
         dirty: nextDirty,
@@ -265,6 +267,7 @@ class EditorPanesController {
         draftEntryType: entryType,
         draftMetadata: cloneMetadata(metadata),
         draftInputs: JSON.parse(JSON.stringify(nextInputs ?? [])),
+        draftOfferOn: [...(nextOfferOn ?? [])],
       };
     });
     // The generic autosave is a no-op for views (saveEditorPane returns early), so
@@ -313,6 +316,12 @@ class EditorPanesController {
           pane.draftStatus,
           pane.draftEntryType,
           draftMetadata,
+          // Pass the prompt drafts too: a baseline refresh (tag rename, schema
+          // edit) that leaves title/body/metadata untouched must not silently
+          // clear `dirty` while an unsaved inputs / offer_on edit is still held
+          // in the draft — that would strand the edit until the pane re-dirties.
+          pane.draftInputs,
+          pane.draftOfferOn,
         ),
       };
     });
@@ -561,7 +570,7 @@ class EditorPanesController {
         ...(documentKind === "scene" ? { status: pane.draftStatus } : {}),
         entry_type: pane.draftEntryType,
         metadata: cloneMetadata(pane.draftMetadata),
-        ...(documentKind === "prompt" ? { inputs: pane.draftInputs } : {}),
+        ...(documentKind === "prompt" ? { inputs: pane.draftInputs, offer_on: pane.draftOfferOn } : {}),
       };
       let savedDocument: EditableDocument;
       if (documentKind === "lore") {
@@ -630,6 +639,7 @@ class EditorPanesController {
           candidate.draftEntryType,
           candidate.draftMetadata,
           candidate.draftInputs,
+          candidate.draftOfferOn,
         );
         return {
           ...candidate,
@@ -999,7 +1009,12 @@ class EditorPanesController {
             draftStatus: "",
             draftEntryType: entry.entry_type,
             draftMetadata: opts.metadata === false ? {} : cloneMetadata(entry.metadata ?? {}),
-            ...(opts.inputs ? { draftInputs: JSON.parse(JSON.stringify((entry as PromptEntry).inputs ?? [])) } : {}),
+            ...(opts.inputs
+              ? {
+                  draftInputs: JSON.parse(JSON.stringify((entry as PromptEntry).inputs ?? [])),
+                  draftOfferOn: [...((entry as PromptEntry).offer_on ?? [])],
+                }
+              : {}),
             saving: false,
             recentlySaved: false,
           }

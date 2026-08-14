@@ -1117,6 +1117,7 @@
             detail.entryType,
             detail.metadata,
             detail.inputs,
+            detail.offer_on,
           )}
         onCustomData={(detail) => schemaPanes?.openForCustomData(detail.entryType, detail.kind, editorPane.id)}
         onNavigate={(detail) => navigateToBacklink(detail.id, detail.kind)}

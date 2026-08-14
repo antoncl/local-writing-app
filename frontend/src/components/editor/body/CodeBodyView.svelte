@@ -16,6 +16,7 @@
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import CodeEditor from "@/components/widgets/CodeEditor.svelte";
   import EntryInputsEditor from "@/components/editor/body/EntryInputsEditor.svelte";
+  import OfferOnPicker from "@/components/editor/body/OfferOnPicker.svelte";
   import PromptPreviewPane from "@/components/editor/body/PromptPreviewPane.svelte";
   import { type EntryInputDraft } from "@/lib/utils/promptInputs";
   import type {
@@ -31,6 +32,10 @@
     // --- Inputs the parent owns (state lifted up; bind:'d by NodeEditor) ---
     rawBody?: string;
     entryInputDrafts?: EntryInputDraft[];
+    // The prompt's `offer_on` allow-list (ADR-0054 §4 / S4b), authored via the
+    // OfferOnPicker below. Bound to NodeEditor's offerOnDraft; only rendered for
+    // a chat_panel prompt (the disposition ＋New lists).
+    offerOn?: string[];
     // --- Read-only context from parent ---
     scene?: EditableDocument | null;
     documentKind?: DocumentKind;
@@ -54,11 +59,14 @@
     readOnly?: boolean;
     // Outbound: declared-inputs changed (#14 — replaces inputsChange dispatch).
     onInputsChange?: () => void;
+    // Outbound: the offer_on allow-list changed (S4b) → parent emits its save.
+    onOfferOnChange?: () => void;
   }
 
   let {
     rawBody = $bindable(""),
     entryInputDrafts = $bindable([]),
+    offerOn = $bindable([]),
     scene = null,
     documentKind = "prompt",
     structure = null,
@@ -72,12 +80,25 @@
     entrySlugify,
     readOnly = false,
     onInputsChange,
+    onOfferOnChange,
   }: Props = $props();
 
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
   const metadataSchema = $derived($metadataSchemaStore);
 
   const isPrompt = (): boolean => documentKind === "prompt" && !!scene;
+
+  // The open prompt's disposition (ADR-0054 §1). The offer_on picker is gated to
+  // `chat_panel` — the only disposition ＋New surfaces a conversation for — so an
+  // author never sees a targeting control that provably does nothing on an
+  // append/replace prompt. Read straight off the type's context_strategy, the
+  // same path `effectiveOutputKind` uses.
+  const promptOutputKind = $derived(
+    isPrompt() && metadataSchema && scene
+      ? metadataSchema.entry_types[scene.entry_type]?.prompt?.context_strategy?.output?.kind ?? null
+      : null,
+  );
+  const showOfferOnPicker = $derived(promptOutputKind === "chat_panel");
 
   // --- Restore-default-body (for prompt sub-types with a non-empty
   //     default_body, e.g. roleplay). Visible only when the current body
@@ -281,6 +302,19 @@
       {onInputsChange}
     />
   </div>
+
+  {#if showOfferOnPicker}
+    <!-- Locked (Library prompt) the same way as the inputs host: `inert` blocks
+         interaction + drops it from the tab order; clone to edit. -->
+    <div class="entry-inputs-host" class:read-only={readOnly} inert={readOnly || undefined}>
+      <OfferOnPicker
+        bind:offerOn
+        {metadataSchema}
+        {readOnly}
+        onChange={onOfferOnChange}
+      />
+    </div>
+  {/if}
 
   <PromptPreviewPane
     bind:diagnostics={promptPreviewDiagnostics}

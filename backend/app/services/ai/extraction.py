@@ -22,7 +22,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from app.services.ai.preview import build_chat_payload, build_preview
+from app.models import (
+    AIChatRequest,
+    ChatMessage,
+    EntryPatchExtraction,
+    ExtractEntryPatchRequest,
+)
+from app.services.ai.chat import run_chat_turn
+from app.services.ai.preview import PreviewError, build_chat_payload, build_preview
 
 if TYPE_CHECKING:
     from app.services.project_service import ProjectService
@@ -107,3 +114,75 @@ def render_extraction_contract(
     )
     system_prompt, _ = build_chat_payload(rendered)
     return system_prompt
+
+
+def _messages_with_extract_cue(transcript: list[ChatMessage]) -> list[ChatMessage]:
+    """Append the extract cue to the transcript, coalescing consecutive same-role
+    turns and dropping whitespace-only ones — the sanitization `build_chat_payload`
+    does for rendered templates, which the raw transcript would otherwise skip.
+    Without it a transcript ending on a user turn (e.g. the author committed right
+    after a failed reply left the last turn a user one) would put two user turns
+    back to back, and the provider rejects that outright."""
+
+    out: list[ChatMessage] = []
+    for msg in [*transcript, ChatMessage(role="user", content=EXTRACT_CUE)]:
+        if not msg.content.strip():
+            continue
+        if out and out[-1].role == msg.role:
+            out[-1] = ChatMessage(role=msg.role, content=f"{out[-1].content}\n\n{msg.content}")
+        else:
+            out.append(msg)
+    return out
+
+
+async def run_entry_patch_extraction(
+    project: ProjectService,
+    *,
+    entry_type: str,
+    creating: bool,
+    request: ExtractEntryPatchRequest,
+) -> EntryPatchExtraction:
+    """Render the fresh contract, run one extraction turn, validate its reply.
+
+    Shared by the revise and create routes so the two never diverge on how the
+    turn is run or costed. `creating` selects the contract's title handling; the
+    validated patch is scoped to `entry_type` either way (kind-neutral, ADR-0048
+    §5). The extraction turn's cost rides back on `cost_usd` for the caller to
+    attribute to the session, exactly as a streamed turn's delta is."""
+
+    try:
+        contract = render_extraction_contract(
+            project,
+            entry_type=entry_type,
+            creating=creating,
+            commit_fields=request.commit_fields,
+        )
+    except PreviewError as exc:
+        # A broken contract template — the generated contract failing to render
+        # (e.g. a schema the field-catalog helper can't walk). Surface it as a
+        # clean failure the pane shows, not an unhandled 500 (mirrors how
+        # `ai_preview` and `ai_generate` handle a PreviewError from the same renderer).
+        return EntryPatchExtraction(
+            patch=None,
+            cost_usd=None,
+            ok=False,
+            error=f"Couldn't render the extraction prompt: {exc.message}",
+        )
+    chat = await run_chat_turn(
+        project,
+        AIChatRequest(
+            assistant_id=request.assistant_id,
+            system_prompt=contract,
+            messages=_messages_with_extract_cue(request.messages),
+            chat_id=None,
+        ),
+    )
+    if not chat.ok or not (chat.content or "").strip():
+        return EntryPatchExtraction(
+            patch=None,
+            cost_usd=chat.cost_usd,
+            ok=False,
+            error=chat.error or "The model returned nothing to commit.",
+        )
+    patch = project.validate_ai_entry_patch_for_type(entry_type, chat.content)
+    return EntryPatchExtraction(patch=patch, cost_usd=chat.cost_usd, ok=True)

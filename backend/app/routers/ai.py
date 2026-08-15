@@ -24,7 +24,6 @@ from app.models import (
     AIProviderList,
     AIProviderModelList,
     AITierResolution,
-    ChatMessage,
     CreateAIInvocationRequest,
     EntryPatchExtraction,
     ExtractEntryDraftRequest,
@@ -42,9 +41,10 @@ from app.services.ai import tokens as ai_tokens
 from app.services.ai.call_resolver import resolve_call_params
 from app.services.ai.chat import (
     expand_and_prepare_chat_blocks,
+    run_chat_turn,
     system_prompt_cache_blocks,
 )
-from app.services.ai.extraction import EXTRACT_CUE, render_extraction_contract
+from app.services.ai.extraction import run_entry_patch_extraction
 from app.services.ai.preview import (
     PreviewError,
     build_chat_payload,
@@ -55,7 +55,7 @@ from app.services.ai.profiles import CapabilityTier, ModelDescriptor
 from app.services.ai.profiles.registry import known_provider_names, profile_for
 from app.services.ai.streaming import transform_provider_events_to_ndjson
 from app.services.ai.usage import translate_usage_to_cost
-from app.services.project_service import ProjectService, ProjectServiceError
+from app.services.project_service import ProjectServiceError
 
 router = APIRouter()
 
@@ -261,61 +261,7 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
 
 @router.post("/api/ai/chat", response_model=AIChatResponse)
 async def ai_chat(project: CurrentProject, request: AIChatRequest) -> AIChatResponse:
-    settings = machine_settings_service.load_settings()
-    resolved = resolve_call_params(
-        project,
-        settings,
-        assistant_id=request.assistant_id,
-        provider_override=request.provider,
-        model_override=request.model,
-        max_tokens_override=request.max_tokens,
-    )
-    try:
-        policy = project.ai_policy()
-    except ProjectServiceError:
-        policy = "off"
-
-    messages_list = [m.model_dump() for m in request.messages]
-    system_blocks, session_id, journal_added = expand_and_prepare_chat_blocks(
-        project,
-        request.chat_id, request.system_prompt, messages_list
-    )
-
-    result = ai_providers.chat(
-        provider_name=resolved.provider,
-        model=resolved.model,
-        system_prompt=request.system_prompt,
-        messages=messages_list,
-        max_tokens=resolved.max_tokens,
-        temperature=resolved.temperature,
-        settings=settings,
-        policy=policy,
-        system_blocks=system_blocks,
-        session_id=session_id,
-    )
-    # Both Anthropic and OpenAI signal "hit max_tokens" — different names.
-    truncated = result.stop_reason in {"max_tokens", "length"}
-    usage_wire, cost_usd = await translate_usage_to_cost(
-        result.usage,
-        provider=result.provider,
-        model=result.model,
-        settings=settings,
-    )
-    return AIChatResponse(
-        role="assistant",
-        content=result.content,
-        provider=result.provider,
-        model=result.model,
-        latency_ms=result.latency_ms,
-        policy=policy,
-        ok=result.ok,
-        error=result.error,
-        stop_reason=result.stop_reason,
-        truncated=truncated,
-        journal_added=journal_added,
-        usage=usage_wire,
-        cost_usd=cost_usd,
-    )
+    return await run_chat_turn(project, request)
 
 
 # --- AI: generate (template + provider, the full pipeline) ---
@@ -644,90 +590,7 @@ def validate_ai_entry_draft(
         return project.validate_ai_entry_draft(request.entry_type, request.raw)
 
 
-# --- AI: fresh-extraction commit (ADR-0051 S4) ---
-#
-# The commit of a brainstorm chat. Instead of replaying the frozen seed system
-# prompt + transcript + a terse finalize cue (the old client-side
-# `runFinalizeTurn`, which got less reliable the longer the chat ran), the server
-# rebuilds the format contract from the target's schema and runs it as its own
-# fresh pass — the transcript is pure input, the contract sits at the top of a
-# small context. Length-independent by construction (ADR §4). Both endpoints reuse
-# the existing pieces end to end: `render_extraction_contract` (built on the
-# preview pipeline), the ordinary `ai_chat` provider call, and the SAME
-# parse+validate the finalize path used — so nothing downstream of the patch
-# changes.
-
-
-def _messages_with_extract_cue(transcript: list[ChatMessage]) -> list[ChatMessage]:
-    """Append the extract cue to the transcript, coalescing consecutive same-role
-    turns and dropping whitespace-only ones — the sanitization `build_chat_payload`
-    does for rendered templates, which the raw transcript would otherwise skip.
-    Without it a transcript ending on a user turn (e.g. the author committed right
-    after a failed reply left the last turn a user one) would put two user turns
-    back to back, and the provider rejects that outright."""
-
-    out: list[ChatMessage] = []
-    for msg in [*transcript, ChatMessage(role="user", content=EXTRACT_CUE)]:
-        if not msg.content.strip():
-            continue
-        if out and out[-1].role == msg.role:
-            out[-1] = ChatMessage(role=msg.role, content=f"{out[-1].content}\n\n{msg.content}")
-        else:
-            out.append(msg)
-    return out
-
-
-async def _run_entry_patch_extraction(
-    project: ProjectService,
-    *,
-    entry_type: str,
-    creating: bool,
-    request: ExtractEntryPatchRequest,
-) -> EntryPatchExtraction:
-    """Render the fresh contract, run one extraction turn, validate its reply.
-
-    Shared by the revise and create routes so the two never diverge on how the
-    turn is run or costed. `creating` selects the contract's title handling; the
-    validated patch is scoped to `entry_type` either way (kind-neutral, ADR-0048
-    §5). The extraction turn's cost rides back on `cost_usd` for the caller to
-    attribute to the session, exactly as a streamed turn's delta is."""
-
-    try:
-        contract = render_extraction_contract(
-            project,
-            entry_type=entry_type,
-            creating=creating,
-            commit_fields=request.commit_fields,
-        )
-    except PreviewError as exc:
-        # A broken contract template — the generated contract failing to render
-        # (e.g. a schema the field-catalog helper can't walk). Surface it as a
-        # clean failure the pane shows, not an unhandled 500 (mirrors how
-        # `ai_preview` and `ai_generate` handle a PreviewError from the same renderer).
-        return EntryPatchExtraction(
-            patch=None,
-            cost_usd=None,
-            ok=False,
-            error=f"Couldn't render the extraction prompt: {exc.message}",
-        )
-    chat = await ai_chat(
-        project,
-        AIChatRequest(
-            assistant_id=request.assistant_id,
-            system_prompt=contract,
-            messages=_messages_with_extract_cue(request.messages),
-            chat_id=None,
-        ),
-    )
-    if not chat.ok or not (chat.content or "").strip():
-        return EntryPatchExtraction(
-            patch=None,
-            cost_usd=chat.cost_usd,
-            ok=False,
-            error=chat.error or "The model returned nothing to commit.",
-        )
-    patch = project.validate_ai_entry_patch_for_type(entry_type, chat.content)
-    return EntryPatchExtraction(patch=patch, cost_usd=chat.cost_usd, ok=True)
+# --- AI: fresh-extraction commit (ADR-0051 S4; orchestration in services/ai/extraction) ---
 
 
 @router.post("/api/ai/entry-patch/{node_id}/extract", response_model=EntryPatchExtraction)
@@ -739,7 +602,7 @@ async def extract_entry_patch(
     Read-only — the adopted patch is written through the node's own save path."""
     with translate_errors():
         entry_type = project.entry_type_for_node(node_id)
-        return await _run_entry_patch_extraction(
+        return await run_entry_patch_extraction(
             project, entry_type=entry_type, creating=False, request=request
         )
 
@@ -751,6 +614,6 @@ async def extract_entry_draft(
     """Create-mode sibling (ADR-0046 §6.4 / ADR-0051 S4): no node yet, so the
     target `entry_type` rides in the body and the contract requires a title."""
     with translate_errors():
-        return await _run_entry_patch_extraction(
+        return await run_entry_patch_extraction(
             project, entry_type=request.entry_type, creating=True, request=request
         )

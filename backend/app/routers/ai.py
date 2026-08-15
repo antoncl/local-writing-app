@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
-from dataclasses import dataclass
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -45,7 +44,7 @@ from app.runtime import CurrentProject, translate_errors
 from app.services import machine_settings as machine_settings_service
 from app.services.ai import providers as ai_providers
 from app.services.ai import tokens as ai_tokens
-from app.services.ai.assistant_validation import coerce_optional_temperature
+from app.services.ai.call_resolver import resolve_call_params
 from app.services.ai.extraction import EXTRACT_CUE, render_extraction_contract
 from app.services.ai.preview import PreviewError, build_chat_payload, build_preview
 from app.services.ai.profiles import CapabilityTier, ModelDescriptor
@@ -73,80 +72,13 @@ def _preview_error_detail(exc: PreviewError) -> Any:
     return detail
 
 
-@dataclass
-class _ResolvedCall:
-    provider: str
-    model: str
-    # None means: the assistant didn't set a temperature. The provider
-    # call sites omit the param entirely so the provider applies its own
-    # default. Don't substitute a hardcoded fallback here — the whole
-    # point of None is "don't assume."
-    temperature: float | None
-    max_tokens: int
-    thinking_enabled: bool = False
-
-
-def _resolve_call_params(
-    project: ProjectService,
-    settings: machine_settings_service.MachineSettings,
-    *,
-    assistant_id: str | None,
-    provider_override: str | None,
-    model_override: str | None,
-    max_tokens_override: int | None,
-) -> _ResolvedCall:
-    """Resolve provider / model / temperature / max_tokens from a request.
-
-    Priority for each field, highest first:
-      1. Explicit override on the request (provider, model, max_tokens).
-      2. The assistant indicated by assistant_id, or the topmost assistant
-         in the file-backed roster when none is given (ADR-0024).
-      3. The legacy default_provider / default_models matrix on settings.
-
-    Temperature has no fallback: when the assistant doesn't set it (or
-    there's no assistant at all), we pass None and let the provider's
-    own default apply. Some newer models (e.g. claude-opus-4-7+) actually
-    400 on an explicit temperature; assuming 0.7 broke them silently.
-    """
-    assistant = project.resolve_assistant(assistant_id)
-    if assistant is not None:
-        meta = assistant.metadata or {}
-        a_provider = meta.get("ai_provider")
-        a_model = meta.get("ai_model")
-        provider = provider_override or (str(a_provider) if isinstance(a_provider, str) else "")
-        model = model_override or (str(a_model) if isinstance(a_model, str) else "")
-        temperature = coerce_optional_temperature(meta.get("ai_temperature"))
-        if max_tokens_override is not None:
-            max_tokens = max_tokens_override
-        else:
-            try:
-                max_tokens = int(meta.get("ai_max_tokens", 4096))
-            except (TypeError, ValueError):
-                max_tokens = 4096
-        return _ResolvedCall(
-            provider=provider,
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            thinking_enabled=bool(meta.get("ai_thinking", False)),
-        )
-    provider = provider_override or settings.default_provider
-    model = model_override or settings.default_models.get(provider or "", "")
-    return _ResolvedCall(
-        provider=provider,
-        model=model,
-        temperature=None,
-        max_tokens=max_tokens_override if max_tokens_override is not None else 4096,
-    )
-
-
 # --- AI: health check ---
 
 
 @router.post("/api/ai/health", response_model=AIHealthResponse)
 def ai_health(project: CurrentProject, request: AIHealthRequest) -> AIHealthResponse:
     settings = machine_settings_service.load_settings()
-    resolved = _resolve_call_params(
+    resolved = resolve_call_params(
         project,
         settings,
         assistant_id=request.assistant_id,
@@ -305,7 +237,7 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
     caching_style: str | None = None
     descriptor: ModelDescriptor | None = None
     if request.assistant_id is not None:
-        resolved = _resolve_call_params(
+        resolved = resolve_call_params(
             project,
             settings,
             assistant_id=request.assistant_id,
@@ -554,7 +486,7 @@ async def _usage_and_cost(
 @router.post("/api/ai/chat", response_model=AIChatResponse)
 async def ai_chat(project: CurrentProject, request: AIChatRequest) -> AIChatResponse:
     settings = machine_settings_service.load_settings()
-    resolved = _resolve_call_params(
+    resolved = resolve_call_params(
         project,
         settings,
         assistant_id=request.assistant_id,
@@ -660,7 +592,7 @@ async def ai_generate(project: CurrentProject, request: AIGenerateRequest) -> AI
         )
 
     settings = machine_settings_service.load_settings()
-    resolved = _resolve_call_params(
+    resolved = resolve_call_params(
         project,
         settings,
         assistant_id=request.assistant_id,
@@ -807,7 +739,7 @@ def _stream_provider_events(
 @router.post("/api/ai/chat/stream")
 async def ai_chat_stream(project: CurrentProject, request: AIChatRequest) -> StreamingResponse:
     settings = machine_settings_service.load_settings()
-    resolved = _resolve_call_params(
+    resolved = resolve_call_params(
         project,
         settings,
         assistant_id=request.assistant_id,
@@ -896,7 +828,7 @@ async def ai_generate_stream(project: CurrentProject, request: AIGenerateRequest
     char_count = sum(len(b.text) for m in rendered.messages for b in m.blocks)
 
     settings = machine_settings_service.load_settings()
-    resolved = _resolve_call_params(
+    resolved = resolve_call_params(
         project,
         settings,
         assistant_id=request.assistant_id,

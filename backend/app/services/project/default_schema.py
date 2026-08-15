@@ -695,6 +695,10 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         "id": {"name": "ID", "type": "text", "intrinsic": True, "hidden": True},
         "status": {
             "name": "Status",
+            "description": (
+                "Where this entry is in your workflow — draft, revised, or "
+                "complete. Organizational only; it does not change the prose."
+            ),
             "type": "select",
             # Colored options demonstrate the ColoredSelect path. Authors
             # can recolor or rename via the Detail Field editor; storage
@@ -706,7 +710,15 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 {"value": "complete", "color": "moss"},
             ],
         },
-        "summary": {"name": "Summary", "type": "long_text"},
+        "summary": {
+            "name": "Summary",
+            "description": (
+                "A one- or two-sentence gist of this entry — what it is at a "
+                "glance. Used as a compact stand-in for the full body in lists and "
+                "AI context."
+            ),
+            "type": "long_text",
+        },
         "beats": {
             # The plot-template beat roster (ADR-0048 S7 Slice 1, #736). An ordered
             # structured-list field whose items take the `plot_beat` group shape;
@@ -791,10 +803,30 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # The roleplay template reads this verbatim; both characters
             # see all beats so the AI plays them as one continuous scene.
             "name": "Dynamics",
+            "description": (
+                "Scene-current beats for the characters in this scene — how each is "
+                "behaving and what's driving them right now. Read verbatim by the "
+                "roleplay AI as direction; present-tense, not backstory."
+            ),
             "type": "long_text",
         },
-        "aliases": {"name": "Aliases", "type": "multi_select"},
-        "tags": {"name": "Tags", "type": "tags"},
+        "aliases": {
+            "name": "Aliases",
+            "description": (
+                "Other names this entry goes by (nicknames, titles, epithets). "
+                "Used to auto-detect mentions of it in your prose and pull it into "
+                "AI context."
+            ),
+            "type": "multi_select",
+        },
+        "tags": {
+            "name": "Tags",
+            "description": (
+                "Free-form labels for grouping and filtering entries. For your own "
+                "organization and Views; never shown to the reader."
+            ),
+            "type": "tags",
+        },
         "context_policy": {
             # How the AI-context layers treat this entry. Values:
             #   - "always":      pulled into every implicit-mode render
@@ -804,6 +836,12 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # Default "auto" preserves the pre-policy behavior — existing
             # entries that omit the field keep their current treatment.
             "name": "Context policy",
+            "description": (
+                "Controls when this entry is fed to the AI as context: 'always' "
+                "(every request), 'auto' (when its name or an alias is mentioned — "
+                "the default), 'manual_only' (only when you pick it), or 'never' "
+                "(excluded everywhere)."
+            ),
             "type": "select",
             "options": ["always", "auto", "manual_only", "never"],
         },
@@ -816,30 +854,54 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # every entry kind can opt in to per-entry tinting without
             # the user having to add a schema field.
             "name": "Color",
+            "description": (
+                "A palette swatch name for tinting this entry in lists and the "
+                "manuscript tree (e.g. 'moss', 'amber', 'slate') — not a hex code, "
+                "and not a description of a color."
+            ),
             "type": "color",
         },
         "characters": {
             "name": "Characters",
+            "description": (
+                "The characters who appear in this scene — references to existing "
+                "character entries, not free text."
+            ),
             "type": "entity_ref_list",
             "picker_config": {"sources": [{"kind": "lore", "expr": {"type": "lore:character"}}]},
         },
         "pov": {
             "name": "POV",
+            "description": (
+                "The point-of-view character this scene is told through — a "
+                "reference to one existing character entry."
+            ),
             "type": "entity_ref",
             "picker_config": {"sources": [{"kind": "lore", "expr": {"type": "lore:character"}}]},
         },
         "locations": {
             "name": "Locations",
+            "description": (
+                "Where this scene takes place — references to existing location "
+                "entries."
+            ),
             "type": "entity_ref_list",
             "picker_config": {"sources": [{"kind": "lore", "expr": {"type": "lore:location"}}]},
         },
         "home_place": {
+            # No default type includes this field, so it reaches no tooltip or AI
+            # catalog today; a description is added when a type adopts it.
             "name": "Home Place",
             "type": "entity_ref",
             "picker_config": {"sources": [{"kind": "lore", "expr": {"type": "lore:location"}}]},
         },
         "related_entries": {
             "name": "Related Entries",
+            "description": (
+                "Other lore entries connected to this one (people, places, "
+                "factions, objects) — references to existing entries, for cross-"
+                "linking and AI context."
+            ),
             "type": "entity_ref_list",
             "picker_config": {"sources": [{"kind": "lore"}]},
         },
@@ -961,6 +1023,10 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # non-hidden `list`) proposable — so the plot-card brainstorm (S8b) can
             # add follow-ups through the same entry-patch it already commits.
             "name": "Follow-ups",
+            "description": (
+                "Loose 'still to do on this card' notes. Each item is one short "
+                "reminder; delete an item when it's done."
+            ),
             "type": "list",
             "item_type": "text",
         },

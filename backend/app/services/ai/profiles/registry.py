@@ -14,11 +14,21 @@ from app.services.ai.profiles.openai import OpenAIProfile
 from app.services.ai.profiles.openrouter import OpenRouterProfile
 from app.services.machine_settings import MachineSettings
 
-_KNOWN = {"anthropic", "openai", "openrouter", "ollama"}
+# The one place a provider is registered. Adding a provider = write the
+# `ProviderProfile` subclass (with its `from_settings`) and add one line
+# here; removing a vendor that shut down = delete both. The name is the
+# authoritative `.name` on the class, so there is no second list to keep
+# in sync (ADR-0058).
+_REGISTRY: dict[str, type[ProviderProfile]] = {
+    AnthropicProfile.name: AnthropicProfile,
+    OpenAIProfile.name: OpenAIProfile,
+    OpenRouterProfile.name: OpenRouterProfile,
+    OllamaProfile.name: OllamaProfile,
+}
 
 
 def known_provider_names() -> list[str]:
-    return sorted(_KNOWN)
+    return sorted(_REGISTRY)
 
 
 def profile_for(provider: str, settings: MachineSettings) -> ProviderProfile:
@@ -26,18 +36,15 @@ def profile_for(provider: str, settings: MachineSettings) -> ProviderProfile:
 
     Returns a new instance each call — callers that want caching should
     hold the reference. The profile's `_cache` field is per-instance.
+    Each subclass's `from_settings` reads its own credential slot, so this
+    resolves polymorphically rather than branching per provider.
     """
 
-    providers = settings.providers
-    if provider == "anthropic":
-        return AnthropicProfile(api_key=providers.anthropic_api_key or "")
-    if provider == "openai":
-        return OpenAIProfile(api_key=providers.openai_api_key or "")
-    if provider == "openrouter":
-        return OpenRouterProfile(api_key=providers.openrouter_api_key or "")
-    if provider == "ollama":
-        return OllamaProfile(host=providers.ollama_host or "http://127.0.0.1:11434")
-    raise ValueError(f"Unknown provider: {provider}")
+    try:
+        profile_cls = _REGISTRY[provider]
+    except KeyError:
+        raise ValueError(f"Unknown provider: {provider}") from None
+    return profile_cls.from_settings(settings)
 
 
 def capability_profile_for(provider: str) -> ProviderProfile | None:

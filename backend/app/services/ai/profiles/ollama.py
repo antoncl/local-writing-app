@@ -8,7 +8,7 @@ Picker just lists what's installed.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
@@ -22,7 +22,14 @@ from app.services.ai.profiles.base import (
     default_token_count,
 )
 
+if TYPE_CHECKING:
+    from app.services.machine_settings import MachineSettings
+
 log = logging.getLogger(__name__)
+
+# Fallback when the machine hasn't set a custom Ollama host — the daemon's
+# default bind address.
+_DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434"
 
 
 class OllamaProfile(ProviderProfile):
@@ -39,6 +46,10 @@ class OllamaProfile(ProviderProfile):
             base = base[: -len("/v1")]
         self._base = base
         self._cache: list[ModelDescriptor] | None = None
+
+    @classmethod
+    def from_settings(cls, settings: MachineSettings) -> OllamaProfile:
+        return cls(host=settings.providers.ollama_host or _DEFAULT_OLLAMA_HOST)
 
     async def list_models(self, *, force_refresh: bool = False) -> list[ModelDescriptor]:
         if not force_refresh and self._cache is not None:

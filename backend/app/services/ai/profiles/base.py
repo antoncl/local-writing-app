@@ -10,7 +10,10 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from app.services.machine_settings import MachineSettings
 
 log = logging.getLogger(__name__)
 
@@ -159,6 +162,17 @@ class ProviderProfile(ABC):
 
     name: str
     display_name: str
+
+    @classmethod
+    @abstractmethod
+    def from_settings(cls, settings: MachineSettings) -> ProviderProfile:
+        """Construct a live profile from machine settings, reading this
+        provider's own credential slot (api key or host).
+
+        This is the single constructor the registry calls: adding a
+        provider means writing this classmethod on the subclass and adding
+        one line to the registration table, not editing a dispatch chain.
+        """
 
     @abstractmethod
     async def list_models(self, *, force_refresh: bool = False) -> list[ModelDescriptor]:

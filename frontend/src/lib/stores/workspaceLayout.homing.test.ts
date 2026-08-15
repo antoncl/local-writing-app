@@ -5,7 +5,15 @@
 // send the board back to the narrow side and stop it persisting.
 import { beforeEach, describe, expect, it } from "vitest";
 import { workspaceLayout } from "./workspaceLayout.svelte";
-import { deserialize, flattenPanels, G_EDITOR, G_SIDE } from "./workspaceLayout.serialize";
+import {
+  deserialize,
+  flattenPanels,
+  group,
+  G_EDITOR,
+  G_SIDE,
+  serialize,
+  split,
+} from "./workspaceLayout.serialize";
 
 describe("workspaceLayout region homing (#757)", () => {
   beforeEach(() => workspaceLayout.reset());
@@ -83,5 +91,51 @@ describe("retired `project` region degrades gracefully (#417 slice 6)", () => {
     const tabs = flattenPanels(restored!.root);
     expect(tabs).not.toContain("project");
     expect(tabs).toContain("outline");
+  });
+});
+
+// #168: the schema_type (field-definitions) editor is a KNOWN region so it homes
+// during a session, but its content is transient in-component selection state
+// that is persisted nowhere. So it must never round-trip through storage — a
+// restored schema_type tab would mount blank with no recovery (a "zombie" pane).
+// Both halves of the guard are exercised: stripped on serialize, dropped on load.
+describe("schema_type editor is ephemeral, never rehydrated (#168)", () => {
+  it("strips a schema_type tab on serialize but keeps its side-column siblings", () => {
+    const sideGroup = group(G_SIDE, ["schema", "schema_type"]);
+    sideGroup.active = "schema_type";
+    const tree = split("root", "row", [group(G_EDITOR, []), sideGroup], [0.6, 0.4]);
+
+    const snapshot = serialize(tree, G_EDITOR, null);
+    const tabs = flattenPanels(snapshot.root);
+    expect(tabs).not.toContain("schema_type");
+    // The store-derived tree tab is self-sufficient and must survive.
+    expect(tabs).toContain("schema");
+  });
+
+  it("drops a schema_type tab persisted before this fix, on load", () => {
+    // A snapshot written by the pre-fix code that still names schema_type.
+    const legacy = JSON.stringify({
+      version: 1,
+      root: {
+        kind: "split",
+        id: "s-right",
+        dir: "col",
+        children: [
+          { kind: "group", id: G_SIDE, tabs: ["schema", "schema_type"], active: "schema_type" },
+          { kind: "group", id: "g-tools", tabs: ["todo"], active: "todo" },
+        ],
+        sizes: [0.6, 0.4],
+      },
+      activeEditorGroupId: G_EDITOR,
+      activePreset: "writing",
+    });
+
+    const restored = deserialize(legacy);
+    expect(restored).not.toBeNull();
+    const tabs = flattenPanels(restored!.root);
+    expect(tabs).not.toContain("schema_type");
+    // The rest of the layout is untouched.
+    expect(tabs).toContain("schema");
+    expect(tabs).toContain("todo");
   });
 });

@@ -21,6 +21,18 @@ export function isEditorPanelId(id: string): boolean {
   return id.startsWith("editor_");
 }
 
+// Tabs that must never survive a reload. Editor documents are session state,
+// reconstructed on open. The `schema_type` field-definitions editor is the
+// same shape (#168): its content is driven entirely by transient in-component
+// selection state (which type/field is open) that is persisted nowhere, so a
+// restored `schema_type` tab remounts blank with no way to recover — a "zombie"
+// pane. Both regions home normally during a live session (schema_type is in
+// HOMES) but are stripped on serialize and dropped on load, so they can only
+// ever exist as freshly-opened, state-backed tabs.
+export function isEphemeralTab(id: string): boolean {
+  return isEditorPanelId(id) || id === "schema_type";
+}
+
 // Where a region lands when opened and not already placed. Editor docs are not
 // listed — they always home to the editor group. Doubles as the known-region
 // allowlist for validating a persisted layout (any tab id that is neither an
@@ -30,6 +42,9 @@ export const HOMES: Record<string, string> = {
   lore: G_SIDE,
   research: G_SIDE,
   schema: G_SIDE,
+  // Homes to the side column when opened, but is ephemeral (isEphemeralTab):
+  // stripped on serialize + dropped on load, because its content is transient
+  // in-component selection state that can't be restored (#168).
   schema_type: G_SIDE,
   prompts: G_SIDE,
   // A Library shelf like `prompts` (browse / clone read-only templates), so it
@@ -53,7 +68,11 @@ export const HOMES: Record<string, string> = {
 const KNOWN_REGIONS = new Set(Object.keys(HOMES));
 
 function isKnownTab(id: string): boolean {
-  return isEditorPanelId(id) || KNOWN_REGIONS.has(id);
+  // Ephemeral tabs (editor docs, the schema_type editor) never restore from
+  // storage — they are reconstructed live during a session, so a persisted one
+  // is dropped on load (#168). Everything else is honored only if it is still a
+  // known region.
+  return !isEphemeralTab(id) && KNOWN_REGIONS.has(id);
 }
 
 // --- Node factories -------------------------------------------------------
@@ -139,14 +158,15 @@ function eachGroup(node: LayoutNode, visit: (g: TabGroup) => void): void {
   else for (const child of node.children) eachGroup(child, visit);
 }
 
-// Drop session-ephemeral editor documents from a cloned tree and repair each
-// group's active tab (editor docs never rehydrate across a reload).
-function stripEditorTabs(node: LayoutNode): void {
+// Drop session-ephemeral tabs (editor documents and the schema_type editor,
+// per isEphemeralTab) from a cloned tree and repair each group's active tab —
+// they never rehydrate across a reload (#168).
+function stripEphemeralTabs(node: LayoutNode): void {
   if (node.kind === "group") {
-    node.tabs = node.tabs.filter((t) => !isEditorPanelId(t));
+    node.tabs = node.tabs.filter((t) => !isEphemeralTab(t));
     if (!node.active || !node.tabs.includes(node.active)) node.active = node.tabs[0] ?? null;
   } else {
-    node.children.forEach(stripEditorTabs);
+    node.children.forEach(stripEphemeralTabs);
   }
 }
 
@@ -198,11 +218,12 @@ function finalizeTree(node: LayoutNode | null, editorId: string): { root: Split;
 }
 
 // Capture the current tree as a persistable snapshot: region arrangement +
-// splitter fractions + a single empty editor home. Editor documents are
-// stripped (they are session state, reconstructed on open).
+// splitter fractions + a single empty editor home. Session-ephemeral tabs
+// (editor documents, the schema_type editor) are stripped — they are
+// reconstructed on open, never restored from storage (#168).
 export function serialize(root: Split, activeEditorGroupId: string, activePreset: PresetName | null): LayoutSnapshot {
   const clone = cloneNode(root);
-  stripEditorTabs(clone);
+  stripEphemeralTabs(clone);
   const { root: outRoot, activeEditorGroupId: editorId } = finalizeTree(clone, activeEditorGroupId);
   return { version: SNAPSHOT_VERSION, root: outRoot, activeEditorGroupId: editorId, activePreset: validPreset(activePreset) };
 }

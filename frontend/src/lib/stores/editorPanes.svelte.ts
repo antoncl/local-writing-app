@@ -805,6 +805,32 @@ class EditorPanesController {
     return this.panes.find((pane) => pane.id === target.id) ?? target;
   }
 
+  // Claim a target pane, run `load` against it, and RELEASE the claim if `load`
+  // throws — so a failed fetch (network, a 404 on an otherwise-valid kind, an
+  // expectedId mismatch) never strands a pane holding a `document` it never
+  // loaded (#347). The claim is stamped synchronously by `#acquireTargetPane`
+  // (its comment explains why the stamp must precede the fetch); this is the one
+  // path that undoes it, rather than a release hand-rolled at each opener — a
+  // cross-cutting concern belongs in a single choke point, not a call every
+  // opener must remember (ADR-0056 §4). Release restores `document: null`: the
+  // acquire may have REUSED a pane the user had open-and-empty, and empty is the
+  // right rest state either way (an empty pane is invisible until content loads).
+  // The throw is nothing that mutated the pane's content — every opener's only
+  // await is the fetch, before any shaping — so null is always the never-loaded
+  // state. Rethrows so the caller's `run()` still surfaces the error.
+  async #loadIntoPane(
+    claim: DocumentRef,
+    load: (pane: EditorPaneState) => Promise<void>,
+  ): Promise<void> {
+    const target = await this.#acquireTargetPane(claim);
+    try {
+      await load(target);
+    } catch (caught) {
+      this.panes = this.panes.map((pane) => (pane.id === target.id ? { ...pane, document: null } : pane));
+      throw caught;
+    }
+  }
+
   // Focus an already-open pane (if the document is showing) and report it.
   #focusExisting(pane: EditorPaneState, label: string): void {
     this.focusedEditorPaneId = pane.id;
@@ -826,47 +852,42 @@ class EditorPanesController {
       return;
     }
 
-    await this.run(async () => {
-      const targetPane = await this.#acquireTargetPane({ type: "project", id: "" });
-      const node = await api.getProjectNode();
-      if (expectedId && node.id !== expectedId) {
-        // Release the claim `#acquireTargetPane` stamped synchronously.
-        // Cleared rather than torn down because the acquire may have REUSED a
-        // pane the user already had open-and-empty; restoring it to empty is
-        // right either way, and an empty pane is invisible until content loads.
-        // Bailing without this is the stranded-empty-pane failure #344 is
-        // about, reached from the other direction.
-        this.panes = this.panes.map((pane) => (pane.id === targetPane.id ? { ...pane, document: null } : pane));
-        throw new Error(FOREIGN_PROJECT_NODE);
-      }
-      // The editor pane uses Scene-compatible shape; project nodes have no
-      // `status` so default to "" and let the documentKind branch hide it.
-      const sceneShaped = {
-        ...node,
-        status: "",
-        source_layer_id: "",
-        source_layer_label: "",
-      } as unknown as Scene;
-      this.panes = this.panes.map((pane) =>
-        pane.id === targetPane.id
-          ? {
-              ...pane,
-              document: { type: "project", id: node.id },
-              scene: sceneShaped,
-              dirty: false,
-              draftTitle: node.title,
-              draftMarkdown: node.body,
-              draftStatus: "",
-              draftEntryType: node.entry_type,
-              draftMetadata: cloneMetadata(node.metadata as EntryMetadata),
-              saving: false,
-              recentlySaved: false,
-            }
-          : pane,
-      );
-      this.focusedEditorPaneId = targetPane.id;
-      this.setStatus(`Loaded ${node.title}`);
-    });
+    await this.run(() =>
+      this.#loadIntoPane({ type: "project", id: "" }, async (targetPane) => {
+        const node = await api.getProjectNode();
+        // Landed on an ancestor's project.md rather than the OPEN project's —
+        // throw so #loadIntoPane releases the claim (the stranded-empty-pane
+        // failure #344 is about, reached from the expectedId direction).
+        if (expectedId && node.id !== expectedId) throw new Error(FOREIGN_PROJECT_NODE);
+        // The editor pane uses Scene-compatible shape; project nodes have no
+        // `status` so default to "" and let the documentKind branch hide it.
+        const sceneShaped = {
+          ...node,
+          status: "",
+          source_layer_id: "",
+          source_layer_label: "",
+        } as unknown as Scene;
+        this.panes = this.panes.map((pane) =>
+          pane.id === targetPane.id
+            ? {
+                ...pane,
+                document: { type: "project", id: node.id },
+                scene: sceneShaped,
+                dirty: false,
+                draftTitle: node.title,
+                draftMarkdown: node.body,
+                draftStatus: "",
+                draftEntryType: node.entry_type,
+                draftMetadata: cloneMetadata(node.metadata as EntryMetadata),
+                saving: false,
+                recentlySaved: false,
+              }
+            : pane,
+        );
+        this.focusedEditorPaneId = targetPane.id;
+        this.setStatus(`Loaded ${node.title}`);
+      }),
+    );
   }
 
   async openScene(sceneId: string): Promise<void> {
@@ -876,27 +897,28 @@ class EditorPanesController {
       return;
     }
 
-    const targetPane = await this.#acquireTargetPane({ type: "scene", id: sceneId });
-    const scene = await api.getScene(sceneId);
-    this.panes = this.panes.map((pane) =>
-      pane.id === targetPane.id
-        ? {
-            ...pane,
-            document: { type: "scene", id: scene.id },
-            scene,
-            dirty: false,
-            draftTitle: scene.title,
-            draftMarkdown: scene.body,
-            draftStatus: scene.status,
-            draftEntryType: scene.entry_type,
-            draftMetadata: cloneMetadata(scene.metadata),
-            saving: false,
-            recentlySaved: false,
-          }
-        : pane,
-    );
-    this.focusedEditorPaneId = targetPane.id;
-    this.setStatus(`Loaded ${scene.title}`);
+    await this.#loadIntoPane({ type: "scene", id: sceneId }, async (targetPane) => {
+      const scene = await api.getScene(sceneId);
+      this.panes = this.panes.map((pane) =>
+        pane.id === targetPane.id
+          ? {
+              ...pane,
+              document: { type: "scene", id: scene.id },
+              scene,
+              dirty: false,
+              draftTitle: scene.title,
+              draftMarkdown: scene.body,
+              draftStatus: scene.status,
+              draftEntryType: scene.entry_type,
+              draftMetadata: cloneMetadata(scene.metadata),
+              saving: false,
+              recentlySaved: false,
+            }
+          : pane,
+      );
+      this.focusedEditorPaneId = targetPane.id;
+      this.setStatus(`Loaded ${scene.title}`);
+    });
   }
 
   // Opens a manuscript-tree structure node (Act, Chapter, leaf-Scene-as-
@@ -922,27 +944,32 @@ class EditorPanesController {
       this.setError(`Node ${node.title} has no underlying scene to edit.`);
       return;
     }
-    const targetPane = await this.#acquireTargetPane({ type: "structure_node", id: node.id });
-    const scene = await api.getScene(node.scene_id);
-    this.panes = this.panes.map((pane) =>
-      pane.id === targetPane.id
-        ? {
-            ...pane,
-            document: { type: "structure_node", id: node.id },
-            scene,
-            dirty: false,
-            draftTitle: scene.title,
-            draftMarkdown: scene.body,
-            draftStatus: scene.status,
-            draftEntryType: scene.entry_type,
-            draftMetadata: cloneMetadata(scene.metadata),
-            saving: false,
-            recentlySaved: false,
-          }
-        : pane,
-    );
-    this.focusedEditorPaneId = targetPane.id;
-    this.setStatus(`Loaded ${scene.title}`);
+    // Capture the guard-narrowed scene_id before the closure: TS drops property
+    // narrowing across the closure boundary, and the guard above already proved
+    // it non-empty.
+    const sceneId = node.scene_id;
+    await this.#loadIntoPane({ type: "structure_node", id: node.id }, async (targetPane) => {
+      const scene = await api.getScene(sceneId);
+      this.panes = this.panes.map((pane) =>
+        pane.id === targetPane.id
+          ? {
+              ...pane,
+              document: { type: "structure_node", id: node.id },
+              scene,
+              dirty: false,
+              draftTitle: scene.title,
+              draftMarkdown: scene.body,
+              draftStatus: scene.status,
+              draftEntryType: scene.entry_type,
+              draftMetadata: cloneMetadata(scene.metadata),
+              saving: false,
+              recentlySaved: false,
+            }
+          : pane,
+      );
+      this.focusedEditorPaneId = targetPane.id;
+      this.setStatus(`Loaded ${scene.title}`);
+    });
   }
 
   // Open a chat session in the editor-pane system. Mirrors the structure-
@@ -961,37 +988,38 @@ class EditorPanesController {
       return;
     }
     const summary = get(chatSessionsStore).find((s) => s.id === chatId);
-    const targetPane = await this.#acquireTargetPane({ type: "chat", id: chatId });
-    const sceneShaped = {
-      id: chatId,
-      title: summary?.title || "Untitled chat",
-      body: "",
-      revision: "",
-      status: "",
-      entry_type: "chat:chat_session",
-      metadata: {},
-      computed_metadata: {},
-    } as unknown as EditableDocument;
-    this.panes = this.panes.map((pane) =>
-      pane.id === targetPane.id
-        ? {
-            ...pane,
-            document: { type: "chat", id: chatId },
-            scene: sceneShaped,
-            dirty: false,
-            draftTitle: sceneShaped.title,
-            draftMarkdown: "",
-            draftStatus: "",
-            draftEntryType: "chat:chat_session",
-            draftMetadata: {},
-            saving: false,
-            recentlySaved: false,
-          }
-        : pane,
-    );
-    this.focusedEditorPaneId = targetPane.id;
-    this.setStatus(`Loaded ${sceneShaped.title}`);
-    this.activeChatId = chatId;
+    await this.#loadIntoPane({ type: "chat", id: chatId }, async (targetPane) => {
+      const sceneShaped = {
+        id: chatId,
+        title: summary?.title || "Untitled chat",
+        body: "",
+        revision: "",
+        status: "",
+        entry_type: "chat:chat_session",
+        metadata: {},
+        computed_metadata: {},
+      } as unknown as EditableDocument;
+      this.panes = this.panes.map((pane) =>
+        pane.id === targetPane.id
+          ? {
+              ...pane,
+              document: { type: "chat", id: chatId },
+              scene: sceneShaped,
+              dirty: false,
+              draftTitle: sceneShaped.title,
+              draftMarkdown: "",
+              draftStatus: "",
+              draftEntryType: "chat:chat_session",
+              draftMetadata: {},
+              saving: false,
+              recentlySaved: false,
+            }
+          : pane,
+      );
+      this.focusedEditorPaneId = targetPane.id;
+      this.setStatus(`Loaded ${sceneShaped.title}`);
+      this.activeChatId = chatId;
+    });
   }
 
   // Open one "entry" document (prompt / plot template / assistant / view) in a
@@ -1017,33 +1045,34 @@ class EditorPanesController {
       this.#focusExisting(existingPane, focusLabel);
       return;
     }
-    const targetPane = await this.#acquireTargetPane({ type, id });
-    const entry = await fetch(id);
-    this.panes = this.panes.map((pane) =>
-      pane.id === targetPane.id
-        ? {
-            ...pane,
-            document: { type, id: entry.id },
-            scene: entry,
-            dirty: false,
-            draftTitle: entry.title,
-            draftMarkdown: opts.body ? ((entry as { body?: string }).body ?? "") : "",
-            draftStatus: "",
-            draftEntryType: entry.entry_type,
-            draftMetadata: opts.metadata === false ? {} : cloneMetadata(entry.metadata ?? {}),
-            ...(opts.inputs
-              ? {
-                  draftInputs: JSON.parse(JSON.stringify((entry as PromptEntry).inputs ?? [])),
-                  draftOfferOn: [...((entry as PromptEntry).offer_on ?? [])],
-                }
-              : {}),
-            saving: false,
-            recentlySaved: false,
-          }
-        : pane,
-    );
-    this.focusedEditorPaneId = targetPane.id;
-    this.setStatus(`Loaded ${entry.title}`);
+    await this.#loadIntoPane({ type, id }, async (targetPane) => {
+      const entry = await fetch(id);
+      this.panes = this.panes.map((pane) =>
+        pane.id === targetPane.id
+          ? {
+              ...pane,
+              document: { type, id: entry.id },
+              scene: entry,
+              dirty: false,
+              draftTitle: entry.title,
+              draftMarkdown: opts.body ? ((entry as { body?: string }).body ?? "") : "",
+              draftStatus: "",
+              draftEntryType: entry.entry_type,
+              draftMetadata: opts.metadata === false ? {} : cloneMetadata(entry.metadata ?? {}),
+              ...(opts.inputs
+                ? {
+                    draftInputs: JSON.parse(JSON.stringify((entry as PromptEntry).inputs ?? [])),
+                    draftOfferOn: [...((entry as PromptEntry).offer_on ?? [])],
+                  }
+                : {}),
+              saving: false,
+              recentlySaved: false,
+            }
+          : pane,
+      );
+      this.focusedEditorPaneId = targetPane.id;
+      this.setStatus(`Loaded ${entry.title}`);
+    });
   }
 
   async openPrompt(entryId: string): Promise<void> {
@@ -1127,31 +1156,32 @@ class EditorPanesController {
       return;
     }
 
-    const targetPane = await this.#acquireTargetPane({ type: "lore", id: entryId });
-    const entry = await api.getLoreEntry(entryId);
-    this.panes = this.panes.map((pane) =>
-      pane.id === targetPane.id
-        ? {
-            ...pane,
-            document: { type: "lore", id: entry.id },
-            scene: entry,
-            dirty: false,
-            draftTitle: entry.title,
-            draftMarkdown: entry.body,
-            draftStatus: "",
-            draftEntryType: entry.entry_type,
-            draftMetadata: cloneMetadata(entry.metadata),
-            saving: false,
-            recentlySaved: false,
-            // Seed L to the rest-position override (open project if inherited,
-            // else null) so an autosave never fires without a write target and
-            // 409s an inherited entry (#314 / ADR-0042).
-            authoringLayerId: defaultAuthoringLayerId(entry),
-          }
-        : pane,
-    );
-    this.focusedEditorPaneId = targetPane.id;
-    this.setStatus(`Loaded ${entry.title}`);
+    await this.#loadIntoPane({ type: "lore", id: entryId }, async (targetPane) => {
+      const entry = await api.getLoreEntry(entryId);
+      this.panes = this.panes.map((pane) =>
+        pane.id === targetPane.id
+          ? {
+              ...pane,
+              document: { type: "lore", id: entry.id },
+              scene: entry,
+              dirty: false,
+              draftTitle: entry.title,
+              draftMarkdown: entry.body,
+              draftStatus: "",
+              draftEntryType: entry.entry_type,
+              draftMetadata: cloneMetadata(entry.metadata),
+              saving: false,
+              recentlySaved: false,
+              // Seed L to the rest-position override (open project if inherited,
+              // else null) so an autosave never fires without a write target and
+              // 409s an inherited entry (#314 / ADR-0042).
+              authoringLayerId: defaultAuthoringLayerId(entry),
+            }
+          : pane,
+      );
+      this.focusedEditorPaneId = targetPane.id;
+      this.setStatus(`Loaded ${entry.title}`);
+    });
   }
 
   // Fork-to-here (#313): sever an inherited lore entry into a local copy, then
@@ -1361,27 +1391,28 @@ class EditorPanesController {
       return;
     }
 
-    const targetPane = await this.#acquireTargetPane({ type: "research", id: noteId });
-    const note = await api.getResearchNote(noteId);
-    this.panes = this.panes.map((pane) =>
-      pane.id === targetPane.id
-        ? {
-            ...pane,
-            document: { type: "research", id: note.id },
-            scene: note,
-            dirty: false,
-            draftTitle: note.title,
-            draftMarkdown: note.body,
-            draftStatus: "",
-            draftEntryType: note.entry_type,
-            draftMetadata: cloneMetadata(note.metadata),
-            saving: false,
-            recentlySaved: false,
-          }
-        : pane,
-    );
-    this.focusedEditorPaneId = targetPane.id;
-    this.setStatus(`Loaded ${note.title}`);
+    await this.#loadIntoPane({ type: "research", id: noteId }, async (targetPane) => {
+      const note = await api.getResearchNote(noteId);
+      this.panes = this.panes.map((pane) =>
+        pane.id === targetPane.id
+          ? {
+              ...pane,
+              document: { type: "research", id: note.id },
+              scene: note,
+              dirty: false,
+              draftTitle: note.title,
+              draftMarkdown: note.body,
+              draftStatus: "",
+              draftEntryType: note.entry_type,
+              draftMetadata: cloneMetadata(note.metadata),
+              saving: false,
+              recentlySaved: false,
+            }
+          : pane,
+      );
+      this.focusedEditorPaneId = targetPane.id;
+      this.setStatus(`Loaded ${note.title}`);
+    });
   }
 
   // ---- Open-pane reconciliation (GH #45) ------------------------------------

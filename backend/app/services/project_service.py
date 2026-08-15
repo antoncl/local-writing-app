@@ -61,6 +61,9 @@ from app.services.project.research import ResearchNotesMixin
 from app.services.project.scene_snapshots import SceneSnapshotsMixin
 from app.services.project.scene_todos import SceneTodoAnchorsMixin
 from app.services.project.schema import MetadataSchemaMixin
+from app.services.project.schema_definition_validation import (
+    MetadataSchemaValidationMixin,
+)
 from app.services.project.schema_groups import MetadataSchemaGroupsMixin
 from app.services.project.schema_inheritance import MetadataSchemaInheritanceMixin
 from app.services.project.search import SearchMixin
@@ -93,6 +96,7 @@ class ProjectService(
     MetadataSchemaMixin,
     MetadataSchemaGroupsMixin,
     MetadataSchemaInheritanceMixin,
+    MetadataSchemaValidationMixin,
     MetadataValuesMixin,
     NodeIndexPatchMixin,
     LayerOverridesMixin,

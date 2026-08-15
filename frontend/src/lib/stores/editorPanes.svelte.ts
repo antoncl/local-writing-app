@@ -388,10 +388,11 @@ class EditorPanesController {
 
   /** The open editor pane holding node `entryId`, if any — the pane the review-lock
    *  methods freeze / flush / thaw. Matches by id across ANY document kind: a review
-   *  lock is only ever registered for a node the host admits into the entry-patch loop
-   *  (`patchLoopKind` in NodeEditor — lore, plot cards (ADR-0048 §5), and scenes
-   *  (ADR-0051 S5-next)), so the id alone identifies the right pane and no kind filter
-   *  is needed. Generalized off lore-only in ADR-0048 S8b. */
+   *  lock is only ever registered for a node that actually holds a review, and that
+   *  is DATA-DRIVEN (#711) — a review exists iff a commit-carrying prompt (ADR-0054
+   *  §2) patched the node, gated by the prompt's `offer_on` + commit disposition, not
+   *  by any NodeEditor kind allow-list. So the id alone identifies the right pane and
+   *  no kind filter is needed. Generalized off lore-only in ADR-0048 S8b. */
   #reviewPaneFor(entryId: string): EditorPaneState | undefined {
     return this.panes.find((p) => p.document?.id === entryId);
   }

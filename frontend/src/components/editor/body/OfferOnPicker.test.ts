@@ -30,11 +30,12 @@ const box = (name: string) => screen.getByRole("checkbox", { name: new RegExp(`^
 describe("OfferOnPicker (#903)", () => {
   it("renders a row per hostable subject and none of the dead targets", () => {
     render(OfferOnPicker, { props: { metadataSchema: SCHEMA, offerOn: [] } });
-    // Lore (root + 3 leaves) + Scene + Card = 6.
-    expect(screen.getAllByRole("checkbox", { hidden: true })).toHaveLength(6);
+    // Lore (root + 3 leaves) + Scene + Card + prompt General (#711) = 7.
+    expect(screen.getAllByRole("checkbox", { hidden: true })).toHaveLength(7);
     expect(screen.queryByText("Act")).not.toBeInTheDocument();
     expect(screen.queryByText("Board")).not.toBeInTheDocument();
-    expect(screen.queryByText("General")).not.toBeInTheDocument();
+    // prompt is a host now (#711 — meta-prompting), so General DOES render.
+    expect(screen.getByText("General")).toBeInTheDocument();
   });
 
   it("a type covered by a checked parent is on but disabled", () => {
@@ -75,7 +76,7 @@ describe("OfferOnPicker (#903)", () => {
     const { container } = render(OfferOnPicker, {
       props: { metadataSchema: SCHEMA, offerOn: ["lore:character", "manuscript:act"] },
     });
-    expect(screen.getAllByRole("checkbox", { hidden: true })).toHaveLength(6);
+    expect(screen.getAllByRole("checkbox", { hidden: true })).toHaveLength(7);
     expect(screen.queryByText("Act")).not.toBeInTheDocument();
     const badge = container.querySelector(".offer-on-editor > summary > small");
     expect(badge?.textContent).toBe("1");

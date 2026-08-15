@@ -52,6 +52,7 @@
   import { refreshReferenceIndexInBackground } from "@/lib/stores/references";
   import {
     assistantScopeTags,
+    assistantSpeakerName,
     assistantTitle,
     partitionAssistants,
     preferredAssistantForPrompt,
@@ -1061,7 +1062,12 @@
       </div>
     </div>
 
-    <ChatTranscript {chatHistory} {chatRunning} bind:scrollEl={chatScrollEl} />
+    <ChatTranscript
+      {chatHistory}
+      {chatRunning}
+      assistantName={assistantSpeakerName(chatAssistantId, assistantEntries, scopedDefaultId)}
+      bind:scrollEl={chatScrollEl}
+    />
 
     {#if declaredInputs.length > 0}
       <ChatInputsStrip

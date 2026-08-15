@@ -1,6 +1,6 @@
 # ADR-0056: The architecture is self-enforcing — a boundary worth keeping is a gate or a choke point, not a convention
 
-- Status: **Proposed** — 2026-08-15 (awaiting Anton). Designed with him over the AI-maintainability thread.
+- Status: **Accepted** — 2026-08-15 (Anton, PR #978). Designed with him over the AI-maintainability thread.
 - Issue: #977 (the enforcement work this decision authorizes) · Pre-1.0 (targets 0.9.0 — code quality / technical debt)
 - Relates: `docs/development/code-standards.md` (the per-file / per-function size rules — the same "make the right thing structural" instinct), `docs/development/quality-gates.md` (the three enforcement layers this generalizes), the class–instance model and the "one uniform shape" it buys (`kind`/`entry_type`/`entry`)
 - **Verified against `9e5740f` (2026-08-15).**

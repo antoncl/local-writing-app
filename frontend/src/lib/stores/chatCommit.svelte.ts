@@ -67,8 +67,10 @@ export interface ChatCommitDeps {
    *  `subject` (ADR-0051 S2) and persist — the chat was launched before its
    *  entry existed, so the association can only be written here, at create time;
    *  without it the new entry's Conversations surface never lists the chat that
-   *  drafted it (#983). Same host-owned write-back shape as onStaged. */
-  onCreated: (entryId: string) => Promise<void>;
+   *  drafted it (#983). `entryTitle` rides along for the host's retitle to the
+   *  launched-with-subject naming convention. Same host-owned write-back shape
+   *  as onStaged. */
+  onCreated: (entryId: string, entryTitle: string) => Promise<void>;
 }
 
 // ADR-0055 §2/§4a: a staged mutation set carries the same content as an entry
@@ -362,19 +364,19 @@ export class ChatCommitController {
       // draft must survive a 409 / offline rejection); a post-create step
       // failure still returns the id, so an entry that exists always clears
       // the draft — a surviving Create button would mint a duplicate.
-      const createdId = await treeActions.createLoreEntryFromDraft(this.draftEntryType, proposal);
+      const created = await treeActions.createLoreEntryFromDraft(this.draftEntryType, proposal);
       // A chat switch while the create was in flight reset this controller
       // (applyChatSession → reset()): the host now feeds a different chat, so
       // the subject write-back would stamp THAT chat with this brainstorm's
       // entry. Skip it — the draft is already gone with the old chat's state.
       if (this.draftProposal !== proposal) return;
-      if (createdId) {
+      if (created) {
         // The entry exists, so the draft is spent regardless of how the stamp
         // goes. Note reset() releases creatingDraft while onCreated is still
         // in flight — re-entry stays blocked by the null draftProposal, which
         // is the guard a future onCreated implementation may rely on.
         this.reset();
-        await this.deps.onCreated(createdId);
+        await this.deps.onCreated(created.id, created.title);
       }
     } catch (e) {
       this.deps.setError((e as Error).message);

@@ -48,6 +48,7 @@
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
   import { ChatCommitController } from "@/lib/stores/chatCommit.svelte";
   import { refreshChatSessions } from "@/lib/stores/chats";
+  import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { refreshReferenceIndexInBackground } from "@/lib/stores/references";
   import {
     assistantScopeTags,
@@ -232,10 +233,19 @@
     // chatSessions (this save bypasses saveEditorPane's change-gated index
     // refresh), so the entry's Conversations panel lists the chat — with fresh
     // roster rows — without a reload.
-    onCreated: async (entryId) => {
+    onCreated: async (entryId, entryTitle) => {
       chatSubject = entryId;
       chatInputDrafts = { ...chatInputDrafts, entry: entryId };
+      // Retitle to the launched-with-subject convention ("<subject> — <prompt>",
+      // chatSessions' launch naming) — but only while the chat still wears its
+      // launch title (the bare prompt name), so a rename the user typed is
+      // never clobbered. syncNodeTitle pushes the persisted title into the
+      // pane's tab + header, which otherwise only hydrate on open.
+      const promptTitle = activePromptEntry?.title ?? "";
+      const retitle = !!promptTitle && activeChatTitle === promptTitle;
+      if (retitle) activeChatTitle = `${entryTitle} — ${promptTitle}`;
       await persistActiveChat();
+      if (retitle && scene?.id) editorPanes.syncNodeTitle(scene.id, activeChatTitle);
       void refreshChatSessions();
       refreshReferenceIndexInBackground();
     },

@@ -58,9 +58,9 @@ describe("treeActions.createLoreEntryFromDraft (ADR-0046 §6.4)", () => {
       fields: { title: "Seren", allegiance: "order" },
     });
 
-    // The created id is the return value — the caller stamps it as the
-    // brainstorm chat's subject (#983).
-    expect(createdId).toBe("lore_new");
+    // The created {id, title} is the return value — the caller stamps the id
+    // as the brainstorm chat's subject and retitles with the title (#983).
+    expect(createdId).toEqual({ id: "lore_new", title: "Seren" });
     expect(api.createLoreEntry).toHaveBeenCalledWith("Seren", "lore:character");
     const [savedEntry, savedBody] = vi.mocked(api.saveLoreEntry).mock.calls[0];
     expect(savedEntry.metadata).toEqual({ allegiance: "order" });
@@ -92,7 +92,7 @@ describe("treeActions.createLoreEntryFromDraft (ADR-0046 §6.4)", () => {
       body: "b",
       fields: { title: "Seren" },
     });
-    expect(createdId).toBe("lore_new");
+    expect(createdId).toEqual({ id: "lore_new", title: "Seren" });
   });
 
   it("falls back to a typed default title when the draft names none", async () => {

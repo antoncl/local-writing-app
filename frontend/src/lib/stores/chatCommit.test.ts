@@ -338,12 +338,13 @@ describe("ChatCommitController — create mode", () => {
     expect(c.draftProposal).not.toBeNull(); // draft survives so it isn't lost
     expect(deps.onCreated).not.toHaveBeenCalled(); // no entry → no subject stamp
 
-    createFromDraft.mockResolvedValueOnce("lore_new");
+    createFromDraft.mockResolvedValueOnce({ id: "lore_new", title: "Vale" });
     await c.createDraft();
     expect(createFromDraft).toHaveBeenLastCalledWith("lore:character", { body: "a life", fields: { name: "Vale" } });
     expect(c.draftProposal).toBeNull(); // cleared on success
-    // #983: the created entry becomes the chat's subject — its first conversation.
-    expect(deps.onCreated).toHaveBeenCalledWith("lore_new");
+    // #983: the created entry becomes the chat's subject — its first
+    // conversation — and the title rides along for the host's retitle.
+    expect(deps.onCreated).toHaveBeenCalledWith("lore_new", "Vale");
   });
 
   it("skips the subject stamp when the controller was reset mid-create (chat switch)", async () => {
@@ -354,7 +355,7 @@ describe("ChatCommitController — create mode", () => {
     c.draftProposal = { body: "x", fields: {} };
     createFromDraft.mockImplementationOnce(async () => {
       c.reset();
-      return "lore_new";
+      return { id: "lore_new", title: "X" };
     });
     await c.createDraft();
     expect(deps.onCreated).not.toHaveBeenCalled();

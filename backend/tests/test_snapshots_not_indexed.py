@@ -83,7 +83,7 @@ class SnapshotsAreNotIndexedTests(unittest.TestCase):
         path = self.root / "scenes" / f"{node_id}.md"
         self.service._write_markdown_with_front_matter(
             path,
-            {"id": node_id, "title": title, "entry_type": "scene:scene", "metadata": {}},
+            {"id": node_id, "title": title, "entry_type": "manuscript:scene", "metadata": {}},
             "The tide went out further than she had ever seen it.",
         )
         return path
@@ -139,7 +139,7 @@ class SnapshotsAreNotIndexedTests(unittest.TestCase):
             [self.scene_path],
             "the scene's id resolves to more than one file",
         )
-        self.assertEqual(self.service._path_for_node_id(SCENE_ID, "scene"), self.scene_path)
+        self.assertEqual(self.service._path_for_node_id(SCENE_ID, "manuscript"), self.scene_path)
 
     def test_the_index_has_the_same_members_before_and_after_six_captures(self) -> None:
         before = sorted(self._cold_index().by_id)

@@ -14,7 +14,7 @@ const SCHEMA = {
 describe("resolveParamControls (type derived from the referencing Filter slot)", () => {
   it("derives each control's field def from the field its {var} operand sits on", () => {
     const spec: ViewSpec = {
-      kind: "scene",
+      kind: "manuscript",
       expr: {
         intersect: [
           { field: { key: "pov_ref", op: "overlap", value: { var: "POV" } } },
@@ -69,15 +69,15 @@ describe("resolveParamControls (type derived from the referencing Filter slot)",
 
   it("finds operands nested in groups + set algebra", () => {
     const spec: ViewSpec = {
-      kind: "scene",
-      groups: [{ name: "G", expr: { difference: { keep: { type: "scene:scene" }, remove: { field: { key: "status", op: "overlap", value: { var: "Status" } } } } } }],
+      kind: "manuscript",
+      groups: [{ name: "G", expr: { difference: { keep: { type: "manuscript:scene" }, remove: { field: { key: "status", op: "overlap", value: { var: "Status" } } } } } }],
       params: [{ name: "Status", label: "Status", default: null }],
     };
     expect(resolveParamControls(spec, SCHEMA)[0].fieldKey).toBe("status");
   });
 
   it("unreferenced / schema-absent formal → a text fallback control", () => {
-    const spec: ViewSpec = { kind: "scene", expr: { type: "scene:scene" }, params: [{ name: "Loose", label: "Loose" }] };
+    const spec: ViewSpec = { kind: "manuscript", expr: { type: "manuscript:scene" }, params: [{ name: "Loose", label: "Loose" }] };
     const [c] = resolveParamControls(spec, SCHEMA);
     expect([c.field.type, c.fieldKey]).toEqual(["text", ""]);
   });
@@ -89,7 +89,7 @@ describe("resolveParamControls (type derived from the referencing Filter slot)",
         "lore:character": { name: "Character", kind: "lore" },
         "lore:place": { name: "Place", kind: "lore" },
         "lore:base": { name: "Base", kind: "lore", abstract: true },
-        "scene:scene": { name: "Scene", kind: "scene" },
+        "manuscript:scene": { name: "Scene", kind: "manuscript" },
       },
       fields: {},
     } as unknown as MetadataSchema;
@@ -100,7 +100,7 @@ describe("resolveParamControls (type derived from the referencing Filter slot)",
     };
     const [c] = resolveParamControls(spec, schema);
     // Non-abstract types of the view's kind only — `lore:base` (abstract) and
-    // `scene:scene` (other kind) are excluded — value=FQN, label=display name.
+    // `manuscript:scene` (other kind) are excluded — value=FQN, label=display name.
     expect(c.field.type).toBe("multi_select");
     expect(c.field.options).toEqual([
       { value: "lore:character", label: "Character" },

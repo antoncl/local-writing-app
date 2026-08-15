@@ -258,7 +258,7 @@ class MetadataSchemaMixin:
 
         entry_type_id = request.entry_type_id.strip()
         if request.entry_type.kind not in {
-            "scene", "lore", "prompt", "assistant", "project", "chat", "mutation_set", "view", "plot"
+            "manuscript", "lore", "prompt", "assistant", "project", "chat", "mutation_set", "view", "plot"
         }:
             raise ProjectServiceError(
                 "Node type kind must be scene, lore, prompt, assistant, project, chat, mutation_set, view, or plot.",
@@ -604,7 +604,7 @@ class MetadataSchemaMixin:
             else:
                 entry_type_data = {
                     "name": request.entry_type,
-                    "kind": "scene",
+                    "kind": "manuscript",
                     "fields": [],
                 }
         fields_list = entry_type_data.get("fields")
@@ -802,7 +802,7 @@ class MetadataSchemaMixin:
             effective_entry_type = self._read_metadata_schema_through_path(root, layer_path).entry_types.get(entry_type)
             entry_type_data = {
                 "name": effective_entry_type.name if effective_entry_type else entry_type,
-                "kind": effective_entry_type.kind if effective_entry_type else "scene",
+                "kind": effective_entry_type.kind if effective_entry_type else "manuscript",
                 "fields": [],
             }
         fields_list = entry_type_data.get("fields")

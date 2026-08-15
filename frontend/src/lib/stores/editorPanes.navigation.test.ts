@@ -24,7 +24,7 @@ import type { MutationSetEntry, ProjectNode } from "@/lib/types";
 // the wrong opener reads as an obvious mismatch here, which the old code's
 // `else` branch could never express.
 const ROUTES = [
-  ["scene", "openScene"],
+  ["manuscript", "openScene"],
   ["lore", "openLore"],
   ["research", "openResearchNote"],
   ["prompt", "openPrompt"],

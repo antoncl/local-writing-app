@@ -87,7 +87,7 @@
 
   const dispatch = createEventDispatcher<{ change: { value: NodePickerRef[] } }>();
 
-  type Category = "scene" | "lore" | "snippet" | "assistant" | "research" | "plot";
+  type Category = "manuscript" | "lore" | "snippet" | "assistant" | "research" | "plot";
 
   let open = false;
   let search = "";
@@ -150,11 +150,11 @@
   // `scene` binding (NC-style). Clicking ★ on a scene toggles it; clicking
   // ★ on a different scene moves the mark. Non-scene refs ignore the flag.
   function toggleTarget(ref: NodePickerRef) {
-    if (ref.kind !== "scene" || !allowTargetMarking) return;
+    if (ref.kind !== "manuscript" || !allowTargetMarking) return;
     const targetKey = refKey(ref);
     const willBeTarget = !ref.target;
     const next = value.map((r) => {
-      if (r.kind !== "scene") return r;
+      if (r.kind !== "manuscript") return r;
       if (refKey(r) === targetKey) return { ...r, target: willBeTarget };
       // Single ★ per input — clear any prior target on other scene refs.
       if (r.target) return { ...r, target: false };
@@ -222,7 +222,7 @@
     }
   }
 
-  // Flatten the structure tree's scenes (entries with kind=scene) into a
+  // Flatten the structure tree's scenes (entries with kind=manuscript) into a
   // searchable list, respecting the per-input sub-type filter so the
   // editor's checkbox actually does something (was a silent no-op).
   function flattenScenes(node: StructureNode | undefined): Array<{ id: string; title: string; entry_type: string }> {
@@ -230,13 +230,13 @@
     const allowed = new Set(membership.entryTypes.scene ?? []);
     const out: Array<{ id: string; title: string; entry_type: string }> = [];
     const walk = (n: StructureNode) => {
-      // StructureNode uses `type` — the FQN entry_type ("scene:scene" /
-      // "scene:act" / "scene:chapter") or the "root" sentinel. An earlier read
+      // StructureNode uses `type` — the FQN entry_type ("manuscript:scene" /
+      // "manuscript:act" / "manuscript:chapter") or the "root" sentinel. An earlier read
       // used `n.kind`, which is always undefined — so the scene list was
       // silently empty. scene_id is the canonical id for the scene itself (the
       // structure node has its own id for the outline position).
-      if (n.type === "scene:scene" && n.scene_id) {
-        const sceneType = (n as unknown as { entry_type?: string }).entry_type ?? "scene:scene";
+      if (n.type === "manuscript:scene" && n.scene_id) {
+        const sceneType = (n as unknown as { entry_type?: string }).entry_type ?? "manuscript:scene";
         if (allowed.size === 0 || allowed.has(sceneType)) {
           out.push({ id: n.scene_id, title: n.title, entry_type: sceneType });
         }
@@ -339,7 +339,7 @@
   // Fixes the inverted-affordance bug where `character` chips read the
   // same as bare `lore` chips because entry_type was missing.
   const KIND_LABEL_SINGULAR: Record<Category | "preset", string> = {
-    scene: "Scene",
+    manuscript: "Scene",
     lore: "Lore",
     research: "Note",
     snippet: "Snippet",
@@ -411,12 +411,12 @@
       });
     }
 
-    if (allowedKinds.includes("scene")) {
+    if (allowedKinds.includes("manuscript")) {
       const items = dropExcluded(
         filteredScenes.map((s) => ({
-          ref: { id: s.id, kind: "scene" as const, title: s.title, entry_type: s.entry_type },
-          tag: itemTag("scene", s.entry_type),
-          monogram: itemMonogram("scene", s.entry_type),
+          ref: { id: s.id, kind: "manuscript" as const, title: s.title, entry_type: s.entry_type },
+          tag: itemTag("manuscript", s.entry_type),
+          monogram: itemMonogram("manuscript", s.entry_type),
         })),
       );
       if (items.length > 0) groups.push({ id: "scenes", label: "Scenes", items });
@@ -546,7 +546,7 @@
         {#if compact}
           <span class="ctx-chip-dot" aria-hidden="true"></span>
         {/if}
-        {#if ref.kind === "scene" && allowTargetMarking}
+        {#if ref.kind === "manuscript" && allowTargetMarking}
           <button
             type="button"
             class="ctx-chip-star"

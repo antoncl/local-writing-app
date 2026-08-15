@@ -80,7 +80,7 @@
     excludeId = null,
     knownTags = [],
     tagOrigin = "project",
-    documentKind = "scene",
+    documentKind = "manuscript",
     entryType = "",
     onNavigate,
   }: Props = $props();

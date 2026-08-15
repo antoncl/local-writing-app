@@ -56,7 +56,7 @@ class ChatSessionsMixin:
         if not subject:
             return ""
         entry = self._build_node_index(root).by_id.get(subject)
-        return subject if entry is not None and entry.kind == "scene" else ""
+        return subject if entry is not None and entry.kind == "manuscript" else ""
 
     def _write_chat_session(self, path: Path, session: ChatSession) -> None:
         """Persist a chat as a Node file (ADR-0051 S2).

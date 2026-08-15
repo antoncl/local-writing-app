@@ -725,7 +725,7 @@ class PerLayerCollectionRulesTests(unittest.TestCase):
 
     def test_scenes_are_collected_only_at_the_open_project(self) -> None:
         # The other half of the same rule, and the one `_families_for_layer`
-        # expresses as `family.kind != "scene" or layer.is_root`.
+        # expresses as `family.kind != "manuscript" or layer.is_root`.
         (self.base / "scenes").mkdir(parents=True, exist_ok=True)
         self.service._write_node_entry_file(
             self.base / "scenes" / "ancestor.md", "scene-ancestor", "Ancestor Scene", "scene", {}, ""
@@ -736,7 +736,7 @@ class PerLayerCollectionRulesTests(unittest.TestCase):
         self.assertNotIn("scene-ancestor", index.by_id)
         # The project's own seeded scene IS indexed — so this fails if the walk
         # collapsed to nothing rather than because the rule works.
-        self.assertTrue(any(entry.kind == "scene" for entry in index.by_id.values()))
+        self.assertTrue(any(entry.kind == "manuscript" for entry in index.by_id.values()))
 
     def test_ancestor_lore_is_collected(self) -> None:
         # Guards the inverse of the two rules above: the scene/chat restriction

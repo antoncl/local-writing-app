@@ -606,25 +606,25 @@ export const api = {
       body: JSON.stringify({ entry_type_id: entryTypeId }),
     });
   },
-  upsertMetadataField(layerId: string, fieldId: string, field: MetadataFieldDefinition, entryType = "scene:scene", allowExisting = true, optionMigration: Record<string, string> | null = null) {
+  upsertMetadataField(layerId: string, fieldId: string, field: MetadataFieldDefinition, entryType = "manuscript:scene", allowExisting = true, optionMigration: Record<string, string> | null = null) {
     return request<MetadataSchema>("/metadata/schema/fields", {
       method: "PUT",
       body: JSON.stringify({ layer_id: layerId, field_id: fieldId, field, entry_type: entryType, allow_existing: allowExisting, option_migration: optionMigration }),
     });
   },
-  moveMetadataField(fieldId: string, targetLayerId: string, entryType = "scene:scene") {
+  moveMetadataField(fieldId: string, targetLayerId: string, entryType = "manuscript:scene") {
     return request<MetadataSchema>("/metadata/schema/fields/move", {
       method: "POST",
       body: JSON.stringify({ field_id: fieldId, target_layer_id: targetLayerId, entry_type: entryType }),
     });
   },
-  renameMetadataField(oldFieldId: string, newFieldId: string, entryType = "scene:scene") {
+  renameMetadataField(oldFieldId: string, newFieldId: string, entryType = "manuscript:scene") {
     return request<MetadataSchema>("/metadata/schema/fields/rename", {
       method: "POST",
       body: JSON.stringify({ old_field_id: oldFieldId, new_field_id: newFieldId, entry_type: entryType }),
     });
   },
-  deleteMetadataField(fieldId: string, entryType = "scene:scene") {
+  deleteMetadataField(fieldId: string, entryType = "manuscript:scene") {
     return request<MetadataSchema>("/metadata/schema/fields", {
       method: "DELETE",
       body: JSON.stringify({ field_id: fieldId, entry_type: entryType }),

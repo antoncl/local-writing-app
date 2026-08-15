@@ -110,7 +110,7 @@ export async function createCard(title: string, id?: string): Promise<string> {
 
 // Delete a card outright (the board kebab's "Delete card", #860) — book-local, the
 // board re-projects without it. Distinct from Detach, which only clears the scene
-// ref; the scene:scene node (if any) is untouched. Uses the same endpoint the card
+// ref; the manuscript:scene node (if any) is untouched. Uses the same endpoint the card
 // editor pane's Delete does.
 // `refresh` is false only inside a batched undo (a seed-undo deletes N cards) — the
 // caller does ONE trailing refresh instead of N (the refetch-storm fix, #909).

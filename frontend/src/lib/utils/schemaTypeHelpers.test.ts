@@ -27,7 +27,7 @@ const SCHEMA = {
     "lore:base": { name: "Lore", kind: "lore", abstract: true },
     "lore:character": { name: "Character", kind: "lore" },
     "lore:place": { name: "Place", kind: "lore" },
-    "scene:scene": { name: "Scene", kind: "scene" },
+    "manuscript:scene": { name: "Scene", kind: "manuscript" },
   },
   fields: {},
 } as unknown as MetadataSchema;
@@ -72,11 +72,11 @@ describe("SCHEMA_KIND_META / SCHEMA_KINDS / asSchemaKind (the kind cascade — #
 
 describe("resolveSchemaScope — the Detail Types cascade end-to-end (#729)", () => {
   // A schema that roots plot under an abstract plot:base (the #724 shape), plus a
-  // scene:scene so the scene fallback is exercisable.
+  // manuscript:scene so the scene fallback is exercisable.
   const CASCADE_SCHEMA = {
     version: 1,
     entry_types: {
-      "scene:scene": { name: "Scene", kind: "scene" },
+      "manuscript:scene": { name: "Scene", kind: "manuscript" },
       "plot:base": { name: "Plot", kind: "plot", abstract: true },
       "plot:template": { name: "Plot template", kind: "plot", parent: "plot:base" },
       "plot:plotline": { name: "Plotline", kind: "plot", parent: "plot:base" },
@@ -103,19 +103,19 @@ describe("resolveSchemaScope — the Detail Types cascade end-to-end (#729)", ()
       expect.arrayContaining(["plot:base", "plot:template", "plot:plotline", "plot:card"]),
     );
     // And NOT the scene tree — the exact collapse the old ternary caused.
-    expect(treeIds(scope.tree)).not.toContain("scene:scene");
+    expect(treeIds(scope.tree)).not.toContain("manuscript:scene");
   });
 
   it("resolves a scene entry type to the scene scope", () => {
-    const scope = resolveSchemaScope(CASCADE_SCHEMA, "scene:scene");
-    expect(scope.kind).toBe("scene");
+    const scope = resolveSchemaScope(CASCADE_SCHEMA, "manuscript:scene");
+    expect(scope.kind).toBe("manuscript");
     expect(scope.heading).toBe("Scene Types");
   });
 
   it("falls back to scene when the entry type is unknown or the schema is null", () => {
-    expect(resolveSchemaScope(CASCADE_SCHEMA, "nope:nope").kind).toBe("scene");
+    expect(resolveSchemaScope(CASCADE_SCHEMA, "nope:nope").kind).toBe("manuscript");
     const nullScope = resolveSchemaScope(null, "plot:template");
-    expect(nullScope.kind).toBe("scene");
+    expect(nullScope.kind).toBe("manuscript");
     expect(nullScope.heading).toBe("Scene Types");
     expect(nullScope.tree).toEqual([]);
   });
@@ -134,11 +134,11 @@ describe("schemaKindForDocumentKind", () => {
   });
 
   it("maps structure_node (a scene in the manuscript tree) to scene", () => {
-    expect(schemaKindForDocumentKind("structure_node")).toBe("scene");
+    expect(schemaKindForDocumentKind("structure_node")).toBe("manuscript");
   });
 
   it("passes the plain schema kinds through unchanged", () => {
-    for (const kind of ["scene", "lore", "research", "prompt", "assistant", "project"] as const) {
+    for (const kind of ["manuscript", "lore", "research", "prompt", "assistant", "project"] as const) {
       expect(schemaKindForDocumentKind(kind)).toBe(kind);
     }
   });

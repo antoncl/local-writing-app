@@ -759,7 +759,7 @@ class PlotMixin:
         # (scene_id, title) for every leaf *scene*, in manuscript reading order —
         # the source list seed-from-manuscript mints cards from. Only true leaves
         # count: containers (acts/chapters) also carry a backing `scene_id`, so
-        # the filter is `_is_leaf_node` (type == scene:scene), not merely
+        # the filter is `_is_leaf_node` (type == manuscript:scene), not merely
         # "has a scene_id". Title is the manuscript node's title (what the writer
         # sees in the tree), which create_scene seeds and rename keeps in step.
         ordered: list[tuple[str, str]] = []

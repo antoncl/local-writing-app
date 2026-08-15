@@ -197,22 +197,22 @@ class MetadataValidationTests(unittest.TestCase):
 
     def test_default_schema_seeds_act_and_chapter(self) -> None:
         schema = self.service.read_metadata_schema()
-        self.assertIn("scene:act", schema.entry_types)
-        self.assertIn("scene:chapter", schema.entry_types)
-        self.assertEqual(schema.entry_types["scene:act"].kind, "scene")
-        self.assertEqual(schema.entry_types["scene:chapter"].kind, "scene")
-        self.assertFalse(schema.entry_types["scene:act"].abstract)
-        self.assertFalse(schema.entry_types["scene:chapter"].abstract)
+        self.assertIn("manuscript:act", schema.entry_types)
+        self.assertIn("manuscript:chapter", schema.entry_types)
+        self.assertEqual(schema.entry_types["manuscript:act"].kind, "manuscript")
+        self.assertEqual(schema.entry_types["manuscript:chapter"].kind, "manuscript")
+        self.assertFalse(schema.entry_types["manuscript:act"].abstract)
+        self.assertFalse(schema.entry_types["manuscript:chapter"].abstract)
 
     def test_manuscript_structure_is_shared_abstract_parent(self) -> None:
         schema = self.service.read_metadata_schema()
-        parent = schema.entry_types.get("scene:base")
+        parent = schema.entry_types.get("manuscript:base")
         self.assertIsNotNone(parent)
         assert parent is not None
         self.assertTrue(parent.abstract)
-        self.assertEqual(parent.kind, "scene")
-        for type_id in ["scene:act", "scene:chapter", "scene:scene"]:
-            self.assertEqual(schema.entry_types[type_id].parent, "scene:base")
+        self.assertEqual(parent.kind, "manuscript")
+        for type_id in ["manuscript:act", "manuscript:chapter", "manuscript:scene"]:
+            self.assertEqual(schema.entry_types[type_id].parent, "manuscript:base")
             self.assertIn("summary", schema.entry_types[type_id].fields)
 
     def test_same_local_key_under_two_kinds_coexists(self) -> None:
@@ -253,7 +253,7 @@ class MetadataValidationTests(unittest.TestCase):
             self.service.upsert_metadata_entry_type(
                 UpsertMetadataEntryTypeRequest(
                     layer_id=layer_id,
-                    entry_type_id="scene:faction",
+                    entry_type_id="manuscript:faction",
                     entry_type=EntryTypeDefinition(name="Faction", kind="lore", parent="lore:base"),
                     allow_existing=False,
                 )
@@ -328,28 +328,28 @@ class MetadataValidationTests(unittest.TestCase):
                 layer_id=self.service._metadata_schema_layer_id(self.root),
                 field_id="weather",
                 field=custom_field,
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
                 allow_existing=False,
             )
         )
 
         overview = self.service.read_metadata_schema_overview()
 
-        self.assertTrue(overview.entry_type_sources["scene:scene"].built_in)
-        self.assertTrue(overview.entry_type_sources["scene:chapter"].built_in)
-        self.assertTrue(overview.entry_type_sources["scene:act"].built_in)
+        self.assertTrue(overview.entry_type_sources["manuscript:scene"].built_in)
+        self.assertTrue(overview.entry_type_sources["manuscript:chapter"].built_in)
+        self.assertTrue(overview.entry_type_sources["manuscript:act"].built_in)
         self.assertFalse(overview.field_sources["weather"].built_in)
 
     def test_summary_lives_on_parent_not_in_scene_own_fields(self) -> None:
         schema = self.service.read_metadata_schema()
-        scene_definition = schema.entry_types["scene:scene"]
+        scene_definition = schema.entry_types["manuscript:scene"]
         self.assertNotIn("summary", scene_definition.own_fields)
         self.assertIn("summary", scene_definition.fields)
         self.assertIn("status", scene_definition.own_fields)
 
     def test_scene_entry_type_defaults_to_wysiwyg_markdown(self) -> None:
         schema = self.service.read_metadata_schema()
-        scene = schema.entry_types["scene:scene"]
+        scene = schema.entry_types["manuscript:scene"]
         self.assertEqual(scene.body_editor, "wysiwyg")
         self.assertEqual(scene.body_language, "markdown")
 
@@ -386,19 +386,19 @@ class MetadataValidationTests(unittest.TestCase):
     def test_new_project_drops_sequence_from_container_types(self) -> None:
         manifest = self.service._read_yaml(self.root / "project.yaml")
         types = [item["type"] for item in manifest["manuscript_structure"]["container_types"]]
-        self.assertEqual(types, ["scene:act", "scene:chapter"])
+        self.assertEqual(types, ["manuscript:act", "manuscript:chapter"])
 
     def test_create_structure_node_inserts_container_under_root(self) -> None:
         from app.models import CreateStructureNodeRequest
 
         updated = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="scene:act")
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
         )
-        act_nodes = [child for child in updated.root.children if child.type == "scene:act"]
+        act_nodes = [child for child in updated.root.children if child.type == "manuscript:act"]
         self.assertEqual(len(act_nodes), 1)
         self.assertEqual(act_nodes[0].title, "Act One")
         self.assertIsNotNone(act_nodes[0].scene_id)
-        backing_file = self.service._path_for_node_id(act_nodes[0].scene_id, "scene")
+        backing_file = self.service._path_for_node_id(act_nodes[0].scene_id, "manuscript")
         self.assertTrue(backing_file.exists())
         self.assertEqual(backing_file.stem, "Act One")
 
@@ -406,31 +406,31 @@ class MetadataValidationTests(unittest.TestCase):
         from app.models import CreateStructureNodeRequest
 
         updated = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="scene:act")
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
         )
-        act_node = next(child for child in updated.root.children if child.type == "scene:act")
+        act_node = next(child for child in updated.root.children if child.type == "manuscript:act")
 
         scene = self.service.read_scene(act_node.scene_id)
 
         self.assertEqual(scene.id, act_node.scene_id)
         self.assertEqual(scene.title, "Act One")
-        self.assertEqual(scene.entry_type, "scene:act")
+        self.assertEqual(scene.entry_type, "manuscript:act")
 
     def test_structure_carries_counter_in_computed_metadata(self) -> None:
         from app.models import CreateStructureNodeRequest
 
-        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 1", entry_type="scene:act"))
-        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 2", entry_type="scene:act"))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 1", entry_type="manuscript:act"))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 2", entry_type="manuscript:act"))
 
         structure = self.service.read_structure()
-        act_nodes = [child for child in structure.root.children if child.type == "scene:act"]
+        act_nodes = [child for child in structure.root.children if child.type == "manuscript:act"]
         numbers = [node.computed_metadata.get("number") for node in act_nodes]
         self.assertEqual(numbers, [1, 2])
 
     def test_structure_yaml_does_not_persist_computed_metadata(self) -> None:
         from app.models import CreateStructureNodeRequest
 
-        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 1", entry_type="scene:act"))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 1", entry_type="manuscript:act"))
 
         raw = self.service._read_yaml(self.root / "manuscript.structure.yaml")
 
@@ -458,7 +458,7 @@ class MetadataValidationTests(unittest.TestCase):
                 body=scene.body,
                 base_revision=scene.revision,
                 status="revised",
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
                 metadata={"pov": hero.id},
             ),
         )
@@ -483,12 +483,12 @@ class MetadataValidationTests(unittest.TestCase):
                 body=scene.body,
                 base_revision=scene.revision,
                 status="revised",
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
                 metadata={"summary": "Opening beat"},
             ),
         )
         # A structure mutation triggers the write path that must strip it.
-        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 1", entry_type="scene:act"))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 1", entry_type="manuscript:act"))
         raw = self.service._read_yaml(self.root / "manuscript.structure.yaml")
 
         def has_metadata(node: dict) -> bool:
@@ -500,16 +500,16 @@ class MetadataValidationTests(unittest.TestCase):
 
     def test_display_template_inherits_from_manuscript_structure(self) -> None:
         schema = self.service.read_metadata_schema()
-        for type_id in ("scene:act", "scene:chapter", "scene:scene"):
+        for type_id in ("manuscript:act", "manuscript:chapter", "manuscript:scene"):
             self.assertEqual(schema.entry_types[type_id].display_template, "{number}. {title}")
         self.assertEqual(schema.entry_types["lore:character"].display_template, "{title}")
 
     def test_has_body_inherits_false_for_containers_true_for_scene(self) -> None:
         schema = self.service.read_metadata_schema()
-        self.assertFalse(schema.entry_types["scene:base"].has_body)
-        self.assertFalse(schema.entry_types["scene:act"].has_body)
-        self.assertFalse(schema.entry_types["scene:chapter"].has_body)
-        self.assertTrue(schema.entry_types["scene:scene"].has_body)
+        self.assertFalse(schema.entry_types["manuscript:base"].has_body)
+        self.assertFalse(schema.entry_types["manuscript:act"].has_body)
+        self.assertFalse(schema.entry_types["manuscript:chapter"].has_body)
+        self.assertTrue(schema.entry_types["manuscript:scene"].has_body)
         self.assertTrue(schema.entry_types["lore:character"].has_body)
 
     def test_status_field_seeds_with_colored_options(self) -> None:
@@ -544,7 +544,7 @@ class MetadataValidationTests(unittest.TestCase):
         _resolve_metadata_schema_inheritance picks up `color`."""
         schema = self.service.read_metadata_schema()
         # Direct seeds.
-        self.assertEqual(schema.entry_types["scene:scene"].color, "forest")
+        self.assertEqual(schema.entry_types["manuscript:scene"].color, "forest")
         self.assertEqual(schema.entry_types["lore:base"].color, "slate-blue")
         self.assertEqual(schema.entry_types["prompt:base"].color, "warm-brown")
         self.assertEqual(schema.entry_types["assistant:assistant"].color, "graphite")
@@ -560,10 +560,10 @@ class MetadataValidationTests(unittest.TestCase):
     def test_counter_among_siblings_for_acts(self) -> None:
         from app.models import CreateStructureNodeRequest
 
-        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 1", entry_type="scene:act"))
-        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 2", entry_type="scene:act"))
-        third = self.service.create_structure_node(CreateStructureNodeRequest(title="Act 3", entry_type="scene:act"))
-        act_nodes = [child for child in third.root.children if child.type == "scene:act"]
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 1", entry_type="manuscript:act"))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 2", entry_type="manuscript:act"))
+        third = self.service.create_structure_node(CreateStructureNodeRequest(title="Act 3", entry_type="manuscript:act"))
+        act_nodes = [child for child in third.root.children if child.type == "manuscript:act"]
 
         scenes = [self.service.read_scene(node.scene_id) for node in act_nodes]
 
@@ -572,14 +572,14 @@ class MetadataValidationTests(unittest.TestCase):
     def test_counter_among_siblings_resets_per_parent(self) -> None:
         from app.models import CreateStructureNodeRequest
 
-        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 1", entry_type="scene:act"))
-        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 2", entry_type="scene:act"))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 1", entry_type="manuscript:act"))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 2", entry_type="manuscript:act"))
         structure = self.service.read_structure()
         act_one = next(child for child in structure.root.children if child.title == "Act 1")
         act_two = next(child for child in structure.root.children if child.title == "Act 2")
-        self.service.create_structure_node(CreateStructureNodeRequest(title="Chapter 1", entry_type="scene:chapter", parent_id=act_one.id))
-        self.service.create_structure_node(CreateStructureNodeRequest(title="Chapter 2", entry_type="scene:chapter", parent_id=act_one.id))
-        self.service.create_structure_node(CreateStructureNodeRequest(title="Chapter 1", entry_type="scene:chapter", parent_id=act_two.id))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Chapter 1", entry_type="manuscript:chapter", parent_id=act_one.id))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Chapter 2", entry_type="manuscript:chapter", parent_id=act_one.id))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Chapter 1", entry_type="manuscript:chapter", parent_id=act_two.id))
 
         structure = self.service.read_structure()
         act_one = next(child for child in structure.root.children if child.title == "Act 1")
@@ -609,14 +609,14 @@ class MetadataValidationTests(unittest.TestCase):
             },
         )
 
-        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 1", entry_type="scene:act"))
-        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 2", entry_type="scene:act"))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 1", entry_type="manuscript:act"))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 2", entry_type="manuscript:act"))
         structure = self.service.read_structure()
         act_one = next(child for child in structure.root.children if child.title == "Act 1")
         act_two = next(child for child in structure.root.children if child.title == "Act 2")
-        self.service.create_structure_node(CreateStructureNodeRequest(title="Chapter 1", entry_type="scene:chapter", parent_id=act_one.id))
-        self.service.create_structure_node(CreateStructureNodeRequest(title="Chapter 2", entry_type="scene:chapter", parent_id=act_one.id))
-        self.service.create_structure_node(CreateStructureNodeRequest(title="Chapter 3", entry_type="scene:chapter", parent_id=act_two.id))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Chapter 1", entry_type="manuscript:chapter", parent_id=act_one.id))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Chapter 2", entry_type="manuscript:chapter", parent_id=act_one.id))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Chapter 3", entry_type="manuscript:chapter", parent_id=act_two.id))
 
         structure = self.service.read_structure()
         act_one = next(child for child in structure.root.children if child.title == "Act 1")
@@ -633,11 +633,11 @@ class MetadataValidationTests(unittest.TestCase):
         from app.models import CreateStructureNodeRequest
 
         updated = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="scene:act")
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
         )
-        act_node = next(child for child in updated.root.children if child.type == "scene:act")
+        act_node = next(child for child in updated.root.children if child.type == "manuscript:act")
 
-        candidates = self.service.list_reference_candidates(entry_type="scene:act")
+        candidates = self.service.list_reference_candidates(entry_type="manuscript:act")
 
         ids = {candidate.id for candidate in candidates.candidates}
         self.assertIn(act_node.scene_id, ids)
@@ -646,14 +646,14 @@ class MetadataValidationTests(unittest.TestCase):
         from app.models import CreateStructureNodeRequest
 
         updated = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="scene:act")
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
         )
-        act_node = next(child for child in updated.root.children if child.type == "scene:act")
+        act_node = next(child for child in updated.root.children if child.type == "manuscript:act")
         updated = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Chapter 1", entry_type="scene:chapter", parent_id=act_node.id)
+            CreateStructureNodeRequest(title="Chapter 1", entry_type="manuscript:chapter", parent_id=act_node.id)
         )
         nested_act = next(child for child in updated.root.children if child.id == act_node.id)
-        chapters = [child for child in nested_act.children if child.type == "scene:chapter"]
+        chapters = [child for child in nested_act.children if child.type == "manuscript:chapter"]
         self.assertEqual(len(chapters), 1)
         self.assertEqual(chapters[0].title, "Chapter 1")
 
@@ -662,7 +662,7 @@ class MetadataValidationTests(unittest.TestCase):
 
         with self.assertRaises(ProjectServiceError) as ctx:
             self.service.create_structure_node(
-                CreateStructureNodeRequest(title="Bad", entry_type="scene:base")
+                CreateStructureNodeRequest(title="Bad", entry_type="manuscript:base")
             )
         self.assertIn("abstract", ctx.exception.message)
 
@@ -670,9 +670,9 @@ class MetadataValidationTests(unittest.TestCase):
         from app.models import CreateStructureNodeRequest
 
         updated = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="scene:act")
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
         )
-        act_node = next(child for child in updated.root.children if child.type == "scene:act")
+        act_node = next(child for child in updated.root.children if child.type == "manuscript:act")
         renamed = self.service.rename_structure_node(act_node.id, "The Departure")
         renamed_act = next(child for child in renamed.root.children if child.id == act_node.id)
         self.assertEqual(renamed_act.title, "The Departure")
@@ -699,15 +699,15 @@ class MetadataValidationTests(unittest.TestCase):
         from app.models import CreateStructureNodeRequest
 
         self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="scene:act")
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
         )
         structure = self.service.read_structure()
-        act_node = next(child for child in structure.root.children if child.type == "scene:act")
+        act_node = next(child for child in structure.root.children if child.type == "manuscript:act")
         scene = self.service.create_scene(
             self._make_create_scene("Arrival", parent_id=act_node.id)
         )
 
-        scene_path = self.service._path_for_node_id(scene.id, "scene")
+        scene_path = self.service._path_for_node_id(scene.id, "manuscript")
         self.assertTrue(scene_path.exists())
 
         self.service.delete_structure_node(act_node.id)
@@ -720,15 +720,15 @@ class MetadataValidationTests(unittest.TestCase):
         from app.models import CreateStructureNodeRequest, SaveSceneRequest
 
         self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="scene:act")
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
         )
         structure = self.service.read_structure()
-        act_node = next(child for child in structure.root.children if child.type == "scene:act")
+        act_node = next(child for child in structure.root.children if child.type == "manuscript:act")
         chapter_doc = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Chapter 1", entry_type="scene:chapter", parent_id=act_node.id)
+            CreateStructureNodeRequest(title="Chapter 1", entry_type="manuscript:chapter", parent_id=act_node.id)
         )
         refreshed_act = next(child for child in chapter_doc.root.children if child.id == act_node.id)
-        chapter_node = next(grandchild for grandchild in refreshed_act.children if grandchild.type == "scene:chapter")
+        chapter_node = next(grandchild for grandchild in refreshed_act.children if grandchild.type == "manuscript:chapter")
         scene_a = self.service.create_scene(self._make_create_scene("Arrival", parent_id=chapter_node.id))
         seren = self.service.create_lore_entry(CreateLoreEntryRequest(title="Seren", entry_type="lore:character"))
         # Outside-the-cascade entry that references one of the about-to-be-
@@ -776,10 +776,10 @@ class MetadataValidationTests(unittest.TestCase):
         from app.models import CreateStructureNodeRequest
 
         self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="scene:act")
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
         )
         structure = self.service.read_structure()
-        act_node = next(child for child in structure.root.children if child.type == "scene:act")
+        act_node = next(child for child in structure.root.children if child.type == "manuscript:act")
         self.service.create_scene(self._make_create_scene("Arrival", parent_id=act_node.id))
         scene_b = self.service.create_scene(self._make_create_scene("Departure", parent_id=act_node.id))
         refreshed_b = self.service.read_scene(scene_b.id)
@@ -802,27 +802,27 @@ class MetadataValidationTests(unittest.TestCase):
     def test_move_structure_node_reorders_within_same_parent(self) -> None:
         from app.models import CreateStructureNodeRequest
 
-        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 1", entry_type="scene:act"))
-        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 2", entry_type="scene:act"))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 1", entry_type="manuscript:act"))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 2", entry_type="manuscript:act"))
         structure = self.service.read_structure()
-        acts = [child for child in structure.root.children if child.type == "scene:act"]
+        acts = [child for child in structure.root.children if child.type == "manuscript:act"]
         act_1, act_2 = acts[0], acts[1]
 
         self.service.move_structure_node(act_2.id, structure.root.id, 0)
         refreshed = self.service.read_structure()
-        reordered = [child for child in refreshed.root.children if child.type == "scene:act"]
+        reordered = [child for child in refreshed.root.children if child.type == "manuscript:act"]
         self.assertEqual([n.id for n in reordered], [act_2.id, act_1.id])
 
     def test_move_structure_node_reparents_into_container(self) -> None:
         from app.models import CreateStructureNodeRequest
 
-        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 1", entry_type="scene:act"))
-        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 2", entry_type="scene:act"))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 1", entry_type="manuscript:act"))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 2", entry_type="manuscript:act"))
         structure = self.service.read_structure()
-        acts = [child for child in structure.root.children if child.type == "scene:act"]
+        acts = [child for child in structure.root.children if child.type == "manuscript:act"]
         act_1, act_2 = acts[0], acts[1]
         chapter_doc = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Chapter 1", entry_type="scene:chapter", parent_id=act_1.id)
+            CreateStructureNodeRequest(title="Chapter 1", entry_type="manuscript:chapter", parent_id=act_1.id)
         )
         refreshed_act_1 = next(child for child in chapter_doc.root.children if child.id == act_1.id)
         chapter_node = refreshed_act_1.children[0]
@@ -838,11 +838,11 @@ class MetadataValidationTests(unittest.TestCase):
     def test_move_structure_node_rejects_self_into_descendant(self) -> None:
         from app.models import CreateStructureNodeRequest
 
-        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 1", entry_type="scene:act"))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act 1", entry_type="manuscript:act"))
         structure = self.service.read_structure()
-        act = next(child for child in structure.root.children if child.type == "scene:act")
+        act = next(child for child in structure.root.children if child.type == "manuscript:act")
         chapter_doc = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Chapter 1", entry_type="scene:chapter", parent_id=act.id)
+            CreateStructureNodeRequest(title="Chapter 1", entry_type="manuscript:chapter", parent_id=act.id)
         )
         refreshed_act = next(child for child in chapter_doc.root.children if child.id == act.id)
         chapter = refreshed_act.children[0]
@@ -867,7 +867,7 @@ class MetadataValidationTests(unittest.TestCase):
 
     def test_new_scene_file_is_named_by_title(self) -> None:
         scene = self.service.create_scene(self._make_create_scene("First Light"))
-        path = self.service._path_for_node_id(scene.id, "scene")
+        path = self.service._path_for_node_id(scene.id, "manuscript")
         self.assertEqual(path.name, "First Light.md")
 
     def test_new_lore_file_is_named_by_title(self) -> None:
@@ -877,31 +877,31 @@ class MetadataValidationTests(unittest.TestCase):
 
     def test_title_with_illegal_chars_gets_sanitized(self) -> None:
         scene = self.service.create_scene(self._make_create_scene('Chapter 1: "Hello?"'))
-        path = self.service._path_for_node_id(scene.id, "scene")
+        path = self.service._path_for_node_id(scene.id, "manuscript")
         for forbidden in '<>:"/\\|?*':
             self.assertNotIn(forbidden, path.stem)
 
     def test_collision_resolved_with_suffix(self) -> None:
         first = self.service.create_scene(self._make_create_scene("Departure"))
         second = self.service.create_scene(self._make_create_scene("Departure"))
-        first_path = self.service._path_for_node_id(first.id, "scene")
-        second_path = self.service._path_for_node_id(second.id, "scene")
+        first_path = self.service._path_for_node_id(first.id, "manuscript")
+        second_path = self.service._path_for_node_id(second.id, "manuscript")
         self.assertEqual(first_path.name, "Departure.md")
         self.assertEqual(second_path.name, "Departure (2).md")
 
     def test_rename_structure_node_renames_file_too(self) -> None:
         from app.models import CreateStructureNodeRequest
 
-        self.service.create_structure_node(CreateStructureNodeRequest(title="Act One", entry_type="scene:act"))
+        self.service.create_structure_node(CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act"))
         structure = self.service.read_structure()
-        act_node = next(child for child in structure.root.children if child.type == "scene:act")
-        original_path = self.service._path_for_node_id(act_node.scene_id, "scene")
+        act_node = next(child for child in structure.root.children if child.type == "manuscript:act")
+        original_path = self.service._path_for_node_id(act_node.scene_id, "manuscript")
         self.assertEqual(original_path.name, "Act One.md")
 
         self.service.rename_structure_node(act_node.id, "The Departure")
 
         self.assertFalse(original_path.exists())
-        new_path = self.service._path_for_node_id(act_node.scene_id, "scene")
+        new_path = self.service._path_for_node_id(act_node.scene_id, "manuscript")
         self.assertEqual(new_path.name, "The Departure.md")
 
     def _make_create_scene(self, title: str, parent_id: str | None = None):
@@ -913,9 +913,9 @@ class MetadataValidationTests(unittest.TestCase):
         from app.models import CreateStructureNodeRequest
 
         updated = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="scene:act")
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
         )
-        act_node = next(child for child in updated.root.children if child.type == "scene:act")
+        act_node = next(child for child in updated.root.children if child.type == "manuscript:act")
         with self.assertRaises(ProjectServiceError):
             self.service.rename_structure_node(act_node.id, "   ")
 
@@ -1013,7 +1013,7 @@ class MetadataValidationTests(unittest.TestCase):
                 body="Seren waits at the taverna.",
                 base_revision=scene.revision,
                 status="draft",
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
                 metadata={
                     "summary": "Opening beat",
                 },
@@ -1034,13 +1034,13 @@ class MetadataValidationTests(unittest.TestCase):
                     body=scene.body,
                     base_revision=scene.revision,
                     status="draft",
-                    entry_type="scene:scene",
+                    entry_type="manuscript:scene",
                     metadata={"word_count": 12},
                 ),
             )
 
     def test_validation_reports_hand_edited_computed_metadata(self) -> None:
-        path = self.service._path_for_node_id(self.scene_id, "scene")
+        path = self.service._path_for_node_id(self.scene_id, "manuscript")
         text = path.read_text(encoding="utf-8")
         path.write_text(text.replace("metadata: {}", "metadata:\n  word_count: 12"), encoding="utf-8")
 
@@ -1118,7 +1118,7 @@ class MetadataValidationTests(unittest.TestCase):
 
     def test_owned_scene_save_clears_omitted_fields_per_type(self) -> None:
         # Scene parity for the same round-trip (#522).
-        self._add_clearable_fields(self.root, "scene:scene")
+        self._add_clearable_fields(self.root, "manuscript:scene")
         scene = self.service.read_scene(self.scene_id)
         self.service.save_scene(
             self.scene_id,
@@ -1127,7 +1127,7 @@ class MetadataValidationTests(unittest.TestCase):
                 body=scene.body,
                 base_revision=scene.revision,
                 status="draft",
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
                 metadata={"flagged": False, "rank": 7, "tier": "a"},
             ),
         )
@@ -1142,7 +1142,7 @@ class MetadataValidationTests(unittest.TestCase):
                 body=scene.body,
                 base_revision=scene.revision,
                 status="draft",
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
                 metadata={},
             ),
         )
@@ -1157,9 +1157,9 @@ class MetadataValidationTests(unittest.TestCase):
             {
                 "version": 1,
                 "entry_types": {
-                    "scene:scene": {
+                    "manuscript:scene": {
                         "name": "Base Scene",
-                        "kind": "scene",
+                        "kind": "manuscript",
                         "fields": ["status", "summary", "mood", "word_count"],
                     }
                 },
@@ -1173,9 +1173,9 @@ class MetadataValidationTests(unittest.TestCase):
             {
                 "version": 1,
                 "entry_types": {
-                    "scene:scene": {
+                    "manuscript:scene": {
                         "name": "World Scene",
-                        "kind": "scene",
+                        "kind": "manuscript",
                         "fields": ["status", "summary", "mood", "tension", "word_count"],
                     }
                 },
@@ -1187,12 +1187,12 @@ class MetadataValidationTests(unittest.TestCase):
 
         schema = self.service.read_metadata_schema()
 
-        self.assertEqual(schema.entry_types["scene:scene"].name, "World Scene")
+        self.assertEqual(schema.entry_types["manuscript:scene"].name, "World Scene")
         self.assertIn("mood", schema.fields)
         self.assertIn("tension", schema.fields)
         # Intrinsic identity fields (#116) lead every type's resolved list.
         self.assertEqual(
-            schema.entry_types["scene:scene"].fields,
+            schema.entry_types["manuscript:scene"].fields,
             ["title", "entry_type", "id", "number", "summary", "color", "status", "pov", "characters", "locations", "dynamics", "word_count", "cost", "mood", "tension"],
         )
 
@@ -1204,7 +1204,7 @@ class MetadataValidationTests(unittest.TestCase):
                 body=scene.body,
                 base_revision=scene.revision,
                 status="draft",
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
                 metadata={"mood": "tense", "tension": 3},
             ),
         )
@@ -1285,9 +1285,9 @@ class MetadataValidationTests(unittest.TestCase):
                     "mood": {"name": "Mood", "type": "text"},
                 },
                 "entry_types": {
-                    "scene:scene": {
+                    "manuscript:scene": {
                         "name": "World Scene",
-                        "kind": "scene",
+                        "kind": "manuscript",
                         "fields": ["status", "summary", "mood", "word_count"],
                     }
                 },
@@ -1300,7 +1300,7 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertTrue(overview.field_sources["summary"].built_in)
         self.assertTrue(overview.field_sources["word_count"].built_in)
         self.assertEqual(overview.field_sources["mood"].layer_label, "series")
-        self.assertEqual(overview.entry_type_sources["scene:scene"].layer_label, "series")
+        self.assertEqual(overview.entry_type_sources["manuscript:scene"].layer_label, "series")
 
     def test_upsert_metadata_field_writes_selected_layer(self) -> None:
         world_layer = next(
@@ -1314,18 +1314,18 @@ class MetadataValidationTests(unittest.TestCase):
                 layer_id=world_layer.id,
                 field_id="pov_character",
                 field=MetadataFieldDefinition(name="POV Character", type="text"),
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
             )
         )
 
         self.assertIn("pov_character", schema.fields)
-        self.assertIn("pov_character", schema.entry_types["scene:scene"].fields)
+        self.assertIn("pov_character", schema.entry_types["manuscript:scene"].fields)
         world_schema = self.service._read_yaml(self.world / "metadata.schema.yaml")
         self.assertIn("pov_character", world_schema["fields"])
-        self.assertEqual(world_schema["entry_types"]["scene:scene"]["fields"], ["pov_character"])
-        self.assertNotIn("status", world_schema["entry_types"]["scene:scene"]["fields"])
-        self.assertNotIn("summary", world_schema["entry_types"]["scene:scene"]["fields"])
-        self.assertNotIn("word_count", world_schema["entry_types"]["scene:scene"]["fields"])
+        self.assertEqual(world_schema["entry_types"]["manuscript:scene"]["fields"], ["pov_character"])
+        self.assertNotIn("status", world_schema["entry_types"]["manuscript:scene"]["fields"])
+        self.assertNotIn("summary", world_schema["entry_types"]["manuscript:scene"]["fields"])
+        self.assertNotIn("word_count", world_schema["entry_types"]["manuscript:scene"]["fields"])
         self.assertNotIn("pov_character", self.service._read_yaml(self.root / "metadata.schema.yaml").get("fields", {}))
 
     def test_upsert_entry_type_does_not_leak_pydantic_defaults_to_disk(self) -> None:
@@ -1379,7 +1379,7 @@ class MetadataValidationTests(unittest.TestCase):
                 layer_id=world_layer.id,
                 field_id="color",
                 field=MetadataFieldDefinition(name="Background Color", type="select", options=["Red", "Green", "Blue"]),
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
             )
         )
 
@@ -1389,7 +1389,7 @@ class MetadataValidationTests(unittest.TestCase):
                     layer_id=world_layer.id,
                     field_id="color",
                     field=MetadataFieldDefinition(name="Color", type="text"),
-                    entry_type="scene:scene",
+                    entry_type="manuscript:scene",
                     allow_existing=False,
                 )
             )
@@ -1414,7 +1414,7 @@ class MetadataValidationTests(unittest.TestCase):
                     type="computed",
                     computed={"function": "counter", "scope": "manuscript"},
                 ),
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
             )
         )
 
@@ -1423,7 +1423,7 @@ class MetadataValidationTests(unittest.TestCase):
             schema.fields["scene_number"].computed,
             {"function": "counter", "scope": "manuscript"},
         )
-        self.assertIn("scene_number", schema.entry_types["scene:scene"].fields)
+        self.assertIn("scene_number", schema.entry_types["manuscript:scene"].fields)
 
     def test_create_computed_cost_field_with_scope(self) -> None:
         # The field editor now offers `cost` as an authorable computed function
@@ -1443,7 +1443,7 @@ class MetadataValidationTests(unittest.TestCase):
                     type="computed",
                     computed={"function": "cost", "scope": "scene"},
                 ),
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
             )
         )
 
@@ -1452,7 +1452,7 @@ class MetadataValidationTests(unittest.TestCase):
             schema.fields["scene_spend"].computed,
             {"function": "cost", "scope": "scene"},
         )
-        self.assertIn("scene_spend", schema.entry_types["scene:scene"].fields)
+        self.assertIn("scene_spend", schema.entry_types["manuscript:scene"].fields)
 
     def test_create_computed_field_rejects_unknown_function(self) -> None:
         world_layer = next(
@@ -1470,7 +1470,7 @@ class MetadataValidationTests(unittest.TestCase):
                         type="computed",
                         computed={"function": "made_up"},
                     ),
-                    entry_type="scene:scene",
+                    entry_type="manuscript:scene",
                 )
             )
         self.assertEqual(raised.exception.status_code, 422)
@@ -1492,7 +1492,7 @@ class MetadataValidationTests(unittest.TestCase):
                         type="computed",
                         computed={"function": "counter", "scope": "galaxy"},
                     ),
-                    entry_type="scene:scene",
+                    entry_type="manuscript:scene",
                 )
             )
         self.assertEqual(raised.exception.status_code, 422)
@@ -1570,13 +1570,13 @@ class MetadataValidationTests(unittest.TestCase):
         )
         self.service.set_entry_type_field_order(
             SetFieldOrderRequest(
-                layer_id=project_layer.id, entry_type_id="scene:scene", field_order=["summary", "number"]
+                layer_id=project_layer.id, entry_type_id="manuscript:scene", field_order=["summary", "number"]
             )
         )
-        fields = self.service.read_metadata_schema().entry_types["scene:scene"].fields
+        fields = self.service.read_metadata_schema().entry_types["manuscript:scene"].fields
         self.assertLess(fields.index("summary"), fields.index("number"))
         overview = self.service.read_metadata_schema_overview()
-        self.assertTrue(overview.entry_type_sources["scene:scene"].built_in)
+        self.assertTrue(overview.entry_type_sources["manuscript:scene"].built_in)
 
     def test_set_entry_type_group_applications_allows_system_type_as_overlay(self) -> None:
         # ADR-0029 §A: group applications are a per-layer overlay too, so the
@@ -1590,11 +1590,11 @@ class MetadataValidationTests(unittest.TestCase):
         )
         self.service.set_entry_type_group_applications(
             SetGroupApplicationsRequest(
-                layer_id=project_layer.id, entry_type_id="scene:scene", applications=[]
+                layer_id=project_layer.id, entry_type_id="manuscript:scene", applications=[]
             )
         )
         overview = self.service.read_metadata_schema_overview()
-        self.assertTrue(overview.entry_type_sources["scene:scene"].built_in)
+        self.assertTrue(overview.entry_type_sources["manuscript:scene"].built_in)
 
     def test_upsert_entry_type_overlays_builtin_without_forking_declaration(self) -> None:
         # ADR-0029 §A: "Save Type" on a built-in persists overlay data (here a
@@ -1680,7 +1680,7 @@ class MetadataValidationTests(unittest.TestCase):
                 layer_id=world_layer.id,
                 field_id="techlevel",
                 field=MetadataFieldDefinition(name="Techlevel", type="text"),
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
             )
         )
 
@@ -1688,17 +1688,17 @@ class MetadataValidationTests(unittest.TestCase):
             MoveMetadataFieldRequest(
                 field_id="techlevel",
                 target_layer_id=project_layer.id,
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
             )
         )
 
-        self.assertIn("techlevel", schema.entry_types["scene:scene"].fields)
+        self.assertIn("techlevel", schema.entry_types["manuscript:scene"].fields)
         world_schema = self.service._read_yaml(self.world / "metadata.schema.yaml")
         project_schema = self.service._read_yaml(self.root / "metadata.schema.yaml")
         self.assertNotIn("techlevel", world_schema.get("fields", {}))
-        self.assertNotIn("techlevel", world_schema["entry_types"]["scene:scene"]["fields"])
+        self.assertNotIn("techlevel", world_schema["entry_types"]["manuscript:scene"]["fields"])
         self.assertIn("techlevel", project_schema["fields"])
-        self.assertEqual(project_schema["entry_types"]["scene:scene"]["fields"], ["techlevel"])
+        self.assertEqual(project_schema["entry_types"]["manuscript:scene"]["fields"], ["techlevel"])
 
     def test_rename_metadata_field_updates_schema_and_scene_metadata(self) -> None:
         world_layer = next(
@@ -1711,7 +1711,7 @@ class MetadataValidationTests(unittest.TestCase):
                 layer_id=world_layer.id,
                 field_id="techlevel",
                 field=MetadataFieldDefinition(name="Techlevel", type="text"),
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
             )
         )
         scene = self.service.read_scene(self.scene_id)
@@ -1728,15 +1728,15 @@ class MetadataValidationTests(unittest.TestCase):
         )
 
         schema = self.service.rename_metadata_field(
-            RenameMetadataFieldRequest(old_field_id="techlevel", new_field_id="technology_level", entry_type="scene:scene")
+            RenameMetadataFieldRequest(old_field_id="techlevel", new_field_id="technology_level", entry_type="manuscript:scene")
         )
 
         self.assertNotIn("techlevel", schema.fields)
         self.assertIn("technology_level", schema.fields)
-        self.assertIn("technology_level", schema.entry_types["scene:scene"].fields)
+        self.assertIn("technology_level", schema.entry_types["manuscript:scene"].fields)
         world_schema = self.service._read_yaml(self.world / "metadata.schema.yaml")
         self.assertNotIn("techlevel", world_schema["fields"])
-        self.assertEqual(world_schema["entry_types"]["scene:scene"]["fields"], ["technology_level"])
+        self.assertEqual(world_schema["entry_types"]["manuscript:scene"]["fields"], ["technology_level"])
         renamed_scene = self.service.read_scene(self.scene_id)
         self.assertEqual(renamed_scene.metadata, {"technology_level": "steam"})
 
@@ -1751,7 +1751,7 @@ class MetadataValidationTests(unittest.TestCase):
                 layer_id=world_layer.id,
                 field_id="color",
                 field=MetadataFieldDefinition(name="Color", type="select", options=["Red", "Green", "Blue"]),
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
             )
         )
         self.service.upsert_metadata_field(
@@ -1759,13 +1759,13 @@ class MetadataValidationTests(unittest.TestCase):
                 layer_id=world_layer.id,
                 field_id="background_color",
                 field=MetadataFieldDefinition(name="Background Color", type="select", options=["Red", "Green", "Blue"]),
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
             )
         )
 
         with self.assertRaises(ProjectServiceError) as raised:
             self.service.rename_metadata_field(
-                RenameMetadataFieldRequest(old_field_id="background_color", new_field_id="color", entry_type="scene:scene")
+                RenameMetadataFieldRequest(old_field_id="background_color", new_field_id="color", entry_type="manuscript:scene")
             )
 
         self.assertEqual(raised.exception.status_code, 422)
@@ -1784,7 +1784,7 @@ class MetadataValidationTests(unittest.TestCase):
                 layer_id=world_layer.id,
                 field_id="color",
                 field=MetadataFieldDefinition(name="Color", type="select", options=["Red", "Green", "Blue"]),
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
             )
         )
         scene = self.service.read_scene(self.scene_id)
@@ -1805,7 +1805,7 @@ class MetadataValidationTests(unittest.TestCase):
                 layer_id=world_layer.id,
                 field_id="color",
                 field=MetadataFieldDefinition(name="Background Color", type="select", options=["red", "green", "blue"]),
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
                 option_migration={"Red": "red", "Green": "green", "Blue": "blue"},
             )
         )
@@ -1824,7 +1824,7 @@ class MetadataValidationTests(unittest.TestCase):
                 layer_id=world_layer.id,
                 field_id="rank",
                 field=MetadataFieldDefinition(name="Rank", type="select", options=["a", "b", "c"]),
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
             )
         )
         scene = self.service.read_scene(self.scene_id)
@@ -1845,7 +1845,7 @@ class MetadataValidationTests(unittest.TestCase):
                 layer_id=world_layer.id,
                 field_id="rank",
                 field=MetadataFieldDefinition(name="Rank", type="select", options=["b", "a", "c"]),
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
             )
         )
         self.assertEqual(self.service.read_scene(self.scene_id).metadata, {"rank": "a"})
@@ -1861,7 +1861,7 @@ class MetadataValidationTests(unittest.TestCase):
                 layer_id=world_layer.id,
                 field_id="faction",
                 field=MetadataFieldDefinition(name="Faction", type="multi_select", options=["red", "blue", "green"]),
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
             )
         )
         scene = self.service.read_scene(self.scene_id)
@@ -1882,7 +1882,7 @@ class MetadataValidationTests(unittest.TestCase):
                 layer_id=world_layer.id,
                 field_id="faction",
                 field=MetadataFieldDefinition(name="Faction", type="multi_select", options=["red", "green"]),
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
             )
         )
         self.assertEqual(self.service.read_scene(self.scene_id).metadata, {"faction": ["red"]})
@@ -1898,7 +1898,7 @@ class MetadataValidationTests(unittest.TestCase):
                 layer_id=world_layer.id,
                 field_id="techlevel",
                 field=MetadataFieldDefinition(name="Techlevel", type="text"),
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
             )
         )
         scene = self.service.read_scene(self.scene_id)
@@ -1914,13 +1914,13 @@ class MetadataValidationTests(unittest.TestCase):
             ),
         )
 
-        schema = self.service.delete_metadata_field(DeleteMetadataFieldRequest(field_id="techlevel", entry_type="scene:scene"))
+        schema = self.service.delete_metadata_field(DeleteMetadataFieldRequest(field_id="techlevel", entry_type="manuscript:scene"))
 
         self.assertNotIn("techlevel", schema.fields)
-        self.assertNotIn("techlevel", schema.entry_types["scene:scene"].fields)
+        self.assertNotIn("techlevel", schema.entry_types["manuscript:scene"].fields)
         world_schema = self.service._read_yaml(self.world / "metadata.schema.yaml")
         self.assertNotIn("techlevel", world_schema["fields"])
-        self.assertNotIn("techlevel", world_schema["entry_types"]["scene:scene"]["fields"])
+        self.assertNotIn("techlevel", world_schema["entry_types"]["manuscript:scene"]["fields"])
         deleted_scene_metadata = self.service.read_scene(self.scene_id).metadata
         self.assertEqual(deleted_scene_metadata, {})
 
@@ -2142,7 +2142,7 @@ class MetadataValidationTests(unittest.TestCase):
 
     def test_scene_can_be_read_after_file_rename_by_front_matter_id(self) -> None:
         scene = self.service.read_scene(self.scene_id)
-        original_path = self.service._path_for_node_id(scene.id, "scene")
+        original_path = self.service._path_for_node_id(scene.id, "manuscript")
         renamed_path = self.root / "scenes" / "opening-scene-renamed.md"
         original_path.rename(renamed_path)
         node_index_gate.invalidate()  # a raw rename is external; model the reopen (#392)
@@ -2205,8 +2205,8 @@ class MetadataValidationTests(unittest.TestCase):
             )
 
     def test_lore_entry_rejects_scene_entry_type(self) -> None:
-        with self.assertRaisesRegex(ProjectServiceError, "non-lore entry_type scene:scene"):
-            self.service.create_lore_entry(CreateLoreEntryRequest(title="Wrong", entry_type="scene:scene"))
+        with self.assertRaisesRegex(ProjectServiceError, "non-lore entry_type manuscript:scene"):
+            self.service.create_lore_entry(CreateLoreEntryRequest(title="Wrong", entry_type="manuscript:scene"))
 
     def test_lore_metadata_field_mutations_update_lore_files(self) -> None:
         world_layer = next(
@@ -2316,7 +2316,7 @@ class MetadataValidationTests(unittest.TestCase):
                 PromptInputDefinition(name="beat", type="long_text", label="Beat instruction"),
             ],
             context_strategy=PromptContextStrategy(
-                target={"required": True, "kind": "scene"},
+                target={"required": True, "kind": "manuscript"},
                 scan_surface=["_text_before", "_selection"],
                 output={"kind": "append_to_body"},
             ),
@@ -2342,7 +2342,7 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual([i.name for i in stored.prompt.inputs], ["words", "beat"])
         assert stored.prompt.context_strategy is not None
         self.assertEqual(stored.prompt.context_strategy.scan_surface, ["_text_before", "_selection"])
-        self.assertEqual(stored.prompt.context_strategy.target, {"required": True, "kind": "scene"})
+        self.assertEqual(stored.prompt.context_strategy.target, {"required": True, "kind": "manuscript"})
 
         on_disk = self.service._read_yaml(self.root / "metadata.schema.yaml")
         disk_entry = on_disk["entry_types"]["prompt:continue_scene"]
@@ -2464,7 +2464,7 @@ class MetadataValidationTests(unittest.TestCase):
         assert revise_scene_output is not None
         self.assertEqual(revise_scene_output.kind, "replace_selection")
         self.assertIsNone(revise_scene_output.commit)
-        self.assertEqual(revise_scene.prompt.context_strategy.target, {"required": True, "kind": "scene"})
+        self.assertEqual(revise_scene.prompt.context_strategy.target, {"required": True, "kind": "manuscript"})
 
         revise_entry = schema.entry_types["prompt:revise:entry"]
         self.assertFalse(revise_entry.abstract)
@@ -2879,7 +2879,7 @@ class MetadataValidationTests(unittest.TestCase):
                     ],
                     default="revised",
                 ),
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
             )
         )
         scene = self.service.create_scene(CreateSceneRequest(title="Defaulted scene"))
@@ -3014,7 +3014,7 @@ class ReferenceResolutionTests(unittest.TestCase):
                 body=scene.body,
                 base_revision=scene.revision,
                 status=scene.status,
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
                 metadata={"characters": [seren.id], "locations": [taverna.id]},
             ),
         )
@@ -3047,13 +3047,13 @@ class ReferenceResolutionTests(unittest.TestCase):
                 body=scene.body,
                 base_revision=scene.revision,
                 status=scene.status,
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
                 metadata={"characters": [seren.id]},
             ),
         )
 
         by_title = self.service.search(SearchRequest(query="Seren"))
-        excerpts = [hit.excerpt for hit in by_title.hits if hit.kind == "scene"]
+        excerpts = [hit.excerpt for hit in by_title.hits if hit.kind == "manuscript"]
         self.assertTrue(any("Seren" in excerpt for excerpt in excerpts))
         self.assertFalse(any(seren.id in excerpt for excerpt in excerpts))
 
@@ -3168,7 +3168,7 @@ class LayeredEntryIndexTests(unittest.TestCase):
             body="",
             revision="",
             status="draft",
-            entry_type="scene:scene",
+            entry_type="manuscript:scene",
             metadata={},
         )
         self.service._write_scene_file(self.universe / "scenes" / "ghost_scene.md", ancestor_scene)

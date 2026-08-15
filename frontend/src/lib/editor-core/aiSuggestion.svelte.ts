@@ -297,7 +297,7 @@ export class AiSuggestionController {
   ): Promise<void> {
     const editor = this.#deps.getEditor();
     const scene = this.#deps.getScene();
-    if (!editor || !scene || this.generating || this.#deps.getDocumentKind() !== "scene") return;
+    if (!editor || !scene || this.generating || this.#deps.getDocumentKind() !== "manuscript") return;
     if (this.suggestionId) {
       this.error = "Accept or revert the pending suggestion before generating another.";
       return;

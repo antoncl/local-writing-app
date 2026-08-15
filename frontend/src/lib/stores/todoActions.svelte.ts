@@ -139,7 +139,7 @@ class TodoActions {
       } else {
         await editorPanes.openScene(hit.file_id);
       }
-      if (hit.kind === "scene" && hit.todo_id) {
+      if (hit.kind === "manuscript" && hit.todo_id) {
         window.setTimeout(() => editorPanes.highlightEmbeddedTodoInOpenPane(hit.file_id, hit.todo_id!), 0);
       }
     });

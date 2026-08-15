@@ -60,7 +60,7 @@ class NodeOpsMixin:
         entry = index.by_id.get(node_id)
         if entry is None:
             raise ProjectServiceError(f"Node {node_id} does not exist.", 404)
-        if entry.kind == "scene":
+        if entry.kind == "manuscript":
             return self.read_scene(node_id)
         if entry.kind == "lore":
             return self.read_lore_entry(node_id)
@@ -106,7 +106,7 @@ class NodeOpsMixin:
                 422,
             )
 
-        if entry.kind == "scene":
+        if entry.kind == "manuscript":
             if not isinstance(request, SaveSceneRequest):
                 raise _mismatch()
             return self.save_scene(node_id, request)
@@ -147,7 +147,7 @@ class NodeOpsMixin:
         entry = index.by_id.get(node_id)
         if entry is None:
             raise ProjectServiceError(f"Node {node_id} does not exist.", 404)
-        if entry.kind == "scene":
+        if entry.kind == "manuscript":
             self.delete_scene(node_id)
             return
         if entry.kind == "lore":

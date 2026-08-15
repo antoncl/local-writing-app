@@ -114,7 +114,7 @@ class OpenANonLeafLevelTests(unittest.TestCase):
         return {
             entry.id
             for entry in ProjectService.opened_at(root)._build_node_index(root).by_id.values()
-            if entry.kind == "scene"
+            if entry.kind == "manuscript"
         }
 
     def test_the_manuscript_is_exactly_this_levels_own_scenes_folder(self) -> None:

@@ -480,11 +480,11 @@ class LoreMutationsMixin(MarkerMixin):
         and changing resolved state across the rest of the manuscript.
         """
         entry = index.by_id.get(scene_id)
-        if entry is not None and entry.kind == "scene":
+        if entry is not None and entry.kind == "manuscript":
             path = entry.path
         else:
             try:
-                path = self._path_for_node_id(scene_id, "scene")
+                path = self._path_for_node_id(scene_id, "manuscript")
             except ProjectServiceError:
                 return None
         try:

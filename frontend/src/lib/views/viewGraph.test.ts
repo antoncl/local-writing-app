@@ -184,7 +184,7 @@ describe("system default views round-trip (first-class, #271)", () => {
   // graph → spec → graph (kind-ful, so the roster resolves). Guards the #271 default
   // rework + the always-`{filter}` producer together (this is the invariant the old
   // §B "lossless re-serialize" tests covered, restated for the new idiom).
-  for (const kind of ["scene", "research", "lore", "prompt", "assistant", "chat"]) {
+  for (const kind of ["manuscript", "research", "lore", "prompt", "assistant", "chat"]) {
     it(`${kind} default view re-serializes to the same expr`, () => {
       const spec = defaultView(kind);
       expect(graphToExpr(specToGraph(spec), kind)).toEqual(spec.expr ?? null);
@@ -638,7 +638,7 @@ describe("nest lowering + self-loop recursion (ADR-0028)", () => {
       nodes: [out(), all, nst],
       edges: [edge(all.id, nst.id, "children"), edge(nst.id, OUTPUT_NODE_ID)],
     };
-    expect(graphToExpr(graph, "scene")).toEqual({ nest: { children: { descendants_of: "scene:base" }, match } });
+    expect(graphToExpr(graph, "manuscript")).toEqual({ nest: { children: { descendants_of: "manuscript:base" }, match } });
     expect(graphToExpr(graph)).toEqual({ nest: { match } });
   });
 
@@ -647,7 +647,7 @@ describe("nest lowering + self-loop recursion (ADR-0028)", () => {
     // key so the evaluator applies its whole-universe-on-missing-seed convention.
     const nst = node("nest", { match }, 0);
     const graph: ViewGraph = { nodes: [out(), nst], edges: [edge(nst.id, OUTPUT_NODE_ID)] };
-    expect(graphToExpr(graph, "scene")).toEqual({ nest: { match } });
+    expect(graphToExpr(graph, "manuscript")).toEqual({ nest: { match } });
   });
 });
 
@@ -667,36 +667,36 @@ describe("nest orphans — first-class node-set output (ADR-0028 Amendment 1, #2
         { id: "eo", source: nst.id, sourceHandle: NEST_ORPHANS_HANDLE, target: OUTPUT_NODE_ID, targetHandle: "h1" }, // orphans → group B
       ],
     };
-    const spec = graphToSpec(graph, { kind: "scene" });
+    const spec = graphToSpec(graph, { kind: "manuscript" });
     expect(spec.groups?.map((g) => g.name)).toEqual(["Placed", "Orphans"]);
     const nestId = spec.groups![0].expr?.nest?.id;
     expect(nestId).toBe(nst.id);
-    expect(spec.groups![0].expr?.nest).toMatchObject({ children: { descendants_of: "scene:base" }, match });
+    expect(spec.groups![0].expr?.nest).toMatchObject({ children: { descendants_of: "manuscript:base" }, match });
     expect(spec.groups![1].expr).toEqual({ orphans_of: nestId });
   });
 
   it("round-trips the two-group orphans view (nest.id ↔ orphans_of stays consistent)", () => {
     const spec: ViewSpec = {
-      kind: "scene",
+      kind: "manuscript",
       groups: [
-        { name: "Placed", expr: { nest: { id: "nA", parents: { field: { key: "parent", op: "unset" } }, children: { descendants_of: "scene:base" }, match, recursive: true } } },
+        { name: "Placed", expr: { nest: { id: "nA", parents: { field: { key: "parent", op: "unset" } }, children: { descendants_of: "manuscript:base" }, match, recursive: true } } },
         { name: "Orphans", expr: { orphans_of: "nA" } },
       ],
     } as ViewSpec;
-    const out2 = graphToSpec(specToGraph(spec, undefined), { kind: "scene" });
+    const out2 = graphToSpec(specToGraph(spec, undefined), { kind: "manuscript" });
     expect(out2.groups?.map((g) => g.name)).toEqual(["Placed", "Orphans"]);
     const nestId = out2.groups![0].expr?.nest?.id;
     expect(nestId).toBeTruthy();
     // The reference still names the same Nest (the id value may be regenerated).
     expect(out2.groups![1].expr?.orphans_of).toBe(nestId);
-    expect(out2.groups![0].expr?.nest).toMatchObject({ children: { descendants_of: "scene:base" }, match, recursive: true });
+    expect(out2.groups![0].expr?.nest).toMatchObject({ children: { descendants_of: "manuscript:base" }, match, recursive: true });
   });
 
   it("specToGraph wires the orphans reference off the nest's orphans output handle", () => {
     const spec: ViewSpec = {
-      kind: "scene",
+      kind: "manuscript",
       groups: [
-        { name: "Placed", expr: { nest: { id: "nA", parents: { field: { key: "parent", op: "unset" } }, children: { descendants_of: "scene:base" }, match, recursive: true } } },
+        { name: "Placed", expr: { nest: { id: "nA", parents: { field: { key: "parent", op: "unset" } }, children: { descendants_of: "manuscript:base" }, match, recursive: true } } },
         { name: "Orphans", expr: { orphans_of: "nA" } },
       ],
     } as ViewSpec;
@@ -717,14 +717,14 @@ describe("nest orphans — first-class node-set output (ADR-0028 Amendment 1, #2
         { id: "eo", source: nst.id, sourceHandle: NEST_ORPHANS_HANDLE, target: OUTPUT_NODE_ID, targetHandle: "h1" },
       ],
     };
-    const spec = graphToSpec(graph, { kind: "scene" });
+    const spec = graphToSpec(graph, { kind: "manuscript" });
     expect(spec.groups![1].expr).toEqual({ orphans_of: nst.id });
   });
 
   it("an unwired orphans output gives the Nest no id and drops its orphans (the default)", () => {
     const nst = node("nest", { match }, 0);
     const graph: ViewGraph = { nodes: [out(), nst], edges: [edge(nst.id, OUTPUT_NODE_ID)] };
-    expect(graphToSpec(graph, { kind: "scene" }).expr).toEqual({ nest: { match } });
+    expect(graphToSpec(graph, { kind: "manuscript" }).expr).toEqual({ nest: { match } });
   });
 
   it("orphans-only (results output unwired): the Nest definition is carried inline (#275)", () => {
@@ -741,15 +741,15 @@ describe("nest orphans — first-class node-set output (ADR-0028 Amendment 1, #2
       ],
     };
     // Only the orphans handle is populated → a flat expr.
-    const spec = graphToSpec(graph, { kind: "scene" });
+    const spec = graphToSpec(graph, { kind: "manuscript" });
     expect(spec.expr?.orphans_of).toBe(nst.id);
-    expect(spec.expr?.orphans_nest).toMatchObject({ children: { descendants_of: "scene:base" }, match, id: nst.id });
+    expect(spec.expr?.orphans_nest).toMatchObject({ children: { descendants_of: "manuscript:base" }, match, id: nst.id });
   });
 
   it("round-trips an orphans-only view — the Nest node survives reload (#275)", () => {
     const spec: ViewSpec = {
-      kind: "scene",
-      expr: { orphans_of: "nA", orphans_nest: { id: "nA", children: { descendants_of: "scene:base" }, match } },
+      kind: "manuscript",
+      expr: { orphans_of: "nA", orphans_nest: { id: "nA", children: { descendants_of: "manuscript:base" }, match } },
     } as ViewSpec;
     const g = specToGraph(spec, undefined);
     // The Nest node is reconstructed from the inline def (not lost), its orphans
@@ -759,9 +759,9 @@ describe("nest orphans — first-class node-set output (ADR-0028 Amendment 1, #2
     expect(g.nodes.some((n) => n.kind === "orphans_ref")).toBe(false);
     expect(g.edges.some((e) => e.source === nst!.id && e.sourceHandle === NEST_ORPHANS_HANDLE)).toBe(true);
     // Re-lowering carries the def again (still orphans-only).
-    const out2 = graphToSpec(g, { kind: "scene" });
+    const out2 = graphToSpec(g, { kind: "manuscript" });
     expect(out2.expr?.orphans_of).toBeTruthy();
-    expect(out2.expr?.orphans_nest).toMatchObject({ children: { descendants_of: "scene:base" }, match });
+    expect(out2.expr?.orphans_nest).toMatchObject({ children: { descendants_of: "manuscript:base" }, match });
   });
 });
 
@@ -893,7 +893,7 @@ describe("#196 value-set pipe (scalar field_of → Filter value slot, ADR-0031 �
 
   it("specToGraph rebuilds the value wire (field_of node + edge into the Filter's value handle)", () => {
     const graph = specToGraph({
-      kind: "scene",
+      kind: "manuscript",
       expr: {
         filter: {
           of: { hand_picked: ["a", "b"] },
@@ -1176,7 +1176,7 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
         : k === "owner"
           ? new Map([
               ["lore", null],
-              ["scene", null],
+              ["manuscript", null],
             ])
           : null,
     descendantsOf: (fqn) => (fqn === "lore:character" ? ["lore:character", "lore:protagonist"] : [fqn]),
@@ -1186,7 +1186,7 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
   // Normalize a type-set to a comparable plain object (sorted fqns, or null).
   const dump = (ts: InputTypeSet | null) =>
     ts === null ? null : Object.fromEntries([...ts].map(([k, s]) => [k, s === null ? null : [...s].sort()]));
-  const infer = (nodes: ViewGraphNode[], edges: ReturnType<typeof edge>[], id: string, anchor = "scene") =>
+  const infer = (nodes: ViewGraphNode[], edges: ReturnType<typeof edge>[], id: string, anchor = "manuscript") =>
     dump(inferInputTypes(byIdOf(nodes), edges, id, anchor, resolvers));
 
   // Post-#271/#284 there is no bare type/descendants_of leaf, so a concretely-typed
@@ -1209,11 +1209,11 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
   };
 
   it("a keep-Filter on a `type` predicate infers that exact entry_type", () => {
-    const src = typedSrc("type", "scene:scene");
+    const src = typedSrc("type", "manuscript:scene");
     const filter = node("filter", { filter_kind: "field" }, 100);
     const nodes = [out(), ...src.nodes, filter];
     const edges = [...src.edges, edge(src.id, filter.id), edge(filter.id, OUTPUT_NODE_ID)];
-    expect(infer(nodes, edges, filter.id)).toEqual({ scene: ["scene:scene"] });
+    expect(infer(nodes, edges, filter.id)).toEqual({ manuscript: ["manuscript:scene"] });
   });
 
   it("a keep-Filter on a `descendants_of` predicate infers the whole subtype family (seed-inclusive)", () => {
@@ -1239,15 +1239,15 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
     const filter = node("filter", { filter_kind: "field" }, 200);
     const nodes = [out(), src, fo, filter];
     const edges = [edge(src.id, fo.id), edge(fo.id, filter.id), edge(filter.id, OUTPUT_NODE_ID)];
-    expect(infer(nodes, edges, filter.id)).toEqual({ lore: null, scene: null });
+    expect(infer(nodes, edges, filter.id)).toEqual({ lore: null, manuscript: null });
   });
 
   it("a `field_of`'s own project-field picker sees its INPUT type, not its output", () => {
-    const src = typedSrc("type", "scene:scene");
+    const src = typedSrc("type", "manuscript:scene");
     const fo = node("field_of", { project_field: "pov" }, 100);
     const nodes = [out(), ...src.nodes, fo];
     const edges = [...src.edges, edge(src.id, fo.id), edge(fo.id, OUTPUT_NODE_ID)];
-    expect(infer(nodes, edges, fo.id)).toEqual({ scene: ["scene:scene"] });
+    expect(infer(nodes, edges, fo.id)).toEqual({ manuscript: ["manuscript:scene"] });
   });
 
   it("downstream of a SCALAR `field_of` (value-set) → indeterminate (null → anchor fallback)", () => {
@@ -1313,8 +1313,8 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
   it("a nest handle unions ALL its inbound sources, not just the first", () => {
     // Two typed sources wired into a nest's children handle → the join-field picker
     // must see BOTH types (lowering unions them), not only the first edge's type.
-    const l1 = typedSrc("type", "scene:action");
-    const l2 = typedSrc("type", "scene:sequel");
+    const l1 = typedSrc("type", "manuscript:action");
+    const l2 = typedSrc("type", "manuscript:sequel");
     const nest = node("nest", { match: { field: "parent", direction: "child_to_parent", by: "ref" } }, 200);
     const nodes = [out(), ...l1.nodes, ...l2.nodes, nest];
     const edges = [
@@ -1324,7 +1324,7 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
       edge(l2.id, nest.id, NEST_CHILDREN_HANDLE),
       edge(nest.id, OUTPUT_NODE_ID),
     ];
-    expect(infer(nodes, edges, nest.id)).toEqual({ scene: ["scene:action", "scene:sequel"] });
+    expect(infer(nodes, edges, nest.id)).toEqual({ manuscript: ["manuscript:action", "manuscript:sequel"] });
   });
 
   it("a provably-empty intersect (disjoint types) yields an empty type-set, not the anchor kind", () => {
@@ -1352,14 +1352,14 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
 
   it("an unwired node falls back to the whole anchor kind", () => {
     const filter = node("filter", { filter_kind: "field" }, 0);
-    expect(infer([out(), filter], [], filter.id)).toEqual({ scene: null });
+    expect(infer([out(), filter], [], filter.id)).toEqual({ manuscript: null });
   });
 
   it("a union of two kinds yields a cross-kind set", () => {
     // A foreign kind is reachable only through a ref field_of (§F remap); narrow it
     // back to a concrete family with a keep-Filter so the union merges two concrete
     // per-kind fqn sets (not just concrete ∪ any-kind).
-    const a = typedSrc("type", "scene:scene");
+    const a = typedSrc("type", "manuscript:scene");
     const pick = node("hand_picked", { hand_picked: ["x"] });
     const fo = node("field_of", { project_field: "pov" }, 100);
     const loreFilter = node("filter", { filter_kind: "descendants_of", filter_mode: "keep", descendants_of: "lore:character" }, 150);
@@ -1376,7 +1376,7 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
       edge(sink.id, OUTPUT_NODE_ID),
     ];
     expect(infer(nodes, edges, sink.id)).toEqual({
-      scene: ["scene:scene"],
+      manuscript: ["manuscript:scene"],
       lore: ["lore:character", "lore:protagonist"],
     });
   });
@@ -1401,7 +1401,7 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
     expect(applies(typeScope("lore", "lore:character"), locInput)).toBe(false); // disjoint leaf types
     expect(applies(typeScope("lore"), locInput)).toBe(true); // kind-scoped → any type
     expect(applies(typeScope("lore", "lore:character"), new Map([["lore", null]]))).toBe(true); // whole-kind input
-    expect(applies(typeScope("scene", "scene:scene"), new Map([["lore", null]]))).toBe(false); // other kind
+    expect(applies(typeScope("manuscript", "manuscript:scene"), new Map([["lore", null]]))).toBe(false); // other kind
   });
 
   it("a diamond over a ref `field_of` still remaps (independent `seen` per branch)", () => {
@@ -1429,7 +1429,7 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
   // Slice B (#215): `inputKinds` reduces an inferred type-set to the kinds it
   // spans — the cross-kind (>1) authoring-warning signal (ADR-0031 §F / Consequences).
   describe("inputKinds — cross-kind warning signal (Slice B)", () => {
-    const kindsOf = (nodes: ViewGraphNode[], edges: ReturnType<typeof edge>[], id: string, anchor = "scene") =>
+    const kindsOf = (nodes: ViewGraphNode[], edges: ReturnType<typeof edge>[], id: string, anchor = "manuscript") =>
       inputKinds(inferInputTypes(byIdOf(nodes), edges, id, anchor, resolvers)).sort();
 
     it("a single-kind input spans one kind (no warning)", () => {
@@ -1437,7 +1437,7 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
       const sink = node("filter", { filter_kind: "field" }, 100);
       const nodes = [out(), src, sink];
       const edges = [edge(src.id, sink.id), edge(sink.id, OUTPUT_NODE_ID)];
-      expect(kindsOf(nodes, edges, sink.id)).toEqual(["scene"]);
+      expect(kindsOf(nodes, edges, sink.id)).toEqual(["manuscript"]);
     });
 
     it("a union of two kinds spans both (cross-kind → warn)", () => {
@@ -1447,7 +1447,7 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
       const sink = node("filter", { filter_kind: "field" }, 300);
       const nodes = [out(), a, ...b.nodes, u, sink];
       const edges = [...b.edges, edge(a.id, u.id), edge(b.id, u.id), edge(u.id, sink.id), edge(sink.id, OUTPUT_NODE_ID)];
-      expect(kindsOf(nodes, edges, sink.id)).toEqual(["lore", "scene"]);
+      expect(kindsOf(nodes, edges, sink.id)).toEqual(["lore", "manuscript"]);
     });
 
     it("a multi-kind ref `field_of` spans its target kinds (cross-kind → warn)", () => {
@@ -1456,7 +1456,7 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
       const sink = node("filter", { filter_kind: "field" }, 200);
       const nodes = [out(), src, fo, sink];
       const edges = [edge(src.id, fo.id), edge(fo.id, sink.id), edge(sink.id, OUTPUT_NODE_ID)];
-      expect(kindsOf(nodes, edges, sink.id)).toEqual(["lore", "scene"]);
+      expect(kindsOf(nodes, edges, sink.id)).toEqual(["lore", "manuscript"]);
     });
 
     it("an indeterminate input (scalar field_of → null) spans no kinds (anchor fallback, not cross-kind)", () => {
@@ -1473,7 +1473,7 @@ describe("field-picker type inference (ADR-0031 §F)", () => {
       // kind → a size-0 (NON-null) Map. `rosterWarningFor` must treat this as
       // cross-kind (ts !== null && size !== 1), NOT confuse it with the null
       // (indeterminate) anchor-fallback case above.
-      const a = typedSrc("type", "scene:scene");
+      const a = typedSrc("type", "manuscript:scene");
       const b = refSrc("pov"); // scene ∩ lore = ∅ across kinds
       const x = node("intersect", {}, 200);
       const sink = node("filter", { filter_kind: "field" }, 300);

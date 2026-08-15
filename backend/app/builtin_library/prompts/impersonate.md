@@ -30,7 +30,7 @@ inputs:
     sources:
     - kind: scene
       expr:
-        type: scene:scene
+        type: manuscript:scene
     multiple: false
     presets: []
 ---

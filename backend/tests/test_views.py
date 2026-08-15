@@ -149,12 +149,12 @@ class ViewCrudTests(unittest.TestCase):
 
     def test_list_reports_summary_with_anchor_kind(self) -> None:
         self._create("Cast", {"kind": "lore", "expr": {"type": "lore:character"}})
-        self._create("Scenes", {"kind": "scene"})
+        self._create("Scenes", {"kind": "manuscript"})
         res = self.client.get("/api/views")
         self.assertEqual(res.status_code, 200, res.text)
         entries = {e["title"]: e for e in res.json()["entries"]}
         self.assertEqual(entries["Cast"]["view_kind"], "lore")
-        self.assertEqual(entries["Scenes"]["view_kind"], "scene")
+        self.assertEqual(entries["Scenes"]["view_kind"], "manuscript")
         # The summary carries the full spec (#95) so a client needn't refetch
         # each view to evaluate it (serialized dense, like the getView endpoint).
         self.assertEqual(entries["Cast"]["spec"]["kind"], "lore")
@@ -172,12 +172,12 @@ class ViewCrudTests(unittest.TestCase):
         # Fresh revision → ok, spec replaced.
         ok = self.client.put(
             f"/api/views/{created['id']}",
-            json={"title": "V2", "base_revision": got["revision"], "spec": {"kind": "scene"}},
+            json={"title": "V2", "base_revision": got["revision"], "spec": {"kind": "manuscript"}},
         )
         self.assertEqual(ok.status_code, 200, ok.text)
         self.assertEqual(
             ok.json()["spec"],
-            {"kind": "scene", "expr": None, "groups": None, "sort": None, "params": None, "group_by": None},
+            {"kind": "manuscript", "expr": None, "groups": None, "sort": None, "params": None, "group_by": None},
         )
 
     def test_delete_removes_view(self) -> None:
@@ -290,16 +290,16 @@ class ParameterizedViewGrammarTests(unittest.TestCase):
                 ViewExpr(field={"key": "pov", "op": old})
 
     def test_field_of_is_a_primary_slot(self) -> None:
-        expr = ViewExpr(field_of={"of": {"type": "scene:scene"}, "field": "pov"})
+        expr = ViewExpr(field_of={"of": {"type": "manuscript:scene"}, "field": "pov"})
         self.assertEqual(expr.field_of.field, "pov")
-        self.assertEqual(expr.field_of.of.type, "scene:scene")
+        self.assertEqual(expr.field_of.of.type, "manuscript:scene")
         # Exclusive with other primaries.
         with self.assertRaises(ValueError):
-            ViewExpr(field_of={"of": {"type": "scene:scene"}, "field": "pov"}, type="lore:character")
+            ViewExpr(field_of={"of": {"type": "manuscript:scene"}, "field": "pov"}, type="lore:character")
 
     def test_field_of_requires_field(self) -> None:
         with self.assertRaises(ValueError):
-            ViewExpr(field_of={"of": {"type": "scene:scene"}, "field": ""})
+            ViewExpr(field_of={"of": {"type": "manuscript:scene"}, "field": ""})
 
     def test_var_leaf(self) -> None:
         self.assertEqual(ViewExpr(var="POV").var, "POV")
@@ -318,7 +318,7 @@ class ParameterizedViewGrammarTests(unittest.TestCase):
 
     def test_params_list_roundtrips_and_stores_no_type(self) -> None:
         spec = ViewSpec(
-            kind="scene",
+            kind="manuscript",
             expr={"field": {"key": "pov", "op": "overlap", "value": {"var": "POV"}}},
             params=[{"name": "POV", "label": "Point of view", "default": None},
                     {"name": "status", "label": "Status", "default": ["draft", "revised"]}],
@@ -539,10 +539,10 @@ class ViewUiStateTests(unittest.TestCase):
         self.assertEqual(ui.json()["ui"]["collapsed"], ["node:q"])
 
     def test_first_ui_write_materializes_system_default_view(self) -> None:
-        # No file for view_default_scene yet; a fold write materializes it (§5).
-        self.assertEqual(self.client.get("/api/views/view_default_scene").status_code, 404)
+        # No file for view_default_manuscript yet; a fold write materializes it (§5).
+        self.assertEqual(self.client.get("/api/views/view_default_manuscript").status_code, 404)
         res = self.client.put(
-            "/api/views/view_default_scene/ui", json={"ui": {"collapsed": ["node:act1"]}}
+            "/api/views/view_default_manuscript/ui", json={"ui": {"collapsed": ["node:act1"]}}
         )
         self.assertEqual(res.status_code, 200, res.text)
         body = res.json()
@@ -550,17 +550,17 @@ class ViewUiStateTests(unittest.TestCase):
         # recursive containment Nest over the `parent` relation, roots =
         # parentless, children = the whole scene roster.
         self.assertTrue(body["system"])
-        self.assertEqual(body["spec"]["kind"], "scene")
+        self.assertEqual(body["spec"]["kind"], "manuscript")
         nest = body["spec"]["expr"]["nest"]
         self.assertTrue(nest["recursive"])
         self.assertEqual(nest["match"], {"field": "parent", "direction": "child_to_parent", "by": "ref"})
         # Roots = the roster narrowed to parent-unset, a first-class Filter (ADR-0041
         # §C; #271 retired the bare-predicate-leaf form).
         parents_filter = nest["parents"]["filter"]
-        self.assertEqual(parents_filter["of"]["descendants_of"], "scene:base")
+        self.assertEqual(parents_filter["of"]["descendants_of"], "manuscript:base")
         self.assertEqual(parents_filter["pred"]["field"]["key"], "parent")
         self.assertEqual(parents_filter["pred"]["field"]["op"], "unset")
-        self.assertEqual(nest["children"]["descendants_of"], "scene:base")
+        self.assertEqual(nest["children"]["descendants_of"], "manuscript:base")
         self.assertNotIn("presentation", body)
         self.assertEqual(body["ui"]["collapsed"], ["node:act1"])
 
@@ -616,17 +616,17 @@ class ViewUiStateTests(unittest.TestCase):
         self.assertEqual(got["spec"]["groups"][1]["expr"]["orphans_of"], "cities")
 
     def test_materialized_default_is_listed_and_reused_on_next_write(self) -> None:
-        self.client.put("/api/views/view_default_scene/ui", json={"ui": {"collapsed": ["node:a"]}})
+        self.client.put("/api/views/view_default_manuscript/ui", json={"ui": {"collapsed": ["node:a"]}})
         listed = self.client.get("/api/views").json()["entries"]
-        defaults = [v for v in listed if v["id"] == "view_default_scene"]
+        defaults = [v for v in listed if v["id"] == "view_default_manuscript"]
         self.assertEqual(len(defaults), 1)
         self.assertTrue(defaults[0]["system"])
         # A second fold write reuses the existing node (no duplicate file).
-        self.client.put("/api/views/view_default_scene/ui", json={"ui": {"collapsed": ["node:b"]}})
+        self.client.put("/api/views/view_default_manuscript/ui", json={"ui": {"collapsed": ["node:b"]}})
         listed2 = self.client.get("/api/views").json()["entries"]
-        self.assertEqual(len([v for v in listed2 if v["id"] == "view_default_scene"]), 1)
+        self.assertEqual(len([v for v in listed2 if v["id"] == "view_default_manuscript"]), 1)
         self.assertEqual(
-            self.client.get("/api/views/view_default_scene").json()["ui"]["collapsed"], ["node:b"]
+            self.client.get("/api/views/view_default_manuscript").json()["ui"]["collapsed"], ["node:b"]
         )
 
     def test_default_view_for_unknown_kind_is_422(self) -> None:

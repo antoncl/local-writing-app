@@ -88,18 +88,18 @@ class _HelperFixtureBase(unittest.TestCase):
 
         # Manuscript structure: Act → Scene 1, Scene 2
         structure = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="scene:act")
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
         )
-        self.act_node = next(c for c in structure.root.children if c.type == "scene:act")
+        self.act_node = next(c for c in structure.root.children if c.type == "manuscript:act")
         s1 = self.service.create_structure_node(
             CreateStructureNodeRequest(
-                title="The Departure", entry_type="scene:scene", parent_id=self.act_node.id
+                title="The Departure", entry_type="manuscript:scene", parent_id=self.act_node.id
             )
         )
         self.scene_one_node = self._latest_scene_under(s1.root, self.act_node.id)
         s2 = self.service.create_structure_node(
             CreateStructureNodeRequest(
-                title="The Arrival", entry_type="scene:scene", parent_id=self.act_node.id
+                title="The Arrival", entry_type="manuscript:scene", parent_id=self.act_node.id
             )
         )
         self.scene_two_node = self._latest_scene_under(s2.root, self.act_node.id)
@@ -108,7 +108,7 @@ class _HelperFixtureBase(unittest.TestCase):
         self._update_scene(
             self.scene_one_node.scene_id,
             title="The Departure",
-            entry_type="scene:scene",
+            entry_type="manuscript:scene",
             metadata={
                 "summary": "Honor takes the Salamander into battle.",
                 "characters": [self.honor["id"]],
@@ -119,7 +119,7 @@ class _HelperFixtureBase(unittest.TestCase):
         self._update_scene(
             self.scene_two_node.scene_id,
             title="The Arrival",
-            entry_type="scene:scene",
+            entry_type="manuscript:scene",
             metadata={
                 "summary": "The fleet returns to Star Kingdom under quiet stars.",
                 "characters": [],
@@ -347,7 +347,7 @@ class EntryAsOfHelperTests(_HelperFixtureBase):
         self._update_scene(
             self.scene_two_node.scene_id,
             title="The Arrival",
-            entry_type="scene:scene",
+            entry_type="manuscript:scene",
             metadata={"summary": "The fleet returns.", "characters": [], "pov": self.honor["id"]},
             body=(
                 "Honor is promoted. "
@@ -396,7 +396,7 @@ class EntryAsOfHelperTests(_HelperFixtureBase):
         import json
 
         self._mutate_honor_in_scene_two()
-        picked = json.dumps([{"id": self.scene_two_node.scene_id, "kind": "scene"}])
+        picked = json.dumps([{"id": self.scene_two_node.scene_id, "kind": "manuscript"}])
         self.assertEqual(
             self._render_as_of(picked),
             "Admiral Harrington|Admiral of the Fleet. Battle-hardened.",
@@ -408,7 +408,7 @@ class EntryAsOfHelperTests(_HelperFixtureBase):
         self._update_scene(
             self.scene_two_node.scene_id,
             title="The Arrival",
-            entry_type="scene:scene",
+            entry_type="manuscript:scene",
             metadata={"summary": "x", "characters": [], "pov": self.honor["id"]},
             body=(
                 f"<!-- mutate:entity={self.honor['id']};field=aliases;op=add;value=Steadholder;id=m1 -->"
@@ -450,7 +450,7 @@ class ImpersonateAsOfPreviewTests(_HelperFixtureBase):
         self._update_scene(
             self.scene_two_node.scene_id,
             title="The Arrival",
-            entry_type="scene:scene",
+            entry_type="manuscript:scene",
             metadata={"summary": "x", "characters": [], "pov": self.honor["id"]},
             body=(
                 f"<!-- mutate:entity={self.honor['id']};field=title;value=Admiral%20Harrington;id=m1 -->"
@@ -763,7 +763,7 @@ class ContextPolicyTests(_HelperFixtureBase):
         self._update_scene(
             self.scene_one_node.scene_id,
             title="The Departure",
-            entry_type="scene:scene",
+            entry_type="manuscript:scene",
             metadata={
                 "summary": "Honor takes the Salamander into Star Kingdom space.",
                 "characters": [self.honor["id"]],
@@ -783,7 +783,7 @@ class ContextPolicyTests(_HelperFixtureBase):
         self._update_scene(
             self.scene_one_node.scene_id,
             title="The Departure",
-            entry_type="scene:scene",
+            entry_type="manuscript:scene",
             metadata={
                 "summary": "Honor takes the Salamander into battle.",
                 "characters": [self.honor["id"]],

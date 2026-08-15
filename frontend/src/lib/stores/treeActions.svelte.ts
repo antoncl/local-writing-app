@@ -252,8 +252,8 @@ class TreeActions {
   // App owns the structure data (passed to Tree separately); these wire the
   // kind-specific api + the editor-pane / collapse callbacks that live here.
   manuscriptTree: TreeConfig = {
-    kind: "scene",
-    leafType: "scene:scene",
+    kind: "manuscript",
+    leafType: "manuscript:scene",
     getStructure: () => get(structureStore),
     applyStructure: (next) => { setStructure(next); },
     refresh: refreshStructure,

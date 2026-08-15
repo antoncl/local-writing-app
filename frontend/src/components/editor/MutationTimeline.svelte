@@ -76,7 +76,7 @@
           onClick={(node) => {
             onSelect?.(node.index + 1);
             const record = node.unit.records[0];
-            if (record) onNavigate?.({ id: record.scene_id, kind: "scene" });
+            if (record) onNavigate?.({ id: record.scene_id, kind: "manuscript" });
           }}
           row={mutationRow}
         />

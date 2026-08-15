@@ -89,7 +89,7 @@ class EntryRef:
         try:
             if idx_entry.kind == "lore":
                 self._loaded = self._project.read_lore_entry(self._id)
-            elif idx_entry.kind == "scene":
+            elif idx_entry.kind == "manuscript":
                 self._loaded = self._project.read_scene(self._id)
             elif idx_entry.kind == "prompt":
                 self._loaded = self._project.read_prompt_entry(self._id)

@@ -25,7 +25,7 @@
 
   let {
     scene = null,
-    documentKind = "scene",
+    documentKind = "manuscript",
     authoringLayerId = null,
     recentlySaved = false,
     onAuthoringLayerChange = undefined,

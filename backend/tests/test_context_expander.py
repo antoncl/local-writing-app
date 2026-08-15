@@ -131,7 +131,7 @@ def test_explicit_picks_of_other_kinds_dont_dedup(project):
     # A scene/snippet/preset pick should NOT shadow a lore detection
     # even if ids collide (separate identity spaces).
     picks = [
-        ChatSessionContextItem(kind="scene", id=project._honor_id, title="x"),
+        ChatSessionContextItem(kind="manuscript", id=project._honor_id, title="x"),
     ]
     out = expand_context(project, "Honor arrived.", explicit_picks=picks)
     ids = {e.entry_id for e in out}

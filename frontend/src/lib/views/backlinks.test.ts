@@ -21,7 +21,7 @@ describe("candidatesToBacklinks (#194 Phase 2c)", () => {
 
   it("sorts by kind then title (case-insensitive), like the retired endpoint", () => {
     const rows = candidatesToBacklinks([
-      candidate({ id: "s1", title: "zed", kind: "scene" }),
+      candidate({ id: "s1", title: "zed", kind: "manuscript" }),
       candidate({ id: "l2", title: "bob", kind: "lore" }),
       candidate({ id: "l1", title: "Alice", kind: "lore" }),
     ]);

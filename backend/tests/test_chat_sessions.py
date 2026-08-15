@@ -63,7 +63,7 @@ class ChatSessionEndpointTests(unittest.TestCase):
             "system_prompt": "Be terse.",
             "pinned": True,
             "context_items": [
-                {"kind": "scene", "id": "scene_1", "title": "Opening"}
+                {"kind": "manuscript", "id": "scene_1", "title": "Opening"}
             ],
             "messages": [
                 {"role": "user", "content": "hello"},
@@ -291,7 +291,7 @@ class ChatSessionEndpointTests(unittest.TestCase):
             "assistant_id": chat["assistant_id"],
             "system_prompt": chat["system_prompt"],
             "pinned": True,
-            "context_items": [{"kind": "scene", "id": "scene_1", "title": "Opening"}],
+            "context_items": [{"kind": "manuscript", "id": "scene_1", "title": "Opening"}],
             "messages": chat["messages"] + [{"role": "assistant", "content": "hello"}],
         }
         response = self.client.put(f"/api/chats/{chat['id']}", json=payload)
@@ -443,7 +443,7 @@ class ChatSubjectAndBodyTests(unittest.TestCase):
         # into subject, so a scene-kind subject must edge like any other.
         (self.root / "scenes").mkdir(parents=True, exist_ok=True)
         self.service._write_node_entry_file(
-            self.root / "scenes" / "sc1.md", "sc1", "Opening", "scene:scene", {}, ""
+            self.root / "scenes" / "sc1.md", "sc1", "Opening", "manuscript:scene", {}, ""
         )
         chat = self.service.create_chat_session(
             CreateChatSessionRequest(title="About the opening", subject="sc1")
@@ -457,7 +457,7 @@ class ChatSubjectAndBodyTests(unittest.TestCase):
         # A lore subject or an empty subject yields no scene.
         (self.root / "scenes").mkdir(parents=True, exist_ok=True)
         self.service._write_node_entry_file(
-            self.root / "scenes" / "sc1.md", "sc1", "Opening", "scene:scene", {}, ""
+            self.root / "scenes" / "sc1.md", "sc1", "Opening", "manuscript:scene", {}, ""
         )
         self._write_lore("aurora", "Aurora")
         self.assertEqual(self.service._subject_scene_id("sc1", self.root), "sc1")

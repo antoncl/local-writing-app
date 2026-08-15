@@ -257,7 +257,7 @@ class ChangeGateEfficiencyTests(MemoTestCase):
         the one the memo carries rather than re-reading it (#392)."""
         scene_id = self._first_scene_id()
         self.service._build_node_index(self.root)  # warm the memo (stashes the schema)
-        path = self.service._path_for_node_id(scene_id, "scene")
+        path = self.service._path_for_node_id(scene_id, "manuscript")
         path.write_text(path.read_text(encoding="utf-8") + "\nMore prose.\n", encoding="utf-8")
 
         reads = self._spy("read_metadata_schema")
@@ -341,7 +341,7 @@ class DeferredFlushTests(MemoTestCase):
 
     def test_structural_writes_defer_and_coalesce_to_one_flush(self) -> None:
         scene_id = self._first_scene_id()
-        path = self.service._path_for_node_id(scene_id, "scene")
+        path = self.service._path_for_node_id(scene_id, "manuscript")
         self.service._build_node_index(self.root)  # warm the memo
 
         writes = self._spy("_write_index_snapshot")
@@ -363,9 +363,9 @@ class DeferredFlushTests(MemoTestCase):
         per-file writes collapse to a handful of flushes instead of one each."""
         structure = self.service.read_structure()
         doc = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Chapter", entry_type="scene:chapter", parent_id=structure.root.id)
+            CreateStructureNodeRequest(title="Chapter", entry_type="manuscript:chapter", parent_id=structure.root.id)
         )
-        chapter_id = next(c.id for c in doc.root.children if c.type == "scene:chapter")
+        chapter_id = next(c.id for c in doc.root.children if c.type == "manuscript:chapter")
         scene_count = 12
         for i in range(scene_count):
             self.service.create_scene(CreateSceneRequest(title=f"Scene {i}", parent_id=chapter_id))
@@ -384,7 +384,7 @@ class DeferredFlushTests(MemoTestCase):
 
     def test_invalidate_flushes_a_pending_snapshot_before_clearing(self) -> None:
         scene_id = self._first_scene_id()
-        path = self.service._path_for_node_id(scene_id, "scene")
+        path = self.service._path_for_node_id(scene_id, "manuscript")
         self.service._build_node_index(self.root)  # warm
 
         writes = self._spy("_write_index_snapshot")
@@ -397,7 +397,7 @@ class DeferredFlushTests(MemoTestCase):
 
     def test_clean_shutdown_flush_writes_a_pending_snapshot(self) -> None:
         scene_id = self._first_scene_id()
-        path = self.service._path_for_node_id(scene_id, "scene")
+        path = self.service._path_for_node_id(scene_id, "manuscript")
         self.service._build_node_index(self.root)  # warm
 
         writes = self._spy("_write_index_snapshot")
@@ -418,7 +418,7 @@ class DeferredFlushTests(MemoTestCase):
         node_index_gate.invalidate()  # clean slate after scaffolding
 
         scene_id = self._first_scene_id()
-        path = self.service._path_for_node_id(scene_id, "scene")
+        path = self.service._path_for_node_id(scene_id, "manuscript")
         self.service._build_node_index(self.root)  # current = book01
 
         # Spy the pending-flush thunk specifically (the cold build calls
@@ -478,7 +478,7 @@ class ScopeInvalidationTests(MemoTestCase):
         self.service._build_node_index(self.root)  # warm the memo with the current title
 
         # Revert the file on disk behind the running server's back.
-        path = self.service._path_for_node_id(scene_id, "scene")
+        path = self.service._path_for_node_id(scene_id, "manuscript")
         path.write_text(
             path.read_text(encoding="utf-8").replace(f"title: {original.title}", "title: Restored From Backup"),
             encoding="utf-8",

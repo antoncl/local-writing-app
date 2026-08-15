@@ -265,7 +265,7 @@ class SceneSnapshotsMixin:
         """The id the store is keyed by: the scene file's front-matter id, which
         is canonical identity. A route may be reached with the structure node's
         id instead, and the two are not always the same."""
-        path = self._path_for_node_id(scene_id, "scene")
+        path = self._path_for_node_id(scene_id, "manuscript")
         return self._node_id_for_path(path)
 
     # ----- capture ----------------------------------------------------------
@@ -273,7 +273,7 @@ class SceneSnapshotsMixin:
     def capture_snapshot(self, scene_id: str, dynamic_context: list[str] | None = None) -> Snapshot:
         """The camera: an explicit, never-thinned capture of the current state."""
         root = self._require_project()
-        path = self._path_for_node_id(scene_id, "scene")
+        path = self._path_for_node_id(scene_id, "manuscript")
         node_id = self._node_id_for_path(path)
         return self._capture(root, node_id, path, retention="kept", dynamic_context=dynamic_context)
 
@@ -412,7 +412,7 @@ class SceneSnapshotsMixin:
         never the reverse.
         """
         root = self._require_project()
-        path = self._path_for_node_id(scene_id, "scene")
+        path = self._path_for_node_id(scene_id, "manuscript")
         node_id = self._node_id_for_path(path)
         self._require_snapshot(root, node_id, snapshot_id)
 

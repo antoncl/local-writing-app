@@ -253,7 +253,7 @@ export type ChatSessionMessage = {
 };
 
 export type ChatSessionContextItem = {
-  kind: "scene" | "lore" | "snippet" | "preset";
+  kind: "manuscript" | "lore" | "snippet" | "preset";
   id: string;
   entry_type?: string;
   title?: string;

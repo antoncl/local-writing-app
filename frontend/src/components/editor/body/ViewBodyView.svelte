@@ -326,7 +326,7 @@
     if (k === "lore") return loreEntries;
     if (k === "assistant") return assistantEntries;
     if (k === "prompt") return promptUniverse;
-    if (k === "scene") return structureToEvalNodes(structure);
+    if (k === "manuscript") return structureToEvalNodes(structure);
     if (k === "chat") return chatUniverse;
     return [];
   }
@@ -395,7 +395,7 @@
   // + non-intrinsic category = joinable AND groupable, matching how the evaluator
   // follows it (`match.field: parent`, by ref). `children` is deferred to #217: no
   // node stamps it, so the evaluator has no inverse index to resolve it yet.
-  const STRUCTURAL_KINDS = new Set(["scene", "research"]);
+  const STRUCTURAL_KINDS = new Set(["manuscript", "research"]);
   // The structural `parent` ref as a computed reference field, scoped to kind `k`
   // so its value widget (op overlap/disjoint → ReferencePicker) offers that kind's
   // nodes — without a `picker_config` the picker falls back to the `lore` roster.

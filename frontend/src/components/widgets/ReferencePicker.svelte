@@ -112,8 +112,8 @@
   function flattenScenesAll(node: StructureNode | null | undefined): Map<string, { id: string; title: string; entry_type: string }> {
     const out = new Map<string, { id: string; title: string; entry_type: string }>();
     const walk = (n: StructureNode) => {
-      if (n.type === "scene:scene" && n.scene_id) {
-        const entryType = (n as unknown as { entry_type?: string }).entry_type ?? "scene:scene";
+      if (n.type === "manuscript:scene" && n.scene_id) {
+        const entryType = (n as unknown as { entry_type?: string }).entry_type ?? "manuscript:scene";
         out.set(n.scene_id, { id: n.scene_id, title: n.title, entry_type: entryType });
       }
       for (const child of n.children ?? []) walk(child);
@@ -124,7 +124,7 @@
 
   function resolveRefById(id: string): ResolvedRef {
     const scene = sceneIndex.get(id);
-    if (scene) return { id, kind: "scene", title: scene.title, entry_type: scene.entry_type };
+    if (scene) return { id, kind: "manuscript", title: scene.title, entry_type: scene.entry_type };
     const lore = loreIndex.get(id);
     if (lore) return { id, kind: "lore", title: lore.title, entry_type: lore.entry_type };
     const snippet = promptIndex.get(id);
@@ -166,7 +166,7 @@
       const entry = loreIndex.get(ref.id);
       return typeof entry?.metadata?.color === "string" ? entry.metadata.color : null;
     }
-    if (ref.kind === "scene") {
+    if (ref.kind === "manuscript") {
       return findStructureColor(structure?.root, ref.id);
     }
     return null;

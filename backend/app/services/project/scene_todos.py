@@ -36,7 +36,7 @@ class SceneTodoAnchorsMixin(MarkerMixin):
         anchors_by_scene: dict[str, set[str]] = {}
         for scene_id in scene_ids:
             try:
-                path = self._path_for_node_id(scene_id, "scene")
+                path = self._path_for_node_id(scene_id, "manuscript")
             except ProjectServiceError:
                 continue
             _, body = self._read_markdown_with_front_matter(path)
@@ -49,7 +49,7 @@ class SceneTodoAnchorsMixin(MarkerMixin):
         counts_by_scene: dict[str, dict[str, int]] = {}
         for scene_id in scene_ids:
             try:
-                path = self._path_for_node_id(scene_id, "scene")
+                path = self._path_for_node_id(scene_id, "manuscript")
             except ProjectServiceError:
                 continue
             _, body = self._read_markdown_with_front_matter(path)

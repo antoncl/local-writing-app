@@ -85,7 +85,7 @@ export function normalizeListFieldValue(fieldType: string, value: MetadataValue)
 // The schema's kind universe (a Node's "class"). Narrower than the wider
 // DocumentKind, which also covers chat / snippet / structure_node — none
 // of which have their own schema-type tree.
-export type SchemaKind = "scene" | "lore" | "research" | "prompt" | "assistant" | "project" | "plot";
+export type SchemaKind = "manuscript" | "lore" | "research" | "prompt" | "assistant" | "project" | "plot";
 
 // The UI metadata each kind-keyed surface needs: the Detail Types tab label,
 // the tree's context heading, and the entry-type id to seed when a project has
@@ -101,7 +101,7 @@ export interface SchemaKindMeta {
   defaultType: string;
 }
 export const SCHEMA_KIND_META: Record<SchemaKind, SchemaKindMeta> = {
-  scene: { label: "Scene", heading: "Scene Types", defaultType: "scene:scene" },
+  manuscript: { label: "Scene", heading: "Scene Types", defaultType: "manuscript:scene" },
   lore: { label: "Lore", heading: "Lore Entry Types", defaultType: "lore:note" },
   research: { label: "Research", heading: "Research Types", defaultType: "research:note" },
   prompt: { label: "Prompt", heading: "Prompt Types", defaultType: "prompt:base" },
@@ -129,7 +129,7 @@ export function asSchemaKind(kind: string | null | undefined): SchemaKind | null
 // schema-kind logic (Detail Types, "Edit type…") must resolve through here.
 // Returns null for DocumentKinds with no schema tree (chat / snippet / view).
 export function schemaKindForDocumentKind(documentKind: string): SchemaKind | null {
-  if (documentKind === "structure_node") return "scene";
+  if (documentKind === "structure_node") return "manuscript";
   if (documentKind.startsWith("plot")) return "plot";
   return asSchemaKind(documentKind);
 }
@@ -348,7 +348,7 @@ export function nodeTypeDisplayName(
   typeId: string,
   definition: EntryTypeDefinition | undefined,
 ): string {
-  if (typeId === "scene:scene") return "Scenes";
+  if (typeId === "manuscript:scene") return "Scenes";
   if (typeId === "lore:base") return "Lore Entries";
   if (typeId === "prompt:base") return "Prompts";
   return definition?.name ?? typeId;
@@ -520,14 +520,14 @@ export function buildNodeTypeTree(
 // can't be mounted to assert the rendered tree. Feeding a plot entry type here
 // and asserting {kind:"plot", heading:"Plot Types", tree:[plot types]} is the
 // guard for the exact path that shipped the Plot tab scoped to the Scene tree
-// (#729). `entryTypeId` unknown → falls back to scene:scene → scene scope.
+// (#729). `entryTypeId` unknown → falls back to manuscript:scene → scene scope.
 export interface SchemaScope {
   kind: SchemaKind;
   heading: string;
   tree: NodeTypeTreeNode[];
 }
 export function resolveSchemaScope(schema: MetadataSchema | null, entryTypeId: string): SchemaScope {
-  const selected = schema?.entry_types[entryTypeId] ?? schema?.entry_types["scene:scene"];
-  const kind = asSchemaKind(selected?.kind) ?? "scene";
+  const selected = schema?.entry_types[entryTypeId] ?? schema?.entry_types["manuscript:scene"];
+  const kind = asSchemaKind(selected?.kind) ?? "manuscript";
   return { kind, heading: SCHEMA_KIND_META[kind].heading, tree: buildNodeTypeTree(schema, kind) };
 }

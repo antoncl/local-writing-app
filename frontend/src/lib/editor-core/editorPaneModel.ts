@@ -16,7 +16,7 @@ import type {
 // A lightweight handle to the open document: which kind it is + its id. The
 // pane resolves the full document into `scene`.
 export type DocumentRef = {
-  type: "scene" | "lore" | "prompt" | "assistant" | "project" | "structure_node" | "chat" | "research" | "view" | "plot_template" | "plot_card" | "plotline";
+  type: "manuscript" | "lore" | "prompt" | "assistant" | "project" | "structure_node" | "chat" | "research" | "view" | "plot_template" | "plot_card" | "plotline";
   id: string;
 };
 
@@ -72,7 +72,7 @@ export function createEmptyEditorPane(id: string): EditorPaneState {
     draftTitle: "",
     draftMarkdown: "",
     draftStatus: "draft",
-    draftEntryType: "scene",
+    draftEntryType: "manuscript",
     draftMetadata: {},
     draftInputs: [],
     draftOfferOn: [],

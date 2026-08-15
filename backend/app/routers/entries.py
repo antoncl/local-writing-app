@@ -170,7 +170,7 @@ def delete_chat_session(project: CurrentProject, chat_id: str) -> ChatSessionLis
 
 
 _SAVE_NODE_REQUEST_BY_KIND: dict[str, type] = {
-    "scene": SaveSceneRequest,
+    "manuscript": SaveSceneRequest,
     "lore": SaveLoreEntryRequest,
     "prompt": SavePromptEntryRequest,
     "assistant": SaveAssistantEntryRequest,

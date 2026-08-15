@@ -130,7 +130,7 @@ describe("editorPaneDelete: per-kind delete routing", () => {
     const deleteScene = vi.spyOn(api, "deleteScene").mockResolvedValue(EMPTY_STRUCTURE);
     // The scene branch refreshes todos afterward (refreshTodos → api.getTodos).
     vi.spyOn(api, "getTodos").mockResolvedValue({ items: [] });
-    await deleteVia(paneFor("scene", "scene"));
+    await deleteVia(paneFor("manuscript", "scene"));
     expect(deleteScene).toHaveBeenCalledWith(NODE_ID);
   });
 });

@@ -19,15 +19,15 @@ import type {
 } from "@/lib/types";
 
 // scene root + act/scene sub-types + the `parent` ref the containment Nest joins
-// on. Drop the root or the `parent` field and defaultView("scene") resolves to a
+// on. Drop the root or the `parent` field and defaultView("manuscript") resolves to a
 // roster that renders nothing — the trap under test.
 const SCHEMA = {
   version: 1,
   fields: { parent: { name: "Parent", type: "entity_ref", category: "stored" } },
   entry_types: {
-    "scene:base": { name: "Scene root", kind: "scene", abstract: true },
-    "scene:act": { name: "Act", kind: "scene", parent: "scene:base" },
-    "scene:scene": { name: "Scene", kind: "scene", parent: "scene:base" },
+    "manuscript:base": { name: "Scene root", kind: "manuscript", abstract: true },
+    "manuscript:act": { name: "Act", kind: "manuscript", parent: "manuscript:base" },
+    "manuscript:scene": { name: "Scene", kind: "manuscript", parent: "manuscript:base" },
   },
 } as unknown as MetadataSchema;
 
@@ -40,12 +40,12 @@ function manuscript(): StructureDocument {
       children: [
         {
           id: "act1",
-          type: "scene:act",
+          type: "manuscript:act",
           title: "Act One",
           computed_metadata: { number: 1 },
           children: [
-            { id: "s1", type: "scene:scene", title: "Arrival", scene_id: "s1", status: "complete", metadata: {}, computed_metadata: { number: 1 }, children: [] },
-            { id: "s2", type: "scene:scene", title: "Departure", scene_id: "s2", status: "draft", metadata: {}, computed_metadata: { number: 2 }, children: [] },
+            { id: "s1", type: "manuscript:scene", title: "Arrival", scene_id: "s1", status: "complete", metadata: {}, computed_metadata: { number: 1 }, children: [] },
+            { id: "s2", type: "manuscript:scene", title: "Departure", scene_id: "s2", status: "draft", metadata: {}, computed_metadata: { number: 2 }, children: [] },
           ],
         },
       ],
@@ -59,8 +59,8 @@ const noopAsync = async () => {};
 // mutation callbacks are never triggered by these tests, so they are inert stubs.
 function manuscriptConfig(): TreeConfig {
   return {
-    kind: "scene",
-    leafType: "scene:scene",
+    kind: "manuscript",
+    leafType: "manuscript:scene",
     getStructure: () => manuscript(),
     applyStructure: () => {},
     refresh: noopAsync,
@@ -93,7 +93,7 @@ function renderTree(structure: StructureDocument | null) {
     props: {
       config: manuscriptConfig(),
       structure,
-      viewSpec: defaultView("scene", SCHEMA),
+      viewSpec: defaultView("manuscript", SCHEMA),
       sectionLabel: "Manuscript",
       emptyLabel: "No scenes yet.",
       draftTitles: new Map<string, string>(),

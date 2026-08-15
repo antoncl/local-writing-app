@@ -12,7 +12,7 @@ const SCHEMA = {
     "lore:note": { name: "Note", kind: "lore", parent: "lore:base", fields: [] },
     "lore:character": { name: "Character", kind: "lore", parent: "lore:base", fields: [] },
     "lore:retired": { name: "Retired", kind: "lore", parent: "lore:base", fields: [], deprecated: true },
-    "scene:scene": { name: "Scene", kind: "scene", fields: [] },
+    "manuscript:scene": { name: "Scene", kind: "manuscript", fields: [] },
   },
   fields: {},
 } as unknown as MetadataSchema;

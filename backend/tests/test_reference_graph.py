@@ -282,7 +282,7 @@ class SceneEdgeTests(unittest.TestCase):
                 body=scene.body,
                 base_revision=scene.revision,
                 status="draft",
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
                 metadata={"pov": hero, "characters": [hero, foil]},
             ),
         )
@@ -319,7 +319,7 @@ class SceneEdgeTests(unittest.TestCase):
                 body=scene.body,
                 base_revision=scene.revision,
                 status="draft",
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
                 metadata={"characters": [hero, foil]},
             ),
         )

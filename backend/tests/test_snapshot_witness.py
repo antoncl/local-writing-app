@@ -72,7 +72,7 @@ class WitnessTestCase(unittest.TestCase):
             self.service,
             "cast",
             MetadataFieldDefinition(name="Cast", type="entity_ref_list"),
-            "scene:scene",
+            "manuscript:scene",
         )
 
         self.tom = self.service.create_lore_entry(
@@ -119,7 +119,7 @@ class WitnessTestCase(unittest.TestCase):
                 title="The Tide",
                 body=body,
                 status="draft",
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
                 metadata={"cast": cast} if cast is not None else {},
             ),
         )
@@ -192,7 +192,7 @@ class WitnessSourcesTests(WitnessTestCase):
                 title="Before",
                 body=f"<!-- mutate:entity={self.tom};field=eye_colour;value=blue;id=m1 -->",
                 status="draft",
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
             ),
         )
         self._save_scene("Tom said nothing at all.")

@@ -96,7 +96,7 @@ class MarkerMixin:
             raise ProjectServiceError(
                 f"{kind_label} {marker_id} does not exist in scene {scene.id}.", 404
             )
-        path = self._path_for_node_id(scene.id, "scene")
+        path = self._path_for_node_id(scene.id, "manuscript")
         self._write_scene_file(path, scene.model_copy(update={"body": new_body}))
         return self.read_scene(scene.id)
 
@@ -113,7 +113,7 @@ class MarkerMixin:
         todo-anchor repair paths, where `replace` matches against a whole
         capture set rather than a single id."""
         try:
-            path = self._path_for_node_id(scene_id, "scene")
+            path = self._path_for_node_id(scene_id, "manuscript")
         except ProjectServiceError:
             return
         front_matter, body = self._read_markdown_with_front_matter(path)

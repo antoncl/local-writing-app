@@ -195,7 +195,7 @@ export function resolveContextPickToken(
   const wantKind = target?.kind;
   const wantEntryType = target?.entry_type;
 
-  type Cand = { id: string; kind: "lore" | "scene"; title: string; entry_type?: string };
+  type Cand = { id: string; kind: "lore" | "manuscript"; title: string; entry_type?: string };
   const candidates: Cand[] = [];
 
   if (!wantKind || wantKind === "lore") {
@@ -205,10 +205,10 @@ export function resolveContextPickToken(
       candidates.push({ id: lore.id, kind: "lore", title: lore.title, entry_type: lore.entry_type });
     }
   }
-  if (!wantKind || wantKind === "scene") {
+  if (!wantKind || wantKind === "manuscript") {
     for (const sc of ctx.availableScenes) {
       if (sc.title.toLowerCase() !== lower) continue;
-      candidates.push({ id: sc.id, kind: "scene", title: sc.title });
+      candidates.push({ id: sc.id, kind: "manuscript", title: sc.title });
     }
   }
 

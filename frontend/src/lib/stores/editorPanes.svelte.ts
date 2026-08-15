@@ -523,7 +523,7 @@ class EditorPanesController {
   async #performSave(id: string, options: { force?: boolean } = {}): Promise<void> {
     const pane = this.panes.find((candidate) => candidate.id === id);
     if (!pane?.scene) return;
-    const documentKind = pane.document?.type ?? "scene";
+    const documentKind = pane.document?.type ?? "manuscript";
     // Chats persist per-turn from within ChatBodyView via the unified
     // PUT /api/nodes/{id} path; the pane's draft-* fields aren't the
     // source of truth for chat state. Treat saveEditorPane as a no-op.
@@ -551,7 +551,7 @@ class EditorPanesController {
         // conflict — an empty revision makes the backend skip the check.
         ...(options.force ? { revision: "" } : {}),
         title: pane.draftTitle,
-        ...(documentKind === "scene" ? { status: pane.draftStatus } : {}),
+        ...(documentKind === "manuscript" ? { status: pane.draftStatus } : {}),
         entry_type: pane.draftEntryType,
         metadata: cloneMetadata(pane.draftMetadata),
         ...(documentKind === "prompt" ? { inputs: pane.draftInputs, offer_on: pane.draftOfferOn } : {}),
@@ -596,7 +596,7 @@ class EditorPanesController {
         // Scene-compatible draft.
         savedDocument = await api.saveProjectNode(draftDocument as ProjectNode, pane.draftMarkdown) as unknown as EditableDocument;
       } else if (documentKind === "structure_node") {
-        // Acts/Chapters are scenes with a non-"scene" entry_type — their
+        // Acts/Chapters are manuscript nodes with a non-"manuscript:scene" entry_type — their
         // metadata + body + status round-trip via the scene endpoints.
         // The structure tree's per-node title is a projection of the scene
         // title, so refreshAfterSave's structure refresh picks up renames.
@@ -890,19 +890,19 @@ class EditorPanesController {
   }
 
   async openScene(sceneId: string): Promise<void> {
-    const existingPane = this.panes.find((pane) => pane.document?.type === "scene" && pane.document.id === sceneId);
+    const existingPane = this.panes.find((pane) => pane.document?.type === "manuscript" && pane.document.id === sceneId);
     if (existingPane) {
       this.#focusExisting(existingPane, "open scene");
       return;
     }
 
-    await this.#loadIntoPane({ type: "scene", id: sceneId }, async (targetPane) => {
+    await this.#loadIntoPane({ type: "manuscript", id: sceneId }, async (targetPane) => {
       const scene = await api.getScene(sceneId);
       this.panes = this.panes.map((pane) =>
         pane.id === targetPane.id
           ? {
               ...pane,
-              document: { type: "scene", id: scene.id },
+              document: { type: "manuscript", id: scene.id },
               scene,
               dirty: false,
               draftTitle: scene.title,
@@ -921,7 +921,7 @@ class EditorPanesController {
   }
 
   // Opens a manuscript-tree structure node (Act, Chapter, leaf-Scene-as-
-  // node) in an editor pane. Acts/Chapters are kind="scene" with a different
+  // node) in an editor pane. Acts/Chapters are kind="manuscript" with a different
   // entry_type — their metadata + body + status live in the underlying scene
   // .md file, so fetch it and round-trip via the regular scene endpoints.
   // document.id stays the node id (the open-pane lookup matches on it);
@@ -1346,7 +1346,7 @@ class EditorPanesController {
   // claimed a pane by then.
   async openNodeOfKind(nodeId: string, kind: string): Promise<void> {
     switch (kind) {
-      case "scene":
+      case "manuscript":
         return this.openScene(nodeId);
       case "lore":
         return this.openLore(nodeId);
@@ -1430,7 +1430,7 @@ class EditorPanesController {
 
   paneForScene(sceneId: string): EditorPaneState | undefined {
     return this.panes.find(
-      (pane) => pane.scene?.id === sceneId && pane.document?.type === "scene",
+      (pane) => pane.scene?.id === sceneId && pane.document?.type === "manuscript",
     );
   }
 

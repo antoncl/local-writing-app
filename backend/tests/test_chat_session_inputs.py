@@ -42,7 +42,7 @@ def test_inputs_round_trip_through_save(tmp_path, monkeypatch):
             inputs={
                 "topic": "haunted lighthouses",
                 "scenes": [
-                    {"id": "scene_xyz", "kind": "scene", "title": "Opening"},
+                    {"id": "scene_xyz", "kind": "manuscript", "title": "Opening"},
                     {"id": "preset:full_outline", "kind": "preset", "title": "Full Outline"},
                 ],
             },

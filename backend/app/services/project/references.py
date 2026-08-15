@@ -63,7 +63,7 @@ log = logging.getLogger(__name__)
 
 # The Node-shaped kinds the index walks, once per layer of the chain.
 NODE_FAMILIES = [
-    NodeFamily("scene", "scenes", "scene:scene"),
+    NodeFamily("manuscript", "scenes", "manuscript:scene"),
     # Research notes walk `research/notes/`. Treated like lore (cross-layer)
     # rather than scenes (book-scoped) — universe- or series-level research
     # notes are a natural use case.
@@ -822,7 +822,7 @@ class ReferencesMixin:
             return MACHINE_LAYER_FAMILIES
         if layer.is_library:
             return LIBRARY_LAYER_FAMILIES
-        return [family for family in NODE_FAMILIES if family.kind not in ("scene", "chat") or layer.is_root]
+        return [family for family in NODE_FAMILIES if family.kind not in ("manuscript", "chat") or layer.is_root]
 
     def _collect_machine_layer_assistants(
         self,
@@ -1065,7 +1065,7 @@ class ReferencesMixin:
         if entry and entry.kind == kind:
             return entry.path
         folder_by_kind = {
-            "scene": "scenes",
+            "manuscript": "scenes",
             "lore": "lore",
             "prompt": "prompts",
             "research": "research/notes",
@@ -1075,7 +1075,7 @@ class ReferencesMixin:
             "chat": "chats",
         }
         label_by_kind = {
-            "scene": "Scene",
+            "manuscript": "Scene",
             "lore": "Lore Entry",
             "prompt": "Prompt",
             "research": "Research Note",

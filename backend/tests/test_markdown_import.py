@@ -90,7 +90,7 @@ class MarkdownImportTestCase(unittest.TestCase):
         # The node references exactly the id the file now carries.
         self.assertEqual(node.scene_id, front["id"])
         self.assertEqual(front["title"], "The Meeting")
-        self.assertEqual(front["entry_type"], "scene:scene")
+        self.assertEqual(front["entry_type"], "manuscript:scene")
         self.assertEqual(front["status"], "draft")
         self.assertIn("They met at dawn.", body)
 
@@ -108,7 +108,7 @@ class MarkdownImportTestCase(unittest.TestCase):
             "---\n"
             "id: keeper\n"
             "title: Kept Title\n"
-            "entry_type: scene:scene\n"
+            "entry_type: manuscript:scene\n"
             "status: final\n"
             "metadata: {}\n"
             "---\n\n"

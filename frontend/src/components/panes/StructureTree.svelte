@@ -12,7 +12,7 @@
   // per-group set (#182 substrate). `onGroupClick` (the old collapse toggle) is
   // gone with it; `onGroupDblClick` stays (open the container editor).
   export type TreeConfig = {
-    kind: "scene" | "research";
+    kind: "manuscript" | "research";
     leafType: string;
     // Live read of App's structure. Used inside handlers (after a mutation the
     // `structure` *prop* is stale until the next tick, but this closure is
@@ -203,7 +203,7 @@
       const before = config.getStructure();
       let createdNodeId: string | null = null;
       const isLeaf = entryType === config.leafType;
-      if (config.kind === "scene" && isLeaf) {
+      if (config.kind === "manuscript" && isLeaf) {
         const scene = await api.createScene(title, parentId ?? undefined);
         await config.refresh();
         await config.openLeaf(scene.id);

@@ -26,7 +26,7 @@ describe("SchemaTreePane kind tabs (#729)", () => {
 
   it("marks the Plot tab selected when the pane is scoped to plot, and switches to it on click", async () => {
     const onSwitchKind = vi.fn();
-    const { rerender } = render(SchemaTreePane, { props: { schemaFieldKind: "scene", onSwitchKind } });
+    const { rerender } = render(SchemaTreePane, { props: { schemaFieldKind: "manuscript", onSwitchKind } });
 
     await fireEvent.click(screen.getByRole("tab", { name: "Plot" }));
     expect(onSwitchKind).toHaveBeenCalledWith("plot");

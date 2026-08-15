@@ -15,8 +15,8 @@ const SCHEMA = {
     "lore:character": { name: "Character", kind: "lore", parent: "lore:base", fields: [] },
     "lore:item": { name: "Item", kind: "lore", parent: "lore:base", fields: [] },
     "lore:location": { name: "Location", kind: "lore", parent: "lore:base", fields: [] },
-    "scene:scene": { name: "Scene", kind: "scene", fields: [] },
-    "scene:act": { name: "Act", kind: "scene", fields: [] },
+    "manuscript:scene": { name: "Scene", kind: "manuscript", fields: [] },
+    "manuscript:act": { name: "Act", kind: "manuscript", fields: [] },
     "plot:card": { name: "Card", kind: "plot", fields: [] },
     "plot:board": { name: "Board", kind: "plot", fields: [] },
     "prompt:general": { name: "General", kind: "prompt", fields: [] },
@@ -70,10 +70,10 @@ describe("OfferOnPicker (#903)", () => {
   });
 
   it("a stale non-host id (from an older picker) renders no row and doesn't inflate the count", () => {
-    // scene:act is a real type but not under the scene:scene host root, so it is
+    // manuscript:act is a real type but not under the manuscript:scene host root, so it is
     // never offered — and must not count toward the badge.
     const { container } = render(OfferOnPicker, {
-      props: { metadataSchema: SCHEMA, offerOn: ["lore:character", "scene:act"] },
+      props: { metadataSchema: SCHEMA, offerOn: ["lore:character", "manuscript:act"] },
     });
     expect(screen.getAllByRole("checkbox", { hidden: true })).toHaveLength(6);
     expect(screen.queryByText("Act")).not.toBeInTheDocument();

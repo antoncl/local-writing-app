@@ -41,7 +41,7 @@ class ImpersonateAndOfferOnTests(unittest.TestCase):
         "builtin-revise-entry": ["lore:base"],
         "builtin-revise-plot-card": ["plot:card"],
         "builtin-revise-plotline": ["plot:plotline"],
-        "builtin-summarize-scene": ["scene:scene"],
+        "builtin-summarize-scene": ["manuscript:scene"],
         "builtin-impersonate": ["lore:character"],
     }
 

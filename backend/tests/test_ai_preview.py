@@ -48,12 +48,12 @@ class PreviewEndpointTests(unittest.TestCase):
         self.honor_id = honor.id
 
         structure = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Act One", entry_type="scene:act")
+            CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
         )
-        act_node = next(c for c in structure.root.children if c.type == "scene:act")
+        act_node = next(c for c in structure.root.children if c.type == "manuscript:act")
         s = self.service.create_structure_node(
             CreateStructureNodeRequest(
-                title="The Departure", entry_type="scene:scene", parent_id=act_node.id
+                title="The Departure", entry_type="manuscript:scene", parent_id=act_node.id
             )
         )
         scene_node = next(c for c in s.root.children if c.id == act_node.id).children[-1]
@@ -67,7 +67,7 @@ class PreviewEndpointTests(unittest.TestCase):
                 body="Some scene prose.",
                 base_revision=scene.revision,
                 status="draft",
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
                 metadata={
                     "summary": "Honor takes the Salamander into battle.",
                     "characters": [self.honor_id],
@@ -540,12 +540,12 @@ class PreviewEndpointTests(unittest.TestCase):
         # input wins over the caller's implicit target_scene_id. Templates
         # see the marked scene as `scene`.
         second_struct = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Aftermath", entry_type="scene:scene"),
+            CreateStructureNodeRequest(title="Aftermath", entry_type="manuscript:scene"),
         )
         second_scene_id = next(
             n.scene_id
             for n in second_struct.root.children
-            if n.type == "scene:scene" and n.title == "Aftermath"
+            if n.type == "manuscript:scene" and n.title == "Aftermath"
         )
         second_scene = self.service.read_scene(second_scene_id)
         self.service.save_scene(
@@ -555,12 +555,12 @@ class PreviewEndpointTests(unittest.TestCase):
                 body="",
                 base_revision=second_scene.revision,
                 status="draft",
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
                 metadata={"summary": "Smoke clears over the bridge."},
             ),
         )
         marked_pick = (
-            '[{"id": "' + second_scene_id + '", "kind": "scene",'
+            '[{"id": "' + second_scene_id + '", "kind": "manuscript",'
             ' "title": "Aftermath", "target": true}]'
         )
         response = self.client.post(
@@ -582,12 +582,12 @@ class PreviewEndpointTests(unittest.TestCase):
         # resolution_scene_id — sets the effective resolution scene, overriding
         # the caller's implicit target_scene_id. Templates see it as `scene`.
         second_struct = self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Aftermath", entry_type="scene:scene"),
+            CreateStructureNodeRequest(title="Aftermath", entry_type="manuscript:scene"),
         )
         second_scene_id = next(
             n.scene_id
             for n in second_struct.root.children
-            if n.type == "scene:scene" and n.title == "Aftermath"
+            if n.type == "manuscript:scene" and n.title == "Aftermath"
         )
         response = self.client.post(
             "/api/ai/preview",
@@ -605,7 +605,7 @@ class PreviewEndpointTests(unittest.TestCase):
         # Picked scenes without target=true should NOT change the binding —
         # the caller's target_scene_id remains authoritative.
         pick_without_target = (
-            '[{"id": "' + self.scene_id + '", "kind": "scene", "title": "X"}]'
+            '[{"id": "' + self.scene_id + '", "kind": "manuscript", "title": "X"}]'
         )
         response = self.client.post(
             "/api/ai/preview",

@@ -226,7 +226,7 @@ class ViewsMixin:
         materialized default and the pane-synthesized one have to match. The golden
         test in test_views.py::test_default_view_specs_match_frontend guards the drift."""
         roster = ViewExpr(descendants_of=root_type)
-        if kind in ("scene", "research"):
+        if kind in ("manuscript", "research"):
             return ViewSpec(
                 kind=kind,
                 expr=ViewExpr(

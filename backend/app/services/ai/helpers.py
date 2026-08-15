@@ -246,11 +246,21 @@ def _field_catalog(project: ProjectService, schema: Any, value: Any) -> list[dic
         # sugar stores its choices on the field, but "one of: …" at field
         # level reads as a constraint on the field's own (non-array) value —
         # the choices belong to the item descriptor below.
+        # Resolve the field's per-type label (#1009): a `field_overrides[id].label`
+        # on the resolved type wins over the shared field def's name — the same
+        # resolution the rail UI (`effectiveFieldLabel`) uses, so the model sees a
+        # field by the name the author sees (e.g. `title` = "Name" on lore,
+        # "Title" on scene) instead of always the global "Title".
+        override = definition.field_overrides.get(field_id)
         descriptor: dict[str, Any] = {
             "id": field_id,
-            "label": field.name,
+            "label": override.label if override and override.label else field.name,
             "type": field.type,
             "options": [opt.value for opt in field.options] if field.options and field.type != "list" else [],
+            # Author help text (#1004): what the field is FOR, so the model
+            # proposes on-target values. Always present (None when unset) so the
+            # template can test `f.description` without hitting StrictUndefined.
+            "description": field.description,
         }
         # List fields (#698): describe the item shape so the model emits
         # legal items — flat scalars for item_type sugar, member-keyed maps

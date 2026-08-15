@@ -384,7 +384,7 @@
           {:else}
             <span class="fr-icon"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
           {/if}
-          <span class="fr-name">{fieldLabel}{#if isMutated(fieldId)}<span class="fr-mutated-marker" title="Changed by here">⤳</span>{/if}</span>
+          <span class="fr-name" title={field.description || undefined}>{fieldLabel}{#if isMutated(fieldId)}<span class="fr-mutated-marker" title="Changed by here">⤳</span>{/if}</span>
           <div class="fr-val" title={isLayerInherited(fieldId) && inheritedFromLabel ? `Inherited from ${inheritedFromLabel}` : undefined}>
             {#if isOverridden(fieldId)}
               {#if canResetOverride}

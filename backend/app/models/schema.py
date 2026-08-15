@@ -75,6 +75,11 @@ class MetadataFieldDefinition(BaseModel):
     # (see the metadata revision design). Display-only; the macro contract
     # is the field key, never the icon.
     icon: str | None = None
+    # Optional author-facing help text: what the field is FOR (#1004). Shown as
+    # a tooltip on the field in the rail, and — the load-bearing half — fed to
+    # the brainstorm / extraction model so it proposes on-target values instead
+    # of guessing a field's meaning from its label. None = no description.
+    description: str | None = None
     # Optional L1 section label. Fields sharing a `group` render under one
     # labelled header in the rail + type editor. None = ungrouped.
     group: str | None = None

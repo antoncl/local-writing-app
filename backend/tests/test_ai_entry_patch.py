@@ -233,6 +233,32 @@ class ValidateAiEntryPatchTests(unittest.TestCase):
         ).render(input={"entry": self.hero.id})
         self.assertIn("bio", rendered)
 
+    def test_field_catalog_applies_per_type_label_override(self) -> None:
+        # #1009: `title` carries a per-type label override — "Name" on lore — so
+        # the catalog must present the field by the name the author sees, not
+        # the shared field def's global "Title". Otherwise the brainstorm prompt
+        # tells the model to fill a "Title" when the author is drafting a
+        # character/item/location whose field reads "Name".
+        schema = self.service.read_metadata_schema()
+        self.assertEqual(schema.fields["title"].name, "Title")  # global name is Title
+        catalog = _field_catalog(self.service, schema, self.hero.id)
+        by_id = {f["id"]: f for f in catalog}
+        self.assertEqual(by_id["title"]["label"], "Name")  # lore override wins
+
+    def test_field_catalog_carries_field_description(self) -> None:
+        # #1004: a field's author description rides in the catalog so the
+        # brainstorm/extraction model sees what the field is FOR. Present as None
+        # when unset, so the template can test it without hitting StrictUndefined.
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data["fields"]["bio"]["description"] = "The character's backstory in brief."
+        self.service._write_yaml(schema_path, data)
+        schema = self.service.read_metadata_schema()
+        catalog = _field_catalog(self.service, schema, self.hero.id)
+        by_id = {f["id"]: f for f in catalog}
+        self.assertEqual(by_id["bio"]["description"], "The character's backstory in brief.")
+        self.assertIsNone(by_id["allegiance"]["description"])
+
 
 class ValidateAiEntryDraftTests(unittest.TestCase):
     """ADR-0046 §6.4 — the create-mode sibling. `validate_ai_entry_draft`

@@ -17,6 +17,7 @@
     name: string;
     id: string;
     icon: string | null;
+    description: string;
     group: string;
     defaultValue: string | undefined;
     options: OptionDraft[];
@@ -107,6 +108,7 @@
       name: f?.name ?? "",
       id: selectedFieldId ?? "",
       icon: f?.icon ?? null,
+      description: f?.description ?? "",
       group: f?.group ?? "",
       // Stringify the persisted default for the editor; null / undefined → "no
       // default". A real `false` boolean default stays editable as "False".
@@ -147,6 +149,7 @@
   let name: string = $state(seed.name);
   let id: string = $state(seed.id);
   let icon: string | null = $state(seed.icon);
+  let description: string = $state(seed.description);
   let group: string = $state(seed.group);
   let defaultValue: string | undefined = $state(seed.defaultValue);
   let options: OptionDraft[] = $state(seed.options);
@@ -257,6 +260,7 @@
       name,
       id,
       icon,
+      description,
       group,
       defaultValue,
       options,
@@ -349,6 +353,16 @@
       {/if}
     </div>
   </div>
+  <label class="sfi-field sfi-description">
+    Description
+    <textarea
+      value={description}
+      placeholder="What is this field for? Shown as a tooltip, and given to the AI when brainstorming this field."
+      aria-label="Field description"
+      rows="2"
+      oninput={(event) => (description = event.currentTarget.value)}
+    ></textarea>
+  </label>
   <div class="sfi-controls">
     <label class="sfi-field">Section
       <input
@@ -548,6 +562,18 @@
     border-radius: 8px;
     background: var(--surface);
     font-size: var(--fs-md);
+  }
+  /* Author help text (#1004). Full-width, vertically resizable. */
+  .sfi-description textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 6px 9px;
+    border: 1px solid var(--border, var(--border));
+    border-radius: 8px;
+    background: var(--surface);
+    font-family: inherit;
+    font-size: var(--fs-md);
+    resize: vertical;
   }
   /* Type chip + grid popover (the 11-type field-type picker). */
   .sfi-type-anchor {

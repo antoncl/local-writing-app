@@ -8,6 +8,8 @@
 //         a scrollbar gutter no longer closes it mid-scroll.
 //   #1003 the `list` item-shape dropdown hides built-in `system` groups, but
 //         still shows one a field already uses so its shape stays valid.
+//   #1004 the editor carries an author `description`, threaded through the
+//         saved draft and seeded back when editing an existing field.
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import type { MetadataFieldDefinition, MetadataGroupDefinition } from "@/lib/types";
@@ -114,5 +116,35 @@ describe("SchemaFieldInlineEditor list item shape hides system groups (#1003)", 
     expect(values).toContain("group:plot_beat_link");
     // It's a real, resolvable shape — not the disabled "current shape missing" fallback.
     expect(disabled.get("group:plot_beat_link")).toBe(false);
+  });
+});
+
+describe("SchemaFieldInlineEditor author description (#1004)", () => {
+  it("threads a typed description through the saved draft", async () => {
+    const onSave = vi.fn();
+    render(SchemaFieldInlineEditor, {
+      props: { field: null, selectedFieldId: null, layerId: "proj", onSave, onCancel: vi.fn(), onRemove: vi.fn() },
+    });
+    await fireEvent.input(screen.getByLabelText("Field display name"), { target: { value: "Bio" } });
+    await fireEvent.input(screen.getByLabelText("Field description"), {
+      target: { value: "The character's backstory in brief." },
+    });
+    await fireEvent.click(screen.getByText("Done"));
+    expect(onSave).toHaveBeenCalledOnce();
+    expect(onSave.mock.calls[0][0].description).toBe("The character's backstory in brief.");
+  });
+
+  it("seeds the description input from an existing field", () => {
+    render(SchemaFieldInlineEditor, {
+      props: {
+        field: { name: "Bio", type: "long_text", options: [], description: "Existing help." },
+        selectedFieldId: "bio",
+        layerId: "proj",
+        onSave: vi.fn(),
+        onCancel: vi.fn(),
+        onRemove: vi.fn(),
+      },
+    });
+    expect((screen.getByLabelText("Field description") as HTMLTextAreaElement).value).toBe("Existing help.");
   });
 });

@@ -174,6 +174,12 @@
   const currentShapeMissing = $derived(
     itemGroup !== null && !shapeableGroups.some(([groupId]) => groupId === itemGroup),
   );
+  // Groups OFFERED as a new item shape hide the built-in system machinery
+  // (#1003) — but keep the field's current group if it happens to be a system
+  // one (a built-in plot list field), so its shape still shows and validates.
+  const offeredGroups = $derived(
+    shapeableGroups.filter(([groupId, groupDef]) => !groupDef.system || groupId === itemGroup),
+  );
   let typeMenuOpen = $state(false);
   let keyEditing = $state(false);
   let keyManual = $state(false);
@@ -429,9 +435,9 @@
                 : `${itemGroup} (current shape — group not found)`}
             </option>
           {/if}
-          {#if shapeableGroups.length > 0}
+          {#if offeredGroups.length > 0}
             <optgroup label="A group…">
-              {#each shapeableGroups as [groupId, groupDef] (groupId)}
+              {#each offeredGroups as [groupId, groupDef] (groupId)}
                 <option value={`group:${groupId}`}>
                   {groupDef.name} ({groupDef.members.map((m) => m.name || m.key).join(" · ")})
                 </option>

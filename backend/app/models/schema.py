@@ -269,6 +269,11 @@ class MetadataGroupDefinition(BaseModel):
     name: str
     icon: str | None = None
     members: list[GroupMember] = Field(default_factory=list)
+    # Built-in machinery groups (e.g. the plot-board beat/link shapes) set this
+    # so the authoring UI hides them from the reusable-group pickers — they are
+    # consumed by feature code by id, never meant for a user to apply or edit.
+    # User-defined groups leave it False.
+    system: bool = False
 
 
 class GroupApplication(BaseModel):

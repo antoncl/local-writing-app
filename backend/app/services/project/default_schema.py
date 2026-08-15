@@ -634,6 +634,8 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # `specifics` there) so a template's read-only beats never sprout an
             # empty book-specialization slot they can't use.
             "name": "Plot instance beat",
+            # Instantiation machinery, not an author-facing shape (#1003).
+            "system": True,
             "members": [
                 {"key": "title", "name": "Title", "type": "text"},
                 {"key": "function", "name": "Function", "type": "long_text"},
@@ -654,6 +656,8 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # save + read — dropping a link whose plotline is gone or whose `beat_id`
             # has left that plotline's roster.
             "name": "Beat link",
+            # Card→beat wiring, not an author-facing shape (#1003).
+            "system": True,
             "members": [
                 {"key": "plotline", "name": "Plotline", "type": "text"},
                 {"key": "beat_id", "name": "Beat", "type": "text"},
@@ -668,6 +672,8 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # duplicates another. v1 is UNTYPED: one directed edge, no label; a `type`
             # member is a later slice, added when a workflow first demands it.
             "name": "Causal link",
+            # Card→card wiring, not an author-facing shape (#1003).
+            "system": True,
             "members": [
                 {"key": "target", "name": "Target", "type": "text"},
             ],

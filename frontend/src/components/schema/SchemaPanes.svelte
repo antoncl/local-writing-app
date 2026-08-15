@@ -151,7 +151,12 @@
     $derived((metadataSchema && selectedSchemaTypeId
       ? metadataSchema.entry_types[selectedSchemaTypeId]?.group_applications
       : null) ?? []);
-  let availableGroupEntries = $derived(Object.entries(metadataSchema?.groups ?? {}));
+  // System groups (built-in plot-board machinery) are hidden from the apply
+  // picker (#1003) — they're consumed by feature code by id, never applied by
+  // the author.
+  let availableGroupEntries = $derived(
+    Object.entries(metadataSchema?.groups ?? {}).filter(([, group]) => !group.system),
+  );
   let schemaContextHeading = $derived(schemaScope.heading);
 
   // --- Entry points App still drives (via bind:this) --------------------------

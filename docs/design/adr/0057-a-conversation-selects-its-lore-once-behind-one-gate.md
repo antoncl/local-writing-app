@@ -1,6 +1,6 @@
 # ADR-0057: A conversation's lore is one gated function whose result is dedupped by id
 
-- Status: **Proposed** — 2026-08-15 (authored by Claude; awaiting Anton's approval). Origin: dogfooding
+- Status: **Accepted** — 2026-08-15 (approved by Anton; authored by Claude, PR #1017). Origin: dogfooding
   — a create-character brainstorm ignored two `lore:note`s the writer had marked **Context policy =
   Always**. Tracing the drop surfaced not a missing feature but a *second*, ungated lore-selection
   channel on the send path that the render-time channel never reconciles with.

@@ -47,24 +47,28 @@
     <strong>Proposed new entry</strong>
     <span class="edc-title">{title}</span>
   </header>
-  {#if fieldRows.length > 0}
-    <dl class="edc-fields">
-      {#each fieldRows as row (row.id)}
-        <div class="edc-field">
-          <dt>{row.label}</dt>
-          <dd>{row.value || "—"}</dd>
-        </div>
-      {/each}
-    </dl>
-  {/if}
-  {#if draft.body}
-    <div class="edc-body">{draft.body}</div>
-  {/if}
-  {#if dropped.length > 0}
-    <p class="edc-notice">
-      Ignored {dropped.length} field(s) the model couldn't set legally: {dropped.join(", ")}.
-    </p>
-  {/if}
+  <!-- The head and actions are pinned; only this region scrolls, so a long
+       profile can never push "Create entry" off-screen (#1018). -->
+  <div class="edc-scroll">
+    {#if fieldRows.length > 0}
+      <dl class="edc-fields">
+        {#each fieldRows as row (row.id)}
+          <div class="edc-field">
+            <dt>{row.label}</dt>
+            <dd>{row.value || "—"}</dd>
+          </div>
+        {/each}
+      </dl>
+    {/if}
+    {#if draft.body}
+      <div class="edc-body">{draft.body}</div>
+    {/if}
+    {#if dropped.length > 0}
+      <p class="edc-notice">
+        Ignored {dropped.length} field(s) the model couldn't set legally: {dropped.join(", ")}.
+      </p>
+    {/if}
+  </div>
   <div class="edc-actions">
     <button type="button" onclick={onDiscard} disabled={creating}>Discard</button>
     <button type="button" class="primary" onclick={onCreate} disabled={creating}>
@@ -79,7 +83,14 @@
     padding: 12px 14px; border-radius: 10px;
     border: 1px solid var(--accent); background: var(--inset);
   }
-  .edc-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  /* Only the middle scrolls; head + actions stay pinned so the primary action
+     is reachable however long the profile is. The card's min-content is head +
+     actions (the scroll collapses to 0), so flex-shrink never clips them. */
+  .edc-scroll {
+    flex: 1 1 auto; min-height: 0; max-height: 320px; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .edc-head { flex: 0 0 auto; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
   .edc-head strong {
     font-size: var(--fs-xs); font-weight: 800; letter-spacing: 0.07em;
     text-transform: uppercase; color: var(--accent);
@@ -93,13 +104,13 @@
   }
   .edc-field dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
   .edc-body {
-    max-height: 200px; overflow-y: auto; white-space: pre-wrap;
+    white-space: pre-wrap;
     font-size: var(--fs-sm); color: var(--text-2);
     padding: 8px 10px; border-radius: 8px; background: var(--surface);
     border: 1px solid var(--divider);
   }
   .edc-notice { margin: 0; font-size: var(--fs-sm); color: var(--text-2); }
-  .edc-actions { display: flex; justify-content: flex-end; gap: 10px; }
+  .edc-actions { flex: 0 0 auto; display: flex; justify-content: flex-end; gap: 10px; }
   .edc-actions button {
     padding: 4px 12px; border-radius: var(--r-sm);
     border: 1px solid var(--border); background: var(--surface);

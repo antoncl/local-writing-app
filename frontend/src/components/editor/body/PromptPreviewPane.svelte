@@ -135,6 +135,16 @@
   ): string {
     if (err.kind === "undefined") {
       const missing = err.undefined_name;
+      const ns = err.undefined_namespace;
+      if (missing && ns) {
+        // A real, populated namespace object was accessed with an attribute it
+        // doesn't have — a wrong path, not a missing input (#1019).
+        let msg = `Your template references \`${ns}.${missing}\`, but \`${ns}\` has no attribute \`${missing}\`.`;
+        if (ns === "project" || ns === "novel") {
+          msg += ` A project's authored fields live under \`${ns}.metadata\` — did you mean \`${ns}.metadata.${missing}\`?`;
+        }
+        return msg;
+      }
       if (missing) {
         const decl = declared.find((d) => d.name === missing);
         if (decl) {

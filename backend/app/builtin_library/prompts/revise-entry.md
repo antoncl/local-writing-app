@@ -63,4 +63,5 @@ The {{ entry_type_label(draft_type) }} has these fields to develop:
 - (just a title and body)
 {% endfor %}
 {% endif %}
+{% include "builtin-project-settings" %}
 {% endrole %}

@@ -109,6 +109,7 @@ class PreviewError(Exception):
         col: int | None = None,
         kind: str = "other",
         undefined_name: str | None = None,
+        undefined_namespace: str | None = None,
     ) -> None:
         super().__init__(message)
         self.message = message
@@ -117,22 +118,59 @@ class PreviewError(Exception):
         self.col = col
         self.kind = kind
         self.undefined_name = undefined_name
+        self.undefined_namespace = undefined_namespace
 
 
 # UndefinedError messages from Jinja2 look like:
 #   "'dict object' has no attribute 'character'"
+#   "'ProjectInfo object' has no attribute 'language'"
 #   "'character' is undefined"
-_UNDEFINED_ATTR_RE = re.compile(r"has no attribute '([^']+)'")
+_UNDEFINED_ATTR_RE = re.compile(r"'([^']+)' has no attribute '([^']+)'")
 _UNDEFINED_NAME_RE = re.compile(r"'([^']+)' is undefined")
 
 
-def _extract_undefined_name(message: str) -> str | None:
+def _extract_undefined_ref(message: str) -> tuple[str | None, str | None]:
+    """Return ``(undefined_name, object_type)`` from a Jinja UndefinedError.
+
+    ``object_type`` is set only for an *attribute miss* (``'X object' has no
+    attribute 'y'`` → ``('y', 'X')``); a bare undefined name (``'y' is
+    undefined``) returns ``('y', None)``. The object type lets the caller tell a
+    namespace attribute miss (``project.language``) apart from an undeclared
+    input, which the leaf name alone cannot.
+    """
     m = _UNDEFINED_ATTR_RE.search(message)
     if m:
-        return m.group(1)
+        return m.group(2), m.group(1).removesuffix(" object")
     m = _UNDEFINED_NAME_RE.search(message)
     if m:
-        return m.group(1)
+        return m.group(1), None
+    return None, None
+
+
+def _extract_undefined_name(message: str) -> str | None:
+    """Back-compat leaf-only accessor (see :func:`_extract_undefined_ref`)."""
+    return _extract_undefined_ref(message)[0]
+
+
+def _namespace_for_object_type(context: dict[str, Any], obj_type: str | None) -> str | None:
+    """Reverse-map a Jinja object type name to its render-context namespace.
+
+    Derived from the live ``context`` (not hardcoded), first key wins so
+    ``ProjectInfo`` resolves to ``project`` ahead of its ``novel`` alias.
+    ``input`` is deliberately excluded: undeclared/empty inputs keep their own
+    dedicated messaging, which keys on the leaf name, not the namespace.
+    """
+    if not obj_type:
+        return None
+    # Jinja's object_type_repr qualifies app classes with their module
+    # ("app.models.project.ProjectInfo object") but leaves builtins bare
+    # ("dict object"); compare on the trailing class-name segment either way.
+    short = obj_type.rsplit(".", 1)[-1]
+    for key, value in context.items():
+        if key == "input":
+            continue
+        if value is not None and type(value).__name__ == short:
+            return key
     return None
 
 
@@ -226,9 +264,14 @@ def build_preview(
         # UndefinedError it's typically missing. Surface what we have.
         line = getattr(exc, "lineno", None)
         # Jinja2 doesn't expose column info on TemplateError; col stays None.
+        undefined_namespace = None
         if isinstance(exc, UndefinedError):
             kind = "undefined"
-            undefined_name = _extract_undefined_name(exc.message or "")
+            undefined_name, obj_type = _extract_undefined_ref(exc.message or "")
+            # An attribute miss on a real namespace object (`project.language`)
+            # is a wrong path, not a missing input — carry the namespace so the
+            # frontend can say so instead of "no input named language".
+            undefined_namespace = _namespace_for_object_type(context, obj_type)
         elif isinstance(exc, TemplateSyntaxError):
             kind = "syntax"
             undefined_name = None
@@ -241,6 +284,7 @@ def build_preview(
             line=int(line) if isinstance(line, int) else None,
             kind=kind,
             undefined_name=undefined_name,
+            undefined_namespace=undefined_namespace,
         ) from exc
 
     if session is not None and commit:

@@ -193,6 +193,62 @@ class BuiltinLibraryTests(unittest.TestCase):
         # seed must NOT emit it, or the model would dump JSON mid-conversation.
         self.assertNotIn('"fields"', revise)
 
+    def test_project_settings_snippet_resolves_and_wires_in(self) -> None:
+        """#1020 / finishes #317: a built-in `prompt:snippet` surfaces the
+        project's authored settings, and revise:entry pulls it in so a brainstorm
+        knows the project's language/units/spelling out of the box."""
+        entries = self._summaries()
+        self.assertIn("builtin-project-settings", entries)
+        self.assertTrue(entries["builtin-project-settings"].is_library)
+        body = self.service.read_prompt_entry("builtin-project-settings").body
+        # Reads labels from the project type and skips the `color` field.
+        self.assertIn('field_catalog("project:project")', body)
+        self.assertIn('f.id != "color"', body)
+        revise = self.service.read_prompt_entry("builtin-revise-entry").body
+        self.assertIn('{% include "builtin-project-settings" %}', revise)
+
+    def test_project_settings_snippet_renders_the_authored_settings(self) -> None:
+        """The snippet lists the project's set fields (renders clean, with the
+        `## Project settings` heading) and omits unset ones."""
+        from app.models import SaveProjectNodeRequest
+        from app.services.ai.helpers import create_environment_for_project
+        from app.services.ai.templates import render_template
+
+        current = self.service.read_project_node()
+        self.service.save_project_node(
+            SaveProjectNodeRequest(
+                title=current.title,
+                body="",
+                entry_type=current.entry_type,
+                metadata={"author": "Jane Roe", "measurement_system": "metric"},
+            )
+        )
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "system" %}{% include "builtin-project-settings" %}{% endrole %}',
+            context={"project": self.service.current_project()},
+            env=env,
+        )
+        text = out.messages[0].text
+        self.assertIn("## Project settings", text)
+        self.assertIn("Jane Roe", text)
+        self.assertIn("metric", text)
+
+    def test_project_settings_snippet_is_inert_without_a_project(self) -> None:
+        """Rendered in a context that does not define `project` (e.g. the unit
+        tests that render revise:entry with only `input`), the snippet must be
+        inert — it guards with `project is defined`, so a StrictUndefined
+        boolean check never raises."""
+        from app.services.ai.helpers import create_environment_for_project
+
+        env = create_environment_for_project(self.service)
+        out = env.from_string(
+            '{% role "system" %}before{% include "builtin-project-settings" %}after{% endrole %}'
+        ).render()
+        self.assertNotIn("## Project settings", out)
+        self.assertIn("before", out)
+        self.assertIn("after", out)
+
     def test_clone_a_library_prompt_into_the_project(self) -> None:
         """Clone (§5): a shipped prompt is lifted into the project under a NEW id
         as an editable copy. The Library original is untouched and still resolves

@@ -233,7 +233,11 @@ class PreviewErrorInfo(BaseModel):
     `kind` is a coarse tag so the frontend can craft a friendly message
     without re-parsing `message`:
       - "undefined"       → Jinja UndefinedError; `undefined_name` carries
-                            the missing attribute when derivable.
+                            the missing attribute when derivable, and
+                            `undefined_namespace` the namespace it was accessed
+                            on (`project` for `project.language`) when the miss
+                            was an attribute on a real render-context object
+                            rather than an undeclared input.
       - "syntax"          → TemplateSyntaxError; `line` is set.
       - "scene_not_found" → preview target_scene_id didn't resolve.
       - "other"           → anything else (catch-all).
@@ -244,6 +248,7 @@ class PreviewErrorInfo(BaseModel):
     line: int | None = None
     col: int | None = None
     undefined_name: str | None = None
+    undefined_namespace: str | None = None
 
 
 class AIPreviewResponse(BaseModel):

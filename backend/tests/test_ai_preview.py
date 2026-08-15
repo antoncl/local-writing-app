@@ -422,6 +422,27 @@ class PreviewEndpointTests(unittest.TestCase):
         error = response.json()["error"]
         self.assertEqual(error["kind"], "undefined")
         self.assertEqual(error["undefined_name"], "character")
+        # `input.*` keeps its dedicated messaging — no namespace is reported, so
+        # the frontend still explains it as an undeclared/empty input (#1019).
+        self.assertIsNone(error["undefined_namespace"])
+
+    def test_project_namespace_attribute_miss_reports_namespace(self) -> None:
+        # `project.language` is a wrong path — a project's authored fields live
+        # under `project.metadata`, not on `project` itself. That is a namespace
+        # attribute miss, not a missing input, so the error carries the namespace
+        # ("project") and the frontend can suggest project.metadata.* (#1019).
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": '{% role "user" %}{{ project.language }}{% endrole %}',
+                "target_scene_id": self.scene_id,
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        error = response.json()["error"]
+        self.assertEqual(error["kind"], "undefined")
+        self.assertEqual(error["undefined_name"], "language")
+        self.assertEqual(error["undefined_namespace"], "project")
 
     def test_empty_target_scene_id_leaves_scene_none(self) -> None:
         # A template that branches on `scene` should see it as falsy.

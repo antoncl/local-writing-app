@@ -259,6 +259,25 @@ class ValidateAiEntryPatchTests(unittest.TestCase):
         self.assertEqual(by_id["bio"]["description"], "The character's backstory in brief.")
         self.assertIsNone(by_id["allegiance"]["description"])
 
+    def test_field_catalog_carries_builtin_field_descriptions(self) -> None:
+        # #1035: the built-in fields a brainstorm actually proposes now ship with
+        # descriptions in the default schema, so the model gets real guidance
+        # instead of `null` (the cause of the "invent a rationale" nonsense).
+        # These four are the proposable built-ins a character inherits from
+        # lore:base; assert their default descriptions reach the catalog.
+        schema = self.service.read_metadata_schema()
+        catalog = _field_catalog(self.service, schema, self.hero.id)
+        by_id = {f["id"]: f for f in catalog}
+        for fid in ("color", "context_policy", "aliases", "tags"):
+            self.assertIn(fid, by_id, f"{fid} should be proposable on a character")
+            self.assertTrue(
+                (by_id[fid].get("description") or "").strip(),
+                f"built-in field {fid} should carry a default description",
+            )
+        # color's guidance explicitly steers off a hex code — the reported bug
+        # was the model inventing a hex value + rationale for this field.
+        self.assertIn("hex", by_id["color"]["description"].lower())
+
 
 class ValidateAiEntryDraftTests(unittest.TestCase):
     """ADR-0046 §6.4 — the create-mode sibling. `validate_ai_entry_draft`

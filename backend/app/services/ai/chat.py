@@ -119,6 +119,74 @@ def _detect_and_persist_journal(
     return new_entries
 
 
+def _chat_resolution_scene(project: ProjectService, chat: ChatSession) -> Any:
+    """The chat's anchored scene wrapped as an EntryRef, or None for a scene-less
+    chat. Send-time lore must resolve as-of the same scene as the lock render
+    (ADR-0055), so this mirrors `build_preview`'s scene wrapping — otherwise the
+    two would render an entity's fields at different effective states.
+    """
+    scene_id = project._subject_scene_id(chat.subject)
+    if not scene_id:
+        return None
+    from app.services.ai.helpers import EntryRef
+
+    try:
+        raw = project.read_scene(scene_id)
+    except Exception:  # noqa: BLE001
+        # A missing / stale-cache scene (its file deleted out-of-band while the
+        # node index is warm raises FileNotFoundError, not ProjectServiceError)
+        # must degrade to a scene-less render, never 500 the send. Mirrors the
+        # broad catch `build_preview` uses at the same read.
+        return None
+    try:
+        schema = project.read_metadata_schema()
+    except Exception:  # noqa: BLE001
+        schema = None
+    return EntryRef(project, schema, raw.id, loaded=raw)
+
+
+def _lore_cache_blocks(
+    project: ProjectService,
+    chat: ChatSession,
+    chat_id: str,
+    journal_for_send: list[Any],
+) -> list[dict]:
+    """The chat's one deduped lore set, placed once *per stability tier*
+    (docs/design/context-caching.md §4). `relevant_lore` — the single selector —
+    computes `{direct ∪ auto(journal) ∪ always} − {never, manual_only}` and, with
+    the chat's in-memory session baseline, splits it: entries unchanged since last
+    turn → a 1h stable block; entries new or changed → a 5m volatile block. Both
+    resolve as-of the chat's scene. `commit()` promotes this turn's set to next
+    turn's baseline. A fresh process starts cold (empty baseline → all volatile),
+    which re-settles on the next turn — deliberately not persisted (§6).
+    """
+    from app.services.ai.helpers import _relevant_lore
+    from app.services.ai.sessions import default_registry
+
+    scene = _chat_resolution_scene(project, chat)
+    index = project.build_mutations_index() if scene is not None else None
+    session = default_registry.get_or_create(f"chatlore:{chat_id}")
+
+    # One selector, two partitions against the same (pre-commit) baseline, so each
+    # entry lands in exactly one tier. This re-runs the selector twice per send
+    # (once per partition) — acceptable at one call per turn; the mutations index
+    # is built once above and threaded into both, not rebuilt per call.
+    stable_xml = _relevant_lore(
+        project, scene, "implicit", "stable", session, journal_for_send, index
+    )
+    volatile_xml = _relevant_lore(
+        project, scene, "implicit", "volatile", session, journal_for_send, index
+    )
+    session.commit()
+
+    blocks: list[dict] = []
+    if stable_xml:
+        blocks.append({"text": stable_xml, "cache_break_after": True, "ttl": "1h"})
+    if volatile_xml:
+        blocks.append({"text": volatile_xml, "cache_break_after": True, "ttl": "5m"})
+    return blocks
+
+
 def expand_and_prepare_chat_blocks(
     project: ProjectService,
     chat_id: str | None,
@@ -128,19 +196,24 @@ def expand_and_prepare_chat_blocks(
     """When chat_id is bound, assemble the ordered system cache-blocks the
     provider call sends, and return:
       - system_blocks, in stable→volatile order so longer TTLs stay ahead of
-        shorter: [{system_prompt, 1h}, {staged_change, 1h}?, {journal_xml, 5m}]
-        — the staged_change block (ADR-0055 S4) is present only when the chat
-        owns a resolvable mutation set; the journal block (ADR-0057) only when
-        the chat is lore-enabled
+        shorter: [{system_prompt, 1h}, {staged_change, 1h}?, {stable_lore, 1h}?,
+        {volatile_lore, 5m}?] — the staged_change block (ADR-0055 S4) is present
+        only when the chat owns a resolvable mutation set; the two lore blocks
+        (ADR-0057 + docs/design/context-caching.md) only when the chat is
+        lore-enabled and the corresponding tier is non-empty
       - session_id for OpenRouter provider stickiness
       - journal_added: lore IDs newly detected on THIS turn (for audit UI)
 
     ADR-0057 §2/§4: the lore gate. Whether this chat sees lore is the prompt's
-    own choice, read from whether `relevant_lore()` executed at its lock render
-    (`chat.lore_enabled`). Gate off → no send-time detection and no lore block at
-    all, so a deliberately lore-free prompt stays clean (Journey C). Gate on →
-    the expander feeds the journal that the one selector reads — an input, never
-    a rival block.
+    own choice, read from whether the template flipped the gate at its lock
+    render (`chat.lore_enabled`). Gate off → no send-time detection and no lore
+    block at all, so a deliberately lore-free prompt stays clean (Journey C).
+
+    Placement (docs/design/context-caching.md §4): the backend — not the template
+    — selects, dedups, and places lore. The one deduped set is split per turn
+    against the chat's in-memory session baseline into a stable 1h block and a
+    volatile 5m block, so a settled entity is a cheap cache read instead of being
+    re-billed every turn.
 
     Returns (None, None, []) when chat_id is empty or the chat doesn't
     exist — caller falls back to the legacy single-string system path.
@@ -151,8 +224,6 @@ def expand_and_prepare_chat_blocks(
         chat = project.read_chat_session(chat_id)
     except ProjectServiceError:
         return None, None, []
-
-    from app.services.ai.helpers import _format_lore_block
 
     new_entries: list[Any] = []
     journal_for_send: list[Any] = []
@@ -165,21 +236,16 @@ def expand_and_prepare_chat_blocks(
     blocks: list[dict] = list(system_prompt_cache_blocks(system_prompt) or [])
     # Slot 1b (ADR-0055 S4): the mutation set this chat OWNS, seeded so a resumed
     # brainstorm continues refining the same staged change. Stable per chat (it
-    # changes only when the writer re-stages), so it sits above the turn-by-turn
-    # journal with a matching 1h TTL. Empty / dangling ref → "" → no block. This
-    # is a mutation set, not lore, so it is not subject to the lore gate.
+    # changes only when the writer re-stages), matching 1h TTL. Empty / dangling
+    # ref → "" → no block. A mutation set, not lore, so it is not gated.
     staged_xml = _staged_set_block(project, chat.staged_set)
     if staged_xml:
         blocks.append({"text": staged_xml, "cache_break_after": True, "ttl": "1h"})
-    # Slot 2 (ADR-0057 §3/§5): the detected/journal lore, placed once. Present
-    # only for a lore-enabled chat (`journal_for_send` stays empty otherwise). 5m
-    # TTL because it grows mid-session — append-only, ratchets forward.
-    if journal_for_send:
-        journal_xml = _format_lore_block(
-            project, [e.entry_id for e in journal_for_send]
-        )
-        if journal_xml:
-            blocks.append({"text": journal_xml, "cache_break_after": True, "ttl": "5m"})
+    # Slots 2a/2b: the one deduped lore set, placed once per stability tier
+    # (stable 1h, then volatile 5m). Only for a lore-enabled chat. At most 4
+    # cache blocks total here — exactly Anthropic's breakpoint limit.
+    if chat.lore_enabled:
+        blocks.extend(_lore_cache_blocks(project, chat, chat_id, journal_for_send))
 
     return (blocks or None), chat_id, list(new_entries)
 

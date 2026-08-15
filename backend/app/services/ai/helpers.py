@@ -391,6 +391,20 @@ def register_helpers(
         )
 
     env.globals["relevant_lore"] = _relevant_lore_helper
+
+    # ADR-0057 §2 + docs/design/context-caching.md §4: the gate-only declaration.
+    # A chat prompt that lets the backend place lore (the normal case) calls
+    # `use_lore()` — it flips the same lore-invoked gate `relevant_lore()` does,
+    # but emits nothing, because the send path selects, dedups, and places the
+    # lore itself, tiered stable/volatile per the revision baseline. Emitting lore
+    # from the template instead bakes it into the (frozen, sometimes uncached)
+    # prompt and double-counts against the send-path block. `relevant_lore()`
+    # stays available for a prompt that genuinely wants lore rendered inline.
+    def _use_lore() -> str:
+        lore_invoked_slot[0] = True
+        return ""
+
+    env.globals["use_lore"] = _use_lore
     env.globals["entry"] = lambda value: _coerce_entry_ref(project, schema, value)
     # As-of read (ADR-0055 §1): the same entry, resolved through `effective_state`
     # at `scene` instead of book-start. `scene` empty/None → a plain base read.

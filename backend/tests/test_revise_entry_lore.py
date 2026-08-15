@@ -1,15 +1,18 @@
-"""ADR-0057 (#1016): the create/revise brainstorm surfaces `context_policy: always`
-lore.
+"""ADR-0057 (#1016) + docs/design/context-caching.md §4: the create/revise
+brainstorm *declares* lore use via `use_lore()` and emits **no** lore inline —
+the backend selects, dedups, and places lore at send time, tiered
+stable/volatile.
 
-`revise-entry.md` now calls `relevant_lore()`, so the `always` wholesale union
-(`helpers._always_included_lore_ids`) reaches the prompt. The regression this
-guards: a create-character brainstorm ignored two `lore:note`s the writer had
-marked Context policy = Always, because that template never called
-`relevant_lore()` and so nothing surfaced the always union for it.
+This guards two things:
 
-`relevant_lore()` is called bare — the `scene` arg (the mutation-resolution
-anchor) defaults to None, which a brainstorm has no use for; the always union
-resolves without it.
+- the gate still flips (`use_lore()` sets the invocation flag `build_preview`
+  reads into `lore_enabled`), so a lore-enabled chat still gets lore; and
+- the template does **not** bake lore back into the rendered prompt — the
+  render-time-emission regression this fix removed (it caused a frozen, often
+  uncached copy that double-counted against the send-path lore block).
+
+The always-lore actually *reaching* the brainstorm is now a send-path behavior,
+guarded in `test_lore_cache_blocks.py`.
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ from app.models import CreateLoreEntryRequest, SaveLoreEntryRequest
 from app.services.ai.helpers import create_environment_for_project
 
 
-class ReviseEntryLoreTests(unittest.TestCase):
+class ReviseEntryLoreGateTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
@@ -53,53 +56,38 @@ class ReviseEntryLoreTests(unittest.TestCase):
         )
         return created.id
 
-    def _render(self, inputs: dict) -> str:
-        # The context is intentionally minimal — no `scene` key — because the
-        # template now calls `relevant_lore()` bare. That the render does not
-        # raise on the missing `scene` is itself part of what this guards.
+    def _render(self, inputs: dict):
+        """Render the builtin revise-entry template, returning (text, env). The
+        env carries `lore_invoked` — the gate flag `build_preview` captures."""
         prompt = self.service.read_prompt_entry("builtin-revise-entry")
         env = create_environment_for_project(self.service)
-        return env.from_string(prompt.body).render(input=inputs)
+        text = env.from_string(prompt.body).render(input=inputs)
+        return text, env
 
-    def _render_create(self) -> str:
-        return self._render({"entry": "", "entry_type": "lore:character"})
+    def test_create_render_flips_the_lore_gate(self) -> None:
+        # use_lore() sets the invocation flag, so the chat becomes lore-enabled
+        # even though nothing is rendered inline.
+        _, env = self._render({"entry": "", "entry_type": "lore:character"})
+        self.assertTrue(env.lore_invoked[0])
 
-    def test_always_note_appears_in_create_brainstorm(self) -> None:
-        # The dogfooding symptom: an always-policy world note must reach a
-        # create-character brainstorm even though it is never mentioned.
+    def test_revise_render_flips_the_lore_gate(self) -> None:
+        subject = self._make_note("Alderman Vane", body="A city councilman.")
+        _, env = self._render({"entry": subject, "entry_type": ""})
+        self.assertTrue(env.lore_invoked[0])
+
+    def test_render_emits_no_lore_inline_even_with_an_always_note(self) -> None:
+        # The regression guard: an always-policy world note must NOT be baked into
+        # the rendered prompt. The backend places it at send time instead.
         self._make_note(
-            "Feral Line: Urban Bestiary universe",
+            "Premise",
             policy="always",
             body="Shapeshifters live hidden in the modern city.",
         )
-        rendered = self._render_create()
-        self.assertIn("## Established lore", rendered)
-        self.assertIn('name="Feral Line: Urban Bestiary universe"', rendered)
-        self.assertIn("Shapeshifters live hidden", rendered)
-
-    def test_always_note_appears_in_revise_mode(self) -> None:
-        # The other template branch: revising an existing entry must also carry
-        # the always union.
-        self._make_note("Premise", policy="always", body="A short premise.")
-        subject = self._make_note("Alderman Vane", body="A city councilman.")
-        rendered = self._render({"entry": subject, "entry_type": ""})
-        self.assertIn("## Established lore", rendered)
-        self.assertIn('name="Premise"', rendered)
-
-    def test_auto_note_not_dumped_when_unmentioned(self) -> None:
-        # Only the always union (and scene-relevant lore) is surfaced — a plain
-        # auto-policy note with no mention and no scene must NOT appear. The
-        # brainstorm doesn't dump the whole lore library.
-        self._make_note("Backstory dump", policy="auto", body="Long unrelated history.")
-        rendered = self._render_create()
-        self.assertNotIn("Backstory dump", rendered)
-        self.assertNotIn("## Established lore", rendered)
-
-    def test_no_lore_section_without_relevant_entries(self) -> None:
-        # No always entries at all → no heading, no empty <lore> block.
-        rendered = self._render_create()
+        rendered, _ = self._render({"entry": "", "entry_type": "lore:character"})
         self.assertNotIn("## Established lore", rendered)
         self.assertNotIn("<lore>", rendered)
+        self.assertNotIn("Shapeshifters live hidden", rendered)
+        self.assertNotIn('name="Premise"', rendered)
 
 
 if __name__ == "__main__":

@@ -178,6 +178,17 @@ fall out: with one function producing one keyed-by-id result, there is nothing l
 
 ### 5. The result is placed once, in the volatile tier
 
+> **⚠ Superseded — see `docs/design/context-caching.md` §7.** "Single placement in
+> the *volatile* tier" is wrong against the provider cost model: it pushes stable
+> content into the 5-minute tier and re-bills its cache-write premium whenever the
+> tier changes (up to ~5× on Anthropic for a slow turn cadence). The corrected rule
+> is **"placed once *per stability tier*"**, where the tier is decided **per turn by
+> each entry's revision** — unchanged-since-last-turn → a **1-hour** stable block,
+> new-or-changed → a **5-minute** volatile block — via the session baseline, not a
+> static policy label. One selector, one dedupped set, each node once; only the
+> placement is tiered by freshness. Everything else in §5 and the rest of this ADR
+> (§1–4, 6) is unchanged and correct.
+
 Conversation-aware lore is *volatile* — the set grows as later turns mention new entities — so the
 rendered lore belongs in the short-TTL tier, re-derived each send from `relevant_lore()`'s current
 result, not baked into the long-TTL system prompt. One selection, one placement. The exact block

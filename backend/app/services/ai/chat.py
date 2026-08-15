@@ -57,6 +57,40 @@ def _staged_set_block(project: ProjectService, staged_set_id: str) -> str:
     return _format_staged_set_block(staged.title, staged.target_entry_type, staged.rows)
 
 
+def _always_policy_lore_ids(
+    project: ProjectService,
+    context_items: list[Any],
+    journal: list[Any],
+) -> list[str]:
+    """The `context_policy: always` lore ids to seed into a chat send (ADR-0057 §3).
+
+    `always` is a *wholesale union*, not a text match: the writer marked these
+    entries "always in context," so they must reach EVERY chat — including a
+    brainstorm whose template never calls `relevant_lore()` (the send path, not
+    the template, is the one place this fires for such chats). Recomputed from
+    current policy on every send, so un-marking an entry drops it next turn.
+
+    Deduped by id against everything already accounted for — the journal's
+    textual detections and the chat's explicit lore picks — so a node reached by
+    several routes at once renders once, not twice. Sorted for a stable, cache-
+    friendly block and deterministic tests. Empty → caller seeds no block.
+    """
+    from app.services.ai.helpers import _always_included_lore_ids
+
+    seen = {getattr(entry, "entry_id", None) for entry in journal}
+    seen |= {item.id for item in context_items if item.kind == "lore" and item.id}
+    return sorted(aid for aid in _always_included_lore_ids(project) if aid not in seen)
+
+
+def _last_user_text(messages_list: list[dict]) -> str:
+    """The content of the last user message — the text this send is a reply to,
+    which the implicit-context expander scans. "" when there is no user turn."""
+    for message in reversed(messages_list):
+        if message.get("role") == "user":
+            return message.get("content") or ""
+    return ""
+
+
 def expand_and_prepare_chat_blocks(
     project: ProjectService,
     chat_id: str | None,
@@ -87,11 +121,7 @@ def expand_and_prepare_chat_blocks(
     from app.services.ai.helpers import _format_lore_block
 
     # The last user message in the conversation triggered this send.
-    user_text = ""
-    for m in reversed(messages_list):
-        if m.get("role") == "user":
-            user_text = m.get("content") or ""
-            break
+    user_text = _last_user_text(messages_list)
     turn = max(0, len(messages_list) - 1)
 
     new_entries = expand_context(
@@ -137,6 +167,19 @@ def expand_and_prepare_chat_blocks(
     staged_xml = _staged_set_block(project, chat.staged_set)
     if staged_xml:
         blocks.append({"text": staged_xml, "cache_break_after": True, "ttl": "1h"})
+    # Slot 1c (ADR-0057 §3): the wholesale `always`-policy lore union. Entries the
+    # writer marked Context policy = Always are project-wide context that must
+    # reach every chat, so they're seeded from the send path itself rather than
+    # relying on the template to call `relevant_lore()` — the gap #1016 hit. Deduped
+    # by id against the journal and explicit picks (§Journey B). Project-stable, so
+    # it rides a 1h TTL above the volatile journal block; this is the 4th and last
+    # system cache breakpoint (Anthropic's budget), so a new stable slot must
+    # consolidate rather than append.
+    always_ids = _always_policy_lore_ids(project, chat.context_items, journal_for_send)
+    if always_ids:
+        always_xml = _format_lore_block(project, always_ids)
+        if always_xml:
+            blocks.append({"text": always_xml, "cache_break_after": True, "ttl": "1h"})
     if journal_for_send:
         journal_xml = _format_lore_block(
             project, [e.entry_id for e in journal_for_send]

@@ -13,14 +13,23 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from datetime import date as _date_cls
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from jinja2 import TemplateError, TemplateSyntaxError, UndefinedError
 
+from app.models import PreviewCacheBlock
+from app.services.ai import tokens as ai_tokens
+from app.services.ai.call_resolver import resolve_call_params
 from app.services.ai.helpers import EntryRef, create_environment_for_project
+from app.services.ai.profiles.registry import profile_for
 from app.services.ai.sessions import AISession, default_registry
 from app.services.ai.templates import RenderedTemplate, render_template
+
+if TYPE_CHECKING:
+    from app.services.ai.profiles import ModelDescriptor
+    from app.services.machine_settings import MachineSettings
 
 
 def _find_marked_target_scene_id(inputs: dict[str, Any]) -> str | None:
@@ -270,3 +279,124 @@ def build_chat_payload(rendered: RenderedTemplate) -> tuple[str, list[dict[str, 
                 chat_messages.append({"role": msg.role, "content": text})
     system_prompt = "\n\n".join(system_parts)
     return system_prompt, chat_messages
+
+
+@dataclass
+class PreviewEstimate:
+    """The token/cost estimate surfaced alongside a preview render (V2)."""
+
+    provider: str | None
+    model: str | None
+    caching_style: str | None
+    estimated_tokens: int
+    cache_blocks: list[PreviewCacheBlock]
+    estimated_cost_usd: float | None
+
+
+async def estimate_preview_tokens_and_cost(
+    project_service,
+    rendered: RenderedTemplate,
+    *,
+    assistant_id: str | None,
+    settings: MachineSettings,
+) -> PreviewEstimate:
+    """Estimate tokens + input cost for a rendered preview (V2).
+
+    When an assistant is named, resolve its provider/model to pick the caching
+    style and price the input; without one, tokens are still counted (the
+    tokenizer choice is provider-agnostic in v1) but cost/caching stay unknown.
+    Blocks are grouped into "cache segments" — each ending at a
+    `cache_break_after` marker (or the message end) — one segment ≈ one
+    ephemeral cache slot from the dispatch layer's perspective.
+    """
+    provider: str | None = None
+    model: str | None = None
+    caching_style: str | None = None
+    descriptor: ModelDescriptor | None = None
+    if assistant_id is not None:
+        resolved = resolve_call_params(
+            project_service,
+            settings,
+            assistant_id=assistant_id,
+            provider_override=None,
+            model_override=None,
+            max_tokens_override=None,
+        )
+        provider = resolved.provider or None
+        model = resolved.model or None
+        if provider:
+            try:
+                profile = profile_for(provider, settings)
+                caching_style = profile.caching_style(model or "")
+            except ValueError:
+                caching_style = None
+        if provider and model:
+            descriptor = await ai_tokens.descriptor_for(
+                provider=provider, model=model, settings=settings
+            )
+
+    cache_blocks: list[PreviewCacheBlock] = []
+    counter_provider = provider or "anthropic"  # tokenizer choice is identical across providers in v1
+    for message in rendered.messages:
+        current_texts: list[str] = []
+        segment_index_in_message = 0
+        for block in message.blocks:
+            current_texts.append(block.text)
+            if block.cache_break_after:
+                segment_index_in_message += 1
+                segment_text = "".join(current_texts)
+                cache_blocks.append(
+                    PreviewCacheBlock(
+                        label=f"{message.role} block {segment_index_in_message}",
+                        role=message.role,
+                        tokens=ai_tokens.count_tokens(
+                            segment_text,
+                            provider=counter_provider,
+                            model=model or "",
+                            settings=settings,
+                        ),
+                        cache_break_after=True,
+                    )
+                )
+                current_texts = []
+        if current_texts:
+            # Trailing run with no terminating marker — the "tail" of the
+            # message. Counts the same way but is_cache=false in spirit.
+            segment_index_in_message += 1
+            tail_text = "".join(current_texts)
+            label = (
+                f"{message.role} tail"
+                if segment_index_in_message > 1 or len(message.blocks) > 1
+                else f"{message.role}"
+            )
+            cache_blocks.append(
+                PreviewCacheBlock(
+                    label=label,
+                    role=message.role,
+                    tokens=ai_tokens.count_tokens(
+                        tail_text,
+                        provider=counter_provider,
+                        model=model or "",
+                        settings=settings,
+                    ),
+                    cache_break_after=False,
+                )
+            )
+
+    estimated_tokens = sum(b.tokens for b in cache_blocks)
+    estimated_cost_usd: float | None = None
+    if descriptor is not None:
+        # Distinguish "no pricing known" (None) from "pricing known, zero
+        # tokens" (0.0). When descriptor exists but cost is 0, that means
+        # either zero-length input or pricing-not-published — surface 0.0
+        # so the UI can show "€0.0000" rather than "—".
+        estimated_cost_usd = ai_tokens.estimate_input_cost(estimated_tokens, descriptor)
+
+    return PreviewEstimate(
+        provider=provider,
+        model=model,
+        caching_style=caching_style,
+        estimated_tokens=estimated_tokens,
+        cache_blocks=cache_blocks,
+        estimated_cost_usd=estimated_cost_usd,
+    )

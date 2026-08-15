@@ -161,6 +161,13 @@
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
   const metadataSchema = $derived($metadataSchemaStore);
 
+  // Section labels already used on this type (#1000) — the datalist behind the
+  // field editor's freeform Section input. Distinct non-empty group names in
+  // section render order (buildSchemaFieldSections drops empties, keeps order).
+  const typeSectionLabels = $derived(
+    typeFieldSections.map((s) => s.group).filter((g): g is string => Boolean(g)),
+  );
+
   // --- Scoped draft + prompt-default state (#14 Step 4), seeded ONCE from the
   // init* props. The host remounts this component per opened/created type (a
   // draft-token `{#key}`), so capturing only the initial prop value is
@@ -460,6 +467,7 @@
         readonly={schemaFieldReadonly}
         layerId={schemaFieldLayerId}
         groups={metadataSchema?.groups ?? {}}
+        sectionLabels={typeSectionLabels}
         onSave={onSaveField}
         onCancel={onCancelField}
         onRemove={onRemoveField}

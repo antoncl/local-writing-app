@@ -250,6 +250,39 @@ class LayerQualifiedIdentityTests(unittest.TestCase):
         self.assertEqual([entry for entry in index.by_id.values() if entry.kind == "project"], [])
         self.assertTrue(any("no front matter id" in error for error in index.errors))
 
+    def test_missing_and_malformed_node_ids_stay_distinguishable(self) -> None:
+        # The id extractor collapses "no id key" and "id present but not text"
+        # into one None; the collector must keep them apart — a missing id is a
+        # legacy file accepted with a warning (stem fallback), a non-text id is a
+        # malformed file that is an error. Collapsing the two is the obvious way
+        # to regress this after the #343 one-extractor refactor (#348).
+        (self.root / "lore").mkdir(parents=True, exist_ok=True)
+        self.service._write_markdown_with_front_matter(
+            self.root / "lore" / "legacy.md",
+            {"title": "Legacy", "entry_type": "lore:character"},
+            "Body.",
+        )
+        self.service._write_markdown_with_front_matter(
+            self.root / "lore" / "malformed.md",
+            {"id": 42, "title": "Malformed", "entry_type": "lore:character"},
+            "Body.",
+        )
+
+        index = self.service._build_node_index(self.root)
+
+        # Missing id → warning, and the node is still indexed under its stem.
+        self.assertTrue(
+            any("legacy.md is missing front matter id" in warning for warning in index.warnings)
+        )
+        self.assertFalse(any("legacy.md" in error for error in index.errors))
+        self.assertEqual(index.by_id["legacy"].title, "Legacy")
+
+        # Non-text id → error, indexed under its stem but flagged malformed.
+        self.assertTrue(
+            any("malformed.md has invalid front matter id" in error for error in index.errors)
+        )
+        self.assertEqual(index.by_id["malformed"].title, "Malformed")
+
     def test_resolve_is_idempotent(self) -> None:
         # #307 patches the index incrementally and will re-resolve. An in-place
         # reverse would invert the winner to the OUTERMOST layer on a second call

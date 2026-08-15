@@ -907,31 +907,32 @@ class ReferencesMixin:
             index.degraded = True
             return
 
-        raw_node_id = front_matter.get("id")
-        if raw_node_id is None:
+        node_id = self._front_matter_id(path, front_matter)
+        if node_id is None:
+            # The extractor collapses "no id key" and "id present but not text"
+            # into one `None`; the diagnostics keep them apart — a missing id is
+            # a legacy file we accept (warning), a malformed one is an error.
             node_id = path.stem
-            index.add_diagnostic(
-                layer_id=layer.id,
-                path=path,
-                message=(
-                    f"{family.kind.title()} file {self._safe_relative(path, folder)} is missing "
-                    f"front matter id; using filename stem as legacy id."
-                ),
-                is_error=False,
-            )
-        elif isinstance(raw_node_id, str) and raw_node_id.strip():
-            node_id = raw_node_id.strip()
-        else:
-            node_id = path.stem
-            index.add_diagnostic(
-                layer_id=layer.id,
-                path=path,
-                message=(
-                    f"{family.kind.title()} file {self._safe_relative(path, folder)} has invalid "
-                    f"front matter id; it must be text."
-                ),
-                is_error=True,
-            )
+            if front_matter.get("id") is None:
+                index.add_diagnostic(
+                    layer_id=layer.id,
+                    path=path,
+                    message=(
+                        f"{family.kind.title()} file {self._safe_relative(path, folder)} is missing "
+                        f"front matter id; using filename stem as legacy id."
+                    ),
+                    is_error=False,
+                )
+            else:
+                index.add_diagnostic(
+                    layer_id=layer.id,
+                    path=path,
+                    message=(
+                        f"{family.kind.title()} file {self._safe_relative(path, folder)} has invalid "
+                        f"front matter id; it must be text."
+                    ),
+                    is_error=True,
+                )
 
         raw_entry_type = front_matter.get("entry_type") or family.default_entry_type
         entry_type = raw_entry_type if isinstance(raw_entry_type, str) else family.default_entry_type

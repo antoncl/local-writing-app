@@ -63,5 +63,12 @@ The {{ entry_type_label(draft_type) }} has these fields to develop:
 - (just a title and body)
 {% endfor %}
 {% endif %}
+{% set relevant = relevant_lore() %}
+{% if relevant %}
+
+## Established lore
+Existing entries relevant to this project — including anything the writer marked as always-in-context (world rules, premise, setting). Treat it as established truth to build on, not to contradict.
+{{ relevant }}
+{% endif %}
 {% include "builtin-project-settings" %}
 {% endrole %}

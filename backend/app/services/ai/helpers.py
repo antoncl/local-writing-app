@@ -369,8 +369,12 @@ def register_helpers(
     env.globals["last_words"] = last_words
     env.globals["pov"] = lambda scene: _pov(project, schema, scene)
     env.globals["scenes_before"] = lambda scene: _scenes_before(project, scene)
+    # `scene` defaults to None so a prompt with no scene anchor can call
+    # `relevant_lore()` bare (a create/revise brainstorm) — the scene is only the
+    # mutation-resolution anchor (as-of-scene state), which such prompts don't have.
+    # The `always` union and explicit refs still resolve without it.
     env.globals["relevant_lore"] = (
-        lambda scene, mode="implicit", partition="all": _relevant_lore(
+        lambda scene=None, mode="implicit", partition="all": _relevant_lore(
             project, scene, mode, partition, session, journal, index=_mutations_index()
         )
     )
@@ -650,7 +654,7 @@ def _walk_collect(
 
 def _relevant_lore(
     project: ProjectService,
-    scene: Any,
+    scene: Any = None,
     mode: str = "implicit",
     partition: str = "all",
     session: AISession | None = None,

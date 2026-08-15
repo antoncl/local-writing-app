@@ -15,7 +15,7 @@
 // actually mount a Conversations panel can receive a prompt — NodeEditor's
 // `conversationsKind` = document kinds lore / scene / plot_card / plotline. That
 // maps to the section roots below: ALL of `lore` (every lore entry is a lore
-// document), and only the `scene:scene` / `plot:card` / `plot:plotline` subtrees.
+// document), and only the `manuscript:scene` / `plot:card` / `plot:plotline` subtrees.
 // Acts/chapters (structure nodes) and plot boards/templates are siblings of those
 // roots, so anchoring each section at its host root structurally excludes them —
 // no per-node denylist. Plotlines joined the hosts in ADR-0048 S7b (revise-plotline).
@@ -27,7 +27,7 @@ import { buildTree, type SchemaNode } from "@/components/schema/pickerTree";
 // otherwise the section is the subtree anchored at that host type.
 export const OFFER_ON_SECTIONS: { kind: string; rootId: string | null }[] = [
   { kind: "lore", rootId: null },
-  { kind: "scene", rootId: "scene:scene" },
+  { kind: "manuscript", rootId: "manuscript:scene" },
   { kind: "plot", rootId: "plot:card" },
   { kind: "plot", rootId: "plot:plotline" },
 ];

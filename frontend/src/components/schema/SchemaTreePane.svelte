@@ -53,7 +53,7 @@
   }
 
   let {
-    schemaFieldKind = "scene",
+    schemaFieldKind = "manuscript",
     schemaContextHeading = "",
     schemaNodeTypeTree = [],
     selectedSchemaTypeId = null,

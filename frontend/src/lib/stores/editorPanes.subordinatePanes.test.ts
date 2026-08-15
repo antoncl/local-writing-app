@@ -13,8 +13,8 @@ import type { EditableDocument } from "@/lib/types";
 
 function scenePane(id: string): void {
   const pane = createEmptyEditorPane(id);
-  pane.document = { type: "scene", id: `${id}-doc` } as DocumentRef;
-  pane.scene = { id: `${id}-doc`, title: "S", body: "", entry_type: "scene:scene", metadata: {} } as unknown as EditableDocument;
+  pane.document = { type: "manuscript", id: `${id}-doc` } as DocumentRef;
+  pane.scene = { id: `${id}-doc`, title: "S", body: "", entry_type: "manuscript:scene", metadata: {} } as unknown as EditableDocument;
   editorPanes.panes = [...editorPanes.panes, pane];
 }
 

@@ -21,7 +21,7 @@ const SCENE: Scene = {
   body: "prose",
   revision: "r1",
   status: "draft",
-  entry_type: "scene:scene",
+  entry_type: "manuscript:scene",
   metadata: {},
   computed_metadata: {},
 } as unknown as Scene;
@@ -57,7 +57,7 @@ describe("editorPanes load-failure claim release (#347)", () => {
 
     // And reopening the SAME id is not a silent no-op — the second attempt loads.
     await editorPanes.openScene("scene_1");
-    const loaded = editorPanes.panes.find((pane) => pane.document?.type === "scene");
+    const loaded = editorPanes.panes.find((pane) => pane.document?.type === "manuscript");
     expect(loaded?.document?.id).toBe("scene_1");
     expect(loaded?.scene?.id).toBe("scene_1");
     expect(getScene).toHaveBeenCalledTimes(2);

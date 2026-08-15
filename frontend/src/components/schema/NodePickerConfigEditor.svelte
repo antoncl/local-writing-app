@@ -153,9 +153,9 @@
     { value: "context_pick", label: "Context Picker" },
   ];
 
-  type Kind = "scene" | "lore";
+  type Kind = "manuscript" | "lore";
   const KINDS: { id: Kind; label: string }[] = [
-    { id: "scene", label: "Scenes" },
+    { id: "manuscript", label: "Scenes" },
     { id: "lore", label: "Lore" },
   ];
 
@@ -295,7 +295,7 @@
 
   // Schema-derived trees: stable across config edits.
   const trees = $derived({
-    scene: buildTree(metadataSchema, "scene"),
+    manuscript: buildTree(metadataSchema, "manuscript"),
     lore: buildTree(metadataSchema, "lore"),
   });
   // Pre-computed render lists per kind, including each node's checkbox
@@ -304,13 +304,13 @@
   // IIFE workaround for `$:` is no longer needed (see
   // [[feedback-svelte5-reactivity-traps]]).
   const renderedByKind = $derived({
-    scene: flattenForRender(trees.scene, selectionFor("scene"), collapsedIds),
+    manuscript: flattenForRender(trees.manuscript, selectionFor("manuscript"), collapsedIds),
     lore: flattenForRender(trees.lore, selectionFor("lore"), collapsedIds),
   });
 
   // Per-kind picked-leaf totals (for the kind-bar count).
   const pickedCountByKind = $derived({
-    scene: selectionFor("scene").size,
+    manuscript: selectionFor("manuscript").size,
     lore: selectionFor("lore").size,
   });
 
@@ -356,7 +356,7 @@
   });
 
   const hasAnySource = $derived(
-    renderedByKind.scene.some((n) => n.state !== "unchecked") ||
+    renderedByKind.manuscript.some((n) => n.state !== "unchecked") ||
       renderedByKind.lore.some((n) => n.state !== "unchecked") ||
       viewRefs.length > 0 ||
       (config.presets ?? []).length > 0,
@@ -364,7 +364,7 @@
 
   // Only surface the ★-marking control when scenes are actually pickable —
   // marking is scene-only; showing it for lore-only inputs would be noise.
-  const scenesPickable = $derived(renderedByKind.scene.some((n) => n.state !== "unchecked"));
+  const scenesPickable = $derived(renderedByKind.manuscript.some((n) => n.state !== "unchecked"));
 
   // Collapsed-state pill strip. Aggregates by kind rather than listing
   // each entry type — gives "Scenes · 2" instead of "Chapter · Scene".

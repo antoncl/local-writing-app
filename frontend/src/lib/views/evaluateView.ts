@@ -227,7 +227,7 @@ export function kindUniverseExpr(kind: string, schema?: MetadataSchema | null): 
 export function defaultView(kind: string, schema?: MetadataSchema | null): ViewSpec {
   const roster = kindUniverseExpr(kind, schema);
   const sort: ViewSort = { by: "manual" };
-  if (kind === "scene" || kind === "research") {
+  if (kind === "manuscript" || kind === "research") {
     return {
       kind,
       expr: {

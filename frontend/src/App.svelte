@@ -709,7 +709,7 @@
   $effect.pre(() => {
     focusedDocumentStore.set(focusedEditorPane?.document ?? null);
   });
-  let activeScene = $derived(focusedEditorPane?.document?.type === "scene" ? focusedEditorPane.scene : null);
+  let activeScene = $derived(focusedEditorPane?.document?.type === "manuscript" ? focusedEditorPane.scene : null);
   let todos = $derived($todosStore);
   // The rebuildable embedded-todo index (GH #45); the Todo pane reads it directly,
   // and each editor pane derives its own status hint from the matching scene.
@@ -828,7 +828,7 @@
 
   <RegionRegistrar
     regions={{
-      outline: { title: "Draft", body: outlineBody, view: { kind: "scene", switcher: true } },
+      outline: { title: "Draft", body: outlineBody, view: { kind: "manuscript", switcher: true } },
       lore: { title: "Lore", body: loreBody, actions: loreActions, view: { kind: "lore", switcher: true } },
       research: { title: "Research", body: researchBody, view: { kind: "research" } },
       prompts: { title: "Prompts", body: promptsBody, actions: promptsActions, view: { kind: "prompt" }, closable: true, onClose: closeRegion("prompts") },
@@ -1104,7 +1104,7 @@
       <NodeEditor
         bind:this={editorPanes.editorPaneComponents[id]}
         scene={editorPane.scene}
-        documentKind={editorPane.document?.type ?? "scene"}
+        documentKind={editorPane.document?.type ?? "manuscript"}
         promptEntries={promptEntries}
         structure={structure}
         researchStructure={researchStructure}
@@ -1125,7 +1125,7 @@
         recentlySaved={editorPane.recentlySaved}
         authoringLayerId={editorPane.authoringLayerId}
         hostPaneId={editorPane.id}
-        todoStatusHint={editorPane.document?.type === "scene" && editorPane.scene && sceneEntryHasBody(editorPane.scene as Scene) ? embeddedHintForScene(editorPane.scene.id) : ""}
+        todoStatusHint={editorPane.document?.type === "manuscript" && editorPane.scene && sceneEntryHasBody(editorPane.scene as Scene) ? embeddedHintForScene(editorPane.scene.id) : ""}
         onFocus={() => workspaceLayout.focus(editorPane.id)}
         onChange={(detail) =>
           editorPanes.updateEditorPaneDraft(

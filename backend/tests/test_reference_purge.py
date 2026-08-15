@@ -383,12 +383,12 @@ class PurgeCoversEveryReferenceBearingKindTests(ReferencePurgeTestCase):
     def test_a_scene_keeps_its_status_and_extra_keys(self) -> None:
         """The same preservation for the kinds that DID have a typed writer —
         `_write_scene_file` emitted five keys and dropped the rest."""
-        self._add_ally_field("scene:scene")
+        self._add_ally_field("manuscript:scene")
         self._write_lore(self.root, "seren", "Seren")
         scene = self._write_node(
             self.root / "scenes" / "s.md",
             "scene1",
-            "scene:scene",
+            "manuscript:scene",
             status="revised",
             pov_note="kept",
         )

@@ -55,7 +55,7 @@
     if (link.kind === "lore") {
       const entry = loreEntries.find((e) => e.id === link.targetId);
       instanceColor = typeof entry?.metadata?.color === "string" ? entry.metadata.color : null;
-    } else if (link.kind === "scene") {
+    } else if (link.kind === "manuscript") {
       instanceColor = findStructureNodeBySceneId(structure?.root, link.targetId)?.color ?? null;
     }
     return resolveColor(instanceColor, link.entry_type, link.kind, metadataSchema)?.hex ?? null;

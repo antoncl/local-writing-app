@@ -142,7 +142,7 @@ class MetadataValuesMixin:
         errors = self._validate_entry_metadata(
             label=f"Scene {scene_id}",
             entry_type=entry_type,
-            expected_kind="scene",
+            expected_kind="manuscript",
             metadata=metadata,
             schema=schema,
             node_index=node_index,

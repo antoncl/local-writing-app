@@ -43,7 +43,7 @@ class Scene(BaseModel):
     body: str
     revision: str
     status: str = "draft"
-    entry_type: str = "scene:scene"
+    entry_type: str = "manuscript:scene"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     source_layer_id: str = ""
@@ -510,7 +510,7 @@ class SaveSceneRequest(BaseModel):
     body: str
     base_revision: str | None = None
     status: str = "draft"
-    entry_type: str = "scene:scene"
+    entry_type: str = "manuscript:scene"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     # The lore entries the prose editor detected in this body — the *dynamic
     # context*, one of the three sources a snapshot witness records (ADR-0043,

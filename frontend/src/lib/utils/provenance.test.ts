@@ -66,7 +66,7 @@ describe("readOnlyInPlace (single reader of the backend #689 verdict)", () => {
     // Library-tenant read-model always stamps the flag, so a genuine tenant
     // payload never reaches this branch.
     expect(readOnlyInPlace({})).toBe(false);
-    expect(readOnlyInPlace({ status: "draft", entry_type: "scene" })).toBe(false);
+    expect(readOnlyInPlace({ status: "draft", entry_type: "manuscript" })).toBe(false);
   });
 
   it("does not lock when there is no document yet (nothing to edit)", () => {

@@ -66,20 +66,20 @@ const LORE_SCHEMA = {
 // (`parent`) — ADR-0037 §4: the structure files are just a materialized index
 // of this relation, and the tree is a Nest over it.
 const MS: EvalNode[] = [
-  { id: "act1", entry_type: "scene:act", title: "Act 1", metadata: {} },
-  { id: "ch1", entry_type: "scene:chapter", title: "Ch 1", metadata: { parent: "act1" } },
-  { id: "ch2", entry_type: "scene:chapter", title: "Ch 2", metadata: { parent: "act1" } },
-  { id: "s1", entry_type: "scene:scene", title: "Scene 1", metadata: { parent: "ch1", status: "draft" } },
-  { id: "s2", entry_type: "scene:scene", title: "Scene 2", metadata: { parent: "ch1", status: "done" } },
+  { id: "act1", entry_type: "manuscript:act", title: "Act 1", metadata: {} },
+  { id: "ch1", entry_type: "manuscript:chapter", title: "Ch 1", metadata: { parent: "act1" } },
+  { id: "ch2", entry_type: "manuscript:chapter", title: "Ch 2", metadata: { parent: "act1" } },
+  { id: "s1", entry_type: "manuscript:scene", title: "Scene 1", metadata: { parent: "ch1", status: "draft" } },
+  { id: "s2", entry_type: "manuscript:scene", title: "Scene 2", metadata: { parent: "ch1", status: "done" } },
 ];
 
 const MS_SCHEMA = {
   version: 1,
   entry_types: {
-    "scene:base": { name: "Scene", kind: "scene", abstract: true, fields: [] },
-    "scene:act": { name: "Act", kind: "scene", parent: "scene:base", fields: [] },
-    "scene:chapter": { name: "Chapter", kind: "scene", parent: "scene:base", fields: [] },
-    "scene:scene": { name: "Scene", kind: "scene", parent: "scene:base", fields: [] },
+    "manuscript:base": { name: "Scene", kind: "manuscript", abstract: true, fields: [] },
+    "manuscript:act": { name: "Act", kind: "manuscript", parent: "manuscript:base", fields: [] },
+    "manuscript:chapter": { name: "Chapter", kind: "manuscript", parent: "manuscript:base", fields: [] },
+    "manuscript:scene": { name: "Scene", kind: "manuscript", parent: "manuscript:base", fields: [] },
   },
   fields: {
     title: { name: "Title", type: "text", category: "intrinsic" },
@@ -95,14 +95,14 @@ const MS_SCHEMA = {
 const CONTAINMENT: ViewExpr = {
   nest: {
     parents: { field: { key: "parent", op: "unset" } },
-    children: { descendants_of: "scene:base" },
+    children: { descendants_of: "manuscript:base" },
     match: { field: "parent", direction: "child_to_parent", by: "ref" },
     recursive: true,
   },
 };
 
 const lore = (spec: Partial<ViewSpec>) => evaluateView({ kind: "lore", ...spec } as ViewSpec, LORE, { schema: LORE_SCHEMA });
-const ms = (spec: Partial<ViewSpec>) => evaluateView({ kind: "scene", ...spec } as ViewSpec, MS, { schema: MS_SCHEMA });
+const ms = (spec: Partial<ViewSpec>) => evaluateView({ kind: "manuscript", ...spec } as ViewSpec, MS, { schema: MS_SCHEMA });
 const nodeIds = (r: { nodes: EvalNode[] }) => r.nodes.map((n) => n.id);
 
 // Render a groups tree as nested labels: a childless group is its label (a
@@ -395,7 +395,7 @@ describe("ADR-0037 §5: row-preserving σ/∩/−", () => {
       expr: {
         nest: {
           parents: { field: { key: "parent", op: "unset" } },
-          children: { type: "scene:scene" },
+          children: { type: "manuscript:scene" },
           match: { field: "parent", direction: "child_to_parent", by: "ref" },
           recursive: true,
         },
@@ -406,9 +406,9 @@ describe("ADR-0037 §5: row-preserving σ/∩/−", () => {
   });
 
   it("ANCHOR: union concatenates rows preserving each operand's paths", () => {
-    const NOTE: EvalNode = { id: "note1", entry_type: "scene:scene", title: "Loose note", metadata: {} };
+    const NOTE: EvalNode = { id: "note1", entry_type: "manuscript:scene", title: "Loose note", metadata: {} };
     const r = evaluateView(
-      { kind: "scene", expr: { union: [CONTAINMENT, { hand_picked: ["note1"] }] } } as ViewSpec,
+      { kind: "manuscript", expr: { union: [CONTAINMENT, { hand_picked: ["note1"] }] } } as ViewSpec,
       // note1 is parentless, so the containment nest ALSO seeds it as a root
       // (a bare leaf row, path []) — identical to its hand-picked row, and the
       // union's (node, path) dedupe collapses the two into one.
@@ -479,7 +479,7 @@ describe("ADR-0037 §7: defaults", () => {
   });
 
   it("the Draft default is a recursive containment Nest — not a presentation flag", () => {
-    const spec = defaultView("scene", MS_SCHEMA);
+    const spec = defaultView("manuscript", MS_SCHEMA);
     expect(spec.expr?.nest?.recursive).toBe(true);
     expect((spec as { presentation?: unknown }).presentation).toBeUndefined();
   });

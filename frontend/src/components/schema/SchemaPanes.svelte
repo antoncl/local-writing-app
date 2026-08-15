@@ -74,7 +74,7 @@
 
   // --- Authoring state --------------------------------------------------------
   let schemaFieldLayerId = $state("");
-  let schemaFieldEntryType = $state("scene");
+  let schemaFieldEntryType = $state("manuscript");
   // The field-editing DRAFT (type / name / key / options / default / picker /
   // computed / icon + the inline editor's popover toggles) lives inside
   // SchemaFieldInlineEditor (#14 Step 4). We keep only the context the parent
@@ -124,7 +124,7 @@
   // the Plot-tab-scopes-to-Scene bug (#729). The old per-kind ternary silently
   // mapped plot → scene; asSchemaKind (inside the resolver) validate-or-defaults.
   const schemaSelectedEntryType = $derived(
-    metadataSchema?.entry_types[schemaFieldEntryType] ?? metadataSchema?.entry_types["scene:scene"] ?? null,
+    metadataSchema?.entry_types[schemaFieldEntryType] ?? metadataSchema?.entry_types["manuscript:scene"] ?? null,
   );
   const schemaScope = $derived(resolveSchemaScope(metadataSchema, schemaFieldEntryType));
   const schemaFieldKind = $derived(schemaScope.kind);
@@ -180,7 +180,7 @@
     if (!schema) return;
     const layers = get(metadataSchemaLayersStore);
     if (!schema.entry_types[schemaFieldEntryType]) {
-      schemaFieldEntryType = schema.entry_types["scene:scene"] ? "scene:scene" : Object.keys(schema.entry_types)[0] ?? "scene:scene";
+      schemaFieldEntryType = schema.entry_types["manuscript:scene"] ? "manuscript:scene" : Object.keys(schema.entry_types)[0] ?? "manuscript:scene";
     }
     if (!schemaFieldLayerId || !layers.some((layer) => layer.id === schemaFieldLayerId)) {
       schemaFieldLayerId = projectSchemaLayerId();
@@ -268,7 +268,7 @@
     const parentType = parentTypeId ? metadataSchema?.entry_types[parentTypeId] : null;
     // Inherit the parent's kind; with no parent, stay in the current tab's kind.
     schemaTypeKind = asSchemaKind(parentType?.kind) ?? schemaFieldKind;
-    schemaTypeParent = parentTypeId || (schemaSelectedEntryType?.abstract || schemaFieldEntryType !== "scene:scene" ? schemaFieldEntryType : defaultSchemaParentType(schemaFieldKind));
+    schemaTypeParent = parentTypeId || (schemaSelectedEntryType?.abstract || schemaFieldEntryType !== "manuscript:scene" ? schemaFieldEntryType : defaultSchemaParentType(schemaFieldKind));
     schemaTypeAbstract = false;
     schemaTypeReadonly = false;
     schemaTypeLayerId = layerId;

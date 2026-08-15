@@ -71,7 +71,7 @@ class MutationIndexReadTests(unittest.TestCase):
                     type="select",
                     options=list(options),
                 ),
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
             )
         )
 

@@ -33,7 +33,7 @@ const ROW_HEIGHT = 120;
 // `schema` closes the lower/lift asymmetry (#211): the designer's `All` injector
 // lowers to `descendants_of:<kind-root>` (`kindUniverseExpr`), so on reopen a
 // `descendants_of` that EQUALS the kind's universe root must lift back to an `all`
-// node — not a "Type & subtypes" node whose abstract root (`scene:base`/`lore:base`)
+// node — not a "Type & subtypes" node whose abstract root (`manuscript:base`/`lore:base`)
 // the type picker filters out, leaving a blank unresettable dropdown. Resolving the
 // root needs the schema (`${kind}:base` alone misses concrete-root kinds like
 // assistant); absent it we skip the collapse and lift verbatim (round-trip helpers).

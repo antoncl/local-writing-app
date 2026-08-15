@@ -306,7 +306,7 @@ class SearchRequest(BaseModel):
 
 
 class SearchHit(BaseModel):
-    kind: Literal["scene", "lore", "project"] = "scene"
+    kind: Literal["manuscript", "lore", "project"] = "manuscript"
     file_id: str
     path: str
     line: int

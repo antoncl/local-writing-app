@@ -109,7 +109,7 @@ class StructureWritesStayInTheCallersProjectTests(unittest.TestCase):
 
     def test_a_concurrent_open_does_not_redirect_a_manuscript_write(self) -> None:
         created = self.service.create_structure_node(
-            _structure_node_request("Act One", "scene:act")
+            _structure_node_request("Act One", "manuscript:act")
         )
         act = _find(created.root, lambda node: node.title == "Act One")
         scene_node = _find(created.root, lambda node: bool(node.scene_id))
@@ -139,7 +139,7 @@ class StructureWritesStayInTheCallersProjectTests(unittest.TestCase):
         # the right one if the wrong one would also have resolved.
         self.service._write_markdown_with_front_matter(
             victim,
-            {"id": scene_node.scene_id, "title": "Book Two Scene", "entry_type": "scene:scene", "metadata": {}},
+            {"id": scene_node.scene_id, "title": "Book Two Scene", "entry_type": "manuscript:scene", "metadata": {}},
             "Book two's prose.",
         )
         before = victim.read_text(encoding="utf-8")

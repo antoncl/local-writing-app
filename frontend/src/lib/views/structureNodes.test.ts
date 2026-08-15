@@ -8,7 +8,7 @@ import { evaluateView } from "./evaluateView";
 const CONTAINMENT = {
   nest: {
     parents: { field: { key: "parent", op: "unset" as const } },
-    children: { descendants_of: "scene:base" },
+    children: { descendants_of: "manuscript:base" },
     match: { field: "parent", direction: "child_to_parent" as const, by: "ref" as const },
     recursive: true,
   },
@@ -17,9 +17,9 @@ const SCENE_SCHEMA = {
   version: 1,
   fields: { parent: { name: "Parent", type: "entity_ref", category: "stored" } },
   entry_types: {
-    "scene:base": { name: "Scene root", kind: "scene", abstract: true },
-    "scene:act": { name: "Act", kind: "scene", parent: "scene:base" },
-    "scene:scene": { name: "Scene", kind: "scene", parent: "scene:base" },
+    "manuscript:base": { name: "Scene root", kind: "manuscript", abstract: true },
+    "manuscript:act": { name: "Act", kind: "manuscript", parent: "manuscript:base" },
+    "manuscript:scene": { name: "Scene", kind: "manuscript", parent: "manuscript:base" },
   },
 } as unknown as MetadataSchema;
 
@@ -32,13 +32,13 @@ function doc(): StructureDocument {
       children: [
         {
           id: "act1",
-          type: "scene:act",
+          type: "manuscript:act",
           title: "Act One",
           computed_metadata: { number: 1 },
           children: [
             {
               id: "s1",
-              type: "scene:scene",
+              type: "manuscript:scene",
               title: "Arrival",
               scene_id: "s1",
               status: "complete",
@@ -49,7 +49,7 @@ function doc(): StructureDocument {
             },
             {
               id: "s2",
-              type: "scene:scene",
+              type: "manuscript:scene",
               title: "Departure",
               scene_id: "s2",
               status: "draft",
@@ -82,7 +82,7 @@ describe("structureToEvalNodes (#184 Phase 3 roster enrichment)", () => {
 
   it("the containment Nest over the stamped roster reproduces the manuscript tree (ADR-0037 §4)", () => {
     const nodes = structureToEvalNodes(doc());
-    const result = evaluateView({ kind: "scene", expr: CONTAINMENT, sort: { by: "manual" } }, nodes, { schema: SCENE_SCHEMA });
+    const result = evaluateView({ kind: "manuscript", expr: CONTAINMENT, sort: { by: "manual" } }, nodes, { schema: SCENE_SCHEMA });
     // Act One (a root) nests its two scenes; no `presentation: "tree"` involved.
     expect(result.groups?.map((g) => g.label)).toEqual(["Act One"]);
     expect(result.groups![0].children.map((c) => c.label)).toEqual(["Arrival", "Departure"]);
@@ -99,13 +99,13 @@ describe("structureToEvalNodes (#184 Phase 3 roster enrichment)", () => {
         type: "root",
         title: "Manuscript",
         children: [
-          { id: "s1", type: "scene:scene", title: "One", children: [] },
-          { id: "s2", type: "scene:scene", title: "Two", children: [] },
+          { id: "s1", type: "manuscript:scene", title: "One", children: [] },
+          { id: "s2", type: "manuscript:scene", title: "Two", children: [] },
         ],
       },
     };
     const nodes = structureToEvalNodes(flat);
-    const result = evaluateView({ kind: "scene", expr: CONTAINMENT, sort: { by: "manual" } }, nodes, { schema: SCENE_SCHEMA });
+    const result = evaluateView({ kind: "manuscript", expr: CONTAINMENT, sort: { by: "manual" } }, nodes, { schema: SCENE_SCHEMA });
     expect(result.groups).toBeNull();
     expect(result.nodes.map((n) => n.id)).toEqual(["s1", "s2"]);
   });
@@ -117,10 +117,10 @@ describe("structureToEvalNodes (#184 Phase 3 roster enrichment)", () => {
     const nodes = structureToEvalNodes(doc());
     const result = evaluateView(
       {
-        kind: "scene",
+        kind: "manuscript",
         groups: [
           { name: "Tree", expr: CONTAINMENT },
-          { name: "Everything", expr: { descendants_of: "scene:base" } }, // 2nd handle so neither collapses
+          { name: "Everything", expr: { descendants_of: "manuscript:base" } }, // 2nd handle so neither collapses
         ],
         sort: { by: "manual" },
       },
@@ -136,7 +136,7 @@ describe("structureToEvalNodes (#184 Phase 3 roster enrichment)", () => {
   it("lets a scene view filter the roster by status (the Draft filter this enables)", () => {
     const nodes = structureToEvalNodes(doc());
     const result = evaluateView(
-      { kind: "scene", expr: { field: { key: "status", op: "overlap", value: "complete" } }, sort: { by: "manual" } },
+      { kind: "manuscript", expr: { field: { key: "status", op: "overlap", value: "complete" } }, sort: { by: "manual" } },
       nodes,
     );
     expect(result.nodes.map((n) => n.id)).toEqual(["s1"]);
@@ -145,7 +145,7 @@ describe("structureToEvalNodes (#184 Phase 3 roster enrichment)", () => {
   it("lets a scene view filter the roster by pov (entity_ref, id-compared)", () => {
     const nodes = structureToEvalNodes(doc());
     const result = evaluateView(
-      { kind: "scene", expr: { field: { key: "pov", op: "overlap", value: "char_bob" } }, sort: { by: "manual" } },
+      { kind: "manuscript", expr: { field: { key: "pov", op: "overlap", value: "char_bob" } }, sort: { by: "manual" } },
       nodes,
     );
     expect(result.nodes.map((n) => n.id)).toEqual(["s2"]);
@@ -166,12 +166,12 @@ function draftDoc(): StructureDocument {
       children: [
         {
           id: "node_act",
-          type: "scene:act",
+          type: "manuscript:act",
           title: "Act One",
           computed_metadata: { number: 1 },
           children: [
-            { id: "node_s1", type: "scene:scene", title: "Scene 1", scene_id: "scene_s1", status: "draft", metadata: {}, computed_metadata: { number: 1 }, children: [] },
-            { id: "node_s2", type: "scene:scene", title: "Scene 2", scene_id: "scene_s2", status: "draft", metadata: {}, computed_metadata: { number: 2 }, children: [] },
+            { id: "node_s1", type: "manuscript:scene", title: "Scene 1", scene_id: "scene_s1", status: "draft", metadata: {}, computed_metadata: { number: 1 }, children: [] },
+            { id: "node_s2", type: "manuscript:scene", title: "Scene 2", scene_id: "scene_s2", status: "draft", metadata: {}, computed_metadata: { number: 2 }, children: [] },
           ],
         },
       ],
@@ -193,7 +193,7 @@ describe("structureToEvalNodes — references over the Draft roster (#201 id-spa
     // for the lookup, then scene_s2 → node_s2 for the roster universe filter.
     const referenceIndex = new Map([["scene_s1", new Set(["scene_s2"])]]);
     const result = evaluateView(
-      { kind: "scene", expr: { field_of: { of: { hand_picked: ["node_s1"] }, field: "references" } }, sort: { by: "manual" } },
+      { kind: "manuscript", expr: { field_of: { of: { hand_picked: ["node_s1"] }, field: "references" } }, sort: { by: "manual" } },
       nodes,
       { referenceIndex },
     );
@@ -215,9 +215,9 @@ describe("structureToEvalNodes — computed fields stay reachable to the evaluat
       number: { name: "Number", type: "computed", category: "computed", computed: { function: "counter", value_type: "number" } },
     },
     entry_types: {
-      "scene:base": { name: "Scene root", kind: "scene", abstract: true },
-      "scene:act": { name: "Act", kind: "scene", parent: "scene:base" },
-      "scene:scene": { name: "Scene", kind: "scene", parent: "scene:base" },
+      "manuscript:base": { name: "Scene root", kind: "manuscript", abstract: true },
+      "manuscript:act": { name: "Act", kind: "manuscript", parent: "manuscript:base" },
+      "manuscript:scene": { name: "Scene", kind: "manuscript", parent: "manuscript:base" },
     },
   } as unknown as MetadataSchema;
 
@@ -232,8 +232,8 @@ describe("structureToEvalNodes — computed fields stay reachable to the evaluat
     const nodes = structureToEvalNodes(draftDoc());
     const result = evaluateView(
       {
-        kind: "scene",
-        expr: { filter: { of: { descendants_of: "scene:base" }, pred: { field: { key: "number", op: "overlap", value: 2 } } } },
+        kind: "manuscript",
+        expr: { filter: { of: { descendants_of: "manuscript:base" }, pred: { field: { key: "number", op: "overlap", value: 2 } } } },
         sort: { by: "manual" },
       },
       nodes,

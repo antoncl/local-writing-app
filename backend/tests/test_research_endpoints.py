@@ -124,7 +124,7 @@ class ResearchHttpEndpointTests(unittest.TestCase):
     def test_create_with_non_research_entry_type_is_rejected(self) -> None:
         response = self.client.post(
             "/api/research-structure/nodes",
-            json={"title": "Bad", "entry_type": "scene:scene"},
+            json={"title": "Bad", "entry_type": "manuscript:scene"},
         )
         self.assertEqual(response.status_code, 422, response.text)
 

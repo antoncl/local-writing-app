@@ -139,7 +139,7 @@
 
   let {
     scene = null,
-    documentKind = "scene",
+    documentKind = "manuscript",
     promptEntries = [],
     loreEntries = [],
     availableScenes = [],
@@ -290,7 +290,7 @@
    *  what the author was shown. Scenes only: v1 snapshots scenes (ADR-0043),
    *  and publishing for other kinds would claim a context nothing consumes. */
   function publishImplicitContext(): void {
-    if (documentKind !== "scene" || !scene?.id || !editor?.view) return;
+    if (documentKind !== "manuscript" || !scene?.id || !editor?.view) return;
     setImplicitContext(scene.id, implicitContextIds(editor.view.state));
   }
 
@@ -401,7 +401,7 @@
 
   // ---------- Slash menu ----------
   function isSlashTriggerContext() {
-    if (documentKind !== "scene") return false;
+    if (documentKind !== "manuscript") return false;
     if (!editor) return false;
     const { selection } = editor.state;
     if (!selection.empty) return false;
@@ -419,7 +419,7 @@
   }
 
   function refreshSlashFilterText() {
-    const next = editor && documentKind === "scene" ? readSlashFilterText() : "";
+    const next = editor && documentKind === "manuscript" ? readSlashFilterText() : "";
     if (next !== slashFilterText) slashFilterText = next;
   }
 
@@ -431,7 +431,7 @@
   }
 
   function updateSlashMenuFromContent() {
-    if (documentKind !== "scene") {
+    if (documentKind !== "manuscript") {
       if (slashMenu.visible) closeSlashMenu();
       return;
     }
@@ -446,7 +446,7 @@
   }
 
   function openSlashMenu() {
-    if (documentKind !== "scene") return;
+    if (documentKind !== "manuscript") return;
     if (!editor || !editorFrame || !editor.isFocused) return;
     if (!isSlashTriggerContext()) return;
     const coords = editor.view.coordsAtPos(editor.state.selection.from);
@@ -687,7 +687,7 @@
   }
 
   function updateTableMenu() {
-    if (!editor || !editorFrame || documentKind !== "scene" || !editor.isFocused) {
+    if (!editor || !editorFrame || documentKind !== "manuscript" || !editor.isFocused) {
       if (tableMenu.visible) tableMenu = { ...tableMenu, visible: false };
       return;
     }
@@ -1113,7 +1113,7 @@
   }
 
   function handleEditorKeydown(view: EditorView, event: KeyboardEvent) {
-    if (documentKind !== "scene") {
+    if (documentKind !== "manuscript") {
       if (slashMenu.visible) closeSlashMenu();
       return false;
     }
@@ -1368,7 +1368,7 @@
     hiddenPromptIds: $hiddenLibraryStore,
   });
   // ---------- Reactives ----------
-  let slashCommands = $derived(editor && documentKind === "scene" ? getSlashCommands() : []);
+  let slashCommands = $derived(editor && documentKind === "manuscript" ? getSlashCommands() : []);
   let parsedSlash = $derived(parseSlashBody(slashFilterText) ?? { command: slashFilterText, args: "" });
   let slashArgTokens = $derived(tokenizeSlashArgs(parsedSlash.args));
   let filteredSlashCommands = $derived(filterSlashCommands(slashCommands, parsedSlash.command, parsedSlash.args.length > 0));
@@ -1396,7 +1396,7 @@
   // under their as-of-scene names, falling back to the global (base-name) matcher
   // while loading / for non-scene bodies. See the controller for invalidation.
   const sceneMatcher = createSceneEffectiveMatcher({
-    sceneId: () => (documentKind === "scene" ? scene?.id ?? null : null),
+    sceneId: () => (documentKind === "manuscript" ? scene?.id ?? null : null),
     entries: () => loreEntries,
     schema: () => metadataSchema,
     invalidateOn: () => implicitContextMatcher,
@@ -1483,7 +1483,7 @@
   bind:this={mutationDialogs}
   getEditor={() => editor}
   sceneId={scene?.id ?? ""}
-  isScene={documentKind === "scene"}
+  isScene={documentKind === "manuscript"}
   {loreEntries}
   schema={metadataSchema}
   implicitContextMatcher={implicitContextMatcher}

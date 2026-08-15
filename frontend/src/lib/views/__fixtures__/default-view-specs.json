@@ -1,7 +1,7 @@
 {
   "_comment": "Canonical per-kind system default view shape (expr + params + group_by), roots fixed at <kind>:base. The FRONTEND defaultView() is the source of truth; the backend _default_view_spec() must match. Asserted by frontend defaultView.golden.test.ts AND backend test_views.py::test_default_view_specs_match_frontend so the two hand-written builders can't drift (#271 / finding-2). `params` joined the comparison with #333, when a default first carried a declared formal. Update this when the default shape intentionally changes.",
-  "scene": {
-    "expr": { "nest": { "parents": { "filter": { "of": { "descendants_of": "scene:base" }, "pred": { "field": { "key": "parent", "op": "unset" } } } }, "children": { "descendants_of": "scene:base" }, "match": { "field": "parent", "direction": "child_to_parent", "by": "ref" }, "recursive": true } },
+  "manuscript": {
+    "expr": { "nest": { "parents": { "filter": { "of": { "descendants_of": "manuscript:base" }, "pred": { "field": { "key": "parent", "op": "unset" } } } }, "children": { "descendants_of": "manuscript:base" }, "match": { "field": "parent", "direction": "child_to_parent", "by": "ref" }, "recursive": true } },
     "params": null,
     "group_by": null
   },

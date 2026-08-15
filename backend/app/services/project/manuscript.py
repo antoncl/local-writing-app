@@ -67,7 +67,7 @@ class ManuscriptMixin:
         index = self._build_node_index(root)
         scene_front: dict[str, tuple[str | None, dict[str, Any]]] = {}
         for scene_id, entry in index.by_id.items():
-            if entry.kind != "scene":
+            if entry.kind != "manuscript":
                 continue
             try:
                 fm = self._read_front_matter_only(entry.path)
@@ -119,9 +119,9 @@ class ManuscriptMixin:
 
     def create_scene(self, request: CreateSceneRequest) -> Scene:
         root = self._require_project()
-        scene_id = self._new_id("scene")
+        scene_id = self._new_id("manuscript")
         schema = self.read_metadata_schema()
-        initial_metadata = self._initial_metadata_from_defaults("scene:scene", schema)
+        initial_metadata = self._initial_metadata_from_defaults("manuscript:scene", schema)
         # `status` is a top-level Scene field (not in metadata), so resolve
         # its default separately when one is authored — otherwise keep the
         # historic "draft" floor so existing flows are unchanged.
@@ -133,7 +133,7 @@ class ManuscriptMixin:
             body="",
             revision="",
             status=initial_status,
-            entry_type="scene:scene",
+            entry_type="manuscript:scene",
             metadata=initial_metadata,
         )
         self._write_scene_file(self._filepath_for_new_node(root / "scenes", request.title), scene)
@@ -141,7 +141,7 @@ class ManuscriptMixin:
         structure = self._read_structure(root)
         scene_node = StructureNode(
             id=self._new_id("node"),
-            type="scene:scene",
+            type="manuscript:scene",
             title=request.title,
             scene_id=scene_id,
         )
@@ -214,7 +214,7 @@ class ManuscriptMixin:
         paths: list[Path] = []
         for scene_id in scene_ids:
             with contextlib.suppress(ProjectServiceError):
-                paths.append(self._path_for_node_id(scene_id, "scene"))
+                paths.append(self._path_for_node_id(scene_id, "manuscript"))
             self._remove_scene_todos(scene_id)
             # A scene and its snapshots are one unit of deletion (ADR-0043).
             # The store is keyed by id, so it must go even when the scene file
@@ -291,7 +291,7 @@ class ManuscriptMixin:
             raise ProjectServiceError("Title cannot be empty.", 422)
         node.title = clean_title
         if node.scene_id:
-            path = self._path_for_node_id(node.scene_id, "scene")
+            path = self._path_for_node_id(node.scene_id, "manuscript")
             front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
             front_matter["title"] = clean_title
             self._write_markdown_with_front_matter(path, front_matter, body)
@@ -305,13 +305,13 @@ class ManuscriptMixin:
         entry_type = schema.entry_types.get(request.entry_type)
         if entry_type is None:
             raise ProjectServiceError(f"Unknown entry type {request.entry_type}.", 404)
-        if entry_type.kind != "scene":
+        if entry_type.kind != "manuscript":
             raise ProjectServiceError(f"Entry type {request.entry_type} is not a manuscript type.", 422)
         if entry_type.abstract:
             raise ProjectServiceError(f"Entry type {request.entry_type} is abstract and cannot be instantiated.", 422)
 
         structure = self._read_structure(root)
-        file_id = self._new_id("scene")
+        file_id = self._new_id("manuscript")
         initial_metadata = self._initial_metadata_from_defaults(request.entry_type, schema)
         status_default = initial_metadata.pop("status", None)
         initial_status = status_default if isinstance(status_default, str) and status_default else "draft"
@@ -357,7 +357,7 @@ class ManuscriptMixin:
         loose = {
             entry.id: entry
             for entry in node_index.by_id.values()
-            if entry.kind == "scene" and entry.id not in referenced
+            if entry.kind == "manuscript" and entry.id not in referenced
         }
         return loose, structure
 
@@ -382,7 +382,7 @@ class ManuscriptMixin:
 
         Each file is normalised into a canonical scene file: a raw dropped `.md`
         with no front matter gains an `id`, a `title` (its first heading, else
-        the filename), `entry_type: scene:scene`, and `status: draft`; a file
+        the filename), `entry_type: manuscript:scene`, and `status: draft`; a file
         that already carries valid front matter keeps it. `scene_ids` None/empty
         imports every loose scene; otherwise only the listed ids that are in fact
         loose. A file whose front-matter id already belongs to a manuscript node
@@ -417,7 +417,7 @@ class ManuscriptMixin:
             # A raw dropped file has no front-matter id (the index keyed it by its
             # filename stem); mint a canonical one. A file that already carries a
             # valid id keeps it.
-            final_id = fm_id if isinstance(fm_id, str) and fm_id.strip() else self._new_id("scene")
+            final_id = fm_id if isinstance(fm_id, str) and fm_id.strip() else self._new_id("manuscript")
             title = self._derive_import_title(front_matter.get("title"), body, entry.path)
             scene = Scene(
                 id=final_id,
@@ -443,12 +443,12 @@ class ManuscriptMixin:
 
     def _import_scene_entry_type(self, raw: object, schema: MetadataSchema) -> str:
         """The scene entry type to stamp on an imported file: keep the file's own
-        if it names a concrete scene type this schema knows, else `scene:scene`."""
+        if it names a concrete scene type this schema knows, else `manuscript:scene`."""
         if isinstance(raw, str):
             candidate = schema.entry_types.get(raw)
-            if candidate is not None and candidate.kind == "scene" and not candidate.abstract:
+            if candidate is not None and candidate.kind == "manuscript" and not candidate.abstract:
                 return raw
-        return "scene:scene"
+        return "manuscript:scene"
 
     def _derive_import_title(self, raw_title: object, body: str, path: Path) -> str:
         """Title for an imported scene: its front-matter title, else its first
@@ -469,15 +469,15 @@ class ManuscriptMixin:
     def read_scene(self, scene_id: str) -> Scene:
         index = self._build_node_index()
         index_entry = index.by_id.get(scene_id)
-        if index_entry is not None and index_entry.kind == "scene":
+        if index_entry is not None and index_entry.kind == "manuscript":
             path = index_entry.path
         else:
-            path = self._path_for_node_id(scene_id, "scene")
+            path = self._path_for_node_id(scene_id, "manuscript")
         front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
         node_id = self._node_id_for_path(path, front_matter)
         title = str(front_matter.get("title") or node_id)
         status = str(front_matter.get("status") or "draft")
-        raw_entry_type = front_matter.get("entry_type") or "scene:scene"
+        raw_entry_type = front_matter.get("entry_type") or "manuscript:scene"
         if not isinstance(raw_entry_type, str):
             raise ProjectServiceError(f"Scene {node_id} has invalid entry_type; it must be text.", 422)
         entry_type = raw_entry_type
@@ -509,7 +509,7 @@ class ManuscriptMixin:
         # work resolves its scope here rather than letting the snapshot store
         # read ambient state (ADR-0045).
         root = self._require_project()
-        path = self._path_for_node_id(scene_id, "scene")
+        path = self._path_for_node_id(scene_id, "manuscript")
         front_matter = self._read_front_matter_only(path, strict=True)
         node_id = self._node_id_for_path(path, front_matter)
         current_revision = self._revision(path)
@@ -525,7 +525,7 @@ class ManuscriptMixin:
         # nodes (lore); here L is always the resolution scope.
         schema = self.read_metadata_schema()
         metadata = self._normalise_metadata(request.metadata, path)
-        metadata = self._canonicalise_metadata_tags(metadata, schema, kind="scene", entry_type=request.entry_type)
+        metadata = self._canonicalise_metadata_tags(metadata, schema, kind="manuscript", entry_type=request.entry_type)
 
         scene = Scene(
             id=node_id,
@@ -564,7 +564,7 @@ class ManuscriptMixin:
 
     def delete_scene(self, scene_id: str) -> StructureDocument:
         root = self._require_project()  # see delete_structure_node (#381)
-        path = self._path_for_node_id(scene_id, "scene")
+        path = self._path_for_node_id(scene_id, "manuscript")
         node_id = self._node_id_for_path(path)  # read the id before the unlink
         self._delete_node_file(path)  # unlink + un-shadow the memo (#392)
         # A scene and its snapshots are one unit of deletion (ADR-0043): a
@@ -582,7 +582,7 @@ class ManuscriptMixin:
         return self._read_structure(root)
 
     def _is_leaf_node(self, node: StructureNode) -> bool:
-        return node.type == "scene:scene"
+        return node.type == "manuscript:scene"
 
     def _first_container(self, node: StructureNode) -> StructureNode:
         if not self._is_leaf_node(node):

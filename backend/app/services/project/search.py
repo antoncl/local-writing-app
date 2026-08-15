@@ -48,7 +48,7 @@ class SearchMixin:
                 if pattern is None or pattern.search(item.text):
                     hits.append(
                         SearchHit(
-                            kind="scene" if item.scene_id else "project",
+                            kind="manuscript" if item.scene_id else "project",
                             file_id=item.scene_id or "project",
                             path=f"{scene_paths.get(item.scene_id, 'Project')} TODO" if item.scene_id else "Project TODO",
                             line=1,
@@ -64,7 +64,7 @@ class SearchMixin:
                 if pattern is None or pattern.search(f"{todo.note} {todo.text}"):
                     hits.append(
                         SearchHit(
-                            kind="scene",
+                            kind="manuscript",
                             file_id=todo.scene_id,
                             path=todo.scene_path,
                             line=todo.line,
@@ -82,7 +82,7 @@ class SearchMixin:
                     scene_id = self._node_id_for_path(path, front_matter)
                     title = str(front_matter.get("title") or scene_id)
                     status = str(front_matter.get("status") or "draft")
-                    entry_type = str(front_matter.get("entry_type") or "scene:scene")
+                    entry_type = str(front_matter.get("entry_type") or "manuscript:scene")
                     metadata = self._resolve_reference_titles(
                         self._normalise_metadata(front_matter.get("metadata"), path),
                         entry_type,
@@ -99,7 +99,7 @@ class SearchMixin:
                         if pattern.search(value):
                             hits.append(
                                 SearchHit(
-                                    kind="scene",
+                                    kind="manuscript",
                                     file_id=scene_id,
                                     path=f"{scene_paths.get(scene_id, str(path.relative_to(root)))} metadata",
                                     line=1,
@@ -110,7 +110,7 @@ class SearchMixin:
                         if pattern.search(line):
                             hits.append(
                                 SearchHit(
-                                    kind="scene",
+                                    kind="manuscript",
                                     file_id=scene_id,
                                     path=scene_paths.get(scene_id, str(path.relative_to(root))),
                                     line=index,

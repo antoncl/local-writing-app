@@ -249,7 +249,7 @@ class SnapshotDiffMixin:
         make the compare view fail exactly when it is most wanted.
         """
         schema = self.read_metadata_schema()
-        entry_type = str(front_matter.get("entry_type") or "scene:scene")
+        entry_type = str(front_matter.get("entry_type") or "manuscript:scene")
         metadata = self._normalise_metadata(front_matter.get("metadata"), path)
         metadata = self._strip_unknown_metadata_fields(metadata, entry_type, schema)
         metadata = self._strip_dangling_references(metadata, schema, self._build_node_index())

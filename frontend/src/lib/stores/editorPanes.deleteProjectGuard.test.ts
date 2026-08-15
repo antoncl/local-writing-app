@@ -47,7 +47,7 @@ describe("editorPanes delete guard for the project node (#750)", () => {
     editorPanes.panes = [
       {
         ...createEmptyEditorPane("pane_scene"),
-        document: { type: "scene" as const, id: "scene_1" },
+        document: { type: "manuscript" as const, id: "scene_1" },
         scene: sceneStub("scene_1", "Chapter One"),
       },
     ];

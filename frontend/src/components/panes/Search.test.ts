@@ -19,7 +19,7 @@ vi.mock("@/lib/api", () => ({ api: { search: vi.fn() } }));
 const run = (action: () => Promise<void>) => action().then(() => true);
 
 function hit(path: string, line: number, excerpt: string): SearchHit {
-  return { kind: "scene", file_id: `f_${path}`, path, line, excerpt };
+  return { kind: "manuscript", file_id: `f_${path}`, path, line, excerpt };
 }
 
 beforeEach(() => {

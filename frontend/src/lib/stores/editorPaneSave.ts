@@ -64,7 +64,7 @@ export async function refreshAfterSave(host: SaveRefreshHost, args: SaveRefreshA
     await refreshTodos();
     // Embedded (in-prose) todos are a rebuildable index over scene bodies;
     // a scene save may add/remove/edit markers, so re-scan (GH #45).
-    if (documentKind === "scene" || documentKind === "structure_node") {
+    if (documentKind === "manuscript" || documentKind === "structure_node") {
       await refreshEmbeddedTodos();
       // Mutations are likewise an index over scene bodies (#63, ADR-0014):
       // a save that touches a marker-bearing scene (before or after the

@@ -295,10 +295,10 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
     // lore-scoped one — offer_on keeps the lore prompts off the scene menu.
     renderPanel(
       [
-        chatPrompt("p-sum", "Summarize scene", ["scene:scene"]),
+        chatPrompt("p-sum", "Summarize scene", ["manuscript:scene"]),
         chatPrompt("p-lore", "Revise entry", ["lore:base"]),
       ],
-      "scene:scene",
+      "manuscript:scene",
     );
     await fireEvent.click(screen.getByRole("button", { name: /New/ }));
     await tick();

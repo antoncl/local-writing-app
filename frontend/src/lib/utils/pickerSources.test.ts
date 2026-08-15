@@ -15,13 +15,13 @@ describe("pickerSources", () => {
     it("reduces degenerate sources and ignores view-refs", () => {
       const config: NodePickerConfig = {
         sources: [
-          { kind: "scene" },
+          { kind: "manuscript" },
           { kind: "lore", expr: { type: "lore:character" } },
           { view: "act-2-cast" },
         ],
       };
       expect(pickerMembership(config)).toEqual({
-        kinds: ["scene", "lore"],
+        kinds: ["manuscript", "lore"],
         entryTypes: { lore: ["lore:character"] },
       });
     });
@@ -30,11 +30,11 @@ describe("pickerSources", () => {
   describe("membershipToSources", () => {
     it("encodes kind-only, single-leaf, and union-of-leaves shapes", () => {
       const sources = membershipToSources(
-        ["scene"],
+        ["manuscript"],
         { lore: ["lore:character", "lore:location"] },
       );
       expect(sources).toEqual([
-        { kind: "scene" },
+        { kind: "manuscript" },
         { kind: "lore", expr: { union: [{ type: "lore:character" }, { type: "lore:location" }] } },
       ]);
     });
@@ -75,8 +75,8 @@ describe("pickerSources", () => {
     });
 
     it("drops nothing but also adds nothing when there are no refs to preserve", () => {
-      const next = membershipToSources(["scene"], {}, [{ kind: "scene" }]);
-      expect(next).toEqual([{ kind: "scene" }]);
+      const next = membershipToSources(["manuscript"], {}, [{ kind: "manuscript" }]);
+      expect(next).toEqual([{ kind: "manuscript" }]);
     });
 
     it("preserves a non-degenerate inline expr source the tree can't represent (#94)", () => {
@@ -93,12 +93,12 @@ describe("pickerSources", () => {
 
     it("preserves multiple view-refs in order", () => {
       const existing: ViewSource[] = [
-        { kind: "scene" },
+        { kind: "manuscript" },
         { view: "a" },
         { view: "b" },
       ];
-      const next = membershipToSources(["scene"], {}, existing);
-      expect(next).toEqual([{ kind: "scene" }, { view: "a" }, { view: "b" }]);
+      const next = membershipToSources(["manuscript"], {}, existing);
+      expect(next).toEqual([{ kind: "manuscript" }, { view: "a" }, { view: "b" }]);
     });
   });
 });

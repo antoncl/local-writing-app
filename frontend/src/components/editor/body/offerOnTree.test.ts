@@ -7,7 +7,7 @@ import { offerOnRows, selectTarget, deselectTarget } from "./offerOnTree";
 import type { MetadataSchema } from "@/lib/types";
 
 // A realistic host schema: lore has an abstract root + concrete leaves + a
-// deprecated one; scene and plot each have their host types (scene:scene /
+// deprecated one; scene and plot each have their host types (manuscript:scene /
 // plot:card / plot:plotline — plotlines joined the hosts in S7b) alongside
 // NON-host siblings (act/chapter, board/template) that must never surface. Plus
 // non-host kinds (prompt/view).
@@ -19,9 +19,9 @@ const SCHEMA = {
     "lore:item": { name: "Item", kind: "lore", parent: "lore:base", fields: [] },
     "lore:location": { name: "Location", kind: "lore", parent: "lore:base", fields: [] },
     "lore:old": { name: "Old", kind: "lore", parent: "lore:base", deprecated: true, fields: [] },
-    "scene:scene": { name: "Scene", kind: "scene", fields: [] },
-    "scene:act": { name: "Act", kind: "scene", fields: [] },
-    "scene:chapter": { name: "Chapter", kind: "scene", fields: [] },
+    "manuscript:scene": { name: "Scene", kind: "manuscript", fields: [] },
+    "manuscript:act": { name: "Act", kind: "manuscript", fields: [] },
+    "manuscript:chapter": { name: "Chapter", kind: "manuscript", fields: [] },
     "plot:card": { name: "Card", kind: "plot", fields: [] },
     "plot:board": { name: "Board", kind: "plot", fields: [] },
     "plot:plotline": { name: "Plotline", kind: "plot", fields: [] },
@@ -37,7 +37,7 @@ const stateOf = (offerOn: string[], id: string) =>
   offerOnRows(SCHEMA, offerOn).find((r) => r.id === id)?.state;
 
 describe("offerOnRows — host filter (#903)", () => {
-  it("offers all lore plus only the scene:scene / plot:card / plot:plotline subtrees", () => {
+  it("offers all lore plus only the manuscript:scene / plot:card / plot:plotline subtrees", () => {
     // The abstract lore root is kept (the natural 'all lore' target); the
     // deprecated lore type and every non-host sibling / kind are gone. plot:plotline
     // joined the hosts in S7b (revise-plotline), a sibling section after plot:card.
@@ -46,7 +46,7 @@ describe("offerOnRows — host filter (#903)", () => {
       "lore:character",
       "lore:item",
       "lore:location",
-      "scene:scene",
+      "manuscript:scene",
       "plot:card",
       "plot:plotline",
     ]);
@@ -54,7 +54,7 @@ describe("offerOnRows — host filter (#903)", () => {
 
   it("drops the dead targets that the coarse kind filter used to show", () => {
     const shown = new Set(ids([]));
-    for (const dead of ["scene:act", "scene:chapter", "plot:board", "plot:template", "lore:old"]) {
+    for (const dead of ["manuscript:act", "manuscript:chapter", "plot:board", "plot:template", "lore:old"]) {
       expect(shown.has(dead)).toBe(false);
     }
   });
@@ -70,7 +70,7 @@ describe("offerOnRows — host filter (#903)", () => {
     const rows = offerOnRows(SCHEMA, []);
     expect(rows.find((r) => r.id === "lore:base")?.depth).toBe(0);
     expect(rows.find((r) => r.id === "lore:character")?.depth).toBe(1);
-    expect(rows.find((r) => r.id === "scene:scene")?.depth).toBe(0);
+    expect(rows.find((r) => r.id === "manuscript:scene")?.depth).toBe(0);
   });
 
   it("no schema → nothing to offer", () => {
@@ -87,7 +87,7 @@ describe("offerOnRows — selection state", () => {
     expect(stateOf(["lore:base"], "lore:base")).toBe("checked");
     expect(stateOf(["lore:base"], "lore:character")).toBe("covered");
     expect(stateOf(["lore:base"], "lore:location")).toBe("covered");
-    expect(stateOf(["lore:base"], "scene:scene")).toBe("unchecked");
+    expect(stateOf(["lore:base"], "manuscript:scene")).toBe("unchecked");
   });
 
   it("a directly-selected leaf leaves its parent indeterminate", () => {
@@ -107,10 +107,10 @@ describe("selectTarget / deselectTarget", () => {
   });
 
   it("selecting the same id twice is idempotent", () => {
-    expect(selectTarget(["scene:scene"], SCHEMA, "scene:scene")).toEqual(["scene:scene"]);
+    expect(selectTarget(["manuscript:scene"], SCHEMA, "manuscript:scene")).toEqual(["manuscript:scene"]);
   });
 
   it("deselect removes exactly that id", () => {
-    expect(deselectTarget(["lore:base", "scene:scene"], "lore:base")).toEqual(["scene:scene"]);
+    expect(deselectTarget(["lore:base", "manuscript:scene"], "lore:base")).toEqual(["manuscript:scene"]);
   });
 });

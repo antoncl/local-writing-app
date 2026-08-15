@@ -125,7 +125,7 @@
 
   let {
     scene = null,
-    documentKind = "scene",
+    documentKind = "manuscript",
     promptEntries = [],
     structure = null,
     researchStructure = null,
@@ -212,7 +212,7 @@
   // third axis on a lore card is exactly the L-not-a-grid problem ADR-0042 had
   // to settle.
   const snapshots = new SnapshotStripController();
-  let snapshotParked = $derived(documentKind === "scene" && snapshots.parked !== null);
+  let snapshotParked = $derived(documentKind === "manuscript" && snapshots.parked !== null);
 
   $effect(() => {
     snapshots.flushScene = onFlushScene ?? null;
@@ -234,7 +234,7 @@
       // the author sees underlined, not a rescan.
       dynamic_context: scene?.id ? implicitContextFor(scene.id) : undefined,
     });
-    return snapshots.load(documentKind === "scene" ? (scene?.id ?? null) : null);
+    return snapshots.load(documentKind === "manuscript" ? (scene?.id ?? null) : null);
   });
 
   // The rail flips with the body (§F). Kept apart from `effectiveOverrides`:
@@ -412,11 +412,11 @@
   function defaultEntryType() {
     if (documentKind === "lore") return "lore:note";
     if (documentKind === "chat") return "chat:chat_session";
-    return "scene:scene";
+    return "manuscript:scene";
   }
 
   function defaultStatus() {
-    return documentKind === "scene" ? "draft" : "";
+    return documentKind === "manuscript" ? "draft" : "";
   }
 
   function documentStatus(document: EditableDocument) {
@@ -494,7 +494,7 @@
   // admits (see ConversationsPanel).
   const patchLoopKind = $derived(
     documentKind === "lore" ||
-      documentKind === "scene" ||
+      documentKind === "manuscript" ||
       documentKind === "plot_card" ||
       documentKind === "plotline",
   );
@@ -505,7 +505,7 @@
   // admit this node's kind, and hides ＋New when none resolves.
   const conversationsKind = $derived(
     documentKind === "lore" ||
-      documentKind === "scene" ||
+      documentKind === "manuscript" ||
       documentKind === "plot_card" ||
       documentKind === "plotline",
   );
@@ -710,7 +710,7 @@
     metadataSchema && entryType ? effectiveFieldLabel(metadataSchema, entryType, "title") : "Title",
   );
   // structure_node has no schema kind of its own — Acts/Chapters share
-  // kind="scene" in the metadata schema. Reuse the scene entry types so
+  // kind="manuscript" in the metadata schema. Reuse the manuscript entry types so
   // the type selector still lists Act/Chapter/Scene/etc.
   // The entry-type control's options. For most kinds `documentKind` IS the schema
   // kind, so we list that kind's concrete sub-types (a switchable variant set —
@@ -731,7 +731,7 @@
     OWN_TYPE_ONLY.has(documentKind)
       ? Object.entries(metadataSchema?.entry_types ?? {}).filter(([typeId]) => typeId === entryType)
       : Object.entries(metadataSchema?.entry_types ?? {}).filter(
-          ([, definition]) => definition.kind === (documentKind === "structure_node" ? "scene" : documentKind) && !definition.abstract,
+          ([, definition]) => definition.kind === (documentKind === "structure_node" ? "manuscript" : documentKind) && !definition.abstract,
         ),
   );
   let activeEntryType = $derived(metadataSchema?.entry_types[entryType] ?? metadataSchema?.entry_types[defaultEntryType()]);
@@ -911,12 +911,12 @@
         {recentlySaved}
         {onAuthoringLayerChange}
       />
-      {#if todoStatusHint || (documentKind === "scene" && (lastInvocationCostUsd != null || characterCostRowsView.length > 0)) || rollupCostKind}
+      {#if todoStatusHint || (documentKind === "manuscript" && (lastInvocationCostUsd != null || characterCostRowsView.length > 0)) || rollupCostKind}
         <div class="editor-hint">
           {#if todoStatusHint}
             <span class="editor-hint-text">{todoStatusHint}</span>
           {/if}
-          {#if documentKind === "scene"}
+          {#if documentKind === "manuscript"}
             <div class="editor-hint-costs">
               {#each characterCostRowsView as row (row.id)}
                 <span
@@ -1113,7 +1113,7 @@
 
   <!-- Foot-docked, and only on scenes: the scrubber's slot is free here, so
        there is no competition for the dock and no mode to collide with. -->
-  {#if documentKind === "scene" && scene && bodyShape === "prose"}
+  {#if documentKind === "manuscript" && scene && bodyShape === "prose"}
     <SnapshotStrip strip={snapshots} />
   {/if}
 

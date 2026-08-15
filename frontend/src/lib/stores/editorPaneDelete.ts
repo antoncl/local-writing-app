@@ -40,7 +40,7 @@ export interface DeletePaneHost {
 export async function requestDeleteScene(host: DeletePaneHost, id: string): Promise<void> {
   const pane = host.panes.find((candidate) => candidate.id === id);
   if (!pane?.scene) return;
-  const documentKind = pane.document?.type ?? "scene";
+  const documentKind = pane.document?.type ?? "manuscript";
   // The project window must not delete the project's own `project.md` (#750) —
   // refuse it as the guard, not just via the disabled button (a stale ref or
   // future caller would otherwise fall through to deleteScene).
@@ -59,11 +59,11 @@ export async function requestDeleteScene(host: DeletePaneHost, id: string): Prom
   // wording, as before). Maps rather than nested ternaries so a new kind is one
   // line in each place, not another ternary rung.
   const fileLabel =
-    ({ scene: "scene", lore: "entry", research: "note", view: "view", plot_template: "template", plot_card: "card", plotline: "plotline" } as Record<string, string>)[
+    ({ manuscript: "scene", lore: "entry", research: "note", view: "view", plot_template: "template", plot_card: "card", plotline: "plotline" } as Record<string, string>)[
       documentKind
     ] ?? "prompt";
   const titleLabel =
-    ({ scene: "Delete Scene", lore: "Delete Entry", research: "Delete Note", view: "Delete View", plot_template: "Delete Template", plot_card: "Delete Card", plotline: "Delete Plotline" } as Record<string, string>)[
+    ({ manuscript: "Delete Scene", lore: "Delete Entry", research: "Delete Note", view: "Delete View", plot_template: "Delete Template", plot_card: "Delete Card", plotline: "Delete Plotline" } as Record<string, string>)[
       documentKind
     ] ?? "Delete Prompt";
   const baseMessage = `Delete "${sceneTitle}"? This removes the ${fileLabel} file from the project.`;
@@ -85,7 +85,7 @@ export async function requestDeleteScene(host: DeletePaneHost, id: string): Prom
 async function deleteScene(host: DeletePaneHost, id: string): Promise<void> {
   const pane = host.panes.find((candidate) => candidate.id === id);
   if (!pane?.scene) return;
-  const documentKind = pane.document?.type ?? "scene";
+  const documentKind = pane.document?.type ?? "manuscript";
   const sceneTitle = pane.scene.title;
   if (documentKind === "lore") {
     setLoreEntries((await api.deleteLoreEntry(pane.scene.id)).entries);

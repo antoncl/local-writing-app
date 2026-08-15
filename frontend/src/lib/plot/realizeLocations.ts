@@ -16,7 +16,7 @@ export type PlotRealizeLocation = {
 };
 
 // Every non-leaf node of the manuscript, in reading (pre-order) order. A leaf is
-// a scene (`type === "scene:scene"`, mirroring the backend's `_is_leaf_node`), so
+// a scene (`type === "manuscript:scene"`, mirroring the backend's `_is_leaf_node`), so
 // only acts/chapters — whatever container types the project declares — are offered.
 // The root is skipped: a scene directly under it is "homeless", not a real
 // placement. A null structure (not yet loaded) yields an empty roster, and the
@@ -26,7 +26,7 @@ export function realizeLocations(structure: StructureDocument | null): PlotReali
   const out: PlotRealizeLocation[] = [];
   const walk = (node: StructureNode, depth: number): void => {
     for (const child of node.children ?? []) {
-      if (child.type === "scene:scene") continue; // a leaf scene — never a container
+      if (child.type === "manuscript:scene") continue; // a leaf scene — never a container
       out.push({ id: child.id, title: child.title, depth });
       walk(child, depth + 1);
     }

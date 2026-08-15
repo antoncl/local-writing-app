@@ -749,7 +749,7 @@ class ContentDiffAssemblyTests(unittest.TestCase):
 
                 status="draft",
 
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
 
                 metadata=metadata or {},
 
@@ -996,7 +996,7 @@ class ContentDiffAssemblyTests(unittest.TestCase):
         file format is the contract — so the interesting comparisons are the
         ones where a key is absent on one side.
         """
-        path = self.service._path_for_node_id(self.scene_id, "scene")
+        path = self.service._path_for_node_id(self.scene_id, "manuscript")
         kept = [
             line
             for line in path.read_text(encoding="utf-8").splitlines()
@@ -1047,7 +1047,7 @@ class ContentDiffAssemblyTests(unittest.TestCase):
         exist only inside a snapshot — the file was written when the schema, or
         the referenced node, still allowed them.
         """
-        path = self.service._path_for_node_id(self.scene_id, "scene")
+        path = self.service._path_for_node_id(self.scene_id, "manuscript")
         out = []
         for existing in path.read_text(encoding="utf-8").splitlines():
             out.append(existing)

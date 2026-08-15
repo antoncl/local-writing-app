@@ -132,7 +132,7 @@ describe("TagPicker", () => {
     await fireEvent.click(screen.getByTitle("Add known tags"));
     expect(screen.getByText("arc")).toBeInTheDocument();
     // Same open popover, a scene node now: the out-of-scope tag drops from the roster.
-    await rerender({ ...props, scopeKind: "scene", scopeEntryType: "" });
+    await rerender({ ...props, scopeKind: "manuscript", scopeEntryType: "" });
     expect(screen.queryByText("arc")).not.toBeInTheDocument();
   });
 

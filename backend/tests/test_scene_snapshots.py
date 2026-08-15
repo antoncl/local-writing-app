@@ -45,7 +45,7 @@ class SnapshotTestCase(unittest.TestCase):
         response = self.client.post("/api/scenes", json={"title": "The Tide"})
         self.assertEqual(response.status_code, 200, response.text)
         self.scene_id = response.json()["id"]
-        self.scene_path = self.service._path_for_node_id(self.scene_id, "scene")
+        self.scene_path = self.service._path_for_node_id(self.scene_id, "manuscript")
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
@@ -55,10 +55,10 @@ class SnapshotTestCase(unittest.TestCase):
     def _save(self, body: str) -> None:
         self.service.save_scene(
             self.scene_id,
-            SaveSceneRequest(title="The Tide", body=body, status="draft", entry_type="scene:scene"),
+            SaveSceneRequest(title="The Tide", body=body, status="draft", entry_type="manuscript:scene"),
         )
         # The scene file may have been renamed by the save; re-resolve.
-        self.scene_path = self.service._path_for_node_id(self.scene_id, "scene")
+        self.scene_path = self.service._path_for_node_id(self.scene_id, "manuscript")
 
     def _age_past_the_gap(self) -> None:
         """Make the last save look like it happened before the session gap."""
@@ -349,7 +349,7 @@ class ViewTests(SnapshotTestCase):
         self.service.save_scene(
             self.scene_id,
             SaveSceneRequest(
-                title="The Tide", body="Out.", status="revised", entry_type="scene:scene"
+                title="The Tide", body="Out.", status="revised", entry_type="manuscript:scene"
             ),
         )
         record = self.service.capture_snapshot(self.scene_id)
@@ -371,7 +371,7 @@ class RestoreTests(SnapshotTestCase):
         record = self.service.capture_snapshot(self.scene_id)
 
         self.service.restore_snapshot(self.scene_id, record.id)
-        self.assertEqual(self.service._path_for_node_id(self.scene_id, "scene").read_bytes(), before)
+        self.assertEqual(self.service._path_for_node_id(self.scene_id, "manuscript").read_bytes(), before)
 
     def test_restore_puts_the_snapshot_back_over_a_changed_scene(self) -> None:
         self._save("The tide went out.")
@@ -419,7 +419,7 @@ class RestoreTests(SnapshotTestCase):
         record = self.service.capture_snapshot(self.scene_id)
         self.service.save_scene(
             self.scene_id,
-            SaveSceneRequest(title="A Different Title", body="x", status="draft", entry_type="scene:scene"),
+            SaveSceneRequest(title="A Different Title", body="x", status="draft", entry_type="manuscript:scene"),
         )
         node_id = self._structure_node_for_scene()
         self.assertEqual(
@@ -438,10 +438,10 @@ class RestoreTests(SnapshotTestCase):
 class DeletionTests(SnapshotTestCase):
     def _chapter_id(self) -> str:
         for node in self.service.read_structure().root.children:
-            if node.type == "scene:chapter":
+            if node.type == "manuscript:chapter":
                 return node.id
         self.service.create_structure_node(
-            CreateStructureNodeRequest(title="Chapter One", entry_type="scene:chapter")
+            CreateStructureNodeRequest(title="Chapter One", entry_type="manuscript:chapter")
         )
         return self._chapter_id()
 
@@ -539,7 +539,7 @@ class RouteTests(SnapshotTestCase):
         base = f"/api/scenes/{self.scene_id}/snapshots"
         self.service.save_scene(
             self.scene_id,
-            SaveSceneRequest(title="The Tide", body="The tide went out.", status="draft", entry_type="scene:scene"),
+            SaveSceneRequest(title="The Tide", body="The tide went out.", status="draft", entry_type="manuscript:scene"),
         )
 
         captured = self.client.post(base)
@@ -553,7 +553,7 @@ class RouteTests(SnapshotTestCase):
 
         self.service.save_scene(
             self.scene_id,
-            SaveSceneRequest(title="The Tide", body="Rewritten.", status="draft", entry_type="scene:scene"),
+            SaveSceneRequest(title="The Tide", body="Rewritten.", status="draft", entry_type="manuscript:scene"),
         )
         viewed = self.client.get(f"{base}/{snapshot_id}")
         self.assertEqual(viewed.status_code, 200, viewed.text)
@@ -773,12 +773,12 @@ class Slice4RouteTests(SnapshotTestCase):
         self._age_past_the_gap()
         self.service.save_scene(
             self.scene_id,
-            SaveSceneRequest(title="The Tide", body="Morning.", status="draft", entry_type="scene:scene"),
+            SaveSceneRequest(title="The Tide", body="Morning.", status="draft", entry_type="manuscript:scene"),
         )
         self._age_past_the_gap()
         self.service.save_scene(
             self.scene_id,
-            SaveSceneRequest(title="The Tide", body="Afternoon.", status="draft", entry_type="scene:scene"),
+            SaveSceneRequest(title="The Tide", body="Afternoon.", status="draft", entry_type="manuscript:scene"),
         )
         auto = self._snapshots()[-1]
         self.assertEqual(auto.retention, "thinned")

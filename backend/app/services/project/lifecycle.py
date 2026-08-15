@@ -201,12 +201,12 @@ class ProjectLifecycleMixin:
         self._write_yaml(root / "metadata.schema.yaml", self._empty_metadata_schema())
         self._write_yaml(root / "tags.yaml", {"tags": []})
         initial_scene = Scene(
-            id=self._new_id("scene"),
+            id=self._new_id("manuscript"),
             title="Untitled Scene",
             body="",
             revision="",
             status="draft",
-            entry_type="scene:scene",
+            entry_type="manuscript:scene",
             metadata={},
         )
         self._write_scene_file(self._filepath_for_new_node(root / "scenes", initial_scene.title), initial_scene)
@@ -215,7 +215,7 @@ class ProjectLifecycleMixin:
         TreeStructureService(root, MANUSCRIPT_TREE_CONFIG).initialize(
             leaf_node={
                 "id": self._new_id("node"),
-                "type": "scene:scene",
+                "type": "manuscript:scene",
                 "title": initial_scene.title,
                 "scene_id": initial_scene.id,
                 "children": [],
@@ -291,8 +291,8 @@ class ProjectLifecycleMixin:
             },
             "manuscript_structure": {
                 "container_types": [
-                    {"type": "scene:act", "label": "Act"},
-                    {"type": "scene:chapter", "label": "Chapter"},
+                    {"type": "manuscript:act", "label": "Act"},
+                    {"type": "manuscript:chapter", "label": "Chapter"},
                 ]
             },
         }
@@ -947,7 +947,7 @@ class ProjectLifecycleMixin:
         except (ProjectServiceError, ValueError) as exc:
             errors.append(f"Invalid metadata schema: {exc}")
 
-        scene_ids = {entry.id for entry in node_index.by_id.values() if entry.kind == "scene"}
+        scene_ids = {entry.id for entry in node_index.by_id.values() if entry.kind == "manuscript"}
         referenced = TreeStructureService.collect_leaf_ids(self.read_structure().root)
 
         for scene_id in sorted(referenced - scene_ids):
@@ -955,19 +955,19 @@ class ProjectLifecycleMixin:
         # Loose scenes (files on disk no node references) are NOT reported here
         # anymore (#635) — they are an import offer, not an integrity problem.
         # `list_loose_scenes` enumerates them for the Import documents surface.
-        for entry in sorted((entry for entry in node_index.by_id.values() if entry.kind == "scene"), key=lambda item: item.id):
+        for entry in sorted((entry for entry in node_index.by_id.values() if entry.kind == "manuscript"), key=lambda item: item.id):
             scene_id = entry.id
             path = entry.path
             try:
                 front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
-                entry_type = front_matter.get("entry_type", "scene:scene")
+                entry_type = front_matter.get("entry_type", "manuscript:scene")
                 if entry_type is not None and not isinstance(entry_type, str):
                     errors.append(f"Scene {scene_id} has invalid entry_type; it must be text.")
-                    entry_type = "scene:scene"
+                    entry_type = "manuscript:scene"
                 metadata = self._normalise_metadata(front_matter.get("metadata"), path)
                 status = str(front_matter.get("status") or "draft")
                 if metadata_schema:
-                    errors.extend(self._validate_scene_metadata(scene_id, str(entry_type or "scene:scene"), status, metadata, metadata_schema, node_index))
+                    errors.extend(self._validate_scene_metadata(scene_id, str(entry_type or "manuscript:scene"), status, metadata, metadata_schema, node_index))
                     # Mutation-value issues are advisory (never block a save), so
                     # they surface as warnings, not errors.
                     warnings.extend(self._validate_scene_mutations(scene_id, body, metadata_schema, node_index))
@@ -1052,7 +1052,7 @@ class ProjectLifecycleMixin:
         root = self._require_project()
         self._restore_project_node_file(root)
         node_index = self._build_node_index(root)
-        scene_ids = {entry.id for entry in node_index.by_id.values() if entry.kind == "scene"}
+        scene_ids = {entry.id for entry in node_index.by_id.values() if entry.kind == "manuscript"}
         anchors_by_scene = self._read_scene_todo_anchors(scene_ids)
         todos = self.read_todos()
 

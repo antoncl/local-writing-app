@@ -416,7 +416,7 @@ class UpsertMetadataFieldRequest(BaseModel):
     layer_id: str = Field(min_length=1)
     field_id: str = Field(min_length=1)
     field: MetadataFieldDefinition
-    entry_type: str = "scene:scene"
+    entry_type: str = "manuscript:scene"
     allow_existing: bool = True
     # Explicit old-value → new-value rename map for select/multi_select
     # options, computed client-side keyed by each option's original value.
@@ -439,18 +439,18 @@ class DeleteMetadataEntryTypeRequest(BaseModel):
 class MoveMetadataFieldRequest(BaseModel):
     field_id: str = Field(min_length=1)
     target_layer_id: str = Field(min_length=1)
-    entry_type: str = "scene:scene"
+    entry_type: str = "manuscript:scene"
 
 
 class RenameMetadataFieldRequest(BaseModel):
     old_field_id: str = Field(min_length=1)
     new_field_id: str = Field(min_length=1)
-    entry_type: str = "scene:scene"
+    entry_type: str = "manuscript:scene"
 
 
 class DeleteMetadataFieldRequest(BaseModel):
     field_id: str = Field(min_length=1)
-    entry_type: str = "scene:scene"
+    entry_type: str = "manuscript:scene"
 
 
 class UpsertMetadataGroupRequest(BaseModel):

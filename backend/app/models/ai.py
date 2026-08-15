@@ -422,10 +422,10 @@ class ChatSessionMessage(BaseModel):
 class ChatSessionContextItem(BaseModel):
     """A context attachment carried with the chat across turns.
 
-    `kind` identifies the source — "scene" / "lore" / "snippet" point at an
+    `kind` identifies the source — "manuscript" / "lore" / "snippet" point at an
     entry by id; "preset" carries a builtin preset name (e.g. "full_outline").
     """
-    kind: Literal["scene", "lore", "snippet", "preset"]
+    kind: Literal["manuscript", "lore", "snippet", "preset"]
     id: str
     entry_type: str = ""
     title: str = ""

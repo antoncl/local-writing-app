@@ -503,9 +503,9 @@ describe("scalar fields compare whole, collections tokenize (#202)", () => {
 // characters via `pov`; a couple of tag-carrying nodes for value projection.
 describe("parameterized views (#184: bindings, field_of)", () => {
   const REFS: EvalNode[] = [
-    { id: "s1", entry_type: "scene:scene", title: "Scene 1", metadata: { pov: "bob", status: "draft" } },
-    { id: "s2", entry_type: "scene:scene", title: "Scene 2", metadata: { pov: "alice", status: "revised" } },
-    { id: "s3", entry_type: "scene:scene", title: "Scene 3", metadata: { pov: "bob", status: "draft" } },
+    { id: "s1", entry_type: "manuscript:scene", title: "Scene 1", metadata: { pov: "bob", status: "draft" } },
+    { id: "s2", entry_type: "manuscript:scene", title: "Scene 2", metadata: { pov: "alice", status: "revised" } },
+    { id: "s3", entry_type: "manuscript:scene", title: "Scene 3", metadata: { pov: "bob", status: "draft" } },
     { id: "bob", entry_type: "lore:character", title: "Bob", metadata: { tags: ["hero"] } },
     { id: "alice", entry_type: "lore:character", title: "Alice", metadata: { tags: ["hero", "villain"] } },
   ];
@@ -513,15 +513,15 @@ describe("parameterized views (#184: bindings, field_of)", () => {
     evaluateView(spec, REFS, ctx).nodes.map((n) => n.id);
 
   it("bound promoted formal: scenes whose pov ∈ {bob}", () => {
-    const spec: ViewSpec = { kind: "scene", expr: { field: { key: "pov", op: "overlap", value: { var: "POV" } } } };
+    const spec: ViewSpec = { kind: "manuscript", expr: { field: { key: "pov", op: "overlap", value: { var: "POV" } } } };
     expect(evalIds(spec, { bindings: { POV: new Set(["bob"]) } })).toEqual(["s1", "s3"]);
   });
   it("bound formal accepts a multi-pick set (pov ∈ {bob, alice})", () => {
-    const spec: ViewSpec = { kind: "scene", expr: { field: { key: "pov", op: "overlap", value: { var: "POV" } } } };
+    const spec: ViewSpec = { kind: "manuscript", expr: { field: { key: "pov", op: "overlap", value: { var: "POV" } } } };
     expect(evalIds(spec, { bindings: { POV: ["bob", "alice"] } })).toEqual(["s1", "s2", "s3"]);
   });
   it("UNBOUND formal ⇒ predicate inactive (whole input passes through)", () => {
-    const spec: ViewSpec = { kind: "scene", expr: { field: { key: "pov", op: "overlap", value: { var: "POV" } } } };
+    const spec: ViewSpec = { kind: "manuscript", expr: { field: { key: "pov", op: "overlap", value: { var: "POV" } } } };
     expect(evalIds(spec, {})).toEqual(["s1", "s2", "s3", "bob", "alice"]);
   });
   // #198: an unbound formal is "no constraint" and must show EVERYTHING in a drop
@@ -530,26 +530,26 @@ describe("parameterized views (#184: bindings, field_of)", () => {
   it("UNBOUND formal in a DROP (difference.remove) ⇒ removes nothing (#198)", () => {
     // "exclude scenes whose pov ∈ {param}", param unset → drop nothing → all scenes.
     const spec: ViewSpec = {
-      kind: "scene",
-      expr: { difference: { keep: { type: "scene:scene" }, remove: { field: { key: "pov", op: "overlap", value: { var: "POV" } } } } },
+      kind: "manuscript",
+      expr: { difference: { keep: { type: "manuscript:scene" }, remove: { field: { key: "pov", op: "overlap", value: { var: "POV" } } } } },
     };
     expect(evalIds(spec, {})).toEqual(["s1", "s2", "s3"]);
   });
   it("BOUND formal in a DROP still subtracts (drop is live once picked)", () => {
     const spec: ViewSpec = {
-      kind: "scene",
-      expr: { difference: { keep: { type: "scene:scene" }, remove: { field: { key: "pov", op: "overlap", value: { var: "POV" } } } } },
+      kind: "manuscript",
+      expr: { difference: { keep: { type: "manuscript:scene" }, remove: { field: { key: "pov", op: "overlap", value: { var: "POV" } } } } },
     };
     expect(evalIds(spec, { bindings: { POV: ["bob"] } })).toEqual(["s2"]);
   });
   it("UNBOUND formal in a COMPLEMENT ⇒ whole universe (#198)", () => {
     // Drop off `All` lowers to complement(p) (viewGraph differenceBuilt); unset
     // param → complement of ∅ → everything, not universe − universe = ∅.
-    const spec: ViewSpec = { kind: "scene", expr: { complement: { field: { key: "pov", op: "overlap", value: { var: "POV" } } } } };
+    const spec: ViewSpec = { kind: "manuscript", expr: { complement: { field: { key: "pov", op: "overlap", value: { var: "POV" } } } } };
     expect(evalIds(spec, {})).toEqual(["s1", "s2", "s3", "bob", "alice"]);
   });
   it("BOUND formal in a COMPLEMENT excludes the matches", () => {
-    const spec: ViewSpec = { kind: "scene", expr: { complement: { field: { key: "pov", op: "overlap", value: { var: "POV" } } } } };
+    const spec: ViewSpec = { kind: "manuscript", expr: { complement: { field: { key: "pov", op: "overlap", value: { var: "POV" } } } } };
     // pov ∈ {bob} matches s1,s3 → complement is everything else.
     expect(evalIds(spec, { bindings: { POV: ["bob"] } })).toEqual(["s2", "bob", "alice"]);
   });
@@ -561,10 +561,10 @@ describe("parameterized views (#184: bindings, field_of)", () => {
     // is the intersect's identity (universe), so remove = draft-scenes and the
     // result is all-scenes − draft-scenes. (A global sign gave ∅ → kept everything.)
     const spec: ViewSpec = {
-      kind: "scene",
+      kind: "manuscript",
       expr: {
         difference: {
-          keep: { type: "scene:scene" },
+          keep: { type: "manuscript:scene" },
           remove: { intersect: [{ field: { key: "status", op: "overlap", value: "draft" } }, { field: { key: "pov", op: "overlap", value: { var: "POV" } } }] },
         },
       },
@@ -575,14 +575,14 @@ describe("parameterized views (#184: bindings, field_of)", () => {
     // "scenes that are revised OR pov∈{param}", param unset → just the revised set,
     // NOT every scene. (A global keep sign gave universe → union absorbed to all.)
     const spec: ViewSpec = {
-      kind: "scene",
+      kind: "manuscript",
       expr: { union: [{ field: { key: "status", op: "overlap", value: "revised" } }, { field: { key: "pov", op: "overlap", value: { var: "POV" } } }] },
     };
     expect(evalIds(spec, {})).toEqual(["s2"]);
   });
   it("BOUND formal in that union still contributes its matches", () => {
     const spec: ViewSpec = {
-      kind: "scene",
+      kind: "manuscript",
       expr: { union: [{ field: { key: "status", op: "overlap", value: "revised" } }, { field: { key: "pov", op: "overlap", value: { var: "POV" } } }] },
     };
     // Top-level union preserves OPERAND order (not roster order): revised {s2}
@@ -592,7 +592,7 @@ describe("parameterized views (#184: bindings, field_of)", () => {
   it("field_of on a reference field projects to a node-set (scenes → their povs)", () => {
     // field_of(scenes, pov) → the pov characters, deduped. Used standalone as
     // membership: the projected ids that exist in the roster (bob, alice).
-    const spec: ViewSpec = { kind: "scene", expr: { field_of: { of: { type: "scene:scene" }, field: "pov" } } };
+    const spec: ViewSpec = { kind: "manuscript", expr: { field_of: { of: { type: "manuscript:scene" }, field: "pov" } } };
     expect(evalIds(spec, {}).sort()).toEqual(["alice", "bob"]);
   });
   it("field_of feeding a Filter operand: same-tag matching (value-set projection)", () => {
@@ -610,7 +610,7 @@ describe("parameterized views (#184: bindings, field_of)", () => {
     // A corrupt/hand-edited operand with no `of`. The designer never emits this,
     // but the evaluator must not throw. It resolves to INACTIVE (no constraint),
     // NOT the empty set — so at the membership root an overlap shows everything.
-    const spec = { kind: "scene", expr: { field: { key: "pov", op: "overlap" as const, value: { field_of: { field: "pov" } } } } } as unknown as ViewSpec;
+    const spec = { kind: "manuscript", expr: { field: { key: "pov", op: "overlap" as const, value: { field_of: { field: "pov" } } } } } as unknown as ViewSpec;
     expect(() => evalIds(spec, {})).not.toThrow();
     expect(evalIds(spec, {})).toEqual(["s1", "s2", "s3", "bob", "alice"]);
   });
@@ -618,20 +618,20 @@ describe("parameterized views (#184: bindings, field_of)", () => {
     // The bug the empty-set degradation would cause: `disjoint ∅` is true for every
     // node. As INACTIVE it's no-constraint instead → in a drop it removes nothing.
     const spec = {
-      kind: "scene",
-      expr: { difference: { keep: { type: "scene:scene" }, remove: { field: { key: "pov", op: "disjoint", value: { field_of: { field: "pov" } } } } } },
+      kind: "manuscript",
+      expr: { difference: { keep: { type: "manuscript:scene" }, remove: { field: { key: "pov", op: "disjoint", value: { field_of: { field: "pov" } } } } } },
     } as unknown as ViewSpec;
     expect(evalIds(spec, {})).toEqual(["s1", "s2", "s3"]); // remove is inert → all scenes kept
   });
   it("malformed field_of in membership position (no `of`) is the empty set, not a crash (#203)", () => {
-    const spec = { kind: "scene", expr: { field_of: { field: "pov" } } } as unknown as ViewSpec;
+    const spec = { kind: "manuscript", expr: { field_of: { field: "pov" } } } as unknown as ViewSpec;
     expect(() => evalIds(spec, {})).not.toThrow();
     expect(evalIds(spec, {})).toEqual([]);
   });
   it("field_of on `references` uses the reverse index (Phase-2 wiring hook)", () => {
     // field_of(set, references) → the referrers of the input node-set, resolved
     // through ctx.referenceIndex. Here bob is referenced by s1 and s3.
-    const spec: ViewSpec = { kind: "scene", expr: { field_of: { of: { hand_picked: ["bob"] }, field: "references" } } };
+    const spec: ViewSpec = { kind: "manuscript", expr: { field_of: { of: { hand_picked: ["bob"] }, field: "references" } } };
     const referenceIndex = new Map([["bob", new Set(["s1", "s3"])]]);
     expect(evalIds(spec, { referenceIndex }).sort()).toEqual(["s1", "s3"]);
   });
@@ -642,7 +642,7 @@ describe("parameterized views (#184: bindings, field_of)", () => {
     const schema = {
       fields: { linked_from: { name: "Linked from", type: "computed", options: [], computed: { function: "references", value_type: "node_set" } } },
     } as unknown as MetadataSchema;
-    const spec: ViewSpec = { kind: "scene", expr: { field_of: { of: { hand_picked: ["bob"] }, field: "linked_from" } } };
+    const spec: ViewSpec = { kind: "manuscript", expr: { field_of: { of: { hand_picked: ["bob"] }, field: "linked_from" } } };
     const referenceIndex = new Map([["bob", new Set(["s1", "s3"])]]);
     expect(evalIds(spec, { schema, referenceIndex }).sort()).toEqual(["s1", "s3"]);
   });

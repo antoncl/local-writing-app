@@ -143,7 +143,7 @@ class ExtractionContractTests(unittest.TestCase):
         assert output.commit is not None
         self.assertEqual(output.commit.fields, ["summary"])
         contract = render_extraction_contract(
-            self.service, entry_type="scene:scene", creating=False, commit_fields=output.commit.fields
+            self.service, entry_type="manuscript:scene", creating=False, commit_fields=output.commit.fields
         )
         self.assertIn("summary", contract)  # the one allow-listed field is offered
         self.assertNotIn('"body"', contract)  # body absent → fields-only, prose-safe

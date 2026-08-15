@@ -29,12 +29,12 @@ class _PlotAiContextBase(PlotTestCase):
     def _chapter(self, title: str = "Chapter") -> str:
         root = self.service.read_structure().root.id
         self.service.create_structure_node(
-            CreateStructureNodeRequest(title=title, entry_type="scene:chapter", parent_id=root)
+            CreateStructureNodeRequest(title=title, entry_type="manuscript:chapter", parent_id=root)
         )
         return next(
             c.id
             for c in self.service.read_structure().root.children
-            if c.type == "scene:chapter" and c.title == title
+            if c.type == "manuscript:chapter" and c.title == title
         )
 
     def _scene(self, title: str, chapter_id: str) -> str:

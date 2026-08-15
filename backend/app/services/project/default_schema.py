@@ -78,30 +78,30 @@ COMMIT_REVIEW_MODES: tuple[str, ...] = ("visual_diff", "replace")
 DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
     "version": 1,
     "entry_types": {
-        "scene:base": {
+        "manuscript:base": {
             "name": "Manuscript",
-            "kind": "scene",
+            "kind": "manuscript",
             "abstract": True,
             "fields": ["number", "summary", "color"],
             "display_template": "{number}. {title}",
             "has_body": False,
         },
-        "scene:act": {
+        "manuscript:act": {
             "name": "Act",
-            "kind": "scene",
-            "parent": "scene:base",
+            "kind": "manuscript",
+            "parent": "manuscript:base",
             "fields": [],
         },
-        "scene:chapter": {
+        "manuscript:chapter": {
             "name": "Chapter",
-            "kind": "scene",
-            "parent": "scene:base",
+            "kind": "manuscript",
+            "parent": "manuscript:base",
             "fields": [],
         },
-        "scene:scene": {
+        "manuscript:scene": {
             "name": "Scene",
-            "kind": "scene",
-            "parent": "scene:base",
+            "kind": "manuscript",
+            "parent": "manuscript:base",
             "fields": ["status", "pov", "characters", "locations", "dynamics", "word_count", "cost"],
             "has_body": True,
             "color": "forest",
@@ -308,7 +308,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "has_body": True,
             "prompt": {
                 "context_strategy": {
-                    "target": {"required": True, "kind": "scene"},
+                    "target": {"required": True, "kind": "manuscript"},
                     "scan_surface": ["_text_before"],
                     "output": {"kind": "append_to_body"},
                 },
@@ -349,7 +349,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             ],
             "prompt": {
                 "context_strategy": {
-                    "target": {"required": True, "kind": "scene"},
+                    "target": {"required": True, "kind": "manuscript"},
                     "scan_surface": ["_text_before"],
                     "output": {
                         "kind": "append_to_body",
@@ -384,7 +384,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "has_body": True,
             "prompt": {
                 "context_strategy": {
-                    "target": {"required": True, "kind": "scene"},
+                    "target": {"required": True, "kind": "manuscript"},
                     "scan_surface": ["_text_before", "_selection", "_text_after"],
                     "output": {"kind": "replace_selection"},
                 },
@@ -482,7 +482,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                     "label": "Scene",
                     "required": True,
                     "target": {
-                        "sources": [{"kind": "scene", "expr": {"type": "scene:scene"}}],
+                        "sources": [{"kind": "manuscript", "expr": {"type": "manuscript:scene"}}],
                         "multiple": False,
                         "presets": [],
                     },
@@ -852,7 +852,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # entries and scenes (character = lore:character).
             "name": "Subject",
             "type": "entity_ref",
-            "picker_config": {"sources": [{"kind": "lore"}, {"kind": "scene"}]},
+            "picker_config": {"sources": [{"kind": "lore"}, {"kind": "manuscript"}]},
         },
         "staged_set": {
             # ADR-0055 S4: the mutation set a chat OWNS — the staged, position-
@@ -901,7 +901,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # on the board is a later, board-layer concern, not this strip.
             "name": "Scene",
             "type": "entity_ref",
-            "picker_config": {"sources": [{"kind": "scene", "expr": {"type": "scene:scene"}}]},
+            "picker_config": {"sources": [{"kind": "manuscript", "expr": {"type": "manuscript:scene"}}]},
         },
         "page_status": {
             # A card's page status (ADR-0048 S7 Slice 3b): whether its story beat is

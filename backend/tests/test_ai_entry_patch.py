@@ -469,10 +469,10 @@ class KindAgnosticSeamTests(unittest.TestCase):
         structure = self.service.read_structure()
         doc = self.service.create_structure_node(
             CreateStructureNodeRequest(
-                title="Chapter", entry_type="scene:chapter", parent_id=structure.root.id
+                title="Chapter", entry_type="manuscript:chapter", parent_id=structure.root.id
             )
         )
-        chapter_id = next(c.id for c in doc.root.children if c.type == "scene:chapter")
+        chapter_id = next(c.id for c in doc.root.children if c.type == "manuscript:chapter")
         scene = self.service.create_scene(
             CreateSceneRequest(title="Scene", parent_id=chapter_id)
         )
@@ -562,10 +562,10 @@ class SceneSummaryPromptTests(unittest.TestCase):
         structure = self.service.read_structure()
         doc = self.service.create_structure_node(
             CreateStructureNodeRequest(
-                title="Chapter", entry_type="scene:chapter", parent_id=structure.root.id
+                title="Chapter", entry_type="manuscript:chapter", parent_id=structure.root.id
             )
         )
-        chapter_id = next(c.id for c in doc.root.children if c.type == "scene:chapter")
+        chapter_id = next(c.id for c in doc.root.children if c.type == "manuscript:chapter")
         created = self.service.create_scene(
             CreateSceneRequest(title="Storm", parent_id=chapter_id)
         )
@@ -578,7 +578,7 @@ class SceneSummaryPromptTests(unittest.TestCase):
                 body="Seren rides into the storm, chasing the thief who took the relic.",
                 base_revision=scene.revision,
                 status="draft",
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
                 metadata={"summary": "Old synopsis."},
             ),
         )
@@ -609,7 +609,7 @@ class SceneSummaryPromptTests(unittest.TestCase):
         self.assertTrue(inputs["entry"].required)
         self.assertEqual(inputs["entry"].type, "context_pick")
         sources = (inputs["entry"].target or {}).get("sources") or [{}]
-        self.assertEqual(sources[0].get("kind"), "scene")
+        self.assertEqual(sources[0].get("kind"), "manuscript")
 
     def test_shipped_prompt_resolves_with_the_type(self) -> None:
         prompt = self.service.read_prompt_entry("builtin-summarize-scene")
@@ -628,7 +628,7 @@ class SceneSummaryPromptTests(unittest.TestCase):
         self.assertNotIn('{"fields"', rendered)
 
     def test_summary_patch_validates_on_a_scene(self) -> None:
-        # `summary` is a scene:base long_text field → proposable, so a summary
+        # `summary` is a manuscript:base long_text field → proposable, so a summary
         # patch on a scene is kept end to end (the commit target of S5-next).
         patch = self.service.validate_ai_entry_patch(
             self.scene_id,

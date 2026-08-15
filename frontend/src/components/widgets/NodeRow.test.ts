@@ -8,9 +8,9 @@ import NodeRow from "@/components/widgets/NodeRow.svelte";
 // one interaction (onClick) — the shape every later widget test can copy.
 describe("NodeRow", () => {
   it("renders the title as <strong> and the detail as <small>", () => {
-    render(NodeRow, { props: { title: "Chapter One", detail: "scene:chapter" } });
+    render(NodeRow, { props: { title: "Chapter One", detail: "manuscript:chapter" } });
     expect(screen.getByText("Chapter One").tagName).toBe("STRONG");
-    expect(screen.getByText("scene:chapter").tagName).toBe("SMALL");
+    expect(screen.getByText("manuscript:chapter").tagName).toBe("SMALL");
   });
 
   it("applies the active class when active", () => {

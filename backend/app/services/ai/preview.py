@@ -59,7 +59,7 @@ def _find_marked_target_scene_id(inputs: dict[str, Any]) -> str | None:
         for item in value:
             if not isinstance(item, dict):
                 continue
-            if item.get("target") and item.get("kind") == "scene":
+            if item.get("target") and item.get("kind") == "manuscript":
                 scene_id = item.get("id")
                 if isinstance(scene_id, str) and scene_id:
                     return scene_id

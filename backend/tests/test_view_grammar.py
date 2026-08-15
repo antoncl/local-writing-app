@@ -68,7 +68,7 @@ def test_children_reaches_every_edge() -> None:
     e = g.ViewExpr(difference={"keep": keep, "remove": remove})
     assert [_dump(c) for c in g.children(e)] == [keep, remove]
 
-    fo_child = {"type": "scene:scene"}
+    fo_child = {"type": "manuscript:scene"}
     u = g.ViewExpr(
         union=[
             {"field_of": {"of": fo_child, "field": "pov"}},

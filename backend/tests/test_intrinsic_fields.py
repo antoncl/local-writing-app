@@ -42,7 +42,7 @@ class IntrinsicFieldTests(unittest.TestCase):
     def test_intrinsic_fields_lead_and_are_not_owned(self) -> None:
         # Injected leading (title first), and NOT counted as own_fields so the
         # editor renders them as built-in rather than type-owned.
-        scene = self.service.read_metadata_schema().entry_types["scene:scene"]
+        scene = self.service.read_metadata_schema().entry_types["manuscript:scene"]
         self.assertEqual(scene.fields[:3], ["title", "entry_type", "id"])
         for key in INTRINSIC_FIELD_KEYS:
             self.assertNotIn(key, scene.own_fields)
@@ -63,15 +63,15 @@ class IntrinsicFieldTests(unittest.TestCase):
             {
                 "version": 1,
                 "entry_types": {
-                    "scene:scene": {
+                    "manuscript:scene": {
                         "name": "Scene",
-                        "kind": "scene",
+                        "kind": "manuscript",
                         "fields": ["title", "status"],
                     }
                 },
             },
         )
-        fields = self.service.read_metadata_schema().entry_types["scene:scene"].fields
+        fields = self.service.read_metadata_schema().entry_types["manuscript:scene"].fields
         self.assertEqual(fields.count("title"), 1)
 
     def test_resolver_stamps_authorship_category(self) -> None:
@@ -118,7 +118,7 @@ class IntrinsicFieldTests(unittest.TestCase):
                 body=scene.body,
                 base_revision=scene.revision,
                 status="draft",
-                entry_type="scene:scene",
+                entry_type="manuscript:scene",
                 metadata=dict(scene.metadata),
             ),
         )
@@ -165,7 +165,7 @@ class FieldOverrideTests(unittest.TestCase):
         character = self.service.read_metadata_schema().entry_types["lore:character"]
         self.assertEqual(character.field_overrides["title"].label, "Name")
         # Scenes keep the plain "Title" — no override.
-        scene = self.service.read_metadata_schema().entry_types["scene:scene"]
+        scene = self.service.read_metadata_schema().entry_types["manuscript:scene"]
         self.assertNotIn("title", scene.field_overrides)
 
     def test_hidden_false_override_can_unhide_a_def_hidden_field(self) -> None:

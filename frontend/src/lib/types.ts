@@ -137,7 +137,7 @@ export type EditableDocument = Scene | LoreEntry | PromptEntry | AssistantEntry 
 
 // Document-kind discriminator: schema kinds plus synthetic editor shapes (chat / snippet / structure_node / plot_card / plotline).
 export type DocumentKind =
-  | "scene"
+  | "manuscript"
   | "lore"
   | "prompt"
   | "snippet"
@@ -700,7 +700,7 @@ export type NodePickerConfig = {
 // target; the picker UI enforces single-selection.
 export type NodePickerRef = {
   id: string;
-  kind: "scene" | "lore" | "snippet" | "assistant" | "research" | "plot" | "preset";
+  kind: "manuscript" | "lore" | "snippet" | "assistant" | "research" | "plot" | "preset";
   title: string;
   entry_type?: string;
   target?: boolean;
@@ -1195,7 +1195,7 @@ export type PathProbe = {
 };
 
 export type SearchHit = {
-  kind: "scene" | "lore" | "project";
+  kind: "manuscript" | "lore" | "project";
   file_id: string;
   path: string;
   line: number;

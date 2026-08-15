@@ -1,8 +1,6 @@
 """AI provider, preview, chat, generate, streaming, and cost routes (#170 main.py split)."""
 from __future__ import annotations
 
-import json
-from collections.abc import Iterator
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -34,7 +32,6 @@ from app.models import (
     PreviewContentBlock,
     PreviewErrorInfo,
     PreviewMessage,
-    SaveChatSessionRequest,
     ValidateEntryDraftRequest,
     ValidateEntryPatchRequest,
 )
@@ -43,6 +40,10 @@ from app.services import machine_settings as machine_settings_service
 from app.services.ai import providers as ai_providers
 from app.services.ai import tokens as ai_tokens
 from app.services.ai.call_resolver import resolve_call_params
+from app.services.ai.chat import (
+    expand_and_prepare_chat_blocks,
+    system_prompt_cache_blocks,
+)
 from app.services.ai.extraction import EXTRACT_CUE, render_extraction_contract
 from app.services.ai.preview import (
     PreviewError,
@@ -52,6 +53,7 @@ from app.services.ai.preview import (
 )
 from app.services.ai.profiles import CapabilityTier, ModelDescriptor
 from app.services.ai.profiles.registry import known_provider_names, profile_for
+from app.services.ai.streaming import transform_provider_events_to_ndjson
 from app.services.ai.usage import translate_usage_to_cost
 from app.services.project_service import ProjectService, ProjectServiceError
 
@@ -257,121 +259,6 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
 # --- AI: chat completion (first real model call) ---
 
 
-def _staged_set_block(project: ProjectService, staged_set_id: str) -> str:
-    """Resolve a chat's OWNED mutation set and render its seed block (ADR-0055 §4).
-
-    Returns "" when the id is empty or no longer resolves (e.g. a deleted set),
-    so the send path stays a thin `if block: append`. Lives here rather than in
-    `helpers.py` (which is at its size cap) since it is the send path's own step.
-    """
-    if not staged_set_id:
-        return ""
-    from app.services.ai.helpers import _format_staged_set_block
-
-    try:
-        staged = project.read_mutation_set_entry(staged_set_id)
-    except ProjectServiceError:
-        return ""
-    return _format_staged_set_block(staged.title, staged.target_entry_type, staged.rows)
-
-
-def _prepare_chat_send_payload(
-    project: ProjectService,
-    chat_id: str | None,
-    system_prompt: str,
-    messages_list: list[dict],
-) -> tuple[list[dict] | None, str | None, list[Any]]:
-    """When chat_id is bound, run the implicit-context expander on the last
-    user message, append new detections to ChatSession.journal, save the
-    chat, and return:
-      - system_blocks, in stable→volatile order so longer TTLs stay ahead of
-        shorter: [{system_prompt, 1h}, {staged_change, 1h}?, {journal_xml, 5m}]
-        — the staged_change block (ADR-0055 S4) is present only when the chat
-        owns a resolvable mutation set
-      - session_id for OpenRouter provider stickiness
-      - journal_added: lore IDs newly detected on THIS turn (for audit UI)
-
-    Returns (None, None, []) when chat_id is empty or the chat doesn't
-    exist — caller falls back to the legacy single-string system path.
-    """
-    if not chat_id:
-        return None, None, []
-    try:
-        chat = project.read_chat_session(chat_id)
-    except ProjectServiceError:
-        return None, None, []
-
-    from app.services.ai.context_expander import expand_context
-    from app.services.ai.helpers import _format_lore_block
-
-    # The last user message in the conversation triggered this send.
-    user_text = ""
-    for m in reversed(messages_list):
-        if m.get("role") == "user":
-            user_text = m.get("content") or ""
-            break
-    turn = max(0, len(messages_list) - 1)
-
-    new_entries = expand_context(
-        project,
-        user_text,
-        existing_journal=chat.journal,
-        explicit_picks=chat.context_items,
-        source="user_message",
-        turn=turn,
-        # The chat's anchored scene is its mutation resolution scene (#60/#61),
-        # so a renamed entity is detected under its as-of-scene name. The anchor
-        # is derived from the chat's `subject` when that subject is a scene
-        # (ADR-0051 S5 folded the old `target_scene_id` field into `subject`).
-        scene=project._subject_scene_id(chat.subject) or None,
-    )
-    if new_entries:
-        extended_journal = list(chat.journal) + new_entries
-        project.save_chat_session(
-            chat_id,
-            SaveChatSessionRequest(
-                title=chat.title,
-                prompt_entry_id=chat.prompt_entry_id,
-                assistant_id=chat.assistant_id,
-                system_prompt=chat.system_prompt,
-                pinned=chat.pinned,
-                context_items=chat.context_items,
-                messages=chat.messages,
-                inputs=chat.inputs,
-                journal=extended_journal,
-            ),
-        )
-        journal_for_send = extended_journal
-    else:
-        journal_for_send = list(chat.journal)
-
-    blocks: list[dict] = []
-    if system_prompt:
-        # Slot 1: system + project-stable (per decisions_implicit_context).
-        # 1h TTL because this only changes when the chat is locked at first
-        # send; multi-turn sessions reuse this for hours.
-        blocks.append({"text": system_prompt, "cache_break_after": True, "ttl": "1h"})
-    # Slot 1b (ADR-0055 S4): the mutation set this chat OWNS, seeded so a resumed
-    # brainstorm continues refining the same staged change. Stable per chat (it
-    # changes only when the writer re-stages), so it sits above the turn-by-turn
-    # journal with a matching 1h TTL. Empty / dangling ref → "" → no block.
-    staged_xml = _staged_set_block(project, chat.staged_set)
-    if staged_xml:
-        blocks.append({"text": staged_xml, "cache_break_after": True, "ttl": "1h"})
-    if journal_for_send:
-        journal_xml = _format_lore_block(
-            project, [e.entry_id for e in journal_for_send]
-        )
-        if journal_xml:
-            # Slot 2: merged explicit + detected context (we treat the
-            # journal as the detected portion; explicit picks already live
-            # in the rendered system_prompt at first turn). 5m TTL because
-            # this grows mid-session — append-only, ratchets forward.
-            blocks.append({"text": journal_xml, "cache_break_after": True, "ttl": "5m"})
-
-    return (blocks or None), chat_id, list(new_entries)
-
-
 @router.post("/api/ai/chat", response_model=AIChatResponse)
 async def ai_chat(project: CurrentProject, request: AIChatRequest) -> AIChatResponse:
     settings = machine_settings_service.load_settings()
@@ -389,7 +276,7 @@ async def ai_chat(project: CurrentProject, request: AIChatRequest) -> AIChatResp
         policy = "off"
 
     messages_list = [m.model_dump() for m in request.messages]
-    system_blocks, session_id, journal_added = _prepare_chat_send_payload(
+    system_blocks, session_id, journal_added = expand_and_prepare_chat_blocks(
         project,
         request.chat_id, request.system_prompt, messages_list
     )
@@ -494,16 +381,10 @@ async def ai_generate(project: CurrentProject, request: AIGenerateRequest) -> AI
     except ProjectServiceError:
         policy = "off"
 
-    # Wrap the rendered system_prompt so providers that support explicit
-    # prompt caching (Anthropic, and OpenRouter when routing to them) can
-    # mark it cacheable. Continuation reuses the same prompt body across
-    # back-to-back invocations on the same scene — a 1h TTL keeps the
-    # system stable so the second hit is a cache read. Chat already gets
-    # this via _prepare_chat_send_payload; we deliberately don't reuse
-    # that helper here because journal expansion is chat-specific.
-    system_blocks: list[dict] | None = None
-    if system_prompt:
-        system_blocks = [{"text": system_prompt, "cache_break_after": True, "ttl": "1h"}]
+    # Chat gets its system block via expand_and_prepare_chat_blocks (with
+    # journal expansion, which is chat-specific); generate shares only the
+    # system-prompt cache wrap so the two never drift on caching.
+    system_blocks = system_prompt_cache_blocks(system_prompt)
 
     result = ai_providers.chat(
         provider_name=resolved.provider,
@@ -544,85 +425,7 @@ async def ai_generate(project: CurrentProject, request: AIGenerateRequest) -> AI
     )
 
 
-# --- AI: streaming variants (NDJSON) ---
-#
-# Each line of the response is a JSON object. Events:
-#   {"type":"delta","text":"..."}                            (zero or more)
-#   {"type":"thinking","text":"..."}                         (zero or more)
-#   {"type":"done","provider":"...","model":"...",
-#    "latency_ms":N,"stop_reason":"...","truncated":bool,
-#    "policy":"...","session_id":"...","char_count":N}       (exactly one, on success)
-#   {"type":"error","error":"...","provider":"...",
-#    "model":"...","latency_ms":N,"policy":"..."}            (exactly one, on failure)
-
-
-def _ndjson(line: dict[str, Any]) -> str:
-    return json.dumps(line, ensure_ascii=False) + "\n"
-
-
-def _stream_provider_events(
-    events: Iterator[ai_providers.StreamEvent],
-    *,
-    policy: str,
-    extra_done: dict[str, Any] | None = None,
-    descriptor: ModelDescriptor | None = None,
-) -> Iterator[str]:
-    """Adapt provider events to NDJSON lines. Suppresses empty deltas.
-
-    When `descriptor` is provided and the terminal StreamDone carries
-    usage, the `done` line includes `usage` + `cost_usd`. The descriptor
-    is pre-fetched by the endpoint so this sync generator can compute
-    cost without an await.
-    """
-    extra_done = extra_done or {}
-    try:
-        for ev in events:
-            if isinstance(ev, ai_providers.StreamDelta):
-                if ev.text:
-                    yield _ndjson({"type": "delta", "text": ev.text})
-            elif isinstance(ev, ai_providers.StreamThinking):
-                if ev.text:
-                    yield _ndjson({"type": "thinking", "text": ev.text})
-            elif isinstance(ev, ai_providers.StreamDone):
-                done_line: dict[str, Any] = {
-                    "type": "done",
-                    "provider": ev.provider,
-                    "model": ev.model,
-                    "latency_ms": ev.latency_ms,
-                    "stop_reason": ev.stop_reason,
-                    "truncated": ev.truncated,
-                    "policy": policy,
-                    **extra_done,
-                }
-                if ev.usage is not None:
-                    done_line["usage"] = {
-                        "input_tokens": ev.usage.input_tokens,
-                        "cached_input_tokens": ev.usage.cached_input_tokens,
-                        "cache_write_tokens": ev.usage.cache_write_tokens,
-                        "output_tokens": ev.usage.output_tokens,
-                    }
-                    if descriptor is not None:
-                        from app.services.ai.profiles import compute_cost
-                        done_line["cost_usd"] = compute_cost(ev.usage, descriptor)
-                yield _ndjson(done_line)
-            elif isinstance(ev, ai_providers.StreamError):
-                yield _ndjson({
-                    "type": "error",
-                    "error": ev.error,
-                    "provider": ev.provider,
-                    "model": ev.model,
-                    "latency_ms": ev.latency_ms,
-                    "policy": policy,
-                })
-    except Exception as exc:  # noqa: BLE001 — last-resort guard so the stream always terminates
-        yield _ndjson({
-            "type": "error",
-            "error": f"{type(exc).__name__}: {exc}",
-            "provider": "",
-            "model": "",
-            "latency_ms": 0,
-            "policy": policy,
-        })
+# --- AI: streaming variants (NDJSON) --- (line protocol in services/ai/streaming.py)
 
 
 @router.post("/api/ai/chat/stream")
@@ -642,7 +445,7 @@ async def ai_chat_stream(project: CurrentProject, request: AIChatRequest) -> Str
         policy = "off"
 
     messages_list = [m.model_dump() for m in request.messages]
-    system_blocks, session_id, journal_added = _prepare_chat_send_payload(
+    system_blocks, session_id, journal_added = expand_and_prepare_chat_blocks(
         project,
         request.chat_id, request.system_prompt, messages_list
     )
@@ -668,7 +471,7 @@ async def ai_chat_stream(project: CurrentProject, request: AIChatRequest) -> Str
         session_id=session_id,
     )
     return StreamingResponse(
-        _stream_provider_events(
+        transform_provider_events_to_ndjson(
             events, policy=policy,
             extra_done=(
                 {"journal_added": [e.model_dump() for e in journal_added]}
@@ -733,12 +536,9 @@ async def ai_generate_stream(project: CurrentProject, request: AIGenerateRequest
     descriptor = await ai_tokens.descriptor_for(
         provider=resolved.provider, model=resolved.model, settings=settings
     )
-    # Same cache-marker treatment as the non-streaming path above. Keep
-    # both endpoints in sync — divergence here would mean cache hits in
-    # one mode and not the other.
-    system_blocks: list[dict] | None = None
-    if system_prompt:
-        system_blocks = [{"text": system_prompt, "cache_break_after": True, "ttl": "1h"}]
+    # Shares the exact system-block wrap with the non-streaming path so the
+    # two can't drift into caching in one mode but not the other.
+    system_blocks = system_prompt_cache_blocks(system_prompt)
 
     events = ai_providers.chat_stream(
         provider_name=resolved.provider,
@@ -754,7 +554,7 @@ async def ai_generate_stream(project: CurrentProject, request: AIGenerateRequest
         session_id=session_id,
     )
     return StreamingResponse(
-        _stream_provider_events(
+        transform_provider_events_to_ndjson(
             events,
             policy=policy,
             extra_done={"session_id": session_id, "char_count": char_count},

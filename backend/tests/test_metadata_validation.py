@@ -1425,6 +1425,35 @@ class MetadataValidationTests(unittest.TestCase):
         )
         self.assertIn("scene_number", schema.entry_types["scene:scene"].fields)
 
+    def test_create_computed_cost_field_with_scope(self) -> None:
+        # The field editor now offers `cost` as an authorable computed function
+        # (#353); this asserts the upsert path the editor drives accepts the
+        # wire shape it produces — {function: "cost", scope: <scene|…>}.
+        world_layer = next(
+            layer
+            for layer in self.service.read_metadata_schema_layers().layers
+            if layer.folder_path == str(self.world)
+        )
+        schema = self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=world_layer.id,
+                field_id="scene_spend",
+                field=MetadataFieldDefinition(
+                    name="Scene spend",
+                    type="computed",
+                    computed={"function": "cost", "scope": "scene"},
+                ),
+                entry_type="scene:scene",
+            )
+        )
+
+        self.assertEqual(schema.fields["scene_spend"].type, "computed")
+        self.assertEqual(
+            schema.fields["scene_spend"].computed,
+            {"function": "cost", "scope": "scene"},
+        )
+        self.assertIn("scene_spend", schema.entry_types["scene:scene"].fields)
+
     def test_create_computed_field_rejects_unknown_function(self) -> None:
         world_layer = next(
             layer

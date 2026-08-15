@@ -166,22 +166,6 @@ class TestLogHttp(unittest.TestCase):
         self.assertIn("browser error: pre-open failure", text)
         self.assertFalse((self.root / LOG_FILENAME).exists())  # not the project log
 
-    def test_a_scoped_409_records_a_trace_with_the_raw_header(self) -> None:
-        # #965 diagnostic: a project-scoped GET that arrives with no X-Project-Root
-        # header 409s "No project is open." — trace every 409 with the RAW header
-        # value (the fact that settles absent vs present) + a trace id echoed in the
-        # response so a browser occurrence can be matched to its log line. No project
-        # bound → the line lands in the machine-scope log.
-        clear_test_scope()
-        resp = self.client.get("/api/views")  # deliberately no X-Project-Root header
-        self.assertEqual(resp.status_code, 409, resp.text)
-        trace_id = resp.headers.get("X-Error-Trace")
-        self.assertIsNotNone(trace_id)
-        text = _log_text(error_log_dir())
-        self.assertIn(f"409 [{trace_id}] GET /api/views", text)
-        self.assertIn("X-Project-Root=None", text)  # absent header captured verbatim
-        self.assertFalse((self.root / LOG_FILENAME).exists())  # not the project log
-
     def test_an_unhandled_500_with_no_project_records_a_machine_backend_line(self) -> None:
         # The class slice 1 could not catch: a 500 with no project bound (a bad
         # ancestor manifest while resolving /api/project/open) now lands machine-side.

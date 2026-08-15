@@ -16,7 +16,6 @@ import atexit
 import traceback
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from uuid import uuid4
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -106,27 +105,6 @@ async def record_unhandled_errors(
             ensure_dir=header_root is None,
         )
         raise
-    if response.status_code == 409:
-        # TEMPORARY DIAGNOSTIC (#965): a `409 "No project is open."` recurs
-        # intermittently and neither the HMR nor the sessionStorage theory held, so
-        # trace every 409 with the one fact that settles it — the RAW `X-Project-Root`
-        # the request carried (absent / empty / a real path). A trace id ties the
-        # error-log line to the network response (echoed as `X-Error-Trace`) so an
-        # occurrence in the browser can be matched to its line. Remove once the cause
-        # is found. Revision-conflict 409s (scoped POST/PUT saves) also land here —
-        # they carry a real root, which is exactly how they read apart from the bug.
-        raw = request.headers.get("X-Project-Root")
-        header_root = root_from_header(raw)
-        trace_id = uuid4().hex[:8]
-        response.headers["X-Error-Trace"] = trace_id
-        append_error_line(
-            header_root if header_root is not None else error_log_dir(),
-            origin="backend",
-            message=f"409 [{trace_id}] {request.method} {request.url.path} — X-Project-Root={raw!r}",
-            detail=f"referer={request.headers.get('referer')!r} user-agent={request.headers.get('user-agent')!r}",
-            context=f"{request.method} {request.url.path}",
-            ensure_dir=header_root is None,
-        )
     return response
 
 

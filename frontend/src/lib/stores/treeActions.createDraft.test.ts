@@ -82,6 +82,19 @@ describe("treeActions.createLoreEntryFromDraft (ADR-0046 §6.4)", () => {
     expect(editorPanes.openLore).not.toHaveBeenCalled();
   });
 
+  it("still returns the id when a post-create step fails — the entry exists", async () => {
+    // The id must not be gated on run()'s overall outcome: after the save
+    // lands the entry is real, and reporting null would leave the caller's
+    // draft live (duplicate mint on re-click) and skip the subject stamp
+    // for an entry that exists (#983).
+    vi.mocked(editorPanes.openLore).mockRejectedValueOnce(new Error("transient"));
+    const createdId = await treeActions.createLoreEntryFromDraft("lore:character", {
+      body: "b",
+      fields: { title: "Seren" },
+    });
+    expect(createdId).toBe("lore_new");
+  });
+
   it("falls back to a typed default title when the draft names none", async () => {
     await treeActions.createLoreEntryFromDraft("lore:character", {
       body: null,

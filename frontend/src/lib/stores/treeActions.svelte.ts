@@ -69,14 +69,16 @@ class TreeActions {
   // open it for normal editing. `title` is the one proposed field the save
   // treats top-level; everything else is metadata (references / computed are
   // already excluded from the validated patch, §4).
-  // Returns the created entry's id, or null when nothing was created (run()
-  // reports API failure as false without throwing) — so the caller can keep the
-  // reviewed draft on failure, and on success stamp the creating chat's
-  // `subject` with the new entry (#983: the brainstorm that generated an entry
-  // is that entry's first conversation).
+  // Returns the created entry's id, or null when no entry was minted. The id
+  // is captured the moment the save lands, NOT gated on run()'s overall
+  // outcome: a failure in the post-create steps (roster refresh, pane open)
+  // must still report the entry that now exists, so the caller clears its
+  // draft (a surviving Create button would mint a duplicate) and stamps the
+  // creating chat's `subject` (#983: the brainstorm that generated an entry is
+  // that entry's first conversation). run() surfaces the error either way.
   async createLoreEntryFromDraft(entryType: string, patch: EntryPatch): Promise<string | null> {
     let createdId: string | null = null;
-    const ok = await this.run(async () => {
+    await this.run(async () => {
       const fields = { ...patch.fields };
       const proposedTitle =
         typeof fields.title === "string" && fields.title.trim() ? fields.title.trim() : "";
@@ -94,7 +96,7 @@ class TreeActions {
       await editorPanes.openLore(saved.id);
       this.setStatus(`Created "${saved.title}"`);
     });
-    return ok ? createdId : null;
+    return createdId;
   }
 
   async newPromptEntry(entryType: string): Promise<void> {

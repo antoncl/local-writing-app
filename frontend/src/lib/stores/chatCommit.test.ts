@@ -346,6 +346,20 @@ describe("ChatCommitController — create mode", () => {
     expect(deps.onCreated).toHaveBeenCalledWith("lore_new");
   });
 
+  it("skips the subject stamp when the controller was reset mid-create (chat switch)", async () => {
+    // Switching chat sessions while the create is in flight runs
+    // applyChatSession → commit.reset(); the resumed createDraft must not
+    // stamp the newly-hosted chat with this brainstorm's entry.
+    const { c, deps } = createController();
+    c.draftProposal = { body: "x", fields: {} };
+    createFromDraft.mockImplementationOnce(async () => {
+      c.reset();
+      return "lore_new";
+    });
+    await c.createDraft();
+    expect(deps.onCreated).not.toHaveBeenCalled();
+  });
+
   it("reset clears a pending draft", () => {
     const { c } = createController();
     c.draftProposal = { body: "x", fields: {} };

@@ -355,20 +355,24 @@ export class ChatCommitController {
 
   async createDraft(): Promise<void> {
     if (!this.draftProposal || this.creatingDraft) return;
+    const proposal = this.draftProposal;
     this.creatingDraft = true;
     try {
-      // Only clear the reviewed draft if the create actually succeeded — the id
-      // is null on failure (run() swallows the error), so clearing
-      // unconditionally would silently lose the draft on a 409 / offline / save
-      // rejection with nothing created.
-      const createdId = await treeActions.createLoreEntryFromDraft(
-        this.draftEntryType,
-        this.draftProposal,
-      );
+      // Null only when no entry was minted (run() swallows the error and the
+      // draft must survive a 409 / offline rejection); a post-create step
+      // failure still returns the id, so an entry that exists always clears
+      // the draft — a surviving Create button would mint a duplicate.
+      const createdId = await treeActions.createLoreEntryFromDraft(this.draftEntryType, proposal);
+      // A chat switch while the create was in flight reset this controller
+      // (applyChatSession → reset()): the host now feeds a different chat, so
+      // the subject write-back would stamp THAT chat with this brainstorm's
+      // entry. Skip it — the draft is already gone with the old chat's state.
+      if (this.draftProposal !== proposal) return;
       if (createdId) {
-        // The entry exists — clear the draft BEFORE the subject stamp so a
-        // failed stamp can't leave a live Create button that would mint a
-        // duplicate entry.
+        // The entry exists, so the draft is spent regardless of how the stamp
+        // goes. Note reset() releases creatingDraft while onCreated is still
+        // in flight — re-entry stays blocked by the null draftProposal, which
+        // is the guard a future onCreated implementation may rely on.
         this.reset();
         await this.deps.onCreated(createdId);
       }

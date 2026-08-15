@@ -755,6 +755,20 @@ class EditorPanesController {
     } catch {
       // Pane closed or scene gone — fall through; nothing to sync.
     }
+    this.#applyTitleToPanes(sceneId, newTitle, refreshedRevision);
+  }
+
+  // Push an already-persisted node title into any open pane showing it (tab
+  // label, header input, draftTitle) — the pane-facing half of syncRename,
+  // without the manuscript-structure walk or the revision refetch (the caller
+  // already holds the freshly-saved node, e.g. a chat retitled at commit time,
+  // #983). Panes save titles from their own state, so a rename that only lands
+  // on the node file would otherwise stay invisible until the pane reopens.
+  syncNodeTitle(nodeId: string, newTitle: string): void {
+    this.#applyTitleToPanes(nodeId, newTitle, null);
+  }
+
+  #applyTitleToPanes(sceneId: string, newTitle: string, refreshedRevision: string | null): void {
     const nextReloads = { ...this.titleReloadsByPane };
     this.panes = this.panes.map((pane) => {
       if (!pane.scene || pane.scene.id !== sceneId) return pane;

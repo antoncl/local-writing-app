@@ -48,6 +48,8 @@
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
   import { ChatCommitController } from "@/lib/stores/chatCommit.svelte";
   import { refreshChatSessions } from "@/lib/stores/chats";
+  import { editorPanes } from "@/lib/stores/editorPanes.svelte";
+  import { refreshReferenceIndexInBackground } from "@/lib/stores/references";
   import {
     assistantScopeTags,
     assistantTitle,
@@ -218,6 +220,34 @@
     onStaged: async (setId) => {
       chatStagedSet = setId;
       await persistActiveChat();
+    },
+    // #983: a create-mode brainstorm launches before its entry exists, so its
+    // `subject` can only be stamped here, when the entry is minted — making this
+    // chat the entry's first conversation (ADR-0051 S2). Seeding the `entry`
+    // input with the same id converts the chat into the revise brainstorm the
+    // entry pane's ＋New would launch (isCreateBrainstorm keys off an empty
+    // `entry` draft): a later commit in the resumed conversation refines this
+    // entry instead of minting a duplicate, and the staging gate
+    // (subjectLoreEntryType) derives from that draft too. Both persist in one
+    // save; the refreshes mirror the create-with-subject launch path in
+    // chatSessions (this save bypasses saveEditorPane's change-gated index
+    // refresh), so the entry's Conversations panel lists the chat — with fresh
+    // roster rows — without a reload.
+    onCreated: async (entryId, entryTitle) => {
+      chatSubject = entryId;
+      chatInputDrafts = { ...chatInputDrafts, entry: entryId };
+      // Retitle to the launched-with-subject convention ("<subject> — <prompt>",
+      // chatSessions' launch naming) — but only while the chat still wears its
+      // launch title (the bare prompt name), so a rename the user typed is
+      // never clobbered. syncNodeTitle pushes the persisted title into the
+      // pane's tab + header, which otherwise only hydrate on open.
+      const promptTitle = activePromptEntry?.title ?? "";
+      const retitle = !!promptTitle && activeChatTitle === promptTitle;
+      if (retitle) activeChatTitle = `${entryTitle} — ${promptTitle}`;
+      await persistActiveChat();
+      if (retitle && scene?.id) editorPanes.syncNodeTitle(scene.id, activeChatTitle);
+      void refreshChatSessions();
+      refreshReferenceIndexInBackground();
     },
   });
 

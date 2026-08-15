@@ -53,12 +53,14 @@ describe("treeActions.createLoreEntryFromDraft (ADR-0046 §6.4)", () => {
   });
 
   it("routes the proposed title top-level and keeps it out of metadata", async () => {
-    const ok = await treeActions.createLoreEntryFromDraft("lore:character", {
+    const createdId = await treeActions.createLoreEntryFromDraft("lore:character", {
       body: "A wandering knight.",
       fields: { title: "Seren", allegiance: "order" },
     });
 
-    expect(ok).toBe(true);
+    // The created {id, title} is the return value — the caller stamps the id
+    // as the brainstorm chat's subject and retitles with the title (#983).
+    expect(createdId).toEqual({ id: "lore_new", title: "Seren" });
     expect(api.createLoreEntry).toHaveBeenCalledWith("Seren", "lore:character");
     const [savedEntry, savedBody] = vi.mocked(api.saveLoreEntry).mock.calls[0];
     expect(savedEntry.metadata).toEqual({ allegiance: "order" });
@@ -67,16 +69,30 @@ describe("treeActions.createLoreEntryFromDraft (ADR-0046 §6.4)", () => {
     expect(editorPanes.openLore).toHaveBeenCalledWith("lore_new");
   });
 
-  it("returns false and does not open a pane when the save fails", async () => {
+  it("returns null and does not open a pane when the save fails", async () => {
     // run() swallows the rejection and reports false; the caller keeps the
-    // draft rather than dropping it silently (code-review finding).
+    // draft rather than dropping it silently (code-review finding), and must
+    // not stamp a subject for an entry that wasn't created (#983).
     vi.mocked(api.saveLoreEntry).mockRejectedValueOnce(new Error("409 conflict"));
-    const ok = await treeActions.createLoreEntryFromDraft("lore:character", {
+    const createdId = await treeActions.createLoreEntryFromDraft("lore:character", {
       body: "b",
       fields: { title: "Seren" },
     });
-    expect(ok).toBe(false);
+    expect(createdId).toBeNull();
     expect(editorPanes.openLore).not.toHaveBeenCalled();
+  });
+
+  it("still returns the id when a post-create step fails — the entry exists", async () => {
+    // The id must not be gated on run()'s overall outcome: after the save
+    // lands the entry is real, and reporting null would leave the caller's
+    // draft live (duplicate mint on re-click) and skip the subject stamp
+    // for an entry that exists (#983).
+    vi.mocked(editorPanes.openLore).mockRejectedValueOnce(new Error("transient"));
+    const createdId = await treeActions.createLoreEntryFromDraft("lore:character", {
+      body: "b",
+      fields: { title: "Seren" },
+    });
+    expect(createdId).toEqual({ id: "lore_new", title: "Seren" });
   });
 
   it("falls back to a typed default title when the draft names none", async () => {

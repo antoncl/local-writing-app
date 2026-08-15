@@ -69,11 +69,19 @@ class TreeActions {
   // open it for normal editing. `title` is the one proposed field the save
   // treats top-level; everything else is metadata (references / computed are
   // already excluded from the validated patch, §4).
-  // Returns whether the entry was created (run() reports false on API failure
-  // without throwing), so the caller can keep the reviewed draft on failure
-  // rather than dropping it.
-  async createLoreEntryFromDraft(entryType: string, patch: EntryPatch): Promise<boolean> {
-    return this.run(async () => {
+  // Returns the created entry's {id, title}, or null when no entry was minted.
+  // Captured the moment the save lands, NOT gated on run()'s overall outcome:
+  // a failure in the post-create steps (roster refresh, pane open) must still
+  // report the entry that now exists, so the caller clears its draft (a
+  // surviving Create button would mint a duplicate) and stamps the creating
+  // chat's `subject` + retitle (#983: the brainstorm that generated an entry
+  // is that entry's first conversation). run() surfaces the error either way.
+  async createLoreEntryFromDraft(
+    entryType: string,
+    patch: EntryPatch,
+  ): Promise<{ id: string; title: string } | null> {
+    let minted: { id: string; title: string } | null = null;
+    await this.run(async () => {
       const fields = { ...patch.fields };
       const proposedTitle =
         typeof fields.title === "string" && fields.title.trim() ? fields.title.trim() : "";
@@ -86,10 +94,12 @@ class TreeActions {
         metadata: { ...created.metadata, ...fields },
       };
       const saved = await api.saveLoreEntry(merged, patch.body ?? "");
+      minted = { id: saved.id, title: saved.title };
       await refreshLoreEntries();
       await editorPanes.openLore(saved.id);
       this.setStatus(`Created "${saved.title}"`);
     });
+    return minted;
   }
 
   async newPromptEntry(entryType: string): Promise<void> {

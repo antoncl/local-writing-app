@@ -97,6 +97,7 @@ function makeDeps(over: Partial<ChatCommitDeps> = {}): ChatCommitDeps {
     entryTitle: vi.fn(() => null),
     getStagedSetId: vi.fn(() => ""),
     onStaged: vi.fn(async () => {}),
+    onCreated: vi.fn(async () => {}),
     ...over,
   };
 }
@@ -328,18 +329,36 @@ describe("ChatCommitController — create mode", () => {
     expect(c.draftProposal).toBeNull();
   });
 
-  it("createDraft resets only when the create succeeds", async () => {
-    const { c } = createController();
+  it("createDraft resets and stamps the chat's subject only when the create succeeds", async () => {
+    const { c, deps } = createController();
     c.draftProposal = { body: "a life", fields: { name: "Vale" } };
 
-    createFromDraft.mockResolvedValueOnce(false); // e.g. a 409 — nothing created
+    createFromDraft.mockResolvedValueOnce(null); // e.g. a 409 — nothing created
     await c.createDraft();
     expect(c.draftProposal).not.toBeNull(); // draft survives so it isn't lost
+    expect(deps.onCreated).not.toHaveBeenCalled(); // no entry → no subject stamp
 
-    createFromDraft.mockResolvedValueOnce(true);
+    createFromDraft.mockResolvedValueOnce({ id: "lore_new", title: "Vale" });
     await c.createDraft();
     expect(createFromDraft).toHaveBeenLastCalledWith("lore:character", { body: "a life", fields: { name: "Vale" } });
     expect(c.draftProposal).toBeNull(); // cleared on success
+    // #983: the created entry becomes the chat's subject — its first
+    // conversation — and the title rides along for the host's retitle.
+    expect(deps.onCreated).toHaveBeenCalledWith("lore_new", "Vale");
+  });
+
+  it("skips the subject stamp when the controller was reset mid-create (chat switch)", async () => {
+    // Switching chat sessions while the create is in flight runs
+    // applyChatSession → commit.reset(); the resumed createDraft must not
+    // stamp the newly-hosted chat with this brainstorm's entry.
+    const { c, deps } = createController();
+    c.draftProposal = { body: "x", fields: {} };
+    createFromDraft.mockImplementationOnce(async () => {
+      c.reset();
+      return { id: "lore_new", title: "X" };
+    });
+    await c.createDraft();
+    expect(deps.onCreated).not.toHaveBeenCalled();
   });
 
   it("reset clears a pending draft", () => {

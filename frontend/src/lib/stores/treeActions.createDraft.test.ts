@@ -53,12 +53,14 @@ describe("treeActions.createLoreEntryFromDraft (ADR-0046 §6.4)", () => {
   });
 
   it("routes the proposed title top-level and keeps it out of metadata", async () => {
-    const ok = await treeActions.createLoreEntryFromDraft("lore:character", {
+    const createdId = await treeActions.createLoreEntryFromDraft("lore:character", {
       body: "A wandering knight.",
       fields: { title: "Seren", allegiance: "order" },
     });
 
-    expect(ok).toBe(true);
+    // The created id is the return value — the caller stamps it as the
+    // brainstorm chat's subject (#983).
+    expect(createdId).toBe("lore_new");
     expect(api.createLoreEntry).toHaveBeenCalledWith("Seren", "lore:character");
     const [savedEntry, savedBody] = vi.mocked(api.saveLoreEntry).mock.calls[0];
     expect(savedEntry.metadata).toEqual({ allegiance: "order" });
@@ -67,15 +69,16 @@ describe("treeActions.createLoreEntryFromDraft (ADR-0046 §6.4)", () => {
     expect(editorPanes.openLore).toHaveBeenCalledWith("lore_new");
   });
 
-  it("returns false and does not open a pane when the save fails", async () => {
+  it("returns null and does not open a pane when the save fails", async () => {
     // run() swallows the rejection and reports false; the caller keeps the
-    // draft rather than dropping it silently (code-review finding).
+    // draft rather than dropping it silently (code-review finding), and must
+    // not stamp a subject for an entry that wasn't created (#983).
     vi.mocked(api.saveLoreEntry).mockRejectedValueOnce(new Error("409 conflict"));
-    const ok = await treeActions.createLoreEntryFromDraft("lore:character", {
+    const createdId = await treeActions.createLoreEntryFromDraft("lore:character", {
       body: "b",
       fields: { title: "Seren" },
     });
-    expect(ok).toBe(false);
+    expect(createdId).toBeNull();
     expect(editorPanes.openLore).not.toHaveBeenCalled();
   });
 

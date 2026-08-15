@@ -63,6 +63,12 @@ export interface ChatCommitDeps {
    *  rides its save path — the controller never touches the chat node. Only
    *  called when the chat didn't already own the set (a first stage). */
   onStaged: (setId: string) => Promise<void>;
+  /** Stamp the entry a create-mode brainstorm just minted as the chat's
+   *  `subject` (ADR-0051 S2) and persist — the chat was launched before its
+   *  entry existed, so the association can only be written here, at create time;
+   *  without it the new entry's Conversations surface never lists the chat that
+   *  drafted it (#983). Same host-owned write-back shape as onStaged. */
+  onCreated: (entryId: string) => Promise<void>;
 }
 
 // ADR-0055 §2/§4a: a staged mutation set carries the same content as an entry
@@ -351,12 +357,21 @@ export class ChatCommitController {
     if (!this.draftProposal || this.creatingDraft) return;
     this.creatingDraft = true;
     try {
-      // Only clear the reviewed draft if the create actually succeeded — run()
-      // reports failure as `false` (it swallows the error), so clearing
+      // Only clear the reviewed draft if the create actually succeeded — the id
+      // is null on failure (run() swallows the error), so clearing
       // unconditionally would silently lose the draft on a 409 / offline / save
       // rejection with nothing created.
-      const ok = await treeActions.createLoreEntryFromDraft(this.draftEntryType, this.draftProposal);
-      if (ok) this.reset();
+      const createdId = await treeActions.createLoreEntryFromDraft(
+        this.draftEntryType,
+        this.draftProposal,
+      );
+      if (createdId) {
+        // The entry exists — clear the draft BEFORE the subject stamp so a
+        // failed stamp can't leave a live Create button that would mint a
+        // duplicate entry.
+        this.reset();
+        await this.deps.onCreated(createdId);
+      }
     } catch (e) {
       this.deps.setError((e as Error).message);
     } finally {

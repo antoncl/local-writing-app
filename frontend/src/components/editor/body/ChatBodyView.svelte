@@ -48,6 +48,7 @@
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
   import { ChatCommitController } from "@/lib/stores/chatCommit.svelte";
   import { refreshChatSessions } from "@/lib/stores/chats";
+  import { refreshReferenceIndexInBackground } from "@/lib/stores/references";
   import {
     assistantScopeTags,
     assistantTitle,
@@ -218,6 +219,17 @@
     onStaged: async (setId) => {
       chatStagedSet = setId;
       await persistActiveChat();
+    },
+    // #983: a create-mode brainstorm launches before its entry exists, so its
+    // `subject` can only be stamped here, when the entry is minted — making this
+    // chat the entry's first conversation (ADR-0051 S2). Persist writes the
+    // chat→subject edge; the index refresh mirrors the create-with-subject path
+    // in chatSessions (this save bypasses saveEditorPane's change-gated refresh),
+    // so the new entry's Conversations panel lists the chat without a reload.
+    onCreated: async (entryId) => {
+      chatSubject = entryId;
+      await persistActiveChat();
+      refreshReferenceIndexInBackground();
     },
   });
 

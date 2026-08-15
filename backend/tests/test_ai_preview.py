@@ -100,6 +100,33 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertTrue(body["char_count"] > 0)
         self.assertIsNone(body["session_id"])
 
+    def test_preview_reports_lore_enabled_when_helper_called(self) -> None:
+        # ADR-0057 §2: the wire contract. The route surfaces the execution-
+        # derived lore gate that the frontend persists as the chat's
+        # lore_enabled — a template that runs relevant_lore() reports True.
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": '{% role "system" %}{{ relevant_lore(scene) }}{% endrole %}',
+                "target_scene_id": self.scene_id,
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["lore_enabled"])
+
+    def test_preview_reports_lore_disabled_when_helper_absent(self) -> None:
+        # A prompt that never calls the helper reports False — the gate stays
+        # off and the send path will inject no lore (Journey C).
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": '{% role "system" %}No lore here.{% endrole %}',
+                "target_scene_id": self.scene_id,
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertFalse(response.json()["lore_enabled"])
+
     def test_preview_uses_helpers(self) -> None:
         response = self.client.post(
             "/api/ai/preview",

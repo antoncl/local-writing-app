@@ -290,6 +290,12 @@ def build_preview(
     if session is not None and commit:
         session.commit()
 
+    # ADR-0057 §2: carry the execution-derived lore gate off the env (set by the
+    # instrumented `relevant_lore()` helper) onto the rendered result, so the
+    # preview route can surface it and the chat can persist `lore_enabled`. The
+    # default `[False]` covers an env that never registered the helper.
+    rendered.lore_invoked = bool(getattr(env, "lore_invoked", [False])[0])
+
     return rendered, session_id
 
 

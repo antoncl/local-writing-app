@@ -528,6 +528,7 @@ class ChatEndpointJournalTests(unittest.TestCase):
         from app.models import (
             CreateChatSessionRequest,
             CreateLoreEntryRequest,
+            SaveChatSessionRequest,
             SaveLoreEntryRequest,
         )
         self.temp_dir = TemporaryDirectory()
@@ -579,6 +580,16 @@ class ChatEndpointJournalTests(unittest.TestCase):
             CreateChatSessionRequest(title="Test", prompt_entry_id="prompt_x")
         )
         self.chat_id = chat.id
+        # ADR-0057 §2: the send-time lore journal now runs only for a
+        # lore-enabled chat (a prompt whose lock render called relevant_lore()).
+        # Enable the gate to represent that; a gate-off chat is covered by
+        # test_lore_gate_off_injects_no_lore below.
+        self.service.save_chat_session(
+            self.chat_id,
+            SaveChatSessionRequest(
+                title="Test", prompt_entry_id="prompt_x", lore_enabled=True
+            ),
+        )
 
     def tearDown(self) -> None:
         self._config_patcher.stop()
@@ -634,6 +645,45 @@ class ChatEndpointJournalTests(unittest.TestCase):
         self.assertIn("Honor Harrington", blocks[1]["text"])
         self.assertIn("Pavel Young", blocks[1]["text"])
         self.assertEqual(blocks[1]["ttl"], "5m")
+
+    def test_lore_gate_off_injects_no_lore(self) -> None:
+        """ADR-0057 §2 Journey C: a chat whose prompt never called
+        relevant_lore() (lore_enabled=False, the default) gets no send-time
+        detection and no lore block at all — even when the message names lore
+        entries that a lore-enabled chat would pull in."""
+        from app.models import CreateChatSessionRequest
+        # No lock render enabled the gate, so lore_enabled stays False.
+        off_chat = self.service.create_chat_session(
+            CreateChatSessionRequest(title="Lore-free", prompt_entry_id="prompt_y")
+        )
+        loaded = _set_machine_keys(anthropic="sk-ant-test", default_provider="anthropic")
+        with patch("app.services.machine_settings.load_settings", return_value=loaded), \
+             patch(
+                "app.services.ai.providers._anthropic_chat",
+                return_value=("Reply.", "end_turn", SimpleNamespace()),
+             ) as mock_chat:
+            response = self.client.post(
+                "/api/ai/chat",
+                json={
+                    "provider": "anthropic",
+                    "model": "claude-haiku-4-5-20251001",
+                    "system_prompt": "You are a writing assistant.",
+                    "messages": [{"role": "user", "content": "Honor walked in."}],
+                    "chat_id": off_chat.id,
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertTrue(body["ok"])
+        # Nothing detected; the journal stays empty.
+        self.assertEqual(body["journal_added"], [])
+        chat = self.service.read_chat_session(off_chat.id)
+        self.assertEqual(list(chat.journal), [])
+        # Only the system_prompt block reaches the provider — no lore Slot 2.
+        kwargs = mock_chat.call_args.kwargs
+        blocks = kwargs["system_blocks"]
+        self.assertEqual(len(blocks), 1)
+        self.assertEqual(blocks[0]["text"], "You are a writing assistant.")
 
     def test_no_chat_id_skips_journal_path(self) -> None:
         loaded = _set_machine_keys(anthropic="sk-ant-test", default_provider="anthropic")

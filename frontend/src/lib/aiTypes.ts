@@ -125,6 +125,10 @@ export type AIPreviewResponse = {
   provider?: string | null;
   model?: string | null;
   caching_style?: "none" | "auto" | "explicit" | null;
+  // ADR-0057 §2: whether relevant_lore() executed during this render — the
+  // lore gate. Captured at the lock render and persisted as the chat's
+  // lore_enabled.
+  lore_enabled?: boolean;
 };
 
 export type ChatMessage = {
@@ -290,6 +294,9 @@ export type ChatSession = {
   messages: ChatSessionMessage[];
   inputs?: Record<string, unknown>;
   journal?: ChatSessionJournalEntry[];
+  // ADR-0057 §2: the execution-derived lore gate, captured at the lock render.
+  // Gate off → the send path injects no lore at all. Absent on legacy chats.
+  lore_enabled?: boolean;
   // V2: running USD cost (display as EUR via money.ts).
   cost_usd_total?: number;
   // V2: per-cache-slot ISO timestamps of last cache write.
@@ -347,6 +354,9 @@ export type SaveChatSessionRequest = {
   // ADR-0055 S4: echoed on save like `subject`, with the same persisted-value
   // fallback, so a per-turn write never drops the chat's staged set.
   staged_set?: string;
+  // ADR-0057 §2: the lore gate. Echoed on save; the backend treats an omitted
+  // value as "leave the captured gate alone", so per-turn saves preserve it.
+  lore_enabled?: boolean;
   pinned: boolean;
   context_items: ChatSessionContextItem[];
   messages: ChatSessionMessage[];

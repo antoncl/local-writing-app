@@ -45,6 +45,7 @@ from app.runtime import CurrentProject, translate_errors
 from app.services import machine_settings as machine_settings_service
 from app.services.ai import providers as ai_providers
 from app.services.ai import tokens as ai_tokens
+from app.services.ai.assistant_validation import coerce_optional_temperature
 from app.services.ai.extraction import EXTRACT_CUE, render_extraction_contract
 from app.services.ai.preview import PreviewError, build_chat_payload, build_preview
 from app.services.ai.profiles import CapabilityTier, ModelDescriptor
@@ -114,7 +115,7 @@ def _resolve_call_params(
         a_model = meta.get("ai_model")
         provider = provider_override or (str(a_provider) if isinstance(a_provider, str) else "")
         model = model_override or (str(a_model) if isinstance(a_model, str) else "")
-        temperature = _coerce_optional_temperature(meta.get("ai_temperature"))
+        temperature = coerce_optional_temperature(meta.get("ai_temperature"))
         if max_tokens_override is not None:
             max_tokens = max_tokens_override
         else:
@@ -137,74 +138,6 @@ def _resolve_call_params(
         temperature=None,
         max_tokens=max_tokens_override if max_tokens_override is not None else 4096,
     )
-
-
-def _coerce_optional_temperature(raw: Any) -> float | None:
-    """Parse a temperature value from assistant metadata. None / empty /
-    unparseable all collapse to None so the call site omits the param."""
-    if raw is None or raw == "":
-        return None
-    try:
-        return float(raw)
-    except (TypeError, ValueError):
-        return None
-
-
-def _profile_for_provider(provider_name: str) -> Any:
-    """Return a throwaway ProviderProfile instance for `provider_name`, or
-    None if unknown. Used for capability queries (supports/requires
-    temperature, caching style, etc.) that don't need credentials.
-    Same instantiate-empty pattern as `_extract_usage_for_provider`."""
-    if provider_name == "anthropic":
-        from app.services.ai.profiles.anthropic import AnthropicProfile
-        return AnthropicProfile(api_key="")
-    if provider_name == "openai":
-        from app.services.ai.profiles.openai import OpenAIProfile
-        return OpenAIProfile(api_key="")
-    if provider_name == "openrouter":
-        from app.services.ai.profiles.openrouter import OpenRouterProfile
-        return OpenRouterProfile(api_key="")
-    if provider_name == "ollama":
-        from app.services.ai.profiles.ollama import OllamaProfile
-        return OllamaProfile(host="http://127.0.0.1:11434")
-    return None
-
-
-def _validate_assistant_temperature(metadata: dict[str, Any] | None) -> str | None:
-    """Check that the assistant's (provider, model, temperature) combo is
-    valid. Returns an error message to surface as 400, or None when OK.
-
-    - Model requires temperature but none set → reject (no current model
-      hits this; the check is here for forward-compat).
-    - Model rejects temperature but one is set → reject so the user fixes
-      it at save time instead of seeing a runtime 400 on first use.
-
-    When provider or model are missing, defer to other validation — we
-    only check the temperature combo when there's enough info to judge.
-    """
-    if not metadata:
-        return None
-    provider_name = metadata.get("ai_provider")
-    model_id = metadata.get("ai_model")
-    if not isinstance(provider_name, str) or not isinstance(model_id, str):
-        return None
-    if not provider_name or not model_id:
-        return None
-    profile = _profile_for_provider(provider_name)
-    if profile is None:
-        return None
-    has_temp = _coerce_optional_temperature(metadata.get("ai_temperature")) is not None
-    if profile.requires_temperature(model_id) and not has_temp:
-        return (
-            f"Model '{model_id}' requires a temperature setting — "
-            "fill in the Temperature field."
-        )
-    if not profile.supports_temperature(model_id) and has_temp:
-        return (
-            f"Model '{model_id}' does not accept a temperature setting — "
-            "clear the Temperature field."
-        )
-    return None
 
 
 # --- AI: health check ---

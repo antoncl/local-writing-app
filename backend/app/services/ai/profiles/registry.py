@@ -38,3 +38,18 @@ def profile_for(provider: str, settings: MachineSettings) -> ProviderProfile:
     if provider == "ollama":
         return OllamaProfile(host=providers.ollama_host or "http://127.0.0.1:11434")
     raise ValueError(f"Unknown provider: {provider}")
+
+
+def capability_profile_for(provider: str) -> ProviderProfile | None:
+    """A credential-less profile for capability queries — `requires_temperature`,
+    `supports_temperature`, caching style — that need no API key and must not
+    raise on an unknown provider (they run on user-supplied metadata).
+
+    Delegates to `profile_for` with default settings, whose provider credentials
+    are empty, so there is one provider→profile constructor rather than two.
+    Returns `None` on an unknown provider, where `profile_for` raises.
+    """
+    try:
+        return profile_for(provider, MachineSettings())
+    except ValueError:
+        return None

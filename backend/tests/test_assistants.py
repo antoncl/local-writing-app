@@ -12,6 +12,7 @@ from project_fixtures import open_test_project
 from app.main import app
 from app.models import UpdateProjectSettingsRequest
 from app.services import machine_settings as ms
+from app.services.project.assistants import normalize_assistant_entry_type
 from app.services.project_service import ProjectService
 
 
@@ -780,6 +781,88 @@ class AssistantLayerOrderingTests(unittest.TestCase):
         )
         titles = [e["title"] for e in self.client.get("/api/assistants").json()["entries"]]
         self.assertEqual(titles, ["Ada", "Zed"])
+
+
+class NormalizeAssistantEntryTypeTests(unittest.TestCase):
+    """The read-time heal for machine assistant files (#87). These files have no
+    import path and pre-1.0 'recreate the project' never reaches them, so a value
+    that drifted from the schema can only be healed when read."""
+
+    def test_bare_kind_upgrades_to_fqn(self) -> None:
+        # The motivating case: a file written before #77 keyed the type as
+        # `assistant:assistant` carries a bare `assistant`.
+        self.assertEqual(normalize_assistant_entry_type("assistant"), "assistant:assistant")
+
+    def test_missing_or_blank_becomes_base(self) -> None:
+        self.assertEqual(normalize_assistant_entry_type(None), "assistant:assistant")
+        self.assertEqual(normalize_assistant_entry_type(""), "assistant:assistant")
+        self.assertEqual(normalize_assistant_entry_type("   "), "assistant:assistant")
+
+    def test_non_text_becomes_base(self) -> None:
+        # Older sites raised 422 here; heal instead, consistent with the roster.
+        self.assertEqual(normalize_assistant_entry_type(123), "assistant:assistant")
+        self.assertEqual(normalize_assistant_entry_type(["assistant"]), "assistant:assistant")
+
+    def test_fqn_shaped_value_passes_through_verbatim(self) -> None:
+        # A genuinely unknown FQN is NOT coerced — it must survive so the editor's
+        # unresolved-type warning can flag it rather than mis-rendering silently.
+        self.assertEqual(
+            normalize_assistant_entry_type("lore:whatever"), "lore:whatever"
+        )
+        self.assertEqual(
+            normalize_assistant_entry_type("assistant:fast"), "assistant:fast"
+        )
+
+
+class AssistantEntryTypeHealOnReadTests(unittest.TestCase):
+    """End-to-end: a machine assistant file with a bare `entry_type` heals to its
+    FQN on read, so the editor never falls back to scene fields for it (#87)."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.config_dir = Path(self.temp_dir.name) / "config"
+        self.config_dir.mkdir()
+        self._patcher = patch(
+            "app.services.machine_settings.config_path",
+            return_value=self.config_dir / "config.yaml",
+        )
+        self._patcher.start()
+        self.folder = self.config_dir / "assistants"
+        self.folder.mkdir(parents=True)
+        self.service = ProjectService()
+
+    def tearDown(self) -> None:
+        self._patcher.stop()
+        self.temp_dir.cleanup()
+
+    def _write(self, entry_id: str, entry_type_line: str) -> None:
+        (self.folder / f"{entry_id}.md").write_text(
+            f"---\nid: {entry_id}\ntitle: {entry_id.title()}\n{entry_type_line}"
+            "metadata: { ai_provider: anthropic, ai_model: m }\n---\n",
+            encoding="utf-8",
+        )
+        (self.folder / ".order.yaml").write_text(
+            f"ids:\n- {entry_id}\nexcluded: []\n", encoding="utf-8"
+        )
+
+    def test_read_heals_bare_entry_type(self) -> None:
+        self._write("creative", "entry_type: assistant\n")
+        self.assertEqual(
+            self.service.read_assistant_entry("creative").entry_type,
+            "assistant:assistant",
+        )
+
+    def test_list_heals_bare_entry_type(self) -> None:
+        self._write("creative", "entry_type: assistant\n")
+        entry = next(e for e in self.service.list_assistant_entries().entries if e.id == "creative")
+        self.assertEqual(entry.entry_type, "assistant:assistant")
+
+    def test_read_leaves_unknown_fqn_verbatim(self) -> None:
+        # An out-of-band FQN survives read so the frontend can warn on it.
+        self._write("creative", "entry_type: lore:whatever\n")
+        self.assertEqual(
+            self.service.read_assistant_entry("creative").entry_type, "lore:whatever"
+        )
 
 
 if __name__ == "__main__":

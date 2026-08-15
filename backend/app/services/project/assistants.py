@@ -47,6 +47,30 @@ from app.services.project.node_index import IndexLayer, NodeIndex, NodeIndexEntr
 
 log = logging.getLogger(__name__)
 
+ASSISTANT_BASE_ENTRY_TYPE = "assistant:assistant"
+
+
+def normalize_assistant_entry_type(raw: object) -> str:
+    """Heal a stored assistant `entry_type` to its FQN on read (#87).
+
+    Machine assistant files have no import path, and the pre-1.0 "recreate the
+    project" reset never reaches them — they live in `%APPDATA%`, independent of
+    any project — so a value that drifted from the schema can only be healed at
+    read time. The narrow rule (the one `feedback_no_pre_1_0_migrations` carves
+    out, because these files *cannot* be recreated): a missing, blank, non-text,
+    or **bare-kind** value (`assistant`, written before #77 keyed the type as
+    `assistant:assistant`) becomes the kind's FQN default. Anything already
+    FQN-shaped (contains a colon) is returned verbatim — so a genuinely unknown
+    `lore:whatever` still surfaces for the editor's unresolved-type warning to
+    flag, rather than being silently coerced.
+    """
+    if not isinstance(raw, str) or not raw.strip():
+        return ASSISTANT_BASE_ENTRY_TYPE
+    value = raw.strip()
+    # Bare token (no `kind:` prefix) in the assistant read path means the
+    # assistant partition — upgrade to its base FQN.
+    return value if ":" in value else ASSISTANT_BASE_ENTRY_TYPE
+
 
 @dataclass
 class AssistantsOrder:
@@ -154,8 +178,7 @@ class AssistantEntriesMixin:
                 front_matter, _body = self._read_markdown_with_front_matter(entry.path, strict=True)
             except ProjectServiceError:
                 continue
-            raw_entry_type = front_matter.get("entry_type") or "assistant:assistant"
-            entry_type = raw_entry_type if isinstance(raw_entry_type, str) else "assistant:assistant"
+            entry_type = normalize_assistant_entry_type(front_matter.get("entry_type"))
             entries.append(
                 AssistantEntrySummary(
                     id=entry.id,
@@ -373,9 +396,7 @@ class AssistantEntriesMixin:
         path = index_entry.path
         front_matter, _body = self._read_markdown_with_front_matter(path, strict=True)
         node_id = self._node_id_for_path(path, front_matter)
-        raw_entry_type = front_matter.get("entry_type") or "assistant:assistant"
-        if not isinstance(raw_entry_type, str):
-            raise ProjectServiceError(f"Assistant {node_id} has invalid entry_type; it must be text.", 422)
+        entry_type = normalize_assistant_entry_type(front_matter.get("entry_type"))
         metadata = self._normalise_metadata(front_matter.get("metadata"), path)
         # Read-side healing (#345), under one rule: heal only when the index
         # answering "does this id still exist" covers the same ground the
@@ -402,7 +423,7 @@ class AssistantEntriesMixin:
             id=node_id,
             title=str(front_matter.get("title") or node_id),
             revision=self._revision(path),
-            entry_type=raw_entry_type,
+            entry_type=entry_type,
             metadata=metadata,
             computed_metadata=self._curation_metadata(node_id),
             source_layer_id=index_entry.source_layer_id,
@@ -595,12 +616,11 @@ class AssistantEntriesMixin:
             front_matter, _body = self._read_markdown_with_front_matter(entry.path, strict=True)
         except ProjectServiceError:
             return None
-        raw_entry_type = front_matter.get("entry_type") or "assistant:assistant"
         return AssistantEntry(
             id=entry.id,
             title=str(front_matter.get("title") or entry.id),
             revision=self._revision(entry.path),
-            entry_type=raw_entry_type if isinstance(raw_entry_type, str) else "assistant:assistant",
+            entry_type=normalize_assistant_entry_type(front_matter.get("entry_type")),
             metadata=self._normalise_metadata(front_matter.get("metadata"), entry.path),
             source_layer_id=entry.source_layer_id,
             source_layer_label=entry.source_layer_label,

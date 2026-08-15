@@ -71,7 +71,7 @@
 <style>
   .cbv-empty {
     margin: 0;
-    font-size: var(--fs-md);
+    font-size: var(--fs-lg);
     color: var(--text-3);
   }
 
@@ -89,7 +89,7 @@
   }
   .cbv-role-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--k-graphite); }
   .cbv-message-content {
-    font-size: var(--fs-md); line-height: 1.6; white-space: pre-wrap; padding: 10px 13px;
+    font-size: var(--fs-lg); line-height: 1.6; white-space: pre-wrap; padding: 10px 13px;
   }
   .cbv-message-user .cbv-message-content {
     max-width: 78%; border-radius: 13px 13px 4px 13px;
@@ -101,13 +101,13 @@
     padding: 11px 14px;
   }
   .cbv-typing { font-style: italic; color: var(--text-3); }
-  :global(.cbv-message-rendered) { font-size: var(--fs-md); line-height: 1.6; }
+  :global(.cbv-message-rendered) { font-size: var(--fs-lg); line-height: 1.6; }
   :global(.cbv-message-rendered p) { margin: 0 0 0.6em; }
   :global(.cbv-message-rendered p:last-child) { margin-bottom: 0; }
   :global(.cbv-message-rendered pre) {
     margin: 0.4em 0; padding: 8px 10px; background: var(--inset); border-radius: 8px; overflow-x: auto;
   }
-  :global(.cbv-message-rendered code) { font-family: var(--mono); font-size: var(--fs-sm); }
+  :global(.cbv-message-rendered code) { font-family: var(--mono); font-size: var(--fs-md); }
 
   /* 4a · thinking accordion. */
   .cbv-thinking {

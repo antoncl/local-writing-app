@@ -9,8 +9,9 @@ import type { MetadataSchema } from "@/lib/types";
 // A realistic host schema: lore has an abstract root + concrete leaves + a
 // deprecated one; scene and plot each have their host types (manuscript:scene /
 // plot:card / plot:plotline — plotlines joined the hosts in S7b) alongside
-// NON-host siblings (act/chapter, board/template) that must never surface. Plus
-// non-host kinds (prompt/view).
+// NON-host siblings (act/chapter, board/template) that must never surface. prompt
+// is a host (#711 — meta-prompting, a code body the run-diff reviews); view is a
+// body-less non-host kind that must stay curated out.
 const SCHEMA = {
   version: 1,
   entry_types: {
@@ -37,10 +38,11 @@ const stateOf = (offerOn: string[], id: string) =>
   offerOnRows(SCHEMA, offerOn).find((r) => r.id === id)?.state;
 
 describe("offerOnRows — host filter (#903)", () => {
-  it("offers all lore plus only the manuscript:scene / plot:card / plot:plotline subtrees", () => {
+  it("offers all lore/prompt plus the manuscript:scene / plot:card / plot:plotline subtrees", () => {
     // The abstract lore root is kept (the natural 'all lore' target); the
-    // deprecated lore type and every non-host sibling / kind are gone. plot:plotline
-    // joined the hosts in S7b (revise-plotline), a sibling section after plot:card.
+    // deprecated lore type and every non-host sibling are gone. plot:plotline joined
+    // in S7b (revise-plotline), a sibling after plot:card; prompt joined in #711
+    // (meta-prompting) as a body-authoring host, a section after the plot hosts.
     expect(ids([])).toEqual([
       "lore:base",
       "lore:character",
@@ -49,12 +51,13 @@ describe("offerOnRows — host filter (#903)", () => {
       "manuscript:scene",
       "plot:card",
       "plot:plotline",
+      "prompt:general",
     ]);
   });
 
-  it("drops the dead targets that the coarse kind filter used to show", () => {
+  it("keeps containers and body-less non-host kinds out (view)", () => {
     const shown = new Set(ids([]));
-    for (const dead of ["manuscript:act", "manuscript:chapter", "plot:board", "plot:template", "lore:old"]) {
+    for (const dead of ["manuscript:act", "manuscript:chapter", "plot:board", "plot:template", "lore:old", "view:board"]) {
       expect(shown.has(dead)).toBe(false);
     }
   });
@@ -64,6 +67,15 @@ describe("offerOnRows — host filter (#903)", () => {
     expect(stateOf(["plot:plotline"], "plot:plotline")).toBe("checked");
     // A depth-0 section root like the other plot host, not nested under plot:card.
     expect(offerOnRows(SCHEMA, []).find((r) => r.id === "plot:plotline")?.depth).toBe(0);
+  });
+
+  it("offers prompt as a body-authoring host — meta-prompting (#711)", () => {
+    // #711 acceptance: an author can target a prompt. Its code body is reviewed by
+    // the same run-diff as prose, so prompt is a first-class offer_on host, a
+    // depth-0 section selectable like any other.
+    expect(stateOf([], "prompt:general")).toBe("unchecked");
+    expect(stateOf(["prompt:general"], "prompt:general")).toBe("checked");
+    expect(offerOnRows(SCHEMA, []).find((r) => r.id === "prompt:general")?.depth).toBe(0);
   });
 
   it("nests lore leaves one level under the root", () => {

@@ -445,7 +445,8 @@
   // (launched via ConversationsPanel's ＋New menu); the controller derives the proposed-vs-
   // current flips off the live buffer fed below, and the adopt write stays here
   // (owns `metadata` + prose buffer, so both land in one PUT — ADR-0046 §1). The
-  // controller is kind-agnostic; the host's participation policy is `patchLoopKind`.
+  // controller is kind-agnostic, and so is participation (#711): a node reviews iff
+  // a commit prompt patched it (keyed on the node id), never by a host kind list.
   const entryReview = new EntryProposalController();
   $effect.pre(() => {
     entryReview.nodeId = scene?.id ?? null;
@@ -473,46 +474,34 @@
     }
     metadata = { ...metadata, ...next };
   };
-  entryReview.onAdoptBody = (body) => proseBodyView?.adoptBody(body);
+  // Body adopt/read route to the ACTIVE body view: the raw editor for a code body
+  // (a prompt template — #711), TipTap otherwise. Both sides are plain strings, so
+  // the run-diff review reads a template exactly as it reads prose. `rawBody` feeds
+  // the save the same way a keystroke does (the rawBodyMode effect → emitChange).
+  entryReview.onAdoptBody = (body) => {
+    if (rawBodyMode) rawBody = body;
+    else proseBodyView?.adoptBody(body);
+  };
   entryReview.onEmitChange = emitChange;
-  entryReview.readCurrentBody = () => proseBodyView?.getBody() ?? scene?.body ?? "";
+  entryReview.readCurrentBody = () =>
+    rawBodyMode ? rawBody : (proseBodyView?.getBody() ?? scene?.body ?? "");
   // The one explicit post that ends a commit — the pane controller cancels the
   // (frozen) timer and PUTs once (body + metadata together).
   entryReview.onFlush = () => {
     if (scene?.id) return onFlushReviewCommit?.(scene.id);
   };
 
-  // ADR-0048 §5 — the host's SINGLE gate for which kinds take part in the
-  // entry-patch loop: the freeze, launcher, and review overlay below all read it,
-  // so they can't drift (a review over an un-frozen pane moves the diff base,
-  // #634). Controller/store are kind-agnostic; widen per-kind here. Lore, plot
-  // cards (ADR-0048 S8b), plotlines (ADR-0048 S7b), and scenes (ADR-0051 S5-next)
-  // all run the entry-patch loop: a card brainstorm patches its `plot:card`, a
-  // plotline brainstorm its `plot:plotline` (beat roster + description), a scene's
-  // "Summarize scene" its `summary` field (review in `replace` mode; see the
-  // overlay). The Conversations ＋New menu filters to the prompts each kind's node
-  // admits (see ConversationsPanel).
-  const patchLoopKind = $derived(
-    documentKind === "lore" ||
-      documentKind === "manuscript" ||
-      documentKind === "plot_card" ||
-      documentKind === "plotline",
-  );
-  // ADR-0051 S3/S5 — which kinds show the Conversations surface. A chat's
-  // `subject` is kind-neutral, so a scene lists its chats (subject → scene) the
-  // same way a lore entry or plot card does. All three offer the brainstorm ＋New
-  // menu; ConversationsPanel scopes it to the commit prompts (ADR-0054 §2) that
-  // admit this node's kind, and hides ＋New when none resolves.
-  const conversationsKind = $derived(
-    documentKind === "lore" ||
-      documentKind === "manuscript" ||
-      documentKind === "plot_card" ||
-      documentKind === "plotline",
-  );
   // A node under an open brainstorm review is a frozen transaction (#634): the
   // rail/title go read-only and the host suppresses autosave, so the diff's
-  // "current" side cannot move under the review.
-  const reviewing = $derived(patchLoopKind && entryReview.hasReview);
+  // "current" side cannot move under the review. Participation is DATA-DRIVEN, not
+  // a per-kind allow-list (#711): a review exists iff a commit-carrying prompt
+  // (ADR-0054 §2) patched THIS node — `entryReview.proposal` is keyed on the node
+  // id alone (see EntryProposalController), and the only writer is a commit chat's
+  // extraction, itself gated by the prompt's `offer_on` + commit disposition. So
+  // review-mode follows the launching PROMPT, never the host kind; the freeze and
+  // the review overlay (rendered for prose AND code bodies below) read this same
+  // `hasReview`, so they can't drift.
+  const reviewing = $derived(entryReview.hasReview);
   // An INHERITED prompt is read-only in place: the backend refuses any save
   // (409) whether it is a built-in Library node (ADR-0049) or an ancestor
   // project's prompt (#676). Lock the whole editor — title, fields and the code
@@ -778,6 +767,53 @@
 <!-- Metadata + backlinks, rendered into either the side rail (prose/code/
      chat) or the whole pane (none-shape). Defined once as a snippet so the
      long prop list isn't duplicated across the two host slots. -->
+{#snippet reviewOverlay()}
+  <!-- The brainstorm commit reviewed on the (frozen) node. Like the snapshot
+       overlay, the live body stays mounted and hidden beneath; adopting writes
+       through the same emitChange autosave (body + metadata in one PUT). Shared by
+       the prose AND code body branches (#711) — the run-diff reads a prompt's
+       template exactly as it reads prose. Two presentations, chosen by the
+       launching prompt's `commit.review` carried on the proposal (ADR-0054 §2). -->
+  {#key entryReview.proposal}
+    {#if entryReview.proposal?.reviewMode === "replace"}
+      <!-- `replace`: a whole-field swap (a scene summary regenerated from the
+           body) — a plain current→proposed card, no run-diff (a regenerated value
+           has no meaningful per-run diff). Replace adopts ONLY the shown long_text
+           fields via `acceptFields` — never the body or a structured flip — so the
+           write set equals what the card displays and a scene's prose can't be
+           rewritten. -->
+      <ReplaceReviewCard
+        fields={entryReview.fields}
+        onReplace={() => {
+          entryReview.acceptFields();
+          void entryReview.commit();
+        }}
+        onDiscard={() => entryReview.abandon()}
+      />
+    {:else}
+      <!-- ADR-0046 slice 3: the per-run adopt flip (body + each long_text field),
+           plus the structured rail flips and the A/S/B judge axis. -->
+      <EntryRevisionReview
+        currentBody={entryReview.currentBody()}
+        proposedBody={entryReview.proposal?.body ?? null}
+        fields={entryReview.fields}
+        hasChanges={entryReview.hasPendingChanges}
+        view={entryReview.view}
+        onView={(v) => entryReview.setView(v)}
+        onToggleView={(v) => entryReview.toggleView(v)}
+        onBodyResolved={(v) => entryReview.setBodyResolution(v)}
+        onFieldResolved={(id, v) => entryReview.setFieldResolution(id, v)}
+        onAcceptAll={() => {
+          entryReview.acceptAll();
+          void entryReview.commit();
+        }}
+        onDone={() => entryReview.commit()}
+        onDiscard={() => entryReview.abandon()}
+      />
+    {/if}
+  {/key}
+{/snippet}
+
 {#snippet metaContent()}
   {#if metadataSchema}
     <MetadataPanel
@@ -821,12 +857,14 @@
         on:navigate={(event) => onNavigate?.(event.detail)}
       />
     {/key}
-    {#if conversationsKind && scene?.id}
+    {#if scene?.id}
       <!-- The Conversations surface (ADR-0051 S3/S5): the chats about this node,
            resume-first, + a ＋New menu — the launcher that replaced the
-           silent-spawn brainstorm verb. Mounted for lore entries and scenes
-           alike (a scene lists chats whose subject → it). Keyed on the node id
-           so its expand / menu state resets when the open node changes. -->
+           silent-spawn brainstorm verb. Mounted on EVERY node (#711): the panel
+           self-hides when there is nothing to resume and no prompt `offer_on`s
+           this node's type, so the kind allow-list that used to gate it here was
+           redundant. Keyed on the node id so its expand / menu state resets when
+           the open node changes. -->
       {#key scene.id}
         <ConversationsPanel
           subjectId={scene.id}
@@ -964,25 +1002,33 @@
     {/if}
   {/if}
   {#if bodyShape === "code"}
-    <CodeBodyView
-      bind:rawBody
-      bind:entryInputDrafts={promptDrafts.drafts}
-      {scene}
-      {documentKind}
-      {structure}
-      {researchStructure}
-      {loreEntries}
-      {promptEntries}
-      {availableScenes}
-      {rawBodyLanguage}
-      {loadedSceneId}
-      nextInputDraftId={promptDrafts.nextDraftId}
-      entrySlugify={promptDrafts.slugify}
-      readOnly={inheritedReadOnly}
-      onInputsChange={emitChange}
-      bind:offerOn={offerOnDraft}
-      onOfferOnChange={emitChange}
-    />
+    {#if entryReview.hasReview && entryReview.proposal}
+      <!-- A commit brainstorm reviewed on a code-bodied node (a prompt template —
+           #711). Same overlay as prose; the raw body stays mounted and hidden
+           beneath (frozen diff base), thawing to the adopted text on commit. -->
+      {@render reviewOverlay()}
+    {/if}
+    <div class="code-body-host" class:hidden={reviewing}>
+      <CodeBodyView
+        bind:rawBody
+        bind:entryInputDrafts={promptDrafts.drafts}
+        {scene}
+        {documentKind}
+        {structure}
+        {researchStructure}
+        {loreEntries}
+        {promptEntries}
+        {availableScenes}
+        {rawBodyLanguage}
+        {loadedSceneId}
+        nextInputDraftId={promptDrafts.nextDraftId}
+        entrySlugify={promptDrafts.slugify}
+        readOnly={inheritedReadOnly}
+        onInputsChange={emitChange}
+        bind:offerOn={offerOnDraft}
+        onOfferOnChange={emitChange}
+      />
+    </div>
   {/if}
   {#if bodyShape === "prose"}
     {#if scrubbed}
@@ -1003,50 +1049,8 @@
         tone="snapshot"
         onRunClick={(regionId, kind) => snapshots.adopt(regionId, kind)}
       />
-    {:else if patchLoopKind && entryReview.hasReview && entryReview.proposal}
-      <!-- The brainstorm commit reviewed on the (frozen) node. Like the snapshot
-           overlay, the live buffer stays mounted and hidden beneath; adopting
-           writes through the same emitChange autosave (body + metadata in one
-           PUT). Two review presentations, chosen by the launching prompt's
-           `commit.review` carried on the proposal (ADR-0054 §2). -->
-      {#key entryReview.proposal}
-        {#if entryReview.proposal.reviewMode === "replace"}
-          <!-- `replace`: a whole-field swap (a scene summary regenerated from the
-               body) — a plain current→proposed card, no run-diff (a regenerated
-               value has no meaningful per-run diff). Replace adopts ONLY the shown
-               long_text fields via `acceptFields` — never the body or a structured
-               flip — so the write set equals what the card displays and a scene's
-               prose can't be rewritten. -->
-          <ReplaceReviewCard
-            fields={entryReview.fields}
-            onReplace={() => {
-              entryReview.acceptFields();
-              void entryReview.commit();
-            }}
-            onDiscard={() => entryReview.abandon()}
-          />
-        {:else}
-          <!-- ADR-0046 slice 3: the per-run adopt flip (body + each long_text
-               field), plus the structured rail flips and the A/S/B judge axis. -->
-          <EntryRevisionReview
-            currentBody={entryReview.currentBody()}
-            proposedBody={entryReview.proposal.body}
-            fields={entryReview.fields}
-            hasChanges={entryReview.hasPendingChanges}
-            view={entryReview.view}
-            onView={(v) => entryReview.setView(v)}
-            onToggleView={(v) => entryReview.toggleView(v)}
-            onBodyResolved={(v) => entryReview.setBodyResolution(v)}
-            onFieldResolved={(id, v) => entryReview.setFieldResolution(id, v)}
-            onAcceptAll={() => {
-              entryReview.acceptAll();
-              void entryReview.commit();
-            }}
-            onDone={() => entryReview.commit()}
-            onDiscard={() => entryReview.abandon()}
-          />
-        {/if}
-      {/key}
+    {:else if entryReview.hasReview && entryReview.proposal}
+      {@render reviewOverlay()}
     {/if}
     <div
       class="prose-body-host"
@@ -1225,10 +1229,12 @@
   /* ---- Time-travel overlay chrome (#64) ---------------------------------- */
   /* Keeps ProseBodyView a direct grid child of .editor-panel when visible;
      display:none while scrubbed preserves the mounted TipTap buffer. */
-  .prose-body-host {
+  .prose-body-host,
+  .code-body-host {
     display: contents;
   }
-  .prose-body-host.hidden {
+  .prose-body-host.hidden,
+  .code-body-host.hidden {
     display: none;
   }
 

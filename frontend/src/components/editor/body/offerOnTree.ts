@@ -11,25 +11,30 @@
 //     re-stored. Storing the parent also covers subtypes added to the schema
 //     later, which a leaf set would miss.
 //
-// Host filter (fixes the S4b dead-target bug): only the subject types whose nodes
-// actually mount a Conversations panel can receive a prompt — NodeEditor's
-// `conversationsKind` = document kinds lore / scene / plot_card / plotline. That
-// maps to the section roots below: ALL of `lore` (every lore entry is a lore
-// document), and only the `manuscript:scene` / `plot:card` / `plot:plotline` subtrees.
-// Acts/chapters (structure nodes) and plot boards/templates are siblings of those
-// roots, so anchoring each section at its host root structurally excludes them —
-// no per-node denylist. Plotlines joined the hosts in ADR-0048 S7b (revise-plotline).
+// Host filter. The read path (`promptOffersOn`) is fully general — any `offer_on`
+// target surfaces + reviews, since #711 made the Conversations panel mount on EVERY
+// node (self-hiding) and the entry-patch review overlay render for prose AND code
+// bodies. So there is no dead-target bug left to defend against; this picker CURATES
+// the ergonomic common targets rather than gating what is legal. It offers the
+// body-authoring kinds — those with a prose or code body a commit prompt can rewrite
+// through the run-diff review: ALL of `lore`, the `manuscript:scene` / `plot:card` /
+// `plot:plotline` subtrees, and ALL of `prompt` (meta-prompting, #711). Reachable
+// only by hand-authoring `offer_on` in the .md: containers (acts/chapters, plot
+// boards/templates — siblings of the host roots, so anchoring each section at its
+// root excludes them structurally), and body-less kinds (assistant / research:topic,
+// whose field-only review has no body diff to render). Plotlines joined in S7b.
 
 import type { MetadataSchema } from "@/lib/types";
 import { buildTree, type SchemaNode } from "@/components/schema/pickerTree";
 
-// The host sections, in render order. `rootId: null` = the whole kind (lore);
+// The host sections, in render order. `rootId: null` = the whole kind (e.g. lore);
 // otherwise the section is the subtree anchored at that host type.
 export const OFFER_ON_SECTIONS: { kind: string; rootId: string | null }[] = [
   { kind: "lore", rootId: null },
   { kind: "manuscript", rootId: "manuscript:scene" },
   { kind: "plot", rootId: "plot:card" },
   { kind: "plot", rootId: "plot:plotline" },
+  { kind: "prompt", rootId: null },
 ];
 
 export type OfferOnState = "checked" | "covered" | "indeterminate" | "unchecked";

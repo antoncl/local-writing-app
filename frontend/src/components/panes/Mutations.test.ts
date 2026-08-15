@@ -54,9 +54,15 @@ afterEach(() => {
 describe("Mutations pane", () => {
   it("renders the mutation-set roster (a display pane's mount test)", () => {
     metadataSchemaStore.set(SCHEMA);
-    mutationSetEntriesStore.set([summary({ title: "Full Moon" })]);
+    mutationSetEntriesStore.set([summary({ title: "Full Moon", row_count: 2 })]);
     render(Mutations);
+    // Assert real data-derived output, not just that the pane mounted (#724):
+    // the title, the target-type detail resolved through the schema (typeLabel),
+    // the row_count pill, and the per-row delete affordance keyed by title.
     expect(screen.getByText("Full Moon")).toBeInTheDocument();
+    expect(screen.getByText("for Character")).toBeInTheDocument();
+    expect(screen.getByText("2")).toBeInTheDocument();
+    expect(screen.getByLabelText("Delete Full Moon")).toBeInTheDocument();
   });
 
   it("the '+' contract: openNewMutationSet sets the editor store, with an optional pin preset", () => {

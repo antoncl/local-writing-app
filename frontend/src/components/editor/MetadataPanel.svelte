@@ -320,6 +320,22 @@
     </button>
   </div>
 
+  {#if entryType && !metadataSchema.entry_types[entryType]}
+    <!-- Unresolved entry_type (#87): the type stored on this node is not in the
+         resolved schema (an out-of-band file edit, a stale import, or a machine
+         file predating a schema re-key). The type select above already keeps the
+         value as a bare option; without this line the editor *also* silently
+         falls back to another type's fields and body, so the author reads the
+         wrong fields with no signal. Make the fallback visible. -->
+    <div class="rail-type-warning" role="status">
+      <span class="rail-type-warning-glyph" aria-hidden="true">⚠</span>
+      <span
+        >Unknown type <code>{entryType}</code> — not in this project's schema.
+        Showing fallback fields; the stored type is kept until you change it.</span
+      >
+    </div>
+  {/if}
+
   {#if inheritedFromLabel}
     <!-- Provenance treatment (#313 / ADR-0039): this entry is owned by an
          ancestor layer. Same --star axis as the level pill and the ancestor
@@ -567,6 +583,27 @@
     font-size: var(--fs-xs);
   }
   .rail-provenance strong {
+    font-weight: 700;
+  }
+  /* Unresolved entry_type (#87) — the --warn axis, a caution not a hard error:
+     the fields shown are a best-effort fallback, and the stored value survives
+     the next save. Sits directly under the type header like rail-provenance. */
+  .rail-type-warning {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 6px 12px;
+    background: var(--warn-soft);
+    border-bottom: 1px solid var(--warn-border);
+    color: var(--warn);
+    font-size: var(--fs-xs);
+  }
+  .rail-type-warning-glyph {
+    flex: none;
+    line-height: 1.4;
+  }
+  .rail-type-warning code {
+    font-family: var(--mono);
     font-weight: 700;
   }
   .rail-type-select {

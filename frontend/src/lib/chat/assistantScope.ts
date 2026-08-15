@@ -114,3 +114,17 @@ export function assistantTitle(
   }
   return entries.find((a) => a.id === assistantId)?.title ?? "Unknown assistant";
 }
+
+// The transcript speaker header for assistant turns (#989). Unlike
+// assistantTitle — a picker/chip label that wraps the empty selection as
+// "Default (…)" — this names the assistant actually answering: the explicit
+// pick, else the scoped default, resolved to its bare title. Neutral fallback
+// when neither resolves (no roster yet, or a dangling id).
+export function assistantSpeakerName(
+  assistantId: string,
+  entries: AssistantEntrySummary[],
+  scopedDefaultId: string,
+): string {
+  const id = assistantId || scopedDefaultId;
+  return entries.find((a) => a.id === id)?.title || "Assistant";
+}

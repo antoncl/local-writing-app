@@ -12,10 +12,12 @@
   interface Props {
     chatHistory: ChatMessage[];
     chatRunning: boolean;
+    /** Speaker header for assistant turns — the answering assistant's title (#989). */
+    assistantName?: string;
     scrollEl?: HTMLDivElement | null;
   }
 
-  let { chatHistory, chatRunning, scrollEl = $bindable(null) }: Props = $props();
+  let { chatHistory, chatRunning, assistantName = "Assistant", scrollEl = $bindable(null) }: Props = $props();
 </script>
 
 <div class="cbv-messages" bind:this={scrollEl} aria-label="Chat history">
@@ -25,7 +27,7 @@
   {#each chatHistory as message, i (i)}
     <div class="cbv-message cbv-message-{message.role}">
       <header class="cbv-message-role">
-        {#if message.role === "assistant"}Claude<span class="cbv-role-dot" aria-hidden="true"></span>{:else}You{/if}
+        {#if message.role === "assistant"}{assistantName}<span class="cbv-role-dot" aria-hidden="true"></span>{:else}You{/if}
       </header>
       {#if message.thinking}
         <details class="cbv-thinking" open={chatRunning && i === chatHistory.length - 1 && !message.content}>

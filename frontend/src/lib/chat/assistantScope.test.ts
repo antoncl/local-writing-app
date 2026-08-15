@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AssistantEntrySummary, PromptEntrySummary } from "@/lib/types";
 import {
   assistantScopeTags,
+  assistantSpeakerName,
   assistantTitle,
   partitionAssistants,
   scopedDefaultAssistantId,
@@ -77,6 +78,19 @@ describe("assistantTitle", () => {
   });
   it("explicit selection shows its title", () => {
     expect(assistantTitle("c", ROSTER, "b")).toBe("Coder");
+  });
+});
+
+describe("assistantSpeakerName (#989 transcript header)", () => {
+  it("explicit pick resolves to its bare title", () => {
+    expect(assistantSpeakerName("c", ROSTER, "b")).toBe("Coder");
+  });
+  it("empty selection names the scoped default without the Default(…) wrapper", () => {
+    expect(assistantSpeakerName("", ROSTER, "b")).toBe("Summarizer");
+  });
+  it("neutral fallback when nothing resolves (empty roster or dangling id)", () => {
+    expect(assistantSpeakerName("", [], "")).toBe("Assistant");
+    expect(assistantSpeakerName("ghost", ROSTER, "b")).toBe("Assistant");
   });
 });
 

@@ -171,6 +171,14 @@ class ExtractEndpointTests(unittest.TestCase):
     def _mock_chat(self, reply: AIChatResponse) -> AsyncMock:
         return patch("app.services.ai.extraction.run_chat_turn", new=AsyncMock(return_value=reply))
 
+    def _mock_chat_sequence(self, *replies: AIChatResponse) -> AsyncMock:
+        # Successive run_chat_turn calls return successive replies — the first
+        # turn then the retry (#1036).
+        return patch(
+            "app.services.ai.extraction.run_chat_turn",
+            new=AsyncMock(side_effect=list(replies)),
+        )
+
     def test_revise_extract_returns_validated_patch_and_cost(self) -> None:
         reply = _chat_reply('{"body": "A knight of renown.", "fields": {"bio": "New bio."}}', cost_usd=0.03)
         with self._mock_chat(reply) as mock_chat:
@@ -208,6 +216,57 @@ class ExtractEndpointTests(unittest.TestCase):
         body = resp.json()
         self.assertTrue(body["ok"])  # the turn succeeded; the reply was unreadable
         self.assertTrue(body["patch"]["garbled"])
+
+    def test_garbled_first_reply_is_retried_and_recovered(self) -> None:
+        # #1036: a chatty first reply (garbled) is retried once with a firmer
+        # cue; a clean object on the retry is adopted, and cost is the sum.
+        first = _chat_reply("Sure! I'd make Seren braver and more decisive.", cost_usd=0.01)
+        second = _chat_reply('{"body": "A braver knight.", "fields": {"bio": "Braver."}}', cost_usd=0.02)
+        with self._mock_chat_sequence(first, second) as mock_chat:
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.hero.id}/extract",
+                json={
+                    "messages": [{"role": "user", "content": "make Seren braver"}],
+                    "assistant_id": None,
+                    "commit_fields": None,
+                },
+            )
+        body = resp.json()
+        self.assertTrue(body["ok"])
+        self.assertFalse(body["patch"]["garbled"])
+        self.assertEqual(body["patch"]["body"], "A braver knight.")
+        self.assertEqual(body["patch"]["fields"], {"bio": "Braver."})
+        self.assertEqual(mock_chat.call_count, 2)
+        self.assertAlmostEqual(body["cost_usd"], 0.03)
+        # The retry carried the model's failed reply + the firmer cue.
+        retry_sent = mock_chat.call_args.args[1]
+        self.assertIn("Sure! I'd make Seren braver", retry_sent.messages[-2].content)
+        self.assertIn("could not be read", retry_sent.messages[-1].content)
+
+    def test_retry_also_garbled_stays_garbled_and_sums_cost(self) -> None:
+        first = _chat_reply("nope, not json", cost_usd=0.01)
+        second = _chat_reply("still not json", cost_usd=0.02)
+        with self._mock_chat_sequence(first, second) as mock_chat:
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.hero.id}/extract",
+                json={"messages": [], "assistant_id": None, "commit_fields": None},
+            )
+        body = resp.json()
+        self.assertTrue(body["ok"])
+        self.assertTrue(body["patch"]["garbled"])
+        self.assertEqual(mock_chat.call_count, 2)
+        self.assertAlmostEqual(body["cost_usd"], 0.03)
+
+    def test_clean_first_reply_is_not_retried(self) -> None:
+        # A good first reply must not incur the extra call.
+        reply = _chat_reply('{"fields": {"bio": "New."}}', cost_usd=0.01)
+        with self._mock_chat_sequence(reply) as mock_chat:
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.hero.id}/extract",
+                json={"messages": [], "assistant_id": None, "commit_fields": None},
+            )
+        self.assertTrue(resp.json()["ok"])
+        self.assertEqual(mock_chat.call_count, 1)
 
     def test_model_returning_nothing_is_ok_false_no_patch(self) -> None:
         with self._mock_chat(_chat_reply("", ok=False, cost_usd=0.0)):

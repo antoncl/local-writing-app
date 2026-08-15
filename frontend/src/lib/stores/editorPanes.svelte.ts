@@ -47,7 +47,11 @@ import { refreshLoreEntries } from "@/lib/stores/lore";
 import { refreshPromptEntries } from "@/lib/stores/prompts";
 import { refreshPlotTemplates } from "@/lib/stores/plotTemplates";
 import { revealPlotline } from "@/lib/stores/plotlines";
-import { refreshAfterSave } from "@/lib/stores/editorPaneSave";
+import {
+  refreshAfterSave,
+  autosaveOnce,
+  offerCloseConflictRecovery,
+} from "@/lib/stores/editorPaneSave";
 import { refreshKnownTags } from "@/lib/stores/tags";
 import { refreshReferenceIndexInBackground } from "@/lib/stores/references";
 import { forwardRefsOf, sameRefSet } from "@/lib/views/referenceIndex";
@@ -198,7 +202,10 @@ class EditorPanesController {
       const pane = this.panes.find((candidate) => candidate.id === id);
       return Boolean(pane?.dirty) && !pane?.saving && pane?.document?.type !== "chat";
     },
-    save: (id) => void this.run(() => this.saveEditorPane(id)),
+    // A failed autosave is CLASSIFIED, not just surfaced (#457): autosaveOnce
+    // routes transport/5xx to a bounded retry, a 4xx validation reject to the
+    // sticky saveError badge, and a 409 to the overwrite-permission prompt.
+    save: (id) => void autosaveOnce(this, id),
     clearIndicator: (id) => {
       this.panes = this.panes.map((pane) =>
         pane.id === id ? { ...pane, recentlySaved: false } : pane,
@@ -363,36 +370,10 @@ class EditorPanesController {
       }
     });
     if (conflict) {
-      this.#offerCloseConflictRecovery(id);
+      offerCloseConflictRecovery(this, id);
       return;
     }
     if (ok) this.tearDown(id);
-  }
-
-  // The document changed on disk while this pane held unsaved edits and the
-  // close-flush 409'd. Let the user pick a side; Cancel keeps the pane open
-  // (e.g. to copy text out first).
-  #offerCloseConflictRecovery(id: string): void {
-    const pane = this.panes.find((candidate) => candidate.id === id);
-    const title = pane?.draftTitle || pane?.scene?.title || "This document";
-    confirmService.request({
-      title: "Changed on disk",
-      message:
-        `"${title}" was modified outside this pane while it had unsaved changes — ` +
-        "another window, another surface, or the file itself. Overwrite the on-disk " +
-        "version with this pane's content, or discard this pane's changes and keep " +
-        "what is on disk?",
-      confirmLabel: "Overwrite and close",
-      destructive: true,
-      secondaryLabel: "Discard changes and close",
-      onSecondary: () => {
-        this.tearDown(id);
-      },
-      onConfirm: async () => {
-        await this.saveEditorPane(id, { force: true });
-        this.tearDown(id);
-      },
-    });
   }
 
   // ---- AI-review freeze (#634 / ADR-0046 slice 3b) --------------------------
@@ -655,6 +636,9 @@ class EditorPanesController {
           scene: savedDocument,
           dirty: paneStillDirty,
           saving: false,
+          // A successful save clears the sticky "Save failed" badge a prior
+          // terminal failure (or a retryable one that has since landed) set (#457).
+          saveError: false,
           // Only show "Saved" feedback if the pane is genuinely caught up;
           // flashing it while drafts are still pending would be misleading.
           recentlySaved: !paneStillDirty,
@@ -700,6 +684,20 @@ class EditorPanesController {
 
   setEditorPaneSaving(id: string, saving: boolean): void {
     this.panes = this.panes.map((pane) => (pane.id === id ? { ...pane, saving } : pane));
+  }
+
+  // Save-failure host hooks (#457) — the classifier in editorPaneSave.ts calls
+  // these. `saveError` is the sticky "Save failed" badge (App.svelte's
+  // editorBadge); it clears only on the next successful save (#performSave's
+  // reconciliation), matching the view-pane precedent in setViewSaveState.
+  markPaneSaveError(id: string): void {
+    this.panes = this.panes.map((pane) =>
+      pane.id === id ? { ...pane, saveError: true, saving: false } : pane,
+    );
+  }
+
+  scheduleAutosaveRetry(id: string): void {
+    this.#autosave.scheduleRetry(id);
   }
 
   // Bridge a self-persisting body's save lifecycle onto the shared pane flags so

@@ -146,6 +146,37 @@ describe("AutosaveScheduler", () => {
     expect(saves).toEqual([]);
   });
 
+  it("scheduleRetry fires at the ceiling delay, not the idle debounce (#457)", () => {
+    // A retried save waits the ceiling (~maxWaitMs), so a persistently-failing
+    // backend retries at that cadence rather than every idleMs — a bounded retry,
+    // not a tight error loop.
+    const { scheduler, saves } = makeScheduler();
+    scheduler.scheduleRetry("a");
+    vi.advanceTimersByTime(IDLE); // past the idle window
+    expect(saves).toEqual([]); // ...a retry has NOT fired
+    vi.advanceTimersByTime(MAX_WAIT - IDLE); // reach the ceiling delay
+    expect(saves).toEqual(["a"]);
+  });
+
+  it("scheduleRetry re-armed on each failure retries at ceiling cadence (#457)", () => {
+    const { scheduler, saves } = makeScheduler();
+    for (let n = 0; n < 3; n += 1) {
+      scheduler.scheduleRetry("a"); // the caller re-arms after each failed attempt
+      vi.advanceTimersByTime(MAX_WAIT);
+    }
+    expect(saves).toEqual(["a", "a", "a"]);
+  });
+
+  it("scheduleRetry re-checks dirtiness before firing (#457)", () => {
+    // If the pane was cleaned in the meantime (another save path landed it), the
+    // armed retry must not fire a redundant save.
+    const { scheduler, saves, setDirty } = makeScheduler();
+    scheduler.scheduleRetry("a");
+    setDirty(false);
+    vi.advanceTimersByTime(MAX_WAIT * 2);
+    expect(saves).toEqual([]);
+  });
+
   it("keeps each pane's ceiling independent", () => {
     // Both panes typed continuously so neither idle timer ever fires — the only
     // thing that can save either one is its own ceiling. `b` starts halfway

@@ -104,6 +104,55 @@ class ParseEntryPatchJsonTests(unittest.TestCase):
         self.assertIsNone(parse_entry_patch_json(""))
         self.assertIsNone(parse_entry_patch_json("   \n  "))
 
+    def test_prefers_the_patch_shaped_object_over_an_example(self) -> None:
+        # #1036: a chatty reply that shows an example object before the real
+        # patch. The naive first-`{`/last-`}` slice spanned both and failed;
+        # now the patch-shaped object (has body/fields) wins.
+        raw = 'For example {"foo": 1} — here is the patch: {"body": "Hi", "fields": {}}'
+        self.assertEqual(parse_entry_patch_json(raw), {"body": "Hi", "fields": {}})
+
+    def test_ignores_stray_braces_in_the_prose(self) -> None:
+        raw = 'Use `{placeholder}` syntax. {"fields": {"bio": "x"}}'
+        self.assertEqual(parse_entry_patch_json(raw), {"fields": {"bio": "x"}})
+
+    def test_a_brace_inside_a_string_value_does_not_truncate(self) -> None:
+        # The scanner is string-aware: the `}` inside the body value doesn't
+        # close the object early.
+        raw = 'Here: {"body": "a } b { c", "fields": {}}'
+        self.assertEqual(
+            parse_entry_patch_json(raw), {"body": "a } b { c", "fields": {}}
+        )
+
+    def test_recovers_a_fenced_object_amid_prose(self) -> None:
+        raw = 'Sure:\n```json\n{"body": "Hi"}\n```\nHope that helps!'
+        self.assertEqual(parse_entry_patch_json(raw), {"body": "Hi"})
+
+    def test_bare_empty_object_is_no_changes_not_garble(self) -> None:
+        # The contract says reply "{}" for "nothing changed" — a clean object
+        # with no body/fields is honored, not treated as garble.
+        self.assertEqual(parse_entry_patch_json("{}"), {})
+
+    def test_only_non_patch_objects_in_prose_is_garbled(self) -> None:
+        # Objects embedded in prose, none patch-shaped → we can't tell which (if
+        # any) is the patch, so it stays garbled rather than silently adopting
+        # an arbitrary one as an empty patch.
+        self.assertIsNone(parse_entry_patch_json('first {"a": 1} then {"b": 2}'))
+
+    def test_two_patch_shaped_objects_are_ambiguous_and_garbled(self) -> None:
+        # #1036: the contract shows the shape, so a chatty model may emit a
+        # filled-in example AND the real answer. We can't tell which is which, so
+        # it is garbled (the caller's firmer retry then yields a single object)
+        # rather than silently adopting the example as the patch.
+        raw = (
+            'The format is {"body": "example", "fields": {"t": "x"}}. '
+            'Applying it: {"body": "Seren is braver.", "fields": {"bravery": "high"}}'
+        )
+        self.assertIsNone(parse_entry_patch_json(raw))
+
+    def test_prose_wrapped_empty_object_is_no_changes(self) -> None:
+        # A bare "{}" wrapped in prose still means "nothing changed", not garble.
+        self.assertEqual(parse_entry_patch_json("No changes needed. {}"), {})
+
 
 class ValidateAiEntryPatchTests(unittest.TestCase):
     def setUp(self) -> None:

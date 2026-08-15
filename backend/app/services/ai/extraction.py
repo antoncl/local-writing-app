@@ -43,6 +43,16 @@ EXTRACT_CUE = (
     "no code fences."
 )
 
+# The firmer cue for the one retry after a garbled first reply (below). Shown
+# alongside the model's own failed reply so it can see what it did wrong — a
+# chatty / cheap model often buries or omits the JSON on the first pass but
+# complies when corrected.
+RETRY_CUE = (
+    "That reply could not be read as the required JSON object. Reply now with "
+    "ONLY that JSON object — no preamble, no commentary, no code fences, and "
+    "nothing before or after it."
+)
+
 # The generated contract (ADR-0051 S4; filtered by ADR-0054 §2). By default it names
 # the body + every proposable field of the target type, straight from `field_catalog`.
 # `commit.fields` (passed in as `input.commit_fields`) narrows it: the field loop
@@ -116,16 +126,16 @@ def render_extraction_contract(
     return system_prompt
 
 
-def _messages_with_extract_cue(transcript: list[ChatMessage]) -> list[ChatMessage]:
-    """Append the extract cue to the transcript, coalescing consecutive same-role
-    turns and dropping whitespace-only ones — the sanitization `build_chat_payload`
-    does for rendered templates, which the raw transcript would otherwise skip.
-    Without it a transcript ending on a user turn (e.g. the author committed right
-    after a failed reply left the last turn a user one) would put two user turns
-    back to back, and the provider rejects that outright."""
+def _coalesce_turns(turns: list[ChatMessage]) -> list[ChatMessage]:
+    """Drop whitespace-only turns and merge consecutive same-role ones — the
+    sanitization `build_chat_payload` does for rendered templates, which a raw
+    transcript (or one we extend with cue / correction turns) would otherwise
+    skip. Without it two same-role turns can land back to back — a transcript
+    ending on a user turn plus the user cue, or the assistant's failed reply
+    next to a prior assistant turn — and the provider rejects that outright."""
 
     out: list[ChatMessage] = []
-    for msg in [*transcript, ChatMessage(role="user", content=EXTRACT_CUE)]:
+    for msg in turns:
         if not msg.content.strip():
             continue
         if out and out[-1].role == msg.role:
@@ -133,6 +143,11 @@ def _messages_with_extract_cue(transcript: list[ChatMessage]) -> list[ChatMessag
         else:
             out.append(msg)
     return out
+
+
+def _messages_with_extract_cue(transcript: list[ChatMessage]) -> list[ChatMessage]:
+    """The transcript plus the extract cue, sanitized for the provider."""
+    return _coalesce_turns([*transcript, ChatMessage(role="user", content=EXTRACT_CUE)])
 
 
 async def run_entry_patch_extraction(
@@ -185,4 +200,39 @@ async def run_entry_patch_extraction(
             error=chat.error or "The model returned nothing to commit.",
         )
     patch = project.validate_ai_entry_patch_for_type(entry_type, chat.content)
-    return EntryPatchExtraction(patch=patch, cost_usd=chat.cost_usd, ok=True)
+    cost = chat.cost_usd
+
+    # One firm retry on a garbled reply (#1036): re-run with the model's own
+    # failed reply plus a stricter cue, so a chatty / cheap model that buried or
+    # omitted the JSON gets a chance to correct itself. Costs one extra call, and
+    # only on failure. A second garble is terminal — the caller reports it.
+    if patch.garbled:
+        retry = await run_chat_turn(
+            project,
+            AIChatRequest(
+                assistant_id=request.assistant_id,
+                system_prompt=contract,
+                messages=_coalesce_turns(
+                    [
+                        *request.messages,
+                        ChatMessage(role="user", content=EXTRACT_CUE),
+                        ChatMessage(role="assistant", content=chat.content),
+                        ChatMessage(role="user", content=RETRY_CUE),
+                    ]
+                ),
+                chat_id=None,
+            ),
+        )
+        cost = _sum_costs(cost, retry.cost_usd)
+        if retry.ok and (retry.content or "").strip():
+            patch = project.validate_ai_entry_patch_for_type(entry_type, retry.content)
+    return EntryPatchExtraction(patch=patch, cost_usd=cost, ok=True)
+
+
+def _sum_costs(a: float | None, b: float | None) -> float | None:
+    """Add two optional per-turn costs — None means 'unknown / unpriced'."""
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return a + b

@@ -77,31 +77,107 @@ def _strip_code_fence(text: str) -> str:
 def parse_entry_patch_json(raw: str) -> dict[str, Any] | None:
     """Return the patch object parsed from ``raw``, or ``None`` if garbled.
 
-    Tolerant of a wrapping code fence and of leading/trailing prose (falls back
-    to the outermost ``{`` … ``}`` slice). Returns ``None`` when the result is
-    not a JSON *object* — the caller treats that as the garbled condition.
+    Tolerant of the ways a chatty / cheap model wraps the object: a code fence,
+    leading/trailing prose, and — crucially — *other* braces in that prose (an
+    example object, markdown, an emoji). It scans for every balanced ``{`` … ``}``
+    span (string-aware, so a ``}`` inside a JSON string doesn't close it), parses
+    each, and prefers one shaped like a patch (carries ``body`` or ``fields``)
+    over an incidental object. Returns ``None`` only when no balanced object
+    parses to a JSON *object* — the genuinely garbled condition (pure prose, or
+    no JSON at all), which the caller reports and retries.
     """
     if not raw or not raw.strip():
         return None
 
     candidate = _strip_code_fence(raw)
 
-    for attempt in (candidate, _brace_slice(candidate)):
-        if attempt is None:
-            continue
-        try:
-            parsed = json.loads(attempt)
-        except (ValueError, TypeError):
-            continue
-        if isinstance(parsed, dict):
-            return parsed
+    # The whole (fence-stripped) reply as a single object — the clean, common
+    # case. When the entire reply is one object there is nothing else it could be
+    # (any braces are inside it), so honor it directly; this also covers a bare
+    # "{}" ("nothing changed", per the contract).
+    whole = _as_json_dict(candidate)
+    if whole is not None:
+        return whole
+
+    # Prose around one or more objects: scan them out (string-aware) and pick the
+    # patch. A patch carries "body" and/or "fields". `is not None`, not
+    # truthiness, so a legitimate empty "{}" isn't dropped.
+    embedded = [
+        obj
+        for span in _balanced_object_spans(candidate)
+        if (obj := _as_json_dict(span)) is not None
+    ]
+    patch_shaped = [obj for obj in embedded if "body" in obj or "fields" in obj]
+    if len(patch_shaped) == 1:
+        return patch_shaped[0]
+    if len(patch_shaped) >= 2:
+        # The contract shows the shape, so a chatty model may emit a filled-in
+        # example AND the real answer. We can't reliably tell which is the patch,
+        # so report garbled and let the caller's firmer retry get a single object
+        # — safer than silently adopting the example.
+        return None
+    # No patch-shaped object. Honor a lone embedded object (a prose-wrapped "{}" =
+    # "no changes", or one slightly-misshapen object); multiple non-patch objects
+    # are ambiguous → garbled.
+    return embedded[0] if len(embedded) == 1 else None
+
+
+def _as_json_dict(text: str) -> dict[str, Any] | None:
+    """Parse ``text`` as JSON, returning it only if it is an object."""
+    if not text:
+        return None
+    try:
+        parsed = json.loads(text)
+    except (ValueError, TypeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _object_end(text: str, start: int) -> int | None:
+    """Index just past the ``}`` that balances the ``{`` at ``start``, or ``None``
+    if it never closes. String-aware: braces inside a JSON string literal don't
+    count, and ``\\`` escapes the next char, so a value like ``"a } b"`` can't
+    truncate the object."""
+    depth = 0
+    in_str = False
+    escaped = False
+    for j in range(start, len(text)):
+        c = text[j]
+        if in_str:
+            if escaped:
+                escaped = False
+            elif c == "\\":
+                escaped = True
+            elif c == '"':
+                in_str = False
+        elif c == '"':
+            in_str = True
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return j + 1
     return None
 
 
-def _brace_slice(text: str) -> str | None:
-    """The substring from the first ``{`` to the last ``}``, if both exist."""
-    start = text.find("{")
-    end = text.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        return None
-    return text[start : end + 1]
+def _balanced_object_spans(text: str) -> list[str]:
+    """Every top-level balanced ``{`` … ``}`` substring, in order of appearance.
+
+    Nested objects are absorbed into their enclosing top-level span (a patch's
+    ``fields`` map is one object, not two). An unbalanced ``{`` is skipped so a
+    later well-formed object is still found. Linear over the string.
+    """
+    spans: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        if text[i] != "{":
+            i += 1
+            continue
+        end = _object_end(text, i)
+        if end is None:
+            i += 1
+        else:
+            spans.append(text[i:end])
+            i = end
+    return spans

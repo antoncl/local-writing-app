@@ -33,7 +33,6 @@ from app.models import (
     UpdateProjectSettingsRequest,
 )
 from app.runtime import CurrentProject, translate_errors
-from app.services.project.node_index_gate import node_index_gate
 from app.services.project_service import ProjectService
 
 router = APIRouter()
@@ -57,39 +56,20 @@ def health() -> dict[str, str]:
 # The two routes below are the only ones that do NOT take `CurrentProject`:
 # they are where a scope comes *from* — the client passes an explicit
 # `root_path`, does not yet know it as a project, and this is what makes it one.
-# Since #413 the wire carries the open project's root on every *subsequent*
-# request, so these no longer record what is open; they keep their real jobs
-# (migrate, validate, touch recents) and drop the node-index memo, which is the
-# open event ADR-0040/#392 hang the memo's lifetime on. Dropping it here (not in
-# the per-request resolver, which builds a throwaway service every call) is what
-# makes a re-open after an external backup-restore rebuild from disk rather than
-# serve the pre-restore index — the browser's F5 re-runs `/open`, no server
-# restart needed.
+# The create/open *event* side effects (drop the node-index memo, touch recents)
+# live behind `ProjectService.create`/`open`; the rationale is at
+# `_register_open_event`. These handlers stay thin translators (ADR-0056).
 
 @router.post("/api/project/create", response_model=ProjectInfo)
 def create_project(request: CreateProjectRequest) -> ProjectInfo:
-    from app.services import machine_settings as ms_service
-
     with translate_errors():
-        created = ProjectService.created_at(
-            Path(request.root_path), request.title, request.inherits
-        )
-        info = created.current_project()
-        node_index_gate.invalidate()
-        ms_service.touch_recent_project(Path(info.root_path), info.title)
-        return info
+        return ProjectService.create(Path(request.root_path), request.title, request.inherits)
 
 
 @router.post("/api/project/open", response_model=ProjectInfo)
 def open_project(request: OpenProjectRequest) -> ProjectInfo:
-    from app.services import machine_settings as ms_service
-
     with translate_errors():
-        opened = ProjectService.opened_at(Path(request.root_path))
-        info = opened.current_project()
-        node_index_gate.invalidate()
-        ms_service.touch_recent_project(Path(info.root_path), info.title)
-        return info
+        return ProjectService.open(Path(request.root_path))
 
 
 @router.get("/api/project", response_model=ProjectInfo)

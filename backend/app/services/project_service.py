@@ -18,9 +18,11 @@ from app.models import (
     LoreEntry,
     MetadataSchema,
     MetadataValue,
+    ProjectInfo,
     Scene,
 )
 from app.scope import WorkScope
+from app.services.machine_settings import touch_recent_project
 from app.services.migrations import migrate_project
 from app.services.project.ai_invocations import AiInvocationsMixin
 from app.services.project.assistant_tags import AssistantTagsMixin
@@ -174,6 +176,37 @@ class ProjectService(
         except Exception as exc:  # noqa: BLE001
             raise ProjectServiceError(f"Project migration failed: {exc}", 500) from exc
         return cls(WorkScope(root=root, migrations_applied=tuple(migrations)))
+
+    @classmethod
+    def create(cls, root_path: Path, title: str, inherits: list[str] | None = None) -> ProjectInfo:
+        """Scaffold a new project and register it as the current open event.
+
+        The route-facing operation: `/api/project/create` delegates straight
+        here, keeping the handler a thin translator (ADR-0056). `created_at`
+        binds a service to the new folder; this layers on the open-event side
+        effects (`_register_open_event`) and returns the project info.
+        """
+        return cls.created_at(root_path, title, inherits)._register_open_event()
+
+    @classmethod
+    def open(cls, root_path: Path) -> ProjectInfo:
+        """Migrate and open an existing project as the current open event (see `create`)."""
+        return cls.opened_at(root_path)._register_open_event()
+
+    def _register_open_event(self) -> ProjectInfo:
+        """The side effects that fire once per create/open event, not per request.
+
+        The per-request resolver builds a throwaway service every call, so it
+        deliberately does neither of these (#413). Dropping the node-index memo
+        here is what makes a re-open — the browser's F5 re-runs `/open`, no server
+        restart — rebuild the index from disk after an external backup-restore,
+        rather than serve the pre-restore index (ADR-0040/#392). Touching machine
+        recents records the project for the picker.
+        """
+        info = self.current_project()
+        node_index_gate.invalidate()
+        touch_recent_project(Path(info.root_path), info.title)
+        return info
 
     def _entry_markdown_paths(self, root: Path) -> list[Path]:
         return [*(root / "scenes").glob("*.md"), *(root / "lore").glob("*.md")]

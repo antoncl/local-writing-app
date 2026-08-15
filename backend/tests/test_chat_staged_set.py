@@ -18,7 +18,7 @@ from app.models import (
     MutationSetRow,
     SaveChatSessionRequest,
 )
-from app.routers.ai import _prepare_chat_send_payload, _staged_set_block
+from app.services.ai.chat import _staged_set_block, expand_and_prepare_chat_blocks
 from app.services.ai.helpers import _format_staged_set_block
 
 
@@ -134,7 +134,7 @@ class ChatStagedSetTests(unittest.TestCase):
         # AI continues refining the same change.
         set_id = self._make_set()
         chat_id = self._make_chat(staged_set=set_id)
-        blocks, _, _ = _prepare_chat_send_payload(
+        blocks, _, _ = expand_and_prepare_chat_blocks(
             self.service, chat_id, "System brief.", [{"role": "user", "content": "hi"}]
         )
         texts = "\n".join(block["text"] for block in (blocks or []))
@@ -145,7 +145,7 @@ class ChatStagedSetTests(unittest.TestCase):
         # A ref to a set that no longer resolves seeds no block and does not fail
         # the send (deleting a set normally purges this pin anyway).
         chat_id = self._make_chat(staged_set="mutation_set_deleted")
-        blocks, _, _ = _prepare_chat_send_payload(
+        blocks, _, _ = expand_and_prepare_chat_blocks(
             self.service, chat_id, "System brief.", [{"role": "user", "content": "hi"}]
         )
         texts = "\n".join(block["text"] for block in (blocks or []))

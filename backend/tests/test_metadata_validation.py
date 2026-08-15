@@ -1700,6 +1700,24 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertIn("techlevel", project_schema["fields"])
         self.assertEqual(project_schema["entry_types"]["manuscript:scene"]["fields"], ["techlevel"])
 
+    def test_built_in_metadata_field_cannot_be_moved(self) -> None:
+        # move/rename/delete field share one source-layer resolver
+        # (`_field_source_layer_path`) whose guard blocks touching a shipped
+        # field; `pov` is a built-in field on manuscript:scene.
+        project_layer = next(
+            layer
+            for layer in self.service.read_metadata_schema_layers().layers
+            if layer.folder_path == str(self.root)
+        )
+        with self.assertRaisesRegex(ProjectServiceError, "cannot be moved"):
+            self.service.move_metadata_field(
+                MoveMetadataFieldRequest(
+                    field_id="pov",
+                    target_layer_id=project_layer.id,
+                    entry_type="manuscript:scene",
+                )
+            )
+
     def test_rename_metadata_field_updates_schema_and_scene_metadata(self) -> None:
         world_layer = next(
             layer

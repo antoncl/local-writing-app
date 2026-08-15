@@ -254,6 +254,9 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
         provider=estimate.provider,
         model=estimate.model,
         caching_style=estimate.caching_style,
+        # ADR-0057 §2: the execution-derived lore gate, captured from this
+        # render so the frontend can persist it as the chat's `lore_enabled`.
+        lore_enabled=rendered.lore_invoked,
     )
 
 

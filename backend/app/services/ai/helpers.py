@@ -366,18 +366,31 @@ def register_helpers(
                 _mutations_index_slot.append(None)
         return _mutations_index_slot[0]
 
+    # ADR-0057 §2: the execution-derived lore gate. `relevant_lore()` records
+    # that it ran into this per-render slot; the caller (build_preview) reads it
+    # back after render to persist the chat's `lore_enabled`. The flag tracks
+    # *invocation*, not a non-empty result — a lore-using prompt in a project
+    # with no lore yet is still lore-enabled, so lore added later flows in. A
+    # mutable slot (not a bare bool) so the nested helper flips it through the
+    # closure; envs are per-render, so it never leaks across renders.
+    lore_invoked_slot: list[bool] = [False]
+    env.lore_invoked = lore_invoked_slot  # type: ignore[attr-defined]
+
     env.globals["last_words"] = last_words
     env.globals["pov"] = lambda scene: _pov(project, schema, scene)
     env.globals["scenes_before"] = lambda scene: _scenes_before(project, scene)
+
     # `scene` defaults to None so a prompt with no scene anchor can call
     # `relevant_lore()` bare (a create/revise brainstorm) — the scene is only the
     # mutation-resolution anchor (as-of-scene state), which such prompts don't have.
     # The `always` union and explicit refs still resolve without it.
-    env.globals["relevant_lore"] = (
-        lambda scene=None, mode="implicit", partition="all": _relevant_lore(
+    def _relevant_lore_helper(scene: Any = None, mode: str = "implicit", partition: str = "all") -> str:
+        lore_invoked_slot[0] = True
+        return _relevant_lore(
             project, scene, mode, partition, session, journal, index=_mutations_index()
         )
-    )
+
+    env.globals["relevant_lore"] = _relevant_lore_helper
     env.globals["entry"] = lambda value: _coerce_entry_ref(project, schema, value)
     # As-of read (ADR-0055 §1): the same entry, resolved through `effective_state`
     # at `scene` instead of book-start. `scene` empty/None → a plain base read.

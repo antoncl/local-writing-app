@@ -135,6 +135,11 @@
   // per-turn persist never drops it; seeded into the prompt context on resume
   // (backend, S3). "" until the chat stages a set.
   let chatStagedSet = "";
+  // ADR-0057 §2: the execution-derived lore gate. Captured from the lock
+  // render's preview response (whether the prompt actually called
+  // relevant_lore()) and echoed on every save so a per-turn persist never
+  // drops it. Drives whether the backend send path injects any lore at all.
+  let chatLoreEnabled = false;
   let activeChatTitle = "Untitled chat";
   let activeChatPinned = false;
   let activeChatJournal: ChatSessionJournalEntry[] = $state([]);
@@ -300,6 +305,7 @@
     chatAssistantId = "";
     chatSubject = "";
     chatStagedSet = "";
+    chatLoreEnabled = false;
     activeChatTitle = "Untitled chat";
     activeChatPinned = false;
     activeChatJournal = [];
@@ -325,6 +331,7 @@
     chatAssistantId = session.assistant_id || "";
     chatSubject = session.subject || "";
     chatStagedSet = session.staged_set || "";
+    chatLoreEnabled = session.lore_enabled ?? false;
     chatSystemPrompt = session.system_prompt || "";
     chatHistory = (session.messages || []).map((m: ChatSessionMessage) => ({
       role: m.role,
@@ -504,6 +511,10 @@
       // ADR-0055 §4: echo the owned mutation set so a per-turn save never drops
       // the edge (mirrors subject; the backend seeds it into context on resume).
       staged_set: chatStagedSet,
+      // ADR-0057 §2: echo the lore gate, captured at the lock render. Mirrors
+      // subject/staged_set — the backend preserves it when a save omits it, but
+      // we always send the hydrated value so it never drifts.
+      lore_enabled: chatLoreEnabled,
       pinned: activeChatPinned,
       context_items: [],
       messages: chatHistory.map((m) => ({
@@ -735,6 +746,11 @@
         .filter((m) => m.role === "user" || m.role === "assistant")
         .map((m) => ({ role: m.role as "user" | "assistant", content: flatten(m.blocks) }));
       chatSystemPrompt = systemBlocks.join("\n\n");
+      // ADR-0057 §2: capture the execution-derived lore gate from this lock
+      // render. Whether the template actually called relevant_lore() decides
+      // whether the send path injects any lore; persisted with the system
+      // prompt via the very next persistActiveChat.
+      chatLoreEnabled = preview.lore_enabled ?? false;
       if (initialTurns.length > 0) chatHistory = [...initialTurns];
       return true;
     } catch (e) {

@@ -56,6 +56,10 @@ class RenderedMessage:
 class RenderedTemplate:
     messages: list[RenderedMessage] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    # ADR-0057 §2: whether `relevant_lore()` executed during this render — the
+    # execution-derived lore gate. Set by `build_preview` from the env's
+    # invocation slot; the preview route surfaces it as `lore_enabled`.
+    lore_invoked: bool = False
 
 
 class RoleExtension(Extension):

@@ -276,6 +276,12 @@ class AIPreviewResponse(BaseModel):
     # `explicit`). Drives whether the cache strip shows in the UI.
     # Null when no assistant is bound.
     caching_style: str | None = None
+    # ADR-0057 §2: whether `relevant_lore()` actually executed during this
+    # render — the execution-derived lore gate. The frontend captures this at
+    # the lock render and persists it as the chat's `lore_enabled`, so the send
+    # path knows whether to inject lore at all. Always populated; False when the
+    # template never called the helper.
+    lore_enabled: bool = False
 
 
 class ChatMessage(BaseModel):
@@ -471,6 +477,14 @@ class ChatSession(BaseModel):
     # context. Grows as the user types new names across turns. See
     # ChatSessionJournalEntry for the per-entry shape.
     journal: list[ChatSessionJournalEntry] = Field(default_factory=list)
+    # ADR-0057 §2: the execution-derived lore gate. Whether this chat sees lore
+    # is the prompt's own choice, expressed by whether `relevant_lore()` actually
+    # ran during the chat's lock render (not a static text-scan, not a user
+    # knob). Captured once from that render (§6) and stable thereafter. Gate off
+    # → the send path injects no lore at all (Journey C: a deliberately lore-free
+    # prompt stays clean). Defaults False so a chat that never ran the helper is
+    # lore-free by construction.
+    lore_enabled: bool = False
     # V2: running USD cost for this chat session, in the provider's currency
     # (USD; frontend converts to EUR for display). Incremented turn-by-turn
     # via save_chat_session(cost_delta_usd=...). Frozen value at time-of-
@@ -554,6 +568,11 @@ class SaveChatSessionRequest(BaseModel):
     # journal entries; general saves (rename, message append, etc.)
     # should omit the field so the journal persists untouched.
     journal: list[ChatSessionJournalEntry] | None = None
+    # ADR-0057 §2: the lore gate, echoed like `subject`/`staged_set`. None =
+    # "don't touch the persisted value" (general saves omit it); an explicit
+    # bool sets it. Only the lock-render save (which learns it from the preview
+    # response's `lore_enabled`) sends a value; thereafter it is preserved.
+    lore_enabled: bool | None = None
     # V2: optional incremental cost update. When provided (typically by
     # the chat panel after a successful AI turn), it's ADDED to the
     # persisted cost_usd_total. Omit on plain renames / message-list saves.

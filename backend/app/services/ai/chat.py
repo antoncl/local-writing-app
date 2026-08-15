@@ -12,7 +12,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from app.models import AIChatRequest, AIChatResponse, SaveChatSessionRequest
+from app.models import (
+    AIChatRequest,
+    AIChatResponse,
+    ChatSession,
+    SaveChatSessionRequest,
+)
 from app.services import machine_settings as machine_settings_service
 from app.services.ai import providers as ai_providers
 from app.services.ai.call_resolver import resolve_call_params
@@ -57,34 +62,21 @@ def _staged_set_block(project: ProjectService, staged_set_id: str) -> str:
     return _format_staged_set_block(staged.title, staged.target_entry_type, staged.rows)
 
 
-def expand_and_prepare_chat_blocks(
+def _detect_and_persist_journal(
     project: ProjectService,
-    chat_id: str | None,
-    system_prompt: str,
+    chat: ChatSession,
+    chat_id: str,
     messages_list: list[dict],
-) -> tuple[list[dict] | None, str | None, list[Any]]:
-    """When chat_id is bound, run the implicit-context expander on the last
-    user message, append new detections to ChatSession.journal, save the
-    chat, and return:
-      - system_blocks, in stable→volatile order so longer TTLs stay ahead of
-        shorter: [{system_prompt, 1h}, {staged_change, 1h}?, {journal_xml, 5m}]
-        — the staged_change block (ADR-0055 S4) is present only when the chat
-        owns a resolvable mutation set
-      - session_id for OpenRouter provider stickiness
-      - journal_added: lore IDs newly detected on THIS turn (for audit UI)
+) -> list[Any]:
+    """Run the send-time context expander on the last user message and persist
+    any new detections to the chat's journal.
 
-    Returns (None, None, []) when chat_id is empty or the chat doesn't
-    exist — caller falls back to the legacy single-string system path.
+    ADR-0057 §4: the expander is an *input* to the one lore selection — it feeds
+    the journal `relevant_lore()` reads, not a rival second selector. It runs
+    only for a lore-enabled chat; that gate is the caller's (`chat.lore_enabled`).
+    Returns the entries newly detected on THIS turn (for the audit UI).
     """
-    if not chat_id:
-        return None, None, []
-    try:
-        chat = project.read_chat_session(chat_id)
-    except ProjectServiceError:
-        return None, None, []
-
     from app.services.ai.context_expander import expand_context
-    from app.services.ai.helpers import _format_lore_block
 
     # The last user message in the conversation triggered this send.
     user_text = ""
@@ -108,7 +100,6 @@ def expand_and_prepare_chat_blocks(
         scene=project._subject_scene_id(chat.subject) or None,
     )
     if new_entries:
-        extended_journal = list(chat.journal) + new_entries
         project.save_chat_session(
             chat_id,
             SaveChatSessionRequest(
@@ -120,12 +111,54 @@ def expand_and_prepare_chat_blocks(
                 context_items=chat.context_items,
                 messages=chat.messages,
                 inputs=chat.inputs,
-                journal=extended_journal,
+                journal=list(chat.journal) + new_entries,
+                # `lore_enabled` omitted → preserved (SaveChatSessionRequest
+                # treats None as "leave the captured gate alone").
             ),
         )
-        journal_for_send = extended_journal
-    else:
-        journal_for_send = list(chat.journal)
+    return new_entries
+
+
+def expand_and_prepare_chat_blocks(
+    project: ProjectService,
+    chat_id: str | None,
+    system_prompt: str,
+    messages_list: list[dict],
+) -> tuple[list[dict] | None, str | None, list[Any]]:
+    """When chat_id is bound, assemble the ordered system cache-blocks the
+    provider call sends, and return:
+      - system_blocks, in stable→volatile order so longer TTLs stay ahead of
+        shorter: [{system_prompt, 1h}, {staged_change, 1h}?, {journal_xml, 5m}]
+        — the staged_change block (ADR-0055 S4) is present only when the chat
+        owns a resolvable mutation set; the journal block (ADR-0057) only when
+        the chat is lore-enabled
+      - session_id for OpenRouter provider stickiness
+      - journal_added: lore IDs newly detected on THIS turn (for audit UI)
+
+    ADR-0057 §2/§4: the lore gate. Whether this chat sees lore is the prompt's
+    own choice, read from whether `relevant_lore()` executed at its lock render
+    (`chat.lore_enabled`). Gate off → no send-time detection and no lore block at
+    all, so a deliberately lore-free prompt stays clean (Journey C). Gate on →
+    the expander feeds the journal that the one selector reads — an input, never
+    a rival block.
+
+    Returns (None, None, []) when chat_id is empty or the chat doesn't
+    exist — caller falls back to the legacy single-string system path.
+    """
+    if not chat_id:
+        return None, None, []
+    try:
+        chat = project.read_chat_session(chat_id)
+    except ProjectServiceError:
+        return None, None, []
+
+    from app.services.ai.helpers import _format_lore_block
+
+    new_entries: list[Any] = []
+    journal_for_send: list[Any] = []
+    if chat.lore_enabled:
+        new_entries = _detect_and_persist_journal(project, chat, chat_id, messages_list)
+        journal_for_send = list(chat.journal) + new_entries
 
     # Slot 1: system + project-stable (per decisions_implicit_context) — the
     # shared 1h cache block; multi-turn sessions reuse it for hours.
@@ -133,19 +166,19 @@ def expand_and_prepare_chat_blocks(
     # Slot 1b (ADR-0055 S4): the mutation set this chat OWNS, seeded so a resumed
     # brainstorm continues refining the same staged change. Stable per chat (it
     # changes only when the writer re-stages), so it sits above the turn-by-turn
-    # journal with a matching 1h TTL. Empty / dangling ref → "" → no block.
+    # journal with a matching 1h TTL. Empty / dangling ref → "" → no block. This
+    # is a mutation set, not lore, so it is not subject to the lore gate.
     staged_xml = _staged_set_block(project, chat.staged_set)
     if staged_xml:
         blocks.append({"text": staged_xml, "cache_break_after": True, "ttl": "1h"})
+    # Slot 2 (ADR-0057 §3/§5): the detected/journal lore, placed once. Present
+    # only for a lore-enabled chat (`journal_for_send` stays empty otherwise). 5m
+    # TTL because it grows mid-session — append-only, ratchets forward.
     if journal_for_send:
         journal_xml = _format_lore_block(
             project, [e.entry_id for e in journal_for_send]
         )
         if journal_xml:
-            # Slot 2: merged explicit + detected context (we treat the
-            # journal as the detected portion; explicit picks already live
-            # in the rendered system_prompt at first turn). 5m TTL because
-            # this grows mid-session — append-only, ratchets forward.
             blocks.append({"text": journal_xml, "cache_break_after": True, "ttl": "5m"})
 
     return (blocks or None), chat_id, list(new_entries)

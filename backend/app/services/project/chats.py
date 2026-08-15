@@ -336,6 +336,15 @@ class ChatSessionsMixin:
             # Echoed with the same persisted-value fallback so a per-turn save
             # that omits it never drops the chat's staged set (ADR-0055 S4).
             staged_set=request.staged_set or existing.staged_set,
+            # ADR-0057 §2: the lore gate. None from the request = "leave the
+            # captured value alone" (general saves), so only the lock-render
+            # save (which carries the value from the preview response) sets it;
+            # every later per-turn save preserves it.
+            lore_enabled=(
+                existing.lore_enabled
+                if request.lore_enabled is None
+                else request.lore_enabled
+            ),
             pinned=request.pinned,
             created_at=existing.created_at,
             updated_at=self._utcnow_iso(),

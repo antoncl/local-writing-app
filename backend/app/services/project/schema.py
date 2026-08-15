@@ -247,7 +247,32 @@ class MetadataSchemaMixin:
         layer_path = self._metadata_schema_layer_path_for_id(root, request.layer_id)
         if layer_path is None:
             raise ProjectServiceError("Unknown metadata schema layer.", 404)
+        entry_type_id = self._resolve_upsert_entry_type_id(request)
 
+        schema = self.read_metadata_schema()
+        if not request.allow_existing and entry_type_id in schema.entry_types:
+            raise ProjectServiceError(f"Node type {entry_type_id} already exists.", 422)
+
+        overview = self.read_metadata_schema_overview()
+        source = overview.entry_type_sources.get(entry_type_id)
+        # ADR-0029 §A: a layer may EXTEND/OVERLAY a built-in type — the shipped
+        # declaration is stripped before write (in `_apply_builtin_overlay`), so
+        # the built-in can never be forked.
+        built_in = bool(source and source.built_in)
+
+        layer_data = self._read_yaml(layer_path) if layer_path.exists() else self._empty_metadata_schema()
+        self._assemble_entry_type_layer_data(request, entry_type_id, layer_data, schema, built_in)
+        self._validate_candidate_schema(root, layer_path, layer_data)
+        self._write_yaml(layer_path, layer_data)
+        return self.read_metadata_schema()
+
+    def _resolve_upsert_entry_type_id(self, request: UpsertMetadataEntryTypeRequest) -> str:
+        """Validate an upsert request's identity and return the canonical FQN
+        (`kind:key`) it is stored under. Accepts a full FQN or a bare local key
+        (qualified with the declared kind — that FQN is the dict key, the stored
+        id, and the value written into a node's `entry_type` front matter).
+        Raises 422 on an unknown kind, a malformed id, a kind/prefix mismatch,
+        prompt config on a non-prompt kind, or self-parenting."""
         entry_type_id = request.entry_type_id.strip()
         if request.entry_type.kind not in {
             "manuscript", "lore", "prompt", "assistant", "project", "chat", "mutation_set", "view", "plot"
@@ -256,11 +281,6 @@ class MetadataSchemaMixin:
                 "Node type kind must be scene, lore, prompt, assistant, project, chat, mutation_set, view, or plot.",
                 422,
             )
-        # Entry-type identity is the kind-qualified FQN `kind:key` (#77): that
-        # FQN is the dict key, the stored id, and the value written into a
-        # node's `entry_type` front matter. Accept either the full FQN or a
-        # bare local key (qualified here with the declared kind) so callers may
-        # send either; the local part is the stable machine handle.
         fqn = entry_type_id if ":" in entry_type_id else f"{request.entry_type.kind}:{entry_type_id}"
         match = ENTRY_TYPE_FQN_RE.fullmatch(fqn)
         if not match:
@@ -274,97 +294,80 @@ class MetadataSchemaMixin:
                 f"Node type id kind prefix '{match.group(1)}' must match the node kind '{request.entry_type.kind}'.",
                 422,
             )
-        entry_type_id = fqn
         if request.entry_type.prompt is not None and request.entry_type.kind != "prompt":
             raise ProjectServiceError("Prompt configuration is only valid on prompt node types.", 422)
-        if request.entry_type.parent == entry_type_id:
+        if request.entry_type.parent == fqn:
             raise ProjectServiceError("Node type cannot inherit from itself.", 422)
+        return fqn
 
-        schema = self.read_metadata_schema()
-        if not request.allow_existing and entry_type_id in schema.entry_types:
-            raise ProjectServiceError(f"Node type {entry_type_id} already exists.", 422)
-
-        overview = self.read_metadata_schema_overview()
-        source = overview.entry_type_sources.get(entry_type_id)
-        # ADR-0029 §A: a layer may EXTEND/OVERLAY a built-in type — the guard is
-        # narrowed from a blanket wall to blocking only DECLARATION rewrites.
-        # A built-in write persists overlay-safe data (fields it extends, color,
-        # body/display settings, group applications, field overrides); the
-        # shipped `name`/`kind`/`parent`/`abstract` declaration is stripped
-        # before write (below), so the built-in can never be forked.
-        entry_type_built_in = bool(source and source.built_in)
-
-        layer_data = self._read_yaml(layer_path) if layer_path.exists() else self._empty_metadata_schema()
+    def _assemble_entry_type_layer_data(
+        self,
+        request: UpsertMetadataEntryTypeRequest,
+        entry_type_id: str,
+        layer_data: dict[str, Any],
+        schema: MetadataSchema,
+        built_in: bool,
+    ) -> None:
+        """Build the per-layer entry-type payload for an upsert and store it into
+        `layer_data`. A built-in overlay that would carry nothing but an empty
+        membership is dropped rather than written as `<type>: {}` (which would
+        flip the built-in's reported source to this layer)."""
         entry_types = layer_data.get("entry_types")
         if not isinstance(entry_types, dict):
             entry_types = {}
+        entry_type_data = self._base_entry_type_payload(request, entry_type_id, entry_types.get(entry_type_id))
+        if built_in:
+            self._apply_builtin_overlay(entry_type_data, schema, entry_type_id)
+        if built_in and not entry_type_data.get("fields") and not (set(entry_type_data) - {"fields"}):
+            entry_types.pop(entry_type_id, None)
+        else:
+            entry_types[entry_type_id] = entry_type_data
+        layer_data["entry_types"] = entry_types
 
-        existing_entry_type = entry_types.get(entry_type_id)
-        existing_fields = existing_entry_type.get("fields") if isinstance(existing_entry_type, dict) else None
+    def _base_entry_type_payload(
+        self, request: UpsertMetadataEntryTypeRequest, entry_type_id: str, existing_entry_type: Any
+    ) -> dict[str, Any]:
+        """The layer payload for one entry-type upsert, before any built-in
+        overlay stripping. Persist ONLY the fields the caller actually set
+        (`exclude_unset`) — Pydantic defaults like body_editor="wysiwyg" would
+        otherwise leak onto disk and mask a parent type's inherited values — but
+        preserve the membership, group-applications, and prompt an existing local
+        definition already carries when the caller omits them (each managed via
+        its own dedicated path)."""
+        existing = existing_entry_type if isinstance(existing_entry_type, dict) else {}
+        existing_fields = existing.get("fields")
         fields = existing_fields if isinstance(existing_fields, list) else request.entry_type.fields
-        # Preserve existing group applications when the caller (e.g. the type
-        # editor's Save Type) doesn't carry them — they're managed via the
-        # dedicated set_entry_type_group_applications path, like `fields`.
-        existing_applications = (
-            existing_entry_type.get("group_applications") if isinstance(existing_entry_type, dict) else None
-        )
-        # Persist ONLY the fields the caller actually set — `model_dump(exclude_unset=True)`.
-        # Pydantic defaults like `body_editor="wysiwyg"` would otherwise leak onto disk and
-        # override the inherited values from a parent type (e.g. a `prompt` sub-type would
-        # end up with body_editor=wysiwyg pinned in the layer file, masking the parent's
-        # code/jinja2). Inheritance fills in absent fields on read.
         entry_type_data = request.entry_type.model_dump(exclude_unset=True, exclude_none=True)
         entry_type_data.pop("own_fields", None)
         entry_type_data["name"] = request.entry_type.name.strip() or entry_type_id
         entry_type_data["kind"] = request.entry_type.kind
         entry_type_data["abstract"] = bool(request.entry_type.abstract)
         entry_type_data["fields"] = fields
+        existing_applications = existing.get("group_applications")
         if isinstance(existing_applications, list) and "group_applications" not in entry_type_data:
             entry_type_data["group_applications"] = deepcopy(existing_applications)
         if not request.entry_type.parent:
             entry_type_data.pop("parent", None)
-        if request.entry_type.prompt is None and isinstance(existing_entry_type, dict):
-            existing_prompt = existing_entry_type.get("prompt")
+        if request.entry_type.prompt is None:
+            existing_prompt = existing.get("prompt")
             if isinstance(existing_prompt, dict):
                 entry_type_data["prompt"] = deepcopy(existing_prompt)
-        if entry_type_built_in:
-            # Overlay-only for a built-in (ADR-0029 §A): never persist the
-            # shipped declaration — `name`/`kind`/`parent`/`abstract` stay
-            # inherited from the built-in. Membership keeps only the fields
-            # that EXTEND the built-in, so inherited/intrinsic keys aren't
-            # pinned literally into the layer (the resolver re-injects them).
-            for declaration_key in ("name", "kind", "parent", "abstract"):
-                entry_type_data.pop(declaration_key, None)
-            builtin_members = set(schema.entry_types[entry_type_id].fields)
-            entry_type_data["fields"] = [
-                field for field in entry_type_data.get("fields", []) if field not in builtin_members
-            ]
-        # Don't leave a source-flipping stub for a built-in: if the overlay
-        # carries nothing but an empty membership, drop the entry rather than
-        # writing `<type>: {}` (which would report the built-in as
-        # layer-sourced) — same reasoning as `set_metadata_field_override`.
-        if entry_type_built_in and not entry_type_data.get("fields") and not (
-            set(entry_type_data) - {"fields"}
-        ):
-            entry_types.pop(entry_type_id, None)
-        else:
-            entry_types[entry_type_id] = entry_type_data
-        layer_data["entry_types"] = entry_types
+        return entry_type_data
 
-        candidate = deepcopy(DEFAULT_METADATA_SCHEMA)
-        for path in self._metadata_schema_layer_paths(root):
-            if path == layer_path:
-                self._merge_metadata_schema_layer(candidate, layer_data)
-            elif path.exists():
-                self._merge_metadata_schema_layer(candidate, self._read_metadata_schema_layer(path))
-        schema_errors = self._validate_metadata_schema_definition(
-            MetadataSchema.model_validate(self._resolve_metadata_schema_inheritance(candidate))
-        )
-        if schema_errors:
-            raise ProjectServiceError(" ".join(schema_errors), 422)
-
-        self._write_yaml(layer_path, layer_data)
-        return self.read_metadata_schema()
+    def _apply_builtin_overlay(
+        self, entry_type_data: dict[str, Any], schema: MetadataSchema, entry_type_id: str
+    ) -> None:
+        """Overlay-only persistence for a built-in type (ADR-0029 §A): never
+        write the shipped declaration (name/kind/parent/abstract stay inherited),
+        and keep only the fields that EXTEND the built-in so inherited/intrinsic
+        keys aren't pinned literally into the layer (the resolver re-injects
+        them)."""
+        for declaration_key in ("name", "kind", "parent", "abstract"):
+            entry_type_data.pop(declaration_key, None)
+        builtin_members = set(schema.entry_types[entry_type_id].fields)
+        entry_type_data["fields"] = [
+            field for field in entry_type_data.get("fields", []) if field not in builtin_members
+        ]
 
     def delete_metadata_entry_type(self, request: DeleteMetadataEntryTypeRequest) -> MetadataSchema:
         root = self._require_project()
@@ -539,6 +542,18 @@ class MetadataSchemaMixin:
             overlay["hidden"] = bool(request.hidden)
 
         layer_data = self._read_yaml(layer_path) if layer_path.exists() else self._empty_metadata_schema()
+        self._write_field_override_to_layer(layer_data, entry_type_id, field_key, overlay)
+        self._validate_candidate_schema(root, layer_path, layer_data)
+        self._write_yaml(layer_path, layer_data)
+        return self.read_metadata_schema()
+
+    def _write_field_override_to_layer(
+        self, layer_data: dict[str, Any], entry_type_id: str, field_key: str, overlay: dict[str, Any]
+    ) -> None:
+        """Apply (or clear) one field's presentation overlay on `entry_type_id`
+        in `layer_data`. Drops an emptied override map and an emptied type stub
+        so a cleared override never leaves cruft that would flip a built-in
+        type's source to this layer (making it look user-defined)."""
         entry_types = layer_data.get("entry_types")
         if not isinstance(entry_types, dict):
             entry_types = {}
@@ -556,18 +571,11 @@ class MetadataSchemaMixin:
             entry_type_data["field_overrides"] = overrides
         else:
             entry_type_data.pop("field_overrides", None)
-        # Don't leave an orphaned empty stub: clearing the last override on a
-        # type that has no other local definition would otherwise write
-        # `<type>: {}` to the layer — cruft that also flips a built-in type's
-        # source to this layer (making it look user-defined). Drop the entry.
         if entry_type_data:
             entry_types[entry_type_id] = entry_type_data
         else:
             entry_types.pop(entry_type_id, None)
         layer_data["entry_types"] = entry_types
-        self._validate_candidate_schema(root, layer_path, layer_data)
-        self._write_yaml(layer_path, layer_data)
-        return self.read_metadata_schema()
 
     def upsert_metadata_field(self, request: UpsertMetadataFieldRequest) -> MetadataSchema:
         root = self._require_project()
@@ -576,6 +584,35 @@ class MetadataSchemaMixin:
             raise ProjectServiceError("Unknown metadata schema layer.", 404)
 
         field_id = request.field_id.strip()
+        self._validate_upsert_field_request(root, layer_path, request, field_id)
+
+        existing_field = self.read_metadata_schema().fields.get(field_id)
+        if existing_field is not None and not request.allow_existing:
+            raise ProjectServiceError(f"Metadata field {field_id} already exists.", 422)
+        layer_data = self._read_yaml(layer_path) if layer_path.exists() else self._empty_metadata_schema()
+        fields = layer_data.get("fields")
+        if not isinstance(fields, dict):
+            fields = {}
+        fields[field_id] = request.field.model_dump(
+            exclude_none=True, exclude={"category", "group_origin", "item_members", "item_scalar"}
+        )
+        layer_data["fields"] = fields
+        self._attach_field_to_entry_type(root, layer_path, layer_data, request, field_id)
+
+        self._validate_candidate_schema(root, layer_path, layer_data)
+        self._write_yaml(layer_path, layer_data)
+        if existing_field is not None:
+            self._apply_option_value_changes(
+                root, field_id, existing_field, request.field, request.option_migration
+            )
+        return self.read_metadata_schema()
+
+    def _validate_upsert_field_request(
+        self, root: Path, layer_path: Path, request: UpsertMetadataFieldRequest, field_id: str
+    ) -> None:
+        """Reject a field upsert whose id is malformed, whose computed spec names
+        an unsupported function/scope, or whose list `item_group` isn't visible
+        at or above the target layer (#698 × ADR-0045)."""
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", field_id):
             raise ProjectServiceError("Metadata field ID must start with a letter and contain only letters, numbers, and underscores.", 422)
         if request.field.type == "computed":
@@ -596,33 +633,24 @@ class MetadataSchemaMixin:
                     "Counter scope must be 'siblings' or 'manuscript'.",
                     422,
                 )
-
-        if request.field.type == "list" and request.field.item_group:
-            # #698 × ADR-0045: the item shape must be visible AT OR ABOVE the
-            # target layer. Validating against the full merged chain would
-            # accept a group defined in a deeper sibling-invisible layer —
-            # every sibling project inheriting this layer would then resolve
-            # the field with no shape and 422 on all saves.
-            visible_groups = self._read_metadata_schema_through_path(root, layer_path).groups
-            if request.field.item_group not in visible_groups:
-                raise ProjectServiceError(
-                    f"Group {request.field.item_group} is not defined at or above this layer; "
-                    "define the group there first, or author the field in the layer that owns it.",
-                    422,
-                )
-
-        existing_field = self.read_metadata_schema().fields.get(field_id)
-        if existing_field is not None and not request.allow_existing:
-            raise ProjectServiceError(f"Metadata field {field_id} already exists.", 422)
-        layer_data = self._read_yaml(layer_path) if layer_path.exists() else self._empty_metadata_schema()
-        fields = layer_data.get("fields")
-        if not isinstance(fields, dict):
-            fields = {}
-        fields[field_id] = request.field.model_dump(
-            exclude_none=True, exclude={"category", "group_origin", "item_members", "item_scalar"}
+        self._require_item_group_visible(
+            root,
+            layer_path,
+            request.field,
+            "this layer; define the group there first, or author the field in the layer that owns it.",
         )
-        layer_data["fields"] = fields
 
+    def _attach_field_to_entry_type(
+        self,
+        root: Path,
+        layer_path: Path,
+        layer_data: dict[str, Any],
+        request: UpsertMetadataFieldRequest,
+        field_id: str,
+    ) -> None:
+        """Add `field_id` to the target entry_type's membership in `layer_data`,
+        creating a minimal local definition when the type exists only in an
+        ancestor layer (empty overlay) or is a brand-new `manuscript` type."""
         entry_types = layer_data.get("entry_types")
         if not isinstance(entry_types, dict):
             entry_types = {}
@@ -645,24 +673,6 @@ class MetadataSchemaMixin:
         entry_type_data["fields"] = fields_list
         entry_types[request.entry_type] = entry_type_data
         layer_data["entry_types"] = entry_types
-
-        candidate = deepcopy(DEFAULT_METADATA_SCHEMA)
-        for path in self._metadata_schema_layer_paths(root):
-            if path == layer_path:
-                self._merge_metadata_schema_layer(candidate, layer_data)
-            elif path.exists():
-                self._merge_metadata_schema_layer(candidate, self._read_metadata_schema_layer(path))
-        schema = MetadataSchema.model_validate(self._resolve_metadata_schema_inheritance(candidate))
-        schema_errors = self._validate_metadata_schema_definition(schema)
-        if schema_errors:
-            raise ProjectServiceError(" ".join(schema_errors), 422)
-
-        self._write_yaml(layer_path, layer_data)
-        if existing_field is not None:
-            self._apply_option_value_changes(
-                root, field_id, existing_field, request.field, request.option_migration
-            )
-        return self.read_metadata_schema()
 
     def move_metadata_field(self, request: MoveMetadataFieldRequest) -> MetadataSchema:
         root = self._require_project()

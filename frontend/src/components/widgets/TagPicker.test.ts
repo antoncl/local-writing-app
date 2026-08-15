@@ -1,6 +1,17 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
+
+// Opening the "+ / Add known tags" popover mounts TagRosterPopover with the real
+// projectTagGovernance adapter, whose loadCounts fires api.getTagsOverview on
+// mount. Stub it so the test never reaches a real backend (#973 — the network
+// guard now fails the test if it does).
+vi.mock("@/lib/api", () => ({
+  api: {
+    getTagsOverview: vi.fn(async () => ({ tags: [] })),
+  },
+}));
+
 import TagPicker from "@/components/widgets/TagPicker.svelte";
 
 // #247: the field crystallises typed text into chips on comma / Enter / blur,

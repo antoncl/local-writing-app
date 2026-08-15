@@ -2,6 +2,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
 
+// The "Suggest on…" scope sub-editor mounts NodePickerConfigEditor, which fetches
+// api.listViews() on mount. Stub it so the test never reaches a real backend
+// (#973 — the network guard now fails the test if it does).
+vi.mock("@/lib/api", () => ({
+  api: {
+    listViews: vi.fn(async () => ({ entries: [] })),
+  },
+}));
+
 // #247 slice-2 PR-1 (generalized in PR-3): the + popover is the
 // govern-from-where-you-browse surface. Each row adds the tag; the ⋯ reveals
 // Rename / Merge (+ Suggest-on for scoped vocabularies). Every op goes through

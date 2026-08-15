@@ -97,6 +97,12 @@ export default defineConfig(({ command, mode }) => {
 
   return {
     plugins: [svelte(), failOnBuildWarnings],
+    // Vitest reads this block. `setupFiles` runs once per test file, before any
+    // test — here it installs the network guard that makes a test touching a
+    // real backend fail loudly instead of silently hitting :8787 (#973).
+    test: {
+      setupFiles: ["./src/lib/test/network-guard.ts"],
+    },
     resolve: {
       alias: {
         "@": fileURLToPath(new URL("./src", import.meta.url)),

@@ -27,8 +27,10 @@ from test_ai_entry_patch import add_character_patch_fields
 
 from app.main import app
 from app.models import AIChatResponse, ChatMessage, CreateLoreEntryRequest
-from app.routers.ai import _messages_with_extract_cue
-from app.services.ai.extraction import render_extraction_contract
+from app.services.ai.extraction import (
+    _messages_with_extract_cue,
+    render_extraction_contract,
+)
 from app.services.project.errors import ProjectServiceError
 
 
@@ -149,7 +151,7 @@ class ExtractionContractTests(unittest.TestCase):
 
 class ExtractEndpointTests(unittest.TestCase):
     """The `/extract` orchestration: render the contract, run ONE turn (mocked
-    here), validate its reply, return `{patch, cost_usd, ok}`. Mocks `ai_chat`
+    here), validate its reply, return `{patch, cost_usd, ok}`. Mocks `run_chat_turn`
     (itself covered by test_ai_chat) so the render→validate wiring is what's
     under test."""
 
@@ -167,7 +169,7 @@ class ExtractEndpointTests(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def _mock_chat(self, reply: AIChatResponse) -> AsyncMock:
-        return patch("app.routers.ai.ai_chat", new=AsyncMock(return_value=reply))
+        return patch("app.services.ai.extraction.run_chat_turn", new=AsyncMock(return_value=reply))
 
     def test_revise_extract_returns_validated_patch_and_cost(self) -> None:
         reply = _chat_reply('{"body": "A knight of renown.", "fields": {"bio": "New bio."}}', cost_usd=0.03)

@@ -12,7 +12,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from app.models import SaveChatSessionRequest
+from app.models import AIChatRequest, AIChatResponse, SaveChatSessionRequest
+from app.services import machine_settings as machine_settings_service
+from app.services.ai import providers as ai_providers
+from app.services.ai.call_resolver import resolve_call_params
+from app.services.ai.usage import translate_usage_to_cost
 from app.services.project.errors import ProjectServiceError
 
 if TYPE_CHECKING:
@@ -145,3 +149,67 @@ def expand_and_prepare_chat_blocks(
             blocks.append({"text": journal_xml, "cache_break_after": True, "ttl": "5m"})
 
     return (blocks or None), chat_id, list(new_entries)
+
+
+async def run_chat_turn(project: ProjectService, request: AIChatRequest) -> AIChatResponse:
+    """Run one chat-completion turn: resolve provider/model, prepare the bound
+    chat's context blocks, call the provider, and shape the response with usage +
+    cost. The `/api/ai/chat` route is a thin shim over this, and the fresh-extraction
+    commit (`services/ai/extraction`) runs its turn through it too — rather than
+    reaching back into the HTTP layer for the chat orchestration.
+    """
+    settings = machine_settings_service.load_settings()
+    resolved = resolve_call_params(
+        project,
+        settings,
+        assistant_id=request.assistant_id,
+        provider_override=request.provider,
+        model_override=request.model,
+        max_tokens_override=request.max_tokens,
+    )
+    try:
+        policy = project.ai_policy()
+    except ProjectServiceError:
+        policy = "off"
+
+    messages_list = [m.model_dump() for m in request.messages]
+    system_blocks, session_id, journal_added = expand_and_prepare_chat_blocks(
+        project,
+        request.chat_id, request.system_prompt, messages_list
+    )
+
+    result = ai_providers.chat(
+        provider_name=resolved.provider,
+        model=resolved.model,
+        system_prompt=request.system_prompt,
+        messages=messages_list,
+        max_tokens=resolved.max_tokens,
+        temperature=resolved.temperature,
+        settings=settings,
+        policy=policy,
+        system_blocks=system_blocks,
+        session_id=session_id,
+    )
+    # Both Anthropic and OpenAI signal "hit max_tokens" — different names.
+    truncated = result.stop_reason in {"max_tokens", "length"}
+    usage_wire, cost_usd = await translate_usage_to_cost(
+        result.usage,
+        provider=result.provider,
+        model=result.model,
+        settings=settings,
+    )
+    return AIChatResponse(
+        role="assistant",
+        content=result.content,
+        provider=result.provider,
+        model=result.model,
+        latency_ms=result.latency_ms,
+        policy=policy,
+        ok=result.ok,
+        error=result.error,
+        stop_reason=result.stop_reason,
+        truncated=truncated,
+        journal_added=journal_added,
+        usage=usage_wire,
+        cost_usd=cost_usd,
+    )

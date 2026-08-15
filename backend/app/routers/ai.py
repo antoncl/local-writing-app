@@ -31,7 +31,6 @@ from app.models import (
     EntryPatchExtraction,
     ExtractEntryDraftRequest,
     ExtractEntryPatchRequest,
-    PreviewCacheBlock,
     PreviewContentBlock,
     PreviewErrorInfo,
     PreviewMessage,
@@ -45,7 +44,12 @@ from app.services.ai import providers as ai_providers
 from app.services.ai import tokens as ai_tokens
 from app.services.ai.call_resolver import resolve_call_params
 from app.services.ai.extraction import EXTRACT_CUE, render_extraction_contract
-from app.services.ai.preview import PreviewError, build_chat_payload, build_preview
+from app.services.ai.preview import (
+    PreviewError,
+    build_chat_payload,
+    build_preview,
+    estimate_preview_tokens_and_cost,
+)
 from app.services.ai.profiles import CapabilityTier, ModelDescriptor
 from app.services.ai.profiles.registry import known_provider_names, profile_for
 from app.services.ai.usage import translate_usage_to_cost
@@ -230,94 +234,10 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
     ]
     char_count = sum(len(b.text) for m in messages for b in m.blocks)
 
-    # ----- Token + cost estimate (V2) ---------------------------------
     settings = machine_settings_service.load_settings()
-    provider: str | None = None
-    model: str | None = None
-    caching_style: str | None = None
-    descriptor: ModelDescriptor | None = None
-    if request.assistant_id is not None:
-        resolved = resolve_call_params(
-            project,
-            settings,
-            assistant_id=request.assistant_id,
-            provider_override=None,
-            model_override=None,
-            max_tokens_override=None,
-        )
-        provider = resolved.provider or None
-        model = resolved.model or None
-        if provider:
-            try:
-                profile = profile_for(provider, settings)
-                caching_style = profile.caching_style(model or "")
-            except ValueError:
-                caching_style = None
-        if provider and model:
-            descriptor = await ai_tokens.descriptor_for(
-                provider=provider, model=model, settings=settings
-            )
-
-    # Group blocks into "cache segments" — each ending at a
-    # cache_break_after marker (or at the end of the message). One segment
-    # ≈ one ephemeral cache slot from the dispatch layer's perspective.
-    cache_blocks: list[PreviewCacheBlock] = []
-    counter_provider = provider or "anthropic"  # tokenizer choice is identical across providers in v1
-    for message in messages:
-        current_texts: list[str] = []
-        segment_index_in_message = 0
-        for block in message.blocks:
-            current_texts.append(block.text)
-            if block.cache_break_after:
-                segment_index_in_message += 1
-                segment_text = "".join(current_texts)
-                cache_blocks.append(
-                    PreviewCacheBlock(
-                        label=f"{message.role} block {segment_index_in_message}",
-                        role=message.role,
-                        tokens=ai_tokens.count_tokens(
-                            segment_text,
-                            provider=counter_provider,
-                            model=model or "",
-                            settings=settings,
-                        ),
-                        cache_break_after=True,
-                    )
-                )
-                current_texts = []
-        if current_texts:
-            # Trailing run with no terminating marker — the "tail" of the
-            # message. Counts the same way but is_cache=false in spirit.
-            segment_index_in_message += 1
-            tail_text = "".join(current_texts)
-            label = (
-                f"{message.role} tail"
-                if segment_index_in_message > 1 or len(message.blocks) > 1
-                else f"{message.role}"
-            )
-            cache_blocks.append(
-                PreviewCacheBlock(
-                    label=label,
-                    role=message.role,
-                    tokens=ai_tokens.count_tokens(
-                        tail_text,
-                        provider=counter_provider,
-                        model=model or "",
-                        settings=settings,
-                    ),
-                    cache_break_after=False,
-                )
-            )
-
-    estimated_tokens = sum(b.tokens for b in cache_blocks)
-    estimated_cost_usd: float | None = None
-    if descriptor is not None:
-        cost = ai_tokens.estimate_input_cost(estimated_tokens, descriptor)
-        # Distinguish "no pricing known" (None) from "pricing known, zero
-        # tokens" (0.0). When descriptor exists but cost is 0, that means
-        # either zero-length input or pricing-not-published — surface 0.0
-        # so the UI can show "€0.0000" rather than "—".
-        estimated_cost_usd = cost
+    estimate = await estimate_preview_tokens_and_cost(
+        project, rendered, assistant_id=request.assistant_id, settings=settings
+    )
 
     return AIPreviewResponse(
         messages=messages,
@@ -325,12 +245,12 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
         char_count=char_count,
         session_id=session_id,
         rendered=True,
-        estimated_tokens=estimated_tokens,
-        cache_blocks=cache_blocks,
-        estimated_cost_usd=estimated_cost_usd,
-        provider=provider,
-        model=model,
-        caching_style=caching_style,
+        estimated_tokens=estimate.estimated_tokens,
+        cache_blocks=estimate.cache_blocks,
+        estimated_cost_usd=estimate.estimated_cost_usd,
+        provider=estimate.provider,
+        model=estimate.model,
+        caching_style=estimate.caching_style,
     )
 
 

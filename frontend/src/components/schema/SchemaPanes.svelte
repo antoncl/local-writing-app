@@ -19,6 +19,7 @@
   import {
     asSchemaKind,
     buildSchemaFieldSections,
+    computedSpecFor,
     resolveSchemaScope,
     schemaKindForDocumentKind,
     SCHEMA_KIND_META,
@@ -484,9 +485,7 @@
     const hasPicker = payload.type === "entity_ref" || payload.type === "entity_ref_list";
     const computedSpec: Record<string, string> | null =
       payload.type === "computed"
-        ? payload.computedFunction === "word_count"
-          ? { source: "body", function: "word_count" }
-          : { function: "counter", scope: payload.computedScope }
+        ? computedSpecFor(payload.computedFunction, payload.computedScope)
         : null;
     // Coerce the editor-side string default into the field-type's wire shape
     // (#38). Computed fields never carry a default. undefined / "" → omit the

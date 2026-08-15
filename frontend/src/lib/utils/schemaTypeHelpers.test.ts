@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { MetadataSchema } from "@/lib/types";
 import {
   asSchemaKind,
+  AUTHORABLE_COMPUTED_FUNCTIONS,
   coerceStringList,
+  computedSpecFor,
   isMetadataValuePresent,
   kindEntryTypeFqns,
   kindEntryTypeOptions,
@@ -274,5 +276,43 @@ describe("isMetadataValuePresent", () => {
     expect(isMetadataValuePresent("first")).toBe(true);
     expect(isMetadataValuePresent(42)).toBe(true);
     expect(isMetadataValuePresent(["a"])).toBe(true);
+  });
+});
+
+describe("computed-function vocabulary + spec mapping (#353)", () => {
+  it("mirrors the backend's authorable set, cost included", () => {
+    // The frontend union used to omit `cost`, which is why the field editor
+    // coerced cost fields to word_count. This table is the single source now.
+    expect(AUTHORABLE_COMPUTED_FUNCTIONS.map((c) => c.value)).toEqual([
+      "word_count",
+      "counter",
+      "cost",
+    ]);
+  });
+
+  it("names the scopes each scoped function offers, backend default first", () => {
+    const cost = AUTHORABLE_COMPUTED_FUNCTIONS.find((c) => c.value === "cost");
+    expect(cost?.scopes.map((s) => s.value)).toEqual(["scene", "character", "project"]);
+    const counter = AUTHORABLE_COMPUTED_FUNCTIONS.find((c) => c.value === "counter");
+    expect(counter?.scopes.map((s) => s.value)).toEqual(["siblings", "manuscript"]);
+    // word_count carries no scope.
+    expect(AUTHORABLE_COMPUTED_FUNCTIONS.find((c) => c.value === "word_count")?.scopes).toEqual([]);
+  });
+
+  it("builds the on-disk spec for each function shape", () => {
+    // word_count keeps its body source and drops any scope.
+    expect(computedSpecFor("word_count", "")).toEqual({ source: "body", function: "word_count" });
+    // scoped functions carry their scope, mirroring default_schema's built-ins.
+    expect(computedSpecFor("cost", "scene")).toEqual({ function: "cost", scope: "scene" });
+    expect(computedSpecFor("counter", "manuscript")).toEqual({
+      function: "counter",
+      scope: "manuscript",
+    });
+    // an unrecognized function is re-emitted verbatim, with its scope if present.
+    expect(computedSpecFor("future_fn", "whatever")).toEqual({
+      function: "future_fn",
+      scope: "whatever",
+    });
+    expect(computedSpecFor("future_fn", "")).toEqual({ function: "future_fn" });
   });
 });

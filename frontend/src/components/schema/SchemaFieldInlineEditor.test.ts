@@ -119,6 +119,100 @@ describe("SchemaFieldInlineEditor list item shape hides system groups (#1003)", 
   });
 });
 
+function mountComputed(field: MetadataFieldDefinition, onSave = vi.fn()) {
+  render(SchemaFieldInlineEditor, {
+    props: {
+      field,
+      selectedFieldId: "fld",
+      layerId: "proj",
+      onSave,
+      onCancel: vi.fn(),
+      onRemove: vi.fn(),
+    },
+  });
+  return onSave;
+}
+
+function optionValues(labelText: string): string[] {
+  const select = screen.getByLabelText(labelText) as HTMLSelectElement;
+  return [...select.querySelectorAll("option")].map((o) => (o as HTMLOptionElement).value);
+}
+
+describe("SchemaFieldInlineEditor computed cost function (#353)", () => {
+  it("round-trips an existing cost field instead of coercing it to word_count", async () => {
+    const onSave = mountComputed({
+      name: "AI cost",
+      type: "computed",
+      options: [],
+      computed: { function: "cost", scope: "scene" },
+    });
+    // The bug: opening a cost field and saving it rewrote it as word_count.
+    await fireEvent.click(screen.getByText("Done"));
+    expect(onSave).toHaveBeenCalledOnce();
+    const payload = onSave.mock.calls[0][0];
+    expect(payload.computedFunction).toBe("cost");
+    expect(payload.computedScope).toBe("scene");
+  });
+
+  it("offers cost in the Computation select and shows its own scopes", () => {
+    mountComputed({
+      name: "AI cost",
+      type: "computed",
+      options: [],
+      computed: { function: "cost", scope: "character" },
+    });
+    expect(optionValues("Computation")).toContain("cost");
+    const scope = screen.getByLabelText("Scope") as HTMLSelectElement;
+    expect(scope.value).toBe("character");
+    expect(optionValues("Scope")).toEqual(["scene", "character", "project"]);
+  });
+
+  it("resets scope to the new function's default when the old scope doesn't fit", async () => {
+    const onSave = mountComputed({
+      name: "Number",
+      type: "computed",
+      options: [],
+      computed: { function: "counter", scope: "manuscript" },
+    });
+    // counter's `manuscript` is not a cost scope, so switching to cost must
+    // reset it to cost's default (scene) rather than carry an invalid scope.
+    await fireEvent.change(screen.getByLabelText("Computation"), { target: { value: "cost" } });
+    await fireEvent.click(screen.getByText("Done"));
+    const payload = onSave.mock.calls[0][0];
+    expect(payload.computedFunction).toBe("cost");
+    expect(payload.computedScope).toBe("scene");
+  });
+
+  it("hides the Scope control and clears the scope for word_count", async () => {
+    const onSave = mountComputed({
+      name: "Words",
+      type: "computed",
+      options: [],
+      computed: { function: "counter", scope: "siblings" },
+    });
+    await fireEvent.change(screen.getByLabelText("Computation"), { target: { value: "word_count" } });
+    expect(screen.queryByLabelText("Scope")).toBeNull();
+    await fireEvent.click(screen.getByText("Done"));
+    expect(onSave.mock.calls[0][0].computedScope).toBe("");
+  });
+
+  it("preserves a stored function it doesn't recognize rather than coercing it", async () => {
+    const onSave = mountComputed({
+      name: "Future",
+      type: "computed",
+      options: [],
+      computed: { function: "future_fn", scope: "whatever" },
+    });
+    expect((screen.getByLabelText("Computation") as HTMLSelectElement).value).toBe("future_fn");
+    // No scope control for an unknown function, but its stored scope survives.
+    expect(screen.queryByLabelText("Scope")).toBeNull();
+    await fireEvent.click(screen.getByText("Done"));
+    const payload = onSave.mock.calls[0][0];
+    expect(payload.computedFunction).toBe("future_fn");
+    expect(payload.computedScope).toBe("whatever");
+  });
+});
+
 describe("SchemaFieldInlineEditor author description (#1004)", () => {
   it("threads a typed description through the saved draft", async () => {
     const onSave = vi.fn();

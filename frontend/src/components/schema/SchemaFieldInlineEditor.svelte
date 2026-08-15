@@ -21,8 +21,12 @@
     group: string;
     defaultValue: string | undefined;
     options: OptionDraft[];
-    computedFunction: "word_count" | "counter";
-    computedScope: "siblings" | "manuscript";
+    // Computed-field settings. Both are free strings so the editor round-trips
+    // any function/scope the backend authorises — including `cost` — and never
+    // coerces one it doesn't recognize (#353). Vocabulary + on-disk mapping
+    // live in `schemaTypeHelpers.AUTHORABLE_COMPUTED_FUNCTIONS`.
+    computedFunction: string;
+    computedScope: string;
     pickerConfig: NodePickerConfig;
     // `list` fields only (#698): exactly one is non-null — the item shape is
     // a named group or a single scalar type. Both null for every other type.
@@ -61,7 +65,11 @@
     fieldIconClass,
     fieldTypeLabel,
   } from "@/lib/utils/fieldIcons";
-  import { slugifyFieldId } from "@/lib/utils/schemaTypeHelpers";
+  import {
+    AUTHORABLE_COMPUTED_FUNCTIONS,
+    computedFunctionChoice,
+    slugifyFieldId,
+  } from "@/lib/utils/schemaTypeHelpers";
 
   interface Props {
     // --- Context from parent (read-only) ---
@@ -122,12 +130,12 @@
         color: o.color ?? null,
         originalValue: o.value,
       })) as OptionDraft[],
-      computedFunction: (f?.computed?.function === "counter" ? "counter" : "word_count") as
-        | "word_count"
-        | "counter",
-      computedScope: (f?.computed?.scope === "manuscript" ? "manuscript" : "siblings") as
-        | "siblings"
-        | "manuscript",
+      // Preserve the stored function/scope exactly (#353) — a `cost` field
+      // (or any function the frontend doesn't yet mirror) round-trips
+      // unchanged rather than being coerced to word_count. A fresh / non-
+      // computed field seeds word_count with no scope.
+      computedFunction: f?.computed?.function ?? "word_count",
+      computedScope: f?.computed?.scope ?? "",
       pickerConfig: (f?.picker_config
         ? {
             sources: [...(f.picker_config.sources ?? [])],
@@ -153,8 +161,16 @@
   let group: string = $state(seed.group);
   let defaultValue: string | undefined = $state(seed.defaultValue);
   let options: OptionDraft[] = $state(seed.options);
-  let computedFunction: "word_count" | "counter" = $state(seed.computedFunction);
-  let computedScope: "siblings" | "manuscript" = $state(seed.computedScope);
+  let computedFunction: string = $state(seed.computedFunction);
+  let computedScope: string = $state(seed.computedScope);
+  // The scope choices the current function offers (empty for word_count, or for
+  // a function the frontend doesn't recognize). Drives the Scope select below.
+  const computedScopeChoices = $derived(computedFunctionChoice(computedFunction)?.scopes ?? []);
+  // An existing field can carry a function this editor doesn't list yet (a
+  // later backend addition). Keep it selectable and re-savable rather than
+  // silently rewriting it — the same "show the real value" idiom as the list
+  // item-shape fallback below.
+  const computedFunctionUnknown = $derived(computedFunctionChoice(computedFunction) === undefined);
   let pickerConfig: NodePickerConfig = $state(seed.pickerConfig);
   let itemShape: string = $state(seed.itemShape);
   const itemGroup = $derived(itemShape.startsWith("group:") ? itemShape.slice(6) : null);
@@ -225,8 +241,22 @@
   function chooseType(next: MetadataFieldType) {
     type = next;
     typeMenuOpen = false;
-    if (next === "computed" && computedFunction !== "counter" && computedFunction !== "word_count") {
-      computedFunction = "word_count";
+    if (next === "computed" && computedFunctionChoice(computedFunction) === undefined) {
+      chooseFunction("word_count");
+    }
+  }
+
+  // Switching the computed function resets the scope to that function's default
+  // (its first scope) whenever the current scope isn't one it offers — so a
+  // counter's `siblings` never rides along onto a `cost` field, and vice versa.
+  // word_count (no scopes) clears the scope entirely.
+  function chooseFunction(next: string) {
+    computedFunction = next;
+    const scopes = computedFunctionChoice(next)?.scopes ?? [];
+    if (scopes.length === 0) {
+      computedScope = "";
+    } else if (!scopes.some((s) => s.value === computedScope)) {
+      computedScope = scopes[0].value;
     }
   }
 
@@ -410,16 +440,27 @@
   {#if type === "computed"}
     <div class="sfi-computed">
       <label class="sfi-field">Computation
-        <select bind:value={computedFunction}>
-          <option value="word_count">Word count (of body)</option>
-          <option value="counter">Counter (position among siblings)</option>
+        <select
+          value={computedFunction}
+          aria-label="Computation"
+          onchange={(event) => chooseFunction(event.currentTarget.value)}
+        >
+          {#if computedFunctionUnknown}
+            <!-- Preserve a stored function this editor doesn't list (a later
+                 backend addition) rather than coerce it (#353). -->
+            <option value={computedFunction} disabled>{computedFunction} (unrecognized — preserved)</option>
+          {/if}
+          {#each AUTHORABLE_COMPUTED_FUNCTIONS as fn (fn.value)}
+            <option value={fn.value}>{fn.label}</option>
+          {/each}
         </select>
       </label>
-      {#if computedFunction === "counter"}
+      {#if computedScopeChoices.length > 0}
         <label class="sfi-field">Scope
-          <select bind:value={computedScope}>
-            <option value="siblings">Among siblings</option>
-            <option value="manuscript">In manuscript</option>
+          <select bind:value={computedScope} aria-label="Scope">
+            {#each computedScopeChoices as scope (scope.value)}
+              <option value={scope.value}>{scope.label}</option>
+            {/each}
           </select>
         </label>
       {/if}

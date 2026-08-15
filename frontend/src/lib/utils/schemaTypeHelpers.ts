@@ -280,6 +280,63 @@ export function slugifyFieldId(value: string): string {
     .replace(/^[0-9]/, "field_$&");
 }
 
+// Authorable computed-function vocabulary — the frontend mirror of the
+// backend's `default_schema.AUTHORABLE_COMPUTED_FUNCTIONS` single source of
+// truth (#333). #353: the field editor's old hand-maintained union omitted
+// `cost`, so opening a cost field coerced it to `word_count` — a lossy
+// round-trip. This one table drives both the editor's option lists and the
+// on-disk spec mapping so the two can't drift from each other, and the editor
+// PRESERVES any function it doesn't recognize instead of coercing it (the same
+// "show exactly what's stored" rule the view designer follows), so a future
+// backend addition stays non-destructive until the mirror catches up.
+export interface ComputedScopeChoice {
+  value: string;
+  label: string;
+}
+export interface ComputedFunctionChoice {
+  value: string;
+  label: string;
+  // The scope choices this function offers; empty for functions with no scope
+  // (word_count). The first entry is the default the backend seeds.
+  scopes: ComputedScopeChoice[];
+}
+export const AUTHORABLE_COMPUTED_FUNCTIONS: ComputedFunctionChoice[] = [
+  { value: "word_count", label: "Word count (of body)", scopes: [] },
+  {
+    value: "counter",
+    label: "Counter (position among siblings)",
+    scopes: [
+      { value: "siblings", label: "Among siblings" },
+      { value: "manuscript", label: "In manuscript" },
+    ],
+  },
+  {
+    value: "cost",
+    label: "AI cost (invocation spend)",
+    scopes: [
+      { value: "scene", label: "This scene" },
+      { value: "character", label: "This character" },
+      { value: "project", label: "Whole project" },
+    ],
+  },
+];
+
+export function computedFunctionChoice(fn: string): ComputedFunctionChoice | undefined {
+  return AUTHORABLE_COMPUTED_FUNCTIONS.find((choice) => choice.value === fn);
+}
+
+// Build the on-disk `computed` spec from the editor's (function, scope) pair,
+// mirroring default_schema's built-ins: word_count carries `source: "body"`
+// and no scope; the scoped functions (counter, cost) carry their scope. An
+// unrecognized function is re-emitted verbatim (with its preserved scope, if
+// any) rather than dropped.
+export function computedSpecFor(fn: string, scope: string): Record<string, string> {
+  if (fn === "word_count") return { source: "body", function: "word_count" };
+  const spec: Record<string, string> = { function: fn };
+  if (scope) spec.scope = scope;
+  return spec;
+}
+
 // Suggest a key prefix for a group application from its label.
 export function suggestPrefixFromLabel(label: string): string {
   const slug = slugifyFieldId(label);

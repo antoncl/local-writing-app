@@ -35,8 +35,8 @@ from app.models_views import (
     ViewNode,
     ViewNodeList,
 )
-from app.routers.ai import _validate_assistant_temperature
 from app.runtime import CurrentProject, translate_errors
+from app.services.ai.assistant_validation import validate_assistant_temperature
 
 router = APIRouter()
 
@@ -101,7 +101,7 @@ def get_assistant_entry(project: CurrentProject, entry_id: str) -> AssistantEntr
 
 @router.put("/api/assistants/{entry_id}", response_model=AssistantEntry)
 def save_assistant_entry(project: CurrentProject, entry_id: str, request: SaveAssistantEntryRequest) -> AssistantEntry:
-    err = _validate_assistant_temperature(request.metadata)
+    err = validate_assistant_temperature(request.metadata)
     if err:
         raise HTTPException(status_code=400, detail=err)
     with translate_errors():
@@ -215,7 +215,7 @@ async def put_node(project: CurrentProject, node_id: str, request: Request):
     # per-kind endpoint runs; mirror it here so the unified path
     # rejects out-of-range temperatures the same way.
     if kind == "assistant":
-        err = _validate_assistant_temperature(parsed.metadata)
+        err = validate_assistant_temperature(parsed.metadata)
         if err:
             raise HTTPException(status_code=400, detail=err)
     with translate_errors():

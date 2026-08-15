@@ -179,22 +179,28 @@
   let keyManual = $state(false);
   let iconPickerOpen = $state(false);
   let iconBtnEl: HTMLButtonElement | undefined = $state();
-  // Flip the icon popover above the tile when there isn't room below (#1001) —
-  // otherwise on a field low in a tall type editor it runs past the fold and
-  // is clipped, and reaching for the panel scrollbar to chase it dismisses it.
-  let iconFlipUp = $state(false);
-  $effect(() => {
-    if (!iconPickerOpen) {
-      iconFlipUp = false;
-      return;
-    }
-    const el = iconBtnEl;
-    if (!el) return;
+  let typeChipEl: HTMLButtonElement | undefined = $state();
+  // Flip a popover above its trigger when there isn't room below (#1001) —
+  // otherwise, opened from a field low in a tall type editor, it runs past the
+  // fold and is clipped (and chasing the icon picker with the panel scrollbar
+  // dismisses it). Applied to BOTH this component's popovers, not just one.
+  function flipUp(el: HTMLElement | undefined, estHeight: number): boolean {
+    if (!el) return false;
     const rect = el.getBoundingClientRect();
     const spaceBelow = window.innerHeight - rect.bottom;
-    // ~360px covers the picker's 340px max-height + chrome. Flip up only when
-    // below is too tight AND above has more room, so it never makes it worse.
-    iconFlipUp = spaceBelow < 360 && rect.top > spaceBelow;
+    // Flip only when below is too tight AND above has more room, so it never
+    // makes things worse. estHeight ≈ the popover's max height + chrome.
+    return spaceBelow < estHeight && rect.top > spaceBelow;
+  }
+  // The icon picker caps at 340px (IconPicker .ip-body); the type grid is
+  // shorter (2 cols × ~6 rows). Each flips off its own trigger + open flag.
+  let iconFlipUp = $state(false);
+  let typeFlipUp = $state(false);
+  $effect(() => {
+    iconFlipUp = iconPickerOpen && flipUp(iconBtnEl, 360);
+  });
+  $effect(() => {
+    typeFlipUp = typeMenuOpen && flipUp(typeChipEl, 260);
   });
 
   // Section datalist (#1000): distinct, non-empty labels already used on this
@@ -311,6 +317,7 @@
         aria-haspopup="true"
         aria-expanded={typeMenuOpen}
         aria-label="Change field type"
+        bind:this={typeChipEl}
         onclick={() => (typeMenuOpen = !typeMenuOpen)}
       >
         <i class={`ti ti-${DEFAULT_FIELD_GLYPH[type] ?? "letter-case"}`} aria-hidden="true"></i>
@@ -318,7 +325,7 @@
         <i class="ti ti-chevron-down sfi-type-chip-caret" aria-hidden="true"></i>
       </button>
       {#if typeMenuOpen}
-        <div class="sfi-type-grid" role="listbox" aria-label="Field type">
+        <div class="sfi-type-grid" class:up={typeFlipUp} role="listbox" aria-label="Field type">
           {#each FIELD_TYPE_CHOICES as choice (choice)}
             <button
               type="button"
@@ -578,6 +585,11 @@
     border-radius: 10px;
     background: var(--surface);
     box-shadow: var(--elev-2);
+  }
+  /* Flipped above the chip when there's no room below (#1001). */
+  .sfi-type-grid.up {
+    top: auto;
+    bottom: calc(100% + 6px);
   }
   .sfi-type-cell {
     display: flex;

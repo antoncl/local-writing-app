@@ -285,7 +285,14 @@ class ReferencesMixin:
             log.warning("Not caching a degraded node index for %s; it will be rebuilt.", root)
             return
         try:
-            self._atomic_write(snapshot_path(root), snapshot_serialize(index, root=root, layers=layers, manifest=manifest))
+            # `durable=False`: the snapshot is rebuildable cache (#476/#480), so
+            # it skips the per-write fsync every user file pays. A crash that
+            # loses it costs the next open its speed and nothing else.
+            self._atomic_write(
+                snapshot_path(root),
+                snapshot_serialize(index, root=root, layers=layers, manifest=manifest),
+                durable=False,
+            )
         except OSError as exc:
             log.warning("Could not write the node-index snapshot for %s: %s", root, exc)
 

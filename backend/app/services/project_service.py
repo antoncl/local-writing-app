@@ -8,7 +8,6 @@ import uuid
 from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from typing import Any
 
 import yaml
@@ -22,6 +21,7 @@ from app.models import (
     Scene,
 )
 from app.scope import WorkScope
+from app.services.atomic_io import atomic_write_text
 from app.services.machine_settings import touch_recent_project
 from app.services.migrations import migrate_project
 from app.services.project.ai_invocations import AiInvocationsMixin
@@ -381,13 +381,12 @@ class ProjectService(
         text = yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
         self._atomic_write(path, text)
 
-    def _atomic_write(self, path: Path, text: str) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as temp:
-            temp.write(text)
-            temp.flush()
-            temp_path = Path(temp.name)
-        temp_path.replace(path)
+    def _atomic_write(self, path: Path, text: str, *, durable: bool = True) -> None:
+        # `durable` fsyncs the contents + parent dir so an acknowledged save
+        # survives a power cut (#480). The one caller that passes False is the
+        # node-index snapshot write — rebuildable cache a crash may just rebuild
+        # (#476), so it should not pay the fsync every index write-back costs.
+        atomic_write_text(path, text, durable=durable)
         self._maintain_index_after_write(path)
 
     def _maintain_index_after_write(self, path: Path) -> None:

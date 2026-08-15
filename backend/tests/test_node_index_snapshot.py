@@ -429,10 +429,10 @@ class SnapshotIntegrityTests(SnapshotTestCase):
         the next open its speed and nothing else."""
         original = self.service._atomic_write
 
-        def failing(path: Path, text: str) -> None:
+        def failing(path: Path, text: str, *, durable: bool = True) -> None:
             if path == snapshot.snapshot_path(self.root):
                 raise OSError("read-only")
-            original(path, text)
+            original(path, text, durable=durable)
 
         self.service._atomic_write = failing  # type: ignore[method-assign]
         self._write_lore(self.root, "seren", "Seren")

@@ -65,4 +65,4 @@ Each slice is behaviour-preserving and verified against the provider tests befor
 
 Citations (symbol · file, at the pin above): `ProviderProfile` · `profiles/base.py`; `profile_for` / `known_provider_names` / `_KNOWN` · `profiles/registry.py`; `chat` / `chat_stream` / `_extract_usage_for_provider` / `health_check` · `providers.py`; design note · `docs/ai-model-selection.md`.
 
-(**Accepted** 2026-08-15, Anton; #76 provider-layer findings fold in; follows 0056; relates the `docs/ai-model-selection.md` design note; verified against `9ea49cd2`.)
+(**Accepted** 2026-08-15, Anton, PR #1046; #76 provider-layer findings fold in; follows 0056; relates the `docs/ai-model-selection.md` design note; verified against `9ea49cd2`.)

@@ -101,12 +101,12 @@ class ScopeOnTheWireTests(unittest.TestCase):
         """The open event rebuilds the index (#392/#476).
 
         #413 moved this invalidation off the deleted `CurrentScope.set` and onto
-        the `/api/project/open` route. It must live on the route and not in the
-        per-request resolver (which builds a throwaway service every call), so the
-        route is what this pins: without the `node_index_gate.invalidate()` in
-        `open_project`, a reopen after an external backup-restore would serve the
-        pre-restore index — and a plain browser F5 re-runs `/open`, so this is the
-        gesture that saves that user.
+        the open *event* — `ProjectService.open` -> `_register_open_event` (#977
+        folded it out of the route handler). It must fire on that event and not in
+        the per-request resolver (which builds a throwaway service every call), so
+        the `/open` round trip is what this pins: without the invalidate, a reopen
+        after an external backup-restore would serve the pre-restore index — and a
+        plain browser F5 re-runs `/open`, so this is the gesture that saves that user.
         """
         from app.scope import WorkScope
         from app.services.project.node_index_gate import node_index_gate

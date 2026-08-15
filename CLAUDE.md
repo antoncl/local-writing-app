@@ -149,7 +149,7 @@ class–instance model: `kind` = class, `entry_type` = sub-class, `entry` =
 instance. **Read `memory/architecture_class_instance_model.md` before touching
 the kind whitelist**, and `memory/strategy_node_model.md` for the shape. Chat is
 a Node kind; resist making any new thing "special enough to need its own
-subsystem" (`feedback_chat_as_node_validation.md`).
+subsystem" (`memory/feedback_chat_as_node_validation.md`).
 
 ### Backend layout (`backend/app/`)
 - `main.py` — the FastAPI app and ~90 HTTP routes (thin; delegates to services).
@@ -165,7 +165,7 @@ subsystem" (`feedback_chat_as_node_validation.md`).
   `sessions.py`, `tokens.py`, `preview.py`.
 - `services/migrations.py` — **pre-1.0: do not write migrations or defensive
   reads** for storage-format changes; test projects are recreated
-  (`feedback_no_pre_1_0_migrations.md`).
+  (`docs/development/code-standards.md` §No pre-1.0 migrations).
 
 ### Frontend layout (`frontend/src/`)
 Flat directory of ~36 `.svelte` components plus `.ts` helpers. `App.svelte` is
@@ -181,10 +181,10 @@ treatment**, and the NodeEditor/metadata decision memos before touching those.
   `LoreEntry` (code) = an item, `Scene` = atomic prose file, `Manuscript
   Structure` = act/chapter/scene ordering. **Never** call story info "Codex".
 - **No monolithic files**: split before any file passes ~1500 LOC
-  (`feedback_no_monolithic_source_files.md`).
+  (`docs/development/code-standards.md` §No monolithic source files).
 - **No compile errors, minimal warnings**: never wave off `svelte-check` issues as
   pre-existing — fix or explicitly flag
-  (`feedback_no_compile_errors_minimal_warnings.md`).
+  (`docs/development/code-standards.md` §No compile errors, minimal warnings).
 - Atomic writes for prose and structure files; keep backend mutations intentful.
 - Currency: backend stores USD, API fields use `_usd` suffix; frontend converts
   to EUR for display.
@@ -216,10 +216,18 @@ on every subsequent step of the session.
 
 ## Reference material
 
+> **`memory/…` is not a repo path.** Every `memory/<name>.md` reference in this
+> file points to Claude Code's per-project memory store — Claude's own working
+> notes, kept *outside* this repository. They are not files in the tree; don't
+> search for them. Human contributors: the design rationale that bears on writing
+> code lives in `docs/` and the ADRs under `docs/design/adr/` — the code standards
+> those notes distilled are in `docs/development/code-standards.md`.
+
 - `memory/MEMORY.md` — index of persistent design decisions and working-style
-  feedback; read the linked memos before touching the areas they name.
-- `docs/development/` — worktree and quality-gate mechanics (the *why* behind
-  the rules above).
+  feedback (Claude memory, per the note above); read the linked memos before
+  touching the areas they name.
+- `docs/development/` — `code-standards.md` (the rules a change must meet),
+  plus worktree and quality-gate mechanics (the *why* behind the rules above).
 - GitHub Issues are the canonical backlog (`gh issue list`); milestones hold the
   roadmap. Do not invent backlog files.
 - `docs/` — deep dives: `metadata-strategy.md`, `ai-model-selection.md`,

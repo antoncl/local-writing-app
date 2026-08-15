@@ -27,7 +27,6 @@ from app.models import (
     AIProviderModelList,
     AITierResolution,
     ChatMessage,
-    ChatUsage,
     CreateAIInvocationRequest,
     EntryPatchExtraction,
     ExtractEntryDraftRequest,
@@ -49,6 +48,7 @@ from app.services.ai.extraction import EXTRACT_CUE, render_extraction_contract
 from app.services.ai.preview import PreviewError, build_chat_payload, build_preview
 from app.services.ai.profiles import CapabilityTier, ModelDescriptor
 from app.services.ai.profiles.registry import known_provider_names, profile_for
+from app.services.ai.usage import translate_usage_to_cost
 from app.services.project_service import ProjectService, ProjectServiceError
 
 router = APIRouter()
@@ -452,37 +452,6 @@ def _prepare_chat_send_payload(
     return (blocks or None), chat_id, list(new_entries)
 
 
-async def _usage_and_cost(
-    usage,
-    *,
-    provider: str,
-    model: str,
-    settings,
-) -> tuple[ChatUsage | None, float | None]:
-    """Convert dispatch-layer UsageMetrics + a (provider, model) lookup
-    into wire-format ChatUsage and USD cost. Returns (None, None) when
-    usage is missing; cost stays None when pricing isn't known."""
-
-    if usage is None:
-        return None, None
-    wire_usage = ChatUsage(
-        input_tokens=usage.input_tokens,
-        cached_input_tokens=usage.cached_input_tokens,
-        cache_write_tokens=usage.cache_write_tokens,
-        output_tokens=usage.output_tokens,
-    )
-    if not provider or not model:
-        return wire_usage, None
-    from app.services.ai.profiles import compute_cost
-    descriptor = await ai_tokens.descriptor_for(
-        provider=provider, model=model, settings=settings
-    )
-    if descriptor is None:
-        return wire_usage, None
-    cost = compute_cost(usage, descriptor)
-    return wire_usage, cost
-
-
 @router.post("/api/ai/chat", response_model=AIChatResponse)
 async def ai_chat(project: CurrentProject, request: AIChatRequest) -> AIChatResponse:
     settings = machine_settings_service.load_settings()
@@ -519,7 +488,7 @@ async def ai_chat(project: CurrentProject, request: AIChatRequest) -> AIChatResp
     )
     # Both Anthropic and OpenAI signal "hit max_tokens" — different names.
     truncated = result.stop_reason in {"max_tokens", "length"}
-    usage_wire, cost_usd = await _usage_and_cost(
+    usage_wire, cost_usd = await translate_usage_to_cost(
         result.usage,
         provider=result.provider,
         model=result.model,
@@ -629,7 +598,7 @@ async def ai_generate(project: CurrentProject, request: AIGenerateRequest) -> AI
         session_id=session_id,
     )
     truncated = result.stop_reason in {"max_tokens", "length"}
-    usage_wire, cost_usd = await _usage_and_cost(
+    usage_wire, cost_usd = await translate_usage_to_cost(
         result.usage,
         provider=result.provider,
         model=result.model,

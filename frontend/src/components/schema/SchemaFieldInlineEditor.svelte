@@ -29,6 +29,10 @@
     itemType: ListItemScalarType | null;
   };
 
+  // Monotonic per-instance counter → a unique `id` for each editor's section
+  // datalist (#1000). More than one field editor can be mounted across schema
+  // surfaces; a shared datalist id would cross-wire their suggestion lists.
+  let sectionListSeq = 0;
 </script>
 
 <script lang="ts">
@@ -70,6 +74,10 @@
     // The schema's named group definitions — the item-shape choices a `list`
     // field can reference (#698). Keyed by group id.
     groups?: Record<string, MetadataGroupDefinition>;
+    // Section labels already in use on this type (#1000) — the datalist
+    // suggestions behind the freeform Section input, so it doubles as a
+    // pick-from-existing dropdown. Distinct not required (deduped below).
+    sectionLabels?: string[];
     // --- Callback props (parent owns persistence) ---
     onSave?: (payload: FieldDraftPayload) => void;
     onCancel?: () => void;
@@ -82,6 +90,7 @@
     readonly = false,
     layerId = "",
     groups = {},
+    sectionLabels = [],
     onSave = () => {},
     onCancel = () => {},
     onRemove = () => {},
@@ -169,6 +178,32 @@
   let keyEditing = $state(false);
   let keyManual = $state(false);
   let iconPickerOpen = $state(false);
+  let iconBtnEl: HTMLButtonElement | undefined = $state();
+  // Flip the icon popover above the tile when there isn't room below (#1001) —
+  // otherwise on a field low in a tall type editor it runs past the fold and
+  // is clipped, and reaching for the panel scrollbar to chase it dismisses it.
+  let iconFlipUp = $state(false);
+  $effect(() => {
+    if (!iconPickerOpen) {
+      iconFlipUp = false;
+      return;
+    }
+    const el = iconBtnEl;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    // ~360px covers the picker's 340px max-height + chrome. Flip up only when
+    // below is too tight AND above has more room, so it never makes it worse.
+    iconFlipUp = spaceBelow < 360 && rect.top > spaceBelow;
+  });
+
+  // Section datalist (#1000): distinct, non-empty labels already used on this
+  // type. The freeform input lists them so it doubles as a pick-from-existing
+  // dropdown; the id is unique per instance (see module counter).
+  const sectionSuggestions = $derived([
+    ...new Set(sectionLabels.map((s) => s.trim()).filter(Boolean)),
+  ]);
+  const sectionListId = `sfi-section-list-${(sectionListSeq += 1)}`;
 
   // Keep the type-specific config blocks coherent when the user picks a
   // different type from the grid.
@@ -195,8 +230,10 @@
     id = slugifyFieldId(value);
   }
 
-  // Click-outside closes the type grid + icon popover (was App-level).
-  function handleDocumentMousedown(event: MouseEvent) {
+  // Click-outside closes the type grid + icon popover (was App-level). Bound to
+  // `click`, not `mousedown` (#1001): a press on a scrollbar gutter fires
+  // mousedown but no click, so scrolling the popover no longer dismisses it.
+  function handleDocumentClick(event: MouseEvent) {
     const target = event.target as HTMLElement | null;
     if (iconPickerOpen && !target?.closest(".sfi-icon-anchor")) iconPickerOpen = false;
     if (typeMenuOpen && !target?.closest(".sfi-type-anchor")) typeMenuOpen = false;
@@ -232,7 +269,7 @@
   );
 </script>
 
-<svelte:window onmousedown={handleDocumentMousedown} />
+<svelte:window onclick={handleDocumentClick} />
 
 <div class="schema-field-inline" role="group" aria-label="Field settings">
   <div class="sfi-head">
@@ -242,12 +279,13 @@
         class="sfr-tile sfi-icon-btn"
         aria-label="Choose icon"
         title="Choose icon"
+        bind:this={iconBtnEl}
         onclick={() => (iconPickerOpen = !iconPickerOpen)}
       >
         <i class={fieldIconClass({ type, icon })} aria-hidden="true"></i>
       </button>
       {#if iconPickerOpen}
-        <div class="sfi-icon-pop">
+        <div class="sfi-icon-pop" class:up={iconFlipUp}>
           <IconPicker
             value={icon}
             defaultGlyph={DEFAULT_FIELD_GLYPH[type] ?? "letter-case"}
@@ -261,7 +299,7 @@
     <input
       class="sfi-name"
       value={name}
-      placeholder="POV Character"
+      placeholder="Field name"
       aria-label="Field display name"
       oninput={(event) => updateName(event.currentTarget.value)}
     />
@@ -299,13 +337,19 @@
     </div>
   </div>
   <div class="sfi-controls">
-    <label class="sfi-field">Group
+    <label class="sfi-field">Section
       <input
         value={group}
         placeholder="— none —"
-        aria-label="Group section"
+        aria-label="Section"
+        list={sectionListId}
         oninput={(event) => (group = event.currentTarget.value)}
       />
+      <datalist id={sectionListId}>
+        {#each sectionSuggestions as label (label)}
+          <option value={label}></option>
+        {/each}
+      </datalist>
     </label>
   </div>
   <div class="sfi-key-row">
@@ -477,6 +521,11 @@
     top: calc(100% + 6px);
     left: 0;
     z-index: 60;
+  }
+  /* Flipped above the tile when there's no room below (#1001). */
+  .sfi-icon-pop.up {
+    top: auto;
+    bottom: calc(100% + 6px);
   }
   .sfi-name {
     flex: 1;

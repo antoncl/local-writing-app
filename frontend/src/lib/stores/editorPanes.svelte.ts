@@ -47,6 +47,7 @@ import { refreshLoreEntries } from "@/lib/stores/lore";
 import { refreshPromptEntries } from "@/lib/stores/prompts";
 import { refreshPlotTemplates } from "@/lib/stores/plotTemplates";
 import { revealPlotline } from "@/lib/stores/plotlines";
+import { openEditMutationSet } from "@/lib/stores/mutationSets";
 import {
   refreshAfterSave,
   autosaveOnce,
@@ -1372,11 +1373,15 @@ class EditorPanesController {
         // an ancestor's project.md is a legitimate source with no surface.
         return this.openProjectNode(nodeId);
       case "mutation_set":
-        // Mutation sets are edited in the Mutations pane, not an editor pane,
-        // and that pane holds the entry being edited in component-local state —
-        // there is no id-addressable open to route to (#449). Saying so beats
-        // opening something else.
-        throw new Error("Mutation sets open from the Mutations pane, not from a reference.");
+        // A mutation set is edited in its app-level dialog, not a pane — so like
+        // `plot` above it routes to a store signal, not a pane opener. The
+        // component-local `editing` state that once made this unreachable was
+        // lifted into `mutationSetEditorStore` (ADR-0055 §3), so a backlink can
+        // now follow the id: fetch the set and open the same dialog every other
+        // trigger uses. This is the id-addressable open #449 was missing — no
+        // second editing surface, just a reference that resolves.
+        openEditMutationSet(await api.getMutationSetEntry(nodeId));
+        return;
       default:
         throw new Error(`Cannot open a ${kind} node from here.`);
     }

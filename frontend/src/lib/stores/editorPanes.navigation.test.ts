@@ -16,8 +16,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { get } from "svelte/store";
 import { FOREIGN_PROJECT_NODE, editorPanes } from "./editorPanes.svelte";
 import { plotlineReveal } from "./plotlines";
+import { mutationSetEditorStore } from "./mutationSets";
 import { api } from "@/lib/api";
-import type { ProjectNode } from "@/lib/types";
+import type { MutationSetEntry, ProjectNode } from "@/lib/types";
 
 // kind → the opener it must reach. The table IS the assertion: a kind wired to
 // the wrong opener reads as an obvious mismatch here, which the old code's
@@ -90,11 +91,22 @@ describe("editorPanes.openNodeOfKind (#344)", () => {
     expect(openScene).not.toHaveBeenCalled();
   });
 
-  it("refuses a mutation set by name rather than opening something else", async () => {
-    const openScene = vi.spyOn(editorPanes, "openScene").mockResolvedValue(undefined);
+  it("follows a mutation-set backlink to its app-level dialog (#449)", async () => {
+    // A mutation set has no pane; like `plot` it routes to a store signal. Since
+    // ADR-0055 lifted the editor's target into `mutationSetEditorStore`, the
+    // backlink resolves by fetching the set and opening that dialog — pin both
+    // halves: the store carries the fetched entry, and no pane opener fired.
+    mutationSetEditorStore.set(null);
+    const entry = { id: "mut_1", title: "Becomes a werewolf" } as MutationSetEntry;
+    const getEntry = vi.spyOn(api, "getMutationSetEntry").mockResolvedValue(entry);
+    const spies = ROUTES.map(([, name]) => vi.spyOn(editorPanes, name).mockResolvedValue(undefined));
 
-    await expect(editorPanes.openNodeOfKind("mut_1", "mutation_set")).rejects.toThrow(/Mutations pane/);
-    expect(openScene).not.toHaveBeenCalled();
+    await editorPanes.openNodeOfKind("mut_1", "mutation_set");
+
+    expect(getEntry).toHaveBeenCalledWith("mut_1");
+    expect(get(mutationSetEditorStore)).toEqual({ editing: entry });
+    for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+    mutationSetEditorStore.set(null);
   });
 });
 

@@ -11,6 +11,8 @@ has already happened, so exit 0 + stdout is the right channel here.)
 Checks:
   * file-size guard  — every source file (scripts/check_file_size.py)
   * style-token guard — frontend style code (scripts/check_style_tokens.py)
+  * layer-import guard — service .py must not import the web layer (ADR-0056)
+  * http-client guard — frontend network I/O must go through lib/api.ts (ADR-0056)
   * ruff             — Python files only, via the backend venv where it lives
 
 Always exits 0; a broken hook must never wedge the session.
@@ -27,6 +29,8 @@ REPO = Path(__file__).resolve().parents[2]
 SIZE_GUARD = REPO / "scripts" / "check_file_size.py"
 STYLE_GUARD = REPO / "scripts" / "check_style_tokens.py"
 MEMORY_GUARD = REPO / "scripts" / "check_memory_index.py"
+LAYER_GUARD = REPO / "scripts" / "check_layer_imports.py"
+HTTP_CLIENT_GUARD = REPO / "scripts" / "check_http_client.py"
 # Advisory complexity rules — flagged, never blocking, while the existing count
 # is burned down (see backend/pyproject.toml for thresholds).
 COMPLEXITY_RULES = ("PLR0912", "PLR0913", "PLR0915", "C901")
@@ -121,10 +125,15 @@ def applicable_guards(path: Path) -> list[list[str]]:
     sits beside a MEMORY.md.
     """
     commands: list[list[str]] = []
+    posix = f"/{path.as_posix()}"
     if SIZE_GUARD.is_file():
         commands.append([sys.executable, str(SIZE_GUARD), str(path)])
     if path.suffix in {".svelte", ".css"} and STYLE_GUARD.is_file():
         commands.append([sys.executable, str(STYLE_GUARD), str(path)])
+    if path.suffix == ".py" and "/backend/app/services/" in posix and LAYER_GUARD.is_file():
+        commands.append([sys.executable, str(LAYER_GUARD), str(path)])
+    if path.suffix in {".ts", ".js", ".svelte"} and "/frontend/src/" in posix and HTTP_CLIENT_GUARD.is_file():
+        commands.append([sys.executable, str(HTTP_CLIENT_GUARD), str(path)])
     if path.suffix == ".md" and (path.parent / "MEMORY.md").is_file() and MEMORY_GUARD.is_file():
         commands.append([sys.executable, str(MEMORY_GUARD), "--memory-dir", str(path.parent)])
     return commands

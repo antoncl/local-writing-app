@@ -710,3 +710,154 @@ def test_it_refuses_to_act_outside_a_linked_worktree(tmp_path):
     """Fails closed: no git answer, or the primary tree, means no killing."""
     assert cleanup_servers.is_linked_worktree(tmp_path) is False
     assert cleanup_servers.is_linked_worktree(REPO.parent) is False
+
+
+# --- the layering fitness gates (ADR-0056, #977) ------------------------------
+#
+# Two boundaries the code kept only as prose, now machine-checked because a
+# silent breach is dangerous and invisible to an author who does not read the
+# code (ADR-0056 §5): a service must not import the web layer, and frontend
+# backend I/O must go through the one scope-injecting client, lib/api.ts. The
+# behaviour tests below are the guards' own mutation check — each asserts the
+# guard *fires* on a real violation, so deleting the detection turns them red;
+# the false-positive tests pin the distinctions that make the guards usable
+# (AST immunity for imports, the `fetch(id)` callback for the client).
+
+layer_guard = _load_script("check_layer_imports")
+http_guard = _load_script("check_http_client")
+
+
+def _service_file(tmp_path, rel: str, body: str) -> str:
+    """A file under a fake backend/app/services — the prefix the guard requires."""
+    path = tmp_path / "backend" / "app" / "services" / Path(rel)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
+    return str(path)
+
+
+def test_a_service_importing_fastapi_fails(tmp_path):
+    f = _service_file(tmp_path, "lore.py", "from fastapi import APIRouter\n")
+    assert layer_guard.main([f]) == 1
+
+
+def test_a_service_importing_starlette_fails(tmp_path):
+    f = _service_file(tmp_path, "lore.py", "import starlette.responses\n")
+    assert layer_guard.main([f]) == 1
+
+
+def test_a_service_reaching_up_to_the_routers_fails(tmp_path):
+    """Relative imports are resolved to absolute first: `from ..main import app`
+    inside app/services/ is `app.main`, the route module — an inversion."""
+    f = _service_file(tmp_path, "orchestration.py", "from ..main import app\n")
+    assert layer_guard.main([f]) == 1
+
+
+def test_fastapi_named_only_in_prose_is_not_a_violation(tmp_path):
+    """AST, not grep: `fastapi` in a docstring or comment is not an import."""
+    body = '"""This service must never import fastapi."""\nimport json  # not from fastapi\n'
+    assert layer_guard.main([_service_file(tmp_path, "clean.py", body)]) == 0
+
+
+def test_a_service_importing_a_sibling_service_is_fine(tmp_path):
+    body = "from app.services import machine_settings\nfrom . import node_index\n"
+    assert layer_guard.main([_service_file(tmp_path, "chats.py", body)]) == 0
+
+
+def test_the_layer_guard_ignores_non_service_files(tmp_path):
+    """Only the service layer is governed — a router importing FastAPI is its job."""
+    router = tmp_path / "backend" / "app" / "routers" / "project.py"
+    router.parent.mkdir(parents=True, exist_ok=True)
+    router.write_text("from fastapi import APIRouter\n", encoding="utf-8")
+    assert layer_guard.main([str(router)]) == 0
+
+
+def test_raw_network_primitives_fail(tmp_path):
+    for ctor in ("new EventSource('/x')", "new WebSocket('/x')", "new XMLHttpRequest()"):
+        f = _frontend_file(tmp_path, "components/Pane.ts", f"const c = {ctor};\n")
+        assert http_guard.main([f]) == 1, ctor
+
+
+def test_window_fetch_and_url_shaped_fetch_fail(tmp_path):
+    for call in ("await window.fetch('/api/x')", "await fetch(`${base}/api/x`)", 'await fetch("/api/y")'):
+        f = _frontend_file(tmp_path, "lib/stores/thing.svelte.ts", f"async function go() {{ {call}; }}\n")
+        assert http_guard.main([f]) == 1, call
+
+
+def test_a_local_fetch_callback_is_not_a_violation(tmp_path):
+    """The exact false positive the URL-shaped rule exists for: a local callback
+    named `fetch`, invoked with a bare id (editorPanes.#openEntryDocument)."""
+    body = "async function open(fetch: (id: string) => unknown) {\n  return await fetch(id);\n}\n"
+    assert http_guard.main([_frontend_file(tmp_path, "lib/stores/editorPanes.svelte.ts", body)]) == 0
+
+
+def test_a_network_pattern_inside_a_comment_is_not_a_violation(tmp_path):
+    body = "// legacy: used to `new WebSocket('/x')` here\n/* fetch('/api/y') */\nconst x = 1;\n"
+    assert http_guard.main([_frontend_file(tmp_path, "components/Note.ts", body)]) == 0
+
+
+def test_the_client_itself_is_exempt(tmp_path):
+    """api.ts is the sanctioned client — its fetches are the point, not drift."""
+    f = _frontend_file(tmp_path, "lib/api.ts", "const r = await fetch(`${baseUrl}/api/x`);\n")
+    assert http_guard.main([f]) == 0
+
+
+def test_test_files_are_exempt_from_the_http_guard(tmp_path):
+    f = _frontend_file(tmp_path, "components/Pane.test.ts", "const c = new EventSource('/x');\n")
+    assert http_guard.main([f]) == 0
+
+
+def test_reaching_for_a_second_http_client_fails(tmp_path):
+    f = _frontend_file(tmp_path, "lib/stores/thing.svelte.ts", 'import axios from "axios";\n')
+    assert http_guard.main([f]) == 1
+
+
+# --- the new gates are enforced at every layer, like the older guards (#687) ---
+#
+# Same superset contract: the scripts own the selection rule; the CI pathspecs,
+# pre-commit regexes and the in-session hook are pre-filters that may over-match
+# but must never under-match, or a file drifts unchecked.
+
+
+def test_ci_pathspecs_cover_the_new_guards():
+    tracked = _tracked_files()
+    layer_truth = {f for f in tracked if layer_guard.is_service_file(Path(f))}
+    http_truth = {f for f in tracked if http_guard.is_checked(Path(f))}
+    layer_selected = _tracked_files(*_ci_pathspecs("check_layer_imports.py"))
+    http_selected = _tracked_files(*_ci_pathspecs("check_http_client.py"))
+    assert layer_truth <= layer_selected, sorted(layer_truth - layer_selected)
+    assert http_truth <= http_selected, sorted(http_truth - http_selected)
+
+
+def test_precommit_filters_cover_the_new_guards():
+    config = yaml.safe_load((REPO / ".pre-commit-config.yaml").read_text(encoding="utf-8"))
+    patterns = {
+        hook["id"]: re.compile(hook["files"])
+        for repo in config["repos"]
+        for hook in repo["hooks"]
+        if "files" in hook
+    }
+    layer_re, http_re = patterns["layer-import-guard"], patterns["http-client-guard"]
+    for f in _tracked_files():
+        if layer_guard.is_service_file(Path(f)):
+            assert layer_re.search(f), f"pre-commit layer filter misses {f}"
+        if http_guard.is_checked(Path(f)):
+            assert http_re.search(f), f"pre-commit http filter misses {f}"
+
+
+def test_the_hook_feeds_the_new_guards_their_files():
+    hook = _load_hook("check_edited_file")
+    for f in _tracked_files():
+        if layer_guard.is_service_file(Path(f)):
+            commands = hook.applicable_guards(REPO / f)
+            assert any("check_layer_imports" in " ".join(cmd) for cmd in commands), f
+        if http_guard.is_checked(Path(f)):
+            commands = hook.applicable_guards(REPO / f)
+            assert any("check_http_client" in " ".join(cmd) for cmd in commands), f
+
+
+def test_the_new_guard_sets_are_ratcheted():
+    """A grandfather set nothing watches can grow silently — the whole failure
+    the ratchet exists to stop. Pin that both new guards are registered."""
+    exemptions = _load_script("check_exemptions")
+    assert "scripts/check_layer_imports.py" in exemptions.GUARD_SETS
+    assert "scripts/check_http_client.py" in exemptions.GUARD_SETS

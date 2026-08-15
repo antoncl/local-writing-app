@@ -457,6 +457,11 @@
     return nodeId != null && entryBrainstorm.hasProposalFor(nodeId);
   }
 
+  // The funnel every user action's failure collapses through — the frontend
+  // choke point twin of the backend error middleware (ADR-0056 §2/§4, #386).
+  // Actions route their failures here (and the global listeners in errorLog.ts
+  // catch the rest) so logging happens by construction, not by each site
+  // remembering to. Keep it one funnel; don't scatter per-action try/catch.
   async function run(action: () => Promise<void>): Promise<boolean> {
     error = "";
     try {

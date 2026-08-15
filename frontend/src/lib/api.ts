@@ -1,3 +1,11 @@
+// The one and only HTTP client to the backend. Every request goes through
+// `request` / `streamNdjson` below, which is what injects the open project's
+// scope on the wire (`scopeHeaders`, #413) — a raw `fetch` from a component or
+// store skips that and talks to the wrong project, invisibly. That boundary is
+// enforced: `scripts/check_http_client.py` fails CI on any network primitive
+// (`fetch` to a URL, `EventSource`, `WebSocket`, `XMLHttpRequest`, axios)
+// outside this file (ADR-0056, #977). Add a method here; do not reach for the
+// network anywhere else.
 import type {
   AIChatRequest,
   AIChatResponse,

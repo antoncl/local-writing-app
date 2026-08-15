@@ -648,74 +648,75 @@
         <div class="button-row">
           <button class="add-affordance" type="button" aria-label="Add field" onclick={() => onCreateFieldDraft(schemaTypeLayerId || projectSchemaLayerId(), selectedSchemaTypeId ?? undefined)}>+ Add field</button>
           <!-- The peer "Add group" (#1002): reusable-group define/apply, surfaced
-               here instead of only in the section below. Editable types only —
-               a readonly type has no group section to route into. -->
-          {#if !schemaTypeReadonly}
-            <button class="add-affordance" type="button" aria-label="Add group" onclick={openAddGroup}>+ Add group</button>
-          {/if}
+               here instead of only in the section below. Shown on built-in types
+               too (#1033), exactly like "Add field" above — a group application is
+               a per-layer overlay the backend accepts on built-ins (ADR-0029 §A),
+               never a rewrite of the built-in declaration. -->
+          <button class="add-affordance" type="button" aria-label="Add group" onclick={openAddGroup}>+ Add group</button>
         </div>
       {/if}
     </section>
 
-    {#if !schemaTypeReadonly}
-      <section class="schema-type-fields schema-type-groups" aria-label="Reusable groups">
-        <header class="schema-type-fields-header">
-          <strong>Reusable groups</strong>
-          <small>{typeGroupApplications.length}</small>
-          <button class="link-accent manage-groups-link" type="button" onclick={() => onManageGroups()}>Manage…</button>
-        </header>
-        {#if typeGroupApplications.length}
-          <div class="applied-groups">
-            {#each typeGroupApplications as application, index}
-              {@const groupDef = metadataSchema?.groups?.[application.group_id]}
-              <div class="applied-group">
-                <span class="sfr-tile"><i class={`ti ti-${groupDef?.icon || "stack-2"}`} aria-hidden="true"></i></span>
-                <span class="ag-name">{groupDef?.name ?? application.group_id}</span>
-                <span class="ag-as">as <strong>{application.label || "—"}</strong></span>
-                <code class="ag-prefix">{application.key_prefix}</code>
-                <button class="link-danger ag-remove" type="button" onclick={() => onRemoveGroupApplication(index)}>Remove</button>
-              </div>
-            {/each}
-          </div>
-        {/if}
-        {#if availableGroupEntries.length === 0}
-          <p class="muted">No reusable groups defined yet — <button class="link-accent manage-groups-link inline" type="button" onclick={() => onManageGroups()}>create one</button>.</p>
-        {:else if groupApplyOpen}
-          <div class="group-apply-form">
-            <label class="sfi-field">Group
-              <select bind:value={applyGroupId}>
-                <option value="">— pick —</option>
-                {#each availableGroupEntries as [gid, gdef]}
-                  <option value={gid}>{gdef.name}</option>
-                {/each}
-              </select>
-            </label>
-            <label class="sfi-field">Label
-              <input
-                value={applyGroupLabel}
-                placeholder="External"
-                oninput={(event) => {
-                  applyGroupLabel = event.currentTarget.value;
-                  if (!applyGroupPrefix.trim()) applyGroupPrefix = suggestPrefixFromLabel(applyGroupLabel);
-                }}
-              />
-            </label>
-            <label class="sfi-field">Prefix
-              <input value={applyGroupPrefix} placeholder="external_" oninput={(event) => (applyGroupPrefix = event.currentTarget.value)} />
-            </label>
-            <div class="sfi-footer">
-              <span class="sfi-spacer"></span>
-              <button class="sfi-cancel" type="button" onclick={() => (groupApplyOpen = false)}>Cancel</button>
-              <button class="sfi-done" type="button" disabled={!applyGroupId} onclick={submitGroupApply}>Apply</button>
+    <!-- Reusable groups: shown on built-in types too (#1033) — see the Add-group
+         note above; the backend accepts group applications as per-layer overlays
+         on built-ins (ADR-0029 §A). -->
+    <section class="schema-type-fields schema-type-groups" aria-label="Reusable groups">
+      <header class="schema-type-fields-header">
+        <strong>Reusable groups</strong>
+        <small>{typeGroupApplications.length}</small>
+        <button class="link-accent manage-groups-link" type="button" onclick={() => onManageGroups()}>Manage…</button>
+      </header>
+      {#if typeGroupApplications.length}
+        <div class="applied-groups">
+          {#each typeGroupApplications as application, index}
+            {@const groupDef = metadataSchema?.groups?.[application.group_id]}
+            <div class="applied-group">
+              <span class="sfr-tile"><i class={`ti ti-${groupDef?.icon || "stack-2"}`} aria-hidden="true"></i></span>
+              <span class="ag-name">{groupDef?.name ?? application.group_id}</span>
+              <span class="ag-as">as <strong>{application.label || "—"}</strong></span>
+              <code class="ag-prefix">{application.key_prefix}</code>
+              <button class="link-danger ag-remove" type="button" onclick={() => onRemoveGroupApplication(index)}>Remove</button>
             </div>
+          {/each}
+        </div>
+      {/if}
+      {#if availableGroupEntries.length === 0}
+        <p class="muted">No reusable groups defined yet — <button class="link-accent manage-groups-link inline" type="button" onclick={() => onManageGroups()}>create one</button>.</p>
+      {:else if groupApplyOpen}
+        <div class="group-apply-form">
+          <label class="sfi-field">Group
+            <select bind:value={applyGroupId}>
+              <option value="">— pick —</option>
+              {#each availableGroupEntries as [gid, gdef]}
+                <option value={gid}>{gdef.name}</option>
+              {/each}
+            </select>
+          </label>
+          <label class="sfi-field">Label
+            <input
+              value={applyGroupLabel}
+              placeholder="External"
+              oninput={(event) => {
+                applyGroupLabel = event.currentTarget.value;
+                if (!applyGroupPrefix.trim()) applyGroupPrefix = suggestPrefixFromLabel(applyGroupLabel);
+              }}
+            />
+          </label>
+          <label class="sfi-field">Prefix
+            <input value={applyGroupPrefix} placeholder="external_" oninput={(event) => (applyGroupPrefix = event.currentTarget.value)} />
+          </label>
+          <div class="sfi-footer">
+            <span class="sfi-spacer"></span>
+            <button class="sfi-cancel" type="button" onclick={() => (groupApplyOpen = false)}>Cancel</button>
+            <button class="sfi-done" type="button" disabled={!applyGroupId} onclick={submitGroupApply}>Apply</button>
           </div>
-        {:else}
-          <div class="button-row">
-            <button class="add-affordance" type="button" title="Apply group" aria-label="Apply group" onclick={() => { groupApplyOpen = true; applyGroupId = availableGroupEntries[0]?.[0] ?? ""; }}>+</button>
-          </div>
-        {/if}
-      </section>
-    {/if}
+        </div>
+      {:else}
+        <div class="button-row">
+          <button class="add-affordance" type="button" title="Apply group" aria-label="Apply group" onclick={() => { groupApplyOpen = true; applyGroupId = availableGroupEntries[0]?.[0] ?? ""; }}>+</button>
+        </div>
+      {/if}
+    </section>
   {/if}
 
   {#if schemaTypeKind === "prompt"}

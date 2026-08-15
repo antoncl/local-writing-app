@@ -510,6 +510,8 @@
       // Per-field icon override (chosen in the IconPicker). null/empty = fall
       // back to the field-type default glyph.
       ...(payload.icon ? { icon: payload.icon } : {}),
+      // Author help text (#1004) — persisted only when non-empty, same as icon.
+      ...(payload.description.trim() ? { description: payload.description.trim() } : {}),
       ...(defaultValue !== undefined ? { default: defaultValue } : {}),
     };
 

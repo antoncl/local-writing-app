@@ -431,6 +431,10 @@ export type MetadataFieldDefinition = {
   // Empty/undefined falls back to the default glyph for the field's type.
   // Display-only — the stable macro contract is the field key, not the icon.
   icon?: string | null;
+  // Optional author help text: what the field is for (#1004). Shown as a rail
+  // tooltip, and fed to the brainstorm/extraction model so it proposes
+  // on-target values. Undefined = no description.
+  description?: string | null;
   // Optional L1 section label. Fields sharing a `group` render under one
   // labelled header in the rail + type editor. Undefined = ungrouped.
   group?: string | null;

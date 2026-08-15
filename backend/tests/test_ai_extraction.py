@@ -74,6 +74,23 @@ class ExtractionContractTests(unittest.TestCase):
         self.assertIn("You may also propose a new", contract)
         self.assertNotIn("ALWAYS include", contract)
 
+    def test_contract_uses_per_type_label_and_renders_descriptions(self) -> None:
+        # #1009: the intrinsic title field is presented by its per-type label —
+        # "Name" on lore — not the shared field def's global "Title", so the
+        # model isn't told to fill a "Title" when drafting a character.
+        # #1004: a field's author description rides into the contract so the
+        # model knows what the field is FOR.
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data["fields"]["bio"]["description"] = "The character's backstory in brief."
+        self.service._write_yaml(schema_path, data)
+        contract = render_extraction_contract(
+            self.service, entry_type="lore:character", creating=True
+        )
+        self.assertIn("title (Name)", contract)  # #1009 per-type label wins
+        self.assertNotIn("title (Title)", contract)
+        self.assertIn("The character's backstory in brief.", contract)  # #1004
+
     def test_revise_contract_makes_the_body_conditional(self) -> None:
         # ADR-0051 S4 review fix: the extraction is blind to the current body, so
         # a revise must OMIT the body key unless the conversation revised it —

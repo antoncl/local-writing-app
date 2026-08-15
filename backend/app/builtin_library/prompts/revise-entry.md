@@ -58,7 +58,7 @@ You don't output the structured result yourself — when the author commits, a s
 
 The {{ entry_type_label(draft_type) }} has these fields to develop:
 {% for f in field_catalog(draft_type) %}
-- {{ f.id }} ({{ f.label }}) — {{ f.type }}{% if f.options %}; one of: {{ f.options | join(", ") }}{% endif %}
+- {{ f.id }} ({{ f.label }}) — {{ f.type }}{% if f.options %}; one of: {{ f.options | join(", ") }}{% endif %}{% if f.description %} — {{ f.description }}{% endif %}
 {% else %}
 - (just a title and body)
 {% endfor %}

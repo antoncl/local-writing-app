@@ -392,36 +392,74 @@ class MetadataSchemaMixin:
         entry_types.pop(entry_type_id)
         layer_data["entry_types"] = entry_types
 
-        candidate = deepcopy(DEFAULT_METADATA_SCHEMA)
-        for path in self._metadata_schema_layer_paths(root):
-            if path == source_path:
-                self._merge_metadata_schema_layer(candidate, layer_data)
-            elif path.exists():
-                self._merge_metadata_schema_layer(candidate, self._read_metadata_schema_layer(path))
-        schema_errors = self._validate_metadata_schema_definition(
-            MetadataSchema.model_validate(self._resolve_metadata_schema_inheritance(candidate))
-        )
-        if schema_errors:
-            raise ProjectServiceError(" ".join(schema_errors), 422)
-
+        self._validate_candidate_schema(root, source_path, layer_data)
         self._write_yaml(source_path, layer_data)
         return self.read_metadata_schema()
 
-    def _validate_candidate_schema(self, root: Path, layer_path: Path, layer_data: dict[str, Any]) -> None:
-        """Merge all layers (substituting `layer_data` for `layer_path`),
-        resolve, validate, and raise on any errors. Shared by the schema
-        write paths."""
+    def _build_candidate_schema(
+        self, root: Path, substitutions: dict[Path, dict[str, Any]]
+    ) -> MetadataSchema:
+        """The resolved schema a pending write would produce: merge every layer
+        under `root`, substituting the caller's in-memory `layer_data` for the
+        paths it is rewriting, then resolve inheritance. The shared 'what would
+        this look like' view behind every definition write's pre-flight check."""
         candidate = deepcopy(DEFAULT_METADATA_SCHEMA)
         for path in self._metadata_schema_layer_paths(root):
-            if path == layer_path:
-                self._merge_metadata_schema_layer(candidate, layer_data)
+            if path in substitutions:
+                self._merge_metadata_schema_layer(candidate, substitutions[path])
             elif path.exists():
                 self._merge_metadata_schema_layer(candidate, self._read_metadata_schema_layer(path))
+        return MetadataSchema.model_validate(self._resolve_metadata_schema_inheritance(candidate))
+
+    def _validate_candidate_schema_layers(
+        self, root: Path, substitutions: dict[Path, dict[str, Any]]
+    ) -> None:
+        """Build the candidate schema for a write that rewrites one or more
+        layers (a field move touches source + target) and raise 422 on any
+        definition error."""
         schema_errors = self._validate_metadata_schema_definition(
-            MetadataSchema.model_validate(self._resolve_metadata_schema_inheritance(candidate))
+            self._build_candidate_schema(root, substitutions)
         )
         if schema_errors:
             raise ProjectServiceError(" ".join(schema_errors), 422)
+
+    def _validate_candidate_schema(self, root: Path, layer_path: Path, layer_data: dict[str, Any]) -> None:
+        """Single-layer variant: validate the schema produced by rewriting just
+        `layer_path`, and raise on any error. Shared by the schema write paths."""
+        self._validate_candidate_schema_layers(root, {layer_path: layer_data})
+
+    def _field_source_layer_path(self, root: Path, field_id: str, action: str) -> Path:
+        """The layer that OWNS `field_id` — the writable source for a
+        move/rename/delete. Raises 404 when the field has no source or its layer
+        can't be resolved, 422 when it is a built-in (which `action` names in the
+        message, e.g. 'moved')."""
+        overview = self.read_metadata_schema_overview()
+        source = overview.field_sources.get(field_id)
+        if source is None:
+            raise ProjectServiceError(f"Unknown metadata field {field_id}.", 404)
+        if source.built_in:
+            raise ProjectServiceError(f"System metadata fields cannot be {action}.", 422)
+        source_path = self._metadata_schema_layer_path_for_id(root, source.layer_id)
+        if source_path is None:
+            raise ProjectServiceError("Unknown metadata schema layer.", 404)
+        return source_path
+
+    def _require_item_group_visible(
+        self, root: Path, path: Path, field: MetadataFieldDefinition, remediation: str
+    ) -> None:
+        """#698 × ADR-0045: a list field's `item_group` must be defined AT OR
+        ABOVE the layer that will own the field. Validating against the full
+        merged chain would accept a group defined in a deeper, sibling-invisible
+        layer — every sibling project inheriting this layer would then resolve
+        the field with no shape and 422 on all saves. No-op unless the field is a
+        list with an item_group; `remediation` completes the error message."""
+        if not (field.type == "list" and field.item_group):
+            return
+        visible_groups = self._read_metadata_schema_through_path(root, path).groups
+        if field.item_group not in visible_groups:
+            raise ProjectServiceError(
+                f"Group {field.item_group} is not defined at or above {remediation}", 422
+            )
 
     # Reusable-group CRUD (upsert/delete/applications) lives in
     # `schema_groups.MetadataSchemaGroupsMixin` — split out at the size gate
@@ -638,49 +676,23 @@ class MetadataSchemaMixin:
         if field is None:
             raise ProjectServiceError(f"Unknown metadata field {field_id}.", 404)
 
-        overview = self.read_metadata_schema_overview()
-        source = overview.field_sources.get(field_id)
-        if source is None:
-            raise ProjectServiceError(f"Unknown metadata field {field_id}.", 404)
-        if source.built_in:
-            raise ProjectServiceError("System metadata fields cannot be moved.", 422)
-
-        source_path = self._metadata_schema_layer_path_for_id(root, source.layer_id)
-        if source_path is None:
-            raise ProjectServiceError("Unknown metadata schema layer.", 404)
+        source_path = self._field_source_layer_path(root, field_id, "moved")
         if source_path == target_path:
             return schema
 
-        if field.type == "list" and field.item_group:
-            # Same at-or-above rule as upsert (#698 × ADR-0045): the candidate
-            # validation below merges the WHOLE chain, so it cannot see that a
-            # move above the group's layer strands every sibling project.
-            visible_groups = self._read_metadata_schema_through_path(root, target_path).groups
-            if field.item_group not in visible_groups:
-                raise ProjectServiceError(
-                    f"Group {field.item_group} is not defined at or above the target layer; "
-                    "move the group first, or keep the field in the layer that can see it.",
-                    422,
-                )
+        self._require_item_group_visible(
+            root,
+            target_path,
+            field,
+            "the target layer; move the group first, or keep the field in the layer that can see it.",
+        )
 
         source_data = self._read_yaml(source_path) if source_path.exists() else self._empty_metadata_schema()
         target_data = self._read_yaml(target_path) if target_path.exists() else self._empty_metadata_schema()
         self._remove_metadata_field_from_layer(source_data, field_id, request.entry_type)
         self._add_metadata_field_to_layer(root, target_path, target_data, field_id, field, request.entry_type)
 
-        candidate = deepcopy(DEFAULT_METADATA_SCHEMA)
-        for path in self._metadata_schema_layer_paths(root):
-            if path == source_path:
-                self._merge_metadata_schema_layer(candidate, source_data)
-            elif path == target_path:
-                self._merge_metadata_schema_layer(candidate, target_data)
-            elif path.exists():
-                self._merge_metadata_schema_layer(candidate, self._read_metadata_schema_layer(path))
-        moved_schema = MetadataSchema.model_validate(self._resolve_metadata_schema_inheritance(candidate))
-        schema_errors = self._validate_metadata_schema_definition(moved_schema)
-        if schema_errors:
-            raise ProjectServiceError(" ".join(schema_errors), 422)
-
+        self._validate_candidate_schema_layers(root, {source_path: source_data, target_path: target_data})
         self._write_yaml(source_path, source_data)
         self._write_yaml(target_path, target_data)
         return self.read_metadata_schema()
@@ -700,15 +712,7 @@ class MetadataSchemaMixin:
         if new_field_id in schema.fields:
             raise ProjectServiceError(f"Metadata field {new_field_id} already exists.", 422)
 
-        overview = self.read_metadata_schema_overview()
-        source = overview.field_sources.get(old_field_id)
-        if source is None:
-            raise ProjectServiceError(f"Unknown metadata field {old_field_id}.", 404)
-        if source.built_in:
-            raise ProjectServiceError("System metadata fields cannot be renamed.", 422)
-        source_path = self._metadata_schema_layer_path_for_id(root, source.layer_id)
-        if source_path is None:
-            raise ProjectServiceError("Unknown metadata schema layer.", 404)
+        source_path = self._field_source_layer_path(root, old_field_id, "renamed")
 
         layer_data = self._read_yaml(source_path) if source_path.exists() else self._empty_metadata_schema()
         fields = layer_data.get("fields")
@@ -717,17 +721,7 @@ class MetadataSchemaMixin:
         fields[new_field_id] = fields.pop(old_field_id)
         self._replace_metadata_field_reference_in_layer(layer_data, old_field_id, new_field_id, request.entry_type)
 
-        candidate = deepcopy(DEFAULT_METADATA_SCHEMA)
-        for path in self._metadata_schema_layer_paths(root):
-            if path == source_path:
-                self._merge_metadata_schema_layer(candidate, layer_data)
-            elif path.exists():
-                self._merge_metadata_schema_layer(candidate, self._read_metadata_schema_layer(path))
-        renamed_schema = MetadataSchema.model_validate(self._resolve_metadata_schema_inheritance(candidate))
-        schema_errors = self._validate_metadata_schema_definition(renamed_schema)
-        if schema_errors:
-            raise ProjectServiceError(" ".join(schema_errors), 422)
-
+        self._validate_candidate_schema(root, source_path, layer_data)
         self._write_yaml(source_path, layer_data)
         self._rename_entry_metadata_key(root, old_field_id, new_field_id)
         return self.read_metadata_schema()
@@ -739,30 +733,12 @@ class MetadataSchemaMixin:
         if field_id not in schema.fields:
             raise ProjectServiceError(f"Unknown metadata field {field_id}.", 404)
 
-        overview = self.read_metadata_schema_overview()
-        source = overview.field_sources.get(field_id)
-        if source is None:
-            raise ProjectServiceError(f"Unknown metadata field {field_id}.", 404)
-        if source.built_in:
-            raise ProjectServiceError("System metadata fields cannot be deleted.", 422)
-        source_path = self._metadata_schema_layer_path_for_id(root, source.layer_id)
-        if source_path is None:
-            raise ProjectServiceError("Unknown metadata schema layer.", 404)
+        source_path = self._field_source_layer_path(root, field_id, "deleted")
 
         layer_data = self._read_yaml(source_path) if source_path.exists() else self._empty_metadata_schema()
         self._remove_metadata_field_from_layer(layer_data, field_id, request.entry_type)
 
-        candidate = deepcopy(DEFAULT_METADATA_SCHEMA)
-        for path in self._metadata_schema_layer_paths(root):
-            if path == source_path:
-                self._merge_metadata_schema_layer(candidate, layer_data)
-            elif path.exists():
-                self._merge_metadata_schema_layer(candidate, self._read_metadata_schema_layer(path))
-        deleted_schema = MetadataSchema.model_validate(self._resolve_metadata_schema_inheritance(candidate))
-        schema_errors = self._validate_metadata_schema_definition(deleted_schema)
-        if schema_errors:
-            raise ProjectServiceError(" ".join(schema_errors), 422)
-
+        self._validate_candidate_schema(root, source_path, layer_data)
         self._write_yaml(source_path, layer_data)
         self._remove_entry_metadata_key(root, field_id)
         return self.read_metadata_schema()

@@ -25,7 +25,6 @@ from pathlib import Path
 from typing import Any
 
 from app.models import (
-    LIST_ITEM_SCALAR_TYPES,
     DeleteMetadataEntryTypeRequest,
     DeleteMetadataFieldRequest,
     EntryTypeDefinition,
@@ -50,13 +49,7 @@ from app.services.project.default_schema import (
 from app.services.project.errors import ProjectServiceError
 from app.services.project.layers import SCHEMA_FILENAME
 from app.services.project.node_index import IndexLayer
-from app.services.project.schema_validation import validate_prompt_output
-
-# Entry-type identity is the kind-qualified FQN `kind:key` (#77). The key may nest
-# (`kind:seg:seg…`, e.g. `prompt:revise:scene`) — the extra colons are a pure naming
-# separator with no tie to the `parent:` chain (#600). The kind is always the first
-# segment (group 1); each segment starts with a letter, then letters/digits/underscores.
-_ENTRY_TYPE_FQN_RE = re.compile(r"([a-z][a-z0-9_]*):([A-Za-z][A-Za-z0-9_]*(?::[A-Za-z][A-Za-z0-9_]*)*)")
+from app.services.project.schema_validation import ENTRY_TYPE_FQN_RE
 
 
 def _entry_type_ancestry(
@@ -269,7 +262,7 @@ class MetadataSchemaMixin:
         # bare local key (qualified here with the declared kind) so callers may
         # send either; the local part is the stable machine handle.
         fqn = entry_type_id if ":" in entry_type_id else f"{request.entry_type.kind}:{entry_type_id}"
-        match = _ENTRY_TYPE_FQN_RE.fullmatch(fqn)
+        match = ENTRY_TYPE_FQN_RE.fullmatch(fqn)
         if not match:
             raise ProjectServiceError(
                 "Node type ID must be `kind:key` (the key may nest as `kind:key:subkey`), where each "
@@ -1051,116 +1044,3 @@ class MetadataSchemaMixin:
                 base.get("groups", {}),
                 layer.get("groups"),
             )
-
-    def _validate_metadata_schema_definition(self, schema: MetadataSchema) -> list[str]:
-        errors: list[str] = []
-        for entry_type_id, entry_type in schema.entry_types.items():
-            # Identity is the kind-qualified FQN `kind:key` (#77): the dict key
-            # must be `<kind>:<local>` and its prefix must match the type's own
-            # `kind`. This is the backstop that keeps a hand-edited layer from
-            # reintroducing a bare (ambiguous) key or crossing a key into the
-            # wrong kind.
-            fqn_match = _ENTRY_TYPE_FQN_RE.fullmatch(entry_type_id)
-            if not fqn_match:
-                errors.append(f"Metadata entry_type key {entry_type_id!r} must be kind-qualified as `kind:key`.")
-            elif fqn_match.group(1) != entry_type.kind:
-                errors.append(
-                    f"Metadata entry_type {entry_type_id} has kind prefix '{fqn_match.group(1)}' "
-                    f"but declares kind '{entry_type.kind}'."
-                )
-            if entry_type.parent and entry_type.parent not in schema.entry_types:
-                errors.append(f"Metadata entry_type {entry_type_id} references unknown parent {entry_type.parent}.")
-            if entry_type.parent and entry_type.parent in schema.entry_types:
-                parent_entry_type = schema.entry_types[entry_type.parent]
-                if parent_entry_type.kind != entry_type.kind:
-                    errors.append(f"Metadata entry_type {entry_type_id} parent {entry_type.parent} has a different kind.")
-            seen: set[str] = set()
-            parent_id = entry_type.parent
-            while parent_id:
-                if parent_id in seen or parent_id == entry_type_id:
-                    errors.append(f"Metadata entry_type {entry_type_id} has a circular parent chain.")
-                    break
-                seen.add(parent_id)
-                parent_id = schema.entry_types.get(parent_id).parent if parent_id in schema.entry_types else None
-
-        for entry_type_id, entry_type in schema.entry_types.items():
-            for field_id in entry_type.fields:
-                if field_id not in schema.fields:
-                    errors.append(f"Metadata entry_type {entry_type_id} references unknown field {field_id}.")
-
-        for entry_type_id, entry_type in schema.entry_types.items():
-            for application in entry_type.group_applications:
-                if application.group_id not in schema.groups:
-                    errors.append(
-                        f"Metadata entry_type {entry_type_id} applies unknown group {application.group_id}."
-                    )
-
-        for entry_type_id, entry_type in schema.entry_types.items():
-            if entry_type.prompt is None:
-                continue
-            if entry_type.kind != "prompt":
-                errors.append(f"Entry type {entry_type_id} has prompt configuration but kind is {entry_type.kind}.")
-                continue
-            seen_inputs: set[str] = set()
-            for input_def in entry_type.prompt.inputs:
-                if input_def.name in seen_inputs:
-                    errors.append(f"Entry type {entry_type_id} has duplicate prompt input '{input_def.name}'.")
-                seen_inputs.add(input_def.name)
-                if input_def.type == "select" and not input_def.options:
-                    errors.append(f"Entry type {entry_type_id} input '{input_def.name}' is type select but has no options.")
-            # ADR-0054 §1/§2 + #954: the prompt's `output` — its disposition `kind`,
-            # optional `commit` (chat_panel only), and optional `on_accept` mark-stamp
-            # (inline only). Soft-validated in `schema_validation` (co-located with the
-            # closed vocabularies), which keeps this file under the size cap.
-            strategy = entry_type.prompt.context_strategy
-            errors.extend(validate_prompt_output(entry_type_id, strategy.output if strategy else None))
-
-        for field_id, field in schema.fields.items():
-            if field.type == "computed":
-                if not field.computed:
-                    errors.append(f"Computed metadata field {field_id} must define computed settings.")
-                continue
-            if field.computed:
-                errors.append(f"Metadata field {field_id} has computed settings but is not type computed.")
-            if field.type == "list":
-                errors.extend(self._list_field_schema_errors(field_id, field, schema))
-            elif field.item_group is not None or field.item_type is not None:
-                errors.append(f"Metadata field {field_id} has item shape settings but is not type list.")
-        return errors
-
-    @staticmethod
-    def _list_field_schema_errors(field_id: str, field: MetadataFieldDefinition, schema: MetadataSchema) -> list[str]:
-        """Shape rules for a list field (#698, ADR-0048 §6) — SOFT errors, not
-        model validators: layers merge field defs by key union, so an
-        ancestor's item_group and a child's item_type can legitimately meet in
-        one merged def, and a raising validator would make the merged schema
-        unreadable (500 on every read). The resolver's tie-break (a resolvable
-        item_group wins, else the item_type sugar) keeps reads serviceable;
-        these report the states the author should fix."""
-
-        errors: list[str] = []
-        if field.item_group is None and field.item_type is None:
-            errors.append(f"List metadata field {field_id} declares neither item_group nor item_type.")
-        elif field.item_group is not None and field.item_type is not None:
-            errors.append(
-                f"List metadata field {field_id} declares both item_group and item_type; "
-                "remove one of them from the layer that added it (the resolved schema uses the group while it exists)."
-            )
-        if field.item_group is not None:
-            group = schema.groups.get(field.item_group)
-            if group is None:
-                errors.append(f"List metadata field {field_id} references unknown group {field.item_group}.")
-            else:
-                # Members must stay inside the one scalar catalog
-                # (LIST_ITEM_SCALAR_TYPES) — the POSITIVE form of the item_type
-                # Literal, so the two cannot drift. Reference-typed members are
-                # out because the read-side healers only walk top-level values
-                # (a nested ref they cannot heal or purge is a silent
-                # mis-link); date and multi_select carry no item affordances.
-                for member in group.members:
-                    if member.type not in LIST_ITEM_SCALAR_TYPES:
-                        errors.append(
-                            f"List metadata field {field_id} item shape {field.item_group} has "
-                            f"member {member.key} of type {member.type}, which list items do not support."
-                        )
-        return errors

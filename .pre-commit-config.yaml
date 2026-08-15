@@ -40,6 +40,18 @@ repos:
         language: system
         files: ^frontend/src/.*\.(svelte|css)$
 
+      - id: layer-import-guard
+        name: layer-import guard (services must not import the web layer, ADR-0056)
+        entry: python scripts/check_layer_imports.py
+        language: system
+        files: ^backend/app/services/.*\.py$
+
+      - id: http-client-guard
+        name: http-client guard (frontend network I/O goes through lib/api.ts, ADR-0056)
+        entry: python scripts/check_http_client.py
+        language: system
+        files: ^frontend/src/.*\.(ts|js|svelte)$
+
       - id: ruff-complexity
         name: ruff complexity (advisory, non-blocking)
         # --exit-zero: never fails the commit; verbose: always print the hints

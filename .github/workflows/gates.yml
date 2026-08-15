@@ -65,6 +65,18 @@ jobs:
       - name: style-token guard
         run: git ls-files 'frontend/src/*.svelte' 'frontend/src/*.css' | xargs -r python scripts/check_style_tokens.py
 
+      # Layering runs one way: routes delegate to services, services never
+      # import the web layer (ADR-0056, #977). A Python guard, so it lives in
+      # this job alongside the style-token guard, not the frontend job.
+      - name: layer-import guard
+        run: git ls-files 'backend/app/services/*.py' | xargs -r python scripts/check_layer_imports.py
+
+      # Frontend backend I/O goes through the one client that injects project
+      # scope, lib/api.ts (ADR-0056, #413). Also a Python guard over frontend
+      # files — same reason it runs here rather than the frontend job.
+      - name: http-client guard
+        run: git ls-files 'frontend/src/*.ts' 'frontend/src/*.js' 'frontend/src/*.svelte' | xargs -r python scripts/check_http_client.py
+
       # Escape hatches may shrink, never grow. PR-only: it is a diff-against-base
       # question, and master has no base to compare with.
       - name: exemption ratchet

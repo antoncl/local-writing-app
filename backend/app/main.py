@@ -4,6 +4,10 @@ The ~115 HTTP routes live in `app/routers/*.py`, one APIRouter per area, and
 delegate to the service layer (`app/services/`). Business logic does not live
 here. The shared `ProjectService` singleton + error translation live in
 `app/runtime.py` so every router shares the same process-wide state.
+
+Layering runs one way — routes import services, never the reverse. That is no
+longer prose you have to remember: `scripts/check_layer_imports.py` fails CI if
+a `services/` module imports FastAPI, starlette, or a router (ADR-0056, #977).
 """
 
 from __future__ import annotations
@@ -70,6 +74,13 @@ async def record_unhandled_errors(
     call_next: Callable[[Request], Awaitable[Response]],
 ) -> Response:
     """Give a genuine `500` a durable line before it vanishes into the console (#386).
+
+    This middleware is a *choke point*, and deliberately so (ADR-0056 §2/§4): every
+    unhandled backend error is logged here because it flows through this one path,
+    not because each call site remembered to log it. Do not "simplify" it into
+    per-handler try/except — the single funnel is the mechanism. Its frontend twin
+    is the `run()` funnel in App.svelte, feeding `lib/errorLog.ts`.
+
 
     Domain failures (`ProjectServiceError`) are already turned into HTTP responses
     upstream, so only *unexpected* exceptions — the ones the UI sees as a bare

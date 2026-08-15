@@ -13,6 +13,12 @@
  *
  * Reporting is always fire-and-forget and never throws: `api.logClientError`
  * swallows its own transport errors, and nothing here adds a way to fail.
+ *
+ * This is a choke point, on purpose (ADR-0056 §2/§4): failures get logged
+ * because they flow through the `run()` funnel and these two global listeners,
+ * not because each call site remembered to log them. Its backend twin is the
+ * `record_unhandled_errors` middleware. Do not scatter this into per-action
+ * logging — the single funnel is the mechanism.
  */
 import { api, type ClientErrorReport } from "@/lib/api";
 

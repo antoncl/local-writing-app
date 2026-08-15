@@ -6,8 +6,11 @@
 //         dropdown via a datalist of the labels already used on the type.
 //   #1001 the icon popover dismisses on `click`, not `mousedown`, so a press on
 //         a scrollbar gutter no longer closes it mid-scroll.
+//   #1003 the `list` item-shape dropdown hides built-in `system` groups, but
+//         still shows one a field already uses so its shape stays valid.
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
+import type { MetadataFieldDefinition, MetadataGroupDefinition } from "@/lib/types";
 import SchemaFieldInlineEditor from "./SchemaFieldInlineEditor.svelte";
 
 function mount(sectionLabels: string[] = []) {
@@ -61,5 +64,55 @@ describe("SchemaFieldInlineEditor field-editor fixes", () => {
     // A genuine outside click does dismiss.
     await fireEvent.click(screen.getByLabelText("Field display name"));
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+const GROUPS: Record<string, MetadataGroupDefinition> = {
+  gmo: { name: "GMO", members: [{ key: "goal", name: "Goal", type: "text" }] },
+  // A built-in machinery group — must not be offered as a new item shape.
+  plot_beat_link: {
+    name: "Beat link",
+    system: true,
+    members: [{ key: "plotline", name: "Plotline", type: "text" }],
+  },
+};
+
+function mountList(field: MetadataFieldDefinition) {
+  render(SchemaFieldInlineEditor, {
+    props: {
+      field,
+      selectedFieldId: "beats",
+      layerId: "proj",
+      groups: GROUPS,
+      onSave: vi.fn(),
+      onCancel: vi.fn(),
+      onRemove: vi.fn(),
+    },
+  });
+}
+
+function itemShapeValues(): { values: string[]; disabled: Map<string, boolean> } {
+  const select = screen.getByLabelText("List item shape") as HTMLSelectElement;
+  const options = [...select.querySelectorAll("option")] as HTMLOptionElement[];
+  return {
+    values: options.map((o) => o.value),
+    disabled: new Map(options.map((o) => [o.value, o.disabled])),
+  };
+}
+
+describe("SchemaFieldInlineEditor list item shape hides system groups (#1003)", () => {
+  it("does not offer a system group as a new item shape", () => {
+    mountList({ name: "Beats", type: "list", options: [] });
+    const { values } = itemShapeValues();
+    expect(values).toContain("group:gmo");
+    expect(values).not.toContain("group:plot_beat_link");
+  });
+
+  it("still shows a system group the field already uses, as a valid (not disabled) shape", () => {
+    mountList({ name: "Beats", type: "list", item_group: "plot_beat_link", options: [] });
+    const { values, disabled } = itemShapeValues();
+    expect(values).toContain("group:plot_beat_link");
+    // It's a real, resolvable shape — not the disabled "current shape missing" fallback.
+    expect(disabled.get("group:plot_beat_link")).toBe(false);
   });
 });

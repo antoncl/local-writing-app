@@ -836,6 +836,10 @@ export type MetadataGroupDefinition = {
   name: string;
   icon?: string | null;
   members: GroupMember[];
+  // Built-in machinery groups (plot-board beat/link shapes) set this so the
+  // authoring UI hides them from the reusable-group pickers (#1003). Absent /
+  // false on every user-defined group.
+  system?: boolean;
 };
 
 // An entry type's use of a reusable group, with a display label + key prefix

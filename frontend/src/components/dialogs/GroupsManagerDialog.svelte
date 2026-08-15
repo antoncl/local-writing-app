@@ -45,7 +45,10 @@
       .replace(/^[0-9]/, "g_$&");
   }
 
-  $: groupList = Object.entries(groups);
+  // System groups (built-in plot-board machinery) are not author-editable and
+  // stay out of the manager list (#1003); `groups` still holds them so the
+  // save guard below can catch an id collision against a hidden one.
+  $: groupList = Object.entries(groups).filter(([, group]) => !group.system);
 
   function openNew() {
     editingId = "__new__";
@@ -123,6 +126,13 @@
     const id = draftIsNew ? slug(draftId || draftName) : draftId;
     if (!id) {
       error = "A group name is required.";
+      return;
+    }
+    // A new group must not collide with an existing id — including a hidden
+    // system group (#1003), which the merge would otherwise let a user group
+    // shadow, breaking the feature that consumes it.
+    if (draftIsNew && groups[id]) {
+      error = `A group with id "${id}" already exists — pick a different name or id.`;
       return;
     }
     // Spread the DRAFT member first: it was loaded as {...member} from the

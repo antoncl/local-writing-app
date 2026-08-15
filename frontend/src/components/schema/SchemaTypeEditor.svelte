@@ -234,6 +234,19 @@
     }
   }
 
+  // "Add group", the peer of "Add field" (#1002): surfaces the reusable-group
+  // flow that otherwise hides in the section below the field list. Opens the
+  // apply form when there are groups to apply, else the manager to define the
+  // first one — "pick an existing group, or roll your own".
+  function openAddGroup() {
+    if (availableGroupEntries.length === 0) {
+      onManageGroups();
+      return;
+    }
+    groupApplyOpen = true;
+    applyGroupId = availableGroupEntries[0]?.[0] ?? "";
+  }
+
   // --- Prompt-kind defaults (scoped — #14 Step 4). Only the brief + output land
   // have editing UI here; the rest round-trip through the draft so saving a
   // prompt type preserves model_class / provider_policy / context target +
@@ -633,7 +646,13 @@
            The draft targets the project layer when none is explicitly chosen. -->
       {#if expandedSchemaFieldId !== NEW_FIELD_SENTINEL}
         <div class="button-row">
-          <button class="add-affordance" type="button" title="Add field" aria-label="Add field" onclick={() => onCreateFieldDraft(schemaTypeLayerId || projectSchemaLayerId(), selectedSchemaTypeId ?? undefined)}>+</button>
+          <button class="add-affordance" type="button" aria-label="Add field" onclick={() => onCreateFieldDraft(schemaTypeLayerId || projectSchemaLayerId(), selectedSchemaTypeId ?? undefined)}>+ Add field</button>
+          <!-- The peer "Add group" (#1002): reusable-group define/apply, surfaced
+               here instead of only in the section below. Editable types only —
+               a readonly type has no group section to route into. -->
+          {#if !schemaTypeReadonly}
+            <button class="add-affordance" type="button" aria-label="Add group" onclick={openAddGroup}>+ Add group</button>
+          {/if}
         </div>
       {/if}
     </section>

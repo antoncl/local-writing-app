@@ -100,6 +100,20 @@ class ListFieldProjectTests(unittest.TestCase):
             ),
         )
 
+    # ---- built-in group visibility (#1003) ----
+
+    def test_builtin_plot_link_groups_are_marked_system(self) -> None:
+        # The plot-board machinery groups are consumed by feature code by id and
+        # must stay out of the author-facing reusable-group pickers, so they are
+        # flagged `system`. The plot-beat *shape* remains author-facing, and a
+        # user-defined group defaults to non-system.
+        groups = self.service.read_metadata_schema().groups
+        self.assertTrue(groups["plot_instance_beat"].system)
+        self.assertTrue(groups["plot_beat_link"].system)
+        self.assertTrue(groups["plot_causal_link"].system)
+        self.assertFalse(groups["plot_beat"].system)
+        self.assertFalse(groups["open_question"].system)
+
     # ---- resolver stamping (one internal model) ----
 
     def test_resolver_stamps_group_item_members(self) -> None:

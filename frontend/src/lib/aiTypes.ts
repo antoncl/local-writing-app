@@ -104,6 +104,10 @@ export type PreviewErrorInfo = {
   line?: number | null;
   col?: number | null;
   undefined_name?: string | null;
+  // Set when the undefined was an attribute miss on a real render-context
+  // object (`project.language` → "project"), so the frontend can report a
+  // wrong path instead of an undeclared input. Absent for undeclared inputs.
+  undefined_namespace?: string | null;
 };
 
 export type AIPreviewResponse = {

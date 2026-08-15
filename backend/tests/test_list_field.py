@@ -19,7 +19,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from layer_fixtures import declare_full_chain
+from layer_fixtures import declare, declare_full_chain, make_project_folder
 
 from app.models import (
     CreateLoreEntryRequest,
@@ -452,6 +452,79 @@ class ListFieldProjectTests(unittest.TestCase):
         self.assertEqual(by_id["open_questions"]["items"][1]["options"], ["open", "answered"])
         self.assertTrue(by_id["nicknames"]["item_scalar"])
         self.assertEqual(by_id["nicknames"]["items"][0]["type"], "text")
+
+
+class DeleteGroupSiblingGuardTests(unittest.TestCase):
+    """#701: deleting a shared group must not strand a SIBLING project that
+    references it. The delete rewrites the shared ancestor layer, but the
+    in-project guards see only the open project's chain — a book that inherits
+    the same ancestor without appearing in this chain is invisible to them.
+    """
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.base = Path(self.temp_dir.name).resolve() / "writing"
+        self.series = self.base / "series"
+        self.book_a = self.series / "book-a"
+        self.book_b = self.series / "book-b"
+        self.service = ProjectService.created_at(self.book_a, "Book A")
+        # book-a inherits the shared series layer; machine root = base.
+        declare(self.service, self.book_a, [self.series], base=self.base)
+        # The shared group lives in the series layer, above both books.
+        self.service._write_yaml(
+            self.series / "metadata.schema.yaml",
+            {"groups": {"beat": {"name": "Beat", "members": [{"key": "name", "name": "Name", "type": "text"}]}}},
+        )
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _make_book_b(self, schema: dict) -> None:
+        make_project_folder(self.service, self.book_b, "Book B")
+        manifest = self.service._read_yaml(self.book_b / "project.yaml")
+        manifest["inherits"] = ["../series"]
+        self.service._write_yaml(self.book_b / "project.yaml", manifest)
+        self.service._write_yaml(self.book_b / "metadata.schema.yaml", schema)
+
+    def _delete_beat(self):
+        return self.service.delete_metadata_group(DeleteMetadataGroupRequest(group_id="beat"))
+
+    def test_refused_when_a_sibling_list_field_references_the_group(self) -> None:
+        self._make_book_b({"fields": {"beats": {"name": "Beats", "type": "list", "item_group": "beat"}}})
+        with self.assertRaisesRegex(ProjectServiceError, r"referenced by book-b \(list field beats\)"):
+            self._delete_beat()
+        # Refused before any rewrite — the series copy is untouched.
+        self.assertIn("beat", self.service.read_metadata_schema().groups)
+
+    def test_refused_when_a_sibling_applies_the_group_to_a_type(self) -> None:
+        self._make_book_b(
+            {"entry_types": {"lore:character": {"group_applications": [{"group_id": "beat"}]}}}
+        )
+        with self.assertRaisesRegex(
+            ProjectServiceError, r"referenced by book-b \(an application on lore:character\)"
+        ):
+            self._delete_beat()
+
+    def test_allowed_when_no_sibling_references_the_group(self) -> None:
+        self._make_book_b({"fields": {"scenes": {"name": "Scenes", "type": "list", "item_type": "text"}}})
+        self._delete_beat()
+        self.assertNotIn("beat", self.service.read_metadata_schema().groups)
+
+    def test_allowed_when_the_sibling_shadows_the_group_in_its_own_layer(self) -> None:
+        # book-b references beat but also DEFINES its own beat in its own layer,
+        # which this delete never touches — so the reference stays resolvable and
+        # nothing is stranded. Exercises the survival branch.
+        self._make_book_b(
+            {
+                "groups": {"beat": {"name": "Beat", "members": [{"key": "name", "name": "Name", "type": "text"}]}},
+                "fields": {"beats": {"name": "Beats", "type": "list", "item_group": "beat"}},
+            }
+        )
+        self._delete_beat()
+        # The series-layer copy is gone…
+        self.assertNotIn("beat", self.service.read_metadata_schema().groups)
+        # …and book-b still resolves the group from its own layer.
+        self.assertIn("beat", self.service.read_metadata_schema(self.book_b).groups)
 
 
 if __name__ == "__main__":

@@ -514,6 +514,32 @@ class LayerWalkMixin:
         """
         return [folder for folder, is_project in self.ancestor_candidates(root) if is_project]
 
+    def descendant_projects(self, folder: Path) -> list[Path]:
+        """Every project folder at any depth strictly below `folder` (#701).
+
+        The downward mirror of `ancestor_projects`: that answers "which of my
+        ancestors are projects", this answers "which projects sit under here".
+        `delete_metadata_group` needs it to reach the *sibling* projects a
+        shared-layer group deletion would strand — the ones the open project's
+        own chain cannot see. Parses nothing (a folder is a project iff it
+        carries `project.yaml`) and guards `iterdir` the way `_project_children`
+        does: a sibling's unreadable directory must not 422 the open project.
+        Dot-folders (`.cache`, `.git`) are skipped — never projects, and walking
+        `.cache` on a large project is pure waste.
+        """
+        found: list[Path] = []
+        try:
+            entries = sorted(folder.iterdir(), key=lambda path: path.name.lower())
+        except OSError:
+            return found
+        for child in entries:
+            if not child.is_dir() or child.name.startswith("."):
+                continue
+            if (child / MANIFEST_FILENAME).exists():
+                found.append(child)
+            found.extend(self.descendant_projects(child))
+        return found
+
     def _declared_ancestors(self, root: Path) -> set[Path]:
         """The folders `root`'s manifest says it inherits from, resolved.
 

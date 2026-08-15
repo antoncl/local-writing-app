@@ -45,6 +45,40 @@ move a self-contained block to a sibling module and re-export it
 
 The guard warns at ≥1200 lines and fails at ≥1500 (`.py`/`.svelte`/`.ts`).
 
+## Keep methods short and parameter lists small
+
+The per-file rule has a per-function twin: keep individual methods short and their
+parameter lists small. Ruff flags both — argument count (`PLR0913`) and
+per-function complexity (`C901`, `PLR0912`, `PLR0915`). These run as an advisory
+hook, so treat them as a **smell to remove, not an obstacle to route around**.
+
+**Why.** A long method or a long parameter list is a signal that the function is
+doing too much. Many parameters mean many internal branches, and a method with
+many flows becomes virtually **untestable** — the number of input permutations
+explodes combinatorially, so no realistic test suite covers them. Short,
+single-purpose functions are the opposite: few flows, each one easy to exercise
+in isolation.
+
+**Decompose — never disguise the count.** When a function trips the argument or
+complexity limit, split its responsibilities into smaller, independently-testable
+helpers. Do **not** pack the parameters into a struct or object purely to get
+under the linter's count: that hides the number from the tool while leaving the
+god-function — and its untestable permutation explosion — fully intact. Bundling
+unrelated parameters to silence the metric is *parameter stuffing*, and it is
+forbidden.
+
+**The line is cohesion, not grouping.** A value object is legitimate when the
+parameters it carries genuinely describe *one thing* — `{x, y, width, height}` is
+a rectangle, and this repo's Pydantic `*Request` models bundle a real request.
+Those model a concept and reduce what the function juggles. The test for which one
+you're doing: does the struct name a thing that already wanted to exist, or is it
+a grab-bag invented only because the linter complained? The first is real
+modelling; the second is evasion.
+
+The same applies to waving a complexity finding off as "pre-existing debt." That
+notes the smell instead of removing it. If a genuinely cohesive value object
+isn't the honest fix, the function is doing too much and must be split.
+
 ## No compile errors, minimal warnings
 
 A clean typecheck and build is the baseline. Never leave compile errors in place,

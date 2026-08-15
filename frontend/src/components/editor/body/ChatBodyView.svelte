@@ -40,6 +40,7 @@
     ChatSessionMessage,
     EditableDocument,
     LoreEntrySummary,
+    PreviewMessage,
     PromptEntrySummary,
     SaveChatSessionRequest,
     StructureDocument,
@@ -157,13 +158,19 @@
   let assistantPickerBtnEl: HTMLButtonElement | null = $state(null);
 
   // ---- 👁 preview popover state ----
-  // The popover shows the rendered system_prompt — what the assistant
-  // actually sees ahead of the conversation. For freeform chats that
-  // IS the brief; for prompt-bound chats it's the post-render template.
-  // Pure diagnostic — no fetch, just read-through of chatSystemPrompt.
+  // The popover shows what the assistant receives ahead of the next turn.
+  // Post-send it reads the locked chatSystemPrompt (the system message that
+  // repeats every turn). Pre-send, before the template is rendered and locked,
+  // it shows chatPreviewMessages — the assembled envelope the estimate path
+  // already fetches from /ai/preview on every draft edit (#991). So the button
+  // is useful from the first keystroke, not only after the first send.
   let chatPreviewPopoverOpen = $state(false);
   let chatPreviewBtnEl: HTMLButtonElement | null = $state(null);
   let chatPreviewPopoverEl: HTMLDivElement | null = $state(null);
+  // The rendered messages from the last successful estimate fetch (system +
+  // any templated initial turns). Null when no prompt is bound (freeform: no
+  // system message) or the template hasn't rendered yet (unfilled inputs).
+  let chatPreviewMessages: PreviewMessage[] | null = $state(null);
 
   // ---- declared-inputs state (filled before first send for prompt-bound chats) ----
   // Per-input draft values keyed by input.name. JSON-encoded for list-shaped
@@ -288,6 +295,7 @@
     chatLastMeta = null;
     chatInput = "";
     chatSystemPrompt = "";
+    chatPreviewMessages = null;
     chatPromptEntryId = "";
     chatAssistantId = "";
     chatSubject = "";
@@ -766,11 +774,13 @@
   async function fetchChatEstimate(): Promise<void> {
     if (!chatPromptEntryId) {
       chatEstimate = null;
+      chatPreviewMessages = null;
       return;
     }
     const entry = promptEntries.find((p) => p.id === chatPromptEntryId);
     if (!entry) {
       chatEstimate = null;
+      chatPreviewMessages = null;
       return;
     }
     const ourToken = ++chatEstimateToken;
@@ -796,8 +806,10 @@
       // them in the estimate strip — they'll surface when the user sends.
       if (preview.error) {
         chatEstimate = null;
+        chatPreviewMessages = null;
         return;
       }
+      chatPreviewMessages = preview.messages ?? null;
       chatEstimate = {
         tokens: preview.estimated_tokens ?? 0,
         cost_usd: preview.estimated_cost_usd ?? null,
@@ -1049,6 +1061,19 @@
             <div class="cbv-preview-popover-body">
               {#if chatSystemPrompt && chatSystemPrompt.trim()}
                 <pre class="cbv-preview-content">{chatSystemPrompt}</pre>
+              {:else if chatPreviewMessages && chatPreviewMessages.length > 0}
+                {#each chatPreviewMessages as message}
+                  <div class="cbv-preview-message">
+                    <header class="cbv-preview-msg-role">{message.role}</header>
+                    {#each message.blocks as block}
+                      <pre class="cbv-preview-content">{block.text}</pre>
+                    {/each}
+                  </div>
+                {/each}
+              {:else if chatPromptEntryId}
+                <p class="cbv-meta">
+                  Fill the required inputs above and the assembled message will appear here.
+                </p>
               {:else}
                 <p class="cbv-meta">No system message will be sent. The model sees only the chat history.</p>
               {/if}
@@ -1366,6 +1391,11 @@
   .cbv-preview-content {
     margin: 0 0 8px; font-family: var(--mono);
     font-size: var(--fs-sm); line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; color: var(--text);
+  }
+  .cbv-preview-message { margin-bottom: 10px; }
+  .cbv-preview-msg-role {
+    font-size: var(--fs-xs); font-weight: 800; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--text-3); margin-bottom: 3px;
   }
   .cbv-preview-hint { font-style: italic; }
 

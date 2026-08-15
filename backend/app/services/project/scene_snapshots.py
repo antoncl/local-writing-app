@@ -38,6 +38,7 @@ from pydantic import ValidationError
 
 from app.models import Snapshot, SnapshotDetail, SnapshotList, Witness
 from app.models.snapshots import UNREADABLE_WITNESS_VERSION
+from app.services.atomic_io import atomic_write_bytes
 from app.services.migrations import CURRENT_VERSION
 from app.services.project.errors import ProjectServiceError
 
@@ -441,10 +442,12 @@ class SceneSnapshotsMixin:
     def _atomic_write_bytes(self, path: Path, data: bytes) -> None:
         """`_atomic_write` for bytes. Restore must not go through the text
         writer: encoding, newline translation and the front-matter writer's
-        normalisation are each a way for "byte-for-byte" to stop being true."""
-        temp_path = path.with_name(f"{path.name}.restore-tmp")
-        temp_path.write_bytes(data)
-        temp_path.replace(path)
+        normalisation are each a way for "byte-for-byte" to stop being true.
+        Durable (#480): a restore replaces the live scene, and a snapshot is
+        "the only durable before the app has" — so the bytes must survive a
+        power cut, not just reach the page cache. Skips the change-gate hook
+        `_atomic_write` carries; the caller notifies the index explicitly."""
+        atomic_write_bytes(path, data)
 
     # ----- author gestures: pin · describe (ADR-0043 Amdt 1/4, #468) --------
     #

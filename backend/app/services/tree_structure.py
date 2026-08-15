@@ -23,12 +23,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from typing import Any
 
 import yaml
 
 from app.models import StructureDocument, StructureNode
+from app.services.atomic_io import atomic_write_text
 
 
 class TreeStructureError(Exception):
@@ -278,11 +278,7 @@ class TreeStructureService:
 
     @staticmethod
     def _atomic_write(path: Path, text: str) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with NamedTemporaryFile(
-            "w", encoding="utf-8", dir=path.parent, delete=False
-        ) as temp:
-            temp.write(text)
-            temp.flush()
-            temp_path = Path(temp.name)
-        temp_path.replace(path)
+        # The manuscript / research structure files are user data a crash cannot
+        # reconstruct, so they are always durable (#480). Shares the one choke
+        # with the node writers rather than keeping a second copy of the dance.
+        atomic_write_text(path, text)

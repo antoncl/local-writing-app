@@ -64,6 +64,19 @@ export class AutosaveScheduler {
     }
   }
 
+  // Arm a single delayed retry after a FAILED save (a retryable transport / 5xx
+  // error — #457). Uses the ceiling delay, not the idle debounce, so a
+  // persistently-failing backend retries at ~maxWaitMs cadence rather than every
+  // idleMs: the difference between a bounded retry and a tight error loop. The
+  // caller re-arms it on each failure. The fire-time `shouldSave` re-check still
+  // applies, so a pane that stopped being dirty (or savable) meanwhile won't fire.
+  scheduleRetry(id: string): void {
+    this.#clearIdle(id);
+    this.#clearCeiling(id);
+    if (!this.#opts.shouldSave(id)) return;
+    this.#ceilingTimers.set(id, setTimeout(() => this.#fire(id), this.#opts.maxWaitMs));
+  }
+
   // Whichever timer got there first ends the run: both are dropped, then the
   // same fire-time `shouldSave` re-check applies.
   #fire(id: string): void {

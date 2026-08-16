@@ -203,9 +203,10 @@ filter axis the loop does not currently have: the `_field_catalog` descriptor
 exposes `id/label/type/options/description` but **not** `category`
 (`helpers.py:255-282`), so the loop cannot say "skip intrinsics" without either
 stamping `category` onto the descriptor or hardcoding the `{title, body}` id set.
-That cleanup is **out of scope** for the dump fix and is left as a follow-up; this
-ADR neither requires nor blocks it. It is named so a reader does not mistake the
-existing `title` redundancy for something this change introduced.
+That cleanup is **out of scope** for the dump fix and is left as a follow-up
+(tracked as #1058, filed YAGNI); this ADR neither requires nor blocks it. It is
+named so a reader does not mistake the existing `title` redundancy for something
+this change introduced.
 
 ## Why / rejected alternatives
 

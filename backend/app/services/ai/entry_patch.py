@@ -50,6 +50,11 @@ def is_proposable_field(field_id: str, field: Any) -> bool:
         return False
     if field.type in NON_PROPOSABLE_FIELD_TYPES:
         return False
+    # ADR-0059 §E: a field can declare itself off-limits to AI authorship
+    # (default True). `body` never reaches here — it enforces the flag at its
+    # own top-level-key sites, not through this fields-object predicate.
+    if not getattr(field, "ai_proposable", True):
+        return False
     return not getattr(field, "hidden", False)
 
 

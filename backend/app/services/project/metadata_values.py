@@ -193,6 +193,16 @@ class MetadataValuesMixin:
         else:
             allowed_field_ids = set(entry_type_definition.fields)
 
+        # Intrinsic fields (title/entry_type/id/body) live on the node's
+        # top-level properties, never in `metadata` (ADR-0029 §B; ADR-0059 §A
+        # adds body). Drop them from the metadata allow-list so a stray
+        # `metadata.body` (or `metadata.title`) is rejected rather than accepted
+        # as shadow storage of a value that already lives on `node.<key>`.
+        allowed_field_ids = {
+            fid for fid in allowed_field_ids
+            if getattr(schema.fields.get(fid), "category", None) != "intrinsic"
+        }
+
         for field_id, value in metadata.items():
             field = schema.fields.get(field_id)
             if not field:
@@ -403,11 +413,27 @@ class MetadataValuesMixin:
         if parsed is None:
             return AIEntryPatch(garbled=True)
 
+        definition = schema.entry_types.get(entry_type)
+        # Keep the body for an UNKNOWN type (no definition) — the create-draft
+        # path deliberately preserves a well-formed body even when the type can't
+        # be resolved; only a KNOWN, bodiless type drops it.
+        body_type_ok = definition is None or "body" in definition.fields
+
         proposed_body = parsed.get("body")
         body_value = proposed_body if isinstance(proposed_body, str) else None
+        # ADR-0059 §B/§E: `body` is adopted verbatim from the top-level "body"
+        # key (never the fields loop), and only when the target type has a body
+        # and body is AI-proposable. A known bodiless target, or a layer marking
+        # body off-limits, drops the proposed body. (Both hold by default → nil.)
+        body_field = schema.fields.get("body")
+        if not body_type_ok or (body_field is not None and not getattr(body_field, "ai_proposable", True)):
+            body_value = None
 
-        definition = schema.entry_types.get(entry_type)
-        allowed_field_ids = set(definition.fields) if definition else set()
+        # `body` is a member of every has_body type's fields (ADR-0059 §B), but
+        # it is single-sourced via the top-level "body" key above — exclude it
+        # from the fields allow-list so a stray `fields.body` is dropped, not
+        # adopted twice.
+        allowed_field_ids = (set(definition.fields) if definition else set()) - {"body"}
 
         fields: dict[str, Any] = {}
         dropped: list[str] = []
@@ -474,6 +500,14 @@ class MetadataValuesMixin:
         for field_id, value in metadata.items():
             field = schema.fields.get(field_id)
             if field is None:
+                continue
+            # Intrinsic fields (title/entry_type/id/body) live on the node's
+            # top-level properties, never in `metadata` (ADR-0059 §A). Strip a
+            # stray one on read so a hand-edited `metadata.body` doesn't round-
+            # trip into shadow storage — the real value stays on `node.<key>`.
+            # Dropped explicitly (not via `allowed`) so the membership guard's
+            # empty-set semantics stay intact for intrinsic-only types.
+            if getattr(field, "category", None) == "intrinsic":
                 continue
             if allowed and field_id not in allowed:
                 continue

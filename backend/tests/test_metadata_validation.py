@@ -1190,10 +1190,11 @@ class MetadataValidationTests(unittest.TestCase):
         self.assertEqual(schema.entry_types["manuscript:scene"].name, "World Scene")
         self.assertIn("mood", schema.fields)
         self.assertIn("tension", schema.fields)
-        # Intrinsic identity fields (#116) lead every type's resolved list.
+        # Intrinsic identity fields (#116) lead every type's resolved list; a
+        # body-bearing type carries `body` as the second intrinsic (ADR-0059 §B).
         self.assertEqual(
             schema.entry_types["manuscript:scene"].fields,
-            ["title", "entry_type", "id", "number", "summary", "color", "status", "pov", "characters", "locations", "dynamics", "word_count", "cost", "mood", "tension"],
+            ["title", "body", "entry_type", "id", "number", "summary", "color", "status", "pov", "characters", "locations", "dynamics", "word_count", "cost", "mood", "tension"],
         )
 
         scene = self.service.read_scene(self.scene_id)

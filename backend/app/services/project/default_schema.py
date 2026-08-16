@@ -693,6 +693,26 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         # `id` is machine identity — hidden by default so it doesn't clutter
         # the rail / picker; unhide per type in the schema editor to filter by it.
         "id": {"name": "ID", "type": "text", "intrinsic": True, "hidden": True},
+        # `body` is the conditional intrinsic (ADR-0059 §A/§B): the node's
+        # top-level markdown body given a field definition so it carries a label
+        # and — decisively — a description that tells the commit model what the
+        # body is FOR. Value lives on `node.body` (never `metadata.body`); the
+        # resolver injects this key into the field membership of `has_body` types
+        # only (unlike the always-injected identity triple), and the description
+        # below drives the extraction contract's body clause in place of the old
+        # hardcoded "complete markdown body" prose that invited the field dump.
+        "body": {
+            "name": "Body",
+            "type": "long_text",
+            "intrinsic": True,
+            "ai_proposable": True,
+            "description": (
+                "Free-form prose for what the structured fields do not capture — "
+                "the entry's narrative, notes, or main text. Do NOT restate values "
+                "that already live in the fields (aliases, tags, appearance, etc.); "
+                "the body is for what has no field of its own."
+            ),
+        },
         "status": {
             "name": "Status",
             "description": (
@@ -844,6 +864,9 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             ),
             "type": "select",
             "options": ["always", "auto", "manual_only", "never"],
+            # Author-owned cost/visibility knob (ADR-0057): a commit must never
+            # set it (ADR-0059 §F). The one built-in field this ADR flips.
+            "ai_proposable": False,
         },
         "color": {
             # Instance-level color override (palette swatch id). Resolves

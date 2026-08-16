@@ -55,15 +55,16 @@ export async function requestDeleteScene(host: DeletePaneHost, id: string): Prom
   } catch (error) {
     console.warn("Failed to fetch backlinks", error);
   }
-  // Confirm-dialog copy per kind (assistant/chat fall through to the prompt
-  // wording, as before). Maps rather than nested ternaries so a new kind is one
-  // line in each place, not another ternary rung.
+  // Confirm-dialog copy per kind. Maps rather than nested ternaries so a new
+  // kind is one line in each place, not another ternary rung. `prompt` is the
+  // fallback (its own kind); chat and assistant are listed explicitly so they
+  // no longer borrow the prompt wording (#1082).
   const fileLabel =
-    ({ manuscript: "scene", lore: "entry", research: "note", view: "view", plot_template: "template", plot_card: "card", plotline: "plotline" } as Record<string, string>)[
+    ({ manuscript: "scene", lore: "entry", research: "note", view: "view", plot_template: "template", plot_card: "card", plotline: "plotline", chat: "chat", assistant: "assistant" } as Record<string, string>)[
       documentKind
     ] ?? "prompt";
   const titleLabel =
-    ({ manuscript: "Delete Scene", lore: "Delete Entry", research: "Delete Note", view: "Delete View", plot_template: "Delete Template", plot_card: "Delete Card", plotline: "Delete Plotline" } as Record<string, string>)[
+    ({ manuscript: "Delete Scene", lore: "Delete Entry", research: "Delete Note", view: "Delete View", plot_template: "Delete Template", plot_card: "Delete Card", plotline: "Delete Plotline", chat: "Delete Chat", assistant: "Delete Assistant" } as Record<string, string>)[
       documentKind
     ] ?? "Delete Prompt";
   const baseMessage = `Delete "${sceneTitle}"? This removes the ${fileLabel} file from the project.`;

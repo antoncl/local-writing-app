@@ -177,6 +177,8 @@
   // is useful from the first keystroke, not only after the first send.
   let chatPreviewPopoverOpen = $state(false);
   let chatPreviewBtnEl: HTMLButtonElement | null = $state(null);
+  // The composer instance, for the imperative clear on send (#1083).
+  let composerRef: { setValue: (v: string) => void; focus: () => void } | null = $state(null);
   let chatPreviewPopoverEl: HTMLDivElement | null = $state(null);
   // The rendered messages from the last successful estimate fetch (system +
   // any templated initial turns). Null when no prompt is bound (freeform: no
@@ -697,10 +699,14 @@
       userIdx = chatHistory.length - 1;
     }
     chatInput = "";
+    // Also clear imperatively (#1083): the reactive value-sync can wedge, so a
+    // clear the user must always see can't depend on it alone.
+    composerRef?.setValue("");
     chatRunning = true;
     const rewindUser = () => {
       if (userIdx >= 0) chatHistory = chatHistory.filter((_, i) => i !== userIdx);
       chatInput = text;
+      composerRef?.setValue(text);
       // Only flag a rewind when there was text to restore — a prompt-bound
       // first turn ships with an empty composer, and re-blanking it is not a
       // "restored for retry" situation worth announcing.
@@ -1158,6 +1164,7 @@
     {/if}
 
     <PlainTextEditor
+      bind:this={composerRef}
       class="cbv-input"
       value={chatInput}
       disabled={chatRunning || commit.committing}

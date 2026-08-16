@@ -11,9 +11,12 @@ inputs:
   required: false
   target:
     sources:
+    # Kind-only, not a lore:base type-leaf: NodePicker filters by exact
+    # entry_type, and no real entry is literally "lore:base" (they are
+    # lore:character/lore:note/…), so a type-leaf here matches nothing. An
+    # empty type-set = "all sub-types allowed" (NodePicker.svelte), which is
+    # the intent: pick any lore entry to revise. See #1038.
     - kind: lore
-      expr:
-        type: lore:base
     multiple: false
     presets: []
 - name: entry_type

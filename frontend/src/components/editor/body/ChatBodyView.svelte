@@ -30,8 +30,9 @@
   import ChatTranscript from "@/components/editor/body/chat/ChatTranscript.svelte";
   import ChatInputsStrip from "@/components/editor/body/chat/ChatInputsStrip.svelte";
   import ChatJournalScope from "@/components/editor/body/chat/ChatJournalScope.svelte";
+  import ChatEstimateStrip from "@/components/editor/body/chat/ChatEstimateStrip.svelte";
   import EntryDraftCard from "@/components/editor/body/chat/EntryDraftCard.svelte";
-  import { formatCostEur, formatTokens } from "@/lib/utils/money";
+  import { formatCostEur } from "@/lib/utils/money";
   import type {
     AssistantEntrySummary,
     ChatMessage,
@@ -116,6 +117,11 @@
   let chatNotice: string | null = $state(null);
   let chatLastMeta: { provider: string; model: string; latency_ms: number } | null = $state(null);
   let chatInput = $state("");
+  // True when the last send failed (error or empty output) and we restored
+  // the typed text to the composer so the user can retry. Without this cue
+  // the restore is indistinguishable from "the composer didn't clear" — the
+  // core confusion behind #1037. Reset on the next send or any edit.
+  let chatRewound = $state(false);
   let chatScrollEl: HTMLDivElement | null = $state(null);
   // Holds the rendered template for a prompt-bound chat (filled by
   // renderAndLockPromptTemplate on first send) or — for legacy sessions
@@ -299,6 +305,7 @@
     chatNotice = null;
     chatLastMeta = null;
     chatInput = "";
+    chatRewound = false;
     chatSystemPrompt = "";
     chatPreviewMessages = null;
     chatPromptEntryId = "";
@@ -345,6 +352,7 @@
     chatLastMeta = null;
     chatError = null;
     chatInput = "";
+    chatRewound = false;
     pendingTurnCost = null;
     pendingTurnCacheWriteSlots = [];
     commit.reset();
@@ -648,7 +656,7 @@
   }
 
   async function sendChat() {
-    if (chatRunning) return;
+    if (chatRunning || commit.committing) return;
     if (missingRequiredInputs.length > 0) {
       chatError = `Missing required: ${missingRequiredInputs.map((i) => i.label || i.name).join(", ")}.`;
       return;
@@ -663,6 +671,7 @@
     const isFirstSubmission = chatHistory.length === 0;
     chatError = null;
     chatNotice = null;
+    chatRewound = false;
     // First-send template render: defer to renderAndLockPromptTemplate
     // when the chat is bound to a prompt that hasn't been rendered yet
     // AND that prompt has declared inputs (the indication that the
@@ -692,6 +701,10 @@
     const rewindUser = () => {
       if (userIdx >= 0) chatHistory = chatHistory.filter((_, i) => i !== userIdx);
       chatInput = text;
+      // Only flag a rewind when there was text to restore — a prompt-bound
+      // first turn ships with an empty composer, and re-blanking it is not a
+      // "restored for retry" situation worth announcing.
+      chatRewound = text.length > 0;
     };
     try {
       await streamAssistantReply(rewindUser);
@@ -1129,30 +1142,7 @@
       <ChatJournalScope journal={activeChatJournal} freshIds={activeChatJournalFreshIds} />
     {/if}
 
-    {#if chatEstimate}
-      <div class="cbv-estimate-strip" title="Estimated input cost for the bound prompt. Output cost depends on the response.">
-        <span class="cbv-estimate-tokens">{formatTokens(chatEstimate.tokens)} tok</span>
-        <span class="cbv-estimate-sep">·</span>
-        <span class="cbv-estimate-cost">{formatCostEur(chatEstimate.cost_usd)}</span>
-        {#if chatEstimate.caching_style === "explicit" && chatEstimate.cache_blocks.length > 1}
-          <span class="cbv-estimate-sep">·</span>
-          {#each chatEstimate.cache_blocks as block, i}
-            <span class="cbv-estimate-chip">{block.label} {formatTokens(block.tokens)}</span>
-            {#if i < chatEstimate.cache_blocks.length - 1}<span class="cbv-estimate-sep">·</span>{/if}
-          {/each}
-        {/if}
-      </div>
-    {/if}
-    {#if ttlChips.length > 0 && chatEstimate?.caching_style === "explicit"}
-      <div class="cbv-ttl-strip" title="Cache lifetime estimates. Provider may evict early under load — these are not authoritative.">
-        {#each ttlChips as chip, i}
-          <span class="cbv-ttl-chip" class:cbv-ttl-expired={chip.expired}>
-            {chip.label} ({chip.ttlLabel}) {chip.formatted}
-          </span>
-          {#if i < ttlChips.length - 1}<span class="cbv-estimate-sep">·</span>{/if}
-        {/each}
-      </div>
-    {/if}
+    <ChatEstimateStrip estimate={chatEstimate} {ttlChips} />
 
     {#if chatLastMeta}
       <p class="cbv-meta">{chatLastMeta.provider} · {chatLastMeta.model} · {chatLastMeta.latency_ms} ms</p>
@@ -1163,11 +1153,18 @@
     {#if chatNotice}
       <p class="cbv-notice">{chatNotice}</p>
     {/if}
+    {#if chatRewound}
+      <p class="cbv-notice cbv-rewound">Message not sent — restored below. Edit it or press Send to retry.</p>
+    {/if}
 
     <PlainTextEditor
       class="cbv-input"
       value={chatInput}
-      on:change={(e) => (chatInput = e.detail.value)}
+      disabled={chatRunning || commit.committing}
+      on:change={(e) => {
+        chatInput = e.detail.value;
+        chatRewound = false;
+      }}
       on:keydown={(e) => handleChatInputKeydown(e.detail)}
       on:focus={() => onFocus?.()}
       placeholder="Message… (Ctrl/⌘+Enter to send)"
@@ -1176,6 +1173,13 @@
       maxHeight={240}
       matcher={implicitContextMatcher}
     />
+
+    {#if chatRunning || commit.committing}
+      <p class="cbv-meta cbv-busy" aria-live="polite">
+        <span class="cbv-busy-dot" aria-hidden="true"></span>
+        {chatRunning ? "Sending…" : "Finalizing…"}
+      </p>
+    {/if}
 
     <div class="cbv-action-row">
       <button type="button" disabled={!chatHistory.length || chatRunning || commit.committing} onclick={clearChat}>Clear</button>
@@ -1287,6 +1291,33 @@
   .cbv-error { color: var(--danger); }
   .cbv-notice { color: var(--text-2); }
   .cbv-meta { font-size: var(--fs-sm); }
+
+  /* Retry cue — the composer text is back on purpose, not a failed clear. */
+  .cbv-rewound { color: var(--text-2); }
+
+  /* Composer-adjacent in-flight status — covers the first-turn render and the
+     out-of-band commit, neither of which shows a streaming bubble. */
+  .cbv-busy {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--text-2);
+    margin-top: 6px;
+  }
+  .cbv-busy-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--accent);
+    animation: cbv-busy-pulse 1.1s ease-in-out infinite;
+  }
+  @keyframes cbv-busy-pulse {
+    0%, 100% { opacity: 0.35; }
+    50% { opacity: 1; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .cbv-busy-dot { animation: none; }
+  }
 
   /* ---- 1 · composer strip ---- */
   .cbv-composer-strip {
@@ -1425,39 +1456,14 @@
      they live in chat/ChatInputsStrip.svelte + chat/ChatJournalScope.svelte
      (#99). */
   .cbv-composer-strip,
-  .cbv-estimate-strip,
-  .cbv-ttl-strip,
   .cbv-action-row,
   .cbv-foot,
   :global(.chat-body-view > .cbv-input) {
     flex: 0 0 auto;
   }
 
-  /* ---- 7 · cost estimate + 8 · TTL (inset) ---- */
-  .cbv-estimate-strip,
-  .cbv-ttl-strip {
-    display: flex; flex-wrap: wrap; align-items: center; gap: 7px;
-    padding: 11px 14px; border-radius: 10px; border: 1px solid var(--divider);
-    background: var(--inset); font-size: var(--fs-xs); color: var(--text-2);
-  }
-  .cbv-estimate-strip::before { content: "NEXT TURN EST."; }
-  .cbv-ttl-strip::before { content: "CACHE TTL"; }
-  .cbv-estimate-strip::before,
-  .cbv-ttl-strip::before {
-    font-size: var(--fs-xs); font-weight: 800; letter-spacing: 0.07em; color: var(--text-3);
-  }
-  .cbv-estimate-tokens,
-  .cbv-estimate-cost,
-  .cbv-estimate-chip,
-  .cbv-ttl-chip {
-    display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px;
-    background: var(--surface); border: 1px solid var(--divider); font-size: var(--fs-xs);
-  }
-  .cbv-estimate-tokens,
-  .cbv-estimate-cost { font-family: var(--mono); }
-  .cbv-estimate-chip { background: var(--accent-soft); border-color: var(--accent-soft2); color: var(--accent-emphasis); font-weight: 600; }
-  .cbv-estimate-sep { display: none; }
-  .cbv-ttl-chip.cbv-ttl-expired { background: var(--danger-soft); border-color: var(--danger-border); color: var(--danger); font-weight: 600; }
+  /* Cost-estimate + TTL strips (§7/§8) moved to chat/ChatEstimateStrip.svelte
+     alongside the #1037 composer-feedback split. */
 
   /* ---- 10 · action row ---- */
   .cbv-action-row { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }

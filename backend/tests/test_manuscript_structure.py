@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 from metadata_validation_base import MetadataValidationBase
 
@@ -425,6 +426,73 @@ class ManuscriptStructureTests(MetadataValidationBase):
             child for child in structure.root.children if child.id == scene_node.id
         )
         self.assertEqual(refreshed.title, "First Arrival")
+
+    def _count_structure_writes(self):
+        """Count `TreeStructureService.write` calls while still writing through.
+
+        `_manuscript_tree` hands back a fresh service per call, so the count is
+        pinned at the class method (in the spirit of test_node_index_memo.py's
+        `_spy`) rather than on any one instance.
+        """
+        calls = [0]
+        original = TreeStructureService.write
+
+        def counting(inner_self, document):
+            calls[0] += 1
+            return original(inner_self, document)
+
+        return calls, patch.object(TreeStructureService, "write", counting)
+
+    def test_prose_only_save_writes_no_structure(self) -> None:
+        """The common autosave changes only prose; the title in the structure
+        YAML is unchanged, so the whole-file structure rewrite must be skipped
+        (the dominant recurring per-autosave cost, #455)."""
+        scene = self.service.read_scene(self.scene_id)
+
+        calls, spy = self._count_structure_writes()
+        with spy:
+            self.service.save_scene(
+                self.scene_id,
+                SaveSceneRequest(
+                    title=scene.title,  # unchanged
+                    body=scene.body + "\n\nA new paragraph — prose only.",
+                    status=scene.status,
+                    entry_type=scene.entry_type,
+                    metadata=scene.metadata,
+                ),
+            )
+
+        self.assertEqual(calls[0], 0, "a prose-only save rewrote the structure YAML")
+
+    def test_title_change_save_still_writes_and_reflects_in_structure(self) -> None:
+        """The negative control: a save that changes the title must still write
+        the structure, and the tree must carry the new title."""
+        scene = self.service.read_scene(self.scene_id)
+        structure = self.service.read_structure()
+        scene_node = next(
+            child for child in structure.root.children if child.scene_id == self.scene_id
+        )
+
+        calls, spy = self._count_structure_writes()
+        with spy:
+            self.service.save_scene(
+                self.scene_id,
+                SaveSceneRequest(
+                    title="A Renamed Scene",
+                    body=scene.body,
+                    status=scene.status,
+                    entry_type=scene.entry_type,
+                    metadata=scene.metadata,
+                ),
+            )
+
+        self.assertGreater(calls[0], 0, "a title change did not rewrite the structure")
+        refreshed = next(
+            child
+            for child in self.service.read_structure().root.children
+            if child.id == scene_node.id
+        )
+        self.assertEqual(refreshed.title, "A Renamed Scene")
 
     def test_rename_structure_node_rejects_unknown_id(self) -> None:
         with self.assertRaises(ProjectServiceError) as ctx:

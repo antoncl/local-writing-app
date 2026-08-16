@@ -99,7 +99,10 @@ vanishes for the common case:
   (`default_schema.py:24`) — that tuple drives the *unconditional* injection
   (`[k for k in INTRINSIC_FIELD_KEYS if k not in existing_fields]`,
   `schema_inheritance.py:138`), which would put a body field on every type. `body`
-  gets its own `has_body`-gated injection step. Separately, the category stamp
+  gets its own `has_body`-gated injection step, **in the leading intrinsic block**
+  (after `title`, the other author-content intrinsic — so the resolved order reads
+  `title`, `body`, `entry_type`, `id`, then the stored fields), not appended among
+  the stored fields. It is one of the intrinsics, listed with them. Separately, the category stamp
   (`_stamp_field_categories`, `schema_inheritance.py:260`) iterates the **global**
   resolved `fields` registry and stamps each definition once; `body` is marked
   intrinsic there by an added `field_key == "body"` clause alongside the
@@ -119,9 +122,14 @@ editor header, `entry_type` → the type selector, `id` → nowhere, **`body` �
 body editor** (`ProseBodyView`/`CodeBodyView`, chosen by `body_editor`). Like the
 other intrinsics, `body` is **relabel-only** per type ("Body" → "Description" /
 "Notes") and is never a metadata-rail row, so it takes no `hide`/`reorder`
-(§J's rule: those act on a rail row that does not exist). The `MetadataPanel` is
-unaffected; body's field-ness is a catalog/schema/AI concept, authored in the
-schema type editor alongside `title`'s relabel.
+(§J's rule: those act on a rail row that does not exist). Body's immovability is
+therefore **not a restriction peculiar to body** — it is the standard intrinsic
+treatment (`id`/`entry_type`/`title` are equally un-reorderable in the rail).
+Accordingly, the schema type editor **lists `body` with the other intrinsics** —
+`title`, `entry_type`, `id` — as a pinned, rename-only row in that group, not among
+the stored fields. The `MetadataPanel` rail is unaffected; body's field-ness is a
+catalog/schema/AI concept, authored in the schema type editor alongside `title`'s
+relabel.
 
 ### D. Body's description drives the commit contract; the hardcoded body prose is retired
 

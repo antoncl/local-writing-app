@@ -514,20 +514,22 @@ class ImpersonateAsOfPreviewTests(_HelperFixtureBase):
         )
 
     def _preview(self, as_of_scene: str) -> str:
-        from app.services.ai.preview import build_preview
+        from app.services.ai.preview import PreviewRequest, build_preview
 
         # The anchor rides the prompt's hidden `as_of` input (launch-seeded),
         # persisted with the chat's inputs — not a build_preview parameter.
         rendered, _ = build_preview(
-            project_service=self.service,
-            template_source=self.IMPERSONATE,
-            target_scene_id="",
-            session_id=None,
-            inputs={"entry": self.honor["id"], "as_of": as_of_scene},
-            text_before="",
-            text_after="",
-            commit=False,
-            subject=self.honor["id"],
+            self.service,
+            PreviewRequest(
+                template_source=self.IMPERSONATE,
+                target_scene_id="",
+                session_id=None,
+                inputs={"entry": self.honor["id"], "as_of": as_of_scene},
+                text_before="",
+                text_after="",
+                commit=False,
+                subject=self.honor["id"],
+            ),
         )
         return "\n".join(m.text for m in rendered.messages)
 

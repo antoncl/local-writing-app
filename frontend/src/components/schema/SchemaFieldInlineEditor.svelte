@@ -62,6 +62,7 @@
   import NodePickerConfigEditor from "@/components/schema/NodePickerConfigEditor.svelte";
   import SelectOptionsEditor from "@/components/schema/SelectOptionsEditor.svelte";
   import DefaultValueEditor from "@/components/schema/DefaultValueEditor.svelte";
+  import ToggleSwitch from "@/components/widgets/ToggleSwitch.svelte";
   import {
     DEFAULT_FIELD_GLYPH,
     FIELD_TYPE_CHOICES,
@@ -409,15 +410,14 @@
     ></textarea>
   </label>
   {#if aiProposableApplies}
-    <label class="sfi-toggle">
-      <input
-        type="checkbox"
+    <div class="sfi-toggle">
+      <ToggleSwitch
         checked={aiProposable}
-        aria-label="AI may write this field"
-        onchange={(event) => (aiProposable = event.currentTarget.checked)}
+        ariaLabel="AI may write this field"
+        onChange={(next) => (aiProposable = next)}
       />
       <span>AI may write this field when committing a brainstorm</span>
-    </label>
+    </div>
   {/if}
   <div class="sfi-controls">
     <label class="sfi-field">Section
@@ -730,16 +730,18 @@
     gap: 16px;
     flex-wrap: wrap;
   }
+  /* The AI-authorship switch sits at the left; the caption flows beside it and
+     wraps naturally rather than being pushed right by a stretched control. */
   .sfi-toggle {
     display: flex;
     align-items: center;
     gap: 8px;
     font-size: var(--fs-sm);
     color: var(--text-2);
-    cursor: pointer;
   }
-  .sfi-toggle input {
-    cursor: pointer;
+  .sfi-toggle span {
+    flex: 1;
+    min-width: 0;
   }
   .sfi-id {
     font-size: var(--fs-xs);

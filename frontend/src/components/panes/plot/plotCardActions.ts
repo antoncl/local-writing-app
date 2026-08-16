@@ -39,11 +39,6 @@ export type PlotCardActions = {
   // Delete the card outright (the kebab's "Delete card", #860). Distinct from Detach,
   // which only clears the scene ref. The provider confirms before the backend delete.
   onDelete: (cardId: string) => void;
-  // Tell the board this card's kebab menu opened / closed. The menu escapes the card's
-  // overflow but is still trapped inside the node's SvelteFlow stacking context (every
-  // node shares one z-index), so a sibling node below paints over it — the board lifts
-  // this node above its siblings while the menu is open, and restores it on close (#1095).
-  onMenuOpenChange: (cardId: string, open: boolean) => void;
   // The current lanes, for the "Set plotline" submenu. A getter on the provider so
   // the card reads them fresh from the projection.
   readonly plotlines: PlotBoardPlotline[];

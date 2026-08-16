@@ -57,7 +57,6 @@ function fakeActions(over: Partial<PlotPlotlineActions> = {}) {
       return { ...e, revision: "r2" };
     },
     onDelete: (id) => deleted.push(id),
-    onMenuOpenChange: () => {},
     ...over,
   };
   return {
@@ -289,13 +288,6 @@ describe("PlotPlotlineNode actions kebab (#1096)", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Plotline actions" }));
     expect(screen.queryByRole("menuitem", { name: "Open in editor" })).toBeNull();
     expect(screen.getByRole("menuitem", { name: "Delete plotline" })).toBeTruthy();
-  });
-
-  it("signals the board to elevate the node while the menu is open (#1095)", async () => {
-    const calls: Array<[string, boolean]> = [];
-    fakeActions({ expandedId: null, onMenuOpenChange: (id, open) => calls.push([id, open]) }).mount();
-    await fireEvent.click(screen.getByRole("button", { name: "Plotline actions" }));
-    await waitFor(() => expect(calls).toEqual([["line_1", true]]));
   });
 
   it("offers no kebab without an actions context (the read-only mount degrade)", () => {

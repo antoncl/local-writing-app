@@ -54,7 +54,6 @@ function actions(
     onMoveBeat: vi.fn(),
     onSetPageStatus: vi.fn(),
     onDelete: vi.fn(),
-    onMenuOpenChange: vi.fn(),
     plotlines,
     focusedPlotlineId,
     locations,

@@ -90,9 +90,6 @@
   // focused button. Only while open, cleaned up on close / unmount.
   $effect(() => {
     if (!menuOpen) return;
-    // Ask the board to lift this node above its siblings while the menu is open (#1095) —
-    // the cleanup fires on close AND on unmount, so the elevation can't get stranded.
-    if (id) actions?.onMenuOpenChange(id, true);
     const onDown = (e: PointerEvent) => {
       if (rootEl && !rootEl.contains(e.target as Node)) closeMenu();
     };
@@ -102,7 +99,6 @@
     window.addEventListener("pointerdown", onDown, true);
     window.addEventListener("keydown", onKey, true);
     return () => {
-      if (id) actions?.onMenuOpenChange(id, false);
       window.removeEventListener("pointerdown", onDown, true);
       window.removeEventListener("keydown", onKey, true);
     };

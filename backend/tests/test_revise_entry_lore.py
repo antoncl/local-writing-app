@@ -23,7 +23,11 @@ from tempfile import TemporaryDirectory
 
 from project_fixtures import open_test_project
 
-from app.models import CreateLoreEntryRequest, SaveLoreEntryRequest
+from app.models import (
+    CreateLoreEntryRequest,
+    SaveLoreEntryRequest,
+    SaveProjectNodeRequest,
+)
 from app.services.ai.helpers import create_environment_for_project
 
 
@@ -107,6 +111,32 @@ class ReviseEntryLoreGateTests(unittest.TestCase):
         rendered, _ = self._render({"entry": subject, "entry_type": ""})
         self.assertIn("A city councilman.", rendered)  # the real body prose, shown once
         self.assertNotIn("### Body (body)", rendered)  # not a duplicate empty field header
+
+    def test_brainstorm_seed_does_not_inherit_manuscript_pov(self) -> None:
+        # #1076: a first-person project must NOT push the metadata-field
+        # brainstorm into first person. revise-entry pulls in the GENERAL project
+        # settings (units/spelling/…), never the prose-generation POV/tense, so
+        # the model develops descriptive fields free of the manuscript's POV.
+        # Rendered WITH project context so the project-settings snippet is live
+        # (the _render harness passes only `input`, leaving the snippet inert).
+        current = self.service.read_project_node()
+        self.service.save_project_node(
+            SaveProjectNodeRequest(
+                title=current.title,
+                body="",
+                entry_type=current.entry_type,
+                metadata={"pov_mode": "first", "tense": "present", "measurement_system": "metric"},
+            )
+        )
+        prompt = self.service.read_prompt_entry("builtin-revise-entry")
+        env = create_environment_for_project(self.service)
+        rendered = env.from_string(prompt.body).render(
+            input={"entry": "", "entry_type": "lore:character"},
+            project=self.service.current_project(),
+        )
+        self.assertIn("metric", rendered)  # general facts still reach the brainstorm
+        self.assertNotIn("Narrative POV", rendered)  # but POV/tense do not
+        self.assertNotIn("First person", rendered)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ from typing import Any
 
 from app.models import AIHealthResponse, AIPolicy
 from app.services.ai.profiles import UsageMetrics
+from app.services.ai.profiles.registry import capability_profile_for
 from app.services.machine_settings import MachineSettings
 
 CLOUD_PROVIDERS = {"anthropic", "openai", "openrouter"}
@@ -380,27 +381,18 @@ def _extract_usage_for_provider(
     raises (malformed response, unknown provider) — usage is best-effort
     telemetry, never a failure surface for the call itself.
 
-    Profile instances are throwaway here because `extract_usage` is
-    pure parsing — no credentials needed, no state held.
+    Resolves the provider through the registry rather than branching per
+    provider. The credential-less `capability_profile_for` is enough
+    because `extract_usage` is pure parsing — no credentials needed, no
+    state held — and it returns None on an unknown provider.
     """
+    profile = capability_profile_for(provider_name)
+    if profile is None:
+        return None
     try:
-        if provider_name == "anthropic":
-            from app.services.ai.profiles.anthropic import AnthropicProfile
-            return AnthropicProfile(api_key="").extract_usage(raw_response, model)
-        if provider_name == "openai":
-            from app.services.ai.profiles.openai import OpenAIProfile
-            return OpenAIProfile(api_key="").extract_usage(raw_response, model)
-        if provider_name == "openrouter":
-            from app.services.ai.profiles.openrouter import OpenRouterProfile
-            return OpenRouterProfile(api_key="").extract_usage(raw_response, model)
-        if provider_name == "ollama":
-            from app.services.ai.profiles.ollama import OllamaProfile
-            return OllamaProfile(host="http://127.0.0.1:11434").extract_usage(
-                raw_response, model
-            )
+        return profile.extract_usage(raw_response, model)
     except Exception:  # noqa: BLE001
         return None
-    return None
 
 
 def _anthropic_chat(

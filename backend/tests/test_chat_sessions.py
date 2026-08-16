@@ -8,7 +8,11 @@ from fastapi.testclient import TestClient
 from project_fixtures import open_test_project
 
 from app.main import app
-from app.models import CreateChatSessionRequest, SaveChatSessionRequest
+from app.models import (
+    CreateChatSessionRequest,
+    CreateLoreEntryRequest,
+    SaveChatSessionRequest,
+)
 
 
 class ChatSessionEndpointTests(unittest.TestCase):
@@ -384,6 +388,43 @@ class ChatSubjectAndBodyTests(unittest.TestCase):
         )
         self.assertEqual(saved.subject, "aurora")
         self.assertEqual(self.service.read_chat_session(chat.id).subject, "aurora")
+
+    def test_deleting_the_subject_cascades_to_its_attached_chats(self) -> None:
+        # #1078: a chat attaches to a node via `subject`; deleting the node
+        # deletes the chat too, so it isn't orphaned. An unrelated freeform chat
+        # (no subject) must survive — the cascade targets only the attached ones.
+        hero = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Aurora", entry_type="lore:character")
+        )
+        attached = self.service.create_chat_session(
+            CreateChatSessionRequest(title="Aurora — brainstorm", subject=hero.id)
+        )
+        freeform = self.service.create_chat_session(CreateChatSessionRequest(title="Freeform"))
+        self.assertTrue((self.root / "chats" / f"{attached.id}.md").exists())
+
+        self.service.delete_lore_entry(hero.id)
+
+        remaining = {s.id for s in self.service.list_chat_sessions().sessions}
+        self.assertNotIn(attached.id, remaining)  # cascaded with its subject
+        self.assertIn(freeform.id, remaining)  # unrelated chat untouched
+        self.assertFalse((self.root / "chats" / f"{attached.id}.md").exists())
+
+    def test_deleting_an_unrelated_node_leaves_chats_alone(self) -> None:
+        # Mutation guard: the cascade must key on the subject edge, not fire on
+        # any delete. A chat about node A survives when a different node B is
+        # deleted.
+        node_a = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="A", entry_type="lore:character")
+        )
+        node_b = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="B", entry_type="lore:character")
+        )
+        chat = self.service.create_chat_session(
+            CreateChatSessionRequest(title="About A", subject=node_a.id)
+        )
+        self.service.delete_lore_entry(node_b.id)
+        remaining = {s.id for s in self.service.list_chat_sessions().sessions}
+        self.assertIn(chat.id, remaining)
 
     def test_transcript_lives_in_the_body_and_the_index_reads_only_the_header(self) -> None:
         chat = self.service.create_chat_session(CreateChatSessionRequest(title="T"))

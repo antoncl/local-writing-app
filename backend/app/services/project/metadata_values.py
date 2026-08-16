@@ -710,6 +710,22 @@ class MetadataValuesMixin:
             return set()
         return {node_id for node_id in purge_ids if node_id not in index.by_id}
 
+    def _chats_with_subject_in(self, subject_ids: set[str], index: NodeIndex) -> set[str]:
+        """Chat ids whose `subject` entity_ref points at one of `subject_ids`,
+        read from the reverse edge index. Backs the delete cascade (#1078): a
+        chat attaches to a metadata-rail node via `subject`, so a deleted subject
+        takes its chats with it. Only `subject` edges FROM a chat count — the same
+        field id another kind used would never match a chat src."""
+        chats: set[str] = set()
+        for subject_id in subject_ids:
+            for edge in index.edges_by_dst.get(subject_id, []):
+                if edge.field_id != "subject":
+                    continue
+                src = index.by_id.get(edge.src)
+                if src is not None and src.kind == "chat":
+                    chats.add(edge.src)
+        return chats
+
     def _purge_references_to(self, purge_ids: set[str], root: Path) -> None:
         """Walk every reference-bearing entry in the project. For each, strip
         any reference value matching one of ``purge_ids`` and write the file
@@ -755,6 +771,20 @@ class MetadataValuesMixin:
         purge_ids = self._ids_safe_to_purge(purge_ids, index, root)
         if not purge_ids:
             return
+        # Cascade (#1078): a brainstorm chat attaches to a metadata-rail node via
+        # its `subject` entity_ref, so a truly-deleted subject takes its chats
+        # with it. `purge_ids` is already the safe set — an id that merely
+        # un-shadowed a promoted ancestor was dropped above, so a chat whose
+        # subject still resolves is correctly left alone. Delete the chats BEFORE
+        # the strip pass below: their files are gone, so the loop skips them, and
+        # `_delete_node_file` does not re-enter this method (a chat's subject is a
+        # content node, never another chat), so nothing chains.
+        for chat_id in self._chats_with_subject_in(purge_ids, index):
+            self._delete_node_file(index.by_id[chat_id].path)
+            # Drop it from the working index so the strip pass below does not try
+            # to read the file we just unlinked (a missing file is not a
+            # ProjectServiceError, so the loop's guard would not catch it).
+            index.by_id.pop(chat_id, None)
         for entry in list(index.by_id.values()):
             if entry.kind not in REFERENCE_BEARING_KINDS:
                 continue

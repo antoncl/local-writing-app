@@ -249,8 +249,8 @@ describe("SchemaFieldInlineEditor AI-authorship toggle (ADR-0059)", () => {
     render(SchemaFieldInlineEditor, {
       props: { field: null, selectedFieldId: null, layerId: "proj", onSave, onCancel: vi.fn(), onRemove: vi.fn() },
     });
-    const toggle = screen.getByLabelText("AI may write this field") as HTMLInputElement;
-    expect(toggle.checked).toBe(true); // §E default: a field is AI-writable unless opted out
+    const toggle = screen.getByLabelText("AI may write this field");
+    expect(toggle.getAttribute("aria-checked")).toBe("true"); // §E default: writable unless opted out
     await fireEvent.input(screen.getByLabelText("Field display name"), { target: { value: "Bio" } });
     await fireEvent.click(screen.getByText("Done"));
     expect(onSave.mock.calls[0][0].aiProposable).toBe(true);
@@ -278,7 +278,7 @@ describe("SchemaFieldInlineEditor AI-authorship toggle (ADR-0059)", () => {
         onRemove: vi.fn(),
       },
     });
-    expect((screen.getByLabelText("AI may write this field") as HTMLInputElement).checked).toBe(false);
+    expect(screen.getByLabelText("AI may write this field").getAttribute("aria-checked")).toBe("false");
   });
 
   it("hides the toggle for a never-proposable type (computed)", () => {

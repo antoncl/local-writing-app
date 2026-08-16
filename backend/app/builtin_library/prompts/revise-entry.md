@@ -7,7 +7,7 @@ offer_on:
 inputs:
 - name: entry
   type: context_pick
-  label: Entry
+  label: Entry to revise
   required: false
   target:
     sources:

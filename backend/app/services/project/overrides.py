@@ -256,41 +256,54 @@ class LayerOverridesMixin:
         for record in sorted(records, key=lambda record: record.layer_rank):
             for row in record.rows:
                 field_type = field_types.get(row.field, "text")
-                applied = True
-                if field_type == "list":
-                    # #698: string rows cannot carry structured items. "" is
-                    # the representable clear (folds to an empty list); any
-                    # other value — a hand-edited file, or a row written while
-                    # the field was still a scalar type before a retype — is
-                    # ignored rather than installed as a string the reads
-                    # would then reject ("a hand-edited file cannot corrupt
-                    # the fold" must hold for this type too).
-                    if row.op == "replace" and row.value == "":
-                        result[row.field] = []
-                    else:
-                        applied = False
-                elif field_type in COLLECTION_FIELD_TYPES:
-                    current = _as_str_list(result.get(row.field))
-                    if row.op == "replace":
-                        current = _split_collection_value(row.value)
-                    elif row.op == "add":
-                        if row.value and row.value not in current:
-                            current = [*current, row.value]
-                    elif row.op == "remove":
-                        current = [item for item in current if item != row.value]
-                    result[row.field] = current
-                elif row.op == "replace":
-                    # Scalar / text: only whole-value replace in PR 1.
-                    result[row.field] = row.value
-                else:
-                    # `add`/`remove` on a non-collection field are rejected at
-                    # write time and ignored on read (a hand-edited file cannot
-                    # corrupt the fold) — and an ignored op does not mark the
-                    # field overridden.
-                    applied = False
+                applied = self._apply_override_row(result, row, field_type)
                 if applied and row.field not in touched:
                     touched.append(row.field)
         return result, touched
+
+    def _apply_override_row(
+        self, result: dict[str, Any], row: MutationSetRow, field_type: str
+    ) -> bool:
+        """Apply one override `row` of `field_type` onto `result` in place.
+
+        Returns whether the row was applied — an ignored op (a hand-edited file
+        cannot corrupt the fold) does not mark the field overridden.
+        """
+        if field_type == "list":
+            # #698: string rows cannot carry structured items. "" is
+            # the representable clear (folds to an empty list); any
+            # other value — a hand-edited file, or a row written while
+            # the field was still a scalar type before a retype — is
+            # ignored rather than installed as a string the reads
+            # would then reject ("a hand-edited file cannot corrupt
+            # the fold" must hold for this type too).
+            if row.op == "replace" and row.value == "":
+                result[row.field] = []
+                return True
+            return False
+        if field_type in COLLECTION_FIELD_TYPES:
+            result[row.field] = self._folded_collection_value(result.get(row.field), row)
+            return True
+        if row.op == "replace":
+            # Scalar / text: only whole-value replace in PR 1.
+            result[row.field] = row.value
+            return True
+        # `add`/`remove` on a non-collection field are rejected at write time
+        # and ignored on read.
+        return False
+
+    def _folded_collection_value(self, current_value: Any, row: MutationSetRow) -> list[str]:
+        """The new list value for a collection field after applying `row`
+        (replace whole / add one / remove one) onto its current value."""
+        current = _as_str_list(current_value)
+        if row.op == "replace":
+            current = _split_collection_value(row.value)
+        elif row.op == "add":
+            if row.value and row.value not in current:
+                current = [*current, row.value]
+        elif row.op == "remove":
+            current = [item for item in current if item != row.value]
+        return current
 
     def _schema_field_types(self, schema: Any) -> dict[str, str]:
         """field id -> declared type, for fold + diff resolution. Empty on a

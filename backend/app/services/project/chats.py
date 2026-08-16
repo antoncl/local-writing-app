@@ -23,6 +23,7 @@ import yaml
 
 from app.models import (
     ChatSession,
+    ChatSessionJournalEntry,
     ChatSessionList,
     ChatSessionSummary,
     ChatUsage,
@@ -231,96 +232,11 @@ class ChatSessionsMixin:
         if not path.exists():
             raise ProjectServiceError(f"Chat {chat_id} does not exist.", 404)
         existing = self.read_chat_session(chat_id)
-        # Once any messages exist, the preset (prompt + assistant + brief) is
-        # locked. Switching them mid-conversation would invalidate the Anthropic
-        # cache prefix and force a full re-send. Callers should start a new chat.
-        if existing.messages:
-            if request.prompt_entry_id != existing.prompt_entry_id:
-                raise ProjectServiceError(
-                    "Cannot change prompt of a chat that already has messages. "
-                    "Start a new chat with this prompt instead.",
-                    409,
-                )
-            if request.assistant_id != existing.assistant_id:
-                raise ProjectServiceError(
-                    "Cannot change assistant of a chat that already has messages. "
-                    "Start a new chat with this assistant instead.",
-                    409,
-                )
-            if request.system_prompt != existing.system_prompt:
-                raise ProjectServiceError(
-                    "Cannot change brief of a chat that already has messages. "
-                    "Start a new chat to use a different brief.",
-                    409,
-                )
-        # Journal handling:
-        # - request.journal is None → leave the persisted journal alone
-        #   (general saves: rename, message append, draft inputs). This
-        #   is the common case — callers that don't manage the journal
-        #   shouldn't have to forward it.
-        # - request.journal is a list → "this is the new value", subject
-        #   to the append-only guard. Only the chat-send endpoint sets
-        #   this on purpose.
-        if request.journal is None:
-            next_journal = list(existing.journal)
-        else:
-            prior_ids = [e.entry_id for e in existing.journal]
-            incoming_ids = [e.entry_id for e in request.journal]
-            if incoming_ids[: len(prior_ids)] != prior_ids:
-                raise ProjectServiceError(
-                    "Chat journal is append-only — cannot drop or reorder "
-                    "auto-detected context entries.",
-                    409,
-                )
-            next_journal = list(request.journal)
-        # Phase C2 Slice B: per-turn cost no longer lives on the chat YAML
-        # — it lands as an ai_invocations row tagged with chat_session_id.
-        # cost_usd_total stays at 0 (kept on the model for back-compat
-        # round-trips); it re-derives from the unified log on read.
-        if request.cost_delta_usd is not None and request.cost_delta_usd > 0:
-            delta = float(request.cost_delta_usd)
-            # Try to resolve provider/model via the chat's assistant for
-            # richer telemetry rows. Empty when the assistant lookup
-            # fails — the cost still attributes correctly via chat_session_id.
-            provider = ""
-            model = ""
-            try:
-                assistant = self.resolve_assistant(request.assistant_id) if request.assistant_id else None
-                if assistant is not None:
-                    raw_provider = assistant.metadata.get("ai_provider")
-                    raw_model = assistant.metadata.get("ai_model")
-                    if isinstance(raw_provider, str):
-                        provider = raw_provider
-                    if isinstance(raw_model, str):
-                        model = raw_model
-            except Exception:
-                pass
-            # Pick up the last assistant turn's usage telemetry if the
-            # incoming messages carry it. Falls back to None when absent.
-            last_usage: ChatUsage | None = None
-            for message in reversed(request.messages):
-                if message.role == "assistant" and message.usage is not None:
-                    last_usage = message.usage
-                    break
-            self.append_ai_invocation(
-                CreateAIInvocationRequest(
-                    prompt_entry_id=request.prompt_entry_id,
-                    prompt_entry_type="chat:chat_session",
-                    scene_id=self._subject_scene_id(existing.subject),
-                    chat_session_id=existing.id,
-                    provider=provider,
-                    model=model,
-                    usage=last_usage,
-                    cost_usd=delta,
-                )
-            )
+        self._guard_chat_preset_lock(existing, request)
+        next_journal = self._resolved_chat_journal(existing, request)
+        self._record_chat_cost_delta(existing, request)
         next_cost = 0.0
-        next_cache_times = dict(existing.cache_write_times)
-        if request.cache_write_slots:
-            now_iso = self._utcnow_iso()
-            for slot in request.cache_write_slots:
-                if slot:
-                    next_cache_times[slot] = now_iso
+        next_cache_times = self._touched_cache_write_times(existing, request)
 
         updated = ChatSession(
             id=existing.id,
@@ -357,6 +273,117 @@ class ChatSessionsMixin:
         )
         self._write_chat_session(path, updated)
         return updated
+
+    def _guard_chat_preset_lock(
+        self, existing: ChatSession, request: SaveChatSessionRequest
+    ) -> None:
+        """Once any messages exist, the preset (prompt + assistant + brief) is
+        locked. Switching them mid-conversation would invalidate the Anthropic
+        cache prefix and force a full re-send. Callers should start a new chat."""
+        if not existing.messages:
+            return
+        if request.prompt_entry_id != existing.prompt_entry_id:
+            raise ProjectServiceError(
+                "Cannot change prompt of a chat that already has messages. "
+                "Start a new chat with this prompt instead.",
+                409,
+            )
+        if request.assistant_id != existing.assistant_id:
+            raise ProjectServiceError(
+                "Cannot change assistant of a chat that already has messages. "
+                "Start a new chat with this assistant instead.",
+                409,
+            )
+        if request.system_prompt != existing.system_prompt:
+            raise ProjectServiceError(
+                "Cannot change brief of a chat that already has messages. "
+                "Start a new chat to use a different brief.",
+                409,
+            )
+
+    def _resolved_chat_journal(
+        self, existing: ChatSession, request: SaveChatSessionRequest
+    ) -> list[ChatSessionJournalEntry]:
+        """The journal to persist for this save.
+
+        - request.journal is None → leave the persisted journal alone
+          (general saves: rename, message append, draft inputs). This
+          is the common case — callers that don't manage the journal
+          shouldn't have to forward it.
+        - request.journal is a list → "this is the new value", subject
+          to the append-only guard. Only the chat-send endpoint sets
+          this on purpose.
+        """
+        if request.journal is None:
+            return list(existing.journal)
+        prior_ids = [e.entry_id for e in existing.journal]
+        incoming_ids = [e.entry_id for e in request.journal]
+        if incoming_ids[: len(prior_ids)] != prior_ids:
+            raise ProjectServiceError(
+                "Chat journal is append-only — cannot drop or reorder "
+                "auto-detected context entries.",
+                409,
+            )
+        return list(request.journal)
+
+    def _record_chat_cost_delta(
+        self, existing: ChatSession, request: SaveChatSessionRequest
+    ) -> None:
+        """Phase C2 Slice B: per-turn cost no longer lives on the chat YAML
+        — it lands as an ai_invocations row tagged with chat_session_id.
+        cost_usd_total stays at 0 (kept on the model for back-compat
+        round-trips); it re-derives from the unified log on read."""
+        if request.cost_delta_usd is None or request.cost_delta_usd <= 0:
+            return
+        delta = float(request.cost_delta_usd)
+        # Try to resolve provider/model via the chat's assistant for
+        # richer telemetry rows. Empty when the assistant lookup
+        # fails — the cost still attributes correctly via chat_session_id.
+        provider = ""
+        model = ""
+        try:
+            assistant = self.resolve_assistant(request.assistant_id) if request.assistant_id else None
+            if assistant is not None:
+                raw_provider = assistant.metadata.get("ai_provider")
+                raw_model = assistant.metadata.get("ai_model")
+                if isinstance(raw_provider, str):
+                    provider = raw_provider
+                if isinstance(raw_model, str):
+                    model = raw_model
+        except Exception:
+            pass
+        # Pick up the last assistant turn's usage telemetry if the
+        # incoming messages carry it. Falls back to None when absent.
+        last_usage: ChatUsage | None = None
+        for message in reversed(request.messages):
+            if message.role == "assistant" and message.usage is not None:
+                last_usage = message.usage
+                break
+        self.append_ai_invocation(
+            CreateAIInvocationRequest(
+                prompt_entry_id=request.prompt_entry_id,
+                prompt_entry_type="chat:chat_session",
+                scene_id=self._subject_scene_id(existing.subject),
+                chat_session_id=existing.id,
+                provider=provider,
+                model=model,
+                usage=last_usage,
+                cost_usd=delta,
+            )
+        )
+
+    def _touched_cache_write_times(
+        self, existing: ChatSession, request: SaveChatSessionRequest
+    ) -> dict[str, str]:
+        """Existing cache-write timestamps with any slots named in this save
+        stamped to now (ADR-0057 cache accounting)."""
+        next_cache_times = dict(existing.cache_write_times)
+        if request.cache_write_slots:
+            now_iso = self._utcnow_iso()
+            for slot in request.cache_write_slots:
+                if slot:
+                    next_cache_times[slot] = now_iso
+        return next_cache_times
 
     def delete_chat_session(self, chat_id: str) -> ChatSessionList:
         path = self._chat_path(chat_id)

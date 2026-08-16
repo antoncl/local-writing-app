@@ -278,16 +278,15 @@ async def run_chat_turn(project: ProjectService, request: AIChatRequest) -> AICh
     )
 
     result = ai_providers.chat(
+        resolved.to_call(
+            system_prompt=request.system_prompt,
+            messages=messages_list,
+            system_blocks=system_blocks,
+            session_id=session_id,
+        ),
         provider_name=resolved.provider,
-        model=resolved.model,
-        system_prompt=request.system_prompt,
-        messages=messages_list,
-        max_tokens=resolved.max_tokens,
-        temperature=resolved.temperature,
         settings=settings,
         policy=policy,
-        system_blocks=system_blocks,
-        session_id=session_id,
     )
     # Both Anthropic and OpenAI signal "hit max_tokens" — different names.
     truncated = result.stop_reason in {"max_tokens", "length"}

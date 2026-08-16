@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from app.services.ai.assistant_validation import coerce_optional_temperature
+from app.services.ai.profiles.base import ChatCall
 
 if TYPE_CHECKING:
     from app.services.machine_settings import MachineSettings
@@ -29,6 +30,31 @@ class ResolvedCall:
     temperature: float | None
     max_tokens: int
     thinking_enabled: bool = False
+
+    def to_call(
+        self,
+        *,
+        system_prompt: str,
+        messages: list[dict[str, str]],
+        system_blocks: list[dict] | None = None,
+        session_id: str | None = None,
+    ) -> ChatCall:
+        """Merge the resolved provider params (model, token cap, temperature,
+        thinking) with this turn's prompt + messages into one provider-agnostic
+        `ChatCall`. The single place the two halves meet, so the dispatch
+        boundary takes one object instead of a fistful of positional twins —
+        no bundle → unbundle → rebundle across the call sites.
+        """
+        return ChatCall(
+            model=self.model,
+            system_prompt=system_prompt,
+            messages=messages,
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+            system_blocks=system_blocks,
+            session_id=session_id,
+            thinking_enabled=self.thinking_enabled,
+        )
 
 
 def resolve_call_params(

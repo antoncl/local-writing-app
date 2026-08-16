@@ -174,32 +174,25 @@ def _validate_chat_request(
 
 
 def chat(
+    call: ChatCall,
     *,
     provider_name: str,
-    model: str,
-    system_prompt: str,
-    messages: list[dict[str, str]],
-    max_tokens: int,
     settings: MachineSettings,
     policy: AIPolicy,
-    temperature: float | None = None,
-    system_blocks: list[dict] | None = None,
-    session_id: str | None = None,
 ) -> ChatResult:
     """Run a chat completion against the chosen provider.
 
-    Validates the request, resolves the provider's profile from the
-    registry, and delegates the wire call to `profile.chat`. `messages` is a
-    list of `{role, content}` dicts; the system prompt is kept separate.
-    `system_blocks` is the multi-block form with per-block cache markers,
-    honored by the providers that support it (Anthropic; OpenRouter on
-    explicit-cache routes) and collapsed to a string by the plain OpenAI
-    path.
+    `call` is the provider-agnostic request (model, prompt, messages, token
+    cap, temperature, and the multi-block `system_blocks` form with per-block
+    cache markers); `provider_name`/`settings`/`policy` say who to route it to
+    and whether that's allowed. Validates the request, resolves the provider's
+    profile from the registry, and delegates the wire call to `profile.chat`.
+    Callers build `call` once via `ResolvedCall.to_call`.
     """
-    error = _validate_chat_request(provider_name, model, messages, policy)
+    error = _validate_chat_request(provider_name, call.model, call.messages, policy)
     if error is not None:
         return ChatResult(
-            content="", provider=provider_name, model=model, latency_ms=0,
+            content="", provider=provider_name, model=call.model, latency_ms=0,
             ok=False, error=error,
         )
 
@@ -207,36 +200,26 @@ def chat(
     try:
         profile = profile_for(provider_name, settings)
         _ensure_provider_key(provider_name, profile.configured_key())
-        outcome = profile.chat(
-            ChatCall(
-                model=model,
-                system_prompt=system_prompt,
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                system_blocks=system_blocks,
-                session_id=session_id,
-            )
-        )
+        outcome = profile.chat(call)
     except ProviderError as exc:
         return ChatResult(
-            content="", provider=provider_name, model=model,
+            content="", provider=provider_name, model=call.model,
             latency_ms=int((time.perf_counter() - started) * 1000),
             ok=False, error=str(exc),
         )
     except Exception as exc:  # noqa: BLE001
         return ChatResult(
-            content="", provider=provider_name, model=model,
+            content="", provider=provider_name, model=call.model,
             latency_ms=int((time.perf_counter() - started) * 1000),
             ok=False, error=f"{type(exc).__name__}: {exc}",
         )
 
-    usage = _extract_usage_for_provider(provider_name, outcome.raw, model)
+    usage = _extract_usage_for_provider(provider_name, outcome.raw, call.model)
 
     return ChatResult(
         content=outcome.content,
         provider=provider_name,
-        model=model,
+        model=call.model,
         latency_ms=int((time.perf_counter() - started) * 1000),
         ok=True,
         stop_reason=outcome.stop_reason,
@@ -294,29 +277,24 @@ StreamEvent = StreamDelta | StreamThinking | StreamDone | StreamError
 
 
 def chat_stream(
+    call: ChatCall,
     *,
     provider_name: str,
-    model: str,
-    system_prompt: str,
-    messages: list[dict[str, str]],
-    max_tokens: int,
     settings: MachineSettings,
     policy: AIPolicy,
-    temperature: float | None = None,
-    thinking_enabled: bool = False,
-    system_blocks: list[dict] | None = None,
-    session_id: str | None = None,
 ) -> Iterator[StreamEvent]:
     """Stream a chat completion.
 
-    Yields zero or more `StreamDelta` events as text chunks arrive, followed by
-    exactly one terminal event: `StreamDone` on success or `StreamError` on
-    failure. Validation errors (unknown provider, policy, missing key) produce
-    a `StreamError` and no deltas.
+    Same request/routing split as `chat` — `call` carries the request (here
+    including `thinking_enabled`), the keyword args carry the routing. Yields
+    zero or more `StreamDelta`/`StreamThinking` events as chunks arrive,
+    followed by exactly one terminal event: `StreamDone` on success or
+    `StreamError` on failure. Validation errors (unknown provider, policy,
+    missing key) produce a `StreamError` and no deltas.
     """
-    error = _validate_chat_request(provider_name, model, messages, policy)
+    error = _validate_chat_request(provider_name, call.model, call.messages, policy)
     if error is not None:
-        yield StreamError(provider=provider_name, model=model, latency_ms=0, error=error)
+        yield StreamError(provider=provider_name, model=call.model, latency_ms=0, error=error)
         return
 
     started = time.perf_counter()
@@ -325,16 +303,6 @@ def chat_stream(
     try:
         profile = profile_for(provider_name, settings)
         _ensure_provider_key(provider_name, profile.configured_key())
-        call = ChatCall(
-            model=model,
-            system_prompt=system_prompt,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            system_blocks=system_blocks,
-            session_id=session_id,
-            thinking_enabled=thinking_enabled,
-        )
         for ev in profile.chat_stream(call):
             if isinstance(ev, (StreamDelta, StreamThinking)):
                 yield ev
@@ -342,19 +310,19 @@ def chat_stream(
                 stop_reason = ev.stop_reason
                 usage = ev.usage
     except ProviderError as exc:
-        yield StreamError(provider=provider_name, model=model,
+        yield StreamError(provider=provider_name, model=call.model,
                           latency_ms=int((time.perf_counter() - started) * 1000),
                           error=str(exc))
         return
     except Exception as exc:  # noqa: BLE001
-        yield StreamError(provider=provider_name, model=model,
+        yield StreamError(provider=provider_name, model=call.model,
                           latency_ms=int((time.perf_counter() - started) * 1000),
                           error=f"{type(exc).__name__}: {exc}")
         return
 
     truncated = stop_reason in {"max_tokens", "length"}
     yield StreamDone(
-        provider=provider_name, model=model,
+        provider=provider_name, model=call.model,
         latency_ms=int((time.perf_counter() - started) * 1000),
         stop_reason=stop_reason, truncated=truncated,
         usage=usage,

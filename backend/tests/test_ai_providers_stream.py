@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.services.ai import providers as ai_providers
+from app.services.ai.profiles.anthropic import AnthropicProfile
 from app.services.ai.profiles.base import (
     ChatCall,
     StreamDelta,
@@ -192,6 +193,103 @@ class OpenAICompatibleStreamTests(unittest.TestCase):
         self.assertEqual("".join(deltas), "Hi")
         self.assertEqual(captured["timeout"], 300.0)
         self.assertEqual(captured["base_url"], "https://openrouter.ai/api/v1")
+
+
+def _a_delta_event(dtype, *, text=None, thinking=None):
+    """One Anthropic content_block_delta stream event."""
+    delta = SimpleNamespace(type=dtype, text=text, thinking=thinking)
+    return SimpleNamespace(type="content_block_delta", delta=delta)
+
+
+def _a_usage(*, input_tokens=12, cache_read=0, cache_write=0, output_tokens=7):
+    return SimpleNamespace(
+        input_tokens=input_tokens,
+        cache_read_input_tokens=cache_read,
+        cache_creation_input_tokens=cache_write,
+        output_tokens=output_tokens,
+    )
+
+
+class AnthropicStreamTests(unittest.TestCase):
+    """Exercise the real AnthropicProfile.chat_stream by faking the anthropic
+    SDK, so the delta routing (_stream_text_events), the thinking budget
+    (_apply_thinking), and the terminal usage/stop-reason are covered — the
+    endpoint/cost tests mock chat_stream away entirely."""
+
+    def _run(self, call, events, *, stop_reason="end_turn", usage=None):
+        captured: dict = {}
+        final_msg = SimpleNamespace(stop_reason=stop_reason, usage=usage)
+
+        class _FakeStream:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_a):
+                return False
+
+            def __iter__(self):
+                return iter(events)
+
+            def get_final_message(self):
+                return final_msg
+
+        class _FakeAnthropic:
+            def __init__(self, **kwargs):
+                captured["client"] = kwargs
+
+                def _stream(**kw):
+                    captured["create"] = kw
+                    return _FakeStream()
+
+                self.messages = SimpleNamespace(stream=_stream)
+
+        with patch("anthropic.Anthropic", _FakeAnthropic):
+            out = list(AnthropicProfile(api_key="sk-ant").chat_stream(call))
+        return out, captured
+
+    def test_routes_text_and_thinking_deltas_and_ignores_other_events(self):
+        events = [
+            SimpleNamespace(type="message_start", delta=None),  # ignored
+            _a_delta_event("thinking_delta", thinking="pondering"),
+            _a_delta_event("text_delta", text="Hello"),
+            _a_delta_event("text_delta", text=""),  # empty → dropped
+            _a_delta_event("text_delta", text=" world"),
+        ]
+        call = ChatCall(
+            model="claude-sonnet-4-6",
+            system_prompt="",
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=64,
+        )
+        out, captured = self._run(
+            call, events, stop_reason="end_turn", usage=_a_usage(output_tokens=9)
+        )
+        thinking = [e.text for e in out if isinstance(e, StreamThinking)]
+        deltas = [e.text for e in out if isinstance(e, StreamDelta)]
+        finals = [e for e in out if isinstance(e, StreamFinal)]
+        self.assertEqual(thinking, ["pondering"])
+        self.assertEqual("".join(deltas), "Hello world")
+        self.assertEqual(len(finals), 1)
+        self.assertEqual(finals[0].stop_reason, "end_turn")
+        self.assertEqual(finals[0].usage.output_tokens, 9)
+        # No thinking requested → no thinking kwarg on the wire.
+        self.assertNotIn("thinking", captured["create"])
+
+    def test_thinking_enabled_sets_budget_and_temperature(self):
+        call = ChatCall(
+            model="claude-sonnet-4-6",
+            system_prompt="",
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=2048,
+            thinking_enabled=True,
+        )
+        _out, captured = self._run(call, [], usage=_a_usage())
+        create = captured["create"]
+        self.assertEqual(
+            create["thinking"], {"type": "enabled", "budget_tokens": 1024}
+        )
+        # Anthropic requires temperature=1 when thinking is on (temp-ok model).
+        self.assertEqual(create["temperature"], 1.0)
 
 
 if __name__ == "__main__":

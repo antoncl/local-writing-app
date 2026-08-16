@@ -147,13 +147,12 @@ class AnthropicProfile(ProviderProfile):
             output_tokens=int(getattr(usage, "output_tokens", 0) or 0),
         )
 
-    def chat(self, call: ChatCall) -> ChatOutcome:
-        try:
-            from anthropic import Anthropic
-        except ImportError as exc:
-            raise ProviderError(f"anthropic package not installed: {exc}") from exc
-
-        client = Anthropic(api_key=self._api_key, timeout=120.0)
+    def _message_kwargs(self, call: ChatCall) -> dict:
+        """The Anthropic `messages.create`/`messages.stream` kwargs shared by
+        `chat` and `chat_stream`: model, token cap, messages, the gated
+        temperature, and the system payload. Streaming layers `thinking` on top
+        via `_apply_thinking`.
+        """
         kwargs: dict = {
             "model": call.model,
             "max_tokens": call.max_tokens,
@@ -172,7 +171,29 @@ class AnthropicProfile(ProviderProfile):
                 kwargs["system"] = system_payload
         elif call.system_prompt:
             kwargs["system"] = anthropic_system_with_cache(call.system_prompt)
-        response = client.messages.create(**kwargs)
+        return kwargs
+
+    def _apply_thinking(self, kwargs: dict, call: ChatCall) -> None:
+        """Enable extended thinking on the streaming request when the caller
+        asked for it and the budget fits under `max_tokens`. Anthropic requires
+        temperature=1 alongside thinking — but only on models that still accept
+        the parameter at all.
+        """
+        budget = max(1024, min(_ANTHROPIC_THINKING_BUDGET, call.max_tokens - 256))
+        if budget < 1024:
+            return
+        kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
+        if anthropic_supports_temperature(call.model):
+            kwargs["temperature"] = 1.0
+
+    def chat(self, call: ChatCall) -> ChatOutcome:
+        try:
+            from anthropic import Anthropic
+        except ImportError as exc:
+            raise ProviderError(f"anthropic package not installed: {exc}") from exc
+
+        client = Anthropic(api_key=self._api_key, timeout=120.0)
+        response = client.messages.create(**self._message_kwargs(call))
         blocks = getattr(response, "content", None) or []
         parts = []
         for block in blocks:
@@ -195,6 +216,26 @@ class AnthropicProfile(ProviderProfile):
             messages=[{"role": "user", "content": "ping"}],
         )
 
+    def _stream_text_events(
+        self, event: Any
+    ) -> Iterator[StreamDelta | StreamThinking]:
+        """Map one Anthropic stream event to the text/thinking deltas we
+        surface. Non-delta events (message start/stop, content-block
+        boundaries) yield nothing.
+        """
+        if getattr(event, "type", None) != "content_block_delta":
+            return
+        delta = getattr(event, "delta", None)
+        dtype = getattr(delta, "type", None) if delta else None
+        if dtype == "text_delta":
+            text = getattr(delta, "text", "") or ""
+            if text:
+                yield StreamDelta(text=text)
+        elif dtype == "thinking_delta":
+            text = getattr(delta, "thinking", "") or ""
+            if text:
+                yield StreamThinking(text=text)
+
     def chat_stream(
         self, call: ChatCall
     ) -> Iterator[StreamDelta | StreamThinking | StreamFinal]:
@@ -204,46 +245,15 @@ class AnthropicProfile(ProviderProfile):
             raise ProviderError(f"anthropic package not installed: {exc}") from exc
 
         client = Anthropic(api_key=self._api_key, timeout=120.0)
-        temp_ok = anthropic_supports_temperature(call.model)
-        kwargs: dict = {
-            "model": call.model,
-            "max_tokens": call.max_tokens,
-            "messages": call.messages,
-        }
-        if call.temperature is not None and temp_ok:
-            kwargs["temperature"] = call.temperature
-        if call.system_blocks:
-            system_payload = anthropic_system_blocks(call.system_blocks)
-            if system_payload:
-                kwargs["system"] = system_payload
-        elif call.system_prompt:
-            kwargs["system"] = anthropic_system_with_cache(call.system_prompt)
+        kwargs = self._message_kwargs(call)
         if call.thinking_enabled:
-            budget = max(1024, min(_ANTHROPIC_THINKING_BUDGET, call.max_tokens - 256))
-            if budget >= 1024:
-                kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
-                # Anthropic requires temperature=1 when thinking is enabled —
-                # but only on models that still accept the parameter at all.
-                if temp_ok:
-                    kwargs["temperature"] = 1.0
-        stop_reason: str | None = None
+            self._apply_thinking(kwargs, call)
         final_message: Any = None
         with client.messages.stream(**kwargs) as stream:
             for event in stream:
-                etype = getattr(event, "type", None)
-                if etype == "content_block_delta":
-                    delta = getattr(event, "delta", None)
-                    dtype = getattr(delta, "type", None) if delta else None
-                    if dtype == "text_delta":
-                        text = getattr(delta, "text", "") or ""
-                        if text:
-                            yield StreamDelta(text=text)
-                    elif dtype == "thinking_delta":
-                        text = getattr(delta, "thinking", "") or ""
-                        if text:
-                            yield StreamThinking(text=text)
+                yield from self._stream_text_events(event)
             final_message = stream.get_final_message()
-            stop_reason = getattr(final_message, "stop_reason", None)
+        stop_reason = getattr(final_message, "stop_reason", None)
         usage = self.extract_usage(final_message, call.model)
         yield StreamFinal(stop_reason=stop_reason, usage=usage)
 

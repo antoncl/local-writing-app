@@ -3,8 +3,7 @@
   // Slice 0 built the muted-inherited / live-overridden + "Reset to <source>"
   // treatment on the Project-pane RADIO; this is the SLIDER form of the same
   // control, used to lead the create-wizard's AI step. The app has no generic
-  // slider, so this is bespoke — modelled on the .fr-toggle track+knob in
-  // FieldValueEditor.svelte.
+  // slider, so this is bespoke — modelled on the ToggleSwitch.svelte track+knob.
   //
   // Three concrete stops Off · Local · Cloud map to AIPolicy. A fourth *state*
   // (not a stop) is "inherit": when the wizard has declared an ancestor chain
@@ -92,7 +91,7 @@
     align-items: flex-start;
   }
 
-  /* The rail the stops sit on — a quiet line behind the dots (the .fr-toggle
+  /* The rail the stops sit on — a quiet line behind the dots (the ToggleSwitch
      track idiom). Inset by a dot-radius each side so it runs dot-centre to
      dot-centre rather than overhanging. */
   .track {

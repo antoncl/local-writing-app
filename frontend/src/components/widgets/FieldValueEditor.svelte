@@ -13,6 +13,7 @@
   import TagPicker from "@/components/widgets/TagPicker.svelte";
   import TagChip from "@/components/widgets/TagChip.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
+  import ToggleSwitch from "@/components/widgets/ToggleSwitch.svelte";
   import {
     coerceStringList,
     isMetadataValuePresent,
@@ -228,19 +229,13 @@
        view params) leave `allowUnset` false and keep the plain 2-state toggle. -->
   {@const set = !allowUnset || isMetadataValuePresent(value)}
   {@const on = set && metadataValueBool(value)}
-  <button
-    type="button"
-    role="switch"
-    class="fr-toggle"
-    class:on={on}
-    class:unset={!set}
-    aria-checked={on}
-    aria-label={set ? label : `${label} (not set)`}
+  <ToggleSwitch
+    checked={on}
+    unset={!set}
+    ariaLabel={set ? label : `${label} (not set)`}
     disabled={readOnly}
-    onclick={readOnly ? undefined : () => emit(!on)}
-  >
-    <span class="fr-toggle-knob"></span>
-  </button>
+    onChange={(next) => emit(next)}
+  />
 {:else if field.type === "number"}
   {#if readOnly}
     <span class="fv-static" aria-label={label}>
@@ -295,46 +290,6 @@
     color: var(--text);
   }
 
-  .fr-toggle {
-    flex: none;
-    width: 34px;
-    height: 20px;
-    padding: 0;
-    border-radius: 999px;
-    border: 1px solid var(--border);
-    background: var(--inset);
-    cursor: pointer;
-    position: relative;
-    transition: background-color 120ms ease, border-color 120ms ease;
-  }
-  .fr-toggle-knob {
-    position: absolute;
-    top: 1px;
-    left: 1px;
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    background: var(--surface);
-    box-shadow: 0 1px 2px var(--shadow-pane);
-    transition: transform 120ms ease;
-  }
-  .fr-toggle.on {
-    background: var(--accent);
-    border-color: var(--accent);
-  }
-  .fr-toggle.on .fr-toggle-knob {
-    transform: translateX(14px);
-  }
-  /* Unset (#522): neither on nor off — a dashed, dimmed track with the knob
-     parked centre so "not set" never reads as a deliberate "off". */
-  .fr-toggle.unset {
-    opacity: 0.55;
-    border-style: dashed;
-    background: var(--inset);
-  }
-  .fr-toggle.unset .fr-toggle-knob {
-    transform: translateX(7px);
-  }
 
   .multi-select-chips {
     display: flex;

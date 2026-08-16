@@ -99,19 +99,26 @@ class UsageMetrics:
 _CACHE_WRITE_MULTIPLIER = 1.25
 
 
-def compute_cost(usage: UsageMetrics, descriptor: ModelDescriptor) -> float:
+def compute_cost(usage: UsageMetrics, descriptor: ModelDescriptor) -> float | None:
     """USD cost for one call, computed from descriptor pricing.
 
-    Returns 0.0 when the descriptor has no pricing (Ollama, or live
-    discovery failed to supply prices). Caller should freeze the
-    returned value into their accumulator — recomputing later would
-    drift when the model's listed price changes.
+    Returns None when the descriptor carries no pricing at all — both
+    input and output rates unknown (a local Ollama model, or a
+    live-discovered model whose provider doesn't publish prices). None
+    means "cost unknown" and surfaces as "—"; it is deliberately
+    distinct from a real 0.0, which a genuinely zero-priced model (one
+    with an explicit 0.0 rate) still produces. Fabricating 0.0 for an
+    unpriced call would render as "€0.00" — a confident zero the display
+    contract reserves for a truly free call (#697).
+
+    Caller should freeze the returned value into their accumulator —
+    recomputing later would drift when the model's listed price changes.
     """
 
+    if descriptor.cost_in_per_mtok is None and descriptor.cost_out_per_mtok is None:
+        return None
     cost_in = (descriptor.cost_in_per_mtok or 0.0) / 1_000_000
     cost_out = (descriptor.cost_out_per_mtok or 0.0) / 1_000_000
-    if cost_in == 0.0 and cost_out == 0.0:
-        return 0.0
     cache_read_mult = (
         descriptor.cache_read_multiplier
         if descriptor.cache_read_multiplier is not None

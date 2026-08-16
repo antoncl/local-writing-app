@@ -44,10 +44,20 @@ def _desc(*, cost_in=None, cost_out=None, cache_read_mult=None) -> ModelDescript
     )
 
 
-def test_compute_cost_returns_zero_when_pricing_absent():
-    # Ollama-shaped descriptor: no prices known.
+def test_compute_cost_returns_none_when_pricing_absent():
+    # Ollama-shaped descriptor: both rates None → cost UNKNOWN, not 0.
+    # A fabricated 0.0 would render as "€0.00", a confident zero the
+    # display contract reserves for a truly free call (#697).
     usage = UsageMetrics(input_tokens=1000, output_tokens=500)
-    assert compute_cost(usage, _desc()) == 0.0
+    assert compute_cost(usage, _desc()) is None
+
+
+def test_compute_cost_zero_for_explicitly_zero_priced_model():
+    # A descriptor that actually declares 0.0 rates IS billed at zero —
+    # a real 0.0, distinct from the unknown-price None above.
+    desc = _desc(cost_in=0.0, cost_out=0.0)
+    usage = UsageMetrics(input_tokens=1000, output_tokens=500)
+    assert compute_cost(usage, desc) == 0.0
 
 
 def test_compute_cost_basic_input_output():

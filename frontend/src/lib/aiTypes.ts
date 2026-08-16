@@ -297,8 +297,10 @@ export type ChatSession = {
   // ADR-0057 §2: the execution-derived lore gate, captured at the lock render.
   // Gate off → the send path injects no lore at all. Absent on legacy chats.
   lore_enabled?: boolean;
-  // V2: running USD cost (display as EUR via money.ts).
-  cost_usd_total?: number;
+  // V2: running USD cost (display as EUR via money.ts). null when the chat
+  // has no priced cost yet (fresh, or unpriced-model turns) — the footer
+  // hides rather than showing a fabricated €0.00 (#697).
+  cost_usd_total?: number | null;
   // V2: per-cache-slot ISO timestamps of last cache write.
   cache_write_times?: Record<string, string>;
 };

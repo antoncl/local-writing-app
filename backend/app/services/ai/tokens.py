@@ -86,17 +86,20 @@ async def descriptor_for(
 def estimate_input_cost(
     tokens: int,
     descriptor: ModelDescriptor | None,
-) -> float:
+) -> float | None:
     """Pre-send input-only USD cost. Output cost depends on the response
     size and isn't known until the model replies — use `compute_cost`
     on the actuals for that.
 
-    Returns 0.0 when pricing is unknown (Ollama, or live discovery
-    didn't supply prices).
+    Returns None when pricing is unknown (a local Ollama model, or live
+    discovery didn't supply an input rate) — "cost unknown", which the
+    preview surface hides rather than showing a fabricated "€0.00" (the
+    display contract reserves a confident zero for a truly free call,
+    #697). A known input rate with a zero-token prompt is a real 0.0.
     """
 
     if descriptor is None or descriptor.cost_in_per_mtok is None:
-        return 0.0
+        return None
     if tokens <= 0:
         return 0.0
     return tokens * descriptor.cost_in_per_mtok / 1_000_000

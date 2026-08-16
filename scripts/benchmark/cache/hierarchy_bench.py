@@ -92,25 +92,34 @@ def deep_size(obj, _seen: set[int] | None = None) -> int:
     if oid in _seen:
         return 0
     _seen.add(oid)
-    size = sys.getsizeof(obj)
+    return sys.getsizeof(obj) + _deep_size_children(obj, _seen)
+
+
+def _deep_size_children(obj, _seen: set[int]) -> int:
+    """Sum of the sizes of `obj`'s referents; 0 for a leaf scalar."""
     if isinstance(obj, dict):
-        for key, value in obj.items():
-            size += deep_size(key, _seen) + deep_size(value, _seen)
-    elif isinstance(obj, (list, tuple, set, frozenset)):
-        for item in obj:
-            size += deep_size(item, _seen)
-    elif is_dataclass(obj) and not isinstance(obj, type):
-        # `fields()`, not `vars()` — a slots dataclass (ReferenceEdge) has no
-        # __dict__ and vars() raises on it. Count the instance __dict__ where
-        # there is one: it is ~88 B of pure per-object overhead, and leaving it
-        # out made `slots=True` look free of charge in both directions.
-        instance_dict = getattr(obj, "__dict__", None)
-        if instance_dict is not None:
-            size += sys.getsizeof(instance_dict)
-        for f in dataclass_fields(obj):
-            size += deep_size(getattr(obj, f.name), _seen)
-    elif isinstance(obj, Path):
-        size += deep_size(str(obj), _seen)
+        return sum(deep_size(key, _seen) + deep_size(value, _seen) for key, value in obj.items())
+    if isinstance(obj, (list, tuple, set, frozenset)):
+        return sum(deep_size(item, _seen) for item in obj)
+    if is_dataclass(obj) and not isinstance(obj, type):
+        return _dataclass_size(obj, _seen)
+    if isinstance(obj, Path):
+        return deep_size(str(obj), _seen)
+    return 0
+
+
+def _dataclass_size(obj, _seen: set[int]) -> int:
+    """A dataclass instance's fields plus its __dict__ overhead where it has one.
+
+    `fields()`, not `vars()` — a slots dataclass (ReferenceEdge) has no __dict__
+    and vars() raises on it. Count the instance __dict__ where there is one: it
+    is ~88 B of pure per-object overhead, and leaving it out made `slots=True`
+    look free of charge in both directions.
+    """
+    instance_dict = getattr(obj, "__dict__", None)
+    size = sys.getsizeof(instance_dict) if instance_dict is not None else 0
+    for f in dataclass_fields(obj):
+        size += deep_size(getattr(obj, f.name), _seen)
     return size
 
 

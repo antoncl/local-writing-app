@@ -29,29 +29,28 @@ TS_NAME = {
     "NestOp": "ViewNestOp",
 }
 
+# IDL scalar/shape type -> TS annotation. The one-to-one cases; `operand` and
+# `enum` stay as guards in _tstype because they read off the spec, not just `t`.
+TS_SCALAR = {
+    "str": "string",
+    "int": "number",
+    "bool": "boolean",
+    "any": "unknown",
+    "leaf_value": "ViewLeafValue",
+    "list[ViewExpr]": "ViewExpr[]",
+    "list[str]": "string[]",
+    "ViewExpr": "ViewExpr",
+}
+
 
 def _tstype(spec: dict[str, Any], records: dict[str, Any]) -> str:
     t = spec["type"]
     if spec.get("operand"):
         return "ViewOperand"
-    if t == "str":
-        return "string"
-    if t == "int":
-        return "number"
-    if t == "bool":
-        return "boolean"
-    if t == "any":
-        return "unknown"
     if t == "enum":
         return " | ".join(f'"{v}"' for v in spec["values"])
-    if t == "leaf_value":
-        return "ViewLeafValue"
-    if t == "list[ViewExpr]":
-        return "ViewExpr[]"
-    if t == "list[str]":
-        return "string[]"
-    if t == "ViewExpr":
-        return "ViewExpr"
+    if t in TS_SCALAR:
+        return TS_SCALAR[t]
     return TS_NAME.get(t, t)
 
 

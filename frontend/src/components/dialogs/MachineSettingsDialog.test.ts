@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
 
 import type { MachineSettingsDraft, MachineSettingsView } from "@/lib/types";
+import type { AIHealthResponse } from "@/lib/aiTypes";
 import MachineSettingsDialog from "@/components/dialogs/MachineSettingsDialog.svelte";
 
 // The app-wide AI policy (#746) is deliberately NOT part of the batched draft:
@@ -92,5 +93,54 @@ describe("MachineSettingsDialog — app-wide AI policy (#746)", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(onSave).toHaveBeenCalledTimes(1); // the batched save ran
     expect(onApplyPolicy).not.toHaveBeenCalled(); // but the permission did NOT ride along
+  });
+});
+
+describe("MachineSettingsDialog — health names the resolved assistant (#336)", () => {
+  function mountHealth(result: AIHealthResponse) {
+    render(MachineSettingsDialog, {
+      props: {
+        open: true,
+        settings: view("cloud-allowed"),
+        draft: draft(),
+        onCancel: () => {},
+        onSave: vi.fn(),
+        onApplyPolicy: vi.fn().mockResolvedValue(true),
+        health: { checking: false, disabledReason: null, onCheck: vi.fn(), result },
+      },
+    });
+  }
+
+  it("names the resolved assistant on a passing ping so the tick isn't ambiguous", () => {
+    mountHealth({
+      provider: "anthropic",
+      model: "claude-haiku",
+      ok: true,
+      latency_ms: 5,
+      policy: "cloud-allowed",
+      assistant_id: "cheap",
+      assistant_name: "Cheap",
+    });
+    const line = screen.getByText(/Cheap/);
+    expect(line.textContent).toContain("✓");
+    expect(line.textContent).toContain("Cheap");
+    expect(line.textContent).toContain("anthropic");
+  });
+
+  it("names the assistant on a failing ping too, so a red ✗ says which one broke", () => {
+    mountHealth({
+      provider: "anthropic",
+      model: "m",
+      ok: false,
+      latency_ms: 0,
+      policy: "cloud-allowed",
+      error: "Anthropic API key is not configured.",
+      assistant_id: "creative",
+      assistant_name: "Creative",
+    });
+    const line = screen.getByText(/Creative/);
+    expect(line.textContent).toContain("✗");
+    expect(line.textContent).toContain("Creative");
+    expect(line.textContent).toContain("not configured");
   });
 });

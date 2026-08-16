@@ -12,6 +12,8 @@
   import { getSwatch } from "@/lib/utils/colors";
   import { isAssistantListed } from "@/lib/stores/assistants";
   import { assistantTagsOf } from "@/lib/chat/assistantScope";
+  import { api } from "@/lib/api";
+  import type { AIHealthResponse } from "@/lib/aiTypes";
   // `isBareDescendantsOf` / `kindUniverseExpr` went with the whole-roster guard
   // (#333): drag no longer inspects the expr's shape at all.
   import { defaultView } from "@/lib/views/evaluateView";
@@ -134,6 +136,36 @@
     else await onSetOrder([...listedIds.filter((id) => id !== entry.id), entry.id]);
   }
 
+  // Per-assistant health check (#336). The Machine Settings ping only ever
+  // tests the topmost assistant, so a green tick there can accompany a broken
+  // send from a chat pinned elsewhere. Testing by id here checks the exact
+  // assistant a send would use. Keyed by id; reassigned wholesale so Svelte 4's
+  // `$:`/DOM reactivity picks it up.
+  let healthByAssistant: Record<
+    string,
+    { checking: boolean; result: AIHealthResponse | null }
+  > = {};
+
+  async function testAssistant(entry: AssistantEntrySummary): Promise<void> {
+    const prev = healthByAssistant[entry.id]?.result ?? null;
+    healthByAssistant = { ...healthByAssistant, [entry.id]: { checking: true, result: prev } };
+    let result: AIHealthResponse;
+    try {
+      result = await api.aiHealth(entry.id);
+    } catch (err) {
+      // A failed ping returns ok:false (200); this catch is for a transport
+      // failure — surface it as a failed result so the row still shows ✗.
+      result = { provider: "", model: "", ok: false, latency_ms: 0, policy: "off", error: String(err) };
+    }
+    healthByAssistant = { ...healthByAssistant, [entry.id]: { checking: false, result } };
+  }
+
+  function healthDetail(r: AIHealthResponse): string {
+    return r.ok
+      ? `Works — ${r.provider} · ${r.model} · ${r.latency_ms} ms`
+      : `Failed — ${r.provider || "(no provider)"}: ${r.error ?? "unknown error"}`;
+  }
+
 
   function assistantSubtitle(entry: AssistantEntrySummary): string {
     const provider = entry.metadata?.ai_provider;
@@ -205,6 +237,33 @@
       {#if ctx.collapsible}
         <CountPill count={ctx.childCount} />
       {:else}
+        {@const health = healthByAssistant[entry.id]}
+        <!-- Test THIS assistant's provider (#336) — the exact one a send would
+             use, unlike the Machine Settings ping which only tests the topmost. -->
+        <button
+          class="assistant-test"
+          type="button"
+          title={health?.result
+            ? healthDetail(health.result)
+            : "Send a test ping to this assistant's provider"}
+          aria-label={`Test ${entry.title}`}
+          disabled={health?.checking}
+          onmousedown={(event) => event.stopPropagation()}
+          onclick={(event) => {
+            // The row itself opens the assistant; this must not.
+            event.stopPropagation();
+            void testAssistant(entry);
+          }}
+        >{health?.checking ? "Testing…" : "Test"}</button>
+        {#if health?.result}
+          <span
+            class="assistant-health"
+            class:ok={health.result.ok}
+            class:fail={!health.result.ok}
+            title={healthDetail(health.result)}
+            aria-label={healthDetail(health.result)}
+          >{health.result.ok ? "✓" : "✗"}</span>
+        {/if}
         <!-- A WORD, not a glyph, deliberately. The closed lexicon
              (design-language §"Glyph-first affordances") offers `×` for remove —
              but `×` already means *delete* on four other surfaces, and mistaking
@@ -276,5 +335,53 @@
   .assistant-curate:hover {
     color: var(--text);
     background: var(--accent-soft);
+  }
+
+  /* Same recessive treatment as .assistant-curate — a per-row test verb
+     shouldn't shout on every line of a roster that's read far more than acted
+     on. Stays visible while a check is running (disabled) so "Testing…" doesn't
+     vanish if the pointer leaves mid-ping. */
+  .assistant-test {
+    padding: 0 6px;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    color: var(--text-3);
+    font-family: var(--sans);
+    font-size: var(--fs-xs);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 120ms ease;
+  }
+
+  :global(.node-row:hover) .assistant-test,
+  .assistant-test:focus-visible,
+  .assistant-test:disabled {
+    opacity: 1;
+  }
+
+  .assistant-test:hover:not(:disabled) {
+    color: var(--text);
+    background: var(--accent-soft);
+  }
+
+  .assistant-test:disabled {
+    cursor: default;
+  }
+
+  /* The result glyph is an OUTCOME, not a control, so it stays visible after a
+     test (no hover gate) — a failing assistant keeps flagging itself. */
+  .assistant-health {
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    padding: 0 2px;
+  }
+
+  .assistant-health.ok {
+    color: var(--accent-deep);
+  }
+
+  .assistant-health.fail {
+    color: var(--danger);
   }
 </style>

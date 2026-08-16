@@ -14,6 +14,10 @@ export type AIHealthResponse = {
   latency_ms: number;
   policy: AIPolicy;
   error?: string | null;
+  // Which assistant the check resolved and tested (#336). null only when the
+  // roster is empty (legacy default_provider path).
+  assistant_id?: string | null;
+  assistant_name?: string | null;
 };
 
 export type AIProviderInfo = {

@@ -184,7 +184,7 @@
           {#if health}
             <section class="health-check">
               <h3>Connection</h3>
-              <p class="muted">Pings the current project's default assistant to confirm its provider answers.</p>
+              <p class="muted">Pings the default assistant (the topmost) to confirm its provider answers. To test a specific assistant, use its Test button in the Assistants pane.</p>
               <div class="button-row">
                 <button
                   type="button"
@@ -199,9 +199,9 @@
               {#if health.result}
                 <p class="ai-health-result" class:ok={health.result.ok} class:fail={!health.result.ok}>
                   {#if health.result.ok}
-                    ✓ {health.result.provider} · {health.result.model} · {health.result.latency_ms} ms
+                    ✓ {#if health.result.assistant_name}{health.result.assistant_name} · {/if}{health.result.provider} · {health.result.model} · {health.result.latency_ms} ms
                   {:else}
-                    ✗ {health.result.provider || "(no provider)"} — {health.result.error}
+                    ✗ {#if health.result.assistant_name}{health.result.assistant_name} · {/if}{health.result.provider || "(no provider)"} — {health.result.error}
                   {/if}
                 </p>
               {/if}

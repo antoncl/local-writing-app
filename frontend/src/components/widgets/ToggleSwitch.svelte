@@ -3,15 +3,18 @@
   // the same idiom FieldValueEditor renders for boolean field values. Extracted
   // as a shared widget so on/off booleans read consistently instead of a raw
   // checkbox. Presentation-only `disabled` blocks the click without changing
-  // state. (#1068 — FieldValueEditor's own hand-rolled copy can migrate here;
-  // tracked separately so its tri-state "unset" path isn't reworked in passing.)
+  // state. The optional tri-state `unset` (#522, #1073) parks the knob centre on
+  // a dashed dimmed track so "not set" never reads as a deliberate "off" — the
+  // metadata rail's boolean uses it; getting back to unset is the row's revert
+  // affordance, not this control.
   interface Props {
     checked: boolean;
     ariaLabel: string;
     disabled?: boolean;
+    unset?: boolean;
     onChange: (next: boolean) => void;
   }
-  let { checked, ariaLabel, disabled = false, onChange }: Props = $props();
+  let { checked, ariaLabel, disabled = false, unset = false, onChange }: Props = $props();
 </script>
 
 <button
@@ -19,6 +22,7 @@
   role="switch"
   class="toggle-switch"
   class:on={checked}
+  class:unset={unset}
   aria-checked={checked}
   aria-label={ariaLabel}
   {disabled}
@@ -63,5 +67,15 @@
   }
   .toggle-switch.on .toggle-switch-knob {
     transform: translateX(14px);
+  }
+  /* Unset (#522): neither on nor off — a dashed, dimmed track with the knob
+     parked centre so "not set" never reads as a deliberate "off". */
+  .toggle-switch.unset {
+    opacity: 0.55;
+    border-style: dashed;
+    background: var(--inset);
+  }
+  .toggle-switch.unset .toggle-switch-knob {
+    transform: translateX(7px);
   }
 </style>

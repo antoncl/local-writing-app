@@ -37,6 +37,8 @@ describe("editorPanes delete routing for plot templates (S4c #3)", () => {
     ];
     // Keep the confirm off the UI and background refreshes off the network.
     vi.spyOn(api, "referenceGraph").mockResolvedValue({ refs: {} });
+    // The delete flow also re-fetches the chat roster (#1087); keep it off-network.
+    vi.spyOn(api, "listChatSessions").mockResolvedValue({ sessions: [] });
   });
 
   afterEach(() => editorPanes.reset());

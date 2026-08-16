@@ -30,6 +30,7 @@ import { refreshPromptEntries } from "@/lib/stores/prompts";
 import { refreshAssistantEntries } from "@/lib/stores/assistants";
 import { refreshPlotTemplates } from "@/lib/stores/plotTemplates";
 import { refreshTodos } from "@/lib/stores/todos";
+import { refreshChatSessions } from "@/lib/stores/chats";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import {
   collectNodeIdSet,
@@ -270,7 +271,12 @@ class TreeActions {
       leaf: { singular: "scene", plural: "scenes" },
       container: { singular: "sub-container", plural: "sub-containers" },
     },
-    afterDelete: () => refreshTodos(),
+    afterDelete: () => {
+      // A deleted scene may have cascade-deleted its attached chats (#1078); drop
+      // them from the Chats pane (#1087).
+      void refreshChatSessions();
+      return refreshTodos();
+    },
     afterRename: (nodeId, title) => editorPanes.syncRename(nodeId, title),
     supportsDrag: true,
     showStatusStripe: true,
@@ -299,6 +305,8 @@ class TreeActions {
       leaf: { singular: "note", plural: "notes" },
       container: { singular: "topic", plural: "topics" },
     },
+    // A deleted note may have cascade-deleted attached chats (#1078/#1087).
+    afterDelete: () => refreshChatSessions(),
     supportsDrag: false,
     showStatusStripe: false,
     containerHasEditor: false,

@@ -56,6 +56,8 @@ describe("editorPaneDelete: per-kind delete routing", () => {
     vi.restoreAllMocks();
     // Background reverse-index rebuild (all branches) — keep it off the network.
     vi.spyOn(api, "referenceGraph").mockResolvedValue({ refs: {} });
+    // Post-delete chat-roster refresh (#1087, all branches) — same treatment.
+    vi.spyOn(api, "listChatSessions").mockResolvedValue({ sessions: [] });
   });
 
   afterEach(() => {
@@ -147,5 +149,12 @@ describe("editorPaneDelete: per-kind delete routing", () => {
     expect(req?.confirmLabel).toBe("Delete Chat");
     expect(req?.message).toContain("removes the chat file");
     expect(req?.message).not.toMatch(/prompt/i);
+  });
+
+  it("re-fetches the chat roster after a delete, so a cascaded chat leaves the pane (#1087)", async () => {
+    vi.spyOn(api, "deleteLoreEntry").mockResolvedValue({ entries: [] });
+    await deleteVia(paneFor("lore", "lore:character"));
+    await Promise.resolve(); // let the fire-and-forget refresh initiate
+    expect(api.listChatSessions).toHaveBeenCalled(); // stubbed in beforeEach
   });
 });

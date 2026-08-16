@@ -54,66 +54,6 @@ def _create_snippets_folder(root: Path) -> None:
     (root / "snippets").mkdir(exist_ok=True)
 
 
-def _move_chat_costs_to_invocation_log(root: Path) -> None:
-    """v3→v4: unify chat-session cost accounting into ai_invocations.yaml
-    (Phase C2 Slice B). Each chat with a non-zero cost_usd_total
-    contributes one summary row to the log (chat_session_id, scene_id,
-    cost_usd, ts), and cost_usd_total is zeroed in the chat YAML.
-    Cost surfaces re-derive from the log post-migration."""
-    chats_dir = root / "chats"
-    if not chats_dir.exists():
-        return
-    log_path = root / "ai_invocations.yaml"
-    log_records: list[dict] = []
-    if log_path.exists():
-        try:
-            existing = yaml.safe_load(log_path.read_text(encoding="utf-8")) or {}
-        except yaml.YAMLError:
-            existing = {}
-        if isinstance(existing, dict):
-            value = existing.get("invocations")
-            if isinstance(value, list):
-                log_records = list(value)
-    appended = False
-    for entry in chats_dir.iterdir():
-        if not entry.is_file() or entry.suffix.lower() != ".yaml":
-            continue
-        try:
-            chat = yaml.safe_load(entry.read_text(encoding="utf-8")) or {}
-        except yaml.YAMLError:
-            continue
-        if not isinstance(chat, dict):
-            continue
-        raw_cost = chat.get("cost_usd_total")
-        try:
-            cost = float(raw_cost) if raw_cost is not None else 0.0
-        except (TypeError, ValueError):
-            cost = 0.0
-        if cost <= 0:
-            continue
-        chat_id = str(chat.get("id", "") or "")
-        log_records.append({
-            "id": f"inv_migrated_{chat_id or entry.stem}",
-            "ts": str(chat.get("updated_at") or chat.get("created_at") or ""),
-            "prompt_entry_id": str(chat.get("prompt_entry_id", "") or ""),
-            "prompt_entry_type": "chat",
-            "scene_id": str(chat.get("target_scene_id", "") or ""),
-            "chat_session_id": chat_id,
-            "cost_usd": cost,
-        })
-        chat["cost_usd_total"] = 0.0
-        entry.write_text(
-            yaml.safe_dump(chat, sort_keys=False, allow_unicode=True),
-            encoding="utf-8",
-        )
-        appended = True
-    if appended:
-        log_path.write_text(
-            yaml.safe_dump({"invocations": log_records}, sort_keys=False, allow_unicode=True),
-            encoding="utf-8",
-        )
-
-
 def _create_research_structure(root: Path) -> None:
     """v4→v5: introduce the research kind. Create research/notes/ for
     note markdown files and seed an empty research.structure.yaml so
@@ -139,13 +79,15 @@ def _create_research_structure(root: Path) -> None:
 
 # Each tuple: (target_version, description, function)
 # Migrations run in registry order. Version numbers are history and are never
-# reused or renumbered, so a retired step leaves a gap: 3 (create project.md)
-# was removed with #343 — it wrote a constant `id: project`, which collides at
-# every layer of a nested chain, and pre-1.0 there are no projects old enough
-# to need it. A pre-v3 folder is simply stamped forward.
+# reused or renumbered, so a retired step leaves a gap. Two gaps now: 3 (create
+# project.md) was removed with #343 — it wrote a constant `id: project`, which
+# collides at every layer of a nested chain; and 4 (move chat cost_usd_total
+# into ai_invocations.yaml) was removed with #76 — pre-1.0 the only projects
+# that would run it are recreated from scratch, so it had already served its
+# purpose and was pure carrying cost. A folder sitting at a retired version is
+# carried forward by the remaining steps and the final stamp-to-CURRENT_VERSION.
 MIGRATIONS: list[tuple[int, str, MigrationFn]] = [
     (2, "create snippets/ folder for snippet node kind", _create_snippets_folder),
-    (4, "move chat cost_usd_total into ai_invocations.yaml", _move_chat_costs_to_invocation_log),
     (5, "create research/ folder and research.structure.yaml", _create_research_structure),
 ]
 

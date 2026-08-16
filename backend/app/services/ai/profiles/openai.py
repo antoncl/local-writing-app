@@ -8,7 +8,7 @@ pricing on the models endpoint.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
@@ -21,6 +21,9 @@ from app.services.ai.profiles.base import (
     default_token_count,
 )
 
+if TYPE_CHECKING:
+    from app.services.machine_settings import MachineSettings
+
 log = logging.getLogger(__name__)
 
 
@@ -31,6 +34,10 @@ class OpenAIProfile(ProviderProfile):
     def __init__(self, api_key: str) -> None:
         self._api_key = api_key
         self._cache: list[ModelDescriptor] | None = None
+
+    @classmethod
+    def from_settings(cls, settings: MachineSettings) -> OpenAIProfile:
+        return cls(api_key=settings.providers.openai_api_key or "")
 
     async def list_models(self, *, force_refresh: bool = False) -> list[ModelDescriptor]:
         if not force_refresh and self._cache is not None:

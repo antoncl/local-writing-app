@@ -24,6 +24,10 @@ class _DummyProfile(ProviderProfile):
     name = "dummy"
     display_name = "Dummy"
 
+    @classmethod
+    def from_settings(cls, settings):
+        return cls()
+
     async def list_models(self, *, force_refresh: bool = False):
         return []
 

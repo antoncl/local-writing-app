@@ -453,6 +453,11 @@ export type MetadataFieldDefinition = {
   intrinsic?: boolean;
   // Hidden by default from the per-node rail and Views field picker.
   hidden?: boolean;
+  // Whether the AI may author this field's value on a brainstorm commit
+  // (ADR-0059 §E). Default true (omitted on save when true); set false to mark
+  // the field off-limits — the built-in `context_policy` ships false. Moot for
+  // never-proposable types (computed / entity_ref / entity_ref_list).
+  ai_proposable?: boolean;
   // Authorship category (ADR-0029 §D), stamped by the backend resolver on
   // every resolved field: `intrinsic` (identity triple, on `node.<key>`),
   // `computed` (app-produced, read-only), else `stored` (`metadata.<key>`).

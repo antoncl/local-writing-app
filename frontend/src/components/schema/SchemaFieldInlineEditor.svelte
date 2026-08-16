@@ -32,6 +32,9 @@
     // a named group or a single scalar type. Both null for every other type.
     itemGroup: string | null;
     itemType: ListItemScalarType | null;
+    // Whether the AI may author this field on a brainstorm commit (ADR-0059 §E).
+    // Default true; the parent omits it on save unless false (built-in default).
+    aiProposable: boolean;
   };
 
   // Monotonic per-instance counter → a unique `id` for each editor's section
@@ -151,6 +154,9 @@
         : f?.item_type
           ? `scalar:${f.item_type}`
           : "",
+      // Default true (ADR-0059 §E) — a field is AI-writable unless the author
+      // opts out. Seeds from an existing field's stored flag.
+      aiProposable: f?.ai_proposable ?? true,
     };
   });
   let type: MetadataFieldType = $state(seed.type);
@@ -176,6 +182,14 @@
   const itemGroup = $derived(itemShape.startsWith("group:") ? itemShape.slice(6) : null);
   const itemType = $derived(
     itemShape.startsWith("scalar:") ? (itemShape.slice(7) as ListItemScalarType) : null,
+  );
+  let aiProposable: boolean = $state(seed.aiProposable);
+  // The AI-authorship toggle only applies to types the AI can ever propose:
+  // references and computed values are never proposed regardless of the flag
+  // (backend `NON_PROPOSABLE_FIELD_TYPES`), so the control is hidden for them
+  // rather than shown as an inert switch.
+  const aiProposableApplies = $derived(
+    type !== "computed" && type !== "entity_ref" && type !== "entity_ref_list",
   );
   // Groups offered as item shapes: only members inside the one scalar
   // catalog (LIST_ITEM_SCALAR_TYPES — same source as the backend's positive
@@ -299,6 +313,7 @@
       pickerConfig,
       itemGroup: type === "list" ? itemGroup : null,
       itemType: type === "list" ? itemType : null,
+      aiProposable,
     });
   }
 
@@ -393,6 +408,17 @@
       oninput={(event) => (description = event.currentTarget.value)}
     ></textarea>
   </label>
+  {#if aiProposableApplies}
+    <label class="sfi-toggle">
+      <input
+        type="checkbox"
+        checked={aiProposable}
+        aria-label="AI may write this field"
+        onchange={(event) => (aiProposable = event.currentTarget.checked)}
+      />
+      <span>AI may write this field when committing a brainstorm</span>
+    </label>
+  {/if}
   <div class="sfi-controls">
     <label class="sfi-field">Section
       <input
@@ -703,6 +729,17 @@
     align-items: center;
     gap: 16px;
     flex-wrap: wrap;
+  }
+  .sfi-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+    cursor: pointer;
+  }
+  .sfi-toggle input {
+    cursor: pointer;
   }
   .sfi-id {
     font-size: var(--fs-xs);

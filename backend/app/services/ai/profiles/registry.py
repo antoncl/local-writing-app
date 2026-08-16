@@ -31,6 +31,26 @@ def known_provider_names() -> list[str]:
     return sorted(_REGISTRY)
 
 
+def recognizing_provider(api_key: str) -> str | None:
+    """Name of the provider whose key signature most specifically matches
+    `api_key`, or None if none does.
+
+    Each provider declares its own `key_prefixes`; the longest matching
+    prefix wins, so a specific sub-prefix (`sk-ant-`) beats a looser one
+    (`sk-`). The dispatch layer uses this to tell a user they pasted one
+    provider's key into another provider's field.
+    """
+    key = api_key.strip()
+    best_name: str | None = None
+    best_len = 0
+    for provider_name, profile_cls in _REGISTRY.items():
+        for prefix in profile_cls.key_prefixes:
+            if key.startswith(prefix) and len(prefix) > best_len:
+                best_name = provider_name
+                best_len = len(prefix)
+    return best_name
+
+
 def profile_for(provider: str, settings: MachineSettings) -> ProviderProfile:
     """Construct a fresh profile for the given provider name.
 

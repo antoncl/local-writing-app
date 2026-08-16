@@ -15,7 +15,11 @@ from app.services.ai.profiles.anthropic import AnthropicProfile
 from app.services.ai.profiles.ollama import OllamaProfile
 from app.services.ai.profiles.openai import OpenAIProfile
 from app.services.ai.profiles.openrouter import OpenRouterProfile
-from app.services.ai.profiles.registry import known_provider_names, profile_for
+from app.services.ai.profiles.registry import (
+    known_provider_names,
+    profile_for,
+    recognizing_provider,
+)
 
 
 def _settings() -> ms.MachineSettings:
@@ -59,3 +63,16 @@ def test_profile_for_raises_on_unknown_provider():
 def test_ollama_from_settings_falls_back_to_default_host_when_empty():
     settings = ms.MachineSettings(providers=ms.ProviderCredentials(ollama_host=""))
     assert profile_for("ollama", settings)._base == "http://127.0.0.1:11434"
+
+
+def test_recognizing_provider_attributes_a_key_by_specificity():
+    # Each provider declares only its own signature; the scan picks the most
+    # specific match, so the sub-prefixes beat OpenAI's loose `sk-`.
+    assert recognizing_provider("sk-ant-abc") == "anthropic"
+    assert recognizing_provider("sk-or-abc") == "openrouter"
+    assert recognizing_provider("sk-proj-abc") == "openai"
+    assert recognizing_provider("sk-abc") == "openai"
+    # Surrounding whitespace is ignored; an unrecognized key attributes to no one.
+    assert recognizing_provider("  sk-ant-abc  ") == "anthropic"
+    assert recognizing_provider("nope") is None
+    assert recognizing_provider("") is None

@@ -16,10 +16,10 @@ from app.services.ai.profiles._loader import baked_in_for, mark_deprecated
 from app.services.ai.profiles.base import (
     CachingStyle,
     ModelDescriptor,
-    ProviderProfile,
     UsageMetrics,
     default_token_count,
 )
+from app.services.ai.profiles.openai_compatible import OpenAICompatibleProfile
 
 if TYPE_CHECKING:
     from app.services.machine_settings import MachineSettings
@@ -27,9 +27,10 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-class OpenAIProfile(ProviderProfile):
+class OpenAIProfile(OpenAICompatibleProfile):
     name = "openai"
     display_name = "OpenAI"
+    key_prefixes = ("sk-",)
 
     def __init__(self, api_key: str) -> None:
         self._api_key = api_key
@@ -38,6 +39,9 @@ class OpenAIProfile(ProviderProfile):
     @classmethod
     def from_settings(cls, settings: MachineSettings) -> OpenAIProfile:
         return cls(api_key=settings.providers.openai_api_key or "")
+
+    def _chat_base_url(self) -> str:
+        return "https://api.openai.com/v1"
 
     async def list_models(self, *, force_refresh: bool = False) -> list[ModelDescriptor]:
         if not force_refresh and self._cache is not None:

@@ -23,7 +23,10 @@ from app.models import UpdateProjectSettingsRequest
 from app.services import machine_settings as ms
 from app.services.ai import providers as ai_providers
 from app.services.ai.profiles import UsageMetrics
+from app.services.ai.profiles.base import ChatOutcome, ProviderError
 from app.services.ai.sessions import default_registry
+
+_ANTHROPIC_CHAT = "app.services.ai.profiles.anthropic.AnthropicProfile.chat"
 
 
 def _set_machine_keys(**keys: str) -> ms.MachineSettings:
@@ -75,8 +78,8 @@ class NonStreamingChatCostTests(unittest.TestCase):
         raw = _anthropic_raw_with_usage()
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
-                "app.services.ai.providers._anthropic_chat",
-                return_value=("Reply.", "end_turn", raw),
+                _ANTHROPIC_CHAT,
+                return_value=ChatOutcome("Reply.", "end_turn", raw),
              ):
             response = self.client.post(
                 "/api/ai/chat",
@@ -104,8 +107,8 @@ class NonStreamingChatCostTests(unittest.TestCase):
         raw = _anthropic_raw_with_usage()
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
-                "app.services.ai.providers._anthropic_chat",
-                return_value=("Reply.", "end_turn", raw),
+                _ANTHROPIC_CHAT,
+                return_value=ChatOutcome("Reply.", "end_turn", raw),
              ):
             response = self.client.post(
                 "/api/ai/chat",
@@ -127,8 +130,8 @@ class NonStreamingChatCostTests(unittest.TestCase):
         loaded = _set_machine_keys(anthropic="sk-ant-test")
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
-                "app.services.ai.providers._anthropic_chat",
-                side_effect=ai_providers._ProviderError("boom"),
+                _ANTHROPIC_CHAT,
+                side_effect=ProviderError("boom"),
              ):
             response = self.client.post(
                 "/api/ai/chat",

@@ -17,10 +17,10 @@ from app.services.ai.profiles.base import (
     Capability,
     CapabilityTier,
     ModelDescriptor,
-    ProviderProfile,
     UsageMetrics,
     default_token_count,
 )
+from app.services.ai.profiles.openai_compatible import OpenAICompatibleProfile
 
 if TYPE_CHECKING:
     from app.services.machine_settings import MachineSettings
@@ -32,7 +32,7 @@ log = logging.getLogger(__name__)
 _DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434"
 
 
-class OllamaProfile(ProviderProfile):
+class OllamaProfile(OpenAICompatibleProfile):
     name = "ollama"
     display_name = "Ollama"
 
@@ -50,6 +50,14 @@ class OllamaProfile(ProviderProfile):
     @classmethod
     def from_settings(cls, settings: MachineSettings) -> OllamaProfile:
         return cls(host=settings.providers.ollama_host or _DEFAULT_OLLAMA_HOST)
+
+    def _chat_base_url(self) -> str:
+        # The OpenAI-compat shim lives at /v1 on the native host.
+        return f"{self._base}/v1"
+
+    def _chat_api_key(self) -> str:
+        # Ollama needs no key; the SDK still wants a non-empty placeholder.
+        return "ollama"
 
     async def list_models(self, *, force_refresh: bool = False) -> list[ModelDescriptor]:
         if not force_refresh and self._cache is not None:

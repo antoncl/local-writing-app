@@ -16,7 +16,10 @@ import httpx
 from app.services.ai.profiles._loader import baked_in_for, mark_deprecated
 from app.services.ai.profiles.base import (
     CachingStyle,
+    ChatCall,
+    ChatOutcome,
     ModelDescriptor,
+    ProviderError,
     ProviderProfile,
     UsageMetrics,
     default_token_count,
@@ -48,10 +51,14 @@ def anthropic_supports_temperature(model_id: str) -> bool:
 class AnthropicProfile(ProviderProfile):
     name = "anthropic"
     display_name = "Anthropic"
+    key_prefixes = ("sk-ant-",)
 
     def __init__(self, api_key: str) -> None:
         self._api_key = api_key
         self._cache: list[ModelDescriptor] | None = None
+
+    def configured_key(self) -> str:
+        return self._api_key
 
     @classmethod
     def from_settings(cls, settings: MachineSettings) -> AnthropicProfile:
@@ -131,3 +138,91 @@ class AnthropicProfile(ProviderProfile):
             cache_write_tokens=int(getattr(usage, "cache_creation_input_tokens", 0) or 0),
             output_tokens=int(getattr(usage, "output_tokens", 0) or 0),
         )
+
+    def chat(self, call: ChatCall) -> ChatOutcome:
+        try:
+            from anthropic import Anthropic
+        except ImportError as exc:
+            raise ProviderError(f"anthropic package not installed: {exc}") from exc
+
+        client = Anthropic(api_key=self._api_key, timeout=120.0)
+        kwargs: dict = {
+            "model": call.model,
+            "max_tokens": call.max_tokens,
+            "messages": call.messages,
+        }
+        # Only send temperature if the caller set one AND the model accepts
+        # it. The model gate is a backstop for legacy assistants that pre-date
+        # save-time validation; new incompatible combos are refused at save.
+        if call.temperature is not None and anthropic_supports_temperature(call.model):
+            kwargs["temperature"] = call.temperature
+        # system_blocks (multi-block, per-block cache markers) overrides the
+        # single-string system_prompt. Caller picks one or the other.
+        if call.system_blocks:
+            system_payload = anthropic_system_blocks(call.system_blocks)
+            if system_payload:
+                kwargs["system"] = system_payload
+        elif call.system_prompt:
+            kwargs["system"] = anthropic_system_with_cache(call.system_prompt)
+        response = client.messages.create(**kwargs)
+        blocks = getattr(response, "content", None) or []
+        parts = []
+        for block in blocks:
+            text = getattr(block, "text", None)
+            if text:
+                parts.append(text)
+        stop_reason = getattr(response, "stop_reason", None)
+        return ChatOutcome("".join(parts), stop_reason, response)
+
+
+def anthropic_system_with_cache(system_prompt: str):
+    """Wrap a single system prompt as a cacheable content block.
+
+    Thin compatibility wrapper around `anthropic_system_blocks` for the
+    single-block path (one cache marker after the whole system prompt).
+    """
+
+    if not system_prompt:
+        return ""
+    return anthropic_system_blocks(
+        [{"text": system_prompt, "cache_break_after": True}]
+    )
+
+
+def anthropic_system_blocks(blocks: list[dict]):
+    """Convert structured system blocks into Anthropic's content-array shape.
+
+    Each input block is a dict:
+        {
+            "text": str,
+            "cache_break_after": bool = False,
+            "ttl": "5m" | "1h" = "5m",   # only honored when cache_break_after
+        }
+
+    Output is a list of `{type, text, cache_control?}` dicts suitable for
+    the Anthropic SDK's `system` kwarg. A cache_control marker is emitted
+    only on blocks where `cache_break_after` is True. Anthropic caches the
+    prefix UP TO each marker; placing markers between stable sections lets
+    later turns reuse the cached prefix up to the last unchanged marker.
+
+    Empty blocks (no text) are dropped. Empty input returns "" so the caller
+    can skip the `system` kwarg entirely. Min-cache-size and breakpoint-budget
+    enforcement are the caller's responsibility.
+    """
+
+    if not blocks:
+        return ""
+    out: list[dict] = []
+    for block in blocks:
+        text = block.get("text") or ""
+        if not text:
+            continue
+        sdk_block: dict = {"type": "text", "text": text}
+        if block.get("cache_break_after"):
+            cache_control: dict = {"type": "ephemeral"}
+            ttl = block.get("ttl")
+            if ttl in ("5m", "1h"):
+                cache_control["ttl"] = ttl
+            sdk_block["cache_control"] = cache_control
+        out.append(sdk_block)
+    return out if out else ""

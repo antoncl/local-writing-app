@@ -23,11 +23,12 @@ from app.services.ai.profiles.base import (
     CachingStyle,
     Capability,
     CapabilityTier,
+    ChatCall,
     ModelDescriptor,
-    ProviderProfile,
     UsageMetrics,
     default_token_count,
 )
+from app.services.ai.profiles.openai_compatible import OpenAICompatibleProfile
 
 if TYPE_CHECKING:
     from app.services.machine_settings import MachineSettings
@@ -52,9 +53,10 @@ _CACHING_BY_PREFIX: dict[str, CachingStyle] = {
 }
 
 
-class OpenRouterProfile(ProviderProfile):
+class OpenRouterProfile(OpenAICompatibleProfile):
     name = "openrouter"
     display_name = "OpenRouter"
+    key_prefixes = ("sk-or-",)
 
     def __init__(self, api_key: str) -> None:
         self._api_key = api_key
@@ -63,6 +65,25 @@ class OpenRouterProfile(ProviderProfile):
     @classmethod
     def from_settings(cls, settings: MachineSettings) -> OpenRouterProfile:
         return cls(api_key=settings.providers.openrouter_api_key or "")
+
+    def _chat_base_url(self) -> str:
+        return "https://openrouter.ai/api/v1"
+
+    def _build_messages(self, call: ChatCall) -> list[dict]:
+        # Pass Anthropic-style cache_control markers through to routes that
+        # cache explicitly; collapse to a plain string otherwise.
+        messages = list(
+            openrouter_system_messages(
+                call.system_prompt,
+                call.system_blocks,
+                self.caching_style(call.model),
+            )
+        )
+        messages.extend(call.messages)
+        return messages
+
+    def _extra_body(self, call: ChatCall) -> dict:
+        return openrouter_extra_body(call.session_id)
 
     async def list_models(self, *, force_refresh: bool = False) -> list[ModelDescriptor]:
         if not force_refresh and self._cache is not None:
@@ -134,13 +155,68 @@ class OpenRouterProfile(ProviderProfile):
 
 
 def caching_style_for_model(model_id: str) -> CachingStyle:
-    """Module-level helper so the chat dispatcher can branch without
+    """Module-level helper so the streaming dispatcher can branch without
     instantiating a ProviderProfile. Mirrors the prefix lookup the
     OpenRouterProfile.caching_style method does."""
     if not model_id:
         return "none"
     prefix = model_id.split("/", 1)[0].lower()
     return _CACHING_BY_PREFIX.get(prefix, "none")
+
+
+def openrouter_system_messages(
+    system_prompt: str,
+    system_blocks: list[dict] | None,
+    caching_style: str,
+) -> list[dict]:
+    """Build the [system] message list for an OpenRouter chat call.
+
+    OpenRouter accepts Anthropic-style `cache_control` markers on individual
+    content blocks when the routed-to provider needs them explicitly
+    (anthropic/google/qwen). For auto-cache providers (openai/deepseek/grok)
+    markers are ignored, so we collapse to a plain string to keep the wire
+    small. Returns [] when there's nothing to send. Pure — no network/SDK.
+    """
+    if system_blocks and caching_style == "explicit":
+        parts: list[dict] = []
+        for block in system_blocks:
+            text = block.get("text") or ""
+            if not text:
+                continue
+            part: dict = {"type": "text", "text": text}
+            if block.get("cache_break_after"):
+                cache_control: dict = {"type": "ephemeral"}
+                ttl = block.get("ttl")
+                if ttl in ("5m", "1h"):
+                    cache_control["ttl"] = ttl
+                part["cache_control"] = cache_control
+            parts.append(part)
+        if parts:
+            return [{"role": "system", "content": parts}]
+        return []
+    # caching_style != "explicit": collapse blocks to a single string
+    # (auto-cache providers index on prefix bytes, no markers needed;
+    # "none" providers don't cache anyway).
+    collapsed = system_prompt
+    if system_blocks and not collapsed:
+        collapsed = "\n\n".join(
+            b.get("text", "") for b in system_blocks if b.get("text")
+        )
+    if not collapsed:
+        return []
+    return [{"role": "system", "content": collapsed}]
+
+
+def openrouter_extra_body(session_id: str | None) -> dict:
+    """OpenRouter-specific fields outside the standard chat-completions
+    schema. Currently just `session_id` for provider stickiness — pinning a
+    chat to one underlying provider so the cache prefix stays valid across
+    turns. See https://openrouter.ai/docs/guides/best-practices/prompt-caching
+    """
+    extra: dict = {}
+    if session_id:
+        extra["session_id"] = session_id
+    return extra
 
 
 def _row_to_descriptor(row: dict) -> ModelDescriptor:

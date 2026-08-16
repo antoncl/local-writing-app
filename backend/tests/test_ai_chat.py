@@ -11,6 +11,10 @@ from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import UpdateProjectSettingsRequest
+from app.services.ai.profiles.base import ChatOutcome
+
+_ANTHROPIC_CHAT = "app.services.ai.profiles.anthropic.AnthropicProfile.chat"
+_OPENAI_COMPAT_CHAT = "app.services.ai.profiles.openai_compatible.OpenAICompatibleProfile.chat"
 
 
 def _set_machine_keys(**keys: str) -> None:
@@ -65,7 +69,7 @@ class ChatEndpointTests(unittest.TestCase):
         self._allow_cloud()
         loaded = _set_machine_keys(anthropic="sk-ant-test", default_provider="anthropic")
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
-             patch("app.services.ai.providers._anthropic_chat", return_value=("Hello back.", "end_turn", SimpleNamespace())):
+             patch(_ANTHROPIC_CHAT, return_value=ChatOutcome("Hello back.", "end_turn", SimpleNamespace())):
             response = self.client.post(
                 "/api/ai/chat",
                 json={
@@ -87,11 +91,31 @@ class ChatEndpointTests(unittest.TestCase):
     def test_ollama_chat_uses_openai_compatible_path(self) -> None:
         self._allow_local_only()
         loaded = _set_machine_keys(default_provider="ollama")
+
+        # Patch the OpenAI SDK client itself so the real OllamaProfile.chat
+        # runs and we can see the endpoint + key it constructs — the base_url
+        # and placeholder-key behaviour that used to be free-function kwargs.
+        captured: dict = {}
+
+        class _FakeOpenAI:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+                self.chat = SimpleNamespace(
+                    completions=SimpleNamespace(create=self._create)
+                )
+
+            def _create(self, **_kw):
+                return SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            message=SimpleNamespace(content="Local reply."),
+                            finish_reason="stop",
+                        )
+                    ]
+                )
+
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
-             patch(
-                "app.services.ai.providers._openai_compatible_chat",
-                return_value=("Local reply.", "stop", SimpleNamespace()),
-            ) as mock_chat:
+             patch("openai.OpenAI", _FakeOpenAI):
             response = self.client.post(
                 "/api/ai/chat",
                 json={
@@ -104,18 +128,18 @@ class ChatEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertTrue(response.json()["ok"])
         self.assertEqual(response.json()["content"], "Local reply.")
-        # Verify the call used Ollama's base URL
-        kwargs = mock_chat.call_args.kwargs
-        self.assertEqual(kwargs["base_url"], "http://127.0.0.1:11434/v1")
-        self.assertFalse(kwargs["requires_key"])
+        # Ollama routes through the OpenAI-compatible client at host/v1 with a
+        # placeholder key — no real credential required.
+        self.assertEqual(captured["base_url"], "http://127.0.0.1:11434/v1")
+        self.assertEqual(captured["api_key"], "ollama")
 
     def test_multi_turn_messages_passed_through(self) -> None:
         self._allow_cloud()
         loaded = _set_machine_keys(anthropic="sk-ant-test")
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
-                "app.services.ai.providers._anthropic_chat",
-                return_value=("Third reply.", "end_turn", SimpleNamespace()),
+                _ANTHROPIC_CHAT,
+                return_value=ChatOutcome("Third reply.", "end_turn", SimpleNamespace()),
             ) as mock_chat:
             self.client.post(
                 "/api/ai/chat",
@@ -130,12 +154,12 @@ class ChatEndpointTests(unittest.TestCase):
                     ],
                 },
             )
-        passed_messages = mock_chat.call_args.kwargs["messages"]
+        passed_messages = mock_chat.call_args.args[0].messages
         self.assertEqual(len(passed_messages), 3)
         self.assertEqual(passed_messages[0]["role"], "user")
         self.assertEqual(passed_messages[1]["role"], "assistant")
         self.assertEqual(passed_messages[2]["content"], "Third?")
-        self.assertEqual(mock_chat.call_args.kwargs["system_prompt"], "Continue the conversation.")
+        self.assertEqual(mock_chat.call_args.args[0].system_prompt, "Continue the conversation.")
 
     # ---- policy enforcement ----
 
@@ -143,7 +167,7 @@ class ChatEndpointTests(unittest.TestCase):
         # Default project policy is "off".
         loaded = _set_machine_keys(anthropic="sk-ant-test")
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
-             patch("app.services.ai.providers._anthropic_chat") as mock_chat:
+             patch(_ANTHROPIC_CHAT) as mock_chat:
             response = self.client.post(
                 "/api/ai/chat",
                 json={
@@ -161,7 +185,7 @@ class ChatEndpointTests(unittest.TestCase):
         self._allow_local_only()
         loaded = _set_machine_keys(anthropic="sk-ant-test", default_provider="anthropic")
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
-             patch("app.services.ai.providers._anthropic_chat") as mock_chat:
+             patch(_ANTHROPIC_CHAT) as mock_chat:
             response = self.client.post(
                 "/api/ai/chat",
                 json={
@@ -180,8 +204,8 @@ class ChatEndpointTests(unittest.TestCase):
         loaded = _set_machine_keys(default_provider="ollama")
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
-                "app.services.ai.providers._openai_compatible_chat",
-                return_value=("OK.", "stop", SimpleNamespace()),
+                _OPENAI_COMPAT_CHAT,
+                return_value=ChatOutcome("OK.", "stop", SimpleNamespace()),
             ):
             response = self.client.post(
                 "/api/ai/chat",
@@ -248,8 +272,8 @@ class ChatEndpointTests(unittest.TestCase):
         loaded = _set_machine_keys(anthropic="sk-ant-test")
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
-                "app.services.ai.providers._anthropic_chat",
-                return_value=("partial response that hit the cap", "max_tokens", SimpleNamespace()),
+                _ANTHROPIC_CHAT,
+                return_value=ChatOutcome("partial response that hit the cap", "max_tokens", SimpleNamespace()),
             ):
             response = self.client.post(
                 "/api/ai/chat",
@@ -269,8 +293,8 @@ class ChatEndpointTests(unittest.TestCase):
         loaded = _set_machine_keys(anthropic="sk-ant-test")
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
-                "app.services.ai.providers._anthropic_chat",
-                return_value=("complete reply", "end_turn", SimpleNamespace()),
+                _ANTHROPIC_CHAT,
+                return_value=ChatOutcome("complete reply", "end_turn", SimpleNamespace()),
             ):
             response = self.client.post(
                 "/api/ai/chat",
@@ -289,7 +313,7 @@ class ChatEndpointTests(unittest.TestCase):
         self._allow_cloud()
         loaded = _set_machine_keys(openai="sk-or-v1-not-an-openai-key", default_provider="openai")
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
-             patch("app.services.ai.providers._openai_compatible_chat") as mock_chat:
+             patch(_OPENAI_COMPAT_CHAT) as mock_chat:
             response = self.client.post(
                 "/api/ai/chat",
                 json={
@@ -309,8 +333,8 @@ class ChatEndpointTests(unittest.TestCase):
         loaded = _set_machine_keys(default_provider="ollama")
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
-                "app.services.ai.providers._openai_compatible_chat",
-                return_value=("default-provider reply", "stop", SimpleNamespace()),
+                _OPENAI_COMPAT_CHAT,
+                return_value=ChatOutcome("default-provider reply", "stop", SimpleNamespace()),
             ):
             response = self.client.post(
                 "/api/ai/chat",
@@ -599,8 +623,8 @@ class ChatEndpointJournalTests(unittest.TestCase):
         loaded = _set_machine_keys(anthropic="sk-ant-test", default_provider="anthropic")
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
-                "app.services.ai.providers._anthropic_chat",
-                return_value=("Reply.", "end_turn", SimpleNamespace()),
+                _ANTHROPIC_CHAT,
+                return_value=ChatOutcome("Reply.", "end_turn", SimpleNamespace()),
              ) as mock_chat:
             response = self.client.post(
                 "/api/ai/chat",
@@ -636,8 +660,7 @@ class ChatEndpointJournalTests(unittest.TestCase):
 
         # Provider received system_blocks: slot 1 = system_prompt (1h),
         # slot 2 = journal XML (5m).
-        kwargs = mock_chat.call_args.kwargs
-        blocks = kwargs["system_blocks"]
+        blocks = mock_chat.call_args.args[0].system_blocks
         self.assertIsNotNone(blocks)
         self.assertEqual(len(blocks), 2)
         self.assertEqual(blocks[0]["text"], "You are a writing assistant.")
@@ -659,8 +682,8 @@ class ChatEndpointJournalTests(unittest.TestCase):
         loaded = _set_machine_keys(anthropic="sk-ant-test", default_provider="anthropic")
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
-                "app.services.ai.providers._anthropic_chat",
-                return_value=("Reply.", "end_turn", SimpleNamespace()),
+                _ANTHROPIC_CHAT,
+                return_value=ChatOutcome("Reply.", "end_turn", SimpleNamespace()),
              ) as mock_chat:
             response = self.client.post(
                 "/api/ai/chat",
@@ -680,8 +703,7 @@ class ChatEndpointJournalTests(unittest.TestCase):
         chat = self.service.read_chat_session(off_chat.id)
         self.assertEqual(list(chat.journal), [])
         # Only the system_prompt block reaches the provider — no lore Slot 2.
-        kwargs = mock_chat.call_args.kwargs
-        blocks = kwargs["system_blocks"]
+        blocks = mock_chat.call_args.args[0].system_blocks
         self.assertEqual(len(blocks), 1)
         self.assertEqual(blocks[0]["text"], "You are a writing assistant.")
 
@@ -689,8 +711,8 @@ class ChatEndpointJournalTests(unittest.TestCase):
         loaded = _set_machine_keys(anthropic="sk-ant-test", default_provider="anthropic")
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
-                "app.services.ai.providers._anthropic_chat",
-                return_value=("Reply.", "end_turn", SimpleNamespace()),
+                _ANTHROPIC_CHAT,
+                return_value=ChatOutcome("Reply.", "end_turn", SimpleNamespace()),
              ) as mock_chat:
             response = self.client.post(
                 "/api/ai/chat",
@@ -705,17 +727,17 @@ class ChatEndpointJournalTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["journal_added"], [])
         # Legacy path: system_blocks not passed.
-        kwargs = mock_chat.call_args.kwargs
-        self.assertIsNone(kwargs.get("system_blocks"))
-        self.assertIsNone(kwargs.get("session_id"))
+        call = mock_chat.call_args.args[0]
+        self.assertIsNone(call.system_blocks)
+        self.assertIsNone(call.session_id)
 
     def test_journal_is_append_only_across_turns(self) -> None:
         # Turn 1: user mentions Honor → Honor + Pavel added.
         loaded = _set_machine_keys(anthropic="sk-ant-test", default_provider="anthropic")
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
-                "app.services.ai.providers._anthropic_chat",
-                return_value=("OK.", "end_turn", SimpleNamespace()),
+                _ANTHROPIC_CHAT,
+                return_value=ChatOutcome("OK.", "end_turn", SimpleNamespace()),
              ):
             self.client.post(
                 "/api/ai/chat",
@@ -733,8 +755,8 @@ class ChatEndpointJournalTests(unittest.TestCase):
         # Turn 2: user mentions Nimitz → Nimitz added; Honor NOT re-added.
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
-                "app.services.ai.providers._anthropic_chat",
-                return_value=("OK.", "end_turn", SimpleNamespace()),
+                _ANTHROPIC_CHAT,
+                return_value=ChatOutcome("OK.", "end_turn", SimpleNamespace()),
              ):
             response = self.client.post(
                 "/api/ai/chat",

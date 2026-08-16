@@ -6,9 +6,11 @@ test, not silent regression.
 
 from __future__ import annotations
 
-from app.services.ai.providers import (
-    _anthropic_system_blocks,
-    _anthropic_system_with_cache,
+from app.services.ai.profiles.anthropic import (
+    anthropic_system_blocks as _anthropic_system_blocks,
+)
+from app.services.ai.profiles.anthropic import (
+    anthropic_system_with_cache as _anthropic_system_with_cache,
 )
 
 # ---- legacy single-string helper (back-compat) ---------------------------

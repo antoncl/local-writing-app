@@ -89,6 +89,7 @@
     computeDraftTitleOverrides,
   } from "@/lib/editor-core/editorPaneModel";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
+  import { flushDirtyPanesOnHide } from "@/lib/stores/editorPaneSave";
   import { entryBrainstorm } from "@/lib/stores/entryBrainstorm.svelte";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
   import { projectChooser } from "@/lib/stores/projectChooser.svelte";
@@ -293,7 +294,21 @@
     // Assistant tags are machine-global (like the roster) — load once at startup
     // so colored chips + suggestions are ready before a project opens (#88).
     void refreshAssistantTags();
+    // Flush dirty panes on the way out (#369). `visibilitychange: hidden` fires
+    // earlier and more reliably (tab switch, minimize, mobile background) while
+    // the page is still alive to complete a normal, uncapped save. `pagehide` is
+    // the terminal backstop (tab/window close, navigation); only it needs the
+    // keepalive hint (whose ~64KB body cap is why the visibility path stays
+    // normal). Between them a paragraph typed just before leaving reaches disk.
+    const onPageHide = () => void flushDirtyPanesOnHide(editorPanes, { keepalive: true });
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") void flushDirtyPanesOnHide(editorPanes);
+    };
+    window.addEventListener("pagehide", onPageHide);
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       editorPanes.dispose();
       cleanupThemeWiring?.();
     };

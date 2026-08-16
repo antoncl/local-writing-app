@@ -41,6 +41,10 @@ class _DummyProfile(ProviderProfile):
         from app.services.ai.profiles.base import UsageMetrics
         return UsageMetrics()
 
+    def chat(self, call):
+        from app.services.ai.profiles.base import ChatOutcome
+        return ChatOutcome("", None, None)
+
 
 def test_baked_in_parses_for_all_expected_providers():
     catalogue = baked_in_catalogue()

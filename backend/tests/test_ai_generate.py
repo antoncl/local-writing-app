@@ -15,7 +15,10 @@ from app.models import (
     SaveSceneRequest,
     UpdateProjectSettingsRequest,
 )
+from app.services.ai.profiles.base import ChatOutcome
 from app.services.ai.sessions import default_registry
+
+_ANTHROPIC_CHAT = "app.services.ai.profiles.anthropic.AnthropicProfile.chat"
 
 
 def _settings(**keys: str):
@@ -81,8 +84,8 @@ class GenerateEndpointTests(unittest.TestCase):
         settings = _settings(anthropic="sk-ant-test", default_provider="anthropic")
         with patch("app.services.machine_settings.load_settings", return_value=settings), \
              patch(
-                "app.services.ai.providers._anthropic_chat",
-                return_value=("Generated continuation.", "end_turn", SimpleNamespace()),
+                _ANTHROPIC_CHAT,
+                return_value=ChatOutcome("Generated continuation.", "end_turn", SimpleNamespace()),
             ) as mock_chat:
             response = self.client.post(
                 "/api/ai/generate",
@@ -101,12 +104,12 @@ class GenerateEndpointTests(unittest.TestCase):
         self.assertTrue(body["ok"])
         self.assertEqual(body["content"], "Generated continuation.")
         # System prompt was extracted from system message
-        kwargs = mock_chat.call_args.kwargs
-        self.assertEqual(kwargs["system_prompt"], "You are a writer.")
+        call = mock_chat.call_args.args[0]
+        self.assertEqual(call.system_prompt, "You are a writer.")
         # User message was passed through with rendered content
-        self.assertEqual(len(kwargs["messages"]), 1)
-        self.assertEqual(kwargs["messages"][0]["role"], "user")
-        self.assertEqual(kwargs["messages"][0]["content"], "Continue: The Departure")
+        self.assertEqual(len(call.messages), 1)
+        self.assertEqual(call.messages[0]["role"], "user")
+        self.assertEqual(call.messages[0]["content"], "Continue: The Departure")
         # Response echoes the rendered messages so the UI can show them
         self.assertEqual(len(body["rendered_messages"]), 2)
 
@@ -115,8 +118,8 @@ class GenerateEndpointTests(unittest.TestCase):
         settings = _settings(anthropic="sk-ant-test", default_provider="anthropic")
         with patch("app.services.machine_settings.load_settings", return_value=settings), \
              patch(
-                "app.services.ai.providers._anthropic_chat",
-                return_value=("OK", "end_turn", SimpleNamespace()),
+                _ANTHROPIC_CHAT,
+                return_value=ChatOutcome("OK", "end_turn", SimpleNamespace()),
             ) as mock_chat:
             self.client.post(
                 "/api/ai/generate",
@@ -132,13 +135,13 @@ class GenerateEndpointTests(unittest.TestCase):
                     "model": "x",
                 },
             )
-        kwargs = mock_chat.call_args.kwargs
+        call = mock_chat.call_args.args[0]
         self.assertEqual(
-            [m["role"] for m in kwargs["messages"]],
+            [m["role"] for m in call.messages],
             ["user", "assistant", "user"],
         )
         self.assertEqual(
-            [m["content"] for m in kwargs["messages"]],
+            [m["content"] for m in call.messages],
             ["first", "reply", "continue"],
         )
 
@@ -186,7 +189,7 @@ class GenerateEndpointTests(unittest.TestCase):
         # Default policy is off — rendering succeeds, but chat refuses.
         settings = _settings(anthropic="sk-ant-test", default_provider="anthropic")
         with patch("app.services.machine_settings.load_settings", return_value=settings), \
-             patch("app.services.ai.providers._anthropic_chat") as mock_chat:
+             patch(_ANTHROPIC_CHAT) as mock_chat:
             response = self.client.post(
                 "/api/ai/generate",
                 json={
@@ -208,8 +211,8 @@ class GenerateEndpointTests(unittest.TestCase):
         settings = _settings(anthropic="sk-ant-test", default_provider="anthropic")
         with patch("app.services.machine_settings.load_settings", return_value=settings), \
              patch(
-                "app.services.ai.providers._anthropic_chat",
-                return_value=("partial", "max_tokens", SimpleNamespace()),
+                _ANTHROPIC_CHAT,
+                return_value=ChatOutcome("partial", "max_tokens", SimpleNamespace()),
             ):
             response = self.client.post(
                 "/api/ai/generate",
@@ -230,8 +233,8 @@ class GenerateEndpointTests(unittest.TestCase):
         settings = _settings(anthropic="sk-ant-test", default_provider="anthropic")
         with patch("app.services.machine_settings.load_settings", return_value=settings), \
              patch(
-                "app.services.ai.providers._anthropic_chat",
-                return_value=("OK", "end_turn", SimpleNamespace()),
+                _ANTHROPIC_CHAT,
+                return_value=ChatOutcome("OK", "end_turn", SimpleNamespace()),
             ) as mock_chat:
             self.client.post(
                 "/api/ai/generate",
@@ -243,17 +246,17 @@ class GenerateEndpointTests(unittest.TestCase):
                     "model": "x",
                 },
             )
-        kwargs = mock_chat.call_args.kwargs
-        self.assertEqual(len(kwargs["messages"]), 1)
-        self.assertEqual(kwargs["messages"][0]["content"], "Rewrite: the original sentence")
+        call = mock_chat.call_args.args[0]
+        self.assertEqual(len(call.messages), 1)
+        self.assertEqual(call.messages[0]["content"], "Rewrite: the original sentence")
 
     def test_session_id_echoed_when_supplied(self) -> None:
         self._allow_cloud()
         settings = _settings(anthropic="sk-ant-test", default_provider="anthropic")
         with patch("app.services.machine_settings.load_settings", return_value=settings), \
              patch(
-                "app.services.ai.providers._anthropic_chat",
-                return_value=("ok", "end_turn", SimpleNamespace()),
+                _ANTHROPIC_CHAT,
+                return_value=ChatOutcome("ok", "end_turn", SimpleNamespace()),
             ):
             response = self.client.post(
                 "/api/ai/generate",

@@ -12,8 +12,11 @@ from project_fixtures import open_test_project
 from app.main import app
 from app.models import UpdateProjectSettingsRequest
 from app.services import machine_settings as ms
+from app.services.ai.profiles.base import ChatOutcome
 from app.services.project.assistants import normalize_assistant_entry_type
 from app.services.project_service import ProjectService
+
+_ANTHROPIC_CHAT = "app.services.ai.profiles.anthropic.AnthropicProfile.chat"
 
 
 class MigrateDefaultModelsTests(unittest.TestCase):
@@ -206,7 +209,7 @@ class ChatEndpointAssistantTests(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_assistant_id_resolves_provider_model_temperature(self) -> None:
-        with patch("app.services.ai.providers._anthropic_chat", return_value=("ok", "end_turn", SimpleNamespace())) as mock:
+        with patch(_ANTHROPIC_CHAT, return_value=ChatOutcome("ok", "end_turn", SimpleNamespace())) as mock:
             response = self.client.post(
                 "/api/ai/chat",
                 json={
@@ -215,25 +218,25 @@ class ChatEndpointAssistantTests(unittest.TestCase):
                 },
             )
         self.assertEqual(response.status_code, 200, response.text)
-        kwargs = mock.call_args.kwargs
-        self.assertEqual(kwargs["model"], "claude-sonnet-4-6")
-        self.assertEqual(kwargs["temperature"], 0.9)
-        self.assertEqual(kwargs["max_tokens"], 2048)
+        call = mock.call_args.args[0]
+        self.assertEqual(call.model, "claude-sonnet-4-6")
+        self.assertEqual(call.temperature, 0.9)
+        self.assertEqual(call.max_tokens, 2048)
 
     def test_default_assistant_used_when_no_id_supplied(self) -> None:
-        with patch("app.services.ai.providers._anthropic_chat", return_value=("ok", "end_turn", SimpleNamespace())) as mock:
+        with patch(_ANTHROPIC_CHAT, return_value=ChatOutcome("ok", "end_turn", SimpleNamespace())) as mock:
             response = self.client.post(
                 "/api/ai/chat",
                 json={"messages": [{"role": "user", "content": "Hi"}]},
             )
         self.assertEqual(response.status_code, 200, response.text)
-        kwargs = mock.call_args.kwargs
+        call = mock.call_args.args[0]
         # No id → topmost by title ("Cheap summary" < "Creative drafting").
-        self.assertEqual(kwargs["model"], "claude-haiku-4-5-20251001")
-        self.assertEqual(kwargs["temperature"], 0.2)
+        self.assertEqual(call.model, "claude-haiku-4-5-20251001")
+        self.assertEqual(call.temperature, 0.2)
 
     def test_explicit_model_overrides_assistant(self) -> None:
-        with patch("app.services.ai.providers._anthropic_chat", return_value=("ok", "end_turn", SimpleNamespace())) as mock:
+        with patch(_ANTHROPIC_CHAT, return_value=ChatOutcome("ok", "end_turn", SimpleNamespace())) as mock:
             response = self.client.post(
                 "/api/ai/chat",
                 json={
@@ -243,12 +246,12 @@ class ChatEndpointAssistantTests(unittest.TestCase):
                 },
             )
         self.assertEqual(response.status_code, 200, response.text)
-        kwargs = mock.call_args.kwargs
-        self.assertEqual(kwargs["model"], "claude-opus-4-8")
+        call = mock.call_args.args[0]
+        self.assertEqual(call.model, "claude-opus-4-8")
         # Temperature still comes from the assistant — there's no override
         # field for it on the request shape (intentional; per-call temp tweaks
         # are a future enhancement).
-        self.assertEqual(kwargs["temperature"], 0.9)
+        self.assertEqual(call.temperature, 0.9)
 
 
 class MachineSettingsViewTests(unittest.TestCase):

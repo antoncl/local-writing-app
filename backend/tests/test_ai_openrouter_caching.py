@@ -7,10 +7,14 @@ red-line clearly.
 
 from __future__ import annotations
 
-from app.services.ai.profiles.openrouter import caching_style_for_model
-from app.services.ai.providers import (
-    _openrouter_extra_body,
-    _openrouter_system_messages,
+from app.services.ai.profiles.openrouter import (
+    caching_style_for_model,
+)
+from app.services.ai.profiles.openrouter import (
+    openrouter_extra_body as _openrouter_extra_body,
+)
+from app.services.ai.profiles.openrouter import (
+    openrouter_system_messages as _openrouter_system_messages,
 )
 
 # ---- caching_style_for_model (prefix lookup) ------------------------------

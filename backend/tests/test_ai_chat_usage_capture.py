@@ -10,7 +10,15 @@ from unittest.mock import patch
 
 from app.services import machine_settings as ms
 from app.services.ai import providers as ai_providers
+from app.services.ai.profiles.base import ChatOutcome, ProviderError
 from app.services.ai.providers import _extract_usage_for_provider
+
+# Seams: the provider call now lives on the profile class. Anthropic has its
+# own; OpenAI/Ollama/OpenRouter inherit OpenAICompatibleProfile.chat.
+_ANTHROPIC_CHAT = "app.services.ai.profiles.anthropic.AnthropicProfile.chat"
+_OPENAI_COMPAT_CHAT = (
+    "app.services.ai.profiles.openai_compatible.OpenAICompatibleProfile.chat"
+)
 
 
 def _settings(**keys: str) -> ms.MachineSettings:
@@ -55,10 +63,7 @@ def _openai_response_with_usage(
 
 def test_chat_anthropic_captures_usage_into_result():
     raw = _anthropic_response_with_usage()
-    with patch(
-        "app.services.ai.providers._anthropic_chat",
-        return_value=("Hello.", "end_turn", raw),
-    ):
+    with patch(_ANTHROPIC_CHAT, return_value=ChatOutcome("Hello.", "end_turn", raw)):
         result = ai_providers.chat(
             provider_name="anthropic",
             model="claude-sonnet-4-6",
@@ -78,10 +83,7 @@ def test_chat_anthropic_captures_usage_into_result():
 
 def test_chat_openai_captures_usage_into_result():
     raw = _openai_response_with_usage()
-    with patch(
-        "app.services.ai.providers._openai_compatible_chat",
-        return_value=("Hello.", "stop", raw),
-    ):
+    with patch(_OPENAI_COMPAT_CHAT, return_value=ChatOutcome("Hello.", "stop", raw)):
         result = ai_providers.chat(
             provider_name="openai",
             model="gpt-4o",
@@ -110,10 +112,7 @@ def test_chat_openrouter_captures_usage_anthropic_style_split():
             cache_creation_input_tokens=200,
         )
     )
-    with patch(
-        "app.services.ai.providers._openrouter_chat",
-        return_value=("Hello.", "stop", raw),
-    ):
+    with patch(_OPENAI_COMPAT_CHAT, return_value=ChatOutcome("Hello.", "stop", raw)):
         result = ai_providers.chat(
             provider_name="openrouter",
             model="anthropic/claude-sonnet-4",
@@ -136,10 +135,7 @@ def test_chat_ollama_captures_usage_from_openai_compat_response():
     raw = SimpleNamespace(
         usage=SimpleNamespace(prompt_tokens=120, completion_tokens=300)
     )
-    with patch(
-        "app.services.ai.providers._openai_compatible_chat",
-        return_value=("Hello.", "stop", raw),
-    ):
+    with patch(_OPENAI_COMPAT_CHAT, return_value=ChatOutcome("Hello.", "stop", raw)):
         result = ai_providers.chat(
             provider_name="ollama",
             model="llama3.2",
@@ -162,10 +158,7 @@ def test_chat_ollama_captures_usage_from_openai_compat_response():
 def test_chat_provider_error_leaves_usage_none():
     # Provider error path returns ChatResult with ok=False and never
     # touches the usage field — it stays at the dataclass default (None).
-    with patch(
-        "app.services.ai.providers._anthropic_chat",
-        side_effect=ai_providers._ProviderError("simulated"),
-    ):
+    with patch(_ANTHROPIC_CHAT, side_effect=ProviderError("simulated")):
         result = ai_providers.chat(
             provider_name="anthropic",
             model="claude-sonnet-4-6",

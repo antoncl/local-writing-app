@@ -156,12 +156,63 @@ def default_token_count(text: str) -> int:
     return len(encoder.encode(text))
 
 
+class ProviderError(RuntimeError):
+    """An expected, user-facing failure from a provider's call path — a
+    missing SDK package, an unconfigured or mispasted key. The dispatch
+    layer catches it and turns it into an error result, not a 500.
+    """
+
+
+@dataclass
+class ChatCall:
+    """One completion request, provider-agnostic — what to say, not who to
+    say it to. Credentials and endpoint live on the resolved profile.
+
+    `system_blocks` is the multi-block form with per-block cache markers;
+    when set it overrides `system_prompt` for providers that honor it
+    (Anthropic; OpenRouter on explicit-cache routes).
+    """
+
+    model: str
+    system_prompt: str
+    messages: list[dict[str, str]]
+    max_tokens: int
+    temperature: float | None = None
+    system_blocks: list[dict] | None = None
+    session_id: str | None = None
+
+
+@dataclass
+class ChatOutcome:
+    """What a provider's `chat` returns: the assistant text, the provider's
+    stop/finish reason, and the raw SDK response (which the dispatch layer
+    hands to `extract_usage`).
+    """
+
+    content: str
+    stop_reason: str | None
+    raw: Any
+
+
 class ProviderProfile(ABC):
     """One per provider. Concrete implementations live in sibling modules
     (anthropic.py, openai.py, openrouter.py, ollama.py)."""
 
     name: str
     display_name: str
+
+    # Key signatures this provider recognizes as its own, e.g. ("sk-ant-",).
+    # Empty = no key (Ollama). The dispatch layer scans providers by these
+    # to spot a key pasted into the wrong provider's field — each provider
+    # declares only its own; specificity (longest prefix) resolves overlap.
+    key_prefixes: tuple[str, ...] = ()
+
+    def configured_key(self) -> str:
+        """The API key this profile holds, or '' when it needs none. The
+        dispatch layer reads it to guard against a blank or mispasted key
+        before delegating the call. Overridden by providers that carry one.
+        """
+        return ""
 
     @classmethod
     @abstractmethod
@@ -204,6 +255,17 @@ class ProviderProfile(ABC):
 
         Each provider knows the shape of its own SDK response. Missing
         fields default to 0 — never raise on a malformed `usage` block.
+        """
+
+    @abstractmethod
+    def chat(self, call: ChatCall) -> ChatOutcome:
+        """Run one non-streaming completion against this provider.
+
+        Credentials and endpoint come from the instance (built via
+        `from_settings`); the request is `call`. Raise `ProviderError` for
+        an expected failure — a missing SDK package, a key problem — which
+        the dispatch layer catches. Streaming is `chat_stream`, added in a
+        later slice.
         """
 
     def supports_temperature(self, model_id: str) -> bool:

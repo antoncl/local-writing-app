@@ -127,6 +127,13 @@ class AIHealthResponse(BaseModel):
     latency_ms: int
     policy: AIPolicy
     error: str | None = None
+    # Which assistant the check actually resolved and tested (#336). A ping
+    # with no assistant_id resolves the topmost assistant, which is rarely the
+    # one a given chat sends with — surfacing the name here keeps a green tick
+    # from implying it tested "your AI" when it tested one specific assistant.
+    # None only when the roster is empty (the legacy default_provider path).
+    assistant_id: str | None = None
+    assistant_name: str | None = None
 
 
 class AIProviderInfo(BaseModel):

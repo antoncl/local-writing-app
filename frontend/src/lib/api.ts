@@ -429,10 +429,17 @@ export const api = {
       `/ai/providers/${encodeURIComponent(provider)}/resolve-tier?tier=${encodeURIComponent(tier)}`,
     );
   },
-  aiHealth(provider?: string, model?: string) {
+  // `assistantId` targets a specific assistant so the check tests the one a
+  // send will actually use — omit it and the backend resolves the topmost
+  // assistant (the default smoke test in Machine Settings). #336.
+  aiHealth(assistantId?: string, provider?: string, model?: string) {
     return request<AIHealthResponse>("/ai/health", {
       method: "POST",
-      body: JSON.stringify({ provider: provider ?? null, model: model ?? null }),
+      body: JSON.stringify({
+        assistant_id: assistantId ?? null,
+        provider: provider ?? null,
+        model: model ?? null,
+      }),
     });
   },
   aiPreview(payload: AIPreviewRequest) {

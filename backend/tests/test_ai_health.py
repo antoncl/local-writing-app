@@ -6,11 +6,17 @@ provider classes) — this path had no prior coverage.
 
 from __future__ import annotations
 
+import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import app.services.machine_settings as ms
+from app.models import AIHealthRequest, AIHealthResponse
+from app.routers import ai as ai_router
 from app.services.ai.providers import health_check
+from app.services.project_service import ProjectService
 
 
 def _settings(**keys: str) -> ms.MachineSettings:
@@ -120,3 +126,59 @@ def test_health_requires_model():
     )
     assert not res.ok
     assert "No model" in res.error
+
+
+class HealthReportsResolvedAssistantTests(unittest.TestCase):
+    """The /api/ai/health route reports WHICH assistant it resolved and tested
+    (#336) — a ping with no assistant_id tests the topmost assistant, not the
+    one a given chat sends with, so the response must name what it checked."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.config_dir = Path(self.temp_dir.name) / "config"
+        self.config_dir.mkdir()
+        self._patcher = patch(
+            "app.services.machine_settings.config_path",
+            return_value=self.config_dir / "config.yaml",
+        )
+        self._patcher.start()
+        folder = self.config_dir / "assistants"
+        folder.mkdir(parents=True)
+        (folder / "creative.md").write_text(
+            "---\nid: creative\ntitle: Creative\nentry_type: assistant\n"
+            "metadata:\n  ai_provider: anthropic\n  ai_model: claude-sonnet-4-6\n---\n",
+            encoding="utf-8",
+        )
+        (folder / "cheap.md").write_text(
+            "---\nid: cheap\ntitle: Cheap\nentry_type: assistant\n"
+            "metadata:\n  ai_provider: anthropic\n  ai_model: claude-haiku-4-5-20251001\n---\n",
+            encoding="utf-8",
+        )
+        # Topmost (dynamic default) is the first LISTED id → cheap.
+        (folder / ".order.yaml").write_text(
+            "ids:\n- cheap\n- creative\nexcluded: []\n", encoding="utf-8"
+        )
+        self.service = ProjectService()
+
+    def tearDown(self) -> None:
+        self._patcher.stop()
+        self.temp_dir.cleanup()
+
+    def _health(self, assistant_id: str | None) -> AIHealthResponse:
+        # Stub the real provider ping — this test is about which assistant the
+        # route resolves and reports, not whether a network call succeeds.
+        canned = AIHealthResponse(
+            provider="anthropic", model="m", ok=True, latency_ms=5, policy="cloud-allowed"
+        )
+        with patch.object(ai_router.ai_providers, "health_check", return_value=canned):
+            return ai_router.ai_health(self.service, AIHealthRequest(assistant_id=assistant_id))
+
+    def test_no_id_reports_topmost_assistant(self) -> None:
+        res = self._health(None)
+        self.assertEqual(res.assistant_id, "cheap")
+        self.assertEqual(res.assistant_name, "Cheap")
+
+    def test_explicit_id_reports_that_assistant(self) -> None:
+        res = self._health("creative")
+        self.assertEqual(res.assistant_id, "creative")
+        self.assertEqual(res.assistant_name, "Creative")

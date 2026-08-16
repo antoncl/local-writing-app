@@ -97,12 +97,21 @@ def ai_health(project: CurrentProject, request: AIHealthRequest) -> AIHealthResp
         policy = project.ai_policy()
     except ProjectServiceError:
         policy = "off"
-    return ai_providers.health_check(
+    result = ai_providers.health_check(
         provider_name=resolved.provider,
         model=resolved.model,
         settings=settings,
         policy=policy,
     )
+    # Report which assistant was actually resolved so the readout can say
+    # "✓ via <name>" — a ping with no assistant_id tests the topmost assistant,
+    # not the one a given chat sends with (#336). None only when the roster is
+    # empty and resolution fell through to the legacy default_provider path.
+    assistant = project.resolve_assistant(request.assistant_id)
+    if assistant is not None:
+        result.assistant_id = assistant.id
+        result.assistant_name = assistant.title
+    return result
 
 
 def _descriptor_to_wire(descriptor: ModelDescriptor) -> AIModelInfo:

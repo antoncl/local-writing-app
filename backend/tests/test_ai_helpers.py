@@ -11,6 +11,9 @@ from app.models import (
     SaveSceneRequest,
 )
 from app.services.ai.helpers import (
+    _role_block,
+    _scene_body_text,
+    _thread_parts,
     create_environment_for_project,
     last_words,
 )
@@ -40,6 +43,58 @@ class LastWordsTests(unittest.TestCase):
 
     def test_n_non_integer_returns_empty(self) -> None:
         self.assertEqual(last_words("hi there", "lots"), "")
+
+
+class SceneBodyTextTests(unittest.TestCase):
+    def test_reads_body_attribute(self) -> None:
+        self.assertEqual(_scene_body_text(_Obj(body="hello")), "hello")
+
+    def test_reads_dict_body(self) -> None:
+        self.assertEqual(_scene_body_text({"body": "hi"}), "hi")
+
+    def test_none_scene_is_empty(self) -> None:
+        self.assertEqual(_scene_body_text(None), "")
+
+    def test_object_without_str_body_is_empty(self) -> None:
+        self.assertEqual(_scene_body_text(_Obj(body=None)), "")
+        self.assertEqual(_scene_body_text({"other": "x"}), "")
+
+
+class ThreadPartsTests(unittest.TestCase):
+    """The roleplay thread builder's core: the focus character's spans become
+    `assistant`, other characters' `user` prefixed `[Name]: `, untagged
+    narration plain `user`; consecutive same-role spans coalesce into one turn.
+    """
+
+    def test_routes_by_focus_and_coalesces_same_role(self) -> None:
+        segments = [
+            (None, "Narr. "),
+            ("c1", "Hi "),
+            ("c1", "there "),
+            ("c2", "Yo"),
+            (None, " end"),
+        ]
+        parts = _thread_parts(segments, focus_id="c1", titles={"c2": "Bob"})
+        self.assertEqual(
+            parts,
+            [
+                _role_block("user", "Narr."),
+                _role_block("assistant", "Hi there"),
+                _role_block("user", "[Bob]: Yo end"),
+            ],
+        )
+
+    def test_other_character_falls_back_to_id_without_title(self) -> None:
+        parts = _thread_parts([("c9", "hey")], focus_id="c1", titles={})
+        self.assertEqual(parts, [_role_block("user", "[c9]: hey")])
+
+    def test_whitespace_only_turn_is_dropped(self) -> None:
+        self.assertEqual(_thread_parts([(None, "   ")], focus_id="c1", titles={}), [])
+
+
+class _Obj:
+    def __init__(self, **kw: object) -> None:
+        self.__dict__.update(kw)
 
 
 class _HelperFixtureBase(unittest.TestCase):

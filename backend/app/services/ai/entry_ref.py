@@ -87,29 +87,34 @@ class EntryRef:
             self._loaded = _MISSING
             return None
         try:
-            if idx_entry.kind == "lore":
-                self._loaded = self._project.read_lore_entry(self._id)
-            elif idx_entry.kind == "manuscript":
-                self._loaded = self._project.read_scene(self._id)
-            elif idx_entry.kind == "prompt":
-                self._loaded = self._project.read_prompt_entry(self._id)
-            elif idx_entry.kind == "research":
-                self._loaded = self._project.read_research_note(self._id)
-            elif idx_entry.kind == "plot":
-                # A plot node — card or plotline — is a first-class Node a prompt
-                # can pull in (revise-plot-card / revise-plotline). Board and
-                # template are not revisable subjects, so they stay unresolved.
-                if idx_entry.entry_type == "plot:plotline":
-                    self._loaded = self._project.read_plotline(self._id)
-                elif idx_entry.entry_type == "plot:card":
-                    self._loaded = self._project.read_card(self._id)
-                else:
-                    self._loaded = _MISSING
-            else:
-                self._loaded = _MISSING
+            self._loaded = self._read_by_kind(idx_entry)
         except Exception:
             self._loaded = _MISSING
         return None if self._loaded is _MISSING else self._loaded
+
+    def _read_by_kind(self, idx_entry: Any) -> Any:
+        """Resolve the node behind this ref via the reader for its kind, or
+        `_MISSING` for kinds/entry_types that aren't a resolvable subject.
+        """
+        kind = idx_entry.kind
+        if kind == "lore":
+            return self._project.read_lore_entry(self._id)
+        if kind == "manuscript":
+            return self._project.read_scene(self._id)
+        if kind == "prompt":
+            return self._project.read_prompt_entry(self._id)
+        if kind == "research":
+            return self._project.read_research_note(self._id)
+        if kind == "plot":
+            # A plot node — card or plotline — is a first-class Node a prompt
+            # can pull in (revise-plot-card / revise-plotline). Board and
+            # template are not revisable subjects, so they stay unresolved.
+            if idx_entry.entry_type == "plot:plotline":
+                return self._project.read_plotline(self._id)
+            if idx_entry.entry_type == "plot:card":
+                return self._project.read_card(self._id)
+            return _MISSING
+        return _MISSING
 
     @property
     def title(self) -> str:

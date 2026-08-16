@@ -104,16 +104,7 @@ def _coerce_entry_ref(
     if isinstance(value, EntryRef):
         return value
     if isinstance(value, str):
-        stripped = value.strip()
-        # context_pick inputs serialize as a JSON list; unwrap to the first
-        # picked ref's id. A bare id string still works (no opening bracket).
-        if stripped.startswith("[") and stripped.endswith("]"):
-            try:
-                parsed = json.loads(stripped)
-            except (ValueError, TypeError):
-                return None
-            return _coerce_entry_ref(project, schema, parsed)
-        return EntryRef(project, schema, value)
+        return _coerce_str_entry_ref(project, schema, value)
     if isinstance(value, list):
         if not value:
             return None
@@ -127,6 +118,23 @@ def _coerce_entry_ref(
     if isinstance(inner, str) and inner:
         return EntryRef(project, schema, inner)
     return None
+
+
+def _coerce_str_entry_ref(
+    project: ProjectService, schema: Any, value: str
+) -> EntryRef | None:
+    """Coerce a string arg to an EntryRef. A `context_pick` input serializes as
+    a JSON list, so a `[...]`-shaped string is unwrapped to its first picked
+    ref's id; a bare id string becomes an EntryRef directly.
+    """
+    stripped = value.strip()
+    if stripped.startswith("[") and stripped.endswith("]"):
+        try:
+            parsed = json.loads(stripped)
+        except (ValueError, TypeError):
+            return None
+        return _coerce_entry_ref(project, schema, parsed)
+    return EntryRef(project, schema, value)
 
 
 def _coerce_entry_ref_as_of(
@@ -726,39 +734,7 @@ def _relevant_lore(
     if mode == "explicit":
         ids = sorted(direct)
     else:
-        # implicit: always-included + direct refs + alias scan + one-hop
-        # Always-included entries (context_policy = "always") feed every
-        # implicit render regardless of mention.
-        found = set(direct) | _always_included_lore_ids(project)
-        if journal is None:
-            # No chat-session journal — helper is the producer of detected
-            # context (one-shot generates, preview, tests). Run the textual
-            # scan on the scene summary.
-            summary = _get_field(scene, "summary") or ""
-            if isinstance(summary, str) and summary.strip():
-                found |= _alias_match(project, summary, scene=scene)
-        else:
-            # Chat-session use: the send-time context expander has already
-            # populated the journal with textual detections (incl. depth-1).
-            # Trust it; don't re-derive.
-            for entry in journal:
-                jid = _attr_or_item(entry, "entry_id")
-                if isinstance(jid, str) and jid:
-                    found.add(jid)
-
-        expanded = set(found)
-        for entry_id in list(found):
-            entry = _safe_read_lore(project, entry_id)
-            if entry is None:
-                continue
-            expanded |= _collect_lore_refs_from_metadata(
-                _attr_or_item(entry, "metadata")
-            )
-        # Textual depth-1 only runs when the journal is absent; otherwise
-        # the journal already carries those expansions.
-        if journal is None:
-            expanded |= _textual_one_hop(project, found, scene=scene)
-        ids = sorted(expanded)
+        ids = sorted(_implicit_lore_ids(project, scene, direct, journal))
 
     # Chokepoint filter: drop any "never"-policy entries that may have
     # arrived via explicit refs or structural expansion. "Never" means
@@ -772,6 +748,54 @@ def _relevant_lore(
             _snapshot_revisions(project, ids, session)
         return _format_lore_block(project, ids, scene=scene, index=index)
 
+    selected = _split_lore_by_partition(project, ids, session, partition)
+    return _format_lore_block(project, selected, scene=scene, index=index)
+
+
+def _implicit_lore_ids(
+    project: ProjectService, scene: Any, direct: set[str], journal: list[Any] | None
+) -> set[str]:
+    """The implicit-mode id set: always-included + direct refs + textual alias
+    scan (or the chat journal's pre-detected ids) + one structural hop through
+    each collected entry's own refs (+ a textual hop when there's no journal).
+    """
+    # Always-included entries (context_policy = "always") feed every implicit
+    # render regardless of mention.
+    found = set(direct) | _always_included_lore_ids(project)
+    if journal is None:
+        # No chat-session journal — helper is the producer of detected context
+        # (one-shot generates, preview, tests). Run the textual scan on summary.
+        summary = _get_field(scene, "summary") or ""
+        if isinstance(summary, str) and summary.strip():
+            found |= _alias_match(project, summary, scene=scene)
+    else:
+        # Chat-session use: the send-time context expander has already populated
+        # the journal with textual detections (incl. depth-1). Trust it.
+        for entry in journal:
+            jid = _attr_or_item(entry, "entry_id")
+            if isinstance(jid, str) and jid:
+                found.add(jid)
+
+    expanded = set(found)
+    for entry_id in list(found):
+        entry = _safe_read_lore(project, entry_id)
+        if entry is None:
+            continue
+        expanded |= _collect_lore_refs_from_metadata(_attr_or_item(entry, "metadata"))
+    # Textual depth-1 only runs when the journal is absent; otherwise the
+    # journal already carries those expansions.
+    if journal is None:
+        expanded |= _textual_one_hop(project, found, scene=scene)
+    return expanded
+
+
+def _split_lore_by_partition(
+    project: ProjectService, ids: list[str], session: AISession, partition: str
+) -> list[str]:
+    """Snapshot each entry's revision against the session baseline and return
+    the ids in the requested partition — `stable` (revision matches baseline)
+    or `volatile` (new or changed since).
+    """
     stable_ids: list[str] = []
     volatile_ids: list[str] = []
     for entry_id in ids:
@@ -784,9 +808,7 @@ def _relevant_lore(
             stable_ids.append(entry_id)
         else:
             volatile_ids.append(entry_id)
-
-    selected = stable_ids if partition == "stable" else volatile_ids
-    return _format_lore_block(project, selected, scene=scene, index=index)
+    return stable_ids if partition == "stable" else volatile_ids
 
 
 def _snapshot_revisions(
@@ -1248,44 +1270,82 @@ def _character_thread(
     ended on the focus character's own turn), a short user nudge is
     appended so the chat API has a turn to respond to.
     """
-    from app.services.ai.templates import ROLE_END, ROLE_START, ROLE_START_SEP
+    from app.services.ai.templates import ROLE_START
 
     focus_ref = _coerce_entry_ref(project, schema, character_input)
     focus_id = focus_ref.id if focus_ref else None
-
-    body = ""
-    if scene is not None:
-        attr = getattr(scene, "body", None)
-        if isinstance(attr, str):
-            body = attr
-        elif isinstance(scene, dict):
-            value = scene.get("body")
-            if isinstance(value, str):
-                body = value
-
-    def role_block(role: str, text: str) -> str:
-        return f"{ROLE_START}{role}{ROLE_START_SEP}{text}{ROLE_END}"
-
+    body = _scene_body_text(scene)
     segments = _split_body_by_character_markers(body)
 
     # First invocation: no markers anywhere, the whole body is one
     # user-narration message. Empty body → nothing to emit.
     if not any(seg[0] for seg in segments):
         if body.strip():
-            return role_block("user", body)
+            return _role_block("user", body)
         return ""
 
     # Resolve all character lore ids to titles for the [Name]: prefix.
     other_ids = {seg[0] for seg in segments if seg[0] and seg[0] != focus_id}
+    titles = _character_titles(project, other_ids)
+
+    parts = _thread_parts(segments, focus_id, titles)
+
+    # Chat APIs need to end on a user turn so the model knows whose turn it is.
+    # If the scene ended on the focus character's own span, append a synthetic
+    # user nudge naming them.
+    if parts and parts[-1].startswith(f"{ROLE_START}assistant"):
+        focus_title = focus_ref.title if focus_ref else ""
+        nudge = f"Continue as {focus_title}." if focus_title else "Continue."
+        parts.append(_role_block("user", nudge))
+
+    return "".join(parts)
+
+
+def _role_block(role: str, text: str) -> str:
+    """One role-tagged span using the same ROLE_START/ROLE_END markers the
+    {% role %} extension emits, so the renderer's marker parser folds it back
+    into a message.
+    """
+    from app.services.ai.templates import ROLE_END, ROLE_START, ROLE_START_SEP
+    return f"{ROLE_START}{role}{ROLE_START_SEP}{text}{ROLE_END}"
+
+
+def _scene_body_text(scene: Any) -> str:
+    """The scene's body text — whether `scene` is an object with a `.body` str
+    or a dict carrying `"body"`. Anything else yields empty.
+    """
+    if scene is None:
+        return ""
+    attr = getattr(scene, "body", None)
+    if isinstance(attr, str):
+        return attr
+    if isinstance(scene, dict):
+        value = scene.get("body")
+        if isinstance(value, str):
+            return value
+    return ""
+
+
+def _character_titles(project: ProjectService, other_ids: set[str]) -> dict[str, str]:
+    """Map each non-focus character lore id to its title (falling back to the
+    id) for the `[Name]: ` prefix on that character's user turns.
+    """
     titles: dict[str, str] = {}
     for cid in other_ids:
         loaded = _safe_read_lore(project, cid)
         title = getattr(loaded, "title", None) if loaded else None
         titles[cid] = str(title) if title else cid
+    return titles
 
-    # Build alternating role-tagged messages. Coalesce consecutive
-    # segments that resolve to the same role so the model sees one
-    # turn per speaker instead of fragmented chunks.
+
+def _thread_parts(
+    segments: list[Any], focus_id: str | None, titles: dict[str, str]
+) -> list[str]:
+    """Turn character-tagged body segments into alternating role blocks: the
+    focus character's spans become `assistant`, other characters' become `user`
+    prefixed `[Name]: `, untagged narration is plain `user`. Consecutive
+    same-role segments coalesce into one turn.
+    """
     parts: list[str] = []
     current_role: str | None = None
     buffer: list[str] = []
@@ -1295,7 +1355,7 @@ def _character_thread(
         if buffer and current_role:
             joined = "".join(buffer).strip()
             if joined:
-                parts.append(role_block(current_role, joined))
+                parts.append(_role_block(current_role, joined))
         buffer = []
 
     for char_id, text in segments:
@@ -1314,13 +1374,4 @@ def _character_thread(
             current_role = role
         buffer.append(content)
     flush()
-
-    # Chat APIs need to end on a user turn so the model knows whose
-    # turn it is. If the scene ended on the focus character's own
-    # span, append a synthetic user nudge naming them.
-    if parts and parts[-1].startswith(f"{ROLE_START}assistant"):
-        focus_title = focus_ref.title if focus_ref else ""
-        nudge = f"Continue as {focus_title}." if focus_title else "Continue."
-        parts.append(role_block("user", nudge))
-
-    return "".join(parts)
+    return parts

@@ -170,9 +170,24 @@ export interface ClientErrorReport {
   detail?: string;
 }
 
+// While a page-hide flush is in progress every save PUT is marked `keepalive` so
+// the browser lets an in-flight request finish even as the tab closes (#369).
+// It is a transient hint, not a mode: App toggles it around the (brief) flush,
+// and a keepalive request the flag catches by accident is harmless — it only
+// asks the browser not to abort the request on unload. Note the ~64KB keepalive
+// body cap: a very large scene save can still be dropped on a hard kill (the
+// irreducible residual tracked in #455). The `visibilitychange: hidden` trigger
+// covers the common case regardless, because the page is still alive then to
+// complete a normal-weight request.
+let keepaliveSaves = false;
+export function setKeepaliveSaves(active: boolean): void {
+  keepaliveSaves = active;
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${baseUrl}${path}`, {
     ...options,
+    keepalive: options.keepalive ?? keepaliveSaves,
     headers: {
       "Content-Type": "application/json",
       ...scopeHeaders(),

@@ -13,7 +13,7 @@ import { refreshPlotlines } from "@/lib/stores/plotlines";
 import { refreshAssistantEntries } from "@/lib/stores/assistants";
 import { refreshTodos, refreshEmbeddedTodos } from "@/lib/stores/todos";
 import { bodyHasMutationMarkers, mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
-import { HttpError } from "@/lib/api";
+import { HttpError, setKeepaliveSaves } from "@/lib/api";
 import { confirmService } from "@/lib/stores/confirmService.svelte";
 import type { EditorPaneState } from "@/lib/editor-core/editorPaneModel";
 
@@ -183,4 +183,36 @@ export function offerAutosaveConflictRecovery(host: SaveFailureHost, id: string)
       await host.run(() => host.saveEditorPane(id, { force: true }));
     },
   });
+}
+
+// ---- Flush on the way out (#369) ------------------------------------------
+// Nothing flushed a dirty pane on tab/window close: an author could type a
+// paragraph, close the tab, and lose up to the whole autosave-idle window with
+// no warning. The app already flushes on every path it controls (pane close,
+// project switch); this closes the paths it does NOT — the browser tearing the
+// page down. App wires it to `pagehide` and `visibilitychange: hidden`.
+//
+// `flushDirtyPanes` is exactly the right traversal (it already skips chat/view,
+// which self-persist). Kept here rather than on the controller so
+// editorPanes.svelte.ts stays under the file-size guard. Errors are swallowed:
+// on the way out there is no one to tell and nothing to retry, and a rejected
+// flush must not become an unhandled rejection.
+//
+// `keepalive` is only for the TERMINAL trigger (`pagehide`): it lets an in-flight
+// PUT survive the page unloading, at the cost of the browser's ~64KB request-body
+// cap. On `visibilitychange: hidden` (tab switch, minimize) the page stays alive
+// to complete a normal, uncapped save — so keepalive must stay OFF there, or a
+// scene larger than 64KB would be rejected in exactly the case it need not be.
+export async function flushDirtyPanesOnHide(
+  store: { flushDirtyPanes(): Promise<boolean> },
+  options: { keepalive?: boolean } = {},
+): Promise<void> {
+  if (options.keepalive) setKeepaliveSaves(true);
+  try {
+    await store.flushDirtyPanes();
+  } catch {
+    // best-effort on unload
+  } finally {
+    if (options.keepalive) setKeepaliveSaves(false);
+  }
 }

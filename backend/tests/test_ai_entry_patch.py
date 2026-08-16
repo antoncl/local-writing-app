@@ -27,7 +27,8 @@ from app.models import (
     SaveLoreEntryRequest,
     SaveSceneRequest,
 )
-from app.services.ai.entry_patch import parse_entry_patch_json
+from app.models.schema import MetadataFieldDefinition
+from app.services.ai.entry_patch import is_proposable_field, parse_entry_patch_json
 from app.services.ai.helpers import (
     _entry_type_label,
     _field_catalog,
@@ -317,7 +318,7 @@ class ValidateAiEntryPatchTests(unittest.TestCase):
         schema = self.service.read_metadata_schema()
         catalog = _field_catalog(self.service, schema, self.hero.id)
         by_id = {f["id"]: f for f in catalog}
-        for fid in ("color", "context_policy", "aliases", "tags"):
+        for fid in ("color", "aliases", "tags"):
             self.assertIn(fid, by_id, f"{fid} should be proposable on a character")
             self.assertTrue(
                 (by_id[fid].get("description") or "").strip(),
@@ -326,6 +327,76 @@ class ValidateAiEntryPatchTests(unittest.TestCase):
         # color's guidance explicitly steers off a hex code — the reported bug
         # was the model inventing a hex value + rationale for this field.
         self.assertIn("hex", by_id["color"]["description"].lower())
+        # ADR-0059 §F: `context_policy` is an author-owned context knob the AI
+        # must never set, so it ships `ai_proposable: false` and drops out of
+        # the catalog the model is offered.
+        self.assertNotIn("context_policy", by_id)
+
+    def test_field_catalog_excludes_body(self) -> None:
+        # ADR-0059 §G: `body` is now an intrinsic *field* (present in the type's
+        # membership), but it is proposed as the top-level "body" key with its
+        # own contract clause — never enumerated in the fields loop. The catalog
+        # must not yield it, or the model would be told to set body twice.
+        schema = self.service.read_metadata_schema()
+        self.assertIn("body", schema.entry_types["lore:character"].fields)  # in membership
+        catalog = _field_catalog(self.service, schema, self.hero.id)
+        self.assertNotIn("body", {f["id"] for f in catalog})  # but not in the catalog
+
+    def test_is_proposable_field_honors_ai_proposable(self) -> None:
+        # ADR-0059 §E: the single predicate gates on `ai_proposable` (default
+        # True). This is the one place the contract loop and the validate-time
+        # filter both consult, so an off-limits field is invisible to the model
+        # AND dropped if smuggled in.
+        yes = MetadataFieldDefinition(name="Yes", type="text")
+        no = MetadataFieldDefinition(name="No", type="text", ai_proposable=False)
+        self.assertTrue(is_proposable_field("yes", yes))
+        self.assertFalse(is_proposable_field("no", no))
+
+    def test_stray_fields_body_is_dropped(self) -> None:
+        # ADR-0059 §B/§E: `body` is single-sourced via the top-level "body" key;
+        # a `body` smuggled into the fields object is dropped, never adopted as a
+        # field value (it is excluded from the fields allow-list).
+        patch = self.service.validate_ai_entry_patch_for_type(
+            "lore:character", '{"fields": {"body": "smuggled"}}'
+        )
+        self.assertNotIn("body", patch.fields)
+        self.assertIn("body", patch.dropped)
+
+    def test_body_kept_by_default_then_dropped_when_not_ai_proposable(self) -> None:
+        # ADR-0059 §E: body enforces `ai_proposable` at the verbatim-adopt site
+        # (it does not travel through is_proposable_field). Default schema keeps a
+        # proposed body; a layer marking body off-limits drops it.
+        kept = self.service.validate_ai_entry_patch_for_type(
+            "lore:character", '{"body": "kept prose", "fields": {}}'
+        )
+        self.assertEqual(kept.body, "kept prose")
+
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data.setdefault("fields", {})["body"] = {"ai_proposable": False}
+        self.service._write_yaml(schema_path, data)
+
+        dropped = self.service.validate_ai_entry_patch_for_type(
+            "lore:character", '{"body": "off-limits prose", "fields": {}}'
+        )
+        self.assertIsNone(dropped.body)
+
+    def test_body_dropped_for_bodiless_type(self) -> None:
+        # ADR-0059 §B: a bodiless type has no body field, so a proposed top-level
+        # "body" is dropped on adopt rather than written to a type with no body.
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data.setdefault("entry_types", {})["lore:token"] = {
+            "name": "Token",
+            "kind": "lore",
+            "parent": "lore:base",
+            "has_body": False,
+        }
+        self.service._write_yaml(schema_path, data)
+        patch = self.service.validate_ai_entry_patch_for_type(
+            "lore:token", '{"body": "nope", "fields": {}}'
+        )
+        self.assertIsNone(patch.body)
 
 
 class ValidateAiEntryDraftTests(unittest.TestCase):

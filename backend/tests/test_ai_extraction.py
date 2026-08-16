@@ -104,6 +104,49 @@ class ExtractionContractTests(unittest.TestCase):
         self.assertIn('OMIT the "body" key', contract)
         self.assertIn("ONLY if the conversation actually revised the body", contract)
 
+    def test_body_clause_renders_the_body_field_description(self) -> None:
+        # ADR-0059 §D — the dump fix. The body clause is now steered by the `body`
+        # intrinsic field's description ("what the fields don't capture; don't
+        # restate field values"), which retires the hardcoded "complete revised
+        # markdown body" prose that invited a verbatim field dump into the body.
+        contract = render_extraction_contract(
+            self.service, entry_type="lore:character", creating=False
+        )
+        self.assertIn("do not restate", contract.lower())
+        self.assertNotIn("complete revised markdown body", contract)
+
+    def test_body_ai_proposable_false_suppresses_body_clause(self) -> None:
+        # ADR-0059 §E: a layer can mark the body off-limits to AI authorship; the
+        # contract then omits the body clause entirely (fields-only), the same
+        # shape a `commit.fields` allow-list without "body" produces.
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data.setdefault("fields", {})["body"] = {"ai_proposable": False}
+        self.service._write_yaml(schema_path, data)
+        contract = render_extraction_contract(
+            self.service, entry_type="lore:character", creating=False
+        )
+        self.assertNotIn('"body"', contract)
+        self.assertIn("allegiance", contract)  # fields still offered
+
+    def test_bodiless_type_gets_a_fields_only_contract(self) -> None:
+        # ADR-0059 §B: a type with no body gets no body clause — injecting a body
+        # into a bodiless type would manufacture a field with no editor or value.
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data.setdefault("entry_types", {})["lore:token"] = {
+            "name": "Token",
+            "kind": "lore",
+            "parent": "lore:base",
+            "has_body": False,
+        }
+        self.service._write_yaml(schema_path, data)
+        contract = render_extraction_contract(
+            self.service, entry_type="lore:token", creating=True
+        )
+        self.assertNotIn('"body"', contract)  # fields-only for a bodiless type
+        self.assertIn("ALWAYS include", contract)  # title still required on create
+
     def test_default_create_contract_requires_title(self) -> None:
         contract = render_extraction_contract(
             self.service, entry_type="lore:character", creating=True

@@ -108,6 +108,16 @@ class MetadataFieldDefinition(BaseModel):
     # out of sight by default (#116). Display-only — never affects storage
     # or filtering membership.
     hidden: bool = False
+    # Whether the AI may author this field's value on a brainstorm commit
+    # (ADR-0059 §E). Default True — the flag is an opt-out for author-owned
+    # fields (e.g. the built-in `context_policy`, a cost/visibility knob a
+    # commit should never set), not a re-permissioning of the schema. Set per
+    # layer by redefining the field, the same reach `description` has. For every
+    # field that reaches the model through the `"fields"` object (all stored
+    # fields + `title`) this feeds the single `is_proposable_field` predicate;
+    # `body` travels as a top-level key, so it enforces the flag at its own two
+    # sites instead (§E).
+    ai_proposable: bool = True
     # Authorship category (ADR-0029): who produces the value —
     # `intrinsic` (identity triple, lives on `node.<key>`),
     # `computed` (app-derived, read-only), else `stored` (`metadata.<key>`).

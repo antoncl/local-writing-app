@@ -68,9 +68,9 @@ You are extracting the final result of a brainstorm into a structured patch. The
 
 Reply with ONLY a JSON object, with no preamble, no commentary, and no code fences, of exactly this shape:
 
-{% if input.body_allowed %}{"body": "<the complete revised markdown body>", "fields": {"<field id>": <value>}}{% else %}{"fields": {"<field id>": <value>}}{% endif %}
+{% if input.body_allowed %}{"body": "<the markdown body>", "fields": {"<field id>": <value>}}{% else %}{"fields": {"<field id>": <value>}}{% endif %}
 
-{% if input.body_allowed %}- "body": {% if input.creating %}the complete markdown body for the new entry.{% else %}include the "body" key ONLY if the conversation actually revised the body; then give the complete revised markdown body. OMIT the "body" key entirely if the body was not discussed or changed — never reconstruct it from nothing.{% endif %}
+{% if input.body_allowed %}- "body": {% if input.body_description %}{{ input.body_description }} {% endif %}{% if input.creating %}Write the body for the new entry on that basis.{% else %}Include the "body" key ONLY if the conversation actually revised the body; then give its complete revised text. OMIT the "body" key entirely if the body was not discussed or changed — never reconstruct it from nothing.{% endif %}
 {% endif %}- "fields": {% if input.creating %}{% if input.title_allowed %}ALWAYS include "title". {% endif %}Add any other field the conversation set, {% else %}include a field ONLY when the conversation changed it, {% endif %}keyed by its field id. For tags / multi_select give a JSON array of strings; for a select field use one of its listed options exactly; for an ordered-list field give the complete new list in its stated item shape (the whole list, in order); otherwise give the field's complete new value.{% if not input.creating %}{% if input.title_allowed %} You may also propose a new "title".{% endif %} Use {} if nothing changed.{% endif %}
 
 The fields you may set:
@@ -101,7 +101,23 @@ def render_extraction_contract(
     contract. Raises `PreviewError` on a broken template (the route surfaces it).
     """
 
-    body_allowed = commit_fields is None or "body" in commit_fields
+    # `body` is an intrinsic field (ADR-0059): resolve its description — which
+    # tells the model what the body is FOR, replacing the old hardcoded "complete
+    # markdown body" prose that invited the field dump (§D) — and its
+    # `ai_proposable` flag, which gates the body clause (§E). The clause is also
+    # gated on the target type actually HAVING a body (§B): a bodiless type gets
+    # a fields-only contract. Body's description / flag are global (per-layer,
+    # not per-type), read from the resolved field registry.
+    schema = project_service.read_metadata_schema()
+    body_field = schema.fields.get("body")
+    definition = schema.entry_types.get(entry_type)
+    # Suppress the body clause only for a KNOWN, bodiless type. An UNKNOWN type
+    # (no definition) keeps the body clause — the existing graceful degradation
+    # (`_field_catalog` returns no fields, so the contract is body-only).
+    body_type_ok = definition is None or "body" in definition.fields
+    body_proposable = bool(getattr(body_field, "ai_proposable", True)) if body_field else True
+    body_description = getattr(body_field, "description", None) if body_field else None
+    body_allowed = (commit_fields is None or "body" in commit_fields) and body_proposable and body_type_ok
     # Create mode ALWAYS requires a title (`validate_ai_entry_draft` rejects a
     # draft without one), so a `commit.fields` allow-list can never suppress the
     # title clause there — only a revise's allow-list can (title is optional then).
@@ -116,6 +132,7 @@ def render_extraction_contract(
             "creating": creating,
             "commit_fields": commit_fields,
             "body_allowed": body_allowed,
+            "body_description": body_description,
             "title_allowed": title_allowed,
         },
         text_before="",

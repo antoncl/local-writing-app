@@ -41,10 +41,11 @@ class IntrinsicFieldTests(unittest.TestCase):
 
     def test_intrinsic_fields_lead_and_are_not_owned(self) -> None:
         # Injected leading (title first), and NOT counted as own_fields so the
-        # editor renders them as built-in rather than type-owned.
+        # editor renders them as built-in rather than type-owned. A body-bearing
+        # type carries `body` as the second intrinsic, after title (ADR-0059 §B).
         scene = self.service.read_metadata_schema().entry_types["manuscript:scene"]
-        self.assertEqual(scene.fields[:3], ["title", "entry_type", "id"])
-        for key in INTRINSIC_FIELD_KEYS:
+        self.assertEqual(scene.fields[:4], ["title", "body", "entry_type", "id"])
+        for key in (*INTRINSIC_FIELD_KEYS, "body"):
             self.assertNotIn(key, scene.own_fields)
 
     def test_intrinsic_field_defs_are_marked(self) -> None:
@@ -55,6 +56,84 @@ class IntrinsicFieldTests(unittest.TestCase):
         # `id` is hidden by default; title/entry_type are shown.
         self.assertTrue(fields["id"].hidden)
         self.assertFalse(fields["title"].hidden)
+
+    def test_intrinsics_are_rejected_in_metadata(self) -> None:
+        # ADR-0029 §B / ADR-0059 §A: intrinsic values live on the node's top-level
+        # properties (node.title / node.body / …), NEVER in `metadata`. A stray
+        # `metadata.body` or `metadata.title` is rejected on save, not accepted as
+        # shadow storage. Asserted with both keys so this is the general intrinsic
+        # rule, not a body special-case.
+        scene = self.service.read_scene(self.scene_id)
+        for stray in ("body", "title"):
+            with self.assertRaises(ProjectServiceError) as ctx:
+                self.service.save_scene(
+                    self.scene_id,
+                    SaveSceneRequest(
+                        title=scene.title,
+                        body=scene.body,
+                        base_revision=scene.revision,
+                        status="draft",
+                        entry_type="manuscript:scene",
+                        metadata={stray: "shadow"},
+                    ),
+                )
+            self.assertIn(stray, str(ctx.exception))
+
+    def test_body_intrinsic_field_def_is_marked(self) -> None:
+        # ADR-0059 §A: `body` gains a built-in intrinsic field definition — a
+        # long_text with a description that steers the commit contract. `intrinsic`
+        # keeps it off the metadata rail (MetadataPanel gates on that flag).
+        body = self.service.read_metadata_schema().fields["body"]
+        self.assertTrue(body.intrinsic)
+        self.assertEqual(body.category, "intrinsic")
+        self.assertEqual(body.type, "long_text")
+        self.assertTrue((body.description or "").strip())
+        self.assertTrue(body.ai_proposable)
+
+    def test_body_membership_tracks_has_body(self) -> None:
+        # ADR-0059 §B: `body` is the conditional intrinsic — injected into a
+        # type's field membership IFF the type has a body. Asserted over EVERY
+        # resolved type, so both over-injection (into a bodiless type) and
+        # under-injection (missing from a body type) fail here.
+        for entry_type_id, definition in self.service.read_metadata_schema().entry_types.items():
+            self.assertEqual(
+                "body" in definition.fields,
+                definition.has_body,
+                f"{entry_type_id}: body membership must match has_body",
+            )
+
+    def test_body_membership_follows_overridden_has_body(self) -> None:
+        # ADR-0059 §B regression guards: `has_body` is resolved through the parent
+        # chain at membership-build time (before attribute inheritance). A bodiless
+        # child of a body-bearing parent LOSES the inherited body; a body-bearing
+        # child of a bodiless parent GAINS it — and lands as the second intrinsic.
+        self.service._write_yaml(
+            self.root / "metadata.schema.yaml",
+            {
+                "version": 1,
+                "entry_types": {
+                    # lore:base has a body by default, so this bodiless subtype
+                    # must have `body` stripped from its inherited membership.
+                    "lore:mapthing": {
+                        "name": "Map Thing",
+                        "kind": "lore",
+                        "parent": "lore:base",
+                        "has_body": False,
+                    },
+                    # ...and its body-bearing child must gain body back.
+                    "lore:mapdetail": {
+                        "name": "Map Detail",
+                        "kind": "lore",
+                        "parent": "lore:mapthing",
+                        "has_body": True,
+                    },
+                },
+            },
+        )
+        types = self.service.read_metadata_schema().entry_types
+        self.assertNotIn("body", types["lore:mapthing"].fields)
+        self.assertIn("body", types["lore:mapdetail"].fields)
+        self.assertEqual(types["lore:mapdetail"].fields[:4], ["title", "body", "entry_type", "id"])
 
     def test_intrinsic_injection_does_not_duplicate(self) -> None:
         # A type that already lists an intrinsic key must not get a duplicate.

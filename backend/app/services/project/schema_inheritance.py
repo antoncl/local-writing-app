@@ -128,15 +128,36 @@ class MetadataSchemaInheritanceMixin:
         # own/inherited so they trail the hand-authored fields).
         self._expand_group_applications(raw_entry_type, next_entry_type["fields"], state)
         # Intrinsic identity fields (#116): every node carries id/title/
-        # entry_type in top-level front matter, so inject them into every type's
-        # membership (leading, before display_order can reorder). Unconditional +
-        # deduped: intrinsic fields can never be dropped by a type omitting them,
-        # and inheriting a parent that already has them doesn't double-count.
-        # Injected here (not via each type's `fields`) keeps them out of
-        # `own_fields`, so the editor renders them as built-in, not type-owned.
-        existing_fields = next_entry_type["fields"]
-        intrinsic_to_add = [k for k in INTRINSIC_FIELD_KEYS if k not in existing_fields]
-        next_entry_type["fields"] = intrinsic_to_add + existing_fields
+        # entry_type in top-level front matter, so they lead every type's
+        # membership (before display_order can reorder). Kept out of `own_fields`
+        # (set above from raw local fields) so the editor renders them built-in,
+        # not type-owned.
+        #
+        # `body` is the CONDITIONAL intrinsic (ADR-0059 §B): spliced in right
+        # after `title` (resolved order reads title, body, entry_type, id), but
+        # ONLY for types that have a body. It cannot join INTRINSIC_FIELD_KEYS —
+        # that tuple is injected unconditionally and would put a body field on
+        # every type. `has_body` must be resolved HERE against the parent chain,
+        # because attribute inheritance (`_inherit_entry_type_attributes`) runs
+        # AFTER this membership build, so a subtype that inherits its body-ness
+        # (e.g. lore:character ← lore:base) has no `has_body` on the working dict
+        # yet — a naive `next_entry_type.get("has_body")` guard would drop body
+        # from every inheriting subtype.
+        #
+        # We STRIP all four intrinsics from the inherited membership, then
+        # re-prepend the canonical `leading` block. A plain "prepend the ones not
+        # already present" would (a) land a freshly-injected `body` ahead of
+        # title/entry_type/id that a parent already injected, and (b) leave an
+        # inherited `body` on a has_body:false child that overrides a body-bearing
+        # parent. Stripping and re-leading fixes both and is order-identical to
+        # the old triple handling for every non-body type.
+        has_body = self._entry_type_resolves_body(raw_entry_type, parent_def)
+        leading = list(INTRINSIC_FIELD_KEYS)
+        if has_body:
+            leading.insert(leading.index("title") + 1 if "title" in leading else 0, "body")
+        strip = set(INTRINSIC_FIELD_KEYS) | {"body"}
+        remaining = [f for f in next_entry_type["fields"] if f not in strip]
+        next_entry_type["fields"] = leading + remaining
         # Display order (#89): membership is inheritance-resolved above; a
         # per-type `display_order` then reorders the whole resolved list
         # (inherited fields included) without touching membership. Additive and
@@ -145,6 +166,22 @@ class MetadataSchemaInheritanceMixin:
         next_entry_type["fields"] = self._apply_display_order(
             next_entry_type["fields"], raw_entry_type.get("display_order")
         )
+
+    @staticmethod
+    def _entry_type_resolves_body(
+        raw_entry_type: dict[str, Any], parent_def: dict[str, Any] | None
+    ) -> bool:
+        """Whether a type has a body, resolved at membership-build time (ADR-0059
+        §B). `has_body` is an inherited attribute, but attribute inheritance runs
+        *after* membership, so we resolve it here from the type's own declaration,
+        else the resolved parent's, else the model default (`has_body: bool = True`
+        on `EntryTypeDefinition`). A body-bearing type gets the `body` intrinsic;
+        a bodiless one (which declares `has_body: False`) does not."""
+        if "has_body" in raw_entry_type:
+            return bool(raw_entry_type["has_body"])
+        if isinstance(parent_def, dict) and "has_body" in parent_def:
+            return bool(parent_def["has_body"])
+        return True
 
     def _inherit_entry_type_attributes(
         self, next_entry_type: dict[str, Any], parent_def: dict[str, Any] | None
@@ -270,7 +307,10 @@ class MetadataSchemaInheritanceMixin:
         for field_key, field_def in schema_fields.items():
             if not isinstance(field_def, dict):
                 continue
-            if field_key in INTRINSIC_FIELD_KEYS:
+            if field_key in INTRINSIC_FIELD_KEYS or field_key == "body":
+                # `body` is the conditional intrinsic (ADR-0059 §B): it drives a
+                # `has_body`-gated injection rather than the unconditional
+                # INTRINSIC_FIELD_KEYS tuple, but its category is still intrinsic.
                 field_def["category"] = "intrinsic"
             elif field_def.get("type") == "computed":
                 field_def["category"] = "computed"

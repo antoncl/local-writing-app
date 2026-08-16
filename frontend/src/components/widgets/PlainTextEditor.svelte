@@ -144,33 +144,51 @@
   function loadValue(nextValue: string) {
     if (!editor) return;
     applyingExternalValue = true;
-    // setContent accepts plain text via paragraph wrappers. Splitting on
-    // \n\n preserves paragraph breaks coming from external state; single
-    // \n becomes a soft break inside the paragraph.
-    const paragraphs = (nextValue || "").split(/\n\n+/);
-    const doc = {
-      type: "doc",
-      content: paragraphs.map((para) => ({
-        type: "paragraph",
-        content: para
-          ? para.split("\n").flatMap((line, i) => {
-              const out: { type: string; text?: string }[] = [];
-              if (i > 0) out.push({ type: "hardBreak" });
-              if (line) out.push({ type: "text", text: line });
-              return out;
-            })
-          : [],
-      })),
-    };
-    editor.commands.setContent(doc, false);
-    isEmpty = editor.isEmpty;
-    lastExternalValue = nextValue || "";
-    pendingLocalValue = null;
-    applyingExternalValue = false;
+    try {
+      // setContent accepts plain text via paragraph wrappers. Splitting on
+      // \n\n preserves paragraph breaks coming from external state; single
+      // \n becomes a soft break inside the paragraph.
+      const paragraphs = (nextValue || "").split(/\n\n+/);
+      const doc = {
+        type: "doc",
+        content: paragraphs.map((para) => ({
+          type: "paragraph",
+          content: para
+            ? para.split("\n").flatMap((line, i) => {
+                const out: { type: string; text?: string }[] = [];
+                if (i > 0) out.push({ type: "hardBreak" });
+                if (line) out.push({ type: "text", text: line });
+                return out;
+              })
+            : [],
+        })),
+      };
+      editor.commands.setContent(doc, false);
+      isEmpty = editor.isEmpty;
+      lastExternalValue = nextValue || "";
+      pendingLocalValue = null;
+    } finally {
+      // ALWAYS release the guard. `applyingExternalValue` is a re-entrancy lock,
+      // not a latch: if `setContent` throws, leaving it `true` would block the
+      // value-sync (`… && !applyingExternalValue`) forever, so every later
+      // external change — the chat composer's clear on the 2nd+ send included —
+      // would silently no-op (#1083). The finally makes a one-off throw
+      // self-healing instead of permanently wedging the editor.
+      applyingExternalValue = false;
+    }
   }
 
   export function focus() {
     editor?.commands.focus("end");
+  }
+
+  // Imperatively set the editor content, bypassing the reactive value-sync.
+  // Callers use this for a critical, must-happen update — the chat composer's
+  // clear on send (#1083) — so it can't be lost to a wedged sync guard or a
+  // missed reactive re-run. Goes through loadValue, so `lastExternalValue` stays
+  // consistent and no `change` echoes back.
+  export function setValue(next: string) {
+    loadValue(next);
   }
 </script>
 

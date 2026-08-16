@@ -133,4 +133,19 @@ describe("editorPaneDelete: per-kind delete routing", () => {
     await deleteVia(paneFor("manuscript", "scene"));
     expect(deleteScene).toHaveBeenCalledWith(NODE_ID);
   });
+
+  it("chat delete dialog names a chat, not a prompt (#1082)", async () => {
+    editorPanes.panes = [paneFor("chat", "chat:chat_session")];
+    let req: { title: string; message: string; confirmLabel: string } | undefined;
+    vi.spyOn(confirmService, "request").mockImplementation(
+      (r: { title: string; message: string; confirmLabel: string; onConfirm: () => void }) => {
+        req = r;
+      },
+    );
+    await editorPanes.requestDeleteScene("pane_1");
+    expect(req?.title).toBe("Delete Chat");
+    expect(req?.confirmLabel).toBe("Delete Chat");
+    expect(req?.message).toContain("removes the chat file");
+    expect(req?.message).not.toMatch(/prompt/i);
+  });
 });

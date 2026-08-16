@@ -18,6 +18,7 @@ Method bodies moved verbatim. Shared helpers resolve through the MRO:
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -39,7 +40,41 @@ from app.services.project.references import REFERENCE_BEARING_KINDS
 log = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class _FieldValueCheck:
+    """The bundle every per-type metadata-value validator needs (#76).
+
+    Fowler "Introduce Parameter Object" over the (label, field_id, value, field,
+    node_index) clump that `_validate_metadata_field_value` used to thread into
+    each type branch by hand — so the branch ladder can become a dispatch table
+    of tiny per-type handlers that each read what they need off one object.
+    """
+
+    label: str
+    field_id: str
+    value: Any
+    field: MetadataFieldDefinition
+    node_index: NodeIndex | None
+
+
 class MetadataValuesMixin:
+    # field.type -> the per-type value validator method (#76). `_validate_
+    # metadata_field_value` dispatches through this instead of an if/elif ladder
+    # over every type; `computed` and `list` keep their own guards in the
+    # orchestrator (the former gates on allow_computed, the latter recurses).
+    _FIELD_VALUE_VALIDATORS: dict[str, str] = {
+        "text": "_validate_text_value",
+        "long_text": "_validate_text_value",
+        "date": "_validate_text_value",
+        "entity_ref": "_validate_entity_ref_value",
+        "select": "_validate_select_value",
+        "number": "_validate_number_value",
+        "boolean": "_validate_boolean_value",
+        "multi_select": "_validate_str_list_value",
+        "tags": "_validate_str_list_value",
+        "entity_ref_list": "_validate_entity_ref_list_value",
+    }
+
     def _normalise_metadata(self, value: Any, path: Path) -> dict[str, Any]:
         if value is None:
             return {}
@@ -228,47 +263,63 @@ class MetadataValuesMixin:
             return []
         if field.type == "computed" and not allow_computed:
             return [f"{label} stores computed metadata field {field_id}; computed fields are derived."]
-        if field.type in {"text", "long_text", "date"}:
-            if not isinstance(value, str):
-                return [f"{label} metadata field {field_id} must be text."]
-            return []
-        if field.type == "entity_ref":
-            if not isinstance(value, str):
-                return [f"{label} metadata field {field_id} must be text."]
-            return self._validate_reference_target(label, field_id, value, field, node_index)
-        if field.type == "select":
-            if not isinstance(value, str):
-                return [f"{label} metadata field {field_id} must be text."]
-            allowed = [opt.value for opt in field.options]
-            if allowed and value not in allowed:
-                return [f"{label} metadata field {field_id} must be one of: {', '.join(allowed)}."]
-            return []
-        if field.type == "number":
-            if isinstance(value, bool) or not isinstance(value, int | float):
-                return [f"{label} metadata field {field_id} must be a number."]
-            return []
-        if field.type == "boolean":
-            if not isinstance(value, bool):
-                return [f"{label} metadata field {field_id} must be true or false."]
-            return []
-        if field.type in {"multi_select", "tags"}:
-            if not isinstance(value, list):
-                return [f"{label} metadata field {field_id} must be a list."]
-            if any(not isinstance(item, str) for item in value):
-                return [f"{label} metadata field {field_id} must contain only text values."]
-            return []
-        if field.type == "entity_ref_list":
-            if not isinstance(value, list):
-                return [f"{label} metadata field {field_id} must be a list."]
-            if any(not isinstance(item, str) for item in value):
-                return [f"{label} metadata field {field_id} must contain only text values."]
-            errors: list[str] = []
-            for item in value:
-                errors.extend(self._validate_reference_target(label, field_id, item, field, node_index))
-            return errors
         if field.type == "list":
             return self._validate_list_field_value(label, field_id, value, field, node_index=node_index)
+        handler_name = self._FIELD_VALUE_VALIDATORS.get(field.type)
+        if handler_name is None:
+            return []
+        check = _FieldValueCheck(
+            label=label, field_id=field_id, value=value, field=field, node_index=node_index
+        )
+        return getattr(self, handler_name)(check)
+
+    def _validate_text_value(self, check: _FieldValueCheck) -> list[str]:
+        if not isinstance(check.value, str):
+            return [f"{check.label} metadata field {check.field_id} must be text."]
         return []
+
+    def _validate_entity_ref_value(self, check: _FieldValueCheck) -> list[str]:
+        if not isinstance(check.value, str):
+            return [f"{check.label} metadata field {check.field_id} must be text."]
+        return self._validate_reference_target(
+            check.label, check.field_id, check.value, check.field, check.node_index
+        )
+
+    def _validate_select_value(self, check: _FieldValueCheck) -> list[str]:
+        if not isinstance(check.value, str):
+            return [f"{check.label} metadata field {check.field_id} must be text."]
+        allowed = [opt.value for opt in check.field.options]
+        if allowed and check.value not in allowed:
+            return [f"{check.label} metadata field {check.field_id} must be one of: {', '.join(allowed)}."]
+        return []
+
+    def _validate_number_value(self, check: _FieldValueCheck) -> list[str]:
+        if isinstance(check.value, bool) or not isinstance(check.value, int | float):
+            return [f"{check.label} metadata field {check.field_id} must be a number."]
+        return []
+
+    def _validate_boolean_value(self, check: _FieldValueCheck) -> list[str]:
+        if not isinstance(check.value, bool):
+            return [f"{check.label} metadata field {check.field_id} must be true or false."]
+        return []
+
+    def _validate_str_list_value(self, check: _FieldValueCheck) -> list[str]:
+        if not isinstance(check.value, list):
+            return [f"{check.label} metadata field {check.field_id} must be a list."]
+        if any(not isinstance(item, str) for item in check.value):
+            return [f"{check.label} metadata field {check.field_id} must contain only text values."]
+        return []
+
+    def _validate_entity_ref_list_value(self, check: _FieldValueCheck) -> list[str]:
+        shape_errors = self._validate_str_list_value(check)
+        if shape_errors:
+            return shape_errors
+        errors: list[str] = []
+        for item in check.value:
+            errors.extend(
+                self._validate_reference_target(check.label, check.field_id, item, check.field, check.node_index)
+            )
+        return errors
 
     def _validate_list_field_value(
         self,
@@ -550,34 +601,39 @@ class MetadataValuesMixin:
         file still carries the stale ID until the user next saves the
         entry, at which point the cleaned metadata is written back.
         """
-
-        def is_valid_ref(item: Any, field: MetadataFieldDefinition) -> bool:
-            if not isinstance(item, str) or not item:
-                return False
-            target = node_index.by_id.get(item)
-            if target is None:
-                return False
-            cfg = field.picker_config
-            if cfg is None:
-                return True
-            if cfg.kinds and target.kind not in cfg.kinds:
-                return False
-            allowed = cfg.entry_types.get(target.kind, []) if cfg.entry_types else []
-            return not allowed or target.entry_type in allowed
-
         cleaned = dict(metadata)
         for field_id, value in metadata.items():
             field = schema.fields.get(field_id)
             if not field:
                 continue
             if field.type == "entity_ref":
-                if value not in (None, "") and not is_valid_ref(value, field):
+                if value not in (None, "") and not self._ref_matches_picker(value, field, node_index):
                     cleaned[field_id] = ""
             elif field.type == "entity_ref_list" and isinstance(value, list):
-                filtered = [item for item in value if is_valid_ref(item, field)]
+                filtered = [item for item in value if self._ref_matches_picker(item, field, node_index)]
                 if len(filtered) != len(value):
                     cleaned[field_id] = filtered
         return cleaned
+
+    def _ref_matches_picker(
+        self, item: Any, field: MetadataFieldDefinition, node_index: NodeIndex
+    ) -> bool:
+        """Whether `item` is a live node id acceptable to `field`'s picker config
+        — it exists in the index and, if the field constrains a picker, matches
+        its `kinds` and per-kind `entry_types`. Was the `is_valid_ref` closure
+        inside `_strip_dangling_references` (#76)."""
+        if not isinstance(item, str) or not item:
+            return False
+        target = node_index.by_id.get(item)
+        if target is None:
+            return False
+        cfg = field.picker_config
+        if cfg is None:
+            return True
+        if cfg.kinds and target.kind not in cfg.kinds:
+            return False
+        allowed = cfg.entry_types.get(target.kind, []) if cfg.entry_types else []
+        return not allowed or target.entry_type in allowed
 
     def _purge_metadata_refs(
         self,

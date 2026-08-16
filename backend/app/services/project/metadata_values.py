@@ -28,11 +28,14 @@ from app.models import (
     MetadataFieldDefinition,
     MetadataSchema,
     ScopedTag,
+    Swatch,
 )
 from app.services.ai.entry_patch import (
     is_proposable_field,
     parse_entry_patch_json,
 )
+from app.services.color_snap import nearest_swatch_id
+from app.services.machine_settings import palette as machine_palette
 from app.services.project.errors import ProjectServiceError
 from app.services.project.node_index import NodeIndex
 from app.services.project.references import REFERENCE_BEARING_KINDS
@@ -74,6 +77,12 @@ class MetadataValuesMixin:
         "tags": "_validate_str_list_value",
         "entity_ref_list": "_validate_entity_ref_list_value",
     }
+
+    def _palette(self) -> list[Swatch]:
+        """The machine colour palette, for snapping AI-proposed colours (#696).
+        Read from machine settings so a user's customised/renamed swatches are
+        the snap targets, not just the seed set."""
+        return machine_palette()
 
     def _normalise_metadata(self, value: Any, path: Path) -> dict[str, Any]:
         if value is None:
@@ -515,6 +524,17 @@ class MetadataValuesMixin:
                     # can act on (`field[2].status must be one of …`).
                     dropped.append(field_id)
                     continue
+                if field.type == "color":
+                    # A colour field's value space IS the palette (#696). The AI
+                    # can emit a raw hex or an unknown name, which would surface
+                    # as a literal in the review card and resolve to no swatch
+                    # once adopted (the colour silently lost). Snap it back into
+                    # the palette; drop the field if it can't be mapped at all.
+                    snapped = nearest_swatch_id(value, self._palette()) if isinstance(value, str) else None
+                    if snapped is None:
+                        dropped.append(field_id)
+                        continue
+                    value = snapped
                 fields[field_id] = value
 
         return AIEntryPatch(body=body_value, fields=fields, dropped=dropped)

@@ -30,6 +30,40 @@ def _ndjson(line: dict[str, Any]) -> str:
     return json.dumps(line, ensure_ascii=False) + "\n"
 
 
+def _done_line(
+    ev: ai_providers.StreamDone,
+    *,
+    policy: str,
+    extra_done: dict[str, Any],
+    descriptor: ModelDescriptor | None,
+) -> dict[str, Any]:
+    """Assemble the terminal `done` object: base fields + `extra_done`, plus
+    `usage` when the stream reported it and `cost_usd` when a pricing
+    descriptor is available to price that usage.
+    """
+    line: dict[str, Any] = {
+        "type": "done",
+        "provider": ev.provider,
+        "model": ev.model,
+        "latency_ms": ev.latency_ms,
+        "stop_reason": ev.stop_reason,
+        "truncated": ev.truncated,
+        "policy": policy,
+        **extra_done,
+    }
+    if ev.usage is not None:
+        line["usage"] = {
+            "input_tokens": ev.usage.input_tokens,
+            "cached_input_tokens": ev.usage.cached_input_tokens,
+            "cache_write_tokens": ev.usage.cache_write_tokens,
+            "output_tokens": ev.usage.output_tokens,
+        }
+        if descriptor is not None:
+            from app.services.ai.profiles import compute_cost
+            line["cost_usd"] = compute_cost(ev.usage, descriptor)
+    return line
+
+
 def transform_provider_events_to_ndjson(
     events: Iterator[ai_providers.StreamEvent],
     *,
@@ -54,27 +88,9 @@ def transform_provider_events_to_ndjson(
                 if ev.text:
                     yield _ndjson({"type": "thinking", "text": ev.text})
             elif isinstance(ev, ai_providers.StreamDone):
-                done_line: dict[str, Any] = {
-                    "type": "done",
-                    "provider": ev.provider,
-                    "model": ev.model,
-                    "latency_ms": ev.latency_ms,
-                    "stop_reason": ev.stop_reason,
-                    "truncated": ev.truncated,
-                    "policy": policy,
-                    **extra_done,
-                }
-                if ev.usage is not None:
-                    done_line["usage"] = {
-                        "input_tokens": ev.usage.input_tokens,
-                        "cached_input_tokens": ev.usage.cached_input_tokens,
-                        "cache_write_tokens": ev.usage.cache_write_tokens,
-                        "output_tokens": ev.usage.output_tokens,
-                    }
-                    if descriptor is not None:
-                        from app.services.ai.profiles import compute_cost
-                        done_line["cost_usd"] = compute_cost(ev.usage, descriptor)
-                yield _ndjson(done_line)
+                yield _ndjson(_done_line(
+                    ev, policy=policy, extra_done=extra_done, descriptor=descriptor
+                ))
             elif isinstance(ev, ai_providers.StreamError):
                 yield _ndjson({
                     "type": "error",

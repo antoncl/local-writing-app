@@ -512,6 +512,10 @@
       // Author help text (#1004) — persisted only when non-empty, same as icon.
       ...(payload.description.trim() ? { description: payload.description.trim() } : {}),
       ...(defaultValue !== undefined ? { default: defaultValue } : {}),
+      // AI-authorship gate (ADR-0059 §E). Default is true, so persist only the
+      // opt-out — an omitted key reads back as true (backend default), keeping
+      // the field yaml clean while a deliberate `false` survives.
+      ...(payload.aiProposable === false ? { ai_proposable: false } : {}),
     };
 
     // Detect option values that are being removed (present before, gone now, and

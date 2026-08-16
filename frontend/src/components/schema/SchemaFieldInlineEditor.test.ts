@@ -242,3 +242,58 @@ describe("SchemaFieldInlineEditor author description (#1004)", () => {
     expect((screen.getByLabelText("Field description") as HTMLTextAreaElement).value).toBe("Existing help.");
   });
 });
+
+describe("SchemaFieldInlineEditor AI-authorship toggle (ADR-0059)", () => {
+  it("defaults to AI-writable and threads that through the saved draft", async () => {
+    const onSave = vi.fn();
+    render(SchemaFieldInlineEditor, {
+      props: { field: null, selectedFieldId: null, layerId: "proj", onSave, onCancel: vi.fn(), onRemove: vi.fn() },
+    });
+    const toggle = screen.getByLabelText("AI may write this field") as HTMLInputElement;
+    expect(toggle.checked).toBe(true); // §E default: a field is AI-writable unless opted out
+    await fireEvent.input(screen.getByLabelText("Field display name"), { target: { value: "Bio" } });
+    await fireEvent.click(screen.getByText("Done"));
+    expect(onSave.mock.calls[0][0].aiProposable).toBe(true);
+  });
+
+  it("threads an opt-out (toggle off) through the saved draft", async () => {
+    const onSave = vi.fn();
+    render(SchemaFieldInlineEditor, {
+      props: { field: null, selectedFieldId: null, layerId: "proj", onSave, onCancel: vi.fn(), onRemove: vi.fn() },
+    });
+    await fireEvent.input(screen.getByLabelText("Field display name"), { target: { value: "Notes" } });
+    await fireEvent.click(screen.getByLabelText("AI may write this field")); // toggle off
+    await fireEvent.click(screen.getByText("Done"));
+    expect(onSave.mock.calls[0][0].aiProposable).toBe(false);
+  });
+
+  it("seeds the toggle from an existing off-limits field", () => {
+    render(SchemaFieldInlineEditor, {
+      props: {
+        field: { name: "Context policy", type: "select", options: [], ai_proposable: false },
+        selectedFieldId: "context_policy",
+        layerId: "proj",
+        onSave: vi.fn(),
+        onCancel: vi.fn(),
+        onRemove: vi.fn(),
+      },
+    });
+    expect((screen.getByLabelText("AI may write this field") as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("hides the toggle for a never-proposable type (computed)", () => {
+    render(SchemaFieldInlineEditor, {
+      props: {
+        field: { name: "Word count", type: "computed", options: [] },
+        selectedFieldId: "word_count",
+        layerId: "proj",
+        onSave: vi.fn(),
+        onCancel: vi.fn(),
+        onRemove: vi.fn(),
+      },
+    });
+    // Computed/reference fields are never AI-proposed regardless of the flag,
+    // so the control is not shown (it would be an inert switch).
+    expect(screen.queryByLabelText("AI may write this field")).toBeNull();
+  });
+});

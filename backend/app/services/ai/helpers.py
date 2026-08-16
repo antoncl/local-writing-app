@@ -243,15 +243,13 @@ def _field_catalog(project: ProjectService, schema: Any, value: Any) -> list[dic
     definition = schema.entry_types.get(entry_type) if entry_type else None
     if definition is None:
         return []
+    # `body` IS a proposable field (ADR-0059 §A), so it appears here — that is
+    # what lets the brainstorm create seed list it with its description. Callers
+    # that route body via the top-level "body" key instead of the fields object
+    # (the extraction contract's loop; the revise-mode long_text value displays,
+    # which already show `e.body` separately) filter it out with `f.id != "body"`.
     catalog: list[dict[str, Any]] = []
     for field_id in definition.fields:
-        if field_id == "body":
-            # `body` is an intrinsic field for the schema editor / catalog
-            # identity (ADR-0059 §A), but it is proposed as the top-level
-            # "body" key with its own contract clause (§E/§G), never enumerated
-            # in the fields loop. Excluded at the source so `field_catalog`
-            # keeps yielding exactly the fields-object fields it always has.
-            continue
         field = schema.fields.get(field_id)
         if not is_proposable_field(field_id, field):
             continue

@@ -79,7 +79,7 @@ Reply with ONLY a JSON object, with no preamble, no commentary, and no code fenc
 {% endif %}- "fields": {% if input.creating %}{% if input.title_allowed %}ALWAYS include "title". {% endif %}Add any other field the conversation set, {% else %}include a field ONLY when the conversation changed it, {% endif %}keyed by its field id. For tags / multi_select give a JSON array of strings; for a select field use one of its listed options exactly; for an ordered-list field give the complete new list in its stated item shape (the whole list, in order); otherwise give the field's complete new value.{% if not input.creating %}{% if input.title_allowed %} You may also propose a new "title".{% endif %} Use {} if nothing changed.{% endif %}
 
 The fields you may set:
-{% for f in field_catalog(input.entry_type) if input.commit_fields is none or f.id in input.commit_fields %}
+{% for f in field_catalog(input.entry_type) if f.id != "body" and (input.commit_fields is none or f.id in input.commit_fields) %}
 - {{ f.id }} ({{ f.label }}) — {{ f.type }}{% if f.options %}; one of: {{ f.options | join(", ") }}{% endif %}{% if f.description %} — {{ f.description }}{% endif %}{% if f.get("items") %}{% if f.item_scalar %}; a JSON array of {{ f["items"][0].type }} values{% if f["items"][0].options %}, each one of: {{ f["items"][0].options | join(", ") }}{% endif %}{% else %}; a JSON array of objects, each with keys: {% for m in f["items"] %}{{ m.key }} ({{ m.type }}{% if m.options %}; one of: {{ m.options | join(", ") }}{% endif %}){% if not loop.last %}, {% endif %}{% endfor %}{% endif %}{% endif %}
 {% else %}
 - (none{% if input.body_allowed %} beyond title/body{% endif %})

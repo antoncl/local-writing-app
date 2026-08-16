@@ -89,6 +89,25 @@ class ReviseEntryLoreGateTests(unittest.TestCase):
         self.assertNotIn("Shapeshifters live hidden", rendered)
         self.assertNotIn('name="Premise"', rendered)
 
+    def test_create_seed_lists_body_with_its_description(self) -> None:
+        # #1067: the create brainstorm seed must list `body` among the fields to
+        # develop, carrying its delineating description — otherwise the model is
+        # never told the entry has a body to write. (Regressed when #1063
+        # excluded body from `field_catalog` globally.)
+        rendered, _ = self._render({"entry": "", "entry_type": "lore:character"})
+        self.assertIn("these fields to develop", rendered)
+        self.assertIn("body (Body)", rendered)  # enumerated in the field list
+        self.assertIn("do not restate", rendered.lower())  # body's steering description
+
+    def test_revise_render_shows_body_once_not_as_empty_field(self) -> None:
+        # #1067: in revise mode the body is shown as the entry's own prose
+        # (`e.body`), never ALSO as an empty `### Body (body)` long_text field
+        # header — body is filtered from the long_text value display.
+        subject = self._make_note("Alderman Vane", body="A city councilman.")
+        rendered, _ = self._render({"entry": subject, "entry_type": ""})
+        self.assertIn("A city councilman.", rendered)  # the real body prose, shown once
+        self.assertNotIn("### Body (body)", rendered)  # not a duplicate empty field header
+
 
 if __name__ == "__main__":
     unittest.main()

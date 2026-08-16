@@ -69,6 +69,10 @@ class ExtractionContractTests(unittest.TestCase):
             self.service, entry_type="lore:character", creating=False
         )
         self.assertIn('"body"', contract)
+        # #1067: body is offered via its dedicated `- "body":` clause, NEVER as a
+        # `- body (Body) — long_text` entry in the generic field loop (it commits
+        # as the top-level "body" key, not under "fields").
+        self.assertNotIn("body (Body)", contract)
         # Straight from field_catalog — a select is named with its options.
         self.assertIn("allegiance", contract)
         self.assertIn("one of: order, chaos", contract)

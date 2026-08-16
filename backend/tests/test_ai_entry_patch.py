@@ -332,15 +332,17 @@ class ValidateAiEntryPatchTests(unittest.TestCase):
         # the catalog the model is offered.
         self.assertNotIn("context_policy", by_id)
 
-    def test_field_catalog_excludes_body(self) -> None:
-        # ADR-0059 §G: `body` is now an intrinsic *field* (present in the type's
-        # membership), but it is proposed as the top-level "body" key with its
-        # own contract clause — never enumerated in the fields loop. The catalog
-        # must not yield it, or the model would be told to set body twice.
+    def test_field_catalog_includes_body_with_description(self) -> None:
+        # #1067: `body` is a proposable field, so it appears in the catalog — that
+        # is what lets the brainstorm create seed list it with its description.
+        # Consumers that route body via the top-level "body" key (the extraction
+        # contract loop; the revise-mode long_text displays) filter `f.id != "body"`
+        # themselves; the catalog itself must yield it, carrying its description.
         schema = self.service.read_metadata_schema()
         self.assertIn("body", schema.entry_types["lore:character"].fields)  # in membership
-        catalog = _field_catalog(self.service, schema, self.hero.id)
-        self.assertNotIn("body", {f["id"] for f in catalog})  # but not in the catalog
+        by_id = {f["id"]: f for f in _field_catalog(self.service, schema, self.hero.id)}
+        self.assertIn("body", by_id)
+        self.assertTrue((by_id["body"].get("description") or "").strip())
 
     def test_is_proposable_field_honors_ai_proposable(self) -> None:
         # ADR-0059 §E: the single predicate gates on `ai_proposable` (default

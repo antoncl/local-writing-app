@@ -34,7 +34,7 @@ Reason about the plot from the board below. The arcs list the beats the story wa
 {% else %}
 _(This card has no synopsis yet.)_
 {% endif %}
-{% for f in field_catalog(e) if f.type == "long_text" %}
+{% for f in field_catalog(e) if f.type == "long_text" and f.id != "body" %}
 
 ### {{ f.label }} ({{ f.id }})
 {{ e.metadata.get(f.id) or "_(empty)_" }}

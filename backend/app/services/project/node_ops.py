@@ -31,6 +31,20 @@ from app.services.project.errors import ProjectServiceError
 
 
 class NodeOpsMixin:
+    # kind → (matching request type, saver method name). `save_node`
+    # dispatches through this table instead of an if/elif ladder that pairs a
+    # kind test with an isinstance guard per kind (#76). Order and outcomes are
+    # unchanged: an unknown kind is a 422, a request whose type does not match
+    # the resolved kind is the same 422, and each kind calls the same saver.
+    _SAVE_NODE_DISPATCH: dict[str, tuple[type, str]] = {
+        "manuscript": (SaveSceneRequest, "save_scene"),
+        "lore": (SaveLoreEntryRequest, "save_lore_entry"),
+        "prompt": (SavePromptEntryRequest, "save_prompt_entry"),
+        "assistant": (SaveAssistantEntryRequest, "save_assistant_entry"),
+        "chat": (SaveChatSessionRequest, "save_chat_session"),
+        "view": (SaveViewRequest, "save_view"),
+    }
+
     def lookup_node_kind(self, node_id: str) -> str | None:
         """Cheap kind lookup that doesn't read the node file. Returns None
         if the id isn't indexed. Used by the unified HTTP endpoints to
@@ -99,40 +113,19 @@ class NodeOpsMixin:
         if entry is None:
             raise ProjectServiceError(f"Node {node_id} does not exist.", 404)
 
-        def _mismatch() -> ProjectServiceError:
-            return ProjectServiceError(
+        dispatch = self._SAVE_NODE_DISPATCH.get(entry.kind)
+        if dispatch is None:
+            raise ProjectServiceError(
+                f"Unsupported node kind {entry.kind!r} for node {node_id}.", 422
+            )
+        request_type, saver_name = dispatch
+        if not isinstance(request, request_type):
+            raise ProjectServiceError(
                 f"Request type {type(request).__name__} does not match "
                 f"node {node_id} kind {entry.kind!r}.",
                 422,
             )
-
-        if entry.kind == "manuscript":
-            if not isinstance(request, SaveSceneRequest):
-                raise _mismatch()
-            return self.save_scene(node_id, request)
-        if entry.kind == "lore":
-            if not isinstance(request, SaveLoreEntryRequest):
-                raise _mismatch()
-            return self.save_lore_entry(node_id, request)
-        if entry.kind == "prompt":
-            if not isinstance(request, SavePromptEntryRequest):
-                raise _mismatch()
-            return self.save_prompt_entry(node_id, request)
-        if entry.kind == "assistant":
-            if not isinstance(request, SaveAssistantEntryRequest):
-                raise _mismatch()
-            return self.save_assistant_entry(node_id, request)
-        if entry.kind == "chat":
-            if not isinstance(request, SaveChatSessionRequest):
-                raise _mismatch()
-            return self.save_chat_session(node_id, request)
-        if entry.kind == "view":
-            if not isinstance(request, SaveViewRequest):
-                raise _mismatch()
-            return self.save_view(node_id, request)
-        raise ProjectServiceError(
-            f"Unsupported node kind {entry.kind!r} for node {node_id}.", 422
-        )
+        return getattr(self, saver_name)(node_id, request)
 
     def delete_node(self, node_id: str) -> None:
         """Unified node-delete entrypoint (Phase 3b-iii).

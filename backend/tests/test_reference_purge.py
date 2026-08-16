@@ -328,13 +328,12 @@ class PurgeCoversEveryReferenceBearingKindTests(ReferencePurgeTestCase):
 
         self.assertEqual(chat_path.read_text(encoding="utf-8"), before)
 
-    def test_a_chat_subject_ref_is_purged_but_the_transcript_survives(self) -> None:
-        """The counterpart: a chat that points `subject` at a deleted id is a real
-        dangling reference and must be purged like any other entity_ref. But the
-        purge rewrites the chat file (`_write_markdown_with_front_matter`), and
-        the transcript now lives in the body — so clearing the ref must leave the
-        conversation intact. Both halves are asserted: subject cleared, messages
-        preserved."""
+    def test_deleting_a_chat_subject_cascades_to_the_whole_chat(self) -> None:
+        """A chat points `subject` at a node; when that node is deleted the chat
+        is a brainstorm about something that no longer exists, so it is deleted
+        with its subject (#1078) — not kept as a freeform chat with a purged ref.
+        The whole node goes, transcript included; the ref purge that would have
+        cleared the `subject` never has a file left to touch."""
         self._write_lore(self.root, "seren", "Seren")
         chat = self.service.create_chat_session(
             CreateChatSessionRequest(title="About Seren", subject="seren")
@@ -344,20 +343,16 @@ class PurgeCoversEveryReferenceBearingKindTests(ReferencePurgeTestCase):
             SaveChatSessionRequest(
                 title="About Seren",
                 subject="seren",
-                messages=[
-                    {"role": "user", "content": "who is seren?"},
-                    {"role": "assistant", "content": "A long answer.\nWith two lines."},
-                ],
+                messages=[{"role": "user", "content": "who is seren?"}],
             ),
         )
-        self.assertEqual(self.service.read_chat_session(chat.id).subject, "seren")
+        self.assertTrue((self.root / "chats" / f"{chat.id}.md").exists())
 
         self.service.delete_lore_entry("seren")
 
-        purged = self.service.read_chat_session(chat.id)
-        self.assertEqual(purged.subject, "")
-        self.assertEqual([m.content for m in purged.messages],
-                         ["who is seren?", "A long answer.\nWith two lines."])
+        # The chat is gone, not merely stripped of its subject.
+        self.assertFalse((self.root / "chats" / f"{chat.id}.md").exists())
+        self.assertNotIn(chat.id, {s.id for s in self.service.list_chat_sessions().sessions})
 
     def test_the_purge_preserves_front_matter_it_does_not_own(self) -> None:
         """The typed writers spelled out a fixed key set, so a purge silently

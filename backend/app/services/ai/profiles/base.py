@@ -268,6 +268,14 @@ class ProviderProfile(ABC):
         later slice.
         """
 
+    @abstractmethod
+    def health_ping(self, model: str) -> None:
+        """Make the cheapest call that proves the endpoint + credentials
+        work — a 1-token completion against `model`. Returns nothing on
+        success; raises `ProviderError` (or lets the SDK's error surface)
+        on failure, which the dispatch layer turns into a health result.
+        """
+
     def supports_temperature(self, model_id: str) -> bool:
         """Whether the model accepts a `temperature` parameter on the
         request. Default True — override for models that 400 on it (e.g.

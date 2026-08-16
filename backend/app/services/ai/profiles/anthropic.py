@@ -174,6 +174,19 @@ class AnthropicProfile(ProviderProfile):
         stop_reason = getattr(response, "stop_reason", None)
         return ChatOutcome("".join(parts), stop_reason, response)
 
+    def health_ping(self, model: str) -> None:
+        try:
+            from anthropic import Anthropic
+        except ImportError as exc:
+            raise ProviderError(f"anthropic package not installed: {exc}") from exc
+
+        client = Anthropic(api_key=self._api_key, timeout=15.0)
+        client.messages.create(
+            model=model,
+            max_tokens=1,
+            messages=[{"role": "user", "content": "ping"}],
+        )
+
 
 def anthropic_system_with_cache(system_prompt: str):
     """Wrap a single system prompt as a cacheable content block.

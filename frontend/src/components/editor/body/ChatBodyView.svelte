@@ -31,6 +31,7 @@
   import ChatInputsStrip from "@/components/editor/body/chat/ChatInputsStrip.svelte";
   import ChatJournalScope from "@/components/editor/body/chat/ChatJournalScope.svelte";
   import ChatEstimateStrip from "@/components/editor/body/chat/ChatEstimateStrip.svelte";
+  import ChatComposerBar from "@/components/editor/body/chat/ChatComposerBar.svelte";
   import EntryDraftCard from "@/components/editor/body/chat/EntryDraftCard.svelte";
   import { formatCostEur } from "@/lib/utils/money";
   import type {
@@ -55,8 +56,6 @@
   import {
     assistantScopeTags,
     assistantSpeakerName,
-    assistantTitle,
-    partitionAssistants,
     preferredAssistantForPrompt,
     scopedDefaultAssistantId,
     topmostMatchingAssistant,
@@ -156,30 +155,11 @@
   let pendingTurnCost: number | null = null;
   let pendingTurnCacheWriteSlots: string[] = [];
 
-  // ---- prompt-picker UI state (composer chip → dropdown) ----
-  let promptPickerOpen = $state(false);
-  let promptPickerSearch = $state("");
-  let promptPickerEl: HTMLDivElement | null = $state(null);
-  let promptPickerBtnEl: HTMLButtonElement | null = $state(null);
-
-  // ---- assistant-picker UI state (mirrors prompt picker; replaces native <select>) ----
-  let assistantPickerOpen = $state(false);
-  let assistantPickerSearch = $state("");
-  let assistantPickerEl: HTMLDivElement | null = $state(null);
-  let assistantPickerBtnEl: HTMLButtonElement | null = $state(null);
-
-  // ---- 👁 preview popover state ----
-  // The popover shows what the assistant receives ahead of the next turn.
-  // Post-send it reads the locked chatSystemPrompt (the system message that
-  // repeats every turn). Pre-send, before the template is rendered and locked,
-  // it shows chatPreviewMessages — the assembled envelope the estimate path
-  // already fetches from /ai/preview on every draft edit (#991). So the button
-  // is useful from the first keystroke, not only after the first send.
-  let chatPreviewPopoverOpen = $state(false);
-  let chatPreviewBtnEl: HTMLButtonElement | null = $state(null);
   // The composer instance, for the imperative clear on send (#1083).
   let composerRef: { setValue: (v: string) => void; focus: () => void } | null = $state(null);
-  let chatPreviewPopoverEl: HTMLDivElement | null = $state(null);
+  // The 👁 preview popover (and both picker chips) live in ChatComposerBar
+  // (#1086); this view feeds it chatPreviewMessages below and the two pick
+  // callbacks (pickPromptForChat / pickAssistantForChat).
   // The rendered messages from the last successful estimate fetch (system +
   // any templated initial turns). Null when no prompt is bound (freeform: no
   // system message) or the template hasn't rendered yet (unfilled inputs).
@@ -371,51 +351,10 @@
     chatInputsHidden = (session.messages || []).length > 0;
   }
 
-  function promptTitle(promptId: string): string {
-    if (!promptId) return "Pick a prompt";
-    const entry = promptEntries.find((p) => p.id === promptId);
-    return entry?.title ?? "Unknown prompt";
-  }
-
-  function chatRoutedPromptEntries(): PromptEntrySummary[] {
-    // Plain chat prompts only. A brainstorm is now a `chat_panel` prompt with a
-    // `commit` (ADR-0054 §2), but it is launched contextually against a subject
-    // via Conversations ＋New — free-picking it in a chat gives a Commit button
-    // with no target entry, so it is excluded from this general picker.
-    return promptEntriesForSurface(promptDiscoveryCtx, "chat_panel").filter(
-      (entry) => !promptDeclaresCommit(promptDiscoveryCtx, entry),
-    );
-  }
-
-  function filteredChatPromptEntries(): PromptEntrySummary[] {
-    const list = chatRoutedPromptEntries();
-    const q = promptPickerSearch.trim().toLowerCase();
-    const sorter = (a: PromptEntrySummary, b: PromptEntrySummary) =>
-      a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
-    if (!q) return list.slice().sort(sorter);
-    return list
-      .filter((e) => e.title.toLowerCase().includes(q) || (e.entry_type || "").toLowerCase().includes(q))
-      .sort(sorter);
-  }
-
-  async function toggleChatPromptPicker() {
-    if (isLocked) return;
-    promptPickerOpen = !promptPickerOpen;
-    promptPickerSearch = "";
-    if (promptPickerOpen) {
-      await tick();
-      const input = promptPickerEl?.querySelector<HTMLInputElement>(".cbv-picker-search");
-      input?.focus();
-    }
-  }
-
-  function closeChatPromptPicker() {
-    promptPickerOpen = false;
-    promptPickerSearch = "";
-  }
-
+  // The two pick gestures stay here (they mutate session state + persist); the
+  // picker chips themselves live in ChatComposerBar (#1086), which closes its
+  // own dropdown before invoking these as callbacks.
   async function pickPromptForChat(entry: PromptEntrySummary): Promise<void> {
-    closeChatPromptPicker();
     if (isLocked) return;
     chatPromptEntryId = entry.id;
     // Seed the assistant from the prompt: an explicit preferred pin wins;
@@ -437,50 +376,10 @@
     await persistActiveChat();
   }
 
-  async function toggleAssistantPicker() {
-    if (isLocked) return;
-    assistantPickerOpen = !assistantPickerOpen;
-    assistantPickerSearch = "";
-    if (assistantPickerOpen) {
-      await tick();
-      const input = assistantPickerEl?.querySelector<HTMLInputElement>(".cbv-picker-search");
-      input?.focus();
-    }
-  }
-
-  function closeAssistantPicker() {
-    assistantPickerOpen = false;
-    assistantPickerSearch = "";
-  }
-
   async function pickAssistantForChat(id: string): Promise<void> {
-    closeAssistantPicker();
     if (isLocked) return;
     chatAssistantId = id;
     await persistActiveChat();
-  }
-
-  function toggleChatPreviewPopover() {
-    chatPreviewPopoverOpen = !chatPreviewPopoverOpen;
-  }
-
-  function handleDocumentClick(event: MouseEvent) {
-    const target = event.target as Node;
-    if (promptPickerOpen) {
-      const insidePicker =
-        promptPickerEl?.contains(target) || promptPickerBtnEl?.contains(target);
-      if (!insidePicker) closeChatPromptPicker();
-    }
-    if (assistantPickerOpen) {
-      const insidePicker =
-        assistantPickerEl?.contains(target) || assistantPickerBtnEl?.contains(target);
-      if (!insidePicker) closeAssistantPicker();
-    }
-    if (chatPreviewPopoverOpen) {
-      const insidePreview =
-        chatPreviewPopoverEl?.contains(target) || chatPreviewBtnEl?.contains(target);
-      if (!insidePreview) chatPreviewPopoverOpen = false;
-    }
   }
 
   // defaultDraftFor / seedInputDraftsFromEntry / isInputMissing /
@@ -798,12 +697,8 @@
   }
 
   onMount(() => {
-    document.addEventListener("mousedown", handleDocumentClick);
     const ttlInterval = setInterval(() => { ttlTick += 1; }, 1000);
-    return () => {
-      document.removeEventListener("mousedown", handleDocumentClick);
-      clearInterval(ttlInterval);
-    };
+    return () => clearInterval(ttlInterval);
   });
 
   async function fetchChatEstimate(): Promise<void> {
@@ -880,6 +775,15 @@
     availableScenes: [],
     hiddenPromptIds: $hiddenLibraryStore,
   });
+  // The chat-routed pick list for ChatComposerBar (#1086): chat_panel prompts,
+  // minus brainstorms (a `chat_panel` prompt with a `commit`, ADR-0054 §2) —
+  // those launch contextually against a subject via Conversations ＋New, so
+  // free-picking one here would give a Commit button with no target entry.
+  let routedPromptEntries = $derived(
+    promptEntriesForSurface(promptDiscoveryCtx, "chat_panel").filter(
+      (entry) => !promptDeclaresCommit(promptDiscoveryCtx, entry),
+    ),
+  );
   // Suppress unused-prop warnings for props Phase 4c+ wires in (preview
   // popover, inputs strip, future journal-scope rendering).
   $effect.pre(() => {
@@ -923,7 +827,6 @@
   });
   let assistantScope = $derived(assistantScopeTags(activePromptEntry));
   let scopedDefaultId = $derived(scopedDefaultAssistantId(assistantEntries, assistantScope, defaultAssistantId));
-  let assistantParts = $derived(partitionAssistants(assistantEntries, assistantPickerSearch, assistantScope));
   let declaredInputs = $derived(activePromptEntry?.inputs ?? []);
   // A hidden input is launch-set, not user-authored (ADR-0046 §6.4) and has no
   // widget in the strip — so it must never gate Send, or an unset one would
@@ -952,175 +855,20 @@
   {:else if loadError}
     <p class="cbv-error">Couldn't load chat: {loadError}</p>
   {:else if chatSession}
-    <div class="cbv-composer-strip">
-      <div class="cbv-prompt-anchor">
-        <button
-          type="button"
-          class="cbv-chip cbv-chip-button"
-          class:cbv-chip-locked={isLocked}
-          class:cbv-chip-assigned={!!chatPromptEntryId}
-          title={isLocked ? "Prompt is locked while this chat has messages." : "Pick a prompt"}
-          bind:this={promptPickerBtnEl}
-          onclick={() => void toggleChatPromptPicker()}
-          disabled={isLocked && !chatPromptEntryId}
-        >
-          <span class="cbv-chip-glyph" aria-hidden="true">✨</span>
-          <strong>{promptTitle(chatPromptEntryId)}</strong>
-          {#if isLocked}
-            <span class="cbv-chip-lock" aria-label="locked">🔒</span>
-          {:else}
-            <span class="cbv-chip-caret" aria-hidden="true">▾</span>
-          {/if}
-        </button>
-        {#if promptPickerOpen}
-          <div class="cbv-prompt-picker" role="menu" bind:this={promptPickerEl}>
-            <input
-              class="cbv-picker-search"
-              type="text"
-              placeholder="Search prompts…"
-              bind:value={promptPickerSearch}
-            />
-            {#each filteredChatPromptEntries() as entry (entry.id)}
-              <button
-                type="button"
-                class:cbv-picker-active={entry.id === chatPromptEntryId}
-                onclick={() => void pickPromptForChat(entry)}
-              >
-                <strong>{entry.title}</strong>
-                <small>{entry.entry_type}</small>
-              </button>
-            {:else}
-              <p class="cbv-picker-empty">
-                {promptPickerSearch
-                  ? "No prompts match."
-                  : "No chat-routed prompts. Create one with output_kind = chat_panel."}
-              </p>
-            {/each}
-          </div>
-        {/if}
-      </div>
-      <div class="cbv-prompt-anchor">
-        <button
-          type="button"
-          class="cbv-chip cbv-chip-button cbv-chip-graphite"
-          class:cbv-chip-locked={isLocked}
-          title={isLocked ? "Assistant is locked while this chat has messages." : "Pick an assistant"}
-          bind:this={assistantPickerBtnEl}
-          onclick={() => void toggleAssistantPicker()}
-          disabled={isLocked}
-          aria-label="Assistant"
-        >
-          <span class="cbv-chip-glyph" aria-hidden="true">🤖</span>
-          <strong>{assistantTitle(chatAssistantId, assistantEntries, scopedDefaultId)}</strong>
-          {#if isLocked}
-            <span class="cbv-chip-lock" aria-label="locked">🔒</span>
-          {:else}
-            <span class="cbv-chip-caret" aria-hidden="true">▾</span>
-          {/if}
-        </button>
-        {#if assistantPickerOpen}
-          <div class="cbv-prompt-picker" role="menu" bind:this={assistantPickerEl}>
-            <input
-              class="cbv-picker-search"
-              type="text"
-              placeholder="Search assistants…"
-              bind:value={assistantPickerSearch}
-            />
-            <button
-              type="button"
-              class:cbv-picker-active={chatAssistantId === ""}
-              onclick={() => void pickAssistantForChat("")}
-            >
-              <strong>Default</strong>
-              <small>{assistantTitle("", assistantEntries, scopedDefaultId).replace(/^Default \(|\)$/g, "") || "machine default"}</small>
-            </button>
-            {#if assistantParts.matching.length === 0 && assistantParts.rest.length === 0}
-              <p class="cbv-picker-empty">
-                {assistantPickerSearch ? "No assistants match." : "No assistants configured."}
-              </p>
-            {:else}
-              {#if assistantParts.matching.length > 0}
-                <div class="cbv-picker-group-label">Suggested for this prompt</div>
-              {/if}
-              {#each assistantParts.matching as assistant (assistant.id)}
-                {@render assistantOption(assistant)}
-              {/each}
-              {#if assistantParts.matching.length > 0 && assistantParts.rest.length > 0}
-                <div class="cbv-picker-divider" role="separator"></div>
-              {/if}
-              {#each assistantParts.rest as assistant (assistant.id)}
-                {@render assistantOption(assistant)}
-              {/each}
-            {/if}
-          </div>
-        {/if}
-      </div>
-      {#snippet assistantOption(assistant: AssistantEntrySummary)}
-        <button
-          type="button"
-          class:cbv-picker-active={assistant.id === chatAssistantId}
-          onclick={() => void pickAssistantForChat(assistant.id)}
-        >
-          <strong>{assistant.title}</strong>
-          <small>{assistant.entry_type}</small>
-        </button>
-      {/snippet}
-      <div class="cbv-preview-anchor">
-        <button
-          type="button"
-          class="cbv-preview-icon"
-          class:cbv-preview-icon-active={chatPreviewPopoverOpen}
-          bind:this={chatPreviewBtnEl}
-          title="Preview what's sent — system message + attached context"
-          aria-label="Preview what's sent"
-          aria-expanded={chatPreviewPopoverOpen}
-          onclick={toggleChatPreviewPopover}
-        >👁</button>
-        {#if chatPreviewPopoverOpen}
-          <div
-            class="cbv-preview-popover"
-            role="dialog"
-            aria-label="Preview what's sent"
-            bind:this={chatPreviewPopoverEl}
-          >
-            <header class="cbv-preview-popover-header">
-              <strong>Preview</strong>
-              <small>system message + attached context</small>
-              <button
-                type="button"
-                class="cbv-preview-popover-close"
-                aria-label="Close"
-                onclick={() => (chatPreviewPopoverOpen = false)}
-              >×</button>
-            </header>
-            <div class="cbv-preview-popover-body">
-              {#if chatSystemPrompt && chatSystemPrompt.trim()}
-                <pre class="cbv-preview-content">{chatSystemPrompt}</pre>
-              {:else if chatPreviewMessages && chatPreviewMessages.length > 0}
-                {#each chatPreviewMessages as message}
-                  <div class="cbv-preview-message">
-                    <header class="cbv-preview-msg-role">{message.role}</header>
-                    {#each message.blocks as block}
-                      <pre class="cbv-preview-content">{block.text}</pre>
-                    {/each}
-                  </div>
-                {/each}
-              {:else if chatPromptEntryId}
-                <p class="cbv-meta">
-                  Fill the required inputs above and the assembled message will appear here.
-                </p>
-              {:else}
-                <p class="cbv-meta">No system message will be sent. The model sees only the chat history.</p>
-              {/if}
-              <p class="cbv-meta cbv-preview-hint">
-                This is the system message and context the assistant receives on the next turn.
-                Chat history above is also sent. Composer text becomes the next user message.
-              </p>
-            </div>
-          </div>
-        {/if}
-      </div>
-    </div>
+    <ChatComposerBar
+      {isLocked}
+      {chatPromptEntryId}
+      {chatAssistantId}
+      {promptEntries}
+      {routedPromptEntries}
+      {assistantEntries}
+      {assistantScope}
+      {scopedDefaultId}
+      {chatSystemPrompt}
+      {chatPreviewMessages}
+      onPickPrompt={(entry) => void pickPromptForChat(entry)}
+      onPickAssistant={(id) => void pickAssistantForChat(id)}
+    />
 
     <ChatTranscript
       {chatHistory}
@@ -1326,132 +1074,8 @@
     .cbv-busy-dot { animation: none; }
   }
 
-  /* ---- 1 · composer strip ---- */
-  .cbv-composer-strip {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-    padding-bottom: 11px;
-    border-bottom: 1px solid var(--divider);
-  }
-  .cbv-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    padding: 5px 11px;
-    border-radius: 999px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    font-size: var(--fs-sm);
-    font-weight: 600;
-    color: var(--text-2);
-  }
-  /* Prompt chip = brown (snippet) StatusPill once bound. */
-  .cbv-chip-assigned {
-    background: var(--k-snippet-soft);
-    border-color: var(--k-snippet);
-    color: var(--k-snippet-text);
-  }
-  .cbv-chip strong { font-weight: 600; }
-  .cbv-chip-glyph { font-size: var(--fs-md); }
-  .cbv-chip-lock { font-size: var(--fs-xs); opacity: 0.65; }
-  .cbv-chip-caret { font-size: var(--fs-xs); opacity: 0.7; }
-  .cbv-chip-locked { opacity: 0.8; }
-  .cbv-chip-button { cursor: pointer; font: inherit; }
-  .cbv-chip-button[disabled] { cursor: default; }
-
-  .cbv-prompt-anchor { position: relative; display: inline-flex; align-items: center; gap: 4px; }
-
-  .cbv-prompt-picker {
-    position: absolute; top: 100%; left: 0; margin-top: 6px; z-index: 30;
-    background: var(--surface); border: 1px solid var(--border-strong);
-    border-radius: 11px; box-shadow: 0 12px 30px var(--shadow2);
-    padding: 6px; min-width: 250px; max-height: 320px; overflow-y: auto;
-    display: flex; flex-direction: column; gap: 2px;
-  }
-  .cbv-picker-search {
-    width: 100%; box-sizing: border-box; padding: 6px 8px; border-radius: 7px;
-    border: 1px solid var(--border); font-size: var(--fs-md); margin-bottom: 4px;
-  }
-  .cbv-prompt-picker > button {
-    text-align: left; padding: 7px 9px; border-radius: 8px;
-    border: 1px solid transparent; background: transparent; cursor: pointer;
-    display: flex; flex-direction: column; gap: 2px;
-  }
-  .cbv-prompt-picker > button:hover { background: var(--inset); }
-  .cbv-prompt-picker > button.cbv-picker-active {
-    background: var(--accent-soft); border-color: var(--accent-soft2);
-  }
-  .cbv-prompt-picker > button > strong { font-weight: 600; font-size: var(--fs-md); }
-  .cbv-prompt-picker > button > small { font-size: var(--fs-xs); color: var(--text-3); }
-  .cbv-picker-empty { margin: 4px 6px; font-size: var(--fs-sm); color: var(--text-3); }
-
-  /* Soft-partition affordances (ADR-0024): a label over the matching group and
-     a hairline before the rest of the roster. */
-  .cbv-picker-group-label {
-    padding: 4px 8px 2px;
-    font-size: var(--fs-xs);
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--text-3);
-  }
-
-  .cbv-picker-divider {
-    height: 1px;
-    margin: 5px 6px;
-    background: var(--border);
-  }
-
-  /* Assistant chip = graphite variant of .cbv-chip. Trigger + popover
-     mirror the prompt picker exactly so both reads at the same height
-     and the dropdown renders NodeRow-style entries. */
-  .cbv-chip-graphite {
-    background: var(--k-graphite-soft);
-    border-color: var(--k-graphite);
-    color: var(--k-graphite-text);
-  }
-  .cbv-chip-graphite strong { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-  /* 👁 preview icon button. */
-  .cbv-preview-anchor { position: relative; display: inline-flex; align-items: center; margin-left: auto; }
-  .cbv-preview-icon {
-    width: 30px; height: 30px; border-radius: 8px;
-    border: 1px solid var(--border); background: var(--surface);
-    cursor: pointer; font-size: var(--fs-lg); line-height: 1; padding: 0; color: var(--text-2);
-  }
-  .cbv-preview-icon:hover { background: var(--inset); }
-  .cbv-preview-icon-active { background: var(--accent-soft); border-color: var(--accent-soft2); }
-
-  /* 3 · preview popover. */
-  .cbv-preview-popover {
-    position: absolute; top: 100%; right: 0; margin-top: 6px; z-index: 40;
-    width: 380px; max-height: 60vh; background: var(--surface);
-    border: 1px solid var(--border-strong); border-radius: 12px;
-    box-shadow: 0 12px 30px var(--shadow2); display: flex; flex-direction: column; overflow: hidden;
-  }
-  .cbv-preview-popover-header {
-    display: flex; align-items: baseline; gap: 8px; padding: 9px 13px;
-    border-bottom: 1px solid var(--divider); background: var(--panel); font-size: var(--fs-sm);
-  }
-  .cbv-preview-popover-header strong { font-size: var(--fs-sm); font-weight: 600; color: var(--text); }
-  .cbv-preview-popover-header small { color: var(--text-3); flex: 1; font-size: var(--fs-xs); }
-  .cbv-preview-popover-close {
-    background: transparent; border: none; cursor: pointer; font-size: var(--fs-lg);
-    line-height: 1; padding: 0 2px; color: var(--text-3);
-  }
-  .cbv-preview-popover-body { padding: 12px 14px; overflow-y: auto; flex: 1; }
-  .cbv-preview-content {
-    margin: 0 0 8px; font-family: var(--mono);
-    font-size: var(--fs-sm); line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; color: var(--text);
-  }
-  .cbv-preview-message { margin-bottom: 10px; }
-  .cbv-preview-msg-role {
-    font-size: var(--fs-xs); font-weight: 800; letter-spacing: 0.08em;
-    text-transform: uppercase; color: var(--text-3); margin-bottom: 3px;
-  }
-  .cbv-preview-hint { font-style: italic; }
+  /* The composer strip (prompt/assistant picker chips + 👁 preview popover) and
+     its styles moved to chat/ChatComposerBar.svelte (#1086). */
 
   /* ---- 4 · messages ---- */
   /* The transcript (.cbv-messages) + its message atoms moved to
@@ -1462,7 +1086,7 @@
   /* The inputs strip + journal scope carry their own flex: 0 0 auto now that
      they live in chat/ChatInputsStrip.svelte + chat/ChatJournalScope.svelte
      (#99). */
-  .cbv-composer-strip,
+  /* ChatComposerBar sets flex: 0 0 auto on its own root (.cbv-composer-strip). */
   .cbv-action-row,
   .cbv-foot,
   :global(.chat-body-view > .cbv-input) {

@@ -120,8 +120,8 @@ export const CONTAINER_HEADER = 32; // the title-bar band at the top of a box
 export const CONTAINER_GAP = 24; // between sibling boxes / rows / acts
 
 // Base z-index for the interactive nodes (cards + plotlines), above their container
-// boxes (level 0/1). PlotEditor lifts a node above this while its kebab menu is open
-// so the menu isn't painted over by a sibling node (#1095), then restores it here.
+// boxes (level 0/1). A node with an open kebab menu is lifted above its siblings by a
+// CSS `:has()` rule in PlotEditor (#1095/#1100), not by changing this value.
 export const NODE_Z_INDEX = 2;
 
 // The class SvelteFlow's `dragHandle` targets so a container drags ONLY by its header

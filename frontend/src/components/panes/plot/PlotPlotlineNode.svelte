@@ -104,14 +104,12 @@
     closeMenu();
     if (op && id) op(id);
   }
-  // Close on an outside pointerdown / Escape, and ask the board to lift this node above
-  // its siblings while the menu is open (#1095) — the menu escapes the node's clip but is
-  // trapped in its SvelteFlow stacking context. Cleanup fires on close AND on unmount, so
-  // the elevation can't get stranded. Capture phase so a click that lands on the canvas
-  // (which reselects/pans) still closes first.
+  // Close on an outside pointerdown / Escape. Capture phase so a click that lands on the
+  // canvas (which reselects / pans) still closes the menu first. The node is lifted above
+  // its siblings while open by a pure-CSS `:has()` rule on the board (#1100), so there's no
+  // elevation signal to fire here.
   $effect(() => {
     if (!menuOpen) return;
-    if (id) actions?.onMenuOpenChange(id, true);
     const onDown = (e: PointerEvent) => {
       if (rootEl && !rootEl.contains(e.target as Node)) closeMenu();
     };
@@ -121,7 +119,6 @@
     window.addEventListener("pointerdown", onDown, true);
     window.addEventListener("keydown", onKey, true);
     return () => {
-      if (id) actions?.onMenuOpenChange(id, false);
       window.removeEventListener("pointerdown", onDown, true);
       window.removeEventListener("keydown", onKey, true);
     };
@@ -624,25 +621,23 @@
     font-size: var(--fs-sm);
     color: var(--text-3);
   }
-  /* Actions kebab (#1096): quiet until node hover / focus / menu-open — the card kebab
-     idiom (the "quiet writing desk"), so it doesn't shout on a dense board. */
+  /* Actions kebab (#1096): quiet until node hover / focus / menu-open. Sized identically to
+     the plot card's kebab (#1100) — icon-plus-padding, not a fixed box — so the dots read the
+     same on both node kinds. */
   .plotline-kebab {
     appearance: none;
-    flex: none;
+    flex: 0 0 auto;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 22px;
-    height: 22px;
-    padding: 0;
-    border: 1px solid transparent;
+    padding: 2px 4px;
+    border: none;
     background: transparent;
     color: var(--text-3);
     border-radius: var(--r-sm);
     cursor: pointer;
-    font-size: var(--fs-sm);
     opacity: 0;
-    transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease;
+    transition: opacity 120ms ease;
   }
   .plot-plotline:hover .plotline-kebab,
   .plotline-kebab:focus-visible,
@@ -650,8 +645,8 @@
     opacity: 1;
   }
   .plotline-kebab:hover {
+    background: var(--surface);
     color: var(--text);
-    border-color: var(--border);
   }
   /* The actions menu, rendered outside the node's flow so overflow can't clip it; the
      board lifts the node's z-index while it's open (#1095). Mirrors the plot card menu. */

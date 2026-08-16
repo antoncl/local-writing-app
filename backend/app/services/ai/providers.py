@@ -71,79 +71,22 @@ def health_check(
     settings: MachineSettings,
     policy: AIPolicy,
 ) -> AIHealthResponse:
-    if not provider_name:
-        return AIHealthResponse(
-            provider="",
-            model=model,
-            ok=False,
-            latency_ms=0,
-            policy=policy,
-            error="No provider specified and no default_provider configured.",
-        )
-    if provider_name not in KNOWN_PROVIDERS:
+    error = _validate_provider_request(provider_name, model, policy)
+    if error is not None:
         return AIHealthResponse(
             provider=provider_name,
             model=model,
             ok=False,
             latency_ms=0,
             policy=policy,
-            error=f"Unknown provider '{provider_name}'. Known: {sorted(KNOWN_PROVIDERS)}.",
-        )
-
-    allowed, reason = _policy_allows(policy, provider_name)
-    if not allowed:
-        return AIHealthResponse(
-            provider=provider_name,
-            model=model,
-            ok=False,
-            latency_ms=0,
-            policy=policy,
-            error=reason,
-        )
-
-    if not model:
-        return AIHealthResponse(
-            provider=provider_name,
-            model="",
-            ok=False,
-            latency_ms=0,
-            policy=policy,
-            error=f"No model specified and no default model configured for '{provider_name}'.",
+            error=error,
         )
 
     started = time.perf_counter()
     try:
-        if provider_name == "anthropic":
-            _ping_anthropic(settings.providers.anthropic_api_key, model)
-        elif provider_name == "openai":
-            _ping_openai_compatible(
-                base_url="https://api.openai.com/v1",
-                api_key=settings.providers.openai_api_key,
-                provider_name="openai",
-                model=model,
-                requires_key=True,
-            )
-        elif provider_name == "openrouter":
-            _ping_openai_compatible(
-                base_url="https://openrouter.ai/api/v1",
-                api_key=settings.providers.openrouter_api_key,
-                provider_name="openrouter",
-                model=model,
-                requires_key=True,
-            )
-        elif provider_name == "ollama":
-            base = settings.providers.ollama_host.rstrip("/")
-            if not base.endswith("/v1"):
-                base = base + "/v1"
-            _ping_openai_compatible(
-                base_url=base,
-                api_key="ollama",
-                provider_name="ollama",
-                model=model,
-                requires_key=False,
-            )
-        else:
-            raise RuntimeError(f"Provider '{provider_name}' is recognized but not wired.")
+        profile = profile_for(provider_name, settings)
+        _ensure_provider_key(provider_name, profile.configured_key())
+        profile.health_ping(model)
     except ProviderError as exc:
         return AIHealthResponse(
             provider=provider_name,
@@ -195,50 +138,17 @@ def _ensure_provider_key(provider_name: str, api_key: str) -> None:
     )
 
 
-def _ping_anthropic(api_key: str, model: str) -> None:
-    _ensure_provider_key("anthropic", api_key)
-    try:
-        from anthropic import Anthropic
-    except ImportError as exc:
-        raise ProviderError(f"anthropic package not installed: {exc}") from exc
-
-    client = Anthropic(api_key=api_key, timeout=15.0)
-    client.messages.create(
-        model=model,
-        max_tokens=1,
-        messages=[{"role": "user", "content": "ping"}],
-    )
-
-
-def _ping_openai_compatible(
-    *, base_url: str, api_key: str, provider_name: str, model: str, requires_key: bool
-) -> None:
-    if requires_key:
-        _ensure_provider_key(provider_name, api_key)
-    try:
-        from openai import OpenAI
-    except ImportError as exc:
-        raise ProviderError(f"openai package not installed: {exc}") from exc
-
-    client = OpenAI(base_url=base_url, api_key=api_key or "sk-none", timeout=15.0)
-    client.chat.completions.create(
-        model=model,
-        max_tokens=1,
-        messages=[{"role": "user", "content": "ping"}],
-    )
-
-
 # ----- Chat completion -----
 
 
-def _validate_chat_request(
+def _validate_provider_request(
     provider_name: str,
     model: str,
-    messages: list[dict[str, str]],
     policy: AIPolicy,
 ) -> str | None:
-    """Shared pre-flight for chat and chat_stream. Returns an error message
-    when the request can't proceed, or None when it's good to dispatch.
+    """Shared pre-flight for any provider call — provider known, allowed by
+    policy, model present. Returns an error message or None. `chat`/`chat_stream`
+    layer a messages check on top; `health_check` uses this directly.
     """
     if not provider_name:
         return "No provider specified and no default_provider configured."
@@ -249,6 +159,21 @@ def _validate_chat_request(
         return reason
     if not model:
         return f"No model specified and no default model configured for '{provider_name}'."
+    return None
+
+
+def _validate_chat_request(
+    provider_name: str,
+    model: str,
+    messages: list[dict[str, str]],
+    policy: AIPolicy,
+) -> str | None:
+    """Pre-flight for chat and chat_stream: the shared provider checks plus a
+    non-empty messages check. Returns an error message or None.
+    """
+    error = _validate_provider_request(provider_name, model, policy)
+    if error is not None:
+        return error
     if not messages:
         return "messages must not be empty."
     return None

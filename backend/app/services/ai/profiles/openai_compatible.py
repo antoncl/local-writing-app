@@ -92,3 +92,20 @@ class OpenAICompatibleProfile(ProviderProfile):
         choice = response.choices[0]
         stop_reason = getattr(choice, "finish_reason", None)
         return ChatOutcome(choice.message.content or "", stop_reason, response)
+
+    def health_ping(self, model: str) -> None:
+        try:
+            from openai import OpenAI
+        except ImportError as exc:
+            raise ProviderError(f"openai package not installed: {exc}") from exc
+
+        client = OpenAI(
+            base_url=self._chat_base_url(),
+            api_key=self._chat_api_key() or "sk-none",
+            timeout=15.0,
+        )
+        client.chat.completions.create(
+            model=model,
+            max_tokens=1,
+            messages=[{"role": "user", "content": "ping"}],
+        )

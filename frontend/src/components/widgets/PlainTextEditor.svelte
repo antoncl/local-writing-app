@@ -21,6 +21,10 @@
   export let minHeight = 60;
   export let maxHeight: number | null = null;
   export let autofocus = false;
+  // Read-only while a send/commit is in flight — the editor stays mounted
+  // (so its value and caret survive) but rejects input. Mirrors a disabled
+  // <textarea>: the substrate is TipTap, so we drive it via setEditable.
+  export let disabled = false;
   // When present, decorates lore-name matches inline so the user can see
   // what the implicit-context expander would pick up on send.
   export let matcher: CompiledMatcher | null = null;
@@ -56,6 +60,10 @@
   // DecorationSet against the new pattern set on the next transaction.
   // Dispatching a no-op transaction is the cheapest way to trigger
   // apply() without mutating the document.
+  // Reflect the disabled prop onto the live editor. setEditable(false) blocks
+  // typing/paste while keeping the current content and selection intact.
+  $: if (editor) editor.setEditable(!disabled);
+
   $: if (editor) updateMatcher(matcher);
   function updateMatcher(next: CompiledMatcher | null): void {
     if (!editor) return;
@@ -94,6 +102,7 @@
         }),
         ImplicitContextHighlight.configure({ matcher }),
       ],
+      editable: !disabled,
       content: "",
       editorProps: {
         attributes: {
@@ -162,6 +171,8 @@
 
 <div
   class="plain-text-editor {className}"
+  class:is-disabled={disabled}
+  aria-disabled={disabled}
   style:--plain-text-min-height={`${minHeight}px`}
   style:--plain-text-max-height={maxHeight ? `${maxHeight}px` : "none"}
 >
@@ -169,7 +180,7 @@
     <div class="plain-text-editor-placeholder" aria-hidden="true">{placeholder}</div>
   {/if}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div bind:this={editorElement} on:mousedown={() => editor?.commands.focus()}></div>
+  <div bind:this={editorElement} on:mousedown={() => !disabled && editor?.commands.focus()}></div>
 </div>
 
 <style>
@@ -185,6 +196,14 @@
   .plain-text-editor:focus-within {
     border-color: var(--accent);
     box-shadow: 0 0 0 2px var(--accent-soft);
+  }
+
+  .plain-text-editor.is-disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .plain-text-editor.is-disabled :global(.plain-text-editor-body) {
+    cursor: default;
   }
 
   .plain-text-editor-placeholder {

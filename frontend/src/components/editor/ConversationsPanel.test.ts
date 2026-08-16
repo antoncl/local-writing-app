@@ -139,6 +139,35 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
     );
   });
 
+  it("seeds a context_pick `entry` target as an array-shaped ref, not a bare id (#1094)", async () => {
+    // The real revise prompts declare `entry` as a required context_pick (an
+    // array of NodePickerRefs). A bare-id seed made isInputMissing throw, so a
+    // plotline/plot-card revise failed "Missing required" on send. The subject's
+    // kind is the FQN prefix of its entry_type.
+    const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue(undefined);
+    const revisePlotline = {
+      id: "p-revise-plotline",
+      title: "Revise plotline",
+      body: "",
+      entry_type: "prompt:revise",
+      metadata: {},
+      inputs: [{ name: "entry", type: "context_pick", label: "Plotline", required: true }],
+      offer_on: ["plot:plotline"],
+    } as unknown as PromptEntrySummary;
+    renderPanel([revisePlotline], "plot:plotline");
+
+    await fireEvent.click(screen.getByRole("button", { name: /New/ }));
+    await tick();
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Revise plotline" }));
+
+    expect(spawn).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "p-revise-plotline" }),
+      { entry: [{ id: "hero", kind: "plot", title: "Hero", entry_type: "plot:plotline" }] },
+      null,
+      expect.objectContaining({ subject: "hero", subjectTitle: "Hero" }),
+    );
+  });
+
   it("seeds the slider's scene onto the prompt's as_of input (ADR-0055 §1)", async () => {
     const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue(undefined);
     render(ConversationsPanel, {

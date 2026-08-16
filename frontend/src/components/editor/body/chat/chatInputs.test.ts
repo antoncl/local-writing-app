@@ -1,16 +1,23 @@
 import { describe, expect, it } from "vitest";
-import type { PromptInputDefinition } from "@/lib/types";
+import type { PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
 import {
   coerceChatInputValue,
   decodeChatInputDrafts,
   encodeChatInputDrafts,
   isInputMissing,
+  seedSubjectEntryInput,
   ttlChipsFor,
 } from "./chatInputs";
 
 // Minimal input factory — only the fields the helpers read.
 const input = (type: PromptInputDefinition["type"], extra: Partial<PromptInputDefinition> = {}): PromptInputDefinition =>
   ({ name: "x", type, ...extra }) as PromptInputDefinition;
+
+// A prompt carrying a single `entry` input of the given type (or none).
+const promptWithEntry = (type: PromptInputDefinition["type"] | null): PromptEntrySummary =>
+  ({ id: "p", title: "P", inputs: type ? [{ name: "entry", type }] : [] }) as PromptEntrySummary;
+
+const SUBJECT = { id: "plot_abc", kind: "plot" as const, title: "Rescue arc", entryType: "plot:plotline" };
 
 describe("coerceChatInputValue", () => {
   it("trims plain text", () => {
@@ -67,6 +74,41 @@ describe("isInputMissing", () => {
 
   it("list types: a non-array JSON value counts as missing", () => {
     expect(isInputMissing(input("context_pick"), '{"id":"a"}')).toBe(true);
+  });
+});
+
+describe("seedSubjectEntryInput (#1094)", () => {
+  it("context_pick target: seeds an array-shaped NodePickerRef, not a bare id", () => {
+    expect(seedSubjectEntryInput(promptWithEntry("context_pick"), SUBJECT)).toEqual([
+      { id: "plot_abc", kind: "plot", title: "Rescue arc", entry_type: "plot:plotline" },
+    ]);
+  });
+
+  it("context_pick seed survives isInputMissing where a bare id did not", () => {
+    // The bug: a bare id string made JSON.parse throw → read as missing → a
+    // required plotline target failed "Missing required" on send.
+    expect(isInputMissing(input("context_pick"), "plot_abc")).toBe(true);
+    const seeded = seedSubjectEntryInput(promptWithEntry("context_pick"), SUBJECT);
+    // The launch path persists the natural value; ChatBodyView decodes it to a
+    // draft string (JSON.stringify). That draft must read as present.
+    const draft = decodeChatInputDrafts({ entry: seeded }).entry;
+    expect(isInputMissing(input("context_pick"), draft)).toBe(false);
+  });
+
+  it("omits entry_type from the ref when the subject has none", () => {
+    const { entryType: _drop, ...noType } = SUBJECT;
+    expect(seedSubjectEntryInput(promptWithEntry("context_pick"), noType)).toEqual([
+      { id: "plot_abc", kind: "plot", title: "Rescue arc" },
+    ]);
+  });
+
+  it("entity_ref_list target: seeds a bare-id array", () => {
+    expect(seedSubjectEntryInput(promptWithEntry("entity_ref_list"), SUBJECT)).toEqual(["plot_abc"]);
+  });
+
+  it("scalar target or no `entry` input: falls back to the bare id (unchanged)", () => {
+    expect(seedSubjectEntryInput(promptWithEntry("entity_ref"), SUBJECT)).toBe("plot_abc");
+    expect(seedSubjectEntryInput(promptWithEntry(null), SUBJECT)).toBe("plot_abc");
   });
 });
 

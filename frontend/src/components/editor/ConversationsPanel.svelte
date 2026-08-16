@@ -38,7 +38,13 @@
     promptEntriesOfferedOn,
     type PromptResolutionContext,
   } from "@/lib/editor-core/promptResolution";
-  import type { ChatSessionSummary, MetadataSchema, PromptEntrySummary } from "@/lib/types";
+  import { seedSubjectEntryInput } from "@/components/editor/body/chat/chatInputs";
+  import type {
+    ChatSessionSummary,
+    MetadataSchema,
+    NodePickerRef,
+    PromptEntrySummary,
+  } from "@/lib/types";
 
   let {
     subjectId,
@@ -111,11 +117,24 @@
     menuOpen = false;
     if (!prompt || !subjectId) return;
     // This node IS the subject (ADR-0051 S2): stamp it so the new chat surfaces
-    // here and is named after this node. Seed the read anchor onto the prompt's
-    // `as_of` scene input (ADR-0055 §1) — hidden from the chat strip but persisted,
-    // so impersonate reads the subject as-of the slider's scene; omitted at
-    // book-start (a prompt without an `as_of` input ignores the seed, as with `entry`).
-    const seededInputs: Record<string, string> = { entry: subjectId };
+    // here and is named after this node, and seed it into the prompt's `entry`
+    // target in that input's own shape (#1094) — a `context_pick` (the revise
+    // prompts' target) needs an array-shaped ref, not the bare id that made a
+    // required plotline/plot-card target fail "Missing required" on send. The
+    // subject's kind is the FQN prefix of its entry_type (kind:key).
+    const subjectKind = (subjectEntryType.split(":")[0] || "lore") as NodePickerRef["kind"];
+    const seededInputs: Record<string, unknown> = {
+      entry: seedSubjectEntryInput(prompt, {
+        id: subjectId,
+        kind: subjectKind,
+        title: subjectTitle,
+        entryType: subjectEntryType || undefined,
+      }),
+    };
+    // Seed the read anchor onto the prompt's `as_of` scene input (ADR-0055 §1) —
+    // hidden from the chat strip but persisted, so impersonate reads the subject
+    // as-of the slider's scene; omitted at book-start (a prompt without an
+    // `as_of` input ignores the seed).
     if (asOfScene) seededInputs.as_of = asOfScene;
     await chatSessions.openChatFromPromptEntry(prompt, seededInputs, null, {
       parentPaneId: hostPaneId,

@@ -91,15 +91,15 @@ interface EditorPaneComponentHandle {
 }
 
 const AUTO_SAVE_IDLE_MS = 6000;
-// Ceiling on a dirty run, regardless of how continuously the author is typing.
-// The idle debounce alone bounds NOTHING: it is re-armed on every keystroke, so
-// a burst with no full 6-second gap in it never reaches disk, and a crash or
-// force-quit takes the whole burst (#369). Thirty seconds because the loss
-// window should be measured in seconds rather than minutes, while a local save
-// every 30s during sustained typing is nothing — and because a save landing
-// mid-keystroke is already an anticipated case (`saveEditorPane` keeps the
-// draft fields rather than snapping them to the server's copy).
-const AUTO_SAVE_MAX_WAIT_MS = 30000;
+// Ceiling on a dirty run, re-armed once (never per keystroke), so an unbroken
+// burst still reaches disk. This is deliberately the app's CRASH-DURABILITY
+// number (#455), not just an anti-chattiness knob: clean exits now flush via the
+// #369 handlers, so this bounds only the unclean exit (crash/force-quit/power
+// loss) where no handler fires. Ten seconds → worst case is a sentence, not a
+// paragraph; the cost is negligible (a save is async and ~325ms at 200 scenes,
+// and only fires this often during genuinely unbroken typing — any 6s gap saves
+// first). Mid-keystroke landings are safe: `saveEditorPane` keeps the drafts.
+const AUTO_SAVE_MAX_WAIT_MS = 10000;
 const SAVED_INDICATOR_MS = 2000;
 
 // The rest-position authoring layer L for a freshly-loaded lore entry (#314 /

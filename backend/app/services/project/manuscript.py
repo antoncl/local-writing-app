@@ -597,6 +597,6 @@ class ManuscriptMixin:
         root = self._require_project()
         structure = self._read_structure(root)
         node = TreeStructureService.find_by_leaf_ref(structure, scene_id)
-        if node is not None:
+        if node is not None and node.title != title:
             node.title = title
             self._manuscript_tree(root).write(structure)

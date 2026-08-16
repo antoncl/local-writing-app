@@ -63,30 +63,54 @@ field — value produced by the user, living in a top-level node property
 stored `metadata.body` key: the body stays the markdown body on disk, so the file
 format, the atomic prose writes, and `ProseBodyView`/`CodeBodyView` are untouched.
 What changes is that `body` gains a built-in field **definition** — a label
-("Body"), a long-text/markdown type aligned with the type's `body_editor` /
-`body_shape`, and a **description** — so it appears in the resolved field catalog
-(`_field_catalog`, `services/ai/helpers.py:211`) exactly like `title` already does.
+("Body"), a single `long_text` (markdown) type, and a **description** — so it
+appears in the resolved field catalog (`_field_catalog`,
+`services/ai/helpers.py:211`) exactly like `title` already does. That definition
+lives in the shared built-in `fields` registry in `default_schema.py`, beside the
+identity intrinsics (`default_schema.py:691`) — the one place an injected
+membership key resolves against. It is a *single* shared definition: `body`'s type
+does not vary with the type's `body_editor`/`body_shape` (those stay per-type
+attributes governing the editor, not the field's type).
 
 ### B. `body` is injected only into types that have a body
 
 This is the one way `body` differs from the identity triple. The intrinsics
 `title`/`entry_type`/`id` are injected into **every** type's field membership
-unconditionally (`_resolve_field_membership`,
+unconditionally (`_build_entry_type_membership`,
 `services/project/schema_inheritance.py:137`). `body` is injected **only when the
-resolved type's `has_body` is true** (`has_body` is a per-type attribute inherited
-at `_inherit_entry_type_attributes`, `schema_inheritance.py:159`; `mutation_set`,
-`assistant`, `plot:board`, and `view` ship `has_body: false`). A bodiless type
-gets no body field — injecting one would create a field with no editor and no
-value. The category stamp (`_stamp_field_categories`,
-`schema_inheritance.py:260`) marks `body` intrinsic wherever it was injected.
+resolved type's `has_body` is true** (`mutation_set`, `assistant`, `plot:board`,
+and `view` ship `has_body: false`). A bodiless type gets no body field — injecting
+one would create a field with no editor and no value.
 
-Concretely, `body` is a **conditional** intrinsic and therefore cannot simply
-join the `INTRINSIC_FIELD_KEYS` tuple (`default_schema.py:24`) — that tuple drives
-the *unconditional* injection at `schema_inheritance.py:138`
-(`[k for k in INTRINSIC_FIELD_KEYS if k not in existing_fields]`), which would put
-a body field on every type including the bodiless ones. `body` needs its own
-`has_body`-gated injection step, and inclusion in the *category stamp's* intrinsic
-check — the two uses of that tuple pull apart for `body`.
+Two ordering facts the implementer must not miss, or the body field silently
+vanishes for the common case:
+
+- **`has_body` is not resolved at injection time.** In `_resolve_one_entry_type`
+  the membership build (`_build_entry_type_membership`, `schema_inheritance.py:88`)
+  runs **before** attribute inheritance (`_inherit_entry_type_attributes`,
+  `:89`), and `has_body` is an *inherited* attribute (`:157-166`). A subtype that
+  inherits its body-ness from `lore:character` rather than declaring `has_body`
+  itself has no `has_body` on the working dict when injection runs, so a naive
+  `if next_entry_type.get("has_body")` guard at injection would omit the body field
+  from every inheriting subtype. The body injection must therefore resolve
+  `has_body` against the parent chain first (reorder the two steps, or resolve
+  `has_body` inline before injecting `body`).
+- **`body` is a *conditional* intrinsic, so it cannot join `INTRINSIC_FIELD_KEYS`**
+  (`default_schema.py:24`) — that tuple drives the *unconditional* injection
+  (`[k for k in INTRINSIC_FIELD_KEYS if k not in existing_fields]`,
+  `schema_inheritance.py:138`), which would put a body field on every type. `body`
+  gets its own `has_body`-gated injection step. Separately, the category stamp
+  (`_stamp_field_categories`, `schema_inheritance.py:260`) iterates the **global**
+  resolved `fields` registry and stamps each definition once; `body` is marked
+  intrinsic there by an added `field_key == "body"` clause alongside the
+  `field_key in INTRINSIC_FIELD_KEYS` check — not per-injection.
+
+**This amends ADR-0029 §D** ("the intrinsic key set lives in exactly one place,
+`INTRINSIC_FIELD_KEYS`, applied by the resolver"): with a conditional intrinsic
+the single set splits into an *unconditional-injection* tuple (`title`,
+`entry_type`, `id`) and a *category-stamp* set that additionally includes `body`.
+The stamp remains the single source of the `category` a field carries; only the
+injection gains a second, gated entry point.
 
 ### C. `body` presents through the body editor, not a rail row
 
@@ -99,29 +123,56 @@ other intrinsics, `body` is **relabel-only** per type ("Body" → "Description" 
 unaffected; body's field-ness is a catalog/schema/AI concept, authored in the
 schema type editor alongside `title`'s relabel.
 
-### D. A field's description drives the commit contract; the hardcoded body prose is retired
+### D. Body's description drives the commit contract; the hardcoded body prose is retired
 
-Because `body` is now a field with a `description`, the contract stops hardcoding
-"the complete revised markdown body" and instead carries body's description —
-built-in text to the effect of *"Free-form prose for what the structured fields do
-not capture; do not restate field values here"* — per-type overridable like any
-field description (a character's body means something different from a location's).
-This is the fix for the dump: the model is told what the body is *for*, in the same
-description channel every other field already uses.
+The dump is a *guidance* failure: the contract asks for "the complete revised
+markdown body" and says nothing about what belongs there versus in the fields.
+Because `body` is now a field, it carries a built-in **description** — text to the
+effect of *"Free-form prose for what the structured fields do not capture; do not
+restate field values here."* The contract's body clause
+(`DEFAULT_EXTRACTION_TEMPLATE`, `services/ai/extraction.py:73`) renders that
+description in place of the hardcoded prose. Mechanically, `render_extraction_contract`
+(`extraction.py:87`) already resolves the schema for the target `entry_type` to
+build the field loop; it resolves body's description the same way and passes it as
+a template input, so no new Jinja lookup is needed. This is the fix for the dump —
+the model is told what the body is *for*.
+
+The description is a single shared built-in, **overridable per layer** (a layer
+redefines the `body` field with its own description) — the same reach every field
+description has. It is **not** per-*type* overridable: `FieldOverride` carries only
+`label` and `hidden` (`models/schema.py:303`), not `description`, so a
+`lore:character` body and a `lore:location` body share one description. Per-type
+body guidance would require extending `FieldOverride` with a `description` aspect;
+that is a possible follow-up, deliberately **out of scope** here — the single
+built-in description already fixes the dump.
 
 ### E. A field declares whether the AI may author it: `ai_proposable`
 
 Add one property to the field definition (`MetadataFieldDefinition`,
-`models/schema.py:24`): `ai_proposable: bool`, **default `true`**, overridable per
-layer/type exactly like `description`. It becomes an additional input to the
-existing `is_proposable_field` predicate (`services/ai/entry_patch.py:36`) — the
-*single* place that already decides AI-writability — so it gates the extraction
-contract's field loop and the validate-time filter
-(`validate_ai_entry_patch_for_type`, `services/project/metadata_values.py:418`)
-through one mechanism, not a parallel one. It **ANDs** with `commit.fields`
-(ADR-0054 §2): a field is proposed only when it is allow-listed (or the allow-list
-is absent) **and** `ai_proposable`. Default `true` preserves today's behavior; the
-flag is an opt-out for author-owned fields, not a re-permissioning of the schema.
+`models/schema.py:24`): `ai_proposable: bool`, **default `true`**, set per layer by
+redefining the field (same reach as `description`). A plain boolean — not an enum
+(create-only, propose-but-flag, …): the author-facing question is exactly
+"may the AI write this field," and the flag mirrors the existing boolean predicate.
+
+For every field that reaches the model through the `"fields"` object — all
+**stored** fields and `title` — it becomes an additional input to
+`is_proposable_field` (`services/ai/entry_patch.py:36`), the *single* place that
+already decides AI-writability, so it gates both the extraction contract's field
+loop and the validate-time filter (`validate_ai_entry_patch_for_type`,
+`services/project/metadata_values.py:418`) through one predicate, not a parallel
+one. It **ANDs** with `commit.fields` (ADR-0054 §2): a field is proposed only when
+allow-listed (or the allow-list is absent) **and** `ai_proposable`.
+
+`body` is the exception, because it does not travel through `"fields"` — it is a
+top-level `"body"` key taken verbatim when present (`metadata_values.py:406`) and
+described by a dedicated contract clause, not the gated loop. So body's
+`ai_proposable` is enforced at those two body-specific sites (the clause is omitted
+when body is not proposable; the verbatim adopt drops `body` likewise), not through
+`is_proposable_field`. This is a real seam in the "single predicate" story and is
+called out, not hidden; its blast radius is nil today (`body` ships `true`), but a
+layer that sets body `ai_proposable: false` depends on those two sites honoring it.
+Default `true` preserves today's behavior; the flag is an opt-out for author-owned
+fields, not a re-permissioning of the schema.
 
 ### F. The built-in schema ships `context_policy` as `ai_proposable: false`
 
@@ -135,16 +186,26 @@ are observed to need it; the ADR does not sweep a set it cannot enumerate.
 
 This ADR changes what *guidance* the contract carries, not its wire contract. In
 the emitted JSON, `body` stays a top-level `"body"` key and `title` stays under
-`"fields"`, exactly as today — both continue to route through the node's ordinary
-layered save (there is no AI-specific body writer: the backend only *validates*,
+`"fields"`, exactly as today — both route through the node's ordinary layered save
+(there is no AI-specific body writer: the backend only *validates*,
 `metadata_values.py:393`, and the frontend adopts via the normal save path,
-`frontend/src/lib/stores/chatCommit.svelte.ts:90`). Concretely, the generic
-field-catalog loop enumerates only the `stored`/`computed` metadata fields; the two
-*proposable intrinsics*, `title` and `body`, keep their dedicated contract clauses,
-which now source their label and description from the field definition. This also
-removes a pre-existing redundancy: `title` is currently emitted **both** by its
-special clause **and** by the field loop (it is a proposable intrinsic, so
-`field_catalog` already yields it), so it is double-mentioned to the model today.
+`frontend/src/lib/stores/chatCommit.svelte.ts:90`). The required change is only
+§D's: body's dedicated clause renders body's description. `body` does **not** join
+the generic field loop — it is not enumerated there today (it is not a field yet),
+and it stays a top-level key, so nothing in the loop changes for the fix.
+
+**One pre-existing wart, and why cleaning it is optional here.** `title` is already
+a proposable intrinsic, so `field_catalog` yields it and the generic loop lists it
+*in addition* to its bare `"ALWAYS include title"` clause (`extraction.py:74`) — the
+model sees `title` twice today. Collapsing that (and, symmetrically, keeping `body`
+out) would mean excluding the proposable intrinsics from the loop, which needs a
+filter axis the loop does not currently have: the `_field_catalog` descriptor
+exposes `id/label/type/options/description` but **not** `category`
+(`helpers.py:255-282`), so the loop cannot say "skip intrinsics" without either
+stamping `category` onto the descriptor or hardcoding the `{title, body}` id set.
+That cleanup is **out of scope** for the dump fix and is left as a follow-up; this
+ADR neither requires nor blocks it. It is named so a reader does not mistake the
+existing `title` redundancy for something this change introduced.
 
 ## Why / rejected alternatives
 
@@ -159,10 +220,10 @@ special clause **and** by the field loop (it is a proposable intrinsic, so
   bodiless type would manufacture a field with no editor and no value — a §C
   routing with no destination.
 - **Why a description, not a hardened code clause.** The dump is a *guidance*
-  failure. Guidance that lives in the field definition is per-type overridable and
-  reuses the contract's existing description rendering — one mechanism, not a body
-  special case. Hardening the prose in the template would fix one type's dump while
-  leaving the guidance un-authorable and still body-specific.
+  failure. Guidance that lives in the field definition is authorable (a layer can
+  refine it) and reuses the description the field model already carries — one
+  mechanism, not a body special case. Hardening the prose in the template would fix
+  the dump but leave the guidance un-authorable and permanently body-specific.
 - **Why `ai_proposable` feeds `is_proposable_field` rather than adding a filter.**
   That predicate is already the one choke point for AI-writability (ADR-0056);
   giving it a per-field input keeps a single decision site. A second gate elsewhere
@@ -185,29 +246,40 @@ special clause **and** by the field loop (it is a proposable intrinsic, so
 
 ## Consequences
 
-- **Backend.** `body` gains a built-in intrinsic field definition (label, a
-  long-text/markdown type, the delineating description, `ai_proposable: true`), and
-  the injection at `schema_inheritance.py:137` grows a `has_body` guard for it while
-  the identity triple stays unconditional; `_stamp_field_categories` stamps it
-  intrinsic. `MetadataFieldDefinition` (`models/schema.py:24`) gains
-  `ai_proposable: bool = True`; `is_proposable_field` (`entry_patch.py:36`) reads
-  it. `DEFAULT_EXTRACTION_TEMPLATE` (`extraction.py:66`) sources the `title`/`body`
-  clauses' label and description from the field definition and drops `title`/`body`
-  from the generic loop. `context_policy` (`default_schema.py:830`) ships
-  `ai_proposable: false`. The schema-definition validator
-  (`_validate_metadata_schema_definition`,
+- **Backend.** `body` gains a built-in `long_text` field definition (label,
+  the delineating description, `ai_proposable: true`) in the shared `fields`
+  registry beside the identity intrinsics (`default_schema.py:691`). The injection
+  gains a **`has_body`-gated** body step — resolving `has_body` against the parent
+  chain *before* injecting (attribute inheritance currently runs after membership,
+  `schema_inheritance.py:88`→`89`; see §B), and **not** by adding `body` to
+  `INTRINSIC_FIELD_KEYS` (that tuple's injection is unconditional). The global
+  category stamp (`_stamp_field_categories`, `schema_inheritance.py:260`) gains a
+  `field_key == "body"` clause so body stamps `intrinsic`.
+  `MetadataFieldDefinition` (`models/schema.py:24`) gains `ai_proposable: bool =
+  True`; `is_proposable_field` (`entry_patch.py:36`) reads it (this gates all
+  stored fields + `title`). The body clause of `DEFAULT_EXTRACTION_TEMPLATE`
+  (`extraction.py:73`) renders body's resolved description (passed in by
+  `render_extraction_contract`, `extraction.py:87`) in place of the hardcoded
+  prose, and is omitted when body is not `ai_proposable`; the verbatim body adopt
+  (`metadata_values.py:406`) drops `body` likewise. `context_policy`
+  (`default_schema.py:830`) ships `ai_proposable: false`. The schema-definition
+  validator (`_validate_metadata_schema_definition`,
   `services/project/schema_definition_validation.py:158`) needs no clause to
   *store* the boolean (the model has no `extra="forbid"`); add a value check only if
-  the property is ever constrained.
-- **Frontend.** The schema type editor gains an `ai_proposable` toggle on field
-  rows and surfaces `body` as an intrinsic row (rename-only, pinned) carrying its
-  relabel + description, exactly as it treats `title`. `field_catalog` consumers
-  already read `description`, so body's guidance renders with no new plumbing. The
-  `MetadataPanel` rail is unchanged. The commit adopt path
+  the property is ever constrained. The generic-loop `title` de-duplication is a
+  separate, optional follow-up (§G).
+- **Frontend.** The schema type editor already classifies rows by
+  `category === "intrinsic"` and renders them rename-only/pinned
+  (`SchemaTypeEditor.svelte:546`), so once the backend injects and stamps `body`
+  the intrinsic body row appears with no new enumeration code — the same treatment
+  `title` gets. The genuinely new UI is the `ai_proposable` toggle on field rows
+  (slice 3). The `MetadataPanel` rail is unchanged. The commit adopt path
   (`chatCommit.svelte.ts`) is unchanged beyond honoring whatever the contract emits.
-- **Complying is the cleanup (per ADR-0029).** The special body clause and the
-  `title` double-mention collapse into the field model; the dump stops for new
-  commits. This is not an optional tidy-up — it *is* the fix.
+- **The dump fix is body's description; the rest is optional.** The one change that
+  stops the dump is §D — body's dedicated clause renders body's description instead
+  of the hardcoded "complete markdown body." The pre-existing `title` double-mention
+  and any collapse of the special clauses into the generic loop are a separate
+  follow-up (§G), neither required nor blocked here.
 - **Out of scope / anti-goals.** No bulk rewrite of existing bodies — an author-run,
   per-entry, reviewed one-shot script may be offered separately. `body` never
   becomes a stored `metadata.body` key. `ai_proposable` is generation-only, never a

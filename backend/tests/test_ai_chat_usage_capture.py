@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from app.services import machine_settings as ms
 from app.services.ai import providers as ai_providers
-from app.services.ai.profiles.base import ChatOutcome, ProviderError
+from app.services.ai.profiles.base import ChatCall, ChatOutcome, ProviderError
 from app.services.ai.providers import _extract_usage_for_provider
 
 # Seams: the provider call now lives on the profile class. Anthropic has its
@@ -58,6 +58,17 @@ def _openai_response_with_usage(
     )
 
 
+def _call(model: str, *, system_prompt: str = "", max_tokens: int = 512) -> ChatCall:
+    # The provider-agnostic request these usage tests send; the profile.chat
+    # seam is mocked, so only model/system_prompt reach anything under test.
+    return ChatCall(
+        model=model,
+        system_prompt=system_prompt,
+        messages=[{"role": "user", "content": "hi"}],
+        max_tokens=max_tokens,
+    )
+
+
 # --- chat() with anthropic populates usage from raw response ----------
 
 
@@ -65,11 +76,8 @@ def test_chat_anthropic_captures_usage_into_result():
     raw = _anthropic_response_with_usage()
     with patch(_ANTHROPIC_CHAT, return_value=ChatOutcome("Hello.", "end_turn", raw)):
         result = ai_providers.chat(
+            _call("claude-sonnet-4-6", system_prompt="You are X."),
             provider_name="anthropic",
-            model="claude-sonnet-4-6",
-            system_prompt="You are X.",
-            messages=[{"role": "user", "content": "hi"}],
-            max_tokens=512,
             settings=_settings(),
             policy="allow-all",
         )
@@ -85,11 +93,8 @@ def test_chat_openai_captures_usage_into_result():
     raw = _openai_response_with_usage()
     with patch(_OPENAI_COMPAT_CHAT, return_value=ChatOutcome("Hello.", "stop", raw)):
         result = ai_providers.chat(
+            _call("gpt-4o"),
             provider_name="openai",
-            model="gpt-4o",
-            system_prompt="",
-            messages=[{"role": "user", "content": "hi"}],
-            max_tokens=512,
             settings=_settings(),
             policy="allow-all",
         )
@@ -114,11 +119,8 @@ def test_chat_openrouter_captures_usage_anthropic_style_split():
     )
     with patch(_OPENAI_COMPAT_CHAT, return_value=ChatOutcome("Hello.", "stop", raw)):
         result = ai_providers.chat(
+            _call("anthropic/claude-sonnet-4"),
             provider_name="openrouter",
-            model="anthropic/claude-sonnet-4",
-            system_prompt="",
-            messages=[{"role": "user", "content": "hi"}],
-            max_tokens=512,
             settings=_settings(),
             policy="allow-all",
         )
@@ -137,11 +139,8 @@ def test_chat_ollama_captures_usage_from_openai_compat_response():
     )
     with patch(_OPENAI_COMPAT_CHAT, return_value=ChatOutcome("Hello.", "stop", raw)):
         result = ai_providers.chat(
+            _call("llama3.2"),
             provider_name="ollama",
-            model="llama3.2",
-            system_prompt="",
-            messages=[{"role": "user", "content": "hi"}],
-            max_tokens=512,
             settings=_settings(),
             policy="allow-all",
         )
@@ -160,11 +159,8 @@ def test_chat_provider_error_leaves_usage_none():
     # touches the usage field — it stays at the dataclass default (None).
     with patch(_ANTHROPIC_CHAT, side_effect=ProviderError("simulated")):
         result = ai_providers.chat(
+            _call("claude-sonnet-4-6"),
             provider_name="anthropic",
-            model="claude-sonnet-4-6",
-            system_prompt="",
-            messages=[{"role": "user", "content": "hi"}],
-            max_tokens=512,
             settings=_settings(),
             policy="allow-all",
         )

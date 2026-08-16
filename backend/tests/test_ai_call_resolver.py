@@ -11,7 +11,7 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from app.services.ai.call_resolver import resolve_call_params
+from app.services.ai.call_resolver import ResolvedCall, resolve_call_params
 
 
 def _project(assistant: object | None) -> mock.Mock:
@@ -122,6 +122,50 @@ class ResolveCallParamsTests(unittest.TestCase):
         self.assertEqual(resolved.provider, "openai")
         self.assertEqual(resolved.model, "gpt-5")
         self.assertEqual(resolved.max_tokens, 1024)
+
+
+class ResolvedCallToCallTests(unittest.TestCase):
+    """`to_call` is the single bridge from resolved provider params + this
+    turn's content into the provider-agnostic ChatCall the dispatch boundary
+    takes. Each field must land in the right slot — a swap here would send the
+    wrong model or silently drop thinking on the streaming path."""
+
+    def test_merges_resolved_params_with_turn_content(self) -> None:
+        resolved = ResolvedCall(
+            provider="anthropic",
+            model="claude-sonnet-5",
+            temperature=0.4,
+            max_tokens=2048,
+            thinking_enabled=True,
+        )
+        messages = [{"role": "user", "content": "hi"}]
+        blocks = [{"text": "sys", "cache_break_after": True}]
+        call = resolved.to_call(
+            system_prompt="You are X.",
+            messages=messages,
+            system_blocks=blocks,
+            session_id="sess-1",
+        )
+        # Provider params come from the ResolvedCall...
+        self.assertEqual(call.model, "claude-sonnet-5")
+        self.assertEqual(call.max_tokens, 2048)
+        self.assertEqual(call.temperature, 0.4)
+        self.assertTrue(call.thinking_enabled)
+        # ...this turn's content from the arguments.
+        self.assertEqual(call.system_prompt, "You are X.")
+        self.assertIs(call.messages, messages)
+        self.assertEqual(call.system_blocks, blocks)
+        self.assertEqual(call.session_id, "sess-1")
+
+    def test_optional_content_defaults_to_none(self) -> None:
+        resolved = ResolvedCall(
+            provider="ollama", model="llama3", temperature=None, max_tokens=4096
+        )
+        call = resolved.to_call(system_prompt="", messages=[])
+        self.assertIsNone(call.system_blocks)
+        self.assertIsNone(call.session_id)
+        self.assertFalse(call.thinking_enabled)
+        self.assertIsNone(call.temperature)
 
 
 if __name__ == "__main__":

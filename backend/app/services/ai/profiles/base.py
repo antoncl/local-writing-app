@@ -243,36 +243,43 @@ class ThinkTagSplitter:
 
     def feed(self, text: str) -> Iterator[StreamDelta | StreamThinking]:
         self._buf += text
+        # The two states are mirror images — inside a think block we scan for
+        # the closing tag and emit thinking; outside we scan for the opening
+        # tag and emit content. `_scan` runs one such pass; a found delimiter
+        # flips the state and we loop, otherwise the buffer is held for the
+        # next chunk and we stop.
         while self._buf:
             if self._in_think:
-                idx = self._buf.find(self._CLOSE)
-                if idx == -1:
-                    # Emit everything except a possible partial closing tag.
-                    hold = len(self._CLOSE) - 1
-                    if len(self._buf) > hold:
-                        out = self._buf[:-hold] if hold else self._buf
-                        if out:
-                            yield StreamThinking(text=out)
-                        self._buf = self._buf[-hold:] if hold else ""
-                    return
-                if idx > 0:
-                    yield StreamThinking(text=self._buf[:idx])
-                self._buf = self._buf[idx + len(self._CLOSE):]
-                self._in_think = False
+                found = yield from self._scan(self._CLOSE, StreamThinking)
             else:
-                idx = self._buf.find(self._OPEN)
-                if idx == -1:
-                    hold = len(self._OPEN) - 1
-                    if len(self._buf) > hold:
-                        out = self._buf[:-hold] if hold else self._buf
-                        if out:
-                            yield StreamDelta(text=out)
-                        self._buf = self._buf[-hold:] if hold else ""
-                    return
-                if idx > 0:
-                    yield StreamDelta(text=self._buf[:idx])
-                self._buf = self._buf[idx + len(self._OPEN):]
-                self._in_think = True
+                found = yield from self._scan(self._OPEN, StreamDelta)
+            if not found:
+                return
+            self._in_think = not self._in_think
+
+    def _scan(
+        self, delim: str, event_cls: type[StreamDelta | StreamThinking]
+    ) -> Iterator[StreamDelta | StreamThinking]:
+        """Consume the buffer up to `delim`, emitting `event_cls` for the text.
+
+        Returns True (via `return`) when the delimiter was found and stripped —
+        the caller flips state and loops. Returns False when it wasn't: emit
+        everything except a possible partial delimiter at the tail, hold that
+        back for the next chunk, and stop.
+        """
+        idx = self._buf.find(delim)
+        if idx == -1:
+            hold = len(delim) - 1
+            if len(self._buf) > hold:
+                out = self._buf[:-hold] if hold else self._buf
+                if out:
+                    yield event_cls(text=out)
+                self._buf = self._buf[-hold:] if hold else ""
+            return False
+        if idx > 0:
+            yield event_cls(text=self._buf[:idx])
+        self._buf = self._buf[idx + len(delim):]
+        return True
 
     def flush(self) -> Iterator[StreamDelta | StreamThinking]:
         if not self._buf:

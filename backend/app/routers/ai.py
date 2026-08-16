@@ -337,16 +337,15 @@ async def ai_generate(project: CurrentProject, request: AIGenerateRequest) -> AI
     system_blocks = system_prompt_cache_blocks(system_prompt)
 
     result = ai_providers.chat(
+        resolved.to_call(
+            system_prompt=system_prompt,
+            messages=chat_messages,
+            system_blocks=system_blocks,
+            session_id=session_id,
+        ),
         provider_name=resolved.provider,
-        model=resolved.model,
-        system_prompt=system_prompt,
-        messages=chat_messages,
-        max_tokens=resolved.max_tokens,
-        temperature=resolved.temperature,
         settings=settings,
         policy=policy,
-        system_blocks=system_blocks,
-        session_id=session_id,
     )
     truncated = result.stop_reason in {"max_tokens", "length"}
     usage_wire, cost_usd = await translate_usage_to_cost(
@@ -408,17 +407,15 @@ async def ai_chat_stream(project: CurrentProject, request: AIChatRequest) -> Str
     )
 
     events = ai_providers.chat_stream(
+        resolved.to_call(
+            system_prompt=request.system_prompt,
+            messages=messages_list,
+            system_blocks=system_blocks,
+            session_id=session_id,
+        ),
         provider_name=resolved.provider,
-        model=resolved.model,
-        system_prompt=request.system_prompt,
-        messages=messages_list,
-        max_tokens=resolved.max_tokens,
-        temperature=resolved.temperature,
-        thinking_enabled=resolved.thinking_enabled,
         settings=settings,
         policy=policy,
-        system_blocks=system_blocks,
-        session_id=session_id,
     )
     return StreamingResponse(
         transform_provider_events_to_ndjson(
@@ -491,17 +488,15 @@ async def ai_generate_stream(project: CurrentProject, request: AIGenerateRequest
     system_blocks = system_prompt_cache_blocks(system_prompt)
 
     events = ai_providers.chat_stream(
+        resolved.to_call(
+            system_prompt=system_prompt,
+            messages=chat_messages,
+            system_blocks=system_blocks,
+            session_id=session_id,
+        ),
         provider_name=resolved.provider,
-        model=resolved.model,
-        system_prompt=system_prompt,
-        messages=chat_messages,
-        max_tokens=resolved.max_tokens,
-        temperature=resolved.temperature,
-        thinking_enabled=resolved.thinking_enabled,
         settings=settings,
         policy=policy,
-        system_blocks=system_blocks,
-        session_id=session_id,
     )
     return StreamingResponse(
         transform_provider_events_to_ndjson(

@@ -130,9 +130,9 @@ at exactly the moment it had something to say.
 
 - **File-size guard** (`scripts/check_file_size.py`) — the enforced half of "no
   monolithic files": warns ≥1200, **fails ≥1500** lines on `.py/.svelte/.ts`.
-  Files knowingly over the cap live in that script's `GRANDFATHERED` set
-  (currently `test_metadata_validation.py`) — split them when you next work
-  there, then delete the entry.
+  Files knowingly over the cap live in that script's `GRANDFATHERED` set — split
+  them when you next work there, then delete the entry. The set is currently
+  empty (#76): every source file is under the cap.
 - **Style-token guard** (`scripts/check_style_tokens.py`) — the enforced half of
   the design language (`docs/design/design-language.md` §5): hex/rgb color
   literals and non-token `font-size` in frontend style code fail. Its own

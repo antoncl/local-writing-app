@@ -27,9 +27,9 @@ EXTENSIONS = {".py", ".svelte", ".ts", ".tsx", ".css"}
 # Files knowingly over the cap, exempt from the hard FAIL until a dedicated
 # split. They still warn. Remove an entry once it is back under HARD_FAIL.
 # Stored repo-relative with forward slashes; matched against the path tail.
-GRANDFATHERED = {
-    "backend/tests/test_metadata_validation.py",
-}
+# Empty: every source file is under the cap (#76). Add an entry only to
+# temporarily exempt a NEW pre-split file while it is being broken up.
+GRANDFATHERED: set[str] = set()
 
 
 def line_count(path: Path) -> int:

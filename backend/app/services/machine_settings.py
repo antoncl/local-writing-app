@@ -226,6 +226,34 @@ def projects_root() -> Path | None:
         return None
 
 
+def palette() -> list[Swatch]:
+    """The machine colour palette, read directly — NOT via `load_settings()`.
+
+    Same discipline as `projects_root()` / `default_ai_policy()`: a read path must
+    not be able to write, and `load_settings()` can materialise assistant files
+    and top up the palette. Snapping an AI-proposed colour onto a swatch (#696)
+    is a read path. Falls back to the seed palette when unset/unreadable, and
+    drops any malformed stored swatch rather than failing the read.
+    """
+    path = config_path()
+    if not path.exists():
+        return _seed_palette()
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (yaml.YAMLError, OSError, UnicodeDecodeError):
+        return _seed_palette()
+    raw = data.get("palette") if isinstance(data, dict) else None
+    if not isinstance(raw, list):
+        return _seed_palette()
+    swatches: list[Swatch] = []
+    for entry in raw:
+        try:
+            swatches.append(Swatch.model_validate(entry))
+        except Exception:  # noqa: BLE001 - skip a malformed swatch, keep the rest
+            continue
+    return swatches or _seed_palette()
+
+
 def default_ai_policy() -> AIPolicy:
     """The application-global default AI policy (#746) — the outermost fallback
     of every project's inheritance chain, resolved when nothing up the chain

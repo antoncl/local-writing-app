@@ -34,6 +34,7 @@ from app.services.ai.helpers import (
     _field_catalog,
     create_environment_for_project,
 )
+from app.services.machine_settings import palette as machine_palette
 from app.services.project.errors import ProjectServiceError
 
 
@@ -780,6 +781,67 @@ class SceneSummaryPromptTests(unittest.TestCase):
             patch.fields, {"summary": "Seren pursues the relic-thief through a storm."}
         )
         self.assertEqual(patch.dropped, [])
+
+
+class ColorFieldSnapTests(unittest.TestCase):
+    """#696 — a colour field's value space is the palette. The AI can emit a raw
+    hex or unknown name; the patch must snap it onto a swatch id (so it renders,
+    and the colour is not silently lost on adoption) or drop it if unmappable."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.service = open_test_project(self.root, "Color Snap Tests")
+        # Add a colour field to lore:character.
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data.setdefault("fields", {})["hue"] = {"name": "Hue", "type": "color"}
+        character = data["entry_types"].get("lore:character") or {}
+        own = list(character.get("fields") or [])
+        if "hue" not in own:
+            own.insert(0, "hue")
+        character["fields"] = own
+        data["entry_types"]["lore:character"] = character
+        self.service._write_yaml(schema_path, data)
+        self.hero = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Seren", entry_type="lore:character")
+        )
+        self.palette_ids = {s.id for s in machine_palette()}
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_raw_hex_is_snapped_to_a_palette_swatch(self) -> None:
+        patch = self.service.validate_ai_entry_patch(self.hero.id, '{"fields": {"hue": "#660066"}}')
+        self.assertFalse(patch.garbled)
+        snapped = patch.fields.get("hue")
+        # No longer the raw hex, and now a real palette id the UI can resolve.
+        self.assertNotEqual(snapped, "#660066")
+        self.assertIn(snapped, self.palette_ids)
+        self.assertEqual(patch.dropped, [])
+
+    def test_existing_palette_id_passes_through(self) -> None:
+        swatch_id = next(iter(self.palette_ids))
+        patch = self.service.validate_ai_entry_patch(
+            self.hero.id, f'{{"fields": {{"hue": "{swatch_id}"}}}}'
+        )
+        self.assertEqual(patch.fields, {"hue": swatch_id})
+        self.assertEqual(patch.dropped, [])
+
+    def test_unmappable_colour_is_dropped_not_stored(self) -> None:
+        patch = self.service.validate_ai_entry_patch(self.hero.id, '{"fields": {"hue": "banana"}}')
+        self.assertEqual(patch.fields, {})
+        self.assertIn("hue", patch.dropped)
+
+    def test_create_draft_path_also_snaps(self) -> None:
+        # The create sibling shares the same validation, so the from-scratch
+        # draft must snap too (it is where #696 was first seen).
+        patch = self.service.validate_ai_entry_draft(
+            "lore:character", '{"fields": {"hue": "#0b6"}}'
+        )
+        snapped = patch.fields.get("hue")
+        self.assertIn(snapped, self.palette_ids)
+        self.assertNotIn(snapped, {"#0b6", "#00bb66"})
 
 
 if __name__ == "__main__":

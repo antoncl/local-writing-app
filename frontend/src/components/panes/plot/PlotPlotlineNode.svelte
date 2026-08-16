@@ -89,6 +89,44 @@
   let loadError = $state<string | null>(null);
   let saving = $state(false);
 
+  // Header kebab (#1096): surfaces Open-in-editor / Delete on the collapsed node, so
+  // they no longer need the expand-and-scroll the foot-actions require. Mirrors the plot
+  // card's kebab; only rendered with an actions context (never in the read-only mount).
+  let menuOpen = $state(false);
+  let rootEl = $state<HTMLElement | null>(null);
+  function toggleMenu(): void {
+    menuOpen = !menuOpen;
+  }
+  function closeMenu(): void {
+    menuOpen = false;
+  }
+  function runAction(op: ((id: string) => void) | undefined): void {
+    closeMenu();
+    if (op && id) op(id);
+  }
+  // Close on an outside pointerdown / Escape, and ask the board to lift this node above
+  // its siblings while the menu is open (#1095) — the menu escapes the node's clip but is
+  // trapped in its SvelteFlow stacking context. Cleanup fires on close AND on unmount, so
+  // the elevation can't get stranded. Capture phase so a click that lands on the canvas
+  // (which reselects/pans) still closes first.
+  $effect(() => {
+    if (!menuOpen) return;
+    if (id) actions?.onMenuOpenChange(id, true);
+    const onDown = (e: PointerEvent) => {
+      if (rootEl && !rootEl.contains(e.target as Node)) closeMenu();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeMenu();
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      if (id) actions?.onMenuOpenChange(id, false);
+      window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("keydown", onKey, true);
+    };
+  });
+
   let colorId = $derived(typeof draft?.metadata.color === "string" ? (draft.metadata.color as string) : null);
 
   // Load the full entry when the node expands; reset when it collapses so a re-open
@@ -247,6 +285,7 @@
   class:coloured={accent}
   class:expanded={isExpanded}
   style={accent ? `--plotline-accent: ${accent}` : undefined}
+  bind:this={rootEl}
 >
   {#if actions}
     <!-- The header row: a leading drag grip, then an eye toggle that FOCUSES this thread
@@ -277,12 +316,40 @@
         <span class="plotline-count" title="Beats">{data.beats.length}</span>
         <i class="ti ti-chevron-{isExpanded ? 'up' : 'down'} plotline-caret" aria-hidden="true"></i>
       </button>
+      <!-- Actions kebab (#1096): Open-in-editor / Delete without expanding, mirroring the
+           plot card's kebab. Quiet until node hover / focus / open (the card idiom). -->
+      <button
+        class="plotline-kebab nodrag nopan"
+        class:open={menuOpen}
+        aria-label="Plotline actions"
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        onclick={toggleMenu}
+      >
+        <i class="ti ti-dots-vertical" aria-hidden="true"></i>
+      </button>
     </div>
   {:else}
     <div class="plotline-head">
       <span class="plotline-dot" class:hollow={!accent}></span>
       <span class="plotline-title" title={data.title}>{data.title}</span>
       <span class="plotline-count" title="Beats">{data.beats.length}</span>
+    </div>
+  {/if}
+
+  {#if menuOpen && actions}
+    <!-- Rendered as a direct child (not inside the scrolling editor) so the node's
+         overflow can't clip it; the board lifts this node's z-index while it's open. -->
+    <div class="plotline-menu nodrag nopan" role="menu" aria-label="Plotline actions">
+      {#if actions.onOpenInEditor}
+        <button role="menuitem" class="menu-item" onclick={() => runAction(actions.onOpenInEditor)}>
+          <i class="ti ti-pencil" aria-hidden="true"></i> Open in editor
+        </button>
+      {/if}
+      <div class="menu-sep" role="separator"></div>
+      <button role="menuitem" class="menu-item menu-danger" onclick={() => runAction(actions.onDelete)}>
+        <i class="ti ti-trash" aria-hidden="true"></i> Delete plotline
+      </button>
     </div>
   {/if}
 
@@ -430,6 +497,8 @@
 <style>
   .plot-plotline {
     box-sizing: border-box;
+    /* Positioning context for the absolutely-placed actions menu (#1096). */
+    position: relative;
     width: 100%;
     display: flex;
     flex-direction: column;
@@ -554,6 +623,84 @@
     flex: none;
     font-size: var(--fs-sm);
     color: var(--text-3);
+  }
+  /* Actions kebab (#1096): quiet until node hover / focus / menu-open — the card kebab
+     idiom (the "quiet writing desk"), so it doesn't shout on a dense board. */
+  .plotline-kebab {
+    appearance: none;
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-3);
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    font-size: var(--fs-sm);
+    opacity: 0;
+    transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease;
+  }
+  .plot-plotline:hover .plotline-kebab,
+  .plotline-kebab:focus-visible,
+  .plotline-kebab.open {
+    opacity: 1;
+  }
+  .plotline-kebab:hover {
+    color: var(--text);
+    border-color: var(--border);
+  }
+  /* The actions menu, rendered outside the node's flow so overflow can't clip it; the
+     board lifts the node's z-index while it's open (#1095). Mirrors the plot card menu. */
+  .plotline-menu {
+    position: absolute;
+    top: 36px;
+    right: 8px;
+    z-index: 5;
+    min-width: 160px;
+    display: flex;
+    flex-direction: column;
+    padding: 4px;
+    background: var(--panel);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-md);
+    box-shadow: var(--elev-2);
+  }
+  .plotline-menu .menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    font-size: var(--fs-sm);
+    text-align: left;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+  }
+  .plotline-menu .menu-item:hover {
+    background: var(--surface);
+  }
+  .plotline-menu .menu-item i {
+    color: var(--text-3);
+  }
+  .plotline-menu .menu-sep {
+    height: 1px;
+    margin: 4px 2px;
+    background: var(--divider);
+  }
+  .plotline-menu .menu-danger {
+    color: var(--danger);
+  }
+  .plotline-menu .menu-danger:hover {
+    background: var(--danger-soft);
+  }
+  .plotline-menu .menu-danger i {
+    color: var(--danger);
   }
   .plotline-beats {
     list-style: none;

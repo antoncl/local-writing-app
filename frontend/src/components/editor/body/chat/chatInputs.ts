@@ -1,7 +1,7 @@
 // Pure helpers extracted from ChatBodyView.svelte (#99). No reactive state —
 // these operate purely on their arguments so they live outside the component
 // and are unit-testable in isolation.
-import type { PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
+import type { NodePickerRef, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
 
 // ---- cost-estimate + TTL strip state ----
 // Per-slot TTL in seconds; drives the TTL countdown chips. Slots not in this
@@ -20,6 +20,37 @@ export function seedInputDraftsFromEntry(entry: PromptEntrySummary): Record<stri
   const drafts: Record<string, string> = {};
   for (const input of entry.inputs ?? []) drafts[input.name] = defaultDraftFor(input);
   return drafts;
+}
+
+// The node a ＋New launch is about (ADR-0051 S2) — the subject seeded into the
+// prompt's target `entry` input. `kind` is the subject's node kind, one of
+// NodePickerRef's; the FQN prefix of an entry_type IS that kind.
+export type SubjectRef = {
+  id: string;
+  kind: NodePickerRef["kind"];
+  title: string;
+  entryType?: string;
+};
+
+// Seed the launching subject into a prompt's `entry` input, in the SHAPE that
+// input's declared type stores. A `context_pick` holds a NodePickerRef[]; an
+// `entity_ref_list` holds a string[]; a scalar ref (or a prompt with no `entry`
+// input, which ignores the seed) holds the bare id. The old launcher seeded a
+// bare id string unconditionally — but a `context_pick` value is array-shaped,
+// so `isInputMissing`'s `JSON.parse("plot_abc")` threw: a REQUIRED target
+// (plotline / plot-card revise) failed "Missing required: <label>" on send, and
+// an OPTIONAL one (lore revise) passed validation but was silently mis-seeded —
+// the empty-array drop `decodeChatInputDrafts`'s note above warns of (#1094).
+// Returns the natural typed value for openChatFromPromptEntry's `inputs`.
+export function seedSubjectEntryInput(entry: PromptEntrySummary, subject: SubjectRef): unknown {
+  const input = (entry.inputs ?? []).find((i) => i.name === "entry");
+  if (input?.type === "context_pick") {
+    const ref: NodePickerRef = { id: subject.id, kind: subject.kind, title: subject.title };
+    if (subject.entryType) ref.entry_type = subject.entryType;
+    return [ref];
+  }
+  if (input?.type === "entity_ref_list") return [subject.id];
+  return subject.id;
 }
 
 // Round-trip the per-input drafts through a persisted `ChatSession.inputs`

@@ -45,6 +45,10 @@ export type PlotPlotlineActions = {
   // test mounts the node with the context absent, and the collapsed read-only path
   // never calls it. On-node editing stays the default; this is an alternative.
   onOpenInEditor?: (id: string) => void;
+  // Tell the board this plotline's kebab menu opened / closed, so the board can lift the
+  // hosting node above its siblings while the menu is open (#1095) — the menu is trapped
+  // in the node's SvelteFlow stacking context and would otherwise be painted over.
+  onMenuOpenChange: (id: string, open: boolean) => void;
 };
 
 // Symbol key so the context can't collide with a string-keyed one.

@@ -57,6 +57,7 @@ function fakeActions(over: Partial<PlotPlotlineActions> = {}) {
       return { ...e, revision: "r2" };
     },
     onDelete: (id) => deleted.push(id),
+    onMenuOpenChange: () => {},
     ...over,
   };
   return {
@@ -260,5 +261,45 @@ describe("PlotPlotlineNode on-node editing (ADR-0053 §3)", () => {
     await waitFor(() => expect(saved.length).toBe(1));
     const beats = saved[0].metadata.instance_beats as Array<{ title: string }>;
     expect(beats.map((b) => b.title)).toEqual(["Confrontation"]);
+  });
+});
+
+// The header kebab (#1096) surfaces Delete / Open-in-editor on the COLLAPSED node, so
+// they no longer require the expand-and-scroll the foot-actions do. Tested collapsed
+// (expandedId: null) so the only such buttons come from the kebab, not the foot-actions.
+describe("PlotPlotlineNode actions kebab (#1096)", () => {
+  it("surfaces Delete without expanding — the kebab's Delete calls onDelete", async () => {
+    const { deleted } = fakeActions({ expandedId: null }).mount();
+    expect(screen.queryByRole("button", { name: "Delete plotline" })).toBeNull(); // collapsed: no foot-actions
+    await fireEvent.click(screen.getByRole("button", { name: "Plotline actions" }));
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Delete plotline" }));
+    expect(deleted).toEqual(["line_1"]);
+  });
+
+  it("surfaces Open in editor in the kebab when the host provides onOpenInEditor", async () => {
+    const opened: string[] = [];
+    fakeActions({ expandedId: null, onOpenInEditor: (id) => opened.push(id) }).mount();
+    await fireEvent.click(screen.getByRole("button", { name: "Plotline actions" }));
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Open in editor" }));
+    expect(opened).toEqual(["line_1"]);
+  });
+
+  it("omits the kebab's Open in editor when the host provides none (optional action)", async () => {
+    fakeActions({ expandedId: null }).mount(); // default omits onOpenInEditor
+    await fireEvent.click(screen.getByRole("button", { name: "Plotline actions" }));
+    expect(screen.queryByRole("menuitem", { name: "Open in editor" })).toBeNull();
+    expect(screen.getByRole("menuitem", { name: "Delete plotline" })).toBeTruthy();
+  });
+
+  it("signals the board to elevate the node while the menu is open (#1095)", async () => {
+    const calls: Array<[string, boolean]> = [];
+    fakeActions({ expandedId: null, onMenuOpenChange: (id, open) => calls.push([id, open]) }).mount();
+    await fireEvent.click(screen.getByRole("button", { name: "Plotline actions" }));
+    await waitFor(() => expect(calls).toEqual([["line_1", true]]));
+  });
+
+  it("offers no kebab without an actions context (the read-only mount degrade)", () => {
+    render(PlotPlotlineNode, { props: { id: "line_1", data: data() } });
+    expect(screen.queryByRole("button", { name: "Plotline actions" })).toBeNull();
   });
 });

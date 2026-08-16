@@ -119,6 +119,11 @@ export const CONTAINER_PAD = 20; // inner padding between a box edge and its con
 export const CONTAINER_HEADER = 32; // the title-bar band at the top of a box
 export const CONTAINER_GAP = 24; // between sibling boxes / rows / acts
 
+// Base z-index for the interactive nodes (cards + plotlines), above their container
+// boxes (level 0/1). PlotEditor lifts a node above this while its kebab menu is open
+// so the menu isn't painted over by a sibling node (#1095), then restores it here.
+export const NODE_Z_INDEX = 2;
+
 // The class SvelteFlow's `dragHandle` targets so a container drags ONLY by its header
 // band (#877), a window-titlebar affordance — the transparent interior stays a
 // non-interactive backdrop, so card drags and the edge layers still pass through it
@@ -358,7 +363,7 @@ export function buildBoardNodes(
       dragHandle: `.${CARD_DRAG_HANDLE_CLASS}`,
       selectable: false,
       extent: box ? containerExtent(box) : undefined,
-      zIndex: 2,
+      zIndex: NODE_Z_INDEX,
       data: {
         title: card.title,
         synopsis: card.synopsis,
@@ -392,7 +397,7 @@ export function buildBoardNodes(
       draggable: true,
       dragHandle: `.${CARD_DRAG_HANDLE_CLASS}`,
       selectable: false,
-      zIndex: 2,
+      zIndex: NODE_Z_INDEX,
       data: { title: line.title, color: line.color, beats: line.beats },
     });
   });

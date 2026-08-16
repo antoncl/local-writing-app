@@ -24,6 +24,7 @@
     buildBoardNodes,
     containerDescendantIds,
     containerMemberCardIds,
+    NODE_Z_INDEX,
     overriddenNodePositions,
     projectionDataKey,
     readBoardPositions,
@@ -235,6 +236,29 @@
     if (selectedDiagnosticId !== null) focusedPlotlineId = null;
   }
 
+  // A card/plotline kebab menu renders OUTSIDE its node's clipped body, but is still
+  // trapped inside the node's SvelteFlow stacking context (every node shares NODE_Z_INDEX),
+  // so a sibling node below paints over it (#1095). Lift the hosting node above its siblings
+  // while its menu is open and restore it on close. Only one menu is open at a time, so a
+  // single elevated id suffices; the patch touches only the newly-raised + previously-raised
+  // nodes (never a rebuild), and changes no position, so the layout autosave stays quiet.
+  const MENU_ELEVATED_Z = 1000;
+  let elevatedNodeId = $state<string | null>(null);
+  function setNodeMenuOpen(nodeId: string, open: boolean): void {
+    const target = open ? nodeId : null;
+    // Ignore a close from a node that no longer holds the elevation (a stale unmount after
+    // another node's menu already took it) so it can't blank the current one.
+    if (!open && elevatedNodeId !== nodeId) return;
+    if (elevatedNodeId === target) return;
+    const prev = elevatedNodeId;
+    elevatedNodeId = target;
+    flowNodes = flowNodes.map((n) => {
+      if (n.id === target) return n.zIndex === MENU_ELEVATED_Z ? n : { ...n, zIndex: MENU_ELEVATED_Z };
+      if (n.id === prev) return n.zIndex === NODE_Z_INDEX ? n : { ...n, zIndex: NODE_Z_INDEX };
+      return n;
+    });
+  }
+
   setContext<PlotCardActions>(PLOT_CARD_ACTIONS, {
     onOpen: (cardId) => void editorPanes.openPlotCard(cardId),
     // Realize mints a scene FILE, recorded via the recorder (S6b): undo deletes that
@@ -274,6 +298,7 @@
     onSetPageStatus: (cardId, status) =>
       void undoRecorder.cardEdit(cardId, "set page status", () => setCardPageStatus(cardId, status)),
     onDelete: (cardId) => removeCard(cardId),
+    onMenuOpenChange: setNodeMenuOpen,
     get plotlines() {
       return projection?.plotlines ?? [];
     },
@@ -334,6 +359,7 @@
     // roomy beat work. Mirrors the card provider's `onOpen`/`openPlotCard` (line above).
     // On-node inline editing stays the default surface.
     onOpenInEditor: (id) => void editorPanes.openPlotline(id),
+    onMenuOpenChange: setNodeMenuOpen,
   });
 
   // Container resize (#878). A container box carries no position (its origin is always

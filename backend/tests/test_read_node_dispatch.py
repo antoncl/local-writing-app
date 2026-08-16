@@ -19,11 +19,14 @@ from app.models import (
     CreateChatSessionRequest,
     LoreEntry,
     PromptEntry,
+    SaveAssistantEntryRequest,
     SaveChatSessionRequest,
     SaveLoreEntryRequest,
     SavePromptEntryRequest,
+    SaveSceneRequest,
     Scene,
 )
+from app.models_views import CreateViewRequest, SaveViewRequest, ViewNode, ViewSpec
 from app.services.project_service import ProjectServiceError
 
 
@@ -111,6 +114,68 @@ class SaveNodeDispatchTests(unittest.TestCase):
         result = self.service.save_node(created.id, request)
         self.assertIsInstance(result, ChatSession)
         self.assertEqual(result.title, "Renamed via unified path")
+
+    # The remaining kinds exercise every `_SAVE_NODE_DISPATCH` entry end-to-end
+    # (#76): the table dispatches by a saver *method name* resolved with getattr,
+    # so a stale name or a mis-paired (kind → saver) row would only surface at
+    # runtime. These pin each kind's happy path, mirroring ReadNodeDispatchTests.
+    def test_dispatches_to_scene_saver(self) -> None:
+        scene_id = self.service.read_structure().root.children[0].scene_id
+        result = self.service.save_node(
+            scene_id, SaveSceneRequest(title="Renamed scene", body="new body")
+        )
+        self.assertIsInstance(result, Scene)
+        self.assertEqual(result.title, "Renamed scene")
+
+    def test_dispatches_to_lore_saver(self) -> None:
+        created = self.service.create_lore_entry(
+            from_request_or_kwargs(title="A note", entry_type="lore:note")
+        )
+        result = self.service.save_node(
+            created.id, SaveLoreEntryRequest(title="Renamed note", body="")
+        )
+        self.assertIsInstance(result, LoreEntry)
+        self.assertEqual(result.title, "Renamed note")
+
+    def test_dispatches_to_prompt_saver(self) -> None:
+        created = self.service.create_prompt_entry(
+            from_request_or_kwargs(title="A prompt", entry_type="prompt:general")
+        )
+        result = self.service.save_node(
+            created.id,
+            SavePromptEntryRequest(
+                title="Renamed prompt", body="", entry_type="prompt:general"
+            ),
+        )
+        self.assertIsInstance(result, PromptEntry)
+        self.assertEqual(result.title, "Renamed prompt")
+
+    def test_dispatches_to_assistant_saver(self) -> None:
+        created = self.service.create_assistant_entry(
+            CreateAssistantEntryRequest(title="An assistant")
+        )
+        result = self.service.save_node(
+            created.id, SaveAssistantEntryRequest(title="Renamed assistant")
+        )
+        self.assertIsInstance(result, AssistantEntry)
+        self.assertEqual(result.title, "Renamed assistant")
+
+    def test_dispatches_to_view_saver(self) -> None:
+        created = self.service.create_view(
+            CreateViewRequest(
+                title="A view",
+                spec=ViewSpec(kind="lore", expr={"type": "lore:character"}),
+            )
+        )
+        result = self.service.save_node(
+            created.id,
+            SaveViewRequest(
+                title="Renamed view",
+                spec=ViewSpec(kind="lore", expr={"type": "lore:location"}),
+            ),
+        )
+        self.assertIsInstance(result, ViewNode)
+        self.assertEqual(result.title, "Renamed view")
 
     def test_wrong_request_type_for_kind_is_422(self) -> None:
         # Create a chat, then try to save it via a Lore request.

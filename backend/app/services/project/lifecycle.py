@@ -50,7 +50,7 @@ from app.models import (
 from app.services.migrations import CURRENT_VERSION as PROJECT_SCHEMA_VERSION
 from app.services.project.errors import ProjectServiceError
 from app.services.project.layers import INHERITS_KEY, MANIFEST_FILENAME, LayerVisitor
-from app.services.project.node_index import IndexLayer
+from app.services.project.node_index import IndexLayer, NodeIndex
 from app.services.project.node_index_gate import node_index_gate
 from app.services.project.tree_configs import (
     MANUSCRIPT_TREE_CONFIG,
@@ -919,11 +919,39 @@ class ProjectLifecycleMixin:
         node_index_gate.invalidate()
         warnings: list[str] = []
         errors: list[str] = []
-        metadata_schema: MetadataSchema | None = None
         node_index = self._build_node_index(root)
         warnings.extend(node_index.warnings)
         errors.extend(node_index.errors)
 
+        errors.extend(self._validate_required_files(root))
+
+        metadata_schema, schema_warnings, schema_errors = self._validate_metadata_schema_section(root)
+        warnings.extend(schema_warnings)
+        errors.extend(schema_errors)
+
+        scene_ids = {entry.id for entry in node_index.by_id.values() if entry.kind == "manuscript"}
+        errors.extend(self._validate_structure_references(scene_ids))
+
+        scene_errors, scene_warnings = self._validate_scene_entries(node_index, metadata_schema)
+        errors.extend(scene_errors)
+        warnings.extend(scene_warnings)
+
+        errors.extend(self._validate_lore_entries(node_index, metadata_schema))
+
+        todo_errors, todo_warnings = self._validate_todo_anchors(scene_ids)
+        errors.extend(todo_errors)
+        warnings.extend(todo_warnings)
+
+        return ProjectValidation(
+            valid=not errors,
+            warnings=warnings,
+            errors=errors,
+            migrations_applied=list(self.last_migrations),
+        )
+
+    def _validate_required_files(self, root: Path) -> list[str]:
+        """The project's mandatory top-level files, each missing one an error."""
+        errors: list[str] = []
         for required in [
             "project.yaml",
             # The project node singleton. Nothing back-fills it since #343
@@ -936,7 +964,17 @@ class ProjectLifecycleMixin:
         ]:
             if not (root / required).exists():
                 errors.append(f"Missing {required}.")
+        return errors
 
+    def _validate_metadata_schema_section(
+        self, root: Path
+    ) -> tuple[MetadataSchema | None, list[str], list[str]]:
+        """The merged schema plus its layer/ancestor warnings and definition
+        errors. Returns the schema (None when it could not be read) so the entry
+        validators below can skip metadata checks rather than crash."""
+        warnings: list[str] = []
+        errors: list[str] = []
+        metadata_schema: MetadataSchema | None = None
         try:
             metadata_schema = self.read_metadata_schema()
             warnings.extend(self._metadata_schema_layer_warnings(root))
@@ -946,15 +984,29 @@ class ProjectLifecycleMixin:
             errors.extend(self._validate_metadata_schema_definition(metadata_schema))
         except (ProjectServiceError, ValueError) as exc:
             errors.append(f"Invalid metadata schema: {exc}")
+        return metadata_schema, warnings, errors
 
-        scene_ids = {entry.id for entry in node_index.by_id.values() if entry.kind == "manuscript"}
+    def _validate_structure_references(self, scene_ids: set[str]) -> list[str]:
+        """Manuscript-structure leaves that point at a scene id no file provides.
+
+        Loose scenes (files on disk no node references) are NOT reported here
+        anymore (#635) — they are an import offer, not an integrity problem.
+        `list_loose_scenes` enumerates them for the Import documents surface.
+        """
         referenced = TreeStructureService.collect_leaf_ids(self.read_structure().root)
+        return [
+            f"Structure references missing scene {scene_id}."
+            for scene_id in sorted(referenced - scene_ids)
+        ]
 
-        for scene_id in sorted(referenced - scene_ids):
-            errors.append(f"Structure references missing scene {scene_id}.")
-        # Loose scenes (files on disk no node references) are NOT reported here
-        # anymore (#635) — they are an import offer, not an integrity problem.
-        # `list_loose_scenes` enumerates them for the Import documents surface.
+    def _validate_scene_entries(
+        self, node_index: NodeIndex, metadata_schema: MetadataSchema | None
+    ) -> tuple[list[str], list[str]]:
+        """Per-scene front-matter + metadata checks. Returns (errors, warnings):
+        mutation-value issues are advisory (never block a save), so they surface
+        as warnings, not errors."""
+        errors: list[str] = []
+        warnings: list[str] = []
         for entry in sorted((entry for entry in node_index.by_id.values() if entry.kind == "manuscript"), key=lambda item: item.id):
             scene_id = entry.id
             path = entry.path
@@ -968,12 +1020,16 @@ class ProjectLifecycleMixin:
                 status = str(front_matter.get("status") or "draft")
                 if metadata_schema:
                     errors.extend(self._validate_scene_metadata(scene_id, str(entry_type or "manuscript:scene"), status, metadata, metadata_schema, node_index))
-                    # Mutation-value issues are advisory (never block a save), so
-                    # they surface as warnings, not errors.
                     warnings.extend(self._validate_scene_mutations(scene_id, body, metadata_schema, node_index))
             except ProjectServiceError as exc:
                 errors.append(exc.message)
+        return errors, warnings
 
+    def _validate_lore_entries(
+        self, node_index: NodeIndex, metadata_schema: MetadataSchema | None
+    ) -> list[str]:
+        """Per-lore-entry front-matter + metadata checks."""
+        errors: list[str] = []
         for entry in sorted((entry for entry in node_index.by_id.values() if entry.kind == "lore"), key=lambda item: item.id):
             entry_id = entry.id
             path = entry.path
@@ -988,7 +1044,12 @@ class ProjectLifecycleMixin:
                     errors.extend(self._validate_lore_entry_metadata(entry_id, str(entry_type or "lore:note"), metadata, metadata_schema, node_index))
             except ProjectServiceError as exc:
                 errors.append(exc.message)
+        return errors
 
+    def _validate_todo_anchors(self, scene_ids: set[str]) -> tuple[list[str], list[str]]:
+        """TODO/anchor integrity. Returns (errors, warnings): a dangling scene or
+        anchor reference and a duplicate anchor are errors; an orphan anchor (a
+        marker in prose with no todo pointing at it) is a warning."""
         todos = self.read_todos()
         todo_anchor_refs = {
             (item.scene_id, item.anchor_id)
@@ -998,6 +1059,21 @@ class ProjectLifecycleMixin:
         anchors_by_scene = self._read_scene_todo_anchors(scene_ids)
         anchor_counts_by_scene = self._read_scene_todo_anchor_counts(scene_ids)
 
+        errors = self._validate_todo_item_refs(todos, scene_ids, anchors_by_scene)
+        anchor_errors, warnings = self._validate_scene_anchor_integrity(
+            anchors_by_scene, anchor_counts_by_scene, todo_anchor_refs
+        )
+        errors.extend(anchor_errors)
+        return errors, warnings
+
+    def _validate_todo_item_refs(
+        self,
+        todos: Any,
+        scene_ids: set[str],
+        anchors_by_scene: dict[str, set[str]],
+    ) -> list[str]:
+        """Each todo's scene/anchor pointers, every dangling one an error."""
+        errors: list[str] = []
         for item in todos.items:
             label = f"TODO {item.id}"
             if item.scene_id and item.scene_id not in scene_ids:
@@ -1006,7 +1082,19 @@ class ProjectLifecycleMixin:
                 errors.append(f"{label} has anchor {item.anchor_id} but no scene.")
             if item.scene_id and item.anchor_id and item.anchor_id not in anchors_by_scene.get(item.scene_id, set()):
                 errors.append(f"{label} references missing anchor {item.anchor_id} in scene {item.scene_id}.")
+        return errors
 
+    def _validate_scene_anchor_integrity(
+        self,
+        anchors_by_scene: dict[str, set[str]],
+        anchor_counts_by_scene: dict[str, dict[str, int]],
+        todo_anchor_refs: set[tuple[str | None, str | None]],
+    ) -> tuple[list[str], list[str]]:
+        """In-prose anchors vs. the todo list. An anchor no todo references is an
+        orphan (warning); an anchor id that appears twice is a duplicate (error).
+        Returns (errors, warnings)."""
+        errors: list[str] = []
+        warnings: list[str] = []
         for scene_id, anchors in anchors_by_scene.items():
             for anchor_id in sorted(anchors):
                 if (scene_id, anchor_id) not in todo_anchor_refs:
@@ -1017,12 +1105,7 @@ class ProjectLifecycleMixin:
                 if count > 1:
                     errors.append(f"Scene {scene_id} contains duplicate TODO anchor {anchor_id}.")
 
-        return ProjectValidation(
-            valid=not errors,
-            warnings=warnings,
-            errors=errors,
-            migrations_applied=list(self.last_migrations),
-        )
+        return errors, warnings
 
     def _new_project_node(self, title: str) -> ProjectNode:
         return ProjectNode(

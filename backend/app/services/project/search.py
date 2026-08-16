@@ -18,6 +18,7 @@ mutators (GH #45).
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any
 
 from app.models import (
@@ -42,121 +43,155 @@ class SearchMixin:
         scene_paths = self._scene_display_paths()
         pattern = re.compile(re.escape(query), re.IGNORECASE) if query else None
         if request.include_open_todos:
-            for item in self.read_todos().items:
-                if item.status != "open":
-                    continue
-                if pattern is None or pattern.search(item.text):
-                    hits.append(
-                        SearchHit(
-                            kind="manuscript" if item.scene_id else "project",
-                            file_id=item.scene_id or "project",
-                            path=f"{scene_paths.get(item.scene_id, 'Project')} TODO" if item.scene_id else "Project TODO",
-                            line=1,
-                            excerpt=item.text,
-                            todo_id=item.id,
-                        )
-                    )
-
-            for todo in self._scan_embedded_todos():
-                if todo.status != "open":
-                    continue
-                excerpt = todo.note or todo.text
-                if pattern is None or pattern.search(f"{todo.note} {todo.text}"):
-                    hits.append(
-                        SearchHit(
-                            kind="manuscript",
-                            file_id=todo.scene_id,
-                            path=todo.scene_path,
-                            line=todo.line,
-                            excerpt=excerpt,
-                            todo_id=todo.todo_id,
-                        )
-                    )
+            hits.extend(self._search_open_todos(pattern, scene_paths))
 
         if pattern is not None:
             schema = self.read_metadata_schema()
             node_index = self._build_node_index(root)
             if request.include_scenes:
-                for path in (root / "scenes").rglob("*.md"):
-                    front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
-                    scene_id = self._node_id_for_path(path, front_matter)
-                    title = str(front_matter.get("title") or scene_id)
-                    status = str(front_matter.get("status") or "draft")
-                    entry_type = str(front_matter.get("entry_type") or "manuscript:scene")
-                    metadata = self._resolve_reference_titles(
-                        self._normalise_metadata(front_matter.get("metadata"), path),
-                        entry_type,
-                        schema,
-                        node_index,
-                    )
-                    searchable_metadata = {
-                        "title": title,
-                        "status": status,
-                        "entry_type": entry_type,
-                        **metadata,
-                    }
-                    for label, value in self._iter_metadata_search_values(searchable_metadata):
-                        if pattern.search(value):
-                            hits.append(
-                                SearchHit(
-                                    kind="manuscript",
-                                    file_id=scene_id,
-                                    path=f"{scene_paths.get(scene_id, str(path.relative_to(root)))} metadata",
-                                    line=1,
-                                    excerpt=f"{label}: {value}",
-                                )
-                            )
-                    for index, line in enumerate(body.splitlines(), start=1):
-                        if pattern.search(line):
-                            hits.append(
-                                SearchHit(
-                                    kind="manuscript",
-                                    file_id=scene_id,
-                                    path=scene_paths.get(scene_id, str(path.relative_to(root))),
-                                    line=index,
-                                    excerpt=line.strip(),
-                                )
-                            )
+                hits.extend(self._search_scene_content(root, pattern, scene_paths, schema, node_index))
             if request.include_lore:
-                for path in (root / "lore").rglob("*.md"):
-                    front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
-                    entry_id = self._node_id_for_path(path, front_matter)
-                    title = str(front_matter.get("title") or entry_id)
-                    entry_type = str(front_matter.get("entry_type") or "lore:note")
-                    metadata = self._resolve_reference_titles(
-                        self._normalise_metadata(front_matter.get("metadata"), path),
-                        entry_type,
-                        schema,
-                        node_index,
-                    )
-                    searchable_metadata = {
-                        "title": title,
-                        "entry_type": entry_type,
-                        **metadata,
-                    }
-                    for label, value in self._iter_metadata_search_values(searchable_metadata):
-                        if pattern.search(value):
-                            hits.append(
-                                SearchHit(
-                                    kind="lore",
-                                    file_id=entry_id,
-                                    path=f"Lore / {title} metadata",
-                                    line=1,
-                                    excerpt=f"{label}: {value}",
-                                )
-                            )
-                    for index, line in enumerate(body.splitlines(), start=1):
-                        if pattern.search(line):
-                            hits.append(
-                                SearchHit(
-                                    kind="lore",
-                                    file_id=entry_id,
-                                    path=f"Lore / {title}",
-                                    line=index,
-                                    excerpt=line.strip(),
-                                )
-                            )
+                hits.extend(self._search_lore_content(root, pattern, schema, node_index))
         return SearchResponse(query=request.query, hits=hits)
+
+    def _search_open_todos(
+        self, pattern: re.Pattern[str] | None, scene_paths: dict[str, str]
+    ) -> list[SearchHit]:
+        """Open TODOs matching `pattern` (or all open ones when `pattern` is
+        None) — both the todo.yaml list and the in-scene embedded-todo comments."""
+        hits: list[SearchHit] = []
+        for item in self.read_todos().items:
+            if item.status != "open":
+                continue
+            if pattern is None or pattern.search(item.text):
+                hits.append(
+                    SearchHit(
+                        kind="manuscript" if item.scene_id else "project",
+                        file_id=item.scene_id or "project",
+                        path=f"{scene_paths.get(item.scene_id, 'Project')} TODO" if item.scene_id else "Project TODO",
+                        line=1,
+                        excerpt=item.text,
+                        todo_id=item.id,
+                    )
+                )
+
+        for todo in self._scan_embedded_todos():
+            if todo.status != "open":
+                continue
+            excerpt = todo.note or todo.text
+            if pattern is None or pattern.search(f"{todo.note} {todo.text}"):
+                hits.append(
+                    SearchHit(
+                        kind="manuscript",
+                        file_id=todo.scene_id,
+                        path=todo.scene_path,
+                        line=todo.line,
+                        excerpt=excerpt,
+                        todo_id=todo.todo_id,
+                    )
+                )
+        return hits
+
+    def _search_scene_content(
+        self,
+        root: Path,
+        pattern: re.Pattern[str],
+        scene_paths: dict[str, str],
+        schema: MetadataSchema,
+        node_index: NodeIndex,
+    ) -> list[SearchHit]:
+        """Scene metadata + body lines matching `pattern`."""
+        hits: list[SearchHit] = []
+        for path in (root / "scenes").rglob("*.md"):
+            front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
+            scene_id = self._node_id_for_path(path, front_matter)
+            title = str(front_matter.get("title") or scene_id)
+            status = str(front_matter.get("status") or "draft")
+            entry_type = str(front_matter.get("entry_type") or "manuscript:scene")
+            metadata = self._resolve_reference_titles(
+                self._normalise_metadata(front_matter.get("metadata"), path),
+                entry_type,
+                schema,
+                node_index,
+            )
+            searchable_metadata = {
+                "title": title,
+                "status": status,
+                "entry_type": entry_type,
+                **metadata,
+            }
+            for label, value in self._iter_metadata_search_values(searchable_metadata):
+                if pattern.search(value):
+                    hits.append(
+                        SearchHit(
+                            kind="manuscript",
+                            file_id=scene_id,
+                            path=f"{scene_paths.get(scene_id, str(path.relative_to(root)))} metadata",
+                            line=1,
+                            excerpt=f"{label}: {value}",
+                        )
+                    )
+            for index, line in enumerate(body.splitlines(), start=1):
+                if pattern.search(line):
+                    hits.append(
+                        SearchHit(
+                            kind="manuscript",
+                            file_id=scene_id,
+                            path=scene_paths.get(scene_id, str(path.relative_to(root))),
+                            line=index,
+                            excerpt=line.strip(),
+                        )
+                    )
+        return hits
+
+    def _search_lore_content(
+        self,
+        root: Path,
+        pattern: re.Pattern[str],
+        schema: MetadataSchema,
+        node_index: NodeIndex,
+    ) -> list[SearchHit]:
+        """Lore metadata + body lines matching `pattern`."""
+        hits: list[SearchHit] = []
+        for path in (root / "lore").rglob("*.md"):
+            front_matter, body = self._read_markdown_with_front_matter(path, strict=True)
+            entry_id = self._node_id_for_path(path, front_matter)
+            title = str(front_matter.get("title") or entry_id)
+            entry_type = str(front_matter.get("entry_type") or "lore:note")
+            metadata = self._resolve_reference_titles(
+                self._normalise_metadata(front_matter.get("metadata"), path),
+                entry_type,
+                schema,
+                node_index,
+            )
+            searchable_metadata = {
+                "title": title,
+                "entry_type": entry_type,
+                **metadata,
+            }
+            for label, value in self._iter_metadata_search_values(searchable_metadata):
+                if pattern.search(value):
+                    hits.append(
+                        SearchHit(
+                            kind="lore",
+                            file_id=entry_id,
+                            path=f"Lore / {title} metadata",
+                            line=1,
+                            excerpt=f"{label}: {value}",
+                        )
+                    )
+            for index, line in enumerate(body.splitlines(), start=1):
+                if pattern.search(line):
+                    hits.append(
+                        SearchHit(
+                            kind="lore",
+                            file_id=entry_id,
+                            path=f"Lore / {title}",
+                            line=index,
+                            excerpt=line.strip(),
+                        )
+                    )
+        return hits
 
     def _iter_metadata_search_values(self, metadata: dict[str, Any], prefix: str = "") -> list[tuple[str, str]]:
         values: list[tuple[str, str]] = []

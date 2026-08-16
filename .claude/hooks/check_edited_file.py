@@ -31,16 +31,13 @@ STYLE_GUARD = REPO / "scripts" / "check_style_tokens.py"
 MEMORY_GUARD = REPO / "scripts" / "check_memory_index.py"
 LAYER_GUARD = REPO / "scripts" / "check_layer_imports.py"
 HTTP_CLIENT_GUARD = REPO / "scripts" / "check_http_client.py"
-# Advisory complexity rules — flagged, never blocking, while the existing count
-# is burned down (see backend/pyproject.toml for thresholds).
-COMPLEXITY_RULES = ("PLR0912", "PLR0913", "PLR0915", "C901")
 
 # The hook runs on *every* edit and its stdout is injected into the model's
 # context, so both its wall-clock and its output are on the session's hot path.
-# Hence: one ruff process, not two (the advisory pass used to be a second
-# invocation with --no-cache, which both doubled the process spawns and threw
-# away the cache the first pass had just warmed), and a cap on how much any
-# one run can inject.
+# Hence: one ruff process, and a cap on how much any one run can inject. The
+# complexity rules (C901, PLR0912/13/15) are part of the configured `select` as
+# of #76, so they surface through the normal ruff pass now — no separate
+# advisory invocation.
 MAX_MESSAGE_CHARS = 4000
 
 # Resolve the backend venv via the shared helper so a git worktree (which has
@@ -77,44 +74,23 @@ def run(cmd: list[str]) -> tuple[int, str]:
 
 
 def ruff_messages(path: Path) -> list[str]:
-    """Lint `path` in a single ruff process, split blocking from advisory.
-
-    The configured rule set and the advisory complexity rules are requested
-    together via --extend-select, then partitioned by rule code on the way
-    out. One process, cache intact, same two sections as before.
+    """Lint `path` with the project's configured rules and return the findings
+    ready to inject. Complexity (C901, PLR0912/13/15) is in `select` as of #76,
+    so it surfaces here like any other rule — no separate advisory pass.
     """
     _, out = run(
-        [
-            str(VENV_PYTHON),
-            "-m",
-            "ruff",
-            "check",
-            "--extend-select",
-            ",".join(COMPLEXITY_RULES),
-            "--output-format",
-            "json",
-            str(path),
-        ]
+        [str(VENV_PYTHON), "-m", "ruff", "check", "--output-format", "json", str(path)]
     )
     try:
         findings = json.loads(out)
     except Exception:  # ruff crashed, or printed something that isn't JSON
         return ["ruff:\n" + out] if out.strip() else []
 
-    blocking: list[str] = []
-    advisory: list[str] = []
-    for f in findings:
-        code = f.get("code") or "?"
-        row = (f.get("location") or {}).get("row", "?")
-        line = f"{path.name}:{row}: {code} {f.get('message', '')}"
-        (advisory if code in COMPLEXITY_RULES else blocking).append(line)
-
-    messages = []
-    if blocking:
-        messages.append("ruff:\n" + "\n".join(blocking))
-    if advisory:
-        messages.append("complexity (advisory - consider simplifying):\n" + "\n".join(advisory))
-    return messages
+    lines = [
+        f"{path.name}:{(f.get('location') or {}).get('row', '?')}: {f.get('code') or '?'} {f.get('message', '')}"
+        for f in findings
+    ]
+    return ["ruff:\n" + "\n".join(lines)] if lines else []
 
 
 def applicable_guards(path: Path) -> list[list[str]]:

@@ -52,19 +52,10 @@ repos:
         language: system
         files: ^frontend/src/.*\.(ts|js|svelte)$
 
-      - id: ruff-complexity
-        name: ruff complexity (advisory, non-blocking)
-        # --exit-zero: never fails the commit; verbose: always print the hints
-        # so complexity stays visible while we burn the count down, then promote
-        # these rules into the blocking `select` in backend/pyproject.toml.
-        # No --no-cache: ruff keys its cache on the resolved settings, so this
-        # pass gets its own entry and re-linting from scratch every commit buys
-        # nothing (see docs/development/quality-gates.md).
-        entry: python scripts/venv_run.py -m ruff check --exit-zero --select PLR0912,PLR0913,PLR0915,C901
-        language: system
-        types_or: [python]
-        files: ^(backend|scripts|\.claude/hooks)/
-        verbose: true
+      # The advisory `ruff-complexity` hook was retired in #76: C901 and
+      # PLR0912/13/15 are now in the blocking `select` in backend/pyproject.toml,
+      # so the `ruff` hook above enforces them like any other rule. No separate
+      # advisory pass to keep in step.
 
       # --- push stage: NONE. CI owns the slow gates (#352) ---
       #

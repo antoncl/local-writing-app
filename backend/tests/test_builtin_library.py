@@ -201,9 +201,10 @@ class BuiltinLibraryTests(unittest.TestCase):
         self.assertIn("builtin-project-settings", entries)
         self.assertTrue(entries["builtin-project-settings"].is_library)
         body = self.service.read_prompt_entry("builtin-project-settings").body
-        # Reads labels from the project type and skips the `color` field.
+        # Reads labels from the project type; skips color and the narrative-craft
+        # settings (POV / tense), which live in builtin-prose-settings (#1076).
         self.assertIn('field_catalog("project:project")', body)
-        self.assertIn('f.id != "color"', body)
+        self.assertIn('not in ["color", "pov_mode", "tense"]', body)
         revise = self.service.read_prompt_entry("builtin-revise-entry").body
         self.assertIn('{% include "builtin-project-settings" %}', revise)
 
@@ -220,7 +221,14 @@ class BuiltinLibraryTests(unittest.TestCase):
                 title=current.title,
                 body="",
                 entry_type=current.entry_type,
-                metadata={"author": "Jane Roe", "measurement_system": "metric"},
+                metadata={
+                    "author": "Jane Roe",
+                    "measurement_system": "metric",
+                    # Narrative-craft settings set too — they must NOT surface in
+                    # the general snippet (#1076); they belong to prose-settings.
+                    "pov_mode": "first",
+                    "tense": "past",
+                },
             )
         )
         env = create_environment_for_project(self.service)
@@ -233,6 +241,41 @@ class BuiltinLibraryTests(unittest.TestCase):
         self.assertIn("## Project settings", text)
         self.assertIn("Jane Roe", text)
         self.assertIn("metric", text)
+        # POV / tense are prose-generation settings — excluded here so they don't
+        # bleed into metadata-field brainstorms (#1076).
+        self.assertNotIn("Narrative POV", text)
+        self.assertNotIn("Tense", text)
+
+    def test_prose_settings_snippet_renders_pov_and_tense_only(self) -> None:
+        """#1076: the prose-generation snippet surfaces POV + tense (for
+        manuscript-prose prompts), and nothing else."""
+        from app.models import SaveProjectNodeRequest
+        from app.services.ai.helpers import create_environment_for_project
+        from app.services.ai.templates import render_template
+
+        current = self.service.read_project_node()
+        self.service.save_project_node(
+            SaveProjectNodeRequest(
+                title=current.title,
+                body="",
+                entry_type=current.entry_type,
+                metadata={"author": "Jane Roe", "pov_mode": "first", "tense": "past"},
+            )
+        )
+        entries = self._summaries()
+        self.assertIn("builtin-prose-settings", entries)
+        self.assertTrue(entries["builtin-prose-settings"].is_library)
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "system" %}{% include "builtin-prose-settings" %}{% endrole %}',
+            context={"project": self.service.current_project()},
+            env=env,
+        )
+        text = out.messages[0].text
+        self.assertIn("## Prose style", text)
+        self.assertIn("Narrative POV", text)
+        self.assertIn("Tense", text)
+        self.assertNotIn("Jane Roe", text)  # general facts stay out of the prose snippet
 
     def test_project_settings_snippet_is_inert_without_a_project(self) -> None:
         """Rendered in a context that does not define `project` (e.g. the unit

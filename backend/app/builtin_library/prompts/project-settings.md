@@ -5,17 +5,21 @@ entry_type: prompt:snippet
 ---
 {#
   Project settings snippet (#1020 / finishes #317). Surfaces the project's
-  authored settings — language, spelling, measurement system, tense, POV, … —
-  so the model honours them. Include it INSIDE a {% role %} block:
+  GENERAL authored facts — language, spelling, measurement system, author,
+  word-count target, series number — so the model honours them everywhere.
+  Include it INSIDE a {% role %} block:
       {% include "builtin-project-settings" %}
-  Labels + display order come from field_catalog("project:project") (computed
-  fields like Path and AI cost are already excluded); values from
-  project.metadata. `color` is skipped and empty fields are omitted, so the
-  block disappears entirely when nothing is set.
+  The narrative-craft settings (POV + tense) are deliberately NOT here — they
+  live in `builtin-prose-settings` and belong only in manuscript-prose prompts,
+  so a first-person project doesn't push metadata-field brainstorms into first
+  person (#1076). Labels + display order come from field_catalog("project:project")
+  (computed fields like Path and AI cost are already excluded); values from
+  project.metadata. `color`/`pov_mode`/`tense` are skipped and empty fields are
+  omitted, so the block disappears entirely when nothing is set.
 #}
 {%- if project is defined and project and project.metadata -%}
 {%- set ns = namespace(rows=[]) -%}
-{%- for f in field_catalog("project:project") if f.id != "color" -%}
+{%- for f in field_catalog("project:project") if f.id not in ["color", "pov_mode", "tense"] -%}
 {%- set val = project.metadata.get(f.id) -%}
 {%- if val is not none and val != "" -%}{%- set ns.rows = ns.rows + [(f.label, val)] -%}{%- endif -%}
 {%- endfor -%}

@@ -24,7 +24,7 @@ from tempfile import TemporaryDirectory
 from project_fixtures import open_test_project
 
 from app.models import CreateChatSessionRequest, SaveChatSessionRequest
-from app.services.ai.preview import build_preview
+from app.services.ai.preview import PreviewRequest, build_preview
 
 _SYS = '{% role "system" %}'
 _END = "{% endrole %}"
@@ -43,14 +43,16 @@ class BuildPreviewLoreInvokedTests(unittest.TestCase):
 
     def _render(self, template_source: str):
         rendered, _ = build_preview(
-            project_service=self.service,
-            template_source=template_source,
-            target_scene_id="",
-            session_id=None,
-            inputs={},
-            text_before="",
-            text_after="",
-            commit=False,
+            self.service,
+            PreviewRequest(
+                template_source=template_source,
+                target_scene_id="",
+                session_id=None,
+                inputs={},
+                text_before="",
+                text_after="",
+                commit=False,
+            ),
         )
         return rendered
 

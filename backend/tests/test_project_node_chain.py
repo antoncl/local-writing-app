@@ -23,7 +23,7 @@ import yaml
 from layer_fixtures import declare, declare_full_chain, make_project_folder
 from project_fixtures import open_test_project
 
-from app.services.ai.preview import build_preview
+from app.services.ai.preview import PreviewRequest, build_preview
 from app.services.ai.templates import create_environment, render_template
 
 
@@ -117,17 +117,19 @@ class ProjectNodeChainTests(unittest.TestCase):
         not a hand-built context."""
         _set_project_metadata(self.universe, {"measurement_system": "metric"})
         rendered, _ = build_preview(
-            project_service=self.service,
-            template_source=(
-                '{% role "system" %}{% if "measurement_system" in project.metadata %}'
-                "Use {{ project.metadata.measurement_system }} units.{% endif %}{% endrole %}"
+            self.service,
+            PreviewRequest(
+                template_source=(
+                    '{% role "system" %}{% if "measurement_system" in project.metadata %}'
+                    "Use {{ project.metadata.measurement_system }} units.{% endif %}{% endrole %}"
+                ),
+                target_scene_id=_seeded_scene_id(self.book),
+                session_id=None,
+                inputs={},
+                text_before="",
+                text_after="",
+                commit=False,
             ),
-            target_scene_id=_seeded_scene_id(self.book),
-            session_id=None,
-            inputs={},
-            text_before="",
-            text_after="",
-            commit=False,
         )
         self.assertIn("Use metric units.", rendered.messages[0].text)
 
@@ -135,17 +137,19 @@ class ProjectNodeChainTests(unittest.TestCase):
         """The doc's guard pattern: an unset field renders nothing, no error."""
         # Nothing sets `tense` anywhere in the chain.
         rendered, _ = build_preview(
-            project_service=self.service,
-            template_source=(
-                '{% role "system" %}A{% if "tense" in project.metadata %}'
-                " {{ project.metadata.tense }}{% endif %}B{% endrole %}"
+            self.service,
+            PreviewRequest(
+                template_source=(
+                    '{% role "system" %}A{% if "tense" in project.metadata %}'
+                    " {{ project.metadata.tense }}{% endif %}B{% endrole %}"
+                ),
+                target_scene_id=_seeded_scene_id(self.book),
+                session_id=None,
+                inputs={},
+                text_before="",
+                text_after="",
+                commit=False,
             ),
-            target_scene_id=_seeded_scene_id(self.book),
-            session_id=None,
-            inputs={},
-            text_before="",
-            text_after="",
-            commit=False,
         )
         self.assertIn("AB", rendered.messages[0].text)
 

@@ -15,7 +15,7 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import date as _date_cls
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from jinja2 import TemplateError, TemplateSyntaxError, UndefinedError
 
@@ -174,25 +174,45 @@ def _namespace_for_object_type(context: dict[str, Any], obj_type: str | None) ->
     return None
 
 
+@dataclass
+class PreviewRequest:
+    """The inputs to one preview render — everything except the project service.
+    Bundled so the dispatch boundary takes one object instead of ten parallel
+    args: the render inputs are a data clump; `project_service` is the dependency
+    that stays a separate parameter.
+    """
+
+    template_source: str
+    target_scene_id: str
+    session_id: str | None
+    inputs: dict[str, Any]
+    text_before: str
+    text_after: str
+    commit: bool
+    selection: str = ""
+    resolution_scene_id: str = ""
+    subject: str = ""
+
+
 def build_preview(
-    *,
-    project_service,
-    template_source: str,
-    target_scene_id: str,
-    session_id: str | None,
-    inputs: dict[str, Any],
-    text_before: str,
-    text_after: str,
-    commit: bool,
-    selection: str = "",
-    resolution_scene_id: str = "",
-    subject: str = "",
+    project_service, request: PreviewRequest
 ) -> tuple[RenderedTemplate, str | None]:
     """Render the template and return (output, session_id_used).
 
     `session_id_used` is None when no session was bound (caller did not supply
     one), so the response surface can report 'no caching' to the user.
     """
+    template_source = request.template_source
+    target_scene_id = request.target_scene_id
+    session_id = request.session_id
+    inputs = request.inputs
+    text_before = request.text_before
+    text_after = request.text_after
+    commit = request.commit
+    selection = request.selection
+    resolution_scene_id = request.resolution_scene_id
+    subject = request.subject
+
     # Mutation resolution scene, in precedence order (ADR-0012): an explicit
     # `scene_ref` input (the frontend resolves the input value into
     # `resolution_scene_id`) wins, then a scene marked ★ in a context_pick
@@ -260,32 +280,7 @@ def build_preview(
     try:
         rendered = render_template(template_source, context=context, env=env)
     except TemplateError as exc:
-        # `lineno` is set for TemplateSyntaxError and most subclasses; for
-        # UndefinedError it's typically missing. Surface what we have.
-        line = getattr(exc, "lineno", None)
-        # Jinja2 doesn't expose column info on TemplateError; col stays None.
-        undefined_namespace = None
-        if isinstance(exc, UndefinedError):
-            kind = "undefined"
-            undefined_name, obj_type = _extract_undefined_ref(exc.message or "")
-            # An attribute miss on a real namespace object (`project.language`)
-            # is a wrong path, not a missing input — carry the namespace so the
-            # frontend can say so instead of "no input named language".
-            undefined_namespace = _namespace_for_object_type(context, obj_type)
-        elif isinstance(exc, TemplateSyntaxError):
-            kind = "syntax"
-            undefined_name = None
-        else:
-            kind = "other"
-            undefined_name = None
-        raise PreviewError(
-            f"{type(exc).__name__}: {exc.message}",
-            422,
-            line=int(line) if isinstance(line, int) else None,
-            kind=kind,
-            undefined_name=undefined_name,
-            undefined_namespace=undefined_namespace,
-        ) from exc
+        _raise_preview_error_from_template(exc, context)
 
     if session is not None and commit:
         session.commit()
@@ -297,6 +292,39 @@ def build_preview(
     rendered.lore_invoked = bool(getattr(env, "lore_invoked", [False])[0])
 
     return rendered, session_id
+
+
+def _raise_preview_error_from_template(
+    exc: TemplateError, context: dict[str, Any]
+) -> NoReturn:
+    """Translate a Jinja `TemplateError` into a `PreviewError` (HTTP 422),
+    carrying the line, a `kind` tag, and — for an attribute miss on a real
+    namespace object (`project.language`) — the namespace, so the frontend can
+    say 'wrong path' instead of 'no input named language'.
+    """
+    # `lineno` is set for TemplateSyntaxError and most subclasses; for
+    # UndefinedError it's typically missing. Surface what we have. Jinja2
+    # doesn't expose column info on TemplateError; col stays None.
+    line = getattr(exc, "lineno", None)
+    undefined_namespace = None
+    if isinstance(exc, UndefinedError):
+        kind = "undefined"
+        undefined_name, obj_type = _extract_undefined_ref(exc.message or "")
+        undefined_namespace = _namespace_for_object_type(context, obj_type)
+    elif isinstance(exc, TemplateSyntaxError):
+        kind = "syntax"
+        undefined_name = None
+    else:
+        kind = "other"
+        undefined_name = None
+    raise PreviewError(
+        f"{type(exc).__name__}: {exc.message}",
+        422,
+        line=int(line) if isinstance(line, int) else None,
+        kind=kind,
+        undefined_name=undefined_name,
+        undefined_namespace=undefined_namespace,
+    ) from exc
 
 
 def build_chat_payload(rendered: RenderedTemplate) -> tuple[str, list[dict[str, str]]]:

@@ -29,7 +29,12 @@ from app.models import (
     ExtractEntryPatchRequest,
 )
 from app.services.ai.chat import run_chat_turn
-from app.services.ai.preview import PreviewError, build_chat_payload, build_preview
+from app.services.ai.preview import (
+    PreviewError,
+    PreviewRequest,
+    build_chat_payload,
+    build_preview,
+)
 
 if TYPE_CHECKING:
     from app.services.project_service import ProjectService
@@ -123,21 +128,23 @@ def render_extraction_contract(
     # title clause there — only a revise's allow-list can (title is optional then).
     title_allowed = creating or commit_fields is None or "title" in commit_fields
     rendered, _ = build_preview(
-        project_service=project_service,
-        template_source=DEFAULT_EXTRACTION_TEMPLATE,
-        target_scene_id="",
-        session_id=None,
-        inputs={
-            "entry_type": entry_type,
-            "creating": creating,
-            "commit_fields": commit_fields,
-            "body_allowed": body_allowed,
-            "body_description": body_description,
-            "title_allowed": title_allowed,
-        },
-        text_before="",
-        text_after="",
-        commit=False,
+        project_service,
+        PreviewRequest(
+            template_source=DEFAULT_EXTRACTION_TEMPLATE,
+            target_scene_id="",
+            session_id=None,
+            inputs={
+                "entry_type": entry_type,
+                "creating": creating,
+                "commit_fields": commit_fields,
+                "body_allowed": body_allowed,
+                "body_description": body_description,
+                "title_allowed": title_allowed,
+            },
+            text_before="",
+            text_after="",
+            commit=False,
+        ),
     )
     system_prompt, _ = build_chat_payload(rendered)
     return system_prompt

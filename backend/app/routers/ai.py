@@ -47,6 +47,7 @@ from app.services.ai.chat import (
 from app.services.ai.extraction import run_entry_patch_extraction
 from app.services.ai.preview import (
     PreviewError,
+    PreviewRequest,
     build_chat_payload,
     build_preview,
     estimate_preview_tokens_and_cost,
@@ -196,17 +197,19 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
         # than throwing. `/api/ai/generate` keeps the strict 422 behavior.
         try:
             rendered, session_id = build_preview(
-                project_service=project,
-                template_source=request.template_source,
-                target_scene_id=request.target_scene_id,
-                session_id=request.session_id,
-                inputs=request.inputs,
-                text_before=request.text_before,
-                text_after=request.text_after,
-                selection=request.selection,
-                commit=request.commit,
-                resolution_scene_id=request.resolution_scene_id,
-                subject=request.subject,
+                project,
+                PreviewRequest(
+                    template_source=request.template_source,
+                    target_scene_id=request.target_scene_id,
+                    session_id=request.session_id,
+                    inputs=request.inputs,
+                    text_before=request.text_before,
+                    text_after=request.text_after,
+                    selection=request.selection,
+                    commit=request.commit,
+                    resolution_scene_id=request.resolution_scene_id,
+                    subject=request.subject,
+                ),
             )
         except PreviewError as exc:
             return AIPreviewResponse(
@@ -276,16 +279,18 @@ async def ai_generate(project: CurrentProject, request: AIGenerateRequest) -> AI
     with translate_errors():
         try:
             rendered, session_id = build_preview(
-                project_service=project,
-                template_source=request.template_source,
-                target_scene_id=request.target_scene_id,
-                session_id=request.session_id,
-                inputs=request.inputs,
-                text_before=request.text_before,
-                text_after=request.text_after,
-                selection=request.selection,
-                commit=request.commit,
-                resolution_scene_id=request.resolution_scene_id,
+                project,
+                PreviewRequest(
+                    template_source=request.template_source,
+                    target_scene_id=request.target_scene_id,
+                    session_id=request.session_id,
+                    inputs=request.inputs,
+                    text_before=request.text_before,
+                    text_after=request.text_after,
+                    selection=request.selection,
+                    commit=request.commit,
+                    resolution_scene_id=request.resolution_scene_id,
+                ),
             )
         except PreviewError as exc:
             raise HTTPException(
@@ -437,16 +442,18 @@ async def ai_generate_stream(project: CurrentProject, request: AIGenerateRequest
     with translate_errors():
         try:
             rendered, session_id = build_preview(
-                project_service=project,
-                template_source=request.template_source,
-                target_scene_id=request.target_scene_id,
-                session_id=request.session_id,
-                inputs=request.inputs,
-                text_before=request.text_before,
-                text_after=request.text_after,
-                selection=request.selection,
-                commit=request.commit,
-                resolution_scene_id=request.resolution_scene_id,
+                project,
+                PreviewRequest(
+                    template_source=request.template_source,
+                    target_scene_id=request.target_scene_id,
+                    session_id=request.session_id,
+                    inputs=request.inputs,
+                    text_before=request.text_before,
+                    text_after=request.text_after,
+                    selection=request.selection,
+                    commit=request.commit,
+                    resolution_scene_id=request.resolution_scene_id,
+                ),
             )
         except PreviewError as exc:
             raise HTTPException(

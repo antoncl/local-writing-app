@@ -18,7 +18,7 @@ import { setPlotTemplates } from "@/lib/stores/plotTemplates";
 import { setPlotlines } from "@/lib/stores/plotlines";
 import { refreshPlotBoard } from "@/lib/stores/plotBoard";
 import { setAssistantEntries } from "@/lib/stores/assistants";
-import { setChatSessions } from "@/lib/stores/chats";
+import { refreshChatSessions, setChatSessions } from "@/lib/stores/chats";
 import { researchStructureStore, setResearchStructure, setStructure } from "@/lib/stores/structure";
 import { refreshTodos } from "@/lib/stores/todos";
 import { findNodeBySceneId } from "@/lib/utils/treeHelpers";
@@ -136,6 +136,10 @@ async function deleteScene(host: DeletePaneHost, id: string): Promise<void> {
   // A delete drops the node's outgoing refs and dangles any backlinks to it,
   // so rebuild the reverse reference index (#184 Phase 2) in the background.
   refreshReferenceIndexInBackground();
+  // The delete may have cascade-deleted brainstorm chats attached to this node
+  // (#1078); re-fetch the roster so the Chats pane drops them (#1087). Harmless
+  // when nothing cascaded — the list just comes back unchanged.
+  void refreshChatSessions();
   host.tearDown(id);
   host.setStatus(`Deleted ${sceneTitle}`);
 }

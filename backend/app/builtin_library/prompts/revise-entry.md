@@ -40,7 +40,7 @@ You don't output the structured result yourself — when the author commits, a s
 {% else %}
 _(This entry has no body yet.)_
 {% endif %}
-{% for f in field_catalog(e) if f.type == "long_text" %}
+{% for f in field_catalog(e) if f.type == "long_text" and f.id != "body" %}
 
 ### {{ f.label }} ({{ f.id }})
 {{ e.metadata.get(f.id) or "_(empty)_" }}

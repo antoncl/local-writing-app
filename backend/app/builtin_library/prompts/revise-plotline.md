@@ -34,7 +34,7 @@ Reason from the board below. Each plotline lists the beats it wants — the requ
 {% else %}
 _(This plotline has no description yet.)_
 {% endif %}
-{% set current = field_catalog(e) | rejectattr("id", "equalto", "title") | list %}
+{% set current = field_catalog(e) | rejectattr("id", "equalto", "title") | rejectattr("id", "equalto", "body") | list %}
 {% if current %}
 
 ### Fields to develop

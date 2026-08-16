@@ -181,13 +181,15 @@ def _desc(cost_in: float | None) -> ModelDescriptor:
     )
 
 
-def test_estimate_input_cost_none_descriptor_returns_zero():
-    assert token_service.estimate_input_cost(10_000, None) == 0.0
+def test_estimate_input_cost_none_descriptor_returns_none():
+    # No descriptor → pricing UNKNOWN, not a confident zero (#697).
+    assert token_service.estimate_input_cost(10_000, None) is None
 
 
-def test_estimate_input_cost_no_pricing_returns_zero():
-    # Ollama descriptors lack cost_in_per_mtok → no estimate possible.
-    assert token_service.estimate_input_cost(10_000, _desc(None)) == 0.0
+def test_estimate_input_cost_no_pricing_returns_none():
+    # Ollama descriptors lack cost_in_per_mtok → no estimate possible;
+    # unknown, not 0.0 (the preview hides an unknown cost).
+    assert token_service.estimate_input_cost(10_000, _desc(None)) is None
 
 
 def test_estimate_input_cost_zero_tokens_returns_zero():

@@ -486,10 +486,13 @@ class ChatSession(BaseModel):
     # lore-free by construction.
     lore_enabled: bool = False
     # V2: running USD cost for this chat session, in the provider's currency
-    # (USD; frontend converts to EUR for display). Incremented turn-by-turn
-    # via save_chat_session(cost_delta_usd=...). Frozen value at time-of-
-    # send — does NOT recompute if model pricing changes.
-    cost_usd_total: float = 0.0
+    # (USD; frontend converts to EUR for display). Re-derived on read as the
+    # sum of this chat's priced ai_invocations rows. None — not 0.0 — when the
+    # chat has no priced cost yet (fresh, or every turn ran an unpriced model):
+    # "cost unknown", which the footer hides rather than showing a fabricated
+    # "€0.00" (#697). The persisted YAML value stays 0.0 for round-trip and is
+    # never consulted.
+    cost_usd_total: float | None = 0.0
     # Per-cache-slot ISO timestamps of the most recent cache write. Slot
     # keys are short labels emitted by the chat dispatch ("system", "lore",
     # etc.). Powers the TTL countdown chips (step 9). Updated when a turn

@@ -329,6 +329,43 @@ class ChatSessionCostViaLogTests(unittest.TestCase):
         # cost_usd_total is re-derived on every read; YAML value stays 0.
         self.assertAlmostEqual(chat.cost_usd_total, 0.30, places=6)
 
+    def test_chat_cost_usd_total_is_none_when_no_priced_rows(self) -> None:
+        # A fresh chat (no invocations) has an UNKNOWN total, not 0.0 — the
+        # footer hides rather than showing a fabricated €0.00 (#697).
+        chat_id = self._create_chat()
+        chat = self.service.read_chat_session(chat_id)
+        self.assertIsNone(chat.cost_usd_total)
+
+    def test_chat_cost_usd_total_ignores_unpriced_rows(self) -> None:
+        # A turn on an unpriced model records a cost_usd=None row; it must not
+        # count as €0.00. With only such rows the total stays None (#697).
+        from app.models import CreateAIInvocationRequest
+
+        chat_id = self._create_chat()
+        self.service.append_ai_invocation(
+            CreateAIInvocationRequest(
+                chat_session_id=chat_id, provider="ollama", model="llama3", cost_usd=None
+            )
+        )
+        chat = self.service.read_chat_session(chat_id)
+        self.assertIsNone(chat.cost_usd_total)
+
+    def test_chat_cost_usd_total_sums_priced_and_ignores_unpriced(self) -> None:
+        # Mixed chat (switched models mid-session): a priced turn makes the
+        # total known — it's the sum of the priced rows; the unpriced row
+        # contributes nothing rather than forcing the whole total to unknown.
+        from app.models import CreateAIInvocationRequest
+
+        chat_id = self._create_chat()
+        self.service.append_ai_invocation(
+            CreateAIInvocationRequest(
+                chat_session_id=chat_id, provider="ollama", model="llama3", cost_usd=None
+            )
+        )
+        self._save_with_cost(chat_id, 0.02)
+        chat = self.service.read_chat_session(chat_id)
+        self.assertAlmostEqual(chat.cost_usd_total, 0.02, places=6)
+
 
 if __name__ == "__main__":
     unittest.main()

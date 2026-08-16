@@ -55,10 +55,14 @@ class ChatCostAccumulatorTests(unittest.TestCase):
             ),
         )
 
-    def test_new_chat_starts_with_zero_cost(self) -> None:
+    def test_new_chat_has_unknown_cost_until_a_priced_turn(self) -> None:
+        # A chat with no priced cost row (fresh, or unpriced-model turns —
+        # which record no positive-cost row) reports cost_usd_total = None,
+        # not 0.0: the footer hides rather than showing a fabricated €0.00
+        # (#697). The first priced turn switches it to a real total.
         cid = self._create_chat()
         chat = self.service.read_chat_session(cid)
-        self.assertEqual(chat.cost_usd_total, 0.0)
+        self.assertIsNone(chat.cost_usd_total)
         self.assertEqual(chat.cache_write_times, {})
 
     def test_cost_delta_accumulates_across_saves(self) -> None:

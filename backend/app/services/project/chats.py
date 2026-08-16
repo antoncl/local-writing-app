@@ -195,14 +195,20 @@ class ChatSessionsMixin:
         # unified ai_invocations log. The persisted YAML value is kept
         # for round-trip back-compat but never consulted — sum log rows
         # tagged with this chat_session_id for the live display value.
+        #
+        # A chat with no priced row — fresh, or one whose turns all ran an
+        # unpriced model (those record no positive-cost row) — has an UNKNOWN
+        # total, surfaced as None → "—"/hidden, not a fabricated €0.00 (#697).
         log_total = 0.0
+        saw_priced = False
         for record in self._read_ai_invocations_raw():
             if str(record.get("chat_session_id") or "") != chat_id:
                 continue
             cost = record.get("cost_usd")
             if isinstance(cost, (int, float)):
                 log_total += float(cost)
-        session.cost_usd_total = log_total
+                saw_priced = True
+        session.cost_usd_total = log_total if saw_priced else None
         return session
 
     def create_chat_session(self, request: CreateChatSessionRequest) -> ChatSession:

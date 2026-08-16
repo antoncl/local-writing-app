@@ -14,6 +14,7 @@ can override under Advanced.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -25,6 +26,9 @@ from app.services.ai.profiles.base import (
     CapabilityTier,
     ChatCall,
     ModelDescriptor,
+    StreamDelta,
+    StreamThinking,
+    ThinkTagSplitter,
     UsageMetrics,
     default_token_count,
 )
@@ -84,6 +88,19 @@ class OpenRouterProfile(OpenAICompatibleProfile):
 
     def _extra_body(self, call: ChatCall) -> dict:
         return openrouter_extra_body(call.session_id)
+
+    # OpenRouter streams get a longer timeout and plain content handling.
+    _stream_timeout = 300.0
+
+    def _stream_delta_events(
+        self, delta: Any, splitter: ThinkTagSplitter
+    ) -> Iterator[StreamDelta | StreamThinking]:
+        # OpenRouter is treated as a plain content stream — no inline
+        # <think>-tag or reasoning-field processing (byte-identical to the
+        # pre-reshape openrouter stream). The splitter is unused.
+        text = getattr(delta, "content", None) if delta else None
+        if text:
+            yield StreamDelta(text=text)
 
     async def list_models(self, *, force_refresh: bool = False) -> list[ModelDescriptor]:
         if not force_refresh and self._cache is not None:

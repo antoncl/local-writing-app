@@ -175,13 +175,13 @@ class StreamingChatCostTests(unittest.TestCase):
             output_tokens=500,
         )
 
-        def fake_stream(**_kwargs):
+        def fake_stream(call):
             yield ai_providers.StreamDelta(text="Hi")
-            yield ai_providers._StreamFinal(stop_reason="end_turn", usage=usage)
+            yield ai_providers.StreamFinal(stop_reason="end_turn", usage=usage)
 
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
-                "app.services.ai.providers._anthropic_chat_stream",
+                "app.services.ai.profiles.anthropic.AnthropicProfile.chat_stream",
                 side_effect=fake_stream,
              ):
             response = self.client.post(
@@ -208,13 +208,13 @@ class StreamingChatCostTests(unittest.TestCase):
         # didn't fire). The done line just has no usage/cost fields.
         loaded = _set_machine_keys(anthropic="sk-ant-test")
 
-        def fake_stream(**_kwargs):
+        def fake_stream(call):
             yield ai_providers.StreamDelta(text="Hi")
-            yield ai_providers._StreamFinal(stop_reason="end_turn", usage=None)
+            yield ai_providers.StreamFinal(stop_reason="end_turn", usage=None)
 
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
              patch(
-                "app.services.ai.providers._anthropic_chat_stream",
+                "app.services.ai.profiles.anthropic.AnthropicProfile.chat_stream",
                 side_effect=fake_stream,
              ):
             response = self.client.post(

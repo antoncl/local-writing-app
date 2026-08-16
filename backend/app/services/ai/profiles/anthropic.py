@@ -9,6 +9,7 @@ back to the bake-in catalogue alone.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -21,9 +22,16 @@ from app.services.ai.profiles.base import (
     ModelDescriptor,
     ProviderError,
     ProviderProfile,
+    StreamDelta,
+    StreamFinal,
+    StreamThinking,
     UsageMetrics,
     default_token_count,
 )
+
+# Default Anthropic extended-thinking budget when ai_thinking is enabled.
+# Anthropic requires budget_tokens >= 1024 and budget_tokens < max_tokens.
+_ANTHROPIC_THINKING_BUDGET = 1024
 
 if TYPE_CHECKING:
     from app.services.machine_settings import MachineSettings
@@ -186,6 +194,58 @@ class AnthropicProfile(ProviderProfile):
             max_tokens=1,
             messages=[{"role": "user", "content": "ping"}],
         )
+
+    def chat_stream(
+        self, call: ChatCall
+    ) -> Iterator[StreamDelta | StreamThinking | StreamFinal]:
+        try:
+            from anthropic import Anthropic
+        except ImportError as exc:
+            raise ProviderError(f"anthropic package not installed: {exc}") from exc
+
+        client = Anthropic(api_key=self._api_key, timeout=120.0)
+        temp_ok = anthropic_supports_temperature(call.model)
+        kwargs: dict = {
+            "model": call.model,
+            "max_tokens": call.max_tokens,
+            "messages": call.messages,
+        }
+        if call.temperature is not None and temp_ok:
+            kwargs["temperature"] = call.temperature
+        if call.system_blocks:
+            system_payload = anthropic_system_blocks(call.system_blocks)
+            if system_payload:
+                kwargs["system"] = system_payload
+        elif call.system_prompt:
+            kwargs["system"] = anthropic_system_with_cache(call.system_prompt)
+        if call.thinking_enabled:
+            budget = max(1024, min(_ANTHROPIC_THINKING_BUDGET, call.max_tokens - 256))
+            if budget >= 1024:
+                kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
+                # Anthropic requires temperature=1 when thinking is enabled —
+                # but only on models that still accept the parameter at all.
+                if temp_ok:
+                    kwargs["temperature"] = 1.0
+        stop_reason: str | None = None
+        final_message: Any = None
+        with client.messages.stream(**kwargs) as stream:
+            for event in stream:
+                etype = getattr(event, "type", None)
+                if etype == "content_block_delta":
+                    delta = getattr(event, "delta", None)
+                    dtype = getattr(delta, "type", None) if delta else None
+                    if dtype == "text_delta":
+                        text = getattr(delta, "text", "") or ""
+                        if text:
+                            yield StreamDelta(text=text)
+                    elif dtype == "thinking_delta":
+                        text = getattr(delta, "thinking", "") or ""
+                        if text:
+                            yield StreamThinking(text=text)
+            final_message = stream.get_final_message()
+            stop_reason = getattr(final_message, "stop_reason", None)
+        usage = self.extract_usage(final_message, call.model)
+        yield StreamFinal(stop_reason=stop_reason, usage=usage)
 
 
 def anthropic_system_with_cache(system_prompt: str):

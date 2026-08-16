@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
@@ -180,6 +181,10 @@ class ChatCall:
     temperature: float | None = None
     system_blocks: list[dict] | None = None
     session_id: str | None = None
+    # Streaming only: ask the provider for extended thinking when it supports
+    # it (Anthropic). Ignored by `chat` and by providers without a thinking
+    # mode.
+    thinking_enabled: bool = False
 
 
 @dataclass
@@ -192,6 +197,91 @@ class ChatOutcome:
     content: str
     stop_reason: str | None
     raw: Any
+
+
+@dataclass
+class StreamDelta:
+    """A chunk of assistant text from a streaming call."""
+
+    text: str
+
+
+@dataclass
+class StreamThinking:
+    """A chunk of provider reasoning/thinking from a streaming call."""
+
+    text: str
+
+
+@dataclass
+class StreamFinal:
+    """The terminator a provider's `chat_stream` yields last, carrying what
+    the dispatch layer needs to build its public `StreamDone`: the stop
+    reason and (when the provider reported it) the token usage.
+    """
+
+    stop_reason: str | None
+    usage: UsageMetrics | None = None
+
+
+class ThinkTagSplitter:
+    """Stream-safe splitter that reroutes <think>…</think> regions as thinking.
+
+    Many local models (DeepSeek-R1, QwQ, Ollama) emit reasoning inline as
+    `<think>…</think>` tags inside the content stream. This splitter consumes
+    chunks of text and yields StreamDelta for normal content, StreamThinking
+    for content inside tags, and holds back enough trailing characters that
+    a tag split across chunk boundaries is still recognized.
+    """
+
+    _OPEN = "<think>"
+    _CLOSE = "</think>"
+
+    def __init__(self) -> None:
+        self._buf = ""
+        self._in_think = False
+
+    def feed(self, text: str) -> Iterator[StreamDelta | StreamThinking]:
+        self._buf += text
+        while self._buf:
+            if self._in_think:
+                idx = self._buf.find(self._CLOSE)
+                if idx == -1:
+                    # Emit everything except a possible partial closing tag.
+                    hold = len(self._CLOSE) - 1
+                    if len(self._buf) > hold:
+                        out = self._buf[:-hold] if hold else self._buf
+                        if out:
+                            yield StreamThinking(text=out)
+                        self._buf = self._buf[-hold:] if hold else ""
+                    return
+                if idx > 0:
+                    yield StreamThinking(text=self._buf[:idx])
+                self._buf = self._buf[idx + len(self._CLOSE):]
+                self._in_think = False
+            else:
+                idx = self._buf.find(self._OPEN)
+                if idx == -1:
+                    hold = len(self._OPEN) - 1
+                    if len(self._buf) > hold:
+                        out = self._buf[:-hold] if hold else self._buf
+                        if out:
+                            yield StreamDelta(text=out)
+                        self._buf = self._buf[-hold:] if hold else ""
+                    return
+                if idx > 0:
+                    yield StreamDelta(text=self._buf[:idx])
+                self._buf = self._buf[idx + len(self._OPEN):]
+                self._in_think = True
+
+    def flush(self) -> Iterator[StreamDelta | StreamThinking]:
+        if not self._buf:
+            return
+        if self._in_think:
+            yield StreamThinking(text=self._buf)
+        else:
+            yield StreamDelta(text=self._buf)
+        self._buf = ""
 
 
 class ProviderProfile(ABC):
@@ -274,6 +364,18 @@ class ProviderProfile(ABC):
         work — a 1-token completion against `model`. Returns nothing on
         success; raises `ProviderError` (or lets the SDK's error surface)
         on failure, which the dispatch layer turns into a health result.
+        """
+
+    @abstractmethod
+    def chat_stream(
+        self, call: ChatCall
+    ) -> Iterator[StreamDelta | StreamThinking | StreamFinal]:
+        """Stream a completion: yield `StreamDelta`/`StreamThinking` chunks as
+        they arrive, then exactly one `StreamFinal` carrying the stop reason
+        and usage. Credentials/endpoint come from the instance; the request is
+        `call` (with `call.thinking_enabled` honored where supported). Raise
+        `ProviderError` for an expected failure; the dispatch layer wraps the
+        events into its public StreamDone/StreamError.
         """
 
     def supports_temperature(self, model_id: str) -> bool:

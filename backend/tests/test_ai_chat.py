@@ -15,6 +15,10 @@ from app.services.ai.profiles.base import ChatOutcome
 
 _ANTHROPIC_CHAT = "app.services.ai.profiles.anthropic.AnthropicProfile.chat"
 _OPENAI_COMPAT_CHAT = "app.services.ai.profiles.openai_compatible.OpenAICompatibleProfile.chat"
+_ANTHROPIC_STREAM = "app.services.ai.profiles.anthropic.AnthropicProfile.chat_stream"
+_OPENAI_COMPAT_STREAM = (
+    "app.services.ai.profiles.openai_compatible.OpenAICompatibleProfile.chat_stream"
+)
 
 
 def _set_machine_keys(**keys: str) -> None:
@@ -385,7 +389,7 @@ class ChatStreamEndpointTests(unittest.TestCase):
             default_provider="openrouter",
         )
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
-             patch("app.services.ai.providers._openrouter_chat_stream") as mock_stream:
+             patch(_OPENAI_COMPAT_STREAM) as mock_stream:
             response = self.client.post(
                 "/api/ai/chat/stream",
                 json={
@@ -407,13 +411,13 @@ class ChatStreamEndpointTests(unittest.TestCase):
         )
         loaded = _set_machine_keys(anthropic="sk-ant-test", default_provider="anthropic")
 
-        def fake_anthropic_stream(**_kwargs):
+        def fake_anthropic_stream(call):
             yield ai_providers.StreamDelta(text="Hello, ")
             yield ai_providers.StreamDelta(text="world!")
-            yield ai_providers._StreamFinal(stop_reason="end_turn")
+            yield ai_providers.StreamFinal(stop_reason="end_turn")
 
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
-             patch("app.services.ai.providers._anthropic_chat_stream", side_effect=fake_anthropic_stream):
+             patch(_ANTHROPIC_STREAM, side_effect=fake_anthropic_stream):
             response = self.client.post(
                 "/api/ai/chat/stream",
                 json={
@@ -438,7 +442,7 @@ class ChatStreamEndpointTests(unittest.TestCase):
         # default project policy is "off"
         loaded = _set_machine_keys(anthropic="sk-ant-test", default_provider="anthropic")
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
-             patch("app.services.ai.providers._anthropic_chat_stream") as mock_stream:
+             patch(_ANTHROPIC_STREAM) as mock_stream:
             response = self.client.post(
                 "/api/ai/chat/stream",
                 json={
@@ -461,11 +465,11 @@ class ChatStreamEndpointTests(unittest.TestCase):
         )
         loaded = _set_machine_keys(anthropic="sk-ant-test")
 
-        def fake_stream(**_kwargs):
+        def fake_stream():
             yield ai_providers.StreamThinking(text="Let me think… ")
             yield ai_providers.StreamThinking(text="OK.")
             yield ai_providers.StreamDelta(text="Hi!")
-            yield ai_providers._StreamFinal(stop_reason="end_turn")
+            yield ai_providers.StreamFinal(stop_reason="end_turn")
 
         # Create an assistant with ai_thinking enabled so the resolver
         # plumbs thinking_enabled=True. The provider mock doesn't care, but
@@ -490,12 +494,12 @@ class ChatStreamEndpointTests(unittest.TestCase):
 
         captured: dict = {}
 
-        def capture_and_stream(**kwargs):
-            captured.update(kwargs)
-            yield from fake_stream(**kwargs)
+        def capture_and_stream(call):
+            captured["call"] = call
+            yield from fake_stream()
 
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
-             patch("app.services.ai.providers._anthropic_chat_stream", side_effect=capture_and_stream):
+             patch(_ANTHROPIC_STREAM, side_effect=capture_and_stream):
             response = self.client.post(
                 "/api/ai/chat/stream",
                 json={
@@ -504,7 +508,7 @@ class ChatStreamEndpointTests(unittest.TestCase):
                 },
             )
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertTrue(captured.get("thinking_enabled"))
+        self.assertTrue(captured["call"].thinking_enabled)
         events = self._parse_ndjson(response.text)
         thinking = [e for e in events if e["type"] == "thinking"]
         deltas = [e for e in events if e["type"] == "delta"]
@@ -518,12 +522,12 @@ class ChatStreamEndpointTests(unittest.TestCase):
         )
         loaded = _set_machine_keys(anthropic="sk-ant-test")
 
-        def fake_stream(**_kwargs):
+        def fake_stream(call):
             yield ai_providers.StreamDelta(text="partial")
-            yield ai_providers._StreamFinal(stop_reason="max_tokens")
+            yield ai_providers.StreamFinal(stop_reason="max_tokens")
 
         with patch("app.services.machine_settings.load_settings", return_value=loaded), \
-             patch("app.services.ai.providers._anthropic_chat_stream", side_effect=fake_stream):
+             patch(_ANTHROPIC_STREAM, side_effect=fake_stream):
             response = self.client.post(
                 "/api/ai/chat/stream",
                 json={

@@ -9,11 +9,18 @@ Anthropic is deliberately not here — it has its own SDK and cache shape.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from typing import Any
+
 from app.services.ai.profiles.base import (
     ChatCall,
     ChatOutcome,
     ProviderError,
     ProviderProfile,
+    StreamDelta,
+    StreamFinal,
+    StreamThinking,
+    ThinkTagSplitter,
 )
 
 # Chat calls are long-running (large context, slow models); match the
@@ -26,9 +33,13 @@ class OpenAICompatibleProfile(ProviderProfile):
 
     Concrete subclasses implement the metadata methods (`list_models`,
     `caching_style`, `count_tokens`, `extract_usage`, `from_settings`) and
-    supply `_chat_base_url` / `_chat_api_key`. They inherit one `chat`;
-    OpenRouter overrides `_build_messages` / `_extra_body`.
+    supply `_chat_base_url` / `_chat_api_key`. They inherit one `chat` and one
+    `chat_stream`; OpenRouter overrides `_build_messages` / `_extra_body`
+    (and `_stream_delta_events` / `_stream_timeout` for its plainer stream).
     """
+
+    # Streaming timeout for the OpenAI/Ollama path. OpenRouter overrides (300s).
+    _stream_timeout: float = 180.0
 
     def _chat_base_url(self) -> str:
         """The OpenAI-compatible endpoint for this provider."""
@@ -109,3 +120,73 @@ class OpenAICompatibleProfile(ProviderProfile):
             max_tokens=1,
             messages=[{"role": "user", "content": "ping"}],
         )
+
+    def chat_stream(
+        self, call: ChatCall
+    ) -> Iterator[StreamDelta | StreamThinking | StreamFinal]:
+        try:
+            from openai import OpenAI
+        except ImportError as exc:
+            raise ProviderError(f"openai package not installed: {exc}") from exc
+
+        client = OpenAI(
+            base_url=self._chat_base_url(),
+            api_key=self._chat_api_key() or "sk-none",
+            timeout=self._stream_timeout,
+        )
+        kwargs: dict = {
+            "model": call.model,
+            "max_tokens": call.max_tokens,
+            "messages": self._build_messages(call),
+            "stream": True,
+            # Ask the endpoint for a final usage chunk; without this the
+            # streaming path never sees usage.
+            "stream_options": {"include_usage": True},
+        }
+        if call.temperature is not None:
+            kwargs["temperature"] = call.temperature
+        extra_body = self._extra_body(call)
+        if extra_body:
+            kwargs["extra_body"] = extra_body
+        splitter = ThinkTagSplitter()
+        stop_reason: str | None = None
+        final_chunk: Any = None
+        for chunk in client.chat.completions.create(**kwargs):
+            if getattr(chunk, "usage", None) is not None:
+                final_chunk = chunk
+            choices = getattr(chunk, "choices", None) or []
+            if not choices:
+                continue
+            choice = choices[0]
+            delta = getattr(choice, "delta", None)
+            yield from self._stream_delta_events(delta, splitter)
+            finish = getattr(choice, "finish_reason", None)
+            if finish:
+                stop_reason = finish
+        # Flush any pending buffered text after the stream ends.
+        yield from splitter.flush()
+        usage = (
+            self.extract_usage(final_chunk, call.model)
+            if final_chunk is not None
+            else None
+        )
+        yield StreamFinal(stop_reason=stop_reason, usage=usage)
+
+    def _stream_delta_events(
+        self, delta: Any, splitter: ThinkTagSplitter
+    ) -> Iterator[StreamDelta | StreamThinking]:
+        """Turn one streamed delta into events. The default handles the
+        OpenAI-compatible extensions: a `reasoning`/`reasoning_content` field
+        (DeepSeek, Ollama's /v1 shim) becomes thinking, and content is routed
+        through the <think>-tag splitter for models that emit inline reasoning.
+        OpenRouter overrides this with a plain content-only version.
+        """
+        reasoning = (
+            getattr(delta, "reasoning_content", None)
+            or getattr(delta, "reasoning", None)
+        ) if delta else None
+        if reasoning:
+            yield StreamThinking(text=reasoning)
+        text = getattr(delta, "content", None) if delta else None
+        if text:
+            yield from splitter.feed(text)

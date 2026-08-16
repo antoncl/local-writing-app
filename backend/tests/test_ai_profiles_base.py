@@ -48,6 +48,10 @@ class _DummyProfile(ProviderProfile):
     def health_ping(self, model):
         return None
 
+    def chat_stream(self, call):
+        from app.services.ai.profiles.base import StreamFinal
+        yield StreamFinal(None, None)
+
 
 def test_baked_in_parses_for_all_expected_providers():
     catalogue = baked_in_catalogue()

@@ -61,8 +61,13 @@
   // Dispatching a no-op transaction is the cheapest way to trigger
   // apply() without mutating the document.
   // Reflect the disabled prop onto the live editor. setEditable(false) blocks
-  // typing/paste while keeping the current content and selection intact.
-  $: if (editor) editor.setEditable(!disabled);
+  // typing/paste while keeping the current content and selection intact. Pass
+  // emitUpdate=false: `disabled` is presentation-only, so toggling editability
+  // must NOT fire onUpdate — otherwise the echo would write the editor's current
+  // text back into `value` and defeat a same-flush programmatic clear (#1071:
+  // the chat composer failed to clear on the 2nd+ send). Mirrors loadValue's
+  // setContent(doc, false) "don't echo" discipline.
+  $: if (editor) editor.setEditable(!disabled, false);
 
   $: if (editor) updateMatcher(matcher);
   function updateMatcher(next: CompiledMatcher | null): void {

@@ -1,6 +1,6 @@
 # ADR-0059: The body is an intrinsic field, and a field says whether the AI may write it
 
-- Status: Proposed — 0.9.0, 2026-08-16
+- Status: Accepted — 0.9.0, 2026-08-16 (Anton, PR #1056)
 - Feature: stems from a commit-pollution bug (a committed lore entry's `body`
   became a verbatim dump of every structured field) plus the adjacent observation
   that a brainstorm set an author-owned cost knob (`context_policy: always`) it

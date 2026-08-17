@@ -140,7 +140,7 @@
         // A real, populated namespace object was accessed with an attribute it
         // doesn't have — a wrong path, not a missing input (#1019).
         let msg = `Your template references \`${ns}.${missing}\`, but \`${ns}\` has no attribute \`${missing}\`.`;
-        if (ns === "project" || ns === "novel") {
+        if (ns === "project") {
           msg += ` A project's authored fields live under \`${ns}.metadata\` — did you mean \`${ns}.metadata.${missing}\`?`;
         }
         return msg;

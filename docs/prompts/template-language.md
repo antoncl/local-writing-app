@@ -1,6 +1,6 @@
 # Template language
 
-A prompt's body markdown is rendered as a [Jinja2](https://jinja.palletsprojects.com/) template inside a sandbox. Jinja's standard syntax — variables, conditionals, loops, includes, filters — works as documented upstream. This page covers only the additions specific to this project.
+A prompt's body markdown is rendered as a [Jinja2](https://jinja.palletsprojects.com/) template inside a sandbox. Jinja's standard syntax — variables, conditionals, loops, includes, filters — works as documented upstream. This page covers only the additions specific to this project. For the exhaustive list of variables, helpers, filters, and tags with their types, see [reference.md](reference.md).
 
 ## What rendering produces
 
@@ -9,16 +9,15 @@ A template doesn't produce a single string. It produces a list of role-tagged me
 ```python
 RenderedTemplate
 ├── messages: list[RenderedMessage]
-│   ├── role: str   # "system" | "user" | "assistant" (and rare custom values)
+│   ├── role: str   # "system" | "user" | "assistant"
 │   └── blocks: list[ContentBlock]
-│       ├── text: str
-│       └── cache_break_after: bool
+│       └── text: str
 └── warnings: list[str]
 ```
 
-A message is built from one `{% role %}` block; a block within a message is a span of text bounded by `{% cache_break %}` markers.
+A message is built from one `{% role %}` block (or from un-roled prose homed to the base type's default role). A content block is just text — the author never marks where caching happens; that ordering is the backend's job (see [Caching is a backend concern](#caching-is-a-backend-concern)).
 
-## `{% role %}` — required wrapper for everything sent to the model
+## `{% role %}` — an override, not a required wrapper
 
 ```jinja
 {% role "system" %}
@@ -30,7 +29,7 @@ Write a paragraph about the rain.
 {% endrole %}
 ```
 
-**Only text inside a role block is sent to the model.** Anything outside is dropped with a warning. This is deliberate: it forces authors to be explicit about which content belongs to which role.
+**Un-roled prose is homed to the base type's default role** (usually `system`), so a prose-only prompt just works — you don't need to wrap anything. `{% role %}` is the **override** you reach for when a prompt needs more than one message: a system persona plus a user instruction, or an assistant turn carrying prior prose. Text is split across roles exactly as the blocks fall.
 
 The role argument is an expression — usually a string literal, but `{% role pov_role %}` works if `pov_role` is in the context.
 
@@ -48,32 +47,22 @@ If `previous_text` is empty, no assistant message is emitted.
 
 **Nested roles** are an author error. The outer wrapper is discarded; inner roles still produce messages. A warning is appended.
 
-## `{% cache_break %}` — split a message into cacheable blocks
+## `{% include %}` — inline a snippet node
 
 ```jinja
 {% role "system" %}
 You are a thriller writer.
-{% include "snippet_house_style" %}
-{% cache_break %}
-{% endrole %}
-
-{% role "user" %}
-{{ relevant_lore(scene) }}
-{% cache_break %}
-Scene so far:
-{{ text_before }}
+{% include "builtin-house-style" %}
 {% endrole %}
 ```
 
-Inside a role block, `{% cache_break %}` ends the current content block and starts a new one. The block before the marker carries `cache_break_after=True`. The provider serializer translates that into Anthropic `cache_control: { type: "ephemeral" }` markers; for OpenAI / Ollama it's a no-op.
+Standard Jinja `{% include %}`, backed by a loader that resolves the name to a `prompt:snippet` node by id and inlines its rendered body. See [snippets-and-prompts.md](snippets-and-prompts.md) for how snippets are stored and inherited.
 
-**Up to four cache breakpoints** can be honored per request by Anthropic. Authors should spend them coarsely: system style + world canon + stable lore + (volatile lore + instruction). See [strategy_ai_integration](../README.md) for the recommended layering.
+## Caching is a backend concern
 
-**Cache_break outside any role block** is a warning. It has no effect.
+The author never places cache breakpoints. Caching is a provider-neutral **volatility ordering** the backend produces: it lays stable content down first (persona, world canon, the lore it selected and tiered `stable`) and the per-call material last, then each provider adapter maps that ordering onto its own caching primitive — Anthropic `cache_control: { type: "ephemeral" }` markers where supported, a no-op for OpenAI / Ollama.
 
-**A trailing cache_break** (the marker at the end of the role's body) marks the LAST block of that message for caching — equivalent to caching the whole message.
-
-**Multiple cache_breaks in a row** produce empty content blocks. Don't do this.
+Because ordering is the backend's job, prose you want cached just needs to be stable prose: authored system content rides the stable system prefix automatically, and lore you select with `use(node)` is placed and tiered by the backend (with `use(node, "stable")` as an advisory hint). You write the meaning; the engine handles the byte-stability. See [reference.md](reference.md) and [preview.md](preview.md#the-cache-strip) — the preview shows the resulting tier-badged composition.
 
 ## The sandbox
 
@@ -87,16 +76,16 @@ Templates render inside [`jinja2.sandbox.SandboxedEnvironment`](https://jinja.pa
 
 ## Variables available
 
-The dispatch pipeline populates the context. Common variables (the actual set will be documented per task type in M2.4+):
+The dispatch pipeline populates the context. See [reference.md](reference.md#variables) for the full table with types; the common ones:
 
 | Variable | Meaning |
 | --- | --- |
-| `scene` | The currently active scene node (`scene.title`, `scene.summary`, `scene.body`, …) |
-| `project` | The current project — `project.title`, `project.ai_policy`, and the authored project-node fields under `project.metadata` (`project.metadata.measurement_system`, `project.metadata.tense`, `project.metadata.spelling`, `project.metadata.language`, `project.metadata.pov_mode`). Each `metadata` field is resolved nearest-explicit-wins over the project's inheritance chain, so a value set on the universe reaches every book under it; a field no layer sets is simply absent, so guard with `{% if 'tense' in project.metadata %}` (a bare `{{ project.metadata.tense }}` raises `UndefinedError` when unset). |
-| `effective` | Resolved effective AI settings (`effective.model_class`, `effective.provider_policy`) |
-| `input` | User-supplied inputs declared by the prompt entry (e.g., `input.words`) |
+| `scene` | The prompt's scene node (`scene.title`, `scene.summary`, `scene.body`, …). Field access is uniform attribute access — `scene.pov.title` chases an entity-ref field — resolved as of this scene. |
+| `project` | The project node. `project.<field>` reads an authored project field (`project.spelling`, `project.tense`, `project.measurement_system`, …). Each is resolved nearest-explicit-wins over the inheritance chain, so a value set on the universe reaches every book under it; a field no layer sets is absent, so guard with `{% if 'tense' in project.metadata %}` (`.metadata` is the explicit whole-map escape; a bare `{{ project.tense }}` raises `UndefinedError` when unset). |
+| `inputs` | User-supplied inputs declared by the prompt entry (e.g., `inputs.words`). |
+| `selection`, `text_before`, `text_after` | The editor selection and the body markdown around the cursor (strings; `""` when not dispatched from an editor). |
 
-Helpers (callable functions like `text_before`, `relevant_lore`) are documented in [helpers.md](helpers.md). They land in M2.2.
+Helpers (callable functions like `use`, `story_so_far`, `pov`) and the `json` filter are documented in [helpers.md](helpers.md) and [reference.md](reference.md).
 
 ## Warnings
 
@@ -104,8 +93,6 @@ Author errors that don't block rendering, returned on `RenderedTemplate.warnings
 
 | Warning | Meaning |
 | --- | --- |
-| `Text outside any role block is ignored: '...'` | Non-whitespace text was found outside a `{% role %}` block. It is not sent to the model. |
-| ``cache_break` outside a role block has no effect` | A `{% cache_break %}` was encountered between or before role blocks. |
 | `Unknown role 'foo'. Valid roles: ['assistant', 'system', 'user']` | The role argument is not one of the canonical names. The message is still emitted. |
 | `Nested role block inside 'foo' is not supported; outer role discarded, inner roles preserved` | A role block contained another role block. The outer wrapper is dropped; inner roles produce messages. |
 
@@ -124,20 +111,18 @@ These propagate up to the dispatch / preview layer and are reported to the user.
 ```jinja
 {% role "system" %}
 You are an expert fiction writer.
-{% if 'tense' in project.metadata %}Always write in {{ project.metadata.tense }} tense.{% endif %}
-{% if 'spelling' in project.metadata %}Use {{ project.metadata.spelling }} spelling.{% endif %}
-{% if 'measurement_system' in project.metadata %}Measurements are {{ project.metadata.measurement_system }}.{% endif %}
-{% include "snippet_house_voice" %}
-{% cache_break %}
+{% if 'tense' in project.metadata %}Always write in {{ project.tense }} tense.{% endif %}
+{% if 'spelling' in project.metadata %}Use {{ project.spelling }} spelling.{% endif %}
+{% if 'measurement_system' in project.metadata %}Measurements are {{ project.measurement_system }}.{% endif %}
+{% include "builtin-house-voice" %}
+{{ use_lore() }}
 {% endrole %}
 
 {% role "user" %}
-{{ relevant_lore(scene) }}
-{% if scenes_before(scene) %}
+{% if story_so_far(scene) %}
 The story so far:
-{{ scenes_before(scene) }}
+{{ story_so_far(scene) }}
 {% endif %}
-{% cache_break %}
 {% endrole %}
 
 {% role "assistant" %}
@@ -145,13 +130,13 @@ The story so far:
 {% endrole %}
 
 {% role "user" %}
-Write {{ input.words }} words that continue the story:
+Write {{ inputs.words }} words that continue the story:
 
-{{ input.message }}
+{{ inputs.message }}
 {% endrole %}
 ```
 
-Three of those helpers (`relevant_lore`, `scenes_before`, `text_before`) land in M2.2; the include (`snippet_house_voice`) is a snippet node — see [snippets-and-prompts.md](snippets-and-prompts.md).
+`use_lore()` enables the scene's implicit lore — the backend selects, places, tiers, and caches it; the template emits nothing for it. `story_so_far` and `text_before` are documented in [helpers.md](helpers.md); the include (`builtin-house-voice`) is a snippet node — see [snippets-and-prompts.md](snippets-and-prompts.md).
 
 ## Implementation reference
 

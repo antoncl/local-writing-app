@@ -49,9 +49,9 @@ You are playing **{{ char.title }}**.
 {# Lore is placed by the backend, tiered stable/volatile — see
    docs/design/context-caching.md §4. use_lore() only flips the lore gate. #}
 {{ use_lore() }}
-{% if scenes_before(scene) %}
+{% if story_so_far(scene) %}
 ## The story so far
-{{ scenes_before(scene) }}
+{{ story_so_far(scene) }}
 
 {% endif %}
 {% endrole %}
@@ -62,4 +62,4 @@ You are playing **{{ char.title }}**.
    narration is plain user text. First invocation (no markers
    yet) sends the whole scene body as one user-narration
    message. Must be used OUTSIDE any role block. #}
-{{ character_thread(scene, inputs.character) }}
+{{ character_turns(scene, inputs.character) }}

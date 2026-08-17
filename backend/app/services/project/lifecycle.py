@@ -398,7 +398,7 @@ class ProjectLifecycleMixin:
         ⚠ **Two of the five AI routes still pay it anyway.** `ai_generate`
         (`routers/ai.py:650`) and `ai_generate_stream` (`:898`) call
         `build_preview` *before* they reach here, and `build_preview` binds the
-        whole `ProjectInfo` into the template context as `project` / `novel`
+        whole `ProjectInfo` into the template context as `project`
         (`services/ai/preview.py:180`). Narrowing that changes what a template
         can reach, which is #317's question, so it is deliberately not done
         here — but it means the saving lands on `ai_health`, `ai_chat` and

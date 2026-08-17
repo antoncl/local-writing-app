@@ -206,7 +206,7 @@ def _namespace_for_object_type(context: dict[str, Any], obj_type: str | None) ->
     """Reverse-map a Jinja object type name to its render-context namespace.
 
     Derived from the live ``context`` (not hardcoded), first key wins for aliased
-    values. Since ADR-0060 §3 the ``scene``/``project``/``novel`` namespaces are
+    values. Since ADR-0060 §3 the ``scene`` / ``project`` namespaces are
     metadata-fallback wrappers (``EntryRef`` / ``ProjectInfoRef``) whose
     ``node.<field>`` access returns ``None`` for an absent key rather than raising
     an attribute miss — so they no longer reach this map; it still serves any
@@ -353,9 +353,7 @@ def build_preview(
         scene = EntryRef(project_service, schema, scene.id, loaded=scene)
 
     # ADR-0060 §3: wrap the project node so a template reads `project.<field>`
-    # off its authored metadata, `.metadata` kept as the whole-map escape. `novel`
-    # is the retired alias kept until slice 6; wrap it identically so both behave
-    # the same until it goes.
+    # off its authored metadata, `.metadata` kept as the whole-map escape.
     project_ref = (
         ProjectInfoRef(project_info, project=project_service, schema=schema)
         if project_info is not None
@@ -365,7 +363,6 @@ def build_preview(
     context = {
         "scene": scene,
         "project": project_ref,
-        "novel": project_ref,
         # ADR-0060 §7: `inputs` (plural — "the inputs, named"). Values are coerced
         # at this bind layer so a `context_pick` reaches the template as a
         # `list[EntryRef]`, not the raw JSON string it travels as on the wire.

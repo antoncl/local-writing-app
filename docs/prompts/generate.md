@@ -1,8 +1,8 @@
 # Generate
 
-`POST /api/ai/generate` runs the full pipeline: render a template against a target scene, convert the rendered role-tagged messages into a chat-API payload, call the provider, return the generated text. This is the first endpoint that ties M2 (preview engine), M2.2 (helpers), M2.3 (sessions), and M3 (provider chat) together.
+`POST /api/ai/generate` runs the full pipeline: render a template against a target scene, convert the rendered role-tagged messages into a chat-API payload, call the provider, return the generated text. It ties the render engine, the helpers, the cache-continuity session, and the provider chat call together.
 
-It's the surface that editor integrations (`continue_scene`, `revise_selection` — coming in M4.1+) will call.
+It's the surface that editor integrations (`continue_scene`, `revise_selection`) call.
 
 ## Request
 
@@ -29,8 +29,8 @@ Same fields as `/api/ai/preview` (see [preview.md](preview.md)) plus the provide
 {
   "content": "the storm without hesitation…",
   "rendered_messages": [
-    { "role": "system", "blocks": [ { "text": "…", "cache_break_after": true } ] },
-    { "role": "user",   "blocks": [ { "text": "…", "cache_break_after": false } ] }
+    { "role": "system", "blocks": [ { "text": "…" } ] },
+    { "role": "user",   "blocks": [ { "text": "…" } ] }
   ],
   "rendered_warnings": [],
   "char_count": 1247,
@@ -42,11 +42,13 @@ Same fields as `/api/ai/preview` (see [preview.md](preview.md)) plus the provide
   "error": null,
   "stop_reason": "end_turn",
   "truncated": false,
-  "session_id": "optional-session-key"
+  "session_id": "optional-session-key",
+  "usage": { "input_tokens": 1180, "output_tokens": 340 },
+  "cost_usd": 0.0042
 }
 ```
 
-`content` is the generated text. `rendered_messages` echoes the prompt that was sent (so the UI can show provenance). `char_count` is the input size in characters — a rough token estimate (~4 chars/token).
+`content` is the generated text. `rendered_messages` echoes the prompt that was sent (so the UI can show provenance) — each block is just text, since the author never marks caching. `char_count` is the input size in characters — a rough token estimate (~4 chars/token). `usage` and `cost_usd` report actual token spend for the call.
 
 `ok`, `error`, `stop_reason`, `truncated`, `policy` behave identically to `/api/ai/chat`.
 
@@ -80,7 +82,7 @@ becomes:
 
 ## Session and cache behavior
 
-Identical to preview. With `session_id` set and `commit: true`, the call partitions stable/volatile lore for cache coherence on the next call. Without a session, the partition parameter on `relevant_lore` is ignored.
+Identical to preview. `session_id` is the cache-continuity key; with `commit: true` this render's selected-node revisions become the baseline the next call diffs against, so the backend can keep the stable prefix warm. The template author manages none of it — caching is the backend's volatility ordering (see [preview.md#the-cache-strip](preview.md#the-cache-strip)).
 
 ## What this endpoint is NOT yet
 

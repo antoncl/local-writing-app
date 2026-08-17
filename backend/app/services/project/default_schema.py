@@ -308,6 +308,8 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "fields": [],
             "has_body": True,
             "prompt": {
+                # ADR-0060 §4: un-roled prose is the model's instruction → `system`.
+                "default_role": "system",
                 "context_strategy": {
                     "target": {"required": True, "kind": "manuscript"},
                     "output": {"handler": "inline"},
@@ -372,6 +374,10 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "abstract": True,
             "fields": [],
             "has_body": True,
+            # ADR-0060 §4: the concrete revise flavours carry the disposition, but
+            # they share this envelope — un-roled brainstorm prose is `system`. Set
+            # on the abstract base and inherited up the `parent:` chain by resolution.
+            "prompt": {"default_role": "system"},
         },
         "prompt:revise:scene": {
             # Today's in-editor scene revise, unchanged — an author selects prose
@@ -509,13 +515,17 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "parent": "prompt:base",
             "fields": [],
             "has_body": True,
-            # No output handler: a general prompt's response simply stays in the
-            # conversation. The presence of a `context_strategy` (even empty) is what
-            # marks it INVOCABLE — vs a `snippet`, which carries no prompt block at all
-            # and is only imported by name — so discovery routes it to the conversation
-            # surface (ADR-0065). Handler-driven behaviour (inline streaming,
-            # extract-to-node) is opt-in via `output.handler`.
-            "prompt": {"context_strategy": {}},
+            "prompt": {
+                # ADR-0060 §4: a general chat's un-roled prose is its system prompt.
+                "default_role": "system",
+                # No output handler (ADR-0065): a general prompt's response simply stays
+                # in the conversation. The presence of a `context_strategy` (even empty)
+                # is what marks it INVOCABLE — vs a `snippet`, which carries no prompt
+                # block at all and is only imported by name — so discovery routes it to
+                # the conversation surface. Handler-driven behaviour (inline streaming,
+                # extract-to-node) is opt-in via `output.handler`.
+                "context_strategy": {},
+            },
         },
         "prompt:snippet": {
             "name": "Snippet",

@@ -30,7 +30,7 @@ from app.services.ai.helpers import (
 )
 from app.services.ai.profiles.registry import profile_for
 from app.services.ai.sessions import AISession, default_registry
-from app.services.ai.templates import RenderedTemplate, render_template
+from app.services.ai.templates import VALID_ROLES, RenderedTemplate, render_template
 
 if TYPE_CHECKING:
     from app.services.ai.profiles import ModelDescriptor
@@ -228,6 +228,29 @@ def _namespace_for_object_type(context: dict[str, Any], obj_type: str | None) ->
     return None
 
 
+def _resolve_default_role(project_service, schema: Any, entry_type: str) -> str:
+    """The default role envelope for un-roled prose (ADR-0060 §4).
+
+    Walks the prompt `entry_type`'s `parent:` chain (nearest first) and returns
+    the first declared `prompt.default_role`, clamped to a valid role. Falls back
+    to `system` — the universal default that homes a prose-only prompt — when the
+    type is unknown, declares nothing up the chain, or names an invalid role.
+    """
+    if not entry_type or schema is None:
+        return "system"
+    try:
+        chain = project_service.entry_type_ancestry(entry_type, schema=schema)
+    except Exception:  # noqa: BLE001
+        return "system"
+    for fqn in chain:
+        definition = schema.entry_types.get(fqn)
+        prompt = getattr(definition, "prompt", None) if definition is not None else None
+        role = getattr(prompt, "default_role", None) if prompt is not None else None
+        if role:
+            return role if role in VALID_ROLES else "system"
+    return "system"
+
+
 @dataclass
 class PreviewRequest:
     """The inputs to one preview render — everything except the project service.
@@ -246,6 +269,11 @@ class PreviewRequest:
     selection: str = ""
     resolution_scene_id: str = ""
     subject: str = ""
+    # ADR-0060 §4: the prompt's entry_type FQN, used only to resolve the base
+    # type's `default_role` envelope for un-roled text. Empty (the default) resolves
+    # to `system`, so a prose-only prompt is still homed even when the caller does
+    # not name a type.
+    entry_type: str = ""
 
 
 def build_preview(
@@ -314,6 +342,9 @@ def build_preview(
     except Exception:  # noqa: BLE001
         schema = None
 
+    # ADR-0060 §4: the base type's default role envelope for un-roled prose.
+    default_role = _resolve_default_role(project_service, schema, request.entry_type)
+
     # Wrap the loaded scene as an EntryRef so templates can write
     # `scene.pov.title` instead of `scene.metadata.pov.title`. The wrapper
     # pre-fills `loaded=` so .title / .body don't trigger a re-read,
@@ -346,7 +377,9 @@ def build_preview(
     }
 
     try:
-        rendered = render_template(template_source, context=context, env=env)
+        rendered = render_template(
+            template_source, context=context, env=env, default_role=default_role
+        )
     except TemplateError as exc:
         _raise_preview_error_from_template(exc, context)
 

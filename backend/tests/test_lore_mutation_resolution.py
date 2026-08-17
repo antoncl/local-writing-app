@@ -139,6 +139,31 @@ class MutationResolutionTests(unittest.TestCase):
         self.assertEqual(value, 600)
         self.assertIsInstance(value, int)
 
+    def test_entry_at_honors_within_scene_position(self) -> None:
+        # ADR-0060 §3 preserves `effective()`'s within-scene cursor as
+        # `entry(x, at=s, position=N)`: a mutation marker AFTER the cursor is not
+        # yet live, so the same scene resolves differently on either side of it.
+        # s2 already promoted rank→Captain earlier; Scene Four re-promotes it to a
+        # DISTINCT value mid-scene, so the cursor discriminates which value stands.
+        scene = self._new_scene(
+            "Scene Four",
+            f"Prologue. <!-- mutate:entity={self.honor};field=rank;value=Admiral;id=p1 -->",
+        )
+        idx = self.service.build_mutations_index()
+        offset = next(m.offset for m in idx.by_entity[self.honor] if m.marker_id == "p1")
+        schema = self.service.read_metadata_schema()
+        # Cursor strictly before this scene's marker: its re-promotion is not live,
+        # so rank is still Captain (s2's earlier, already-passed mutation).
+        before = _coerce_entry_ref_as_of(
+            self.service, schema, self.honor, scene, position=offset - 1
+        )
+        self.assertEqual(before.rank, "Captain")
+        # Cursor at the marker (and the END_OF_SCENE default): the re-promotion wins.
+        at_marker = _coerce_entry_ref_as_of(
+            self.service, schema, self.honor, scene, position=offset
+        )
+        self.assertEqual(at_marker.rank, "Admiral")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -148,5 +148,61 @@ class TemplateEngineTests(unittest.TestCase):
         self.assertEqual(out.messages[0].text, "onetwo")
 
 
+class DefaultRoleHomingTests(unittest.TestCase):
+    """ADR-0060 §4: un-roled prose is homed to the base type's `default_role`
+    instead of discarded. `default_role=None` keeps the legacy warn-and-drop."""
+
+    def test_prose_only_prompt_homes_to_default_role(self) -> None:
+        # Journey D: a plain instruction paragraph, no {% role %} scaffolding.
+        out = render_template("Write a tense opening.", default_role="system")
+        self.assertEqual(len(out.messages), 1)
+        self.assertEqual(out.messages[0].role, "system")
+        self.assertEqual(out.messages[0].text, "Write a tense opening.")
+        self.assertEqual(out.warnings, [])
+
+    def test_loose_text_homed_before_a_role_block_in_order(self) -> None:
+        out = render_template(
+            'lead instruction{% role "user" %}u{% endrole %}',
+            default_role="system",
+        )
+        self.assertEqual([(m.role, m.text) for m in out.messages],
+                         [("system", "lead instruction"), ("user", "u")])
+        self.assertEqual(out.warnings, [])
+
+    def test_loose_text_between_role_blocks_homed(self) -> None:
+        out = render_template(
+            '{% role "system" %}s{% endrole %}mid text{% role "user" %}u{% endrole %}',
+            default_role="system",
+        )
+        self.assertEqual([(m.role, m.text) for m in out.messages],
+                         [("system", "s"), ("system", "mid text"), ("user", "u")])
+
+    def test_none_default_role_keeps_legacy_ignore(self) -> None:
+        # No declared envelope → loose text is still ignored with a warning.
+        out = render_template('leaked{% role "system" %}s{% endrole %}', default_role=None)
+        self.assertEqual([m.role for m in out.messages], ["system"])
+        self.assertTrue(any("outside any role block" in w for w in out.warnings), out.warnings)
+
+    def test_whitespace_only_loose_text_not_homed(self) -> None:
+        out = render_template(
+            '  \n  {% role "system" %}s{% endrole %}  \n  ',
+            default_role="system",
+        )
+        self.assertEqual([(m.role, m.text) for m in out.messages], [("system", "s")])
+        self.assertEqual(out.warnings, [])
+
+    def test_cache_break_in_loose_text_stripped_and_warned_when_homed(self) -> None:
+        # Homing does not resurrect cache_break outside a role (slice-4 territory):
+        # it is stripped, the text still homes, and the no-effect warning stands.
+        out = render_template("before{% cache_break %}after", default_role="system")
+        self.assertEqual(len(out.messages), 1)
+        self.assertEqual(out.messages[0].text, "beforeafter")
+        self.assertTrue(any("outside a role block" in w for w in out.warnings), out.warnings)
+
+    def test_default_role_can_be_user(self) -> None:
+        out = render_template("play the scene", default_role="user")
+        self.assertEqual(out.messages[0].role, "user")
+
+
 if __name__ == "__main__":
     unittest.main()

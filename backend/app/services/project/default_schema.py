@@ -307,6 +307,8 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "fields": [],
             "has_body": True,
             "prompt": {
+                # ADR-0060 §4: un-roled prose is the model's instruction → `system`.
+                "default_role": "system",
                 "context_strategy": {
                     "target": {"required": True, "kind": "manuscript"},
                     "scan_surface": ["_text_before"],
@@ -373,6 +375,10 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "abstract": True,
             "fields": [],
             "has_body": True,
+            # ADR-0060 §4: the concrete revise flavours carry the disposition, but
+            # they share this envelope — un-roled brainstorm prose is `system`. Set
+            # on the abstract base and inherited up the `parent:` chain by resolution.
+            "prompt": {"default_role": "system"},
         },
         "prompt:revise:scene": {
             # Today's in-editor scene revise, unchanged — an author selects prose
@@ -512,6 +518,8 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "fields": [],
             "has_body": True,
             "prompt": {
+                # ADR-0060 §4: a general chat's un-roled prose is its system prompt.
+                "default_role": "system",
                 "context_strategy": {
                     "output": {"kind": "chat_panel"},
                 },

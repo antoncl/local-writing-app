@@ -531,19 +531,35 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertEqual(text, "has scene")
 
     def test_warnings_are_surfaced(self) -> None:
+        # An unknown role still warns (loose text no longer does — ADR-0060 §4
+        # homes it; see test_route_homes_un_roled_prose_to_system).
         response = self.client.post(
             "/api/ai/preview",
             json={
-                "template_source": (
-                    "leaked outside\n"
-                    '{% role "user" %}content{% endrole %}'
-                ),
+                "template_source": '{% role "robot" %}content{% endrole %}',
                 "target_scene_id": self.scene_id,
             },
         )
         self.assertEqual(response.status_code, 200, response.text)
         warnings = response.json()["warnings"]
-        self.assertTrue(any("outside any role block" in w for w in warnings), warnings)
+        self.assertTrue(any("Unknown role" in w for w in warnings), warnings)
+
+    def test_route_homes_un_roled_prose_to_system(self) -> None:
+        # ADR-0060 §4 / Journey D through the HTTP route: with no entry_type on the
+        # request the default role falls back to `system`, so a prose-only prompt
+        # is sent (as a system message) rather than discarded with a warning.
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": "Write a tense opening paragraph.",
+                "target_scene_id": self.scene_id,
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["warnings"], [])
+        self.assertEqual(len(body["messages"]), 1)
+        self.assertEqual(body["messages"][0]["role"], "system")
 
     def test_marked_target_in_context_pick_overrides_target_scene_id(self) -> None:
         # NC-style ★ target: a scene flagged target=true in a context_pick
@@ -832,6 +848,82 @@ class PreviewCostEstimateTests(unittest.TestCase):
         body = response.json()
         for key in ("messages", "warnings", "char_count", "session_id", "rendered"):
             self.assertIn(key, body, f"missing legacy field: {key}")
+
+
+class DefaultRoleResolutionTests(unittest.TestCase):
+    """ADR-0060 §4: `_resolve_default_role` walks the prompt entry_type's parent
+    chain for a declared `default_role`, clamped to a valid role, else `system`."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.service = open_test_project(self.root, "Role Resolution")
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _resolve(self, entry_type: str) -> str:
+        from app.services.ai.preview import _resolve_default_role
+
+        schema = self.service.read_metadata_schema()
+        return _resolve_default_role(self.service, schema, entry_type)
+
+    def _add_prompt_type(self, fqn: str, default_role: str) -> None:
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data.setdefault("entry_types", {})[fqn] = {
+            "name": fqn.rsplit(":", 1)[-1].title(),
+            "kind": "prompt",
+            "parent": "prompt:general",
+            "has_body": True,
+            "prompt": {"default_role": default_role},
+        }
+        self.service._write_yaml(schema_path, data)
+
+    def test_base_types_default_to_system(self) -> None:
+        self.assertEqual(self._resolve("prompt:general"), "system")
+        self.assertEqual(self._resolve("prompt:continuation"), "system")
+
+    def test_child_inherits_base_envelope_via_ancestry(self) -> None:
+        # revise:entry declares no default_role of its own; it inherits from the
+        # abstract prompt:revise up the parent chain.
+        self.assertEqual(self._resolve("prompt:revise:entry"), "system")
+
+    def test_empty_and_unknown_fall_back_to_system(self) -> None:
+        self.assertEqual(self._resolve(""), "system")
+        self.assertEqual(self._resolve("prompt:nonesuch"), "system")
+
+    def test_declared_non_system_role_is_read(self) -> None:
+        # A custom prompt type overrides the envelope — proves the resolver reads
+        # the declaration rather than always returning "system".
+        self._add_prompt_type("prompt:general:scripted", "user")
+        self.assertEqual(self._resolve("prompt:general:scripted"), "user")
+
+    def test_invalid_declared_role_falls_back_to_system(self) -> None:
+        self._add_prompt_type("prompt:general:bogus", "robot")
+        self.assertEqual(self._resolve("prompt:general:bogus"), "system")
+
+    def test_build_preview_homes_prose_only_to_default_role(self) -> None:
+        # End-to-end through the render path: a prose-only prompt with a named
+        # entry_type produces one system message; nothing is discarded.
+        from app.services.ai.preview import PreviewRequest, build_preview
+
+        rendered, _ = build_preview(
+            self.service,
+            PreviewRequest(
+                template_source="Draft a scene beat.",
+                target_scene_id="",
+                session_id=None,
+                inputs={},
+                text_before="",
+                text_after="",
+                commit=False,
+                entry_type="prompt:general",
+            ),
+        )
+        self.assertEqual(len(rendered.messages), 1)
+        self.assertEqual(rendered.messages[0].role, "system")
+        self.assertEqual(rendered.messages[0].text, "Draft a scene beat.")
 
 
 if __name__ == "__main__":

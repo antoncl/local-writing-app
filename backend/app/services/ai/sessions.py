@@ -7,12 +7,13 @@ set into:
 - **stable** — entries whose revision still matches the baseline
 - **volatile** — entries that are new or changed since the baseline
 
-The send path — not the template — drives the partition (ADR-0057 §7 / ADR-0060
-§2 retired the template-emitting form): `_lore_cache_blocks` calls the internal
-`_relevant_lore(scene, partition="stable")` for a 1h block, then
-`partition="volatile")` for a 5m block, against this session's baseline. The
-provider serializer turns those tier boundaries into Anthropic `cache_control`
-markers, hitting the cache on the stable prefix.
+The send path — not the template — drives the split (ADR-0057 §7 / ADR-0060 §2
+retired the template-emitting form): `_lore_cache_blocks` computes the one deduped
+set once and `_tier_lore_ids` splits it against this session's baseline into a
+stable block and a volatile block (ADR-0060 §5 retired the `partition=` two-call
+form). The shared layer marks each block's `tier`; each provider adapter maps that
+to its own primitive (Anthropic: a `cache_control` breakpoint with a ttl), hitting
+the cache on the stable prefix.
 
 Lifecycle:
 
@@ -49,6 +50,13 @@ class AISession:
     def is_stable(self, entry_id: str, revision: str) -> bool:
         """True if this entry's revision matches the baseline from the prior call."""
         return self.baseline.get(entry_id) == revision
+
+    def seen(self, entry_id: str) -> bool:
+        """True if this entry was in the envelope on the prior call (it is in the
+        baseline). Lets a caller tell a *new* entry (not seen) apart from a
+        *changed* one (seen, different revision) — both are `not is_stable` — which
+        the `use(node, "stable")` placement prior needs (ADR-0060 §5)."""
+        return entry_id in self.baseline
 
     def commit(self) -> None:
         """Promote touched revisions to baseline. Clears touched for the next call."""

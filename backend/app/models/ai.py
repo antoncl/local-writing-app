@@ -294,6 +294,10 @@ class AIPreviewResponse(BaseModel):
     # persisted as the chat's `used_node_ids`, so the send path unions them into
     # its one lore selector. Empty when the template selected no nodes.
     used_node_ids: list[str] = Field(default_factory=list)
+    # ADR-0060 §5: per-node volatility priors from `use(node, "stable"|"volatile")`,
+    # keyed by id. Captured at the lock render beside `used_node_ids` and persisted
+    # so the send path's tiering reads them. Empty when no node carried a hint.
+    used_node_hints: dict[str, str] = Field(default_factory=dict)
 
 
 class ChatMessage(BaseModel):
@@ -503,6 +507,10 @@ class ChatSession(BaseModel):
     # direct channel), so an author-picked entry/scene/card lands in the tiered,
     # cached set — never emitted inline. Defaults empty (no selections).
     used_node_ids: list[str] = Field(default_factory=list)
+    # ADR-0060 §5: per-node volatility priors from `use(node, hint)`, captured at
+    # the lock render beside `used_node_ids` and stable thereafter. The send path's
+    # `_tier_lore_ids` reads them as a revision-bounded placement bias. Empty = none.
+    used_node_hints: dict[str, str] = Field(default_factory=dict)
     # V2: running USD cost for this chat session, in the provider's currency
     # (USD; frontend converts to EUR for display). Re-derived on read as the
     # sum of this chat's priced ai_invocations rows. None — not 0.0 — when the
@@ -599,6 +607,10 @@ class SaveChatSessionRequest(BaseModel):
     # the new value. Only the lock-render save carries it (from the preview
     # response's `used_node_ids`); thereafter it is preserved.
     used_node_ids: list[str] | None = None
+    # ADR-0060 §5: the per-node volatility priors, echoed like `used_node_ids`.
+    # None = "leave the captured value alone"; a dict (even {}) is the new value.
+    # Only the lock-render save carries it (from the preview response).
+    used_node_hints: dict[str, str] | None = None
     # V2: optional incremental cost update. When provided (typically by
     # the chat panel after a successful AI turn), it's ADDED to the
     # persisted cost_usd_total. Omit on plain renames / message-list saves.

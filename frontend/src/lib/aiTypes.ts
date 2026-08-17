@@ -136,6 +136,8 @@ export type AIPreviewResponse = {
   // ADR-0060 §2: node ids the template selected via use(node), captured at the
   // lock render and persisted as the chat's used_node_ids.
   used_node_ids?: string[];
+  // ADR-0060 §5: per-node volatility priors from use(node, "stable"|"volatile").
+  used_node_hints?: Record<string, string>;
 };
 
 export type ChatMessage = {
@@ -307,6 +309,8 @@ export type ChatSession = {
   // ADR-0060 §2: node ids the chat's prompt selected via use(node) at its lock
   // render. The send path unions them into its one lore selector.
   used_node_ids?: string[];
+  // ADR-0060 §5: per-node volatility priors, captured beside used_node_ids.
+  used_node_hints?: Record<string, string>;
   // V2: running USD cost (display as EUR via money.ts). null when the chat
   // has no priced cost yet (fresh, or unpriced-model turns) — the footer
   // hides rather than showing a fabricated €0.00 (#697).
@@ -371,6 +375,8 @@ export type SaveChatSessionRequest = {
   lore_enabled?: boolean;
   // ADR-0060 §2: the author-selected node ids, echoed on save like lore_enabled.
   used_node_ids?: string[];
+  // ADR-0060 §5: per-node volatility priors, echoed on save like used_node_ids.
+  used_node_hints?: Record<string, string>;
   pinned: boolean;
   context_items: ChatSessionContextItem[];
   messages: ChatSessionMessage[];

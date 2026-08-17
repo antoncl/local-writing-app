@@ -49,7 +49,6 @@ You are playing **{{ char.title }}**.
 {# Lore is placed by the backend, tiered stable/volatile — see
    docs/design/context-caching.md §4. use_lore() only flips the lore gate. #}
 {{ use_lore() }}
-{% cache_break %}
 {% if scenes_before(scene) %}
 ## The story so far
 {{ scenes_before(scene) }}

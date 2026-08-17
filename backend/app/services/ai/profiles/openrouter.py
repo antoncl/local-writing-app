@@ -56,6 +56,13 @@ _CACHING_BY_PREFIX: dict[str, CachingStyle] = {
     "moonshotai": "auto",
 }
 
+# ADR-0060 §5: this adapter's own volatility-tier → cache_control mapping. Defined
+# per-adapter (not in the shared block model, which carries only `tier`); it
+# coincides with the Anthropic adapter's because OpenRouter's explicit routes are
+# the Anthropic-family providers that consume the same `cache_control` primitive.
+_TTL_BY_TIER = {"stable": "1h", "volatile": "5m"}
+_MAX_BREAKPOINTS = 4
+
 
 class OpenRouterProfile(OpenAICompatibleProfile):
     name = "openrouter"
@@ -193,20 +200,30 @@ def openrouter_system_messages(
     (anthropic/google/qwen). For auto-cache providers (openai/deepseek/grok)
     markers are ignored, so we collapse to a plain string to keep the wire
     small. Returns [] when there's nothing to send. Pure — no network/SDK.
+
+    ADR-0060 §5: the shared blocks carry only `{text, tier}`; this adapter maps a
+    tier to the cache_control ttl (`stable` → 1h, `volatile` → 5m) and caps markers
+    at 4 (its explicit routes are the Anthropic family), mirroring the Anthropic
+    adapter — the same primitive, owned per-adapter.
     """
     if system_blocks and caching_style == "explicit":
+        markable = [
+            i
+            for i, b in enumerate(system_blocks)
+            if (b.get("text") or "") and b.get("tier") in _TTL_BY_TIER
+        ]
+        budget = set(markable[-_MAX_BREAKPOINTS:])
         parts: list[dict] = []
-        for block in system_blocks:
+        for i, block in enumerate(system_blocks):
             text = block.get("text") or ""
             if not text:
                 continue
             part: dict = {"type": "text", "text": text}
-            if block.get("cache_break_after"):
-                cache_control: dict = {"type": "ephemeral"}
-                ttl = block.get("ttl")
-                if ttl in ("5m", "1h"):
-                    cache_control["ttl"] = ttl
-                part["cache_control"] = cache_control
+            if i in budget:
+                part["cache_control"] = {
+                    "type": "ephemeral",
+                    "ttl": _TTL_BY_TIER[block["tier"]],
+                }
             parts.append(part)
         if parts:
             return [{"role": "system", "content": parts}]

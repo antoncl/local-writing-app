@@ -277,22 +277,6 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertIsNotNone(body["error"])
         self.assertIn("TemplateNotFound", body["error"]["message"])
 
-    def test_preview_emits_cache_break_blocks(self) -> None:
-        response = self.client.post(
-            "/api/ai/preview",
-            json={
-                "template_source": (
-                    '{% role "user" %}stable{% cache_break %}volatile{% endrole %}'
-                ),
-                "target_scene_id": self.scene_id,
-            },
-        )
-        body = response.json()
-        blocks = body["messages"][0]["blocks"]
-        self.assertEqual(len(blocks), 2)
-        self.assertTrue(blocks[0]["cache_break_after"])
-        self.assertFalse(blocks[1]["cache_break_after"])
-
     def test_session_id_round_trips_through_preview(self) -> None:
         # ADR-0060 §2 retired the emitting `relevant_lore(..., partition)` form, so
         # the send-path partition mechanic is covered by `_relevant_lore` unit tests
@@ -770,8 +754,7 @@ class PreviewCostEstimateTests(unittest.TestCase):
     def _basic_preview_body(self, *, assistant_id: str | None = None) -> dict:
         body: dict = {
             "template_source": (
-                '{% role "system" %}You write fiction.{% cache_break %}'
-                "Stay concise.{% endrole %}"
+                '{% role "system" %}You write fiction. Stay concise.{% endrole %}'
                 '{% role "user" %}Continue from here.{% endrole %}'
             ),
             "target_scene_id": "",
@@ -792,20 +775,17 @@ class PreviewCostEstimateTests(unittest.TestCase):
         self.assertIsNone(body["model"])
         self.assertIsNone(body["caching_style"])
 
-    def test_cache_blocks_segment_by_cache_break_marker(self) -> None:
+    def test_cache_blocks_are_one_segment_per_message(self) -> None:
+        # ADR-0060 §5 retired author `{% cache_break %}`, so the preview no longer
+        # splits a message into cache segments — one block per role message. (Slice 5
+        # reworks the preview to visualize the send-path volatility tiers instead.)
         response = self.client.post("/api/ai/preview", json=self._basic_preview_body())
         body = response.json()
-        # Template structure: system has a {% cache_break %} → 2 segments
-        # (the second is the tail). user role has 1 segment.
-        # Total: 3 cache blocks.
-        self.assertEqual(len(body["cache_blocks"]), 3)
-        first, second, third = body["cache_blocks"]
+        self.assertEqual(len(body["cache_blocks"]), 2)
+        first, second = body["cache_blocks"]
         self.assertEqual(first["role"], "system")
-        self.assertTrue(first["cache_break_after"])
-        self.assertEqual(second["role"], "system")
-        self.assertFalse(second["cache_break_after"])
-        self.assertEqual(third["role"], "user")
-        self.assertFalse(third["cache_break_after"])
+        self.assertEqual(second["role"], "user")
+        self.assertFalse(any(b["cache_break_after"] for b in body["cache_blocks"]))
         # Tokens summed across blocks equal the top-level estimate.
         self.assertEqual(
             sum(b["tokens"] for b in body["cache_blocks"]),

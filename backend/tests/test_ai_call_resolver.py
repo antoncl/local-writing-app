@@ -139,7 +139,7 @@ class ResolvedCallToCallTests(unittest.TestCase):
             thinking_enabled=True,
         )
         messages = [{"role": "user", "content": "hi"}]
-        blocks = [{"text": "sys", "cache_break_after": True}]
+        blocks = [{"text": "sys", "tier": "stable"}]
         call = resolved.to_call(
             system_prompt="You are X.",
             messages=messages,

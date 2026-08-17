@@ -258,54 +258,60 @@ class AnthropicProfile(ProviderProfile):
         yield StreamFinal(stop_reason=stop_reason, usage=usage)
 
 
-def anthropic_system_with_cache(system_prompt: str):
-    """Wrap a single system prompt as a cacheable content block.
+# ADR-0060 §5: the tier→ttl mapping and the breakpoint cap live HERE, in the
+# Anthropic adapter, and never reach the shared block model or the language.
+_TTL_BY_TIER = {"stable": "1h", "volatile": "5m"}
+_MAX_BREAKPOINTS = 4  # Anthropic's hard cap on cache_control markers per request
 
-    Thin compatibility wrapper around `anthropic_system_blocks` for the
-    single-block path (one cache marker after the whole system prompt).
-    """
+
+def anthropic_system_with_cache(system_prompt: str):
+    """Wrap a single system prompt as one cacheable (stable-tier) content block —
+    the single-block path for the plain-system-string case. A system prompt is the
+    most stable content, so it caches at the stable (1h) ttl."""
 
     if not system_prompt:
         return ""
-    return anthropic_system_blocks(
-        [{"text": system_prompt, "cache_break_after": True}]
-    )
+    return anthropic_system_blocks([{"text": system_prompt, "tier": "stable"}])
 
 
 def anthropic_system_blocks(blocks: list[dict]):
-    """Convert structured system blocks into Anthropic's content-array shape.
+    """Convert the shared volatility-ordered blocks into Anthropic's content-array.
 
-    Each input block is a dict:
-        {
-            "text": str,
-            "cache_break_after": bool = False,
-            "ttl": "5m" | "1h" = "5m",   # only honored when cache_break_after
-        }
+    Each input block is `{"text": str, "tier": "stable"|"volatile"|None}` (ADR-0060
+    §5): the shared layer carries only the volatility tier, never Anthropic's ttl or
+    breakpoint vocabulary. THIS adapter owns that mapping — a block with a tier gets
+    a `cache_control` ephemeral marker at the tier's ttl (`stable` → 1h, `volatile`
+    → 5m); a block with no tier gets none. Anthropic caches the prefix UP TO each
+    marker, so markers between stable sections let later turns reuse the cached
+    prefix up to the last unchanged marker.
 
-    Output is a list of `{type, text, cache_control?}` dicts suitable for
-    the Anthropic SDK's `system` kwarg. A cache_control marker is emitted
-    only on blocks where `cache_break_after` is True. Anthropic caches the
-    prefix UP TO each marker; placing markers between stable sections lets
-    later turns reuse the cached prefix up to the last unchanged marker.
+    Anthropic caps `cache_control` markers at 4 per request; if more than 4 tiered
+    blocks arrive, only the LAST 4 are marked — Anthropic caches the longest prefix
+    at the latest marker, so the earliest boundaries are the cheapest to drop.
 
-    Empty blocks (no text) are dropped. Empty input returns "" so the caller
-    can skip the `system` kwarg entirely. Min-cache-size and breakpoint-budget
-    enforcement are the caller's responsibility.
+    Empty blocks (no text) are dropped. Empty input returns "" so the caller can
+    skip the `system` kwarg entirely.
     """
 
     if not blocks:
         return ""
+    # The tiered, non-empty blocks eligible for a marker; the last 4 win the budget.
+    markable = [
+        i
+        for i, block in enumerate(blocks)
+        if (block.get("text") or "") and block.get("tier") in _TTL_BY_TIER
+    ]
+    budget = set(markable[-_MAX_BREAKPOINTS:])
     out: list[dict] = []
-    for block in blocks:
+    for i, block in enumerate(blocks):
         text = block.get("text") or ""
         if not text:
             continue
         sdk_block: dict = {"type": "text", "text": text}
-        if block.get("cache_break_after"):
-            cache_control: dict = {"type": "ephemeral"}
-            ttl = block.get("ttl")
-            if ttl in ("5m", "1h"):
-                cache_control["ttl"] = ttl
-            sdk_block["cache_control"] = cache_control
+        if i in budget:
+            sdk_block["cache_control"] = {
+                "type": "ephemeral",
+                "ttl": _TTL_BY_TIER[block["tier"]],
+            }
         out.append(sdk_block)
     return out if out else ""

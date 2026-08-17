@@ -395,6 +395,9 @@ def build_preview(
     # onto the rendered result, so the chat can persist `used_node_ids` and the
     # send path unions them into its one lore selector.
     rendered.used_node_ids = list(getattr(env, "used_nodes", []) or [])
+    # ADR-0060 §5: carry the per-node volatility priors (set by `use(node, hint)`)
+    # so the chat can persist `used_node_hints` and the send path's tiering reads them.
+    rendered.used_node_hints = dict(getattr(env, "used_hints", {}) or {})
 
     return rendered, session_id
 

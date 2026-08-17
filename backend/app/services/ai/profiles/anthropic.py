@@ -28,6 +28,7 @@ from app.services.ai.profiles.base import (
     UsageMetrics,
     default_token_count,
 )
+from app.services.ai.profiles.explicit_cache import TIER_TTL, cache_control_indices
 
 # Default Anthropic extended-thinking budget when ai_thinking is enabled.
 # Anthropic requires budget_tokens >= 1024 and budget_tokens < max_tokens.
@@ -259,53 +260,44 @@ class AnthropicProfile(ProviderProfile):
 
 
 def anthropic_system_with_cache(system_prompt: str):
-    """Wrap a single system prompt as a cacheable content block.
-
-    Thin compatibility wrapper around `anthropic_system_blocks` for the
-    single-block path (one cache marker after the whole system prompt).
-    """
+    """Wrap a single system prompt as one cacheable (stable-tier) content block —
+    the single-block path for the plain-system-string case. A system prompt is the
+    most stable content, so it caches at the stable (1h) ttl."""
 
     if not system_prompt:
         return ""
-    return anthropic_system_blocks(
-        [{"text": system_prompt, "cache_break_after": True}]
-    )
+    return anthropic_system_blocks([{"text": system_prompt, "tier": "stable"}])
 
 
 def anthropic_system_blocks(blocks: list[dict]):
-    """Convert structured system blocks into Anthropic's content-array shape.
+    """Convert the shared volatility-ordered blocks into Anthropic's content-array.
 
-    Each input block is a dict:
-        {
-            "text": str,
-            "cache_break_after": bool = False,
-            "ttl": "5m" | "1h" = "5m",   # only honored when cache_break_after
-        }
+    Each input block is `{"text": str, "tier": "stable"|"volatile"|None}` (ADR-0060
+    §5): the shared layer carries only the volatility tier, never Anthropic's ttl or
+    breakpoint vocabulary. The adapter-side mapping (`explicit_cache`) turns a tier
+    into a `cache_control` ephemeral marker at the tier's ttl (`stable` → 1h,
+    `volatile` → 5m) and enforces Anthropic's ≤4-marker cap; a block with no tier,
+    or beyond the cap, gets none. Anthropic caches the prefix UP TO each marker, so
+    markers between stable sections let later turns reuse the cached prefix up to
+    the last unchanged marker.
 
-    Output is a list of `{type, text, cache_control?}` dicts suitable for
-    the Anthropic SDK's `system` kwarg. A cache_control marker is emitted
-    only on blocks where `cache_break_after` is True. Anthropic caches the
-    prefix UP TO each marker; placing markers between stable sections lets
-    later turns reuse the cached prefix up to the last unchanged marker.
-
-    Empty blocks (no text) are dropped. Empty input returns "" so the caller
-    can skip the `system` kwarg entirely. Min-cache-size and breakpoint-budget
-    enforcement are the caller's responsibility.
+    Empty blocks (no text) are dropped. Empty input returns "" so the caller can
+    skip the `system` kwarg entirely.
     """
 
     if not blocks:
         return ""
+    budget = cache_control_indices(blocks)
     out: list[dict] = []
-    for block in blocks:
+    for i, block in enumerate(blocks):
         text = block.get("text") or ""
         if not text:
             continue
         sdk_block: dict = {"type": "text", "text": text}
-        if block.get("cache_break_after"):
-            cache_control: dict = {"type": "ephemeral"}
-            ttl = block.get("ttl")
-            if ttl in ("5m", "1h"):
-                cache_control["ttl"] = ttl
-            sdk_block["cache_control"] = cache_control
+        if i in budget:
+            sdk_block["cache_control"] = {
+                "type": "ephemeral",
+                "ttl": TIER_TTL[block["tier"]],
+            }
         out.append(sdk_block)
     return out if out else ""

@@ -275,6 +275,12 @@ class ChatSessionsMixin:
                 if request.used_node_ids is None
                 else request.used_node_ids
             ),
+            # ADR-0060 §5: volatility priors, preserved like `used_node_ids`.
+            used_node_hints=(
+                existing.used_node_hints
+                if request.used_node_hints is None
+                else request.used_node_hints
+            ),
             pinned=request.pinned,
             created_at=existing.created_at,
             updated_at=self._utcnow_iso(),

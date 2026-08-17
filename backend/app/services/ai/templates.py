@@ -1,14 +1,16 @@
 """Prompt template engine.
 
-Templates are Jinja2 with two custom block-level directives:
+Templates are Jinja2 with one custom block-level directive:
 
 - `{% role "system" %}…{% endrole %}` — marks the message role for the wrapped
   content. An override for multi-turn / mixed-role prompts (ADR-0060 §4): text
   outside any role block is homed to the base type's `default_role` (passed to
   `render_template`), not discarded, so a prose-only prompt just works.
-- `{% cache_break %}` — emits a cache-control marker. Inside a role block it
-  splits the content into multiple blocks; the block before the marker carries
-  `cache_break_after=True`. Outside any role it is a warning.
+
+`{% cache_break %}` is **retired** (ADR-0060 §5): the author no longer places cache
+breakpoints. Caching is a provider-neutral volatility ordering the send path
+produces and each provider adapter maps to its own primitive; author prose that
+should cache already rides the stable system prefix automatically.
 
 The renderer returns a `RenderedTemplate` with:
 - `messages: list[RenderedMessage]` — role-tagged message structures
@@ -16,9 +18,6 @@ The renderer returns a `RenderedTemplate` with:
 
 Sandboxing uses `jinja2.sandbox.SandboxedEnvironment` with `StrictUndefined`,
 so typos in variable names raise rather than render empty.
-
-Helpers (callable functions like `relevant_lore`, `text_before`) are registered
-into the environment by `register_helpers()`; that lands in M2.2.
 """
 
 from __future__ import annotations
@@ -32,7 +31,6 @@ from jinja2.sandbox import SandboxedEnvironment
 
 ROLE_START = "\x00ROLE_START:"
 ROLE_END = "\x00ROLE_END\x00"
-CACHE_BREAK_MARKER = "\x00CACHE_BREAK\x00"
 ROLE_START_SEP = "\x00"
 
 VALID_ROLES = {"system", "user", "assistant"}
@@ -41,6 +39,10 @@ VALID_ROLES = {"system", "user", "assistant"}
 @dataclass
 class ContentBlock:
     text: str
+    # Vestigial since ADR-0060 §5 retired `{% cache_break %}`: always False now (no
+    # author breakpoints). Kept so the preview cache-segment view (preview.py) and
+    # its frontend still read one segment per message; removed when slice 5 reworks
+    # the preview to show send-path volatility tiers.
     cache_break_after: bool = False
 
 
@@ -67,6 +69,11 @@ class RenderedTemplate:
     # persisted on the chat (`ChatSession.used_node_ids`) and unioned into the send
     # path's one lore selector. Empty when the template selected no nodes.
     used_node_ids: list[str] = field(default_factory=list)
+    # ADR-0060 §5: per-node volatility priors from `use(node, "stable"|"volatile")`,
+    # keyed by id. Carried beside `used_node_ids`, persisted on the chat, and read by
+    # the send path's `_tier_lore_ids` as a revision-bounded placement bias. Empty
+    # when no node carried a hint.
+    used_node_hints: dict[str, str] = field(default_factory=dict)
 
 
 class RoleExtension(Extension):
@@ -86,26 +93,19 @@ class RoleExtension(Extension):
         return f"{ROLE_START}{role}{ROLE_START_SEP}{body}{ROLE_END}"
 
 
-class CacheBreakExtension(Extension):
-    """`{% cache_break %}` — standalone marker, no body."""
-
-    tags = {"cache_break"}
-
-    def parse(self, parser):  # type: ignore[override]
-        lineno = next(parser.stream).lineno
-        return nodes.Output(
-            [nodes.MarkSafe(nodes.Const(CACHE_BREAK_MARKER))]
-        ).set_lineno(lineno)
-
-
 def create_environment() -> SandboxedEnvironment:
-    """Create a sandboxed Jinja2 env with the prompt extensions installed."""
+    """Create a sandboxed Jinja2 env with the prompt extensions installed.
+
+    Only `{% role %}` remains; `{% cache_break %}` was retired (ADR-0060 §5), so a
+    template still using it now raises a Jinja `TemplateSyntaxError` (unknown tag) —
+    surfaced to the author, not silently rendered.
+    """
     return SandboxedEnvironment(
         autoescape=False,
         trim_blocks=True,
         lstrip_blocks=True,
         keep_trailing_newline=False,
-        extensions=[RoleExtension, CacheBreakExtension],
+        extensions=[RoleExtension],
         undefined=StrictUndefined,
     )
 
@@ -183,9 +183,10 @@ def _parse_marker_stream(raw: str, default_role: str | None = None) -> RenderedT
             result.warnings.extend(inner.warnings)
             continue
 
-        blocks = _split_on_cache_breaks(body)
-        if blocks:
-            result.messages.append(RenderedMessage(role=role_name, blocks=blocks))
+        if body:
+            result.messages.append(
+                RenderedMessage(role=role_name, blocks=[ContentBlock(text=body)])
+            )
 
     return result
 
@@ -220,17 +221,8 @@ def _home_loose_text(
     Text outside any `{% role %}` block lands in a message of the base type's
     `default_role`, in document order, instead of being discarded. When no
     default is declared (`default_role is None`) the legacy behaviour stands: the
-    text is ignored with a warning. A `cache_break` in loose text still has no
-    effect — caching lives inside role placement (slice 4) — so it is stripped
-    with its own warning either way.
+    text is ignored with a warning.
     """
-    cache_break_count = segment.count(CACHE_BREAK_MARKER)
-    if cache_break_count:
-        result.warnings.append(
-            f"`cache_break` outside a role block has no effect "
-            f"({cache_break_count} occurrence{'s' if cache_break_count > 1 else ''})."
-        )
-        segment = segment.replace(CACHE_BREAK_MARKER, "")
     if not segment.strip():
         return
     if default_role is not None:
@@ -244,28 +236,5 @@ def _home_loose_text(
         if len(excerpt) >= 60
         else f"Text outside any role block is ignored: '{excerpt}'"
     )
-
-
-def _split_on_cache_breaks(body: str) -> list[ContentBlock]:
-    if CACHE_BREAK_MARKER not in body:
-        return [ContentBlock(text=body)] if body else []
-
-    parts = body.split(CACHE_BREAK_MARKER)
-    # Each split point is a cache breakpoint AFTER the preceding chunk.
-    blocks: list[ContentBlock] = []
-    for index, chunk in enumerate(parts):
-        is_last = index == len(parts) - 1
-        # A trailing cache_break leaves an empty last chunk; treat as
-        # "cache after the previous content block".
-        if is_last and chunk == "":
-            if blocks:
-                blocks[-1] = ContentBlock(
-                    text=blocks[-1].text, cache_break_after=True
-                )
-            continue
-        blocks.append(
-            ContentBlock(text=chunk, cache_break_after=not is_last)
-        )
-    return [block for block in blocks if block.text or block.cache_break_after]
 
 

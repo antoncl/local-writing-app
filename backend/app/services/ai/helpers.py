@@ -41,8 +41,6 @@ if TYPE_CHECKING:
     from app.models import MutationSetRow
     from app.services.project_service import ProjectService
 
-VALID_PARTITIONS = {"all", "stable", "volatile"}
-
 # Sentinel distinguishing "the `at=` anchor was omitted" (use the prompt's
 # ambient scene) from "at=None passed explicitly" (book-start). See the `entry()`
 # global in `register_helpers` (ADR-0060 §3).
@@ -124,6 +122,28 @@ def _coerce_entry_ref(
     if isinstance(inner, str) and inner:
         return EntryRef(project, schema, inner)
     return None
+
+
+def _record_use(
+    project: ProjectService,
+    schema: Any,
+    value: Any,
+    hint: Any,
+    used_nodes_slot: list[str],
+    used_hints_slot: dict[str, str],
+) -> None:
+    """Record a `use(node[, hint])` call into the per-render slots (ADR-0060 §2/§5):
+    the resolved id into `used_nodes_slot` (deduped, insertion-ordered), and a valid
+    volatility `hint` into `used_hints_slot` keyed by id (last hint wins). A value
+    that doesn't resolve, or an invalid hint, is a no-op. Module-level so the `use`
+    closure in `register_helpers` stays trivial."""
+    ref = _coerce_entry_ref(project, schema, value)
+    if ref is None or not ref.id:
+        return
+    if ref.id not in used_nodes_slot:
+        used_nodes_slot.append(ref.id)
+    if hint in ("stable", "volatile"):
+        used_hints_slot[ref.id] = hint
 
 
 def _coerce_str_entry_ref(
@@ -405,6 +425,15 @@ def register_helpers(
     used_nodes_slot: list[str] = []
     env.used_nodes = used_nodes_slot  # type: ignore[attr-defined]
 
+    # ADR-0060 §5: the optional volatility hint on `use(node, "stable"|"volatile")`,
+    # keyed by resolved id. Carried beside `used_nodes` (not folded into it, so the
+    # selector's id union is untouched) onto `RenderedTemplate.used_node_hints`,
+    # persisted on the chat, and read by `_tier_lore_ids` as a revision-bounded
+    # placement prior. Only valid hints land here; a node named twice keeps its
+    # last hint.
+    used_hints_slot: dict[str, str] = {}
+    env.used_hints = used_hints_slot  # type: ignore[attr-defined]
+
     env.globals["last_words"] = last_words
     env.globals["pov"] = lambda scene: _pov(project, schema, scene)
     env.globals["scenes_before"] = lambda scene: _scenes_before(project, scene)
@@ -424,17 +453,18 @@ def register_helpers(
 
     env.globals["use_lore"] = _use_lore
 
-    # ADR-0060 §2: `use(node)` — "also include *this* node in context." Coerces its
-    # argument to an EntryRef exactly as `entry()` does (an id, an EntryRef, a dict,
-    # or a single context_pick value), records the resolved id, and flips the lore
-    # gate (using a node means the chat is lore-enabled). Emits nothing — the backend
-    # places and caches it — so it composes inside a loop over a picked list:
-    # `{% for p in inputs.picks %}{{ use(p) }}{% endfor %}`.
-    def _use(value: Any) -> str:
+    # ADR-0060 §2/§5: `use(node)` / `use(node, "stable"|"volatile")` — "also include
+    # *this* node in context." Coerces its argument to an EntryRef exactly as
+    # `entry()` does (an id, an EntryRef, a dict, or a single context_pick value),
+    # records the resolved id, and flips the lore gate (using a node means the chat
+    # is lore-enabled). The optional second arg is an advisory volatility PRIOR
+    # (ADR-0060 §5): it biases which tier the node starts in but never overrides the
+    # per-revision correctness check (a "stable"-hinted node that changed still
+    # re-writes). Emits nothing — the backend places and caches it — so it composes
+    # inside a loop: `{% for p in inputs.picks %}{{ use(p, "volatile") }}{% endfor %}`.
+    def _use(value: Any, hint: Any = None) -> str:
         lore_invoked_slot[0] = True
-        ref = _coerce_entry_ref(project, schema, value)
-        if ref is not None and ref.id and ref.id not in used_nodes_slot:
-            used_nodes_slot.append(ref.id)
+        _record_use(project, schema, value, hint, used_nodes_slot, used_hints_slot)
         return ""
 
     env.globals["use"] = _use
@@ -672,17 +702,16 @@ def _walk_collect(
 # ----- `relevant_lore(scene, mode)` ---------------------------------------
 
 
-def _relevant_lore(
+def _relevant_lore_ids(
     project: ProjectService,
     scene: Any = None,
     mode: str = "implicit",
-    partition: str = "all",
-    session: AISession | None = None,
     journal: list[Any] | None = None,
-    index: Any = None,
     used_ids: list[str] | None = None,
-) -> str:
-    """Return a markdown block of lore entries relevant to `scene`.
+) -> list[str]:
+    """The one lore selector (ADR-0057 §3 / ADR-0060 §2): the deduped, sorted,
+    `never`-filtered id set relevant to `scene`. Formatting and per-turn tiering
+    are the caller's next step.
 
     Modes:
     - `"implicit"` (default): union of (a) lore directly referenced by the
@@ -690,48 +719,46 @@ def _relevant_lore(
       any alias appears in the scene's `summary` field, and (c) one-hop
       expansion through the entries collected in (a)+(b).
     - `"explicit"`: only the lore directly referenced via entity_ref fields.
-      No alias scan, no graph walk.
-    - `"pinned_only"`: returns empty for now (pin UI ships in a later milestone).
+    - `"pinned_only"`: empty for now (pin UI ships in a later milestone).
 
-    Partition (only meaningful when a session is bound; see
-    `register_helpers`):
-    - `"all"` (default): every relevant entry, regardless of baseline.
-    - `"stable"`: entries whose revision matches the session baseline.
-    - `"volatile"`: entries new or changed since the session baseline.
-
-    Sessions track touched entries automatically — every entry returned (in
-    any partition) is recorded for the upcoming commit.
+    `use()` selections (`used_ids`) join the SAME direct channel as the scene's
+    structural entity_ref picks — deduped by id, subject to the one `never`
+    chokepoint — never a second matcher (ADR-0057 anti-goal).
     """
-    if partition not in VALID_PARTITIONS:
-        partition = "all"
     if mode == "pinned_only":
-        return ""
-
+        return []
     scene_metadata = _attr_or_item(scene, "metadata")
-    # ADR-0060 §2: author selections join the SAME direct channel as the scene's
-    # structural entity_ref picks — deduped by id with everything else, subject to
-    # the one `never` chokepoint below — never a second matcher (ADR-0057 anti-goal).
     direct = _collect_lore_refs_from_metadata(scene_metadata) | set(used_ids or [])
-
     if mode == "explicit":
         ids = sorted(direct)
     else:
         ids = sorted(_implicit_lore_ids(project, scene, direct, journal))
-
-    # Chokepoint filter: drop any "never"-policy entries that may have
-    # arrived via explicit refs or structural expansion. "Never" means
-    # truly excluded everywhere — single source of authority for that rule.
+    # Chokepoint filter: drop any "never"-policy entries that may have arrived via
+    # explicit refs or structural expansion. Single source of authority for that rule.
     never_ids = _never_lore_ids(project)
     if never_ids:
         ids = [eid for eid in ids if eid not in never_ids]
+    return ids
 
-    if session is None or partition == "all":
-        if session is not None:
-            _snapshot_revisions(project, ids, session)
-        return _format_lore_block(project, ids, scene=scene, index=index)
 
-    selected = _split_lore_by_partition(project, ids, session, partition)
-    return _format_lore_block(project, selected, scene=scene, index=index)
+def _relevant_lore(
+    project: ProjectService,
+    scene: Any = None,
+    mode: str = "implicit",
+    session: AISession | None = None,
+    journal: list[Any] | None = None,
+    index: Any = None,
+    used_ids: list[str] | None = None,
+) -> str:
+    """A markdown block of ALL lore entries relevant to `scene`, in one block —
+    the untiered form for one-shot / preview callers. A bound `session` only
+    snapshots touched revisions for the upcoming commit; the send path's per-turn
+    stable/volatile split lives in `_tier_lore_ids` (ADR-0060 §5 retired the
+    `partition=` two-call form)."""
+    ids = _relevant_lore_ids(project, scene, mode, journal, used_ids)
+    if session is not None:
+        _snapshot_revisions(project, ids, session)
+    return _format_lore_block(project, ids, scene=scene, index=index)
 
 
 def _implicit_lore_ids(
@@ -771,13 +798,27 @@ def _implicit_lore_ids(
     return expanded
 
 
-def _split_lore_by_partition(
-    project: ProjectService, ids: list[str], session: AISession, partition: str
-) -> list[str]:
-    """Snapshot each entry's revision against the session baseline and return
-    the ids in the requested partition — `stable` (revision matches baseline)
-    or `volatile` (new or changed since).
+def _tier_lore_ids(
+    project: ProjectService,
+    ids: list[str],
+    session: AISession,
+    hints: dict[str, str] | None = None,
+) -> tuple[list[str], list[str]]:
+    """Split the one deduped lore set into `(stable_ids, volatile_ids)` for
+    per-tier placement (ADR-0060 §5), snapshotting each entry for the upcoming
+    commit. The base tier is per-revision vs the session baseline — unchanged →
+    stable, new-or-changed → volatile. The optional `use(node, hint)` prior biases
+    it, revision-bounded so it never rides stale bytes:
+
+    - `"volatile"`: always volatile (pin to the 5m tier).
+    - `"stable"`: start/stay stable UNLESS the entry actually changed since it was
+      last sent — a changed entry re-writes that turn, then re-settles.
+    - no hint: the base per-revision tier.
+
+    Order within each tier follows `ids` (already sorted), so a settled block is
+    byte-identical turn-to-turn.
     """
+    hints = hints or {}
     stable_ids: list[str] = []
     volatile_ids: list[str] = []
     for entry_id in ids:
@@ -785,12 +826,20 @@ def _split_lore_by_partition(
         if entry is None:
             continue
         revision = _attr_or_item(entry, "revision") or ""
+        # `changed` (seen before, different revision) vs `new` (never seen) — both
+        # are `not is_stable`, but the "stable" prior treats them differently.
+        changed = session.seen(entry_id) and not session.is_stable(entry_id, revision)
         session.snapshot(entry_id, revision)
-        if session.is_stable(entry_id, revision):
+        hint = hints.get(entry_id)
+        if hint == "volatile":
+            volatile_ids.append(entry_id)
+        elif hint == "stable":
+            (volatile_ids if changed else stable_ids).append(entry_id)
+        elif session.is_stable(entry_id, revision):
             stable_ids.append(entry_id)
         else:
             volatile_ids.append(entry_id)
-    return stable_ids if partition == "stable" else volatile_ids
+    return stable_ids, volatile_ids
 
 
 def _snapshot_revisions(

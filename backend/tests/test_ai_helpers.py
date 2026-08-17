@@ -14,9 +14,11 @@ from app.models.project import ProjectInfo
 from app.services.ai.entry_ref import ProjectInfoRef
 from app.services.ai.helpers import (
     _relevant_lore,
+    _relevant_lore_ids,
     _role_block,
     _scene_body_text,
     _thread_parts,
+    _tier_lore_ids,
     create_environment_for_project,
     last_words,
 )
@@ -965,86 +967,93 @@ class ContextPolicyTests(_HelperFixtureBase):
         self.assertIn('name="Nimitz"', text)
 
 
-class SessionPartitionTests(_HelperFixtureBase):
+class SessionTierTests(_HelperFixtureBase):
+    """ADR-0060 §5: the send path computes the one selector once (`_relevant_lore_ids`)
+    then splits it into (stable, volatile) via `_tier_lore_ids` against the session
+    baseline — the `partition=` two-call form is retired. Also covers the
+    revision-bounded `use(node, hint)` placement prior."""
+
     def setUp(self) -> None:
         super().setUp()
         self.session = AISession(id="test-scene-one")
         self.scene_one = self.service.read_scene(self.scene_one_node.scene_id)
 
-    def _render_with_partition(self, partition: str) -> str:
-        return _relevant_lore(
-            self.service, self.scene_one, "implicit", partition, session=self.session
+    def _tier(self, hints: dict[str, str] | None = None) -> tuple[list[str], list[str]]:
+        ids = _relevant_lore_ids(self.service, self.scene_one, "implicit")
+        return _tier_lore_ids(self.service, ids, self.session, hints)
+
+    def _edit_honor(self, body: str) -> None:
+        self._update_lore(
+            self.honor["id"],
+            entry_type="lore:character",
+            metadata={
+                "aliases": ["The Salamander"],
+                "related_entries": [self.nimitz["id"]],
+            },
+            body=body,
         )
 
     def test_first_call_everything_is_volatile(self) -> None:
         # Baseline is empty; everything looks new.
-        stable = self._render_with_partition("stable")
-        volatile = self._render_with_partition("volatile")
-        self.assertEqual(stable, "")
-        self.assertIn("Honor Harrington", volatile)
-        self.assertIn("Nimitz", volatile)
+        stable, volatile = self._tier()
+        self.assertEqual(stable, [])
+        self.assertIn(self.honor["id"], volatile)
+        self.assertIn(self.nimitz["id"], volatile)
 
     def test_after_commit_unchanged_entries_are_stable(self) -> None:
-        # First call records revisions; commit promotes them to baseline.
-        self._render_with_partition("all")
+        self._tier()
         self.session.commit()
+        stable, volatile = self._tier()
+        self.assertIn(self.honor["id"], stable)
+        self.assertIn(self.nimitz["id"], stable)
+        self.assertEqual(volatile, [])
 
-        # Second call with no edits between → everything stable.
-        stable = self._render_with_partition("stable")
-        volatile = self._render_with_partition("volatile")
-        self.assertIn("Honor Harrington", stable)
-        self.assertIn("Nimitz", stable)
-        self.assertEqual(volatile, "")
-
-    def test_modified_entry_partitions_volatile_others_stable(self) -> None:
-        self._render_with_partition("all")
+    def test_modified_entry_is_volatile_others_stable(self) -> None:
+        self._tier()
         self.session.commit()
+        self._edit_honor("Captain of the Fearless. Treecat-adopted. EDITED.")
+        stable, volatile = self._tier()
+        self.assertIn(self.honor["id"], volatile)  # revision changed
+        self.assertNotIn(self.honor["id"], stable)
+        self.assertIn(self.nimitz["id"], stable)  # untouched
+        self.assertNotIn(self.nimitz["id"], volatile)
 
-        # Edit Honor's body; her revision changes, Nimitz's doesn't.
-        self._update_lore(
-            self.honor["id"],
-            entry_type="lore:character",
-            metadata={
-                "aliases": ["The Salamander"],
-                "related_entries": [self.nimitz["id"]],
-            },
-            body="Captain of the Fearless. Treecat-adopted. EDITED.",
+    def test_stable_hint_starts_a_new_node_stable(self) -> None:
+        # A "stable"-hinted node skips the volatile-first turn (the placement prior).
+        stable, volatile = self._tier(hints={self.honor["id"]: "stable"})
+        self.assertIn(self.honor["id"], stable)  # hinted → stable on turn 1
+        self.assertIn(self.nimitz["id"], volatile)  # unhinted, new → volatile
+
+    def test_stable_hint_still_re_writes_a_changed_node(self) -> None:
+        # Revision-bounded: a hinted-stable node that actually changed goes volatile
+        # (never rides stale bytes).
+        self._tier()
+        self.session.commit()
+        self._edit_honor("Captain of the Fearless. Treecat-adopted. EDITED.")
+        stable, volatile = self._tier(hints={self.honor["id"]: "stable"})
+        self.assertIn(self.honor["id"], volatile)  # changed → volatile despite hint
+        self.assertNotIn(self.honor["id"], stable)
+
+    def test_volatile_hint_pins_a_settled_node_volatile(self) -> None:
+        # A "volatile"-hinted node stays in the 5m tier even once settled.
+        self._tier()
+        self.session.commit()
+        stable, volatile = self._tier(hints={self.honor["id"]: "volatile"})
+        self.assertIn(self.honor["id"], volatile)  # pinned volatile
+        self.assertIn(self.nimitz["id"], stable)  # unhinted, settled → stable
+
+    def test_relevant_lore_returns_everything_untiered(self) -> None:
+        # The untiered form (one-shot / preview) returns all relevant entries.
+        text = _relevant_lore(
+            self.service, self.scene_one, "implicit", session=self.session
         )
+        self.assertIn("Honor Harrington", text)
+        self.assertIn("Nimitz", text)
 
-        stable = self._render_with_partition("stable")
-        volatile = self._render_with_partition("volatile")
-        # Honor is volatile (her revision changed)
-        self.assertIn("Honor Harrington", volatile)
-        self.assertNotIn("Honor Harrington", stable)
-        # Nimitz is stable (untouched)
-        self.assertIn("Nimitz", stable)
-        self.assertNotIn("Nimitz", volatile)
-
-    def test_partition_all_returns_everything_regardless_of_baseline(self) -> None:
-        self._render_with_partition("all")
-        self.session.commit()
-
-        self._update_lore(
-            self.honor["id"],
-            entry_type="lore:character",
-            metadata={
-                "aliases": ["The Salamander"],
-                "related_entries": [self.nimitz["id"]],
-            },
-            body="A totally different body.",
-        )
-
-        all_text = self._render_with_partition("all")
-        self.assertIn("Honor Harrington", all_text)
-        self.assertIn("Nimitz", all_text)
-
-    def test_no_session_ignores_partition(self) -> None:
-        # No session → partition param is meaningless but must not crash.
-        stable = _relevant_lore(self.service, self.scene_one, "implicit", "stable")
-        volatile = _relevant_lore(self.service, self.scene_one, "implicit", "volatile")
-        # No session → all entries returned, partition ignored.
-        self.assertIn("Honor Harrington", stable)
-        self.assertIn("Honor Harrington", volatile)
+    def test_no_session_relevant_lore_returns_all(self) -> None:
+        text = _relevant_lore(self.service, self.scene_one, "implicit")
+        self.assertIn("Honor Harrington", text)
+        self.assertIn("Nimitz", text)
 
 
 class XmlOutputStructureTests(_HelperFixtureBase):

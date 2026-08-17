@@ -83,8 +83,8 @@ class LoreCacheBlockTests(unittest.TestCase):
         # Empty baseline → everything is new → volatile. So: the system 1h block,
         # and one 5m lore block carrying the premise. No stable lore block yet.
         blocks = self._blocks(self.chat_id, [{"role": "user", "content": "hi"}])
-        one_h = [b for b in blocks if b["ttl"] == "1h"]
-        five_m = [b for b in blocks if b["ttl"] == "5m"]
+        one_h = [b for b in blocks if b["tier"] == "stable"]
+        five_m = [b for b in blocks if b["tier"] == "volatile"]
         self.assertEqual(len(one_h), 1)  # just the system prompt
         self.assertEqual(len(five_m), 1)  # the volatile lore
         self.assertIn('name="Premise"', five_m[0]["text"])
@@ -96,8 +96,8 @@ class LoreCacheBlockTests(unittest.TestCase):
         # what makes this prove a *migration* rather than surviving a code that
         # always classifies stable.
         turn1 = self._blocks(self.chat_id, [{"role": "user", "content": "hi"}])
-        t1_stable = "".join(b["text"] for b in turn1 if b["ttl"] == "1h")
-        t1_volatile = "".join(b["text"] for b in turn1 if b["ttl"] == "5m")
+        t1_stable = "".join(b["text"] for b in turn1 if b["tier"] == "stable")
+        t1_volatile = "".join(b["text"] for b in turn1 if b["tier"] == "volatile")
         self.assertIn('name="Premise"', t1_volatile)
         self.assertNotIn('name="Premise"', t1_stable)
         # Turn 2: the premise is unchanged since the baseline → it moves into the
@@ -110,8 +110,8 @@ class LoreCacheBlockTests(unittest.TestCase):
                 {"role": "user", "content": "tell me more"},
             ],
         )
-        stable_text = "".join(b["text"] for b in blocks if b["ttl"] == "1h")
-        volatile_text = "".join(b["text"] for b in blocks if b["ttl"] == "5m")
+        stable_text = "".join(b["text"] for b in blocks if b["tier"] == "stable")
+        volatile_text = "".join(b["text"] for b in blocks if b["tier"] == "volatile")
         self.assertIn('name="Premise"', stable_text)
         self.assertNotIn('name="Premise"', volatile_text)
 
@@ -122,7 +122,7 @@ class LoreCacheBlockTests(unittest.TestCase):
             CreateChatSessionRequest(title="Lore-free", prompt_entry_id="prompt_y")
         )
         blocks = self._blocks(off.id, [{"role": "user", "content": "Premise please"}])
-        self.assertEqual([b["ttl"] for b in blocks], ["1h"])  # only the system prompt
+        self.assertEqual([b["tier"] for b in blocks], ["stable"])  # only the system prompt
         self.assertTrue(all("Premise" not in b["text"] for b in blocks))
 
     def test_scene_anchored_chat_includes_the_scenes_referenced_lore(self) -> None:
@@ -228,10 +228,10 @@ class LoreCacheBlockTests(unittest.TestCase):
             ],
         )
         in_stable = any(
-            'name="Premise"' in b["text"] for b in blocks if b["ttl"] == "1h"
+            'name="Premise"' in b["text"] for b in blocks if b["tier"] == "stable"
         )
         in_volatile = any(
-            'name="Premise"' in b["text"] for b in blocks if b["ttl"] == "5m"
+            'name="Premise"' in b["text"] for b in blocks if b["tier"] == "volatile"
         )
         self.assertNotEqual(in_stable, in_volatile)  # exactly one, never both
 

@@ -29,19 +29,20 @@ if TYPE_CHECKING:
 
 
 def system_prompt_cache_blocks(system_prompt: str) -> list[dict] | None:
-    """Wrap a rendered system prompt as a single cacheable 1h block, or None
+    """Wrap a rendered system prompt as a single **stable-tier** block, or None
     when empty.
 
-    Providers that support explicit prompt caching (Anthropic, and OpenRouter
-    when routing to them) mark this block cacheable, so back-to-back invocations
-    that reuse the same system body are cache reads. The 1h TTL keeps the system
-    stable across a scene's continuations. Shared by the chat send path (its
-    stable slot 1) and the generate path (its only system block) so the two can
-    never drift into caching in one mode but not the other.
+    ADR-0060 §5: the shared block model carries only `{text, tier}` — a volatility
+    class, not a provider primitive. Each adapter maps the tier to its own caching
+    (Anthropic/OpenRouter: a `cache_control` breakpoint, `stable` → a 1h ttl), so
+    back-to-back invocations that reuse the same system body are cache reads. The
+    system prompt is the most stable content, so it leads the stable-first order.
+    Shared by the chat send path (its stable slot 1) and the generate path (its
+    only system block) so the two can never drift.
     """
     if not system_prompt:
         return None
-    return [{"text": system_prompt, "cache_break_after": True, "ttl": "1h"}]
+    return [{"text": system_prompt, "tier": "stable"}]
 
 
 def _staged_set_block(project: ProjectService, staged_set_id: str) -> str:
@@ -151,42 +152,46 @@ def _lore_cache_blocks(
     chat_id: str,
     journal_for_send: list[Any],
 ) -> list[dict]:
-    """The chat's one deduped lore set, placed once *per stability tier*
-    (docs/design/context-caching.md §4). `relevant_lore` — the single selector —
-    computes `{direct ∪ auto(journal) ∪ always} − {never, manual_only}` and, with
-    the chat's in-memory session baseline, splits it: entries unchanged since last
-    turn → a 1h stable block; entries new or changed → a 5m volatile block. Both
-    resolve as-of the chat's scene. `commit()` promotes this turn's set to next
-    turn's baseline. A fresh process starts cold (empty baseline → all volatile),
-    which re-settles on the next turn — deliberately not persisted (§6).
+    """The chat's one deduped lore set, placed once *per volatility tier*
+    (docs/design/context-caching.md §4). `_relevant_lore_ids` — the single selector
+    — computes `{direct ∪ auto(journal) ∪ always} − {never, manual_only}`;
+    `_tier_lore_ids` splits it against the chat's in-memory session baseline: entries
+    unchanged since last turn → the stable block, new or changed → the volatile
+    block, biased by any `use(node, hint)` prior. Both resolve as-of the chat's
+    scene. `commit()` promotes this turn's set to next turn's baseline. A fresh
+    process starts cold (empty baseline → all volatile), which re-settles on the next
+    turn — deliberately not persisted (§6). The blocks carry only a `tier`; the
+    provider adapter maps it to a ttl/breakpoint (ADR-0060 §5).
     """
-    from app.services.ai.helpers import _relevant_lore
+    from app.services.ai.helpers import (
+        _format_lore_block,
+        _relevant_lore_ids,
+        _tier_lore_ids,
+    )
     from app.services.ai.sessions import default_registry
 
     scene = _chat_resolution_scene(project, chat)
     index = project.build_mutations_index() if scene is not None else None
     session = default_registry.get_or_create(f"chatlore:{chat_id}")
 
-    # One selector, two partitions against the same (pre-commit) baseline, so each
-    # entry lands in exactly one tier. This re-runs the selector twice per send
-    # (once per partition) — acceptable at one call per turn; the mutations index
-    # is built once above and threaded into both, not rebuilt per call. ADR-0060
-    # §2: the chat's `use(node)` selections join the selector's SAME direct channel
-    # (deduped by id, `never`-filtered), never a rival matcher.
+    # ADR-0060 §2/§5: one selector, computed ONCE, then split into the two tiers by
+    # `_tier_lore_ids` against the same (pre-commit) baseline — so each entry lands
+    # in exactly one tier and the selector isn't re-run per partition. The chat's
+    # `use(node)` selections join the selector's SAME direct channel (deduped by id,
+    # `never`-filtered); their `use(node, hint)` priors bias placement only.
     used_ids = list(chat.used_node_ids)
-    stable_xml = _relevant_lore(
-        project, scene, "implicit", "stable", session, journal_for_send, index, used_ids
-    )
-    volatile_xml = _relevant_lore(
-        project, scene, "implicit", "volatile", session, journal_for_send, index, used_ids
-    )
+    hints = dict(chat.used_node_hints)
+    ids = _relevant_lore_ids(project, scene, "implicit", journal_for_send, used_ids)
+    stable_ids, volatile_ids = _tier_lore_ids(project, ids, session, hints)
     session.commit()
 
     blocks: list[dict] = []
+    stable_xml = _format_lore_block(project, stable_ids, scene=scene, index=index)
     if stable_xml:
-        blocks.append({"text": stable_xml, "cache_break_after": True, "ttl": "1h"})
+        blocks.append({"text": stable_xml, "tier": "stable"})
+    volatile_xml = _format_lore_block(project, volatile_ids, scene=scene, index=index)
     if volatile_xml:
-        blocks.append({"text": volatile_xml, "cache_break_after": True, "ttl": "5m"})
+        blocks.append({"text": volatile_xml, "tier": "volatile"})
     return blocks
 
 
@@ -198,12 +203,13 @@ def expand_and_prepare_chat_blocks(
 ) -> tuple[list[dict] | None, str | None, list[Any]]:
     """When chat_id is bound, assemble the ordered system cache-blocks the
     provider call sends, and return:
-      - system_blocks, in stable→volatile order so longer TTLs stay ahead of
-        shorter: [{system_prompt, 1h}, {staged_change, 1h}?, {stable_lore, 1h}?,
-        {volatile_lore, 5m}?] — the staged_change block (ADR-0055 S4) is present
-        only when the chat owns a resolvable mutation set; the two lore blocks
-        (ADR-0057 + docs/design/context-caching.md) only when the chat is
-        lore-enabled and the corresponding tier is non-empty
+      - system_blocks, in stable-first order (ADR-0060 §5): [{system_prompt,
+        stable}, {staged_change, stable}?, {stable_lore, stable}?, {volatile_lore,
+        volatile}?] — the staged_change block (ADR-0055 S4) is present only when the
+        chat owns a resolvable mutation set; the two lore blocks (ADR-0057 +
+        docs/design/context-caching.md) only when the chat is lore-enabled and the
+        corresponding tier is non-empty. Each block carries a `tier`, not a ttl;
+        the adapter maps tier → ttl/breakpoint and caps the breakpoint count
       - session_id for OpenRouter provider stickiness
       - journal_added: lore IDs newly detected on THIS turn (for audit UI)
 
@@ -243,10 +249,11 @@ def expand_and_prepare_chat_blocks(
     # ref → "" → no block. A mutation set, not lore, so it is not gated.
     staged_xml = _staged_set_block(project, chat.staged_set)
     if staged_xml:
-        blocks.append({"text": staged_xml, "cache_break_after": True, "ttl": "1h"})
-    # Slots 2a/2b: the one deduped lore set, placed once per stability tier
-    # (stable 1h, then volatile 5m). Only for a lore-enabled chat. At most 4
-    # cache blocks total here — exactly Anthropic's breakpoint limit.
+        blocks.append({"text": staged_xml, "tier": "stable"})
+    # Slots 2a/2b: the one deduped lore set, placed once per volatility tier
+    # (stable, then volatile). Only for a lore-enabled chat. The provider adapter
+    # caps breakpoints (Anthropic: ≤4) and assigns each tier its ttl — the shared
+    # layer only orders stable-first (ADR-0060 §5).
     if chat.lore_enabled:
         blocks.extend(_lore_cache_blocks(project, chat, chat_id, journal_for_send))
 

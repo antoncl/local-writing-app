@@ -176,9 +176,12 @@ class ChatCall:
     """One completion request, provider-agnostic — what to say, not who to
     say it to. Credentials and endpoint live on the resolved profile.
 
-    `system_blocks` is the multi-block form with per-block cache markers;
-    when set it overrides `system_prompt` for providers that honor it
-    (Anthropic; OpenRouter on explicit-cache routes).
+    `system_blocks` is the multi-block form: a volatility-ordered (stable-first)
+    list of `{"text": str, "tier": "stable"|"volatile"|None}` blocks (ADR-0060 §5).
+    It carries only the volatility tier — never a provider's ttl/breakpoint
+    vocabulary; each adapter maps the tier to its own caching primitive. When set it
+    overrides `system_prompt` for providers that honor it (Anthropic; OpenRouter on
+    explicit-cache routes); others collapse it to a string.
     """
 
     model: str

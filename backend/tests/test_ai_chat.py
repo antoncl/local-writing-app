@@ -662,16 +662,17 @@ class ChatEndpointJournalTests(unittest.TestCase):
         self.assertIn(self.honor_id, journal_ids)
         self.assertIn(self.pavel_id, journal_ids)
 
-        # Provider received system_blocks: slot 1 = system_prompt (1h),
-        # slot 2 = journal XML (5m).
+        # Provider received system_blocks: slot 1 = system_prompt (stable),
+        # slot 2 = journal XML (volatile). ADR-0060 §5: blocks carry a `tier`,
+        # not a ttl — the adapter maps tier → ttl.
         blocks = mock_chat.call_args.args[0].system_blocks
         self.assertIsNotNone(blocks)
         self.assertEqual(len(blocks), 2)
         self.assertEqual(blocks[0]["text"], "You are a writing assistant.")
-        self.assertEqual(blocks[0]["ttl"], "1h")
+        self.assertEqual(blocks[0]["tier"], "stable")
         self.assertIn("Honor Harrington", blocks[1]["text"])
         self.assertIn("Pavel Young", blocks[1]["text"])
-        self.assertEqual(blocks[1]["ttl"], "5m")
+        self.assertEqual(blocks[1]["tier"], "volatile")
 
     def test_lore_gate_off_injects_no_lore(self) -> None:
         """ADR-0057 §2 Journey C: a chat whose prompt never called

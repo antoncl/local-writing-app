@@ -149,6 +149,9 @@
   // lock render's preview response and echoed on every save, exactly like
   // chatLoreEnabled — the backend unions them into its one lore selector.
   let chatUsedNodeIds: string[] = [];
+  // ADR-0060 §5: per-node volatility priors from use(node, hint), mirrored beside
+  // chatUsedNodeIds through the same capture/echo path.
+  let chatUsedNodeHints: Record<string, string> = {};
   let activeChatTitle = "Untitled chat";
   let activeChatPinned = false;
   let activeChatJournal: ChatSessionJournalEntry[] = $state([]);
@@ -300,6 +303,7 @@
     chatStagedSet = "";
     chatLoreEnabled = false;
     chatUsedNodeIds = [];
+    chatUsedNodeHints = {};
     activeChatTitle = "Untitled chat";
     activeChatPinned = false;
     activeChatJournal = [];
@@ -327,6 +331,7 @@
     chatStagedSet = session.staged_set || "";
     chatLoreEnabled = session.lore_enabled ?? false;
     chatUsedNodeIds = session.used_node_ids ?? [];
+    chatUsedNodeHints = session.used_node_hints ?? {};
     chatSystemPrompt = session.system_prompt || "";
     chatHistory = (session.messages || []).map((m: ChatSessionMessage) => ({
       role: m.role,
@@ -431,6 +436,7 @@
       // we always send the hydrated value so it never drifts.
       lore_enabled: chatLoreEnabled,
       used_node_ids: chatUsedNodeIds,
+      used_node_hints: chatUsedNodeHints,
       pinned: activeChatPinned,
       context_items: [],
       messages: chatHistory.map((m) => ({
@@ -677,6 +683,7 @@
       // prompt via the very next persistActiveChat.
       chatLoreEnabled = preview.lore_enabled ?? false;
       chatUsedNodeIds = preview.used_node_ids ?? [];
+      chatUsedNodeHints = preview.used_node_hints ?? {};
       if (initialTurns.length > 0) chatHistory = [...initialTurns];
       return true;
     } catch (e) {

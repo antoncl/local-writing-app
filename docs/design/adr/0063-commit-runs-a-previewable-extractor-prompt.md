@@ -58,7 +58,7 @@ The filter is now *visible* in the extractor body + preview, so the blind YAML l
 
 ## User journey
 
-A writer imports (or authors) the **Character Spine Wizard** — a `chat_panel` prompt that interviews them through the four McKee elements. They model a "Character Spine" in their schema (four `long_text` fields — its own entry_type, or a field-group on `character`; **their** choice). On the prompt they set `commit.target` to that type. They open the extractor's **Preview** and see the generated contract asking for exactly those four fields; they tweak the wording and watch it re-render. Later, mid-conversation, they hit **Commit**: the extractor emits the four fields as JSON, validated against the spine schema, shown as a diff, accepted, written. The spine is now a **node** other prompts pull in by reference or `{% snippet %}` (ADR-0061) — "paste into other prompts / keep as reference," as data.
+A writer imports (or authors) the **Character Spine Wizard** — a `chat_panel` prompt that interviews them through the four McKee elements. They model a "Character Spine" in their schema (four `long_text` fields — its own entry_type, or a field-group on `character`; **their** choice). On the prompt they set `commit.target` to that type. They open the extractor's **Preview** and see the generated contract asking for exactly those four fields; they tweak the wording and watch it re-render. Later, mid-conversation, they hit **Commit**: the extractor emits the four fields as JSON, validated against the spine schema, shown as a diff, accepted, written. The spine is now a **node** other prompts pull in by reference or `{% import %}` (ADR-0061) — "paste into other prompts / keep as reference," as data.
 
 ## Consequences
 

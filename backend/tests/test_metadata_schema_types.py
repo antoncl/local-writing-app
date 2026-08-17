@@ -100,6 +100,25 @@ class MetadataSchemaTypeTests(MetadataValidationBase):
         )
         self.assertFalse(any("commit target" in e for e in errors), errors)
 
+    def test_commit_target_without_known_types_checks_shape_only(self) -> None:
+        # The `known_entry_types=None` default (a caller with no schema to resolve
+        # against) validates target SHAPE only — a well-formed but undefined target
+        # is not flagged (existence is a lint the caller opts into), a malformed one
+        # still is.
+        from app.models.schema import PromptOutput
+        from app.services.project.schema_validation import validate_prompt_output
+
+        well_formed = PromptOutput.model_validate(
+            {"kind": "chat_panel", "commit": {"review": "visual_diff", "target": "lore:ghost"}}
+        )
+        self.assertEqual(validate_prompt_output("prompt:x", well_formed), [])
+        malformed = PromptOutput.model_validate(
+            {"kind": "chat_panel", "commit": {"review": "visual_diff", "target": "Not A Type"}}
+        )
+        self.assertTrue(
+            any("not a valid entry-type id" in e for e in validate_prompt_output("prompt:x", malformed)),
+        )
+
     def test_on_accept_only_rides_on_an_inline_disposition(self) -> None:
         # #954 (Lever 2): on_accept stamps a mark on an accepted INLINE suggestion, so
         # it is a (soft) error on chat_panel, which has no accept gesture.

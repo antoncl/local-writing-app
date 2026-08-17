@@ -133,6 +133,9 @@ export type AIPreviewResponse = {
   // lore gate. Captured at the lock render and persisted as the chat's
   // lore_enabled.
   lore_enabled?: boolean;
+  // ADR-0060 §2: node ids the template selected via use(node), captured at the
+  // lock render and persisted as the chat's used_node_ids.
+  used_node_ids?: string[];
 };
 
 export type ChatMessage = {
@@ -301,6 +304,9 @@ export type ChatSession = {
   // ADR-0057 §2: the execution-derived lore gate, captured at the lock render.
   // Gate off → the send path injects no lore at all. Absent on legacy chats.
   lore_enabled?: boolean;
+  // ADR-0060 §2: node ids the chat's prompt selected via use(node) at its lock
+  // render. The send path unions them into its one lore selector.
+  used_node_ids?: string[];
   // V2: running USD cost (display as EUR via money.ts). null when the chat
   // has no priced cost yet (fresh, or unpriced-model turns) — the footer
   // hides rather than showing a fabricated €0.00 (#697).
@@ -363,6 +369,8 @@ export type SaveChatSessionRequest = {
   // ADR-0057 §2: the lore gate. Echoed on save; the backend treats an omitted
   // value as "leave the captured gate alone", so per-turn saves preserve it.
   lore_enabled?: boolean;
+  // ADR-0060 §2: the author-selected node ids, echoed on save like lore_enabled.
+  used_node_ids?: string[];
   pinned: boolean;
   context_items: ChatSessionContextItem[];
   messages: ChatSessionMessage[];

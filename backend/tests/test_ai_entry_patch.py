@@ -508,7 +508,7 @@ class FieldCatalogFromTypeTests(unittest.TestCase):
         template = env.from_string(prompt.body)
         label = self.service.read_metadata_schema().entry_types["lore:character"].name
 
-        create_mode = template.render(input={"entry": "", "entry_type": "lore:character"})
+        create_mode = template.render(inputs={"entry": "", "entry_type": "lore:character"})
         self.assertIn("create a new", create_mode)
         self.assertIn(label, create_mode)
         self.assertIn("allegiance", create_mode)  # fields to develop listed
@@ -522,7 +522,7 @@ class FieldCatalogFromTypeTests(unittest.TestCase):
         hero = self.service.create_lore_entry(
             CreateLoreEntryRequest(title="Seren", entry_type="lore:character")
         )
-        revise_mode = template.render(input={"entry": hero.id, "entry_type": ""})
+        revise_mode = template.render(inputs={"entry": hero.id, "entry_type": ""})
         self.assertIn("entry under revision", revise_mode)
         self.assertNotIn("create a new", revise_mode)
         # The revise branch shows the fields to develop as the north-star (the
@@ -572,7 +572,7 @@ class FieldCatalogFromTypeTests(unittest.TestCase):
         prompt = self.service.read_prompt_entry("builtin-revise-entry")
         env = create_environment_for_project(self.service)
         rendered = env.from_string(prompt.body).render(
-            input={"entry": hero.id, "entry_type": ""}
+            inputs={"entry": hero.id, "entry_type": ""}
         )
         self.assertIn("Allegiance (allegiance): order", rendered)
         self.assertIn("Aliases (aliases): The Grey, Wanderer", rendered)
@@ -764,7 +764,7 @@ class SceneSummaryPromptTests(unittest.TestCase):
         # (the fields-only shape is asserted in test_ai_extraction).
         prompt = self.service.read_prompt_entry("builtin-summarize-scene")
         env = create_environment_for_project(self.service)
-        rendered = env.from_string(prompt.body).render(input={"entry": self.scene_id})
+        rendered = env.from_string(prompt.body).render(inputs={"entry": self.scene_id})
         self.assertIn("chasing the thief", rendered)
         self.assertIn("Old synopsis.", rendered)
         self.assertNotIn('{"fields"', rendered)

@@ -26,8 +26,8 @@ inputs:
   hidden: true
 ---
 
-{% set e = entry(input.entry) %}
-{% set draft_type = input.entry_type if input.entry_type is defined else "" %}
+{% set e = entry(inputs.entry) %}
+{% set draft_type = inputs.entry_type if inputs.entry_type is defined else "" %}
 {% role "system" %}
 {% if e %}
 You are an ideation partner helping the author revise a lore entry, working toward a concrete, committable result. Brainstorm with the author — ask questions, suggest directions, react to their ideas — but steer toward filling out the entry's fields, and don't circle. Once you have enough to fill them, propose a concrete draft of the affected fields and body in prose and say it's ready to commit; stop asking questions past that point. Ask a question only when a field genuinely needs the author's input to settle.

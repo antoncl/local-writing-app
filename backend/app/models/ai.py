@@ -283,12 +283,17 @@ class AIPreviewResponse(BaseModel):
     # `explicit`). Drives whether the cache strip shows in the UI.
     # Null when no assistant is bound.
     caching_style: str | None = None
-    # ADR-0057 §2: whether `relevant_lore()` actually executed during this
-    # render — the execution-derived lore gate. The frontend captures this at
-    # the lock render and persists it as the chat's `lore_enabled`, so the send
-    # path knows whether to inject lore at all. Always populated; False when the
-    # template never called the helper.
+    # ADR-0057 §2: whether the lore gate (`use_lore()` / `use()`) actually executed
+    # during this render — the execution-derived lore gate. The frontend captures
+    # this at the lock render and persists it as the chat's `lore_enabled`, so the
+    # send path knows whether to inject lore at all. Always populated; False when
+    # the template never called the helper.
     lore_enabled: bool = False
+    # ADR-0060 §2: node ids the template selected via `use(node)`, deduped and in
+    # insertion order. Captured at the lock render alongside `lore_enabled` and
+    # persisted as the chat's `used_node_ids`, so the send path unions them into
+    # its one lore selector. Empty when the template selected no nodes.
+    used_node_ids: list[str] = Field(default_factory=list)
 
 
 class ChatMessage(BaseModel):
@@ -492,6 +497,12 @@ class ChatSession(BaseModel):
     # prompt stays clean). Defaults False so a chat that never ran the helper is
     # lore-free by construction.
     lore_enabled: bool = False
+    # ADR-0060 §2: node ids the chat's prompt selected via `use(node)` at its lock
+    # render, captured alongside `lore_enabled` and stable thereafter. The send
+    # path unions these into its one deduped lore selector (`_relevant_lore`'s
+    # direct channel), so an author-picked entry/scene/card lands in the tiered,
+    # cached set — never emitted inline. Defaults empty (no selections).
+    used_node_ids: list[str] = Field(default_factory=list)
     # V2: running USD cost for this chat session, in the provider's currency
     # (USD; frontend converts to EUR for display). Re-derived on read as the
     # sum of this chat's priced ai_invocations rows. None — not 0.0 — when the
@@ -583,6 +594,11 @@ class SaveChatSessionRequest(BaseModel):
     # bool sets it. Only the lock-render save (which learns it from the preview
     # response's `lore_enabled`) sends a value; thereafter it is preserved.
     lore_enabled: bool | None = None
+    # ADR-0060 §2: the author-selected node ids, echoed like `lore_enabled`. None =
+    # "leave the captured value alone" (general saves omit it); a list (even []) is
+    # the new value. Only the lock-render save carries it (from the preview
+    # response's `used_node_ids`); thereafter it is preserved.
+    used_node_ids: list[str] | None = None
     # V2: optional incremental cost update. When provided (typically by
     # the chat panel after a successful AI turn), it's ADDED to the
     # persisted cost_usd_total. Omit on plain renames / message-list saves.

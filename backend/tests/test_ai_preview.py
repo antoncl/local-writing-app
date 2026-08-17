@@ -101,13 +101,13 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertIsNone(body["session_id"])
 
     def test_preview_reports_lore_enabled_when_helper_called(self) -> None:
-        # ADR-0057 §2: the wire contract. The route surfaces the execution-
-        # derived lore gate that the frontend persists as the chat's
-        # lore_enabled — a template that runs relevant_lore() reports True.
+        # ADR-0057 §2 / ADR-0060 §2: the wire contract. The route surfaces the
+        # execution-derived lore gate that the frontend persists as the chat's
+        # lore_enabled — a template that runs the gate (`use_lore()`) reports True.
         response = self.client.post(
             "/api/ai/preview",
             json={
-                "template_source": '{% role "system" %}{{ relevant_lore(scene) }}{% endrole %}',
+                "template_source": '{% role "system" %}{{ use_lore() }}{% endrole %}',
                 "target_scene_id": self.scene_id,
             },
         )
@@ -128,12 +128,14 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertFalse(response.json()["lore_enabled"])
 
     def test_preview_uses_helpers(self) -> None:
+        # `pov()` renders inline; `use_lore()` selects lore for the backend to
+        # place and emits nothing (ADR-0060 §2 — no inline lore emission).
         response = self.client.post(
             "/api/ai/preview",
             json={
                 "template_source": (
                     '{% role "user" %}POV: {{ pov(scene).title }}\n'
-                    "{{ relevant_lore(scene) }}{% endrole %}"
+                    "{{ use_lore() }}{% endrole %}"
                 ),
                 "target_scene_id": self.scene_id,
             },
@@ -141,7 +143,8 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         text = response.json()["messages"][0]["blocks"][0]["text"]
         self.assertIn("POV: Honor Harrington", text)
-        self.assertIn("Captain of the Fearless", text)
+        # use_lore() emits nothing — lore is backend-placed, not inline.
+        self.assertNotIn("Captain of the Fearless", text)
 
     def test_preview_can_include_prompt_snippet(self) -> None:
         snippet = self.service.create_prompt_entry(
@@ -290,47 +293,22 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertTrue(blocks[0]["cache_break_after"])
         self.assertFalse(blocks[1]["cache_break_after"])
 
-    def test_session_with_commit_partitions_on_second_call(self) -> None:
-        # First call commits the session baseline.
-        first = self.client.post(
+    def test_session_id_round_trips_through_preview(self) -> None:
+        # ADR-0060 §2 retired the emitting `relevant_lore(..., partition)` form, so
+        # the send-path partition mechanic is covered by `_relevant_lore` unit tests
+        # (test_ai_helpers) and the send-path tests, not an inline preview render.
+        # The preview still binds and echoes a session id for the caller.
+        response = self.client.post(
             "/api/ai/preview",
             json={
-                "template_source": (
-                    '{% role "user" %}{{ relevant_lore(scene, "implicit", "stable") }}'
-                    "::"
-                    '{{ relevant_lore(scene, "implicit", "volatile") }}{% endrole %}'
-                ),
+                "template_source": '{% role "user" %}{{ use_lore() }}{% endrole %}',
                 "target_scene_id": self.scene_id,
                 "session_id": "test-session",
                 "commit": True,
             },
         )
-        self.assertEqual(first.status_code, 200, first.text)
-        first_text = first.json()["messages"][0]["blocks"][0]["text"]
-        # Empty baseline → everything is volatile on first call
-        stable_part, volatile_part = first_text.split("::")
-        self.assertEqual(stable_part, "")
-        self.assertIn("Honor Harrington", volatile_part)
-        self.assertEqual(first.json()["session_id"], "test-session")
-
-        # Second call with no edits: stable now contains Honor.
-        second = self.client.post(
-            "/api/ai/preview",
-            json={
-                "template_source": (
-                    '{% role "user" %}{{ relevant_lore(scene, "implicit", "stable") }}'
-                    "::"
-                    '{{ relevant_lore(scene, "implicit", "volatile") }}{% endrole %}'
-                ),
-                "target_scene_id": self.scene_id,
-                "session_id": "test-session",
-                "commit": False,
-            },
-        )
-        second_text = second.json()["messages"][0]["blocks"][0]["text"]
-        stable_part, volatile_part = second_text.split("::")
-        self.assertIn("Honor Harrington", stable_part)
-        self.assertEqual(volatile_part, "")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["session_id"], "test-session")
 
     def test_undefined_variable_returns_200_with_error(self) -> None:
         # Preview render failures return 200 with the error in the body —
@@ -433,14 +411,14 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertIsNone(error["line"])
 
     def test_undefined_input_attribute_carries_attr_name(self) -> None:
-        # `input.character` with no character supplied is the canonical
+        # `inputs.character` with no character supplied is the canonical
         # roleplay-prompt-just-opened case. The error should carry the
         # missing attribute name so the editor can match it against the
         # prompt's declared inputs and explain that it just needs filling.
         response = self.client.post(
             "/api/ai/preview",
             json={
-                "template_source": '{% role "user" %}{{ input.character }}{% endrole %}',
+                "template_source": '{% role "user" %}{{ inputs.character }}{% endrole %}',
                 "target_scene_id": self.scene_id,
                 "inputs": {},
             },
@@ -449,7 +427,7 @@ class PreviewEndpointTests(unittest.TestCase):
         error = response.json()["error"]
         self.assertEqual(error["kind"], "undefined")
         self.assertEqual(error["undefined_name"], "character")
-        # `input.*` keeps its dedicated messaging — no namespace is reported, so
+        # `inputs.*` keeps its dedicated messaging — no namespace is reported, so
         # the frontend still explains it as an undeclared/empty input (#1019).
         self.assertIsNone(error["undefined_namespace"])
 
@@ -646,12 +624,12 @@ class PreviewEndpointTests(unittest.TestCase):
         text = response.json()["messages"][0]["blocks"][0]["text"]
         self.assertEqual(text, "The Departure")
 
-    def test_inputs_are_available_as_input(self) -> None:
+    def test_inputs_are_available_as_inputs(self) -> None:
         response = self.client.post(
             "/api/ai/preview",
             json={
                 "template_source": (
-                    '{% role "user" %}Write {{ input.words }} words.{% endrole %}'
+                    '{% role "user" %}Write {{ inputs.words }} words.{% endrole %}'
                 ),
                 "target_scene_id": self.scene_id,
                 "inputs": {"words": 250},

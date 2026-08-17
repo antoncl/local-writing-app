@@ -981,7 +981,7 @@ class LoreAndPromptTests(MetadataValidationBase):
             created.id,
             SavePromptEntryRequest(
                 title="Brainstorm",
-                body='{% role "user" %}Talk about {{ input.topic }}.{% endrole %}',
+                body='{% role "user" %}Talk about {{ inputs.topic }}.{% endrole %}',
                 base_revision=created.revision,
                 entry_type=created.entry_type,
                 metadata={},

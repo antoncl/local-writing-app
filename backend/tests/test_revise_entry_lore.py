@@ -65,7 +65,7 @@ class ReviseEntryLoreGateTests(unittest.TestCase):
         env carries `lore_invoked` — the gate flag `build_preview` captures."""
         prompt = self.service.read_prompt_entry("builtin-revise-entry")
         env = create_environment_for_project(self.service)
-        text = env.from_string(prompt.body).render(input=inputs)
+        text = env.from_string(prompt.body).render(inputs=inputs)
         return text, env
 
     def test_create_render_flips_the_lore_gate(self) -> None:
@@ -118,7 +118,7 @@ class ReviseEntryLoreGateTests(unittest.TestCase):
         # settings (units/spelling/…), never the prose-generation POV/tense, so
         # the model develops descriptive fields free of the manuscript's POV.
         # Rendered WITH project context so the project-settings snippet is live
-        # (the _render harness passes only `input`, leaving the snippet inert).
+        # (the _render harness passes only `inputs`, leaving the snippet inert).
         current = self.service.read_project_node()
         self.service.save_project_node(
             SaveProjectNodeRequest(
@@ -131,7 +131,7 @@ class ReviseEntryLoreGateTests(unittest.TestCase):
         prompt = self.service.read_prompt_entry("builtin-revise-entry")
         env = create_environment_for_project(self.service)
         rendered = env.from_string(prompt.body).render(
-            input={"entry": "", "entry_type": "lore:character"},
+            inputs={"entry": "", "entry_type": "lore:character"},
             project=self.service.current_project(),
         )
         self.assertIn("metric", rendered)  # general facts still reach the brainstorm

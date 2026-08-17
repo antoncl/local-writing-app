@@ -16,7 +16,7 @@ inputs:
     presets: []
 ---
 
-{% set char = entry(input.character) %}
+{% set char = entry(inputs.character) %}
 {% role "system" %}
 You roleplay one character within an ongoing scene. Stay in voice, in motive, in the moment. Write that character's NEXT beat — action, dialogue, or both — and stop. One beat, not a paragraph of them.
 {% if 'tense' in project.metadata %}
@@ -63,4 +63,4 @@ You are playing **{{ char.title }}**.
    narration is plain user text. First invocation (no markers
    yet) sends the whole scene body as one user-narration
    message. Must be used OUTSIDE any role block. #}
-{{ character_thread(scene, input.character) }}
+{{ character_thread(scene, inputs.character) }}

@@ -267,6 +267,14 @@ class ChatSessionsMixin:
                 if request.lore_enabled is None
                 else request.lore_enabled
             ),
+            # ADR-0060 §2: the author-selected node ids, preserved like the lore
+            # gate. None from the request = "leave the captured value alone"
+            # (general saves), so only the lock-render save sets it.
+            used_node_ids=(
+                existing.used_node_ids
+                if request.used_node_ids is None
+                else request.used_node_ids
+            ),
             pinned=request.pinned,
             created_at=existing.created_at,
             updated_at=self._utcnow_iso(),

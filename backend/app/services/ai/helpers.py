@@ -346,18 +346,12 @@ def register_helpers(
 ) -> None:
     """Bind project-aware helpers to the given env. Idempotent.
 
-    If `session` is provided, `relevant_lore(..., partition="stable"|"volatile")`
-    becomes meaningful — entries' revisions are snapshotted into the session
-    and partitioned against its baseline.
-
-    If `journal` is provided (a list of ChatSessionJournalEntry), the
-    implicit mode of `relevant_lore` treats the journal as the source of
-    truth for textual detection: it skips its own alias scan and depth-1
-    textual expansion. The send-time pipeline is the single producer of
-    detected context for chat sessions; the helper becomes a read of what
-    that pipeline already deposited. Structural entity_ref expansion from
-    the scene's own metadata still runs — those are template-author
-    explicit picks the send pipeline doesn't see.
+    `session` and `journal` are accepted for API compatibility. They once fed
+    the emitting `relevant_lore()` Jinja global, which ADR-0060 §2 retired (a
+    template that emits lore double-includes it — ADR-0060 Context §3). The one
+    lore selector — the internal `_relevant_lore` — now runs only on the send
+    path (`chat.py::_lore_cache_blocks`), which threads its own session/journal
+    directly; no Jinja global reads them here anymore.
     """
     try:
         schema = project.read_metadata_schema()
@@ -379,8 +373,8 @@ def register_helpers(
                 _mutations_index_slot.append(None)
         return _mutations_index_slot[0]
 
-    # ADR-0057 §2: the execution-derived lore gate. `relevant_lore()` records
-    # that it ran into this per-render slot; the caller (build_preview) reads it
+    # ADR-0057 §2: the execution-derived lore gate. `use_lore()` / `use()` record
+    # that they ran into this per-render slot; the caller (build_preview) reads it
     # back after render to persist the chat's `lore_enabled`. The flag tracks
     # *invocation*, not a non-empty result — a lore-using prompt in a project
     # with no lore yet is still lore-enabled, so lore added later flows in. A
@@ -389,35 +383,49 @@ def register_helpers(
     lore_invoked_slot: list[bool] = [False]
     env.lore_invoked = lore_invoked_slot  # type: ignore[attr-defined]
 
+    # ADR-0060 §2: the author-selection channel. `use(node)` records the resolved
+    # node id into this per-render slot (deduped, insertion-ordered); `build_preview`
+    # reads it back after render onto `RenderedTemplate.used_node_ids`, whence it is
+    # persisted on the chat and unioned into the send path's one lore selector — the
+    # SAME dedupped set `relevant_lore` owns, never a rival matcher (ADR-0057
+    # anti-goal). A mutable list (not a bare local) so the nested helper appends
+    # through the closure; envs are per-render, so it never leaks across renders.
+    used_nodes_slot: list[str] = []
+    env.used_nodes = used_nodes_slot  # type: ignore[attr-defined]
+
     env.globals["last_words"] = last_words
     env.globals["pov"] = lambda scene: _pov(project, schema, scene)
     env.globals["scenes_before"] = lambda scene: _scenes_before(project, scene)
 
-    # `scene` defaults to None so a prompt with no scene anchor can call
-    # `relevant_lore()` bare (a create/revise brainstorm) — the scene is only the
-    # mutation-resolution anchor (as-of-scene state), which such prompts don't have.
-    # The `always` union and explicit refs still resolve without it.
-    def _relevant_lore_helper(scene: Any = None, mode: str = "implicit", partition: str = "all") -> str:
-        lore_invoked_slot[0] = True
-        return _relevant_lore(
-            project, scene, mode, partition, session, journal, index=_mutations_index()
-        )
-
-    env.globals["relevant_lore"] = _relevant_lore_helper
-
     # ADR-0057 §2 + docs/design/context-caching.md §4: the gate-only declaration.
     # A chat prompt that lets the backend place lore (the normal case) calls
-    # `use_lore()` — it flips the same lore-invoked gate `relevant_lore()` does,
-    # but emits nothing, because the send path selects, dedups, and places the
-    # lore itself, tiered stable/volatile per the revision baseline. Emitting lore
-    # from the template instead bakes it into the (frozen, sometimes uncached)
-    # prompt and double-counts against the send-path block. `relevant_lore()`
-    # stays available for a prompt that genuinely wants lore rendered inline.
+    # `use_lore()` — it flips the lore-invoked gate but emits nothing, because the
+    # send path selects, dedups, and places the lore itself, tiered stable/volatile
+    # per the revision baseline. Emitting lore from the template instead bakes it
+    # into the (frozen, sometimes uncached) prompt and double-counts against the
+    # send-path block (ADR-0060 Context §3) — which is why the emitting
+    # `relevant_lore()` global is retired; only the internal `_relevant_lore`
+    # function survives, on the send path (chat.py).
     def _use_lore() -> str:
         lore_invoked_slot[0] = True
         return ""
 
     env.globals["use_lore"] = _use_lore
+
+    # ADR-0060 §2: `use(node)` — "also include *this* node in context." Coerces its
+    # argument to an EntryRef exactly as `entry()` does (an id, an EntryRef, a dict,
+    # or a single context_pick value), records the resolved id, and flips the lore
+    # gate (using a node means the chat is lore-enabled). Emits nothing — the backend
+    # places and caches it — so it composes inside a loop over a picked list:
+    # `{% for p in inputs.picks %}{{ use(p) }}{% endfor %}`.
+    def _use(value: Any) -> str:
+        lore_invoked_slot[0] = True
+        ref = _coerce_entry_ref(project, schema, value)
+        if ref is not None and ref.id and ref.id not in used_nodes_slot:
+            used_nodes_slot.append(ref.id)
+        return ""
+
+    env.globals["use"] = _use
     env.globals["entry"] = lambda value: _coerce_entry_ref(project, schema, value)
     # As-of read (ADR-0055 §1): the same entry, resolved through `effective_state`
     # at `scene` instead of book-start. `scene` empty/None → a plain base read.
@@ -700,6 +708,7 @@ def _relevant_lore(
     session: AISession | None = None,
     journal: list[Any] | None = None,
     index: Any = None,
+    used_ids: list[str] | None = None,
 ) -> str:
     """Return a markdown block of lore entries relevant to `scene`.
 
@@ -727,7 +736,10 @@ def _relevant_lore(
         return ""
 
     scene_metadata = _attr_or_item(scene, "metadata")
-    direct = _collect_lore_refs_from_metadata(scene_metadata)
+    # ADR-0060 §2: author selections join the SAME direct channel as the scene's
+    # structural entity_ref picks — deduped by id with everything else, subject to
+    # the one `never` chokepoint below — never a second matcher (ADR-0057 anti-goal).
+    direct = _collect_lore_refs_from_metadata(scene_metadata) | set(used_ids or [])
 
     if mode == "explicit":
         ids = sorted(direct)

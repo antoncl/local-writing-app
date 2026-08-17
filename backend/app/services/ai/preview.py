@@ -22,7 +22,11 @@ from jinja2 import TemplateError, TemplateSyntaxError, UndefinedError
 from app.models import PreviewCacheBlock
 from app.services.ai import tokens as ai_tokens
 from app.services.ai.call_resolver import resolve_call_params
-from app.services.ai.helpers import EntryRef, create_environment_for_project
+from app.services.ai.helpers import (
+    EntryRef,
+    _coerce_entry_ref,
+    create_environment_for_project,
+)
 from app.services.ai.profiles.registry import profile_for
 from app.services.ai.sessions import AISession, default_registry
 from app.services.ai.templates import RenderedTemplate, render_template
@@ -64,6 +68,51 @@ def _find_marked_target_scene_id(inputs: dict[str, Any]) -> str | None:
                 if isinstance(scene_id, str) and scene_id:
                     return scene_id
     return None
+
+
+def _coerce_inputs(project_service, schema: Any, inputs: dict[str, Any]) -> dict[str, Any]:
+    """ADR-0060 §2: coerce `context_pick` input values to `list[EntryRef]` at the
+    bind layer, so the template author never learns the picks arrived as JSON on
+    the wire (no `fromjson` filter — rejected alternative). A picker value is a
+    JSON-encoded string of `[{id, kind, title, target?}, ...]`; parse it and wrap
+    each item into an EntryRef (reusing the same coercion `entry()`/`use()` use).
+    Non-picker values (plain strings, numbers, bools) pass through unchanged, so
+    `entry(inputs.x)` still works for a single pick (it takes `[0]`)."""
+    return {
+        name: _coerce_input_value(project_service, schema, value)
+        for name, value in inputs.items()
+    }
+
+
+def _coerce_input_value(project_service, schema: Any, value: Any) -> Any:
+    """One input value, coerced: a JSON-list string of picked refs becomes a
+    `list[EntryRef]`; anything else is returned untouched.
+
+    The coercion keys on the *picker shape*, not merely a `[...]`-looking string:
+    a `context_pick` always serializes as a JSON list of dicts (`{id, kind, …}`).
+    A plain `text`/`long_text` input whose value happens to look like a JSON array
+    of scalars (`["a","b"]`, `[1,2,3]`) is left as the author's string — otherwise
+    it would silently become an empty `list[EntryRef]` and break `{{ inputs.x }}`."""
+    if not isinstance(value, str):
+        return value
+    stripped = value.strip()
+    if not (stripped.startswith("[") and stripped.endswith("]")):
+        return value
+    try:
+        parsed = json.loads(stripped)
+    except (ValueError, TypeError):
+        return value
+    if not isinstance(parsed, list):
+        return value
+    # Only a context_pick is a list of dicts; a scalar list is a plain value.
+    if not all(isinstance(item, dict) for item in parsed):
+        return value
+    refs: list[EntryRef] = []
+    for item in parsed:
+        ref = _coerce_entry_ref(project_service, schema, item)
+        if ref is not None:
+            refs.append(ref)
+    return refs
 
 
 class _DateProxy:
@@ -157,7 +206,7 @@ def _namespace_for_object_type(context: dict[str, Any], obj_type: str | None) ->
 
     Derived from the live ``context`` (not hardcoded), first key wins so
     ``ProjectInfo`` resolves to ``project`` ahead of its ``novel`` alias.
-    ``input`` is deliberately excluded: undeclared/empty inputs keep their own
+    ``inputs`` is deliberately excluded: undeclared/empty inputs keep their own
     dedicated messaging, which keys on the leaf name, not the namespace.
     """
     if not obj_type:
@@ -167,7 +216,7 @@ def _namespace_for_object_type(context: dict[str, Any], obj_type: str | None) ->
     # ("dict object"); compare on the trailing class-name segment either way.
     short = obj_type.rsplit(".", 1)[-1]
     for key, value in context.items():
-        if key == "input":
+        if key == "inputs":
             continue
         if value is not None and type(value).__name__ == short:
             return key
@@ -255,22 +304,26 @@ def build_preview(
     except Exception:  # noqa: BLE001
         project_info = None
 
+    try:
+        schema = project_service.read_metadata_schema()
+    except Exception:  # noqa: BLE001
+        schema = None
+
     # Wrap the loaded scene as an EntryRef so templates can write
     # `scene.pov.title` instead of `scene.metadata.pov.title`. The wrapper
     # pre-fills `loaded=` so .title / .body don't trigger a re-read,
     # and helpers reach the raw payload via _attr_or_item's EntryRef path.
     if scene is not None:
-        try:
-            schema = project_service.read_metadata_schema()
-        except Exception:  # noqa: BLE001
-            schema = None
         scene = EntryRef(project_service, schema, scene.id, loaded=scene)
 
     context = {
         "scene": scene,
         "project": project_info,
         "novel": project_info,
-        "input": inputs,
+        # ADR-0060 §7: `inputs` (plural — "the inputs, named"). Values are coerced
+        # at this bind layer so a `context_pick` reaches the template as a
+        # `list[EntryRef]`, not the raw JSON string it travels as on the wire.
+        "inputs": _coerce_inputs(project_service, schema, inputs),
         "text_before": text_before,
         "text_after": text_after,
         "selection": selection,
@@ -286,10 +339,14 @@ def build_preview(
         session.commit()
 
     # ADR-0057 §2: carry the execution-derived lore gate off the env (set by the
-    # instrumented `relevant_lore()` helper) onto the rendered result, so the
-    # preview route can surface it and the chat can persist `lore_enabled`. The
-    # default `[False]` covers an env that never registered the helper.
+    # `use_lore()` / `use()` helpers) onto the rendered result, so the preview
+    # route can surface it and the chat can persist `lore_enabled`. The default
+    # `[False]` covers an env that never registered the helpers.
     rendered.lore_invoked = bool(getattr(env, "lore_invoked", [False])[0])
+    # ADR-0060 §2: carry the author-selected node ids off the env (set by `use()`)
+    # onto the rendered result, so the chat can persist `used_node_ids` and the
+    # send path unions them into its one lore selector.
+    rendered.used_node_ids = list(getattr(env, "used_nodes", []) or [])
 
     return rendered, session_id
 

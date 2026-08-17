@@ -14,26 +14,33 @@
 //   source      what it reads: scan tokens (inline) | the transcript (extract)
 //   review      how the result is reviewed: inline_mark | patch_diff
 //   activation  what fires it: inline (slash / selection toolbar) | conversation (＋New)
-// Behavioural — the two phases the activation surface drives:
-//   produce     inline → gather the scan source (identity generation);
-//               extract → the second-pass extractor (ADR-0063).
-//   apply       inline → stream at the destination behind the aiSuggestion mark;
-//               extract → write the node's fields after the diff.
+// Behavioural — the two phases the core drives polymorphically:
+//   produce(host)          run the transform → the thing to review (null = the
+//                          produce can't proceed, having reported why via `host`).
+//                          inline → gather the scan source; extract → the 2nd-pass
+//                          extractor (ADR-0063).
+//   apply(produced, host)  write it at the destination behind its review. inline →
+//                          stream at cursor/selection behind the aiSuggestion mark;
+//                          extract → publish the patch for the diff review.
 //
-// produce/apply are typed on each CONCRETE handler, not the shared base: the two
-// live on different activation surfaces (the prose editor vs the chat pane) with
-// genuinely different hosts, so a single generic signature would only buy an
-// `any`. The shared `OutputHandler` is the declarative bundle the registry holds
-// and routing reads; a unified produce/apply base is left for S3, when the bases
-// collapse and one loop drives both (YAGNI until then, per the ADR's minimality
-// rule: the base earns a method only when ≥2 handlers share its exact shape).
+// `produce`/`apply` live on the shared generic base `OutputHandler<Host, Produced>`
+// — the two handlers have different hosts, so the base is generic over them, and
+// each concrete handler binds its own (the ADR's minimality rule is met now that
+// two handlers share the exact shape). The host carries the state-bound primitives
+// (the streaming controller, the extraction + review publish); the handler is the
+// registered dispatch seam.
 //
-// Slice: S2a registers `inline` (continuation / revise / roleplay) and routes the
-// editor's inline dispatch through it. `extract_to_node` (the brainstorm commit)
-// joins in S2b; retiring the `output.kind` enum + re-authoring the built-ins is S3.
+// Slice: S2a registered `inline`; S2b adds `extract_to_node` (the brainstorm
+// commit) and lifts produce/apply onto the generic base. Retiring the
+// `output.kind` enum + re-authoring the built-ins is S3.
 
 import type { Editor } from "@tiptap/core";
-import type { EditableDocument, PromptEntrySummary, PromptOutput } from "@/lib/types";
+import type {
+  AIEntryPatch,
+  EditableDocument,
+  PromptEntrySummary,
+  PromptOutput,
+} from "@/lib/types";
 
 export type OutputHandlerKey = "inline" | "extract_to_node";
 export type OutputSource = "scan" | "transcript";
@@ -44,17 +51,21 @@ export type OutputActivation = "inline" | "conversation";
 export type InlineDestination = "cursor" | "selection";
 
 // How much surrounding prose a revise (selection) sends as context. Lives with
-// the gather it parameterises (moved here from the controller with the source
-// gathering it belongs to).
+// the gather it parameterises.
 export const REVISE_CONTEXT_CHARS = 600;
 
-// The declarative bundle — what every handler IS. The registry holds these; the
-// core reads them to route without branching on the old `output.kind`.
-export interface OutputHandler {
+// The generic base: the declarative bundle every handler IS, plus the two phases
+// the core drives. `Host` is the state-bound surface a handler needs (an editor
+// streaming controller, a chat's extraction + publish); `Produced` is what
+// `produce` yields for review. `produce` may return null to abort (message
+// already surfaced via the host).
+export interface OutputHandler<Host = unknown, Produced = unknown> {
   readonly key: OutputHandlerKey;
   readonly source: OutputSource;
   readonly review: OutputReview;
   readonly activation: OutputActivation;
+  produce(host: Host): Produced | null | Promise<Produced | null>;
+  apply(produced: Produced, host: Host): void | Promise<void>;
 }
 
 // One invocation's identity, shared by both phases of an inline run.
@@ -65,9 +76,10 @@ export interface OutputRun {
   scene: EditableDocument;
 }
 
+// ── inline ──────────────────────────────────────────────────────────────────
+
 // The gathered scan source — `produce`'s output for the inline handler. The
-// destination rides along so `apply` (streaming) knows cursor-vs-selection
-// without re-reading the kind.
+// destination rides along so `apply` (streaming) knows cursor-vs-selection.
 export interface InlineGathered {
   destination: InlineDestination;
   from: number;
@@ -80,34 +92,24 @@ export interface InlineGathered {
 // What the inline handler needs from its activation surface (the
 // AiSuggestionController). `streamInline` is the controller's streaming
 // primitive — the stream stays bound to the controller's reactive state (the
-// pending mark, accept/revert/retry, telemetry), so `apply` delegates to it
-// rather than reimplementing it.
+// pending mark, accept/revert/retry, telemetry), so `apply` delegates to it.
 export interface InlineHost {
+  destination: InlineDestination;
   getEditor(): Editor | null;
   setError(message: string, anchor?: number): void;
   streamInline(gathered: InlineGathered): Promise<void>;
 }
 
-export interface InlineOutputHandler extends OutputHandler {
-  readonly key: "inline";
-  // produce: gather the scan source for the destination. Returns null when the
-  // gather can't proceed (e.g. an empty selection) — having already reported it
-  // via host.setError, exactly as the old inline branch did.
-  produce(host: InlineHost, destination: InlineDestination): InlineGathered | null;
-  // apply: stream the generation at the destination behind the aiSuggestion mark.
-  apply(gathered: InlineGathered, host: InlineHost): Promise<void>;
-}
-
-export const inlineHandler: InlineOutputHandler = {
+export const inlineHandler: OutputHandler<InlineHost, InlineGathered> = {
   key: "inline",
   source: "scan",
   review: "inline_mark",
   activation: "inline",
 
-  produce(host, destination) {
+  produce(host) {
     const editor = host.getEditor();
     if (!editor) return null;
-    if (destination === "selection") {
+    if (host.destination === "selection") {
       const sel = editor.state.selection;
       const from = sel.from;
       const to = sel.to;
@@ -125,14 +127,14 @@ export const inlineHandler: InlineOutputHandler = {
       const afterEnd = Math.min(docSize, to + REVISE_CONTEXT_CHARS);
       const textBefore = editor.state.doc.textBetween(beforeStart, from, "\n\n", " ");
       const textAfter = editor.state.doc.textBetween(to, afterEnd, "\n\n", " ");
-      return { destination, from, to, textBefore, textAfter, selectionText };
+      return { destination: "selection", from, to, textBefore, textAfter, selectionText };
     }
     const from = editor.state.selection.from;
     const to = from;
     const docSize = editor.state.doc.content.size;
     const textBefore = editor.state.doc.textBetween(0, from, "\n\n", " ");
     const textAfter = editor.state.doc.textBetween(from, docSize, "\n\n", " ");
-    return { destination, from, to, textBefore, textAfter };
+    return { destination: "cursor", from, to, textBefore, textAfter };
   },
 
   apply(gathered, host) {
@@ -140,27 +142,49 @@ export const inlineHandler: InlineOutputHandler = {
   },
 };
 
+// ── extract_to_node ─────────────────────────────────────────────────────────
+
+// What the extract handler needs from the chat pane (the ChatCommitController).
+// Both phases are bound to the controller's state (cost attribution, the
+// cross-pane review store), so — as with inline's stream — they delegate to the
+// host: `extract` runs the transcript through the second-pass extractor and
+// returns the validated patch (null on failure, message already surfaced);
+// `publish` hands the patch to its diff review.
+export interface ExtractHost {
+  extract(): Promise<AIEntryPatch | null>;
+  publish(patch: AIEntryPatch): void | Promise<void>;
+}
+
+export const extractHandler: OutputHandler<ExtractHost, AIEntryPatch> = {
+  key: "extract_to_node",
+  source: "transcript",
+  review: "patch_diff",
+  activation: "conversation",
+  produce: (host) => host.extract(),
+  apply: (patch, host) => host.publish(patch),
+};
+
+// ── registry + routing ──────────────────────────────────────────────────────
+
 // The registry — the single import-time seam (ADR-0058). A new output behaviour
 // is a new handler object + one line here, never a new core branch.
-const _REGISTRY: Partial<Record<OutputHandlerKey, OutputHandler>> = {
-  [inlineHandler.key]: inlineHandler,
+const _REGISTRY: Record<OutputHandlerKey, OutputHandler> = {
+  inline: inlineHandler as OutputHandler,
+  extract_to_node: extractHandler as OutputHandler,
 };
 
 // The inline destination a kind implies (append → cursor, replace → selection).
-// The one place the two inline `output.kind` values map to the destination
-// sub-choice.
 export function inlineDestinationFor(output: PromptOutput | null | undefined): InlineDestination {
   return output?.kind === "replace_selection" ? "selection" : "cursor";
 }
 
-// Route a prompt's output to its handler. S2a resolves only the inline behaviour
-// (append_to_body / replace_selection); chat_panel and commit stay with their
-// current consumers until extract_to_node registers in S2b. Returns null for
-// anything this registry doesn't yet own.
+// Route a prompt's output to its handler. A `commit` is the extract_to_node
+// bundle (it only rides on chat_panel, so its presence is the whole test); the
+// two inline kinds are the inline bundle; a plain chat_panel (general) and an
+// unset/unknown kind have no handler (the result stays in the chat).
 export function outputHandlerFor(output: PromptOutput | null | undefined): OutputHandler | null {
+  if (output?.commit) return _REGISTRY.extract_to_node;
   const kind = output?.kind;
-  if (kind === "append_to_body" || kind === "replace_selection") {
-    return _REGISTRY.inline ?? null;
-  }
+  if (kind === "append_to_body" || kind === "replace_selection") return _REGISTRY.inline;
   return null;
 }

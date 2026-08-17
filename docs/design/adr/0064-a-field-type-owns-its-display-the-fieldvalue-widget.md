@@ -1,6 +1,7 @@
 # ADR-0064: A field type owns its read-only display — the FieldValue widget
 
 - Status: **Accepted** — 2026-08-17 (Anton). Approved over the prompt/field-system design session.
+- **Amendment 1 (2026-08-17, Anton):** `DriftReport` is **removed from scope**. It is a *diff* surface under ADR-0044's colour rule — *cool = the snapshot's side, warm = now* — and `FieldValue`'s self-coloured widgets would show (e.g.) a green "alive" pill on **both** sides, erasing the side-signal the report exists to give; it also carries no field definitions to hand the widget. Its plain-text-with-diff-colour is correct by design, not the divergence the survey flagged. `FieldValue` unification therefore covers the metadata rail, chat's structured diff, the create-draft card, and (S3) NodeRow — **not** the drift report. Read every `DriftReport` mention below as superseded by this. (Landed with S2, PR #1118.)
 - Issue: #1108 · Pre-1.0 (no release milestone)
 - Follows: the inputs/fields-uniformity rule (the *same edit widget per type* across a definition default, options, and the runtime value — GH #40/#36), ADR-0029 (the field model; presentation ops are category-independent), the UI widget taxonomy (NodeRow / NodeList / NodeEditor + the color-system widgets)
 - Relates: ADR-0046 / ADR-0044 (the entry-patch diff review already reuses the rail's read-only field widgets)

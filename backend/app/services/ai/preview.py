@@ -86,7 +86,13 @@ def _coerce_inputs(project_service, schema: Any, inputs: dict[str, Any]) -> dict
 
 def _coerce_input_value(project_service, schema: Any, value: Any) -> Any:
     """One input value, coerced: a JSON-list string of picked refs becomes a
-    `list[EntryRef]`; anything else is returned untouched."""
+    `list[EntryRef]`; anything else is returned untouched.
+
+    The coercion keys on the *picker shape*, not merely a `[...]`-looking string:
+    a `context_pick` always serializes as a JSON list of dicts (`{id, kind, …}`).
+    A plain `text`/`long_text` input whose value happens to look like a JSON array
+    of scalars (`["a","b"]`, `[1,2,3]`) is left as the author's string — otherwise
+    it would silently become an empty `list[EntryRef]` and break `{{ inputs.x }}`."""
     if not isinstance(value, str):
         return value
     stripped = value.strip()
@@ -97,6 +103,9 @@ def _coerce_input_value(project_service, schema: Any, value: Any) -> Any:
     except (ValueError, TypeError):
         return value
     if not isinstance(parsed, list):
+        return value
+    # Only a context_pick is a list of dicts; a scalar list is a plain value.
+    if not all(isinstance(item, dict) for item in parsed):
         return value
     refs: list[EntryRef] = []
     for item in parsed:

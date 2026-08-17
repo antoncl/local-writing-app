@@ -164,3 +164,40 @@ def test_context_pick_input_iterates_as_entry_ref_list(tmp_path, monkeypatch):
     # {% for p in inputs.picks %}{{ use(p) }} selected BOTH picks, in order.
     assert rendered.used_node_ids == [alpha.id, beta.id]
     assert rendered.lore_invoked is True
+
+
+def test_json_array_of_scalars_is_not_coerced(tmp_path, monkeypatch):
+    # ADR-0060 §2: the bind-layer coercion keys on the picker SHAPE (a JSON list
+    # of dicts), not merely a `[...]`-looking string. A plain text input whose
+    # value is a JSON array of scalars must reach the template as the string —
+    # not silently become an (empty) list[EntryRef], which would break
+    # `{{ inputs.x }}`.
+    monkeypatch.setattr(
+        "app.services.machine_settings.config_path",
+        lambda: tmp_path / "machine_settings.yaml",
+    )
+    from app.services.ai.preview import PreviewRequest, build_preview
+    from app.services.project_service import ProjectService
+
+    service = ProjectService.created_at(tmp_path / "project", "Picks")
+    rendered, _ = build_preview(
+        service,
+        PreviewRequest(
+            template_source=(
+                '{% role "system" %}'
+                "len={{ inputs.notes | length }} val={{ inputs.notes }}"
+                "{% endrole %}"
+            ),
+            target_scene_id="",
+            session_id=None,
+            inputs={"notes": '["a", "b"]'},
+            text_before="",
+            text_after="",
+            commit=False,
+        ),
+    )
+    text = "".join(m.text for m in rendered.messages)
+    # Left as the raw string: `| length` is the 10-char string length and the
+    # literal renders — NOT coerced to a 0-length EntryRef list.
+    assert "len=10" in text
+    assert 'val=["a", "b"]' in text

@@ -8,8 +8,8 @@
   so ChatBodyView stays under the file-size cap.
 -->
 <script lang="ts">
-  import { metadataValueDisplayString } from "@/lib/utils/schemaTypeHelpers";
-  import type { EntryPatch, MetadataSchema } from "@/lib/types";
+  import FieldValue from "@/components/widgets/FieldValue.svelte";
+  import type { EntryPatch, MetadataFieldDefinition, MetadataSchema, MetadataValue } from "@/lib/types";
 
   interface Props {
     draft: EntryPatch;
@@ -28,16 +28,21 @@
       ? draft.fields.title.trim()
       : "(untitled)",
   );
+  // Render each proposed value through the canonical FieldValue widget (ADR-0064),
+  // so the review reads exactly like the metadata rail — a select as its pill, a
+  // boolean as a toggle — never a raw string dump. References are never proposed
+  // (ADR-0046), so no ref roster is needed here; a field the schema doesn't define
+  // degrades to a plain text display.
   let fieldRows = $derived(
     Object.entries(draft.fields)
       .filter(([id]) => id !== "title")
       .map(([id, value]) => ({
         id,
         label: metadataSchema?.fields?.[id]?.name ?? id,
-        // The shared record-aware rule (#698): this card is the ONLY review
-        // surface before create — a list of records must read as its member
-        // values, never "[object Object]".
-        value: metadataValueDisplayString(value),
+        field:
+          metadataSchema?.fields?.[id] ??
+          ({ name: id, type: "text", options: [] } as MetadataFieldDefinition),
+        value: value as MetadataValue,
       })),
   );
 </script>
@@ -55,7 +60,7 @@
         {#each fieldRows as row (row.id)}
           <div class="edc-field">
             <dt>{row.label}</dt>
-            <dd>{row.value || "—"}</dd>
+            <dd><FieldValue field={row.field} value={row.value} ariaLabel={row.label} /></dd>
           </div>
         {/each}
       </dl>

@@ -431,23 +431,28 @@ class PreviewEndpointTests(unittest.TestCase):
         # the frontend still explains it as an undeclared/empty input (#1019).
         self.assertIsNone(error["undefined_namespace"])
 
-    def test_project_namespace_attribute_miss_reports_namespace(self) -> None:
-        # `project.language` is a wrong path — a project's authored fields live
-        # under `project.metadata`, not on `project` itself. That is a namespace
-        # attribute miss, not a missing input, so the error carries the namespace
-        # ("project") and the frontend can suggest project.metadata.* (#1019).
+    def test_project_field_sugar_supersedes_namespace_miss(self) -> None:
+        # ADR-0060 §3 overturns #1019's "namespace attribute miss": `project.<field>`
+        # is now valid sugar for the project node's authored metadata (`.metadata`
+        # kept as the escape). A key no layer authors is simply ABSENT — falsy,
+        # guardable with `{% if %}`, consistent with how an entry's absent field
+        # reads — NOT a namespace error steering the author to `project.metadata.*`.
         response = self.client.post(
             "/api/ai/preview",
             json={
-                "template_source": '{% role "user" %}{{ project.language }}{% endrole %}',
+                "template_source": (
+                    '{% role "user" %}'
+                    "{% if project.language %}has{% else %}absent{% endif %}"
+                    "{% endrole %}"
+                ),
                 "target_scene_id": self.scene_id,
             },
         )
         self.assertEqual(response.status_code, 200, response.text)
-        error = response.json()["error"]
-        self.assertEqual(error["kind"], "undefined")
-        self.assertEqual(error["undefined_name"], "language")
-        self.assertEqual(error["undefined_namespace"], "project")
+        body = response.json()
+        self.assertIsNone(body["error"])
+        text = "".join(b["text"] for b in body["messages"][0]["blocks"])
+        self.assertEqual(text, "absent")
 
     def test_empty_target_scene_id_leaves_scene_none(self) -> None:
         # A template that branches on `scene` should see it as falsy.

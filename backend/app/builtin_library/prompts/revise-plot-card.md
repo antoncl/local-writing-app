@@ -34,12 +34,12 @@ Reason about the plot from the board below. The arcs list the beats the story wa
 {% else %}
 _(This card has no synopsis yet.)_
 {% endif %}
-{% for f in field_catalog(e) if f.type == "long_text" and f.id != "body" %}
+{% for f in fields(e) if f.proposable and f.type == "long_text" and f.id != "body" %}
 
 ### {{ f.label }} ({{ f.id }})
 {{ e.metadata.get(f.id) or "_(empty)_" }}
 {% endfor %}
-{% set current = field_catalog(e) | rejectattr("type", "equalto", "long_text") | rejectattr("id", "equalto", "title") | list %}
+{% set current = fields(e) | selectattr("proposable") | rejectattr("type", "equalto", "long_text") | rejectattr("id", "equalto", "title") | list %}
 {% if current %}
 
 ### Fields to develop

@@ -12,14 +12,14 @@ entry_type: prompt:snippet
   The narrative-craft settings (POV + tense) are deliberately NOT here — they
   live in `builtin-prose-settings` and belong only in manuscript-prose prompts,
   so a first-person project doesn't push metadata-field brainstorms into first
-  person (#1076). Labels + display order come from field_catalog("project:project")
-  (computed fields like Path and AI cost are already excluded); values from
-  project.metadata. `color`/`pov_mode`/`tense` are skipped and empty fields are
-  omitted, so the block disappears entirely when nothing is set.
+  person (#1076). Labels + display order come from fields("project:project"),
+  kept to `f.proposable` so computed fields (Path, AI cost) stay excluded; values
+  from project.metadata. `color`/`pov_mode`/`tense` are skipped and empty fields
+  are omitted, so the block disappears entirely when nothing is set.
 #}
 {%- if project is defined and project and project.metadata -%}
 {%- set ns = namespace(rows=[]) -%}
-{%- for f in field_catalog("project:project") if f.id not in ["color", "pov_mode", "tense"] -%}
+{%- for f in fields("project:project") if f.proposable and f.id not in ["color", "pov_mode", "tense"] -%}
 {%- set val = project.metadata.get(f.id) -%}
 {%- if val is not none and val != "" -%}{%- set ns.rows = ns.rows + [(f.label, val)] -%}{%- endif -%}
 {%- endfor -%}

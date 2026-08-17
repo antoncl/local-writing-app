@@ -97,7 +97,7 @@ class ReviseEntryLoreGateTests(unittest.TestCase):
         # #1067: the create brainstorm seed must list `body` among the fields to
         # develop, carrying its delineating description — otherwise the model is
         # never told the entry has a body to write. (Regressed when #1063
-        # excluded body from `field_catalog` globally.)
+        # excluded body from the field roster globally.)
         rendered, _ = self._render({"entry": "", "entry_type": "lore:character"})
         self.assertIn("these fields to develop", rendered)
         self.assertIn("body (Body)", rendered)  # enumerated in the field list

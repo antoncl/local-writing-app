@@ -40,12 +40,12 @@ You don't output the structured result yourself — when the author commits, a s
 {% else %}
 _(This entry has no body yet.)_
 {% endif %}
-{% for f in field_catalog(e) if f.type == "long_text" and f.id != "body" %}
+{% for f in fields(e) if f.proposable and f.type == "long_text" and f.id != "body" %}
 
 ### {{ f.label }} ({{ f.id }})
 {{ e.metadata.get(f.id) or "_(empty)_" }}
 {% endfor %}
-{% set current = field_catalog(e) | rejectattr("type", "equalto", "long_text") | rejectattr("id", "equalto", "title") | list %}
+{% set current = fields(e) | selectattr("proposable") | rejectattr("type", "equalto", "long_text") | rejectattr("id", "equalto", "title") | list %}
 {% if current %}
 
 ### Fields to develop
@@ -55,12 +55,12 @@ _(This entry has no body yet.)_
 {% endfor %}
 {% endif %}
 {% else %}
-You are an ideation partner helping the author create a new {{ entry_type_label(draft_type) }} from scratch, working toward a concrete, committable entry. Brainstorm — ask questions, propose directions, develop it together — but steer toward a complete entry and don't circle. Once you have enough, propose a concrete draft in prose and say it's ready to commit; stop asking questions past that point.
+You are an ideation partner helping the author create a new {{ type_name(draft_type) }} from scratch, working toward a concrete, committable entry. Brainstorm — ask questions, propose directions, develop it together — but steer toward a complete entry and don't circle. Once you have enough, propose a concrete draft in prose and say it's ready to commit; stop asking questions past that point.
 
 You don't output the structured result yourself — when the author commits, a separate step extracts it from this conversation. Keep the discussion in prose.
 
-The {{ entry_type_label(draft_type) }} has these fields to develop:
-{% for f in field_catalog(draft_type) %}
+The {{ type_name(draft_type) }} has these fields to develop:
+{% for f in fields(draft_type) if f.proposable %}
 - {{ f.id }} ({{ f.label }}) — {{ f.type }}{% if f.options %}; one of: {{ f.options | join(", ") }}{% endif %}{% if f.description %} — {{ f.description }}{% endif %}
 {% else %}
 - (just a title and body)

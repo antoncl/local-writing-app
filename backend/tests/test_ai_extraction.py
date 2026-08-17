@@ -52,8 +52,9 @@ def _chat_reply(content: str, *, ok: bool = True, cost_usd: float | None = 0.01)
 
 
 class ExtractionContractTests(unittest.TestCase):
-    """The generated contract is built from `field_catalog`, so it names real
-    field ids / option values; `commit.fields` narrows which it enumerates."""
+    """The generated contract is built from `fields` (kept to `f.proposable`), so
+    it names real field ids / option values; `commit.fields` narrows which it
+    enumerates."""
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
@@ -64,7 +65,7 @@ class ExtractionContractTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
-    def test_default_revise_contract_has_body_and_field_catalog(self) -> None:
+    def test_default_revise_contract_has_body_and_fields(self) -> None:
         contract = render_extraction_contract(
             self.service, entry_type="lore:character", creating=False
         )
@@ -73,7 +74,7 @@ class ExtractionContractTests(unittest.TestCase):
         # `- body (Body) — long_text` entry in the generic field loop (it commits
         # as the top-level "body" key, not under "fields").
         self.assertNotIn("body (Body)", contract)
-        # Straight from field_catalog — a select is named with its options.
+        # Straight from the proposable roster — a select is named with its options.
         self.assertIn("allegiance", contract)
         self.assertIn("one of: order, chaos", contract)
         # Revise title handling, not create's.
@@ -247,7 +248,7 @@ class ExtractEndpointTests(unittest.TestCase):
         self.assertEqual(body["patch"]["fields"], {"bio": "New bio."})
         self.assertEqual(body["cost_usd"], 0.03)
         # The extraction turn ships the freshly-rendered contract as its system
-        # prompt (built from field_catalog), the transcript, then the extract cue
+        # prompt (built from `fields`), the transcript, then the extract cue
         # (a distinct trailing user turn since the transcript ends on assistant).
         sent = mock_chat.call_args.args[1]
         self.assertIn("allegiance", sent.system_prompt)

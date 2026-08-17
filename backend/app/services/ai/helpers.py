@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 from xml.sax.saxutils import escape as xml_escape
 from xml.sax.saxutils import quoteattr
 
+from jinja2 import pass_context
 from jinja2.sandbox import SandboxedEnvironment
 
 from app.services.ai.entry_patch import (
@@ -41,6 +42,11 @@ if TYPE_CHECKING:
     from app.services.project_service import ProjectService
 
 VALID_PARTITIONS = {"all", "stable", "volatile"}
+
+# Sentinel distinguishing "the `at=` anchor was omitted" (use the prompt's
+# ambient scene) from "at=None passed explicitly" (book-start). See the `entry()`
+# global in `register_helpers` (ADR-0060 §3).
+_UNSET = object()
 
 # Per-entry context policy. Default "auto" preserves the pre-policy
 # alias-match behavior for every entry that omits the field.
@@ -142,25 +148,27 @@ def _coerce_entry_ref_as_of(
     schema: Any,
     value: Any,
     scene: Any,
+    position: int | None = None,
     index: Any = None,
 ) -> EntryRef | None:
-    """Backs the `entry_as_of()` Jinja global (ADR-0055 §1): like `entry()`, but
-    the returned EntryRef's fields are resolved **as of** a scene rather than at
-    book-start. Every field the entry carries a live mutation for (title/body and
-    any metadata field) is overlaid with its effective value at end-of-`scene`;
-    unmutated fields keep their base value.
+    """Resolve an entry **as of** a scene — the engine behind `entry(x)` /
+    `entry(x, at=scene)` (ADR-0060 §3, was ADR-0055 §1's `entry_as_of`). The
+    returned EntryRef's fields are overlaid with their effective value at
+    `scene` (title/body and any mutated metadata field); unmutated fields keep
+    their book-start value, read uniformly by attribute (`entry(x, at=s).rank`).
 
     `scene` accepts any form a `context_pick` / entity input carries — a bare
     scene id (the launch seed), the picker's JSON list (the writer's choice), a
     dict/EntryRef — resolved through `_coerce_entry_ref` like `entry()`'s own arg.
 
-    Degrades to a plain base read (exactly `entry()`) when there is no anchor —
-    no/empty scene, a scene outside the manuscript, a non-lore or unmutated
-    entry — so a subject-anchored prompt with no anchor set behaves as before.
+    Degrades to a plain book-start read (exactly `original(x)`) when there is no
+    anchor — no/empty scene, a scene outside the manuscript, a non-lore or
+    unmutated entry — so a subject-anchored prompt with no anchor set behaves as
+    before.
 
-    Scene granularity only (`position=END_OF_SCENE`, the `effective_state`
-    default): every marker in the scene counts as live. A sub-scene cursor
-    anchor is a deferred refinement (ADR-0055 §1, "optionally a prose position").
+    `position` is the optional within-scene cursor (`effective_state`'s
+    `position`; default `END_OF_SCENE`, every marker in the scene live) — the
+    `effective()` capability preserved on this path per ADR-0060 §3.
     """
     ref = _coerce_entry_ref(project, schema, value)
     if ref is None:
@@ -173,7 +181,7 @@ def _coerce_entry_ref_as_of(
     if base is None:
         return ref
     try:
-        overrides = project.effective_state(ref.id, scene_id, index=index)
+        overrides = project.effective_state(ref.id, scene_id, position, index)
     except Exception:
         overrides = {}
     # Read base once: hand it to the EntryRef as `loaded=` even with no overrides,
@@ -208,7 +216,7 @@ def _coerce_effective_value(project: ProjectService, schema: Any, field: str, ra
     """Coerce one `effective_state` value to its field's native type: a collection
     already resolves to the list to hand back as-is (ADR-0009); a scalar marker is
     a string that `_coerce_mutation_value` turns back into a number/bool/etc. so an
-    as-of value matches a base value. Shared by `effective()` and `entry_as_of()`."""
+    as-of value matches a book-start value. Used by the `entry(x, at=…)` overlay."""
     if isinstance(raw, list):
         return raw
     field_def = getattr(schema, "fields", {}).get(field) if schema is not None else None
@@ -216,18 +224,19 @@ def _coerce_effective_value(project: ProjectService, schema: Any, field: str, ra
     return project._coerce_mutation_value(raw, field_type)
 
 
-def _field_catalog(project: ProjectService, schema: Any, value: Any) -> list[dict[str, Any]]:
-    """Backing the `field_catalog()` Jinja global.
+def _fields(project: ProjectService, schema: Any, value: Any) -> list[dict[str, Any]]:
+    """Backing the `fields()` Jinja global (ADR-0060 §3, was `field_catalog`).
 
-    Returns the AI-proposable fields of a lore type as `{id, label, type,
-    options?}` descriptors, in the type's display order — the catalog the
-    `revise:entry` template hands the model so a committed patch names real
-    field ids with legal option values (ADR-0046 §4/§6.3). ``value`` may be an
-    *entry* (revise mode — its resolved type is used) or an *entry_type FQN
-    string* (create mode, §6.4 — no entry exists yet, so the type to draft is
-    named directly). References and computed fields are excluded (never
-    proposed); the template filters the rest by type. Empty when the type can't
-    be resolved — the template degrades to a body-only instruction.
+    Returns the **full** field roster of a lore type as `{id, label, type,
+    options, description, proposable}` descriptors, in the type's display order.
+    Nothing is hidden and nothing is enforced: `proposable` is an **advisory**
+    flag (structurally `false` for computed / reference / hidden fields) that the
+    template reads and decides on — `{% for f in fields(x) if f.proposable %}` is
+    the author's choice, not a gate (`author_vs_runtime_authority`: trust the
+    designer). ``value`` may be an *entry* (revise mode — its resolved type is
+    used) or an *entry_type FQN string* (create mode, §6.4 — no entry exists yet,
+    so the type to draft is named directly). Empty when the type can't be
+    resolved — the template degrades to a body-only instruction.
     """
     if schema is None:
         return []
@@ -251,8 +260,6 @@ def _field_catalog(project: ProjectService, schema: Any, value: Any) -> list[dic
     catalog: list[dict[str, Any]] = []
     for field_id in definition.fields:
         field = schema.fields.get(field_id)
-        if not is_proposable_field(field_id, field):
-            continue
         # `options` is always present (empty when the field has none) so the
         # create template can test `f.options` without hitting StrictUndefined.
         # For `list` fields the top-level options are SUPPRESSED: the select
@@ -274,6 +281,11 @@ def _field_catalog(project: ProjectService, schema: Any, value: Any) -> list[dic
             # proposes on-target values. Always present (None when unset) so the
             # template can test `f.description` without hitting StrictUndefined.
             "description": field.description,
+            # Advisory (ADR-0060 §3): whether it makes sense to ask the AI to
+            # compute a value — `false` for computed / reference / hidden fields.
+            # The template decides what to do with it; the roster is never
+            # pre-filtered on it (retires the old `is_proposable_field` gate).
+            "proposable": is_proposable_field(field_id, field),
         }
         # List fields (#698): describe the item shape so the model emits
         # legal items — flat scalars for item_type sugar, member-keyed maps
@@ -297,11 +309,11 @@ def _field_catalog(project: ProjectService, schema: Any, value: Any) -> list[dic
     return catalog
 
 
-def _entry_type_label(schema: Any, entry_type: Any) -> str:
-    """The human name of an entry_type FQN for a prompt instruction (ADR-0046
-    §6.4 create mode: "draft a new {{ entry_type_label(input.entry_type) }}").
-    Falls back to the FQN's last segment, then the FQN itself, so a template
-    never renders an empty noun."""
+def _type_name(schema: Any, entry_type: Any) -> str:
+    """The human name of an entry_type FQN for a prompt instruction (ADR-0060 §7,
+    was `entry_type_label`; ADR-0046 §6.4 create mode: "draft a new
+    {{ type_name(inputs.entry_type) }}"). Falls back to the FQN's last segment,
+    then the FQN itself, so a template never renders an empty noun."""
     fqn = entry_type if isinstance(entry_type, str) else ""
     if schema is not None and fqn:
         definition = schema.entry_types.get(fqn)
@@ -426,20 +438,28 @@ def register_helpers(
         return ""
 
     env.globals["use"] = _use
-    env.globals["entry"] = lambda value: _coerce_entry_ref(project, schema, value)
-    # As-of read (ADR-0055 §1): the same entry, resolved through `effective_state`
-    # at `scene` instead of book-start. `scene` empty/None → a plain base read.
-    env.globals["entry_as_of"] = lambda value, scene: _coerce_entry_ref_as_of(
-        project, schema, value, scene, index=_mutations_index()
-    )
-    env.globals["field_catalog"] = lambda value: _field_catalog(project, schema, value)
-    env.globals["entry_type_label"] = lambda value: _entry_type_label(schema, value)
-    env.globals["base"] = lambda entity, field: _base_field(project, schema, entity, field)
-    env.globals["effective"] = (
-        lambda entity, field, scene, position=None: _effective_field(
-            project, schema, entity, field, scene, position, index=_mutations_index()
+    # ADR-0060 §3: one scene-anchored constructor. `entry(x)` resolves x **as of
+    # the prompt's ambient `scene`** (the single ADR-0012 anchor) when there is
+    # one, book-start when there is not — the common "this node as it is here"
+    # default. `entry(x, at=s)` names an explicit anchor (a different scene, or a
+    # picked scene); an explicit `at=None` forces book-start; `position=` is the
+    # optional within-scene cursor. `@pass_context` hands the helper the render
+    # context so it can read the ambient `scene` the template was invoked with —
+    # the scene-less path skips building the mutations index it never needs.
+    @pass_context
+    def _entry(ctx: Any, value: Any, at: Any = _UNSET, position: int | None = None) -> Any:
+        scene = ctx.get("scene") if at is _UNSET else at
+        if scene is None or scene == "":
+            return _coerce_entry_ref(project, schema, value)
+        return _coerce_entry_ref_as_of(
+            project, schema, value, scene, position, index=_mutations_index()
         )
-    )
+
+    env.globals["entry"] = _entry
+    # ADR-0060 §3: the one clearly-named book-start read, ignoring every mutation.
+    env.globals["original"] = lambda value: _coerce_entry_ref(project, schema, value)
+    env.globals["fields"] = lambda value: _fields(project, schema, value)
+    env.globals["type_name"] = lambda value: _type_name(schema, value)
     env.globals["full_outline"] = lambda: _full_outline(project)
     env.globals["full_text"] = lambda: _full_text(project)
     env.globals["character_thread"] = (
@@ -562,54 +582,6 @@ def _scene_id_of(scene: Any) -> str | None:
     if isinstance(scene, str):
         return scene or None
     return _attr_or_item(scene, "id")
-
-
-def _entity_id_of(project: ProjectService, schema: Any, entity: Any) -> str | None:
-    """The lore id from whatever a template passed as `entity` — an id string,
-    an EntryRef, or a context_pick value (via `_coerce_entry_ref`)."""
-    if isinstance(entity, str):
-        return entity or None
-    ref = _coerce_entry_ref(project, schema, entity)
-    return ref.id if ref is not None else None
-
-
-def _base_field(project: ProjectService, schema: Any, entity: Any, field: str) -> Any:
-    """The entry's **base** (book-start) value for `field` — the stored lore
-    value, ignoring any mutation. Backs the `base()` Jinja helper so a template
-    can show "then vs. now" (ADR-0006)."""
-    entity_id = _entity_id_of(project, schema, entity)
-    if not entity_id:
-        return None
-    return _get_field(_safe_read_lore(project, entity_id), field)
-
-
-def _effective_field(
-    project: ProjectService,
-    schema: Any,
-    entity: Any,
-    field: str,
-    scene: Any,
-    position: int | None = None,
-    index: Any = None,
-) -> Any:
-    """The **effective** value of `field` for `entity` as of `scene` — the live
-    mutation if one applies there, else the base value. Backs the `effective()`
-    Jinja helper; this is the field-query surface that carries structured fields
-    like `rank` that the `<lore>` block does not render (§4.2, ADR-0006)."""
-    entity_id = _entity_id_of(project, schema, entity)
-    scene_id = _scene_id_of(scene)
-    if not entity_id or not scene_id:
-        return _base_field(project, schema, entity, field)
-    try:
-        overrides = project.effective_state(entity_id, scene_id, position, index)
-    except Exception:
-        overrides = {}
-    if field in overrides:
-        # Collection → the resolved list as-is; scalar → coerced to the field's
-        # native type so `effective(...)` matches `base(...)` (shared with the
-        # `entry_as_of` overlay so the two helpers can't drift).
-        return _coerce_effective_value(project, schema, field, overrides[field])
-    return _get_field(_safe_read_lore(project, entity_id), field)
 
 
 # ----- `pov(scene)` --------------------------------------------------------

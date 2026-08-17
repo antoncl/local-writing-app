@@ -248,3 +248,48 @@ class _EntryMetadataView:
 
     def items(self):
         return [(k, self._wrap(k, v)) for k, v in self._data.items()]
+
+
+class ProjectInfoRef:
+    """Template-facing wrapper over `ProjectInfo` (ADR-0060 §3).
+
+    Gives the project node the same `node.<field>` access `EntryRef` gives
+    entries: `project.<field>` reads the project's authored metadata, `.metadata`
+    stays the explicit whole-map escape, and the model's own intrinsics
+    (`title`, `root_path`, …) win a name collision. `entity_ref` metadata fields
+    wrap to `EntryRef` through the shared `_EntryMetadataView`, so a project-level
+    reference resolves the same way an entry's does.
+    """
+
+    __slots__ = ("_info", "_project", "_schema")
+
+    def __init__(self, info: Any, *, project: ProjectService, schema: Any) -> None:
+        self._info = info
+        self._project = project
+        self._schema = schema
+
+    @property
+    def metadata(self) -> _EntryMetadataView:
+        data = getattr(self._info, "metadata", None)
+        return _EntryMetadataView(
+            data if isinstance(data, dict) else {},
+            project=self._project,
+            schema=self._schema,
+            depth=1,
+        )
+
+    def __getattr__(self, name: str) -> Any:
+        # `__slots__` plus this fallback: the real slots and the `metadata`
+        # property resolve through normal lookup; every other attribute lands
+        # here. An intrinsic on the wrapped model wins (the node.<field> rule),
+        # then the metadata fallback lets `{{ project.measurement_system }}`
+        # resolve to a value an ancestor layer authored.
+        if name.startswith("_"):
+            raise AttributeError(name)
+        info = self._info
+        if info is not None and hasattr(info, name):
+            return getattr(info, name)
+        return self.metadata.get(name)
+
+    def __bool__(self) -> bool:
+        return self._info is not None

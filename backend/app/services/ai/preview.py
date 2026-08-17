@@ -22,6 +22,7 @@ from jinja2 import TemplateError, TemplateSyntaxError, UndefinedError
 from app.models import PreviewCacheBlock
 from app.services.ai import tokens as ai_tokens
 from app.services.ai.call_resolver import resolve_call_params
+from app.services.ai.entry_ref import ProjectInfoRef
 from app.services.ai.helpers import (
     EntryRef,
     _coerce_entry_ref,
@@ -204,10 +205,14 @@ def _extract_undefined_name(message: str) -> str | None:
 def _namespace_for_object_type(context: dict[str, Any], obj_type: str | None) -> str | None:
     """Reverse-map a Jinja object type name to its render-context namespace.
 
-    Derived from the live ``context`` (not hardcoded), first key wins so
-    ``ProjectInfo`` resolves to ``project`` ahead of its ``novel`` alias.
-    ``inputs`` is deliberately excluded: undeclared/empty inputs keep their own
-    dedicated messaging, which keys on the leaf name, not the namespace.
+    Derived from the live ``context`` (not hardcoded), first key wins for aliased
+    values. Since ADR-0060 §3 the ``scene``/``project``/``novel`` namespaces are
+    metadata-fallback wrappers (``EntryRef`` / ``ProjectInfoRef``) whose
+    ``node.<field>`` access returns ``None`` for an absent key rather than raising
+    an attribute miss — so they no longer reach this map; it still serves any
+    plain namespace object (e.g. ``date``). ``inputs`` is deliberately excluded:
+    undeclared/empty inputs keep their own dedicated messaging, which keys on the
+    leaf name, not the namespace.
     """
     if not obj_type:
         return None
@@ -316,10 +321,20 @@ def build_preview(
     if scene is not None:
         scene = EntryRef(project_service, schema, scene.id, loaded=scene)
 
+    # ADR-0060 §3: wrap the project node so a template reads `project.<field>`
+    # off its authored metadata, `.metadata` kept as the whole-map escape. `novel`
+    # is the retired alias kept until slice 6; wrap it identically so both behave
+    # the same until it goes.
+    project_ref = (
+        ProjectInfoRef(project_info, project=project_service, schema=schema)
+        if project_info is not None
+        else None
+    )
+
     context = {
         "scene": scene,
-        "project": project_info,
-        "novel": project_info,
+        "project": project_ref,
+        "novel": project_ref,
         # ADR-0060 §7: `inputs` (plural — "the inputs, named"). Values are coerced
         # at this bind layer so a `context_pick` reaches the template as a
         # `list[EntryRef]`, not the raw JSON string it travels as on the wire.

@@ -87,7 +87,7 @@ class DiagnosePlotPromptTests(_DiagnosticPromptBase):
 class EntryHelperResolvesPlotNodesTests(_DiagnosticPromptBase):
     """The `entry()` Jinja helper must resolve plot nodes (card + plotline), not
     just lore/scene/prompt/research. Before S7b it had no `plot` branch, so
-    `entry(id).title/.body/field_catalog(entry(id))` silently degraded — the id
+    `entry(id).title/.body/fields(entry(id))` silently degraded — the id
     stood in for the title and the body/fields came back empty. Both
     `revise-plot-card` and `revise-plotline` depend on this resolving."""
 
@@ -99,12 +99,12 @@ class EntryHelperResolvesPlotNodesTests(_DiagnosticPromptBase):
     def test_entry_resolves_a_plotline_title_and_fields(self) -> None:
         line = self.service.instantiate_plot_template(_THREE_ACT)
         out = self._render(
-            '{% role "system" %}{{ entry(id).title }}|{{ field_catalog(entry(id)) | length }}{% endrole %}',
+            '{% role "system" %}{{ entry(id).title }}|{{ fields(entry(id)) | length }}{% endrole %}',
             id=line.id,
         )
-        title, catalog_len = out.split("|")
+        title, roster_len = out.split("|")
         self.assertEqual(title, line.title)
-        self.assertGreater(int(catalog_len), 0)  # color + instance_beats, not an empty catalog
+        self.assertGreater(int(roster_len), 0)  # color + instance_beats, not an empty roster
 
 
 class RevisePlotlinePromptTests(_DiagnosticPromptBase):

@@ -27,7 +27,7 @@ from app.models import (
     MetadataFieldDefinition,
     SaveLoreEntryRequest,
 )
-from app.services.ai.helpers import _field_catalog
+from app.services.ai.helpers import _fields
 from app.services.project.errors import ProjectServiceError
 from app.services.project_service import ProjectService
 
@@ -453,10 +453,10 @@ class ListFieldProjectTests(unittest.TestCase):
                 )
             )
 
-    def test_field_catalog_describes_item_shapes(self) -> None:
+    def test_fields_describes_item_shapes(self) -> None:
         schema = self.service.read_metadata_schema()
-        catalog = _field_catalog(self.service, schema, "lore:character")
-        by_id = {descriptor["id"]: descriptor for descriptor in catalog}
+        roster = _fields(self.service, schema, "lore:character")
+        by_id = {descriptor["id"]: descriptor for descriptor in roster}
         self.assertIn("open_questions", by_id)
         self.assertFalse(by_id["open_questions"]["item_scalar"])
         self.assertEqual(

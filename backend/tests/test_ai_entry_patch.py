@@ -6,8 +6,8 @@ Covers the three new backend pieces:
 - `validate_ai_entry_patch` — validate-on-return: per-field validation against
   the entry_type's schema, dropping the illegal ones without failing the whole
   patch, references / computed always excluded (§4);
-- `field_catalog` — the Jinja helper that lists an entry's proposable fields so
-  the prompt names real field ids.
+- `fields` — the Jinja helper that lists an entry's full field roster (each with
+  an advisory `proposable` flag) so the prompt names real field ids.
 """
 
 from __future__ import annotations
@@ -30,8 +30,8 @@ from app.models import (
 from app.models.schema import MetadataFieldDefinition
 from app.services.ai.entry_patch import is_proposable_field, parse_entry_patch_json
 from app.services.ai.helpers import (
-    _entry_type_label,
-    _field_catalog,
+    _fields,
+    _type_name,
     create_environment_for_project,
 )
 from app.services.machine_settings import palette as machine_palette
@@ -258,46 +258,57 @@ class ValidateAiEntryPatchTests(unittest.TestCase):
         self.assertIsNone(patch.body)
         self.assertEqual(patch.fields, {})
 
-    def test_field_catalog_lists_proposable_fields_only(self) -> None:
+    def test_fields_lists_full_roster_with_proposable_flag(self) -> None:
+        # ADR-0060 §3: `fields()` returns the FULL roster — nothing is pre-filtered.
+        # Proposability is an advisory per-descriptor flag the template reads; the
+        # roster hides nothing (the old `is_proposable_field` pre-filter is gone).
         schema = self.service.read_metadata_schema()
-        catalog = _field_catalog(self.service, schema, self.hero.id)
-        by_id = {f["id"]: f for f in catalog}
+        roster = _fields(self.service, schema, self.hero.id)
+        by_id = {f["id"]: f for f in roster}
         # long_text + select are proposable and carry their type / options.
         self.assertEqual(by_id["bio"]["type"], "long_text")
+        self.assertTrue(by_id["bio"]["proposable"])
         self.assertEqual(by_id["allegiance"]["type"], "select")
         self.assertEqual(by_id["allegiance"]["options"], ["order", "chaos"])
+        self.assertTrue(by_id["allegiance"]["proposable"])
         # `title` IS proposable — an AI rename is adoptable (#4).
-        self.assertIn("title", by_id)
-        # References, computed, the structural id/entry_type, and hidden fields
-        # are never offered.
-        self.assertNotIn("patron", by_id)
-        self.assertNotIn("id", by_id)
-        self.assertNotIn("entry_type", by_id)
-        self.assertNotIn("secret_note", by_id)
+        self.assertTrue(by_id["title"]["proposable"])
+        # References and hidden fields are now PRESENT in the roster (full list)
+        # but flagged not-proposable — the template decides, the list hides nothing.
+        self.assertIn("patron", by_id)
+        self.assertFalse(by_id["patron"]["proposable"])
+        self.assertIn("secret_note", by_id)
+        self.assertFalse(by_id["secret_note"]["proposable"])
+        # The structural id/entry_type and computed fields are membership fields,
+        # so the full roster carries them too — flagged not-proposable.
+        self.assertFalse(by_id["id"]["proposable"])
+        self.assertFalse(by_id["entry_type"]["proposable"])
+        self.assertFalse(by_id["character_cost"]["proposable"])  # computed
 
-    def test_field_catalog_usable_from_jinja(self) -> None:
-        # The helper is registered and the for-if filter the template uses works.
+    def test_fields_usable_from_jinja(self) -> None:
+        # The helper is registered and the for-if filter the template uses works —
+        # the template keeps `f.proposable` itself (no engine pre-filter).
         env = create_environment_for_project(self.service)
         rendered = env.from_string(
-            "{% for f in field_catalog(input.entry) if f.type == 'long_text' %}"
+            "{% for f in fields(inputs.entry) if f.proposable and f.type == 'long_text' %}"
             "{{ f.id }},{% endfor %}"
-        ).render(input={"entry": self.hero.id})
+        ).render(inputs={"entry": self.hero.id})
         self.assertIn("bio", rendered)
 
-    def test_field_catalog_applies_per_type_label_override(self) -> None:
+    def test_fields_applies_per_type_label_override(self) -> None:
         # #1009: `title` carries a per-type label override — "Name" on lore — so
-        # the catalog must present the field by the name the author sees, not
+        # the roster must present the field by the name the author sees, not
         # the shared field def's global "Title". Otherwise the brainstorm prompt
         # tells the model to fill a "Title" when the author is drafting a
         # character/item/location whose field reads "Name".
         schema = self.service.read_metadata_schema()
         self.assertEqual(schema.fields["title"].name, "Title")  # global name is Title
-        catalog = _field_catalog(self.service, schema, self.hero.id)
-        by_id = {f["id"]: f for f in catalog}
+        roster = _fields(self.service, schema, self.hero.id)
+        by_id = {f["id"]: f for f in roster}
         self.assertEqual(by_id["title"]["label"], "Name")  # lore override wins
 
-    def test_field_catalog_carries_field_description(self) -> None:
-        # #1004: a field's author description rides in the catalog so the
+    def test_fields_carries_field_description(self) -> None:
+        # #1004: a field's author description rides in the roster so the
         # brainstorm/extraction model sees what the field is FOR. Present as None
         # when unset, so the template can test it without hitting StrictUndefined.
         schema_path = self.root / "metadata.schema.yaml"
@@ -305,22 +316,23 @@ class ValidateAiEntryPatchTests(unittest.TestCase):
         data["fields"]["bio"]["description"] = "The character's backstory in brief."
         self.service._write_yaml(schema_path, data)
         schema = self.service.read_metadata_schema()
-        catalog = _field_catalog(self.service, schema, self.hero.id)
-        by_id = {f["id"]: f for f in catalog}
+        roster = _fields(self.service, schema, self.hero.id)
+        by_id = {f["id"]: f for f in roster}
         self.assertEqual(by_id["bio"]["description"], "The character's backstory in brief.")
         self.assertIsNone(by_id["allegiance"]["description"])
 
-    def test_field_catalog_carries_builtin_field_descriptions(self) -> None:
+    def test_fields_carries_builtin_field_descriptions(self) -> None:
         # #1035: the built-in fields a brainstorm actually proposes now ship with
         # descriptions in the default schema, so the model gets real guidance
         # instead of `null` (the cause of the "invent a rationale" nonsense).
-        # These four are the proposable built-ins a character inherits from
-        # lore:base; assert their default descriptions reach the catalog.
+        # These are proposable built-ins a character inherits from lore:base;
+        # assert their default descriptions reach the roster.
         schema = self.service.read_metadata_schema()
-        catalog = _field_catalog(self.service, schema, self.hero.id)
-        by_id = {f["id"]: f for f in catalog}
+        roster = _fields(self.service, schema, self.hero.id)
+        by_id = {f["id"]: f for f in roster}
         for fid in ("color", "aliases", "tags"):
-            self.assertIn(fid, by_id, f"{fid} should be proposable on a character")
+            self.assertIn(fid, by_id, f"{fid} should be on a character")
+            self.assertTrue(by_id[fid]["proposable"], f"{fid} should be proposable")
             self.assertTrue(
                 (by_id[fid].get("description") or "").strip(),
                 f"built-in field {fid} should carry a default description",
@@ -329,20 +341,22 @@ class ValidateAiEntryPatchTests(unittest.TestCase):
         # was the model inventing a hex value + rationale for this field.
         self.assertIn("hex", by_id["color"]["description"].lower())
         # ADR-0059 §F: `context_policy` is an author-owned context knob the AI
-        # must never set, so it ships `ai_proposable: false` and drops out of
-        # the catalog the model is offered.
-        self.assertNotIn("context_policy", by_id)
+        # must never set. It ships `ai_proposable: false`, so it stays in the full
+        # roster (ADR-0060 §3) but flagged not-proposable for the template to skip.
+        self.assertIn("context_policy", by_id)
+        self.assertFalse(by_id["context_policy"]["proposable"])
 
-    def test_field_catalog_includes_body_with_description(self) -> None:
-        # #1067: `body` is a proposable field, so it appears in the catalog — that
+    def test_fields_includes_body_with_description(self) -> None:
+        # #1067: `body` is a proposable field, so it appears in the roster — that
         # is what lets the brainstorm create seed list it with its description.
         # Consumers that route body via the top-level "body" key (the extraction
         # contract loop; the revise-mode long_text displays) filter `f.id != "body"`
-        # themselves; the catalog itself must yield it, carrying its description.
+        # themselves; the roster itself must yield it, carrying its description.
         schema = self.service.read_metadata_schema()
         self.assertIn("body", schema.entry_types["lore:character"].fields)  # in membership
-        by_id = {f["id"]: f for f in _field_catalog(self.service, schema, self.hero.id)}
+        by_id = {f["id"]: f for f in _fields(self.service, schema, self.hero.id)}
         self.assertIn("body", by_id)
+        self.assertTrue(by_id["body"]["proposable"])
         self.assertTrue((by_id["body"].get("description") or "").strip())
 
     def test_is_proposable_field_honors_ai_proposable(self) -> None:
@@ -461,41 +475,42 @@ class ValidateAiEntryDraftTests(unittest.TestCase):
         self.assertIn("bio", patch.dropped)
 
 
-class FieldCatalogFromTypeTests(unittest.TestCase):
-    """The catalog / label helpers used by the create-mode template, which names
+class FieldRosterFromTypeTests(unittest.TestCase):
+    """The roster / name helpers used by the create-mode template, which names
     a target entry_type rather than an entry (ADR-0046 §6.4)."""
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
-        self.service = open_test_project(self.root, "Catalog Tests")
+        self.service = open_test_project(self.root, "Roster Tests")
         add_character_patch_fields(self.service, self.root)
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
-    def test_field_catalog_accepts_an_entry_type_string(self) -> None:
+    def test_fields_accepts_an_entry_type_string(self) -> None:
         schema = self.service.read_metadata_schema()
-        catalog = _field_catalog(self.service, schema, "lore:character")
-        by_id = {f["id"]: f for f in catalog}
+        roster = _fields(self.service, schema, "lore:character")
+        by_id = {f["id"]: f for f in roster}
         self.assertEqual(by_id["allegiance"]["type"], "select")
         self.assertEqual(by_id["allegiance"]["options"], ["order", "chaos"])
-        self.assertIn("title", by_id)  # proposable in create mode too
-        self.assertNotIn("patron", by_id)
-        self.assertNotIn("secret_note", by_id)
+        self.assertTrue(by_id["title"]["proposable"])  # proposable in create mode too
+        # Full roster in create mode too: reference / hidden present, not-proposable.
+        self.assertFalse(by_id["patron"]["proposable"])
+        self.assertFalse(by_id["secret_note"]["proposable"])
 
-    def test_field_catalog_unknown_type_is_empty(self) -> None:
+    def test_fields_unknown_type_is_empty(self) -> None:
         schema = self.service.read_metadata_schema()
-        self.assertEqual(_field_catalog(self.service, schema, "lore:nonesuch"), [])
+        self.assertEqual(_fields(self.service, schema, "lore:nonesuch"), [])
 
-    def test_entry_type_label_uses_definition_name(self) -> None:
+    def test_type_name_uses_definition_name(self) -> None:
         schema = self.service.read_metadata_schema()
         expected = schema.entry_types["lore:character"].name
-        self.assertEqual(_entry_type_label(schema, "lore:character"), expected)
+        self.assertEqual(_type_name(schema, "lore:character"), expected)
 
-    def test_entry_type_label_falls_back_to_last_segment(self) -> None:
+    def test_type_name_falls_back_to_last_segment(self) -> None:
         schema = self.service.read_metadata_schema()
-        self.assertEqual(_entry_type_label(schema, "lore:nonesuch"), "nonesuch")
+        self.assertEqual(_type_name(schema, "lore:nonesuch"), "nonesuch")
 
     def test_revise_entry_template_renders_both_modes(self) -> None:
         # The materialized prompt body branches on `input.entry`: present ⇒

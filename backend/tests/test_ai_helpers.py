@@ -10,6 +10,8 @@ from app.models import (
     SaveLoreEntryRequest,
     SaveSceneRequest,
 )
+from app.models.project import ProjectInfo
+from app.services.ai.entry_ref import ProjectInfoRef
 from app.services.ai.helpers import (
     _relevant_lore,
     _role_block,
@@ -393,8 +395,9 @@ class ScenesBeforeHelperTests(_HelperFixtureBase):
 
 
 class EntryAsOfHelperTests(_HelperFixtureBase):
-    """ADR-0055 §1: `entry_as_of(entry, scene)` resolves the subject through
-    `effective_state` at the anchor scene; no anchor degrades to a base read."""
+    """ADR-0060 §3 (was ADR-0055 §1): `entry(entry, at=scene)` resolves the subject
+    through `effective_state` at the explicit anchor scene; no anchor (`at=""`)
+    degrades to a book-start read."""
 
     def _mutate_honor_in_scene_two(self) -> None:
         from urllib.parse import quote
@@ -415,7 +418,7 @@ class EntryAsOfHelperTests(_HelperFixtureBase):
     def _render_as_of(self, scene_id: str) -> str:
         env = create_environment_for_project(self.service)
         out = render_template(
-            '{% role "system" %}{% set c = entry_as_of(who, as_of) %}'
+            '{% role "system" %}{% set c = entry(who, at=as_of) %}'
             "{{ c.title }}|{{ c.body }}{% endrole %}",
             context={"who": self.honor["id"], "as_of": scene_id},
             env=env,
@@ -436,9 +439,9 @@ class EntryAsOfHelperTests(_HelperFixtureBase):
         text = self._render_as_of(self.scene_one_node.scene_id)
         self.assertEqual(text, "Honor Harrington|Captain of the Fearless. Treecat-adopted.")
 
-    def test_no_anchor_is_a_base_read(self) -> None:
+    def test_no_anchor_is_a_book_start_read(self) -> None:
         self._mutate_honor_in_scene_two()
-        # Empty anchor → exactly `entry()` (today's behaviour), even though a
+        # Empty anchor → exactly `original()` (book-start), even though a
         # mutation exists downstream.
         self.assertEqual(
             self._render_as_of(""),
@@ -473,7 +476,7 @@ class EntryAsOfHelperTests(_HelperFixtureBase):
         )
         env = create_environment_for_project(self.service)
         out = render_template(
-            '{% role "system" %}{% set c = entry_as_of(who, as_of) %}'
+            '{% role "system" %}{% set c = entry(who, at=as_of) %}'
             "{{ c.aliases | join(',') }}|{{ c.home_place.title if c.home_place else 'none' }}"
             "{% endrole %}",
             context={"who": self.honor["id"], "as_of": self.scene_two_node.scene_id},
@@ -486,15 +489,113 @@ class EntryAsOfHelperTests(_HelperFixtureBase):
         self.assertTrue(text.endswith("|Manticore"))
 
 
+class EntryAmbientSceneTests(_HelperFixtureBase):
+    """ADR-0060 §3: `entry(x)` reads x as of the prompt's *ambient* `scene` — the
+    zero-arg "this node as it is here" default — book-start when no scene is set.
+    `original(x)` and an explicit `at=None` are always book-start."""
+
+    def _promote_honor_in_scene_two(self) -> None:
+        self._update_scene(
+            self.scene_two_node.scene_id,
+            title="The Arrival",
+            entry_type="manuscript:scene",
+            metadata={"summary": "x", "characters": [], "pov": self.honor["id"]},
+            body=(
+                "Honor is promoted. "
+                f"<!-- mutate:entity={self.honor['id']};field=title;value=Admiral%20Harrington;id=m1 -->"
+            ),
+        )
+
+    def _render(self, template: str, scene: object) -> str:
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            template, context={"who": self.honor["id"], "scene": scene}, env=env
+        )
+        return out.messages[0].text.strip()
+
+    def test_entry_defaults_to_ambient_scene(self) -> None:
+        self._promote_honor_in_scene_two()
+        # Ambient scene = scene_two, where the promotion is live → as-of read.
+        text = self._render(
+            '{% role "system" %}{{ entry(who).title }}{% endrole %}',
+            self.scene_two_node.scene_id,
+        )
+        self.assertEqual(text, "Admiral Harrington")
+
+    def test_entry_book_start_when_no_ambient_scene(self) -> None:
+        self._promote_honor_in_scene_two()
+        text = self._render(
+            '{% role "system" %}{{ entry(who).title }}{% endrole %}', None
+        )
+        self.assertEqual(text, "Honor Harrington")
+
+    def test_original_ignores_the_ambient_scene(self) -> None:
+        self._promote_honor_in_scene_two()
+        # Even under a scene where the mutation is live, `original()` is book-start.
+        text = self._render(
+            '{% role "system" %}{{ original(who).title }}{% endrole %}',
+            self.scene_two_node.scene_id,
+        )
+        self.assertEqual(text, "Honor Harrington")
+
+    def test_explicit_at_none_overrides_ambient_scene(self) -> None:
+        self._promote_honor_in_scene_two()
+        # `at=None` explicitly forces book-start, even under an as-of ambient scene.
+        text = self._render(
+            '{% role "system" %}{{ entry(who, at=None).title }}{% endrole %}',
+            self.scene_two_node.scene_id,
+        )
+        self.assertEqual(text, "Honor Harrington")
+
+    def test_node_field_sugar_matches_metadata_escape(self) -> None:
+        # `node.<field>` resolves the same value as the `node.metadata.<field>`
+        # escape (ADR-0060 §3); the escape stays valid.
+        text = self._render(
+            '{% role "system" %}{{ entry(who).aliases | join(",") }}'
+            '|{{ entry(who).metadata.aliases | join(",") }}{% endrole %}',
+            None,
+        )
+        self.assertEqual(text, "The Salamander|The Salamander")
+
+
+class ProjectInfoRefTests(unittest.TestCase):
+    """ADR-0060 §3: `project.<field>` reads the project node's authored metadata,
+    with `.metadata` kept as the whole-map escape and the model's own intrinsics
+    winning a name collision."""
+
+    def _ref(self):
+        info = ProjectInfo(
+            title="My Book",
+            root_path="/x",
+            metadata={"measurement_system": "metric", "title": "SHADOW"},
+        )
+        return ProjectInfoRef(info, project=None, schema=None)
+
+    def test_field_sugar_reads_metadata(self) -> None:
+        self.assertEqual(self._ref().measurement_system, "metric")
+
+    def test_intrinsic_wins_a_collision(self) -> None:
+        # A metadata key colliding with a model field never shadows the intrinsic.
+        self.assertEqual(self._ref().title, "My Book")
+
+    def test_metadata_escape_is_the_whole_map(self) -> None:
+        ref = self._ref()
+        self.assertEqual(ref.metadata.get("measurement_system"), "metric")
+        self.assertIn("measurement_system", ref.metadata)
+
+    def test_absent_field_is_none(self) -> None:
+        self.assertIsNone(self._ref().nonexistent)
+
+
 class ImpersonateAsOfPreviewTests(_HelperFixtureBase):
     """The anchor rides the prompt's `as_of` scene input (slider-seeded at launch,
-    persisted with the chat's inputs) → `inputs.as_of` → `entry_as_of`, so an
-    impersonate render reads its subject as-of the anchor scene (ADR-0055 §1).
+    persisted with the chat's inputs) → `inputs.as_of` → `entry(…, at=as_of)`, so
+    an impersonate render reads its subject as-of the anchor scene (ADR-0060 §3).
     Mirrors impersonate.md's two key lines; the render takes no as-of param."""
 
     IMPERSONATE = (
         '{% set as_of = inputs.as_of if inputs.as_of is defined else "" %}'
-        "{% set char = entry_as_of(inputs.entry, as_of) %}"
+        "{% set char = entry(inputs.entry, at=as_of) %}"
         '{% role "system" %}You ARE {{ char.title }}.\n'
         "{% if char.body %}{{ char.body }}{% endif %}{% endrole %}"
     )

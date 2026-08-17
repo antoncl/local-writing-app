@@ -103,8 +103,8 @@ For Ollama, swap `provider` to `"ollama"` and `model` to a locally pulled model 
 
 ## What this endpoint is NOT yet
 
-- **No streaming.** The response is returned all at once. Streaming is a planned addition (M3+).
-- **No template rendering.** The system prompt and messages are passed verbatim. Prose-generation tasks that need `relevant_lore`, `scenes_before`, etc., will use a different endpoint that wraps the template engine (M4).
+- **No streaming.** The response is returned all at once. Streaming is a planned addition.
+- **No template rendering.** The system prompt and messages are passed verbatim. Prose-generation tasks that need the template engine's helpers (`use`, `story_so_far`, …) use `/api/ai/generate` instead — see [generate.md](generate.md).
 - **No persistence.** Chats live only in the UI's memory. Saving conversations as `chat` node files is planned but not yet implemented.
 - **No conversation tools / function calling.** Plain text in, plain text out.
 

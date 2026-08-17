@@ -3,10 +3,9 @@
 Two kinds of helpers:
 
 - **Pure helpers** (`last_words`) need no project state and are always available.
-- **Project-bound helpers** (`pov`, `scenes_before`, `relevant_lore`) need to
-  look up nodes, walk the reference graph, or read prior scenes. They are
-  registered by `register_helpers(env, project_service)` against a specific
-  project.
+- **Project-bound helpers** (`pov`, `story_so_far`, `entry`) need to look up
+  nodes, walk the reference graph, or read prior scenes. They are registered by
+  `register_helpers(env, project_service)` against a specific project.
 
 Helpers return either strings (which render directly via `{{ helper(...) }}`)
 or dicts (which support both attribute-style and key-style access in Jinja).
@@ -436,7 +435,7 @@ def register_helpers(
 
     env.globals["last_words"] = last_words
     env.globals["pov"] = lambda scene: _pov(project, schema, scene)
-    env.globals["scenes_before"] = lambda scene: _scenes_before(project, scene)
+    env.globals["story_so_far"] = lambda scene: _story_so_far(project, scene)
 
     # ADR-0057 §2 + docs/design/context-caching.md §4: the gate-only declaration.
     # A chat prompt that lets the backend place lore (the normal case) calls
@@ -492,20 +491,21 @@ def register_helpers(
     env.globals["type_name"] = lambda value: _type_name(schema, value)
     env.globals["full_outline"] = lambda: _full_outline(project)
     env.globals["full_text"] = lambda: _full_text(project)
-    env.globals["character_thread"] = (
-        lambda scene, character: _character_thread(project, schema, scene, character)
+    env.globals["character_turns"] = (
+        lambda scene, character: _character_turns(project, schema, scene, character)
     )
     env.globals["is_a"] = lambda node, entry_type: _is_a(project, schema, node, entry_type)
     # The spoiler-gated plot-board context (ADR-0048 S8b) — a plot-card brainstorm
     # renders `{{ plot_context(as_of=e.id) }}` so the model reasons over the board
     # up to and including the card's reveal position, no future scenes leaked.
     env.globals["plot_context"] = lambda as_of=None: _plot_context(project, as_of)
-    # Plain JSON for values quoted to the model (#698). Jinja's `| tojson`
-    # is htmlsafe_json_dumps: it escapes ' & < > to \uXXXX and sorts keys —
-    # the model imitates both (escapes persist into adopted values, and the
-    # member order contradicts the catalog). json.dumps preserves insertion
-    # order and emits readable text.
-    env.globals["plain_json"] = lambda value: json.dumps(value, ensure_ascii=False)
+    # ADR-0060 §7: the one JSON filter for values quoted to the model (#698),
+    # `{{ value | json }}`. Jinja's built-in `| tojson` is htmlsafe_json_dumps: it
+    # escapes ' & < > to \uXXXX and sorts keys — the model imitates both (escapes
+    # persist into adopted values, and the member order contradicts the catalog).
+    # This one preserves insertion order and emits readable text. Replaces the old
+    # `plain_json()` global and `tojson`; there is one spelling now.
+    env.filters["json"] = lambda value: json.dumps(value, ensure_ascii=False)
 
 
 def create_environment_for_project(
@@ -640,10 +640,10 @@ def _pov(
     return EntryRef(project, schema, raw)
 
 
-# ----- `scenes_before(scene)` ---------------------------------------------
+# ----- `story_so_far(scene)` ----------------------------------------------
 
 
-def _scenes_before(project: ProjectService, scene: Any) -> str:
+def _story_so_far(project: ProjectService, scene: Any) -> str:
     """XML listing of summaries for all scenes before `scene` in manuscript order.
 
     Walks the manuscript structure depth-first, collecting scene summaries up
@@ -1278,7 +1278,7 @@ def _split_body_by_character_markers(body: str) -> list[tuple[str | None, str]]:
     return segments
 
 
-def _character_thread(
+def _character_turns(
     project: ProjectService,
     schema: Any,
     scene: Any,

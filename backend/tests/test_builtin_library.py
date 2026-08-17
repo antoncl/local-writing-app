@@ -63,7 +63,7 @@ class BuiltinLibraryTests(unittest.TestCase):
         # Yet the shipped prompts resolve, and one reads back by id (runnable).
         self.assertTrue(set(self._summaries()) >= LIBRARY_IDS)
         roleplay = self.service.read_prompt_entry("builtin-roleplay")
-        self.assertIn("character_thread", roleplay.body)
+        self.assertIn("character_turns", roleplay.body)
 
     def test_library_prompt_cannot_be_saved_in_place(self) -> None:
         before = self._library_path("builtin-roleplay").read_bytes()
@@ -176,7 +176,7 @@ class BuiltinLibraryTests(unittest.TestCase):
             "project.metadata.tense",
             "project.metadata.measurement_system",
             "project.metadata.spelling",
-            "character_thread",
+            "character_turns",
         ):
             self.assertIn(marker, roleplay)
         revise = self.service.read_prompt_entry("builtin-revise-entry").body

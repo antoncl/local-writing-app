@@ -375,7 +375,7 @@ class ScenesBeforeHelperTests(_HelperFixtureBase):
         scene_two = self.service.read_scene(self.scene_two_node.scene_id)
         env = create_environment_for_project(self.service)
         out = render_template(
-            '{% role "user" %}{{ scenes_before(scene) }}{% endrole %}',
+            '{% role "user" %}{{ story_so_far(scene) }}{% endrole %}',
             context={"scene": scene_two},
             env=env,
         )
@@ -389,7 +389,7 @@ class ScenesBeforeHelperTests(_HelperFixtureBase):
         scene_one = self.service.read_scene(self.scene_one_node.scene_id)
         env = create_environment_for_project(self.service)
         out = render_template(
-            '{% role "user" %}{{ scenes_before(scene) }}{% endrole %}',
+            '{% role "user" %}{{ story_so_far(scene) }}{% endrole %}',
             context={"scene": scene_one},
             env=env,
         )
@@ -1128,11 +1128,11 @@ class XmlOutputStructureTests(_HelperFixtureBase):
             text,
         )
 
-    def test_scenes_before_wraps_in_story_so_far(self) -> None:
+    def test_story_so_far_wraps_in_story_so_far(self) -> None:
         scene_two = self.service.read_scene(self.scene_two_node.scene_id)
         env = create_environment_for_project(self.service)
         out = render_template(
-            '{% role "user" %}{{ scenes_before(scene) }}{% endrole %}',
+            '{% role "user" %}{{ story_so_far(scene) }}{% endrole %}',
             context={"scene": scene_two},
             env=env,
         )
@@ -1152,9 +1152,9 @@ class HelperIntegrationTests(_HelperFixtureBase):
             '{% role "user" %}'
             "POV: {{ pov(scene).title }}\n"
             # ADR-0060 §2: use_lore() selects lore for backend placement and emits
-            # nothing inline; scenes_before is a surviving derived-recap emitter.
+            # nothing inline; story_so_far is a surviving derived-recap emitter.
             "{{ use_lore() }}"
-            "Story so far:\n{{ scenes_before(scene) }}"
+            "Story so far:\n{{ story_so_far(scene) }}"
             "{% endrole %}",
             context={"scene": scene_two},
             env=env,
@@ -1286,6 +1286,22 @@ class EntryRefTests(_HelperFixtureBase):
         # The cycle alternates honor → nimitz → honor; 6 hops lands on honor.
         text = out.messages[0].text
         self.assertEqual(text, self.honor["id"])
+
+
+class JsonFilterTests(_HelperFixtureBase):
+    """ADR-0060 §7: the one `json` filter — insertion-order-preserving, no
+    surprise HTML-escaping (retires `plain_json` / `tojson`)."""
+
+    def test_json_filter_preserves_order_and_does_not_escape(self) -> None:
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "system" %}{{ value | json }}{% endrole %}',
+            context={"value": {"b": 1, "a": "<x> & 'y'"}},
+            env=env,
+        )
+        # Member order preserved (b before a); `<`, `>`, `&`, `'` NOT \uXXXX-escaped
+        # the way Jinja's built-in `tojson` would.
+        self.assertEqual(out.messages[0].text, '{"b": 1, "a": "<x> & \'y\'"}')
 
 
 class FullOutlineTests(_HelperFixtureBase):

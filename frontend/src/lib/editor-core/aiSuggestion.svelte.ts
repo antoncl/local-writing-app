@@ -17,22 +17,27 @@ import { countWords } from "@/lib/utils/wordCount";
 import type { AiSuggestionMeta, AiToolbarPosition } from "@/lib/editor-core/aiToolbar";
 import {
   type PromptResolutionContext,
-  effectiveOutputKind,
+  effectivePromptOutput,
   effectivePromptInputs,
   findPromptEntry,
   promptOnAccept,
   characterIdFromInputValue,
   resolutionSceneIdFromInputs,
 } from "@/lib/editor-core/promptResolution";
+import {
+  inlineHandler,
+  inlineDestinationFor,
+  outputHandlerFor,
+  type InlineGathered,
+  type InlineHost,
+  type OutputRun,
+} from "@/lib/editor-core/outputHandlers";
 import type {
   ChatUsage,
   DocumentKind,
   EditableDocument,
   PromptEntrySummary,
 } from "@/lib/types";
-
-// How much surrounding prose to send as context for a revise (replace_selection).
-const REVISE_CONTEXT_CHARS = 600;
 
 export interface AiSuggestionDeps {
   // Live editor / document accessors (per-pane, change over the controller's life).
@@ -318,63 +323,59 @@ export class AiSuggestionController {
     const editor = this.#deps.getEditor();
     const scene = this.#deps.getScene();
     if (!editor || !scene) return;
-    const outputKind = effectiveOutputKind(this.#deps.getPromptCtx(), entry);
-    if (outputKind === "chat_panel") {
+    const output = effectivePromptOutput(this.#deps.getPromptCtx(), entry);
+    const handler = outputHandlerFor(output);
+    if (handler?.key === "inline") {
+      const run: OutputRun = { entry, inputs, assistantId, scene };
+      const host = this.#inlineHost(run);
+      const gathered = inlineHandler.produce(host, inlineDestinationFor(output));
+      if (!gathered) return;
+      this.error = null;
+      this.#anchorPos = gathered.from;
+      this.generating = true;
+      this.#lastInvokedEntryId = entry.id;
+      this.#lastInvokedInputs = inputs;
+      this.#lastInvokedAssistantId = assistantId;
+      this.updateToolbarPosition();
+      await inlineHandler.apply(gathered, host);
+      return;
+    }
+    if (output?.kind === "chat_panel") {
       this.#lastInvokedEntryId = entry.id;
       this.#lastInvokedInputs = inputs;
       this.#lastInvokedAssistantId = assistantId;
       this.#deps.onOpenChat({ entry, inputs, sceneId: scene.id, assistantId });
       return;
     }
-    if (outputKind !== "append_to_body" && outputKind !== "replace_selection") {
-      this.error = `Output kind "${outputKind ?? "(unset)"}" is not yet supported for inline dispatch.`;
-      this.updateToolbarPosition();
-      return;
-    }
-
-    let selectionText: string | undefined;
-    let textBefore: string;
-    let textAfter: string;
-    let from: number;
-    let to: number;
-
-    if (outputKind === "replace_selection") {
-      const sel = editor.state.selection;
-      from = sel.from;
-      to = sel.to;
-      if (from === to) {
-        this.#anchorPos = from;
-        this.error = "Select text to revise.";
-        this.updateToolbarPosition();
-        return;
-      }
-      selectionText = editor.state.doc.textBetween(from, to, "\n\n", " ");
-      if (!selectionText.trim()) {
-        this.#anchorPos = from;
-        this.error = "Select non-empty text to revise.";
-        this.updateToolbarPosition();
-        return;
-      }
-      const docSize = editor.state.doc.content.size;
-      const beforeStart = Math.max(0, from - REVISE_CONTEXT_CHARS);
-      const afterEnd = Math.min(docSize, to + REVISE_CONTEXT_CHARS);
-      textBefore = editor.state.doc.textBetween(beforeStart, from, "\n\n", " ");
-      textAfter = editor.state.doc.textBetween(to, afterEnd, "\n\n", " ");
-    } else {
-      from = editor.state.selection.from;
-      to = from;
-      const docSize = editor.state.doc.content.size;
-      textBefore = editor.state.doc.textBetween(0, from, "\n\n", " ");
-      textAfter = editor.state.doc.textBetween(from, docSize, "\n\n", " ");
-    }
-
-    this.error = null;
-    this.#anchorPos = from;
-    this.generating = true;
-    this.#lastInvokedEntryId = entry.id;
-    this.#lastInvokedInputs = inputs;
-    this.#lastInvokedAssistantId = assistantId;
+    this.error = `Output kind "${output?.kind ?? "(unset)"}" is not yet supported for inline dispatch.`;
     this.updateToolbarPosition();
+  }
+
+  // Build the inline handler's host for one run — the seam between the registered
+  // handler and this controller's streaming primitive + error surface.
+  #inlineHost(run: OutputRun): InlineHost {
+    return {
+      getEditor: () => this.#deps.getEditor(),
+      setError: (message, anchor) => {
+        this.error = message;
+        if (anchor !== undefined) this.#anchorPos = anchor;
+        this.updateToolbarPosition();
+      },
+      streamInline: (gathered) => this.#streamInline(gathered, run),
+    };
+  }
+
+  // The inline handler's `apply`: stream the generation at the gathered
+  // destination behind the aiSuggestion mark. It stays a method here because the
+  // stream is bound to this controller's reactive state (the pending mark, the
+  // revert-original buffer, telemetry) — the handler delegates to it. Behaviour is
+  // the pre-ADR-0065 inline stream verbatim: only the source now arrives as
+  // `gathered`, and the destination test reads `gathered.destination`.
+  async #streamInline(gathered: InlineGathered, run: OutputRun): Promise<void> {
+    const editor = this.#deps.getEditor();
+    if (!editor) return;
+    const { from, to, selectionText, textBefore, textAfter, destination } = gathered;
+    const { entry, inputs, assistantId, scene } = run;
 
     const suggestionId = `ai-${this.#nextSuggestionId++}`;
     let startPos = from;
@@ -392,7 +393,7 @@ export class AiSuggestionController {
 
     const ensureStreamingStarted = () => {
       if (streamingActive || !editor) return;
-      if (outputKind === "replace_selection") {
+      if (destination === "selection") {
         const currentText = editor.state.doc.textBetween(from, to, "\n\n", " ");
         if (currentText !== selectionText) {
           this.error = "Document changed during the AI call. Re-select the text and retry.";
@@ -443,7 +444,7 @@ export class AiSuggestionController {
           if (streamingActive && editor) {
             const range = this.#findSuggestionRange(suggestionId);
             if (range) {
-              if (outputKind === "replace_selection" && this.#suggestionOriginal) {
+              if (destination === "selection" && this.#suggestionOriginal) {
                 editor
                   .chain()
                   .setTextSelection({ from: range.from, to: range.to })

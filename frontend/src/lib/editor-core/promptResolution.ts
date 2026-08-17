@@ -12,6 +12,7 @@ import type {
   MetadataSchema,
   PromptEntrySummary,
   PromptInputDefinition,
+  PromptOutput,
 } from "@/lib/types";
 
 // The output dispositions a prompt can select (ADR-0054 §1), mirroring the
@@ -41,6 +42,17 @@ export function effectiveOutputKind(
   const output = definition?.prompt?.context_strategy?.output;
   if (!output || typeof output.kind !== "string") return null;
   return output.kind;
+}
+
+// The prompt's whole `output` block — the object the OutputHandler registry
+// (ADR-0065) routes on. `effectiveOutputKind` above stays the thin read for
+// discovery filters; dispatch reads the full output so a handler owns its bundle.
+export function effectivePromptOutput(
+  ctx: PromptResolutionContext,
+  entry: PromptEntrySummary,
+): PromptOutput | null {
+  const definition = ctx.metadataSchema?.entry_types[entry.entry_type];
+  return definition?.prompt?.context_strategy?.output ?? null;
 }
 
 // True iff the prompt declares a `commit` (ADR-0054 §2) — i.e. it is a brainstorm

@@ -195,7 +195,7 @@
     tokens: number;
     cost_usd: number | null;
     caching_style: "none" | "auto" | "explicit" | null;
-    cache_blocks: { label: string; tokens: number; cache_break_after: boolean }[];
+    cache_blocks: { label: string; tokens: number; tier?: string | null }[];
   } | null = $state(null);
   // Stale-response guard: every fetch grabs ourToken = ++chatEstimateToken;
   // on resolve we drop the response if the token moved. Out-of-order
@@ -762,7 +762,7 @@
         cache_blocks: (preview.cache_blocks ?? []).map((b) => ({
           label: b.label,
           tokens: b.tokens,
-          cache_break_after: b.cache_break_after,
+          tier: b.tier,
         })),
       };
     } catch {

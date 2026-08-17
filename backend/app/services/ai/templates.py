@@ -39,11 +39,6 @@ VALID_ROLES = {"system", "user", "assistant"}
 @dataclass
 class ContentBlock:
     text: str
-    # Vestigial since ADR-0060 §5 retired `{% cache_break %}`: always False now (no
-    # author breakpoints). Kept so the preview cache-segment view (preview.py) and
-    # its frontend still read one segment per message; removed when slice 5 reworks
-    # the preview to show send-path volatility tiers.
-    cache_break_after: bool = False
 
 
 @dataclass
@@ -74,6 +69,12 @@ class RenderedTemplate:
     # the send path's `_tier_lore_ids` as a revision-bounded placement bias. Empty
     # when no node carried a hint.
     used_node_hints: dict[str, str] = field(default_factory=dict)
+    # ADR-0060 §6: the send-path lore the model will receive, split into the two
+    # tiers, computed cold (a fresh throwaway session) by `build_preview` so the
+    # cache-aware preview can surface it — templates no longer emit lore. Empty when
+    # the prompt is not lore-enabled or selects nothing.
+    send_lore_stable: str = ""
+    send_lore_volatile: str = ""
 
 
 class RoleExtension(Extension):

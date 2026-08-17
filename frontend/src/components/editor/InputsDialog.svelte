@@ -5,7 +5,7 @@
     tokens: number;
     cost_usd: number | null;
     caching_style: "none" | "auto" | "explicit" | null;
-    cache_blocks: { label: string; tokens: number; cache_break_after: boolean }[];
+    cache_blocks: { label: string; tokens: number; tier?: string | null }[];
   };
 </script>
 

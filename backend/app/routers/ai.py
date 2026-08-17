@@ -241,7 +241,7 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
         PreviewMessage(
             role=m.role,
             blocks=[
-                PreviewContentBlock(text=b.text, cache_break_after=b.cache_break_after)
+                PreviewContentBlock(text=b.text)
                 for b in m.blocks
             ],
         )
@@ -318,7 +318,7 @@ async def ai_generate(project: CurrentProject, request: AIGenerateRequest) -> AI
         PreviewMessage(
             role=m.role,
             blocks=[
-                PreviewContentBlock(text=b.text, cache_break_after=b.cache_break_after)
+                PreviewContentBlock(text=b.text)
                 for b in m.blocks
             ],
         )

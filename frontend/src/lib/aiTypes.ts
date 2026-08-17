@@ -79,7 +79,6 @@ export type AIPreviewRequest = {
 
 export type PreviewContentBlock = {
   text: string;
-  cache_break_after: boolean;
 };
 
 export type PreviewMessage = {
@@ -87,11 +86,15 @@ export type PreviewMessage = {
   blocks: PreviewContentBlock[];
 };
 
+// ADR-0060 §6: one block of the send-path composition the model will receive —
+// the system prefix, the tier-tagged lore the backend places (visible again), then
+// the uncached conversation turns. `tier` is "stable" | "volatile" | null.
 export type PreviewCacheBlock = {
   label: string;
   role: string;
   tokens: number;
-  cache_break_after: boolean;
+  tier?: string | null;
+  text?: string;
 };
 
 // Populated on AIPreviewResponse.error when the render failed. The preview

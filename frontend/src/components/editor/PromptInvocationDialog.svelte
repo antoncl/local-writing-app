@@ -83,7 +83,7 @@
     tokens: number;
     cost_usd: number | null;
     caching_style: "none" | "auto" | "explicit" | null;
-    cache_blocks: { label: string; tokens: number; cache_break_after: boolean }[];
+    cache_blocks: { label: string; tokens: number; tier?: string | null }[];
   } | null = $state(null);
   // Monotonic token guarding async preview races — bumps on every fetch; late
   // responses with a stale token drop their result.
@@ -196,7 +196,7 @@
         cache_blocks: (preview.cache_blocks ?? []).map((b) => ({
           label: b.label,
           tokens: b.tokens,
-          cache_break_after: b.cache_break_after,
+          tier: b.tier,
         })),
       };
     } catch {

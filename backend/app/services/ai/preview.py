@@ -398,8 +398,48 @@ def build_preview(
     # ADR-0060 §5: carry the per-node volatility priors (set by `use(node, hint)`)
     # so the chat can persist `used_node_hints` and the send path's tiering reads them.
     rendered.used_node_hints = dict(getattr(env, "used_hints", {}) or {})
+    # ADR-0060 §6: compute the send-path lore the model will receive so the
+    # cache-aware preview can surface it (templates no longer emit lore). Only for a
+    # lore-enabled prompt; `scene` is the same as-of anchor the send path resolves.
+    if rendered.lore_invoked:
+        rendered.send_lore_stable, rendered.send_lore_volatile = _preview_lore_tiers(
+            project_service, scene, rendered.used_node_ids, rendered.used_node_hints
+        )
 
     return rendered, session_id
+
+
+def _preview_lore_tiers(
+    project_service,
+    scene: Any,
+    used_node_ids: list[str],
+    used_node_hints: dict[str, str],
+) -> tuple[str, str]:
+    """The send-path lore the model will receive, split into (stable, volatile) XML
+    for the cache-aware preview (ADR-0060 §6). Mirrors the send path's selection +
+    tiering (`_relevant_lore_ids` + `_tier_lore_ids`) but against a FRESH throwaway
+    `AISession` — the cold turn-1 view (unhinted lore volatile; `use(node,
+    "stable")` stable) — and never commits, so it cannot touch a live chat's cache
+    baseline. Both tiers resolve as-of `scene`, like the send path."""
+    from app.services.ai.helpers import (
+        _format_lore_block,
+        _relevant_lore_ids,
+        _tier_lore_ids,
+    )
+    from app.services.ai.sessions import AISession
+
+    ids = _relevant_lore_ids(
+        project_service, scene, "implicit", None, list(used_node_ids or [])
+    )
+    if not ids:
+        return "", ""
+    stable_ids, volatile_ids = _tier_lore_ids(
+        project_service, ids, AISession(id="preview"), dict(used_node_hints or {})
+    )
+    index = project_service.build_mutations_index() if scene is not None else None
+    stable_xml = _format_lore_block(project_service, stable_ids, scene, index=index)
+    volatile_xml = _format_lore_block(project_service, volatile_ids, scene, index=index)
+    return stable_xml, volatile_xml
 
 
 def _raise_preview_error_from_template(
@@ -479,6 +519,35 @@ class PreviewEstimate:
     estimated_cost_usd: float | None
 
 
+def _preview_send_blocks(
+    rendered: RenderedTemplate, count: Any
+) -> list[PreviewCacheBlock]:
+    """The send-path composition the model will receive (ADR-0060 §6): the stable
+    system prefix, the tier-tagged lore the backend will place (visible again now
+    that templates no longer emit it), then the uncached conversation turns.
+    `count(text)` returns the token count for a block."""
+    blocks: list[PreviewCacheBlock] = []
+
+    def add(label: str, role: str, text: str, tier: str | None) -> None:
+        if text.strip():
+            blocks.append(
+                PreviewCacheBlock(
+                    label=label, role=role, tokens=count(text), tier=tier, text=text
+                )
+            )
+
+    system_text = "\n\n".join(
+        m.text for m in rendered.messages if m.role == "system" and m.text.strip()
+    )
+    add("system", "system", system_text, "stable")
+    add("stable lore", "system", rendered.send_lore_stable, "stable")
+    add("volatile lore", "system", rendered.send_lore_volatile, "volatile")
+    for message in rendered.messages:
+        if message.role != "system":
+            add(message.role, message.role, message.text, None)
+    return blocks
+
+
 async def estimate_preview_tokens_and_cost(
     project_service,
     rendered: RenderedTemplate,
@@ -491,9 +560,12 @@ async def estimate_preview_tokens_and_cost(
     When an assistant is named, resolve its provider/model to pick the caching
     style and price the input; without one, tokens are still counted (the
     tokenizer choice is provider-agnostic in v1) but cost/caching stay unknown.
-    Blocks are grouped into "cache segments" — each ending at a
-    `cache_break_after` marker (or the message end) — one segment ≈ one
-    ephemeral cache slot from the dispatch layer's perspective.
+
+    `cache_blocks` is the send-path composition the model will receive (ADR-0060
+    §6): the stable system prefix, the tier-tagged lore the backend will place
+    (visible again now that templates no longer emit it), then the uncached
+    conversation turns. `estimated_tokens` sums them, so it now includes the lore
+    the older flattened-template count missed.
     """
     provider: str | None = None
     model: str | None = None
@@ -521,54 +593,14 @@ async def estimate_preview_tokens_and_cost(
                 provider=provider, model=model, settings=settings
             )
 
-    cache_blocks: list[PreviewCacheBlock] = []
     counter_provider = provider or "anthropic"  # tokenizer choice is identical across providers in v1
-    for message in rendered.messages:
-        current_texts: list[str] = []
-        segment_index_in_message = 0
-        for block in message.blocks:
-            current_texts.append(block.text)
-            if block.cache_break_after:
-                segment_index_in_message += 1
-                segment_text = "".join(current_texts)
-                cache_blocks.append(
-                    PreviewCacheBlock(
-                        label=f"{message.role} block {segment_index_in_message}",
-                        role=message.role,
-                        tokens=ai_tokens.count_tokens(
-                            segment_text,
-                            provider=counter_provider,
-                            model=model or "",
-                            settings=settings,
-                        ),
-                        cache_break_after=True,
-                    )
-                )
-                current_texts = []
-        if current_texts:
-            # Trailing run with no terminating marker — the "tail" of the
-            # message. Counts the same way but is_cache=false in spirit.
-            segment_index_in_message += 1
-            tail_text = "".join(current_texts)
-            label = (
-                f"{message.role} tail"
-                if segment_index_in_message > 1 or len(message.blocks) > 1
-                else f"{message.role}"
-            )
-            cache_blocks.append(
-                PreviewCacheBlock(
-                    label=label,
-                    role=message.role,
-                    tokens=ai_tokens.count_tokens(
-                        tail_text,
-                        provider=counter_provider,
-                        model=model or "",
-                        settings=settings,
-                    ),
-                    cache_break_after=False,
-                )
-            )
 
+    def _count(text: str) -> int:
+        return ai_tokens.count_tokens(
+            text, provider=counter_provider, model=model or "", settings=settings
+        )
+
+    cache_blocks = _preview_send_blocks(rendered, _count)
     estimated_tokens = sum(b.tokens for b in cache_blocks)
     estimated_cost_usd: float | None = None
     if descriptor is not None:

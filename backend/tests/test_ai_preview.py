@@ -545,6 +545,26 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertEqual(len(body["messages"]), 1)
         self.assertEqual(body["messages"][0]["role"], "system")
 
+    def test_lore_enabled_preview_surfaces_tiered_lore(self) -> None:
+        # ADR-0060 §6: a lore-enabled prompt's preview shows the send-path lore the
+        # backend will place — invisible before, because templates no longer emit
+        # it. Honor is named in the scene summary → picked implicitly; cold tiering
+        # (no hint) → the volatile tier, with the lore text visible in the block.
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": '{% role "system" %}Write the scene.{% endrole %}{{ use_lore() }}',
+                "target_scene_id": self.scene_id,
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertTrue(body["lore_enabled"])
+        lore = [b for b in body["cache_blocks"] if "lore" in b["label"]]
+        self.assertTrue(lore, body["cache_blocks"])
+        self.assertTrue(all(b["tier"] == "volatile" for b in lore))  # cold, unhinted
+        self.assertIn("Honor Harrington", "".join(b["text"] for b in lore))
+
     def test_marked_target_in_context_pick_overrides_target_scene_id(self) -> None:
         # NC-style ★ target: a scene flagged target=true in a context_pick
         # input wins over the caller's implicit target_scene_id. Templates
@@ -775,17 +795,17 @@ class PreviewCostEstimateTests(unittest.TestCase):
         self.assertIsNone(body["model"])
         self.assertIsNone(body["caching_style"])
 
-    def test_cache_blocks_are_one_segment_per_message(self) -> None:
-        # ADR-0060 §5 retired author `{% cache_break %}`, so the preview no longer
-        # splits a message into cache segments — one block per role message. (Slice 5
-        # reworks the preview to visualize the send-path volatility tiers instead.)
+    def test_cache_blocks_are_the_send_path_composition(self) -> None:
+        # ADR-0060 §6: cache_blocks are the send-path composition, tier-tagged, each
+        # carrying its text. This basic (lore-free) prompt → a stable system block
+        # then an uncached user turn.
         response = self.client.post("/api/ai/preview", json=self._basic_preview_body())
         body = response.json()
         self.assertEqual(len(body["cache_blocks"]), 2)
         first, second = body["cache_blocks"]
-        self.assertEqual(first["role"], "system")
-        self.assertEqual(second["role"], "user")
-        self.assertFalse(any(b["cache_break_after"] for b in body["cache_blocks"]))
+        self.assertEqual((first["role"], first["tier"]), ("system", "stable"))
+        self.assertEqual((second["role"], second["tier"]), ("user", None))
+        self.assertIn("You write fiction", first["text"])
         # Tokens summed across blocks equal the top-level estimate.
         self.assertEqual(
             sum(b["tokens"] for b in body["cache_blocks"]),

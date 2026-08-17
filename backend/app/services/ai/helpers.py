@@ -640,7 +640,7 @@ def _pov(
     return EntryRef(project, schema, raw)
 
 
-# ----- `scenes_before(scene)` ---------------------------------------------
+# ----- `story_so_far(scene)` ----------------------------------------------
 
 
 def _story_so_far(project: ProjectService, scene: Any) -> str:

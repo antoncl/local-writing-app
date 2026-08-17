@@ -26,7 +26,7 @@ So every derived prompt is really: **a chat, plus (optionally) one bundle that t
 
 ### 1. Two prompt kinds
 
-The concrete prompt bases collapse to **`{general, snippet}`**. `snippet` = non-AI text inclusion (`{% snippet %}` / `{% import %}`, no output). `general` = a chat. continuation / revise / roleplay / impersonate / brainstorm are all `general`, differing only by which output handler (if any) they declare.
+The concrete prompt bases collapse to **`{general, snippet}`**. `snippet` = non-AI reusable text, included by name into another prompt's body via `{% import %}` (no output handler; not invoked). `general` = a chat. continuation / revise / roleplay / impersonate / brainstorm are all `general`, differing only by which output handler (if any) they declare.
 
 ### 2. An output handler is a registered class implementing a minimal interface
 
@@ -78,7 +78,23 @@ A genuinely new output behaviour (a todo, a plot card, a new scene) is a **new c
 
 ## Grounding — the scan, and the Jinja verdict
 
-The interface above was **derived from a scan** of the six real behaviors (continuation / revise:scene / revise:entry / general+impersonate / roleplay / snippet), not designed top-down. Each behaviour's source, transform, destination, review, and activation were read from the code; the base interface keeps only what ≥2 of them share, and the two per-handler capabilities (`commit`, `on_accept`) are what the scan shows are genuinely unique.
+The interface above was **derived from a scan** of the six real behaviors, not designed top-down. This is that scan — the map an implementer needs, since it names what each handler must cover and where the behaviour lives today. (Symbols are the durable anchors; line numbers are a convenience under the pin.)
+
+| Behaviour (today's `output.kind`) | source | transform | destination | review | activation | where it lives today |
+|---|---|---|---|---|---|---|
+| **continuation** (`append_to_body`) | `_text_before` | identity | scene body **at the cursor** | `aiSuggestion` mark | slash / toolbar | gather + stream in `runPromptEntryWithInputs` / `#renderStreamingSuggestion` (`frontend/src/lib/editor-core/aiSuggestion.svelte.ts`, append branch ~363-369, ~148-182); mark `proseMarks.ts` (`aiSuggestion` ~12-34); route `POST /api/ai/generate/stream` (`backend/app/routers/ai.py:438`) |
+| **revise:scene** (`replace_selection`) | `_text_before`+`_selection`+`_text_after` | identity | **the selection** | `aiSuggestion` mark | selection toolbar | gather ~341-362, delete-then-stream `ensureStreamingStarted` ~395-410 (same file); same route |
+| **revise:entry** (`chat_panel` + `commit`) | **transcript** | **extractor** (2nd pass) | **a node's fields** | patch diff (`commit.review`) | conversation ＋New | `run_entry_patch_extraction` + `DEFAULT_EXTRACTION_TEMPLATE` / `render_extraction_contract` (`backend/app/services/ai/extraction.py` ~71-150, ~214); validate `validate_ai_entry_patch_for_type`; route `POST /api/ai/entry-patch/{id}/extract` (`ai.py:602-613`) |
+| **general / impersonate** (`chat_panel`) | — | — | **none** (stays in the chat) | none | conversation ＋New | `runPromptEntryWithInputs` chat_panel branch → `onOpenChat` (`aiSuggestion.svelte.ts:322-327`) |
+| **roleplay** (`continuation` + `on_accept`) | `_text_before` | identity | body at cursor | `aiSuggestion` mark **+ a character mark on accept** | slash / toolbar | as continuation, **plus** `promptOnAccept` (`frontend/src/lib/editor-core/promptResolution.ts:283-292`) → `createCharacterMark` (`proseMarks.ts:48-77`) → markdown-comment round-trip (`markdown.ts:35`), read back by `character_thread()` (`backend/app/services/ai/helpers.py:1248-1299`) |
+| **snippet** | — | — | — | — | not invoked | text-included by name via `{% import %}`, `PromptSnippetLoader` (`backend/app/services/ai/snippet_loader.py:20-60`); no `context_strategy` block |
+
+Two structural facts the implementer must know:
+
+- **`output.kind` is the discriminator that everything else is derived from today.** The five rows above are selected by `output.kind` (`backend/app/models/schema.py:222`); destination, review, and activation all follow from it. Dispatch is scattered — the frontend branches on it in `runPromptEntryWithInputs` (`aiSuggestion.svelte.ts:322-369`) to decide inline-vs-chat and *what to gather*; the backend splits by route (`/generate/stream` vs `/entry-patch/{id}/extract`). **S2/S3 replace those branches with `handler = registry[key]; handler.produce(...); handler.apply(...)`.**
+- **`scan_surface` is declared but dead.** It is stored (`schema.py:229`), edited (`SchemaTypeEditor.svelte` ~187, ~350), and tested — but **no dispatch reads it**; the frontend derives what to gather from `output.kind` (above). So today `source` is redundant with the kind; this ADR makes `source` a **live** handler property that actually drives gathering (naming only context vars `build_preview` already injects), and retires the zombie declaration.
+
+The base interface keeps only what **≥2** of these rows share — `produce` + `apply` + the declarative bundle (`source`, `review`, `activation`). The two per-handler capabilities the scan shows are genuinely unique — `commit` (only `extract_to_node`) and `on_accept` (only `inline`) — stay handler-local, never in the base.
 
 **Jinja / template-engine verdict: NO new helper or token is required.** Every source the interface names is an already-injected context variable; the `_text_before` / `_selection` / `_text_after` scan tokens map 1:1 onto context vars `build_preview` already injects; the extractor's only real template need (`field_catalog`) already exists; and the two per-handler capabilities live *outside* the template engine — `commit` via the extraction route, `on_accept` via a TipTap mark + a markdown-comment round-trip read back by the existing `character_thread()` helper. Handed to the template-language thread as the interface's template-support requirement (which is: none).
 

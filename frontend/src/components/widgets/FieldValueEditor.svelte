@@ -11,15 +11,14 @@
   import ReferencePicker from "@/components/widgets/ReferencePicker.svelte";
   import ColoredSelect from "@/components/widgets/ColoredSelect.svelte";
   import TagPicker from "@/components/widgets/TagPicker.svelte";
-  import TagChip from "@/components/widgets/TagChip.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import ToggleSwitch from "@/components/widgets/ToggleSwitch.svelte";
+  import FieldValue from "@/components/widgets/FieldValue.svelte";
   import {
     coerceStringList,
     isMetadataValuePresent,
     normalizeListFieldValue,
   } from "@/lib/utils/schemaTypeHelpers";
-  import { parseTagList, tagColorMap } from "@/lib/utils/tags";
   import type {
     LoreEntrySummary,
     MetadataFieldDefinition,
@@ -88,8 +87,6 @@
 
   const label = $derived(ariaLabel ?? field.name);
   const currentValue = $derived(metadataValueString(value));
-  // Built once, not per-chip, so the read-only tags render stays O(n) (#247).
-  const tagColors = $derived(tagColorMap(knownTags));
 
   function metadataValueString(v: MetadataValue | undefined): string {
     if (Array.isArray(v)) return v.join(", ");
@@ -155,30 +152,35 @@
     emit(hasIt ? current.filter((item) => item.toLowerCase() !== key) : [...current, option]);
   }
 
-  function optionLabel(raw: string): string {
-    const key = raw.toLowerCase();
-    const match = field.options.find((option) => option.value.toLowerCase() === key);
-    return match?.label ?? raw;
-  }
 </script>
 
-{#if field.type === "long_text"}
-  {#if readOnly}
-    <div class="fv-static fv-static-longtext" aria-label={label}>
-      {#if currentValue}{currentValue}{:else}<span class="fv-empty">—</span>{/if}
-    </div>
-  {:else}
-    <MetadataLongTextEditor
-      ariaLabel={label}
-      value={currentValue}
-      matcher={implicitContextMatcher}
-      on:change={(event) => emit(event.detail.value)}
-    />
-  {/if}
+{#if readOnly}
+  <!-- Read-only display is the FieldValue widget's job (ADR-0064); the editor owns
+       only the edit controls below. Same per-type rendering, one canonical home. -->
+  <FieldValue
+    {field}
+    {value}
+    ariaLabel={label}
+    {allowUnset}
+    {loreEntries}
+    {promptEntries}
+    {structure}
+    {researchStructure}
+    {knownTags}
+    {excludeId}
+    {implicitContextMatcher}
+    {onNavigate}
+  />
+{:else if field.type === "long_text"}
+  <MetadataLongTextEditor
+    ariaLabel={label}
+    value={currentValue}
+    matcher={implicitContextMatcher}
+    on:change={(event) => emit(event.detail.value)}
+  />
 {:else if field.type === "entity_ref" || field.type === "entity_ref_list"}
   <ReferencePicker
     {field}
-    {readOnly}
     value={metadataReferenceValue(field, value)}
     excludeId={excludeId}
     ariaLabel={label}
@@ -190,90 +192,50 @@
     on:navigate={(event) => onNavigate?.(event.detail)}
   />
 {:else if field.type === "multi_select" && field.options.length > 0}
-  {#if readOnly}
-    <!-- Only the selected options — the read-only question is "what IS the
-         value", not "what could it be". -->
-    <div class="multi-select-chips" aria-label={label}>
-      <!-- De-dupe through the shared normaliser so the read-only render matches
-           the SAVE policy (case-insensitive for multi_select, #725) — otherwise a
-           case-duplicate shows as two chips until the next save heals it — and the
-           keyed each can't throw each_key_duplicate on malformed data. -->
-      {#each normalizeListFieldValue("multi_select", value) as selected (selected)}
-        <span class="multi-select-chip active static">{optionLabel(selected)}</span>
-      {:else}
-        <span class="fv-empty">—</span>
-      {/each}
-    </div>
-  {:else}
-    <div class="multi-select-chips" aria-label={label}>
-      {#each field.options as option}
-        <button
-          class:active={hasOption(option.value)}
-          class="multi-select-chip"
-          type="button"
-          onclick={() => toggleOption(option.value)}
-        >
-          {option.label ?? option.value}
-        </button>
-      {/each}
-    </div>
-  {/if}
+  <div class="multi-select-chips" aria-label={label}>
+    {#each field.options as option}
+      <button
+        class:active={hasOption(option.value)}
+        class="multi-select-chip"
+        type="button"
+        onclick={() => toggleOption(option.value)}
+      >
+        {option.label ?? option.value}
+      </button>
+    {/each}
+  </div>
 {:else if field.type === "select"}
-  <ColoredSelect value={currentValue} options={field.options} ariaLabel={label} {readOnly} onChange={(v) => emit(v)} />
+  <ColoredSelect value={currentValue} options={field.options} ariaLabel={label} onChange={(v) => emit(v)} />
 {:else if field.type === "boolean"}
-  <!-- Tri-state display (#522), rail-only via `allowUnset`: a two-state toggle
-       can't tell "unset" from "off", so an untouched boolean looks false. When
-       unset is a real state and the value is absent, the toggle reads
-       dimmed/indeterminate (knob centred); getting *back* to unset is the row's
-       revert affordance, not this control. Authoring surfaces (mutation rows,
-       view params) leave `allowUnset` false and keep the plain 2-state toggle. -->
+  <!-- Tri-state (#522), rail-only via `allowUnset`: an absent boolean reads
+       dimmed/indeterminate rather than "off". Authoring surfaces leave `allowUnset`
+       false and keep the plain 2-state toggle. -->
   {@const set = !allowUnset || isMetadataValuePresent(value)}
   {@const on = set && metadataValueBool(value)}
   <ToggleSwitch
     checked={on}
     unset={!set}
     ariaLabel={set ? label : `${label} (not set)`}
-    disabled={readOnly}
     onChange={(next) => emit(next)}
   />
 {:else if field.type === "number"}
-  {#if readOnly}
-    <span class="fv-static" aria-label={label}>
-      {#if currentValue}{currentValue}{:else}<span class="fv-empty">—</span>{/if}
-    </span>
-  {:else}
-    <input type="number" aria-label={label} value={currentValue} oninput={(event) => emit(event.currentTarget.value)} />
-  {/if}
+  <input type="number" aria-label={label} value={currentValue} oninput={(event) => emit(event.currentTarget.value)} />
 {:else if field.type === "tags"}
-  {#if readOnly}
-    <div class="multi-select-chips" aria-label={label}>
-      {#each parseTagList(currentValue) as tag (tag)}
-        <TagChip name={tag} color={tagColors.get(tag.toLowerCase()) ?? null} />
-      {:else}
-        <span class="fv-empty">—</span>
-      {/each}
-    </div>
-  {:else}
-    <TagPicker
-      value={currentValue}
-      knownTags={knownTags}
-      origin={tagOrigin}
-      scopeKind={documentKind}
-      scopeEntryType={entryType}
-      ariaLabel={label}
-      onChange={(v) => emit(v)}
-    />
-  {/if}
+  <TagPicker
+    value={currentValue}
+    knownTags={knownTags}
+    origin={tagOrigin}
+    scopeKind={documentKind}
+    scopeEntryType={entryType}
+    ariaLabel={label}
+    onChange={(v) => emit(v)}
+  />
 {:else if field.type === "list"}
   <!-- #698: the list value is already normalized (an array of scalars or
        member-keyed records) — bypass normaliseFieldValue's string coercion. -->
-  <ListValueEditor {field} {value} {readOnly} onChange={(next) => onChange(next)} {implicitContextMatcher} />
+  <ListValueEditor {field} {value} onChange={(next) => onChange(next)} {implicitContextMatcher} />
 {:else if field.type === "color"}
-  <SwatchPicker value={currentValue || null} {readOnly} onChange={(id) => emit(id ?? "")} />
-{:else if readOnly}
-  <span class="fv-static" aria-label={label}>
-    {#if currentValue}{currentValue}{:else}<span class="fv-empty">—</span>{/if}
-  </span>
+  <SwatchPicker value={currentValue || null} onChange={(id) => emit(id ?? "")} />
 {:else}
   <input aria-label={label} value={currentValue} oninput={(event) => emit(event.currentTarget.value)} />
 {/if}
@@ -313,23 +275,5 @@
     border-color: var(--accent);
     color: var(--accent-emphasis);
   }
-  .multi-select-chip.static {
-    cursor: default;
-  }
 
-  /* Read-only static values (#64). Sized to sit where the input would. */
-  .fv-static {
-    font-size: var(--fs-md);
-    padding: 5px 2px;
-    color: var(--text);
-    min-width: 0;
-    overflow-wrap: anywhere;
-  }
-  .fv-static-longtext {
-    white-space: pre-wrap;
-    line-height: 1.5;
-  }
-  .fv-empty {
-    color: var(--text-3);
-  }
 </style>

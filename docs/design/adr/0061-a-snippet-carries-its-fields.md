@@ -3,7 +3,7 @@
 - Status: **Proposed** — 2026-08-16. Awaiting Anton.
 - Issue: #1104 · Pre-1.0 (no release milestone)
 - Follows: ADR-0054 (a prompt picks a disposition + optional commit; **`inputs` and `offer_on` live on the node's front-matter**, read as structured metadata), the prompt-as-kind model (four concrete bases; `snippet` = "a prompt with no invocation contract")
-- Depends on: the template-language thread's rename of `{% include %}` → `{% snippet %}` (ADR-0060 area). This ADR is written in terms of `{% snippet %}` and adds only the *field* semantics; the directive itself is that thread's.
+- Depends on: the `{% snippet %}` inclusion directive owned by the template-language thread (ADR-0060 area). This ADR is written in terms of `{% snippet %}` and adds only the *field* semantics; the directive itself is that thread's. (`{% import %}` — Jinja macro import — is a separate directive, unchanged, and not part of the field-carrying mechanism here.)
 - Relates: ADR-0039 (layered `metadata.schema.yaml` inheritance — the *nearer-wins* precedent reused here), ADR-0040 (the reference index / reverse adjacency the dependency alert reads), ADR-0057 (lore is gated by **runtime execution**, never a static text scan — the mirror-image distinction this ADR draws for *fields*)
 - **Verified against `f0c20603` (2026-08-16).**
 

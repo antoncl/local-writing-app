@@ -28,6 +28,7 @@ import {
   inlineHandler,
   inlineDestinationFor,
   outputHandlerFor,
+  type InlineDestination,
   type InlineGathered,
   type InlineHost,
   type OutputRun,
@@ -327,8 +328,8 @@ export class AiSuggestionController {
     const handler = outputHandlerFor(output);
     if (handler?.key === "inline") {
       const run: OutputRun = { entry, inputs, assistantId, scene };
-      const host = this.#inlineHost(run);
-      const gathered = inlineHandler.produce(host, inlineDestinationFor(output));
+      const host = this.#inlineHost(run, inlineDestinationFor(output));
+      const gathered = await inlineHandler.produce(host);
       if (!gathered) return;
       this.error = null;
       this.#anchorPos = gathered.from;
@@ -353,8 +354,9 @@ export class AiSuggestionController {
 
   // Build the inline handler's host for one run — the seam between the registered
   // handler and this controller's streaming primitive + error surface.
-  #inlineHost(run: OutputRun): InlineHost {
+  #inlineHost(run: OutputRun, destination: InlineDestination): InlineHost {
     return {
+      destination,
       getEditor: () => this.#deps.getEditor(),
       setError: (message, anchor) => {
         this.error = message;

@@ -34,6 +34,11 @@ import type {
 import { api, HttpError } from "@/lib/api";
 import { entryBrainstorm } from "@/lib/stores/entryBrainstorm.svelte";
 import { treeActions } from "@/lib/stores/treeActions.svelte";
+import {
+  extractHandler,
+  outputHandlerFor,
+  type ExtractHost,
+} from "@/lib/editor-core/outputHandlers";
 
 /** The live chat state + status/cost sinks the controller reaches into. Stable
  *  for the controller's life (wired once at construction) — the reactive inputs
@@ -128,9 +133,10 @@ export class ChatCommitController {
   constructor(private readonly deps: ChatCommitDeps) {}
 
   /** A chat carrying a `commit` (ADR-0054 §2) extracts its result to a
-   *  schema-typed node — the routing question that was `output.kind ===
-   *  "entry_patch"`. */
-  isCommitChat = $derived(!!this.output?.commit);
+   *  schema-typed node — the `extract_to_node` output handler (ADR-0065). This is
+   *  the routing question that was `output.kind === "entry_patch"`, now asked
+   *  through the registry instead of re-deriving it from the raw commit field. */
+  isCommitChat = $derived(outputHandlerFor(this.output)?.key === "extract_to_node");
   /** ADR-0063 S1: the entry_type the prompt DECLARES its commit creates. When set,
    *  the chat is a create brainstorm for that type regardless of how it was
    *  launched — the target wins over a seeded `entry` (we create, never revise). */
@@ -219,38 +225,58 @@ export class ChatCommitController {
     this.deps.setNotice(null);
     this.committing = true;
     try {
-      const patch = await this.extractPatch(
-        entryId,
-        "Couldn't read the model's response as a patch — ask it to finalize again.",
-      );
+      const host = this.reviseExtractHost(entryId);
+      const patch = await extractHandler.produce(host);
       if (!patch) return;
-      // `replace` (a scene summary) swaps one field whole; strip any body the
-      // model returned so the stored proposal stays fields-only (the commit-side
-      // guarantee that prose is never rewritten lives in `acceptFields`).
-      const reviewMode: ReviewMode =
-        this.output?.commit?.review === "replace" ? "replace" : "visual_diff";
-      const body = reviewMode === "replace" ? null : patch.body;
-      const hasBody = body != null;
-      const hasFields = Object.keys(patch.fields).length > 0;
-      if (!hasBody && !hasFields) {
-        this.deps.setNotice("The model proposed no changes to commit.");
-        return;
-      }
-      entryBrainstorm.propose(entryId, { body, fields: patch.fields, reviewMode });
-      // Hand-off cue (#710 slice 3): the commit lands here in the chat pane but
-      // the review renders on the entry pane. Name where it went so the author
-      // knows to flip over. A scene subject isn't in the caller's roster → "the scene".
-      const reviewOn = this.deps.entryTitle(entryId) ?? "the scene";
-      const dropped =
-        patch.dropped.length > 0
-          ? ` Ignored ${patch.dropped.length} field(s) the model couldn't set legally: ${patch.dropped.join(", ")}.`
-          : "";
-      this.deps.setNotice(`Committed — review it on ${reviewOn}.${dropped}`);
+      await extractHandler.apply(patch, host);
     } catch (e) {
       this.deps.setError((e as Error).message);
     } finally {
       this.committing = false;
     }
+  }
+
+  // The `extract_to_node` host for a revise commit (ADR-0065): `produce` runs the
+  // shared transcript extraction; `apply` publishes the patch to the entry pane's
+  // diff review. The controller-state-bound work (cost attribution inside
+  // extractPatch, the cross-pane propose + hand-off notice) stays here; the
+  // handler is the registered dispatch seam.
+  private reviseExtractHost(entryId: string): ExtractHost {
+    return {
+      extract: () =>
+        this.extractPatch(
+          entryId,
+          "Couldn't read the model's response as a patch — ask it to finalize again.",
+        ),
+      publish: (patch) => this.publishRevisePatch(entryId, patch),
+    };
+  }
+
+  // Publish an extracted patch to the entry pane's proposed-vs-current review
+  // (the `patch_diff` apply). `replace` (a scene summary) swaps one field whole,
+  // so any body the model returned is stripped — the producer side of the
+  // prose-never-rewritten guarantee (which lives in `acceptFields`). A patch that
+  // proposes nothing is surfaced, never a silent no-op.
+  private publishRevisePatch(entryId: string, patch: AIEntryPatch): void {
+    const reviewMode: ReviewMode =
+      this.output?.commit?.review === "replace" ? "replace" : "visual_diff";
+    const body = reviewMode === "replace" ? null : patch.body;
+    const hasBody = body != null;
+    const hasFields = Object.keys(patch.fields).length > 0;
+    if (!hasBody && !hasFields) {
+      this.deps.setNotice("The model proposed no changes to commit.");
+      return;
+    }
+    entryBrainstorm.propose(entryId, { body, fields: patch.fields, reviewMode });
+    // Hand-off cue (#710 slice 3): the commit lands here in the chat pane but the
+    // review renders on the entry pane. Name where it went so the author knows to
+    // flip over. A scene subject isn't in the caller's roster → "the scene".
+    const reviewOn = this.deps.entryTitle(entryId) ?? "the scene";
+    const dropped =
+      patch.dropped.length > 0
+        ? ` Ignored ${patch.dropped.length} field(s) the model couldn't set legally: ${patch.dropped.join(", ")}.`
+        : "";
+    this.deps.setNotice(`Committed — review it on ${reviewOn}.${dropped}`);
   }
 
   // Stage the brainstorm as a subject-pinned mutation set (ADR-0055 §4a/§6 — the

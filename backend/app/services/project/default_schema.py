@@ -409,11 +409,11 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # streaming mark. The patch is validated server-side (`validate_ai_entry_patch`
             # / `validate_ai_entry_draft`) before review — the safety guarantee is
             # validate-on-return, not constrained decoding. The entry rides in as
-            # an `entry` input loaded with `entry(input.entry)` — exactly how
+            # an `entry` input loaded with `entry(inputs.entry)` — exactly how
             # roleplay pulls its character — because `{{ scene }}` resolves scenes
             # only (`read_scene`), never a lore entry. No `context_strategy.target`
-            # for the same reason. `field_catalog(e)` (revise) / `field_catalog(
-            # input.entry_type)` (create) lists the proposable fields so the
+            # for the same reason. `fields(e)` (revise) / `fields(inputs.entry_type)`
+            # (create) list the roster and the template keeps `f.proposable` so the
             # instruction names real field ids.
             "name": "Revise entry",
             "kind": "prompt",

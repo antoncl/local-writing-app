@@ -17,7 +17,7 @@ entry_type: prompt:snippet
 #}
 {%- if project is defined and project and project.metadata -%}
 {%- set ns = namespace(rows=[]) -%}
-{%- for f in field_catalog("project:project") if f.id in ["pov_mode", "tense"] -%}
+{%- for f in fields("project:project") if f.proposable and f.id in ["pov_mode", "tense"] -%}
 {%- set val = project.metadata.get(f.id) -%}
 {%- if val is not none and val != "" -%}{%- set ns.rows = ns.rows + [(f.label, val)] -%}{%- endif -%}
 {%- endfor -%}

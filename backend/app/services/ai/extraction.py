@@ -9,7 +9,7 @@
 # small fresh context. Length-independent by construction.
 #
 # The contract is a Jinja template rendered through the ordinary preview pipeline,
-# so it reuses `field_catalog` and the entry helpers rather than re-deriving the
+# so it reuses `fields` and the entry helpers rather than re-deriving the
 # field descriptors in Python (the seed templates' item-shape logic is non-trivial
 # — one source of it, not two). `DEFAULT_EXTRACTION_TEMPLATE` is the ONE generated
 # contract (body + all proposable fields); a prompt that needs a narrower shape sets
@@ -59,7 +59,8 @@ RETRY_CUE = (
 )
 
 # The generated contract (ADR-0051 S4; filtered by ADR-0054 §2). By default it names
-# the body + every proposable field of the target type, straight from `field_catalog`.
+# the body + every proposable field of the target type: `fields()` returns the full
+# roster and the loop keeps `f.proposable` (ADR-0060 §3 — the pre-filter is gone).
 # `commit.fields` (passed in as `inputs.commit_fields`) narrows it: the field loop
 # enumerates only allow-listed descriptors, and `inputs.body_allowed` /
 # `inputs.title_allowed` gate the body and title clauses (both are `true` when no
@@ -79,7 +80,7 @@ Reply with ONLY a JSON object, with no preamble, no commentary, and no code fenc
 {% endif %}- "fields": {% if inputs.creating %}{% if inputs.title_allowed %}ALWAYS include "title". {% endif %}Add any other field the conversation set, {% else %}include a field ONLY when the conversation changed it, {% endif %}keyed by its field id. For tags / multi_select give a JSON array of strings; for a select field use one of its listed options exactly; for an ordered-list field give the complete new list in its stated item shape (the whole list, in order); otherwise give the field's complete new value.{% if not inputs.creating %}{% if inputs.title_allowed %} You may also propose a new "title".{% endif %} Use {} if nothing changed.{% endif %}
 
 The fields you may set:
-{% for f in field_catalog(inputs.entry_type) if f.id != "body" and (inputs.commit_fields is none or f.id in inputs.commit_fields) %}
+{% for f in fields(inputs.entry_type) if f.proposable and f.id != "body" and (inputs.commit_fields is none or f.id in inputs.commit_fields) %}
 - {{ f.id }} ({{ f.label }}) — {{ f.type }}{% if f.options %}; one of: {{ f.options | join(", ") }}{% endif %}{% if f.description %} — {{ f.description }}{% endif %}{% if f.get("items") %}{% if f.item_scalar %}; a JSON array of {{ f["items"][0].type }} values{% if f["items"][0].options %}, each one of: {{ f["items"][0].options | join(", ") }}{% endif %}{% else %}; a JSON array of objects, each with keys: {% for m in f["items"] %}{{ m.key }} ({{ m.type }}{% if m.options %}; one of: {{ m.options | join(", ") }}{% endif %}){% if not loop.last %}, {% endif %}{% endfor %}{% endif %}{% endif %}
 {% else %}
 - (none{% if inputs.body_allowed %} beyond title/body{% endif %})
@@ -101,8 +102,8 @@ def render_extraction_contract(
     ``commit_fields`` is the prompt's ``commit.fields`` allow-list (ADR-0054 §2):
     None ⇒ the full contract (body + every proposable field); a list ⇒ only those
     targets, with ``body`` counted as a field (so its absence yields a fields-only
-    contract). Rendered through `build_preview` so `field_catalog` and the entry
-    helpers are available exactly as in the seed templates; the system block is the
+    contract). Rendered through `build_preview` so `fields` and the entry helpers
+    are available exactly as in the seed templates; the system block is the
     contract. Raises `PreviewError` on a broken template (the route surfaces it).
     """
 
@@ -118,7 +119,7 @@ def render_extraction_contract(
     definition = schema.entry_types.get(entry_type)
     # Suppress the body clause only for a KNOWN, bodiless type. An UNKNOWN type
     # (no definition) keeps the body clause — the existing graceful degradation
-    # (`_field_catalog` returns no fields, so the contract is body-only).
+    # (`_fields` returns no fields, so the contract is body-only).
     body_type_ok = definition is None or "body" in definition.fields
     body_proposable = bool(getattr(body_field, "ai_proposable", True)) if body_field else True
     body_description = getattr(body_field, "description", None) if body_field else None

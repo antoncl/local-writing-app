@@ -165,11 +165,11 @@ class BuiltinLibraryTests(unittest.TestCase):
         here, onto the resolved Library node body.
 
         Roleplay must still read the #317 project-metadata triple out of the box;
-        revise:entry must still carry both of its modes (revise via
-        `field_catalog(e)`, create via `field_catalog(draft_type)` /
-        `entry_type_label(draft_type)`). Since ADR-0051 S4 the seed no longer
-        carries the JSON commit contract — it is a goal-directed brainstorm and
-        the structured result is extracted separately at commit.
+        revise:entry must still carry both of its modes (revise via `fields(e)`,
+        create via `fields(draft_type)` / `type_name(draft_type)`). Since ADR-0051
+        S4 the seed no longer carries the JSON commit contract — it is a
+        goal-directed brainstorm and the structured result is extracted separately
+        at commit.
         """
         roleplay = self.service.read_prompt_entry("builtin-roleplay").body
         for marker in (
@@ -183,9 +183,9 @@ class BuiltinLibraryTests(unittest.TestCase):
         for marker in (
             "ideation partner",
             "entry(inputs.entry)",
-            "field_catalog(e)",
-            "field_catalog(draft_type)",
-            "entry_type_label(draft_type)",
+            "fields(e)",
+            "fields(draft_type)",
+            "type_name(draft_type)",
             "ready to commit",
         ):
             self.assertIn(marker, revise)
@@ -203,7 +203,7 @@ class BuiltinLibraryTests(unittest.TestCase):
         body = self.service.read_prompt_entry("builtin-project-settings").body
         # Reads labels from the project type; skips color and the narrative-craft
         # settings (POV / tense), which live in builtin-prose-settings (#1076).
-        self.assertIn('field_catalog("project:project")', body)
+        self.assertIn('fields("project:project")', body)
         self.assertIn('not in ["color", "pov_mode", "tense"]', body)
         revise = self.service.read_prompt_entry("builtin-revise-entry").body
         self.assertIn('{% include "builtin-project-settings" %}', revise)

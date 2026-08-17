@@ -6,8 +6,8 @@ Two surfaces:
 
 - `_format_lore_block` (the single field-value choke-point, ADR-0006): the auto
   `<lore>` block renders the effective name/body at the calling scene.
-- the `base()` / `effective()` Jinja helpers: the field-query surface that
-  carries structured fields (like `rank`) the block does not render.
+- the `original(x)` / `entry(x, at=…)` field reads (ADR-0060 §3): the field-query
+  surface that carries structured fields (like `rank`) the block does not render.
 """
 
 from __future__ import annotations
@@ -25,7 +25,11 @@ from app.models import (
     MetadataFieldDefinition,
     UpsertMetadataFieldRequest,
 )
-from app.services.ai.helpers import _format_lore_block, create_environment_for_project
+from app.services.ai.helpers import (
+    _coerce_entry_ref_as_of,
+    _format_lore_block,
+    create_environment_for_project,
+)
 
 
 class MutationResolutionTests(unittest.TestCase):
@@ -87,33 +91,32 @@ class MutationResolutionTests(unittest.TestCase):
         block = _format_lore_block(self.service, [self.honor])
         self.assertIn('name="Commodore Honor"', block)
 
-    # --- base()/effective() helpers (structured field: rank) --------------
+    # --- original()/entry(at=) field reads (structured field: rank) --------
 
-    def test_effective_helper_resolves_field_per_scene(self) -> None:
+    def test_entry_at_resolves_field_per_scene(self) -> None:
         env = create_environment_for_project(self.service)
-        render = env.from_string(
-            "{{ effective(hid, 'rank', sid) }}"
-        ).render
+        render = env.from_string("{{ entry(hid, at=sid).rank }}").render
         self.assertEqual(render(hid=self.honor, sid=self.s2), "Captain")
         # Redaction: the future "Captain" must not leak into the earlier scene
-        # (base rank is unset here, so it resolves to the base, not the mutation).
+        # (book-start rank is unset here, so it resolves to book-start, not the
+        # mutation).
         self.assertNotEqual(render(hid=self.honor, sid=self.s1), "Captain")
 
-    def test_effective_helper_resolves_title_per_scene(self) -> None:
+    def test_entry_at_resolves_title_per_scene(self) -> None:
         env = create_environment_for_project(self.service)
-        render = env.from_string("{{ effective(hid, 'title', sid) }}").render
+        render = env.from_string("{{ entry(hid, at=sid).title }}").render
         self.assertEqual(render(hid=self.honor, sid=self.s1), "Commodore Honor")
         self.assertEqual(render(hid=self.honor, sid=self.s2), "Captain Honor")
 
-    def test_base_helper_ignores_mutations(self) -> None:
+    def test_original_ignores_mutations(self) -> None:
         env = create_environment_for_project(self.service)
-        render = env.from_string("{{ base(hid, 'title') }}").render
-        # base() is scene-independent: always the stored (book-start) value.
+        render = env.from_string("{{ original(hid).title }}").render
+        # original() is scene-independent: always the stored (book-start) value.
         self.assertEqual(render(hid=self.honor), "Commodore Honor")
 
-    def test_effective_coerces_to_field_native_type(self) -> None:
+    def test_entry_at_coerces_to_field_native_type(self) -> None:
         # A number field resolves to an int, not the marker's "600" string, so
-        # template comparisons behave the same as with a base value.
+        # template comparisons behave the same as with a book-start value.
         layers = self.service.read_metadata_schema_layers()
         self.service.upsert_metadata_field(
             UpsertMetadataFieldRequest(
@@ -127,8 +130,12 @@ class MutationResolutionTests(unittest.TestCase):
             "Scene Three",
             f"Grew stronger. <!-- mutate:entity={self.honor};field=strength;value=600;id=s1 -->",
         )
-        env = create_environment_for_project(self.service)
-        value = env.globals["effective"](self.honor, "strength", scene)
+        # `entry()` is a pass_context global (needs a render context); exercise the
+        # same coercion through the function it delegates to, then read the field
+        # off the returned EntryRef — value must be a native int.
+        schema = self.service.read_metadata_schema()
+        ref = _coerce_entry_ref_as_of(self.service, schema, self.honor, scene)
+        value = ref.strength
         self.assertEqual(value, 600)
         self.assertIsInstance(value, int)
 

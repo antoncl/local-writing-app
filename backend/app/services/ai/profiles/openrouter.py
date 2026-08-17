@@ -32,6 +32,7 @@ from app.services.ai.profiles.base import (
     UsageMetrics,
     default_token_count,
 )
+from app.services.ai.profiles.explicit_cache import TIER_TTL, cache_control_indices
 from app.services.ai.profiles.openai_compatible import OpenAICompatibleProfile
 
 if TYPE_CHECKING:
@@ -55,13 +56,6 @@ _CACHING_BY_PREFIX: dict[str, CachingStyle] = {
     "groq": "auto",
     "moonshotai": "auto",
 }
-
-# ADR-0060 §5: this adapter's own volatility-tier → cache_control mapping. Defined
-# per-adapter (not in the shared block model, which carries only `tier`); it
-# coincides with the Anthropic adapter's because OpenRouter's explicit routes are
-# the Anthropic-family providers that consume the same `cache_control` primitive.
-_TTL_BY_TIER = {"stable": "1h", "volatile": "5m"}
-_MAX_BREAKPOINTS = 4
 
 
 class OpenRouterProfile(OpenAICompatibleProfile):
@@ -201,18 +195,13 @@ def openrouter_system_messages(
     markers are ignored, so we collapse to a plain string to keep the wire
     small. Returns [] when there's nothing to send. Pure — no network/SDK.
 
-    ADR-0060 §5: the shared blocks carry only `{text, tier}`; this adapter maps a
-    tier to the cache_control ttl (`stable` → 1h, `volatile` → 5m) and caps markers
-    at 4 (its explicit routes are the Anthropic family), mirroring the Anthropic
-    adapter — the same primitive, owned per-adapter.
+    ADR-0060 §5: the shared blocks carry only `{text, tier}`; the explicit routes
+    are the Anthropic family, so this uses the shared `explicit_cache` mapping
+    (tier → cache_control ttl, ≤4-marker cap) — the same translation the Anthropic
+    adapter uses.
     """
     if system_blocks and caching_style == "explicit":
-        markable = [
-            i
-            for i, b in enumerate(system_blocks)
-            if (b.get("text") or "") and b.get("tier") in _TTL_BY_TIER
-        ]
-        budget = set(markable[-_MAX_BREAKPOINTS:])
+        budget = cache_control_indices(system_blocks)
         parts: list[dict] = []
         for i, block in enumerate(system_blocks):
             text = block.get("text") or ""
@@ -222,7 +211,7 @@ def openrouter_system_messages(
             if i in budget:
                 part["cache_control"] = {
                     "type": "ephemeral",
-                    "ttl": _TTL_BY_TIER[block["tier"]],
+                    "ttl": TIER_TTL[block["tier"]],
                 }
             parts.append(part)
         if parts:

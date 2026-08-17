@@ -183,12 +183,17 @@ class PromptCommit(BaseModel):
     (`visual_diff` = per-run adopt against the current entry; `replace` = a plain
     current→proposed swap). `fields` is an optional allow-list of what the commit
     extracts — `body` counts as a field, so its absence means fields-only; omit
-    `fields` entirely for the default (body + every proposable field). Kept lenient
-    (`str`, not a `Literal`) so a hand-edited layer stays readable; the save paths
-    validate the values (`_validate_metadata_schema_definition`)."""
+    `fields` entirely for the default (body + every proposable field). `target`
+    (ADR-0063 S1) is the entry_type FQN the commit *creates* — declaring it makes
+    the chat a create brainstorm for that type regardless of how it was launched;
+    unset ⇒ today's behaviour (revise the seeded `entry`, or create the launch's
+    `entry_type`). Kept lenient (`str`, not a `Literal`) so a hand-edited layer
+    stays readable; the save paths validate the values
+    (`_validate_metadata_schema_definition`)."""
 
     review: str = "visual_diff"
     fields: list[str] | None = None
+    target: str | None = None
 
 
 class PromptOnAccept(BaseModel):

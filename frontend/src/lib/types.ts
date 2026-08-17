@@ -729,9 +729,13 @@ export type PromptInputDefinition = {
 // a reviewable patch. `review` is how it's reviewed; `fields` is the optional
 // allow-list of what the commit extracts (`body` counts as a field, so its absence
 // is fields-only; omit `fields` for the default body + every proposable field).
+// `target` (ADR-0063 S1) is the entry_type the commit CREATES — declaring it makes
+// the chat a create brainstorm for that type regardless of how it was launched;
+// unset is today's behaviour (revise the seeded entry, or create the launch's type).
 export type PromptCommit = {
   review?: string;
   fields?: string[] | null;
+  target?: string | null;
 };
 
 // The accept-time mark-stamp of an inline prompt (#954, Lever 2). Present ⇒

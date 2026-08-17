@@ -76,10 +76,11 @@ def _entry_type_group_application_errors(entry_type_id: str, entry_type, schema:
     ]
 
 
-def _entry_type_prompt_errors(entry_type_id: str, entry_type) -> list[str]:
+def _entry_type_prompt_errors(entry_type_id: str, entry_type, known_entry_types: set[str]) -> list[str]:
     """Prompt-config coherence for one type: a prompt only rides on `kind ==
     'prompt'`, inputs are unique and (for select) populated, and the output
-    disposition passes ADR-0054 soft-validation."""
+    disposition passes ADR-0054 soft-validation. `known_entry_types` lets the
+    output validator resolve a `commit.target` (ADR-0063) against the schema."""
     if entry_type.prompt is None:
         return []
     if entry_type.kind != "prompt":
@@ -97,7 +98,9 @@ def _entry_type_prompt_errors(entry_type_id: str, entry_type) -> list[str]:
     # (inline only). Soft-validated in `schema_validation` (co-located with the
     # closed vocabularies).
     strategy = entry_type.prompt.context_strategy
-    errors.extend(validate_prompt_output(entry_type_id, strategy.output if strategy else None))
+    errors.extend(
+        validate_prompt_output(entry_type_id, strategy.output if strategy else None, known_entry_types)
+    )
     return errors
 
 
@@ -168,8 +171,9 @@ class MetadataSchemaValidationMixin:
             errors.extend(_entry_type_field_reference_errors(entry_type_id, entry_type, schema))
         for entry_type_id, entry_type in schema.entry_types.items():
             errors.extend(_entry_type_group_application_errors(entry_type_id, entry_type, schema))
+        known_entry_types = set(schema.entry_types)
         for entry_type_id, entry_type in schema.entry_types.items():
-            errors.extend(_entry_type_prompt_errors(entry_type_id, entry_type))
+            errors.extend(_entry_type_prompt_errors(entry_type_id, entry_type, known_entry_types))
         for field_id, field in schema.fields.items():
             errors.extend(_field_shape_errors(field_id, field, schema))
         return errors

@@ -143,6 +143,50 @@ describe("ChatCommitController — launch-mode derivations", () => {
   });
 });
 
+// ADR-0063 S1: a prompt DECLARES the entry_type its commit creates. A declared
+// target makes the chat a create brainstorm for that type — and WINS over how the
+// chat was launched (a seeded `entry` would otherwise mean revise).
+describe("ChatCommitController — commit.target (ADR-0063 S1)", () => {
+  it("commitTarget reads output.commit.target (trimmed), else empty", () => {
+    const { c } = makeController();
+    expect(c.commitTarget).toBe("");
+    c.output = { kind: "chat_panel", commit: { review: "visual_diff", target: "  lore:character  " } };
+    expect(c.commitTarget).toBe("lore:character");
+  });
+
+  it("a declared target drives draftEntryType and forces isCreateBrainstorm", () => {
+    const { c } = makeController();
+    c.output = { kind: "chat_panel", commit: { review: "visual_diff", target: "lore:character" } };
+    // No launch inputs at all — the target alone makes it a create brainstorm.
+    expect(c.draftEntryType).toBe("lore:character");
+    expect(c.isCreateBrainstorm).toBe(true);
+  });
+
+  it("the target wins over a seeded entry — create, never revise, and no staging", () => {
+    const { c } = makeController();
+    c.output = { kind: "chat_panel", commit: { review: "visual_diff", target: "lore:character" } };
+    // A seeded `entry` would normally mean revise; the declared target overrides it.
+    c.inputDrafts = { entry: "lore-1" };
+    c.subjectEntryType = "lore:character";
+    expect(c.isCreateBrainstorm).toBe(true);
+    expect(c.canStage).toBe(false);
+  });
+
+  it("commitDraft extracts against the declared target type", async () => {
+    const { c } = makeController();
+    c.output = { kind: "chat_panel", commit: { review: "visual_diff", target: "lore:character" } };
+    extractDraft.mockResolvedValue(okResult({ body: "a spine", fields: { name: "Vale" } }));
+
+    await c.commitDraft();
+
+    expect(extractDraft).toHaveBeenCalledWith("lore:character", {
+      messages: [{ role: "user", content: "brainstorm turn" }],
+      assistant_id: "asst-1",
+      commit_fields: null,
+    });
+  });
+});
+
 describe("ChatCommitController — commitToEntry", () => {
   beforeEach(() => {
     entryBrainstorm.clear("lore-1");

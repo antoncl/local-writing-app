@@ -269,6 +269,9 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
         # ADR-0057 §2: the execution-derived lore gate, captured from this
         # render so the frontend can persist it as the chat's `lore_enabled`.
         lore_enabled=rendered.lore_invoked,
+        # ADR-0060 §2: node ids the template selected via `use(node)`, captured
+        # here so the lock-render save can persist them as `used_node_ids`.
+        used_node_ids=rendered.used_node_ids,
     )
 
 

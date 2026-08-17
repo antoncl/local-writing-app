@@ -182,7 +182,7 @@ class BuiltinLibraryTests(unittest.TestCase):
         revise = self.service.read_prompt_entry("builtin-revise-entry").body
         for marker in (
             "ideation partner",
-            "entry(input.entry)",
+            "entry(inputs.entry)",
             "field_catalog(e)",
             "field_catalog(draft_type)",
             "entry_type_label(draft_type)",

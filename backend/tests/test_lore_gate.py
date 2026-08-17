@@ -1,6 +1,6 @@
 """ADR-0057 §2: the execution-derived lore gate.
 
-The gate is captured from whether `relevant_lore()` actually ran during a
+The gate is captured from whether `use_lore()` actually ran during a
 chat's lock render (not a static text-scan, not a user knob) and persisted as
 the chat's `lore_enabled`. These tests cover the two ends of that mechanism:
 
@@ -31,7 +31,7 @@ _END = "{% endrole %}"
 
 
 class BuildPreviewLoreInvokedTests(unittest.TestCase):
-    """`build_preview` records whether `relevant_lore()` executed."""
+    """`build_preview` records whether `use_lore()` executed."""
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
@@ -57,7 +57,7 @@ class BuildPreviewLoreInvokedTests(unittest.TestCase):
         return rendered
 
     def test_lore_invoked_true_when_helper_called(self) -> None:
-        rendered = self._render(f"{_SYS}Lore:\n{{{{ relevant_lore() }}}}{_END}")
+        rendered = self._render(f"{_SYS}Lore:\n{{{{ use_lore() }}}}{_END}")
         self.assertTrue(rendered.lore_invoked)
 
     def test_lore_invoked_false_when_helper_absent(self) -> None:
@@ -70,14 +70,14 @@ class BuildPreviewLoreInvokedTests(unittest.TestCase):
         # system block renders to nothing) — but the prompt still *called* it, so
         # the chat is lore-enabled and lore added later will flow in. Invocation,
         # not a non-empty result, is the gate.
-        rendered = self._render(f"{_SYS}{{{{ relevant_lore() }}}}{_END}")
+        rendered = self._render(f"{_SYS}{{{{ use_lore() }}}}{_END}")
         self.assertTrue(rendered.lore_invoked)
 
     def test_helper_behind_an_unfired_conditional_does_not_flag(self) -> None:
         # The reachability point (ADR-0057 anti-goals): a static text-scan would
         # wrongly flag this; execution does not, because the branch never runs.
         rendered = self._render(
-            f"{_SYS}{{% if false %}}{{{{ relevant_lore() }}}}{{% endif %}}X{_END}"
+            f"{_SYS}{{% if false %}}{{{{ use_lore() }}}}{{% endif %}}X{_END}"
         )
         self.assertFalse(rendered.lore_invoked)
 

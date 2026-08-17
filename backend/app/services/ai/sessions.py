@@ -7,11 +7,12 @@ set into:
 - **stable** — entries whose revision still matches the baseline
 - **volatile** — entries that are new or changed since the baseline
 
-The template author opts into the partition by calling
-`relevant_lore(scene, partition="stable")`, emitting `{% cache_break %}`, then
-calling `relevant_lore(scene, partition="volatile")`. The provider serializer
-turns the cache_break into Anthropic `cache_control` markers, hitting the cache
-on the stable prefix.
+The send path — not the template — drives the partition (ADR-0057 §7 / ADR-0060
+§2 retired the template-emitting form): `_lore_cache_blocks` calls the internal
+`_relevant_lore(scene, partition="stable")` for a 1h block, then
+`partition="volatile")` for a 5m block, against this session's baseline. The
+provider serializer turns those tier boundaries into Anthropic `cache_control`
+markers, hitting the cache on the stable prefix.
 
 Lifecycle:
 

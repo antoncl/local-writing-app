@@ -179,6 +179,43 @@ class LoreCacheBlockTests(unittest.TestCase):
         text = "".join(b["text"] for b in blocks)
         self.assertIn('name="Honor Harrington"', text)
 
+    def test_use_selected_node_joins_the_lore_set(self) -> None:
+        # ADR-0060 §2: a node the prompt selected via `use()` — persisted as the
+        # chat's `used_node_ids` — joins the send path's ONE lore selector. No
+        # scene ref, no mention, no always-policy: the selection alone pulls it in,
+        # and it is placed and tiered like any other entry (never emitted inline).
+        picked = self._make_note("Sidebar", body="A picked aside.")
+        self.service.save_chat_session(
+            self.chat_id,
+            SaveChatSessionRequest(
+                title="Brainstorm",
+                prompt_entry_id="prompt_x",
+                lore_enabled=True,
+                used_node_ids=[picked],
+            ),
+        )
+        blocks = self._blocks(self.chat_id, [{"role": "user", "content": "hi"}])
+        text = "".join(b["text"] for b in blocks)
+        self.assertIn('name="Sidebar"', text)
+        self.assertIn("A picked aside", text)
+
+    def test_use_selected_never_policy_node_stays_excluded(self) -> None:
+        # `use()` joins the SAME direct channel, so it still obeys the one `never`
+        # chokepoint — a selection cannot override a `never`-policy entry.
+        blocked = self._make_note("Secret", policy="never", body="Do not show.")
+        self.service.save_chat_session(
+            self.chat_id,
+            SaveChatSessionRequest(
+                title="Brainstorm",
+                prompt_entry_id="prompt_x",
+                lore_enabled=True,
+                used_node_ids=[blocked],
+            ),
+        )
+        blocks = self._blocks(self.chat_id, [{"role": "user", "content": "hi"}])
+        text = "".join(b["text"] for b in blocks)
+        self.assertNotIn('name="Secret"', text)
+
     def test_an_entry_appears_in_exactly_one_tier(self) -> None:
         # The double-inclusion this fix removes: no entry may be in both blocks.
         self._blocks(self.chat_id, [{"role": "user", "content": "hi"}])

@@ -170,12 +170,15 @@ def _lore_cache_blocks(
     # One selector, two partitions against the same (pre-commit) baseline, so each
     # entry lands in exactly one tier. This re-runs the selector twice per send
     # (once per partition) — acceptable at one call per turn; the mutations index
-    # is built once above and threaded into both, not rebuilt per call.
+    # is built once above and threaded into both, not rebuilt per call. ADR-0060
+    # §2: the chat's `use(node)` selections join the selector's SAME direct channel
+    # (deduped by id, `never`-filtered), never a rival matcher.
+    used_ids = list(chat.used_node_ids)
     stable_xml = _relevant_lore(
-        project, scene, "implicit", "stable", session, journal_for_send, index
+        project, scene, "implicit", "stable", session, journal_for_send, index, used_ids
     )
     volatile_xml = _relevant_lore(
-        project, scene, "implicit", "volatile", session, journal_for_send, index
+        project, scene, "implicit", "volatile", session, journal_for_send, index, used_ids
     )
     session.commit()
 

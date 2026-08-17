@@ -11,6 +11,7 @@ from app.models import (
     SaveSceneRequest,
 )
 from app.services.ai.helpers import (
+    _relevant_lore,
     _role_block,
     _scene_body_text,
     _thread_parts,
@@ -487,13 +488,13 @@ class EntryAsOfHelperTests(_HelperFixtureBase):
 
 class ImpersonateAsOfPreviewTests(_HelperFixtureBase):
     """The anchor rides the prompt's `as_of` scene input (slider-seeded at launch,
-    persisted with the chat's inputs) → `input.as_of` → `entry_as_of`, so an
+    persisted with the chat's inputs) → `inputs.as_of` → `entry_as_of`, so an
     impersonate render reads its subject as-of the anchor scene (ADR-0055 §1).
     Mirrors impersonate.md's two key lines; the render takes no as-of param."""
 
     IMPERSONATE = (
-        '{% set as_of = input.as_of if input.as_of is defined else "" %}'
-        "{% set char = entry_as_of(input.entry, as_of) %}"
+        '{% set as_of = inputs.as_of if inputs.as_of is defined else "" %}'
+        "{% set char = entry_as_of(inputs.entry, as_of) %}"
         '{% role "system" %}You ARE {{ char.title }}.\n'
         "{% if char.body %}{{ char.body }}{% endif %}{% endrole %}"
     )
@@ -547,15 +548,16 @@ class ImpersonateAsOfPreviewTests(_HelperFixtureBase):
 
 
 class RelevantLoreHelperTests(_HelperFixtureBase):
+    """ADR-0060 §2 retired the emitting `relevant_lore()` Jinja global; the one
+    lore selector survives as the internal `_relevant_lore`, which the send path
+    calls (chat.py). These tests exercise that selector directly."""
+
+    def _lore(self, scene, mode: str = "implicit", *, journal=None) -> str:
+        return _relevant_lore(self.service, scene, mode, journal=journal)
+
     def test_implicit_finds_alias_match_and_one_hop(self) -> None:
         scene_one = self.service.read_scene(self.scene_one_node.scene_id)
-        env = create_environment_for_project(self.service)
-        out = render_template(
-            '{% role "user" %}{{ relevant_lore(scene) }}{% endrole %}',
-            context={"scene": scene_one},
-            env=env,
-        )
-        text = out.messages[0].text
+        text = self._lore(scene_one)
         # Honor — direct ref via 'characters' field
         self.assertIn("Honor Harrington", text)
         # Nimitz — one-hop expansion through Honor's related_entries
@@ -563,25 +565,13 @@ class RelevantLoreHelperTests(_HelperFixtureBase):
 
     def test_implicit_alias_only_match(self) -> None:
         scene_two = self.service.read_scene(self.scene_two_node.scene_id)
-        env = create_environment_for_project(self.service)
-        out = render_template(
-            '{% role "user" %}{{ relevant_lore(scene) }}{% endrole %}',
-            context={"scene": scene_two},
-            env=env,
-        )
-        text = out.messages[0].text
+        text = self._lore(scene_two)
         # 'Star Kingdom' alias for Manticore appears in the summary
         self.assertIn("Manticore", text)
 
     def test_explicit_skips_alias_scan(self) -> None:
         scene_two = self.service.read_scene(self.scene_two_node.scene_id)
-        env = create_environment_for_project(self.service)
-        out = render_template(
-            '{% role "user" %}{{ relevant_lore(scene, "explicit") }}{% endrole %}',
-            context={"scene": scene_two},
-            env=env,
-        )
-        text = out.messages[0].text
+        text = self._lore(scene_two, "explicit")
         # Scene two has no characters in its list and Manticore is alias-only
         self.assertNotIn("Manticore", text)
         # But pov is an entity_ref → Honor should be picked up
@@ -608,13 +598,7 @@ class RelevantLoreHelperTests(_HelperFixtureBase):
         )
 
         scene_one = self.service.read_scene(self.scene_one_node.scene_id)
-        env = create_environment_for_project(self.service)
-        out = render_template(
-            '{% role "user" %}{{ relevant_lore(scene) }}{% endrole %}',
-            context={"scene": scene_one},
-            env=env,
-        )
-        text = out.messages[0].text
+        text = self._lore(scene_one)
         # Honor is the direct entry (via characters field)
         self.assertIn("Honor Harrington", text)
         # Nimitz arrives via structural one-hop (related_entries on Honor)
@@ -649,13 +633,7 @@ class RelevantLoreHelperTests(_HelperFixtureBase):
         )
 
         scene_one = self.service.read_scene(self.scene_one_node.scene_id)
-        env = create_environment_for_project(self.service)
-        out = render_template(
-            '{% role "user" %}{{ relevant_lore(scene) }}{% endrole %}',
-            context={"scene": scene_one},
-            env=env,
-        )
-        text = out.messages[0].text
+        text = self._lore(scene_one)
         # Check entity inclusion by the rendered XML tag, not raw substring —
         # Pavel's body literally contains "Anders Pierce" as prose.
         self.assertIn('name="Honor Harrington"', text)
@@ -663,21 +641,13 @@ class RelevantLoreHelperTests(_HelperFixtureBase):
         self.assertNotIn('name="Anders Pierce"', text)   # depth 2: stop
 
     def test_journal_mode_trusts_journal_skips_alias_scan(self) -> None:
-        # When a journal is bound, the helper does NOT rescan the scene
+        # When a journal is bound, the selector does NOT rescan the scene
         # summary — it uses the journal as source of truth for detected
         # context. Scene one's summary mentions Honor's alias "Salamander",
         # but with an EMPTY journal we should only get the structural
         # entity_ref picks (characters: [Honor]).
-        from app.services.ai.helpers import create_environment_for_project
-
         scene_one = self.service.read_scene(self.scene_one_node.scene_id)
-        env = create_environment_for_project(self.service, journal=[])
-        out = render_template(
-            '{% role "user" %}{{ relevant_lore(scene) }}{% endrole %}',
-            context={"scene": scene_one},
-            env=env,
-        )
-        text = out.messages[0].text
+        text = self._lore(scene_one, journal=[])
         # Honor — structural ref via characters[]
         self.assertIn("Honor Harrington", text)
         # Nimitz — structural one-hop via Honor's related_entries (still runs)
@@ -693,7 +663,6 @@ class RelevantLoreHelperTests(_HelperFixtureBase):
         # even though the scene summary wouldn't have surfaced them via
         # alias scan.
         from app.models import ChatSessionJournalEntry
-        from app.services.ai.helpers import create_environment_for_project
 
         # Manticore is not referenced or mentioned in scene one's summary
         # ("Honor takes the Salamander into battle.") nor in Honor's metadata.
@@ -708,13 +677,7 @@ class RelevantLoreHelperTests(_HelperFixtureBase):
             )
         ]
         scene_one = self.service.read_scene(self.scene_one_node.scene_id)
-        env = create_environment_for_project(self.service, journal=journal)
-        out = render_template(
-            '{% role "user" %}{{ relevant_lore(scene) }}{% endrole %}',
-            context={"scene": scene_one},
-            env=env,
-        )
-        text = out.messages[0].text
+        text = self._lore(scene_one, journal=journal)
         self.assertIn("Honor Harrington", text)  # structural
         self.assertIn("Nimitz", text)            # structural one-hop
         self.assertIn("Manticore", text)         # via journal
@@ -723,8 +686,6 @@ class RelevantLoreHelperTests(_HelperFixtureBase):
         # Without journal: textual depth-1 fires (we just added it in step 1).
         # With journal: textual depth-1 is skipped — the send-time pipeline
         # is supposed to have done that already and put results into journal.
-        from app.services.ai.helpers import create_environment_for_project
-
         # Add Pavel; mention him in Honor's body. Without journal, Pavel
         # would arrive via textual depth-1. With empty journal, he should NOT.
         self._make_lore(
@@ -744,30 +705,74 @@ class RelevantLoreHelperTests(_HelperFixtureBase):
         )
 
         scene_one = self.service.read_scene(self.scene_one_node.scene_id)
-        env = create_environment_for_project(self.service, journal=[])
-        out = render_template(
-            '{% role "user" %}{{ relevant_lore(scene) }}{% endrole %}',
-            context={"scene": scene_one},
-            env=env,
-        )
-        text = out.messages[0].text
+        text = self._lore(scene_one, journal=[])
         self.assertIn('name="Honor Harrington"', text)
         self.assertIn('name="Nimitz"', text)
         # Pavel was found via textual depth-1 in journal=None mode, but with
-        # an explicit empty journal the helper trusts that signal: send-time
+        # an explicit empty journal the selector trusts that signal: send-time
         # would have added Pavel to the journal if it wanted him.
         self.assertNotIn('name="Pavel Young"', text)
 
     def test_pinned_only_returns_empty(self) -> None:
         scene_one = self.service.read_scene(self.scene_one_node.scene_id)
-        env = create_environment_for_project(self.service)
-        out = render_template(
-            '{% role "user" %}{{ relevant_lore(scene, "pinned_only") }}{% endrole %}',
-            context={"scene": scene_one},
-            env=env,
+        # No pinning machinery yet → empty block.
+        self.assertEqual(self._lore(scene_one, "pinned_only"), "")
+
+
+class UseHelperTests(_HelperFixtureBase):
+    """ADR-0060 §2: `use(node)` records the selection onto the env slot that
+    `build_preview` carries to `RenderedTemplate.used_node_ids`, flips the lore
+    gate, and emits nothing inline."""
+
+    def _render(self, template_source: str):
+        from app.services.ai.preview import PreviewRequest, build_preview
+
+        rendered, _ = build_preview(
+            self.service,
+            PreviewRequest(
+                template_source=template_source,
+                target_scene_id="",
+                session_id=None,
+                inputs={},
+                text_before="",
+                text_after="",
+                commit=False,
+            ),
         )
-        # No pinning machinery yet → empty body → no message.
-        self.assertEqual(out.messages, [])
+        return rendered
+
+    def test_use_records_id_flips_gate_and_emits_nothing(self) -> None:
+        rendered = self._render(
+            '{% role "system" %}[{{ use("' + self.nimitz["id"] + '") }}]{% endrole %}'
+        )
+        # The id is carried to used_node_ids and the lore gate is flipped.
+        self.assertEqual(rendered.used_node_ids, [self.nimitz["id"]])
+        self.assertTrue(rendered.lore_invoked)
+        # use() emits nothing — the node is backend-placed, not inline. The
+        # brackets render adjacent (empty between them) and no body leaks.
+        text = "".join(m.text for m in rendered.messages)
+        self.assertIn("[]", text)
+        self.assertNotIn("treecat", text.lower())
+
+    def test_use_dedupes_repeated_ids_preserving_order(self) -> None:
+        rendered = self._render(
+            '{% role "system" %}'
+            '{{ use("' + self.honor["id"] + '") }}'
+            '{{ use("' + self.nimitz["id"] + '") }}'
+            '{{ use("' + self.honor["id"] + '") }}'
+            "{% endrole %}"
+        )
+        self.assertEqual(
+            rendered.used_node_ids, [self.honor["id"], self.nimitz["id"]]
+        )
+
+    def test_use_of_an_entry_ref_object_records_its_id(self) -> None:
+        # `use(entry(x))` / `use(pov(scene))` — an EntryRef argument resolves the
+        # same as an id string (the coercion `entry()` uses).
+        rendered = self._render(
+            '{% role "system" %}{{ use(entry("' + self.honor["id"] + '")) }}{% endrole %}'
+        )
+        self.assertEqual(rendered.used_node_ids, [self.honor["id"]])
 
 
 class ContextPolicyTests(_HelperFixtureBase):
@@ -790,13 +795,7 @@ class ContextPolicyTests(_HelperFixtureBase):
 
     def _render_scene_one(self) -> str:
         scene_one = self.service.read_scene(self.scene_one_node.scene_id)
-        env = create_environment_for_project(self.service)
-        out = render_template(
-            '{% role "user" %}{{ relevant_lore(scene) }}{% endrole %}',
-            context={"scene": scene_one},
-            env=env,
-        )
-        return out.messages[0].text if out.messages else ""
+        return _relevant_lore(self.service, scene_one)
 
     def test_always_policy_unioned_into_implicit_render(self) -> None:
         # A character that's NOT referenced by scene_one and whose name is
@@ -872,14 +871,9 @@ class SessionPartitionTests(_HelperFixtureBase):
         self.scene_one = self.service.read_scene(self.scene_one_node.scene_id)
 
     def _render_with_partition(self, partition: str) -> str:
-        env = create_environment_for_project(self.service, session=self.session)
-        source = (
-            '{% role "user" %}{{ relevant_lore(scene, "implicit", "'
-            + partition
-            + '") }}{% endrole %}'
+        return _relevant_lore(
+            self.service, self.scene_one, "implicit", partition, session=self.session
         )
-        out = render_template(source, context={"scene": self.scene_one}, env=env)
-        return out.messages[0].text if out.messages else ""
 
     def test_first_call_everything_is_volatile(self) -> None:
         # Baseline is empty; everything looks new.
@@ -944,33 +938,18 @@ class SessionPartitionTests(_HelperFixtureBase):
         self.assertIn("Nimitz", all_text)
 
     def test_no_session_ignores_partition(self) -> None:
-        # No session bound to env → partition param is meaningless but must not crash.
-        env = create_environment_for_project(self.service, session=None)
-        out_stable = render_template(
-            '{% role "user" %}{{ relevant_lore(scene, "implicit", "stable") }}{% endrole %}',
-            context={"scene": self.scene_one},
-            env=env,
-        )
-        out_volatile = render_template(
-            '{% role "user" %}{{ relevant_lore(scene, "implicit", "volatile") }}{% endrole %}',
-            context={"scene": self.scene_one},
-            env=env,
-        )
+        # No session → partition param is meaningless but must not crash.
+        stable = _relevant_lore(self.service, self.scene_one, "implicit", "stable")
+        volatile = _relevant_lore(self.service, self.scene_one, "implicit", "volatile")
         # No session → all entries returned, partition ignored.
-        self.assertIn("Honor Harrington", out_stable.messages[0].text)
-        self.assertIn("Honor Harrington", out_volatile.messages[0].text)
+        self.assertIn("Honor Harrington", stable)
+        self.assertIn("Honor Harrington", volatile)
 
 
 class XmlOutputStructureTests(_HelperFixtureBase):
     def _render_lore(self, scene_attr: str) -> str:
         scene = self.service.read_scene(getattr(self, scene_attr).scene_id)
-        env = create_environment_for_project(self.service)
-        out = render_template(
-            '{% role "user" %}{{ relevant_lore(scene) }}{% endrole %}',
-            context={"scene": scene},
-            env=env,
-        )
-        return out.messages[0].text
+        return _relevant_lore(self.service, scene)
 
     def test_lore_block_wraps_in_lore_tag(self) -> None:
         text = self._render_lore("scene_one_node")
@@ -1062,7 +1041,9 @@ class HelperIntegrationTests(_HelperFixtureBase):
             '{% role "system" %}You are a writer.{% endrole %}'
             '{% role "user" %}'
             "POV: {{ pov(scene).title }}\n"
-            "{{ relevant_lore(scene) }}\n"
+            # ADR-0060 §2: use_lore() selects lore for backend placement and emits
+            # nothing inline; scenes_before is a surviving derived-recap emitter.
+            "{{ use_lore() }}"
             "Story so far:\n{{ scenes_before(scene) }}"
             "{% endrole %}",
             context={"scene": scene_two},
@@ -1071,7 +1052,6 @@ class HelperIntegrationTests(_HelperFixtureBase):
         self.assertEqual(len(out.messages), 2)
         user_text = out.messages[1].text
         self.assertIn("POV: Honor Harrington", user_text)
-        self.assertIn("Manticore", user_text)
         self.assertIn("The Departure", user_text)
 
 

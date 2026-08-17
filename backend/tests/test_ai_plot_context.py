@@ -176,7 +176,7 @@ class RevisePlotCardPromptTests(_PlotAiContextBase):
         card = self._card("The turn", body="He decides to leave.", scene=s0)
         self._card("Aftermath", body="SECRET_FUTURE fallout.", scene=s1)
         body = self.service.read_prompt_entry(_PROMPT_ID).body
-        out = self._render(body, input={"entry": card})
+        out = self._render(body, inputs={"entry": card})
         self.assertIn("The turn", out)  # the card under revision
         self.assertIn("<plot_context", out)  # the board block is injected
         self.assertNotIn("SECRET_FUTURE", out)  # gated at this card's reveal position

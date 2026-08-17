@@ -145,6 +145,10 @@
   // relevant_lore()) and echoed on every save so a per-turn persist never
   // drops it. Drives whether the backend send path injects any lore at all.
   let chatLoreEnabled = false;
+  // ADR-0060 §2: node ids the prompt selected via use(node). Captured from the
+  // lock render's preview response and echoed on every save, exactly like
+  // chatLoreEnabled — the backend unions them into its one lore selector.
+  let chatUsedNodeIds: string[] = [];
   let activeChatTitle = "Untitled chat";
   let activeChatPinned = false;
   let activeChatJournal: ChatSessionJournalEntry[] = $state([]);
@@ -295,6 +299,7 @@
     chatSubject = "";
     chatStagedSet = "";
     chatLoreEnabled = false;
+    chatUsedNodeIds = [];
     activeChatTitle = "Untitled chat";
     activeChatPinned = false;
     activeChatJournal = [];
@@ -321,6 +326,7 @@
     chatSubject = session.subject || "";
     chatStagedSet = session.staged_set || "";
     chatLoreEnabled = session.lore_enabled ?? false;
+    chatUsedNodeIds = session.used_node_ids ?? [];
     chatSystemPrompt = session.system_prompt || "";
     chatHistory = (session.messages || []).map((m: ChatSessionMessage) => ({
       role: m.role,
@@ -424,6 +430,7 @@
       // subject/staged_set — the backend preserves it when a save omits it, but
       // we always send the hydrated value so it never drifts.
       lore_enabled: chatLoreEnabled,
+      used_node_ids: chatUsedNodeIds,
       pinned: activeChatPinned,
       context_items: [],
       messages: chatHistory.map((m) => ({
@@ -669,6 +676,7 @@
       // whether the send path injects any lore; persisted with the system
       // prompt via the very next persistActiveChat.
       chatLoreEnabled = preview.lore_enabled ?? false;
+      chatUsedNodeIds = preview.used_node_ids ?? [];
       if (initialTurns.length > 0) chatHistory = [...initialTurns];
       return true;
     } catch (e) {

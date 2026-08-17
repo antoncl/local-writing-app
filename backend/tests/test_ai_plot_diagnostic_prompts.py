@@ -123,7 +123,7 @@ class RevisePlotlinePromptTests(_DiagnosticPromptBase):
     def test_its_body_renders_the_plotline_and_its_roster(self) -> None:
         plotline = self._plotline()
         body = self.service.read_prompt_entry(_REVISE_PLOTLINE).body
-        out = self._render(body, input={"entry": plotline.id})
+        out = self._render(body, inputs={"entry": plotline.id})
         self.assertIn(plotline.title, out)  # the plotline under revision
         self.assertIn("<plot_context", out)  # the board block is injected
         self.assertIn("instance_beats", out)  # the roster is presented as a field to develop

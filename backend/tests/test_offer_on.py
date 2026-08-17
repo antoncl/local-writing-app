@@ -82,7 +82,7 @@ class ImpersonateAndOfferOnTests(unittest.TestCase):
         body = entry.body
         # Pulls the character in via the seeded `entry` input, resolved AS-OF the
         # conversation's anchor scene (ADR-0055 §1) rather than at book-start.
-        self.assertIn("entry_as_of(input.entry, as_of)", body)
+        self.assertIn("entry_as_of(inputs.entry, as_of)", body)
         # A first-person, in-character lock that reads the character's own body.
         self.assertIn("first person", body)
         self.assertIn("char.body", body)

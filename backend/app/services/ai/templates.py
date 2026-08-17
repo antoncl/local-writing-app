@@ -56,10 +56,15 @@ class RenderedMessage:
 class RenderedTemplate:
     messages: list[RenderedMessage] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
-    # ADR-0057 §2: whether `relevant_lore()` executed during this render — the
-    # execution-derived lore gate. Set by `build_preview` from the env's
-    # invocation slot; the preview route surfaces it as `lore_enabled`.
+    # ADR-0057 §2: whether the lore gate (`use_lore()` / `use()`) executed during
+    # this render — the execution-derived lore gate. Set by `build_preview` from
+    # the env's invocation slot; the preview route surfaces it as `lore_enabled`.
     lore_invoked: bool = False
+    # ADR-0060 §2: node ids the template selected via `use(node)`, in insertion
+    # order, deduped. Set by `build_preview` from the env's `used_nodes` slot;
+    # persisted on the chat (`ChatSession.used_node_ids`) and unioned into the send
+    # path's one lore selector. Empty when the template selected no nodes.
+    used_node_ids: list[str] = field(default_factory=list)
 
 
 class RoleExtension(Extension):

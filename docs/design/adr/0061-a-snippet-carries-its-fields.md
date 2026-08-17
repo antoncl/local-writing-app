@@ -1,6 +1,6 @@
 # ADR-0061: A snippet carries its fields — inclusion contributes field definitions
 
-- Status: **Proposed** — 2026-08-16. Awaiting Anton.
+- Status: **Accepted** — 2026-08-17 (Anton). Approved over the prompt/field-system design session.
 - Issue: #1104 · Pre-1.0 (no release milestone)
 - Follows: ADR-0054 (a prompt picks a disposition + optional commit; **`inputs` and `offer_on` live on the node's front-matter**, read as structured metadata), the prompt-as-kind model (four concrete bases; `snippet` = "a prompt with no invocation contract")
 - Depends on: Jinja's **`{% import %}`** directive — a `snippet` (the reusable-text kind) is pulled into another prompt's body by importing it. This ADR adds only the *field-definition* semantics to that import; the directive itself is the template-language thread's (ADR-0060 area). `{% import %}` already means "import definitions," so importing a snippet's *fields* alongside its text is a natural extension, not a bolt-on. (Historical note: the thread briefly planned to rename `{% import %}` → `{% import %}` to dodge a naming conflict, then resolved the conflict otherwise — so the directive stays `{% import %}`.)

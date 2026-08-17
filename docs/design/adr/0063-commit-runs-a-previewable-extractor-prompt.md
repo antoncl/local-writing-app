@@ -1,6 +1,6 @@
 # ADR-0063: Commit runs an author-previewable extractor prompt to a declared target
 
-- Status: **Proposed** — 2026-08-17. Awaiting Anton.
+- Status: **Accepted** — 2026-08-17 (Anton). Approved over the prompt/field-system design session.
 - Issue: #1107 · Pre-1.0 (no release milestone)
 - **Supersedes** ADR-0054 §Why — the `output.extract` rejection (on grounds that no longer hold; see Decision §Why). **Realises** ADR-0054's deferred `commit.target` (whose named trigger is now met).
 - Follows: ADR-0054 (a prompt picks a disposition + optional commit), ADR-0046 (AI edit is a reviewable patch; **validate-on-return** is the safety guarantee), ADR-0059 (body-as-field, `ai_proposable` gates authorship), ADR-0049 (the built-in Library — the default extractor's home)

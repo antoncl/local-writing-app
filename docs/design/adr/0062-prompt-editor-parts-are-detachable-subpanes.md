@@ -1,6 +1,6 @@
 # ADR-0062: A prompt editor part is a detachable, subordinate sub-pane
 
-- Status: **Proposed** — 2026-08-16. Awaiting Anton.
+- Status: **Accepted** — 2026-08-17 (Anton). Approved over the prompt/field-system design session.
 - Issue: #1105 · Pre-1.0 (no release milestone)
 - Follows: ADR-0030 (the tiled shell — nothing floats/overlaps/cascades; splitters replace move-buttons; the surface taxonomy region/tab/rail/popover/dialog), ADR-0051 (a node owns its conversations — the `parentPaneId` **subordinate-pane** relationship reused here)
 - Consumes: ADR-0061 (a snippet carries its fields — the Inputs surface renders the *effective* set, two-tier with provenance)

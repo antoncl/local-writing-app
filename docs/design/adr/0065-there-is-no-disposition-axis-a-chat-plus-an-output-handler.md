@@ -1,6 +1,6 @@
 # ADR-0065: There is no disposition axis — a chat plus an optional output-handler
 
-- Status: **Proposed** — 2026-08-17. Awaiting Anton.
+- Status: **Accepted** — 2026-08-17 (Anton). Approved over the prompt/field-system design session.
 - Issue: #1109 · Pre-1.0 (no release milestone)
 - **Supersedes** ADR-0054's central decision — the output **disposition axis** (`output.kind` as a closed set of peer values + `commit` as a separate capability on `chat_panel`). **Subsumes** ADR-0063 (commit-to-a-target = the `extract_to_node` handler).
 - Follows: ADR-0058 (a provider is a class, registered once — the call on the class, not a branch — the pattern this reuses), ADR-0056 (self-enforcing: registered choke points + uniformity so a cold session copies a sibling), ADR-0050 (the caretaker "knows only commands" — the core-knows-only-the-contract precedent), ADR-0054 (the disposition/commit model this collapses)

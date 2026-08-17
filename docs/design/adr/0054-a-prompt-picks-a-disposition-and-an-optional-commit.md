@@ -1,6 +1,7 @@
 # ADR-0054: A prompt picks an output disposition, plus an optional commit
 
 - Status: **Accepted** — 2026-08-13 (Anton). Designed with him over the output-kind unification thread.
+- **Partially superseded (2026-08-17):** the `output.extract` rejection (§Why) by **ADR-0063**; the output-disposition axis itself (Decision §1 — `output.kind` as a set of peer values) by **ADR-0065**, which recasts it as a chat plus an optional registered output-handler. `commit`, `commit.fields`, `commit.review`, `offer_on`, and the `impersonate`/`roleplay` reservations stand.
 - Issue: #881 (umbrella) · Pre-1.0 (no release milestone)
 - Follows: ADR-0046 (AI lore editing is a reviewable patch — introduced `entry_patch`,
   the thing this ADR reclassifies), ADR-0051 (a node owns its conversations — §4 already

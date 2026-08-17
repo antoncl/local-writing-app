@@ -1,6 +1,6 @@
 # ADR-0064: A field type owns its read-only display — the FieldValue widget
 
-- Status: **Proposed** — 2026-08-17. Awaiting Anton.
+- Status: **Accepted** — 2026-08-17 (Anton). Approved over the prompt/field-system design session.
 - Issue: #1108 · Pre-1.0 (no release milestone)
 - Follows: the inputs/fields-uniformity rule (the *same edit widget per type* across a definition default, options, and the runtime value — GH #40/#36), ADR-0029 (the field model; presentation ops are category-independent), the UI widget taxonomy (NodeRow / NodeList / NodeEditor + the color-system widgets)
 - Relates: ADR-0046 / ADR-0044 (the entry-patch diff review already reuses the rail's read-only field widgets)

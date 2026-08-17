@@ -131,15 +131,20 @@ export class ChatCommitController {
    *  schema-typed node — the routing question that was `output.kind ===
    *  "entry_patch"`. */
   isCommitChat = $derived(!!this.output?.commit);
+  /** ADR-0063 S1: the entry_type the prompt DECLARES its commit creates. When set,
+   *  the chat is a create brainstorm for that type regardless of how it was
+   *  launched — the target wins over a seeded `entry` (we create, never revise). */
+  commitTarget = $derived((this.output?.commit?.target ?? "").trim());
   /** The revise target — the `entry` input the launch seeded (empty in create
    *  mode). */
   commitTargetEntryId = $derived((this.inputDrafts["entry"] ?? "").trim());
-  // ADR-0046 §6.4: the target entry_type for a create-mode brainstorm (no entry
-  // seeded). Mutually exclusive with commitTargetEntryId by how the chat was
-  // launched — revise seeds `entry`, create seeds `entry_type`.
-  draftEntryType = $derived((this.inputDrafts["entry_type"] ?? "").trim());
+  // ADR-0046 §6.4 / ADR-0063 S1: the entry_type a create-mode brainstorm drafts.
+  // A declared `commit.target` wins; otherwise it's the launch's seeded
+  // `entry_type` (create seeds `entry_type`, revise seeds `entry`).
+  draftEntryType = $derived(this.commitTarget || (this.inputDrafts["entry_type"] ?? "").trim());
   isCreateBrainstorm = $derived(
-    this.isCommitChat && !this.commitTargetEntryId && !!this.draftEntryType,
+    this.isCommitChat &&
+      (!!this.commitTarget || (!this.commitTargetEntryId && !!this.draftEntryType)),
   );
   /** The prompt's `commit.fields` allow-list (ADR-0054 §2), sent to the extraction
    *  endpoint so the server narrows the generated contract to those targets. Null
@@ -149,9 +154,13 @@ export class ChatCommitController {
   /** ADR-0055 §4a/§6: a committing brainstorm on a time-travel-aware lore subject
    *  may stage its result as a subject-pinned mutation set (the timeline branch)
    *  instead of writing the entry's base (the canonical branch). Offered only
-   *  when there is a revise target that is a lore entity. */
+   *  when there is a revise target that is a lore entity — a declared
+   *  `commit.target` forces create (ADR-0063 S1), so there's no base to stage. */
   canStage = $derived(
-    this.isCommitChat && !!this.commitTargetEntryId && !!this.subjectEntryType,
+    this.isCommitChat &&
+      !this.commitTarget &&
+      !!this.commitTargetEntryId &&
+      !!this.subjectEntryType,
   );
 
   // The commit preamble both modes share: run the extraction, attribute the

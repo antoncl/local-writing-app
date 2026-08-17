@@ -6,7 +6,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import EntryDraftCard from "./EntryDraftCard.svelte";
-import type { EntryPatch } from "@/lib/types";
+import type { EntryPatch, MetadataSchema } from "@/lib/types";
 
 const draft: EntryPatch = {
   body: "A long character profile body.",
@@ -41,6 +41,25 @@ describe("EntryDraftCard (#1018)", () => {
 
     await fireEvent.click(screen.getByRole("button", { name: "Discard" }));
     expect(onDiscard).toHaveBeenCalledOnce();
+  });
+
+  it("renders a proposed value through FieldValue — a select shows its LABEL, not the raw value (#1108)", () => {
+    render(EntryDraftCard, {
+      props: {
+        ...baseProps,
+        draft: { body: "", fields: { title: "Mira", status: "cursed" } },
+        metadataSchema: {
+          fields: {
+            status: { name: "Status", type: "select", options: [{ value: "cursed", label: "Cursed soul" }] },
+          },
+          entry_types: {},
+        } as unknown as MetadataSchema,
+      },
+    });
+    // The pill shows the option's label; the raw stored value never leaks — the
+    // draft card now reads like the metadata rail (ADR-0064).
+    expect(screen.getByText("Cursed soul")).toBeInTheDocument();
+    expect(screen.queryByText("cursed")).toBeNull();
   });
 
   it("pins the actions OUTSIDE the scroll region so a long profile can't hide them", () => {

@@ -116,8 +116,8 @@ MUTATION_CLOSE_PATTERN = re.compile(
 )
 
 # Sentinel position: resolve at end of scene (every in-scene marker counts as
-# live). Only `replace_selection` passes a real cursor offset; every other
-# surface resolves at end-of-scene (ADR-0003).
+# live). Only the inline handler's `selection` destination passes a real cursor
+# offset; every other surface resolves at end-of-scene (ADR-0003).
 END_OF_SCENE: int | None = None
 
 # Node-intrinsic fields a mutation may target that are not schema fields: the

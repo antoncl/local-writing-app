@@ -1,15 +1,15 @@
 """ADR-0054 §4/S4: the `offer_on` allow-list and the built-in `impersonate` prompt.
 
 `offer_on` is a per-prompt, instance-level list of the subject entry_types a
-`chat_panel` prompt is offered on in a node's Conversations "＋New" menu. It is
+conversation prompt is offered on in a node's Conversations "＋New" menu. It is
 read off the node's front-matter exactly like `inputs`, it REPLACES the old
 inference from context_pick input targets, and it must round-trip a clone/save
 verbatim (the S3 carry-verbatim invariant — a field with no authoring UI yet must
 not be stripped by an edit).
 
 `impersonate` is the first shipped no-commit conversation prompt: a `prompt:general`
-(a plain `chat_panel` disposition) Library node, offered on `lore:character`, whose
-body locks the model into the character.
+(a plain general chat, no output handler) Library node, offered on `lore:character`,
+whose body locks the model into the character.
 """
 
 from __future__ import annotations
@@ -61,13 +61,15 @@ class ImpersonateAndOfferOnTests(unittest.TestCase):
         self.assertIn("builtin-impersonate", entries)
         imp = entries["builtin-impersonate"]
         # It reuses the existing `prompt:general` type — no bespoke subtype (the
-        # disposition it needs, chat_panel with no commit, already exists there).
+        # behaviour it needs, a plain chat with no handler and no commit, already
+        # exists there).
         self.assertEqual(imp.entry_type, "prompt:general")
         self.assertTrue(imp.is_library)
         gen = self.service.read_metadata_schema().entry_types["prompt:general"]
-        output = gen.prompt.context_strategy.output
-        self.assertEqual(output.kind, "chat_panel")
-        self.assertIsNone(output.commit)  # a conversation, not a brainstorm
+        # general has a context_strategy (invocable) but no output block — no handler,
+        # a conversation, not a brainstorm.
+        self.assertIsNotNone(gen.prompt.context_strategy)
+        self.assertIsNone(gen.prompt.context_strategy.output)
 
     def test_offer_on_parsed_onto_both_read_models(self) -> None:
         summaries = self._summaries()

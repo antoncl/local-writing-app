@@ -93,10 +93,10 @@ def _entry_type_prompt_errors(entry_type_id: str, entry_type, known_entry_types:
         seen_inputs.add(input_def.name)
         if input_def.type == "select" and not input_def.options:
             errors.append(f"Entry type {entry_type_id} input '{input_def.name}' is type select but has no options.")
-    # ADR-0054 §1/§2 + #954: the prompt's `output` — its disposition `kind`,
-    # optional `commit` (chat_panel only), and optional `on_accept` mark-stamp
-    # (inline only). Soft-validated in `schema_validation` (co-located with the
-    # closed vocabularies).
+    # ADR-0065 (+ ADR-0054 §2, #954): the prompt's `output` — its `handler` key,
+    # inline `destination`, optional `commit` (extract_to_node only), and optional
+    # `on_accept` mark-stamp (inline only). Soft-validated in `schema_validation`
+    # (co-located with the closed vocabularies).
     strategy = entry_type.prompt.context_strategy
     errors.extend(
         validate_prompt_output(entry_type_id, strategy.output if strategy else None, known_entry_types)

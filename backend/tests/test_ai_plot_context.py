@@ -3,9 +3,9 @@
 Two layers: the `plot_context` Jinja helper + its formatter (the spoiler-gated
 board block a prompt drops in), and the `revise-plot-card` builtin prompt that
 uses it (a `plot:card` brainstorm — the ADR-0046 loop on a card).
-These prove the block renders + gates, the prompt ships and routes as a
-`chat_panel` + `commit` brainstorm (ADR-0054 §2), and a returned patch validates
-for a card.
+These prove the block renders + gates, the prompt ships and routes as an
+`extract_to_node` + `commit` brainstorm (ADR-0054 §2 / ADR-0065), and a returned
+patch validates for a card.
 """
 
 from __future__ import annotations
@@ -165,9 +165,9 @@ class RevisePlotCardPromptTests(_PlotAiContextBase):
         self.assertEqual(entries[_PROMPT_ID].entry_type, "prompt:revise:entry")
         schema = self.service.read_metadata_schema()
         output = schema.entry_types["prompt:revise:entry"].prompt.context_strategy.output
-        # ADR-0054 §2: the brainstorm is `chat_panel` + a `commit`, not a distinct
-        # `entry_patch` disposition.
-        self.assertEqual(output.kind, "chat_panel")
+        # ADR-0054 §2 / ADR-0065: the brainstorm is the `extract_to_node` handler + a
+        # `commit`, not a distinct disposition.
+        self.assertEqual(output.handler, "extract_to_node")
         self.assertIsNotNone(output.commit)
 
     def test_the_prompt_body_renders_the_gated_context_for_its_card(self) -> None:

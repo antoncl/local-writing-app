@@ -783,12 +783,12 @@
     availableScenes: [],
     hiddenPromptIds: $hiddenLibraryStore,
   });
-  // The chat-routed pick list for ChatComposerBar (#1086): chat_panel prompts,
-  // minus brainstorms (a `chat_panel` prompt with a `commit`, ADR-0054 §2) —
-  // those launch contextually against a subject via Conversations ＋New, so
+  // The chat-routed pick list for ChatComposerBar (#1086): conversation prompts,
+  // minus brainstorms (a conversation prompt with a `commit`, ADR-0054 §2 / ADR-0065)
+  // — those launch contextually against a subject via Conversations ＋New, so
   // free-picking one here would give a Commit button with no target entry.
   let routedPromptEntries = $derived(
-    promptEntriesForSurface(promptDiscoveryCtx, "chat_panel").filter(
+    promptEntriesForSurface(promptDiscoveryCtx, "conversation").filter(
       (entry) => !promptDeclaresCommit(promptDiscoveryCtx, entry),
     ),
   );

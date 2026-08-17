@@ -94,8 +94,8 @@
   // The list-edit baseline (#71, ADR-0017): the entity's EFFECTIVE overrides in
   // this scene, excluding the edited unit's own rows so the diff can't count
   // itself. The scene was flushed before the dialog opened (GH-#45 spine), so
-  // the saved index is current. Resolution is end-of-scene (ADR-0003: only
-  // replace_selection carries a real cursor offset). `null` = still loading —
+  // the saved index is current. Resolution is end-of-scene (ADR-0003: only the
+  // inline handler's `selection` destination carries a real cursor offset). `null` = still loading —
   // the rows area waits so every seeded baseline is deterministic.
   let effectiveValues = $state<Record<string, string | string[]> | null>(null);
 

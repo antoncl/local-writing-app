@@ -511,8 +511,7 @@ class LoreAndPromptTests(MetadataValidationBase):
             ],
             context_strategy=PromptContextStrategy(
                 target={"required": True, "kind": "manuscript"},
-                scan_surface=["_text_before", "_selection"],
-                output={"kind": "append_to_body"},
+                output={"handler": "inline"},
             ),
         )
         schema = self.service.upsert_metadata_entry_type(
@@ -537,9 +536,8 @@ class LoreAndPromptTests(MetadataValidationBase):
         self.assertEqual(stored.prompt.provider_policy, "cloud-allowed")
         self.assertEqual([i.name for i in stored.prompt.inputs], ["words", "beat"])
         assert stored.prompt.context_strategy is not None
-        self.assertEqual(
-            stored.prompt.context_strategy.scan_surface, ["_text_before", "_selection"]
-        )
+        assert stored.prompt.context_strategy.output is not None
+        self.assertEqual(stored.prompt.context_strategy.output.handler, "inline")
         self.assertEqual(
             stored.prompt.context_strategy.target,
             {"required": True, "kind": "manuscript"},
@@ -634,12 +632,12 @@ class LoreAndPromptTests(MetadataValidationBase):
 
     def test_default_schema_seeds_four_prompt_bases(self) -> None:
         """continuation/general/snippet are concrete bases with preset output
-        kinds; users instantiate them directly or sub-type them to add
+        handlers; users instantiate them directly or sub-type them to add
         personality. `revise` is abstract (ADR-0046 §5) and splits symmetrically
         into `revise:scene` (today's scene revise) + `revise:entry` (the lore
-        brainstorm commit) — the dispositions differ (`revise:scene` is
-        `replace_selection`; `revise:entry` is `chat_panel` + a `commit`), so
-        nothing is hoisted onto the base. Inputs live on the instance (not the type)."""
+        brainstorm commit) — the handlers differ (`revise:scene` is the `inline`
+        handler at the selection; `revise:entry` is `extract_to_node` + a `commit`),
+        so nothing is hoisted onto the base. Inputs live on the instance (not the type)."""
         schema = self.service.read_metadata_schema()
         for type_id in ("prompt:continuation", "prompt:general", "prompt:snippet"):
             self.assertIn(type_id, schema.entry_types)
@@ -652,10 +650,10 @@ class LoreAndPromptTests(MetadataValidationBase):
         assert continuation_prompt.context_strategy is not None
         continuation_output = continuation_prompt.context_strategy.output
         assert continuation_output is not None
-        self.assertEqual(continuation_output.kind, "append_to_body")
+        self.assertEqual(continuation_output.handler, "inline")
         self.assertIsNone(
             continuation_output.commit
-        )  # an inline disposition carries no commit
+        )  # the inline handler carries no commit
 
         # `revise` is now the abstract parent of the two concrete flavours.
         revise = schema.entry_types["prompt:revise"]
@@ -672,7 +670,8 @@ class LoreAndPromptTests(MetadataValidationBase):
         )
         revise_scene_output = revise_scene.prompt.context_strategy.output
         assert revise_scene_output is not None
-        self.assertEqual(revise_scene_output.kind, "replace_selection")
+        self.assertEqual(revise_scene_output.handler, "inline")
+        self.assertEqual(revise_scene_output.destination, "selection")
         self.assertIsNone(revise_scene_output.commit)
         self.assertEqual(
             revise_scene.prompt.context_strategy.target,
@@ -690,7 +689,7 @@ class LoreAndPromptTests(MetadataValidationBase):
         assert (
             revise_entry_output is not None and revise_entry_output.commit is not None
         )
-        self.assertEqual(revise_entry_output.kind, "chat_panel")
+        self.assertEqual(revise_entry_output.handler, "extract_to_node")
         self.assertEqual(revise_entry_output.commit.review, "visual_diff")
         # The entry rides in as an `entry` input (loaded via entry(input.entry)),
         # NOT as context_strategy.target — a lore id there would drive a scene
@@ -710,11 +709,10 @@ class LoreAndPromptTests(MetadataValidationBase):
 
         general_prompt = schema.entry_types["prompt:general"].prompt
         assert general_prompt is not None
+        # A general chat has a context_strategy (marking it INVOCABLE, vs a snippet which
+        # has none) but no output block — no handler, so the response stays in the chat.
         assert general_prompt.context_strategy is not None
-        general_output = general_prompt.context_strategy.output
-        assert general_output is not None
-        self.assertEqual(general_output.kind, "chat_panel")
-        self.assertIsNone(general_output.commit)  # a plain chat, no commit
+        self.assertIsNone(general_prompt.context_strategy.output)
 
         self.assertIsNone(schema.entry_types["prompt:snippet"].prompt)
 
@@ -724,7 +722,7 @@ class LoreAndPromptTests(MetadataValidationBase):
         # #957 (Lever 2): roleplay is a continuation that DECLARES its accept-time
         # character-stamp as a capability (`output.on_accept`), not an
         # `entry_type == roleplay` code branch. It redeclares its full context
-        # strategy (the parent-merge is shallow), so it stays append_to_body.
+        # strategy (the parent-merge is shallow), so it stays the inline handler.
         schema = self.service.read_metadata_schema()
         roleplay = schema.entry_types["prompt:roleplay"]
         self.assertFalse(roleplay.abstract)
@@ -734,12 +732,12 @@ class LoreAndPromptTests(MetadataValidationBase):
         )
         roleplay_output = roleplay.prompt.context_strategy.output
         assert roleplay_output is not None and roleplay_output.on_accept is not None
-        self.assertEqual(roleplay_output.kind, "append_to_body")
+        self.assertEqual(roleplay_output.handler, "inline")
         self.assertEqual(roleplay_output.on_accept.mark, "character")
         self.assertEqual(roleplay_output.on_accept.from_input, "character")
 
-    def test_concrete_subtype_inherits_output_kind_from_abstract_base(self) -> None:
-        """A user creates `bob extends general`; the output disposition is inherited."""
+    def test_concrete_subtype_inherits_output_from_abstract_base(self) -> None:
+        """A user creates `bob extends general`; the output block is inherited."""
         layer_id = self._project_layer_id()
         schema = self.service.upsert_metadata_entry_type(
             UpsertMetadataEntryTypeRequest(
@@ -756,11 +754,38 @@ class LoreAndPromptTests(MetadataValidationBase):
 
         bob_prompt = schema.entry_types["prompt:bob"].prompt
         assert bob_prompt is not None
+        # bob inherits general's context_strategy (present ⇒ invocable) with no output.
         assert bob_prompt.context_strategy is not None
-        bob_output = bob_prompt.context_strategy.output
-        assert bob_output is not None
-        self.assertEqual(bob_output.kind, "chat_panel")
+        self.assertIsNone(bob_prompt.context_strategy.output)  # general: no handler
         self.assertEqual(bob_prompt.system_prompt, "You are Bob.")
+
+    def test_saved_general_prompt_stays_invocable_without_an_output_block(self) -> None:
+        # ADR-0065: a `general` chat is marked INVOCABLE by the presence of a
+        # `context_strategy` (vs a `snippet`, which carries no prompt block at all) —
+        # NOT by an output block; it has no handler. The entry-type save path dumps
+        # with exclude_unset/exclude_none AND the read path resolves inheritance, so
+        # this pins that an EMPTY context_strategy survives the whole round-trip —
+        # without it a saved general prompt would collapse into a snippet, invocable
+        # nowhere.
+        layer_id = self._project_layer_id()
+        self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=layer_id,
+                entry_type_id="chatty",
+                entry_type=EntryTypeDefinition(
+                    name="Chatty",
+                    kind="prompt",
+                    parent="prompt:base",
+                    prompt=PromptEntryTypeExtras(context_strategy=PromptContextStrategy()),
+                ),
+            )
+        )
+        reread = self.service.read_metadata_schema().entry_types["prompt:chatty"]
+        assert reread.prompt is not None
+        # context_strategy present ⇒ invocable (a conversation), not a snippet; no output.
+        self.assertIsNotNone(reread.prompt.context_strategy)
+        assert reread.prompt.context_strategy is not None
+        self.assertIsNone(reread.prompt.context_strategy.output)
 
     def test_snippet_subtype_inherits_from_prompt_kind(self) -> None:
         layer_id = self._project_layer_id()

@@ -31,6 +31,7 @@
   // the per-row reveal and the new-draft slot share the same configuration.
 
   import { untrack } from "svelte";
+  import { surfaceForStrategy } from "@/lib/editor-core/promptResolution";
   import SchemaFieldInlineEditor, { type FieldDraftPayload } from "@/components/schema/SchemaFieldInlineEditor.svelte";
   import SchemaFieldRow from "@/components/schema/SchemaFieldRow.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
@@ -59,6 +60,7 @@
     MetadataSchemaOverview,
     PromptCommit,
     PromptContextStrategy,
+    PromptOutput,
   } from "@/lib/types";
 
   // Props (#14 — first runes component). The save layer + the inline-editor
@@ -184,11 +186,14 @@
       providerPolicy: (initialPrompt?.provider_policy ?? "") as AIPolicy | "",
       contextTargetKind: typeof cs?.target?.kind === "string" ? (cs.target.kind as string) : "",
       contextTargetRequired: Boolean(cs?.target?.required),
-      scanSurface: (cs?.scan_surface ?? []).join(", "),
-      outputKind: typeof cs?.output?.kind === "string" ? (cs.output.kind as string) : "",
-      // ADR-0054 S3: a `chat_panel` prompt may declare a `commit` (turns it into a
-      // brainstorm). We author its presence + review mode; the `fields` allow-list
-      // has no UI and is preserved verbatim below.
+      // The single writer-facing "surface" choice (ADR-0065), derived from the type's
+      // context_strategy via the shared `surfaceForStrategy`: a present strategy with no
+      // handler is a conversation, the inline handler resolves to its destination, and
+      // no strategy (a snippet, or a base with none) is "" = inherit.
+      outputSurface: (surfaceForStrategy(cs) ?? "") as "" | "cursor" | "selection" | "conversation",
+      // ADR-0065: a conversation prompt may declare a `commit` (turns it into an
+      // extract_to_node brainstorm). We author its presence + review mode; the
+      // `fields` allow-list has no UI and is preserved verbatim below.
       commitEnabled: cs?.output?.commit != null,
       commitReview: typeof cs?.output?.commit?.review === "string" ? (cs.output.commit.review as string) : "visual_diff",
     };
@@ -256,9 +261,8 @@
   let promptProviderPolicy = $state<AIPolicy | "">(seed.providerPolicy);
   let promptContextTargetKind = $state(seed.contextTargetKind);
   let promptContextTargetRequired = $state(seed.contextTargetRequired);
-  let promptScanSurface = $state(seed.scanSurface);
-  let promptOutputKind = $state(seed.outputKind);
-  // ADR-0054 S3: a `chat_panel` prompt's commit is authorable — its presence (does
+  let promptOutputSurface = $state(seed.outputSurface);
+  // ADR-0065: a conversation prompt's commit is authorable — its presence (does
   // this chat offer a Commit button → is it a brainstorm) and its review mode. Its
   // other properties have no UI: `commit.fields` (the built-in scene-summary's
   // `[summary]`) today, and a deferred `commit.target` tomorrow (the ADR models
@@ -292,8 +296,7 @@
       providerPolicy: promptProviderPolicy,
       contextTargetKind: promptContextTargetKind,
       contextTargetRequired: promptContextTargetRequired,
-      scanSurface: promptScanSurface,
-      outputKind: promptOutputKind,
+      outputSurface: promptOutputSurface,
       commitEnabled: promptCommitEnabled,
       commitReview: promptCommitReview,
     };
@@ -307,8 +310,7 @@
       promptProviderPolicy !== baseline.providerPolicy ||
       promptContextTargetKind !== baseline.contextTargetKind ||
       promptContextTargetRequired !== baseline.contextTargetRequired ||
-      promptScanSurface !== baseline.scanSurface ||
-      promptOutputKind !== baseline.outputKind ||
+      promptOutputSurface !== baseline.outputSurface ||
       promptCommitEnabled !== baseline.commitEnabled ||
       promptCommitReview !== baseline.commitReview,
   );
@@ -317,27 +319,36 @@
   });
 
   function buildPromptExtras(): PromptEntryTypeExtras | null {
-    const scanSurface = promptScanSurface
-      .split(",")
-      .map((token) => token.trim())
-      .filter(Boolean);
     const hasTarget = Boolean(promptContextTargetKind) || promptContextTargetRequired;
-    // ADR-0054 S3: a commit rides only on `chat_panel` (the backend rejects it on any
-    // other disposition), so switching the disposition away drops it. Spread the
-    // captured initial commit first, then override the one property we author, so
-    // `fields` (and any future sub-key) survive verbatim.
+    const isInline = promptOutputSurface === "cursor" || promptOutputSurface === "selection";
+    const isConversation = promptOutputSurface === "conversation";
+    // ADR-0065: a commit rides only on a conversation (the backend rejects it on the
+    // inline handler), and makes that conversation an `extract_to_node` brainstorm.
+    // Spread the captured initial commit first, then override the one property we
+    // author, so `fields`/`target` (and any future sub-key) survive verbatim.
     const commit: PromptCommit | null =
-      promptOutputKind === "chat_panel" && promptCommitEnabled
+      isConversation && promptCommitEnabled
         ? { ...promptCommitInitial, review: promptCommitReview }
         : null;
-    // on_accept rides only on an inline disposition (#957), so switching away from
-    // one drops it — mirroring how a commit drops off a non-chat_panel disposition.
-    const onAccept =
-      promptOutputKind === "append_to_body" || promptOutputKind === "replace_selection"
-        ? promptOnAcceptInitial
-        : null;
-    const hasOutput = Boolean(promptOutputKind) || commit !== null || onAccept !== null;
-    const contextStrategy: PromptContextStrategy | null = scanSurface.length || hasTarget || hasOutput
+    // on_accept rides only on the inline handler (#957), so a non-inline surface drops
+    // it — mirroring how a commit drops off a non-conversation surface.
+    const onAccept = isInline ? promptOnAcceptInitial : null;
+    // Map the surface to the stored handler + destination. A conversation with a commit
+    // is `extract_to_node`; without one it is a handler-less general chat — NO output
+    // block, just a (possibly empty) context_strategy, whose presence is what marks it
+    // invocable vs a snippet (ADR-0065). An inherited surface ("") emits no strategy.
+    const hasSurface = isInline || isConversation;
+    let output: PromptOutput | null = null;
+    if (isInline) {
+      output = {
+        handler: "inline",
+        ...(promptOutputSurface === "selection" ? { destination: "selection" } : {}),
+        ...(onAccept !== null ? { on_accept: onAccept } : {}),
+      };
+    } else if (isConversation && commit !== null) {
+      output = { handler: "extract_to_node", commit };
+    }
+    const contextStrategy: PromptContextStrategy | null = hasTarget || hasSurface
       ? {
           ...(hasTarget
             ? {
@@ -347,16 +358,7 @@
                 },
               }
             : {}),
-          ...(scanSurface.length ? { scan_surface: scanSurface } : {}),
-          ...(hasOutput
-            ? {
-                output: {
-                  ...(promptOutputKind ? { kind: promptOutputKind } : {}),
-                  ...(commit !== null ? { commit } : {}),
-                  ...(onAccept !== null ? { on_accept: onAccept } : {}),
-                },
-              }
-            : {}),
+          ...(output !== null ? { output } : {}),
         }
       : null;
 
@@ -728,15 +730,15 @@
       </label>
       <label>
         Output
-        <select bind:value={promptOutputKind}>
+        <select bind:value={promptOutputSurface}>
           <option value="">(inherit from parent)</option>
-          <option value="append_to_body">Append to body</option>
-          <option value="replace_selection">Replace selection</option>
-          <option value="chat_panel">Chat panel</option>
+          <option value="cursor">Continue at cursor</option>
+          <option value="selection">Revise selection</option>
+          <option value="conversation">Chat</option>
         </select>
         <small>Where AI responses for this prompt type land. Inherited from parent (Continuation / Revise / General) when set there — only override for a top-level sub-type that doesn't inherit one of the bases.</small>
       </label>
-      {#if promptOutputKind === "chat_panel"}
+      {#if promptOutputSurface === "conversation"}
         <label class="commit-toggle">
           <input type="checkbox" bind:checked={promptCommitEnabled} />
           Commit results back to the subject
@@ -1049,7 +1051,7 @@
     font-family: inherit;
     min-height: 64px;
   }
-  /* Commit block (ADR-0054 S3) — only shown under a chat_panel disposition. */
+  /* Commit block (ADR-0054 S3 / ADR-0065) — only shown under a conversation surface. */
   .prompt-fieldset .commit-toggle {
     display: flex;
     align-items: center;

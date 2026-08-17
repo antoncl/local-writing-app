@@ -593,7 +593,7 @@
           else void mutationDialogs?.openAuthoring(match?.id ?? "");
         },
       },
-      ...promptEntriesForSurface(promptCtx, "append_to_body")
+      ...promptEntriesForSurface(promptCtx, "cursor")
         .map((entry) => ({
           group: "AI",
           label: entry.title,
@@ -913,7 +913,7 @@
 
   function getSelectionToolbarActions(): ToolbarAction[] {
     if (!editor) return [];
-    const reviseEntries = promptEntriesForSurface(promptCtx, "replace_selection");
+    const reviseEntries = promptEntriesForSurface(promptCtx, "selection");
     const reviseAction: ToolbarAction | null =
       reviseEntries.length === 0
         ? null
@@ -1120,13 +1120,13 @@
 
     if (event.key.toLowerCase() === "j" && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey) {
       event.preventDefault();
-      const entry = defaultPromptForSurface(promptCtx, "append_to_body");
+      const entry = defaultPromptForSurface(promptCtx, "cursor");
       if (entry) void aiSuggestion.runPromptEntry(entry);
       return true;
     }
     if (event.key.toLowerCase() === "j" && (event.ctrlKey || event.metaKey) && !event.altKey && event.shiftKey) {
       event.preventDefault();
-      const entry = defaultPromptForSurface(promptCtx, "replace_selection");
+      const entry = defaultPromptForSurface(promptCtx, "selection");
       if (entry) void aiSuggestion.runPromptEntry(entry);
       return true;
     }

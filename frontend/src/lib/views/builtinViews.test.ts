@@ -15,11 +15,11 @@ const CHAT_SCHEMA = {
 const EVAL_SCHEMA = {
   entry_types: {
     "chat:chat_session": { name: "Chat", kind: "chat" },
-    "prompt:general": { name: "General", kind: "prompt", prompt: { context_strategy: { output: { kind: "chat_panel" } } } },
+    "prompt:general": { name: "General", kind: "prompt", prompt: { context_strategy: {} } },
     "prompt:revise:entry": {
       name: "Revise entry",
       kind: "prompt",
-      prompt: { context_strategy: { output: { kind: "chat_panel", commit: { review: "visual_diff" } } } },
+      prompt: { context_strategy: { output: { handler: "extract_to_node", commit: { review: "visual_diff" } } } },
     },
   },
   fields: {

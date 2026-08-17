@@ -111,9 +111,9 @@ describe("ChatCommitController — launch-mode derivations", () => {
   it("isCommitChat tracks whether the fed output declares a commit", () => {
     const { c } = makeController();
     expect(c.isCommitChat).toBe(false);
-    c.output = { kind: "chat_panel" }; // a plain chat, no commit
+    c.output = {}; // a plain chat: no handler, no commit
     expect(c.isCommitChat).toBe(false);
-    c.output = { kind: "chat_panel", commit: { review: "visual_diff" } };
+    c.output = { handler: "extract_to_node", commit: { review: "visual_diff" } };
     expect(c.isCommitChat).toBe(true);
   });
 
@@ -126,7 +126,7 @@ describe("ChatCommitController — launch-mode derivations", () => {
 
   it("isCreateBrainstorm = a commit + no entry + an entry_type", () => {
     const { c } = makeController();
-    c.output = { kind: "chat_panel", commit: { review: "visual_diff" } };
+    c.output = { handler: "extract_to_node", commit: { review: "visual_diff" } };
     c.inputDrafts = { entry_type: "lore:character" };
     expect(c.draftEntryType).toBe("lore:character");
     expect(c.isCreateBrainstorm).toBe(true);
@@ -138,7 +138,7 @@ describe("ChatCommitController — launch-mode derivations", () => {
   it("commitFields is the output.commit.fields allow-list, else null", () => {
     const { c } = makeController();
     expect(c.commitFields).toBeNull();
-    c.output = { kind: "chat_panel", commit: { review: "replace", fields: ["summary"] } };
+    c.output = { handler: "extract_to_node", commit: { review: "replace", fields: ["summary"] } };
     expect(c.commitFields).toEqual(["summary"]);
   });
 });
@@ -150,13 +150,13 @@ describe("ChatCommitController — commit.target (ADR-0063 S1)", () => {
   it("commitTarget reads output.commit.target (trimmed), else empty", () => {
     const { c } = makeController();
     expect(c.commitTarget).toBe("");
-    c.output = { kind: "chat_panel", commit: { review: "visual_diff", target: "  lore:character  " } };
+    c.output = { handler: "extract_to_node", commit: { review: "visual_diff", target: "  lore:character  " } };
     expect(c.commitTarget).toBe("lore:character");
   });
 
   it("a declared target drives draftEntryType and forces isCreateBrainstorm", () => {
     const { c } = makeController();
-    c.output = { kind: "chat_panel", commit: { review: "visual_diff", target: "lore:character" } };
+    c.output = { handler: "extract_to_node", commit: { review: "visual_diff", target: "lore:character" } };
     // No launch inputs at all — the target alone makes it a create brainstorm.
     expect(c.draftEntryType).toBe("lore:character");
     expect(c.isCreateBrainstorm).toBe(true);
@@ -164,7 +164,7 @@ describe("ChatCommitController — commit.target (ADR-0063 S1)", () => {
 
   it("the target wins over a seeded entry — create, never revise, and no staging", () => {
     const { c } = makeController();
-    c.output = { kind: "chat_panel", commit: { review: "visual_diff", target: "lore:character" } };
+    c.output = { handler: "extract_to_node", commit: { review: "visual_diff", target: "lore:character" } };
     // A seeded `entry` would normally mean revise; the declared target overrides it.
     c.inputDrafts = { entry: "lore-1" };
     c.subjectEntryType = "lore:character";
@@ -174,7 +174,7 @@ describe("ChatCommitController — commit.target (ADR-0063 S1)", () => {
 
   it("commitDraft extracts against the declared target type", async () => {
     const { c } = makeController();
-    c.output = { kind: "chat_panel", commit: { review: "visual_diff", target: "lore:character" } };
+    c.output = { handler: "extract_to_node", commit: { review: "visual_diff", target: "lore:character" } };
     extractDraft.mockResolvedValue(okResult({ body: "a spine", fields: { name: "Vale" } }));
 
     await c.commitDraft();
@@ -195,7 +195,7 @@ describe("ChatCommitController — commitToEntry", () => {
 
   function reviseController(over: Partial<ChatCommitDeps> = {}) {
     const made = makeController(over);
-    made.c.output = { kind: "chat_panel", commit: { review: "visual_diff" } };
+    made.c.output = { handler: "extract_to_node", commit: { review: "visual_diff" } };
     made.c.inputDrafts = { entry: "lore-1" };
     return made;
   }
@@ -210,7 +210,7 @@ describe("ChatCommitController — commitToEntry", () => {
 
   it("errors when there is no target entry", async () => {
     const { c, deps } = makeController();
-    c.output = { kind: "chat_panel", commit: { review: "visual_diff" } }; // commit but no `entry` draft
+    c.output = { handler: "extract_to_node", commit: { review: "visual_diff" } }; // commit but no `entry` draft
     await c.commitToEntry();
     expect(deps.setError).toHaveBeenCalledWith(
       "This brainstorm has no target entry to commit to.",
@@ -220,7 +220,7 @@ describe("ChatCommitController — commitToEntry", () => {
 
   it("posts the transcript, assistant, and commit.fields allow-list to the extraction endpoint", async () => {
     const { c } = reviseController();
-    c.output = { kind: "chat_panel", commit: { review: "replace", fields: ["summary"] } };
+    c.output = { handler: "extract_to_node", commit: { review: "replace", fields: ["summary"] } };
     extractPatch.mockResolvedValue(okResult({ fields: { bio: "x" } }));
 
     await c.commitToEntry();
@@ -260,7 +260,7 @@ describe("ChatCommitController — commitToEntry", () => {
     // returns a body, the stored proposal must be fields-only so a summary
     // regenerate can never carry a scene's manuscript prose to the review.
     const { c } = reviseController();
-    c.output = { kind: "chat_panel", commit: { review: "replace" } };
+    c.output = { handler: "extract_to_node", commit: { review: "replace" } };
     extractPatch.mockResolvedValue(okResult({ body: "REWRITTEN PROSE", fields: { summary: "a synopsis" } }));
 
     await c.commitToEntry();
@@ -343,7 +343,7 @@ describe("ChatCommitController — create mode", () => {
 
   function createController(over: Partial<ChatCommitDeps> = {}) {
     const made = makeController(over);
-    made.c.output = { kind: "chat_panel", commit: { review: "visual_diff" } };
+    made.c.output = { handler: "extract_to_node", commit: { review: "visual_diff" } };
     made.c.inputDrafts = { entry_type: "lore:character" };
     return made;
   }
@@ -461,7 +461,7 @@ describe("ChatCommitController — stageToPendingSet", () => {
   // host fed its entry_type, so staging is offered (§4a/§6).
   function stageController(over: Partial<ChatCommitDeps> = {}) {
     const made = makeController(over);
-    made.c.output = { kind: "chat_panel", commit: { review: "visual_diff" } };
+    made.c.output = { handler: "extract_to_node", commit: { review: "visual_diff" } };
     made.c.inputDrafts = { entry: "lore-1" };
     made.c.subjectEntryType = "lore:character";
     return made;
@@ -469,7 +469,7 @@ describe("ChatCommitController — stageToPendingSet", () => {
 
   it("canStage requires a commit, a lore target, and a fed entry_type", () => {
     const { c } = makeController();
-    c.output = { kind: "chat_panel", commit: { review: "visual_diff" } };
+    c.output = { handler: "extract_to_node", commit: { review: "visual_diff" } };
     c.inputDrafts = { entry: "lore-1" };
     expect(c.canStage).toBe(false); // no subject entry_type yet (not a lore subject)
     c.subjectEntryType = "lore:character";

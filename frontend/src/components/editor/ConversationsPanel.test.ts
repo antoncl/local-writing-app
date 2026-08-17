@@ -24,15 +24,15 @@ const SCHEMA = {
   entry_types: {
     "prompt:revise": {
       name: "Revise",
-      prompt: { context_strategy: { output: { kind: "chat_panel", commit: { review: "visual_diff" } } } },
+      prompt: { context_strategy: { output: { handler: "extract_to_node", commit: { review: "visual_diff" } } } },
     },
     "prompt:scenechat": {
       name: "Scene chat",
-      prompt: { context_strategy: { output: { kind: "chat_panel" } } },
+      prompt: { context_strategy: {} },
     },
     "prompt:inline": {
       name: "Inline",
-      prompt: { context_strategy: { output: { kind: "append_to_body" } } },
+      prompt: { context_strategy: { output: { handler: "inline" } } },
     },
   },
   fields: {},

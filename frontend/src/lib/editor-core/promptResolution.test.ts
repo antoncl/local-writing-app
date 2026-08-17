@@ -13,13 +13,14 @@ function prompt(id: string, entryType: string): PromptEntrySummary {
   return { id, title: id, body: "", entry_type: entryType, metadata: {}, inputs: [] };
 }
 
-// prompt:a / prompt:b emit to append_to_body; prompt:chat routes to the chat
-// panel, so the surface filter partitions them and the hidden filter removes one.
+// prompt:a / prompt:b use the inline handler (cursor surface); prompt:chat is a
+// general conversation (an empty output block), so the surface filter partitions
+// them and the hidden filter removes one.
 const schema = {
   entry_types: {
-    "prompt:a": { prompt: { context_strategy: { output: { kind: "append_to_body" } } } },
-    "prompt:b": { prompt: { context_strategy: { output: { kind: "append_to_body" } } } },
-    "prompt:chat": { prompt: { context_strategy: { output: { kind: "chat_panel" } } } },
+    "prompt:a": { prompt: { context_strategy: { output: { handler: "inline" } } } },
+    "prompt:b": { prompt: { context_strategy: { output: { handler: "inline" } } } },
+    "prompt:chat": { prompt: { context_strategy: {} } },
   },
 } as unknown as MetadataSchema;
 
@@ -38,11 +39,11 @@ describe("promptOnAccept — the declared accept-time mark-stamp (#954)", () => 
   // schema carries it); continuation declares none.
   const onAcceptSchema = {
     entry_types: {
-      "prompt:continuation": { prompt: { context_strategy: { output: { kind: "append_to_body" } } } },
+      "prompt:continuation": { prompt: { context_strategy: { output: { handler: "inline" } } } },
       "prompt:roleplay": {
         prompt: {
           context_strategy: {
-            output: { kind: "append_to_body", on_accept: { mark: "character", from_input: "character" } },
+            output: { handler: "inline", on_accept: { mark: "character", from_input: "character" } },
           },
         },
       },
@@ -70,7 +71,7 @@ describe("promptOnAccept — the declared accept-time mark-stamp (#954)", () => 
 
 describe("promptEntriesForSurface — hidden filter (ADR-0049 slice 3)", () => {
   it("returns every matching prompt when nothing is hidden", () => {
-    expect(promptEntriesForSurface(ctx(), "append_to_body").map((e) => e.id)).toEqual([
+    expect(promptEntriesForSurface(ctx(), "cursor").map((e) => e.id)).toEqual([
       "p-a",
       "p-b",
     ]);
@@ -79,7 +80,7 @@ describe("promptEntriesForSurface — hidden filter (ADR-0049 slice 3)", () => {
   it("drops a hidden prompt from discovery", () => {
     const ids = promptEntriesForSurface(
       ctx({ hiddenPromptIds: new Set(["p-a"]) }),
-      "append_to_body",
+      "cursor",
     ).map((e) => e.id);
     expect(ids).toEqual(["p-b"]);
   });
@@ -87,21 +88,21 @@ describe("promptEntriesForSurface — hidden filter (ADR-0049 slice 3)", () => {
   it("an empty hidden set changes nothing", () => {
     const ids = promptEntriesForSurface(
       ctx({ hiddenPromptIds: new Set() }),
-      "append_to_body",
+      "cursor",
     ).map((e) => e.id);
     expect(ids).toEqual(["p-a", "p-b"]);
   });
 
   // The chat "Pick a prompt" list (ChatBodyView) routes through this seam (#682),
-  // so a hidden chat_panel prompt must drop out of the chat surface too.
-  it("drops a hidden prompt from the chat_panel surface", () => {
+  // so a hidden conversation prompt must drop out of the conversation surface too.
+  it("drops a hidden prompt from the conversation surface", () => {
     const base = ctx({ promptEntries: [prompt("p-chat", "prompt:chat")] });
-    expect(promptEntriesForSurface(base, "chat_panel").map((e) => e.id)).toEqual(["p-chat"]);
+    expect(promptEntriesForSurface(base, "conversation").map((e) => e.id)).toEqual(["p-chat"]);
     const hidden = ctx({
       promptEntries: [prompt("p-chat", "prompt:chat")],
       hiddenPromptIds: new Set(["p-chat"]),
     });
-    expect(promptEntriesForSurface(hidden, "chat_panel")).toEqual([]);
+    expect(promptEntriesForSurface(hidden, "conversation")).toEqual([]);
   });
 });
 
@@ -121,7 +122,7 @@ describe("hidePromptEntries (ADR-0049 #682)", () => {
 });
 
 // The per-node conversation filter (ADR-0054 §4/S4): the ＋New menu shows the
-// chat_panel prompts whose `offer_on` allow-list admits the open node's type, so
+// conversation prompts whose `offer_on` allow-list admits the open node's type, so
 // a lore entry offers the lore revise prompt, a plot card the plot-card one, and
 // a character both the revise prompt and impersonate. `offer_on` (where a prompt
 // is offered) replaces the old inference from context_pick input targets.
@@ -133,8 +134,8 @@ describe("offer_on filter (ADR-0054 §4/S4)", () => {
       "plot:base": {},
       "plot:card": { parent: "plot:base" },
       "plot:plotline": { parent: "plot:base" },
-      "prompt:chat": { prompt: { context_strategy: { output: { kind: "chat_panel" } } } },
-      "prompt:append": { prompt: { context_strategy: { output: { kind: "append_to_body" } } } },
+      "prompt:chat": { prompt: { context_strategy: {} } },
+      "prompt:append": { prompt: { context_strategy: { output: { handler: "inline" } } } },
     },
   } as unknown as MetadataSchema;
 
@@ -183,7 +184,7 @@ describe("offer_on filter (ADR-0054 §4/S4)", () => {
   });
 
   describe("promptEntriesOfferedOn", () => {
-    it("offers the chat_panel prompts whose offer_on admits the subject", () => {
+    it("offers the conversation prompts whose offer_on admits the subject", () => {
       const c = isaCtx({ promptEntries: [reviseP, cardP, impersonateP] });
       // A character card offers both the revise prompt (lore:base ⊇ character)
       // and impersonate (lore:character exact) — not the plot-card one.
@@ -201,7 +202,7 @@ describe("offer_on filter (ADR-0054 §4/S4)", () => {
       expect(promptEntriesOfferedOn(c, "plot:card").map((e) => e.id)).toEqual(["p-card"]);
     });
 
-    it("excludes a non-chat_panel prompt even when its offer_on matches (eligibility axis)", () => {
+    it("excludes an inline (non-conversation) prompt even when its offer_on matches (eligibility axis)", () => {
       const appendP = offered("p-app", "prompt:append", ["lore:character"]);
       const c = isaCtx({ promptEntries: [appendP, impersonateP] });
       expect(promptEntriesOfferedOn(c, "lore:character").map((e) => e.id)).toEqual(["p-imp"]);

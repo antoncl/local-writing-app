@@ -3,16 +3,16 @@
 Two shipped Library prompts complete the diagnostic surface begun by S7a's
 deterministic detector:
 
-- `diagnose-plot` — an ADVISORY whole-board read. A `prompt:general` (plain
-  `chat_panel`, no commit) with no subject: it reads the entire board via the
+- `diagnose-plot` — an ADVISORY whole-board read. A `prompt:general` (plain chat,
+  no output handler, no commit) with no subject: it reads the entire board via the
   `plot_context()` helper and reports the *semantic* weak spots the structural
   detector can't see. Launched from the board, not a subject's ＋New menu, so it
   carries no `offer_on`.
 - `revise-plotline` — the plotline-level FIXER. An instance of `prompt:revise:entry`
-  (identical `chat_panel` + `commit` disposition as `revise-plot-card`), offered on
+  (identical `extract_to_node` + `commit` handler as `revise-plot-card`), offered on
   `plot:plotline`, whose committable surface is the thread's beat roster + description.
 
-These prove the two prompts ship, route to the right disposition, render their
+These prove the two prompts ship, route to the right handler, render their
 board context, and — for the fixer — that a returned patch validates for a plotline
 node through the kind-neutral commit loop.
 """
@@ -57,12 +57,13 @@ class DiagnosePlotPromptTests(_DiagnosticPromptBase):
         self.assertIn(_DIAGNOSE, entries)
         entry = entries[_DIAGNOSE]
         self.assertTrue(entry.is_library)
-        # Reuses `prompt:general` (like impersonate): chat_panel, no commit — a
-        # conversation that reports, never a brainstorm that patches.
+        # Reuses `prompt:general` (like impersonate): no output handler, no commit —
+        # a conversation that reports, never a brainstorm that patches.
         self.assertEqual(entry.entry_type, "prompt:general")
-        output = self.service.read_metadata_schema().entry_types["prompt:general"].prompt.context_strategy.output
-        self.assertEqual(output.kind, "chat_panel")
-        self.assertIsNone(output.commit)
+        strategy = self.service.read_metadata_schema().entry_types["prompt:general"].prompt.context_strategy
+        # general has a context_strategy (invocable) but no output block — no handler.
+        self.assertIsNotNone(strategy)
+        self.assertIsNone(strategy.output)
 
     def test_it_is_offered_nowhere_and_needs_no_subject(self) -> None:
         # No offer_on: it never appears in a subject's ＋New menu — the board
@@ -117,7 +118,7 @@ class RevisePlotlinePromptTests(_DiagnosticPromptBase):
         self.assertEqual(entry.entry_type, "prompt:revise:entry")
         self.assertEqual(entry.offer_on, ["plot:plotline"])
         output = self.service.read_metadata_schema().entry_types["prompt:revise:entry"].prompt.context_strategy.output
-        self.assertEqual(output.kind, "chat_panel")
+        self.assertEqual(output.handler, "extract_to_node")
         self.assertIsNotNone(output.commit)
 
     def test_its_body_renders_the_plotline_and_its_roster(self) -> None:

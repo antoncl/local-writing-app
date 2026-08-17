@@ -24,8 +24,8 @@ export function isBuiltinExtraViewId(id: string): boolean {
 }
 
 // "Openable chats": hides the brainstorm chats — those whose seed prompt has the
-// "Revise entities" disposition (a chat_panel prompt that declares a `commit`,
-// ADR-0054 §2) — keeping plain chats ("Chat") and freeform ones. It filters on the
+// "Revise entities" disposition (an extract_to_node prompt that declares a `commit`,
+// ADR-0054 §2 / ADR-0065) — keeping plain chats ("Chat") and freeform ones. It filters on the
 // seed's disposition label, the same vocabulary the Prompts shelf uses, so a user
 // can rebuild or invert this view in the designer (#960). Blacklist, not whitelist:
 // a freeform chat has no seeding prompt and so carries "", and must stay openable (a

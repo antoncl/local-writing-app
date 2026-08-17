@@ -19,7 +19,7 @@
     // Full roster — so the bound prompt's title resolves even when it isn't in
     // the (routed, filtered) pick list.
     promptEntries: PromptEntrySummary[];
-    // The chat-routed pick list (chat_panel prompts, brainstorms excluded).
+    // The chat-routed pick list (conversation prompts, brainstorms excluded).
     routedPromptEntries: PromptEntrySummary[];
     assistantEntries: AssistantEntrySummary[];
     // The bound prompt's assistant tag-scope (ADR-0024) — drives the soft
@@ -193,7 +193,7 @@
           <p class="cbv-picker-empty">
             {promptPickerSearch
               ? "No prompts match."
-              : "No chat-routed prompts. Create one with output_kind = chat_panel."}
+              : "No chat-routed prompts. Create one with a Chat output (no output handler)."}
           </p>
         {/each}
       </div>

@@ -17,15 +17,17 @@ import {
 // frontend receives resolves that inheritance, so we model it here as if resolved.
 const SCHEMA = {
   entry_types: {
-    "prompt:continuation": { name: "Continuation", prompt: { context_strategy: { output: { kind: "append_to_body" } } } },
-    "prompt:revise:scene": { name: "Revise scene", prompt: { context_strategy: { output: { kind: "replace_selection" } } } },
-    "prompt:general": { name: "General", prompt: { context_strategy: { output: { kind: "chat_panel" } } } },
+    "prompt:continuation": { name: "Continuation", prompt: { context_strategy: { output: { handler: "inline" } } } },
+    "prompt:revise:scene": { name: "Revise scene", prompt: { context_strategy: { output: { handler: "inline", destination: "selection" } } } },
+    "prompt:general": { name: "General", prompt: { context_strategy: {} } },
     "prompt:revise:entry": {
       name: "Revise entry",
-      prompt: { context_strategy: { output: { kind: "chat_panel", commit: { review: "visual_diff" } } } },
+      prompt: { context_strategy: { output: { handler: "extract_to_node", commit: { review: "visual_diff" } } } },
     },
-    "prompt:snippet": { name: "Snippet", prompt: { context_strategy: {} } },
-    "prompt:broken": { name: "Broken", prompt: { context_strategy: { output: { kind: "who_knows" } } } },
+    // A snippet carries NO context_strategy — that absence (vs general's empty one) is
+    // what makes it non-invocable (ADR-0065).
+    "prompt:snippet": { name: "Snippet" },
+    "prompt:broken": { name: "Broken", prompt: { context_strategy: { output: { handler: "who_knows" } } } },
   },
   fields: {},
 } as unknown as MetadataSchema;
@@ -49,10 +51,11 @@ describe("dispositionFor — the five shelves (#951)", () => {
     expect(dispositionFor(ctx, prompt("d", "prompt:revise:entry")).label).toBe("Revise entities");
   });
 
-  it("shelves a no-contract prompt (and any unknown kind) under Snippets", () => {
+  it("shelves a no-contract prompt (and any unregistered handler) under Snippets", () => {
     // A snippet declares no output — the definition of 'no invocation contract'.
     expect(dispositionFor(ctx, prompt("e", "prompt:snippet")).label).toBe("Snippets");
-    // A misconfigured concrete type can't be invoked either → Snippets, not a crash.
+    // A misconfigured concrete type (a non-empty but unregistered handler) can't be
+    // invoked either → Snippets, not a crash.
     expect(dispositionFor(ctx, prompt("f", "prompt:broken")).label).toBe("Snippets");
     // An entry_type absent from the schema resolves to no output → Snippets.
     expect(dispositionFor(ctx, prompt("g", "prompt:ghost")).label).toBe("Snippets");

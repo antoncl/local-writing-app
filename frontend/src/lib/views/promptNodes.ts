@@ -6,7 +6,7 @@
 // one-prompt-per-sub-type clutter into five meaningful shelves (#951).
 //
 // `disposition` is DERIVED at render from the entry_type's context_strategy
-// (effectiveOutputKind + promptDeclaresCommit), never stored — the same pattern
+// (promptSurfaceFor + promptDeclaresCommit), never stored — the same pattern
 // as chatNodes' `seed_disposition` and the Assistants default's `listed`. It goes
 // in `metadata` so the prompt default view's `group_by: [{ field: "disposition" }]`
 // can bucket on it through ordinary field access.
@@ -14,7 +14,7 @@
 import type { EntryMetadata, MetadataFieldDefinition, MetadataSchema, PromptEntrySummary } from "@/lib/types";
 import type { EvalNode } from "@/lib/views/evaluateView";
 import {
-  effectiveOutputKind,
+  promptSurfaceFor,
   promptDeclaresCommit,
   type PromptResolutionContext,
 } from "@/lib/editor-core/promptResolution";
@@ -35,26 +35,26 @@ const CHAT: Disposition = { label: "Chat", rank: 2 };
 const REVISE_ENTITIES: Disposition = { label: "Revise entities", rank: 3 };
 const SNIPPETS: Disposition = { label: "Snippets", rank: 4 };
 
-// Which shelf a prompt lands on, from its type's disposition (ADR-0054 §1/§2):
-//   append_to_body → Continue · replace_selection → Revise prose ·
-//   chat_panel + commit → Revise entities · chat_panel alone → Chat.
-// No output kind means the prompt declares no invocation contract — which is the
+// Which shelf a prompt lands on, from its output handler (ADR-0065):
+//   inline+cursor → Continue · inline+selection → Revise prose ·
+//   conversation + commit → Revise entities · conversation alone → Chat.
+// No output surface means the prompt declares no invocation contract — which is the
 // definition of a snippet (decisions-prompt-model) — so it, and any misconfigured
 // concrete type (which likewise can't be invoked), shelves under Snippets.
 export function dispositionFor(ctx: PromptResolutionContext, entry: PromptEntrySummary): Disposition {
-  switch (effectiveOutputKind(ctx, entry)) {
-    case "append_to_body":
+  switch (promptSurfaceFor(ctx, entry)) {
+    case "cursor":
       return CONTINUE;
-    case "replace_selection":
+    case "selection":
       return REVISE_PROSE;
-    case "chat_panel":
+    case "conversation":
       return promptDeclaresCommit(ctx, entry) ? REVISE_ENTITIES : CHAT;
     default:
       return SNIPPETS;
   }
 }
 
-// The two dispositions a chat_panel seed can carry, exported so chatNodes' chat
+// The two dispositions a conversation seed can carry, exported so chatNodes' chat
 // seed-disposition descriptor and the "Openable chats" predicate bind to the same
 // label strings this module stamps (a rename here can't drift them).
 export const CHAT_DISPOSITION_LABEL = CHAT.label;
@@ -90,7 +90,7 @@ export function promptSummariesToGroupNodes(
   entries: PromptEntrySummary[],
   schema: MetadataSchema | null,
 ): PromptGroupNode[] {
-  // effectiveOutputKind / promptDeclaresCommit read only ctx.metadataSchema; the
+  // promptSurfaceFor / promptDeclaresCommit read only ctx.metadataSchema; the
   // rest satisfy the type.
   const ctx: PromptResolutionContext = {
     metadataSchema: schema,

@@ -66,7 +66,7 @@ class MetadataValidationBase(unittest.TestCase):
         if output is not None:
             prompt["prompt"] = {"context_strategy": {"output": output}}
         else:
-            prompt["prompt"] = {"context_strategy": {"scan_surface": []}}
+            prompt["prompt"] = {"context_strategy": {}}
         return MetadataSchema.model_validate(
             {
                 "entry_types": {
@@ -77,8 +77,8 @@ class MetadataValidationBase(unittest.TestCase):
             }
         )
 
-    def _schema_with_output_kind(self, kind: object) -> MetadataSchema:
-        return self._schema_with_output(None if kind is None else {"kind": kind})
+    def _schema_with_output_handler(self, handler: object) -> MetadataSchema:
+        return self._schema_with_output(None if handler is None else {"handler": handler})
 
     def _first_scene_id(self) -> str:
         first_scene_path = next((self.root / "scenes").glob("*.md"))

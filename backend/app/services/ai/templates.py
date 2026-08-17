@@ -3,7 +3,9 @@
 Templates are Jinja2 with two custom block-level directives:
 
 - `{% role "system" %}…{% endrole %}` — marks the message role for the wrapped
-  content. Only text inside role blocks is sent to the model.
+  content. An override for multi-turn / mixed-role prompts (ADR-0060 §4): text
+  outside any role block is homed to the base type's `default_role` (passed to
+  `render_template`), not discarded, so a prose-only prompt just works.
 - `{% cache_break %}` — emits a cache-control marker. Inside a role block it
   splits the content into multiple blocks; the block before the marker carries
   `cache_break_after=True`. Outside any role it is a warning.
@@ -113,21 +115,26 @@ def render_template(
     context: dict[str, Any] | None = None,
     *,
     env: SandboxedEnvironment | None = None,
+    default_role: str | None = None,
 ) -> RenderedTemplate:
     """Render a template source into structured role-tagged messages.
 
     Raises Jinja's TemplateError subclasses for syntax errors and undefined
-    variables. Author-mistake warnings (text outside roles, cache_break outside
-    role, unknown role names) are collected on `RenderedTemplate.warnings`
-    rather than raised.
+    variables. Author-mistake warnings (unknown role names, cache_break outside
+    role) are collected on `RenderedTemplate.warnings` rather than raised.
+
+    `default_role` (ADR-0060 §4) is the prompt base type's default envelope: text
+    outside any `{% role %}` block is emitted as a message of that role, in
+    document order, instead of being discarded. `None` (the caller declared no
+    default) keeps the legacy behaviour — loose text is ignored with a warning.
     """
     env = env or create_environment()
     template = env.from_string(source)
     raw = template.render(**(context or {}))
-    return _parse_marker_stream(raw)
+    return _parse_marker_stream(raw, default_role=default_role)
 
 
-def _parse_marker_stream(raw: str) -> RenderedTemplate:
+def _parse_marker_stream(raw: str, default_role: str | None = None) -> RenderedTemplate:
     result = RenderedTemplate()
     cursor = 0
     length = len(raw)
@@ -135,11 +142,11 @@ def _parse_marker_stream(raw: str) -> RenderedTemplate:
     while cursor < length:
         role_start_idx = raw.find(ROLE_START, cursor)
         if role_start_idx == -1:
-            _check_trailing_text(raw[cursor:], result)
+            _home_loose_text(raw[cursor:], result, default_role)
             break
 
         if role_start_idx > cursor:
-            _check_trailing_text(raw[cursor:role_start_idx], result)
+            _home_loose_text(raw[cursor:role_start_idx], result, default_role)
 
         sep_idx = raw.find(ROLE_START_SEP, role_start_idx + len(ROLE_START))
         if sep_idx == -1:
@@ -205,7 +212,18 @@ def _find_matching_role_end(raw: str, start: int) -> int:
         cursor = next_end + len(ROLE_END)
 
 
-def _check_trailing_text(segment: str, result: RenderedTemplate) -> None:
+def _home_loose_text(
+    segment: str, result: RenderedTemplate, default_role: str | None
+) -> None:
+    """Home un-roled text (ADR-0060 §4).
+
+    Text outside any `{% role %}` block lands in a message of the base type's
+    `default_role`, in document order, instead of being discarded. When no
+    default is declared (`default_role is None`) the legacy behaviour stands: the
+    text is ignored with a warning. A `cache_break` in loose text still has no
+    effect — caching lives inside role placement (slice 4) — so it is stripped
+    with its own warning either way.
+    """
     cache_break_count = segment.count(CACHE_BREAK_MARKER)
     if cache_break_count:
         result.warnings.append(
@@ -213,13 +231,19 @@ def _check_trailing_text(segment: str, result: RenderedTemplate) -> None:
             f"({cache_break_count} occurrence{'s' if cache_break_count > 1 else ''})."
         )
         segment = segment.replace(CACHE_BREAK_MARKER, "")
-    if segment.strip():
-        excerpt = segment.strip().splitlines()[0][:60]
-        result.warnings.append(
-            f"Text outside any role block is ignored: '{excerpt}…'"
-            if len(excerpt) >= 60
-            else f"Text outside any role block is ignored: '{excerpt}'"
+    if not segment.strip():
+        return
+    if default_role is not None:
+        result.messages.append(
+            RenderedMessage(role=default_role, blocks=[ContentBlock(text=segment)])
         )
+        return
+    excerpt = segment.strip().splitlines()[0][:60]
+    result.warnings.append(
+        f"Text outside any role block is ignored: '{excerpt}…'"
+        if len(excerpt) >= 60
+        else f"Text outside any role block is ignored: '{excerpt}'"
+    )
 
 
 def _split_on_cache_breaks(body: str) -> list[ContentBlock]:

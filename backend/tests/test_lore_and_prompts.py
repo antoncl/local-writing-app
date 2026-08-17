@@ -638,8 +638,9 @@ class LoreAndPromptTests(MetadataValidationBase):
         personality. `revise` is abstract (ADR-0046 §5) and splits symmetrically
         into `revise:scene` (today's scene revise) + `revise:entry` (the lore
         brainstorm commit) — the dispositions differ (`revise:scene` is
-        `replace_selection`; `revise:entry` is `chat_panel` + a `commit`), so
-        nothing is hoisted onto the base. Inputs live on the instance (not the type)."""
+        `replace_selection`; `revise:entry` is `chat_panel` + a `commit`), so no
+        *disposition* is hoisted onto the base — only the shared `default_role`
+        envelope (ADR-0060 §4). Inputs live on the instance (not the type)."""
         schema = self.service.read_metadata_schema()
         for type_id in ("prompt:continuation", "prompt:general", "prompt:snippet"):
             self.assertIn(type_id, schema.entry_types)
@@ -657,11 +658,14 @@ class LoreAndPromptTests(MetadataValidationBase):
             continuation_output.commit
         )  # an inline disposition carries no commit
 
-        # `revise` is now the abstract parent of the two concrete flavours.
+        # `revise` is now the abstract parent of the two concrete flavours. It
+        # carries only the shared `default_role` envelope (ADR-0060 §4) — no
+        # disposition (no context_strategy); that stays on the concrete children.
         revise = schema.entry_types["prompt:revise"]
         self.assertTrue(revise.abstract)
         self.assertEqual(revise.parent, "prompt:base")
-        self.assertIsNone(revise.prompt)
+        assert revise.prompt is not None and revise.prompt.context_strategy is None
+        self.assertEqual(revise.prompt.default_role, "system")
 
         revise_scene = schema.entry_types["prompt:revise:scene"]
         self.assertFalse(revise_scene.abstract)

@@ -1,4 +1,4 @@
-<script context="module" lang="ts">
+<script module lang="ts">
   import type { PromptEntrySummary } from "@/lib/types";
 </script>
 
@@ -20,39 +20,50 @@
   } from "@/lib/stores/hiddenLibrary";
   import type { ViewSpec } from "@/lib/types";
 
-  export let entries: PromptEntrySummary[];
-  // Prompts is a real view like Lore (ADR-0022/0036): the whole prompt roster
-  // evaluated by evaluateView. The default view groups by DISPOSITION — what the
-  // prompt does to the document, of which there are only five — not by leaf
-  // entry_type, which was a bucket per sub-type (#951). Disposition is a synthesized
-  // field the lift below stamps; membership is the whole roster, so an entry never
-  // "falls off" — an unrecognised one just shelves under Snippets.
-  export let viewSpec: ViewSpec = defaultView("prompt");
+  let {
+    entries,
+    // Prompts is a real view like Lore (ADR-0022/0036): the whole prompt roster
+    // evaluated by evaluateView. The default view groups by DISPOSITION — what the
+    // prompt does to the document, of which there are only five — not by leaf
+    // entry_type, which was a bucket per sub-type (#951). Disposition is a synthesized
+    // field the lift below stamps; membership is the whole roster, so an entry never
+    // "falls off" — an unrecognised one just shelves under Snippets.
+    viewSpec = defaultView("prompt"),
+    // Open a prompt entry in an editor pane (App owns the pane set).
+    onOpenEntry,
+    // Create a new prompt entry of the given concrete sub-type.
+    onNewEntry,
+    // Clone a built-in Library prompt into the project as an editable copy
+    // (ADR-0049 §5). Offered only on Library rows via a trailing action.
+    onCloneEntry,
+  }: {
+    entries: PromptEntrySummary[];
+    viewSpec?: ViewSpec;
+    onOpenEntry: (entryId: string) => void;
+    onNewEntry: (entryType: string) => void;
+    onCloneEntry: (entryId: string) => void;
+  } = $props();
+
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
-  $: schema = $metadataSchemaStore;
+  const schema = $derived($metadataSchemaStore);
   // Active-row highlight reads from the editor-focus store, not props (#14 Step 2).
-  $: focusedDocument = $focusedDocumentStore;
+  const focusedDocument = $derived($focusedDocumentStore);
 
   // ADR-0049 slice 3: hidden built-in Library prompts (per-project, localStorage).
   // The hidden set drops shipped prompts the writer curated off the shelf; "Show
   // hidden" reveals them dimmed so they can be un-hidden. The node index stays
   // complete — this is a presentation filter, so the same prompt still resolves
   // and runs if referenced by id. Hide is offered only on Library rows.
-  let showHidden = false;
-  $: hiddenSet = $hiddenLibraryStore;
-  $: hiddenCount = entries.filter((entry) => hiddenSet.has(entry.id)).length;
+  let showHidden = $state(false);
+  const hiddenSet = $derived($hiddenLibraryStore);
+  const hiddenCount = $derived(entries.filter((entry) => hiddenSet.has(entry.id)).length);
   // Once nothing is hidden the "Show hidden" reveal disappears, so drop the flag
   // with it — otherwise it stays latched and the NEXT hide would dim the row in
   // place instead of removing it from the shelf.
-  $: if (hiddenCount === 0) showHidden = false;
-  $: visibleEntries = showHidden ? entries : entries.filter((entry) => !hiddenSet.has(entry.id));
-  // Open a prompt entry in an editor pane (App owns the pane set).
-  export let onOpenEntry: (entryId: string) => void;
-  // Create a new prompt entry of the given concrete sub-type.
-  export let onNewEntry: (entryType: string) => void;
-  // Clone a built-in Library prompt into the project as an editable copy
-  // (ADR-0049 §5). Offered only on Library rows via a trailing action.
-  export let onCloneEntry: (entryId: string) => void;
+  $effect(() => {
+    if (hiddenCount === 0) showHidden = false;
+  });
+  const visibleEntries = $derived(showHidden ? entries : entries.filter((entry) => !hiddenSet.has(entry.id)));
 
   // The add-menu popover lives inside this pane's ViewNodeList (mode-agnostic); the
   // pane-header "+" button drives its imperative handles (mirrors Lore). One add
@@ -76,13 +87,13 @@
   // The lift stamps each roster node with its derived `disposition` (metadata) and
   // pre-clusters by shelf order, so the default view's `group_by: [disposition]`
   // buckets on it — the same shape as the Chats pane lifting `seed_disposition`.
-  $: promptNodes = promptSummariesToGroupNodes(visibleEntries, schema);
-  $: view = {
+  const promptNodes = $derived(promptSummariesToGroupNodes(visibleEntries, schema));
+  const view = $derived({
     spec: viewSpec,
     universe: promptNodes,
     schema,
     referenceIndex: $referenceIndexStore,
-  };
+  });
 </script>
 
 <ViewNodeList

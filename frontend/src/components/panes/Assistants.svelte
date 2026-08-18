@@ -1,4 +1,4 @@
-<script context="module" lang="ts">
+<script module lang="ts">
   import type { AssistantEntrySummary } from "@/lib/types";
 </script>
 
@@ -23,24 +23,33 @@
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
   import type { ViewSpec } from "@/lib/types";
 
-  export let entries: AssistantEntrySummary[];
-  // The view to render through, computed by App from the pane's selected view
-  // (paneViews) — the reactivity bridge for this legacy `$:` pane. The
-  // standalone default is the kind's honest default view (ADR-0037 §7 / #333:
-  // the roster in merged priority order, tag-parameterized, grouped Active vs
-  // Unlisted).
-  export let viewSpec: ViewSpec = defaultView("assistant");
-  $: schema = $metadataSchemaStore;
+  let {
+    entries,
+    // The view to render through, computed by App from the pane's selected view
+    // (paneViews) — the reactivity bridge for this legacy `$:` pane. The
+    // standalone default is the kind's honest default view (ADR-0037 §7 / #333:
+    // the roster in merged priority order, tag-parameterized, grouped Active vs
+    // Unlisted).
+    viewSpec = defaultView("assistant"),
+    // Open an assistant in an editor pane (App owns the pane set).
+    onOpenEntry,
+    // Persist curation. App owns assistantEntries (shared with the chat pane), so
+    // it makes the api calls + updates state; this component only turns a drag
+    // into the intent. Neither takes a layer — a curation gesture is always the
+    // local layer's opinion (#332/#333), and the backend resolves that.
+    onSetOrder,
+    onUnlist,
+  }: {
+    entries: AssistantEntrySummary[];
+    viewSpec?: ViewSpec;
+    onOpenEntry: (entryId: string) => void;
+    onSetOrder: (orderedIds: string[]) => Promise<void>;
+    onUnlist: (entryId: string) => Promise<void>;
+  } = $props();
+
+  const schema = $derived($metadataSchemaStore);
   // Active-row highlight + pin-star read from the editor-focus store, not props (#14 Step 2).
-  $: focusedDocument = $focusedDocumentStore;
-  // Open an assistant in an editor pane (App owns the pane set).
-  export let onOpenEntry: (entryId: string) => void;
-  // Persist curation. App owns assistantEntries (shared with the chat pane), so
-  // it makes the api calls + updates state; this component only turns a drag
-  // into the intent. Neither takes a layer — a curation gesture is always the
-  // local layer's opinion (#332/#333), and the backend resolves that.
-  export let onSetOrder: (orderedIds: string[]) => Promise<void>;
-  export let onUnlist: (entryId: string) => Promise<void>;
+  const focusedDocument = $derived($focusedDocumentStore);
 
   // Per-group collapse is ephemeral and owned by ViewNodeList (phase 1; not
   // persisted, same as the Lore pane).
@@ -48,25 +57,31 @@
   // Colored tag chips: name → hex from the machine-global assistant-tag
   // vocabulary (#88), via the shared `tagColorMap` (lowercase name → swatch id)
   // resolved to a hex here. Uncolored tags fall back to the neutral chip.
-  $: assistantSwatchIds = tagColorMap(assistantTagsAsScoped($assistantTagsStore));
+  const assistantSwatchIds = $derived(tagColorMap(assistantTagsAsScoped($assistantTagsStore)));
   // Reactive (not const) so the function reference changes when colors update,
-  // re-rendering the rows' chips.
-  $: tagHexFor = (tag: string): string | null => {
-    const id = assistantSwatchIds.get(tag.toLowerCase());
-    return id ? getSwatch(id)?.hex ?? null : null;
-  };
+  // re-rendering the rows' chips. `$derived.by` with a synchronous read of
+  // `assistantSwatchIds` inside the returned closure — a plain `$derived` arrow
+  // would never re-track its dependency since creating the function doesn't
+  // read it.
+  const tagHexFor = $derived.by(() => {
+    const ids = assistantSwatchIds;
+    return (tag: string): string | null => {
+      const id = ids.get(tag.toLowerCase());
+      return id ? getSwatch(id)?.hex ?? null : null;
+    };
+  });
 
   // Every NodeList is backed by a view (ADR-0022), and the view is authoritative
   // for its own shape (ADR-0037 §3): any buckets come from the spec's own
   // `group_by` levels, never synthesized here. Hand the whole view to
   // ViewNodeList, which owns evaluation + the parameter strip (ADR-0032 §D) — so a
   // parameterized assistant view now gets its strip here too, not only in Lore.
-  $: view = {
+  const view = $derived({
     spec: viewSpec,
     universe: entries,
     schema,
     referenceIndex: $referenceIndexStore,
-  };
+  });
   // Drag expresses MANUAL order, so it is offered exactly when the view has not
   // taken ordering out of the author's hands: a `sort` other than manual, or a
   // named-handle shape whose members are not one sequence, means the position a
@@ -80,12 +95,12 @@
   // longer keys off `group_by`, which #333 re-pointed from provenance to
   // curation — the levels are what the drop TARGETS, not a precondition for
   // dragging at all.
-  $: canReorder = (viewSpec.sort?.by ?? "manual") === "manual" && !viewSpec.groups?.length;
+  const canReorder = $derived((viewSpec.sort?.by ?? "manual") === "manual" && !viewSpec.groups?.length);
 
   // The listed sequence, in the order the roster presents it. `onSetOrder`
   // replaces a layer's whole opinion, so every drop sends the full sequence —
   // an id absent from it is demoted, which is exactly what un-listing means.
-  $: listedIds = entries.filter(isAssistantListed).map((entry) => entry.id);
+  const listedIds = $derived(entries.filter(isAssistantListed).map((entry) => entry.id));
 
   // A drop on another ROW. Landing among the listed sequence sets priority
   // relative to that row; landing among the unlisted means "not in my roster",
@@ -139,12 +154,12 @@
   // Per-assistant health check (#336). The Machine Settings ping only ever
   // tests the topmost assistant, so a green tick there can accompany a broken
   // send from a chat pinned elsewhere. Testing by id here checks the exact
-  // assistant a send would use. Keyed by id; reassigned wholesale so Svelte 4's
-  // `$:`/DOM reactivity picks it up.
+  // assistant a send would use. Keyed by id; reassigned wholesale so Svelte's
+  // reactivity picks it up.
   let healthByAssistant: Record<
     string,
     { checking: boolean; result: AIHealthResponse | null }
-  > = {};
+  > = $state({});
 
   async function testAssistant(entry: AssistantEntrySummary): Promise<void> {
     const prev = healthByAssistant[entry.id]?.result ?? null;

@@ -1,6 +1,7 @@
 // Pure helpers extracted from ChatBodyView.svelte (#99). No reactive state —
 // these operate purely on their arguments so they live outside the component
 // and are unit-testable in isolation.
+import { effectivePromptInputs } from "@/lib/editor-core/promptResolution";
 import type { NodePickerRef, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
 
 // ---- cost-estimate + TTL strip state ----
@@ -18,7 +19,7 @@ export function defaultDraftFor(input: PromptInputDefinition): string {
 
 export function seedInputDraftsFromEntry(entry: PromptEntrySummary): Record<string, string> {
   const drafts: Record<string, string> = {};
-  for (const input of entry.inputs ?? []) drafts[input.name] = defaultDraftFor(input);
+  for (const input of effectivePromptInputs(entry)) drafts[input.name] = defaultDraftFor(input);
   return drafts;
 }
 

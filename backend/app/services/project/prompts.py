@@ -34,6 +34,20 @@ from app.services.project.errors import ProjectServiceError
 
 class PromptEntriesMixin:
     def list_prompt_entries(self) -> PromptEntryList:
+        entries = self._build_prompt_summaries()
+        self._populate_effective_inputs(entries)
+        entries.sort(key=lambda entry: (entry.title.lower(), entry.id))
+        return PromptEntryList(entries=entries)
+
+    def _build_prompt_summaries(self) -> list[PromptEntrySummary]:
+        """Every prompt node as a summary — WITHOUT `effective_inputs`, unsorted.
+
+        Shared by `list_prompt_entries` (which adds effective_inputs then sorts)
+        and the snippet render loader, which only needs id/title/entry_type to
+        resolve an include and must NOT trigger the effective-inputs pass: the
+        loader runs once per `{% include %}` on every render, and that pass parses
+        every prompt body for a read-model field the render path never reads.
+        """
         root = self._require_project()
         index = self._build_node_index()
         entries: list[PromptEntrySummary] = []
@@ -61,8 +75,55 @@ class PromptEntriesMixin:
                     editable=self._node_is_owned_here(entry, root),
                 )
             )
-        entries.sort(key=lambda entry: (entry.title.lower(), entry.id))
-        return PromptEntryList(entries=entries)
+        return entries
+
+    def _populate_effective_inputs(self, entries: list[PromptEntrySummary]) -> None:
+        """Set `effective_inputs` on each loaded prompt summary (ADR-0061).
+
+        A prompt's effective inputs = its own `inputs` ∪ the transitive union of
+        every `prompt:snippet` it `{% include %}`s. The snippet bodies + inputs
+        are already in `entries` (this same load), so the resolver reads them
+        from memory rather than re-reading each snippet from disk — the include
+        name → snippet match reuses the render loader's `match_snippet_name` so
+        gathering and rendering can never disagree on which snippet a name means.
+        """
+        from app.services.ai.effective_inputs import (
+            SnippetSource,
+            resolve_effective_inputs,
+        )
+        from app.services.ai.snippet_loader import match_snippet_name
+        from app.services.ai.templates import create_environment
+
+        schema = self.read_metadata_schema()
+        snippets = [
+            entry
+            for entry in entries
+            if "prompt:snippet" in self.entry_type_ancestry(entry.entry_type, schema=schema)
+        ]
+        # No snippets ⇒ no include can resolve, so effective always equals own.
+        # Set it directly (a non-empty own list must NOT be left as the default
+        # empty list — the frontend's `effective_inputs ?? inputs` fallback only
+        # fires on null) and skip parsing every body.
+        if not snippets:
+            for entry in entries:
+                entry.effective_inputs = list(entry.inputs)
+            return
+
+        sources = {
+            entry.id: SnippetSource(id=entry.id, body=entry.body, inputs=tuple(entry.inputs))
+            for entry in snippets
+        }
+
+        def resolve(name: str) -> SnippetSource | None:
+            matched = match_snippet_name(
+                name, snippets, id_of=lambda e: e.id, title_of=lambda e: e.title
+            )
+            return sources.get(matched.id) if matched is not None else None
+
+        env = create_environment()
+        for entry in entries:
+            resolution = resolve_effective_inputs(entry.body, entry.inputs, resolve, env=env)
+            entry.effective_inputs = resolution.inputs
 
     def create_prompt_entry(self, request: CreatePromptEntryRequest) -> PromptEntry:
         root = self._require_project()

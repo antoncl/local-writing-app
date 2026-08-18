@@ -261,12 +261,17 @@ The §4/§5 anchors that assert the childless container first (`adr0037.conforma
 visible"), not that it belongs *above* its siblings. The `toEqual` pinned the slot incidentally.
 
 ### The decision
-**Under `manual` sort, a containment Nest orders siblings by their `rank` in the containment
-relation** — the input / universe position — restoring §4's third column and the §2 "manual == input
-order" invariant. The fix lives in the one no-op branch: `sortNestRows` (`evaluateView.ts:953`)
-orders the Nest's rows in document **pre-order** (lexicographically by the universe index of each
-path segment's node, then the leaf) instead of returning placement order untouched. `buildLevel`'s
-first-seen rule then reconstructs input order at every level, for free.
+**Under `manual` sort, a Nest orders siblings by input position** — restoring the §2 "manual == input
+order" invariant, which holds for *every* Nest, not only containment ones. For the containment trees
+(Draft / Research / Scene) that input position is precisely §4's `rank`, the relation's third column,
+materialized as universe/array order — so this is stated as "manual sort honors `rank`" throughout,
+but the mechanism is general and needs no test for "is this a containment nest." The fix lives in the
+one no-op branch: `sortNestRows` (`evaluateView.ts:953`) orders the Nest's rows in document
+**pre-order** (lexicographically by the universe index of each path segment's node, then the leaf)
+instead of returning placement order untouched. `buildLevel`'s first-seen rule then reconstructs
+input order at every level, for free. The shipped defaults are all containment nests; a
+non-containment nest under `manual` sort (a user-authored view) simply becomes roster-ordered, which
+is what §2 already promised it should be.
 
 The change is confined to that branch:
 - **Non-`manual` sorts are unchanged** — `sortNestRows` already re-sorts by title/field regardless

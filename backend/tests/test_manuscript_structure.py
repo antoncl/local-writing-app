@@ -73,6 +73,35 @@ class ManuscriptStructureTests(MetadataValidationBase):
         numbers = [node.computed_metadata.get("number") for node in act_nodes]
         self.assertEqual(numbers, [1, 2])
 
+    def test_same_title_containers_disambiguate_filename_not_identity(self) -> None:
+        """The number is now a POSTFIX in the display, so auto-named siblings share
+        a bare title ("Act") — #1144 follow-up. Two same-titled containers must
+        coexist: the backing FILENAME takes a collision suffix while the title, the
+        canonical id, and the live counter all stay distinct."""
+        from app.models import CreateStructureNodeRequest
+
+        for _ in range(2):
+            self.service.create_structure_node(
+                CreateStructureNodeRequest(title="Act", entry_type="manuscript:act")
+            )
+
+        structure = self.service.read_structure()
+        act_nodes = [
+            child for child in structure.root.children if child.type == "manuscript:act"
+        ]
+        self.assertEqual(len(act_nodes), 2)
+        # Same title, distinct canonical ids, distinct live numbers.
+        self.assertEqual([n.title for n in act_nodes], ["Act", "Act"])
+        self.assertEqual(len({n.scene_id for n in act_nodes}), 2)
+        self.assertEqual([n.computed_metadata.get("number") for n in act_nodes], [1, 2])
+        # The collision is resolved on the FILENAME only ("Act" / "Act (2)"),
+        # never by mangling the title or the id.
+        stems = sorted(
+            self.service._path_for_node_id(n.scene_id, "manuscript").stem
+            for n in act_nodes
+        )
+        self.assertEqual(stems, ["Act", "Act (2)"])
+
     def test_structure_yaml_does_not_persist_computed_metadata(self) -> None:
         from app.models import CreateStructureNodeRequest
 
@@ -156,7 +185,7 @@ class ManuscriptStructureTests(MetadataValidationBase):
         schema = self.service.read_metadata_schema()
         for type_id in ("manuscript:act", "manuscript:chapter", "manuscript:scene"):
             self.assertEqual(
-                schema.entry_types[type_id].display_template, "{number}. {title}"
+                schema.entry_types[type_id].display_template, "{title} {number}"
             )
         self.assertEqual(
             schema.entry_types["lore:character"].display_template, "{title}"

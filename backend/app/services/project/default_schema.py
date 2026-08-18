@@ -84,7 +84,12 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "kind": "manuscript",
             "abstract": True,
             "fields": ["number", "summary", "color"],
-            "display_template": "{number}. {title}",
+            # Number POSTFIX (#1144 follow-up): the counter is reorder-live, so it
+            # trails the title ("Act 1", "Chapter 3") rather than prefixing it. New
+            # nodes are auto-named WITHOUT a baked-in number (see nextAutoName), so
+            # the live number is the single source — no "1. Act 1" doubling, no
+            # stale number after a drag.
+            "display_template": "{title} {number}",
             "has_body": False,
         },
         "manuscript:act": {

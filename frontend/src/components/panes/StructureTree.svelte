@@ -71,6 +71,7 @@
     updateNodeTitleInTree,
   } from "@/lib/utils/treeHelpers";
   import { structureToEvalNodes } from "@/lib/views/structureNodes";
+  import { applyDisplayTemplate } from "@/lib/utils/nodeTitle";
   import type { EvalNode } from "@/lib/views/evaluateView";
   import type { ViewSpec } from "@/lib/types";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
@@ -174,19 +175,18 @@
   }
 
   function renderNodeTitle(node: EvalNode): string {
-    const template = schema?.entry_types[node.entry_type]?.display_template ?? "{title}";
     const liveTitle = node.ref_id ? draftTitles.get(node.ref_id) : undefined;
-    const effectiveTitle = liveTitle ?? node.title;
-    return template.replace(/\{(\w+)\}/g, (_match, fieldName) => {
-      if (fieldName === "title") return effectiveTitle;
-      const computed = node.metadata?.[fieldName];
-      if (computed !== undefined && computed !== null) return String(computed);
-      return "";
-    });
+    return applyDisplayTemplate(node.entry_type, liveTitle ?? node.title, node.metadata, schema);
   }
 
   function nextAutoName(parentId: string | null, entryType: string): string {
     const typeName = entryTypeName(entryType, schema);
+    // When the type's display carries a live computed {number} (the manuscript
+    // tree), auto-name WITHOUT a number — the display appends it, so baking one in
+    // would double ("Act 1 1") and go stale on reorder. Kinds whose display shows
+    // no number (research) still disambiguate siblings in the name itself.
+    const template = schema?.entry_types[entryType]?.display_template ?? "{title}";
+    if (template.includes("{number}")) return typeName;
     const root = config.getStructure()?.root ?? null;
     const parent = !root ? null : parentId ? findStructureNodeById(root, parentId) : root;
     const siblingCount = parent?.children?.filter((child) => child.type === entryType).length ?? 0;

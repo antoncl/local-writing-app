@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
+import { reactive } from "@/lib/test/reactive.svelte";
 
 import type { MachineSettingsDraft, MachineSettingsView } from "@/lib/types";
 import type { AIHealthResponse } from "@/lib/aiTypes";
@@ -51,7 +52,7 @@ function mount(ai_policy: MachineSettingsView["ai_policy"], onApplyPolicy = vi.f
     props: {
       open: true,
       settings: view(ai_policy),
-      draft: draft(),
+      draft: reactive(draft()),
       onCancel: () => {},
       onSave,
       onApplyPolicy,
@@ -102,7 +103,7 @@ describe("MachineSettingsDialog — health names the resolved assistant (#336)",
       props: {
         open: true,
         settings: view("cloud-allowed"),
-        draft: draft(),
+        draft: reactive(draft()),
         onCancel: () => {},
         onSave: vi.fn(),
         onApplyPolicy: vi.fn().mockResolvedValue(true),

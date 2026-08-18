@@ -8,35 +8,49 @@
   import type { LooseScene } from "@/lib/types";
   import Modal from "@/components/dialogs/Modal.svelte";
 
-  export let open: boolean = false;
-  export let looseScenes: LooseScene[] = [];
-  export let busy: boolean = false;
-  export let onClose: () => void = () => {};
-  export let onImport: (sceneIds: string[]) => void = () => {};
+  let {
+    open = false,
+    looseScenes = [],
+    busy = false,
+    onClose = () => {},
+    onImport = () => {},
+  }: {
+    open?: boolean;
+    looseScenes?: LooseScene[];
+    busy?: boolean;
+    onClose?: () => void;
+    onImport?: (sceneIds: string[]) => void;
+  } = $props();
 
-  $: allLooseIds = looseScenes.map((doc) => doc.id);
+  const allLooseIds = $derived(looseScenes.map((doc) => doc.id));
 
   // Selection is local, everything ticked by default (the common case is "take
   // them all"). Seed only on the open TRANSITION — a legacy `$:` reruns on every
   // dependency change, so gating on `if (open)` alone would re-seed whenever
   // `looseScenes` is reassigned (the post-import refresh), silently re-selecting
   // what the user deselected (#639). `seededFor` makes it fire once per open.
-  let selected: Set<string> = new Set();
-  let seededFor = false;
-  $: if (!open) seededFor = false;
-  $: if (open && !seededFor) {
-    selected = new Set(allLooseIds);
-    seededFor = true;
-  }
+  let selected = $state<Set<string>>(new Set());
+  let seededFor = $state(false);
+  $effect(() => {
+    if (!open) seededFor = false;
+  });
+  $effect(() => {
+    if (open && !seededFor) {
+      selected = new Set(allLooseIds);
+      seededFor = true;
+    }
+  });
 
   // Keep the selection scoped to what's still loose: after a partial import the
   // imported ids leave `looseScenes`, so drop them. This only REMOVES ids, never
   // adds, so it can't undo a deselection (unlike a reseed) — and it keeps
   // `selected` authoritative, so the count and payload read straight off it.
-  $: if ([...selected].some((id) => !allLooseIds.includes(id))) {
-    const stillLoose = new Set(allLooseIds);
-    selected = new Set([...selected].filter((id) => stillLoose.has(id)));
-  }
+  $effect(() => {
+    if ([...selected].some((id) => !allLooseIds.includes(id))) {
+      const stillLoose = new Set(allLooseIds);
+      selected = new Set([...selected].filter((id) => stillLoose.has(id)));
+    }
+  });
 
   function toggle(id: string) {
     const next = new Set(selected);
@@ -45,7 +59,7 @@
     selected = next;
   }
 
-  $: allSelected = looseScenes.length > 0 && selected.size === looseScenes.length;
+  const allSelected = $derived(looseScenes.length > 0 && selected.size === looseScenes.length);
 
   function toggleAll() {
     selected = allSelected ? new Set() : new Set(allLooseIds);
@@ -72,14 +86,14 @@
         Pick which to add.
       </p>
       <label class="select-all">
-        <input type="checkbox" checked={allSelected} on:change={toggleAll} />
+        <input type="checkbox" checked={allSelected} onchange={toggleAll} />
         Select all
       </label>
       <ul class="doc-list">
         {#each looseScenes as doc (doc.id)}
           <li>
             <label class="doc-row">
-              <input type="checkbox" checked={selected.has(doc.id)} on:change={() => toggle(doc.id)} />
+              <input type="checkbox" checked={selected.has(doc.id)} onchange={() => toggle(doc.id)} />
               <span class="doc-title">{doc.title}</span>
               <span class="doc-file">{doc.filename}</span>
             </label>
@@ -89,13 +103,13 @@
     {/if}
 
     {#snippet actions()}
-      <button type="button" on:click={onClose}>{looseScenes.length === 0 ? "Close" : "Cancel"}</button>
+      <button type="button" onclick={onClose}>{looseScenes.length === 0 ? "Close" : "Cancel"}</button>
       {#if looseScenes.length > 0}
         <button
           class="primary"
           type="button"
           disabled={busy || selected.size === 0}
-          on:click={() => onImport([...selected])}
+          onclick={() => onImport([...selected])}
         >{busy ? "Importing…" : `Add ${selected.size} to manuscript`}</button>
       {/if}
     {/snippet}

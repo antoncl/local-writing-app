@@ -5,13 +5,19 @@
   import { dropPositionFromEvent, reorderByPosition } from "@/lib/utils/listOrder";
   import type { GroupMember, MetadataGroupDefinition, MetadataSchema } from "@/lib/types";
 
-  // Reusable L2 group definitions (keyed by id) + the layer to save into.
-  export let groups: Record<string, MetadataGroupDefinition> = {};
-  export let layerId: string;
-
-  // Callback props (#14: App is runes — no on:event on components).
-  export let onChanged: ((payload: { schema: MetadataSchema }) => void) | undefined = undefined;
-  export let onClose: (() => void) | undefined = undefined;
+  let {
+    // Reusable L2 group definitions (keyed by id) + the layer to save into.
+    groups = {},
+    layerId,
+    // Callback props (#14: App is runes — no on:event on components).
+    onChanged = undefined,
+    onClose = undefined,
+  }: {
+    groups?: Record<string, MetadataGroupDefinition>;
+    layerId: string;
+    onChanged?: (payload: { schema: MetadataSchema }) => void;
+    onClose?: () => void;
+  } = $props();
 
   const MEMBER_TYPES: { value: GroupMember["type"]; label: string }[] = [
     { value: "text", label: "Text" },
@@ -27,14 +33,14 @@
   ];
 
   // null = list view; "__new__" or an id = the editor.
-  let editingId: string | null = null;
-  let draftIsNew = false;
-  let draftId = "";
-  let draftIdTouched = false;
-  let draftName = "";
-  let draftMembers: GroupMember[] = [];
-  let error = "";
-  let busy = false;
+  let editingId = $state<string | null>(null);
+  let draftIsNew = $state(false);
+  let draftId = $state("");
+  let draftIdTouched = $state(false);
+  let draftName = $state("");
+  let draftMembers = $state<GroupMember[]>([]);
+  let error = $state("");
+  let busy = $state(false);
 
   function slug(value: string): string {
     return value
@@ -48,7 +54,7 @@
   // System groups (built-in plot-board machinery) are not author-editable and
   // stay out of the manager list (#1003); `groups` still holds them so the
   // save guard below can catch an id collision against a hidden one.
-  $: groupList = Object.entries(groups).filter(([, group]) => !group.system);
+  const groupList = $derived(Object.entries(groups).filter(([, group]) => !group.system));
 
   function openNew() {
     editingId = "__new__";
@@ -93,7 +99,7 @@
     draftMembers = draftMembers.filter((_, i) => i !== index);
   }
   // Per-member icon picker (the tile is the trigger). null = none open.
-  let iconPickerFor: number | null = null;
+  let iconPickerFor = $state<number | null>(null);
   function updateMemberIcon(index: number, icon: string | null) {
     draftMembers[index] = { ...draftMembers[index], icon: icon ?? undefined };
     draftMembers = draftMembers;
@@ -102,8 +108,8 @@
 
   // Drag-reorder members — same before/after insertion-line marker as the
   // field/option lists for a consistent feel.
-  let memberDragIndex: number | null = null;
-  let memberDropTarget: { index: number; position: "before" | "after" } | null = null;
+  let memberDragIndex = $state<number | null>(null);
+  let memberDropTarget = $state<{ index: number; position: "before" | "after" } | null>(null);
   function onMemberDragOver(event: DragEvent, index: number) {
     if (memberDragIndex === null || memberDragIndex === index) return;
     event.preventDefault();
@@ -188,12 +194,12 @@
   }
 </script>
 
-<div class="gm-backdrop" role="presentation" on:mousedown={() => onClose?.()}>
-  <div class="gm-dialog" role="dialog" aria-modal="true" aria-label="Reusable groups" tabindex="-1" on:mousedown|stopPropagation>
+<div class="gm-backdrop" role="presentation" onmousedown={() => onClose?.()}>
+  <div class="gm-dialog" role="dialog" aria-modal="true" aria-label="Reusable groups" tabindex="-1" onmousedown={(event) => event.stopPropagation()}>
     <header class="gm-head">
       <i class="ti ti-stack-2" aria-hidden="true"></i>
       <h2>Reusable groups</h2>
-      <button class="gm-close" type="button" on:click={() => onClose?.()}>Close</button>
+      <button class="gm-close" type="button" onclick={() => onClose?.()}>Close</button>
     </header>
 
     {#if error}
@@ -206,7 +212,7 @@
           <p class="muted">No reusable groups yet. A group (e.g. GMO = Goal / Motivation / Obstacle) can be applied to several types.</p>
         {/if}
         {#each groupList as [id, group]}
-          <button class="gm-row" type="button" on:click={() => openEdit(id)}>
+          <button class="gm-row" type="button" onclick={() => openEdit(id)}>
             <span class="sfr-tile"><i class={`ti ti-${group.icon || "stack-2"}`} aria-hidden="true"></i></span>
             <span class="gm-row-name">{group.name}</span>
             <span class="gm-row-members">{group.members.map((m) => m.name).join(" · ")}</span>
@@ -214,18 +220,18 @@
           </button>
         {/each}
         <div class="gm-foot">
-          <button class="sfi-done" type="button" title="New group" aria-label="New group" on:click={openNew}>+</button>
+          <button class="sfi-done" type="button" title="New group" aria-label="New group" onclick={openNew}>+</button>
         </div>
       </div>
     {:else}
       <div class="gm-body">
         <div class="gm-editor-head">
           <label class="sfi-field gm-grow">Name
-            <input value={draftName} placeholder="GMO" on:input={(event) => onNameInput(event.currentTarget.value)} />
+            <input value={draftName} placeholder="GMO" oninput={(event) => onNameInput(event.currentTarget.value)} />
           </label>
           {#if draftIsNew}
             <label class="sfi-field">Id
-              <input value={draftId} placeholder="gmo" on:input={(event) => { draftId = slug(event.currentTarget.value); draftIdTouched = true; }} />
+              <input value={draftId} placeholder="gmo" oninput={(event) => { draftId = slug(event.currentTarget.value); draftIdTouched = true; }} />
             </label>
           {:else}
             <span class="gm-id-static">id <code>{draftId}</code></span>
@@ -241,9 +247,9 @@
               class:dragging={memberDragIndex === index}
               class:drop-before={memberDropTarget?.index === index && memberDropTarget?.position === "before"}
               class:drop-after={memberDropTarget?.index === index && memberDropTarget?.position === "after"}
-              on:dragover={(event) => onMemberDragOver(event, index)}
-              on:dragleave={() => { if (memberDropTarget?.index === index) memberDropTarget = null; }}
-              on:drop|preventDefault={() => onMemberDrop(index)}
+              ondragover={(event) => onMemberDragOver(event, index)}
+              ondragleave={() => { if (memberDropTarget?.index === index) memberDropTarget = null; }}
+              ondrop={(event) => { event.preventDefault(); onMemberDrop(index); }}
             >
               <span
                 class="gm-member-grip"
@@ -252,8 +258,8 @@
                 aria-label="Drag to reorder"
                 title="Drag to reorder"
                 draggable="true"
-                on:dragstart={() => (memberDragIndex = index)}
-                on:dragend={clearMemberDrag}
+                ondragstart={() => (memberDragIndex = index)}
+                ondragend={clearMemberDrag}
               ><i class="ti ti-grip-vertical"></i></span>
               <div class="gm-member-icon-anchor">
                 <button
@@ -261,7 +267,7 @@
                   class="sfr-tile gm-icon-btn"
                   aria-label="Choose icon"
                   title="Choose icon"
-                  on:click={() => (iconPickerFor = iconPickerFor === index ? null : index)}
+                  onclick={() => (iconPickerFor = iconPickerFor === index ? null : index)}
                 >
                   <i class={fieldIconClass({ type: member.type, icon: member.icon ?? null })} aria-hidden="true"></i>
                 </button>
@@ -277,26 +283,26 @@
                   </div>
                 {/if}
               </div>
-              <input class="gm-member-name" value={member.name} placeholder="Goal" on:input={(event) => updateMemberName(index, event.currentTarget.value)} />
-              <select class="gm-member-type" value={member.type} on:change={(event) => updateMemberType(index, event.currentTarget.value as GroupMember["type"])}>
+              <input class="gm-member-name" value={member.name} placeholder="Goal" oninput={(event) => updateMemberName(index, event.currentTarget.value)} />
+              <select class="gm-member-type" value={member.type} onchange={(event) => updateMemberType(index, event.currentTarget.value as GroupMember["type"])}>
                 {#each MEMBER_TYPES as option}
                   <option value={option.value}>{option.label}</option>
                 {/each}
               </select>
               <code class="gm-member-key" title={member.key || slug(member.name)}>{member.key || slug(member.name)}</code>
-              <button class="link-danger" type="button" on:click={() => removeMember(index)} aria-label="Remove member">✕</button>
+              <button class="link-danger" type="button" onclick={() => removeMember(index)} aria-label="Remove member">✕</button>
             </div>
           {/each}
-          <button class="gm-add-member" type="button" title="Add member" aria-label="Add member" on:click={addMember}>+</button>
+          <button class="gm-add-member" type="button" title="Add member" aria-label="Add member" onclick={addMember}>+</button>
         </div>
 
         <div class="gm-editor-foot">
           {#if !draftIsNew}
-            <button class="link-danger" type="button" disabled={busy} on:click={() => deleteGroup(draftId)}>Delete group</button>
+            <button class="link-danger" type="button" disabled={busy} onclick={() => deleteGroup(draftId)}>Delete group</button>
           {/if}
           <span class="sfi-spacer"></span>
-          <button class="sfi-cancel" type="button" on:click={() => (editingId = null)}>Cancel</button>
-          <button class="sfi-done" type="button" disabled={busy || !(draftName.trim() || draftId.trim())} on:click={saveGroup}>Save group</button>
+          <button class="sfi-cancel" type="button" onclick={() => (editingId = null)}>Cancel</button>
+          <button class="sfi-done" type="button" disabled={busy || !(draftName.trim() || draftId.trim())} onclick={saveGroup}>Save group</button>
         </div>
       </div>
     {/if}

@@ -13,40 +13,52 @@
   import { api } from "@/lib/api";
   import type { DirectoryListing, DirectoryRoot, PathProbe } from "@/lib/types";
 
-  export let open: boolean = false;
-  export let initialPath: string = "";
-  export let title: string = "Choose Folder";
-  export let selectLabel: string = "Select This Folder";
-  export let onClose: () => void = () => {};
-  export let onSelect: (path: string) => void = () => {};
-  // Open-project only (#441): refuse a folder outside the machine projects
-  // root — books must live under it. Left false by the create and choose-root
-  // pickers, which legitimately browse anywhere. The backend decides
-  // membership (`listing.within_root`); this just governs the gesture.
-  export let enforceWithinRoot: boolean = false;
+  let {
+    open = false,
+    initialPath = "",
+    title = "Choose Folder",
+    selectLabel = "Select This Folder",
+    onClose = () => {},
+    onSelect = () => {},
+    // Open-project only (#441): refuse a folder outside the machine projects
+    // root — books must live under it. Left false by the create and choose-root
+    // pickers, which legitimately browse anywhere. The backend decides
+    // membership (`listing.within_root`); this just governs the gesture.
+    enforceWithinRoot = false,
+  }: {
+    open?: boolean;
+    initialPath?: string;
+    title?: string;
+    selectLabel?: string;
+    onClose?: () => void;
+    onSelect?: (path: string) => void;
+    enforceWithinRoot?: boolean;
+  } = $props();
 
-  let listing: DirectoryListing | null = null;
-  let roots: DirectoryRoot[] = [];
-  let loading = false;
-  let error: string | null = null;
+  let listing = $state<DirectoryListing | null>(null);
+  let roots = $state<DirectoryRoot[]>([]);
+  let loading = $state(false);
+  let error = $state<string | null>(null);
 
   // The editable path field, kept in sync with the shown folder on navigate.
-  let typedPath = "";
-  let probe: PathProbe | null = null;
+  let typedPath = $state("");
+  let probe = $state<PathProbe | null>(null);
   let probeTimer: ReturnType<typeof setTimeout> | null = null;
 
-  let showCreate = false;
-  let newFolderName = "";
-  let createError: string | null = null;
+  let showCreate = $state(false);
+  let newFolderName = $state("");
+  let createError = $state<string | null>(null);
 
   // Load roots + the start folder on the closed→open transition only.
-  let wasOpen = false;
-  $: if (open && !wasOpen) {
-    wasOpen = true;
-    void handleOpen();
-  } else if (!open && wasOpen) {
-    wasOpen = false;
-  }
+  let wasOpen = $state(false);
+  $effect(() => {
+    if (open && !wasOpen) {
+      wasOpen = true;
+      void handleOpen();
+    } else if (!open && wasOpen) {
+      wasOpen = false;
+    }
+  });
 
   async function handleOpen() {
     error = null;
@@ -122,7 +134,7 @@
 
   // Outside the machine projects root, in a picker that enforces it: the shown
   // folder can't be opened (#441). Drives the message + the dimmed Select.
-  $: outOfRoot = enforceWithinRoot && listing !== null && !listing.within_root;
+  const outOfRoot = $derived(enforceWithinRoot && listing !== null && !listing.within_root);
 
   function select() {
     if (listing && !outOfRoot) onSelect(listing.path);
@@ -169,11 +181,11 @@
     return out;
   }
 
-  $: crumbs = listing ? crumbsFor(listing.path) : [];
+  const crumbs = $derived(listing ? crumbsFor(listing.path) : []);
 
   // Only trust the probe hint when it describes the path currently in the
   // field — a debounced reply for a superseded keystroke is ignored.
-  $: probeMatches = probe !== null && probe.input === typedPath.trim();
+  const probeMatches = $derived(probe !== null && probe.input === typedPath.trim());
 
   // Focus the create-folder field when it appears, without the `autofocus`
   // attribute (which svelte-check flags for a11y).
@@ -187,7 +199,7 @@
     <div class="directory-modal">
       <header class="directory-modal-header">
         <h2>{title}</h2>
-        <button type="button" on:click={onClose}>Cancel</button>
+        <button type="button" onclick={onClose}>Cancel</button>
       </header>
 
       {#if roots.length > 0}
@@ -197,7 +209,7 @@
               type="button"
               class="root-chip"
               title={root.path}
-              on:click={() => navigate(root.path)}
+              onclick={() => navigate(root.path)}
             >{root.label}</button>
           {/each}
         </div>
@@ -205,7 +217,7 @@
 
       <nav class="directory-crumbs" aria-label="Current path">
         {#each crumbs as crumb, i}
-          <button type="button" class="crumb" title={crumb.path} on:click={() => navigate(crumb.path)}
+          <button type="button" class="crumb" title={crumb.path} onclick={() => navigate(crumb.path)}
             >{crumb.label}</button>
           {#if i < crumbs.length - 1}<span class="crumb-sep" aria-hidden="true">›</span>{/if}
         {/each}
@@ -217,11 +229,11 @@
           aria-label="Folder path"
           spellcheck="false"
           bind:value={typedPath}
-          on:input={onTypedInput}
-          on:keydown={(e) => e.key === "Enter" && goToTyped()}
+          oninput={onTypedInput}
+          onkeydown={(e) => e.key === "Enter" && goToTyped()}
           placeholder="Type or paste a folder path"
         />
-        <button type="button" on:click={toggleCreate}>New Folder…</button>
+        <button type="button" onclick={toggleCreate}>New Folder…</button>
       </div>
 
       {#if typedPath.trim() && probeMatches && !probe?.is_dir}
@@ -238,10 +250,10 @@
             spellcheck="false"
             bind:value={newFolderName}
             use:focusOnMount
-            on:keydown={(e) => e.key === "Enter" && submitCreate()}
+            onkeydown={(e) => e.key === "Enter" && submitCreate()}
             placeholder="New folder name"
           />
-          <button class="primary" type="button" disabled={!newFolderName.trim()} on:click={submitCreate}>Create</button>
+          <button class="primary" type="button" disabled={!newFolderName.trim()} onclick={submitCreate}>Create</button>
         </div>
         {#if createError}<p class="directory-hint danger">{createError}</p>{/if}
       {/if}
@@ -253,7 +265,7 @@
           <p class="directory-hint danger">{error}</p>
         {:else if listing}
           {#each listing.directories as directory}
-            <button type="button" class="directory-row" on:click={() => navigate(directory.path)} title={directory.path}>
+            <button type="button" class="directory-row" onclick={() => navigate(directory.path)} title={directory.path}>
               <span class="directory-row-name">{directory.name}</span>
               {#if directory.is_project}
                 <span class="directory-tag is-project">project</span>
@@ -269,7 +281,7 @@
       </div>
 
       <footer class="directory-modal-actions">
-        <button type="button" disabled={!listing?.parent_path || loading} on:click={() => navigate(listing?.parent_path ?? undefined)}>
+        <button type="button" disabled={!listing?.parent_path || loading} onclick={() => navigate(listing?.parent_path ?? undefined)}>
           Up
         </button>
         {#if outOfRoot}
@@ -278,7 +290,7 @@
           <span class="directory-hint inline">Already a project</span>
         {/if}
         <span class="directory-actions-spacer"></span>
-        <button class="primary" type="button" disabled={!listing || loading || outOfRoot} on:click={select}>
+        <button class="primary" type="button" disabled={!listing || loading || outOfRoot} onclick={select}>
           {selectLabel}
         </button>
       </footer>

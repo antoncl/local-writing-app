@@ -11,29 +11,39 @@
   import { portalToBody } from "@/lib/actions/portal";
   import type { SelectOption } from "@/lib/types";
 
-  export let value: string = "";
-  export let options: SelectOption[] = [];
-  // When true, the trigger renders a small placeholder when value is "".
-  export let allowBlank: boolean = true;
-  export let placeholder: string = "(none)";
-  export let ariaLabel: string = "";
-  export let onChange: ((value: string) => void) | undefined = undefined;
-  // Read-only display (#64): the trigger pill renders identically (dot +
-  // label + tint) but is inert — no popover, no hover affordance, no caret.
-  export let readOnly: boolean = false;
+  let {
+    value = "",
+    options = [],
+    // When true, the trigger renders a small placeholder when value is "".
+    allowBlank = true,
+    placeholder = "(none)",
+    ariaLabel = "",
+    onChange = undefined,
+    // Read-only display (#64): the trigger pill renders identically (dot +
+    // label + tint) but is inert — no popover, no hover affordance, no caret.
+    readOnly = false,
+  }: {
+    value?: string;
+    options?: SelectOption[];
+    allowBlank?: boolean;
+    placeholder?: string;
+    ariaLabel?: string;
+    onChange?: (value: string) => void;
+    readOnly?: boolean;
+  } = $props();
 
-  let open = false;
+  let open = $state(false);
   let anchor: HTMLButtonElement | undefined;
   // Popover is fixed-positioned (computed from the anchor) so it escapes the
   // metadata rail's overflow clipping. Mirrors TagPicker.
-  let menuPos: { x: number; y: number; width: number } | null = null;
+  let menuPos = $state<{ x: number; y: number; width: number } | null>(null);
 
-  $: current = options.find((o) => o.value === value) ?? null;
+  const current = $derived(options.find((o) => o.value === value) ?? null);
   // Resolve the swatch hex when the selected option carries a color id.
-  $: currentSwatch = current?.color ? getSwatch(current.color) : null;
+  const currentSwatch = $derived(current?.color ? getSwatch(current.color) : null);
   // Only reserve a dot column when at least one option is actually colored.
   // A select with no colors shows no dots at all (no "no color" placeholder).
-  $: anyColored = options.some((o) => !!o.color);
+  const anyColored = $derived(options.some((o) => !!o.color));
 
   function toggle() {
     if (readOnly) return;
@@ -84,7 +94,7 @@
   }
 </script>
 
-<svelte:window on:click={onDocClick} on:keydown={onKey} />
+<svelte:window onclick={onDocClick} onkeydown={onKey} />
 
 <span class="colored-select">
   <button
@@ -98,7 +108,10 @@
     disabled={readOnly}
     bind:this={anchor}
     style={pillStyle()}
-    on:click|stopPropagation={toggle}
+    onclick={(e) => {
+      e.stopPropagation();
+      toggle();
+    }}
   >
     {#if current}
       {#if currentSwatch}
@@ -127,7 +140,10 @@
           class:selected={value === ""}
           role="option"
           aria-selected={value === ""}
-          on:click|stopPropagation={clear}
+          onclick={(e) => {
+            e.stopPropagation();
+            clear();
+          }}
         >
           {#if anyColored}
             <span class="colored-select-dot colored-select-dot-spacer"></span>
@@ -142,7 +158,10 @@
           class:selected={opt.value === value}
           role="option"
           aria-selected={opt.value === value}
-          on:click|stopPropagation={() => select(opt)}
+          onclick={(e) => {
+            e.stopPropagation();
+            select(opt);
+          }}
         >
           {#if opt.color}
             <span class="colored-select-dot" style={dotStyle(opt)}></span>

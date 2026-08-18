@@ -1,26 +1,34 @@
 <script lang="ts">
   import DirectoryPickerModal from "@/components/dialogs/DirectoryPickerModal.svelte";
 
-  // The canonical projects-folder editor (#643 / ADR-0047 slice 4). One control,
-  // mounted by Settings → Storage (the persistent home) and the New-project
-  // wizard's first-run root step. Both write `default_projects_folder`; this
-  // owns the row (input + Browse + optional Clear) and its own directory picker.
-  export let value: string;
-  // The host owns the value. Called on every keystroke, on a Browse selection,
-  // and on Clear — the host decides where the string lands (a settings draft,
-  // the wizard's root draft).
-  export let onChange: (value: string) => void;
-  // Settings offers Clear (emptying the root is a real, warned-about choice);
-  // the wizard does not — first-run must set a root to continue.
-  export let showClear: boolean = false;
-  // Dialog heading. The two homes historically phrased it differently, so it is
-  // a prop rather than baked in.
-  export let pickerTitle: string = "Projects Folder";
-  // Where Browse opens when the field is empty (the wizard's first-run start
-  // folder). Settings leaves it empty and opens at the current value.
-  export let startPath: string = "";
+  let {
+    // The canonical projects-folder editor (#643 / ADR-0047 slice 4). One control,
+    // mounted by Settings → Storage (the persistent home) and the New-project
+    // wizard's first-run root step. Both write `default_projects_folder`; this
+    // owns the row (input + Browse + optional Clear) and its own directory picker.
+    value,
+    // The host owns the value. Called on every keystroke, on a Browse selection,
+    // and on Clear — the host decides where the string lands (a settings draft,
+    // the wizard's root draft).
+    onChange,
+    // Settings offers Clear (emptying the root is a real, warned-about choice);
+    // the wizard does not — first-run must set a root to continue.
+    showClear = false,
+    // Dialog heading. The two homes historically phrased it differently, so it is
+    // a prop rather than baked in.
+    pickerTitle = "Projects Folder",
+    // Where Browse opens when the field is empty (the wizard's first-run start
+    // folder). Settings leaves it empty and opens at the current value.
+    startPath = "",
+  }: {
+    value: string;
+    onChange: (value: string) => void;
+    showClear?: boolean;
+    pickerTitle?: string;
+    startPath?: string;
+  } = $props();
 
-  let pickerOpen = false;
+  let pickerOpen = $state(false);
 </script>
 
 <div class="path-picker-row" class:with-clear={showClear}>
@@ -28,11 +36,11 @@
     type="text"
     value={value}
     placeholder="C:\path\to\writing"
-    on:input={(event) => onChange(event.currentTarget.value)}
+    oninput={(event) => onChange(event.currentTarget.value)}
   />
-  <button type="button" on:click={() => (pickerOpen = true)}>Browse…</button>
+  <button type="button" onclick={() => (pickerOpen = true)}>Browse…</button>
   {#if showClear}
-    <button type="button" disabled={!value} on:click={() => onChange("")}>Clear</button>
+    <button type="button" disabled={!value} onclick={() => onChange("")}>Clear</button>
   {/if}
 </div>
 

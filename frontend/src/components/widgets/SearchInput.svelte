@@ -18,23 +18,32 @@
   import { registerFindTarget, isCurrentTarget } from "@/lib/stores/focusTargetStore";
   import type { Readable } from "svelte/store";
 
-  export let value: string = "";
-  export let placeholder: string = "";
-  export let onChange: ((value: string) => void) | undefined = undefined;
-  export let clearable: boolean = true;
-  // 0 by default: sync. Consumers opt in to debounce by passing a ms
-  // value; useful if the matcher is expensive to recompute per keystroke.
-  export let debounceMs: number = 0;
+  let {
+    value = $bindable(""),
+    placeholder = "",
+    onChange = undefined,
+    clearable = true,
+    // 0 by default: sync. Consumers opt in to debounce by passing a ms
+    // value; useful if the matcher is expensive to recompute per keystroke.
+    debounceMs = 0,
+  }: {
+    value?: string;
+    placeholder?: string;
+    onChange?: ((value: string) => void) | undefined;
+    clearable?: boolean;
+    debounceMs?: number;
+  } = $props();
+
   // Mac platforms show ⌘F; everything else shows Ctrl+F. Cheap detect.
   // Falls back to Ctrl+F server-side / before mount.
-  let shortcutLabel = "Ctrl+F";
+  let shortcutLabel = $state("Ctrl+F");
 
   let input: HTMLInputElement | undefined;
-  let registrationId: number | null = null;
-  let isActiveTarget: Readable<boolean> | null = null;
-  let badgeActive = false;
-  let badgeUnsub: (() => void) | undefined;
-  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+  let registrationId: number | null = $state(null);
+  let isActiveTarget: Readable<boolean> | null = $state(null);
+  let badgeActive = $state(false);
+  let badgeUnsub: (() => void) | undefined = $state();
+  let debounceTimer: ReturnType<typeof setTimeout> | undefined = $state();
 
   onMount(() => {
     if (typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform)) {
@@ -99,8 +108,8 @@
     type="search"
     {placeholder}
     {value}
-    on:input={handleInput}
-    on:keydown={handleKeydown}
+    oninput={handleInput}
+    onkeydown={handleKeydown}
   />
   {#if clearable && value}
     <button
@@ -109,7 +118,7 @@
       title="Clear search (Esc)"
       aria-label="Clear search"
       tabindex="-1"
-      on:click={clearValue}
+      onclick={clearValue}
     >×</button>
   {/if}
   <span

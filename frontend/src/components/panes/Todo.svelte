@@ -5,34 +5,49 @@
   // editor-pane independent. This view renders them above the file-level TODOs;
   // every mutation routes through the todoActions controller (intentful backend
   // endpoints) and is passed in as a callback.
-  export let todos: TodoItem[];
-  export let embeddedTodos: EmbeddedTodoRecord[];
-  // Two-way: the "Add" textarea. App clears it on a successful create (only
-  // inside its run() success path), so it stays App-owned and binds down.
-  export let newTodo: string;
-
-  export let onAddTodo: () => void;
-  export let onToggleTodo: (item: TodoItem) => void;
-  export let onUpdateTodoText: (item: TodoItem, text: string) => void;
-  export let onDeleteTodo: (item: TodoItem) => void;
-  export let onTodoTextKeydown: (event: KeyboardEvent, item: TodoItem) => void;
-  export let onOpenFileTodo: (item: TodoItem) => void;
-  export let onToggleEmbeddedTodo: (item: EmbeddedTodoRecord) => void;
-  export let onUpdateEmbeddedTodoNote: (item: EmbeddedTodoRecord, note: string) => void;
-  export let onOpenEmbeddedTodo: (item: EmbeddedTodoRecord) => void;
-  export let onDeleteEmbeddedTodo: (item: EmbeddedTodoRecord) => void;
+  let {
+    todos,
+    embeddedTodos,
+    // Two-way: the "Add" textarea. App clears it on a successful create (only
+    // inside its run() success path), so it stays App-owned and binds down.
+    newTodo = $bindable(),
+    onAddTodo,
+    onToggleTodo,
+    onUpdateTodoText,
+    onDeleteTodo,
+    onTodoTextKeydown,
+    onOpenFileTodo,
+    onToggleEmbeddedTodo,
+    onUpdateEmbeddedTodoNote,
+    onOpenEmbeddedTodo,
+    onDeleteEmbeddedTodo,
+  }: {
+    todos: TodoItem[];
+    embeddedTodos: EmbeddedTodoRecord[];
+    newTodo: string;
+    onAddTodo: () => void;
+    onToggleTodo: (item: TodoItem) => void;
+    onUpdateTodoText: (item: TodoItem, text: string) => void;
+    onDeleteTodo: (item: TodoItem) => void;
+    onTodoTextKeydown: (event: KeyboardEvent, item: TodoItem) => void;
+    onOpenFileTodo: (item: TodoItem) => void;
+    onToggleEmbeddedTodo: (item: EmbeddedTodoRecord) => void;
+    onUpdateEmbeddedTodoNote: (item: EmbeddedTodoRecord, note: string) => void;
+    onOpenEmbeddedTodo: (item: EmbeddedTodoRecord) => void;
+    onDeleteEmbeddedTodo: (item: EmbeddedTodoRecord) => void;
+  } = $props();
 </script>
 
 <div class="todo-entry">
-  <textarea bind:value={newTodo} placeholder="Add a file-level TODO description" rows="3" on:keydown={(event) => event.key === "Enter" && event.ctrlKey && onAddTodo()}></textarea>
-  <button on:click={onAddTodo}>Add</button>
+  <textarea bind:value={newTodo} placeholder="Add a file-level TODO description" rows="3" onkeydown={(event) => event.key === "Enter" && event.ctrlKey && onAddTodo()}></textarea>
+  <button onclick={onAddTodo}>Add</button>
 </div>
 {#if embeddedTodos.length > 0}
   <div class="todo-section-label">Embedded TODOs</div>
 {/if}
 {#each embeddedTodos as item (item.scene_id + ":" + item.todo_id)}
   <div class:done={item.status === "done"} class="todo-item">
-    <input class="todo-checkbox" type="checkbox" checked={item.status === "done"} aria-label="Toggle embedded TODO" on:change={() => onToggleEmbeddedTodo(item)} />
+    <input class="todo-checkbox" type="checkbox" checked={item.status === "done"} aria-label="Toggle embedded TODO" onchange={() => onToggleEmbeddedTodo(item)} />
     <div class="todo-text-stack">
       <textarea
         class="todo-text"
@@ -41,15 +56,15 @@
         title="Edit embedded TODO note"
         placeholder={item.text}
         rows="3"
-        on:blur={(event) => onUpdateEmbeddedTodoNote(item, event.currentTarget.value)}
+        onblur={(event) => onUpdateEmbeddedTodoNote(item, event.currentTarget.value)}
       ></textarea>
-      <button class="todo-link" type="button" on:click={() => onOpenEmbeddedTodo(item)}>
+      <button class="todo-link" type="button" onclick={() => onOpenEmbeddedTodo(item)}>
         <strong>{item.scene_path}</strong>
         <span>{item.text}</span>
       </button>
     </div>
     <small>Embedded</small>
-    <button class="todo-delete" type="button" on:click={() => onDeleteEmbeddedTodo(item)}>Remove</button>
+    <button class="todo-delete" type="button" onclick={() => onDeleteEmbeddedTodo(item)}>Remove</button>
   </div>
 {/each}
 {#if todos.length > 0}
@@ -57,7 +72,7 @@
 {/if}
 {#each todos as item}
   <div class:done={item.status === "done"} class="todo-item">
-    <input class="todo-checkbox" type="checkbox" checked={item.status === "done"} aria-label="Toggle TODO" on:change={() => onToggleTodo(item)} />
+    <input class="todo-checkbox" type="checkbox" checked={item.status === "done"} aria-label="Toggle TODO" onchange={() => onToggleTodo(item)} />
     <textarea
       class="todo-text"
       value={item.text}
@@ -65,15 +80,15 @@
       title="Edit TODO description"
       placeholder="Describe this TODO"
       rows="3"
-      on:blur={(event) => onUpdateTodoText(item, event.currentTarget.value)}
-      on:keydown={(event) => onTodoTextKeydown(event, item)}
+      onblur={(event) => onUpdateTodoText(item, event.currentTarget.value)}
+      onkeydown={(event) => onTodoTextKeydown(event, item)}
     ></textarea>
     {#if item.scene_id}
-      <button class="todo-link compact" type="button" on:click={() => onOpenFileTodo(item)}>Open Scene</button>
+      <button class="todo-link compact" type="button" onclick={() => onOpenFileTodo(item)}>Open Scene</button>
     {:else}
       <small>Project</small>
     {/if}
-    <button class="todo-delete" type="button" on:click={() => onDeleteTodo(item)}>Delete</button>
+    <button class="todo-delete" type="button" onclick={() => onDeleteTodo(item)}>Delete</button>
   </div>
 {/each}
 

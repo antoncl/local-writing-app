@@ -22,59 +22,79 @@
   // provides, which is all the chrome dropdowns need.
   import type { Snippet } from "svelte";
 
-  // Two-way: overlay-click and Escape flip this back to false in the caller.
-  export let open = false;
-  // The control that opened the popover. Escape returns focus here (the panel
-  // unmounts on close, so without this focus falls to <body> and the next Tab
-  // restarts from the top of the document). A click on the overlay does NOT
-  // refocus — a mouse user dismissing shouldn't have focus yanked onto the
-  // button. Post-action focus (a menu item that navigates elsewhere) stays the
-  // caller's business.
-  export let triggerEl: HTMLElement | null = null;
-  // `menu` (non-modal, like the switcher/app-menu/contains) vs `dialog` (modal:
-  // owns focus while open — focus-into on mount, Tab trapped, aria-modal). The
-  // inheritance editor is the only modal one.
-  export let role: "menu" | "dialog" = "menu";
-  // Accessible name: `label` → aria-label, or `labelledby` → aria-labelledby
-  // when the panel carries its own visible heading (the inherit editor does).
-  export let label: string | undefined = undefined;
-  export let labelledby: string | undefined = undefined;
-  // Panel id, so the caller's trigger can point aria-controls at it while open.
-  export let id: string | undefined = undefined;
-  // Horizontal anchor against the positioned wrapper: `left` drops the panel from
-  // the wrapper's left edge, `right` from its right edge (#766.3 — a trigger on
-  // the right side of the bar wants its panel right-aligned so a wide panel grows
-  // leftward into the bar rather than off the viewport's right edge).
-  export let anchor: "left" | "right" = "left";
-  // Vertical gap between the trigger and the panel.
-  export let offset = 4;
-  // Per-caller box shape (see the class comments on each dropdown for why the
-  // numbers differ). `overflow-y` is derived: a capped panel (maxHeight set)
-  // scrolls, an uncapped one (the small inherit editor) stays `visible` so it is
-  // byte-identical to the pre-primitive markup.
-  export let minWidth = "auto";
-  export let maxWidth = "none";
-  export let maxHeight = "none";
-  export let padding = "6px";
-  export let gap = "1px";
-  // Exposes the panel element to the caller (the switcher juggles focus among its
-  // remove-buttons after a row unmounts, #423). Bindable; unused by most callers.
-  export let panel: HTMLElement | null = null;
-  // Extra side effect to run whenever the popover dismisses itself (overlay click
-  // or Escape) — the app menu resets its inline "save preset" field here.
-  export let onClose: (() => void) | undefined = undefined;
-  export let children: Snippet;
+  let {
+    // Two-way: overlay-click and Escape flip this back to false in the caller.
+    open = $bindable(false),
+    // The control that opened the popover. Escape returns focus here (the panel
+    // unmounts on close, so without this focus falls to <body> and the next Tab
+    // restarts from the top of the document). A click on the overlay does NOT
+    // refocus — a mouse user dismissing shouldn't have focus yanked onto the
+    // button. Post-action focus (a menu item that navigates elsewhere) stays the
+    // caller's business.
+    triggerEl = null,
+    // `menu` (non-modal, like the switcher/app-menu/contains) vs `dialog` (modal:
+    // owns focus while open — focus-into on mount, Tab trapped, aria-modal). The
+    // inheritance editor is the only modal one.
+    role = "menu",
+    // Accessible name: `label` → aria-label, or `labelledby` → aria-labelledby
+    // when the panel carries its own visible heading (the inherit editor does).
+    label = undefined,
+    labelledby = undefined,
+    // Panel id, so the caller's trigger can point aria-controls at it while open.
+    id = undefined,
+    // Horizontal anchor against the positioned wrapper: `left` drops the panel from
+    // the wrapper's left edge, `right` from its right edge (#766.3 — a trigger on
+    // the right side of the bar wants its panel right-aligned so a wide panel grows
+    // leftward into the bar rather than off the viewport's right edge).
+    anchor = "left",
+    // Vertical gap between the trigger and the panel.
+    offset = 4,
+    // Per-caller box shape (see the class comments on each dropdown for why the
+    // numbers differ). `overflow-y` is derived: a capped panel (maxHeight set)
+    // scrolls, an uncapped one (the small inherit editor) stays `visible` so it is
+    // byte-identical to the pre-primitive markup.
+    minWidth = "auto",
+    maxWidth = "none",
+    maxHeight = "none",
+    padding = "6px",
+    gap = "1px",
+    // Exposes the panel element to the caller (the switcher juggles focus among its
+    // remove-buttons after a row unmounts, #423). Bindable; unused by most callers.
+    panel = $bindable(null),
+    // Extra side effect to run whenever the popover dismisses itself (overlay click
+    // or Escape) — the app menu resets its inline "save preset" field here.
+    onClose = undefined,
+    children,
+  }: {
+    open?: boolean;
+    triggerEl?: HTMLElement | null;
+    role?: "menu" | "dialog";
+    label?: string | undefined;
+    labelledby?: string | undefined;
+    id?: string | undefined;
+    anchor?: "left" | "right";
+    offset?: number;
+    minWidth?: string;
+    maxWidth?: string;
+    maxHeight?: string;
+    padding?: string;
+    gap?: string;
+    panel?: HTMLElement | null;
+    onClose?: (() => void) | undefined;
+    children: Snippet;
+  } = $props();
 
-  $: modal = role === "dialog";
-  $: overflowY = maxHeight === "none" ? "visible" : "auto";
-  $: panelStyle =
+  const modal = $derived(role === "dialog");
+  const overflowY = $derived(maxHeight === "none" ? "visible" : "auto");
+  const panelStyle = $derived(
     `--pop-offset:${offset}px;` +
-    `--pop-min-w:${minWidth};` +
-    `--pop-max-w:${maxWidth};` +
-    `--pop-max-h:${maxHeight};` +
-    `--pop-pad:${padding};` +
-    `--pop-gap:${gap};` +
-    `--pop-overflow-y:${overflowY};`;
+      `--pop-min-w:${minWidth};` +
+      `--pop-max-w:${maxWidth};` +
+      `--pop-max-h:${maxHeight};` +
+      `--pop-pad:${padding};` +
+      `--pop-gap:${gap};` +
+      `--pop-overflow-y:${overflowY};`,
+  );
 
   // Everything tabbable inside the panel — for the initial focus and the trap.
   const FOCUSABLE =
@@ -129,11 +149,11 @@
   }
 </script>
 
-<svelte:window on:keydown={handleKeydown} />
+<svelte:window onkeydown={handleKeydown} />
 
 {#if open}
   <!-- Click-outside dismiss (does not refocus; see close()). -->
-  <div class="popover-overlay" role="presentation" on:click={onOverlayClick}></div>
+  <div class="popover-overlay" role="presentation" onclick={onOverlayClick}></div>
   <div
     bind:this={panel}
     class="popover-panel"

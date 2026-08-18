@@ -2,17 +2,22 @@
   import type { SearchHit } from "@/lib/types";
   import { api } from "@/lib/api";
 
-  // App's error-catching async wrapper (same one Tree uses). Returns whether
-  // the action completed without throwing.
-  export let run: (action: () => Promise<void>) => Promise<boolean>;
-  // Open a hit in an editor pane — App owns the pane set + the embedded-TODO
-  // highlight that follows a scene hit.
-  export let onOpenHit: (hit: SearchHit) => void;
+  let {
+    // App's error-catching async wrapper (same one Tree uses). Returns whether
+    // the action completed without throwing.
+    run,
+    // Open a hit in an editor pane — App owns the pane set + the embedded-TODO
+    // highlight that follows a scene hit.
+    onOpenHit,
+  }: {
+    run: (action: () => Promise<void>) => Promise<boolean>;
+    onOpenHit: (hit: SearchHit) => void;
+  } = $props();
 
   // All search state is local to this feature — nothing else in the app reads it.
-  let query = "";
-  let includeOpenTodos = false;
-  let hits: SearchHit[] = [];
+  let query = $state("");
+  let includeOpenTodos = $state(false);
+  let hits: SearchHit[] = $state([]);
 
   async function runSearch() {
     if (!query.trim() && !includeOpenTodos) return;
@@ -23,15 +28,15 @@
 </script>
 
 <div class="todo-entry">
-  <input bind:value={query} placeholder="Find in scenes and lore" on:keydown={(event) => event.key === "Enter" && runSearch()} />
-  <button on:click={runSearch}>Find</button>
+  <input bind:value={query} placeholder="Find in scenes and lore" onkeydown={(event) => event.key === "Enter" && runSearch()} />
+  <button onclick={runSearch}>Find</button>
 </div>
 <label class="inline-check">
   <input type="checkbox" bind:checked={includeOpenTodos} />
   Include open TODOs
 </label>
 {#each hits as hit}
-  <button class="search-hit" on:click={() => onOpenHit(hit)}>
+  <button class="search-hit" onclick={() => onOpenHit(hit)}>
     <strong>{hit.path}:{hit.line}</strong>
     <span>{hit.excerpt}</span>
   </button>

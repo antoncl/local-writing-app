@@ -26,39 +26,59 @@
     if (draft) applyProsePresentation(draft.display);
   }
 
-  export let open: boolean = false;
-
-  // The persisted view (read-only here — used for `config_path` and
-  // any context that shouldn't be edited inline).
-  export let settings: MachineSettingsView | null = null;
-  // The editable draft. Two-way bound so the parent sees changes to
-  // text inputs and the palette without needing per-field callbacks.
-  export let draft: MachineSettingsDraft | null = null;
-  export let onCancel: () => void = () => {};
-  export let onSave: () => void = () => {};
-
-  // The application-global default AI policy (#746). Deliberately NOT part of
-  // the batched `draft`/`onSave`: widening AI permission must be its own
-  // explicit gesture, never a side effect of saving an unrelated field like a
-  // provider key (decisions_ai_permission_fails_closed). It holds its own draft,
-  // seeded from the persisted `settings` on each open, and commits via
-  // `onApplyPolicy` — mirroring the per-project AIPolicyModal.
-  export let onApplyPolicy: (policy: AIPolicy) => Promise<boolean> = async () => false;
+  let {
+    open = false,
+    // The persisted view (read-only here — used for `config_path` and
+    // any context that shouldn't be edited inline).
+    settings = null,
+    // The editable draft. Two-way bound so the parent sees changes to
+    // text inputs and the palette without needing per-field callbacks.
+    draft = $bindable(null),
+    onCancel = () => {},
+    onSave = () => {},
+    // The application-global default AI policy (#746). Deliberately NOT part of
+    // the batched `draft`/`onSave`: widening AI permission must be its own
+    // explicit gesture, never a side effect of saving an unrelated field like a
+    // provider key (decisions_ai_permission_fails_closed). It holds its own draft,
+    // seeded from the persisted `settings` on each open, and commits via
+    // `onApplyPolicy` — mirroring the per-project AIPolicyModal.
+    onApplyPolicy = async () => false,
+    // The AI-connection test, re-homed from the Project pane (#629): it pings the
+    // default assistant's provider, so it belongs beside the providers it tests.
+    // The host owns the gate — the ping needs an open project with AI access, so
+    // `disabledReason` is non-null (and shown) when it can't run.
+    health = null,
+  }: {
+    open?: boolean;
+    settings?: MachineSettingsView | null;
+    draft?: MachineSettingsDraft | null;
+    onCancel?: () => void;
+    onSave?: () => void;
+    onApplyPolicy?: (policy: AIPolicy) => Promise<boolean>;
+    health?: {
+      onCheck: () => void;
+      result: AIHealthResponse | null;
+      checking: boolean;
+      disabledReason: string | null;
+    } | null;
+  } = $props();
 
   // Typed as the draft superset so it can bind the shared PolicyRadioGroup, but
   // the "inherit" stop is never rendered here (the app-wide floor can't inherit),
   // so `applyPolicy` narrows back to AIPolicy before committing.
-  let policyDraft: AIPolicyDraft = "off";
-  let policyWasOpen = false;
-  let applyingPolicy = false;
+  let policyDraft = $state<AIPolicyDraft>("off");
+  let policyWasOpen = $state(false);
+  let applyingPolicy = $state(false);
   // Snapshot the stored policy on each open→shown transition only; our own apply
   // re-syncs `settings` from the parent, and re-seeding on that would be a no-op
   // anyway (draft already equals the saved value).
-  $: if (open !== policyWasOpen) {
-    if (open) policyDraft = settings?.ai_policy ?? "off";
-    policyWasOpen = open;
-  }
-  $: policyDirty = policyDraft !== (settings?.ai_policy ?? "off");
+  $effect(() => {
+    if (open !== policyWasOpen) {
+      if (open) policyDraft = settings?.ai_policy ?? "off";
+      policyWasOpen = open;
+    }
+  });
+  const policyDirty = $derived(policyDraft !== (settings?.ai_policy ?? "off"));
 
   async function applyPolicy() {
     // The floor has no "inherit" stop; guard so the type stays honest and a
@@ -68,17 +88,6 @@
     await onApplyPolicy(policyDraft);
     applyingPolicy = false;
   }
-
-  // The AI-connection test, re-homed from the Project pane (#629): it pings the
-  // default assistant's provider, so it belongs beside the providers it tests.
-  // The host owns the gate — the ping needs an open project with AI access, so
-  // `disabledReason` is non-null (and shown) when it can't run.
-  export let health: {
-    onCheck: () => void;
-    result: AIHealthResponse | null;
-    checking: boolean;
-    disabledReason: string | null;
-  } | null = null;
 
   // PaletteEditor is controlled — it hands back a whole new ordered list, which
   // we assign onto the draft. A member assignment is reactive here the same way
@@ -98,9 +107,11 @@
     { key: "palette", label: "Palette" },
     { key: "storage", label: "Storage" },
   ];
-  let activeTab: SettingsTab = "ai";
+  let activeTab = $state<SettingsTab>("ai");
   // Land on the first tab whenever the dialog reopens, never a stale one.
-  $: if (!open) activeTab = "ai";
+  $effect(() => {
+    if (!open) activeTab = "ai";
+  });
 
   // The AI tab presents providers via the shared ProviderSubscriptions surface,
   // which edits the flat credential fields on the draft; Save persists the whole
@@ -131,7 +142,7 @@
             role="tab"
             aria-selected={activeTab === tab.key}
             aria-controls="settings-panel"
-            on:click={() => (activeTab = tab.key)}
+            onclick={() => (activeTab = tab.key)}
           >{tab.label}</button>
         {/each}
       </div>
@@ -156,7 +167,7 @@
                 type="button"
                 class="primary"
                 disabled={!policyDirty || applyingPolicy}
-                on:click={applyPolicy}
+                onclick={applyPolicy}
               >{applyingPolicy ? "Applying…" : "Apply"}</button>
             </div>
           </section>
@@ -190,7 +201,7 @@
                   type="button"
                   disabled={health.checking || !!health.disabledReason}
                   title={health.disabledReason ?? "Ping the default assistant's provider"}
-                  on:click={() => health?.onCheck()}
+                  onclick={() => health?.onCheck()}
                 >{health.checking ? "Testing…" : "Test connection"}</button>
               </div>
               {#if health.disabledReason}
@@ -220,7 +231,7 @@
                 max="1.5"
                 step="0.05"
                 bind:value={draft.display.ui_scale}
-                on:input={previewDisplay}
+                oninput={previewDisplay}
               />
               <small class="muted">Scales the whole interface. Sizes snap to whole pixels.</small>
             </label>
@@ -228,17 +239,17 @@
             <fieldset class="prose-align">
               <legend>Paragraph alignment</legend>
               <label class="choice-row">
-                <input type="radio" value="left" bind:group={draft.display.paragraph_align} on:change={previewDisplay} />
+                <input type="radio" value="left" bind:group={draft.display.paragraph_align} onchange={previewDisplay} />
                 Left (ragged right)
               </label>
               <label class="choice-row">
-                <input type="radio" value="justify" bind:group={draft.display.paragraph_align} on:change={previewDisplay} />
+                <input type="radio" value="justify" bind:group={draft.display.paragraph_align} onchange={previewDisplay} />
                 Justified (both edges)
               </label>
             </fieldset>
 
             <label class="choice-row">
-              <input type="checkbox" bind:checked={draft.display.paragraph_indent} on:change={previewDisplay} />
+              <input type="checkbox" bind:checked={draft.display.paragraph_indent} onchange={previewDisplay} />
               Indent the first line of each paragraph
             </label>
           </section>
@@ -276,8 +287,8 @@
       <p class="muted stored-at">Stored locally at: <code>{settings?.config_path}</code></p>
 
       {#snippet actions()}
-        <button type="button" on:click={onCancel}>Cancel</button>
-        <button class="primary" type="button" on:click={onSave}>Save</button>
+        <button type="button" onclick={onCancel}>Cancel</button>
+        <button class="primary" type="button" onclick={onSave}>Save</button>
       {/snippet}
   </Modal>
 {/if}

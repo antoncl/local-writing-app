@@ -190,6 +190,10 @@ def _literal_include_names(source: str, env: SandboxedEnvironment) -> list[str]:
     rather than raising — the render path surfaces the real syntax error later;
     gathering must degrade, matching `_parse_prompt_inputs`'s leniency.
     """
+    # An include tag always spells the word "include"; without it there is
+    # nothing to find, so skip building the AST for the common include-free body.
+    if "include" not in source:
+        return []
     try:
         ast = env.parse(source)
     except TemplateError:

@@ -71,7 +71,11 @@ class PromptSnippetLoader(BaseLoader):
         surfaces the real failure instead of a misleading "not found".
         """
         schema = self.project.read_metadata_schema()
-        entries = self.project.list_prompt_entries().entries
+        # `_build_prompt_summaries`, not `list_prompt_entries`: resolution only
+        # needs id/title/entry_type, and going through the public list would run
+        # the effective-inputs pass (a parse of every prompt body) on every
+        # include of every render for a field the render path never reads.
+        entries = self.project._build_prompt_summaries()
 
         # `entry_type_ancestry` is the shared "is X a kind-of Y" primitive
         # (ADR-0026) — reuse it rather than re-walking the parent chain here.

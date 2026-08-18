@@ -163,6 +163,12 @@
   --danger: #a64a4a;
   --danger-soft: #fbeeee;
   --danger-border: #e2c4c2;
+  /* Danger emphasis: danger-colored TEXT sitting on --danger-soft. Like
+     --accent-emphasis, it is tuned per-theme in opposite directions (darker
+     in light, brighter in dark) so a small error label keeps AA contrast on
+     the soft tint in both themes — --danger stays for fills/borders/text on a
+     plain surface. */
+  --danger-emphasis: #8f3a3a;
   /* Warning role (promoted from the context-picker's local --ctx-warn-*
      palette when it folded into the global roles, #125 phase 1). */
   --warn: #8a520d;
@@ -258,6 +264,7 @@
   --danger: #d97070;
   --danger-soft: #3a2424;
   --danger-border: #5a3838;
+  --danger-emphasis: #e58a8a; /* brighter than --danger in dark — see light block */
   --warn: #e6c084;
   --warn-soft: #2c2414;
   --warn-border: #5a4a24;

@@ -13,13 +13,12 @@
   import PromptInputField from "@/components/widgets/PromptInputField.svelte";
   import { api } from "@/lib/api";
   import { formatCostEur, formatTokens } from "@/lib/utils/money";
-  import { coerceInputValue } from "@/lib/utils/promptInputs";
+  import { coerceInputValue, friendlyTemplateError } from "@/lib/utils/promptInputs";
   import type {
     AIPreviewResponse,
     DocumentKind,
     EditableDocument,
     LoreEntrySummary,
-    PreviewErrorInfo,
     PromptEntrySummary,
     PromptInputConflict,
     PromptInputDefinition,
@@ -147,61 +146,6 @@
       return v === undefined || v === null || (typeof v === "string" && !v.trim());
     }),
   );
-
-  /** Render PreviewErrorInfo into a user-facing message for the inline
-   * preview pane. Always returns a string — silent suppression hides the
-   * fact that the render stopped at the first undefined and tricked the
-   * author into thinking later refs were OK.
-   *
-   * Three undefined-name cases worth distinguishing:
-   *   - declared & currently empty (required)  → "fill it in" (render blocked here)
-   *   - declared & currently empty (optional)  → "fill in or guard with `is defined`"
-   *   - undeclared                             → "no such input" — real authoring bug
-   */
-  function friendlyTemplateError(
-    err: PreviewErrorInfo,
-    declared: PromptInputDefinition[],
-    drafts: Record<string, string>,
-  ): string {
-    if (err.kind === "undefined") {
-      const missing = err.undefined_name;
-      const ns = err.undefined_namespace;
-      if (missing && ns) {
-        // A real, populated namespace object was accessed with an attribute it
-        // doesn't have — a wrong path, not a missing input (#1019).
-        let msg = `Your template references \`${ns}.${missing}\`, but \`${ns}\` has no attribute \`${missing}\`.`;
-        if (ns === "project") {
-          msg += ` A project's authored fields live under \`${ns}.metadata\` — did you mean \`${ns}.metadata.${missing}\`?`;
-        }
-        return msg;
-      }
-      if (missing) {
-        const decl = declared.find((d) => d.name === missing);
-        if (decl) {
-          const draft = drafts[missing];
-          const isEmpty =
-            draft === undefined || draft === null || (typeof draft === "string" && !draft.trim());
-          if (isEmpty) {
-            if (decl.required) {
-              return `Preview blocked: required input \`${decl.label || missing}\` isn't set. Fill it in above to render the rest of the template.`;
-            }
-            return `Template references \`input.${missing}\`, but the input is optional and no value is set. Either fill it in above, or guard with \`{% if input.${missing} is defined %}…{% endif %}\`.`;
-          }
-          // Declared and filled — shouldn't normally happen; fall through.
-        } else {
-          const declaredNames = declared.map((d) => d.name);
-          const inputsList = declaredNames.length
-            ? ` Available inputs: ${declaredNames.map((n) => "input." + n).join(", ")}.`
-            : " No inputs are declared on this prompt — add one in the Detail Type editor first.";
-          return `Your template references \`input.${missing}\` but there's no input named "${missing}".${inputsList}`;
-        }
-      }
-    }
-    if (err.kind === "scene_not_found") {
-      return `${err.message} Pick a different target scene in the preview controls above.`;
-    }
-    return err.message;
-  }
 
   function seedInputDrafts(declared: PromptInputDefinition[]): Record<string, string> {
     const drafts: Record<string, string> = {};
@@ -699,7 +643,7 @@
     background: var(--danger-soft);
     border: 1px solid var(--danger-border);
     border-radius: 4px;
-    color: var(--danger);
+    color: var(--danger-emphasis);
     font-size: var(--fs-sm);
     line-height: 1.45;
   }

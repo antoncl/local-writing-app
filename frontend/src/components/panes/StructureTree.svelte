@@ -71,6 +71,7 @@
     updateNodeTitleInTree,
   } from "@/lib/utils/treeHelpers";
   import { structureToEvalNodes } from "@/lib/views/structureNodes";
+  import { applyDisplayTemplate } from "@/lib/utils/nodeTitle";
   import type { EvalNode } from "@/lib/views/evaluateView";
   import type { ViewSpec } from "@/lib/types";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
@@ -174,15 +175,8 @@
   }
 
   function renderNodeTitle(node: EvalNode): string {
-    const template = schema?.entry_types[node.entry_type]?.display_template ?? "{title}";
     const liveTitle = node.ref_id ? draftTitles.get(node.ref_id) : undefined;
-    const effectiveTitle = liveTitle ?? node.title;
-    return template.replace(/\{(\w+)\}/g, (_match, fieldName) => {
-      if (fieldName === "title") return effectiveTitle;
-      const computed = node.metadata?.[fieldName];
-      if (computed !== undefined && computed !== null) return String(computed);
-      return "";
-    });
+    return applyDisplayTemplate(node.entry_type, liveTitle ?? node.title, node.metadata, schema);
   }
 
   function nextAutoName(parentId: string | null, entryType: string): string {

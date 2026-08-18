@@ -25,7 +25,8 @@
   import Search from "@/components/panes/Search.svelte";
   import Todo from "@/components/panes/Todo.svelte";
   import Workspace from "@/components/workspace/Workspace.svelte";
-  import { isLeafNode } from "@/lib/utils/treeHelpers";
+  import { isLeafNode, findNodeBySceneId } from "@/lib/utils/treeHelpers";
+  import { structureNodeTitle } from "@/lib/utils/nodeTitle";
   import CreateProjectWizard from "@/components/dialogs/CreateProjectWizard.svelte";
   import MachineSettingsDialog from "@/components/dialogs/MachineSettingsDialog.svelte";
   import ImportDocumentsModal from "@/components/dialogs/ImportDocumentsModal.svelte";
@@ -451,7 +452,17 @@
   }
 
   // Tab-bar accessors for open editor documents (the one dynamic surface class).
-  const editorTitle = (id: string) => editorPaneById(id)?.scene?.title ?? "Editor";
+  // A manuscript pane resolves through the shared display-title resolver so its
+  // reorder-live {number} rides the tab too ("Scene 3"); reading `structure`
+  // (a $derived over the store) keeps it live on reorder. Non-manuscript panes
+  // (lore, chat, research) aren't in the manuscript tree → fall back to the raw
+  // scene title, unchanged.
+  const editorTitle = (id: string) => {
+    const pane = editorPaneById(id);
+    if (!pane?.scene) return "Editor";
+    const node = structure?.root ? findNodeBySceneId(structure.root, pane.scene.id) : null;
+    return node ? structureNodeTitle(node, metadataSchema) : pane.scene.title;
+  };
   function editorBadge(id: string): { text: string; saved: boolean; error?: boolean } | null {
     const pane = editorPaneById(id);
     if (!pane) return null;

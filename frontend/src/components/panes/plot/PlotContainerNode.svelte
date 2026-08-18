@@ -12,11 +12,26 @@
 -->
 <script lang="ts">
   import { CONTAINER_DRAG_HANDLE_CLASS, type PlotContainerData } from "@/lib/plot/plotBoardLayout";
+  import { structureStore } from "@/lib/stores/structure";
+  import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { findStructureNodeById } from "@/lib/utils/treeHelpers";
+  import { structureNodeTitle } from "@/lib/utils/nodeTitle";
 
   let { data }: { id?: string; data: PlotContainerData; selected?: boolean } = $props();
 
   // Level 0 = a top-level act (stronger), 1 = a box nested inside one (quieter).
   let isAct = $derived(data.level === 0);
+
+  // A board column IS a manuscript act/chapter, so resolve its label through the
+  // shared display-title resolver — the reorder-live {number} shows here the same
+  // way it does in the tree. Reading the structure store keeps it live when the
+  // manuscript is reordered; falls back to the raw projection title if the node
+  // isn't loaded (e.g. store not yet hydrated).
+  let displayTitle = $derived.by(() => {
+    const root = $structureStore?.root;
+    const node = root ? findStructureNodeById(root, data.containerId) : null;
+    return node ? structureNodeTitle(node, $metadataSchemaStore) : data.title;
+  });
 </script>
 
 <div class="plot-container" class:act={isAct}>
@@ -24,7 +39,7 @@
        class, so the box moves ONLY when grabbed here — a window-titlebar affordance —
        and the transparent interior stays inert (card drags + edges pass through). -->
   <div class="container-head {CONTAINER_DRAG_HANDLE_CLASS}">
-    <span class="container-title" title={data.title}>{data.title}</span>
+    <span class="container-title" title={displayTitle}>{displayTitle}</span>
     <span class="container-count">{data.count}</span>
   </div>
 </div>

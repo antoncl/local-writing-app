@@ -108,7 +108,7 @@ def resolve_effective_inputs(
         parse_env=env or create_environment(),
         max_depth=max_depth,
     )
-    for name in _literal_include_names(body, state.parse_env):
+    for name in literal_include_names(body, state.parse_env):
         child = resolve_snippet(name)
         if child is not None:
             _visit(state, child, 1)
@@ -129,7 +129,7 @@ def _visit(state: _GatherState, snippet: SnippetSource, depth: int) -> None:
     try:
         for inp in snippet.inputs:
             _offer(state, inp)
-        for name in _literal_include_names(snippet.body, state.parse_env):
+        for name in literal_include_names(snippet.body, state.parse_env):
             child = state.resolve_snippet(name)
             if child is not None:
                 _visit(state, child, depth + 1)
@@ -180,7 +180,7 @@ def _overlay_own_inputs(
     return result
 
 
-def _literal_include_names(source: str, env: SandboxedEnvironment) -> list[str]:
+def literal_include_names(source: str, env: SandboxedEnvironment) -> list[str]:
     """The literal template names of every `{% include %}` in `source`, in
     document order. A dynamically-named include (`{% include input.x %}`) yields
     nothing — its name isn't knowable statically, so it can't contribute fields

@@ -13,15 +13,14 @@
   // separately (#619) rather than done here, to keep this a vertical slice.
   import type { Swatch } from "@/lib/types";
 
-  export let swatches: Swatch[];
-  export let onChange: (next: Swatch[]) => void;
+  let { swatches, onChange }: { swatches: Swatch[]; onChange: (next: Swatch[]) => void } = $props();
 
   // Which swatch is expanded in the inline form, by position. null = closed.
   // Tracked by index (stable across id edits, unlike the id itself); the list
   // ops below each keep it pointed at the same swatch.
-  let editingIndex: number | null = null;
+  let editingIndex = $state<number | null>(null);
 
-  $: editing = editingIndex !== null ? (swatches[editingIndex] ?? null) : null;
+  const editing = $derived(editingIndex !== null ? (swatches[editingIndex] ?? null) : null);
 
   function addSwatch() {
     const base = "new-color";
@@ -81,14 +80,14 @@
             class="chip-tag-btn"
             title={`Edit ${sw.label || sw.id}`}
             aria-label={`Edit ${sw.label || sw.id}`}
-            on:click={() => (editingIndex = i === editingIndex ? null : i)}
+            onclick={() => (editingIndex = i === editingIndex ? null : i)}
           ><i class="ti ti-pencil" aria-hidden="true"></i></button>
           <button
             type="button"
             class="chip-tag-btn is-remove"
             title={`Remove ${sw.label || sw.id}`}
             aria-label={`Remove ${sw.label || sw.id}`}
-            on:click={() => removeSwatch(i)}
+            onclick={() => removeSwatch(i)}
           ><i class="ti ti-x" aria-hidden="true"></i></button>
         </span>
       {/each}
@@ -106,14 +105,14 @@
           class="edit-color"
           aria-label="Color"
           value={editing.hex}
-          on:input={(e) => setField({ hex: (e.currentTarget as HTMLInputElement).value })}
+          oninput={(e) => setField({ hex: (e.currentTarget as HTMLInputElement).value })}
         />
         <label class="edit-field">
           <span>Label</span>
           <input
             type="text"
             value={editing.label}
-            on:input={(e) => setField({ label: (e.currentTarget as HTMLInputElement).value })}
+            oninput={(e) => setField({ label: (e.currentTarget as HTMLInputElement).value })}
           />
         </label>
         <label class="edit-field">
@@ -124,24 +123,24 @@
             value={editing.id}
             pattern="^[a-z0-9][a-z0-9-]*$"
             title="Lowercase letters, digits, dashes"
-            on:input={(e) => setField({ id: (e.currentTarget as HTMLInputElement).value })}
+            oninput={(e) => setField({ id: (e.currentTarget as HTMLInputElement).value })}
           />
         </label>
       </div>
       <div class="edit-actions">
-        <button type="button" disabled={editingIndex === 0} on:click={() => move(-1)}>
+        <button type="button" disabled={editingIndex === 0} onclick={() => move(-1)}>
           <i class="ti ti-chevron-up" aria-hidden="true"></i> Earlier
         </button>
-        <button type="button" disabled={editingIndex === swatches.length - 1} on:click={() => move(1)}>
+        <button type="button" disabled={editingIndex === swatches.length - 1} onclick={() => move(1)}>
           Later <i class="ti ti-chevron-down" aria-hidden="true"></i>
         </button>
         <span class="spacer"></span>
-        <button type="button" on:click={() => (editingIndex = null)}>Done</button>
+        <button type="button" onclick={() => (editingIndex = null)}>Done</button>
       </div>
     </div>
   {/if}
 
-  <button type="button" class="inline-add-btn" on:click={addSwatch}>+ Add color</button>
+  <button type="button" class="inline-add-btn" onclick={addSwatch}>+ Add color</button>
 </section>
 
 <style>

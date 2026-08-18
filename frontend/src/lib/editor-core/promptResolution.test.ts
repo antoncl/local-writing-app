@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  dependencyAdvisoryText,
   hidePromptEntries,
   promptEntriesForSurface,
   promptEntriesOfferedOn,
@@ -207,5 +208,26 @@ describe("offer_on filter (ADR-0054 §4/S4)", () => {
       const c = isaCtx({ promptEntries: [appendP, impersonateP] });
       expect(promptEntriesOfferedOn(c, "lore:character").map((e) => e.id)).toEqual(["p-imp"]);
     });
+  });
+});
+
+describe("dependencyAdvisoryText — the snippet dependency alert line (ADR-0061 §5)", () => {
+  it("names both counts, pluralized", () => {
+    expect(dependencyAdvisoryText({ prompt_count: 2, chat_count: 3 })).toBe("2 prompts / 3 chats");
+  });
+
+  it("uses the singular for a count of one", () => {
+    expect(dependencyAdvisoryText({ prompt_count: 1, chat_count: 1 })).toBe("1 prompt / 1 chat");
+  });
+
+  it("omits a zero half rather than saying '0 chats'", () => {
+    expect(dependencyAdvisoryText({ prompt_count: 2, chat_count: 0 })).toBe("2 prompts");
+    expect(dependencyAdvisoryText({ prompt_count: 0, chat_count: 4 })).toBe("4 chats");
+  });
+
+  it("is empty when there are no dependents, so the editor renders no note", () => {
+    expect(dependencyAdvisoryText({ prompt_count: 0, chat_count: 0 })).toBe("");
+    expect(dependencyAdvisoryText(null)).toBe("");
+    expect(dependencyAdvisoryText(undefined)).toBe("");
   });
 });

@@ -19,6 +19,7 @@ from app.models import (
     SaveLoreEntryRequest,
     SaveMutationSetEntryRequest,
     SavePromptEntryRequest,
+    SnippetDependents,
 )
 from app.runtime import CurrentProject, translate_errors
 
@@ -141,6 +142,15 @@ def save_prompt_entry(project: CurrentProject, entry_id: str, request: SavePromp
 def delete_prompt_entry(project: CurrentProject, entry_id: str) -> PromptEntryList:
     with translate_errors():
         return project.delete_prompt_entry(entry_id)
+
+
+@router.get("/api/prompts/{entry_id}/dependents", response_model=SnippetDependents)
+def prompt_dependents(project: CurrentProject, entry_id: str) -> SnippetDependents:
+    """The advisory *"used by N prompts / M chats"* counts for a snippet
+    (ADR-0061 §5) — the reverse-transitive include closure and the chats locked
+    to a prompt in it. Zero/zero for a prompt nothing includes."""
+    with translate_errors():
+        return project.snippet_dependents(entry_id)
 
 
 @router.post("/api/prompts/{entry_id}/fork", response_model=PromptEntry)

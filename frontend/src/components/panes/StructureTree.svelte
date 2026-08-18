@@ -57,7 +57,7 @@
   import { api } from "@/lib/api";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import NodeList from "@/components/widgets/NodeList.svelte";
-  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
+  import RowCaret from "@/components/widgets/RowCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
   import ViewNodeList, { type RowCtx, type ViewInput } from "@/components/widgets/ViewNodeList.svelte";
   import { getSwatch } from "@/lib/utils/colors";
@@ -419,6 +419,9 @@
             ondragend={ctx.reorder.onDragEnd}
           >⋮⋮</span>
         {/if}
+        <!-- Leaves are never collapsible; the gutter stays empty so a leaf's
+             title aligns with a sibling container's title (#484). -->
+        <span class="tree-caret-gutter"></span>
       {/snippet}
       {#snippet trailing()}
         <!-- A scene is deletable like its container (#465). No `+`: no children. -->
@@ -426,9 +429,12 @@
       {/snippet}
     </NodeRow>
   {:else}
-    <!-- Container (real-node parent). Single click defers collapse to
-         RowCtx.toggle; double-click opens the editor (or renames). Children
-         recurse below via ViewNodeTree, indented by depth. -->
+    <!-- Container (real-node parent). Collapse lives on the caret alone
+         (RowCtx.toggle, immediate — no CollapseGuard defer); double-click
+         opens the editor (or renames). No row-level onClick: with the caret
+         as the sole collapse control there is no single/double-click race to
+         guard against (#484). Children recurse below via ViewNodeTree,
+         indented by depth. -->
     <NodeRow
       groupHeader
       role="treeitem"
@@ -441,7 +447,6 @@
       dataNodeId={node.id}
       {dragging}
       {dropPosition}
-      onClick={ctx.toggleCollapse}
       onDblClick={ctx.onDblClick}
       onmousedown={(event) => event.stopPropagation()}
       ondragover={ctx.reorder?.onDragOver}
@@ -459,9 +464,11 @@
             ondragend={ctx.reorder.onDragEnd}
           >⋮⋮</span>
         {/if}
-        {#if ctx.collapsible}
-          <GroupCaret collapsed={ctx.collapsed} />
-        {/if}
+        <span class="tree-caret-gutter">
+          {#if ctx.collapsible}
+            <RowCaret collapsed={ctx.collapsed} toggle={ctx.toggle} size="md" />
+          {/if}
+        </span>
       {/snippet}
       {#snippet trailing()}
         <!-- childCount is subtree leaf members; a childless container's
@@ -509,5 +516,26 @@
     display: flex;
     align-items: center;
     gap: 4px;
+  }
+
+  /* Fixed-width caret slot on both leaf and container rows so a title's
+     horizontal position tracks depth only, never whether that particular row
+     happens to have a caret (#484). */
+  .tree-caret-gutter {
+    flex: none;
+    width: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Drafts-tree-only hit-target affordance for the enlarged (size="md")
+     caret; other RowCaret consumers are untouched. */
+  .tree-caret-gutter :global(.row-caret) {
+    border-radius: 4px;
+  }
+
+  .tree-caret-gutter :global(.row-caret):hover {
+    background: var(--inset);
   }
 </style>

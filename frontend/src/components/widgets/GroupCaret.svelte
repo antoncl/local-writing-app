@@ -4,12 +4,13 @@
   // Decorative glyph — always aria-hidden; rotates when the group is collapsed.
   interface Props {
     collapsed?: boolean;
+    size?: "sm" | "md";
   }
 
-  let { collapsed = false }: Props = $props();
+  let { collapsed = false, size = "sm" }: Props = $props();
 </script>
 
-<span class="caret" class:collapsed aria-hidden="true">▾</span>
+<span class="caret" class:collapsed class:md={size === "md"} aria-hidden="true">▾</span>
 
 <style>
   .caret {
@@ -23,5 +24,11 @@
 
   .caret.collapsed {
     transform: rotate(-90deg);
+  }
+
+  .caret.md {
+    width: 20px;
+    color: var(--text-2);
+    font-size: var(--fs-lg);
   }
 </style>

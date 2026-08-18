@@ -4,21 +4,27 @@
   import NodeList from "@/components/widgets/NodeList.svelte";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
 
-  // The enumerated ancestor rows to offer (from `declarationRows`), outermost
-  // first. `checked`/`toggleable` come from the model, never the DOM.
-  export let rows: DeclarationRow[];
-  // A save is in flight — lock the boxes. Each request is derived from the
-  // ancestors currently on screen, so a second click during the round trip
-  // would compute from the stale enumeration and silently undo the first tick.
-  // The create-time wizard has no round trip and leaves this false.
-  export let busy: boolean = false;
-  // The host owns the mutation. This list never trusts the browser's own toggle:
-  // `on:change` puts the box straight back to the model value and lets the host
-  // move it, because a save can fail (a 422, a vanished folder) and a ticked box
-  // over an unchanged manifest is the one state this editor must never show. On
-  // success the rows come back changed and Svelte flips the box. The wizard has
-  // no round trip, so its rows re-derive synchronously to the same effect.
-  export let onToggle: (path: string) => void = () => {};
+  let {
+    // The enumerated ancestor rows to offer (from `declarationRows`), outermost
+    // first. `checked`/`toggleable` come from the model, never the DOM.
+    rows,
+    // A save is in flight — lock the boxes. Each request is derived from the
+    // ancestors currently on screen, so a second click during the round trip
+    // would compute from the stale enumeration and silently undo the first tick.
+    // The create-time wizard has no round trip and leaves this false.
+    busy = false,
+    // The host owns the mutation. This list never trusts the browser's own toggle:
+    // `onchange` puts the box straight back to the model value and lets the host
+    // move it, because a save can fail (a 422, a vanished folder) and a ticked box
+    // over an unchanged manifest is the one state this editor must never show. On
+    // success the rows come back changed and Svelte flips the box. The wizard has
+    // no round trip, so its rows re-derive synchronously to the same effect.
+    onToggle = () => {},
+  }: {
+    rows: DeclarationRow[];
+    busy?: boolean;
+    onToggle?: (path: string) => void;
+  } = $props();
 </script>
 
 <!--
@@ -42,7 +48,7 @@
           checked={row.checked}
           disabled={!row.toggleable || busy}
           aria-label={`Inherit from ${row.label}`}
-          on:change={(event) => {
+          onchange={(event) => {
             event.currentTarget.checked = row.checked;
             onToggle(row.path);
           }}

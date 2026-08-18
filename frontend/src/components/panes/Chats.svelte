@@ -8,31 +8,41 @@
   import { referenceIndexStore } from "@/lib/stores/references";
   import { formatCostEur } from "@/lib/utils/money";
 
-  export let sessions: ChatSessionSummary[];
-  // The view to render through, resolved by App from the pane's selected view
-  // (paneViews.specFor("chat", …)); the standalone default is the kind's honest
-  // default view — the whole roster in the backend's pinned-first / last-active
-  // order (ADR-0037 §7). A chat is now a real node (ADR-0051 S1/S6), so the pane
-  // stops being a `nodeSet()` bypass and becomes designable like Lore/Assistants.
-  export let viewSpec: ViewSpec = defaultView("chat");
-  export let activeChatId: string | null = null;
-  // Passed so the per-session preset line resolves prompt/assistant names
-  // reactively (App owns both lists); resolving via props rather than a
-  // callback keeps the lookups tracking their inputs. `promptEntries` also
-  // resolves each chat's seeding-prompt output kind for the "Openable" view.
-  export let promptEntries: PromptEntrySummary[];
-  export let assistantEntries: AssistantEntrySummary[];
-  // App owns the editor pane set + error wrapper, so open/delete are callbacks.
-  export let onOpenChat: (chatId: string) => void;
-  export let onDeleteChat: (chatId: string) => void;
+  let {
+    sessions,
+    // The view to render through, resolved by App from the pane's selected view
+    // (paneViews.specFor("chat", …)); the standalone default is the kind's honest
+    // default view — the whole roster in the backend's pinned-first / last-active
+    // order (ADR-0037 §7). A chat is now a real node (ADR-0051 S1/S6), so the pane
+    // stops being a `nodeSet()` bypass and becomes designable like Lore/Assistants.
+    viewSpec = defaultView("chat"),
+    activeChatId = null,
+    // Passed so the per-session preset line resolves prompt/assistant names
+    // reactively (App owns both lists); resolving via props rather than a
+    // callback keeps the lookups tracking their inputs. `promptEntries` also
+    // resolves each chat's seeding-prompt output kind for the "Openable" view.
+    promptEntries,
+    assistantEntries,
+    // App owns the editor pane set + error wrapper, so open/delete are callbacks.
+    onOpenChat,
+    onDeleteChat,
+  }: {
+    sessions: ChatSessionSummary[];
+    viewSpec?: ViewSpec;
+    activeChatId?: string | null;
+    promptEntries: PromptEntrySummary[];
+    assistantEntries: AssistantEntrySummary[];
+    onOpenChat: (chatId: string) => void;
+    onDeleteChat: (chatId: string) => void;
+  } = $props();
 
-  $: schema = $metadataSchemaStore;
+  const schema = $derived($metadataSchemaStore);
   // Lift each roster summary to an EvalNode: `subject` and the seeding prompt's
   // derived `seed_disposition` go in metadata (ADR-0029 §D), so a designed or
   // built-in view can group/filter by subject and hide the brainstorm ("Revise
   // entities") chats. The lift is shared with the view-designer preview.
-  $: chatNodes = chatSummariesToEvalNodes(sessions, promptEntries, schema);
-  $: view = { spec: viewSpec, universe: chatNodes, schema, referenceIndex: $referenceIndexStore };
+  const chatNodes = $derived(chatSummariesToEvalNodes(sessions, promptEntries, schema));
+  const view = $derived({ spec: viewSpec, universe: chatNodes, schema, referenceIndex: $referenceIndexStore });
 
   function chatSessionPromptTitle(session: ChatSessionSummary): string {
     if (!session.prompt_entry_id) return "";
@@ -89,7 +99,7 @@
       </small>
     {/snippet}
     {#snippet trailing()}
-      <button class="row-action-delete" type="button" title="Delete chat" on:click|stopPropagation={() => onDeleteChat(session.id)}>×</button>
+      <button class="row-action-delete" type="button" title="Delete chat" onclick={(event) => { event.stopPropagation(); onDeleteChat(session.id); }}>×</button>
     {/snippet}
   </NodeRow>
 {/snippet}

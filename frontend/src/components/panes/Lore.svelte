@@ -1,4 +1,4 @@
-<script context="module" lang="ts">
+<script module lang="ts">
   import type { LoreEntrySummary, MetadataSchema } from "@/lib/types";
 </script>
 
@@ -26,21 +26,28 @@
   import { inheritedLayerLabel } from "@/lib/utils/provenance";
   import type { ViewSpec } from "@/lib/types";
 
-  export let entries: LoreEntrySummary[];
-  // The view to render through. App computes it from the pane's selected view
-  // (paneViews) and passes it in — the reactivity bridge for the legacy `$:`
-  // pane (feedback_svelte5_reactivity_traps). The standalone default is the
-  // kind's honest default view (ADR-0037 §7: roster grouped by entry_type).
-  export let viewSpec: ViewSpec = defaultView("lore");
+  let {
+    entries,
+    // The view to render through. App computes it from the pane's selected view
+    // (paneViews) and passes it in — the reactivity bridge for the legacy `$:`
+    // pane (feedback_svelte5_reactivity_traps). The standalone default is the
+    // kind's honest default view (ADR-0037 §7: roster grouped by entry_type).
+    viewSpec = defaultView("lore"),
+    // Open an entry in an editor pane (App owns the pane set).
+    onOpenEntry,
+  }: {
+    entries: LoreEntrySummary[];
+    viewSpec?: ViewSpec;
+    onOpenEntry: (entryId: string) => void;
+  } = $props();
+
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
-  $: schema = $metadataSchemaStore;
+  const schema = $derived($metadataSchemaStore);
   // Active-row highlight + pin-star read from the editor-focus store, not props (#14 Step 2).
-  $: focusedDocument = $focusedDocumentStore;
+  const focusedDocument = $derived($focusedDocumentStore);
   // The open project's own (innermost) layer id — a row whose source layer
   // differs is inherited and gets a level pill (#313).
-  $: ownLayerId = $projectLayerIdStore;
-  // Open an entry in an editor pane (App owns the pane set).
-  export let onOpenEntry: (entryId: string) => void;
+  const ownLayerId = $derived($projectLayerIdStore);
 
   // Add-child menu is a ViewNodeList feature (mode-agnostic; #112 4c-iv). The
   // "+" button lives in the pane header (App's loreActions), so we bind the list
@@ -62,21 +69,21 @@
 
   // Pane-local search text — bound to ViewNodeList's search box. Per-group
   // collapse is ephemeral and owned by ViewNodeList (phase 1; not persisted).
-  let searchQuery = "";
+  let searchQuery = $state("");
 
   // ADR-0046 §6.4: "Brainstorm a new <type>…" — launch the lore brainstorm with
   // NO entry (create mode), seeding the target entry_type as a hidden input. The
   // prompt is the same one the entry-pane revise launcher uses (an `extract_to_node`
   // prompt carrying a `commit`, ADR-0054 §2 / ADR-0065); hidden when no such instance exists
   // yet (#606). A temporary home until ADR-0047 contextual actions land.
-  $: brainstormCtx = {
+  const brainstormCtx = $derived({
     metadataSchema: schema,
     promptEntries: $promptEntriesStore,
     loreEntries: [],
     availableScenes: [],
     hiddenPromptIds: $hiddenLibraryStore,
-  } satisfies PromptResolutionContext;
-  $: brainstormPrompt = promptEntriesWithCommit(brainstormCtx)[0] ?? null;
+  } satisfies PromptResolutionContext);
+  const brainstormPrompt = $derived(promptEntriesWithCommit(brainstormCtx)[0] ?? null);
 
   function launchBrainstorm(entryType: string): void {
     if (!brainstormPrompt) return;
@@ -92,12 +99,12 @@
   // roster data;
   // `referenceIndex` backs the `references` field so a view can project backlinks
   // (`field_of(set, references)`) and compose them.
-  $: view = {
+  const view = $derived({
     spec: viewSpec,
     universe: entries,
     schema,
     referenceIndex: $referenceIndexStore,
-  };
+  });
 
   function entrySearchText(entry: LoreEntrySummary) {
     return [

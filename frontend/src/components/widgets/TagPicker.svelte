@@ -8,31 +8,42 @@
   import { parseTagList, tagColorMap } from "@/lib/utils/tags";
   import { assistantTagGovernance, projectTagGovernance } from "@/lib/utils/tagGovernance";
 
-  export let value: string = "";
-  export let knownTags: ScopedTag[] = [];
-  // The current node's kind + sub-type — used to filter suggestions by tag
-  // scope (a tag is suggested where its scope is empty or includes this).
-  export let scopeKind: string = "";
-  export let scopeEntryType: string = "";
-  export let ariaLabel: string;
-  export let placeholder: string = "Add tags…";
-  // Which vocabulary this field's roster comes from. Both govern from the + now
-  // (scope / rename / merge for project tags; rename / merge / colour for the
-  // flat, scope-less assistant tags) — the difference is the injected governance
-  // adapter, chosen here by origin. Decided once, at the pane that picks the
-  // roster (App feeds the assistant/prompt pane a mixed roster), and threaded
-  // down — never re-derived from the document kind here (#247).
-  export let origin: "project" | "assistant" = "project";
-  // Emits the committed tags as a comma-joined string (the wire contract the
-  // parent round-trips). A callback prop, not a `change` event, so it composes
-  // with the runes-based FieldValueEditor and is directly testable.
-  export let onChange: (value: string) => void = () => {};
+  let {
+    value = "",
+    knownTags = [],
+    // The current node's kind + sub-type — used to filter suggestions by tag
+    // scope (a tag is suggested where its scope is empty or includes this).
+    scopeKind = "",
+    scopeEntryType = "",
+    ariaLabel,
+    placeholder = "Add tags…",
+    // Which vocabulary this field's roster comes from. Both govern from the + now
+    // (scope / rename / merge for project tags; rename / merge / colour for the
+    // flat, scope-less assistant tags) — the difference is the injected governance
+    // adapter, chosen here by origin. Decided once, at the pane that picks the
+    // roster (App feeds the assistant/prompt pane a mixed roster), and threaded
+    // down — never re-derived from the document kind here (#247).
+    origin = "project",
+    // Emits the committed tags as a comma-joined string (the wire contract the
+    // parent round-trips). A callback prop, not a `change` event, so it composes
+    // with the runes-based FieldValueEditor and is directly testable.
+    onChange = () => {},
+  }: {
+    value?: string;
+    knownTags?: ScopedTag[];
+    scopeKind?: string;
+    scopeEntryType?: string;
+    ariaLabel: string;
+    placeholder?: string;
+    origin?: "project" | "assistant";
+    onChange?: (value: string) => void;
+  } = $props();
 
   // The committed tags come from `value` (the parent is the source of truth);
   // `entryText` is the in-progress, uncommitted input. Typing stays free-form and
   // only *crystallises* into chips on a comma, Enter, or when the field loses
   // focus (#247) — so the fast "just type them" habit keeps working, tidily.
-  let entryText = "";
+  let entryText = $state("");
   let inputEl: HTMLInputElement | null = null;
 
   // Stable ids for the a11y wiring below (#706). The token-field rework moved the
@@ -44,19 +55,19 @@
   const summaryId = `tag-picker-summary-${Math.random().toString(36).slice(2, 9)}`;
   const popoverId = `tag-picker-menu-${Math.random().toString(36).slice(2, 9)}`;
 
-  $: chips = parseTagList(value);
-  $: tagSummary = chips.length ? chips.join(", ") : "No tags selected";
+  const chips = $derived(parseTagList(value));
+  const tagSummary = $derived(chips.length ? chips.join(", ") : "No tags selected");
   // "Known" means present in the vocabulary at all — a known-but-out-of-scope tag
   // is still known (not pending). Scope only governs what the + *suggests*.
-  $: knownKeys = new Set(knownTags.map((t) => t.name.toLowerCase()));
+  const knownKeys = $derived(new Set(knownTags.map((t) => t.name.toLowerCase())));
   // Lowercased-name → swatch id, so a committed chip renders its tag's colour.
-  $: colorMap = tagColorMap(knownTags);
-  // Per-chip pending state, computed in ONE reactive statement that reads both
-  // `chips` and `knownKeys` — so "will be created" re-evaluates when the roster
-  // loads or a just-created tag is registered. A template `pending={!isKnown(tag)}`
-  // would NOT: Svelte can't see `knownKeys` through the `isKnown()` call, so a
-  // chip would stay outlined after the roster arrives (feedback_svelte5_reactivity_traps).
-  $: chipStates = chips.map((tag) => ({ tag, pending: !knownKeys.has(tag.toLowerCase()) }));
+  const colorMap = $derived(tagColorMap(knownTags));
+  // Per-chip pending state, computed in ONE derived that reads both `chips` and
+  // `knownKeys` — so "will be created" re-evaluates when the roster loads or a
+  // just-created tag is registered. A template `pending={!isKnown(tag)}` would
+  // NOT: Svelte can't see `knownKeys` through the `isKnown()` call, so a chip
+  // would stay outlined after the roster arrives (feedback_svelte5_reactivity_traps).
+  const chipStates = $derived(chips.map((tag) => ({ tag, pending: !knownKeys.has(tag.toLowerCase()) })));
 
   function commit(next: string[]) {
     onChange(next.join(", "));
@@ -124,17 +135,17 @@
     if (subs && subs.length && !subs.includes(entryType)) return false;
     return true;
   }
-  // scopeKind/scopeEntryType are referenced IN the reactive statement so `$:`
-  // tracks them — filtering through a closure that merely reads them would not
+  // scopeKind/scopeEntryType are referenced directly IN the derived expression so
+  // it tracks them — filtering through a closure that merely reads them would not
   // re-run when the node's type changes (feedback_svelte5_reactivity_traps).
-  $: suggestions = knownTags.filter((tag) => inScope(tag, scopeKind, scopeEntryType));
-  $: selectedKeys = new Set(chips.map((t) => t.toLowerCase()));
+  const suggestions = $derived(knownTags.filter((tag) => inScope(tag, scopeKind, scopeEntryType)));
+  const selectedKeys = $derived(new Set(chips.map((t) => t.toLowerCase())));
   // The governance operations for this roster's vocabulary — the only thing that
   // differs between the two origins; the surface is one component (#247 PR-3).
-  $: governanceAdapter = origin === "assistant" ? assistantTagGovernance : projectTagGovernance;
+  const governanceAdapter = $derived(origin === "assistant" ? assistantTagGovernance : projectTagGovernance);
 
-  let open = false;
-  let position: { x: number; y: number; width: number } | null = null;
+  let open = $state(false);
+  let position = $state<{ x: number; y: number; width: number } | null>(null);
   let anchorEl: HTMLDivElement | null = null;
   let rafId = 0;
 
@@ -198,13 +209,13 @@
   }
 </script>
 
-<svelte:window on:pointerdown={handleOutsidePointerdown} />
+<svelte:window onpointerdown={handleOutsidePointerdown} />
 
 <div class="tag-picker-anchor" bind:this={anchorEl}>
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
   <!-- Clicking bare field space just focuses the input, which is already in the
        tab order; the real controls are the input, chips, and + button. -->
-  <div class="tag-field" on:click={focusField}>
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+  <div class="tag-field" onclick={focusField}>
     <input
       class="tag-entry"
       bind:this={inputEl}
@@ -212,8 +223,8 @@
       placeholder={chips.length ? "" : placeholder}
       aria-label={ariaLabel}
       aria-describedby={summaryId}
-      on:keydown={onKeydown}
-      on:blur={crystallize}
+      onkeydown={onKeydown}
+      onblur={crystallize}
     />
     <!-- The field's current value for assistive tech: read after the input on
          focus (aria-describedby) and announced on change (aria-live). -->
@@ -231,8 +242,11 @@
       aria-haspopup="true"
       aria-expanded={open}
       aria-controls={popoverId}
-      on:mousedown|preventDefault
-      on:click|stopPropagation={toggle}
+      onmousedown={(e) => e.preventDefault()}
+      onclick={(e) => {
+        e.stopPropagation();
+        toggle(e);
+      }}
     >+</button>
   </div>
   {#if open && position}

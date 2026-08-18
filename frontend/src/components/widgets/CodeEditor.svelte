@@ -7,27 +7,35 @@
   import { json as jsonLang } from "@codemirror/lang-json";
   import { lintGutter, setDiagnostics, type Diagnostic } from "@codemirror/lint";
 
-  export let value: string;
-  // Languages that ship with a CodeMirror extension here highlight; anything
-  // else falls through to a plain code surface (still better than TipTap for
-  // editing raw text — monospace font, no auto-formatting).
-  export let language: "jinja2" | "json" | "markdown" | "plain" = "jinja2";
-  /** Soft-wrap long lines instead of horizontal scrolling. Live-reconfigured
-   * via a Compartment so callers can toggle it without rebuilding the view. */
-  export let lineWrapping = false;
-  /** Diagnostics to pin in the gutter. Line is 1-based (matches Jinja's
-   * `lineno`); col is optional and 1-based when present. Callers update this
-   * prop after a render; CodeEditor reactively pushes them into CodeMirror. */
-  export let diagnostics: { line: number; col?: number; severity: "error" | "warning"; message: string }[] = [];
-  /** Lock the buffer against edits (ADR-0049: a built-in Library prompt is
-   * shipped read-only material — clone it to edit). Live-reconfigured via a
-   * Compartment. `EditorView.editable.of(false)` also drops the caret so the
-   * surface reads as a viewer, not a focusable-but-inert field. */
-  export let readOnly = false;
+  let {
+    value = $bindable(),
+    // Languages that ship with a CodeMirror extension here highlight; anything
+    // else falls through to a plain code surface (still better than TipTap for
+    // editing raw text — monospace font, no auto-formatting).
+    language = "jinja2",
+    // Soft-wrap long lines instead of horizontal scrolling. Live-reconfigured
+    // via a Compartment so callers can toggle it without rebuilding the view.
+    lineWrapping = false,
+    // Diagnostics to pin in the gutter. Line is 1-based (matches Jinja's
+    // `lineno`); col is optional and 1-based when present. Callers update this
+    // prop after a render; CodeEditor reactively pushes them into CodeMirror.
+    diagnostics = [],
+    // Lock the buffer against edits (ADR-0049: a built-in Library prompt is
+    // shipped read-only material — clone it to edit). Live-reconfigured via a
+    // Compartment. `EditorView.editable.of(false)` also drops the caret so the
+    // surface reads as a viewer, not a focusable-but-inert field.
+    readOnly = false,
+  }: {
+    value: string;
+    language?: "jinja2" | "json" | "markdown" | "plain";
+    lineWrapping?: boolean;
+    diagnostics?: { line: number; col?: number; severity: "error" | "warning"; message: string }[];
+    readOnly?: boolean;
+  } = $props();
 
   let host: HTMLDivElement;
   let editor: EditorView | null = null;
-  let lastEmitted = value;
+  let lastEmitted = $state(value);
   const wrapCompartment = new Compartment();
   const readOnlyCompartment = new Compartment();
 
@@ -62,32 +70,40 @@
   });
 
   // External writes to `value` (e.g. reset to default) propagate into the editor.
-  $: if (editor && value !== lastEmitted) {
-    const current = editor.state.doc.toString();
-    if (current !== value) {
-      editor.dispatch({
-        changes: { from: 0, to: current.length, insert: value },
-      });
-      lastEmitted = value;
+  $effect(() => {
+    if (editor && value !== lastEmitted) {
+      const current = editor.state.doc.toString();
+      if (current !== value) {
+        editor.dispatch({
+          changes: { from: 0, to: current.length, insert: value },
+        });
+        lastEmitted = value;
+      }
     }
-  }
+  });
 
   // Live-toggle soft wrap when the prop changes.
-  $: if (editor) {
-    editor.dispatch({
-      effects: wrapCompartment.reconfigure(lineWrapping ? EditorView.lineWrapping : []),
-    });
-  }
+  $effect(() => {
+    if (editor) {
+      editor.dispatch({
+        effects: wrapCompartment.reconfigure(lineWrapping ? EditorView.lineWrapping : []),
+      });
+    }
+  });
 
   // Live-toggle read-only when the prop changes.
-  $: if (editor) {
-    editor.dispatch({
-      effects: readOnlyCompartment.reconfigure(readOnlyExtensions(readOnly)),
-    });
-  }
+  $effect(() => {
+    if (editor) {
+      editor.dispatch({
+        effects: readOnlyCompartment.reconfigure(readOnlyExtensions(readOnly)),
+      });
+    }
+  });
 
   // Push diagnostics whenever the prop changes.
-  $: if (editor) pushDiagnostics(diagnostics);
+  $effect(() => {
+    if (editor) pushDiagnostics(diagnostics);
+  });
 
   function pushDiagnostics(_d = diagnostics): void {
     if (!editor) return;

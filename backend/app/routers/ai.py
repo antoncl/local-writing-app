@@ -31,6 +31,8 @@ from app.models import (
     PreviewContentBlock,
     PreviewErrorInfo,
     PreviewMessage,
+    PromptInputConflict,
+    PromptInputDefinition,
     ValidateEntryDraftRequest,
     ValidateEntryPatchRequest,
 )
@@ -197,6 +199,8 @@ async def resolve_ai_provider_tier(
 
 @router.post("/api/ai/preview", response_model=AIPreviewResponse)
 async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPreviewResponse:
+    effective_inputs: list[PromptInputDefinition] = []
+    input_conflicts: list[PromptInputConflict] = []
     with translate_errors():
         # `current_project` raises ProjectServiceError if no project is open;
         # translate_errors handles that. Preview-render failures (undefined
@@ -204,6 +208,25 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
         # the editor auto-fires this endpoint before the user has filled
         # required inputs, so we return 200 with `error` populated rather
         # than throwing. `/api/ai/generate` keeps the strict 422 behavior.
+        # ADR-0061 S2: resolve the effective inputs of the LIVE body FIRST, so
+        # the author preview's inputs panel (and any include-type conflict) comes
+        # back even when the render below errors on a not-yet-filled input. Kept
+        # resilient like the rest of this endpoint (and build_preview's schema
+        # read): a failure to resolve — e.g. a mid-edit malformed schema — degrades
+        # to no effective set, never turning the 200 render surface into an error.
+        if request.resolve_effective_inputs:
+            try:
+                resolution = project.effective_inputs_for_body(
+                    request.template_source, request.own_inputs
+                )
+                effective_inputs = resolution.inputs
+                input_conflicts = [
+                    PromptInputConflict(name=c.name, types=list(c.types))
+                    for c in resolution.conflicts
+                ]
+            except Exception:  # noqa: BLE001
+                effective_inputs = []
+                input_conflicts = []
         try:
             rendered, session_id = build_preview(
                 project,
@@ -235,6 +258,8 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
                     undefined_name=exc.undefined_name,
                     undefined_namespace=exc.undefined_namespace,
                 ),
+                effective_inputs=effective_inputs,
+                input_conflicts=input_conflicts,
             )
 
     messages = [
@@ -274,6 +299,10 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
         used_node_ids=rendered.used_node_ids,
         # ADR-0060 §5: the per-node volatility priors from `use(node, hint)`.
         used_node_hints=rendered.used_node_hints,
+        # ADR-0061 S2: the live body's effective inputs + any include-type
+        # conflict (empty unless the request asked to resolve them).
+        effective_inputs=effective_inputs,
+        input_conflicts=input_conflicts,
     )
 
 

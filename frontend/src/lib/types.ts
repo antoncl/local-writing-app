@@ -1156,6 +1156,7 @@ export type {
   PreviewCacheBlock,
   PreviewErrorInfo,
   AIPreviewResponse,
+  PromptInputConflict,
   ChatMessage,
   AIChatRequest,
   ChatUsage,

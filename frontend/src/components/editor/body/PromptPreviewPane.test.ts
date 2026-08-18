@@ -72,4 +72,49 @@ describe("PromptPreviewPane", () => {
     // ...and the lore is visible again (the point of the slice).
     expect(screen.getByText(/Honor Harrington/)).toBeTruthy();
   });
+
+  // ADR-0061 S2: the panel renders the EFFECTIVE inputs the resolver returns, so
+  // a snippet's field shows up even though the outer prompt never declared it.
+  it("shows a snippet-contributed input once the resolver returns it", async () => {
+    (api.aiPreview as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...PREVIEW,
+      effective_inputs: [
+        { name: "subject", type: "text" },
+        { name: "menace", type: "select" },
+      ],
+      input_conflicts: [],
+    });
+    render(PromptPreviewPane, {
+      props: {
+        rawBody: '{% role "user" %}{% include "villain" %} {{ inputs.subject }}{% endrole %}',
+        documentKind: "prompt",
+        scene: { id: "p1", title: "P", body: "", inputs: [{ name: "subject", type: "text" }] } as never,
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: /preview/i }));
+    await vi.advanceTimersByTimeAsync(1000);
+
+    // The outer declared only `subject`; `menace` came from the included snippet.
+    expect(screen.getByText("menace")).toBeTruthy();
+  });
+
+  it("surfaces an include-type conflict returned by the resolver", async () => {
+    (api.aiPreview as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...PREVIEW,
+      effective_inputs: [{ name: "tone", type: "text" }],
+      input_conflicts: [{ name: "tone", types: ["text", "select"] }],
+    });
+    render(PromptPreviewPane, {
+      props: {
+        rawBody: '{% include "a" %}{% include "b" %}',
+        documentKind: "prompt",
+        scene: { id: "p2", title: "P", body: "", inputs: [] } as never,
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: /preview/i }));
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(screen.getByText(/Input type conflict/i)).toBeTruthy();
+    expect(screen.getByText(/different types across included/i)).toBeTruthy();
+  });
 });

@@ -11,21 +11,30 @@
   // unconditionally and the caller wraps it in its own {#if}.
   import type { Snippet } from "svelte";
 
-  // Title text (the <h2>) and the dialog's accessible name.
-  export let title: string;
-  // Backdrop's accessible name; defaults to the title.
-  export let label: string = "";
-  // Extra class on the frame (for per-dialog descendant styling).
-  export let frameClass: string = "";
-  // Inline style on the frame — consumers size it by setting the --modal-*
-  // custom properties here (e.g. a wider settings dialog). Custom props beat
-  // the scoped default cleanly, without a specificity fight.
-  export let frameStyle: string = "";
-  // Footer buttons; the body is the default slot content.
-  export let actions: Snippet | undefined = undefined;
-  export let children: Snippet | undefined = undefined;
+  let {
+    // Title text (the <h2>) and the dialog's accessible name.
+    title,
+    // Backdrop's accessible name; defaults to the title.
+    label = "",
+    // Extra class on the frame (for per-dialog descendant styling).
+    frameClass = "",
+    // Inline style on the frame — consumers size it by setting the --modal-*
+    // custom properties here (e.g. a wider settings dialog). Custom props beat
+    // the scoped default cleanly, without a specificity fight.
+    frameStyle = "",
+    // Footer buttons; the body is the default slot content.
+    actions = undefined,
+    children = undefined,
+  }: {
+    title: string;
+    label?: string;
+    frameClass?: string;
+    frameStyle?: string;
+    actions?: Snippet;
+    children?: Snippet;
+  } = $props();
 
-  $: backdropLabel = label || title;
+  const backdropLabel = $derived(label || title);
 </script>
 
 <section class="modal-backdrop" aria-label={backdropLabel}>

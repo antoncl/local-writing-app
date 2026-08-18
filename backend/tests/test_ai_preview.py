@@ -13,6 +13,7 @@ from app.models import (
     CreateLoreEntryRequest,
     CreatePromptEntryRequest,
     CreateStructureNodeRequest,
+    PromptInputDefinition,
     SaveLoreEntryRequest,
     SavePromptEntryRequest,
     SaveSceneRequest,
@@ -218,7 +219,13 @@ class PreviewEndpointTests(unittest.TestCase):
         text = response.json()["messages"][0]["blocks"][0]["text"]
         self.assertIn("Reusable snippet body.", text)
 
-    def _make_prompt(self, title: str, body: str, entry_type: str) -> str:
+    def _make_prompt(
+        self,
+        title: str,
+        body: str,
+        entry_type: str,
+        inputs: list[PromptInputDefinition] | None = None,
+    ) -> str:
         entry = self.service.create_prompt_entry(
             CreatePromptEntryRequest(title=title, entry_type=entry_type)
         )
@@ -230,10 +237,115 @@ class PreviewEndpointTests(unittest.TestCase):
                 base_revision=entry.revision,
                 entry_type=entry_type,
                 metadata={},
-                inputs=[],
+                inputs=inputs or [],
             ),
         )
         return entry.id
+
+    def test_preview_resolves_effective_inputs_from_include(self) -> None:
+        # ADR-0061 S2: with the flag set, the preview resolves the LIVE body's
+        # effective inputs — own ∪ the included snippet's — even though the outer
+        # never re-declares the snippet's `menace`.
+        self._make_prompt(
+            "Villain Voice",
+            "{{ inputs.menace }}",
+            "prompt:snippet",
+            [PromptInputDefinition(name="menace", type="select")],
+        )
+        resp = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": (
+                    '{% role "user" %}{% include "Villain Voice" %} {{ inputs.subject }}{% endrole %}'
+                ),
+                "own_inputs": [{"name": "subject", "type": "text"}],
+                "inputs": {"menace": "high", "subject": "the heist"},
+                "resolve_effective_inputs": True,
+            },
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        body = resp.json()
+        self.assertIsNone(body["error"])
+        self.assertEqual([i["name"] for i in body["effective_inputs"]], ["subject", "menace"])
+        self.assertEqual(body["input_conflicts"], [])
+
+    def test_preview_returns_effective_inputs_even_when_render_errors(self) -> None:
+        # The inputs panel must appear before the body renders, so effective
+        # inputs come back even when the render errors on the unfilled input.
+        self._make_prompt(
+            "Villain Voice",
+            "{{ inputs.menace }}",
+            "prompt:snippet",
+            [PromptInputDefinition(name="menace", type="select")],
+        )
+        resp = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": '{% role "user" %}{% include "Villain Voice" %}{% endrole %}',
+                "resolve_effective_inputs": True,
+            },
+        )
+        body = resp.json()
+        self.assertIsNotNone(body["error"])  # menace is unset → strict-undefined
+        self.assertEqual([i["name"] for i in body["effective_inputs"]], ["menace"])
+
+    def test_preview_surfaces_include_type_conflict(self) -> None:
+        # Two snippets declare `tone` with different types → surfaced as a conflict
+        # (ADR §3), first-seen type still wins in the effective set.
+        self._make_prompt(
+            "Snip A", "a", "prompt:snippet", [PromptInputDefinition(name="tone", type="text")]
+        )
+        self._make_prompt(
+            "Snip B", "b", "prompt:snippet", [PromptInputDefinition(name="tone", type="select")]
+        )
+        resp = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": '{% include "Snip A" %}{% include "Snip B" %}',
+                "resolve_effective_inputs": True,
+            },
+        )
+        body = resp.json()
+        self.assertEqual(len(body["input_conflicts"]), 1)
+        self.assertEqual(body["input_conflicts"][0]["name"], "tone")
+        self.assertEqual(body["input_conflicts"][0]["types"], ["text", "select"])
+
+    def test_preview_without_flag_omits_effective_inputs(self) -> None:
+        # The chat/dialog preview callers don't set the flag → no resolve cost,
+        # and the fields come back empty.
+        self._make_prompt(
+            "Villain Voice",
+            "{{ inputs.menace }}",
+            "prompt:snippet",
+            [PromptInputDefinition(name="menace", type="select")],
+        )
+        resp = self.client.post(
+            "/api/ai/preview",
+            json={"template_source": '{% include "Villain Voice" %} x'},
+        )
+        body = resp.json()
+        self.assertEqual(body["effective_inputs"], [])
+        self.assertEqual(body["input_conflicts"], [])
+
+    def test_preview_effective_inputs_failure_degrades_to_200(self) -> None:
+        # The preview is a resilient 200 render surface — a failure to resolve
+        # effective inputs (e.g. a mid-edit malformed schema) must degrade to no
+        # effective set, never turn the render into an error status.
+        with patch.object(
+            self.service, "effective_inputs_for_body", side_effect=RuntimeError("boom")
+        ):
+            resp = self.client.post(
+                "/api/ai/preview",
+                json={
+                    "template_source": '{% role "user" %}hello{% endrole %}',
+                    "resolve_effective_inputs": True,
+                },
+            )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        body = resp.json()
+        self.assertTrue(body["rendered"])
+        self.assertEqual(body["effective_inputs"], [])
+        self.assertEqual(body["input_conflicts"], [])
 
     def _preview_include(self, name: str) -> dict:
         response = self.client.post(

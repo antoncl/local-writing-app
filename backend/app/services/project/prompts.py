@@ -18,7 +18,8 @@ and lore slices too.
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 from app.models import (
     CreatePromptEntryRequest,
@@ -29,7 +30,11 @@ from app.models import (
     PromptInputDefinition,
     SavePromptEntryRequest,
 )
+from app.services.ai.effective_inputs import SnippetSource
 from app.services.project.errors import ProjectServiceError
+
+if TYPE_CHECKING:
+    from app.services.ai.effective_inputs import EffectiveInputs
 
 
 class PromptEntriesMixin:
@@ -77,22 +82,19 @@ class PromptEntriesMixin:
             )
         return entries
 
-    def _populate_effective_inputs(self, entries: list[PromptEntrySummary]) -> None:
-        """Set `effective_inputs` on each loaded prompt summary (ADR-0061).
+    def _build_snippet_resolver(
+        self, entries: list[PromptEntrySummary]
+    ) -> tuple[Callable[[str], SnippetSource | None], bool]:
+        """Build a `(resolve_snippet, has_snippets)` pair over the project's
+        `prompt:snippet` entries for the S1 effective-inputs resolver (ADR-0061).
 
-        A prompt's effective inputs = its own `inputs` ∪ the transitive union of
-        every `prompt:snippet` it `{% include %}`s. The snippet bodies + inputs
-        are already in `entries` (this same load), so the resolver reads them
-        from memory rather than re-reading each snippet from disk — the include
-        name → snippet match reuses the render loader's `match_snippet_name` so
-        gathering and rendering can never disagree on which snippet a name means.
+        `entries` are already-loaded prompt summaries — the roster path reuses the
+        ones it just built (no extra disk reads); a single-body caller passes a
+        fresh `_build_prompt_summaries()`. The include name → snippet match reuses
+        the render loader's `match_snippet_name` so gathering and rendering can
+        never disagree on which snippet a name means.
         """
-        from app.services.ai.effective_inputs import (
-            SnippetSource,
-            resolve_effective_inputs,
-        )
         from app.services.ai.snippet_loader import match_snippet_name
-        from app.services.ai.templates import create_environment
 
         schema = self.read_metadata_schema()
         snippets = [
@@ -100,15 +102,6 @@ class PromptEntriesMixin:
             for entry in entries
             if "prompt:snippet" in self.entry_type_ancestry(entry.entry_type, schema=schema)
         ]
-        # No snippets ⇒ no include can resolve, so effective always equals own.
-        # Set it directly (a non-empty own list must NOT be left as the default
-        # empty list — the frontend's `effective_inputs ?? inputs` fallback only
-        # fires on null) and skip parsing every body.
-        if not snippets:
-            for entry in entries:
-                entry.effective_inputs = list(entry.inputs)
-            return
-
         sources = {
             entry.id: SnippetSource(id=entry.id, body=entry.body, inputs=tuple(entry.inputs))
             for entry in snippets
@@ -120,10 +113,42 @@ class PromptEntriesMixin:
             )
             return sources.get(matched.id) if matched is not None else None
 
+        return resolve, bool(snippets)
+
+    def _populate_effective_inputs(self, entries: list[PromptEntrySummary]) -> None:
+        """Set `effective_inputs` on each loaded prompt summary (ADR-0061) — its
+        own `inputs` ∪ the transitive union of every `prompt:snippet` it
+        `{% include %}`s."""
+        from app.services.ai.effective_inputs import resolve_effective_inputs
+        from app.services.ai.templates import create_environment
+
+        resolve, has_snippets = self._build_snippet_resolver(entries)
+        # No snippets ⇒ no include can resolve, so effective always equals own.
+        # Set it directly (a non-empty own list must NOT be left as the default
+        # empty list — the frontend's `effective_inputs ?? inputs` fallback only
+        # fires on null) and skip parsing every body.
+        if not has_snippets:
+            for entry in entries:
+                entry.effective_inputs = list(entry.inputs)
+            return
+
         env = create_environment()
         for entry in entries:
             resolution = resolve_effective_inputs(entry.body, entry.inputs, resolve, env=env)
             entry.effective_inputs = resolution.inputs
+
+    def effective_inputs_for_body(
+        self, body: str, own_inputs: list[PromptInputDefinition]
+    ) -> EffectiveInputs:
+        """Effective inputs (+ conflicts) for a single, possibly-unsaved prompt
+        `body` and its own inputs — the author preview's entry to the S1 resolver
+        (ADR-0061 S2). Reads a fresh prompt roster to resolve includes against the
+        live body; the roster path uses the batch `_populate_effective_inputs`.
+        """
+        from app.services.ai.effective_inputs import resolve_effective_inputs
+
+        resolve, _ = self._build_snippet_resolver(self._build_prompt_summaries())
+        return resolve_effective_inputs(body, own_inputs, resolve)
 
     def create_prompt_entry(self, request: CreatePromptEntryRequest) -> PromptEntry:
         root = self._require_project()

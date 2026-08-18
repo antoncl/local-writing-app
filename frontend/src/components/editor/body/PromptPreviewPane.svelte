@@ -21,6 +21,7 @@
     LoreEntrySummary,
     PreviewErrorInfo,
     PromptEntrySummary,
+    PromptInputConflict,
     PromptInputDefinition,
     StructureDocument,
   } from "@/lib/types";
@@ -71,10 +72,26 @@
   let promptPreviewDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   let promptPreviewLastRenderKey = "";
 
-  // Inputs are per-entry. Read scene.inputs directly so this reactive
-  // re-fires when the entry's inputs change via the editor section below.
-  const promptPreviewDeclaredInputs = $derived(
+  // The prompt's OWN inputs (what the editor edits), read straight off the open
+  // doc so this re-fires as they change in the editor section below.
+  const promptPreviewOwnInputs = $derived(
     isPrompt() ? ((scene as unknown as PromptEntrySummary).inputs ?? []) : [],
+  );
+
+  // ADR-0061 S2: the EFFECTIVE inputs the panel renders — own ∪ every
+  // `{% include %}`d snippet's, resolved server-side against the LIVE body and
+  // returned by the last render. Falls back to own inputs as an instant
+  // placeholder until the first render returns (so a snippet-free prompt and the
+  // moment of opening a prompt are unchanged). The resolver stays the single
+  // source; this is only which set the panel displays.
+  let promptPreviewEffectiveInputs: PromptInputDefinition[] = $state([]);
+  let promptPreviewConflicts: PromptInputConflict[] = $state([]);
+  const promptPreviewDeclaredInputs = $derived(
+    !isPrompt()
+      ? []
+      : promptPreviewEffectiveInputs.length > 0
+        ? promptPreviewEffectiveInputs
+        : promptPreviewOwnInputs,
   );
 
   // Reset preview when the underlying entry changes. The default-filler
@@ -88,6 +105,10 @@
       promptPreviewError = null;
       promptPreviewLastRenderKey = "";
       diagnostics = [];
+      // Drop the previous entry's resolved set — fall back to the new entry's own
+      // inputs until its first render resolves includes (ADR-0061 S2).
+      promptPreviewEffectiveInputs = [];
+      promptPreviewConflicts = [];
       promptPreviewInputDrafts = seedInputDrafts(promptPreviewDeclaredInputs);
       promptPreviewSeededEntryId = loadedSceneId;
     }
@@ -231,8 +252,17 @@
         target_scene_id: promptPreviewSceneId || "",
         inputs,
         commit: false,
+        // ADR-0061 S2: resolve the live body's effective inputs (own ∪ includes)
+        // so the panel below shows a snippet's fields; own inputs are sent so the
+        // resolver can merge them with the includes'.
+        own_inputs: promptPreviewOwnInputs,
+        resolve_effective_inputs: true,
       });
       promptPreviewResult = result;
+      // Adopt the resolved set + any include-type conflict (returned even when the
+      // render errored, so the form appears before the body renders).
+      promptPreviewEffectiveInputs = result.effective_inputs ?? [];
+      promptPreviewConflicts = result.input_conflicts ?? [];
       // Render errors come back as 200 + result.error (the endpoint is
       // exploratory; auto-firing it before required inputs are filled
       // would otherwise look like an HTTP failure). HttpError is still
@@ -380,6 +410,18 @@
     </div>
 
     <div class="prompt-preview-pane-body">
+      {#if promptPreviewConflicts.length > 0}
+        <div class="prompt-preview-error" role="alert">
+          <strong>Input type conflict</strong>
+          {#each promptPreviewConflicts as conflict (conflict.name)}
+            <p>
+              <code>{conflict.name}</code> is declared with different types across included
+              snippets ({conflict.types.join(", ")}). Included snippets must agree on an
+              input's type before this prompt can resolve it.
+            </p>
+          {/each}
+        </div>
+      {/if}
       {#if promptPreviewError}
         <p class="prompt-preview-error">{promptPreviewError}</p>
       {/if}

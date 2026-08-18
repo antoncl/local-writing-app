@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 from app.models.base import (
     AIPolicy,
 )
+from app.models.schema import PromptInputDefinition
 
 # --- AI / machine settings ---
 
@@ -183,8 +184,26 @@ class AITierResolution(BaseModel):
     model_id: str | None
 
 
+class PromptInputConflict(BaseModel):
+    """A same-name / different-type collision across the snippets a prompt
+    includes (ADR-0061 §3). `types` are the distinct types seen for `name`, in
+    encounter order. Surfaced in the author preview; never silently resolved."""
+
+    name: str
+    types: list[str] = Field(default_factory=list)
+
+
 class AIPreviewRequest(BaseModel):
     template_source: str = Field(min_length=1)
+    # ADR-0061 S2: the definitions of the inputs the author is editing (the open
+    # prompt's own `inputs`). Sent only by the author preview pane, which needs
+    # the effective set resolved against the LIVE body; the resolver unions these
+    # with the includes' inputs. Empty for every other preview caller.
+    own_inputs: list[PromptInputDefinition] = Field(default_factory=list)
+    # ADR-0061 S2: resolve + return `effective_inputs`/`input_conflicts` for this
+    # body. Off by default so the chat/dialog preview calls — which read the saved
+    # roster's effective_inputs, not the live body — pay nothing for the resolve.
+    resolve_effective_inputs: bool = False
     # Empty string is allowed: chat-routed prompts don't need a scene context.
     # build_preview skips scene resolution in that case and `scene` becomes None.
     target_scene_id: str = ""
@@ -305,6 +324,15 @@ class AIPreviewResponse(BaseModel):
     # keyed by id. Captured at the lock render beside `used_node_ids` and persisted
     # so the send path's tiering reads them. Empty when no node carried a hint.
     used_node_hints: dict[str, str] = Field(default_factory=dict)
+    # ADR-0061 S2: the effective inputs of the previewed body — its own inputs ∪
+    # the transitive union of every `{% include %}`-ed snippet's inputs — plus any
+    # same-name/different-type conflict across those snippets. Populated only when
+    # the request set `resolve_effective_inputs`; the author preview drives its
+    # inputs panel from `effective_inputs` and shows `input_conflicts` as an error.
+    # Resolved before the render, so they come back even when the render errors on
+    # a not-yet-filled input.
+    effective_inputs: list[PromptInputDefinition] = Field(default_factory=list)
+    input_conflicts: list[PromptInputConflict] = Field(default_factory=list)
 
 
 class ChatMessage(BaseModel):

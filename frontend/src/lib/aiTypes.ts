@@ -1,9 +1,11 @@
 // AI provider / model / preview / generate / chat / invocation / chat-session
 // wire types (#763.5). Extracted from types.ts to keep that barrel under the
 // file-size cap; re-exported from `@/lib/types` so it stays the single import
-// surface. A leaf module: nothing here references a non-AI type, and only
-// `AIPolicy` is used back in types.ts (ProjectInfo, PromptEntryTypeExtras),
-// which imports it from here.
+// surface. A leaf module at runtime: only `AIPolicy` is used back in types.ts
+// (ProjectInfo, PromptEntryTypeExtras), which imports it from here. The lone
+// `import type` below (ADR-0061 S2) is erased at compile time, so it adds no
+// runtime edge — the preview response genuinely carries PromptInputDefinition.
+import type { PromptInputDefinition } from "@/lib/types";
 
 export type AIPolicy = "off" | "local-only" | "cloud-allowed";
 
@@ -75,6 +77,21 @@ export type AIPreviewRequest = {
   subject?: string;
   // V2: when set, preview response includes estimated_cost_usd + caching_style.
   assistant_id?: string | null;
+  // ADR-0061 S2: the open prompt's own input definitions, sent so the resolver
+  // can union them with the live body's `{% include %}`d snippets. Only the
+  // author preview pane sends these + the flag below.
+  own_inputs?: PromptInputDefinition[];
+  // ADR-0061 S2: resolve + return `effective_inputs` / `input_conflicts` for the
+  // live body. Off for the chat/dialog preview calls (they read the saved
+  // roster's effective_inputs), so those pay nothing for the resolve.
+  resolve_effective_inputs?: boolean;
+};
+
+// ADR-0061 §3: a same-name/different-type collision across the snippets a prompt
+// includes. `types` are the distinct types seen for `name`, in encounter order.
+export type PromptInputConflict = {
+  name: string;
+  types: string[];
 };
 
 export type PreviewContentBlock = {
@@ -141,6 +158,13 @@ export type AIPreviewResponse = {
   used_node_ids?: string[];
   // ADR-0060 §5: per-node volatility priors from use(node, "stable"|"volatile").
   used_node_hints?: Record<string, string>;
+  // ADR-0061 S2: the live body's effective inputs (own ∪ every `{% include %}`d
+  // snippet's) + any same-name/different-type conflict across those snippets.
+  // Populated only when the request set `resolve_effective_inputs`; the author
+  // preview drives its inputs panel from `effective_inputs` and shows
+  // `input_conflicts` as an error. Present even when the render errored.
+  effective_inputs?: PromptInputDefinition[];
+  input_conflicts?: PromptInputConflict[];
 };
 
 export type ChatMessage = {

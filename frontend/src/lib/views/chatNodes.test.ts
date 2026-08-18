@@ -6,11 +6,11 @@ import type { ChatSessionSummary, MetadataSchema, PromptEntrySummary } from "@/l
 // `commit` (ADR-0054 §2), the plain chat does not.
 const SCHEMA = {
   entry_types: {
-    "prompt:general": { name: "General", kind: "prompt", prompt: { context_strategy: { output: { kind: "chat_panel" } } } },
+    "prompt:general": { name: "General", kind: "prompt", prompt: { context_strategy: {} } },
     "prompt:revise:entry": {
       name: "Revise entry",
       kind: "prompt",
-      prompt: { context_strategy: { output: { kind: "chat_panel", commit: { review: "visual_diff" } } } },
+      prompt: { context_strategy: { output: { handler: "extract_to_node", commit: { review: "visual_diff" } } } },
     },
   },
   fields: {},

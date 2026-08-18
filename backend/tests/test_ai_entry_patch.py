@@ -749,13 +749,13 @@ class SceneSummaryPromptTests(unittest.TestCase):
         self.assertFalse(etype.abstract)
         self.assertEqual(etype.parent, "prompt:revise")
         assert etype.prompt is not None and etype.prompt.context_strategy is not None
-        # A brainstorm chat with a commit (ADR-0054 §2): the disposition is
-        # `chat_panel` and the review + extraction ride on the `commit`. The first
+        # A brainstorm chat with a commit (ADR-0054 §2 / ADR-0065): the handler is
+        # `extract_to_node` and the review + extraction ride on the `commit`. The first
         # non-default `review` value — `replace`, not `visual_diff` — is the signal
         # that flips the review off the run-diff engine (S5-next).
         output = etype.prompt.context_strategy.output
         assert output is not None and output.commit is not None
-        self.assertEqual(output.kind, "chat_panel")
+        self.assertEqual(output.handler, "extract_to_node")
         self.assertEqual(output.commit.review, "replace")
         # ADR-0054 §2: `commit.fields: ["summary"]` — a fields-only contract (a
         # scene summary is `summary` only, never the manuscript body).

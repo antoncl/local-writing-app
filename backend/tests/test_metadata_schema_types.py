@@ -17,63 +17,95 @@ from app.services.project.errors import ProjectServiceError
 
 
 class MetadataSchemaTypeTests(MetadataValidationBase):
-    def test_output_kind_must_be_a_known_disposition(self) -> None:
-        # ADR-0054: `context_strategy.output.kind` is a closed vocabulary,
-        # validated on save. A bogus kind is a (soft) schema error.
+    def test_output_handler_must_be_a_known_key(self) -> None:
+        # ADR-0065: `context_strategy.output.handler` is a closed vocabulary,
+        # validated on save. A bogus handler is a (soft) schema error.
         errors = self.service._validate_metadata_schema_definition(
-            self._schema_with_output_kind("not_a_kind")
+            self._schema_with_output_handler("not_a_handler")
         )
-        self.assertTrue(any("not_a_kind" in e for e in errors), errors)
+        self.assertTrue(any("not_a_handler" in e for e in errors), errors)
 
-    def test_retired_entry_patch_kind_is_now_rejected(self) -> None:
-        # ADR-0054 S2 retired `entry_patch` into `chat_panel` + `commit`, so the
-        # old value is no longer a known disposition.
-        errors = self.service._validate_metadata_schema_definition(
-            self._schema_with_output_kind("entry_patch")
-        )
-        self.assertTrue(any("entry_patch" in e for e in errors), errors)
-
-    def test_known_output_kinds_validate(self) -> None:
-        # Every disposition in the (post-S2) closed set passes.
-        for kind in ("append_to_body", "replace_selection", "chat_panel"):
+    def test_retired_disposition_kinds_are_now_rejected(self) -> None:
+        # ADR-0065 retired the `output.kind` disposition enum for handler keys, so
+        # the old disposition values (and ADR-0054's earlier `entry_patch`) are no
+        # longer known handlers.
+        for retired in ("append_to_body", "replace_selection", "chat_panel", "entry_patch"):
             errors = self.service._validate_metadata_schema_definition(
-                self._schema_with_output_kind(kind)
+                self._schema_with_output_handler(retired)
             )
-            self.assertFalse(any("output kind" in e for e in errors), (kind, errors))
+            self.assertTrue(any(retired in e for e in errors), (retired, errors))
 
-    def test_commit_only_rides_on_chat_panel(self) -> None:
-        # ADR-0054 §2: a commit is meaningful only under `chat_panel` — append /
-        # replace target the body directly, so a commit on them is a (soft) error.
-        output = {"kind": "append_to_body", "commit": {"review": "visual_diff"}}
+    def test_known_output_handlers_validate(self) -> None:
+        # Every handler in the closed set passes.
+        for handler in ("inline", "extract_to_node"):
+            errors = self.service._validate_metadata_schema_definition(
+                self._schema_with_output_handler(handler)
+            )
+            self.assertFalse(any("output handler" in e for e in errors), (handler, errors))
+
+    def test_destination_must_be_a_known_inline_destination(self) -> None:
+        # ADR-0065: `destination` (the inline cursor-vs-selection sub-choice) is a
+        # closed vocabulary.
+        output = {"handler": "inline", "destination": "sideways"}
         errors = self.service._validate_metadata_schema_definition(
             self._schema_with_output(output)
         )
-        self.assertTrue(any("only chat_panel" in e for e in errors), errors)
+        self.assertTrue(any("output destination" in e for e in errors), errors)
+
+    def test_destination_only_rides_on_the_inline_handler(self) -> None:
+        # A destination is meaningless without the inline handler that streams to it.
+        output = {"handler": "extract_to_node", "destination": "selection"}
+        errors = self.service._validate_metadata_schema_definition(
+            self._schema_with_output(output)
+        )
+        self.assertTrue(
+            any("only the inline handler streams to a destination" in e for e in errors), errors
+        )
+
+    def test_inline_with_a_valid_destination_validates(self) -> None:
+        for destination in ("cursor", "selection"):
+            output = {"handler": "inline", "destination": destination}
+            errors = self.service._validate_metadata_schema_definition(
+                self._schema_with_output(output)
+            )
+            self.assertFalse(any("destination" in e for e in errors), (destination, errors))
+
+    def test_commit_only_rides_on_extract_to_node(self) -> None:
+        # ADR-0054 §2 / ADR-0065: a commit is meaningful only under `extract_to_node` —
+        # the inline handler streams to the prose directly, so a commit on it is a
+        # (soft) error.
+        output = {"handler": "inline", "commit": {"review": "visual_diff"}}
+        errors = self.service._validate_metadata_schema_definition(
+            self._schema_with_output(output)
+        )
+        self.assertTrue(
+            any("only the extract_to_node handler can carry a commit" in e for e in errors), errors
+        )
 
     def test_commit_review_must_be_a_known_mode(self) -> None:
-        output = {"kind": "chat_panel", "commit": {"review": "sideways"}}
+        output = {"handler": "extract_to_node", "commit": {"review": "sideways"}}
         errors = self.service._validate_metadata_schema_definition(
             self._schema_with_output(output)
         )
         self.assertTrue(any("commit review" in e for e in errors), errors)
 
-    def test_chat_panel_with_a_valid_commit_validates(self) -> None:
+    def test_extract_to_node_with_a_valid_commit_validates(self) -> None:
         output = {
-            "kind": "chat_panel",
+            "handler": "extract_to_node",
             "commit": {"review": "replace", "fields": ["summary"]},
         }
         errors = self.service._validate_metadata_schema_definition(
             self._schema_with_output(output)
         )
         self.assertFalse(
-            any("output kind" in e or "commit" in e for e in errors), errors
+            any("output handler" in e or "commit" in e for e in errors), errors
         )
 
     def test_commit_target_must_be_a_defined_entry_type(self) -> None:
         # ADR-0063 S1: commit.target names the entry_type the commit CREATES. A
         # well-formed but undefined target is a (soft) error — resolved against the
         # schema's known ids.
-        output = {"kind": "chat_panel", "commit": {"review": "visual_diff", "target": "lore:ghost"}}
+        output = {"handler": "extract_to_node", "commit": {"review": "visual_diff", "target": "lore:ghost"}}
         errors = self.service._validate_metadata_schema_definition(
             self._schema_with_output(output)
         )
@@ -83,7 +115,7 @@ class MetadataSchemaTypeTests(MetadataValidationBase):
 
     def test_malformed_commit_target_is_flagged_as_a_bad_id(self) -> None:
         # A target that isn't a `kind:key` FQN is a typo, caught by shape alone.
-        output = {"kind": "chat_panel", "commit": {"review": "visual_diff", "target": "Not A Type"}}
+        output = {"handler": "extract_to_node", "commit": {"review": "visual_diff", "target": "Not A Type"}}
         errors = self.service._validate_metadata_schema_definition(
             self._schema_with_output(output)
         )
@@ -94,7 +126,7 @@ class MetadataSchemaTypeTests(MetadataValidationBase):
     def test_commit_target_to_a_defined_type_validates(self) -> None:
         # The declared target names a type that exists in the schema → no target
         # error. S1 validates existence, not kind-appropriateness.
-        output = {"kind": "chat_panel", "commit": {"review": "visual_diff", "target": "prompt:custom"}}
+        output = {"handler": "extract_to_node", "commit": {"review": "visual_diff", "target": "prompt:custom"}}
         errors = self.service._validate_metadata_schema_definition(
             self._schema_with_output(output)
         )
@@ -109,30 +141,30 @@ class MetadataSchemaTypeTests(MetadataValidationBase):
         from app.services.project.schema_validation import validate_prompt_output
 
         well_formed = PromptOutput.model_validate(
-            {"kind": "chat_panel", "commit": {"review": "visual_diff", "target": "lore:ghost"}}
+            {"handler": "extract_to_node", "commit": {"review": "visual_diff", "target": "lore:ghost"}}
         )
         self.assertEqual(validate_prompt_output("prompt:x", well_formed), [])
         malformed = PromptOutput.model_validate(
-            {"kind": "chat_panel", "commit": {"review": "visual_diff", "target": "Not A Type"}}
+            {"handler": "extract_to_node", "commit": {"review": "visual_diff", "target": "Not A Type"}}
         )
         self.assertTrue(
             any("not a valid entry-type id" in e for e in validate_prompt_output("prompt:x", malformed)),
         )
 
-    def test_on_accept_only_rides_on_an_inline_disposition(self) -> None:
+    def test_on_accept_only_rides_on_the_inline_handler(self) -> None:
         # #954 (Lever 2): on_accept stamps a mark on an accepted INLINE suggestion, so
-        # it is a (soft) error on chat_panel, which has no accept gesture.
+        # it is a (soft) error on extract_to_node, which has no accept gesture.
         output = {
-            "kind": "chat_panel",
+            "handler": "extract_to_node",
             "on_accept": {"mark": "character", "from_input": "character"},
         }
         errors = self.service._validate_metadata_schema_definition(
             self._schema_with_output(output)
         )
-        self.assertTrue(any("inline disposition" in e for e in errors), errors)
+        self.assertTrue(any("only the inline handler stamps a mark on accept" in e for e in errors), errors)
 
     def test_on_accept_requires_a_mark_and_from_input(self) -> None:
-        output = {"kind": "append_to_body", "on_accept": {"mark": "character"}}
+        output = {"handler": "inline", "on_accept": {"mark": "character"}}
         errors = self.service._validate_metadata_schema_definition(
             self._schema_with_output(output)
         )
@@ -140,30 +172,30 @@ class MetadataSchemaTypeTests(MetadataValidationBase):
             any("on_accept" in e and "from_input" in e for e in errors), errors
         )
 
-    def test_inline_disposition_with_a_valid_on_accept_validates(self) -> None:
+    def test_inline_handler_with_a_valid_on_accept_validates(self) -> None:
         output = {
-            "kind": "append_to_body",
+            "handler": "inline",
             "on_accept": {"mark": "character", "from_input": "character"},
         }
         errors = self.service._validate_metadata_schema_definition(
             self._schema_with_output(output)
         )
         self.assertFalse(
-            any("on_accept" in e or "output kind" in e for e in errors), errors
+            any("on_accept" in e or "output handler" in e for e in errors), errors
         )
 
-    def test_unset_output_kind_is_allowed(self) -> None:
-        # No output disposition (a snippet, or a prompt that produces none) is
-        # legitimate — the check only fires on a non-empty unknown kind.
+    def test_unset_output_handler_is_allowed(self) -> None:
+        # No output handler (a `general` prompt whose response stays in the chat, or a
+        # snippet) is legitimate — the check only fires on a non-empty unknown handler.
         for empty in (None, ""):
             errors = self.service._validate_metadata_schema_definition(
-                self._schema_with_output_kind(empty)
+                self._schema_with_output_handler(empty)
             )
-            self.assertFalse(any("output kind" in e for e in errors), (empty, errors))
+            self.assertFalse(any("output handler" in e for e in errors), (empty, errors))
 
-    def test_saving_a_prompt_type_with_an_unknown_output_kind_is_rejected(self) -> None:
-        # End-to-end: a save resolves + validates, and an unknown disposition
-        # blocks it (the validator's errors are raised by the save path).
+    def test_saving_a_prompt_type_with_an_unknown_output_handler_is_rejected(self) -> None:
+        # End-to-end: a save resolves + validates, and an unknown handler blocks it
+        # (the validator's errors are raised by the save path).
         layer_id = self.service._metadata_schema_layer_id(self.root)
         with self.assertRaises(ProjectServiceError) as ctx:
             self.service.upsert_metadata_entry_type(
@@ -176,25 +208,25 @@ class MetadataSchemaTypeTests(MetadataValidationBase):
                         parent="prompt:base",
                         prompt=PromptEntryTypeExtras(
                             context_strategy=PromptContextStrategy(
-                                output={"kind": "not_a_kind"}
+                                output={"handler": "not_a_handler"}
                             )
                         ),
                     ),
                     allow_existing=False,
                 )
             )
-        self.assertIn("not_a_kind", str(ctx.exception))
+        self.assertIn("not_a_handler", str(ctx.exception))
 
-    def test_output_kind_inherited_by_a_subtype_validates(self) -> None:
+    def test_output_handler_inherited_by_a_subtype_validates(self) -> None:
         # The validator runs on the RESOLVED schema, so a subtype that inherits
-        # its disposition from a base (the common shape) is validated through the
-        # inherited value — a valid inherited kind must not be flagged.
+        # its handler from a base (the common shape) is validated through the
+        # inherited value — a valid inherited handler must not be flagged.
         data = {
             "entry_types": {
                 "prompt:base": {
                     "name": "Prompt",
                     "kind": "prompt",
-                    "prompt": {"context_strategy": {"output": {"kind": "chat_panel"}}},
+                    "prompt": {"context_strategy": {"output": {"handler": "inline"}}},
                 },
                 "prompt:child": {
                     "name": "Child",
@@ -208,7 +240,7 @@ class MetadataSchemaTypeTests(MetadataValidationBase):
             self.service._resolve_metadata_schema_inheritance(data)
         )
         errors = self.service._validate_metadata_schema_definition(resolved)
-        self.assertFalse(any("output kind" in e for e in errors), errors)
+        self.assertFalse(any("output handler" in e for e in errors), errors)
 
     def test_default_schema_seeds_act_and_chapter(self) -> None:
         schema = self.service.read_metadata_schema()

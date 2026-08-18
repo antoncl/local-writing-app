@@ -176,7 +176,8 @@ class PromptInputDefinition(BaseModel):
 
 
 class PromptCommit(BaseModel):
-    """The optional commit capability of a `chat_panel` prompt (ADR-0054 §2).
+    """The optional commit capability of an `extract_to_node` prompt (ADR-0054 §2 /
+    ADR-0065).
 
     Present ⇒ the conversation gains a Commit button that extracts its result to
     the target node as a reviewable patch. `review` is how that result is reviewed
@@ -204,34 +205,40 @@ class PromptOnAccept(BaseModel):
     `from_input`. This is what makes `roleplay` a *declared* capability rather
     than a hardcoded `entry_type == prompt:roleplay` branch: the mark it stamps
     (`character`) and the input it reads (`character`) are named here, on the
-    type, exactly as `commit` names its capability. Meaningful only under an
-    inline disposition (`append_to_body` / `replace_selection`) — the validator
-    rejects it elsewhere. Kept lenient (`str`) like the rest; the save paths
-    validate it."""
+    type, exactly as `commit` names its capability. Meaningful only under the
+    `inline` handler — the validator rejects it elsewhere. Kept lenient (`str`)
+    like the rest; the save paths validate it."""
 
     mark: str = ""
     from_input: str = ""
 
 
 class PromptOutput(BaseModel):
-    """Where a prompt's output lands (ADR-0054 §1), plus its optional commit (§2)
-    or accept-time mark-stamp (`on_accept`).
+    """Which OutputHandler runs a prompt's result (ADR-0065), plus its optional
+    commit (`extract_to_node`) or accept-time mark-stamp (`inline`).
 
-    `kind` is the disposition — `append_to_body` / `replace_selection` /
-    `chat_panel`, or unset for no output (e.g. `snippet`). The set is closed and
-    backend-owned (`OUTPUT_KINDS`), validated on save; kept `str` here so an
-    unknown value is a soft validation error, not an unreadable layer. `commit` is
-    meaningful only under `chat_panel`, and `on_accept` only under an inline
-    disposition — the validator rejects each on any other."""
+    `handler` is the registry key — `inline` (stream a suggestion into the prose
+    editor) or `extract_to_node` (a brainstorm chat whose commit becomes a reviewable
+    node patch) — or unset for no handler: a `general` prompt whose response stays in
+    the conversation, and `snippet`. It replaces the old `output.kind` disposition —
+    `kind` named WHERE the output landed and source/review/activation all derived from
+    it; the handler now owns that behaviour and the key just names which one.
+    `destination` is the inline sub-choice — `cursor` (continue at the caret, the old
+    `append_to_body`) or `selection` (replace the selection, the old
+    `replace_selection`); meaningful only under `inline`. Both sets are closed and
+    backend-owned (`HANDLER_KEYS` / `INLINE_DESTINATIONS`), validated on save; kept
+    `str` here so an unknown value is a soft validation error, not an unreadable layer.
+    `commit` is meaningful only under `extract_to_node`, and `on_accept` only under
+    `inline` — the validator rejects each on any other."""
 
-    kind: str = ""
+    handler: str = ""
+    destination: str = ""
     commit: PromptCommit | None = None
     on_accept: PromptOnAccept | None = None
 
 
 class PromptContextStrategy(BaseModel):
     target: dict[str, Any] | None = None
-    scan_surface: list[str] = Field(default_factory=list)
     output: PromptOutput | None = None
 
 

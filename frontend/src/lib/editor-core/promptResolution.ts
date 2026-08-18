@@ -2,23 +2,29 @@
 // selection toolbar (which live in ProseBodyView) and the AI suggestion
 // pipeline (AiSuggestionController). Both need to resolve which prompt
 // entries apply to a surface, fill positional slash args, and inspect a
-// prompt's output kind / roleplay lineage — so the logic lives here as
+// prompt's output handler / roleplay lineage — so the logic lives here as
 // pure functions over a context snapshot rather than being duplicated or
 // passed around as a bag of closures.
 
 import { coerceInputValue } from "@/lib/utils/promptInputs";
+import {
+  inlineDestinationFor,
+  outputHandlerFor,
+  type InlineDestination,
+} from "@/lib/editor-core/outputHandlers";
 import type {
   LoreEntrySummary,
   MetadataSchema,
+  PromptContextStrategy,
   PromptEntrySummary,
   PromptInputDefinition,
-  PromptOutput,
 } from "@/lib/types";
 
-// The output dispositions a prompt can select (ADR-0054 §1), mirroring the
-// backend `OUTPUT_KINDS`. A brainstorm is no longer a fifth surface — it is
-// `chat_panel` + a `commit`, asked via `promptDeclaresCommit` below.
-export type PromptSurface = "append_to_body" | "replace_selection" | "chat_panel";
+// The DISCOVERY surface a prompt is offered on, derived from its output handler
+// (ADR-0065): the two inline destinations (`cursor` = continue, `selection` =
+// revise) plus `conversation` (any non-inline invocable prompt — a brainstorm or a
+// general chat). Replaces the old disposition triple; `promptSurfaceFor` derives it.
+export type PromptSurface = InlineDestination | "conversation";
 
 // A snapshot of the reactive data the resolvers read. ProseBodyView builds
 // this as a `$derived` and passes it (or a getter onto it) at each call.
@@ -34,32 +40,40 @@ export interface PromptResolutionContext {
   hiddenPromptIds?: Set<string>;
 }
 
-export function effectiveOutputKind(
-  ctx: PromptResolutionContext,
-  entry: PromptEntrySummary,
-): string | null {
-  const definition = ctx.metadataSchema?.entry_types[entry.entry_type];
-  const output = definition?.prompt?.context_strategy?.output;
-  if (!output || typeof output.kind !== "string") return null;
-  return output.kind;
+// The discovery surface a `context_strategy` implies (ADR-0065). The presence of a
+// `context_strategy` IS the invocation contract: a `snippet` (imported by name, never
+// run) has none → null; every runnable prompt has one. Within that, the `inline`
+// handler resolves to its destination (cursor/selection); any other REGISTERED handler
+// (`extract_to_node`) or a handler-less `general` chat is a `conversation`. A non-empty
+// but unregistered handler is misconfigured → null (invocable on no surface). Factored
+// out of `promptSurfaceFor` so a caller holding a raw strategy — the prompt editor
+// reading the open node's own type — shares the exact rule.
+export function surfaceForStrategy(
+  strategy: PromptContextStrategy | null | undefined,
+): PromptSurface | null {
+  if (!strategy) return null;
+  const output = strategy.output ?? null;
+  const handler = outputHandlerFor(output);
+  if (handler) return handler.key === "inline" ? inlineDestinationFor(output) : "conversation";
+  return output?.handler ? null : "conversation";
 }
 
-// The prompt's whole `output` block — the object the OutputHandler registry
-// (ADR-0065) routes on. `effectiveOutputKind` above stays the thin read for
-// discovery filters; dispatch reads the full output so a handler owns its bundle.
-export function effectivePromptOutput(
+// The discovery surface a prompt is offered on. REPLACES the old `effectiveOutputKind`
+// read every discovery filter used.
+export function promptSurfaceFor(
   ctx: PromptResolutionContext,
   entry: PromptEntrySummary,
-): PromptOutput | null {
-  const definition = ctx.metadataSchema?.entry_types[entry.entry_type];
-  return definition?.prompt?.context_strategy?.output ?? null;
+): PromptSurface | null {
+  return surfaceForStrategy(
+    ctx.metadataSchema?.entry_types[entry.entry_type]?.prompt?.context_strategy,
+  );
 }
 
-// True iff the prompt declares a `commit` (ADR-0054 §2) — i.e. it is a brainstorm
-// whose chat-panel output can be extracted to a target node as a reviewable patch.
-// This is the routing question dispatch asks now, in place of the retired
-// `output.kind === "entry_patch"`. A commit only rides on `chat_panel`, so the
-// presence of the object is the whole test.
+// True iff the prompt declares a `commit` (ADR-0054 §2) — i.e. it is an
+// `extract_to_node` brainstorm whose output can be extracted to a target node as a
+// reviewable patch. This is the routing question dispatch asks now, in place of the
+// retired `output.kind === "entry_patch"`. A commit only rides on `extract_to_node`,
+// so the presence of the object is the whole test.
 export function promptDeclaresCommit(
   ctx: PromptResolutionContext,
   entry: PromptEntrySummary,
@@ -106,15 +120,14 @@ export function promptEntriesForSurface(
   ctx: PromptResolutionContext,
   surface: PromptSurface,
 ): PromptEntrySummary[] {
-  return filterPromptRoster(ctx, (entry) => effectiveOutputKind(ctx, entry) === surface);
+  return filterPromptRoster(ctx, (entry) => promptSurfaceFor(ctx, entry) === surface);
 }
 
 // The brainstorm prompts — those declaring a `commit` (ADR-0054 §2) — as a
-// discovery roster, the commit-era replacement for
-// `promptEntriesForSurface(ctx, "entry_patch")`. Used where "a committing
-// prompt" specifically is wanted (Lore's Brainstorm affordance); the ＋New menu
-// itself keys off `promptEntriesOfferedOn` (offer_on + chat_panel), where commit
-// is orthogonal.
+// discovery roster, the commit-era replacement for the retired `entry_patch`
+// surface. Used where "a committing prompt" specifically is wanted (Lore's
+// Brainstorm affordance); the ＋New menu itself keys off `promptEntriesOfferedOn`
+// (offer_on + the `conversation` surface), where commit is orthogonal.
 export function promptEntriesWithCommit(ctx: PromptResolutionContext): PromptEntrySummary[] {
   return filterPromptRoster(ctx, (entry) => promptDeclaresCommit(ctx, entry));
 }
@@ -163,18 +176,18 @@ export function promptOffersOn(
 }
 
 // The prompts offered as a "＋New" conversation on a subject of type `entryType`:
-// a `chat_panel` disposition (the only kind that surfaces a conversation, and the
-// only kind that menu launches — the eligibility axis) whose `offer_on` admits
-// this subject (the applicability axis). A committing brainstorm and a plain
-// conversation (e.g. impersonate) both qualify — commit is orthogonal. Callers
-// pass the result to `buildPromptMenuTree` for the "/" grouping.
+// a `conversation` surface (the only surface that menu launches — the eligibility
+// axis) whose `offer_on` admits this subject (the applicability axis). A committing
+// brainstorm and a plain conversation (e.g. impersonate) both qualify — the commit is
+// orthogonal, and both are non-inline so both are `conversation`. Callers pass the
+// result to `buildPromptMenuTree` for the "/" grouping.
 export function promptEntriesOfferedOn(
   ctx: PromptResolutionContext,
   entryType: string | null | undefined,
 ): PromptEntrySummary[] {
   return filterPromptRoster(
     ctx,
-    (entry) => effectiveOutputKind(ctx, entry) === "chat_panel" && promptOffersOn(ctx, entry, entryType),
+    (entry) => promptSurfaceFor(ctx, entry) === "conversation" && promptOffersOn(ctx, entry, entryType),
   );
 }
 
@@ -192,7 +205,7 @@ export function findPromptEntry(
 
 export function defaultPromptForSurface(
   ctx: PromptResolutionContext,
-  surface: "append_to_body" | "replace_selection",
+  surface: "cursor" | "selection",
 ): PromptEntrySummary | null {
   return promptEntriesForSurface(ctx, surface)[0] ?? null;
 }

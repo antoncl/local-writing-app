@@ -59,9 +59,10 @@ editor it shows prompt sub-classes.
 
 ### Invariants — don't introduce a new `kind` to express:
 
-- **An output disposition.** "I want this prompt to chat vs. append vs. replace"
-  is captured by `context_strategy.output.kind` on an entry-type, inherited from
-  an abstract base. See [Prompt taxonomy](#prompt-taxonomy) below.
+- **An output behaviour.** "I want this prompt to chat vs. stream inline vs.
+  commit a patch" is captured by `context_strategy.output.handler` — the output
+  handler (ADR-0065) — on an entry-type, inherited from an abstract base. See
+  [Prompt taxonomy](#prompt-taxonomy) below.
 - **A body editor variant.** "I want raw text vs. WYSIWYG vs. code" is captured
   by per-entry-type `body_editor` (`wysiwyg` | `code`) and `body_language`
   (`markdown` | `jinja2` | `plain`), both inherited from the parent chain.
@@ -79,22 +80,23 @@ editor it shows prompt sub-classes.
 
 ### Prompt taxonomy
 
-The `prompt` kind has four built-in concrete sub-types. Each captures an
-activation surface × output disposition. Users can instantiate them directly,
-or sub-type one to add personality (`system_prompt`, the Jinja body) and have
-the dispatch behavior inherited automatically.
+The `prompt` kind has built-in concrete sub-types. Each captures an activation
+surface × output handler. Users can instantiate them directly, or sub-type one to
+add personality (`system_prompt`, the Jinja body) and have the dispatch behavior
+inherited automatically.
 
 | Sub-type | Activation surface | Output |
 |---|---|---|
-| `continuation` | Slash menu in scene editor | Append at cursor (`append_to_body`) |
-| `revise` | Selection toolbar | Replace selection (`replace_selection`) |
-| `general` | Slash menu / "+ New Chat" | Chat panel (`chat_panel`) |
+| `continuation` | Slash menu in scene editor | Inline at the cursor (`handler: inline`) |
+| `revise:scene` | Selection toolbar | Inline over the selection (`handler: inline`, `destination: selection`) |
+| `revise:entry` | "+ New" conversation | Brainstorm then commit a patch (`handler: extract_to_node` + a `commit`) |
+| `general` | Slash menu / "+ New Chat" | Chat — the response stays in the conversation (no handler) |
 | `snippet` | None — included by name via `{% include %}` from other prompts | None |
 
 Routing example: a user creates `bob extends general` with the system_prompt
-"You are Bob." The dispatcher walks Bob's parent chain to find `general`, sees
-the inherited `output.kind: chat_panel`, and surfaces Bob in the prompt picker;
-when invoked, the response lands in the chat panel.
+"You are Bob." The dispatcher walks Bob's parent chain to find `general`, sees the
+inherited (handler-less) context strategy — present, so invocable — and surfaces Bob
+in the prompt picker; when invoked, the response lands in the conversation.
 
 The bases used to be abstract — when prompt `inputs` were declared on the type,
 abstraction meant "users must create a sub-type to fix the input shape." Once

@@ -14,6 +14,7 @@
 -->
 <script lang="ts">
   import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { surfaceForStrategy } from "@/lib/editor-core/promptResolution";
   import CodeEditor from "@/components/widgets/CodeEditor.svelte";
   import EntryInputsEditor from "@/components/editor/body/EntryInputsEditor.svelte";
   import OfferOnPicker from "@/components/editor/body/OfferOnPicker.svelte";
@@ -34,7 +35,7 @@
     entryInputDrafts?: EntryInputDraft[];
     // The prompt's `offer_on` allow-list (ADR-0054 §4 / S4b), authored via the
     // OfferOnPicker below. Bound to NodeEditor's offerOnDraft; only rendered for
-    // a chat_panel prompt (the disposition ＋New lists).
+    // a conversation prompt (the surface ＋New lists).
     offerOn?: string[];
     // --- Read-only context from parent ---
     scene?: EditableDocument | null;
@@ -88,17 +89,17 @@
 
   const isPrompt = (): boolean => documentKind === "prompt" && !!scene;
 
-  // The open prompt's disposition (ADR-0054 §1). The offer_on picker is gated to
-  // `chat_panel` — the only disposition ＋New surfaces a conversation for — so an
-  // author never sees a targeting control that provably does nothing on an
-  // append/replace prompt. Read straight off the type's context_strategy, the
-  // same path `effectiveOutputKind` uses.
-  const promptOutputKind = $derived(
+  // The offer_on picker is gated to CONVERSATION prompts (ADR-0065) — those ＋New
+  // launches a conversation for: a handler-less `general` chat OR an `extract_to_node`
+  // brainstorm. `surfaceForStrategy` is the shared rule (a snippet has no strategy →
+  // null; the inline handler → cursor/selection), so an author never sees a targeting
+  // control that provably does nothing on an inline prompt or a snippet.
+  const promptStrategy = $derived(
     isPrompt() && metadataSchema && scene
-      ? metadataSchema.entry_types[scene.entry_type]?.prompt?.context_strategy?.output?.kind ?? null
+      ? (metadataSchema.entry_types[scene.entry_type]?.prompt?.context_strategy ?? null)
       : null,
   );
-  const showOfferOnPicker = $derived(promptOutputKind === "chat_panel");
+  const showOfferOnPicker = $derived(surfaceForStrategy(promptStrategy) === "conversation");
 
   // --- Restore-default-body (for prompt sub-types with a non-empty
   //     default_body, e.g. roleplay). Visible only when the current body

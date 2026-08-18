@@ -47,32 +47,33 @@ BUILTIN_COMPUTED_FUNCTIONS: tuple[str, ...] = (
 )
 COMPUTED_FUNCTIONS: tuple[str, ...] = AUTHORABLE_COMPUTED_FUNCTIONS + BUILTIN_COMPUTED_FUNCTIONS
 
-# The closed vocabulary of prompt output dispositions — `context_strategy.output.kind`,
-# i.e. WHERE a prompt's output lands (ADR-0054). This is the single source of truth the
-# whole app derives from; the frontend `PromptSurface` union derives from it rather than
-# re-listing values. The backend validates a saved prompt type's `output.kind` against
-# this list (`_validate_metadata_schema_definition`), closing the free-dict gap.
+# The closed vocabulary of output HANDLER keys — `context_strategy.output.handler`,
+# the registry key that selects which OutputHandler runs a prompt's result (ADR-0065).
+# This replaces the old `output.kind` disposition enum: `kind` named WHERE the output
+# landed and everything else (source, review, activation) was derived from it; the
+# handler now OWNS that behaviour, and the key just names which one. The frontend
+# `OutputHandlerKey` union mirrors this. The backend validates a saved prompt type's
+# `output.handler` against this list (`_validate_metadata_schema_definition`).
 #
-# The old `entry_patch` value is GONE (ADR-0054 S2): a brainstorm is not a fifth
-# disposition but `chat_panel` + an optional `commit` capability (`PromptCommit`), so the
-# built-in brainstorm prompts below are `chat_panel` with a `commit` block. An empty/unset
-# `output.kind` is legitimate (the `snippet` base and any prompt with no output
-# disposition) and is not checked here.
-OUTPUT_KINDS: tuple[str, ...] = (
-    "append_to_body",
-    "replace_selection",
-    "chat_panel",
+# An empty/unset `handler` is legitimate — a prompt with no output handler stays in the
+# conversation (the `general` and `snippet` bases). A brainstorm is not a special kind
+# but `extract_to_node` + a `commit` capability (`PromptCommit`); the built-in brainstorm
+# prompts below are `extract_to_node` with a `commit` block.
+HANDLER_KEYS: tuple[str, ...] = (
+    "inline",
+    "extract_to_node",
 )
 
-# The inline dispositions — those that stream a suggestion into the prose editor
-# (as opposed to `chat_panel`, which routes to a conversation). Only these carry
-# an `output.on_accept` mark-stamp (#954, Lever 2), validated alongside OUTPUT_KINDS.
-INLINE_OUTPUT_KINDS: tuple[str, ...] = ("append_to_body", "replace_selection")
+# The inline handler's destination — WHERE in the prose editor it streams (ADR-0065 §3):
+# `cursor` continues at the caret (the old `append_to_body`), `selection` replaces the
+# selected prose (the old `replace_selection`). A destination-sub-choice of one handler,
+# not two handlers. Meaningful only under the `inline` handler; unset defaults to cursor.
+INLINE_DESTINATIONS: tuple[str, ...] = ("cursor", "selection")
 
 # The closed set of commit review modes (ADR-0054 §2 `commit.review`): `visual_diff`
 # is the per-run adopt against the current entry; `replace` is a plain
 # current→proposed swap (a from-scratch regenerate with no meaningful run-diff, e.g.
-# a scene summary). Validated on save alongside `OUTPUT_KINDS`.
+# a scene summary). Validated on save alongside `HANDLER_KEYS`.
 COMMIT_REVIEW_MODES: tuple[str, ...] = ("visual_diff", "replace")
 
 DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
@@ -311,15 +312,14 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "default_role": "system",
                 "context_strategy": {
                     "target": {"required": True, "kind": "manuscript"},
-                    "scan_surface": ["_text_before"],
-                    "output": {"kind": "append_to_body"},
+                    "output": {"handler": "inline"},
                 },
             },
         },
         "prompt:roleplay": {
             # Continuation sub-type for two-character roleplay in one scene. It is a
-            # `continuation` (append_to_body, scans `_text_before`) that additionally
-            # STAMPS a `character` mark on the accepted text, keyed to its `character`
+            # `continuation` (the `inline` handler, streaming at the cursor) that
+            # additionally STAMPS a `character` mark on the accepted text, keyed to its `character`
             # input — the mark `character_turns` later reads to reconstruct
             # per-character turns, and the id per-character cost attributes to. That
             # stamp is a DECLARED capability (`output.on_accept`, #954 Lever 2), NOT an
@@ -352,9 +352,8 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "prompt": {
                 "context_strategy": {
                     "target": {"required": True, "kind": "manuscript"},
-                    "scan_surface": ["_text_before"],
                     "output": {
-                        "kind": "append_to_body",
+                        "handler": "inline",
                         "on_accept": {"mark": "character", "from_input": "character"},
                     },
                 },
@@ -365,10 +364,10 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # (ADR-0046 §5): sub-typing the lore case (`revise:entry`) while
             # leaving the scene case bare would leave the taxonomy lopsided, and
             # the TipTap editor filters its prompts by type — both flavours must
-            # sit at the same depth. The concrete children carry the disposition;
-            # they differ (`revise:scene` is `replace_selection`; the brainstorm
-            # children are `chat_panel` + a `commit`), so there is nothing shared
-            # to hoist onto the base.
+            # sit at the same depth. The concrete children carry the output handler;
+            # they differ (`revise:scene` is the `inline` handler at the selection;
+            # the brainstorm children are `extract_to_node` + a `commit`), so there
+            # is nothing shared to hoist onto the base.
             "name": "Revise",
             "kind": "prompt",
             "parent": "prompt:base",
@@ -391,16 +390,15 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "prompt": {
                 "context_strategy": {
                     "target": {"required": True, "kind": "manuscript"},
-                    "scan_surface": ["_text_before", "_selection", "_text_after"],
-                    "output": {"kind": "replace_selection"},
+                    "output": {"handler": "inline", "destination": "selection"},
                 },
             },
         },
         "prompt:revise:entry": {
             # The lore brainstorm (ADR-0046 §5/§6.3/§6.4), a pre-rolled prompt
-            # like `roleplay`: an ideation *chat* (`output.kind = chat_panel`) that
-            # carries a `commit` — the Commit button that, on a commit turn, extracts
-            # a JSON patch for review (ADR-0054 §2). It has TWO modes, chosen by how
+            # like `roleplay`: an ideation *chat* driven by the `extract_to_node`
+            # handler — its `commit` is the Commit button that, on a commit turn,
+            # extracts a JSON patch for review (ADR-0054 §2 / ADR-0065). It has TWO modes, chosen by how
             # it was launched, not by a separate prompt (ADR-0046 §6.4 — one vehicle):
             #   • REVISE — an existing entry rides in the `entry` input; the
             #     commit is the entry's revised body plus any changed proposable
@@ -410,7 +408,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             #     names the kind to draft from scratch; the commit is a whole new
             #     entry (title + fields + body), reviewed whole (no flip) and
             #     created via `POST /api/lore` + `PUT` (§6.4).
-            # `output.kind = chat_panel` + a `commit` routes invocation to a chat
+            # The `extract_to_node` handler (a `commit`) routes invocation to a chat
             # and the committed patch to review, not the scene aiSuggestion
             # streaming mark. The patch is validated server-side (`validate_ai_entry_patch`
             # / `validate_ai_entry_draft`) before review — the safety guarantee is
@@ -452,7 +450,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             ],
             "prompt": {
                 "context_strategy": {
-                    "output": {"kind": "chat_panel", "commit": {"review": "visual_diff"}},
+                    "output": {"handler": "extract_to_node", "commit": {"review": "visual_diff"}},
                 },
             },
         },
@@ -505,7 +503,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                     # (#859). Prose-safety is thus held by the contract itself and
                     # again at the commit path (`acceptFields`).
                     "output": {
-                        "kind": "chat_panel",
+                        "handler": "extract_to_node",
                         "commit": {"review": "replace", "fields": ["summary"]},
                     },
                 },
@@ -520,9 +518,13 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "prompt": {
                 # ADR-0060 §4: a general chat's un-roled prose is its system prompt.
                 "default_role": "system",
-                "context_strategy": {
-                    "output": {"kind": "chat_panel"},
-                },
+                # No output handler (ADR-0065): a general prompt's response simply stays
+                # in the conversation. The presence of a `context_strategy` (even empty)
+                # is what marks it INVOCABLE — vs a `snippet`, which carries no prompt
+                # block at all and is only imported by name — so discovery routes it to
+                # the conversation surface. Handler-driven behaviour (inline streaming,
+                # extract-to-node) is opt-in via `output.handler`.
+                "context_strategy": {},
             },
         },
         "prompt:snippet": {

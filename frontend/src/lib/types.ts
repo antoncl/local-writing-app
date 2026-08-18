@@ -724,8 +724,8 @@ export type PromptInputDefinition = {
   target?: Record<string, MetadataValue> | null;
 };
 
-// The optional commit capability of a `chat_panel` prompt (ADR-0054 §2): the
-// conversation gains a Commit button that extracts its result to a target node as
+// The optional commit capability of an `extract_to_node` prompt (ADR-0054 §2 /
+// ADR-0065): the conversation gains a Commit button that extracts its result to a target node as
 // a reviewable patch. `review` is how it's reviewed; `fields` is the optional
 // allow-list of what the commit extracts (`body` counts as a field, so its absence
 // is fields-only; omit `fields` for the default body + every proposable field).
@@ -747,19 +747,21 @@ export type PromptOnAccept = {
   from_input?: string;
 };
 
-// Where a prompt's output lands (ADR-0054 §1) + its optional commit (§2) or
-// accept-time mark-stamp (`on_accept`). `kind` is the disposition (`append_to_body`
-// / `replace_selection` / `chat_panel`, or unset for no output); `commit` only
-// rides on `chat_panel`, `on_accept` only on an inline disposition.
+// Which OutputHandler runs a prompt's result (ADR-0065) + its optional commit
+// (ADR-0054 §2) or accept-time mark-stamp (`on_accept`). `handler` is the registry
+// key (`inline` / `extract_to_node`, or unset for a `general` chat / `snippet`);
+// `destination` is the inline cursor-vs-selection sub-choice (was
+// `append_to_body` / `replace_selection`). `commit` only rides on `extract_to_node`,
+// `on_accept` only on `inline`. Mirrors backend `HANDLER_KEYS` / `INLINE_DESTINATIONS`.
 export type PromptOutput = {
-  kind?: string;
+  handler?: string;
+  destination?: string;
   commit?: PromptCommit | null;
   on_accept?: PromptOnAccept | null;
 };
 
 export type PromptContextStrategy = {
   target?: Record<string, MetadataValue> | null;
-  scan_surface?: string[];
   output?: PromptOutput | null;
 };
 

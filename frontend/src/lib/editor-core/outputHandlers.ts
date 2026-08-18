@@ -30,9 +30,10 @@
 // (the streaming controller, the extraction + review publish); the handler is the
 // registered dispatch seam.
 //
-// Slice: S2a registered `inline`; S2b adds `extract_to_node` (the brainstorm
-// commit) and lifts produce/apply onto the generic base. Retiring the
-// `output.kind` enum + re-authoring the built-ins is S3.
+// Slice: S2a registered `inline`; S2b added `extract_to_node` (the brainstorm
+// commit) and lifted produce/apply onto the generic base; S3 retired the
+// `output.kind` disposition enum for the stored `handler` key this file routes on,
+// so `outputHandlerFor` is now a pure registry lookup.
 
 import type { Editor } from "@tiptap/core";
 import type {
@@ -47,7 +48,7 @@ export type OutputSource = "scan" | "transcript";
 export type OutputReview = "inline_mark" | "patch_diff";
 export type OutputActivation = "inline" | "conversation";
 // Where an inline handler writes. cursor vs selection is a DESTINATION sub-choice
-// (append_to_body vs replace_selection), not two separate handlers (ADR-0065 §3).
+// (was append_to_body vs replace_selection), not two separate handlers (ADR-0065 §3).
 export type InlineDestination = "cursor" | "selection";
 
 // How much surrounding prose a revise (selection) sends as context. Lives with
@@ -173,18 +174,19 @@ const _REGISTRY: Record<OutputHandlerKey, OutputHandler> = {
   extract_to_node: extractHandler as OutputHandler,
 };
 
-// The inline destination a kind implies (append → cursor, replace → selection).
+// The inline destination a prompt declares (unset defaults to cursor). A pure read
+// of `output.destination` now that it is stored — it used to be implied by the
+// append-vs-replace kind.
 export function inlineDestinationFor(output: PromptOutput | null | undefined): InlineDestination {
-  return output?.kind === "replace_selection" ? "selection" : "cursor";
+  return output?.destination === "selection" ? "selection" : "cursor";
 }
 
-// Route a prompt's output to its handler. A `commit` is the extract_to_node
-// bundle (it only rides on chat_panel, so its presence is the whole test); the
-// two inline kinds are the inline bundle; a plain chat_panel (general) and an
-// unset/unknown kind have no handler (the result stays in the chat).
+// Route a prompt's output to its handler — a pure registry lookup on `output.handler`
+// (ADR-0065). The stored key names the handler directly, so there is no branch to keep
+// in sync with the vocabulary: a new handler is a new registry entry, nothing here.
+// An unset/unknown handler (a `general` chat, a `snippet`) has none, and the result
+// stays in the conversation.
 export function outputHandlerFor(output: PromptOutput | null | undefined): OutputHandler | null {
-  if (output?.commit) return _REGISTRY.extract_to_node;
-  const kind = output?.kind;
-  if (kind === "append_to_body" || kind === "replace_selection") return _REGISTRY.inline;
-  return null;
+  const key = output?.handler as OutputHandlerKey | undefined;
+  return (key && _REGISTRY[key]) || null;
 }

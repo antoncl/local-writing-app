@@ -45,10 +45,10 @@ const noop = () => {};
 const DISPOSITION_SCHEMA = {
   entry_types: {
     "prompt:base": { name: "Prompt" },
-    "prompt:continuation": { name: "Continuation", parent: "prompt:base", prompt: { context_strategy: { output: { kind: "append_to_body" } } } },
-    "prompt:general": { name: "General", parent: "prompt:base", prompt: { context_strategy: { output: { kind: "chat_panel" } } } },
-    "prompt:revise:entry": { name: "Revise entry", parent: "prompt:base", prompt: { context_strategy: { output: { kind: "chat_panel", commit: { review: "visual_diff" } } } } },
-    "prompt:snippet": { name: "Snippet", parent: "prompt:base", prompt: { context_strategy: {} } },
+    "prompt:continuation": { name: "Continuation", parent: "prompt:base", prompt: { context_strategy: { output: { handler: "inline" } } } },
+    "prompt:general": { name: "General", parent: "prompt:base", prompt: { context_strategy: {} } },
+    "prompt:revise:entry": { name: "Revise entry", parent: "prompt:base", prompt: { context_strategy: { output: { handler: "extract_to_node", commit: { review: "visual_diff" } } } } },
+    "prompt:snippet": { name: "Snippet", parent: "prompt:base" },
   },
   fields: {},
 } as unknown as MetadataSchema;

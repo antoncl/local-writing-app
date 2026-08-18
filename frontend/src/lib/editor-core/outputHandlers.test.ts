@@ -54,29 +54,31 @@ const patch = (over: Partial<AIEntryPatch> = {}): AIEntryPatch => ({
 });
 
 describe("outputHandlerFor — routing", () => {
-  it("routes a commit to extract_to_node (a commit only rides on chat_panel)", () => {
-    expect(outputHandlerFor({ kind: "chat_panel", commit: { review: "visual_diff" } })?.key).toBe(
-      "extract_to_node",
-    );
+  it("routes the extract_to_node handler (the brainstorm commit) by its key", () => {
+    expect(
+      outputHandlerFor({ handler: "extract_to_node", commit: { review: "visual_diff" } })?.key,
+    ).toBe("extract_to_node");
   });
 
-  it("routes the two inline kinds to inline", () => {
-    expect(outputHandlerFor({ kind: "append_to_body" })?.key).toBe("inline");
-    expect(outputHandlerFor({ kind: "replace_selection" })?.key).toBe("inline");
+  it("routes the inline handler to inline, regardless of destination", () => {
+    expect(outputHandlerFor({ handler: "inline" })?.key).toBe("inline");
+    expect(outputHandlerFor({ handler: "inline", destination: "selection" })?.key).toBe("inline");
   });
 
-  it("has no handler for a plain chat_panel, unset, or null (result stays in the chat)", () => {
-    expect(outputHandlerFor({ kind: "chat_panel" })).toBeNull();
-    expect(outputHandlerFor({ kind: "" })).toBeNull();
+  it("has no handler for a general chat, unset, unknown, or null (result stays in the chat)", () => {
+    expect(outputHandlerFor({})).toBeNull(); // a general chat: a present-but-empty output block
+    expect(outputHandlerFor({ handler: "" })).toBeNull();
+    expect(outputHandlerFor({ handler: "bogus" })).toBeNull();
     expect(outputHandlerFor(null)).toBeNull();
     expect(outputHandlerFor(undefined)).toBeNull();
   });
 });
 
 describe("inlineDestinationFor", () => {
-  it("maps replace_selection→selection, everything else→cursor", () => {
-    expect(inlineDestinationFor({ kind: "replace_selection" })).toBe("selection");
-    expect(inlineDestinationFor({ kind: "append_to_body" })).toBe("cursor");
+  it("maps destination selection→selection, everything else→cursor", () => {
+    expect(inlineDestinationFor({ handler: "inline", destination: "selection" })).toBe("selection");
+    expect(inlineDestinationFor({ handler: "inline" })).toBe("cursor");
+    expect(inlineDestinationFor({ handler: "inline", destination: "cursor" })).toBe("cursor");
     expect(inlineDestinationFor(null)).toBe("cursor");
   });
 });

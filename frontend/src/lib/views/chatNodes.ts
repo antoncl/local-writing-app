@@ -32,8 +32,8 @@ import {
 export const SEED_DISPOSITION_FIELD = "seed_disposition";
 
 // `seed_disposition` as a computed field the view designer offers (computedFields
-// registry). Chats are seeded only by chat_panel prompts, so the reachable values
-// are exactly the two chat_panel dispositions; a freeform/deleted-seed chat carries
+// registry). Chats are seeded only by conversation prompts, so the reachable values
+// are exactly the two conversation dispositions; a freeform/deleted-seed chat carries
 // "" and simply matches neither. The lift stamps the value; this declares the field
 // exists and its choices so the filter picker can select it.
 export function seedDispositionFieldDef(): MetadataFieldDefinition {

@@ -66,8 +66,8 @@
 
   // ADR-0046 §6.4: "Brainstorm a new <type>…" — launch the lore brainstorm with
   // NO entry (create mode), seeding the target entry_type as a hidden input. The
-  // prompt is the same one the entry-pane revise launcher uses (a `chat_panel`
-  // prompt carrying a `commit`, ADR-0054 §2); hidden when no such instance exists
+  // prompt is the same one the entry-pane revise launcher uses (an `extract_to_node`
+  // prompt carrying a `commit`, ADR-0054 §2 / ADR-0065); hidden when no such instance exists
   // yet (#606). A temporary home until ADR-0047 contextual actions land.
   $: brainstormCtx = {
     metadataSchema: schema,

@@ -1,27 +1,33 @@
 // @vitest-environment happy-dom
-// ADR-0054 S3 — the commit authoring block in "Prompt defaults". A chat_panel
-// prompt may declare a `commit` (turning it into a brainstorm); this editor
-// authors its presence + review mode. Two invariants matter and are easy to
-// regress: (a) the commit control exists ONLY under a chat_panel disposition
-// (the backend rejects a commit on any other), and (b) the `commit.fields`
-// allow-list has no UI but must survive an edit through this editor verbatim —
-// the built-in scene-summary carries `fields: [summary]`, and stripping it on an
-// unrelated edit would let a summary regenerate rewrite the manuscript body.
+// ADR-0054 S3 / ADR-0065 — the commit authoring block in "Prompt defaults". A
+// CONVERSATION prompt may declare a `commit` (turning it into an extract_to_node
+// brainstorm); this editor authors its presence + review mode. Invariants that are
+// easy to regress: (a) the commit control exists ONLY under a conversation surface
+// (the backend rejects a commit on the inline handler); (b) a handler-less general
+// chat saves as an empty `context_strategy` (no output block) — its presence is what
+// marks it INVOCABLE vs a snippet (ADR-0065), so it must not collapse to no strategy;
+// and (c) `commit.fields` / `on_accept` have no UI but must ride through verbatim.
 //
-// The disposition is seeded through `initialPrompt` rather than by driving the
-// Output <select>: that select carries an empty `value=""` option that the
-// happy-dom / Svelte-5 select binding doesn't update under fireEvent (the app's
-// real browser behaviour is fine — S2 verified it). Seeding exercises the same
-// `{#if output.kind === "chat_panel"}` gate from both sides.
+// The surface is seeded through `initialPrompt` rather than by driving the Output
+// <select>: that select carries an empty `value=""` option that the happy-dom /
+// Svelte-5 select binding doesn't update under fireEvent (the app's real browser
+// behaviour is fine — S2 verified it). Seeding exercises the same
+// `{#if promptOutputSurface === "conversation"}` gate from both sides.
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
-import type { PromptEntryTypeExtras, PromptOutput } from "@/lib/types";
+import type { PromptContextStrategy, PromptEntryTypeExtras, PromptOutput } from "@/lib/types";
 import SchemaTypeEditor from "./SchemaTypeEditor.svelte";
 
 const TOGGLE = "Commit results back to the subject";
 
+// A prompt whose output block is `output` (an inline or extract prompt).
 function promptWith(output: PromptOutput | null): PromptEntryTypeExtras | null {
   return output ? { context_strategy: { output } } : null;
+}
+
+// A handler-less general chat: an (empty) context_strategy, no output block.
+function generalPrompt(): PromptEntryTypeExtras {
+  return { context_strategy: {} };
 }
 
 function mount(initialPrompt: PromptEntryTypeExtras | null, onSaveType: ReturnType<typeof vi.fn>) {
@@ -37,35 +43,43 @@ function mount(initialPrompt: PromptEntryTypeExtras | null, onSaveType: ReturnTy
   });
 }
 
-async function savedOutput(onSaveType: ReturnType<typeof vi.fn>): Promise<PromptOutput | undefined> {
+async function savedStrategy(
+  onSaveType: ReturnType<typeof vi.fn>,
+): Promise<PromptContextStrategy | undefined> {
   await fireEvent.click(screen.getByRole("button", { name: "Save Type" }));
-  return onSaveType.mock.calls.at(-1)?.[0]?.promptExtras?.context_strategy?.output;
+  return onSaveType.mock.calls.at(-1)?.[0]?.promptExtras?.context_strategy;
 }
 
-describe("SchemaTypeEditor commit authoring (ADR-0054 S3)", () => {
-  it("offers no commit control unless the disposition is chat_panel", () => {
-    mount(promptWith({ kind: "append_to_body" }), vi.fn());
+describe("SchemaTypeEditor commit authoring (ADR-0054 S3 / ADR-0065)", () => {
+  it("offers no commit control unless the surface is a conversation", () => {
+    mount(promptWith({ handler: "inline" }), vi.fn());
     expect(screen.queryByLabelText(TOGGLE)).toBeNull();
   });
 
-  it("shows an unchecked toggle on a plain chat panel, and writes a default commit when enabled", async () => {
+  it("shows an unchecked toggle on a plain conversation, and writes an extract_to_node commit when enabled", async () => {
     const onSaveType = vi.fn();
-    mount(promptWith({ kind: "chat_panel" }), onSaveType);
+    mount(generalPrompt(), onSaveType);
 
     const toggle = screen.getByLabelText(TOGGLE) as HTMLInputElement;
-    // A plain chat panel is not a brainstorm until the author opts in.
+    // A plain conversation is not a brainstorm until the author opts in.
     expect(toggle.checked).toBe(false);
     expect(screen.queryByRole("combobox", { name: /Review as/ })).toBeNull();
-    expect(await savedOutput(onSaveType)).toEqual({ kind: "chat_panel" });
+    // Saved as an empty context_strategy — no output block, but present ⇒ invocable.
+    expect(await savedStrategy(onSaveType)).toEqual({});
 
     onSaveType.mockClear();
     await fireEvent.click(toggle);
-    expect(await savedOutput(onSaveType)).toEqual({ kind: "chat_panel", commit: { review: "visual_diff" } });
+    expect(await savedStrategy(onSaveType)).toEqual({
+      output: { handler: "extract_to_node", commit: { review: "visual_diff" } },
+    });
   });
 
   it("preserves the commit.fields allow-list verbatim through an unrelated edit", async () => {
     const onSaveType = vi.fn();
-    mount(promptWith({ kind: "chat_panel", commit: { review: "replace", fields: ["summary"] } }), onSaveType);
+    mount(
+      promptWith({ handler: "extract_to_node", commit: { review: "replace", fields: ["summary"] } }),
+      onSaveType,
+    );
 
     // Seeded state reflects the existing commit.
     expect((screen.getByLabelText(TOGGLE) as HTMLInputElement).checked).toBe(true);
@@ -74,18 +88,21 @@ describe("SchemaTypeEditor commit authoring (ADR-0054 S3)", () => {
 
     // Change only the review mode — fields has no UI and must ride through.
     await fireEvent.change(review, { target: { value: "visual_diff" } });
-    expect(await savedOutput(onSaveType)).toEqual({
-      kind: "chat_panel",
-      commit: { review: "visual_diff", fields: ["summary"] },
+    expect(await savedStrategy(onSaveType)).toEqual({
+      output: { handler: "extract_to_node", commit: { review: "visual_diff", fields: ["summary"] } },
     });
   });
 
   it("drops the whole commit (fields included) when the author turns it off", async () => {
     const onSaveType = vi.fn();
-    mount(promptWith({ kind: "chat_panel", commit: { review: "replace", fields: ["summary"] } }), onSaveType);
+    mount(
+      promptWith({ handler: "extract_to_node", commit: { review: "replace", fields: ["summary"] } }),
+      onSaveType,
+    );
 
     await fireEvent.click(screen.getByLabelText(TOGGLE));
-    expect(await savedOutput(onSaveType)).toEqual({ kind: "chat_panel" });
+    // Turning the commit off makes it a plain (handler-less) conversation again.
+    expect(await savedStrategy(onSaveType)).toEqual({});
   });
 });
 
@@ -122,13 +139,17 @@ describe("SchemaTypeEditor on_accept round-trip (#957)", () => {
     // ride through a save verbatim — the same guarantee as commit.fields. Without
     // this, editing roleplay's type would silently drop the stamp.
     const onSaveType = vi.fn();
-    mount(promptWith({ kind: "append_to_body", on_accept: { ...onAccept } }), onSaveType);
-    expect(await savedOutput(onSaveType)).toEqual({ kind: "append_to_body", on_accept: { ...onAccept } });
+    mount(promptWith({ handler: "inline", on_accept: { ...onAccept } }), onSaveType);
+    expect(await savedStrategy(onSaveType)).toEqual({
+      output: { handler: "inline", on_accept: { ...onAccept } },
+    });
   });
 
-  it("drops on_accept when the disposition is not inline (it rides only on inline)", async () => {
+  it("drops on_accept when the surface is not inline (it rides only on inline)", async () => {
     const onSaveType = vi.fn();
-    mount(promptWith({ kind: "chat_panel", on_accept: { ...onAccept } }), onSaveType);
-    expect(await savedOutput(onSaveType)).toEqual({ kind: "chat_panel" });
+    // A handler-less conversation carrying an on_accept — the stamp must drop, leaving
+    // a plain conversation (an empty context_strategy).
+    mount(promptWith({ on_accept: { ...onAccept } }), onSaveType);
+    expect(await savedStrategy(onSaveType)).toEqual({});
   });
 });

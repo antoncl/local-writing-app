@@ -92,8 +92,8 @@
     availableScenes: [],
     hiddenPromptIds: $hiddenLibraryStore,
   });
-  // The prompts applicable to this node — the ＋New menu. The chat_panel
-  // conversation prompts whose `offer_on` allow-list admits THIS node's type
+  // The prompts applicable to this node — the ＋New menu. The conversation
+  // prompts whose `offer_on` allow-list admits THIS node's type
   // (ADR-0054 §4/S4) — a lore entry offers the lore revise prompt, a plot card
   // the plot-card one, a scene the scene-summary one, a character both the revise
   // prompt and impersonate, never cross. Both committing brainstorms and plain

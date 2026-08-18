@@ -1,5 +1,5 @@
 <!--
-  OfferOnPicker — the "Show in ＋New on…" authoring control for a chat_panel
+  OfferOnPicker — the "Show in ＋New on…" authoring control for a conversation
   prompt (ADR-0054 §4 / S4b, reworked in #903). Writes the instance-level
   `offer_on` allow-list: the subject entry_types on which this prompt is offered
   as a ＋New conversation in a node's Conversations panel (read back by
@@ -11,7 +11,7 @@
   parent (e.g. lore's root) covers its descendants, which then render disabled as
   "covered." Only conversation-host subjects are offered (all lore; the scene and
   plot-card subtrees), so no dead targets. Mounted by CodeBodyView ONLY for a
-  chat_panel prompt (the gate lives in the host).
+  conversation prompt (the gate lives in the host).
 
   `offer_on` is bind:'d to the parent (NodeEditor's offerOnDraft) so the parent's
   save logic owns serialization; `onChange` fires the pane's emitChange.

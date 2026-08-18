@@ -611,9 +611,9 @@ class PromptEntrySummary(BaseModel):
     # off the node's front-matter exactly like `inputs`. A prompt is offered on a
     # subject iff one of these is an ancestor-or-self of the subject's entry_type;
     # an empty list means "offered nowhere" (opt-in, no implicit everywhere-match).
-    # Only meaningful on `chat_panel` prompts (the only disposition launched from
-    # that menu); inert on the others. Intentionally lenient — unknown ids simply
-    # never match, like `commit.fields`.
+    # Only meaningful on conversation prompts (those with no `inline` output
+    # handler — the only ones launched from that menu); inert on the others.
+    # Intentionally lenient — unknown ids simply never match, like `commit.fields`.
     offer_on: list[str] = Field(default_factory=list)
     source_layer_id: str = ""
     source_layer_label: str = ""

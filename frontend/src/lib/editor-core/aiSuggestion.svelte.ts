@@ -17,7 +17,7 @@ import { countWords } from "@/lib/utils/wordCount";
 import type { AiSuggestionMeta, AiToolbarPosition } from "@/lib/editor-core/aiToolbar";
 import {
   type PromptResolutionContext,
-  effectivePromptOutput,
+  promptSurfaceFor,
   effectivePromptInputs,
   findPromptEntry,
   promptOnAccept,
@@ -26,8 +26,6 @@ import {
 } from "@/lib/editor-core/promptResolution";
 import {
   inlineHandler,
-  inlineDestinationFor,
-  outputHandlerFor,
   type InlineDestination,
   type InlineGathered,
   type InlineHost,
@@ -324,11 +322,11 @@ export class AiSuggestionController {
     const editor = this.#deps.getEditor();
     const scene = this.#deps.getScene();
     if (!editor || !scene) return;
-    const output = effectivePromptOutput(this.#deps.getPromptCtx(), entry);
-    const handler = outputHandlerFor(output);
-    if (handler?.key === "inline") {
+    const ctx = this.#deps.getPromptCtx();
+    const surface = promptSurfaceFor(ctx, entry);
+    if (surface === "cursor" || surface === "selection") {
       const run: OutputRun = { entry, inputs, assistantId, scene };
-      const host = this.#inlineHost(run, inlineDestinationFor(output));
+      const host = this.#inlineHost(run, surface);
       const gathered = await inlineHandler.produce(host);
       if (!gathered) return;
       this.error = null;
@@ -341,14 +339,17 @@ export class AiSuggestionController {
       await inlineHandler.apply(gathered, host);
       return;
     }
-    if (output?.kind === "chat_panel") {
+    // A `conversation` surface (ADR-0065) — an `extract_to_node` brainstorm or a
+    // handler-less `general` chat — opens in a chat. Only a prompt with no
+    // context_strategy at all (a snippet, or a misconfigured type) can't be invoked here.
+    if (surface === "conversation") {
       this.#lastInvokedEntryId = entry.id;
       this.#lastInvokedInputs = inputs;
       this.#lastInvokedAssistantId = assistantId;
       this.#deps.onOpenChat({ entry, inputs, sceneId: scene.id, assistantId });
       return;
     }
-    this.error = `Output kind "${output?.kind ?? "(unset)"}" is not yet supported for inline dispatch.`;
+    this.error = `Prompt "${entry.title}" has no output handler and can't be invoked here.`;
     this.updateToolbarPosition();
   }
 

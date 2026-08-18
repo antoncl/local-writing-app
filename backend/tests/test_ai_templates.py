@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from jinja2 import UndefinedError
+from jinja2 import TemplateSyntaxError, UndefinedError
 
 from app.services.ai.templates import (
     ContentBlock,
@@ -28,41 +28,16 @@ class TemplateEngineTests(unittest.TestCase):
         self.assertEqual(roles, ["system", "user", "assistant"])
         self.assertEqual(out.messages[1].text, "usr")
 
-    def test_cache_break_inside_role_splits_blocks(self) -> None:
-        out = render_template(
-            '{% role "system" %}stable{% cache_break %}volatile{% endrole %}'
-        )
-        self.assertEqual(len(out.messages), 1)
-        blocks = out.messages[0].blocks
-        self.assertEqual(len(blocks), 2)
-        self.assertEqual(blocks[0], ContentBlock(text="stable", cache_break_after=True))
-        self.assertEqual(blocks[1], ContentBlock(text="volatile", cache_break_after=False))
+    def test_role_body_is_one_block(self) -> None:
+        # ADR-0060 §5 retired intra-message splitting; a role body is one block.
+        out = render_template('{% role "system" %}stable then volatile{% endrole %}')
+        self.assertEqual(out.messages[0].blocks, [ContentBlock(text="stable then volatile")])
 
-    def test_trailing_cache_break_marks_last_block(self) -> None:
-        out = render_template(
-            '{% role "system" %}content{% cache_break %}{% endrole %}'
-        )
-        blocks = out.messages[0].blocks
-        self.assertEqual(len(blocks), 1)
-        self.assertTrue(blocks[0].cache_break_after)
-
-    def test_multiple_cache_breaks_in_one_role(self) -> None:
-        out = render_template(
-            '{% role "user" %}a{% cache_break %}b{% cache_break %}c{% endrole %}'
-        )
-        blocks = out.messages[0].blocks
-        self.assertEqual([b.text for b in blocks], ["a", "b", "c"])
-        self.assertEqual([b.cache_break_after for b in blocks], [True, True, False])
-
-    def test_cache_break_outside_role_warns(self) -> None:
-        out = render_template(
-            '{% cache_break %}{% role "system" %}sys{% endrole %}'
-        )
-        self.assertEqual(len(out.messages), 1)
-        self.assertTrue(
-            any("outside a role block" in w for w in out.warnings),
-            out.warnings,
-        )
+    def test_retired_cache_break_tag_raises(self) -> None:
+        # ADR-0060 §5: `{% cache_break %}` is gone — an unknown tag is a syntax
+        # error surfaced to the author, not silently rendered.
+        with self.assertRaises(TemplateSyntaxError):
+            render_template('{% role "system" %}a{% cache_break %}b{% endrole %}')
 
     def test_bare_text_outside_role_warns(self) -> None:
         out = render_template(
@@ -142,9 +117,8 @@ class TemplateEngineTests(unittest.TestCase):
             )
 
     def test_rendered_template_text_property(self) -> None:
-        out = render_template(
-            '{% role "system" %}one{% cache_break %}two{% endrole %}'
-        )
+        out = render_template('{% role "system" %}{% if x %}one{% endif %}two{% endrole %}',
+                              context={"x": True})
         self.assertEqual(out.messages[0].text, "onetwo")
 
 
@@ -190,14 +164,6 @@ class DefaultRoleHomingTests(unittest.TestCase):
         )
         self.assertEqual([(m.role, m.text) for m in out.messages], [("system", "s")])
         self.assertEqual(out.warnings, [])
-
-    def test_cache_break_in_loose_text_stripped_and_warned_when_homed(self) -> None:
-        # Homing does not resurrect cache_break outside a role (slice-4 territory):
-        # it is stripped, the text still homes, and the no-effect warning stands.
-        out = render_template("before{% cache_break %}after", default_role="system")
-        self.assertEqual(len(out.messages), 1)
-        self.assertEqual(out.messages[0].text, "beforeafter")
-        self.assertTrue(any("outside a role block" in w for w in out.warnings), out.warnings)
 
     def test_default_role_can_be_user(self) -> None:
         out = render_template("play the scene", default_role="user")

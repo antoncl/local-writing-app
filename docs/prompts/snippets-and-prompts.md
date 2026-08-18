@@ -24,7 +24,7 @@ Snippets live in their own folder so they're easy to browse and back up separate
 Inside a prompt template, snippets are pulled in by node ID. Filenames give you readable IDs:
 
 ```jinja
-{% include "snippet_house_voice" %}
+{% include "builtin-house-voice" %}
 ```
 
 See [Template language](template-language.md) for the full include syntax.
@@ -40,7 +40,6 @@ A prompt is everything required to invoke the AI for one specific task. It pairs
 - An **instruction template** (the body — Jinja2)
 - A **context strategy** (what to pull into the envelope before sending)
 - **Inputs** the user fills in at dispatch time (e.g., "how many words?")
-- Optional overrides for model class, provider policy, etc.
 
 ### Abstract parent + concrete sub-types
 
@@ -48,7 +47,7 @@ A prompt is everything required to invoke the AI for one specific task. It pairs
 `continuation`, `revise`, `general`, `snippet`. Users may instantiate the bases
 directly, or sub-type one to declare the behavior for a specific task:
 
-| Planned sub-type | What it does |
+| Sub-type | What it does |
 | --- | --- |
 | `prompt.continue_scene` | Generate prose from cursor + beat instructions (output: insert at cursor, visual diff) |
 | `prompt.revise_selection` | Rewrite a marked selection (output: replace selection, visual diff) |
@@ -57,14 +56,14 @@ directly, or sub-type one to declare the behavior for a specific task:
 | `prompt.lore_query` | Research over lore canon (output: chat panel) |
 | `prompt.character_query` | Roleplay as a character at the current scene's effective state — used to verify mutable-metadata timelines (output: chat panel) |
 
-These sub-types ship seeded with the system schema. Users can fork them or add their own via the schema editor (M5).
+These sub-types ship seeded with the system schema. Users can fork them or add their own via the schema editor.
 
 ### Properties
 
 - **Kind:** `prompt`
 - **Has body:** yes (the body markdown is the Jinja2 template; see [Template language](template-language.md))
 - **Stored at:** `<project>/prompts/<title>.md`
-- **Front matter:** `id`, `title`, `entry_type`, `model_class`, `provider_policy`, `inputs`, `context_strategy`
+- **Front matter:** `id`, `title`, `entry_type`, `inputs`, `context_strategy`
 
 ### Properties on the entry-type definition (not on the node)
 
@@ -117,22 +116,22 @@ Cardinality is implied by the type literal (`entity_ref` → single, `entity_ref
 Inside the template the value is the raw id (or list of ids). Wrap with `entry()` to walk into fields:
 
 ```jinja
-{{ entry(input.character).title }}
-{% for r in input.related %}- {{ entry(r).title }}{% endfor %}
+{{ entry(inputs.character).title }}
+{% for r in inputs.related %}- {{ entry(r).title }}{% endfor %}
 ```
 
 ## File layout
 
-A fresh M2-era project has:
+A project has:
 
 ```
 <project>/
-  prompts/          (already present pre-M2)
-  snippets/         (added by migration v1→v2)
+  prompts/
+  snippets/
   ...
 ```
 
-The migration framework (see [strategy_migration](../../README.md)) creates `snippets/` on open for any project that doesn't yet have it.
+Both folders are part of the project format; `snippets/` is created on open for any project that doesn't yet have it.
 
 ## See also
 

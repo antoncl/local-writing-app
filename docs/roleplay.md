@@ -76,10 +76,10 @@ When `/roleplay Bob` fires, the backend walks the scene body and produces an alt
 
 The renderer also coalesces consecutive same-role messages and drops whitespace-only turns, so the LLM sees a clean user/assistant/user alternation regardless of how spans interleave with narration.
 
-This happens automatically in the `character_thread(scene, character)` Jinja helper at the bottom of the Roleplay default body. If you write your own roleplay-flavoured prompt, call the helper outside any `{% role %}` block — it emits its own role-tagged content. Example skeleton:
+This happens automatically in the `character_turns(scene, character)` Jinja helper at the bottom of the Roleplay default body. If you write your own roleplay-flavoured prompt, call the helper outside any `{% role %}` block — it emits its own role-tagged content. Example skeleton:
 
 ```jinja
-{% set char = entry(input.character) %}
+{% set char = entry(inputs.character) %}
 {% role "system" %}
 You are playing {{ char.title }}.
 {{ char.body }}
@@ -90,7 +90,7 @@ You are playing {{ char.title }}.
 {{ scene.metadata.dynamics }}{% endif %}
 {% endrole %}
 
-{{ character_thread(scene, input.character) }}
+{{ character_turns(scene, inputs.character) }}
 ```
 
 ## Cache identity
@@ -107,14 +107,14 @@ The `character` input on a Roleplay prompt:
 
 | Field | Value |
 |---|---|
-| `name` | `character` (must match what the template references: `input.character`) |
+| `name` | `character` (must match what the template references: `inputs.character`) |
 | `type` | `context_pick` |
 | `target.kinds` | `["lore"]` |
 | `target.entry_types` | `{"lore": ["character"]}` |
 | `target.multiple` | `false` (single-pick — only one focus character per invocation) |
 | `required` | `true` |
 
-This is the shape `default_inputs` seeds onto fresh Roleplay prompts. If you change it, the template's `entry(input.character)` call still works as long as the value resolves to a single lore entry.
+This is the shape `default_inputs` seeds onto fresh Roleplay prompts. If you change it, the template's `entry(inputs.character)` call still works as long as the value resolves to a single lore entry.
 
 ## Caveats
 

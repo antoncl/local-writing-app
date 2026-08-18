@@ -1,11 +1,13 @@
 # Helpers
 
-Functions callable from a prompt template. All are registered as globals on the sandboxed Jinja2 environment by `register_helpers(env, project_service)`; users cannot define new helpers (security boundary).
+Functions callable from a prompt template. All are registered as globals on the sandboxed Jinja2 environment by `register_helpers(env, project_service)`; users cannot define new helpers (security boundary). For the one-line-per-entry roster with types, see [reference.md](reference.md#helpers).
 
 There are two flavors:
 
 - **Pure helpers** (`last_words`) need no project state. Always available.
-- **Project-bound helpers** (`pov`, `scenes_before`, `relevant_lore`) need to look up nodes, walk the reference graph, or read prior scenes. They are bound to a specific project at env-construction time.
+- **Project-bound helpers** (`pov`, `story_so_far`, `use`) need to look up nodes, walk the reference graph, or read prior scenes. They are bound to a specific project at env-construction time.
+
+Everything is resolved **as of the prompt's one scene** (ADR-0012): `scene.pov.title`, `entry(x)`, `story_so_far(scene)` all read the values effective at that scene. A scene-less prompt reads book-start values.
 
 Two values that look like helpers but are actually template **variables**, populated by the dispatch layer per call:
 
@@ -57,14 +59,18 @@ POV: {{ pov(scene).title }} (also known as: {{ pov(scene).aliases | join(", ") }
 - The seeded `pov` field on the `scene` entry type is an `entity_ref` targeting characters. A `pov` field with free-form text (no lore id) returns `None`; read `scene.metadata.pov` directly if you need the raw string.
 - If the metadata holds a list of refs, only the first is returned.
 
-## `entry(ref_or_id)`
+## `entry(x, at=scene, position=n)` and `original(x)`
 
-Wrap a string id (or an EntryRef, or any object with an `.id` attribute) as an [EntryRef](#entryref). Useful when you have the raw id of an entry and want to walk into its fields without writing the lookup by hand.
+Resolve a node into an [EntryRef](#entryref) you can walk. `entry(x)` returns the node **as of the prompt's scene** — the values effective at that point in the story; `original(x)` returns the same node at **book-start**, ignoring every mutation. Useful when you have the raw id (or a picked ref) of an entry and want to walk into its fields without writing the lookup by hand.
 
 **Signature**
 ```python
-entry(value) -> EntryRef | None
+entry(value, at=<scene>, position=None) -> EntryRef | None
+original(value) -> EntryRef | None
 ```
+
+- `at=` overrides the resolution scene — `entry(x, at=other_scene)` reads `x` as of a different anchor; `at=None` forces book-start (so `entry(x, at=None) == original(x)`). In a scene-less prompt `entry(x) == original(x)` already.
+- `position=` is an optional within-scene cursor for mid-scene mutation resolution.
 
 **Returns**: an EntryRef for the resolved id, or `None` when the input is empty / unrecognized. The EntryRef itself is lazy — it doesn't touch disk until you read a non-id attribute.
 
@@ -77,19 +83,22 @@ entry(value) -> EntryRef | None
 - A `list` of any of the above — the **first** element wins.
 - A JSON-string of a list (the form a `context_pick` input takes when rendered into a template). Auto-parsed; the first picked ref is used.
 
-The last two shapes mean `entry(input.character)` works directly when `character` is a `context_pick` input (whether single- or multi-pick).
+The last two shapes mean `entry(inputs.character)` works directly when `character` is a `context_pick` input (whether single- or multi-pick).
 
 **Example**
 ```jinja
-{% set honor = entry(scene.metadata.pov) %}
+{% set honor = entry(scene.pov) %}
 {{ honor.title }} lives on {{ honor.home_place.title }}.
 
 {# Or against a context_pick input — first picked ref wins #}
-{% set bob = entry(input.character) %}
+{% set bob = entry(inputs.character) %}
 You are playing {{ bob.title }}.
+
+{# Book-start value, ignoring mid-story mutations #}
+{{ original(honor).title }} started the book as a {{ original(honor).rank }}.
 ```
 
-## `character_thread(scene, character)`
+## `character_turns(scene, character)`
 
 Reconstruct a per-character chat thread from a scene body's character markers (the `<!-- character:id=X -->…<!-- /character -->` spans the Roleplay flow writes on Accept). Emits its own role-tagged content using the same markers the `{% role %}` extension produces, so the renderer splits the output into multiple alternating chat messages.
 
@@ -97,11 +106,11 @@ Reconstruct a per-character chat thread from a scene body's character markers (t
 
 **Signature**
 ```python
-character_thread(scene, character) -> str
+character_turns(scene, character) -> str
 ```
 
 - `scene` — the target scene (an EntryRef or anything exposing `.body`). The helper reads `.body` directly.
-- `character` — the focus character whose turn is being generated. Accepts the same shapes `entry()` does: a bare id, an EntryRef, a ContextPickRef dict, a list, or a JSON-string list. In practice you pass `input.<your_character_pick_name>`.
+- `character` — the focus character whose turn is being generated. Accepts the same shapes `entry()` does: a bare id, an EntryRef, a ContextPickRef dict, a list, or a JSON-string list. In practice you pass `inputs.<your_character_pick_name>`.
 
 **Mapping** (each segment of the body becomes a message):
 
@@ -117,33 +126,32 @@ Consecutive same-role segments are coalesced into one message, and empty message
 
 **Example** (the Roleplay default body, abridged):
 ```jinja
-{% set char = entry(input.character) %}
+{% set char = entry(inputs.character) %}
 {% role "system" %}
 You are playing {{ char.title }}.
 {{ char.body }}
 {% endrole %}
 
 {% role "user" %}
-{% if scene.metadata.dynamics %}
+{% if scene.dynamics %}
 ## Dynamics
-{{ scene.metadata.dynamics }}
+{{ scene.dynamics }}
 {% endif %}
-{{ relevant_lore(scene) }}
-{% cache_break %}
-{% if scenes_before(scene) %}
+{{ use_lore() }}
+{% if story_so_far(scene) %}
 ## The story so far
-{{ scenes_before(scene) }}
+{{ story_so_far(scene) }}
 {% endif %}
 {% endrole %}
 
 {# Per-character thread takes over below. Outside the role block. #}
-{{ character_thread(scene, input.character) }}
+{{ character_turns(scene, inputs.character) }}
 ```
 
 **Caveats**:
 
 - The helper emits raw control-character markers (`ROLE_START`, `ROLE_END`). The template environment is `autoescape=False`, so they pass through verbatim and get re-parsed. Don't manually `e()` or `Markup()` the result.
-- Nesting `character_thread` inside a `{% role %}` block triggers the renderer's "nested role" warning and drops the outer wrapper — keep it outside.
+- Nesting `character_turns` inside a `{% role %}` block triggers the renderer's "nested role" warning and drops the outer wrapper — keep it outside.
 - See [`docs/roleplay.md`](../roleplay.md) for the user-facing howto on Roleplay prompts and the marker scheme.
 
 ## EntryRef
@@ -231,13 +239,13 @@ full_text() -> list[SceneText]
 
 **Caveats**: skips structure nodes that don't link to a scene (acts, chapters with no body). For an outline-only view use `full_outline()`.
 
-## `scenes_before(scene)`
+## `story_so_far(scene)`
 
-Returns an XML-wrapped listing of every scene that appears before `scene` in manuscript order.
+Returns an XML-wrapped recap of every scene that appears before `scene` in manuscript order (scenes 1 → n-1, reading order). A derived, per-scene-deterministic block: it is **emitted** (not selected), and because it is deterministic for a given scene it rides the stable prefix and caches there.
 
 **Signature**
 ```python
-scenes_before(scene) -> str
+story_so_far(scene) -> str
 ```
 
 **Returns**: a string. Output shape:
@@ -256,142 +264,60 @@ Empty string if there are no prior scenes (which produces no message if the surr
 
 **Example**
 ```jinja
-{% if scenes_before(scene) %}
+{% if story_so_far(scene) %}
 The story so far:
-{{ scenes_before(scene) }}
+{{ story_so_far(scene) }}
 {% endif %}
 ```
 
 **Caveats**:
 
-- **Scope is the entire project** for now. Once nested-project support lands (a Honorverse → series → book layout), the scope narrows to the current book. Don't include this helper in a prompt that's supposed to span multiple books — that case will need a different helper (`scenes_before_series(scene)` or similar).
+- **Scope is the current book.** Under a nested layout (a Honorverse → series → book folder chain) the recap is the book's own scenes, not the whole universe.
 - Only scenes with a non-empty `summary` metadata field contribute. Empty-summary scenes are skipped silently.
 - The walk is depth-first through `manuscript.structure.yaml`. Containers (acts, chapters) contribute their own summaries if they have one; otherwise they're invisible structural nodes.
 
-## `relevant_lore(scene, mode="implicit", partition="all")`
+## `use(node, "stable"|"volatile")` and `use_lore()`
 
-Returns an XML block of lore entries the model should know about for this scene. Each entry uses its `entry_type` as the tag name. [Anthropic specifically recommends XML tags](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/use-xml-tags) for delimiting structure in prompts; the format helps the model locate entities unambiguously.
-
-**Output shape**:
-```xml
-<lore>
-<character name="Honor Harrington" aliases="The Salamander">
-Captain of the Fearless. Treecat-adopted.
-</character>
-
-<character name="Nimitz">
-Honor's treecat companion.
-</character>
-
-<place name="Manticore" aliases="Star Kingdom">
-A binary star system; the capital world of the Star Kingdom.
-</place>
-</lore>
-```
-
-The entry's body is XML-escaped (so `Captain & Crew` becomes `Captain &amp; Crew`); markdown structure within the body is preserved as-is. Aliases are comma-joined into a single attribute. An entry with no body or summary renders as a self-closing tag (`<character name="..." />`).
+These **select** context; they do not emit it. The template's job is to name what the model should know about — `use(node)` picks one specific node, `use_lore()` enables the scene's implicit lore (the reference-graph retrieval). The backend then does the work: it selects, dedups, places, tiers, and caches the chosen nodes. **Both return an empty string** — nothing lands in the template output where you call them.
 
 **Signature**
 ```python
-relevant_lore(scene, mode: str = "implicit", partition: str = "all") -> str
+use(node, hint: str | None = None) -> str   # "" — selection side-effect only
+use_lore() -> str                            # "" — enables implicit lore for the scene
 ```
 
-**Modes** (what lore is in scope):
+- `node` accepts the same shapes `entry()` does (id, EntryRef, picked ref, list). Reach for `use(inputs.character)` to force a specific picked node into context.
+- The optional `hint` is `"stable"` or `"volatile"` — an **advisory** cache-tier prior. It nudges where the backend orders the node in the volatility sequence; correctness (a changed node cannot be served as stable) always wins over the hint.
+- `use_lore()` is the gate for the scene's *implicit* lore: the union of lore the scene references directly, lore whose name appears in the scene summary, and a one-hop expansion. Calling it turns that retrieval on; leaving it out means no implicit lore is pulled.
 
-| Mode | What's included |
-| --- | --- |
-| `"implicit"` (default) | Union of: (a) lore directly referenced by the scene's entity_ref / entity_ref_list metadata; (b) lore whose title or any alias appears in the scene's `summary` field as a whole word; (c) one-hop expansion through the entries found by (a) + (b). |
-| `"explicit"` | Only (a) — lore directly referenced via entity_ref fields. No alias scan, no graph walk. |
-| `"pinned_only"` | Empty for now. Pinning UI ships in M4. |
-
-**Partitions** (which of the in-scope lore is returned, only meaningful when a session is bound — see [Sessions](#sessions)):
-
-| Partition | What's included |
-| --- | --- |
-| `"all"` (default) | Every in-scope entry, regardless of session baseline. |
-| `"stable"` | Entries whose `revision` matches the session baseline (unchanged since the prior call). |
-| `"volatile"` | Entries that are new or changed since the prior call. |
-
-**Returns**: a string. Sorted by lore ID for stable ordering — important for cache coherence; see [strategy_ai_integration](README.md).
-
-**Example — partition-aware**
+**Example**
 ```jinja
 {% role "user" %}
-{{ relevant_lore(scene, "implicit", "stable") }}
-{% cache_break %}
-{{ relevant_lore(scene, "implicit", "volatile") }}
+{{ use_lore() }}
+{{ use(inputs.pinned_place, "stable") }}
 Scene so far:
 {{ text_before }}
 {% endrole %}
 ```
 
-This is the canonical pattern for cache-coherent assembly: stable lore above the cache_break, volatile below. On the second call in a session, the stable block is byte-identical and hits Anthropic's prompt cache.
+Nothing above renders lore text into the message — the `use_lore()` / `use(...)` calls emit `""`. The backend places the selected lore into the send-path envelope, tiered by volatility, and the [preview](preview.md) shows exactly where it lands and how it is badged.
 
-**Caveats**:
+**Why selection instead of emission?** The template no longer decides placement or caching. That removes the old cache-coherence footwork — there is no author-managed stable/volatile split, no cache breakpoint to spend, and no double-resolution of a "relevant set." One deterministic ordering, owned by the backend, feeds every provider.
 
-- Alias matching is **case-insensitive** and **whole-word**. Multi-word names (like "Star Kingdom") are matched as a substring with word boundaries. This catches normal prose mentions but won't match if the prose mangles capitalization across word boundaries (e.g., `starkingdom`).
-- The one-hop expansion only walks lore→lore references via fields whose values look like lore IDs. It does not follow scene references back into other scenes.
-- Stable ordering by ID is important: changing order between calls invalidates the cache breakpoint. The helper sorts internally; don't sort the output yourself in templates.
-- The scope, like `scenes_before`, is the entire project for now and narrows to the current book under nesting.
-- Calling `relevant_lore` twice in a render (e.g., for stable + volatile) re-resolves the relevant set both times. Cheap for now; a future pass may cache it within a single render.
+### Resolving lore as of a different scene
 
-### The `scene` argument is also the mutation resolution scene
-
-The `scene` you pass is what mid-scene lore mutations (#33) resolve **against** — each
-returned entry's fields show their *effective value as of that scene* (an earlier scene
-sees the old value, a later one the new). The same is true of the `effective(entity, field, scene)`
-helper.
-
-`scene` accepts a scene **object** *or* a plain scene **id string**, so a prompt can take an
-explicit resolution scene via a **`scene_ref` input** (#60) and thread it in — falling back to
-the current/anchored `scene`, and to nothing (base / end-of-book) in a general chat:
+Mid-scene lore mutations (#33) resolve against the prompt's scene by default — `scene.pov.rank`, `entry(x)`, and the lore that `use_lore()` selects all show their effective value at that point. To resolve against a *different* anchor, pass `at=` to `entry`:
 
 ```jinja
 {# A roleplay prompt with a `scene_ref` input named `as_of`: #}
-{{ relevant_lore(input.as_of or scene) }}
-
-{# Query one field as of the picked scene: #}
-Your rank as of this point: {{ effective(character, "rank", input.as_of or scene) }}
+Your rank as of this point: {{ entry(inputs.character, at=inputs.as_of or scene).rank }}
 ```
 
-Unlike `context_pick`, a `scene_ref` value injects **no content** — it is only the resolution
-setting (ADR-0012). An empty `scene_ref` and no anchored `scene` resolves at **end-of-book**
-(full knowledge), the safe default for a non-manuscript chat.
+A `scene_ref` value injects **no content** — it is only the resolution setting (ADR-0012). With no anchor at all (`entry(x, at=None)`, or a scene-less general chat) resolution falls to **book-start** via `original(x)`.
 
-## Sessions
+## Caching and tiering are not the author's job
 
-A session lets `relevant_lore`'s `stable` / `volatile` partition distinguish entries that have been seen unchanged from entries that are new or have been edited since the prior call. It's the engine's answer to the cache-coherence objection in the [strategy doc](README.md).
-
-### Lifecycle
-
-```python
-from app.services.ai.sessions import AISession
-from app.services.ai.helpers import create_environment_for_project
-from app.services.ai.templates import render_template
-
-session = AISession(id="scene_xxxxx")           # caller-supplied ID
-env = create_environment_for_project(svc, session=session)
-out = render_template(source, context=ctx, env=env)
-session.commit()                                 # promote touched → baseline
-```
-
-Every entry that `relevant_lore` returns (in any partition) is **snapshotted** into `session.touched` automatically. Calling `session.commit()` at the end of a successful render promotes touched to baseline. The next call partitions against that baseline.
-
-### First-call behavior
-
-The first call has an empty baseline, so **every entry is volatile**. After commit, the second call sees the same set as stable. The cache builds up naturally — you don't need to special-case the first call.
-
-### Without a session
-
-If `create_environment_for_project` is called without a session, the partition parameter on `relevant_lore` is ignored — all calls behave like `partition="all"`. This is the right default for testing and for one-shot prompts where caching isn't useful.
-
-### Session keying
-
-Sessions are keyed by a string ID the caller supplies. The typical choice is the scene_id of the current target: opening a scene starts a new session keyed by that scene; reopening the same scene resumes the same session. The dispatch endpoint (M2.4) will manage this; the engine just provides the machinery.
-
-### `AISessionRegistry`
-
-A process-wide registry exists at `app.services.ai.sessions.default_registry`. It's a simple `dict[str, AISession]` with `get_or_create(id)`, `get(id)`, `drop(id)`, and `clear()`. No expiry yet — the dispatch layer will own the expiry policy when it lands.
+There is no author-facing session or stable/volatile split in the template language. A prompt **selects** nodes with `use()` / `use_lore()`; the backend orders the whole envelope by volatility (stable content first), tiers each selected node, and maps that ordering onto each provider's caching primitive. The template author writes meaning, not placement — see [Caching is a backend concern](template-language.md#caching-is-a-backend-concern) and the [preview's cache strip](preview.md#the-cache-strip), which shows the resulting `stable` / `volatile` badging.
 
 ## Adding a new helper
 

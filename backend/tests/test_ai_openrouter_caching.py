@@ -55,12 +55,14 @@ def test_plain_string_system_yields_string_content():
 
 
 def test_blocks_with_explicit_caching_emit_cache_control():
+    # ADR-0060 §5: blocks carry only a `tier`; this adapter maps it to cache_control
+    # + ttl (stable → 1h, volatile → 5m); a tier-less block gets no marker.
     out = _openrouter_system_messages(
         "",
         [
-            {"text": "stable header", "cache_break_after": True, "ttl": "1h"},
-            {"text": "lore block", "cache_break_after": True},
-            {"text": "volatile tail", "cache_break_after": False},
+            {"text": "stable header", "tier": "stable"},
+            {"text": "lore block", "tier": "volatile"},
+            {"text": "no tier", "tier": None},
         ],
         "explicit",
     )
@@ -78,9 +80,9 @@ def test_blocks_with_explicit_caching_emit_cache_control():
     assert parts[1] == {
         "type": "text",
         "text": "lore block",
-        "cache_control": {"type": "ephemeral"},
+        "cache_control": {"type": "ephemeral", "ttl": "5m"},
     }
-    assert parts[2] == {"type": "text", "text": "volatile tail"}
+    assert parts[2] == {"type": "text", "text": "no tier"}
     assert "cache_control" not in parts[2]
 
 
@@ -90,8 +92,8 @@ def test_blocks_with_auto_caching_collapse_to_string():
     out = _openrouter_system_messages(
         "",
         [
-            {"text": "stable", "cache_break_after": True},
-            {"text": "volatile", "cache_break_after": False},
+            {"text": "stable", "tier": "stable"},
+            {"text": "volatile", "tier": "volatile"},
         ],
         "auto",
     )
@@ -101,7 +103,7 @@ def test_blocks_with_auto_caching_collapse_to_string():
 def test_blocks_with_none_caching_also_collapse():
     out = _openrouter_system_messages(
         "",
-        [{"text": "stable", "cache_break_after": True}],
+        [{"text": "stable", "tier": "stable"}],
         "none",
     )
     assert out == [{"role": "system", "content": "stable"}]
@@ -111,8 +113,8 @@ def test_explicit_blocks_drop_empty_text():
     out = _openrouter_system_messages(
         "",
         [
-            {"text": "real", "cache_break_after": True},
-            {"text": "", "cache_break_after": True},
+            {"text": "real", "tier": "stable"},
+            {"text": "", "tier": "stable"},
         ],
         "explicit",
     )
@@ -124,21 +126,21 @@ def test_explicit_blocks_drop_empty_text():
 def test_explicit_all_empty_blocks_returns_empty_list():
     out = _openrouter_system_messages(
         "",
-        [{"text": "", "cache_break_after": True}],
+        [{"text": "", "tier": "stable"}],
         "explicit",
     )
     assert out == []
 
 
-def test_unknown_ttl_drops_ttl_keeps_marker():
+def test_unknown_tier_gets_no_marker():
     out = _openrouter_system_messages(
         "",
-        [{"text": "x", "cache_break_after": True, "ttl": "bogus"}],
+        [{"text": "x", "tier": "bogus"}],
         "explicit",
     )
     parts = out[0]["content"]
-    # Unknown ttl silently dropped — we don't pass garbage to the API.
-    assert parts[0]["cache_control"] == {"type": "ephemeral"}
+    # A tier the adapter doesn't recognise isn't cached — no garbage to the API.
+    assert "cache_control" not in parts[0]
 
 
 def test_system_prompt_used_when_blocks_absent_explicit():

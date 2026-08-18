@@ -241,7 +241,7 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
         PreviewMessage(
             role=m.role,
             blocks=[
-                PreviewContentBlock(text=b.text, cache_break_after=b.cache_break_after)
+                PreviewContentBlock(text=b.text)
                 for b in m.blocks
             ],
         )
@@ -272,6 +272,8 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
         # ADR-0060 §2: node ids the template selected via `use(node)`, captured
         # here so the lock-render save can persist them as `used_node_ids`.
         used_node_ids=rendered.used_node_ids,
+        # ADR-0060 §5: the per-node volatility priors from `use(node, hint)`.
+        used_node_hints=rendered.used_node_hints,
     )
 
 
@@ -316,7 +318,7 @@ async def ai_generate(project: CurrentProject, request: AIGenerateRequest) -> AI
         PreviewMessage(
             role=m.role,
             blocks=[
-                PreviewContentBlock(text=b.text, cache_break_after=b.cache_break_after)
+                PreviewContentBlock(text=b.text)
                 for b in m.blocks
             ],
         )

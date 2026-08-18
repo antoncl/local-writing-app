@@ -51,7 +51,7 @@ _(This entry has no body yet.)_
 ### Fields to develop
 {% for f in current %}
 {% set val = e.metadata.get(f.id) %}
-- {{ f.label }} ({{ f.id }}): {% if f.type == "list" %}{% if val %}{{ plain_json(val) }}{% else %}_(empty)_{% endif %}{% elif val is sequence and val is not string %}{{ val | join(", ") or "_(empty)_" }}{% elif val is none or val == "" %}_(empty)_{% else %}{{ val }}{% endif %}
+- {{ f.label }} ({{ f.id }}): {% if f.type == "list" %}{% if val %}{{ val | json }}{% else %}_(empty)_{% endif %}{% elif val is sequence and val is not string %}{{ val | join(", ") or "_(empty)_" }}{% elif val is none or val == "" %}_(empty)_{% else %}{{ val }}{% endif %}
 {% endfor %}
 {% endif %}
 {% else %}

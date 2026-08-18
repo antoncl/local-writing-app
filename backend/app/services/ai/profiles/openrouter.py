@@ -32,6 +32,7 @@ from app.services.ai.profiles.base import (
     UsageMetrics,
     default_token_count,
 )
+from app.services.ai.profiles.explicit_cache import TIER_TTL, cache_control_indices
 from app.services.ai.profiles.openai_compatible import OpenAICompatibleProfile
 
 if TYPE_CHECKING:
@@ -193,20 +194,25 @@ def openrouter_system_messages(
     (anthropic/google/qwen). For auto-cache providers (openai/deepseek/grok)
     markers are ignored, so we collapse to a plain string to keep the wire
     small. Returns [] when there's nothing to send. Pure — no network/SDK.
+
+    ADR-0060 §5: the shared blocks carry only `{text, tier}`; the explicit routes
+    are the Anthropic family, so this uses the shared `explicit_cache` mapping
+    (tier → cache_control ttl, ≤4-marker cap) — the same translation the Anthropic
+    adapter uses.
     """
     if system_blocks and caching_style == "explicit":
+        budget = cache_control_indices(system_blocks)
         parts: list[dict] = []
-        for block in system_blocks:
+        for i, block in enumerate(system_blocks):
             text = block.get("text") or ""
             if not text:
                 continue
             part: dict = {"type": "text", "text": text}
-            if block.get("cache_break_after"):
-                cache_control: dict = {"type": "ephemeral"}
-                ttl = block.get("ttl")
-                if ttl in ("5m", "1h"):
-                    cache_control["ttl"] = ttl
-                part["cache_control"] = cache_control
+            if i in budget:
+                part["cache_control"] = {
+                    "type": "ephemeral",
+                    "ttl": TIER_TTL[block["tier"]],
+                }
             parts.append(part)
         if parts:
             return [{"role": "system", "content": parts}]

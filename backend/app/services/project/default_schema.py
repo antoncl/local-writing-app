@@ -320,7 +320,7 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # Continuation sub-type for two-character roleplay in one scene. It is a
             # `continuation` (the `inline` handler, streaming at the cursor) that
             # additionally STAMPS a `character` mark on the accepted text, keyed to its `character`
-            # input — the mark `character_thread` later reads to reconstruct
+            # input — the mark `character_turns` later reads to reconstruct
             # per-character turns, and the id per-character cost attributes to. That
             # stamp is a DECLARED capability (`output.on_accept`, #954 Lever 2), NOT an
             # `entry_type == prompt:roleplay` code branch: roleplay earns its sub-type

@@ -140,7 +140,7 @@
         // A real, populated namespace object was accessed with an attribute it
         // doesn't have — a wrong path, not a missing input (#1019).
         let msg = `Your template references \`${ns}.${missing}\`, but \`${ns}\` has no attribute \`${missing}\`.`;
-        if (ns === "project" || ns === "novel") {
+        if (ns === "project") {
           msg += ` A project's authored fields live under \`${ns}.metadata\` — did you mean \`${ns}.metadata.${missing}\`?`;
         }
         return msg;
@@ -379,17 +379,6 @@
       {/if}
     </div>
 
-    {#if promptPreviewResult && promptPreviewResult.cache_blocks && promptPreviewResult.cache_blocks.length > 1 && promptPreviewResult.caching_style === "explicit"}
-      <div class="prompt-preview-cache-strip" title="Per-cache-block token sizes. The first segment is the cacheable prefix.">
-        {#each promptPreviewResult.cache_blocks as block, i}
-          <span class="prompt-preview-cache-chip" class:cache-strip-break={block.cache_break_after}>
-            {block.label} {formatTokens(block.tokens)}
-          </span>
-          {#if i < promptPreviewResult.cache_blocks.length - 1}<span class="prompt-preview-cache-sep">·</span>{/if}
-        {/each}
-      </div>
-    {/if}
-
     <div class="prompt-preview-pane-body">
       {#if promptPreviewError}
         <p class="prompt-preview-error">{promptPreviewError}</p>
@@ -412,15 +401,24 @@
             {/each}
           </div>
         {/if}
-        {#each promptPreviewResult.messages as message}
-          <div class="prompt-preview-message prompt-preview-message-{message.role}">
-            <header class="prompt-preview-message-role">{message.role}</header>
-            {#each message.blocks as block}
-              <pre class="prompt-preview-block">{block.text}</pre>
-              {#if block.cache_break_after}
-                <div class="prompt-preview-cache-break" aria-label="cache breakpoint">cache_break</div>
+        <!-- ADR-0060 §6: the send-path composition the model will receive — the
+             system prefix, the tier-tagged lore the backend places (visible again),
+             then the uncached conversation turns. -->
+        {#each promptPreviewResult.cache_blocks as block}
+          <div class="prompt-preview-message prompt-preview-message-{block.role}">
+            <header class="prompt-preview-message-role">
+              <span>{block.label}</span>
+              {#if block.tier}
+                <span
+                  class="prompt-preview-tier prompt-preview-tier-{block.tier}"
+                  title={block.tier === "stable"
+                    ? "Stable — cached 1h on explicit-cache providers"
+                    : "Volatile — new or changed; cached 5m"}
+                >{block.tier}</span>
               {/if}
-            {/each}
+              <span class="prompt-preview-block-tokens">{formatTokens(block.tokens)}</span>
+            </header>
+            {#if block.text}<pre class="prompt-preview-block">{block.text}</pre>{/if}
           </div>
         {/each}
       {:else if !promptPreviewRunning && !promptPreviewError}
@@ -673,11 +671,36 @@
     border-radius: 4px;
   }
   .prompt-preview-message-role {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     font-size: var(--fs-xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--text-3);
+  }
+  .prompt-preview-block-tokens {
+    margin-left: auto;
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+  }
+  /* Volatility tier (ADR-0060 §6): stable = quiet neutral, volatile = a gentle
+     attention accent (reuses the ★ tokens). */
+  .prompt-preview-tier {
+    padding: 0 5px;
+    border-radius: 3px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+  .prompt-preview-tier-stable {
+    color: var(--text-3);
+    border: 1px solid var(--border);
+  }
+  .prompt-preview-tier-volatile {
+    color: var(--star);
+    background: var(--star-soft);
+    border: 1px solid var(--star-border);
   }
   /* Role accent — dynamic suffix class (prompt-preview-message-{role}); the
      suffix isn't statically visible to Svelte, so :global avoids pruning. */
@@ -699,31 +722,6 @@
     font-size: var(--fs-sm);
     line-height: 1.45;
     color: var(--text);
-  }
-  .prompt-preview-cache-break {
-    align-self: start;
-    padding: 1px 6px;
-    background: var(--star-soft);
-    border: 1px dashed var(--star-border);
-    border-radius: 4px;
-    color: var(--star);
-    font-size: var(--fs-xs);
-    font-family: var(--mono);
-  }
-  .prompt-preview-cache-strip {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 4px 6px;
-    padding: 2px 8px 6px;
-    font-size: var(--fs-sm);
-    color: var(--text-3);
-  }
-  .prompt-preview-cache-chip {
-    font-variant-numeric: tabular-nums;
-  }
-  .prompt-preview-cache-sep {
-    opacity: 0.6;
   }
   .prompt-preview-cost {
     font-variant-numeric: tabular-nums;

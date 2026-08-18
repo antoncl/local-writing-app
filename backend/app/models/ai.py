@@ -211,7 +211,6 @@ class AIPreviewRequest(BaseModel):
 
 class PreviewContentBlock(BaseModel):
     text: str
-    cache_break_after: bool
 
 
 class PreviewMessage(BaseModel):
@@ -220,15 +219,22 @@ class PreviewMessage(BaseModel):
 
 
 class PreviewCacheBlock(BaseModel):
-    """One cache block derived from `cache_break_after` markers on the
-    rendered messages. Labels are position-derived for v1; richer
-    naming may come later (template hints, role-based, etc.).
+    """One block of the **send-path composition** the model will receive
+    (ADR-0060 §6): the system prefix, the tier-tagged lore the backend places
+    (now visible in the preview again), then the uncached conversation turns.
+
+    `tier` is the volatility class the send path assigns — `"stable"` (cached at
+    1h on explicit-cache providers), `"volatile"` (5m), or `None` (uncached, e.g.
+    a conversation turn). `text` is the block's content, so the author can *see*
+    the lore that will be sent (not just its token size). The author cannot control
+    placement but can now see it.
     """
 
     label: str
     role: str
     tokens: int
-    cache_break_after: bool
+    tier: str | None = None
+    text: str = ""
 
 
 class PreviewErrorInfo(BaseModel):
@@ -267,9 +273,10 @@ class AIPreviewResponse(BaseModel):
     error: PreviewErrorInfo | None = None
     # Token estimate over the assembled wire bytes. Always populated.
     estimated_tokens: int = 0
-    # Per-cache-block breakdown — powers the cache strip UI. Each entry
-    # is one run of blocks ending at a `cache_break_after` marker (or
-    # the end of the message). Empty when there are no rendered messages.
+    # The send-path composition (ADR-0060 §6): the system prefix (stable), the
+    # tier-tagged lore the backend will place (visible again now that templates no
+    # longer emit it), then the uncached conversation turns — as the model receives
+    # it. Powers the cache strip UI. Empty when there is nothing to send.
     cache_blocks: list[PreviewCacheBlock] = Field(default_factory=list)
     # Pre-send input-side cost in USD. Frontend converts to EUR for
     # display (see decisions_currency_display). Null when no assistant
@@ -294,6 +301,10 @@ class AIPreviewResponse(BaseModel):
     # persisted as the chat's `used_node_ids`, so the send path unions them into
     # its one lore selector. Empty when the template selected no nodes.
     used_node_ids: list[str] = Field(default_factory=list)
+    # ADR-0060 §5: per-node volatility priors from `use(node, "stable"|"volatile")`,
+    # keyed by id. Captured at the lock render beside `used_node_ids` and persisted
+    # so the send path's tiering reads them. Empty when no node carried a hint.
+    used_node_hints: dict[str, str] = Field(default_factory=dict)
 
 
 class ChatMessage(BaseModel):
@@ -503,6 +514,10 @@ class ChatSession(BaseModel):
     # direct channel), so an author-picked entry/scene/card lands in the tiered,
     # cached set — never emitted inline. Defaults empty (no selections).
     used_node_ids: list[str] = Field(default_factory=list)
+    # ADR-0060 §5: per-node volatility priors from `use(node, hint)`, captured at
+    # the lock render beside `used_node_ids` and stable thereafter. The send path's
+    # `_tier_lore_ids` reads them as a revision-bounded placement bias. Empty = none.
+    used_node_hints: dict[str, str] = Field(default_factory=dict)
     # V2: running USD cost for this chat session, in the provider's currency
     # (USD; frontend converts to EUR for display). Re-derived on read as the
     # sum of this chat's priced ai_invocations rows. None — not 0.0 — when the
@@ -599,6 +614,10 @@ class SaveChatSessionRequest(BaseModel):
     # the new value. Only the lock-render save carries it (from the preview
     # response's `used_node_ids`); thereafter it is preserved.
     used_node_ids: list[str] | None = None
+    # ADR-0060 §5: the per-node volatility priors, echoed like `used_node_ids`.
+    # None = "leave the captured value alone"; a dict (even {}) is the new value.
+    # Only the lock-render save carries it (from the preview response).
+    used_node_hints: dict[str, str] | None = None
     # V2: optional incremental cost update. When provided (typically by
     # the chat panel after a successful AI turn), it's ADDED to the
     # persisted cost_usd_total. Omit on plain renames / message-list saves.

@@ -605,6 +605,15 @@ class PromptEntrySummary(BaseModel):
     # uses it lives. The Type-level inputs field stays in the model for
     # backwards-compatibility on read but is no longer consulted at runtime.
     inputs: list[PromptInputDefinition] = Field(default_factory=list)
+    # The prompt's EFFECTIVE inputs (ADR-0061): its own `inputs` plus,
+    # transitively, the inputs of every `prompt:snippet` it pulls in with a
+    # literal `{% include "<name>" %}`. Computed by the one backend resolver
+    # (`services/ai/effective_inputs.py`) so every invocation surface reads the
+    # SAME set — the run/invocation dialog and chat's inputs strip. Equals
+    # `inputs` for a prompt with no snippet includes. The editor still edits
+    # `inputs` (own); the two-tier own-vs-inherited view is S3. Read-only egress:
+    # saves round-trip `inputs`, never this.
+    effective_inputs: list[PromptInputDefinition] = Field(default_factory=list)
     # Subject entry_types this prompt is offered on as a "＋New" conversation in a
     # node's Conversations panel (ADR-0054 §4/S4). A per-prompt, instance-level
     # allow-list — the author's explicit "show this prompt on…" declaration, read

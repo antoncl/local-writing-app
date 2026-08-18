@@ -6,6 +6,7 @@ from metadata_validation_base import MetadataValidationBase
 
 from app.models import (
     CreateLoreEntryRequest,
+    CreatePromptEntryRequest,
     CreateSceneRequest,
     DeleteMetadataEntryTypeRequest,
     EntryTypeDefinition,
@@ -15,6 +16,7 @@ from app.models import (
     PromptInputDefinition,
     RenameMetadataFieldRequest,
     SaveLoreEntryRequest,
+    SavePromptEntryRequest,
     SearchRequest,
     SelectOption,
     UpsertMetadataEntryTypeRequest,
@@ -790,6 +792,71 @@ class LoreAndPromptTests(MetadataValidationBase):
         self.assertIsNotNone(reread.prompt.context_strategy)
         assert reread.prompt.context_strategy is not None
         self.assertIsNone(reread.prompt.context_strategy.output)
+
+    def _save_prompt(
+        self,
+        title: str,
+        body: str,
+        entry_type: str,
+        inputs: list[PromptInputDefinition] | None = None,
+    ) -> str:
+        entry = self.service.create_prompt_entry(
+            CreatePromptEntryRequest(title=title, entry_type=entry_type)
+        )
+        self.service.save_prompt_entry(
+            entry.id,
+            SavePromptEntryRequest(
+                title=title,
+                body=body,
+                base_revision=entry.revision,
+                entry_type=entry_type,
+                metadata={},
+                inputs=inputs or [],
+            ),
+        )
+        return entry.id
+
+    def test_list_prompt_entries_populates_effective_inputs_from_includes(self) -> None:
+        # ADR-0061 S1 end-to-end through the roster: a prompt that {% include %}s a
+        # snippet gains the snippet's inputs in `effective_inputs` while its own
+        # `inputs` stay as authored — the invoke surfaces read the former.
+        self._save_prompt(
+            "Villain Voice",
+            "{{ input.menace }}",
+            "prompt:snippet",
+            inputs=[PromptInputDefinition(name="menace", type="select")],
+        )
+        including = self._save_prompt(
+            "Revise Scene",
+            '{% include "Villain Voice" %}\n{{ input.subject }}',
+            "prompt:general",
+            inputs=[PromptInputDefinition(name="subject", type="text")],
+        )
+
+        by_id = {e.id: e for e in self.service.list_prompt_entries().entries}
+        entry = by_id[including]
+        # Own inputs untouched; effective adds the snippet's, own-first.
+        self.assertEqual([i.name for i in entry.inputs], ["subject"])
+        self.assertEqual([i.name for i in entry.effective_inputs], ["subject", "menace"])
+        self.assertEqual(
+            {i.name: i.type for i in entry.effective_inputs},
+            {"subject": "text", "menace": "select"},
+        )
+
+    def test_list_prompt_entries_effective_equals_own_without_includes(self) -> None:
+        # A prompt with no snippet includes: effective_inputs mirrors own inputs
+        # exactly, so every surface reading the effective set is unchanged.
+        entry_id = self._save_prompt(
+            "Plain",
+            "{{ input.subject }}",
+            "prompt:general",
+            inputs=[PromptInputDefinition(name="subject", type="text")],
+        )
+        by_id = {e.id: e for e in self.service.list_prompt_entries().entries}
+        entry = by_id[entry_id]
+        self.assertEqual(
+            [i.name for i in entry.effective_inputs], [i.name for i in entry.inputs]
+        )
 
     def test_snippet_subtype_inherits_from_prompt_kind(self) -> None:
         layer_id = self._project_layer_id()

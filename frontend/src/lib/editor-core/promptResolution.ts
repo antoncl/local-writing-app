@@ -191,8 +191,15 @@ export function promptEntriesOfferedOn(
   );
 }
 
+// The prompt's EFFECTIVE inputs (ADR-0061): its own declared inputs plus the
+// transitive union of every `prompt:snippet` it `{% include %}`s. The backend's
+// one resolver computes this (`effective_inputs` on the summary); every
+// invocation surface — the run/invocation dialog, chat's inputs strip — reads it
+// here so a snippet's fields flow to all of them without hand-copying. Falls
+// back to own `inputs` for a summary the backend didn't populate (equal anyway
+// for a prompt with no includes).
 export function effectivePromptInputs(entry: PromptEntrySummary): PromptInputDefinition[] {
-  return entry.inputs ?? [];
+  return entry.effective_inputs ?? entry.inputs ?? [];
 }
 
 export function findPromptEntry(

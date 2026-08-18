@@ -21,6 +21,7 @@
   import { onMount, tick } from "svelte";
   import { api } from "@/lib/api";
   import {
+    effectivePromptInputs,
     promptDeclaresCommit,
     promptEntriesForSurface,
     resolutionSceneIdFromInputs,
@@ -591,7 +592,7 @@
     // AND that prompt has declared inputs (the indication that the
     // template needs values plugged in). Gating matches App.svelte's
     // bespoke sendChat.
-    if (activePromptEntry && !chatSystemPrompt && (activePromptEntry.inputs ?? []).length > 0) {
+    if (activePromptEntry && !chatSystemPrompt && effectivePromptInputs(activePromptEntry).length > 0) {
       chatRunning = true;
       try {
         const ok = await renderAndLockPromptTemplate(activePromptEntry);
@@ -645,7 +646,7 @@
   // hold initial turns); subsequent sends skip this path.
   async function renderAndLockPromptTemplate(entry: PromptEntrySummary): Promise<boolean> {
     const inputs: Record<string, unknown> = {};
-    for (const input of entry.inputs ?? []) {
+    for (const input of effectivePromptInputs(entry)) {
       const raw = chatInputDrafts[input.name] ?? "";
       const coerced = coerceChatInputValue(raw, input.type);
       if (coerced !== null && coerced !== "") inputs[input.name] = coerced;
@@ -730,7 +731,7 @@
     }
     const ourToken = ++chatEstimateToken;
     const inputs: Record<string, unknown> = {};
-    for (const declared of entry.inputs ?? []) {
+    for (const declared of effectivePromptInputs(entry)) {
       const raw = chatInputDrafts[declared.name] ?? "";
       const coerced = coerceChatInputValue(raw, declared.type);
       if (coerced !== null && coerced !== "") inputs[declared.name] = coerced;
@@ -842,7 +843,7 @@
   });
   let assistantScope = $derived(assistantScopeTags(activePromptEntry));
   let scopedDefaultId = $derived(scopedDefaultAssistantId(assistantEntries, assistantScope, defaultAssistantId));
-  let declaredInputs = $derived(activePromptEntry?.inputs ?? []);
+  let declaredInputs = $derived(activePromptEntry ? effectivePromptInputs(activePromptEntry) : []);
   // A hidden input is launch-set, not user-authored (ADR-0046 §6.4) and has no
   // widget in the strip — so it must never gate Send, or an unset one would
   // disable the button with nothing for the user to fill.

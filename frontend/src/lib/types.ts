@@ -169,6 +169,12 @@ export type PromptEntrySummary = {
   entry_type: string;
   metadata: EntryMetadata;
   inputs: PromptInputDefinition[];
+  // The prompt's EFFECTIVE inputs (ADR-0061): own `inputs` ∪ the transitive
+  // union of every `prompt:snippet` it `{% include %}`s, computed by the one
+  // backend resolver. Read via `effectivePromptInputs`; equals `inputs` when the
+  // prompt includes no snippets. Absent only on a summary an older backend
+  // produced — the reader falls back to `inputs`.
+  effective_inputs?: PromptInputDefinition[];
   // Subject entry_types this prompt is offered on as a "＋New" conversation in a
   // node's Conversations panel (ADR-0054 §4/S4) — the author's explicit "show
   // this prompt on…" allow-list, read off the node like `inputs`. Empty/absent =

@@ -26,48 +26,63 @@
 <script lang="ts">
   import Modal from "@/components/dialogs/Modal.svelte";
 
-  export let state: ConfirmationState | null = null;
-  export let onCancel: () => void = () => {};
-  export let onConfirm: (dontShowAgain: boolean) => void | Promise<void> = () => {};
-  export let onSecondary: () => void | Promise<void> = () => {};
+  // Destructured as `confirmState` locally (not `state`) — a local binding
+  // named `state` collides with the `$state` rune used below for
+  // `dontShowAgain` (Svelte reads `$state` as an auto-subscription to a
+  // local `state` variable in that case). The external prop name stays
+  // `state` for callers (e.g. `<ConfirmModal state={...} />`).
+  let {
+    state: confirmState = null,
+    onCancel = () => {},
+    onConfirm = () => {},
+    onSecondary = () => {},
+  }: {
+    state?: ConfirmationState | null;
+    onCancel?: () => void;
+    onConfirm?: (dontShowAgain: boolean) => void | Promise<void>;
+    onSecondary?: () => void | Promise<void>;
+  } = $props();
 
   // Reset the checkbox whenever a new confirmation opens (depends only on
-  // `state`, so ticking the box itself doesn't re-trigger the reset).
-  let dontShowAgain = false;
-  $: state, (dontShowAgain = false);
+  // `confirmState`, so ticking the box itself doesn't re-trigger the reset).
+  let dontShowAgain = $state(false);
+  $effect(() => {
+    confirmState;
+    dontShowAgain = false;
+  });
 </script>
 
-{#if state}
-  <Modal title={state.title}>
-    <p>{state.message}</p>
-    {#if state.details && state.details.length > 0}
+{#if confirmState}
+  <Modal title={confirmState.title}>
+    <p>{confirmState.message}</p>
+    {#if confirmState.details && confirmState.details.length > 0}
       <ul class="confirm-modal-details">
-        {#each state.details as detail}
+        {#each confirmState.details as detail}
           <li>{detail}</li>
         {/each}
       </ul>
     {/if}
-    {#if state.cannotBeUndone}
+    {#if confirmState.cannotBeUndone}
       <p class="confirm-modal-undo"><i class="ti ti-alert-triangle" aria-hidden="true"></i> This cannot be undone.</p>
     {/if}
-    {#if state.dontShowAgainKey}
+    {#if confirmState.dontShowAgainKey}
       <label class="confirm-modal-dsa">
         <input type="checkbox" bind:checked={dontShowAgain} />
         Don't show this again
       </label>
     {/if}
     {#snippet actions()}
-      <button type="button" on:click={onCancel}>Cancel</button>
-      {#if state.secondaryLabel}
-        <button type="button" on:click={() => onSecondary()}>{state.secondaryLabel}</button>
+      <button type="button" onclick={onCancel}>Cancel</button>
+      {#if confirmState.secondaryLabel}
+        <button type="button" onclick={() => onSecondary()}>{confirmState.secondaryLabel}</button>
       {/if}
       <button
-        class:danger-primary={state.destructive}
-        class:primary={!state.destructive}
+        class:danger-primary={confirmState.destructive}
+        class:primary={!confirmState.destructive}
         type="button"
-        on:click={() => onConfirm(dontShowAgain)}
+        onclick={() => onConfirm(dontShowAgain)}
       >
-        {state.confirmLabel}
+        {confirmState.confirmLabel}
       </button>
     {/snippet}
   </Modal>

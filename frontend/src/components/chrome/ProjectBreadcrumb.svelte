@@ -22,43 +22,52 @@
     return identity;
   }
 
-  // The RESOLVED chain as the backend walker computed it (#432) — already the
-  // declared subset, already labelled. This took the whole enumeration and
-  // re-derived both, which is the duplication #432 deleted. `declaredChain`
-  // now only drops the root layer, and stays a function so it is testable
-  // without a component harness.
-  export let chain: ProjectChainLayer[] = [];
-  // Selecting a crumb is a **scope change** — a different project gets built,
-  // with its own index and merged schema. The parent owns that; this component
-  // only says which one was chosen.
-  export let onOpen: (path: string) => void = () => {};
-  // The declaration editor's rows (#417 slice 4b): the WHOLE ancestor
-  // enumeration as DeclarationRow[] — the payload the retired Project pane used
-  // to render, now hosted in a popover hung off this bar. The parent feeds it
-  // from `declarationRows(ancestors)` and owns the toggle side effect; this
-  // component only shows the rows and reports which box was clicked.
-  export let inheritRows: DeclarationRow[] = [];
-  // A declaration save is in flight (`projectSession.declarationSaving`) — locks
-  // the popover's checkboxes, because a second tick mid-round-trip would be
-  // computed from the enumeration the first one is about to replace (#426).
-  export let inheritSaving: boolean = false;
-  // Apply one tick/untick. The parent owns the mutation (`toggledDeclaration` →
-  // `setDeclaration`); `InheritsFromList` never trusts the DOM checkbox.
-  export let onToggleInherit: (path: string) => void = () => {};
-  // The child projects directly inside the open one (#310), fed from
-  // `project.children` (#417 slice 5). The breadcrumb owns the chain's *down*
-  // direction now, so descent lives on the bar rather than in the retiring
-  // Project pane. Opening a child is a scope change exactly like clicking a
-  // crumb, so it reuses `onOpen` — one "open a project in the chain" callback,
-  // fed the children here instead of the ancestors — rather than threading a
-  // second open handler through the top bar. NOT named `children`: that is
-  // Svelte 5's reserved default-slot snippet name (and this codebase's own
-  // `children: Snippet` convention, e.g. Modal.svelte), which a runes migration
-  // would collide with.
-  export let childProjects: ProjectChild[] = [];
+  let {
+    // The RESOLVED chain as the backend walker computed it (#432) — already the
+    // declared subset, already labelled. This took the whole enumeration and
+    // re-derived both, which is the duplication #432 deleted. `declaredChain`
+    // now only drops the root layer, and stays a function so it is testable
+    // without a component harness.
+    chain = [],
+    // Selecting a crumb is a **scope change** — a different project gets built,
+    // with its own index and merged schema. The parent owns that; this component
+    // only says which one was chosen.
+    onOpen = () => {},
+    // The declaration editor's rows (#417 slice 4b): the WHOLE ancestor
+    // enumeration as DeclarationRow[] — the payload the retired Project pane used
+    // to render, now hosted in a popover hung off this bar. The parent feeds it
+    // from `declarationRows(ancestors)` and owns the toggle side effect; this
+    // component only shows the rows and reports which box was clicked.
+    inheritRows = [],
+    // A declaration save is in flight (`projectSession.declarationSaving`) — locks
+    // the popover's checkboxes, because a second tick mid-round-trip would be
+    // computed from the enumeration the first one is about to replace (#426).
+    inheritSaving = false,
+    // Apply one tick/untick. The parent owns the mutation (`toggledDeclaration` →
+    // `setDeclaration`); `InheritsFromList` never trusts the DOM checkbox.
+    onToggleInherit = () => {},
+    // The child projects directly inside the open one (#310), fed from
+    // `project.children` (#417 slice 5). The breadcrumb owns the chain's *down*
+    // direction now, so descent lives on the bar rather than in the retiring
+    // Project pane. Opening a child is a scope change exactly like clicking a
+    // crumb, so it reuses `onOpen` — one "open a project in the chain" callback,
+    // fed the children here instead of the ancestors — rather than threading a
+    // second open handler through the top bar. NOT named `children`: that is
+    // Svelte 5's reserved default-slot snippet name (and this codebase's own
+    // `children: Snippet` convention, e.g. Modal.svelte), which a runes migration
+    // would collide with.
+    childProjects = [],
+  }: {
+    chain?: ProjectChainLayer[];
+    onOpen?: (path: string) => void;
+    inheritRows?: DeclarationRow[];
+    inheritSaving?: boolean;
+    onToggleInherit?: (path: string) => void;
+    childProjects?: ProjectChild[];
+  } = $props();
 
-  $: crumbs = declaredChain(chain);
-  $: empty = inheritsNothing(chain);
+  const crumbs = $derived(declaredChain(chain));
+  const empty = $derived(inheritsNothing(chain));
   // Is there an ancestor the editor could actually act on — i.e. any toggleable
   // row? Not "the enumeration is non-empty": a project directly inside the
   // machine root enumerates that root folder, a non-project shown as a disabled
@@ -67,11 +76,11 @@
   // is withheld — it must never open onto a dead end (#427). Derived from the
   // very rows the popover renders, so the affordance and its contents cannot
   // disagree about what is actionable.
-  $: canDeclare = inheritRows.some((row) => row.toggleable);
+  const canDeclare = $derived(inheritRows.some((row) => row.toggleable));
   // The bar's "down" direction (#417 slice 5): is there a child project to
   // descend into? Only surfaced when there is — a leaf has none, and an
   // always-present control would read as a dead affordance.
-  $: hasChildren = childProjects.length > 0;
+  const hasChildren = $derived(childProjects.length > 0);
 
   // The inheritance-editor popover (#417 slice 4b, replacing the Project pane's
   // Inheritance section) and the "Contains" descent menu (#417 slice 5) are both
@@ -82,10 +91,10 @@
   // editor is a modal `role="dialog"` (it owns focus while open); the descent
   // menu is a non-modal `role="menu"` like the switcher, because descending is
   // navigation, not editing.
-  let popoverOpen = false;
-  let editButton: HTMLButtonElement | null = null;
-  let descendOpen = false;
-  let descendButton: HTMLButtonElement | null = null;
+  let popoverOpen = $state(false);
+  let editButton = $state<HTMLButtonElement | null>(null);
+  let descendOpen = $state(false);
+  let descendButton = $state<HTMLButtonElement | null>(null);
 
   function togglePopover(): void {
     popoverOpen = !popoverOpen;
@@ -99,7 +108,9 @@
   // only organisational folders), `canDeclare` goes false and the anchor button
   // unmounts — close the popover so its overlay cannot linger over a bar that no
   // longer has anything to edit.
-  $: if (!canDeclare) popoverOpen = false;
+  $effect(() => {
+    if (!canDeclare) popoverOpen = false;
+  });
 
   function closeDescend(): void {
     descendOpen = false;
@@ -113,7 +124,9 @@
   }
   // If the children vanish under a scope change, close the menu so its overlay
   // cannot linger (mirrors the inherit popover's `canDeclare` guard).
-  $: if (!hasChildren) descendOpen = false;
+  $effect(() => {
+    if (!hasChildren) descendOpen = false;
+  });
 </script>
 
 <!--
@@ -197,7 +210,7 @@
       aria-expanded={descendOpen}
       aria-controls={descendOpen ? "contains-menu" : undefined}
       title="Open a project inside this one"
-      on:click={toggleDescend}>Contains<span class="descend-caret" aria-hidden="true">▾</span></button>
+      onclick={toggleDescend}>Contains<span class="descend-caret" aria-hidden="true">▾</span></button>
   {/if}
 {/snippet}
 
@@ -220,7 +233,7 @@
               class="crumb"
               class:available={crumb.state === "available"}
               title={crumbTitle(crumb)}
-              on:click={() => onOpen(crumb.path)}
+              onclick={() => onOpen(crumb.path)}
             >{crumb.label}{#if crumb.state === "available"}<span class="sr-only"> — not inherited</span>{/if}</button>
           {:else}
             <!-- `stale`: declared but no longer a project, so there is nothing to
@@ -248,7 +261,7 @@
             aria-controls={popoverOpen ? "inherit-popover" : undefined}
             aria-label="Edit what this project inherits from"
             title="Edit what this project inherits from"
-            on:click={togglePopover}>edit…</button>
+            onclick={togglePopover}>edit…</button>
         {/if}
         {@render descendControl()}
       </nav>
@@ -315,7 +328,7 @@
           role="menuitem"
           aria-label={`Open ${child.title}`}
           title={child.path}
-          on:click={() => handleOpenChild(child.path)}
+          onclick={() => handleOpenChild(child.path)}
         >
           <span class="contains-title">{child.title}</span>
           {#if child.name !== child.title}

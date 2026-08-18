@@ -107,7 +107,7 @@
   // sites lift their arrays via `nodeSet()` (lib/views/viewResult). There is no
   // `ViewResult | T[]` union and no `Array.isArray` branch here.
   import type { Snippet } from "svelte";
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import NodeList from "@/components/widgets/NodeList.svelte";
   import ViewNodeTree from "@/components/widgets/ViewNodeTree.svelte";
@@ -279,47 +279,75 @@
 
   const isEmpty = $derived(effectiveGroups.length === 0);
 
-  // One drag-gesture holder for the whole tree, threaded through the recursion
-  // (inert unless `onReorder` is wired). See treeDrag.svelte.ts.
-  const drag = new TreeDrag<T>();
+  // Interactivity gates (#268). A read-only, non-reorderable list (Backlinks,
+  // ReferencePicker selected-refs, MutationTimeline, Chats, …) wires none of the
+  // editing handlers, so it should mount none of the editing machinery — the
+  // controllers below, the document mousedown listener, or the treeKeyboard
+  // keydown listener. A metadata panel renders one ReferencePicker per ref field,
+  // so that per-instance dead weight adds up. Captured once at construction, like
+  // the controllers themselves — a consumer's handler set is fixed per mount.
+  //   • drag: needed for row reorder (onReorder) OR bucket drop (onGroupDrop).
+  //   • rename: needed for inline rename (onRename) OR the F2 that rides the
+  //     reorderable keyboard bundle (onReorder).
+  //   • add: needed for the per-container add-child popover (addMenu).
+  // `untrack`: read the handlers' initial values deliberately (not reactively) —
+  // a consumer's handler set is fixed for the instance's life, so these gate
+  // one-time construction below exactly as the controllers themselves do.
+  const needsDrag = untrack(() => onReorder !== undefined || onGroupDrop !== undefined);
+  const needsRename = untrack(() => onReorder !== undefined || onRename !== undefined);
+  const needsAdd = untrack(() => addMenu !== undefined);
 
-  // One collapse defer-guard for the tree (single-click vs dblclick). See
+  // One drag-gesture holder for the whole tree, threaded through the recursion.
+  // Null on a non-reorderable list. See treeDrag.svelte.ts.
+  const drag = needsDrag ? new TreeDrag<T>() : null;
+
+  // One collapse defer-guard for the tree (single-click vs dblclick). Kept on
+  // every list: it's a non-reactive timer (zero reactive-graph cost) and the
+  // defer/cancel serves the dblclick path a read-only list can still wire. See
   // treeCollapseGuard.ts.
   const collapseGuard = new CollapseGuard();
 
   // Inline-rename controller (4c-iii). Owns edit state; persists via `onRename`.
   // Threaded down like `drag`; also driven imperatively by the consumer (F2 is
-  // wrapper-side, but create-then-rename comes from outside a row render).
-  const rename = new TreeRename<T>({
-    persist: (node, nextTitle) => onRename?.(node, nextTitle),
-    resolve: (id) => locate(id)?.node ?? null,
-  });
+  // wrapper-side, but create-then-rename comes from outside a row render). Null
+  // on a list with neither rename nor reorder.
+  const rename = needsRename
+    ? new TreeRename<T>({
+        persist: (node, nextTitle) => onRename?.(node, nextTitle),
+        resolve: (id) => locate(id)?.node ?? null,
+      })
+    : null;
 
   // Imperative rename entry points for the consumer (see the block comment): begin
   // an inline rename on a just-created node, or cancel one whose row is being
   // deleted. F2 / dblclick renames are driven wrapper-side (keyboard) or via RowCtx.
   export function beginRename(id: string, title: string): void {
-    rename.begin(id, title);
+    rename?.begin(id, title);
   }
   export function cancelRename(id: string): void {
-    rename.cancel(id);
+    rename?.cancel(id);
   }
 
   // Per-instance add-child menu (4c-iv). The holder threads down for per-container
   // "+" buttons; these exports drive it from a consumer's header/pane button. A
   // document mousedown outside the anchor/popover closes it (per instance — no
-  // shared App-level handler). See treeAddMenu.svelte.ts.
-  const add = new TreeAddMenu();
+  // shared App-level handler). Null (and no document listener) on a list without
+  // an `addMenu`. See treeAddMenu.svelte.ts.
+  const add = needsAdd ? new TreeAddMenu() : null;
   export function toggleAddMenu(parentId: string | null, key: string, event?: MouseEvent): void {
-    add.toggle(parentId, key, event);
+    add?.toggle(parentId, key, event);
   }
   export function closeAddMenu(): void {
-    add.close();
+    add?.close();
   }
   export function isAddMenuOpen(key: string): boolean {
-    return add.isOpen(key);
+    return add?.isOpen(key) ?? false;
   }
+  // The dismissal listener exists only when there's an add-menu to dismiss (#268)
+  // — otherwise every read-only list would add a document-level mousedown handler
+  // that can never fire.
   $effect(() => {
+    if (!add) return;
     const onDown = (event: MouseEvent) => {
       if (add.key === null) return;
       const target = event.target;
@@ -393,6 +421,9 @@
   // a focused row → F2 rename-start or Ctrl+arrow reorder. Add-popover keys are
   // the popover's own.
   function treeKeyboard(container: HTMLElement) {
+    // No reorder and no rename → nothing this listener does can fire, so a
+    // read-only list adds no keydown handler at all (#268).
+    if (!needsRename) return;
     const onKey = (event: KeyboardEvent) => {
       const target = event.target;
       if (!(target instanceof HTMLElement)) return;
@@ -401,10 +432,10 @@
       if (target.closest("[data-node-edit-id]")) {
         if (event.key === "Enter") {
           event.preventDefault();
-          rename.commit();
+          rename?.commit();
         } else if (event.key === "Escape") {
           event.preventDefault();
-          rename.cancel();
+          rename?.cancel();
         }
         return;
       }
@@ -417,7 +448,7 @@
         if (!onReorder) return;
         event.preventDefault();
         const node = locate(id)?.node;
-        if (node) rename.begin(node.id, node.title);
+        if (node) rename?.begin(node.id, node.title);
         return;
       }
       if (event.ctrlKey || event.metaKey) handleReorderKey(event, id);
@@ -460,7 +491,7 @@
   </NodeList>
 </div>
 
-{#if add.key !== null && addMenu}
+{#if addMenu && add && add.key !== null}
   <!-- Add-child popover shell: wrapper-owned open-state/position/dismissal; the
        consumer's `addMenu` snippet supplies the heading + type choices. -->
   <div

@@ -40,6 +40,33 @@ The AI integration was scoped to fix two specific complaints with Novelcrafter:
 
 See the [strategy memory file](../../README.md) (private to the project for now) for the full discussion.
 
+## Roles: system, user, and assistant
+
+A model doesn't read one blob of text — a chat API takes an ordered list of **messages**, each tagged with a **role**. `{% role "…" %}…{% endrole %}` (see [template-language.md](template-language.md)) marks which message a chunk of your template belongs to.
+
+Most of the time you don't write it. Un-roled prose is **homed to the base type's default role** (usually `system`), so a plain instruction paragraph just works. Reach for `{% role %}` only when a prompt is **more than one message** — a multi-turn exchange, or an instruction plus an example dialogue.
+
+The three roles, and when each is for:
+
+- **`system`** — the standing setup: who the model is, the rules it follows, the world facts and lore it should honor. It frames the *whole* conversation and the model treats it as authoritative context, not as something to answer. This is the "role/persona" from the mental model above, plus the selected data — and it is the most stable content, so it caches (below).
+- **`user`** — the human's turn: the request, the selected prose, the material to work on. This is what the model responds *to*.
+- **`assistant`** — the model's own turns: earlier replies in a continued conversation, or example outputs you supply to show the shape you want (some providers also let an `assistant` block *prefill* the start of the response).
+
+A single-message prompt is all `system` (the default). A back-and-forth — like the Roleplay prompt reconstructing a scene with `character_turns` — alternates `user` and `assistant`.
+
+## Caching
+
+A long prompt — persona, world rules, the lore in scope — is mostly the **same bytes every turn**. **Prompt caching** lets a provider recognize a repeated prefix and charge a fraction for it (on Anthropic a cache *read* is ≈0.1× a fresh write) instead of re-billing the whole thing. Over a chat that re-sends the same setup each turn, that is most of the cost saved.
+
+**You never place caches.** The backend orders the prompt **stable content first, volatile content last** — the system prompt and settled lore lead; new-or-changed lore and the latest turn trail — so editing one lore entry doesn't invalidate the stable prefix above it. Each provider maps that ordering to its own caching: Anthropic gets breakpoints with a 1-hour lifetime on the stable tier and 5 minutes on the volatile tier; OpenAI caches the stable prefix automatically; Ollama ignores it. Nothing about caching appears in your template — it is a provider-neutral volatility ordering, not an author control.
+
+To make caching work for you:
+
+- **Put stable content in the `system` role** — persona, world rules, style. It caches for an hour and is reused across turns.
+- **Select lore with `use()` / `use_lore()`; don't paste it.** The backend places it in the right tier and keeps a settled entry as a cheap cache read; a freshly-edited one re-writes just that turn, then re-settles.
+- **The one lever, when you know the churn:** `use(node, "stable")` starts a node in the cached tier from turn one (e.g. a roleplay's POV character, fixed for the whole chat); `use(node, "volatile")` pins one you're actively editing to the cheap-rewrite tier. It is advisory — a `"stable"`-hinted node that actually changes still re-writes, so you never see stale text.
+- **Watch it in the preview.** The [preview](preview.md#the-cache-strip)'s cache strip shows the send-path composition, each block badged `stable` / `volatile` — so you can see what will be reused and what will re-send before you spend a token.
+
 ## Audience
 
 These pages are for prompt authors: the technical user writing or customizing prompt templates. They are not tutorials for end users; the slash menu surfaces prompts under friendlier labels.

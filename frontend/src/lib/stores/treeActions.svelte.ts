@@ -295,6 +295,7 @@ class TreeActions {
     api: {
       create: api.createResearchNode.bind(api),
       rename: api.renameResearchNode.bind(api),
+      move: api.moveResearchNode.bind(api),
       cascadePreview: api.cascadeResearchDeletePreview.bind(api),
       delete: api.deleteResearchNode.bind(api),
     },
@@ -307,7 +308,7 @@ class TreeActions {
     },
     // A deleted note may have cascade-deleted attached chats (#1078/#1087).
     afterDelete: () => refreshChatSessions(),
-    supportsDrag: false,
+    supportsDrag: true,
     showStatusStripe: false,
     containerHasEditor: false,
     inlineRenameOnLeafCreate: false,

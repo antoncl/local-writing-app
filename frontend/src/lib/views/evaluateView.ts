@@ -444,7 +444,7 @@ function evalSource<T extends EvalNode>(
     if (expr.nest) {
       // Nest is the other row-producing primary (ADR-0028): it denormalizes a
       // relational join into `(node, path)` rows with real-node parent segments.
-      return sortNestRows(evalNest(state, expr.nest).rows, sort, state.schema);
+      return sortNestRows(evalNest(state, expr.nest).rows, sort, state.schema, state.universe);
     }
     // ADR-0037 §5: σ downstream of a row-producer is row-preserving. When the
     // structure-carrying operand (intersect's first, difference's `keep`) is a
@@ -946,16 +946,42 @@ function buildNestAdjacency<T extends EvalNode>(
   return adj;
 }
 
-// Order a nest's leaf rows by the segment sort (title/field). `manual`/none keeps
-// the natural universe/BFS order. Ranks nodes by the shared node comparator, then
-// stable-sorts rows by their node's rank — so within each parent the leaves come
-// out sorted while sibling parents keep their first-seen order.
+// Order a nest's leaf rows by the segment sort (title/field). Ranks nodes by the
+// shared node comparator, then stable-sorts rows by their node's rank — so within
+// each parent the leaves come out sorted while sibling parents keep their
+// first-seen order.
+//
+// For `manual` sort (ADR-0037 Amendment 2) the rows are ordered in document
+// PRE-ORDER instead — by the universe position of every node on the row's path,
+// then the leaf. `buildLevel`'s first-seen reconstruction then reproduces input
+// order at every level. This honors §4's containment `rank` (materialized as
+// universe/array position), which the recursive Nest's breadth-first placement
+// order would otherwise drop — floating an empty container above populated
+// siblings that precede it in the file.
 function sortNestRows<T extends EvalNode>(
   rows: ViewRow<T>[],
   sort: ViewSort | null | undefined,
   schema: MetadataSchema | null | undefined,
+  universe: T[],
 ): ViewRow<T>[] {
-  if (!sort || sort.by === "manual") return rows;
+  if (!sort || sort.by === "manual") {
+    const pos = new Map<string, number>();
+    universe.forEach((n, i) => pos.set(n.id, i));
+    const rankOf = (id: string | null): number => (id ? pos.get(id) ?? Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER);
+    const keyOf = (r: ViewRow<T>): number[] => [...r.path.map((seg) => rankOf(seg.nodeId)), rankOf(r.node.id)];
+    return rows
+      .map((r, i) => ({ r, key: keyOf(r), i }))
+      .sort((a, b) => {
+        const len = Math.min(a.key.length, b.key.length);
+        for (let k = 0; k < len; k++) {
+          if (a.key[k] !== b.key[k]) return a.key[k] - b.key[k];
+        }
+        // Equal common prefix: the shorter path (an ancestor's own row) sorts
+        // first; identical keys fall back to input index for a stable order.
+        return a.key.length - b.key.length || a.i - b.i;
+      })
+      .map((x) => x.r);
+  }
   const ranked = sortNodes(rows.map((r) => r.node), sort, schema);
   const rank = new Map<string, number>();
   ranked.forEach((n, i) => {

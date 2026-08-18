@@ -19,28 +19,34 @@
     PROVIDER_DISPLAY_NAMES,
   } from "@/lib/utils/aiProviders";
 
-  export let providers: ProviderCredentialsView;
-  // The machine default provider, highlighted as the live one. Display only.
-  export let defaultProviderId: string = "";
-  // Settings passes true (rotate/remove); the wizard leaves it false (add-only).
-  export let editable: boolean = false;
-  // True while a write is in flight — disables the form's commit (wizard).
-  export let busy: boolean = false;
-  export let onSaveKey: (
-    field: keyof ProviderCredentialsView,
-    value: string,
-  ) => void | Promise<void>;
-  // Only used when `editable`; clears a provider's key (drops the subscription).
-  export let onClearKey: ((field: keyof ProviderCredentialsView) => void) | undefined = undefined;
+  let {
+    providers,
+    // The machine default provider, highlighted as the live one. Display only.
+    defaultProviderId = "",
+    // Settings passes true (rotate/remove); the wizard leaves it false (add-only).
+    editable = false,
+    // True while a write is in flight — disables the form's commit (wizard).
+    busy = false,
+    onSaveKey,
+    // Only used when `editable`; clears a provider's key (drops the subscription).
+    onClearKey = undefined,
+  }: {
+    providers: ProviderCredentialsView;
+    defaultProviderId?: string;
+    editable?: boolean;
+    busy?: boolean;
+    onSaveKey: (field: keyof ProviderCredentialsView, value: string) => void | Promise<void>;
+    onClearKey?: ((field: keyof ProviderCredentialsView) => void) | undefined;
+  } = $props();
 
-  $: configured = configuredCloudProviders(providers);
-  $: addable = addableCloudProviders(providers);
+  const configured = $derived(configuredCloudProviders(providers));
+  const addable = $derived(addableCloudProviders(providers));
 
   // Add/rotate form. "add" shows the addable <select>; "rotate" targets one
   // already-configured provider (a label, no select).
-  let formMode: "none" | "add" | "rotate" = "none";
-  let formProviderId = "";
-  let formSecret = "";
+  let formMode: "none" | "add" | "rotate" = $state("none");
+  let formProviderId = $state("");
+  let formSecret = $state("");
 
   function resetForm() {
     formMode = "none";
@@ -88,7 +94,7 @@
               title={`Change ${prov.label} key`}
               aria-label={`Change ${prov.label} key`}
               disabled={busy}
-              on:click={() => beginRotate(prov.id)}
+              onclick={() => beginRotate(prov.id)}
             ><i class="ti ti-pencil" aria-hidden="true"></i></button>
             <button
               type="button"
@@ -96,7 +102,7 @@
               title={`Remove ${prov.label}`}
               aria-label={`Remove ${prov.label}`}
               disabled={busy}
-              on:click={() => remove(prov.id)}
+              onclick={() => remove(prov.id)}
             ><i class="ti ti-x" aria-hidden="true"></i></button>
           {/if}
         </span>
@@ -132,17 +138,17 @@
         />
       </label>
       <div class="inline-form-actions">
-        <button type="button" on:click={resetForm}>Cancel</button>
+        <button type="button" onclick={resetForm}>Cancel</button>
         <button
           type="button"
           class="primary"
           disabled={busy || !formSecret.trim()}
-          on:click={commit}>Save</button
+          onclick={commit}>Save</button
         >
       </div>
     </div>
   {:else if addable.length > 0}
-    <button type="button" class="inline-add-btn" on:click={beginAdd}>+ Add provider</button>
+    <button type="button" class="inline-add-btn" onclick={beginAdd}>+ Add provider</button>
   {/if}
 </div>
 

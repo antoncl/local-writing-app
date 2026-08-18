@@ -84,6 +84,11 @@ alphabetized buckets reads as broken sorting (2026-07-12, Anton). In first-seen 
 interleaved by row order (as the table row above notes), which is expected there. Membership invariant
 unchanged (ADR-0027 §E): `groups` may repeat a node, `nodes` dedupes.
 
+> **Amended by [Amendment 2](#amendment-2--manual-sort-honors-the-containment-relations-rank-2026-08-18):**
+> first-seen is meant to *derive* bucket order from the view's sort. Under `manual` sort a
+> containment Nest must derive it from the relation's `rank` (§4) — its input position — which the
+> recursive-Nest evaluation dropped. The flat `group_by` case described here is unchanged.
+
 ### 3. `ViewPresentation` is eradicated
 The enum, the spec field (`types.ts:413`), the node/summary/request fields (`models_views.py:480`,
 `:501`, `:521`, `:530`), the storage blob + `_view_presentation` parse, `paneViews.presentationFor`
@@ -107,6 +112,11 @@ it via the existing ancestry machinery (`structureToEvalNodes` + path append): t
 **evaluation strategy**, not a grammar special case — the ancestry pass already produces exactly
 this nested relation. A rejected alternative, `group_by: [{structure: true}]`, is recorded in
 §Rejected: it would have baked a dying storage artifact into the grammar's public vocabulary.
+
+> **Amended by [Amendment 2](#amendment-2--manual-sort-honors-the-containment-relations-rank-2026-08-18):**
+> the relation's third column, `rank`, is load-bearing — it is the sibling order. Manual-sort tree
+> rendering must honor it; the recursive-Nest evaluation substituted BFS placement, which is the bug
+> the amendment fixes.
 
 ### 5. The pipeline downstream of a row-producer is **row-preserving**
 Today only a *bare* Nest (or union) keeps its rows; an operand buried in the set algebra flattens
@@ -215,6 +225,104 @@ existing §2 anchors stay green (they are the unnamed-group case).
   forward-compatible subset — no stored-format break for the single-group defaults.
 - This is a grouping-semantics change and lives **entirely in ADR-0037.** It is *not* related to the
   view-designer-UX pass (ADR-0038).
+
+## Amendment 2 — Manual sort honors the containment relation's `rank` (2026-08-18)
+
+**Status: proposed (2026-08-18).** Raised by Anton after dogfooding: newly-created (empty) acts and
+chapters render *above* their populated siblings in the Draft/Research trees, and manuscript
+drag-to-reorder persists to disk but the view springs the row back to the wrong slot. Awaiting
+approval — no code or suite change until approved.
+
+### The problem
+The Draft / Research / Scene defaults are containment Nests under `manual` sort (§4, §7). §2 fixes
+bucket order as "first-seen in row order … so the view's sort also orders buckets," and the
+conformance fixture states the intended invariant plainly: **manual sort == input order; first-seen
+bucket order derives from it** (`adr0037.conformance.test.ts:34`).
+
+That derivation holds for a flat `group_by` — its rows come straight from the roster in universe
+order, so first-seen *is* input order. It **breaks for a recursive Nest.** `evalNest` emits leaf rows
+in breadth-first placement order: every seeded parent first, then level by level
+(`evaluateView.ts:811`, `:864`). A childless container is itself a leaf row, emitted at its own
+(shallow) level; a populated sibling never gets its own row and surfaces only through its (deeper)
+descendant leaves. `buildLevel` reconstructs each sibling group by first-seen (`groupTree.ts:240`),
+and `sortNestRows` does nothing under `manual` (`evaluateView.ts:958`). So a childless container
+floats to the **top** of its sibling group — ahead of siblings that precede it in the file.
+
+This is not what §4 models. §4 defines containment as the relation **`(parent, child, rank)`** —
+sibling order is the relation's third column, materialized as array position in
+`manuscript.structure.yaml`. The recursive-Nest evaluation drops `rank` and substitutes BFS
+placement, which coincides with `rank` only for uniform-depth trees. Every newly-created act/chapter
+is empty at creation, so it is exactly the childless case that floats — the reported symptom.
+Manuscript drag then persists a new `rank`, but the view re-derives order from placement and ignores
+it, so the drop appears inert.
+
+The §4/§5 anchors that assert the childless container first (`adr0037.conformance.test.ts:299`,
+`:353`, `:365`) froze this artifact: their comments assert the container stays **visible** ("still
+visible"), not that it belongs *above* its siblings. The `toEqual` pinned the slot incidentally.
+
+### The decision
+**Under `manual` sort, a Nest orders siblings by input position** — restoring the §2 "manual == input
+order" invariant, which holds for *every* Nest, not only containment ones. For the containment trees
+(Draft / Research / Scene) that input position is precisely §4's `rank`, the relation's third column,
+materialized as universe/array order — so this is stated as "manual sort honors `rank`" throughout,
+but the mechanism is general and needs no test for "is this a containment nest." The fix lives in the
+one no-op branch: `sortNestRows` (`evaluateView.ts:953`) orders the Nest's rows in document
+**pre-order** (lexicographically by the universe index of each path segment's node, then the leaf)
+instead of returning placement order untouched. `buildLevel`'s first-seen rule then reconstructs
+input order at every level, for free. The shipped defaults are all containment nests; a
+non-containment nest under `manual` sort (a user-authored view) simply becomes roster-ordered, which
+is what §2 already promised it should be.
+
+The change is confined to that branch:
+- **Non-`manual` sorts are unchanged** — `sortNestRows` already re-sorts by title/field regardless
+  of emission order, so it overwrites placement order today.
+- **Flat `group_by` is unchanged** — its rows never pass through `evalNest`/`sortNestRows`; they come
+  from `evalSegment` already in universe order.
+- **`buildLevel`, `applyGroupBy`, `order: "label"`, `show_empty` are untouched** — the fix reorders
+  the *rows fed in*, not the reconstruction. First-seen stays the rule; it now derives from `rank`
+  as §2 always intended.
+- **`orphans_of` / union placement is untouched** — orphans arrive as a separate union operand
+  concatenated after the Nest's rows; `sortNestRows` only reorders the placed subtree's own siblings.
+- **Childless containers stay visible** — they take their `rank` slot instead of the top. The
+  visibility the §4 anchor actually guarantees is preserved.
+- **Plot boards (ADR-0048) never touch the evaluator** — no interaction.
+
+No grammar, storage, or `ViewSpec` change; no migration.
+
+### Why positional now, `rank` as a computed field later
+`rank` is left **positional** (universe order), not reified as a field. The principled alternative —
+a computed intrinsic `rank` field, symmetric with §4 exposing `parent` / `children` as computed
+reference fields (the ADR-0031 precedent) — would let the ordinary field-sort chain order siblings
+and retire the positional comparator entirely. It is deferred on purpose: its proper moment is §4's
+own future, when the structure files are removed and containment becomes stored references. A bare
+ref-set has no order, so `rank` must become explicit *then*, alongside `parent` / `children`.
+Building it now would stand up that machinery ahead of the storage change that motivates it, inside
+the very subsystem this fix means to leave undisturbed. Named here so it is not reinvented.
+
+### Conformance (amends the normative suite)
+In the implementing commit:
+- **Flip** the three containment sibling-order anchors to input order — `["Ch 1", ["Scene 1",
+  "Scene 2"]]` **then** `"Ch 2"` (`adr0037.conformance.test.ts:299`, `:353`, `:365`). The
+  `new Set(...)` membership assertions (`:306`, `:361`) are order-independent and stay as-is; the one
+  *ordered* `nodeIds` assertion — the hand-picked intersect (`:372`) — flips with the rows,
+  `["ch2", "s1"]` → `["s1", "ch2"]`, the same rank ordering applied to membership.
+- **Add** an anchor: a mixed-depth containment Nest under `manual` sort renders siblings in input
+  order — a childless container beside a populated one keeps both in `rank` order, the empty one no
+  longer floating. This is the case the suite lacks today (existing Nest tests are uniform-depth) and
+  the one that regressed in the field.
+- **Keep** the orphan placement-order anchor (`:328`, "placed rows first … then orphans in roster
+  order") as-is: placed-vs-orphan is a different axis (union concat), and the implementation must
+  leave it green.
+
+### Not in scope / unaffected
+- Flat `group_by` semantics (§2), `order: "label"`, `show_empty`, provenance / membership (§6), the
+  two ν operators (§1), and the row-preserving σ/∩/− pipeline (§5's ancestor-revival, empty-branch
+  self-prune) are all untouched. Only sibling ordering *within a containment Nest under manual sort*
+  changes.
+- The research-tree drag-and-drop config gap (`treeActions.svelte.ts` — `supportsDrag: false` plus a
+  missing `move` API) and the acts/chapters `{number}` counter (keyed on `scene_id`, which container
+  nodes lack) are real defects surfaced alongside this bug, but are **separate issues**, not this
+  amendment.
 
 ## Conformance
 

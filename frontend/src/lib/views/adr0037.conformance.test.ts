@@ -296,14 +296,41 @@ describe("ADR-0037 §6: provenance rules", () => {
 describe("ADR-0037 §4: containment Nest", () => {
   it("ANCHOR: nest over the parent ref (roots = parent unset, recursive) reproduces the manuscript tree", () => {
     const r = ms({ expr: CONTAINMENT });
+    // Manual sort follows rank = document order (ADR-0037 Amdt 2): ch1 precedes
+    // ch2 in the roster, so ch1's subtree comes first; the childless ch2 stays
+    // visible, in its own rank slot rather than floating to the top.
     expect(shape(r.groups)).toEqual([
       ["Act 1", [
-        "Ch 2", // childless container: a leaf row, still visible
         ["Ch 1", ["Scene 1", "Scene 2"]],
+        "Ch 2",
       ]],
     ]);
     // Unfiltered: every placed node passes selection → all are members.
     expect(new Set(nodeIds(r))).toEqual(new Set(["act1", "ch1", "ch2", "s1", "s2"]));
+  });
+
+  it("ANCHOR (Amd 2): manual sort orders siblings by rank — mixed-depth empties keep their document slot", () => {
+    // Siblings under one act, in document order: Ch A (empty) · Ch Pop (holds a
+    // scene) · Ch B (empty). The recursive Nest emits Ch A / Ch B as shallow leaf
+    // rows and Ch Pop only via its deeper scene; pre-Amendment-2 first-seen
+    // floated both empties above Ch Pop. Rank ordering keeps Ch A first and Ch B
+    // last — pure document order, regardless of depth (neither "empties float"
+    // nor "empties sink").
+    const roster: EvalNode[] = [
+      { id: "act1", entry_type: "manuscript:act", title: "Act 1", metadata: {} },
+      { id: "chA", entry_type: "manuscript:chapter", title: "Ch A", metadata: { parent: "act1" } },
+      { id: "chP", entry_type: "manuscript:chapter", title: "Ch Pop", metadata: { parent: "act1" } },
+      { id: "sc", entry_type: "manuscript:scene", title: "Sc", metadata: { parent: "chP" } },
+      { id: "chB", entry_type: "manuscript:chapter", title: "Ch B", metadata: { parent: "act1" } },
+    ];
+    const r = evaluateView({ kind: "manuscript", expr: CONTAINMENT } as ViewSpec, roster, { schema: MS_SCHEMA });
+    expect(shape(r.groups)).toEqual([
+      ["Act 1", [
+        "Ch A",
+        ["Ch Pop", ["Sc"]],
+        "Ch B",
+      ]],
+    ]);
   });
 
   it("orphans wired flat to the root — the routed equivalent of the retired keep (ADR-0028 Amdt 1)", () => {
@@ -353,8 +380,8 @@ describe("ADR-0037 §5: row-preserving σ/∩/−", () => {
     const r = ms({ expr: { difference: { keep: CONTAINMENT, remove: { field: { key: "status", op: "overlap", value: "done" } } } } });
     expect(shape(r.groups)).toEqual([
       ["Act 1", [
-        "Ch 2",
         ["Ch 1", ["Scene 1"]],
+        "Ch 2",
       ]],
     ]);
     // Everything surviving passes σ (nothing here is "done") → all members.
@@ -365,11 +392,13 @@ describe("ADR-0037 §5: row-preserving σ/∩/−", () => {
     const r = ms({ expr: { intersect: [CONTAINMENT, { hand_picked: ["s1", "ch2"] }] } });
     expect(shape(r.groups)).toEqual([
       ["Act 1", [
-        "Ch 2",
         ["Ch 1", ["Scene 1"]],
+        "Ch 2",
       ]],
     ]);
-    expect(nodeIds(r)).toEqual(["ch2", "s1"]);
+    // Membership follows the same rank order as the rows: s1's subtree sorts
+    // ahead of the childless ch2 (ADR-0037 Amdt 2).
+    expect(nodeIds(r)).toEqual(["s1", "ch2"]);
   });
 
   it("ANCHOR: a container that is both a σ-passing member AND the parent of a surviving child appears exactly once (#101 merge-dedup)", () => {

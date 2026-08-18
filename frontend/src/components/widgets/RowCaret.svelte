@@ -7,7 +7,11 @@
   // stopped from bubbling to the row's own open-on-click.
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
 
-  let { collapsed, toggle }: { collapsed: boolean; toggle: () => void } = $props();
+  let {
+    collapsed,
+    toggle,
+    size = "sm",
+  }: { collapsed: boolean; toggle: () => void; size?: "sm" | "md" } = $props();
 </script>
 
 <button
@@ -19,7 +23,7 @@
     toggle();
   }}
 >
-  <GroupCaret {collapsed} />
+  <GroupCaret {collapsed} {size} />
 </button>
 
 <style>

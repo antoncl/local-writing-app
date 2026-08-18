@@ -2,9 +2,11 @@
   PlotContainerNode — a soft, free-flow act/chapter box on the plot board (ADR-0048
   S7 Slice 4). A non-interactive backdrop the cards float over: it shows the
   container's title and its card count, sized by plotBoardLayout to wrap its member
-  cards (a chapter box nests inside its act box via `level`). Plain presentational
-  component (no @xyflow/svelte imports) for the same reason as PlotCardNode — mountable
-  in happy-dom, drawn by Svelte Flow via the `plotContainer` node type.
+  cards (a chapter box nests inside its act box via `level`). No @xyflow/svelte imports
+  (same reason as PlotCardNode) — drawn by Svelte Flow via the `plotContainer` node type
+  and mountable in happy-dom. It DOES read the structure + schema stores to resolve the
+  container's live display title (with its reorder-live number), falling back to the raw
+  projection title; the stores have inert defaults, so it stays happy-dom-mountable.
 
   The whole box is `pointer-events: none` so it never intercepts a card drag/click —
   it is structure, not a control. Structure carries no colour (plotline is the card's

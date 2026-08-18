@@ -44,7 +44,7 @@ scene-less prompt reads book-start values, so `entry(x) == original(x)` there.
 | `use(node, "stable"\|"volatile")` | `""` — **selects** the node into context; the backend places, dedups, tiers, and caches it (the template emits nothing). The optional hint is an advisory cache-tier prior, bounded by per-revision correctness. |
 | `use_lore()` | `""` — enables the scene's implicit lore (the gate); the backend selects and places it. |
 | `full_outline()` | The manuscript's outline: a nested list of nodes with `.title`, `.summary`, `.children`. |
-| `full_text()` | `str` — every scene's prose in reading order. Heavy; prefer `use(scene)` for a single scene. |
+| `full_text()` | `str` — every scene's prose in reading order. Heavy — the whole-manuscript escape hatch. For one scene, use the prompt's target `scene` (`scene.body`); `use()` selects **lore**, not scene prose. |
 | `story_so_far(scene)` | `str` — an XML recap of prior scenes' summaries (scenes **1 → n-1**, reading order). A derived, per-scene-deterministic block: it is emitted (not selected) and caches in the stable prefix. |
 | `character_turns(scene, character)` | Reconstructs the scene as **alternating chat turns** for the Roleplay sub-type (focus character → `assistant`, others → `user` prefixed `[Name]:`, narration → plain `user`). Emits its own role boundaries — use it **outside** any `{% role %}` block. |
 | `plot_context(as_of=node)` | `str` — the spoiler-gated plot-board recap up to `as_of` (a card/scene). Derived and emitted, like `story_so_far`. |

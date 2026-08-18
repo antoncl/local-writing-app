@@ -45,6 +45,12 @@
       severity: "error" | "warning";
       message: string;
     }[];
+    // ADR-0061 S3b: the live effective inputs + provenance (name → source snippet
+    // id), bound OUT so the sibling EntryInputsEditor can render the inherited
+    // tier from the SAME resolve this pane already runs on every body change —
+    // which fires even while the pane is collapsed, so the tier stays live.
+    effectiveInputs?: PromptInputDefinition[];
+    inputProvenance?: Record<string, string>;
   }
 
   let {
@@ -58,6 +64,8 @@
     availableScenes = [],
     loadedSceneId = null,
     diagnostics = $bindable([]),
+    effectiveInputs = $bindable([]),
+    inputProvenance = $bindable({}),
   }: Props = $props();
 
   const isPrompt = (): boolean => documentKind === "prompt" && !!scene;
@@ -83,14 +91,14 @@
   // returned by the last render. Falls back to own inputs as an instant
   // placeholder until the first render returns (so a snippet-free prompt and the
   // moment of opening a prompt are unchanged). The resolver stays the single
-  // source; this is only which set the panel displays.
-  let promptPreviewEffectiveInputs: PromptInputDefinition[] = $state([]);
+  // source; this is only which set the panel displays. `effectiveInputs` is a
+  // bind-out prop (S3b) so the editor's inherited tier reads the same live set.
   let promptPreviewConflicts: PromptInputConflict[] = $state([]);
   const promptPreviewDeclaredInputs = $derived(
     !isPrompt()
       ? []
-      : promptPreviewEffectiveInputs.length > 0
-        ? promptPreviewEffectiveInputs
+      : effectiveInputs.length > 0
+        ? effectiveInputs
         : promptPreviewOwnInputs,
   );
 
@@ -107,7 +115,8 @@
       diagnostics = [];
       // Drop the previous entry's resolved set — fall back to the new entry's own
       // inputs until its first render resolves includes (ADR-0061 S2).
-      promptPreviewEffectiveInputs = [];
+      effectiveInputs = [];
+      inputProvenance = {};
       promptPreviewConflicts = [];
       promptPreviewInputDrafts = seedInputDrafts(promptPreviewDeclaredInputs);
       promptPreviewSeededEntryId = loadedSceneId;
@@ -259,9 +268,10 @@
         resolve_effective_inputs: true,
       });
       promptPreviewResult = result;
-      // Adopt the resolved set + any include-type conflict (returned even when the
-      // render errored, so the form appears before the body renders).
-      promptPreviewEffectiveInputs = result.effective_inputs ?? [];
+      // Adopt the resolved set + provenance + any include-type conflict (returned
+      // even when the render errored, so the form appears before the body renders).
+      effectiveInputs = result.effective_inputs ?? [];
+      inputProvenance = result.input_provenance ?? {};
       promptPreviewConflicts = result.input_conflicts ?? [];
       // Render errors come back as 200 + result.error (the endpoint is
       // exploratory; auto-firing it before required inputs are filled

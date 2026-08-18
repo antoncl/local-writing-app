@@ -219,6 +219,35 @@ export function dependencyAdvisoryText(dependents: SnippetDependents | null | un
   return parts.join(" / ");
 }
 
+// One inherited input for the editor's two-tier list (ADR-0061 §3, S3b): the
+// definition the resolver contributed plus the snippet it came from, resolved to
+// a human title for the "inherited, from <snippet>" tag.
+export type InheritedInput = {
+  definition: PromptInputDefinition;
+  sourceId: string;
+  sourceTitle: string;
+};
+
+// The inherited tier: the effective inputs the resolver credited to a snippet
+// (i.e. present in `provenance` — a name the outer prompt declares itself is
+// absent, so it stays in the own tier), each tagged with its source snippet's
+// title. Source ids with no matching roster entry fall back to the raw id rather
+// than vanishing, so a just-created or unlisted snippet still shows a tag.
+export function inheritedInputsFrom(
+  effective: PromptInputDefinition[],
+  provenance: Record<string, string>,
+  promptEntries: PromptEntrySummary[],
+): InheritedInput[] {
+  const titleById = new Map(promptEntries.map((entry) => [entry.id, entry.title]));
+  const result: InheritedInput[] = [];
+  for (const definition of effective) {
+    const sourceId = provenance[definition.name];
+    if (sourceId === undefined) continue; // own, not inherited
+    result.push({ definition, sourceId, sourceTitle: titleById.get(sourceId) ?? sourceId });
+  }
+  return result;
+}
+
 export function findPromptEntry(
   ctx: PromptResolutionContext,
   entryId: string | null,

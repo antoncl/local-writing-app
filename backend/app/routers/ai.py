@@ -201,6 +201,7 @@ async def resolve_ai_provider_tier(
 async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPreviewResponse:
     effective_inputs: list[PromptInputDefinition] = []
     input_conflicts: list[PromptInputConflict] = []
+    input_provenance: dict[str, str] = {}
     with translate_errors():
         # `current_project` raises ProjectServiceError if no project is open;
         # translate_errors handles that. Preview-render failures (undefined
@@ -224,9 +225,11 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
                     PromptInputConflict(name=c.name, types=list(c.types))
                     for c in resolution.conflicts
                 ]
+                input_provenance = resolution.provenance
             except Exception:  # noqa: BLE001
                 effective_inputs = []
                 input_conflicts = []
+                input_provenance = {}
         try:
             rendered, session_id = build_preview(
                 project,
@@ -260,6 +263,7 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
                 ),
                 effective_inputs=effective_inputs,
                 input_conflicts=input_conflicts,
+                input_provenance=input_provenance,
             )
 
     messages = [
@@ -303,6 +307,9 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
         # conflict (empty unless the request asked to resolve them).
         effective_inputs=effective_inputs,
         input_conflicts=input_conflicts,
+        # ADR-0061 S3b: name → source snippet id for each inherited input, so the
+        # editor's two-tier list can tag it "from <snippet>".
+        input_provenance=input_provenance,
     )
 
 

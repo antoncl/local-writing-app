@@ -2,13 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   dependencyAdvisoryText,
   hidePromptEntries,
+  inheritedInputsFrom,
   promptEntriesForSurface,
   promptEntriesOfferedOn,
   promptOffersOn,
   promptOnAccept,
   type PromptResolutionContext,
 } from "@/lib/editor-core/promptResolution";
-import type { MetadataSchema, PromptEntrySummary } from "@/lib/types";
+import type { MetadataSchema, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
 
 function prompt(id: string, entryType: string): PromptEntrySummary {
   return { id, title: id, body: "", entry_type: entryType, metadata: {}, inputs: [] };
@@ -229,5 +230,30 @@ describe("dependencyAdvisoryText — the snippet dependency alert line (ADR-0061
     expect(dependencyAdvisoryText({ prompt_count: 0, chat_count: 0 })).toBe("");
     expect(dependencyAdvisoryText(null)).toBe("");
     expect(dependencyAdvisoryText(undefined)).toBe("");
+  });
+});
+
+describe("inheritedInputsFrom — the editor's inherited tier (ADR-0061 S3b)", () => {
+  const roster: PromptEntrySummary[] = [
+    { id: "villain", title: "Villain Voice", body: "", entry_type: "prompt:snippet", metadata: {}, inputs: [] },
+  ];
+  const menace: PromptInputDefinition = { name: "menace", type: "select" };
+  const subject: PromptInputDefinition = { name: "subject", type: "text" };
+
+  it("keeps only snippet-contributed inputs, tagged with the source title", () => {
+    const result = inheritedInputsFrom([subject, menace], { menace: "villain" }, roster);
+    // `subject` is own (absent from provenance) → excluded; `menace` is inherited.
+    expect(result).toEqual([
+      { definition: menace, sourceId: "villain", sourceTitle: "Villain Voice" },
+    ]);
+  });
+
+  it("falls back to the raw id when the source is not in the roster", () => {
+    const result = inheritedInputsFrom([menace], { menace: "ghost" }, roster);
+    expect(result[0].sourceTitle).toBe("ghost");
+  });
+
+  it("is empty when nothing is inherited", () => {
+    expect(inheritedInputsFrom([subject], {}, roster)).toEqual([]);
   });
 });

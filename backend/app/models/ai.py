@@ -333,6 +333,12 @@ class AIPreviewResponse(BaseModel):
     # a not-yet-filled input.
     effective_inputs: list[PromptInputDefinition] = Field(default_factory=list)
     input_conflicts: list[PromptInputConflict] = Field(default_factory=list)
+    # ADR-0061 S3b: which snippet contributed each INHERITED input — name →
+    # source snippet id. Only names not declared by the outer prompt appear (an
+    # own override is not inherited). The editor's two-tier Inputs list reads this
+    # to render "inherited, from <snippet>"; the id → title lookup is the
+    # frontend's (it holds the prompt roster). Populated with `effective_inputs`.
+    input_provenance: dict[str, str] = Field(default_factory=dict)
 
 
 class ChatMessage(BaseModel):

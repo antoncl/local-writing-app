@@ -165,6 +165,11 @@ export type AIPreviewResponse = {
   // `input_conflicts` as an error. Present even when the render errored.
   effective_inputs?: PromptInputDefinition[];
   input_conflicts?: PromptInputConflict[];
+  // ADR-0061 S3b: which snippet contributed each INHERITED input — name → source
+  // snippet id. Only names the outer prompt does not declare itself appear. The
+  // editor's two-tier Inputs list resolves the id → title via the prompt roster
+  // and renders "inherited, from <snippet>".
+  input_provenance?: Record<string, string>;
 };
 
 export type ChatMessage = {

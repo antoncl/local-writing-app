@@ -1,0 +1,83 @@
+// @vitest-environment happy-dom
+// ADR-0061 §3 / S3b + the #642 lesson (a data-displaying pane needs a mount test
+// asserting its rows render): the Inputs editor gained a second, read-only tier
+// for inputs a `{% include %}`d snippet contributes. This pins that an inherited
+// row renders, tagged with its source snippet, and that the tier is absent when
+// nothing is inherited.
+import { describe, expect, it } from "vitest";
+import { render, screen } from "@/lib/test/component";
+import { PromptInputDraftsController } from "@/lib/stores/promptInputDrafts.svelte";
+import EntryInputsEditor from "./EntryInputsEditor.svelte";
+
+const noopId = () => "cid-0";
+const slug = (v: string) => v;
+
+// A valid own draft for `name`, built the same way the editor seeds them.
+function ownDrafts(...names: string[]) {
+  const controller = new PromptInputDraftsController();
+  controller.reseed(
+    { id: "p1", inputs: names.map((name) => ({ name, type: "text" })) } as never,
+    "prompt",
+  );
+  return controller.drafts;
+}
+
+describe("EntryInputsEditor — inherited tier", () => {
+  it("renders an inherited input read-only, tagged with its source snippet", () => {
+    render(EntryInputsEditor, {
+      props: {
+        entryInputDrafts: [],
+        inheritedInputs: [
+          {
+            definition: { name: "menace", type: "select" },
+            sourceId: "villain",
+            sourceTitle: "Villain Voice",
+          },
+        ],
+        nextInputDraftId: noopId,
+        entrySlugify: slug,
+      },
+    });
+
+    // The inherited field and its provenance tag both render...
+    expect(screen.getByText("menace")).toBeTruthy();
+    expect(screen.getByText(/from Villain Voice/)).toBeTruthy();
+    // ...under the read-only "Inherited" tier, not as an editable own input.
+    expect(screen.getByText("Inherited")).toBeTruthy();
+    expect(screen.queryByText(/declared on this prompt/)).toBeTruthy(); // the own-tier header still there
+  });
+
+  it("shows no inherited tier when nothing is inherited", () => {
+    render(EntryInputsEditor, {
+      props: {
+        entryInputDrafts: [],
+        inheritedInputs: [],
+        nextInputDraftId: noopId,
+        entrySlugify: slug,
+      },
+    });
+    expect(screen.queryByText("Inherited")).toBeNull();
+  });
+
+  it("drops an inherited input the author has declared as an own input (the override case)", () => {
+    render(EntryInputsEditor, {
+      props: {
+        // `menace` is declared as an OWN input, overriding the snippet's.
+        entryInputDrafts: ownDrafts("menace"),
+        inheritedInputs: [
+          {
+            definition: { name: "menace", type: "text" },
+            sourceId: "villain",
+            sourceTitle: "Villain Voice",
+          },
+        ],
+        nextInputDraftId: noopId,
+        entrySlugify: slug,
+      },
+    });
+    // The own draft wins its row; the inherited duplicate drops, so there is no
+    // inherited tier at all (it was the only inherited input).
+    expect(screen.queryByText("Inherited")).toBeNull();
+    expect(screen.queryByText(/from Villain Voice/)).toBeNull();
+  });
+});

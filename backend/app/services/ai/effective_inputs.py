@@ -70,6 +70,13 @@ class InputTypeConflict:
 class EffectiveInputs:
     inputs: list[PromptInputDefinition]
     conflicts: list[InputTypeConflict]
+    # Which snippet contributed each INHERITED input: name → source snippet id
+    # (ADR-0061 §3, S3b). Keyed by every snippet-contributed name; a name the
+    # outer prompt declares itself is absent (it is own, not inherited). The
+    # nearer snippet wins the tag, like the definition it carries. The editor's
+    # two-tier Inputs list reads this to render "inherited, from <snippet>"; the
+    # id → title lookup is the reader's (the frontend holds the prompt roster).
+    provenance: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -82,6 +89,8 @@ class _GatherState:
     parse_env: SandboxedEnvironment
     max_depth: int
     gathered: dict[str, PromptInputDefinition] = field(default_factory=dict)
+    # name → id of the snippet that first (nearest) contributed it (S3b).
+    provenance: dict[str, str] = field(default_factory=dict)
     conflict_types: dict[str, list[str]] = field(default_factory=dict)
     on_path: set[str] = field(default_factory=set)  # ids on the current DFS path
     done: set[str] = field(default_factory=set)  # fully-visited ids (diamond skip)
@@ -115,7 +124,11 @@ def resolve_effective_inputs(
 
     inputs = _overlay_own_inputs(own_inputs, state.gathered)
     conflicts = [InputTypeConflict(name=n, types=tuple(t)) for n, t in state.conflict_types.items()]
-    return EffectiveInputs(inputs=inputs, conflicts=conflicts)
+    # Only names the outer does NOT declare itself are inherited — the rest are
+    # own (an override), so drop their provenance so the editor tiers them as own.
+    own_names = {inp.name for inp in own_inputs}
+    provenance = {name: source for name, source in state.provenance.items() if name not in own_names}
+    return EffectiveInputs(inputs=inputs, conflicts=conflicts, provenance=provenance)
 
 
 def _visit(state: _GatherState, snippet: SnippetSource, depth: int) -> None:
@@ -128,7 +141,7 @@ def _visit(state: _GatherState, snippet: SnippetSource, depth: int) -> None:
     state.on_path.add(snippet.id)
     try:
         for inp in snippet.inputs:
-            _offer(state, inp)
+            _offer(state, inp, snippet.id)
         for name in literal_include_names(snippet.body, state.parse_env):
             child = state.resolve_snippet(name)
             if child is not None:
@@ -138,13 +151,16 @@ def _visit(state: _GatherState, snippet: SnippetSource, depth: int) -> None:
         state.done.add(snippet.id)
 
 
-def _offer(state: _GatherState, inp: PromptInputDefinition) -> None:
+def _offer(state: _GatherState, inp: PromptInputDefinition, source_id: str) -> None:
     """Record the first-seen definition of each name; note a same-name /
     different-type clash across snippets as a conflict (the first still wins so a
-    form renders)."""
+    form renders). `source_id` is the snippet contributing this definition — kept
+    for the first-seen (nearest) one, so the provenance tag names the snippet
+    whose definition actually wins (S3b)."""
     existing = state.gathered.get(inp.name)
     if existing is None:
         state.gathered[inp.name] = inp
+        state.provenance[inp.name] = source_id
         return
     if existing.type != inp.type:
         seen = state.conflict_types.setdefault(inp.name, [existing.type])

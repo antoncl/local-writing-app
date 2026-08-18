@@ -191,6 +191,44 @@ def test_diamond_snippet_contributes_once():
     assert _names(result.inputs) == ["l", "common", "r"]
 
 
+# --- provenance (S3b: which snippet contributed each inherited input) -------
+
+
+def test_provenance_names_the_source_snippet():
+    voice = _snippet("voice", "{{ input.tone }}", _inp("tone"))
+    result = resolve_effective_inputs('{% include "voice" %}', [], _resolver(voice))
+    assert result.provenance == {"tone": "voice"}
+
+
+def test_provenance_excludes_a_name_the_outer_declares():
+    # A name the outer prompt also declares is OWN (an override), not inherited,
+    # so it carries no provenance tag even though a snippet contributes it.
+    voice = _snippet("voice", "{{ input.tone }}", _inp("tone"))
+    result = resolve_effective_inputs(
+        '{% include "voice" %}', [_inp("tone")], _resolver(voice)
+    )
+    assert result.provenance == {}
+
+
+def test_provenance_tags_each_snippet_across_a_transitive_chain():
+    inner = _snippet("inner", "{{ input.deep }}", _inp("deep"))
+    outer_snip = _snippet("outer", '{% include "inner" %}', _inp("mid"))
+    result = resolve_effective_inputs('{% include "outer" %}', [], _resolver(inner, outer_snip))
+    # Each inherited input is tagged with the snippet that declares it.
+    assert result.provenance == {"mid": "outer", "deep": "inner"}
+
+
+def test_provenance_credits_the_nearer_snippet_on_a_shared_name():
+    # Two snippets contribute `tone`; the nearer (first-visited) one wins both the
+    # definition and the tag, matching nearer-wins.
+    near = _snippet("near", "{{ input.tone }}", _inp("tone"))
+    far = _snippet("far", "{{ input.tone }}", _inp("tone"))
+    result = resolve_effective_inputs(
+        '{% include "near" %}{% include "far" %}', [], _resolver(near, far)
+    )
+    assert result.provenance == {"tone": "near"}
+
+
 # --- shared name matcher (used by both the loader and the resolver) ---------
 
 

@@ -114,6 +114,19 @@ class PatchTestCase(unittest.TestCase):
         path.write_text(f"---\n{front_matter}\n---\n\nBody.\n", encoding="utf-8")
         return path
 
+    def _write_prompt_externally(self, folder: Path, node_id: str, title: str, *, body: str = "Body.") -> Path:
+        """Write a prompt node file outside the app's write path (#392), so the
+        decision falls to the open-time patch — like `_write_lore_externally`."""
+        (folder / "prompts").mkdir(parents=True, exist_ok=True)
+        path = folder / "prompts" / f"{node_id}.md"
+        front_matter = yaml.safe_dump(
+            {"id": node_id, "title": title, "entry_type": "prompt:general", "metadata": {}},
+            sort_keys=False,
+            allow_unicode=True,
+        ).strip()
+        path.write_text(f"---\n{front_matter}\n---\n\n{body}\n", encoding="utf-8")
+        return path
+
     def _cold_build(self) -> NodeIndex:
         """A from-scratch index over the current files, bypassing the cache."""
         from app.services.project import node_index_snapshot as snapshot
@@ -317,6 +330,20 @@ class PatchDeclinesWhenTheChangeFansOutTests(PatchTestCase):
         self._open_index()
 
         (self.universe / "metadata.schema.yaml").write_text("version: 1\n", encoding="utf-8")
+
+        self.assertFalse(self._patched_without_full_walk())
+        self._assert_patch_matches_cold_build()
+
+    def test_a_prompt_edit_rebuilds(self) -> None:
+        """A prompt edit can change include edges (ADR-0061 §5), which are a
+        whole-graph derivation — a snippet's title/id edit changes what *other*
+        prompts resolve to. A per-file patch cannot model that fan-out, so any
+        prompt-family change declines and rebuilds, rerunning the include
+        finalize over the whole chain."""
+        self._write_prompt_externally(self.root, "revise", "Revise")
+        self._open_index()
+
+        self._write_prompt_externally(self.root, "revise", "Revise, renamed")
 
         self.assertFalse(self._patched_without_full_walk())
         self._assert_patch_matches_cold_build()

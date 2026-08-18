@@ -192,7 +192,13 @@ class ShadowedEdgeTests(unittest.TestCase):
         index = self.service._build_node_index()
 
         self.assertNotIn("shared", index.edges_by_src)
-        self.assertEqual(index.edges_by_dst, {})
+        # The ancestor's target no longer has a backlink — asserted directly
+        # rather than as "the whole reverse map is empty", because the built-in
+        # Library ships a prompt that `{% include %}`s a snippet (ADR-0061 §5), a
+        # real include edge that legitimately sits in `edges_by_dst`.
+        self.assertNotIn("ancestor_target", index.edges_by_dst)
+        # …and no lore ref survives into the entity-ref reference view (which
+        # excludes include edges).
         self.assertEqual(self.service.reference_graph().refs, {})
 
 

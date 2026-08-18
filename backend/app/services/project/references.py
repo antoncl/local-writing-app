@@ -61,6 +61,17 @@ from app.services.project.node_index_snapshot import serialize as snapshot_seria
 
 log = logging.getLogger(__name__)
 
+# The reserved `field_id` a `{% include %}` reference edge carries (ADR-0061 §5).
+# The include is a template-composition relationship, not an `entity_ref`, so the
+# entity-ref surfaces exclude it — the entity-ref backlinks skip it
+# (`schema.fields.get(...)` is None) and `reference_graph` filters it out; it
+# reaches consumers only as its own edge kind, which the dependency alert (S3)
+# queries from the reverse map. The leading `@` is load-bearing: a user field id
+# is validated against `[A-Za-z][A-Za-z0-9_]*` (see `schema.py`), so this value
+# can never collide with a real field — a field a user *did* name "include" would
+# otherwise be silently dropped from the reference view by that same filter.
+INCLUDE_FIELD_ID = "@include"
+
 # The Node-shaped kinds the index walks, once per layer of the chain.
 NODE_FAMILIES = [
     NodeFamily("manuscript", "scenes", "manuscript:scene"),
@@ -444,6 +455,12 @@ class ReferencesMixin:
             # the folded graph with no scope parameter (#314 / ADR-0039).
             self._collect_all_overrides(index, layers)
             self._fold_override_edges(index, root, schema)
+        # Include edges (ADR-0061 §5) are extracted here, after the whole chain
+        # is collected, because resolving an `{% include %}` name → snippet id
+        # needs the complete snippet set — unlike the field edges, which the
+        # per-file walk extracts inline. Before `resolve()`, so it projects these
+        # into the winner / reverse maps alongside the field edges.
+        self._extract_include_edges(index, schema)
         # One post-walk pass: order the candidate lists innermost-first, derive
         # `by_id` / `edges_by_src` from the winners, emit the shadow warnings and
         # build the reverse edge map. Nothing before this point resolves a
@@ -651,6 +668,15 @@ class ReferencesMixin:
         try:
             unit = self._patch_unit(path, layers)
         except PatchNotApplicable:
+            return self._SIGNATURE_STRUCTURAL
+        if unit.family is not None and unit.family.kind == "prompt":
+            # A prompt's include edges (ADR-0061 §5) are extracted by a
+            # whole-index finalize, not by the per-file `_collect_entry_file` this
+            # probe runs — so the disk signature would omit them and a body edit
+            # that adds an `{% include %}` (with no field-edge change) would read
+            # as unchanged and skip the rebuild. Force every prompt write onto the
+            # patch path via the structural sentinel; `_patch_node_index` then
+            # declines it to a cold rebuild that reruns the finalize.
             return self._SIGNATURE_STRUCTURAL
         probe = NodeIndex()
         if unit.kind == "family":
@@ -1205,6 +1231,74 @@ class ReferencesMixin:
             for target in dict.fromkeys(targets)
         ]
 
+    def _extract_include_edges(self, index: NodeIndex, schema: MetadataSchema | None) -> None:
+        """Record each prompt's literal `{% include %}` tags as reference edges
+        (ADR-0061 §5), so *"what includes this snippet?"* is a reverse-index
+        lookup the dependency alert rides on.
+
+        A **whole-index finalize**, not a per-file extraction like the
+        `entity_ref` edges above: an include names a snippet by id-or-title, and
+        resolving that name needs the *complete* snippet set — which the per-file
+        walk does not have (a prompt may include a snippet the walk has not
+        reached yet). So this runs once, after the walk, before `resolve()`,
+        over the winner of each id — the same set the render loader and the S1
+        resolver match against (`match_snippet_name`), so an edge targets the
+        snippet that actually renders and gather/render/dependency cannot drift.
+
+        The resolved edges are appended to `edges_by_layer_src` like any other,
+        so `resolve()` projects them into the forward/reverse maps and the
+        snapshot serializes them with no include-specific persistence code. A
+        prompt edit declines the incremental patch (`_patch_node_index`) and
+        rebuilds, so this reruns whenever an include could have changed.
+
+        Skipped when the schema failed to load: without it a snippet's
+        `entry_type` cannot be recognised, matching the "no edges" degradation
+        the cold build already applies to an unreadable schema.
+        """
+        if schema is None:
+            return
+        from app.services.ai.effective_inputs import literal_include_names
+        from app.services.ai.snippet_loader import match_snippet_name
+        from app.services.ai.templates import create_environment
+
+        # Winners only, computed the way `resolve()` will: `candidates` is
+        # innermost-first after the walk (`NodeIndex.add` front-inserts in walk
+        # order), so the first entry is the winner. `resolve()` has not run yet.
+        prompts = [entries[0] for entries in index.candidates.values() if entries[0].kind == "prompt"]
+        if not prompts:
+            return
+        snippets = [
+            entry
+            for entry in prompts
+            if "prompt:snippet" in self.entry_type_ancestry(entry.entry_type, schema=schema)
+        ]
+        if not snippets:
+            return  # nothing an include could resolve to
+        env = create_environment()
+        for prompt in prompts:
+            try:
+                _, body = self._read_markdown_with_front_matter(prompt.path)
+            except (OSError, ProjectServiceError):
+                # An unreadable body contributes no include edges — the render
+                # path surfaces the real failure; the graph degrades quietly.
+                continue
+            targets: list[str] = []
+            for name in literal_include_names(body, env):
+                matched = match_snippet_name(
+                    name, snippets, id_of=lambda entry: entry.id, title_of=lambda entry: entry.title
+                )
+                if matched is not None:
+                    targets.append(matched.id)
+            if not targets:
+                continue
+            # Dedup within the prompt — a snippet included twice is one edge —
+            # matching `_edges_from_field`, and append so a prompt's own
+            # `entity_ref` edges (if any) are kept alongside its include edges.
+            index.edges_by_layer_src.setdefault((prompt.source_layer_id, prompt.id), []).extend(
+                ReferenceEdge(src=prompt.id, dst=dst, field_id=INCLUDE_FIELD_ID)
+                for dst in dict.fromkeys(targets)
+            )
+
     def reference_graph(self) -> ReferenceGraphResponse:
         """Forward reference adjacency for the whole project (#184 Phase 2).
 
@@ -1213,13 +1307,21 @@ class ReferencesMixin:
         across fields and deduped in field-declaration order. The frontend
         inverts this into a reverse index the view evaluator's `references`
         computed field projects over. Only nodes that reference something appear
-        as keys."""
+        as keys.
+
+        `{% include %}` edges (ADR-0061 §5) are excluded: this is the entity-ref
+        reference view, and an include is a template-composition edge with its own
+        dependency surface (S3), not an `entity_ref` — the same reason the
+        entity-ref backlinks skip it. A node whose *only* edges are includes is
+        therefore absent, so the dict comprehension guards each key on a non-empty
+        list rather than trusting `edges_by_src` to hold none."""
         node_index = self._build_node_index()
-        # `edges_by_src` never holds an empty list, so every key is a node that
-        # references something — no filtering needed here.
         refs = {
-            src: list(dict.fromkeys(edge.dst for edge in edges))
+            src: deduped
             for src, edges in node_index.edges_by_src.items()
+            if (deduped := list(dict.fromkeys(
+                edge.dst for edge in edges if edge.field_id != INCLUDE_FIELD_ID
+            )))
         }
         return ReferenceGraphResponse(refs=refs)
 

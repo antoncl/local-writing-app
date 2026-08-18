@@ -106,6 +106,19 @@ class NodeIndexPatchMixin:
         for path_str in changed:
             unit = self._patch_unit(Path(path_str), layers)
             units.setdefault(unit.key, unit)
+        # A prompt edit can change include edges (ADR-0061 §5), which are a
+        # whole-graph derivation: an `{% include %}` resolves a snippet by
+        # id-or-title against the *full* prompt set, so a snippet's title/id edit
+        # changes what *other* prompts resolve to, and a body edit can add an
+        # include the per-file signature never sees. A per-file patch cannot model
+        # that fan-out — the same class as a schema edit — so any prompt-family
+        # change rebuilds, rerunning `_extract_include_edges` over the whole chain.
+        # Declined here rather than in `_patch_unit` so the write funnel's
+        # placeability filter still places a prompt file (it is a real index
+        # input), and both the open-time and write-time patch callers, which catch
+        # `PatchNotApplicable` and rebuild cold, route through it.
+        if any(unit.family is not None and unit.family.kind == "prompt" for unit in units.values()):
+            raise PatchNotApplicable("a prompt edit can change include edges across the graph")
         # **Drop everything first, then collect.** Two phases, not one per unit,
         # because a rename is a delete plus an add of the same id at the same
         # layer and the diff is ordered by path rather than by intent. Collect

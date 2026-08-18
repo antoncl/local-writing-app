@@ -15,12 +15,17 @@
   import SchemaFieldRow from "@/components/schema/SchemaFieldRow.svelte";
   import SelectOptionsEditor from "@/components/schema/SelectOptionsEditor.svelte";
   import { DEFAULT_FIELD_GLYPH } from "@/lib/utils/fieldIcons";
+  import { type InheritedInput } from "@/lib/editor-core/promptResolution";
   import { type EntryInputDraft } from "@/lib/utils/promptInputs";
   import type { NodePickerConfig, PromptInputType } from "@/lib/types";
 
   interface Props {
     // Persisted shape (bind:'d by the parent); parent owns serialization.
     entryInputDrafts?: EntryInputDraft[];
+    // ADR-0061 §3 / S3b: inputs a `{% include %}`d snippet contributes — shown
+    // read-only in a second tier below the own inputs, each tagged with its
+    // source snippet. The author edits only own inputs; these are inherited.
+    inheritedInputs?: InheritedInput[];
     // Shared id factory + slug helper — same counters/rules as NodeEditor's
     // reseed path, so clientIds don't collide and names slugify consistently.
     nextInputDraftId: () => string;
@@ -31,10 +36,21 @@
 
   let {
     entryInputDrafts = $bindable([]),
+    inheritedInputs = [],
     nextInputDraftId,
     entrySlugify,
     onInputsChange,
   }: Props = $props();
+
+  // The inherited tier excludes any name the author has declared as an OWN input
+  // (S3b): provenance is computed backend-side from the SAVED own inputs, but the
+  // own tier shows live drafts — so a name being added here to override a
+  // snippet's would otherwise show in both tiers until the next resolve. The own
+  // draft always wins its row; the inherited duplicate drops.
+  const ownInputNames = $derived(new Set(entryInputDrafts.map((draft) => draft.name)));
+  const inheritedRows = $derived(
+    inheritedInputs.filter((inherited) => !ownInputNames.has(inherited.definition.name)),
+  );
 
   // Which input row is currently expanded for editing. Matches the schema
   // field-row pattern (App.svelte: expandedSchemaFieldId): one row open at a
@@ -343,6 +359,26 @@
   <div class="entry-inputs-add">
     <button type="button" title="Add input" aria-label="Add input" onclick={addEntryInput}>+</button>
   </div>
+
+  <!-- ADR-0061 §3 / S3b: inputs contributed by `{% include %}`d snippets. A
+       second, read-only tier — the author edits only own inputs above; these
+       flow in from the snippet and are tagged with their source. -->
+  {#if inheritedRows.length > 0}
+    <div class="entry-inputs-inherited" role="group" aria-label="Inherited inputs">
+      <p class="entry-inputs-inherited-head">
+        Inherited <small>{inheritedRows.length}</small>
+        <small class="entry-inputs-hint">read-only · contributed by an included snippet</small>
+      </p>
+      {#each inheritedRows as inherited (inherited.definition.name)}
+        <div class="prompt-input-row prompt-input-row-inherited">
+          <i class={inputIconClass(inherited.definition.type)} aria-hidden="true"></i>
+          <span class="entry-inherited-name">{inherited.definition.label || inherited.definition.name}</span>
+          <span class="entry-inherited-type">{INPUT_TYPE_LABEL[inherited.definition.type] ?? inherited.definition.type}</span>
+          <span class="entry-inherited-source">from {inherited.sourceTitle}</span>
+        </div>
+      {/each}
+    </div>
+  {/if}
 </details>
 
 <style>
@@ -537,5 +573,38 @@
   }
   .prompt-input-row :global(.danger):hover {
     background: var(--danger-soft);
+  }
+  /* Inherited tier (S3b): a quiet, read-only list under the own inputs — the
+     writing-desk aside, not another editor. Divider sets it apart; rows carry no
+     controls, each tagged with the snippet it came from. */
+  .entry-inputs-inherited {
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border);
+  }
+  .entry-inputs-inherited-head {
+    margin: 0 0 2px;
+    font-size: var(--fs-sm);
+    color: var(--text);
+  }
+  .prompt-input-row-inherited {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 4px 0;
+    padding: 4px 6px;
+    font-size: var(--fs-sm);
+    color: var(--text-3);
+  }
+  .entry-inherited-name {
+    color: var(--text);
+  }
+  .entry-inherited-type {
+    font-size: var(--fs-xs);
+  }
+  .entry-inherited-source {
+    margin-left: auto;
+    font-size: var(--fs-xs);
+    font-style: italic;
   }
 </style>

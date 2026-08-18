@@ -15,7 +15,11 @@
 <script lang="ts">
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
-  import { dependencyAdvisoryText, surfaceForStrategy } from "@/lib/editor-core/promptResolution";
+  import {
+    dependencyAdvisoryText,
+    inheritedInputsFrom,
+    surfaceForStrategy,
+  } from "@/lib/editor-core/promptResolution";
   import CodeEditor from "@/components/widgets/CodeEditor.svelte";
   import EntryInputsEditor from "@/components/editor/body/EntryInputsEditor.svelte";
   import OfferOnPicker from "@/components/editor/body/OfferOnPicker.svelte";
@@ -27,6 +31,7 @@
     EntryBodyLanguage,
     LoreEntrySummary,
     PromptEntrySummary,
+    PromptInputDefinition,
     SnippetDependents,
     StructureDocument,
   } from "@/lib/types";
@@ -221,6 +226,17 @@
     message: string;
   }[] = $state([]);
 
+  // ADR-0061 §3 / S3b: the live effective inputs + provenance, bound out of
+  // PromptPreviewPane (which resolves them on every body change, even collapsed),
+  // so the Inputs editor's inherited tier tracks the edit buffer. The inherited
+  // list is the effective inputs the resolver credited to a snippet, tagged with
+  // that snippet's title from the roster.
+  let promptEffectiveInputs: PromptInputDefinition[] = $state([]);
+  let promptInputProvenance: Record<string, string> = $state({});
+  const inheritedInputs = $derived(
+    inheritedInputsFrom(promptEffectiveInputs, promptInputProvenance, promptEntries),
+  );
+
   // rawBody change propagation: CodeEditor's bind:value updates our
   // `rawBody`, which (because the parent uses bind:rawBody) updates the
   // parent's rawBody too. The parent has its own `$: if (rawBodyMode &&
@@ -346,6 +362,7 @@
   <div class="entry-inputs-host" class:read-only={readOnly} inert={readOnly || undefined}>
     <EntryInputsEditor
       bind:entryInputDrafts
+      {inheritedInputs}
       {nextInputDraftId}
       {entrySlugify}
       {onInputsChange}
@@ -367,6 +384,8 @@
 
   <PromptPreviewPane
     bind:diagnostics={promptPreviewDiagnostics}
+    bind:effectiveInputs={promptEffectiveInputs}
+    bind:inputProvenance={promptInputProvenance}
     {rawBody}
     {scene}
     {documentKind}

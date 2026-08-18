@@ -269,6 +269,30 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertEqual([i["name"] for i in body["effective_inputs"]], ["subject", "menace"])
         self.assertEqual(body["input_conflicts"], [])
 
+    def test_preview_returns_input_provenance_for_inherited_inputs(self) -> None:
+        # ADR-0061 S3b: the preview names which snippet contributed each INHERITED
+        # input, so the editor's two-tier list can tag it "from <snippet>". The
+        # outer's own `subject` is absent (own, not inherited).
+        snippet_id = self._make_prompt(
+            "Villain Voice",
+            "{{ inputs.menace }}",
+            "prompt:snippet",
+            [PromptInputDefinition(name="menace", type="select")],
+        )
+        resp = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": (
+                    '{% role "user" %}{% include "Villain Voice" %} {{ inputs.subject }}{% endrole %}'
+                ),
+                "own_inputs": [{"name": "subject", "type": "text"}],
+                "inputs": {"menace": "high", "subject": "the heist"},
+                "resolve_effective_inputs": True,
+            },
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(resp.json()["input_provenance"], {"menace": snippet_id})
+
     def test_preview_returns_effective_inputs_even_when_render_errors(self) -> None:
         # The inputs panel must appear before the body renders, so effective
         # inputs come back even when the render errors on the unfilled input.

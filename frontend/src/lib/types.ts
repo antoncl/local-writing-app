@@ -192,6 +192,15 @@ export type PromptEntrySummary = {
   editable?: boolean;
 };
 
+// How many nodes depend on a `prompt:snippet`'s fields (ADR-0061 §5), for the
+// editor's advisory "used by N prompts / M chats" when editing a snippet.
+// `prompt_count` is the reverse-transitive `{% include %}` closure; `chat_count`
+// the chats whose locked prompt is in it. Advisory only — never blocks a save.
+export type SnippetDependents = {
+  prompt_count: number;
+  chat_count: number;
+};
+
 export type PromptEntry = {
   id: string;
   title: string;

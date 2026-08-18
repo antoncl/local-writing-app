@@ -1325,6 +1325,30 @@ class ReferencesMixin:
         }
         return ReferenceGraphResponse(refs=refs)
 
+    def prompts_including_snippet(self, snippet_id: str) -> set[str]:
+        """The ids of every prompt that transitively `{% include %}`s
+        `snippet_id` (ADR-0061 §5) — the "N prompts" half of the dependency alert.
+
+        A reverse-**transitive** closure over the `@include` edges the index
+        already carries (S2b): a prompt that includes a snippet that includes
+        `snippet_id` is affected too, because it renders `snippet_id`'s text and
+        so depends on its fields. `snippet_id` itself is never in the result
+        (a self- or cyclic include cannot make a node its own dependent); the
+        `seen` guard also terminates any include cycle."""
+        index = self._build_node_index()
+        including: set[str] = set()
+        frontier = [snippet_id]
+        while frontier:
+            current = frontier.pop()
+            for edge in index.edges_by_dst.get(current, []):
+                if edge.field_id != INCLUDE_FIELD_ID or edge.src in including:
+                    continue
+                including.add(edge.src)
+                # Its own includers depend on `snippet_id` transitively too.
+                frontier.append(edge.src)
+        including.discard(snippet_id)
+        return including
+
     def list_reference_candidates(
         self,
         *,

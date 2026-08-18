@@ -62,6 +62,7 @@ import type {
   SaveProjectNodeRequest,
   PromptEntry,
   PromptEntryList,
+  SnippetDependents,
   PlotTemplate,
   PlotTemplateList,
   PlotBoardProjection,
@@ -954,6 +955,12 @@ export const api = {
   // shipped original in place; the returned entry is the local copy.
   forkPromptEntry(entryId: string) {
     return request<PromptEntry>(`/prompts/${entryId}/fork`, { method: "POST" });
+  },
+  // The "used by N prompts / M chats" dependency counts for a snippet (ADR-0061
+  // §5). Harmless for a non-snippet prompt (nothing includes it → 0/0), so the
+  // caller shows the advisory only when a count is non-zero.
+  getPromptDependents(entryId: string) {
+    return request<SnippetDependents>(`/prompts/${entryId}/dependents`);
   },
   // Plot templates (ADR-0048 S4c) — the ADR-0049 Library's second tenant. Same
   // browse/read/clone shape as prompts: list the resolved shelf, read one (with

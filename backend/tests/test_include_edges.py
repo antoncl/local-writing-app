@@ -22,6 +22,7 @@ from tempfile import TemporaryDirectory
 from project_fixtures import open_test_project
 
 from app.models import (
+    CreateChatSessionRequest,
     CreatePromptEntryRequest,
     MetadataFieldDefinition,
     PromptInputDefinition,
@@ -242,6 +243,69 @@ class IncludeEdgeTests(unittest.TestCase):
             index.edges_by_dst[snippet],
             [ReferenceEdge(src=prompt, dst=snippet, field_id=INCLUDE_FIELD_ID)],
         )
+
+
+class SnippetDependentsTests(unittest.TestCase):
+    """The "used by N prompts / M chats" counts (ADR-0061 S3a)."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.service = open_test_project(self.root, "Snippet Dependents Tests")
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def _save_prompt(self, title: str, body: str, entry_type: str) -> str:
+        entry = self.service.create_prompt_entry(
+            CreatePromptEntryRequest(title=title, entry_type=entry_type)
+        )
+        self.service.save_prompt_entry(
+            entry.id,
+            SavePromptEntryRequest(
+                title=title, body=body, base_revision=entry.revision,
+                entry_type=entry_type, metadata={}, inputs=[],
+            ),
+        )
+        return entry.id
+
+    def test_prompt_count_is_the_transitive_include_closure(self) -> None:
+        voice = self._save_prompt("Voice", "{{ input.m }}", "prompt:snippet")
+        mid = self._save_prompt("Mid", '{% include "Voice" %}', "prompt:snippet")
+        direct = self._save_prompt("Direct", '{% include "Voice" %}', "prompt:general")
+        nested = self._save_prompt("Nested", '{% include "Mid" %}', "prompt:general")
+        self._save_prompt("Unrelated", "{{ input.x }}", "prompt:general")
+
+        # direct + mid include Voice; nested includes Mid, so depends transitively.
+        self.assertEqual(self.service.prompts_including_snippet(voice), {mid, direct, nested})
+        dep = self.service.snippet_dependents(voice)
+        self.assertEqual((dep.prompt_count, dep.chat_count), (3, 0))
+
+    def test_chat_count_counts_chats_locked_to_an_including_prompt(self) -> None:
+        voice = self._save_prompt("Voice", "{{ input.m }}", "prompt:snippet")
+        including = self._save_prompt("Revise", '{% include "Voice" %}', "prompt:general")
+        other = self._save_prompt("Other", "{{ input.x }}", "prompt:general")
+        self.service.create_chat_session(CreateChatSessionRequest(title="c1", prompt_entry_id=including))
+        self.service.create_chat_session(CreateChatSessionRequest(title="c2", prompt_entry_id=including))
+        self.service.create_chat_session(CreateChatSessionRequest(title="c3", prompt_entry_id=other))
+        self.service.create_chat_session(CreateChatSessionRequest(title="c4"))  # freeform, no prompt
+
+        dep = self.service.snippet_dependents(voice)
+        self.assertEqual((dep.prompt_count, dep.chat_count), (1, 2))
+
+    def test_a_snippet_nothing_includes_has_no_dependents(self) -> None:
+        lonely = self._save_prompt("Lonely", "{{ input.m }}", "prompt:snippet")
+        dep = self.service.snippet_dependents(lonely)
+        self.assertEqual((dep.prompt_count, dep.chat_count), (0, 0))
+
+    def test_an_include_cycle_terminates_and_excludes_the_snippet_itself(self) -> None:
+        # A includes B, B includes A. Neither is its own dependent, and the walk
+        # terminates rather than looping.
+        a = self._save_prompt("A", '{% include "B" %}', "prompt:snippet")
+        b = self._save_prompt("B", '{% include "A" %}', "prompt:snippet")
+
+        self.assertEqual(self.service.prompts_including_snippet(a), {b})
+        self.assertEqual(self.service.prompts_including_snippet(b), {a})
 
 
 if __name__ == "__main__":

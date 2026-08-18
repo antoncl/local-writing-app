@@ -18,6 +18,7 @@ import type {
   PromptContextStrategy,
   PromptEntrySummary,
   PromptInputDefinition,
+  SnippetDependents,
 } from "@/lib/types";
 
 // The DISCOVERY surface a prompt is offered on, derived from its output handler
@@ -200,6 +201,22 @@ export function promptEntriesOfferedOn(
 // for a prompt with no includes).
 export function effectivePromptInputs(entry: PromptEntrySummary): PromptInputDefinition[] {
   return entry.effective_inputs ?? entry.inputs ?? [];
+}
+
+// The "N prompts / M chats" text for the snippet dependency advisory (ADR-0061
+// §5). Each half is pluralized and omitted when zero; the whole string is empty
+// when there are no dependents (or no counts yet), which is the editor's signal
+// to render no note at all — so a non-snippet prompt (always 0/0) shows nothing.
+// Pure and here so the pluralization / zero-hiding is unit-tested without
+// mounting the code-body editor (which embeds CodeMirror).
+export function dependencyAdvisoryText(dependents: SnippetDependents | null | undefined): string {
+  if (!dependents) return "";
+  const parts: string[] = [];
+  if (dependents.prompt_count > 0)
+    parts.push(`${dependents.prompt_count} ${dependents.prompt_count === 1 ? "prompt" : "prompts"}`);
+  if (dependents.chat_count > 0)
+    parts.push(`${dependents.chat_count} ${dependents.chat_count === 1 ? "chat" : "chats"}`);
+  return parts.join(" / ");
 }
 
 export function findPromptEntry(

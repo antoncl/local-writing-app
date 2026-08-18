@@ -13,8 +13,9 @@
   owns serialization.
 -->
 <script lang="ts">
+  import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
-  import { surfaceForStrategy } from "@/lib/editor-core/promptResolution";
+  import { dependencyAdvisoryText, surfaceForStrategy } from "@/lib/editor-core/promptResolution";
   import CodeEditor from "@/components/widgets/CodeEditor.svelte";
   import EntryInputsEditor from "@/components/editor/body/EntryInputsEditor.svelte";
   import OfferOnPicker from "@/components/editor/body/OfferOnPicker.svelte";
@@ -26,6 +27,7 @@
     EntryBodyLanguage,
     LoreEntrySummary,
     PromptEntrySummary,
+    SnippetDependents,
     StructureDocument,
   } from "@/lib/types";
 
@@ -100,6 +102,40 @@
       : null,
   );
   const showOfferOnPicker = $derived(surfaceForStrategy(promptStrategy) === "conversation");
+
+  // --- Dependency advisory (ADR-0061 §5 / S3a) ---
+  // "used by N prompts / M chats — changing these fields may affect them."
+  // Fetched per open node: the count depends on OTHER prompts' `{% include %}`s,
+  // not on edits to this body, so once per open is enough. Only snippets have
+  // includers — a non-snippet prompt returns 0/0, so the note self-hides below
+  // and no snippet-vs-prompt gate is needed here.
+  //
+  // Depends on `loadedSceneId` (+ the stable `documentKind`), NOT `scene`: the id
+  // changes only on a node switch, whereas `scene` can be reassigned with the
+  // same id on autosave/reactive updates (the case NodeEditor's
+  // `scene.id !== loadedSceneId` guard absorbs). Reading `scene` here would
+  // re-fire this effect — and its O(chats) backend scan — on every such edit.
+  // The loaded id is captured so a slow response for a previous node is discarded.
+  let dependents = $state<SnippetDependents | null>(null);
+  $effect(() => {
+    const id = loadedSceneId;
+    dependents = null;
+    if (!id || documentKind !== "prompt") return;
+    let cancelled = false;
+    api
+      .getPromptDependents(id)
+      .then((result) => {
+        if (!cancelled) dependents = result;
+      })
+      .catch(() => {
+        // Advisory only — a failed count degrades to no note, never an error.
+        if (!cancelled) dependents = null;
+      });
+    return () => {
+      cancelled = true;
+    };
+  });
+  const dependentsNote = $derived(dependencyAdvisoryText(dependents));
 
   // --- Restore-default-body (for prompt sub-types with a non-empty
   //     default_body, e.g. roleplay). Visible only when the current body
@@ -292,6 +328,16 @@
         </section>
       </div>
     </div>
+  {/if}
+
+  <!-- Dependency advisory (ADR-0061 §5): a snippet whose fields other prompts /
+       chats depend on. Advisory only, never a gate; absent for a prompt nothing
+       includes (the count is 0/0). -->
+  {#if dependentsNote}
+    <p class="entry-inputs-dependents">
+      <i class="ti ti-info-circle" aria-hidden="true"></i>
+      Used by {dependentsNote} — changing these fields may affect them.
+    </p>
   {/if}
 
   <!-- A Library prompt's declared inputs are shown but locked: `inert` blocks
@@ -504,6 +550,20 @@
      `inert` on the element does the actual interaction blocking. */
   .entry-inputs-host.read-only {
     opacity: 0.6;
+  }
+  /* A quiet, advisory dependency note (ADR-0061 §5) — a writing-desk aside, not
+     an alarm: muted text, small, an unobtrusive info glyph. */
+  .entry-inputs-dependents {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    margin: 0 0 8px;
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+  }
+  .entry-inputs-dependents > .ti {
+    flex: none;
+    align-self: center;
   }
   .raw-body-editor {
     display: grid;

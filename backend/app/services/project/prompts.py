@@ -29,6 +29,7 @@ from app.models import (
     PromptEntrySummary,
     PromptInputDefinition,
     SavePromptEntryRequest,
+    SnippetDependents,
 )
 from app.services.ai.effective_inputs import SnippetSource
 from app.services.project.errors import ProjectServiceError
@@ -136,6 +137,24 @@ class PromptEntriesMixin:
         for entry in entries:
             resolution = resolve_effective_inputs(entry.body, entry.inputs, resolve, env=env)
             entry.effective_inputs = resolution.inputs
+
+    def snippet_dependents(self, snippet_id: str) -> SnippetDependents:
+        """The advisory *"used by N prompts / M chats"* counts for a
+        `prompt:snippet` (ADR-0061 §5), shown when editing it so a writer knows a
+        field change may invalidate resumable chats or including prompts.
+
+        `prompt_count` is the reverse-transitive include closure (`references.py`
+        `prompts_including_snippet`, over S2b's `@include` edges); `chat_count`
+        is the chat sessions whose locked prompt is in that closure — a
+        header-only scan, since a chat links its prompt by scalar, not an edge.
+        Harmless on a non-snippet prompt (nothing includes it → 0/0)."""
+        including = self.prompts_including_snippet(snippet_id)
+        chat_count = sum(
+            1
+            for session in self.list_chat_sessions().sessions
+            if session.prompt_entry_id in including
+        )
+        return SnippetDependents(prompt_count=len(including), chat_count=chat_count)
 
     def effective_inputs_for_body(
         self, body: str, own_inputs: list[PromptInputDefinition]

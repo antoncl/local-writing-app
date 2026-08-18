@@ -646,6 +646,20 @@ class PromptEntrySummary(BaseModel):
     editable: bool = False
 
 
+class SnippetDependents(BaseModel):
+    """How many nodes depend on a `prompt:snippet`'s fields (ADR-0061 §5), for
+    the editor's advisory *"used by N prompts / M chats"* shown on a snippet.
+
+    `prompt_count` is the reverse-transitive closure over `{% include %}` edges
+    (a prompt that includes a snippet that includes this one counts too);
+    `chat_count` is the chat sessions whose locked prompt is in that closure.
+    Advisory only — it never blocks the edit; its obligation is a truthful
+    count."""
+
+    prompt_count: int = 0
+    chat_count: int = 0
+
+
 class PromptEntry(BaseModel):
     id: str
     title: str

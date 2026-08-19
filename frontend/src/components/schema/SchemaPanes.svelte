@@ -35,7 +35,7 @@
   } from "@/lib/stores/schema";
   import { setValidation } from "@/lib/stores/validation";
   import { workspaceLayout } from "@/lib/stores/workspaceLayout.svelte";
-  import { subordinatePanes } from "@/lib/stores/subordinatePanes";
+  import { closeSubordinatePane, openSubordinatePane } from "@/lib/utils/subordinatePane";
   import RegionRegistrar from "@/components/workspace/RegionRegistrar.svelte";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
   import type {
@@ -277,10 +277,10 @@
     schemaTypeInitColor = null;
     schemaTypeInitPrompt = null;
     schemaTypeDraftToken += 1;
-    // A new-type draft is a schema-tree action with no owning editor — clear any
-    // stale subordinate link so it isn't auto-closed with an unrelated pane.
-    subordinatePanes.unregister("schema_type");
-    workspaceLayout.ensureVisible("schema_type");
+    // A new-type draft is a schema-tree action with no owning editor — the null
+    // host clears any stale subordinate link so it isn't auto-closed with an
+    // unrelated pane.
+    openSubordinatePane("schema_type", null, () => closeSchemaPane("schema_type"));
   }
 
   function openSchemaTypeDetail(typeId: string, ownerPaneId: string | null = null) {
@@ -288,13 +288,8 @@
     if (!entryType) return;
     // schema_type is a singleton pane. Opened from an entry editor's "Edit type…"
     // it is that pane's subordinate (auto-closes with it); opened from the schema
-    // tree it has no owner, so clear any stale link rather than let it die with an
-    // unrelated editor.
-    if (ownerPaneId) {
-      subordinatePanes.register("schema_type", ownerPaneId, () => closeSchemaPane("schema_type"));
-    } else {
-      subordinatePanes.unregister("schema_type");
-    }
+    // tree it has no owner. `openSubordinatePane` (below) registers or clears the
+    // link accordingly.
     const source = schemaTypeSource(typeId);
     selectedSchemaTypeId = typeId;
     // The type's own kind — validate-or-default. The old ternary listed only
@@ -312,7 +307,7 @@
     schemaTypeInitColor = entryType.own_color ?? null;
     schemaTypeInitPrompt = entryType.prompt ?? null;
     schemaTypeDraftToken += 1;
-    workspaceLayout.ensureVisible("schema_type");
+    openSubordinatePane("schema_type", ownerPaneId, () => closeSchemaPane("schema_type"));
   }
 
   function defaultSchemaParentType(kind: SchemaKind) {
@@ -389,14 +384,12 @@
         confirmLabel: "Discard changes",
         destructive: true,
         onConfirm: async () => {
-          subordinatePanes.unregister("schema_type");
-          workspaceLayout.removePanel("schema_type");
+          closeSubordinatePane("schema_type");
         },
       });
       return;
     }
-    subordinatePanes.unregister("schema_type");
-    workspaceLayout.removePanel("schema_type");
+    closeSubordinatePane("schema_type");
   }
 
   function startSchemaTypeDrag(typeId: string) {
@@ -713,7 +706,7 @@
     await refreshMetadataSchema();
     setValidation(await api.validateProject());
     selectedSchemaTypeId = null;
-    workspaceLayout.removePanel("schema_type");
+    closeSubordinatePane("schema_type");
     if (schemaFieldEntryType === typeId || !metadataSchema?.entry_types[schemaFieldEntryType]) {
       schemaFieldEntryType = defaultSchemaEntryType(deletedKind);
     }

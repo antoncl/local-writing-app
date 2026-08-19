@@ -26,8 +26,7 @@
   import OfferOnPicker from "@/components/editor/body/OfferOnPicker.svelte";
   import PromptPreviewPane from "@/components/editor/body/PromptPreviewPane.svelte";
   import RegionRegistrar from "@/components/workspace/RegionRegistrar.svelte";
-  import { workspaceLayout } from "@/lib/stores/workspaceLayout.svelte";
-  import { subordinatePanes } from "@/lib/stores/subordinatePanes";
+  import { closeSubordinatePane, openSubordinatePane } from "@/lib/utils/subordinatePane";
   import { type EntryInputDraft } from "@/lib/utils/promptInputs";
   import type {
     DocumentKind,
@@ -315,20 +314,14 @@
     const id = previewPaneId;
     if (!id || !hostPaneId) return;
     previewDetached = true;
-    // ensureVisible homes it (briefly, synchronously) then dropOnEdge tiles it to
-    // the right of the editor's own group — full height and width beside the code.
-    workspaceLayout.ensureVisible(id);
-    const editorGroup = workspaceLayout.groupOf(hostPaneId);
-    if (editorGroup) workspaceLayout.dropOnEdge(id, editorGroup.id, "right");
-    subordinatePanes.register(id, hostPaneId, reattachPreview);
+    // Tile it to the right of the editor's own group — full height and width
+    // beside the code — and tie its lifetime to this editor pane.
+    openSubordinatePane(id, hostPaneId, reattachPreview, { beside: hostPaneId, edge: "right" });
   }
 
   function reattachPreview(): void {
     previewDetached = false;
-    const id = previewPaneId;
-    if (!id) return;
-    subordinatePanes.unregister(id);
-    if (workspaceLayout.isPlaced(id)) workspaceLayout.removePanel(id);
+    if (previewPaneId) closeSubordinatePane(previewPaneId);
   }
 
   // Guardrails: if the pane's document is swapped for a non-prompt while the
@@ -339,10 +332,7 @@
     if (previewDetached && !isPrompt()) reattachPreview();
   });
   onDestroy(() => {
-    const id = previewPaneId;
-    if (!id) return;
-    subordinatePanes.unregister(id);
-    if (workspaceLayout.isPlaced(id)) workspaceLayout.removePanel(id);
+    if (previewPaneId) closeSubordinatePane(previewPaneId);
   });
 
   // rawBody change propagation: CodeEditor's bind:value updates our

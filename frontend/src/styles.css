@@ -222,9 +222,12 @@
   --board: #181c1a;
   --panel: #20272a;
   --inset: #242a28;
-  --tier1: #232a27;
-  --tier2: #2d3633;
-  --tier3: #3a4541;
+  /* Widened per ADR-0066: the old steps sat ~1.5% off --surface (#1f2522)
+     and the grouped-panel tint read as invisible in dark. Each step now
+     clears the surface and the one below it by a legible margin. */
+  --tier1: #29322e;
+  --tier2: #333e39;
+  --tier3: #404d47;
   --border: #3a4541;
   --border-strong: #4a5651;
   --divider: #2a322f;

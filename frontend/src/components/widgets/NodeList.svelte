@@ -37,6 +37,16 @@
   // have to plumb a per-row `variant` prop.
   interface Props {
     mode?: "card" | "tree";
+    // Density is the second, orthogonal axis to layout `mode` (ADR-0066).
+    // `mode` chooses flat-cards vs. indented-tree; `density` chooses how
+    // much air a row breathes — comfortable · compact · dense:
+    //   comfortable → the Editorial Card look (the default; unchanged).
+    //   compact     → the same card, tightened, for deep trees / long lists.
+    //   dense       → tight single-line rounded cards for pickers / inputs.
+    // A NodeRow reads this via context exactly as it reads `mode`, so a
+    // consumer sets it once on the list and never plumbs a per-row flag.
+    // The two axes compose freely (a tree can be dense; a card list can be).
+    density?: "comfortable" | "compact" | "dense";
     // When set, NodeList renders a SearchInput at the top. The caller
     // is responsible for using the bound `searchValue` to filter the
     // children it passes into the default slot.
@@ -59,6 +69,7 @@
 
   let {
     mode = "card",
+    density = "comfortable",
     searchPlaceholder = null,
     searchValue = $bindable(""),
     searchDebounceMs = 0,
@@ -73,6 +84,15 @@
   setContext("nodeListMode", {
     get current() {
       return mode;
+    },
+  });
+
+  // Density rides the same reactive-getter channel as mode, so a row reads
+  // one value from context and never grows a per-aspect density flag
+  // (ADR-0066, the load-bearing anti-goal).
+  setContext("nodeListDensity", {
+    get current() {
+      return density;
     },
   });
 </script>

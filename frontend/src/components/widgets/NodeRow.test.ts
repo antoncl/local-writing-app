@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@/lib/test/component";
+import { render, screen, fireEvent, within } from "@/lib/test/component";
 import NodeRow from "@/components/widgets/NodeRow.svelte";
 
 // NodeRow is the app's most-reused list atom, so a regression here is
@@ -36,11 +36,18 @@ describe("NodeRow", () => {
     expect(screen.getByText("Static")).toBeInTheDocument();
   });
 
-  it("caps visible tags at two and shows a +N overflow chip", () => {
-    render(NodeRow, { props: { title: "T", tags: ["alpha", "beta", "gamma", "delta"] } });
-    expect(screen.getByText("alpha")).toBeInTheDocument();
-    expect(screen.getByText("beta")).toBeInTheDocument();
-    expect(screen.queryByText("gamma")).toBeNull();
-    expect(screen.getByText("+2")).toBeInTheDocument();
+  it("renders every tag and no +N chip when the width is unmeasured", () => {
+    // With no layout (happy-dom reports width 0), the width-aware pack
+    // (ADR-0066) hides nothing — it never guesses an overflow it can't
+    // measure. Scope the query to the visible cluster so the hidden font
+    // probe doesn't count. Collapse behaviour is covered in the browser.
+    const { container } = render(NodeRow, {
+      props: { title: "T", tags: ["alpha", "beta", "gamma", "delta"] },
+    });
+    const cluster = within(container.querySelector(".node-row-tags") as HTMLElement);
+    for (const tag of ["alpha", "beta", "gamma", "delta"]) {
+      expect(cluster.getByText(tag)).toBeInTheDocument();
+    }
+    expect(cluster.queryByText(/^\+\d+$/)).toBeNull();
   });
 });

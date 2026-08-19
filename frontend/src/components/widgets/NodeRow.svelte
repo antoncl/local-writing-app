@@ -17,12 +17,21 @@
 
   import { getContext } from "svelte";
   import type { Snippet } from "svelte";
+  import { packTagLine } from "@/lib/tagPacking";
+  import { measureTextWidth } from "@/lib/textMeasure";
 
   // Read the enclosing NodeList's mode via context. The context value is
   // a reactive getter wrapper (set by NodeList.svelte) so changes to the
   // list's `mode` prop propagate here without a refresh.
   type NodeListModeContext = { readonly current: "card" | "tree" };
   const nodeListMode = getContext<NodeListModeContext | undefined>("nodeListMode");
+
+  // The enclosing NodeList's density (ADR-0066), read the same way as mode:
+  // one reactive value from context, never a per-row flag. comfortable is the
+  // default (today's Editorial Card look) when no list sets it.
+  type NodeListDensity = "comfortable" | "compact" | "dense";
+  type NodeListDensityContext = { readonly current: NodeListDensity };
+  const nodeListDensity = getContext<NodeListDensityContext | undefined>("nodeListDensity");
 
   interface Props {
     title?: string;
@@ -59,7 +68,8 @@
     role?: string | null;
     // Tag pills under the title. Bound explicitly to `metadata.tags` —
     // do NOT pass aliases here (aliases live in the editor pane, not
-    // the row). Visible cap: TAG_VISIBLE_MAX; overflow becomes a +N chip.
+    // the row). Pills pack to the measured width (ADR-0066); the genuine
+    // remainder collapses into a trailing +N chip.
     tags?: readonly string[];
     // Optional per-tag hue: given a tag, return a hex (or null for the neutral
     // chip). Colors the tag as a Chip (a distinct color system from the kind
@@ -158,16 +168,66 @@
     nested,
   }: Props = $props();
 
-  const TAG_VISIBLE_MAX = 2;
-
   const indentStyle = $derived(depth > 0 ? `padding-left: ${depth * 14}px` : "");
   const stripeStyle = $derived(stripeColor ? `--row-stripe: ${stripeColor}` : "");
   const rootStyle = $derived([indentStyle, stripeStyle].filter(Boolean).join("; "));
   // Effective mode: header rows always bare; otherwise explicit variant
   // prop wins, then enclosing NodeList's mode (via context), then card.
   const effectiveMode = $derived(groupHeader ? "tree" : (variant ?? nodeListMode?.current ?? "card"));
-  const visibleTags = $derived(tags.slice(0, TAG_VISIBLE_MAX));
-  const hiddenTagCount = $derived(Math.max(0, tags.length - TAG_VISIBLE_MAX));
+  // One density value, resolved from context. comfortable === today's look.
+  const effectiveDensity = $derived<NodeListDensity>(nodeListDensity?.current ?? "comfortable");
+  // Width-aware tag packing (ADR-0066) — the fixed cap is retired. We
+  // measure the available tag-line width (`bind:clientWidth`) and each
+  // pill's natural width (canvas text metrics off a hidden font probe, so
+  // there's no per-tag mirror DOM to duplicate the labels), then greedily
+  // fill the line and show a `+N` chip only for the genuine remainder.
+  // Pills grow left→right; the `+N` sits where the line runs out. Until a
+  // width is measured (SSR / happy-dom tests), every tag renders — we never
+  // hide what we can't prove overflows.
+  const TAG_GAP = 4; // must match .node-row-tags `gap`
+  let tagsAreaWidth = $state(0);
+  let fontProbeEl = $state<HTMLElement | undefined>();
+  let tagMetrics = $state<{ font: string; padX: number } | null>(null);
+
+  // Read the pill's resolved font + horizontal padding/border once it is in
+  // the DOM; re-read on font-load reflow via a ResizeObserver on the probe.
+  $effect(() => {
+    const el = fontProbeEl;
+    if (!el) return;
+    const read = () => {
+      const cs = getComputedStyle(el);
+      tagMetrics = {
+        font: `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`,
+        padX:
+          parseFloat(cs.paddingLeft) +
+          parseFloat(cs.paddingRight) +
+          parseFloat(cs.borderLeftWidth) +
+          parseFloat(cs.borderRightWidth),
+      };
+    };
+    read();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
+
+  function pillWidth(text: string, m: { font: string; padX: number }): number {
+    // +1 guards against sub-pixel rounding so a pill never clips by a hair.
+    return Math.ceil(measureTextWidth(text, m.font) + m.padX) + 1;
+  }
+
+  const visibleCount = $derived.by(() => {
+    const n = tags.length;
+    if (n === 0) return 0;
+    const m = tagMetrics;
+    if (!m) return n; // unmeasured → show all, guess nothing
+    const widths = tags.map((t) => pillWidth(t, m));
+    return packTagLine(widths, tagsAreaWidth, TAG_GAP, pillWidth(`+${n}`, m));
+  });
+
+  const visibleTags = $derived(tags.slice(0, visibleCount));
+  const hiddenTagCount = $derived(tags.length - visibleCount);
   // Colored-chip CSS vars for one tag (empty when the tag has no hue). The tint
   // reads on both themes; the hue itself carries the border + text.
   function tagStyle(tag: string): string {
@@ -177,12 +237,18 @@
   }
 </script>
 
+<!-- Title + optional detail + packed tag line. One copy, rendered inside the
+     clickable <button> or the static <span>. The tag line binds its width for
+     the width-aware pack; the empty probe pill carries the pill's resolved
+     font/padding for canvas measurement (no per-tag mirror DOM). -->
+{#snippet textBody()}<span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if tags.length > 0}<span class="node-row-tags" bind:clientWidth={tagsAreaWidth}>{#each visibleTags as tag}<span class="node-row-tag" style={tagStyle(tag)}>{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span><span class="node-row-tag node-row-tag-probe" aria-hidden="true" bind:this={fontProbeEl}></span>{/if}</span>{/snippet}
+
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <!-- Whitespace between conditional blocks is intentionally absent in
      the main interpolation below: `display: flex` would otherwise
      promote inter-block text nodes to anonymous flex items. -->
 <div
-  class="node-row variant-{effectiveMode}"
+  class="node-row variant-{effectiveMode} density-{effectiveDensity}"
   class:tree-row={effectiveMode === "tree"}
   class:group-header={groupHeader}
   class:active
@@ -204,7 +270,7 @@
   {ondragover}
   {ondragleave}
   {ondrop}
->{#if leading}{@render leading()}{/if}{#if titleSlot}{@render titleSlot()}{:else if clickable}<button type="button" class="node-row-click" onclick={onClick} ondblclick={onDblClick}><span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag" style={tagStyle(tag)}>{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span></button>{:else}<span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if visibleTags.length > 0}<span class="node-row-tags">{#each visibleTags as tag}<span class="node-row-tag" style={tagStyle(tag)}>{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span>{/if}</span>{/if}{#if layerLabel}<span class="node-row-layer" title={`Inherited from ${layerLabel}`}>{layerLabel}</span>{/if}{#if trailing}<span class="node-row-trailing">{@render trailing()}</span>{/if}</div>
+>{#if leading}{@render leading()}{/if}{#if titleSlot}{@render titleSlot()}{:else if clickable}<button type="button" class="node-row-click" onclick={onClick} ondblclick={onDblClick}>{@render textBody()}</button>{:else}{@render textBody()}{/if}{#if layerLabel}<span class="node-row-layer" title={`Inherited from ${layerLabel}`}>{layerLabel}</span>{/if}{#if trailing}<span class="node-row-trailing">{@render trailing()}</span>{/if}</div>
 
 {#if nested && !collapsed}
   <div class="node-row-group-children">{@render nested()}</div>
@@ -236,11 +302,17 @@
     transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
   }
 
-  .node-row.variant-card:hover {
+  /* Dense shares the card's hover / focus / stripe chrome (ADR-0066: a dense
+     row IS a tighter card) — it differs only in the base padding/radius set
+     in the dense block below. These selector lists are the single source for
+     the shared chrome so the two densities can't drift. */
+  .node-row.variant-card:hover,
+  .node-row.density-dense:hover {
     background: var(--inset);
   }
 
-  .node-row.variant-card.active {
+  .node-row.variant-card.active,
+  .node-row.density-dense.active {
     border-color: var(--accent);
     background: var(--surface);
     box-shadow:
@@ -252,11 +324,13 @@
      than a ::before lets the band follow the card's rounded corners
      naturally, giving the bookmark-band look the design called for.
      The 4px inset is the band's width. */
-  .node-row.variant-card.has-row-stripe {
+  .node-row.variant-card.has-row-stripe,
+  .node-row.density-dense.has-row-stripe {
     box-shadow: inset 4px 0 0 0 var(--row-stripe);
   }
 
-  .node-row.variant-card.has-row-stripe.active {
+  .node-row.variant-card.has-row-stripe.active,
+  .node-row.density-dense.has-row-stripe.active {
     box-shadow:
       inset 4px 0 0 0 var(--accent),
       0 0 0 1.5px var(--accent-soft2),
@@ -346,16 +420,22 @@
   }
 
   /* Tag pill cluster — bound to metadata.tags, never aliases. Small,
-     neutral, capped at TAG_VISIBLE_MAX visible plus a +N overflow chip
-     so row height stays predictable. */
+     neutral. Packs to one line: as many pills as fit the measured width
+     (ADR-0066, width-aware pack), then a +N chip for the true remainder.
+     nowrap + overflow:hidden keep it a single line even if a measurement
+     is a hair off; the pack logic normally leaves nothing to clip. */
   .node-row-tags {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 4px;
     margin-top: 3px;
+    overflow: hidden;
   }
 
   .node-row-tag {
+    /* flex:none — pills keep their natural width so the pack count holds;
+       without it nowrap would shrink them and none would ever "overflow". */
+    flex: none;
     display: inline-flex;
     align-items: center;
     padding: 1px 7px;
@@ -366,6 +446,19 @@
     font-size: var(--fs-xs);
     font-weight: 600;
     line-height: 1.45;
+    white-space: nowrap;
+  }
+
+  /* Font probe — an empty pill kept in the layout (so its resolved font +
+     padding are readable) but visually gone. Canvas metrics come off this,
+     so there is no per-tag mirror duplicating the labels in the DOM. Left in
+     place (not pushed to left:-9999px): an off-screen probe would widen any
+     ancestor pane that doesn't clip overflow-x into a phantom scrollbar, and
+     absolute + visibility:hidden already resolves the metrics we read. */
+  .node-row-tag-probe {
+    position: absolute;
+    visibility: hidden;
+    pointer-events: none;
   }
 
   .node-row-tag-overflow {
@@ -476,13 +569,29 @@
 
   /* Group-header treatment: serif title + a hairline rule below. The
      chapter-divider look from the Editorial Card direction. Trailing
-     count pills are styled by the caller (they aren't button affordances). */
+     count pills are styled by the caller (they aren't button affordances).
+     The frame outweighs its leaves (ADR-0066): the header title steps UP to
+     --fs-xl serif so an expandable container never reads quieter than the
+     leaves it holds — at every density (headers are exempt from the
+     compact/dense leaf recession below). */
   .node-row.group-header > .node-row-click .node-row-text :global(strong),
   .node-row.group-header > .node-row-text :global(strong) {
     font-family: var(--serif);
-    font-size: var(--fs-md);
+    font-size: var(--fs-xl);
     font-weight: 700;
     color: var(--text);
+  }
+
+  /* Leaf recession — the other half of "the frame outweighs its leaves".
+     In compact / dense a non-header leaf title steps DOWN to --fs-md and
+     tones to --text-2, so the serif frame leads the eye. Comfortable keeps
+     the full --fs-lg / --text leaf (the flat lore list is unchanged). */
+  .node-row.density-compact:not(.group-header) > .node-row-click .node-row-text :global(strong),
+  .node-row.density-compact:not(.group-header) > .node-row-text :global(strong),
+  .node-row.density-dense:not(.group-header) > .node-row-click .node-row-text :global(strong),
+  .node-row.density-dense:not(.group-header) > .node-row-text :global(strong) {
+    font-size: var(--fs-md);
+    color: var(--text-2);
   }
 
   .node-row.group-header {
@@ -520,6 +629,75 @@
 
   .node-row-group-children :global(.node-row-group-children .node-row-group-children) {
     background: var(--tier3);
+  }
+
+  /* ── Dense (ADR-0066) ────────────────────────────────────────────────
+     A dense row is a *tighter rounded card*: the same curved inset kind-
+     stripe (it follows the smaller radius), tight padding so the stripe's
+     vertical run is short, a single line (detail dropped; title + packed
+     tags share it), and no header divider. Dense composes with either
+     layout mode, so these rules come after the card/tree blocks to win on
+     source order. No consumer requests dense yet — this defines the
+     capability the picker/inputs reduction (#1175) will consume. */
+  .node-row.density-dense {
+    padding: 4px 10px;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    background: transparent;
+    margin: 0;
+    transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+  }
+
+  /* Hover / active / stripe (incl. the curved inset band that now follows the
+     tighter corners) are shared with the card variant above — one source, no
+     drift. Dense only sets its own base padding/radius and the single-line
+     layout below. */
+
+  /* Dense tree rows drop the bare-tree click padding + hover — the card
+     padding above spaces them and the row itself carries the hover. */
+  .node-row.density-dense > .node-row-click {
+    padding: 0;
+  }
+
+  .node-row.density-dense.variant-tree > .node-row-click:hover {
+    background: transparent;
+  }
+
+  /* Single line: title + packed tags on one row; the detail line is
+     dropped (a dense picker leads with title + tags). */
+  .node-row.density-dense .node-row-text {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .node-row.density-dense .node-row-text :global(strong) {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .node-row.density-dense .node-row-text :global(small) {
+    display: none;
+  }
+
+  .node-row.density-dense .node-row-tags {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin-top: 0;
+  }
+
+  /* Dense drops the header divider — the stripe + tight rhythm separate. */
+  .node-row.density-dense.group-header {
+    border-bottom: none;
+    padding-bottom: 4px;
+    margin-bottom: 2px;
+  }
+
+  /* Tighter grouped-panel spacing under a dense header. */
+  .node-row.density-dense + .node-row-group-children {
+    gap: 4px;
+    padding: 6px 6px 7px;
+    margin-top: -1px;
   }
 
   .node-row.dragging {

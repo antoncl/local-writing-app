@@ -13,7 +13,7 @@
   // Stores only refs (id, kind, title) — bodies are materialized
   // server-side at template render time. See docs/context-picker.md.
 
-  import { createEventDispatcher, tick } from "svelte";
+  import { tick } from "svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
   import { hidePromptEntries } from "@/lib/editor-core/promptResolution";
@@ -42,56 +42,75 @@
     return swatch ? `--chip-base: ${swatch.hex};` : "";
   }
 
-  export let config: NodePickerConfig = {};
-  export let value: NodePickerRef[] = [];
-  export let label: string = "Context";
-  // Glyph-first trigger (opt-in, #163). When set, the add button renders a
-  // bare lexicon glyph instead of a `+ word` compound — anchored by a labelled
-  // host (the metadata rail's field row supplies the *what*). `"add"` → `+`
-  // (append), `"change"` → `⇄` (replace a single bound value; the swap glyph
-  // added to the lexicon in design-language.md §4). `null` keeps the legacy
-  // `+ label` word form used by the context-picker, whose host is less clearly
-  // labelled. `label` is reused as the aria/tooltip subject in glyph mode.
-  export let affordance: "add" | "change" | null = null;
-  $: affordanceVerb = affordance === "change" ? "Change" : "Add";
-  $: affordanceGlyph = affordance === "change" ? "⇄" : "+";
-  $: affordanceAria = label && label !== "Context" ? `${affordanceVerb} ${label}` : affordanceVerb;
-  export let structure: StructureDocument | null = null;
-  // Research tree, sibling to `structure`. Same shape — used to enumerate
-  // research notes (leaves only; topics are organizational containers
-  // with no body to inject).
-  export let researchStructure: StructureDocument | null = null;
-  export let loreEntries: LoreEntrySummary[] = [];
-  export let promptEntries: PromptEntrySummary[] = [];
-  // Plotlines for the card's `plotline` ref (ADR-0048 #742) — the picker's only
-  // `plot` source today. A flat list like assistants; the board's lanes and this
-  // picker both draw from the plotline roster.
-  export let plotEntries: PlotlineSummary[] = [];
-  // Assistants are machine-global nodes; enumerated here so views/pickers can
-  // hand-pick them (the view designer's hand_picked leaf over kind=assistant).
-  export let assistantEntries: AssistantEntrySummary[] = [];
-  // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
-  $: metadataSchema = $metadataSchemaStore;
-  // Compact mode trims chrome so the picker fits inside the Inputs
-  // dialog's narrow column. Composer-level renders use the default.
-  export let compact: boolean = false;
-  // Suppress the built-in chip display. Caller renders selected refs
-  // themselves (e.g. ReferencePicker hosts NodeRow cards above the
-  // picker). The `value` prop still flows in so the dropdown can mark
-  // already-picked items as disabled.
-  export let hideChips: boolean = false;
-  // Ids to drop from the candidate menu — used by ReferencePicker to
-  // hide the entry that owns the field (no self-references) without the
-  // caller having to filter the in-memory data sources.
-  export let excludeIds: string[] = [];
+  let {
+    config = {},
+    value = [],
+    label = "Context",
+    // Glyph-first trigger (opt-in, #163). When set, the add button renders a
+    // bare lexicon glyph instead of a `+ word` compound — anchored by a labelled
+    // host (the metadata rail's field row supplies the *what*). `"add"` → `+`
+    // (append), `"change"` → `⇄` (replace a single bound value; the swap glyph
+    // added to the lexicon in design-language.md §4). `null` keeps the legacy
+    // `+ label` word form used by the context-picker, whose host is less clearly
+    // labelled. `label` is reused as the aria/tooltip subject in glyph mode.
+    affordance = null,
+    structure = null,
+    // Research tree, sibling to `structure`. Same shape — used to enumerate
+    // research notes (leaves only; topics are organizational containers
+    // with no body to inject).
+    researchStructure = null,
+    loreEntries = [],
+    promptEntries = [],
+    // Plotlines for the card's `plotline` ref (ADR-0048 #742) — the picker's only
+    // `plot` source today. A flat list like assistants; the board's lanes and this
+    // picker both draw from the plotline roster.
+    plotEntries = [],
+    // Assistants are machine-global nodes; enumerated here so views/pickers can
+    // hand-pick them (the view designer's hand_picked leaf over kind=assistant).
+    assistantEntries = [],
+    // Compact mode trims chrome so the picker fits inside the Inputs
+    // dialog's narrow column. Composer-level renders use the default.
+    compact = false,
+    // Suppress the built-in chip display. Caller renders selected refs
+    // themselves (e.g. ReferencePicker hosts NodeRow cards above the
+    // picker). The `value` prop still flows in so the dropdown can mark
+    // already-picked items as disabled.
+    hideChips = false,
+    // Ids to drop from the candidate menu — used by ReferencePicker to
+    // hide the entry that owns the field (no self-references) without the
+    // caller having to filter the in-memory data sources.
+    excludeIds = [],
+    onChange,
+  }: {
+    config?: NodePickerConfig;
+    value?: NodePickerRef[];
+    label?: string;
+    affordance?: "add" | "change" | null;
+    structure?: StructureDocument | null;
+    researchStructure?: StructureDocument | null;
+    loreEntries?: LoreEntrySummary[];
+    promptEntries?: PromptEntrySummary[];
+    plotEntries?: PlotlineSummary[];
+    assistantEntries?: AssistantEntrySummary[];
+    compact?: boolean;
+    hideChips?: boolean;
+    excludeIds?: string[];
+    onChange?: (detail: { value: NodePickerRef[] }) => void;
+  } = $props();
 
-  const dispatch = createEventDispatcher<{ change: { value: NodePickerRef[] } }>();
+  const affordanceVerb = $derived(affordance === "change" ? "Change" : "Add");
+  const affordanceGlyph = $derived(affordance === "change" ? "⇄" : "+");
+  const affordanceAria = $derived(
+    label && label !== "Context" ? `${affordanceVerb} ${label}` : affordanceVerb,
+  );
+  // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
+  const metadataSchema = $derived($metadataSchemaStore);
 
   type Category = "manuscript" | "lore" | "snippet" | "assistant" | "research" | "plot";
 
-  let open = false;
-  let search = "";
-  let searchInputEl: HTMLInputElement | null = null;
+  let open = $state(false);
+  let search = $state("");
+  let searchInputEl: HTMLInputElement | null = $state(null);
 
   // Group-default thresholds: groups larger than this collapse by default
   // so a 128-scene project doesn't drown the menu. Compact mode is more
@@ -101,12 +120,12 @@
 
   // Membership (kinds + per-kind entry_type whitelist) reduced from the
   // config's `sources` — the pre-evaluator degenerate subset (#78).
-  $: membership = pickerMembership(config);
+  const membership = $derived(pickerMembership(config));
   // Allowed presets per the author config — empty means no presets shown.
-  $: allowedPresets = config.presets ?? [];
+  const allowedPresets = $derived(config.presets ?? []);
   // Allowed kinds per the author config — empty means no browse section.
-  $: allowedKinds = membership.kinds as Category[];
-  $: allowMultiple = config.multiple !== false;
+  const allowedKinds = $derived(membership.kinds as Category[]);
+  const allowMultiple = $derived(config.multiple !== false);
 
   const PRESET_META: Record<string, { title: string; tooltip: string }> = {
     full_outline: {
@@ -131,12 +150,12 @@
   function add(ref: NodePickerRef) {
     if (isPicked(ref)) return;
     const next = allowMultiple ? [...value, ref] : [ref];
-    dispatch("change", { value: next });
+    onChange?.({ value: next });
     if (!allowMultiple) close();
   }
 
   function remove(key: string) {
-    dispatch("change", {
+    onChange?.({
       value: value.filter((ref) => refKey(ref) !== key),
     });
   }
@@ -144,7 +163,7 @@
   // Author opt-in: ★ target marking only when config flags it. Surface
   // controlled by the prompt author so template code knows whether
   // `scene` is reliably bound.
-  $: allowTargetMarking = config.allow_target_marking === true;
+  const allowTargetMarking = $derived(config.allow_target_marking === true);
 
   // ★ target marking: one scene per input may be flagged as the template's
   // `scene` binding (NC-style). Clicking ★ on a scene toggles it; clicking
@@ -160,7 +179,7 @@
       if (r.target) return { ...r, target: false };
       return r;
     });
-    dispatch("change", { value: next });
+    onChange?.({ value: next });
   }
 
   // Trigger element + menu position state. The menu is rendered with
@@ -168,8 +187,8 @@
   // (which clipped the dropdown when ReferencePicker hosts this picker
   // inside a scene/lore metadata field). Position is captured from the
   // trigger's getBoundingClientRect at open time and on resize/scroll.
-  let triggerEl: HTMLButtonElement | undefined;
-  let menuStyle = "";
+  let triggerEl: HTMLButtonElement | undefined = $state();
+  let menuStyle = $state("");
   const MENU_WIDTH = 344;
   const MENU_MAX_HEIGHT = 420;
 
@@ -247,8 +266,8 @@
     return out;
   }
 
-  $: allScenes = structure ? flattenScenes(structure.root) : [];
-  $: filteredScenes = filterByTitle(allScenes, search);
+  const allScenes = $derived(structure ? flattenScenes(structure.root) : []);
+  const filteredScenes = $derived(filterByTitle(allScenes, search));
 
   // Flatten the research tree's notes (leaves) into a searchable list.
   // Topics are organizational containers with no body — only notes are
@@ -271,8 +290,8 @@
     return out;
   }
 
-  $: allResearchNotes = researchStructure ? flattenResearchNotes(researchStructure.root) : [];
-  $: filteredResearchNotes = filterByTitle(allResearchNotes, search);
+  const allResearchNotes = $derived(researchStructure ? flattenResearchNotes(researchStructure.root) : []);
+  const filteredResearchNotes = $derived(filterByTitle(allResearchNotes, search));
 
   function filterByTitle<T extends { title: string }>(items: T[], q: string): T[] {
     if (!q.trim()) return items;
@@ -282,7 +301,7 @@
 
   // Lore grouped by sub-type, respecting `config.entry_types.lore` filter
   // when set. Empty filter = all sub-types allowed.
-  $: loreGroups = (() => {
+  const loreGroups = $derived.by(() => {
     const allowed = new Set(membership.entryTypes.lore ?? []);
     const visible = loreEntries.filter((entry) => {
       // context_policy = "never" hides the entry from every explicit
@@ -301,37 +320,43 @@
       typeName: metadataSchema?.entry_types[typeId]?.name ?? typeId,
       entries,
     }));
-  })();
+  });
 
   // Snippets are prompts of sub-types where kind=prompt and not abstract
   // and (loosely) snippet-shaped; for v1 we expose all such prompt entries
   // that match the search.
   // Hidden Library prompts (ADR-0049 #682) drop out of the snippet picker too —
   // it is a prompt-discovery surface, so it routes through the shared seam.
-  $: snippetEntries = filterByTitle(
-    hidePromptEntries(promptEntries, $hiddenLibraryStore).filter((p) => {
-      const allowed = new Set(membership.entryTypes.snippet ?? []);
-      return allowed.size === 0 || allowed.has(p.entry_type);
-    }),
-    search,
+  const snippetEntries = $derived(
+    filterByTitle(
+      hidePromptEntries(promptEntries, $hiddenLibraryStore).filter((p) => {
+        const allowed = new Set(membership.entryTypes.snippet ?? []);
+        return allowed.size === 0 || allowed.has(p.entry_type);
+      }),
+      search,
+    ),
   );
 
   // Assistants matching the config's per-kind entry_type whitelist + search.
-  $: assistantCandidates = filterByTitle(
-    assistantEntries.filter((a) => {
-      const allowed = new Set(membership.entryTypes.assistant ?? []);
-      return allowed.size === 0 || allowed.has(a.entry_type);
-    }),
-    search,
+  const assistantCandidates = $derived(
+    filterByTitle(
+      assistantEntries.filter((a) => {
+        const allowed = new Set(membership.entryTypes.assistant ?? []);
+        return allowed.size === 0 || allowed.has(a.entry_type);
+      }),
+      search,
+    ),
   );
 
   // Plotlines matching the config's per-kind entry_type whitelist + search (#742).
-  $: plotCandidates = filterByTitle(
-    plotEntries.filter((p) => {
-      const allowed = new Set(membership.entryTypes.plot ?? []);
-      return allowed.size === 0 || allowed.has(p.entry_type);
-    }),
-    search,
+  const plotCandidates = $derived(
+    filterByTitle(
+      plotEntries.filter((p) => {
+        const allowed = new Set(membership.entryTypes.plot ?? []);
+        return allowed.size === 0 || allowed.has(p.entry_type);
+      }),
+      search,
+    ),
   );
 
   // Chip text resolution. Show the entry-type's display name from the
@@ -383,9 +408,9 @@
   // as a collapsible <details> with a header and a flat item list.
   // Groups with no items (after the search filter and config gating)
   // are dropped entirely.
-  $: excludeIdSet = new Set(excludeIds);
+  const excludeIdSet = $derived(new Set(excludeIds));
 
-  $: visibleGroups = (() => {
+  const visibleGroups = $derived.by(() => {
     type Group = { id: string; label: string; items: Array<{ ref: NodePickerRef; tag: string; monogram: string }> };
     const groups: Group[] = [];
     const dropExcluded = <T extends { ref: NodePickerRef }>(items: T[]): T[] =>
@@ -482,18 +507,19 @@
     }
 
     return groups;
-  })();
+  });
 
-  $: hasAnyConfigured =
-    allowedPresets.length > 0 || allowedKinds.length > 0;
-  $: hasAnyResults = visibleGroups.length > 0;
+  const hasAnyConfigured = $derived(
+    allowedPresets.length > 0 || allowedKinds.length > 0,
+  );
+  const hasAnyResults = $derived(visibleGroups.length > 0);
 
   // Total result count for the search-bar live counter. Reflects the
   // post-filter, post-gating reality so the user can tell when their
   // search has zeroed out before scrolling.
-  $: totalVisibleItems = visibleGroups.reduce((acc, g) => acc + g.items.length, 0);
+  const totalVisibleItems = $derived(visibleGroups.reduce((acc, g) => acc + g.items.length, 0));
 
-  $: collapseThreshold = compact ? COLLAPSE_THRESHOLD_COMPACT : COLLAPSE_THRESHOLD_DEFAULT;
+  const collapseThreshold = $derived(compact ? COLLAPSE_THRESHOLD_COMPACT : COLLAPSE_THRESHOLD_DEFAULT);
 
   // Search-aware: when the user is searching, expand every surviving
   // group so they can see what matched. When idle, collapse heavy
@@ -526,8 +552,8 @@
   }
 </script>
 
-<svelte:document on:mousedown={handleDocumentClick} on:keydown={handleKeydown} />
-<svelte:window on:scroll={handleViewportShift} on:resize={handleViewportShift} />
+<svelte:document onmousedown={handleDocumentClick} onkeydown={handleKeydown} />
+<svelte:window onscroll={handleViewportShift} onresize={handleViewportShift} />
 
 <div class="ctx-picker" class:compact>
   <!-- PR 2: chips + trigger live in one bordered "context bar" so the
@@ -553,7 +579,7 @@
             aria-pressed={ref.target ?? false}
             aria-label={ref.target ? `Unmark ${ref.title} as target scene` : `Mark ${ref.title} as target scene`}
             title={ref.target ? "★ Target — binds to `scene` in the template. Click to unmark." : "Mark as target — binds to `scene` in the template."}
-            on:click={() => toggleTarget(ref)}
+            onclick={() => toggleTarget(ref)}
           >{ref.target ? "★" : "☆"}</button>
         {/if}
         {#if !compact}
@@ -564,7 +590,7 @@
           type="button"
           class="ctx-chip-remove"
           aria-label="Remove {ref.title}"
-          on:click={() => remove(refKey(ref))}
+          onclick={() => remove(refKey(ref))}
         >×</button>
       </span>
     {/each}
@@ -580,7 +606,7 @@
         aria-expanded={open}
         aria-label={affordance ? affordanceAria : undefined}
         title={affordance ? affordanceAria : undefined}
-        on:click={toggle}
+        onclick={toggle}
       >
         {#if affordance}
           <span class="ctx-add-plus" aria-hidden="true">{affordanceGlyph}</span>
@@ -609,7 +635,7 @@
               type="button"
               class="ctx-search-clear"
               aria-label="Clear search"
-              on:click={() => (search = "")}
+              onclick={() => (search = "")}
             >×</button>
           {:else if hasAnyResults}
             <span class="ctx-search-count">{totalVisibleItems}{compact ? "" : " items"}</span>
@@ -658,7 +684,7 @@
                     disabled={picked}
                     title={picked ? "Already added" : ""}
                     style={colorStyleForRef(item.ref)}
-                    on:click={() => add(item.ref)}
+                    onclick={() => add(item.ref)}
                   >
                     <span class="ctx-item-mono" aria-hidden="true">{item.monogram}</span>
                     <span class="ctx-item-title">

@@ -918,7 +918,7 @@
         assistantEntries={ctx.assistantEntries}
         structure={ctx.structure}
         researchStructure={ctx.researchStructure}
-        on:change={(e) => onPickerChange(e.detail.value)}
+        onChange={(detail) => onPickerChange(detail.value)}
       />
     </div>
   {:else if kind === "nest"}

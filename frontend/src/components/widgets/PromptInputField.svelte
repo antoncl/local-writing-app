@@ -166,7 +166,7 @@
     researchStructure={researchStructure}
     loreEntries={loreEntries}
     promptEntries={promptEntries}
-    on:change={(event) => onChange(JSON.stringify(event.detail.value))}
+    onChange={(detail) => onChange(JSON.stringify(detail.value))}
   />
 {:else}
   <input

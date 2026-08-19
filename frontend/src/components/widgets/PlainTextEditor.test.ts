@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render } from "@/lib/test/component";
 
 import PlainTextEditor from "@/components/widgets/PlainTextEditor.svelte";
@@ -58,6 +58,28 @@ describe("PlainTextEditor disabled affordance", () => {
 // Regression for #1083: the chat composer stopped clearing from the 2nd send on
 // because the reactive value-sync could wedge. `setValue` is the imperative
 // escape hatch sendChat uses so the clear can't be lost to a skipped sync.
+// #49 runes port: the pre-runes `on:focus` on this component was dead — it
+// emitted no focus event, so the chat composer never marked its pane active the
+// way prose/view panes do. The port turns focus into a real `onFocus` callback,
+// wired to `focusin` (which bubbles from the inner contenteditable) so a parent
+// can activate the pane. This locks that it actually fires.
+describe("PlainTextEditor onFocus (pane activation, mirrors ViewBodyView)", () => {
+  it("fires onFocus when the editing surface gains focus", () => {
+    const onFocus = vi.fn();
+    const { container } = render(PlainTextEditor, { props: { value: "", onFocus } });
+    const wrapper = container.querySelector(".plain-text-editor") as HTMLElement;
+    expect(wrapper).not.toBeNull();
+    wrapper.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    expect(onFocus).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fire onFocus without a focus event", () => {
+    const onFocus = vi.fn();
+    render(PlainTextEditor, { props: { value: "", onFocus } });
+    expect(onFocus).not.toHaveBeenCalled();
+  });
+});
+
 describe("PlainTextEditor imperative setValue (#1083)", () => {
   // sendChat calls `composerRef.setValue("")` via bind:this so the clear can't be
   // lost to a wedged value-sync. This guards that contract: the instance exposes

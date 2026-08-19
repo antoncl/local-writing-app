@@ -9,57 +9,81 @@
   // Behaves textarea-like — multi-line, plain text, soft-wrap. Hard
   // returns produce paragraph breaks. Shift+Enter still inserts a hard
   // break within a paragraph (TipTap default).
-  import { createEventDispatcher, onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { Editor } from "@tiptap/core";
   import StarterKit from "@tiptap/starter-kit";
   import { ImplicitContextHighlight, REBUILD_META } from "@/lib/editor-core/implicitContextHighlight";
   import type { CompiledMatcher } from "@/lib/editor-core/implicitContextMatcher";
 
-  export let value = "";
-  export let placeholder = "";
-  export let ariaLabel = "";
-  export let minHeight = 60;
-  export let maxHeight: number | null = null;
-  export let autofocus = false;
-  // Read-only while a send/commit is in flight — the editor stays mounted
-  // (so its value and caret survive) but rejects input. Mirrors a disabled
-  // <textarea>: the substrate is TipTap, so we drive it via setEditable.
-  export let disabled = false;
-  // When present, decorates lore-name matches inline so the user can see
-  // what the implicit-context expander would pick up on send.
-  export let matcher: CompiledMatcher | null = null;
-  // Optional class additions on the wrapper (so callers can size or theme).
-  let className = "";
-  export { className as class };
-
-  const dispatch = createEventDispatcher<{
-    change: { value: string };
-    keydown: KeyboardEvent;
-  }>();
+  let {
+    value = "",
+    placeholder = "",
+    ariaLabel = "",
+    minHeight = 60,
+    maxHeight = null,
+    autofocus = false,
+    // Read-only while a send/commit is in flight — the editor stays mounted
+    // (so its value and caret survive) but rejects input. Mirrors a disabled
+    // <textarea>: the substrate is TipTap, so we drive it via setEditable.
+    disabled = false,
+    // When present, decorates lore-name matches inline so the user can see
+    // what the implicit-context expander would pick up on send.
+    matcher = null,
+    // Optional class additions on the wrapper (so callers can size or theme).
+    class: className = "",
+    // Callback props (were `change` / `keydown` CustomEvents before the runes
+    // pass). onChange carries the new plain-text value; onKeydown forwards the
+    // raw KeyboardEvent so callers can intercept (e.g. Ctrl+Enter to send).
+    onChange = () => {},
+    onKeydown = () => {},
+    // Fired when the editing surface gains focus so a parent can mark its pane
+    // active — mirrors ProseBodyView/ViewBodyView. (The pre-runes `on:focus` on
+    // this component never fired: the component emitted no focus event.)
+    onFocus = () => {},
+  }: {
+    value?: string;
+    placeholder?: string;
+    ariaLabel?: string;
+    minHeight?: number;
+    maxHeight?: number | null;
+    autofocus?: boolean;
+    disabled?: boolean;
+    matcher?: CompiledMatcher | null;
+    class?: string;
+    onChange?: (value: string) => void;
+    onKeydown?: (event: KeyboardEvent) => void;
+    onFocus?: () => void;
+  } = $props();
 
   let editorElement: HTMLDivElement;
-  let editor: Editor | null = null;
-  let isEmpty = true;
-  let lastExternalValue = "";
-  let pendingLocalValue: string | null = null;
-  let applyingExternalValue = false;
+  let editor = $state<Editor | null>(null);
+  let isEmpty = $state(true);
+  // Bookkeeping for the external/local value guard — mutated across the TipTap
+  // onUpdate callback and loadValue, never rendered. `$state` so the value-sync
+  // effect below reads current values, not a stale closure; the effect reads
+  // them inside untrack() so only `value` (and `editor` becoming ready) drive it.
+  let lastExternalValue = $state("");
+  let pendingLocalValue = $state<string | null>(null);
+  let applyingExternalValue = $state(false);
 
-  // External value changes — sync into the editor without re-emitting
-  // change. Pattern mirrors MetadataLongTextEditor's external/local guard.
-  $: if (editor && value !== lastExternalValue && !applyingExternalValue) {
-    if (pendingLocalValue !== null && value === pendingLocalValue) {
-      lastExternalValue = value;
-      pendingLocalValue = null;
-    } else {
-      loadValue(value);
-    }
-  }
+  // External value changes — sync into the editor without re-emitting change.
+  // Pattern mirrors MetadataLongTextEditor's external/local guard. Only `value`
+  // (and `editor`) drive this; the bookkeeping reads/writes are untracked so a
+  // loadValue() write can't re-trigger the effect.
+  $effect(() => {
+    const next = value;
+    if (!editor) return;
+    untrack(() => {
+      if (next === lastExternalValue || applyingExternalValue) return;
+      if (pendingLocalValue !== null && next === pendingLocalValue) {
+        lastExternalValue = next;
+        pendingLocalValue = null;
+      } else {
+        loadValue(next);
+      }
+    });
+  });
 
-  // When the matcher reference changes (lore loaded / edited), poke the
-  // ImplicitContextHighlight extension so its plugin rebuilds the
-  // DecorationSet against the new pattern set on the next transaction.
-  // Dispatching a no-op transaction is the cheapest way to trigger
-  // apply() without mutating the document.
   // Reflect the disabled prop onto the live editor. setEditable(false) blocks
   // typing/paste while keeping the current content and selection intact. Pass
   // emitUpdate=false: `disabled` is presentation-only, so toggling editability
@@ -67,9 +91,16 @@
   // text back into `value` and defeat a same-flush programmatic clear (#1071:
   // the chat composer failed to clear on the 2nd+ send). Mirrors loadValue's
   // setContent(doc, false) "don't echo" discipline.
-  $: if (editor) editor.setEditable(!disabled, false);
+  $effect(() => {
+    if (editor) editor.setEditable(!disabled, false);
+  });
 
-  $: if (editor) updateMatcher(matcher);
+  // When the matcher reference changes (lore loaded / edited), poke the
+  // ImplicitContextHighlight extension so its plugin rebuilds the
+  // DecorationSet against the new pattern set on the next transaction.
+  $effect(() => {
+    if (editor) updateMatcher(matcher);
+  });
   function updateMatcher(next: CompiledMatcher | null): void {
     if (!editor) return;
     const ext = editor.extensionManager.extensions.find(
@@ -120,7 +151,7 @@
           // to send a chat). Returning false lets ProseMirror handle the
           // event normally afterward; parents that want to preventDefault
           // must call event.preventDefault() themselves.
-          dispatch("keydown", event);
+          onKeydown(event);
           return false;
         },
       },
@@ -130,7 +161,7 @@
         const text = editor.getText();
         isEmpty = editor.isEmpty;
         pendingLocalValue = text;
-        dispatch("change", { value: text });
+        onChange(text);
       },
       onCreate: () => {
         if (editor) isEmpty = editor.isEmpty;
@@ -192,18 +223,22 @@
   }
 </script>
 
+<!-- focusin (bubbles from the contenteditable) marks the pane active, the way
+     ProseBodyView/ViewBodyView do; onFocus defaults to a no-op for callers that
+     don't care. -->
 <div
   class="plain-text-editor {className}"
   class:is-disabled={disabled}
   aria-disabled={disabled}
   style:--plain-text-min-height={`${minHeight}px`}
   style:--plain-text-max-height={maxHeight ? `${maxHeight}px` : "none"}
+  onfocusin={() => onFocus()}
 >
   {#if isEmpty && placeholder}
     <div class="plain-text-editor-placeholder" aria-hidden="true">{placeholder}</div>
   {/if}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div bind:this={editorElement} on:mousedown={() => !disabled && editor?.commands.focus()}></div>
+  <div bind:this={editorElement} onmousedown={() => !disabled && editor?.commands.focus()}></div>
 </div>
 
 <style>

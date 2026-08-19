@@ -95,7 +95,7 @@
     minHeight={60}
     maxHeight={200}
     matcher={implicitContextMatcher}
-    on:change={(e) => dispatch("change", { value: e.detail.value })}
+    onChange={(next) => dispatch("change", { value: next })}
   />
 {:else if input.type === "number"}
   <input

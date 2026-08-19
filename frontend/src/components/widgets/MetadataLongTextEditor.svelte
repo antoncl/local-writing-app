@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createEventDispatcher, onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { Editor } from "@tiptap/core";
   import StarterKit from "@tiptap/starter-kit";
   import Table from "@tiptap/extension-table";
@@ -11,31 +11,55 @@
   import type { CompiledMatcher } from "@/lib/editor-core/implicitContextMatcher";
   import { sanitizePastedHtml } from "@/lib/utils/sanitizePastedHtml";
 
-  export let value = "";
-  export let ariaLabel = "Long text metadata";
-  // Optional implicit-context matcher — when provided, lore-name matches
-  // get inline highlighting + hover preview. Null disables.
-  export let matcher: CompiledMatcher | null = null;
-
-  const dispatch = createEventDispatcher<{ change: { value: string } }>();
+  let {
+    value = "",
+    ariaLabel = "Long text metadata",
+    // Optional implicit-context matcher — when provided, lore-name matches
+    // get inline highlighting + hover preview. Null disables.
+    matcher = null,
+    // Emitted with the new markdown value (was a `change` CustomEvent before the
+    // runes pass); the parent persists it.
+    onChange = () => {},
+  }: {
+    value?: string;
+    ariaLabel?: string;
+    matcher?: CompiledMatcher | null;
+    onChange?: (value: string) => void;
+  } = $props();
 
   let editorElement: HTMLDivElement;
-  let editor: Editor | null = null;
-  let loadedValue = "";
-  let lastExternalValue = "";
-  let pendingLocalValue: string | null = null;
-  let applyingExternalValue = false;
+  let editor = $state<Editor | null>(null);
+  // Bookkeeping for the external/local value guard — mutated across the TipTap
+  // onUpdate callback and loadValue, never rendered. `$state` so the value-sync
+  // effect reads current values; it reads them inside untrack() so only `value`
+  // (and `editor` becoming ready) drive it.
+  let loadedValue = $state("");
+  let lastExternalValue = $state("");
+  let pendingLocalValue = $state<string | null>(null);
+  let applyingExternalValue = $state(false);
 
-  $: if (editor && value !== lastExternalValue && !applyingExternalValue) {
-    if (pendingLocalValue !== null && value === pendingLocalValue) {
-      lastExternalValue = value;
-      pendingLocalValue = null;
-    } else {
-      void loadValue(value);
-    }
-  }
+  // External value changes — sync into the editor without re-emitting change.
+  // Only `value` (and `editor`) drive this; the bookkeeping reads/writes are
+  // untracked so a loadValue() write can't re-trigger the effect.
+  $effect(() => {
+    const next = value;
+    if (!editor) return;
+    untrack(() => {
+      if (next === lastExternalValue || applyingExternalValue) return;
+      if (pendingLocalValue !== null && next === pendingLocalValue) {
+        lastExternalValue = next;
+        pendingLocalValue = null;
+      } else {
+        void loadValue(next);
+      }
+    });
+  });
 
-  $: if (editor) updateMatcher(matcher);
+  // When the matcher reference changes, poke the ImplicitContextHighlight
+  // extension so its plugin rebuilds the DecorationSet on the next transaction.
+  $effect(() => {
+    if (editor) updateMatcher(matcher);
+  });
   function updateMatcher(next: CompiledMatcher | null): void {
     if (!editor) return;
     const ext = editor.extensionManager.extensions.find(
@@ -73,7 +97,7 @@
         if (!editor || applyingExternalValue) return;
         loadedValue = editorHtmlToSceneMarkdown(editor.getHTML());
         pendingLocalValue = loadedValue;
-        dispatch("change", { value: loadedValue });
+        onChange(loadedValue);
       },
     });
 
@@ -100,17 +124,17 @@
 
 <div class="metadata-long-text">
   <div class="metadata-long-text-toolbar" aria-label={`${ariaLabel} formatting`}>
-    <button type="button" title="Bold" on:mousedown|preventDefault={() => run(() => editor?.chain().focus().toggleBold().run())}>B</button>
-    <button type="button" title="Italic" on:mousedown|preventDefault={() => run(() => editor?.chain().focus().toggleItalic().run())}>I</button>
-    <button type="button" title="Heading 1" on:mousedown|preventDefault={() => run(() => editor?.chain().focus().toggleHeading({ level: 1 }).run())}>H1</button>
-    <button type="button" title="Heading 2" on:mousedown|preventDefault={() => run(() => editor?.chain().focus().toggleHeading({ level: 2 }).run())}>H2</button>
-    <button type="button" title="Bullet list" on:mousedown|preventDefault={() => run(() => editor?.chain().focus().toggleBulletList().run())}>List</button>
-    <button type="button" title="Numbered list" on:mousedown|preventDefault={() => run(() => editor?.chain().focus().toggleOrderedList().run())}>1.</button>
-    <button type="button" title="Quote" on:mousedown|preventDefault={() => run(() => editor?.chain().focus().toggleBlockquote().run())}>Quote</button>
-    <button type="button" title="Table" on:mousedown|preventDefault={() => run(() => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run())}>Table</button>
+    <button type="button" title="Bold" onmousedown={(e) => { e.preventDefault(); run(() => editor?.chain().focus().toggleBold().run()); }}>B</button>
+    <button type="button" title="Italic" onmousedown={(e) => { e.preventDefault(); run(() => editor?.chain().focus().toggleItalic().run()); }}>I</button>
+    <button type="button" title="Heading 1" onmousedown={(e) => { e.preventDefault(); run(() => editor?.chain().focus().toggleHeading({ level: 1 }).run()); }}>H1</button>
+    <button type="button" title="Heading 2" onmousedown={(e) => { e.preventDefault(); run(() => editor?.chain().focus().toggleHeading({ level: 2 }).run()); }}>H2</button>
+    <button type="button" title="Bullet list" onmousedown={(e) => { e.preventDefault(); run(() => editor?.chain().focus().toggleBulletList().run()); }}>List</button>
+    <button type="button" title="Numbered list" onmousedown={(e) => { e.preventDefault(); run(() => editor?.chain().focus().toggleOrderedList().run()); }}>1.</button>
+    <button type="button" title="Quote" onmousedown={(e) => { e.preventDefault(); run(() => editor?.chain().focus().toggleBlockquote().run()); }}>Quote</button>
+    <button type="button" title="Table" onmousedown={(e) => { e.preventDefault(); run(() => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()); }}>Table</button>
   </div>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div on:mousedown={() => editor?.commands.focus()} bind:this={editorElement}></div>
+  <div onmousedown={() => editor?.commands.focus()} bind:this={editorElement}></div>
 </div>
 
 <style>

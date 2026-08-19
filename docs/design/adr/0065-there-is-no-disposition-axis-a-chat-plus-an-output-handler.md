@@ -9,7 +9,7 @@
 
 ## Amendment 1 (2026-08-19) — the collapse is *config on `general`*, S3 is unbuilt, and the no-helper verdict is retracted
 
-Review of the implementation surfaced that this ADR's central slice was never built and that two of its calls were wrong. This amendment corrects them; where it touches how the output is *authored*, it is refined in **ADR-0067** (the prompt-output model + the field-contract Jinja helper), which this ADR now composes with.
+Review of the implementation surfaced that this ADR's central slice was never built and that two of its calls were wrong. This amendment corrects them; where it touches how the output is *authored*, it is refined in **ADR-0067** (the prompt-output model + the `field_contract` Jinja accumulator), which this ADR now composes with.
 
 **1. S3 was never implemented.** #1127 retired the `output.kind`→handler-key *dispatch*, but `default_schema.py` still ships `prompt:continuation / roleplay / revise / revise:scene / revise:entry / revise:scene_summary`, and the built-in Library prompts still carry those `entry_type`s. The two authored kinds `{general, snippet}` (§1) are **not yet the only concrete prompt types**. Finishing S3 — collapsing the built-ins to `{general, snippet}` — is the outstanding work.
 
@@ -19,11 +19,11 @@ Review of the implementation surfaced that this ADR's central slice was never bu
    - **`headless`** — a boolean, orthogonal to `method`: run as a single pass with no conversation (vs. open a chat). The ADR's `activation` conflated this; it is its own axis.
    - **target type** (for `node`) — **authored on the prompt**, per ADR-0063 S1's `commit.target`. A brainstorm prompt is type-specific (a "brainstorm a location" prompt renders `fields("lore:location")` and can only produce a location); the caller supplies only the *instance* to update (the launch subject, of that type), never the type.
 
-**3. The extractor is `general` + `headless`, not a sub-type.** ADR-0063 S2 (#1174) introduced a `prompt:extractor` entry_type — this **re-created the very sub-type proliferation this ADR collapses, and is withdrawn.** The default extractor is a `general` prompt with `method` = node + `headless = true`; #1174 is re-based onto this, not merged as-is.
+**3. `prompt:extractor` is withdrawn, and there is no separate extractor prompt at all.** ADR-0063 S2 (#1174) introduced a `prompt:extractor` entry_type — this **re-created the very sub-type proliferation this ADR collapses, and is withdrawn.** More than that: the field contract is authored *inline* in each node-writing `general` prompt via the `field_contract` accumulator (ADR-0067), so there is no separate default-extractor prompt to type or maintain. A single-pass (no-conversation) extraction is just a `general` prompt with `headless = true`. #1174 is re-based onto ADR-0067, not merged as-is.
 
 **4. The "which fields" scope leaves the type for the Jinja.** With only `{general, snippet}`, `output.commit.fields` has no per-behaviour type to hang off. So the field scope moves into the **extractor's Jinja** (this is ADR-0063 S3, "commit.fields retires into the authorable Jinja") — which means **the two-type collapse and 0063 S3 are coupled: you cannot finish this ADR's S3 without doing 0063's.** See ADR-0067.
 
-**5. The §Grounding "NO new Jinja helper is required" verdict is retracted.** Once the field contract is an authored fragment rendered at *both* chat-start and commit (ADR-0063 S3 / ADR-0067), the template layer needs real helper support for "the fields this prompt outputs," not the hand-inlined `{% for f in fields(...) %}` loop `DEFAULT_EXTRACTION_TEMPLATE` carries today. The new helper is specified in **ADR-0067**.
+**5. The §Grounding "NO new Jinja helper is required" verdict is retracted.** Once the field contract is authored inline and read back as data at commit (ADR-0063 S3 / ADR-0067), the template layer needs real support for "the fields this prompt outputs" — the `field_contract` accumulator (`store` / `render`) plus enabling `{% do %}` — not the hand-inlined `{% for f in fields(...) %}` loop `DEFAULT_EXTRACTION_TEMPLATE` carries today. Specified in **ADR-0067**.
 
 **6. The built-ins are application deliverables.** The shipped built-in Library prompts are part of the app "on par with a config file"; finishing S3 re-authors them to `{general, snippet}` + config **completely and correctly**, not half-typed.
 

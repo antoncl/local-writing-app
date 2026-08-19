@@ -2,7 +2,7 @@
 
 - Status: **Proposed** — 2026-08-19
 - Issue: (to file) · Pre-1.0 (no release milestone)
-- Follows: ADR-0065 (two prompt kinds; a `general` prompt's output is a config area — this ADR is where its *field* scope lives), ADR-0063 (commit runs a previewable extractor prompt — this ADR is its S3, "the field contract is authored Jinja"), ADR-0061 (a snippet/include carries its fields — the include mechanism this reuses), ADR-0060 (the prompt language — the helper set this adds to), ADR-0059 (`ai_proposable` gates which fields may be proposed)
+- Follows: ADR-0065 (two prompt kinds; a `general` prompt's output is a config area — this ADR is where its *field* scope lives), ADR-0063 (commit runs a previewable extractor — this ADR is its S3, "the field contract is authored Jinja," and it retires the *separate* extractor prompt), ADR-0060 (the prompt language — the helper surface + `{% do %}` this adds to), ADR-0059 (`ai_proposable` gates which fields may be proposed), ADR-0026 (`fields()` — the roster this builds on)
 - **Retracts** ADR-0065 §Grounding's "NO new Jinja helper or token is required" verdict.
 
 ## Context
@@ -14,63 +14,96 @@ So the "which fields" scope has to move to the only per-prompt authored surface 
 Two further facts force this ADR's shape:
 
 - **The list must not drift.** ADR-0051 S4 already learned that a field contract carried through a growing chat gets unreliable, and rebuilt it fresh at commit. The recurring design intent (raised repeatedly during the ADR work) is a **two-step** contract: the fields are stated at **chat-start** (so the AI knows, and the author/user can see, what will be produced) and re-asserted at **commit** (the authoritative extraction). Both must come from **one authored source**, or the two drift.
-- **The hand-inlined loop is not reusable.** A `{% for f in fields(...) %}` loop copy-pasted into a prompt body *and* an extractor cannot be the "one source." The field contract needs to be a **fragment authored once** and rendered at both points — which needs template-layer support ADR-0065 assumed away.
+- **The commit must know the field set without re-parsing text.** If the field list lives only as a `{% for %}` inside the prompt's system role, the Commit button would have to find-and-parse it out of rendered prose — a marker problem. The field set has to be captured as **data** when the prompt renders, so the commit reads it rather than scrapes it — which needs template-layer support ADR-0065 assumed away.
 
 ## Decision
 
-**The fields a prompt outputs are an authored Jinja *field-contract fragment*, rendered from one source at chat-start and at commit, produced by a dedicated helper.**
+**A node-writing prompt declares the fields it outputs inline, in the one prompt, via a `field_contract` accumulator — populated as the prompt renders, and read back as data by the backend at commit.**
 
-### 1. The field contract is authored Jinja, not `commit.fields` on a type
+### 1. One prompt — no snippet, no separate extractor
 
-A node-writing `general` prompt expresses *which fields it produces* in its Jinja, against its authored **target type** (ADR-0065 Amendment 1 §2 / ADR-0063 S1). The static `output.commit.fields` allow-list **retires** — narrowing is what the template author writes (render all proposable fields, or a chosen subset). `fields()` supplies the universe (`ai_proposable`-gated, ADR-0059); the author narrows it.
+A node-writing `general` prompt carries its field contract **in its own body**. There is no second artifact to keep synchronised: no field-contract snippet to import, and **no separate "extractor prompt."** The author selects the fields with an ordinary `fields()` loop and registers them into `field_contract`; the backend reads the registered set at commit. `output.commit.fields` retires entirely.
 
-### 2. One fragment, rendered at two points
+### 2. `field_contract` is a per-render accumulator
 
-The field contract is authored **once** as a fragment — a role-less **include** (ADR-0061 amendment: includes carry no `{% role %}`; the includer wraps it) that both the prompt body and the extractor pull in. It is rendered:
+`field_contract` is a per-render object with two operations, split so the Jinja reads honestly — **a side effect is a statement; output is an expression**:
 
-- **at chat-start** — wrapped in the prompt body's `{% role "system" %}`, so the model (and the author's Preview) sees the target fields up front; and
-- **at commit** — as the authoritative extraction contract (the fresh pass of ADR-0051 S4 / ADR-0063).
+- **`{% do field_contract.store(f) %}`** — register field descriptor `f` (from `fields(...)`) into the contract, optionally with author guidance: `store(f, note="lead with the wound")`. Emits nothing.
+- **`{{ field_contract.render }}`** — emit everything registered so far as the descriptor list.
 
-Given the same authored target type, the two renders are **identical by construction** — the list cannot drift across the conversation, and it is *visible* at both points. This realises the two-step intent without duplicating the list.
+`{% do %}` — Jinja's side-effecting call that prints nothing — is a standard extension **not currently enabled** (`create_environment()` installs only `RoleExtension`); this ADR turns it on: `extensions=[RoleExtension, "jinja2.ext.do"]`.
 
-### 3. A new Jinja helper renders the field contract
+### 3. The backend reads the registered set — no marker, no re-parse
 
-The hand-inlined descriptor loop becomes a **helper** the app provides — sketch: `field_contract(target_type, only=None)` (name illustrative) → the rendered "fields you may set" contract for that type: each proposable field's id, label, type, options, and item-shape, in the exact wording the extractor needs, narrowable by `only`. It is the single source of the descriptor/item-shape rendering (the "one source, not two" the extraction module already prizes), now callable from any prompt or include rather than copy-pasted. The related raw helper `fields()` stays as the field *roster*; `field_contract` is the *rendered contract* built on it.
+Rendering the prompt at **chat-start** does two things at once: it prints the field list into the system role (`{{ field_contract.render }}` — so the model and the author's Preview see it up front), **and** it leaves the backend holding the **registered field set as data.** So the Commit button never has to find-and-parse a `{% for %}` buried in the system role (the marker problem): it reads the set the render already captured. At **commit** the backend emits that same set inside its JSON envelope (system-owned wording). Start and commit share the set by construction — they cannot drift.
 
-### 4. The target type is authored; the caller binds the instance
+### 4. Narrowing, guidance, and the write-ceiling fall out of the accumulator
 
-Per ADR-0065 Amendment 1 §2 and ADR-0063 S1: the **target type is authored on the prompt** (so a location prompt can't be aimed at a character). The caller supplies only the **instance** — the existing node to update (of that type), or nothing (a create). `create` vs `update` falls out of "is there a subject?"; `diff` (ADR-0065 Amendment 1 §2) governs the review.
+- **Narrowing** is the loop's `if f.id in [...]` filter — authored, previewable, ordinary Jinja over `fields()` (`ai_proposable`-gated, ADR-0059).
+- **Per-field guidance** rides the `store(f, note=…)` argument, folded in by `render`.
+- **The write-ceiling** answers itself — the registered set *is* the machine-readable list the backend validates and writes against; no config remnant of `commit.fields` survives.
+
+### 5. The target type is authored; the caller binds the instance
+
+Per ADR-0065 Amendment 1 §2 and ADR-0063 S1: the **target type is authored on the prompt** (so a location prompt can't be aimed at a character). The caller supplies only the **instance** — the existing node to update, or nothing (a create). `create` vs `update` falls out of "is there a subject?"; `diff` (ADR-0065 Amendment 1) governs the review.
+
+### The worked example — Goal / Motivation / Obstacle onto a character
+
+Given a `lore:character` type with proposable `goal` / `motivation` / `obstacle`, the **one** prompt body is:
+
+```jinja
+{% role "system" %}
+You're a story-development partner. Help the writer pin down one character's
+drive. Probe, offer options, push back. By the end we need these three fields:
+{% for f in fields(target) if f.id in ["goal", "motivation", "obstacle"] %}
+{% do field_contract.store(f) %}
+{% endfor %}
+{{ field_contract.render }}
+{% endrole %}
+{% role "user" %}Let's develop {{ target.title }}.{% endrole %}
+```
+
+**Chat-start** (launched from character *Kevery* → `target` = Kevery) renders the system message with the three descriptors, and leaves the backend holding `{goal, motivation, obstacle}`. **Commit** — the backend emits, from that registered set:
+
+```
+Reply with ONLY a JSON object, no prose, of exactly this shape — one key per
+field, its value the field's content:
+- Goal (`goal`): What the character is consciously chasing.
+- Motivation (`motivation`): The need underneath the goal.
+- Obstacle (`obstacle`): What stands in the way.
+```
+
+→ validate against the schema, diff (`diff: true`), accept, write.
 
 ## Why / rejected alternatives
 
-**Keep `output.commit.fields` as a static per-type list.** No home once types collapse to `{general, snippet}`; and even before that it was a hand-maintained list of bare field-id strings with **no validation** that the ids exist on the target type — a rename or typo silently narrows to nothing. The template author is already looking at the target's fields; expressing the scope there removes the drift surface.
+**A separate field-contract snippet the prompt imports.** Rejected — a second artifact the author must keep in sync with the prompt (the GMO mock surfaced exactly this). The accumulator keeps the contract in the one prompt.
 
-**Duplicate the field list at chat-start and at commit (two authored copies).** Rejected — two copies drift, which is the exact failure ADR-0051 S4 fixed. One fragment, two renders.
+**A static `commit.fields` list (even relocated to config).** Rejected — it re-introduces the hand-maintained, unvalidated id-list this ADR removes; the loop filter is authored and previewable, and the registered set is what the backend validates against anyway.
 
-**Keep the hand-inlined `{% for f in fields(...) %}` loop (no helper).** Rejected — it is non-trivial (item-shape logic for list/select fields) and would be copy-pasted into every custom extractor and every prompt body that wants to show its contract. One helper, one source.
+**Overload `{{ field_contract(f) }}` to register-and-return-`""`.** Rejected — `{{ }}` means "emit text"; a no-output side effect must read as a `{% do %}` statement. (A custom `{% field_contract.store f %}` tag built like `RoleExtension` is the only near-equal alternative — house-consistent, but more code than enabling `do` for no behavioural gain.)
 
-**A fully free-form extractor (arbitrary Jinja, no helper).** The author *may* write arbitrary Jinja — but the common, safe path (render this type's proposable fields) must be one helper call, not a re-derivation. The helper is the paved road, not a cage.
+**A `{% for %}` the backend text-scans at commit.** Rejected — that is the marker problem; the accumulator captures the set as data, so nothing is parsed back out of rendered text.
 
 ## Anti-goals
 
-- **Not a re-opening of the handler set.** The output *method* set stays closed and backend-owned (ADR-0065). This ADR is only about the **field scope** of the `node` method and how it is authored/rendered.
-- **Not a general template-macro system.** One curated helper for the field contract, added to the existing curated helper set (ADR-0060) — not arbitrary author-defined macros.
-- **No pre-1.0 migration.** The built-in extractor + brainstorm prompts are re-authored; test projects recreated.
+- **Not a re-opening of the output-method set.** That set stays closed and backend-owned (ADR-0065). This ADR is only the `node` method's field scope + how it is authored and read back.
+- **Not a general macro/DSL.** One curated accumulator (`store` / `render`) on the existing helper surface (ADR-0060), reading `fields()` — not author-defined tags.
+- **No pre-1.0 migration.** The built-in node-writing prompts are re-authored; test projects recreated.
 
 ## Consequences
 
-- `DEFAULT_EXTRACTION_TEMPLATE`'s inlined descriptor loop moves behind the `field_contract` helper; the built-in extractor and the brainstorm prompt bodies both render the contract via the helper (the extractor at commit; the prompt body at chat-start).
-- `output.commit.fields` and the `commit_fields` request field retire (their narrowing is expressed in the template `only=`).
-- The prompt **check / validator** must know `field_contract` (and the rest of the ADR-0060 helper set — see the ADR-0060/0061 amendment) so authored contracts don't flag as errors.
-- ADR-0065's `prompt:extractor` withdrawal (Amendment 1 §3) lands here: the default extractor is a `general` + `headless` prompt whose body is one `field_contract` call.
+- `DEFAULT_EXTRACTION_TEMPLATE` **and the separate default-extractor prompt go away**; each node-writing prompt carries its field contract inline via `field_contract`. A "revise everything" prompt registers all proposable fields (a `store` over the full `fields(target)`), so there is no default extractor to maintain. This subsumes ADR-0063 S2's #1174 and its withdrawn `prompt:extractor`.
+- `output.commit.fields` and the `commit_fields` request field retire.
+- `{% do %}` is enabled on the render environment.
+- The prompt **check** must know `field_contract` and `{% do %}` (see the ADR-0060 amendment) so authored contracts don't flag as errors.
 
 ## Slice plan (proposed — one lane, disjoint, vertical)
 
-- **S1 — the helper.** Add `field_contract(target_type, only=None)` to the prompt helpers + the check's known set; re-point `DEFAULT_EXTRACTION_TEMPLATE`'s loop at it (behaviour byte-identical).
-- **S2 — the fragment + two-step render.** Author the field contract as a role-less include; render it at chat-start (in the brainstorm prompt body) as well as at commit; retire `output.commit.fields` / `commit_fields`.
-- **S3 — the built-ins.** Re-author the brainstorm/extractor built-ins onto `general` + config + the helper (folds ADR-0063 S2's #1174 and ADR-0065 S3's collapse).
+- **S1 — the accumulator + `{% do %}`.** Add `field_contract` (`store` / `render`) to the helper surface, enable `jinja2.ext.do`, teach the check both; re-express today's extraction as "render the registered set" (behaviour byte-identical once the current built-ins are re-authored).
+- **S2 — read-back at commit.** Commit reads the registered set the chat-start render captured (no re-parse), and emits the JSON envelope from it; retire `commit.fields` / `commit_fields`.
+- **S3 — the built-ins.** Re-author the node-writing built-ins onto `general` + config + inline `field_contract` (folds ADR-0063 S2/#1174 and ADR-0065 S3's collapse).
 
-## Open questions (for review)
+## Open question (for review)
 
-- **Helper surface:** is `field_contract(type, only=…)` the right shape, or should narrowing be by *inclusion* (`only=[…]`) *and* *exclusion*, and should it take the whole contract wording or just the descriptor list (leaving prose to the author)?
-- **Chat-start injection:** the field contract at chat-start is *guidance*; should it be the same rendered text as the commit contract, or a softer "you'll be asked to produce: …" phrasing that shares only the field set?
+- **(b) Commit: cached continuation vs. fresh pass.** Because the contract is in the system prompt from turn 1, it is never buried — so the extraction can **continue the already-cached conversation** (a short "commit now" turn, no transcript re-ship) rather than run ADR-0051 S4's **fresh pass** (a small clean context, but the transcript re-shipped). The accumulator is orthogonal to this choice; it stays open pending a reliability check on the noisier continuation context.

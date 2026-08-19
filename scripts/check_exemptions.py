@@ -16,6 +16,7 @@ base ref (default `origin/master`) and FAIL if any of them got weaker.
                                       GENERATED_ROOTS (build-output skip list)
   * `scripts/check_layer_imports.py`  GRANDFATHERED (services on the web layer)
   * `scripts/check_http_client.py`    GRANDFATHERED (raw frontend network I/O)
+  * `scripts/check_svelte_runes.py`   GRANDFATHERED (legacy Svelte-4 constructs)
   * `backend/pyproject.toml`          ruff lint `ignore` (must not grow),
                                       `select` (must not shrink),
                                       `per-file-ignores` (must not grow)
@@ -53,6 +54,7 @@ GUARD_SETS = {
     ),
     "scripts/check_layer_imports.py": ("GRANDFATHERED",),
     "scripts/check_http_client.py": ("GRANDFATHERED",),
+    "scripts/check_svelte_runes.py": ("GRANDFATHERED",),
 }
 PYPROJECT = "backend/pyproject.toml"
 

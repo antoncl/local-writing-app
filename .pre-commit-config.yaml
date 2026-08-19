@@ -52,6 +52,12 @@ repos:
         language: system
         files: ^frontend/src/.*\.(ts|js|svelte)$
 
+      - id: svelte-runes-guard
+        name: runes guard (component events use callback props, not createEventDispatcher, #49)
+        entry: python scripts/check_svelte_runes.py
+        language: system
+        files: ^frontend/src/.*\.svelte$
+
       # The advisory `ruff-complexity` hook was retired in #76: C901 and
       # PLR0912/13/15 are now in the blocking `select` in backend/pyproject.toml,
       # so the `ruff` hook above enforces them like any other rule. No separate

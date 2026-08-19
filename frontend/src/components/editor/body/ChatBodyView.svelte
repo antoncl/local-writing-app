@@ -932,12 +932,12 @@
       class="cbv-input"
       value={chatInput}
       disabled={chatRunning || commit.committing}
-      on:change={(e) => {
-        chatInput = e.detail.value;
+      onChange={(next) => {
+        chatInput = next;
         chatRewound = false;
       }}
-      on:keydown={(e) => handleChatInputKeydown(e.detail)}
-      on:focus={() => onFocus?.()}
+      onKeydown={handleChatInputKeydown}
+      onFocus={() => onFocus?.()}
       placeholder="Message… (Ctrl/⌘+Enter to send)"
       ariaLabel="Chat message"
       minHeight={60}

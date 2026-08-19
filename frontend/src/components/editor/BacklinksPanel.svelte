@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { createEventDispatcher } from "svelte";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
@@ -14,17 +13,24 @@
   } from "@/lib/types";
   import { metadataSchemaStore } from "@/lib/stores/schema";
 
-  export let backlinks: Backlink[] = [];
+  let {
+    backlinks = [],
+    loreEntries = [],
+    structure = null,
+    // Emitted with the navigation target (was a `navigate` CustomEvent before
+    // the runes pass); NodeEditor routes it up to open the referenced node.
+    onNavigate = () => {},
+  }: {
+    backlinks?: Backlink[];
+    loreEntries?: LoreEntrySummary[];
+    structure?: StructureDocument | null;
+    onNavigate?: (detail: { id: string; kind: string }) => void;
+  } = $props();
+
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
-  $: metadataSchema = $metadataSchemaStore;
-  export let loreEntries: LoreEntrySummary[] = [];
-  export let structure: StructureDocument | null = null;
+  const metadataSchema = $derived($metadataSchemaStore);
 
-  const dispatch = createEventDispatcher<{
-    navigate: { id: string; kind: string };
-  }>();
-
-  let expanded = false;
+  let expanded = $state(false);
 
   // A non-view surface (ADR-0035 §3, #256): the backlink list lifts to the
   // degenerate ViewResult via nodeSet() and renders through ViewNodeList like
@@ -34,11 +40,13 @@
   // (id:field_id) keeps keyed rows distinct while `targetId` carries the real
   // navigation target.
   type BacklinkNode = Omit<Backlink, "id"> & { id: string; targetId: string };
-  $: backlinkNodes = backlinks.map((link): BacklinkNode => ({
-    ...link,
-    id: `${link.id}:${link.field_id}`,
-    targetId: link.id,
-  }));
+  const backlinkNodes = $derived(
+    backlinks.map((link): BacklinkNode => ({
+      ...link,
+      id: `${link.id}:${link.field_id}`,
+      targetId: link.id,
+    })),
+  );
 
   function findStructureNodeBySceneId(node: StructureNode | null | undefined, sceneId: string): StructureNode | null {
     if (!node) return null;
@@ -79,7 +87,7 @@
       <ViewNodeList
         result={nodeSet(backlinkNodes)}
         mode="tree"
-        onClick={(node) => dispatch("navigate", { id: node.targetId, kind: node.kind })}
+        onClick={(node) => onNavigate({ id: node.targetId, kind: node.kind })}
         row={backlinkRow}
       >
         {#snippet whenEmpty()}

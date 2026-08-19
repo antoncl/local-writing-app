@@ -854,7 +854,7 @@
         backlinks={backlinks}
         loreEntries={loreEntries}
         structure={structure}
-        on:navigate={(event) => onNavigate?.(event.detail)}
+        onNavigate={(detail) => onNavigate?.(detail)}
       />
     {/key}
     {#if scene?.id}

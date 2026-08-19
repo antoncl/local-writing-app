@@ -1,6 +1,6 @@
 # ADR-0066: A NodeList sets its density; the NodeRow adapts
 
-- Status: **Draft — awaiting review**
+- Status: **Accepted** — 2026-08-19 (Anton). Ratifies the direction settled over five live mockup rounds.
 - Concern: the NodeRow / NodeList density overhaul (this ADR is its design). Gates #1175 (the NodePicker widget-taxonomy reduction), which is out of scope here.
 - Follows: ADR-0030 (the design language — "a quiet writing desk"; the kind-stripe and serif=the-work / sans=the-tool contract), the UI widget taxonomy (NodeRow / NodeList / NodeEditor + the color-system widgets), ADR-0064 (FieldValue — the field-level display citizen a NodeRow may host)
 - Relates: #1175 (NodePicker reduction — unblocked by this, not done here)

@@ -121,7 +121,7 @@
     researchStructure={researchStructure}
     loreEntries={loreEntries}
     promptEntries={promptEntries}
-    on:navigate={(event) => onNavigate?.(event.detail)}
+    onNavigate={(detail) => onNavigate?.(detail)}
   />
 {:else if field.type === "multi_select" && field.options.length > 0}
   <!-- Only the selected options — the read-only question is "what IS the value",

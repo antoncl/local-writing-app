@@ -18,6 +18,7 @@
   import { getContext } from "svelte";
   import type { Snippet } from "svelte";
   import { packTagLine } from "@/lib/tagPacking";
+  import { measureTextWidth } from "@/lib/textMeasure";
 
   // Read the enclosing NodeList's mode via context. The context value is
   // a reactive getter wrapper (set by NodeList.svelte) so changes to the
@@ -187,7 +188,6 @@
   let tagsAreaWidth = $state(0);
   let fontProbeEl = $state<HTMLElement | undefined>();
   let tagMetrics = $state<{ font: string; padX: number } | null>(null);
-  let measureCanvas: HTMLCanvasElement | null = null;
 
   // Read the pill's resolved font + horizontal padding/border once it is in
   // the DOM; re-read on font-load reflow via a ResizeObserver on the probe.
@@ -213,12 +213,8 @@
   });
 
   function pillWidth(text: string, m: { font: string; padX: number }): number {
-    if (!measureCanvas) measureCanvas = document.createElement("canvas");
-    const ctx = measureCanvas.getContext("2d");
-    if (!ctx) return 0;
-    ctx.font = m.font;
     // +1 guards against sub-pixel rounding so a pill never clips by a hair.
-    return Math.ceil(ctx.measureText(text).width + m.padX) + 1;
+    return Math.ceil(measureTextWidth(text, m.font) + m.padX) + 1;
   }
 
   const visibleCount = $derived.by(() => {
@@ -306,11 +302,17 @@
     transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
   }
 
-  .node-row.variant-card:hover {
+  /* Dense shares the card's hover / focus / stripe chrome (ADR-0066: a dense
+     row IS a tighter card) — it differs only in the base padding/radius set
+     in the dense block below. These selector lists are the single source for
+     the shared chrome so the two densities can't drift. */
+  .node-row.variant-card:hover,
+  .node-row.density-dense:hover {
     background: var(--inset);
   }
 
-  .node-row.variant-card.active {
+  .node-row.variant-card.active,
+  .node-row.density-dense.active {
     border-color: var(--accent);
     background: var(--surface);
     box-shadow:
@@ -322,11 +324,13 @@
      than a ::before lets the band follow the card's rounded corners
      naturally, giving the bookmark-band look the design called for.
      The 4px inset is the band's width. */
-  .node-row.variant-card.has-row-stripe {
+  .node-row.variant-card.has-row-stripe,
+  .node-row.density-dense.has-row-stripe {
     box-shadow: inset 4px 0 0 0 var(--row-stripe);
   }
 
-  .node-row.variant-card.has-row-stripe.active {
+  .node-row.variant-card.has-row-stripe.active,
+  .node-row.density-dense.has-row-stripe.active {
     box-shadow:
       inset 4px 0 0 0 var(--accent),
       0 0 0 1.5px var(--accent-soft2),
@@ -447,11 +451,12 @@
 
   /* Font probe — an empty pill kept in the layout (so its resolved font +
      padding are readable) but visually gone. Canvas metrics come off this,
-     so there is no per-tag mirror duplicating the labels in the DOM. */
+     so there is no per-tag mirror duplicating the labels in the DOM. Left in
+     place (not pushed to left:-9999px): an off-screen probe would widen any
+     ancestor pane that doesn't clip overflow-x into a phantom scrollbar, and
+     absolute + visibility:hidden already resolves the metrics we read. */
   .node-row-tag-probe {
     position: absolute;
-    left: -9999px;
-    top: 0;
     visibility: hidden;
     pointer-events: none;
   }
@@ -643,30 +648,10 @@
     transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
   }
 
-  .node-row.density-dense:hover {
-    background: var(--inset);
-  }
-
-  .node-row.density-dense.active {
-    border-color: var(--accent);
-    background: var(--surface);
-    box-shadow:
-      0 0 0 1.5px var(--accent-soft2),
-      0 6px 18px var(--shadow2);
-  }
-
-  /* Same stripe recipe as the card — one curved inset band, now curving
-     along the tighter corners. There is no second stripe object. */
-  .node-row.density-dense.has-row-stripe {
-    box-shadow: inset 4px 0 0 0 var(--row-stripe);
-  }
-
-  .node-row.density-dense.has-row-stripe.active {
-    box-shadow:
-      inset 4px 0 0 0 var(--accent),
-      0 0 0 1.5px var(--accent-soft2),
-      0 6px 18px var(--shadow2);
-  }
+  /* Hover / active / stripe (incl. the curved inset band that now follows the
+     tighter corners) are shared with the card variant above — one source, no
+     drift. Dense only sets its own base padding/radius and the single-line
+     layout below. */
 
   /* Dense tree rows drop the bare-tree click padding + hover — the card
      padding above spaces them and the row itself carries the hover. */

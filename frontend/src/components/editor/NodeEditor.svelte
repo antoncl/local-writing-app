@@ -1012,6 +1012,7 @@
       <CodeBodyView
         bind:rawBody
         bind:entryInputDrafts={promptDrafts.drafts}
+        {hostPaneId}
         {scene}
         {documentKind}
         {structure}

@@ -4,7 +4,7 @@
 // ROUTES its snippet enumeration through it — the wiring a future refactor could
 // silently drop, since no shipped prompt is snippet-typed so it can't be caught
 // in the browser.
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { tick } from "svelte";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import NodePicker from "./NodePicker.svelte";
@@ -95,5 +95,53 @@ describe("NodePicker plot source (#742)", () => {
 
     expect(screen.getByText("Main plot")).toBeInTheDocument();
     expect(screen.queryByText("A card")).toBeNull();
+  });
+});
+
+describe("NodePicker onChange callback (runes conversion #49)", () => {
+  // The dispatch("change", …) → onChange callback prop is the crux of the runes
+  // conversion; lock the payload shape and the multi-select append so a later
+  // edit can't silently regress it.
+  it("reports the picked ref through onChange with the { value } payload", async () => {
+    const onChange = vi.fn();
+    render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "plot", expr: { type: "plot:plotline" } }] },
+        plotEntries: [plotline("p1", "Main plot"), plotline("p2", "Romance")],
+        affordance: "add",
+        onChange,
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+
+    await fireEvent.click(screen.getByText("Main plot").closest("button")!);
+    await tick();
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const [detail] = onChange.mock.calls[0];
+    expect(detail.value).toHaveLength(1);
+    expect(detail.value[0]).toMatchObject({ id: "p1", kind: "plot" });
+  });
+
+  it("appends to the existing value when multiple selection is allowed", async () => {
+    const onChange = vi.fn();
+    render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "plot", expr: { type: "plot:plotline" } }] },
+        plotEntries: [plotline("p1", "Main plot"), plotline("p2", "Romance")],
+        value: [{ id: "p2", kind: "plot", title: "Romance" }],
+        affordance: "add",
+        onChange,
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+
+    await fireEvent.click(screen.getByText("Main plot").closest("button")!);
+    await tick();
+
+    const [detail] = onChange.mock.calls[0];
+    expect(detail.value.map((r: { id: string }) => r.id)).toEqual(["p2", "p1"]);
   });
 });

@@ -156,8 +156,8 @@
     onChange(multi ? nextIds : nextIds[0] ?? "");
   }
 
-  function handlePickerChange(event: CustomEvent<{ value: NodePickerRef[] }>) {
-    const nextIds = event.detail.value.map((ref) => ref.id);
+  function handlePickerChange(detail: { value: NodePickerRef[] }) {
+    const nextIds = detail.value.map((ref) => ref.id);
     emit(nextIds);
   }
 
@@ -227,7 +227,7 @@
             promptEntries={promptEntries}
             plotEntries={$plotlineEntriesStore}
             assistantEntries={$assistantEntriesStore}
-            on:change={handlePickerChange}
+            onChange={handlePickerChange}
           />
         </span>
       {/if}

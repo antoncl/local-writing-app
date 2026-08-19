@@ -77,6 +77,13 @@ jobs:
       - name: http-client guard
         run: git ls-files 'frontend/src/*.ts' 'frontend/src/*.js' 'frontend/src/*.svelte' | xargs -r python scripts/check_http_client.py
 
+      # The frontend is on idiomatic Svelte 5 runes (#49); component events use
+      # callback props. createEventDispatcher is a true Svelte deprecation
+      # (removed in v6) that svelte-check does not flag, so a Python guard is
+      # what locks it out. Single-star pathspec for the same reason as above.
+      - name: runes guard
+        run: git ls-files 'frontend/src/*.svelte' | xargs -r python scripts/check_svelte_runes.py
+
       # Escape hatches may shrink, never grow. PR-only: it is a diff-against-base
       # question, and master has no base to compare with.
       - name: exemption ratchet

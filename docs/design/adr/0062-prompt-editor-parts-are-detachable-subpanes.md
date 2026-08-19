@@ -22,6 +22,33 @@
 > per-pane case. §4 and the "keep the draft in `CodeBodyView`" rejected-alternative
 > are superseded accordingly.
 
+> **Amendment 2 (2026-08-19, review of the shipped S1+S2).** Using the merged
+> editor showed it drifted from this ADR's own design, and that Amendment 1's
+> call was wrong. Corrections:
+>
+> - **The end state is three real sub-tabs — Template · Preview · Setup — you
+>   *drag* to detach, like any pane.** §1 says exactly this. Shipped S1 instead
+>   built a *fixed* code‖preview split (the "kept as slice 1" compromise §Why
+>   only tolerated as a stepping stone), and S2 added a bespoke **Detach
+>   button** rather than tab-drag. The sub-tabs must be real drag-handles
+>   integrating with the shell's tab-DnD (ADR-0030), not a button.
+> - **Amendment 1's closure-snippet was the wrong call — the per-document store
+>   §4 named IS needed.** The snippet renders the Preview as a *different
+>   component instance* docked vs. detached, so `PromptPreviewPane`'s own input
+>   drafts **reset on detach** (the observed bug). Draggable tab-handles that
+>   move between "docked tab" and "detached pane" while preserving state require
+>   the draft to live outside the component — the store. Amendment 1's §4-is-
+>   unnecessary conclusion is itself superseded; §4 stands.
+> - **Setup hosts the `general` config area.** Per ADR-0065 Amendment 1 / ADR-0067,
+>   a `general` prompt's output config (`method` · `diff` · `headless` · target
+>   type) is authored here — Setup is that home, alongside Inputs + Offered-on.
+> - **"Snippet" → "Include" in the UI.** The include mechanism (ADR-0061) is
+>   surfaced to authors as "include," not "snippet" (code names unchanged).
+>
+> Whether to **fix-forward** the merged S1+S2 or **revert and rebuild** on the
+> store + 3-draggable-tab model is a scoped estimate to be attached once the
+> surrounding model (ADR-0065 Amendment 1, ADR-0067) is settled.
+
 ## Context
 
 A prompt editor exists for one tight loop: **edit the template, watch it render.** But the prompt editor (`CodeBodyView`, inside the shared `NodeEditor` shell) stacks all of a prompt's parts into **one narrow vertical scroll column** — the CodeMirror template, then the `EntryInputsEditor`, then the `OfferOnPicker`, then the `PromptPreviewPane`, each a collapsed `<details>`. The preview loses a four-way fight for that column: in practice it renders **one or two lines**, which makes the loop it exists to serve unusable.

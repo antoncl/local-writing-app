@@ -7,6 +7,28 @@
 - Composes with: ADR-0061/0062 (the extractor is a prompt), ADR-0059 (`ai_proposable` gating on the node write)
 - **Verified against `f0c20603` (2026-08-17). Interface derived from a scan of the real handlers (see §Grounding).**
 
+## Amendment 1 (2026-08-19) — the collapse is *config on `general`*, S3 is unbuilt, and the no-helper verdict is retracted
+
+Review of the implementation surfaced that this ADR's central slice was never built and that two of its calls were wrong. This amendment corrects them; where it touches how the output is *authored*, it is refined in **ADR-0067** (the prompt-output model + the field-contract Jinja helper), which this ADR now composes with.
+
+**1. S3 was never implemented.** #1127 retired the `output.kind`→handler-key *dispatch*, but `default_schema.py` still ships `prompt:continuation / roleplay / revise / revise:scene / revise:entry / revise:scene_summary`, and the built-in Library prompts still carry those `entry_type`s. The two authored kinds `{general, snippet}` (§1) are **not yet the only concrete prompt types**. Finishing S3 — collapsing the built-ins to `{general, snippet}` — is the outstanding work.
+
+**2. The behaviour is *config on `general`*, not a per-type declaration.** §1 is right that continuation / revise / roleplay / brainstorm are all `general`; what §1–§3 underspecify is *where the choice lives*. It is a **per-prompt config area** on a `general` prompt, with these independent axes:
+   - **`method`** — where the output goes, from the closed backend-owned set: `append` (stream at cursor) · `inline` (replace selection) · `roleplay` (append + character mark) · `node` (extract → write a node's fields) · `none` (stays in the chat). This corrects §3's over-collapse of `append`+`inline` into one handler with a hidden destination sub-choice: they are **distinct authored methods**, because an author picks "append at cursor" vs "replace selection," not "inline, destination=cursor."
+   - **`diff`** — a boolean, only meaningful for `node`: show a field-by-field diff to review, vs. preview-and-accept. Off for "regenerate the summary," on for a large multi-field revise. This replaces the create-vs-update-vs-replace distinction, which does **not** need to be a method axis — it falls out of `diff` × the target below.
+   - **`headless`** — a boolean, orthogonal to `method`: run as a single pass with no conversation (vs. open a chat). The ADR's `activation` conflated this; it is its own axis.
+   - **target type** (for `node`) — **authored on the prompt**, per ADR-0063 S1's `commit.target`. A brainstorm prompt is type-specific (a "brainstorm a location" prompt renders `fields("lore:location")` and can only produce a location); the caller supplies only the *instance* to update (the launch subject, of that type), never the type.
+
+**3. The extractor is `general` + `headless`, not a sub-type.** ADR-0063 S2 (#1174) introduced a `prompt:extractor` entry_type — this **re-created the very sub-type proliferation this ADR collapses, and is withdrawn.** The default extractor is a `general` prompt with `method` = node + `headless = true`; #1174 is re-based onto this, not merged as-is.
+
+**4. The "which fields" scope leaves the type for the Jinja.** With only `{general, snippet}`, `output.commit.fields` has no per-behaviour type to hang off. So the field scope moves into the **extractor's Jinja** (this is ADR-0063 S3, "commit.fields retires into the authorable Jinja") — which means **the two-type collapse and 0063 S3 are coupled: you cannot finish this ADR's S3 without doing 0063's.** See ADR-0067.
+
+**5. The §Grounding "NO new Jinja helper is required" verdict is retracted.** Once the field contract is an authored fragment rendered at *both* chat-start and commit (ADR-0063 S3 / ADR-0067), the template layer needs real helper support for "the fields this prompt outputs," not the hand-inlined `{% for f in fields(...) %}` loop `DEFAULT_EXTRACTION_TEMPLATE` carries today. The new helper is specified in **ADR-0067**.
+
+**6. The built-ins are application deliverables.** The shipped built-in Library prompts are part of the app "on par with a config file"; finishing S3 re-authors them to `{general, snippet}` + config **completely and correctly**, not half-typed.
+
+Unchanged: the handler *set* stays closed and backend-owned (§Anti-goals) — the config only *selects* from it; `commit` / `on_accept` stay handler-local; `snippet` is the **include** (see the ADR-0061 amendment: includes are role-less).
+
 ## Context
 
 ADR-0054 modelled a prompt's output as **two** things: a **disposition** (`output.kind` ∈ `append_to_body` · `replace_selection` · `chat_panel`) and an optional **commit** capability on `chat_panel`; the four concrete bases (continuation / revise / general / snippet) each bundle one. That framing treats the disposition as an axis of independent choices.

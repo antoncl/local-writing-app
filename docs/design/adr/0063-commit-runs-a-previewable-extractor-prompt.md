@@ -7,6 +7,17 @@
 - Composes with: ADR-0061 (the extractor is a prompt → it gets effective inputs / snippets), ADR-0062 (the extractor gets the Template/Preview sub-panes)
 - **Verified against `4c93d820` (2026-08-17).**
 
+## Amendment 1 (2026-08-19) — S3's field contract is Jinja; it is coupled to the 0065 collapse; the extractor is `general`
+
+Working ADR-0065's two-type collapse revealed that this ADR's **S3** is not an optional polish — it is *forced* by the collapse, and its shape is now specified in **ADR-0067**. Corrections:
+
+- **`commit.target` is the authored target *type*, and it stays that way.** A brainstorm prompt is type-specific — "brainstorm a location" can only produce a `lore:location`. The **caller supplies only the instance** (an existing node to update; or nothing, for a create) — never the type. `create` vs `update` falls out of "is there a subject?"; `diff` (ADR-0065 Amendment 1) governs the review.
+- **S3's "field contract is authored Jinja" is coupled to ADR-0065's S3.** Once prompt types collapse to `{general, snippet}`, `output.commit.fields` has no per-behaviour type to live on, so the field scope *must* move into the extractor Jinja. You cannot finish either ADR's S3 without the other — they are one piece of work. The mechanism (an authored field-contract fragment rendered at chat-start **and** commit, via a new `field_contract` helper) is **ADR-0067**.
+- **The extractor is a `general` + `headless` prompt, not a new type.** S2 (#1174) shipped a `prompt:extractor` entry_type — **withdrawn** (ADR-0065 Amendment 1 §3): it re-created the sub-type proliferation ADR-0065 collapses. #1174 is re-based onto ADR-0067 S3, not merged as-is; its built-in `default-extractor.md` becomes a `general` prompt whose body is one `field_contract` call.
+- **The two-step field list is realised, not deferred.** This ADR's Preview-shows-the-contract, plus the recurring "state the fields at chat-start and re-assert at commit" intent, is delivered by ADR-0067 §2 (one authored fragment, two renders — identical by construction, so it can't drift).
+
+Net: S1 (`commit.target`) stands as shipped; **S2/S3 are superseded by ADR-0067's slice plan.**
+
 ## Context
 
 The Commit button today runs a **hardcoded, app-owned Jinja template** (`DEFAULT_EXTRACTION_TEMPLATE`, `services/ai/extraction.py`): it instructs the AI to emit the target type's proposable fields as JSON (the field list generated from `field_catalog(entry_type)`), and on reply the backend parses → validates each field against the schema (**validate-on-return**, ADR-0046) → diff-reviews → writes back. Two limits surface once you try to bring in richer prompts:

@@ -10,7 +10,6 @@
 </script>
 
 <script lang="ts">
-  import { createEventDispatcher } from "svelte";
   import PromptInputField from "@/components/widgets/PromptInputField.svelte";
   import { formatCostEur, formatTokens } from "@/lib/utils/money";
   import type {
@@ -22,52 +21,77 @@
     StructureDocument,
   } from "@/lib/types";
 
-  export let entry: PromptEntrySummary;
-  export let description: string = "";
-  export let declaredInputs: PromptInputDefinition[] = [];
-  export let drafts: Record<string, string> = {};
-  export let assistantId: string = "";
-  export let defaultAssistantLabel: string = "use machine default";
-  export let assistantEntries: AssistantEntrySummary[] = [];
-  export let error: string | null = null;
-  export let estimate: InputsDialogEstimate | null = null;
-
-  // Pass-throughs for PromptInputField
-  export let structure: StructureDocument | null = null;
-  // Research tree (sibling to manuscript) — threaded to the picker.
-  export let researchStructure: StructureDocument | null = null;
-  export let loreEntries: LoreEntrySummary[] = [];
-  export let promptEntries: PromptEntrySummary[] = [];
-  export let excludeId: string | null = null;
-  export let implicitContextMatcher: import("@/lib/editor-core/implicitContextMatcher").CompiledMatcher | null = null;
-
-  const dispatch = createEventDispatcher<{
-    updateDraft: { name: string; value: string };
-    updateAssistant: { assistantId: string };
-    cancel: void;
-    submit: void;
-  }>();
+  let {
+    entry,
+    description = "",
+    declaredInputs = [],
+    drafts = {},
+    assistantId = "",
+    defaultAssistantLabel = "use machine default",
+    assistantEntries = [],
+    error = null,
+    estimate = null,
+    // Pass-throughs for PromptInputField
+    structure = null,
+    // Research tree (sibling to manuscript) — threaded to the picker.
+    researchStructure = null,
+    loreEntries = [],
+    promptEntries = [],
+    excludeId = null,
+    implicitContextMatcher = null,
+    // Callback props (were `updateDraft` / `updateAssistant` / `cancel` /
+    // `submit` CustomEvents before the runes pass); PromptInvocationDialog
+    // wires them.
+    onUpdateDraft = () => {},
+    onUpdateAssistant = () => {},
+    onCancel = () => {},
+    onSubmit = () => {},
+  }: {
+    entry: PromptEntrySummary;
+    description?: string;
+    declaredInputs?: PromptInputDefinition[];
+    drafts?: Record<string, string>;
+    assistantId?: string;
+    defaultAssistantLabel?: string;
+    assistantEntries?: AssistantEntrySummary[];
+    error?: string | null;
+    estimate?: InputsDialogEstimate | null;
+    structure?: StructureDocument | null;
+    researchStructure?: StructureDocument | null;
+    loreEntries?: LoreEntrySummary[];
+    promptEntries?: PromptEntrySummary[];
+    excludeId?: string | null;
+    implicitContextMatcher?: import("@/lib/editor-core/implicitContextMatcher").CompiledMatcher | null;
+    onUpdateDraft?: (detail: { name: string; value: string }) => void;
+    onUpdateAssistant?: (detail: { assistantId: string }) => void;
+    onCancel?: () => void;
+    onSubmit?: () => void;
+  } = $props();
 
   function handleKeydown(event: KeyboardEvent) {
     if (event.key === "Escape") {
       event.preventDefault();
-      dispatch("cancel");
+      onCancel();
     } else if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
       event.preventDefault();
-      dispatch("submit");
+      onSubmit();
     }
   }
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="inputs-dialog-backdrop" role="presentation" on:mousedown|self={() => dispatch("cancel")}>
+<div
+  class="inputs-dialog-backdrop"
+  role="presentation"
+  onmousedown={(e) => { if (e.target === e.currentTarget) onCancel(); }}
+>
   <div
     class="inputs-dialog"
     role="dialog"
     aria-label={`Run ${entry.title}`}
     aria-modal="true"
     tabindex="-1"
-    on:keydown={handleKeydown}
+    onkeydown={handleKeydown}
   >
     <header>
       <strong>{entry.title}</strong>
@@ -90,7 +114,7 @@
             loreEntries={loreEntries}
             promptEntries={promptEntries}
             implicitContextMatcher={implicitContextMatcher}
-            on:change={(event) => dispatch("updateDraft", { name: input.name, value: event.detail.value })}
+            on:change={(event) => onUpdateDraft({ name: input.name, value: event.detail.value })}
           />
         </label>
       {/each}
@@ -98,7 +122,7 @@
         Assistant
         <select
           value={assistantId}
-          on:change={(event) => dispatch("updateAssistant", { assistantId: event.currentTarget.value })}
+          onchange={(event) => onUpdateAssistant({ assistantId: event.currentTarget.value })}
         >
           <option value="">Default ({defaultAssistantLabel})</option>
           {#each assistantEntries as assistant (assistant.id)}
@@ -124,8 +148,8 @@
       </div>
     {/if}
     <div class="inputs-dialog-actions">
-      <button type="button" on:click={() => dispatch("cancel")}>Cancel</button>
-      <button type="button" class="primary" on:click={() => dispatch("submit")}>Run</button>
+      <button type="button" onclick={() => onCancel()}>Cancel</button>
+      <button type="button" class="primary" onclick={() => onSubmit()}>Run</button>
     </div>
     <small class="inputs-dialog-hint">Ctrl/⌘+Enter to run · Esc to cancel</small>
   </div>

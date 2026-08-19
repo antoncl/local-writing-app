@@ -176,7 +176,7 @@
     ariaLabel={label}
     value={currentValue}
     matcher={implicitContextMatcher}
-    on:change={(event) => emit(event.detail.value)}
+    onChange={(next) => emit(next)}
   />
 {:else if field.type === "entity_ref" || field.type === "entity_ref_list"}
   <ReferencePicker

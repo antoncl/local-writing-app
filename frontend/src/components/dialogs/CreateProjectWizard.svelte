@@ -341,7 +341,7 @@
             <MetadataLongTextEditor
               ariaLabel="Description"
               value={wizard.description}
-              on:change={(event) => wizard.setDescription(event.detail.value)}
+              onChange={(next) => wizard.setDescription(next)}
             />
           </div>
         {/if}

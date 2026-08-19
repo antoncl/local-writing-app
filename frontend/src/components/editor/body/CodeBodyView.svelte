@@ -20,10 +20,14 @@
     inheritedInputsFrom,
     surfaceForStrategy,
   } from "@/lib/editor-core/promptResolution";
+  import { onDestroy } from "svelte";
   import CodeEditor from "@/components/widgets/CodeEditor.svelte";
   import EntryInputsEditor from "@/components/editor/body/EntryInputsEditor.svelte";
   import OfferOnPicker from "@/components/editor/body/OfferOnPicker.svelte";
   import PromptPreviewPane from "@/components/editor/body/PromptPreviewPane.svelte";
+  import RegionRegistrar from "@/components/workspace/RegionRegistrar.svelte";
+  import { workspaceLayout } from "@/lib/stores/workspaceLayout.svelte";
+  import { subordinatePanes } from "@/lib/stores/subordinatePanes";
   import { type EntryInputDraft } from "@/lib/utils/promptInputs";
   import type {
     DocumentKind,
@@ -34,12 +38,16 @@
     PromptInputDefinition,
     SnippetDependents,
     StructureDocument,
+    ViewSpec,
   } from "@/lib/types";
 
   interface Props {
     // --- Inputs the parent owns (state lifted up; bind:'d by NodeEditor) ---
     rawBody?: string;
     entryInputDrafts?: EntryInputDraft[];
+    // This editor's own workspace pane id (ADR-0062 S2) — the key for a detached
+    // Preview pane (`preview:<hostPaneId>`) and the parent it's subordinate to.
+    hostPaneId?: string | null;
     // The prompt's `offer_on` allow-list (ADR-0054 §4 / S4b), authored via the
     // OfferOnPicker below. Bound to NodeEditor's offerOnDraft; only rendered for
     // a conversation prompt (the surface ＋New lists).
@@ -74,6 +82,7 @@
   let {
     rawBody = $bindable(""),
     entryInputDrafts = $bindable([]),
+    hostPaneId = null,
     offerOn = $bindable([]),
     scene = null,
     documentKind = "prompt",
@@ -290,6 +299,52 @@
     document.addEventListener("mouseup", onUp);
   }
 
+  // --- Preview detach (ADR-0062 S2) ---------------------------------------
+  // The Preview is defined once as the `previewPane` snippet below. Docked, it
+  // renders inline in the split; detached, the SAME snippet is registered under
+  // `preview:<hostPaneId>` and RegionBody renders it in a subordinate workspace
+  // pane beside the editor. Svelte 5 carries the snippet's reactive reads across
+  // that boundary (the SchemaPanes pattern), so a detached preview stays live
+  // as-you-type and its bound-out signals (diagnostics / effective-inputs) keep
+  // feeding the docked gutter and Setup tab — no per-document store needed. The
+  // pane is subordinate (closes with the editor) and ephemeral (never restored).
+  const previewPaneId = $derived(hostPaneId ? `preview:${hostPaneId}` : null);
+  let previewDetached = $state(false);
+
+  function detachPreview(): void {
+    const id = previewPaneId;
+    if (!id || !hostPaneId) return;
+    previewDetached = true;
+    // ensureVisible homes it (briefly, synchronously) then dropOnEdge tiles it to
+    // the right of the editor's own group — full height and width beside the code.
+    workspaceLayout.ensureVisible(id);
+    const editorGroup = workspaceLayout.groupOf(hostPaneId);
+    if (editorGroup) workspaceLayout.dropOnEdge(id, editorGroup.id, "right");
+    subordinatePanes.register(id, hostPaneId, reattachPreview);
+  }
+
+  function reattachPreview(): void {
+    previewDetached = false;
+    const id = previewPaneId;
+    if (!id) return;
+    subordinatePanes.unregister(id);
+    if (workspaceLayout.isPlaced(id)) workspaceLayout.removePanel(id);
+  }
+
+  // Guardrails: if the pane's document is swapped for a non-prompt while the
+  // preview is detached, fold it back (the snippet would render nothing). And on
+  // teardown, drop the pane + link — the editor-close cascade covers the common
+  // case, this covers CodeBodyView unmounting while its pane stays open.
+  $effect(() => {
+    if (previewDetached && !isPrompt()) reattachPreview();
+  });
+  onDestroy(() => {
+    const id = previewPaneId;
+    if (!id) return;
+    subordinatePanes.unregister(id);
+    if (workspaceLayout.isPlaced(id)) workspaceLayout.removePanel(id);
+  });
+
   // rawBody change propagation: CodeEditor's bind:value updates our
   // `rawBody`, which (because the parent uses bind:rawBody) updates the
   // parent's rawBody too. The parent has its own `$: if (rawBodyMode &&
@@ -326,7 +381,7 @@
          CodeMirror's undo history and the live preview survive a trip to Setup. -->
     <div class="prompt-tabpanel" class:hidden={activePromptTab !== "edit"} role="tabpanel" aria-label="Edit">
       <div class="prompt-split" bind:this={splitContainerEl}>
-        <div class="prompt-split-code" style="flex-grow: {codeFlex};">
+        <div class="prompt-split-code" style="flex-grow: {previewDetached ? 1 : codeFlex};">
           <div class="editor-wrap raw-body-wrap">
             <div class="raw-body-editor">
               <!-- Belt-and-braces (#368): keyed per document id so a CodeMirror
@@ -370,34 +425,34 @@
         aria-expanded={cheatsheetPopoverOpen}
         onclick={toggleCheatsheetPopover}
       >?</button>
+      {#if previewPaneId}
+        <button
+          type="button"
+          class="prompt-wrap-button"
+          class:active={previewDetached}
+          title={previewDetached
+            ? "Reattach the preview into this editor's split."
+            : "Detach the preview into its own pane beside the editor."}
+          aria-label={previewDetached ? "Reattach preview" : "Detach preview"}
+          onclick={previewDetached ? reattachPreview : detachPreview}
+        >{previewDetached ? "Reattach preview" : "Detach preview"}</button>
+      {/if}
             </div>
           </div>
         </div>
-        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-        <div
-          class="prompt-split-gutter"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize preview"
-          onmousedown={startSplitDrag}
-        ></div>
-        <div class="prompt-split-preview" style="flex-grow: {1 - codeFlex};">
-          <PromptPreviewPane
-            fill
-            bind:diagnostics={promptPreviewDiagnostics}
-            bind:effectiveInputs={promptEffectiveInputs}
-            bind:inputProvenance={promptInputProvenance}
-            {rawBody}
-            {scene}
-            {documentKind}
-            {structure}
-            {researchStructure}
-            {loreEntries}
-            {promptEntries}
-            {availableScenes}
-            {loadedSceneId}
-          />
-        </div>
+        {#if !previewDetached}
+          <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+          <div
+            class="prompt-split-gutter"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize preview"
+            onmousedown={startSplitDrag}
+          ></div>
+          <div class="prompt-split-preview" style="flex-grow: {1 - codeFlex};">
+            {@render previewPane(undefined)}
+          </div>
+        {/if}
       </div>
     </div>
 
@@ -502,6 +557,36 @@
       {/key}
     </div>
   </div>
+{/if}
+
+<!-- The Preview, defined once (ADR-0062 S2). Rendered inline in the split when
+     docked; registered under `preview:<hostPaneId>` and rendered by RegionBody
+     in a subordinate pane when detached. `_spec` is the RegionBody view-spec arg
+     (unused — this is not an explicit-view pane). -->
+{#snippet previewPane(_spec: ViewSpec | undefined)}
+  <PromptPreviewPane
+    fill
+    bind:diagnostics={promptPreviewDiagnostics}
+    bind:effectiveInputs={promptEffectiveInputs}
+    bind:inputProvenance={promptInputProvenance}
+    {rawBody}
+    {scene}
+    {documentKind}
+    {structure}
+    {researchStructure}
+    {loreEntries}
+    {promptEntries}
+    {availableScenes}
+    {loadedSceneId}
+  />
+{/snippet}
+
+{#if isPrompt() && previewPaneId}
+  <RegionRegistrar
+    regions={{
+      [previewPaneId]: { title: "Preview", body: previewPane, closable: true, onClose: reattachPreview },
+    }}
+  />
 {/if}
 
 <style>

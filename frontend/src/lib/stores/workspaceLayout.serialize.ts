@@ -30,7 +30,11 @@ export function isEditorPanelId(id: string): boolean {
 // HOMES) but are stripped on serialize and dropped on load, so they can only
 // ever exist as freshly-opened, state-backed tabs.
 export function isEphemeralTab(id: string): boolean {
-  return isEditorPanelId(id) || id === "schema_type";
+  // A detached prompt preview (`preview:<editorPaneId>`, ADR-0062 S2) is the same
+  // shape as schema_type: its content is a live view of an open editor's draft,
+  // reconstructed only while that editor is mounted. A restored one would be a
+  // blank zombie, so it is stripped on serialize and dropped on load.
+  return isEditorPanelId(id) || id === "schema_type" || id.startsWith("preview:");
 }
 
 // Where a region lands when opened and not already placed. Editor docs are not

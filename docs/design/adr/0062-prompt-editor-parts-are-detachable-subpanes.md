@@ -7,6 +7,21 @@
 - Relates: ADR-0038 §A (edit-in-place, compact-at-rest), ADR-0054 (the disposition/commit surface, which stays where it is — see anti-goals)
 - **Verified against `f0c20603` (2026-08-16).**
 
+> **Amendment 1 (2026-08-19, S2 implementation).** §4 asserted the draft *must*
+> lift into a per-document store, calling it "the real work." Implementation
+> found this unnecessary: `SchemaPanes` already runs a subordinate pane off a
+> `panelRegistry` **snippet that closes over its live component state**, and
+> Svelte 5 propagates reactivity across the `RegionBody` render boundary. So the
+> Preview is defined once as a snippet in `CodeBodyView`, rendered inline in the
+> split when docked and registered under `preview:<editorPaneId>` when detached —
+> **no store, docked path untouched**, its bound-out signals (`diagnostics`,
+> `effectiveInputs`) still feeding the docked gutter + Setup tab. This collapsed
+> the planned S2a (store lift) + S2b (detach) into **one slice**. The store's
+> only edges over the snippet — standalone unit-testing and a path toward the
+> deferred OS-window detach — did not justify the extra machinery for this
+> per-pane case. §4 and the "keep the draft in `CodeBodyView`" rejected-alternative
+> are superseded accordingly.
+
 ## Context
 
 A prompt editor exists for one tight loop: **edit the template, watch it render.** But the prompt editor (`CodeBodyView`, inside the shared `NodeEditor` shell) stacks all of a prompt's parts into **one narrow vertical scroll column** — the CodeMirror template, then the `EntryInputsEditor`, then the `OfferOnPicker`, then the `PromptPreviewPane`, each a collapsed `<details>`. The preview loses a four-way fight for that column: in practice it renders **one or two lines**, which makes the loop it exists to serve unusable.

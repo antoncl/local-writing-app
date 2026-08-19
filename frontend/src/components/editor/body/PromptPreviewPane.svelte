@@ -50,6 +50,11 @@
     // which fires even while the pane is collapsed, so the tier stays live.
     effectiveInputs?: PromptInputDefinition[];
     inputProvenance?: Record<string, string>;
+    // ADR-0062 §1: `fill` mode — the pane owns a whole column (the code‖preview
+    // split, later a detached pane) rather than sitting stacked under the editor.
+    // It's then always expanded, drops the collapse caret + vertical resize
+    // handle, and stretches to fill instead of carrying a pixel height.
+    fill?: boolean;
   }
 
   let {
@@ -65,6 +70,7 @@
     diagnostics = $bindable([]),
     effectiveInputs = $bindable([]),
     inputProvenance = $bindable({}),
+    fill = false,
   }: Props = $props();
 
   const isPrompt = (): boolean => documentKind === "prompt" && !!scene;
@@ -76,6 +82,10 @@
   let promptPreviewError: string | null = $state(null);
   let promptPreviewPaneHeight = $state(280); // px; persisted only in memory for now.
   let promptPreviewCollapsed = $state(true);
+  // In `fill` mode the pane always shows its full contents; otherwise the
+  // author's collapse toggle governs. Everything below gates on this, not on
+  // the raw collapse flag, so a filled pane ignores the (irrelevant) toggle.
+  const previewExpanded = $derived(fill || !promptPreviewCollapsed);
   let promptPreviewDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   let promptPreviewLastRenderKey = "";
 
@@ -273,7 +283,9 @@
      preview is expanded; collapsed by default so the body editor is
      the primary focus. The header toggles open/closed; the handle
      between editor and preview resizes the preview when expanded. -->
-{#if !promptPreviewCollapsed}
+<!-- The vertical resize handle only makes sense in the stacked layout (a pixel
+     height under the editor); in `fill` mode the pane's column owns its size. -->
+{#if previewExpanded && !fill}
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div
     class="prompt-preview-resize"
@@ -285,19 +297,24 @@
 {/if}
 <section
   class="prompt-preview-pane"
-  class:collapsed={promptPreviewCollapsed}
-  style={promptPreviewCollapsed ? "" : `height: ${promptPreviewPaneHeight}px;`}
+  class:collapsed={!previewExpanded}
+  class:fill
+  style={fill || promptPreviewCollapsed ? "" : `height: ${promptPreviewPaneHeight}px;`}
 >
   <header class="prompt-preview-pane-header">
-    <button
-      type="button"
-      class="prompt-preview-toggle"
-      aria-expanded={!promptPreviewCollapsed}
-      onclick={() => (promptPreviewCollapsed = !promptPreviewCollapsed)}
-    >
-      <span class="prompt-preview-caret" aria-hidden="true">{promptPreviewCollapsed ? "▸" : "▾"}</span>
-      <strong>Preview</strong>
-    </button>
+    {#if fill}
+      <strong class="prompt-preview-title">Preview</strong>
+    {:else}
+      <button
+        type="button"
+        class="prompt-preview-toggle"
+        aria-expanded={!promptPreviewCollapsed}
+        onclick={() => (promptPreviewCollapsed = !promptPreviewCollapsed)}
+      >
+        <span class="prompt-preview-caret" aria-hidden="true">{promptPreviewCollapsed ? "▸" : "▾"}</span>
+        <strong>Preview</strong>
+      </button>
+    {/if}
     <div class="prompt-preview-pane-meta">
       {#if promptPreviewRunning}
         <span class="prompt-preview-status">rendering…</span>
@@ -314,7 +331,7 @@
           </span>
         {/if}
       {/if}
-      {#if !promptPreviewCollapsed}
+      {#if previewExpanded}
         <button type="button" disabled={promptPreviewRunning || !rawBody.trim()} onclick={runPromptPreview}>
           {promptPreviewRunning ? "Rendering…" : "Render now"}
         </button>
@@ -322,7 +339,7 @@
     </div>
   </header>
 
-  {#if !promptPreviewCollapsed}
+  {#if previewExpanded}
     <div class="prompt-preview-pane-controls">
       {#if promptPreviewDeclaredInputs.length > 0}
         <div class="prompt-preview-inputs">
@@ -452,6 +469,17 @@
     grid-template-rows: auto;
     min-height: 0;
     height: auto;
+  }
+  /* ADR-0062 §1: filling a split/detached column — stretch to the parent's
+     height, drop the stacked-layout top divider (the split gutter separates). */
+  .prompt-preview-pane.fill {
+    flex: 1 1 0;
+    min-height: 0;
+    border-top: none;
+  }
+  .prompt-preview-title {
+    color: var(--text);
+    font: inherit;
   }
   .prompt-preview-toggle {
     display: flex;

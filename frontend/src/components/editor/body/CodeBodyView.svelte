@@ -237,6 +237,59 @@
     inheritedInputsFrom(promptEffectiveInputs, promptInputProvenance, promptEntries),
   );
 
+  // --- Prompt editor sub-tabs (ADR-0062 §1) -------------------------------
+  // Edit = the code‖preview loop (side by side); Setup = Inputs + Offered-on,
+  // off the main column. Both panels stay MOUNTED across switches (CSS-hidden,
+  // not {#if}) so a trip to Setup never tears down CodeMirror's undo history or
+  // the live preview. S2 will refine Edit into detachable Template/Preview
+  // sub-tabs; S1 ships them as a fixed split (tabs-alone would break the loop).
+  type PromptTab = "edit" | "setup";
+  let activePromptTab = $state<PromptTab>("edit");
+  function selectPromptTab(tab: PromptTab): void {
+    activePromptTab = tab;
+    cheatsheetPopoverOpen = false; // its trigger lives on the Edit toolbar
+  }
+
+  // Code column's share of the split width (preview gets the rest). Persisted
+  // globally — a preferred balance is an author habit, not a per-prompt property.
+  const SPLIT_PREF_KEY = "lwa.editor.promptSplit";
+  function loadSplitRatio(): number {
+    try {
+      const raw = localStorage.getItem(SPLIT_PREF_KEY);
+      const n = raw ? Number.parseFloat(raw) : Number.NaN;
+      return Number.isFinite(n) && n >= 0.2 && n <= 0.8 ? n : 0.5;
+    } catch {
+      return 0.5;
+    }
+  }
+  let codeFlex = $state(loadSplitRatio());
+  let splitContainerEl: HTMLDivElement | undefined = $state();
+
+  function startSplitDrag(event: MouseEvent): void {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const container = splitContainerEl;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    // House pattern (AGENTS.md): document-level move/up, write the fraction live
+    // for smooth drag, commit to localStorage on release.
+    function onMove(e: MouseEvent): void {
+      const frac = (e.clientX - rect.left) / rect.width;
+      codeFlex = Math.max(0.2, Math.min(0.8, frac));
+    }
+    function onUp(): void {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      try {
+        localStorage.setItem(SPLIT_PREF_KEY, String(codeFlex));
+      } catch {
+        // Best-effort — a blocked localStorage just means it won't persist.
+      }
+    }
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }
+
   // rawBody change propagation: CodeEditor's bind:value updates our
   // `rawBody`, which (because the parent uses bind:rawBody) updates the
   // parent's rawBody too. The parent has its own `$: if (rawBodyMode &&
@@ -244,22 +297,50 @@
   // save event — no extra dispatch needed here.
 </script>
 
-<div class="editor-wrap raw-body-wrap">
-  <div class="raw-body-editor">
-    <!-- Belt-and-braces (#368): keyed per document id so a CodeMirror
-         instance's undo history and mount-fixed language extension can never
-         span documents. No in-pane document switch exists today (one tab per
-         document; panes are torn down on close), so this only guards a future
-         pane-model change. It does NOT cover a same-id external reload (none
-         exists for code bodies today) — that would need a state reset, not a
-         remount, exactly like ProseBodyView's loadScene boundary. -->
-    {#key scene?.id}
-      <CodeEditor bind:value={rawBody} language={rawBodyLanguage} lineWrapping={lineWrapEnabled} {readOnly} diagnostics={isPrompt() ? promptPreviewDiagnostics : []} />
-    {/key}
-  </div>
+{#if isPrompt()}
+  <!-- ADR-0062 §1: the prompt editor is a sub-tabbed shell. Edit holds the
+       code‖preview loop side by side; Setup holds Inputs + Offered-on off the
+       main column. One top-level element so it lands in .editor-panel's 1fr
+       grid row and drives its own internal split. -->
+  <div class="prompt-editor-shell">
+    <div class="tab-strip" role="tablist" aria-label="Prompt editor sections">
+      <button
+        type="button"
+        class="tab-strip-tab"
+        class:active={activePromptTab === "edit"}
+        role="tab"
+        aria-selected={activePromptTab === "edit"}
+        onclick={() => selectPromptTab("edit")}
+      >Edit</button>
+      <button
+        type="button"
+        class="tab-strip-tab"
+        class:active={activePromptTab === "setup"}
+        role="tab"
+        aria-selected={activePromptTab === "setup"}
+        onclick={() => selectPromptTab("setup")}
+      >Setup</button>
+    </div>
 
-  {#if isPrompt()}
-    <div class="raw-body-toolbar">
+    <!-- Edit panel — kept MOUNTED across tab switches (CSS-hidden, not {#if}) so
+         CodeMirror's undo history and the live preview survive a trip to Setup. -->
+    <div class="prompt-tabpanel" class:hidden={activePromptTab !== "edit"} role="tabpanel" aria-label="Edit">
+      <div class="prompt-split" bind:this={splitContainerEl}>
+        <div class="prompt-split-code" style="flex-grow: {codeFlex};">
+          <div class="editor-wrap raw-body-wrap">
+            <div class="raw-body-editor">
+              <!-- Belt-and-braces (#368): keyed per document id so a CodeMirror
+                   instance's undo history and mount-fixed language extension can never
+                   span documents. No in-pane document switch exists today (one tab per
+                   document; panes are torn down on close), so this only guards a future
+                   pane-model change. It does NOT cover a same-id external reload (none
+                   exists for code bodies today) — that would need a state reset, not a
+                   remount, exactly like ProseBodyView's loadScene boundary. -->
+              {#key scene?.id}
+                <CodeEditor bind:value={rawBody} language={rawBodyLanguage} lineWrapping={lineWrapEnabled} {readOnly} diagnostics={promptPreviewDiagnostics} />
+              {/key}
+            </div>
+            <div class="raw-body-toolbar">
       <button
         type="button"
         class="prompt-wrap-button"
@@ -289,12 +370,38 @@
         aria-expanded={cheatsheetPopoverOpen}
         onclick={toggleCheatsheetPopover}
       >?</button>
+            </div>
+          </div>
+        </div>
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+        <div
+          class="prompt-split-gutter"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize preview"
+          onmousedown={startSplitDrag}
+        ></div>
+        <div class="prompt-split-preview" style="flex-grow: {1 - codeFlex};">
+          <PromptPreviewPane
+            fill
+            bind:diagnostics={promptPreviewDiagnostics}
+            bind:effectiveInputs={promptEffectiveInputs}
+            bind:inputProvenance={promptInputProvenance}
+            {rawBody}
+            {scene}
+            {documentKind}
+            {structure}
+            {researchStructure}
+            {loreEntries}
+            {promptEntries}
+            {availableScenes}
+            {loadedSceneId}
+          />
+        </div>
+      </div>
     </div>
-  {/if}
-</div>
 
-{#if isPrompt()}
-  {#if cheatsheetPopoverOpen}
+    {#if cheatsheetPopoverOpen}
     <div class="prompt-help-popover" role="dialog" aria-label="Variables and helpers" style="top: {popoverPos.top}px; right: {popoverPos.right}px;">
       <header class="prompt-help-popover-header">
         <strong>Variables &amp; helpers</strong>
@@ -344,58 +451,57 @@
         </section>
       </div>
     </div>
-  {/if}
+    {/if}
 
-  <!-- Dependency advisory (ADR-0061 §5): a snippet whose fields other prompts /
-       chats depend on. Advisory only, never a gate; absent for a prompt nothing
-       includes (the count is 0/0). -->
-  {#if dependentsNote}
-    <p class="entry-inputs-dependents">
-      <i class="ti ti-info-circle" aria-hidden="true"></i>
-      Used by {dependentsNote} — changing these fields may affect them.
-    </p>
-  {/if}
+    <!-- Setup panel — Inputs + Offered-on, off the main loop (ADR-0062 §1).
+         Also kept mounted (CSS-hidden) so its drafts don't re-seed on switch. -->
+    <div class="prompt-tabpanel prompt-setup" class:hidden={activePromptTab !== "setup"} role="tabpanel" aria-label="Setup">
+      <!-- Dependency advisory (ADR-0061 §5): a snippet whose fields other prompts /
+           chats depend on. Advisory only, never a gate; absent for a prompt nothing
+           includes (the count is 0/0). -->
+      {#if dependentsNote}
+        <p class="entry-inputs-dependents">
+          <i class="ti ti-info-circle" aria-hidden="true"></i>
+          Used by {dependentsNote} — changing these fields may affect them.
+        </p>
+      {/if}
 
-  <!-- A Library prompt's declared inputs are shown but locked: `inert` blocks
-       every control and drops the subtree from the tab order, so there is no
-       edit that could 409 on save. Clone to edit. -->
-  <div class="entry-inputs-host" class:read-only={readOnly} inert={readOnly || undefined}>
-    <EntryInputsEditor
-      bind:entryInputDrafts
-      {inheritedInputs}
-      {nextInputDraftId}
-      {entrySlugify}
-      {onInputsChange}
-    />
-  </div>
+      <!-- A Library prompt's declared inputs are shown but locked: `inert` blocks
+           every control and drops the subtree from the tab order, so there is no
+           edit that could 409 on save. Clone to edit. -->
+      <div class="entry-inputs-host" class:read-only={readOnly} inert={readOnly || undefined}>
+        <EntryInputsEditor
+          bind:entryInputDrafts
+          {inheritedInputs}
+          {nextInputDraftId}
+          {entrySlugify}
+          {onInputsChange}
+        />
+      </div>
 
-  {#if showOfferOnPicker}
-    <!-- Locked (Library prompt) the same way as the inputs host: `inert` blocks
-         interaction + drops it from the tab order; clone to edit. -->
-    <div class="entry-inputs-host" class:read-only={readOnly} inert={readOnly || undefined}>
-      <OfferOnPicker
-        bind:offerOn
-        {metadataSchema}
-        {readOnly}
-        onChange={onOfferOnChange}
-      />
+      {#if showOfferOnPicker}
+        <!-- Locked (Library prompt) the same way as the inputs host: `inert` blocks
+             interaction + drops it from the tab order; clone to edit. -->
+        <div class="entry-inputs-host" class:read-only={readOnly} inert={readOnly || undefined}>
+          <OfferOnPicker
+            bind:offerOn
+            {metadataSchema}
+            {readOnly}
+            onChange={onOfferOnChange}
+          />
+        </div>
+      {/if}
     </div>
-  {/if}
-
-  <PromptPreviewPane
-    bind:diagnostics={promptPreviewDiagnostics}
-    bind:effectiveInputs={promptEffectiveInputs}
-    bind:inputProvenance={promptInputProvenance}
-    {rawBody}
-    {scene}
-    {documentKind}
-    {structure}
-    {researchStructure}
-    {loreEntries}
-    {promptEntries}
-    {availableScenes}
-    {loadedSceneId}
-  />
+  </div>
+{:else}
+  <!-- Non-prompt code body (e.g. a snippet / structure file): just the editor. -->
+  <div class="editor-wrap raw-body-wrap">
+    <div class="raw-body-editor">
+      {#key scene?.id}
+        <CodeEditor bind:value={rawBody} language={rawBodyLanguage} lineWrapping={lineWrapEnabled} {readOnly} diagnostics={[]} />
+      {/key}
+    </div>
+  </div>
 {/if}
 
 <style>
@@ -583,6 +689,64 @@
   .entry-inputs-dependents > .ti {
     flex: none;
     align-self: center;
+  }
+  /* --- ADR-0062 §1: sub-tabbed shell + code‖preview split --- */
+  .prompt-editor-shell {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    background: var(--surface);
+  }
+  .prompt-editor-shell > .tab-strip {
+    flex: none;
+    padding: 0 var(--sp-2);
+  }
+  .prompt-tabpanel {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .prompt-tabpanel.hidden {
+    display: none;
+  }
+  .prompt-split {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: row;
+  }
+  .prompt-split-code,
+  .prompt-split-preview {
+    flex-basis: 0;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .prompt-split-code > .editor-wrap {
+    flex: 1;
+    min-height: 0;
+  }
+  /* The drag handle between code and preview — the shell's gutter vocabulary
+     (var(--sp-1) bar, accent on hover), one column-resize cursor. */
+  .prompt-split-gutter {
+    flex: none;
+    width: var(--sp-1);
+    cursor: col-resize;
+    background: var(--divider);
+    transition: background var(--t-fast);
+  }
+  .prompt-split-gutter:hover {
+    background: var(--accent);
+  }
+  .prompt-setup {
+    overflow-y: auto;
+    padding: var(--sp-3);
+    gap: var(--sp-2);
   }
   .raw-body-editor {
     display: grid;

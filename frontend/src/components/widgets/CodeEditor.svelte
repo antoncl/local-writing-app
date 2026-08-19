@@ -155,14 +155,16 @@
     border-right: 1px solid var(--border);
     color: var(--text-2);
   }
-  /* CodeMirror's lint tooltip ships only a light appearance (@codemirror/view
-     `&light .cm-tooltip` → #f5f5f5) and this editor never enables CodeMirror's
-     dark variant, so in the app's dark mode the diagnostic renders as a light
-     band under our light `--text` — the message was illegible (#1155). Theme
-     the lint surfaces with our tokens so it reads in both themes. The extra
-     `.cm-editor` in the selector lifts specificity above CodeMirror's own
-     `&light` rule regardless of stylesheet insertion order. */
-  .code-editor :global(.cm-editor .cm-tooltip.cm-tooltip-lint) {
+  /* CodeMirror tooltips (the lint diagnostic is one — a `.cm-tooltip-lint`
+     section INSIDE a `.cm-tooltip.cm-tooltip-hover` wrapper) ship only a light
+     appearance (@codemirror/view `&light .cm-tooltip` → #f5f5f5) because this
+     editor never enables CodeMirror's dark variant. In the app's dark mode that
+     light band inherits our light `.cm-editor` `color: var(--text)`, so the
+     message was near-white on near-white — illegible (#1155/#1158). Theme the
+     `.cm-tooltip` WRAPPER (the background lives there, not on the lint section)
+     with our tokens; the extra `.cm-editor` lifts specificity above CodeMirror's
+     own `&light` rule regardless of stylesheet insertion order. */
+  .code-editor :global(.cm-editor .cm-tooltip) {
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 4px;

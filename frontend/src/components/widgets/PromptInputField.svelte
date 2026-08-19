@@ -5,7 +5,6 @@
   // value as a string. Used by both the inputs-dialog (prompt-dispatch flow)
   // and the prompt-preview inputs panel — keeps look-and-feel identical and
   // halves the maintenance surface for input types.
-  import { createEventDispatcher } from "svelte";
   import NodePicker from "@/components/widgets/NodePicker.svelte";
   import PlainTextEditor from "@/components/widgets/PlainTextEditor.svelte";
   import ReferencePicker from "@/components/widgets/ReferencePicker.svelte";
@@ -19,22 +18,36 @@
     StructureDocument,
   } from "@/lib/types";
 
-  export let input: PromptInputDefinition;
-  export let value: string;
-  export let excludeId: string | null = null;
-  export let ariaLabel: string | undefined = undefined;
-  // Data sources for the context_pick input type. Optional — the picker
-  // will degrade to "no items" when missing rather than throw.
-  export let structure: StructureDocument | null = null;
-  // Research tree (sibling to manuscript) — threaded to the picker.
-  export let researchStructure: StructureDocument | null = null;
-  export let loreEntries: LoreEntrySummary[] = [];
-  export let promptEntries: PromptEntrySummary[] = [];
-  // Optional matcher pass-through for implicit-context highlighting on
-  // long_text inputs. Other input types ignore it.
-  export let implicitContextMatcher: import("@/lib/editor-core/implicitContextMatcher").CompiledMatcher | null = null;
-
-  const dispatch = createEventDispatcher<{ change: { value: string } }>();
+  let {
+    input,
+    value,
+    excludeId = null,
+    ariaLabel = undefined,
+    // Data sources for the context_pick input type. Optional — the picker
+    // will degrade to "no items" when missing rather than throw.
+    structure = null,
+    // Research tree (sibling to manuscript) — threaded to the picker.
+    researchStructure = null,
+    loreEntries = [],
+    promptEntries = [],
+    // Optional matcher pass-through for implicit-context highlighting on
+    // long_text inputs. Other input types ignore it.
+    implicitContextMatcher = null,
+    // Emitted with the new value as a string (was a `change` CustomEvent before
+    // the runes pass); the inputs-dialog / prompt-preview panel persist it.
+    onChange = () => {},
+  }: {
+    input: PromptInputDefinition;
+    value: string;
+    excludeId?: string | null;
+    ariaLabel?: string | undefined;
+    structure?: StructureDocument | null;
+    researchStructure?: StructureDocument | null;
+    loreEntries?: LoreEntrySummary[];
+    promptEntries?: PromptEntrySummary[];
+    implicitContextMatcher?: import("@/lib/editor-core/implicitContextMatcher").CompiledMatcher | null;
+    onChange?: (value: string) => void;
+  } = $props();
 
   function refStubField(): MetadataFieldDefinition {
     // entity_ref / entity_ref_list inputs persist their picker config as a
@@ -95,14 +108,14 @@
     minHeight={60}
     maxHeight={200}
     matcher={implicitContextMatcher}
-    onChange={(next) => dispatch("change", { value: next })}
+    onChange={onChange}
   />
 {:else if input.type === "number"}
   <input
     type="number"
     value={value ?? ""}
     aria-label={ariaLabel}
-    on:input={(e) => dispatch("change", { value: (e.currentTarget as HTMLInputElement).value })}
+    oninput={(e) => onChange((e.currentTarget as HTMLInputElement).value)}
   />
 {:else if input.type === "boolean"}
   <!-- Tri-state: Unset / True / False. Unset is a real persisted state
@@ -113,7 +126,7 @@
   <select
     value={value ?? ""}
     aria-label={ariaLabel}
-    on:change={(e) => dispatch("change", { value: (e.currentTarget as HTMLSelectElement).value })}
+    onchange={(e) => onChange((e.currentTarget as HTMLSelectElement).value)}
   >
     <option value="">Unset</option>
     <option value="true">True</option>
@@ -123,7 +136,7 @@
   <select
     value={value ?? ""}
     aria-label={ariaLabel}
-    on:change={(e) => dispatch("change", { value: (e.currentTarget as HTMLSelectElement).value })}
+    onchange={(e) => onChange((e.currentTarget as HTMLSelectElement).value)}
   >
     {#if !input.required}
       <option value="">(none)</option>
@@ -142,7 +155,7 @@
     researchStructure={researchStructure}
     loreEntries={loreEntries}
     promptEntries={promptEntries}
-    on:change={(event) => dispatch("change", { value: encodeRefValue(event.detail.value) })}
+    on:change={(event) => onChange(encodeRefValue(event.detail.value))}
   />
 {:else if input.type === "context_pick"}
   <NodePicker
@@ -153,13 +166,13 @@
     researchStructure={researchStructure}
     loreEntries={loreEntries}
     promptEntries={promptEntries}
-    on:change={(event) => dispatch("change", { value: JSON.stringify(event.detail.value) })}
+    on:change={(event) => onChange(JSON.stringify(event.detail.value))}
   />
 {:else}
   <input
     type="text"
     value={value ?? ""}
     aria-label={ariaLabel}
-    on:input={(e) => dispatch("change", { value: (e.currentTarget as HTMLInputElement).value })}
+    oninput={(e) => onChange((e.currentTarget as HTMLInputElement).value)}
   />
 {/if}

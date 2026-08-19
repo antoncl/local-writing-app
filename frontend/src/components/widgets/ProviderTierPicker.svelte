@@ -80,10 +80,13 @@
     if (provider) await loadModels();
   });
 
-  async function loadModels(forceRefresh = false) {
+  // Returns the freshly-loaded list so callers can resolve against it
+  // directly, rather than reading the derived `tierResolutions`/`visibleTiers`
+  // back (which recompute from `models` and invite a stale-read window).
+  async function loadModels(forceRefresh = false): Promise<AIModelInfo[]> {
     if (!provider) {
       models = [];
-      return;
+      return models;
     }
     modelsLoading = true;
     modelsError = "";
@@ -96,6 +99,7 @@
     } finally {
       modelsLoading = false;
     }
+    return models;
   }
 
   // Tiers that have at least one candidate model — these are the only
@@ -105,24 +109,31 @@
     TIER_ORDER.filter((t) => models.some((m) => m.tier === t && !m.deprecated)),
   );
 
-  // For each available tier, the model the resolver will pick — used
-  // to render "⚖ Balanced — Sonnet 4.6" in the dropdown. Mirrors the
-  // backend's `model_for_tier` (cheapest non-deprecated, tie-break on
-  // context window). Computed client-side so the dropdown can show
-  // the resolved name without a round-trip per tier.
+  // The model the resolver picks for a tier: cheapest non-deprecated
+  // candidate, tie-broken on the widest context window. Mirrors the backend's
+  // `model_for_tier`. A PURE function over an explicit model list — both the
+  // reactive `tierResolutions` map (for the dropdown) and the post-load
+  // provider default (`onProviderChange`) resolve tiers through this, from the
+  // same freshly-loaded data, so neither can pick against a stale catalogue.
+  function resolveTier(list: AIModelInfo[], t: AICapabilityTier): AIModelInfo | null {
+    const candidates = list
+      .filter((m) => m.tier === t && !m.deprecated)
+      .slice()
+      .sort((a, b) => {
+        const ac = a.cost_in_per_mtok ?? Infinity;
+        const bc = b.cost_in_per_mtok ?? Infinity;
+        if (ac !== bc) return ac - bc;
+        return b.context_window - a.context_window;
+      });
+    return candidates[0] ?? null;
+  }
+
+  // For each available tier, the model the resolver will pick — used to render
+  // "⚖ Balanced — Sonnet 4.6" in the dropdown, without a round-trip per tier.
   const tierResolutions = $derived.by(() => {
     const out: Partial<Record<AICapabilityTier, AIModelInfo | null>> = {};
     for (const t of TIER_ORDER) {
-      const candidates = models
-        .filter((m) => m.tier === t && !m.deprecated)
-        .slice()
-        .sort((a, b) => {
-          const ac = a.cost_in_per_mtok ?? Infinity;
-          const bc = b.cost_in_per_mtok ?? Infinity;
-          if (ac !== bc) return ac - bc;
-          return b.context_window - a.context_window;
-        });
-      out[t] = candidates[0] ?? null;
+      out[t] = resolveTier(models, t);
     }
     return out;
   });
@@ -154,15 +165,18 @@
     // re-picks tier (or it stays empty for explicit-model mode).
     tier = "";
     model = "";
-    await loadModels();
-    // Try to default to BALANCED on the new provider if available,
-    // else LOCAL for Ollama.
+    // Try to default to BALANCED on the new provider (LOCAL for Ollama).
+    // Resolve straight from the list `loadModels` just returned, NOT from the
+    // derived `tierResolutions`/`visibleTiers` — reading those back here would
+    // reintroduce the stale-catalogue window the fresh list exists to close.
+    const loaded = await loadModels();
     const fallback: AICapabilityTier = provider === "ollama" ? "local" : "balanced";
-    if (visibleTiers.includes(fallback)) {
-      onTierChange(fallback);
-    } else {
-      emitChange();
+    const resolved = resolveTier(loaded, fallback);
+    if (resolved) {
+      tier = fallback;
+      model = resolved.id;
     }
+    emitChange();
   }
 
   function onTierChange(newTier: AICapabilityTier | "") {

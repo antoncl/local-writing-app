@@ -65,10 +65,10 @@ describe("ProviderTierPicker — onChange callback (runes port of the `change` e
   });
 
   it("resolves the tier against the NEWLY selected provider's catalogue, not the old one", async () => {
-    // This locks the runes pull-semantics: onProviderChange reads the derived
-    // tier resolutions synchronously after `await loadModels()`, so they must
-    // reflect the just-loaded provider. Under the old push-batched `$:` these
-    // reads were stale and would have resolved to the previous provider's model
+    // onProviderChange resolves the default tier from the list `loadModels`
+    // just returned (via the pure `resolveTier`), so it always reflects the
+    // just-loaded provider. The pre-runes `$:` version read stale derived data
+    // here and would have resolved to the previous provider's model
     // ("claude-bal"); the correct result is the new provider's "gpt-bal".
     const onChange = vi.fn();
     render(ProviderTierPicker, { props: { onChange } });

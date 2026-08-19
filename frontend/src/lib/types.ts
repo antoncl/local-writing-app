@@ -734,7 +734,7 @@ export type PromptInputDefinition = {
   options?: SelectOption[];
   required?: boolean;
   // A launch-set input the strip should not author (ADR-0046 §6.4): declared so
-  // it reaches the template's `input.*`, but its widget is skipped.
+  // it reaches the template's `inputs.*`, but its widget is skipped.
   hidden?: boolean;
   target?: Record<string, MetadataValue> | null;
 };

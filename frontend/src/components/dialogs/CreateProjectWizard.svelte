@@ -247,8 +247,8 @@
                     <input type="text" bind:value={wizard.hireTitle} placeholder="Drafting assistant" />
                   </label>
                   <ProviderTierPicker
-                    on:change={(event) =>
-                      wizard.setHireProvider(event.detail.provider, event.detail.tier, event.detail.model)}
+                    onChange={(detail) =>
+                      wizard.setHireProvider(detail.provider, detail.tier, detail.model)}
                   />
                   <div class="inline-form-actions">
                     <button type="button" on:click={() => wizard.cancelHire()}>Cancel</button>

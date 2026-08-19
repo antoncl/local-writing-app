@@ -11,7 +11,7 @@
   //
   // Per docs/ai-model-selection.md.
 
-  import { onMount, createEventDispatcher } from "svelte";
+  import { onMount } from "svelte";
   import { api } from "@/lib/api";
   import type {
     AICapabilityTier,
@@ -19,14 +19,28 @@
     AIProviderInfo,
   } from "@/lib/types";
 
-  export let provider: string = "";
-  // Empty string = "explicit-model mode" (Advanced is the source of truth).
-  export let tier: AICapabilityTier | "" = "";
-  export let model: string = "";
-
-  const dispatch = createEventDispatcher<{
-    change: { provider: string; tier: AICapabilityTier | ""; model: string };
-  }>();
+  let {
+    provider = $bindable(""),
+    // Empty string = "explicit-model mode" (Advanced is the source of truth).
+    tier = $bindable(""),
+    model = $bindable(""),
+    // Emitted with the literal provider/tier/model the entry should store; the
+    // parent writes all three back (was a `change` CustomEvent before the runes
+    // pass). provider/tier/model are `$bindable` because the picker reassigns
+    // them internally (onMount defaulting, provider/tier/model changes) — a
+    // non-bindable prop cannot be reassigned in runes mode. No parent binds
+    // them today; they are passed one-way and updated via onChange.
+    onChange = () => {},
+  }: {
+    provider?: string;
+    tier?: AICapabilityTier | "";
+    model?: string;
+    onChange?: (detail: {
+      provider: string;
+      tier: AICapabilityTier | "";
+      model: string;
+    }) => void;
+  } = $props();
 
   // Tier display order. LOCAL deliberately last; it's Ollama-only.
   const TIER_ORDER: AICapabilityTier[] = [
@@ -44,11 +58,11 @@
     local: "💻 Local",
   };
 
-  let providers: AIProviderInfo[] = [];
-  let models: AIModelInfo[] = [];
-  let modelsLoading = false;
-  let modelsError = "";
-  let advancedOpen = false;
+  let providers = $state<AIProviderInfo[]>([]);
+  let models = $state<AIModelInfo[]>([]);
+  let modelsLoading = $state(false);
+  let modelsError = $state("");
+  let advancedOpen = $state(false);
 
   onMount(async () => {
     try {
@@ -66,10 +80,13 @@
     if (provider) await loadModels();
   });
 
-  async function loadModels(forceRefresh = false) {
+  // Returns the freshly-loaded list so callers can resolve against it
+  // directly, rather than reading the derived `tierResolutions`/`visibleTiers`
+  // back (which recompute from `models` and invite a stale-read window).
+  async function loadModels(forceRefresh = false): Promise<AIModelInfo[]> {
     if (!provider) {
       models = [];
-      return;
+      return models;
     }
     modelsLoading = true;
     modelsError = "";
@@ -82,50 +99,65 @@
     } finally {
       modelsLoading = false;
     }
+    return models;
   }
 
   // Tiers that have at least one candidate model — these are the only
   // tiers worth surfacing in the dropdown (no point offering REASONING
   // when the provider has no thinking models).
-  $: availableTiers = TIER_ORDER.filter((t) =>
-    models.some((m) => m.tier === t && !m.deprecated),
+  const availableTiers = $derived(
+    TIER_ORDER.filter((t) => models.some((m) => m.tier === t && !m.deprecated)),
   );
 
-  // For each available tier, the model the resolver will pick — used
-  // to render "⚖ Balanced — Sonnet 4.6" in the dropdown. Mirrors the
-  // backend's `model_for_tier` (cheapest non-deprecated, tie-break on
-  // context window). Computed client-side so the dropdown can show
-  // the resolved name without a round-trip per tier.
-  $: tierResolutions = (() => {
+  // The model the resolver picks for a tier: cheapest non-deprecated
+  // candidate, tie-broken on the widest context window. Mirrors the backend's
+  // `model_for_tier`. A PURE function over an explicit model list — both the
+  // reactive `tierResolutions` map (for the dropdown) and the post-load
+  // provider default (`onProviderChange`) resolve tiers through this, from the
+  // same freshly-loaded data, so neither can pick against a stale catalogue.
+  function resolveTier(list: AIModelInfo[], t: AICapabilityTier): AIModelInfo | null {
+    const candidates = list
+      .filter((m) => m.tier === t && !m.deprecated)
+      .slice()
+      .sort((a, b) => {
+        const ac = a.cost_in_per_mtok ?? Infinity;
+        const bc = b.cost_in_per_mtok ?? Infinity;
+        if (ac !== bc) return ac - bc;
+        return b.context_window - a.context_window;
+      });
+    return candidates[0] ?? null;
+  }
+
+  // For each available tier, the model the resolver will pick — used to render
+  // "⚖ Balanced — Sonnet 4.6" in the dropdown, without a round-trip per tier.
+  const tierResolutions = $derived.by(() => {
     const out: Partial<Record<AICapabilityTier, AIModelInfo | null>> = {};
     for (const t of TIER_ORDER) {
-      const candidates = models
-        .filter((m) => m.tier === t && !m.deprecated)
-        .slice()
-        .sort((a, b) => {
-          const ac = a.cost_in_per_mtok ?? Infinity;
-          const bc = b.cost_in_per_mtok ?? Infinity;
-          if (ac !== bc) return ac - bc;
-          return b.context_window - a.context_window;
-        });
-      out[t] = candidates[0] ?? null;
+      out[t] = resolveTier(models, t);
     }
     return out;
-  })();
+  });
 
   // Hide LOCAL tier from non-Ollama providers and non-LOCAL tiers
   // from Ollama. Keeps the picker focused on what's actually useful
   // for the current provider.
-  $: visibleTiers = availableTiers.filter((t) =>
-    provider === "ollama" ? t === "local" : t !== "local",
+  const visibleTiers = $derived(
+    availableTiers.filter((t) =>
+      provider === "ollama" ? t === "local" : t !== "local",
+    ),
   );
 
-  $: currentResolvedModel = tier ? tierResolutions[tier as AICapabilityTier]?.id ?? "" : "";
+  const currentResolvedModel = $derived(
+    tier ? (tierResolutions[tier as AICapabilityTier]?.id ?? "") : "",
+  );
 
   // If we have a tier set but the resolved model differs from the
   // stored one, the user picked an explicit override at some point —
   // flip to "custom" mode to surface that in the UI.
-  $: isCustom = !tier || (Boolean(model) && Boolean(currentResolvedModel) && model !== currentResolvedModel);
+  const isCustom = $derived(
+    !tier ||
+      (Boolean(model) && Boolean(currentResolvedModel) && model !== currentResolvedModel),
+  );
 
   async function onProviderChange(newProvider: string) {
     provider = newProvider;
@@ -133,15 +165,18 @@
     // re-picks tier (or it stays empty for explicit-model mode).
     tier = "";
     model = "";
-    await loadModels();
-    // Try to default to BALANCED on the new provider if available,
-    // else LOCAL for Ollama.
+    // Try to default to BALANCED on the new provider (LOCAL for Ollama).
+    // Resolve straight from the list `loadModels` just returned, NOT from the
+    // derived `tierResolutions`/`visibleTiers` — reading those back here would
+    // reintroduce the stale-catalogue window the fresh list exists to close.
+    const loaded = await loadModels();
     const fallback: AICapabilityTier = provider === "ollama" ? "local" : "balanced";
-    if (visibleTiers.includes(fallback)) {
-      onTierChange(fallback);
-    } else {
-      emitChange();
+    const resolved = resolveTier(loaded, fallback);
+    if (resolved) {
+      tier = fallback;
+      model = resolved.id;
     }
+    emitChange();
   }
 
   function onTierChange(newTier: AICapabilityTier | "") {
@@ -167,7 +202,7 @@
   }
 
   function emitChange() {
-    dispatch("change", { provider, tier, model });
+    onChange({ provider, tier, model });
   }
 
   function fmtCost(cost: number | null | undefined): string {
@@ -187,7 +222,7 @@
     <span class="ptp-label">Subscription</span>
     <select
       value={provider}
-      on:change={(e) => onProviderChange((e.currentTarget as HTMLSelectElement).value)}
+      onchange={(e) => onProviderChange((e.currentTarget as HTMLSelectElement).value)}
     >
       {#if providers.length === 0}
         <option value="">(no providers)</option>
@@ -203,7 +238,7 @@
     <select
       value={isCustom ? "" : tier}
       disabled={modelsLoading || visibleTiers.length === 0}
-      on:change={(e) => onTierChange((e.currentTarget as HTMLSelectElement).value as AICapabilityTier | "")}
+      onchange={(e) => onTierChange((e.currentTarget as HTMLSelectElement).value as AICapabilityTier | "")}
     >
       <option value="">{isCustom ? "Custom (Advanced)" : "—"}</option>
       {#each visibleTiers as t (t)}
@@ -223,7 +258,7 @@
       <span class="ptp-label">Model</span>
       <select
         value={model}
-        on:change={(e) => onModelChange((e.currentTarget as HTMLSelectElement).value)}
+        onchange={(e) => onModelChange((e.currentTarget as HTMLSelectElement).value)}
       >
         {#if model && !models.some((m) => m.id === model)}
           <!-- Persisted model not in current catalogue — show it so
@@ -240,7 +275,7 @@
       </select>
     </label>
     <div class="ptp-meta">
-      <button type="button" class="ptp-refresh" on:click={() => loadModels(true)} disabled={modelsLoading}>
+      <button type="button" class="ptp-refresh" onclick={() => loadModels(true)} disabled={modelsLoading}>
         Refresh models
       </button>
       {#if model}

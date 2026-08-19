@@ -351,7 +351,7 @@
         provider={metadataValueString(metadata.ai_provider)}
         tier={metadataValueString(metadata.ai_capability_tier) as import("@/lib/types").AICapabilityTier | ""}
         model={metadataValueString(metadata.ai_model)}
-        on:change={(event) => updateAssistantProvider(event.detail.provider, event.detail.tier, event.detail.model)}
+        onChange={(detail) => updateAssistantProvider(detail.provider, detail.tier, detail.model)}
       />
     </div>
   {/if}

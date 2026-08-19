@@ -264,9 +264,9 @@
     promptEntries={promptEntries}
     excludeId={scene?.id ?? null}
     implicitContextMatcher={implicitContextMatcher}
-    on:updateDraft={(event) => updateDraft(event.detail.name, event.detail.value)}
-    on:updateAssistant={(event) => (assistantId = event.detail.assistantId)}
-    on:cancel={cancel}
-    on:submit={() => void submit()}
+    onUpdateDraft={(detail) => updateDraft(detail.name, detail.value)}
+    onUpdateAssistant={(detail) => (assistantId = detail.assistantId)}
+    onCancel={cancel}
+    onSubmit={() => void submit()}
   />
 {/if}

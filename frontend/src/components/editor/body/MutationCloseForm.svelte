@@ -121,7 +121,7 @@
         promptEntries={promptEntries}
         structure={structure}
         researchStructure={researchStructure}
-        on:change={(e) => (entityId = Array.isArray(e.detail.value) ? (e.detail.value[0] ?? "") : e.detail.value)}
+        onChange={(value) => (entityId = Array.isArray(value) ? (value[0] ?? "") : value)}
       />
     </div>
 

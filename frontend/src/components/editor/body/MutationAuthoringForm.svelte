@@ -404,7 +404,7 @@
       promptEntries={promptEntries}
       structure={structure}
       researchStructure={researchStructure}
-      on:change={(e) => selectEntity(e.detail.value)}
+      onChange={(value) => selectEntity(value)}
     />
   </div>
 

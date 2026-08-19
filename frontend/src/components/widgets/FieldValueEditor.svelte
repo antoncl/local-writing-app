@@ -188,8 +188,8 @@
     researchStructure={researchStructure}
     loreEntries={loreEntries}
     promptEntries={promptEntries}
-    on:change={(event) => emit(event.detail.value)}
-    on:navigate={(event) => onNavigate?.(event.detail)}
+    onChange={(value) => emit(value)}
+    onNavigate={(detail) => onNavigate?.(detail)}
   />
 {:else if field.type === "multi_select" && field.options.length > 0}
   <div class="multi-select-chips" aria-label={label}>

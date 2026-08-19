@@ -155,7 +155,7 @@
     researchStructure={researchStructure}
     loreEntries={loreEntries}
     promptEntries={promptEntries}
-    on:change={(event) => onChange(encodeRefValue(event.detail.value))}
+    onChange={(value) => onChange(encodeRefValue(value))}
   />
 {:else if input.type === "context_pick"}
   <NodePicker

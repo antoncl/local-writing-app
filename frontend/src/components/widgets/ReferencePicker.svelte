@@ -11,7 +11,6 @@
   // (structure, loreEntries, promptEntries) the rest of the UI uses are
   // canonical. excludeId becomes NodePicker.excludeIds.
 
-  import { createEventDispatcher } from "svelte";
   import NodePicker from "@/components/widgets/NodePicker.svelte";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
@@ -38,48 +37,62 @@
   // a `plot:plotline` ref resolves anywhere without the caller threading the roster.
   import { plotlineEntriesStore } from "@/lib/stores/plotlines";
 
-  export let field: MetadataFieldDefinition;
-  export let value: string | string[] | null | undefined;
+  let {
+    field,
+    value,
+    excludeId = null,
+    ariaLabel = "",
+    // Read-only display (#64): resolved reference rows stay visible + navigable,
+    // but the Add/Change trigger and per-row remove buttons are hidden.
+    readOnly = false,
+    // In-memory data sources used by the embedded NodePicker.
+    structure = null,
+    // Research tree (sibling to manuscript) — threaded to the picker.
+    researchStructure = null,
+    loreEntries = [],
+    promptEntries = [],
+    // Callback props (were `change` / `navigate` CustomEvents before the runes
+    // pass). onChange carries the selected id(s); onNavigate opens a ref.
+    onChange = () => {},
+    onNavigate = () => {},
+  }: {
+    field: MetadataFieldDefinition;
+    value?: string | string[] | null;
+    excludeId?: string | null;
+    ariaLabel?: string;
+    readOnly?: boolean;
+    structure?: StructureDocument | null;
+    researchStructure?: StructureDocument | null;
+    loreEntries?: LoreEntrySummary[];
+    promptEntries?: PromptEntrySummary[];
+    onChange?: (value: string | string[]) => void;
+    onNavigate?: (detail: { id: string; kind: string }) => void;
+  } = $props();
+
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
-  $: metadataSchema = $metadataSchemaStore;
-  export let excludeId: string | null = null;
-  export let ariaLabel: string = "";
-  // Read-only display (#64): resolved reference rows stay visible + navigable,
-  // but the Add/Change trigger and per-row remove buttons are hidden.
-  export let readOnly: boolean = false;
-  // In-memory data sources used by the embedded NodePicker.
-  export let structure: StructureDocument | null = null;
-  // Research tree (sibling to manuscript) — threaded to the picker.
-  export let researchStructure: StructureDocument | null = null;
-  export let loreEntries: LoreEntrySummary[] = [];
-  export let promptEntries: PromptEntrySummary[] = [];
+  const metadataSchema = $derived($metadataSchemaStore);
 
-  const dispatch = createEventDispatcher<{
-    change: { value: string | string[] };
-    navigate: { id: string; kind: string };
-  }>();
+  let expanded = $state(false);
 
-  let expanded = false;
-
-  $: multi = field.type === "entity_ref_list";
+  const multi = $derived(field.type === "entity_ref_list");
   // The field's authored picker_config drives the dropdown directly.
   // `multiple` is derived from the field type (entity_ref → false,
   // entity_ref_list → true) and overrides any cfg.multiple — the field
   // type is the authority on cardinality, not the picker config.
-  $: pickerConfig = ({ ...(field.picker_config ?? {}), multiple: multi } as NodePickerConfig);
+  const pickerConfig = $derived({ ...(field.picker_config ?? {}), multiple: multi } as NodePickerConfig);
   // Legacy membership subset reduced from the config's `sources` (#78).
-  $: pickerFilter = pickerMembership(pickerConfig);
+  const pickerFilter = $derived(pickerMembership(pickerConfig));
   // First configured kind, used when computing fallback ref hydration
   // for selected ids the in-memory indices don't resolve to a known
   // entry (e.g. a freshly-saved id whose index hasn't refreshed).
-  $: targetKind = (pickerFilter.kinds[0] ?? "") as NodePickerRef["kind"] | "";
-  $: targetEntryType = (() => {
+  const targetKind = $derived((pickerFilter.kinds[0] ?? "") as NodePickerRef["kind"] | "");
+  const targetEntryType = $derived.by(() => {
     if (!targetKind) return "";
     const allowed = pickerFilter.entryTypes[targetKind] ?? [];
     return allowed.length === 1 ? allowed[0] : "";
-  })();
+  });
 
-  $: pickerExcludeIds = excludeId ? [excludeId] : [];
+  const pickerExcludeIds = $derived(excludeId ? [excludeId] : []);
 
   // id ↔ NodePickerRef translation. Selected ids are persisted; NodePicker
   // wants refs. Look up in the same in-memory sources the picker uses so the
@@ -93,14 +106,14 @@
   // leaves it undefined) so the node satisfies EvalNode.
   type RefNode = ResolvedRef & { entry_type: string };
 
-  $: selectedIds = toIdList(value);
-  $: sceneIndex = structure ? flattenScenesAll(structure.root) : new Map<string, { id: string; title: string; entry_type: string }>();
-  $: loreIndex = new Map(loreEntries.map((e) => [e.id, e] as const));
-  $: promptIndex = new Map(promptEntries.map((e) => [e.id, e] as const));
-  $: plotIndex = new Map($plotlineEntriesStore.map((e) => [e.id, e] as const));
-  $: assistantIndex = new Map($assistantEntriesStore.map((e) => [e.id, e] as const));
-  $: selectedRefs = selectedIds.map((id) => resolveRefById(id));
-  $: refNodes = selectedRefs.map((ref): RefNode => ({ ...ref, entry_type: ref.entry_type ?? "" }));
+  const selectedIds = $derived(toIdList(value));
+  const sceneIndex = $derived(structure ? flattenScenesAll(structure.root) : new Map<string, { id: string; title: string; entry_type: string }>());
+  const loreIndex = $derived(new Map(loreEntries.map((e) => [e.id, e] as const)));
+  const promptIndex = $derived(new Map(promptEntries.map((e) => [e.id, e] as const)));
+  const plotIndex = $derived(new Map($plotlineEntriesStore.map((e) => [e.id, e] as const)));
+  const assistantIndex = $derived(new Map($assistantEntriesStore.map((e) => [e.id, e] as const)));
+  const selectedRefs = $derived(selectedIds.map((id) => resolveRefById(id)));
+  const refNodes = $derived(selectedRefs.map((ref): RefNode => ({ ...ref, entry_type: ref.entry_type ?? "" })));
 
   function toIdList(input: string | string[] | null | undefined): string[] {
     if (input === null || input === undefined) return [];
@@ -140,7 +153,7 @@
   }
 
   function emit(nextIds: string[]) {
-    dispatch("change", { value: multi ? nextIds : nextIds[0] ?? "" });
+    onChange(multi ? nextIds : nextIds[0] ?? "");
   }
 
   function handlePickerChange(event: CustomEvent<{ value: NodePickerRef[] }>) {
@@ -235,7 +248,7 @@
     title={ref.title}
     depth={ctx.depth}
     stripeColor={ref.missing ? "#c98a8a" : null}
-    onClick={ref.missing ? undefined : () => dispatch("navigate", { id: ref.id, kind: ref.kind })}
+    onClick={ref.missing ? undefined : () => onNavigate({ id: ref.id, kind: ref.kind })}
   >
     {#snippet trailing()}
       <span
@@ -250,7 +263,7 @@
           class="row-action-delete"
           aria-label="Remove {ref.title}"
           title="Remove"
-          on:click={() => removeId(ref.id)}
+          onclick={() => removeId(ref.id)}
         >×</button>
       {/if}
     {/snippet}

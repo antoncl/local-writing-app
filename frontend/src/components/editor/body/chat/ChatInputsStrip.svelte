@@ -73,7 +73,7 @@
             loreEntries={loreEntries}
             promptEntries={promptEntries}
             implicitContextMatcher={implicitContextMatcher}
-            on:change={(event) => !isLocked && onDraftChange(input.name, event.detail.value)}
+            onChange={(next) => !isLocked && onDraftChange(input.name, next)}
           />
         </label>
       {/each}

@@ -372,7 +372,7 @@
                 researchStructure={researchStructure}
                 loreEntries={loreEntries}
                 promptEntries={promptEntries}
-                on:change={(event) => promptPreviewInputDrafts = {...promptPreviewInputDrafts, [inputDef.name]: event.detail.value}}
+                onChange={(next) => promptPreviewInputDrafts = {...promptPreviewInputDrafts, [inputDef.name]: next}}
               />
             </label>
           {/each}

@@ -114,7 +114,7 @@
             loreEntries={loreEntries}
             promptEntries={promptEntries}
             implicitContextMatcher={implicitContextMatcher}
-            on:change={(event) => onUpdateDraft({ name: input.name, value: event.detail.value })}
+            onChange={(next) => onUpdateDraft({ name: input.name, value: next })}
           />
         </label>
       {/each}

@@ -28,6 +28,7 @@ from test_ai_entry_patch import add_character_patch_fields
 from app.main import app
 from app.models import AIChatResponse, ChatMessage, CreateLoreEntryRequest
 from app.services.ai.extraction import (
+    DEFAULT_EXTRACTOR_PROMPT_ID,
     _messages_with_extract_cue,
     render_extraction_contract,
 )
@@ -398,6 +399,39 @@ class ExtractCueSanitizationTests(unittest.TestCase):
         )
         self.assertEqual([m.role for m in msgs], ["user", "assistant", "user"])
         self.assertIn("Extract", msgs[-1].content)
+
+
+class ExtractorBuiltinPromptTests(unittest.TestCase):
+    """ADR-0063 S2: the extraction contract is the built-in Library prompt
+    `builtin-default-extractor` resolved by id, not a Python constant. These
+    guard the ship invariant (the file exists, keeps its id + type) and that the
+    contract renders from its body."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve() / "project"
+        self.service = open_test_project(self.root, "S2 extractor builtin")
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_default_extractor_ships_as_a_library_extractor_prompt(self) -> None:
+        entry = self.service.read_prompt_entry(DEFAULT_EXTRACTOR_PROMPT_ID)
+        self.assertEqual(entry.entry_type, "prompt:extractor")
+        # Comes from a real source layer (the read-only built-in Library floor),
+        # not the project itself.
+        self.assertTrue(entry.source_layer_label)
+        # Its body is the extraction Jinja the contract renders.
+        self.assertIn('{% role "system" %}', entry.body)
+        self.assertIn("fields(inputs.entry_type)", entry.body)
+
+    def test_contract_renders_from_the_builtin_body(self) -> None:
+        # A drifted id / missing file would yield an empty or broken contract.
+        contract = render_extraction_contract(
+            self.service, entry_type="lore:character", creating=True
+        )
+        self.assertIn("Reply with ONLY a JSON object", contract)
+        self.assertIn("The fields you may set:", contract)
 
 
 if __name__ == "__main__":

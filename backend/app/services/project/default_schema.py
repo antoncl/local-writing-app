@@ -539,6 +539,19 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "fields": [],
             "has_body": True,
         },
+        "prompt:extractor": {
+            # The commit-side extraction contract (ADR-0063 S2). Like a snippet it
+            # carries NO `prompt`/`context_strategy` block, so it is non-invocable
+            # — never launched as a conversation, only rendered as the JSON contract
+            # a chat's Commit runs (services/ai/extraction.py). The shipped default
+            # lives in the built-in Library (`builtin-default-extractor`, ADR-0049);
+            # clone that node to customise it. No `offer_on` → absent from ＋New.
+            "name": "Extractor",
+            "kind": "prompt",
+            "parent": "prompt:base",
+            "fields": [],
+            "has_body": True,
+        },
         "assistant:assistant": {
             "name": "Assistant",
             "kind": "assistant",

@@ -101,6 +101,45 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertTrue(body["char_count"] > 0)
         self.assertIsNone(body["session_id"])
 
+    def test_request_entry_type_homes_prose_to_base_default_role(self) -> None:
+        # #1229: the route now threads the request's entry_type into build_preview,
+        # so a custom prompt type's declared default_role (ADR-0060 §4) governs how
+        # un-roled prose is homed. Before the wiring the entry_type never reached
+        # the resolver, so this prose-only source fell back to "system" regardless.
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data.setdefault("entry_types", {})["prompt:general:scripted"] = {
+            "name": "Scripted",
+            "kind": "prompt",
+            "parent": "prompt:general",
+            "has_body": True,
+            "prompt": {"default_role": "user"},
+        }
+        self.service._write_yaml(schema_path, data)
+
+        def _preview(payload: dict) -> dict:
+            resp = self.client.post("/api/ai/preview", json=payload)
+            self.assertEqual(resp.status_code, 200, resp.text)
+            return resp.json()
+
+        source = "Draft a scene beat."
+        # With the entry_type: prose is homed to the type's "user" envelope.
+        homed = _preview(
+            {
+                "template_source": source,
+                "target_scene_id": "",
+                "entry_type": "prompt:general:scripted",
+            }
+        )
+        self.assertEqual(len(homed["messages"]), 1)
+        self.assertEqual(homed["messages"][0]["role"], "user")
+        self.assertEqual(homed["messages"][0]["blocks"][0]["text"], source)
+        # Without it: the resolver's "system" fallback applies — so the "user"
+        # above can only have come from the threaded entry_type, not the source.
+        bare = _preview({"template_source": source, "target_scene_id": ""})
+        self.assertEqual(len(bare["messages"]), 1)
+        self.assertEqual(bare["messages"][0]["role"], "system")
+
     def test_preview_reports_lore_enabled_when_helper_called(self) -> None:
         # ADR-0057 §2 / ADR-0060 §2: the wire contract. The route surfaces the
         # execution-derived lore gate that the frontend persists as the chat's

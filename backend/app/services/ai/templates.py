@@ -130,8 +130,8 @@ def render_template(
     """Render a template source into structured role-tagged messages.
 
     Raises Jinja's TemplateError subclasses for syntax errors and undefined
-    variables. Author-mistake warnings (unknown role names, cache_break outside
-    role) are collected on `RenderedTemplate.warnings` rather than raised.
+    variables. Author-mistake warnings (e.g. unknown role names) are collected on
+    `RenderedTemplate.warnings` rather than raised.
 
     `default_role` (ADR-0060 §4) is the prompt base type's default envelope: text
     outside any `{% role %}` block is emitted as a message of that role, in

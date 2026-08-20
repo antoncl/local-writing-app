@@ -1,18 +1,25 @@
 <script lang="ts">
   // Shared input control for a PromptInputDefinition. Renders the
-  // type-specific element (text / long_text / number / boolean / select /
-  // entity_ref / entity_ref_list) and emits a `change` event with the new
-  // value as a string. Used by both the inputs-dialog (prompt-dispatch flow)
-  // and the prompt-preview inputs panel — keeps look-and-feel identical and
-  // halves the maintenance surface for input types.
+  // type-specific element and emits a `change` event with the new value as a
+  // string. Used by both the inputs-dialog (prompt-dispatch flow) and the
+  // prompt-preview inputs panel — keeps look-and-feel identical and halves the
+  // maintenance surface for input types. The shared *value* types
+  // (multi_select / tags / list / color) delegate to the metadata
+  // FieldValueEditor — one dispatcher, no parallel widget code (#1225); the
+  // scalar / ref / context_pick types keep their own local controls.
   import NodePicker from "@/components/widgets/NodePicker.svelte";
   import PlainTextEditor from "@/components/widgets/PlainTextEditor.svelte";
   import ReferencePicker from "@/components/widgets/ReferencePicker.svelte";
+  import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
+  import { isListShapedInputType } from "@/lib/utils/promptInputs";
   import type {
+    GroupMember,
     NodePickerConfig,
     NodePickerRef,
     LoreEntrySummary,
     MetadataFieldDefinition,
+    MetadataFieldType,
+    MetadataValue,
     PromptEntrySummary,
     PromptInputDefinition,
     StructureDocument,
@@ -84,6 +91,41 @@
 
   function encodeRefValue(v: string | string[]): string {
     return Array.isArray(v) ? JSON.stringify(v) : (v ?? "");
+  }
+
+  // The shared value types delegate to FieldValueEditor (#1225). The input is
+  // adapted into a field-definition stub; the list-shaped ones bridge between
+  // this component's string form and FieldValueEditor's MetadataValue.
+  function inputAsField(): MetadataFieldDefinition {
+    const base: MetadataFieldDefinition = {
+      name: input.label || input.name,
+      type: input.type as MetadataFieldType,
+      options: input.options ?? [],
+    };
+    if (input.type === "list") {
+      // v1 prompt `list` is a scalar text list — synthesize the resolver-stamped
+      // scalar shape ListValueEditor reads (one member keyed "value").
+      const member: GroupMember = { key: "value", name: input.label || input.name, type: "text", options: [] };
+      return { ...base, item_scalar: true, item_members: [member] };
+    }
+    return base;
+  }
+
+  function decodeFieldValue(raw: string): MetadataValue {
+    if (isListShapedInputType(input.type)) {
+      try {
+        const parsed = JSON.parse(raw || "[]");
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return raw ?? "";
+  }
+
+  function encodeFieldValue(v: MetadataValue): string {
+    if (Array.isArray(v)) return JSON.stringify(v);
+    return v == null ? "" : String(v);
   }
 
   function decodeContextPickValue(raw: string): NodePickerRef[] {
@@ -167,6 +209,18 @@
     loreEntries={loreEntries}
     promptEntries={promptEntries}
     onChange={(detail) => onChange(JSON.stringify(detail.value))}
+  />
+{:else if input.type === "multi_select" || input.type === "tags" || input.type === "list" || input.type === "color"}
+  <!-- Shared value types → the metadata FieldValueEditor (#1225). tagOrigin
+       "assistant" keeps a `tags` input add-only (no project tag governance in
+       the prompt-authoring context). -->
+  <FieldValueEditor
+    field={inputAsField()}
+    value={decodeFieldValue(value)}
+    ariaLabel={ariaLabel ?? (input.label || input.name)}
+    tagOrigin="assistant"
+    implicitContextMatcher={implicitContextMatcher}
+    onChange={(v) => onChange(encodeFieldValue(v))}
   />
 {:else}
   <input

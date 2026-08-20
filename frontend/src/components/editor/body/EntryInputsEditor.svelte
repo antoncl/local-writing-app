@@ -16,7 +16,11 @@
   import SelectOptionsEditor from "@/components/schema/SelectOptionsEditor.svelte";
   import { DEFAULT_FIELD_GLYPH } from "@/lib/utils/fieldIcons";
   import { type InheritedInput } from "@/lib/editor-core/promptResolution";
-  import { type EntryInputDraft } from "@/lib/utils/promptInputs";
+  import {
+    type EntryInputDraft,
+    PROMPT_INPUT_TYPE_CHOICES,
+    promptInputTypeLabel,
+  } from "@/lib/utils/promptInputs";
   import type { NodePickerConfig, PromptInputType } from "@/lib/types";
 
   interface Props {
@@ -63,21 +67,6 @@
   function toggleInputRow(clientId: string): void {
     expandedInputClientId = expandedInputClientId === clientId ? null : clientId;
   }
-
-  // Short label for the type chip in the collapsed row. Mirrors the
-  // dropdown options in the expanded editor below.
-  const INPUT_TYPE_LABEL: Record<string, string> = {
-    text: "Text",
-    long_text: "Long Text",
-    number: "Number",
-    boolean: "Boolean",
-    select: "Select",
-    entity_ref: "Entity Reference",
-    entity_ref_list: "Entity Reference List",
-    context_pick: "Context Picker",
-    scene_ref: "Scene Reference",
-    color: "Colour",
-  };
 
   function inputIconClass(type: string): string {
     const glyph = DEFAULT_FIELD_GLYPH[type as keyof typeof DEFAULT_FIELD_GLYPH] ?? "letter-case";
@@ -264,7 +253,7 @@
         rowClass="prompt-input-row-collapsed"
         iconClass={inputIconClass(draft.type)}
         name={draft.label || draft.name || "(unnamed input)"}
-        typeLabel={INPUT_TYPE_LABEL[draft.type] ?? draft.type}
+        typeLabel={promptInputTypeLabel(draft.type)}
         expanded={isExpanded}
         draggable={entryInputDrafts.length > 1}
         dragging={inputDragFromIndex === index}
@@ -298,15 +287,9 @@
             <label>
               Type
               <select value={draft.type} onchange={(e) => updateEntryInput(index, { type: (e.currentTarget as HTMLSelectElement).value as PromptInputType, defaultValue: undefined })}>
-                <option value="text">Text</option>
-                <option value="long_text">Long Text</option>
-                <option value="number">Number</option>
-                <option value="boolean">Boolean</option>
-                <option value="select">Select</option>
-                <option value="entity_ref">Entity Reference</option>
-                <option value="entity_ref_list">Entity Reference List</option>
-                <option value="context_pick">Context Picker</option>
-                <option value="scene_ref">Scene Reference</option>
+                {#each PROMPT_INPUT_TYPE_CHOICES as choice (choice)}
+                  <option value={choice}>{promptInputTypeLabel(choice)}</option>
+                {/each}
               </select>
             </label>
             <label>
@@ -324,10 +307,11 @@
             </label>
             <button type="button" class="prompt-input-remove" title="Remove input" onclick={() => removeEntryInput(index)}>×</button>
           </div>
-          {#if draft.type === "select"}
+          {#if draft.type === "select" || draft.type === "multi_select"}
             <!-- Row-per-option editor — same SelectOptionsEditor the
-                 metadata-field side uses. Replaces the comma-string text
-                 box that round-tripped-lost labels and colors. See
+                 metadata-field side uses (select AND multi_select author their
+                 choices the same way). Replaces the comma-string text box that
+                 round-tripped-lost labels and colors. See
                  decisions-inputs-fields-uniformity. -->
             <div class="prompt-input-options-editor">
               <SelectOptionsEditor
@@ -373,7 +357,7 @@
         <div class="prompt-input-row prompt-input-row-inherited">
           <i class={inputIconClass(inherited.definition.type)} aria-hidden="true"></i>
           <span class="entry-inherited-name">{inherited.definition.label || inherited.definition.name}</span>
-          <span class="entry-inherited-type">{INPUT_TYPE_LABEL[inherited.definition.type] ?? inherited.definition.type}</span>
+          <span class="entry-inherited-type">{promptInputTypeLabel(inherited.definition.type)}</span>
           <span class="entry-inherited-source">from {inherited.sourceTitle}</span>
         </div>
       {/each}

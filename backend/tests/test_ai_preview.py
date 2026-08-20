@@ -269,6 +269,25 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertEqual([i["name"] for i in body["effective_inputs"]], ["subject", "menace"])
         self.assertEqual(body["input_conflicts"], [])
 
+    def test_preview_renders_multi_select_input_value_as_a_list(self) -> None:
+        # #1225: a list-shaped input (multi_select / tags / list) reaches the
+        # template as a real list, so `join` iterates it — not the literal
+        # string "['sight', 'sound']". The frontend sends a JSON array;
+        # _coerce_input_value passes a list through unchanged.
+        resp = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": '{% role "user" %}{{ inputs.senses | join(", ") }}{% endrole %}',
+                "own_inputs": [{"name": "senses", "type": "multi_select"}],
+                "inputs": {"senses": ["sight", "sound"]},
+            },
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        body = resp.json()
+        self.assertIsNone(body["error"])
+        text = "".join(b["text"] for b in body["messages"][0]["blocks"])
+        self.assertEqual(text, "sight, sound")
+
     def test_preview_returns_input_provenance_for_inherited_inputs(self) -> None:
         # ADR-0061 S3b: the preview names which snippet contributed each INHERITED
         # input, so the editor's two-tier list can tag it "from <snippet>". The

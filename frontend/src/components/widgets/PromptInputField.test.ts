@@ -53,3 +53,39 @@ describe("PromptInputField — onChange callback (runes port of the `change` eve
     expect(onChange).toHaveBeenLastCalledWith("");
   });
 });
+
+describe("PromptInputField — shared value types delegate to FieldValueEditor (#1225)", () => {
+  it("multi_select renders option chips and encodes the selection as a JSON array", async () => {
+    const onChange = vi.fn();
+    const input = def({
+      type: "multi_select",
+      name: "senses",
+      label: "Senses",
+      options: [
+        { value: "sight", label: "Sight" },
+        { value: "sound", label: "Sound" },
+      ],
+    });
+    render(PromptInputField, { props: { input, value: "[]", onChange } });
+    // The FieldValueEditor chip widget renders one toggle per option.
+    await fireEvent.click(screen.getByRole("button", { name: "Sight" }));
+    // Wire form is the JSON array the backend coercer expects — not "Sight".
+    expect(onChange).toHaveBeenLastCalledWith(JSON.stringify(["sight"]));
+  });
+
+  it("multi_select decodes an existing JSON-array value as the active selection", async () => {
+    const onChange = vi.fn();
+    const input = def({
+      type: "multi_select",
+      name: "senses",
+      options: [
+        { value: "sight", label: "Sight" },
+        { value: "sound", label: "Sound" },
+      ],
+    });
+    render(PromptInputField, { props: { input, value: JSON.stringify(["sound"]), onChange } });
+    // Toggling the already-selected chip clears it back to an empty array.
+    await fireEvent.click(screen.getByRole("button", { name: "Sound" }));
+    expect(onChange).toHaveBeenLastCalledWith(JSON.stringify([]));
+  });
+});

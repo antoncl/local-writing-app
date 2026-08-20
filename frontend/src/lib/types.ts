@@ -510,17 +510,25 @@ export type MetadataFieldDefinition = {
   item_scalar?: boolean | null;
 };
 
+// Prompt inputs offer the same authorable *value* types as metadata fields —
+// one catalog, so the two can't drift (#1225 / decisions-inputs-fields-uniformity).
+// Excludes `computed` (derived) and `date` (deprecated); adds the two prompt-only
+// invocation types (context_pick / scene_ref). Kept in sync with the backend
+// PromptInputType literal (models/base.py).
 export type PromptInputType =
   | "text"
   | "long_text"
   | "number"
   | "boolean"
   | "select"
+  | "multi_select"
+  | "tags"
+  | "list"
   | "entity_ref"
   | "entity_ref_list"
+  | "color"
   | "context_pick"
-  | "scene_ref"
-  | "color";
+  | "scene_ref";
 
 // The ViewExpr grammar family is machine-generated from the view-grammar IDL
 // (#277, ADR-0041). Imported for local use (ViewSpec/ViewGroupSpec reference

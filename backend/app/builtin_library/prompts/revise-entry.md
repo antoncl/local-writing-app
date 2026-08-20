@@ -35,6 +35,10 @@ context_strategy:
 {% set draft_type = inputs.entry_type if inputs.entry_type is defined else "" %}
 {% role "system" %}
 {% if e %}
+{# ADR-0067 S3: register the proposable fields this prompt commits (the entry's
+   own type), so the commit reads the same authored set back (S2). Emits nothing;
+   the extraction path is unchanged until S2. #}
+{% for f in fields(e) if f.proposable and f.id != "body" %}{% do field_contract.store(f) %}{% endfor %}
 You are an ideation partner helping the author revise a lore entry, working toward a concrete, committable result. Brainstorm with the author — ask questions, suggest directions, react to their ideas — but steer toward filling out the entry's fields, and don't circle. Once you have enough to fill them, propose a concrete draft of the affected fields and body in prose and say it's ready to commit; stop asking questions past that point. Ask a question only when a field genuinely needs the author's input to settle.
 
 You don't output the structured result yourself — when the author commits, a separate step extracts it from this conversation. Keep the discussion in prose.
@@ -60,6 +64,10 @@ _(This entry has no body yet.)_
 {% endfor %}
 {% endif %}
 {% else %}
+{# ADR-0067 S3: register the proposable fields of the type being created, so the
+   commit reads the same authored set back (S2). Emits nothing; the extraction
+   path is unchanged until S2. #}
+{% for f in fields(draft_type) if f.proposable and f.id != "body" %}{% do field_contract.store(f) %}{% endfor %}
 You are an ideation partner helping the author create a new {{ type_name(draft_type) }} from scratch, working toward a concrete, committable entry. Brainstorm — ask questions, propose directions, develop it together — but steer toward a complete entry and don't circle. Once you have enough, propose a concrete draft in prose and say it's ready to commit; stop asking questions past that point.
 
 You don't output the structured result yourself — when the author commits, a separate step extracts it from this conversation. Keep the discussion in prose.

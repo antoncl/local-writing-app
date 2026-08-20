@@ -129,6 +129,7 @@
     groupHeader,
     mode = "card",
     density,
+    frameParents = false,
     searchPlaceholder = null,
     searchValue = $bindable(""),
     searchDebounceMs = 0,
@@ -163,6 +164,12 @@
     // NodeList's own default (comfortable). Sourced by a pane from the view's
     // `ui.appearance` (ADR-0069), the same way `mode` is.
     density?: "comfortable" | "compact" | "dense";
+    // Frame a real-node PARENT's children in a tinted, guide-rail'd tier panel,
+    // so a container node reads as *holding* its members (ADR-0066 Amendment 2).
+    // Opt-in because ViewNodeTree is shared: on for Lore's Nests, off (default)
+    // for the flat manuscript outline and every other consumer. Independent of
+    // the serif parent header — a consumer can have one without the other.
+    frameParents?: boolean;
     // When set, NodeList renders a SearchInput; pair with `filter` to prune.
     searchPlaceholder?: string | null;
     searchValue?: string;
@@ -492,6 +499,7 @@
       {collapseGuard}
       {row}
       {groupHeader}
+      {frameParents}
     />
   </NodeList>
 </div>

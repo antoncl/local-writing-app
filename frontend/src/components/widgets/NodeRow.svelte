@@ -641,8 +641,16 @@
      migrated, schema tree) gets the visual consistently without each
      caller wiring its own wrapper. The padding hugs the children edges;
      the radius matches the card variant so a card-variant entry inside
-     the panel sits cleanly within the tier. */
-  .node-row-group-children {
+     the panel sits cleanly within the tier.
+
+     `:global` because a SECOND widget emits this same panel: ViewNodeTree
+     wraps a real-node parent's children in `.node-row-group-children` under
+     its `frameParents` opt-in (ADR-0066 Amendment 2) — the parent renders
+     through the consumer's `row` snippet, so ViewNodeTree can't reach this
+     NodeRow's `nested` slot and emits the identical wrapper itself. The rules
+     stay authored here (NodeRow is the panel's one home); global scope only
+     lets both emitters share them without duplicating the tokens. */
+  :global(.node-row-group-children) {
     position: relative;
     display: flex;
     flex-direction: column;
@@ -657,7 +665,7 @@
   /* A single quiet guide rail marking the nested level's left edge — one 2px
      line, never ├─└─ connectors (ADR-0066 Amendment 1, decision 3). Sits just
      inside the panel's rounded left edge. */
-  .node-row-group-children::before {
+  :global(.node-row-group-children)::before {
     content: "";
     position: absolute;
     left: 3px;
@@ -670,15 +678,17 @@
   }
 
   /* Nested tier panels darken slightly per depth level so deeply
-     nested groups stay readable against their parent. The :global()
-     wrapper escapes Svelte's CSS pruner — without it the compiler
-     decides the descendant combinator can't match within a single
-     component instance and drops the rule. */
-  .node-row-group-children :global(.node-row-group-children) {
+     nested groups stay readable against their parent. Both sides are
+     `:global` (not just the descendant): under `frameParents` a panel
+     can be nested inside another panel that ViewNodeTree — not NodeRow —
+     emitted (a Nest inside a Nest), so an ancestor scoped to this
+     component would miss it. Global on both keeps the depth tint working
+     regardless of which widget emitted each level. */
+  :global(.node-row-group-children .node-row-group-children) {
     background: var(--tier2);
   }
 
-  .node-row-group-children :global(.node-row-group-children .node-row-group-children) {
+  :global(.node-row-group-children .node-row-group-children .node-row-group-children) {
     background: var(--tier3);
   }
 
@@ -744,8 +754,11 @@
     margin-bottom: 2px;
   }
 
-  /* Tighter grouped-panel spacing under a dense header. */
-  .node-row.density-dense + .node-row-group-children {
+  /* Tighter grouped-panel spacing under a dense header. The panel side is
+     `:global` so a dense framed parent (ViewNodeTree's `frameParents`) whose
+     panel this component didn't emit still tightens; `.node-row` stays scoped
+     (only NodeRow emits it). */
+  .node-row.density-dense + :global(.node-row-group-children) {
     gap: 4px;
     padding: 6px 6px 7px;
     margin-top: -1px;

@@ -169,6 +169,7 @@
   {view}
   mode={appearance?.mode ?? undefined}
   density={appearance?.density ?? undefined}
+  frameParents
   searchPlaceholder="Search entries, tags, aliases"
   bind:searchValue={searchQuery}
   filter={(entry, query) => entrySearchText(entry).includes(query)}
@@ -221,10 +222,15 @@
     stripeColor={stripeFor(entry, ctx)}
     onClick={ctx.onClick}
     onmousedown={(event) => event.stopPropagation()}
+    groupHeader={ctx.collapsible}
+    dataNodeId={entry.id}
   >
     {#snippet leading()}
       <!-- A real-node parent (a Nest tree header that IS a lore entry) stays a
-           real NodeRow — collapsible via its own caret, still openable. A leaf
+           real NodeRow — collapsible via its own caret, still openable. It is a
+           `groupHeader` carrying its own `dataNodeId`, so the serif node-header
+           rule renders it in --serif (ADR-0066 Amendment 2, decision 1) — the
+           same treatment a manuscript Act/Chapter already gets. A leaf
            reserves the same caret gutter (empty) so its title aligns on the
            parent group's content edge (ADR-0066 Amendment 1). -->
       <RowCaret collapsible={ctx.collapsible} collapsed={ctx.collapsed} toggle={ctx.toggle} />

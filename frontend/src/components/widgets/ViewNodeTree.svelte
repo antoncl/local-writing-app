@@ -48,6 +48,7 @@
     collapseGuard,
     row,
     groupHeader,
+    frameParents = false,
   }: {
     groups: ViewGroup<T>[];
     depth?: number;
@@ -71,6 +72,10 @@
     collapseGuard: CollapseGuard;
     row: Snippet<[T, RowCtx<T>]>;
     groupHeader?: Snippet<[GroupCtx]>;
+    // Wrap a real-node parent's children in the shared tier panel so the members
+    // read as contained by the parent (ADR-0066 Amendment 2). Opt-in; forwarded
+    // unchanged down the recursion so every nesting level frames alike.
+    frameParents?: boolean;
   } = $props();
 
   function toggle(key: string): void {
@@ -220,25 +225,36 @@
     <!-- Real node — leaf or real-node parent — always via the consumer's row. -->
     {@render row(group.node, rowCtx(group, group.node))}
     {#if group.children.length > 0 && !isCollapsed}
-      <ViewNodeTree
-        groups={group.children}
-        depth={depth + 1}
-        {collapsed}
-        {annotations}
-        {active}
-        {onClick}
-        {onDblClick}
-        {onRename}
-        {onReorder}
-        {onGroupDrop}
-        {isContainer}
-        {drag}
-        {rename}
-        {add}
-        {collapseGuard}
-        {row}
-        {groupHeader}
-      />
+      {#snippet parentChildren()}
+        <ViewNodeTree
+          groups={group.children}
+          depth={depth + 1}
+          {collapsed}
+          {annotations}
+          {active}
+          {onClick}
+          {onDblClick}
+          {onRename}
+          {onReorder}
+          {onGroupDrop}
+          {isContainer}
+          {drag}
+          {rename}
+          {add}
+          {collapseGuard}
+          {row}
+          {groupHeader}
+          {frameParents}
+        />
+      {/snippet}
+      {#if frameParents}
+        <!-- Contain the members in the shared tier panel (the same wrapper a
+             synthetic bucket uses) so the parent reads as HOLDING them, not just
+             sitting above flat siblings (ADR-0066 Amendment 2). -->
+        <div class="node-row-group-children">{@render parentChildren()}</div>
+      {:else}
+        {@render parentChildren()}
+      {/if}
     {/if}
   {:else if groupHeader}
     <!-- Synthetic bucket, consumer-overridden header; ViewNodeList keeps children. -->
@@ -269,6 +285,7 @@
         {collapseGuard}
         {row}
         {groupHeader}
+        {frameParents}
       />
     {/if}
   {:else}
@@ -313,6 +330,7 @@
             {collapseGuard}
             {row}
             {groupHeader}
+            {frameParents}
           />
         {/if}
       {/snippet}

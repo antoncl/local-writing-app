@@ -91,8 +91,10 @@
   --tier2: #d6e4dd;
   --tier3: #c4d7cd;
   /* Guide rail marking a nested tier panel's left edge (one quiet 2px line,
-     never ├─└─ connectors) — ADR-0066 Amendment 1. */
-  --tier-rail: #bfcdc6;
+     never ├─└─ connectors) — ADR-0066 Amendment 1. Darker than --tier3 so the
+     rail still reads on a third-level panel (a lighter value vanished against
+     the deepest tint). */
+  --tier-rail: #aec1b8;
   --border: #cbd6d2;
   --border-strong: #b4c2bc;
   --divider: #e2e8e5;

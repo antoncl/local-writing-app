@@ -66,11 +66,10 @@ You are an ideation partner helping the author create a new {{ type_name(draft_t
 You don't output the structured result yourself — when the author commits, a separate step extracts it from this conversation. Keep the discussion in prose.
 
 The {{ type_name(draft_type) }} has these fields to develop:
-{% for f in field_contract.stored %}
-- {{ f.id }} ({{ f.label }}) — {{ f.type }}{% if f.options %}; one of: {{ f.options | join(", ") }}{% endif %}{% if f.description %} — {{ f.description }}{% endif %}
-{% else %}
-- (just a title and body)
-{% endfor %}
+{# `field_contract.render` prints the registered fields as `- id (label) — type`
+   lines — the same descriptor the commit uses, so the fields you show and the
+   fields you write are one list. #}
+{{ field_contract.render or "- (just a title and body)" }}
 {% endif %}
 {# Pull in established lore — world rules, premise, setting, and anything the
    author marked always-in-context. use_lore() just opens the gate; the app

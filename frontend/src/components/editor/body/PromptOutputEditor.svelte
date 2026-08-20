@@ -3,8 +3,8 @@
   instance's `context_strategy.output` (ADR-0062 Am.2 / D3): which
   OutputHandler runs its result, the orthogonal `headless` toggle, and each
   mode's sub-form (inline destination + accept-time mark; extract_to_node's
-  commit — review, fields allow-list, target type). A sidecar like
-  OfferOnPicker/EntryInputsEditor, peer to both in the Setup tab.
+  commit — review, target type). A sidecar like OfferOnPicker/EntryInputsEditor,
+  peer to both in the Setup tab.
 
   Every field here has a live runtime consumer (see promptResolution.ts /
   outputHandlers.ts) — this is not an inert form. `headless` is the one
@@ -22,7 +22,7 @@
 -->
 <script lang="ts">
   import SegmentedControl from "@/components/widgets/SegmentedControl.svelte";
-  import { commitTargetOptions, proposableFieldOptions } from "./promptOutputFields";
+  import { commitTargetOptions } from "./promptOutputFields";
   import type { MetadataSchema, PromptCommit, PromptContextStrategy, PromptOnAccept, PromptOutput } from "@/lib/types";
 
   interface Props {
@@ -73,8 +73,6 @@
   const commit = $derived(output?.commit ?? null);
   const review = $derived(commit?.review === "replace" ? "replace" : "visual_diff");
   const onAccept = $derived(output?.on_accept ?? null);
-  const restrictFields = $derived(commit ? commit.fields !== undefined && commit.fields !== null : false);
-  const fieldOptions = $derived(proposableFieldOptions(metadataSchema, commit?.target ?? ""));
   const targetOptions = $derived(commitTargetOptions(metadataSchema));
   // The one cell with no runtime yet (E lands the one-shot produce path) —
   // annotate it so the author doesn't think it silently no-ops.
@@ -145,33 +143,6 @@
     if (!commit) return;
     patchOutput({ commit: { ...commit, target: next || undefined } });
   }
-
-  function toggleRestrictFields(on: boolean): void {
-    if (!commit) return;
-    patchOutput({ commit: { ...commit, fields: on ? [] : undefined } });
-  }
-
-  function toggleField(id: string): void {
-    if (!commit) return;
-    const current = commit.fields ?? [];
-    const next = current.includes(id) ? current.filter((f) => f !== id) : [...current, id];
-    patchOutput({ commit: { ...commit, fields: next } });
-  }
-
-  // Fields the resolved options list doesn't cover (a target-less commit, or a
-  // hand-typed key) — kept as always-checked chips so a save never silently
-  // drops what the author already declared.
-  const extraFields = $derived((commit?.fields ?? []).filter((id) => !fieldOptions.some((opt) => opt.id === id)));
-
-  let customFieldInput = $state("");
-  function addCustomField(): void {
-    const key = customFieldInput.trim();
-    customFieldInput = "";
-    if (!key || !commit) return;
-    const current = commit.fields ?? [];
-    if (current.includes(key)) return;
-    patchOutput({ commit: { ...commit, fields: [...current, key] } });
-  }
 </script>
 
 <details class="prompt-output-editor">
@@ -232,40 +203,6 @@
             {/each}
           </select>
         </label>
-        <label class="prompt-output-restrict">
-          <input type="checkbox" checked={restrictFields} disabled={readOnly} onchange={(e) => toggleRestrictFields(e.currentTarget.checked)} />
-          Restrict to specific fields <small class="prompt-output-hint">unset = body + every proposable field</small>
-        </label>
-        {#if restrictFields}
-          <div class="prompt-output-fields" role="group" aria-label="Committed fields">
-            {#each fieldOptions as opt (opt.id)}
-              <label class="prompt-output-field-chip">
-                <input type="checkbox" checked={(commit.fields ?? []).includes(opt.id)} disabled={readOnly} onchange={() => toggleField(opt.id)} />
-                {opt.label}
-              </label>
-            {/each}
-            {#each extraFields as id (id)}
-              <label class="prompt-output-field-chip">
-                <input type="checkbox" checked disabled={readOnly} onchange={() => toggleField(id)} />
-                {id}
-              </label>
-            {/each}
-          </div>
-          <div class="prompt-output-add-field">
-            <input
-              value={customFieldInput}
-              placeholder="add a field key…"
-              disabled={readOnly}
-              oninput={(e) => (customFieldInput = e.currentTarget.value)}
-              onkeydown={(e) => {
-                if (e.key !== "Enter") return;
-                e.preventDefault();
-                addCustomField();
-              }}
-            />
-            <button type="button" disabled={readOnly} onclick={addCustomField}>+</button>
-          </div>
-        {/if}
       {/if}
     </div>
   {/if}
@@ -388,8 +325,7 @@
     font-weight: 400;
     letter-spacing: normal;
   }
-  .prompt-output-commit-toggle,
-  .prompt-output-restrict {
+  .prompt-output-commit-toggle {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -397,57 +333,9 @@
     color: var(--text-2);
     cursor: pointer;
   }
-  .prompt-output-commit-toggle > input,
-  .prompt-output-restrict > input {
+  .prompt-output-commit-toggle > input {
     flex: none;
     width: auto;
     margin: 0;
-  }
-  .prompt-output-fields {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-  .prompt-output-field-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 2px 8px;
-    border: 1px solid var(--divider);
-    border-radius: var(--r-pill);
-    background: var(--inset);
-    font-size: var(--fs-xs);
-    color: var(--text-2);
-    cursor: pointer;
-  }
-  .prompt-output-field-chip > input {
-    flex: none;
-    width: auto;
-    margin: 0;
-    accent-color: var(--accent);
-  }
-  .prompt-output-add-field {
-    display: flex;
-    gap: 4px;
-  }
-  .prompt-output-add-field > input {
-    flex: 1;
-    padding: 3px 6px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    font-size: var(--fs-sm);
-    background: var(--surface);
-  }
-  .prompt-output-add-field > button {
-    flex: none;
-    border: 1px solid var(--border);
-    background: var(--surface);
-    color: var(--text-2);
-    border-radius: 4px;
-    padding: 0 10px;
-    cursor: pointer;
-  }
-  .prompt-output-add-field > button:hover {
-    background: var(--inset);
   }
 </style>

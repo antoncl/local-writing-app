@@ -49,6 +49,10 @@ export interface ChatCommitDeps {
   /** The visible transcript, mapped to the extraction request's message shape —
    *  the extraction reads it as pure input (ADR-0051 S4). */
   getHistory: () => Pick<ChatMessage, "role" | "content">[];
+  /** The chat's own node id (ADR-0067 S2): the commit runs as a cached
+   *  CONTINUATION of this chat, so the server can read back the field set its
+   *  lock render registered and reuse the cached system prefix + lore. */
+  getChatId: () => string;
   /** Attribute the (always-billed) extraction turn's cost to the session and
    *  persist — the host owns `pendingTurnCost`, so the delta rides its next save. */
   addTurnCost: (usd: number) => Promise<void>;
@@ -105,8 +109,9 @@ export class ChatCommitController {
   // ---- fed each render by the host (the derivations below track these) -------
   /** The active prompt's `output` config (ADR-0054): `.kind` is the disposition;
    *  a `.commit` marks a brainstorm whose result is extracted to its `entry`
-   *  target (`.commit.review` = how it's reviewed, `.commit.fields` = what it
-   *  extracts). */
+   *  target (`.commit.review` = how it's reviewed; WHAT it extracts is
+   *  authored in the prompt's own `field_contract` loop, read back at commit —
+   *  ADR-0067 S2). */
   output = $state<PromptOutput | null>(null);
   /** The chat's per-input drafts — `entry` (revise target) / `entry_type`
    *  (create target) are seeded here at launch (ADR-0046 §6.4). */
@@ -152,11 +157,6 @@ export class ChatCommitController {
     this.isCommitChat &&
       (!!this.commitTarget || (!this.commitTargetEntryId && !!this.draftEntryType)),
   );
-  /** The prompt's `commit.fields` allow-list (ADR-0054 §2), sent to the extraction
-   *  endpoint so the server narrows the generated contract to those targets. Null
-   *  → the default (body + all proposable fields). */
-  commitFields = $derived(this.output?.commit?.fields ?? null);
-
   /** ADR-0055 §4a/§6: a committing brainstorm on a time-travel-aware lore subject
    *  may stage its result as a subject-pinned mutation set (the timeline branch)
    *  instead of writing the entry's base (the canonical branch). Offered only
@@ -194,16 +194,16 @@ export class ChatCommitController {
   }
 
   // The one extraction call `commitToEntry` and `stageToPendingSet` share (same
-  // transcript, assistant, and commit.fields allow-list) — kept in one place so
-  // the two destinations can never drift on what's posted. The garbled message
-  // is per-caller (an entry "patch" vs a staged "change").
+  // transcript, assistant, and chat_id) — kept in one place so the two
+  // destinations can never drift on what's posted. The garbled message is
+  // per-caller (an entry "patch" vs a staged "change").
   private extractPatch(entryId: string, garbledMessage: string): Promise<AIEntryPatch | null> {
     return this.runExtraction(
       () =>
         api.extractEntryPatch(entryId, {
           messages: this.deps.getHistory(),
           assistant_id: this.deps.getAssistantId() || null,
-          commit_fields: this.commitFields,
+          chat_id: this.deps.getChatId(),
         }),
       garbledMessage,
     );
@@ -370,7 +370,7 @@ export class ChatCommitController {
           api.extractEntryDraft(entryType, {
             messages: this.deps.getHistory(),
             assistant_id: this.deps.getAssistantId() || null,
-            commit_fields: this.commitFields,
+            chat_id: this.deps.getChatId(),
           }),
         "Couldn't read the model's response as an entry — ask it to finalize again.",
       );

@@ -758,9 +758,6 @@ class SceneSummaryPromptTests(unittest.TestCase):
         assert output is not None and output.commit is not None
         self.assertEqual(output.handler, "extract_to_node")
         self.assertEqual(output.commit.review, "replace")
-        # ADR-0054 §2: `commit.fields: ["summary"]` — a fields-only contract (a
-        # scene summary is `summary` only, never the manuscript body).
-        self.assertEqual(output.commit.fields, ["summary"])
         # REVISE-ONLY: a required `entry` input targeting a scene (no create mode).
         inputs = {i.name: i for i in prompt.inputs}
         self.assertEqual(list(inputs), ["entry"])
@@ -774,10 +771,11 @@ class SceneSummaryPromptTests(unittest.TestCase):
         self.assertEqual(prompt.entry_type, "prompt:general")
 
     def test_template_hands_the_scene_prose_but_carries_no_contract(self) -> None:
-        # ADR-0051 S4: the goal-directed seed hands the model the scene's prose and
-        # current summary to work from, but the JSON format contract is NOT in the
-        # seed anymore — it is generated at commit and filtered by `commit.fields`
-        # (the fields-only shape is asserted in test_ai_extraction).
+        # ADR-0051 S4 / ADR-0067 S2: the goal-directed seed hands the model the
+        # scene's prose and current summary to work from; the JSON format
+        # envelope is NOT in the seed — it is built at commit from the field
+        # set the seed's own `field_contract` loop registered (asserted in
+        # test_ai_extraction).
         prompt = self.service.read_prompt_entry("builtin-summarize-scene")
         env = create_environment_for_project(self.service)
         rendered = env.from_string(prompt.body).render(inputs={"entry": self.scene_id})

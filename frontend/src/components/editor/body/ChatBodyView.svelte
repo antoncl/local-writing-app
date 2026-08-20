@@ -153,6 +153,11 @@
   // ADR-0060 §5: per-node volatility priors from use(node, hint), mirrored beside
   // chatUsedNodeIds through the same capture/echo path.
   let chatUsedNodeHints: Record<string, string> = {};
+  // ADR-0067 S2: the field descriptors the prompt registered via field_contract.
+  // Captured from the lock render's preview response and echoed on every save,
+  // mirrored beside chatUsedNodeIds — the commit reads this back instead of
+  // re-rendering a separate extractor.
+  let chatFieldContractStored: Record<string, unknown>[] = [];
   let activeChatTitle = "Untitled chat";
   let activeChatPinned = false;
   let activeChatJournal: ChatSessionJournalEntry[] = $state([]);
@@ -213,6 +218,10 @@
   const commit = new ChatCommitController({
     getAssistantId: () => chatAssistantId,
     getHistory: () => chatHistory.map(({ role, content }) => ({ role, content })),
+    // ADR-0067 S2: the chat's own node id — the commit runs as a cached
+    // continuation of this chat, so the server reads back the field set its
+    // lock render registered instead of rebuilding a separate contract.
+    getChatId: () => scene?.id ?? "",
     addTurnCost: async (usd) => {
       pendingTurnCost = (pendingTurnCost ?? 0) + usd;
       await persistActiveChat();
@@ -305,6 +314,7 @@
     chatLoreEnabled = false;
     chatUsedNodeIds = [];
     chatUsedNodeHints = {};
+    chatFieldContractStored = [];
     activeChatTitle = "Untitled chat";
     activeChatPinned = false;
     activeChatJournal = [];
@@ -333,6 +343,7 @@
     chatLoreEnabled = session.lore_enabled ?? false;
     chatUsedNodeIds = session.used_node_ids ?? [];
     chatUsedNodeHints = session.used_node_hints ?? {};
+    chatFieldContractStored = session.field_contract_stored ?? [];
     chatSystemPrompt = session.system_prompt || "";
     chatHistory = (session.messages || []).map((m: ChatSessionMessage) => ({
       role: m.role,
@@ -438,6 +449,7 @@
       lore_enabled: chatLoreEnabled,
       used_node_ids: chatUsedNodeIds,
       used_node_hints: chatUsedNodeHints,
+      field_contract_stored: chatFieldContractStored,
       pinned: activeChatPinned,
       context_items: [],
       messages: chatHistory.map((m) => ({
@@ -685,6 +697,7 @@
       chatLoreEnabled = preview.lore_enabled ?? false;
       chatUsedNodeIds = preview.used_node_ids ?? [];
       chatUsedNodeHints = preview.used_node_hints ?? {};
+      chatFieldContractStored = preview.field_contract_stored ?? [];
       if (initialTurns.length > 0) chatHistory = [...initialTurns];
       return true;
     } catch (e) {
@@ -819,7 +832,8 @@
     : null);
   // The active prompt's `output` (ADR-0054): `.kind` is the disposition; a
   // `.commit` marks a brainstorm that extracts to its `entry` target
-  // (`.commit.review` how it's reviewed, `.commit.fields` what it extracts).
+  // (`.commit.review` = how it's reviewed; WHAT it extracts is authored in the
+  // prompt's own `field_contract` loop, read back at commit — ADR-0067 S2).
   // Read off the prompt INSTANCE's own `context_strategy` (ADR-0065 S3) — never
   // the entry-type's, which no longer carries per-prompt behavior.
   let activeOutput = $derived(activePromptEntry?.context_strategy?.output ?? null);

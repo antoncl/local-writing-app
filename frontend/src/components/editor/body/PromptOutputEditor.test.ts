@@ -80,7 +80,7 @@ describe("PromptOutputEditor (ADR-0062 D3)", () => {
     expect(onChange).toHaveBeenCalledTimes(3);
   });
 
-  it("switching to Brainstorm/commit reveals the commit toggle; enabling it reveals review/target/fields", async () => {
+  it("switching to Brainstorm/commit reveals the commit toggle; enabling it reveals review/target", async () => {
     const onChange = vi.fn();
     render(PromptOutputEditor, { props: { contextStrategy: null, metadataSchema: SCHEMA, onChange } });
     await fireEvent.click(btn("Brainstorm / commit"));
@@ -92,24 +92,9 @@ describe("PromptOutputEditor (ADR-0062 D3)", () => {
     await fireEvent.click(commitToggle);
     expect(btn("Visual diff")).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("combobox", { name: "Target type", hidden: true })).toBeInTheDocument();
-    expect(box(/Restrict to specific fields/)).toBeInTheDocument();
-  });
-
-  it("the commit fields multi-select resolves the target type's proposable fields (excl. non-proposable)", async () => {
-    render(PromptOutputEditor, { props: { contextStrategy: null, metadataSchema: SCHEMA } });
-    await fireEvent.click(btn("Brainstorm / commit"));
-    await fireEvent.click(box("Commit button (extract to a node)"));
-    await fireEvent.change(screen.getByRole("combobox", { name: "Target type", hidden: true }), {
-      target: { value: "lore:character" },
-    });
-    await fireEvent.click(box(/Restrict to specific fields/));
-
-    // body (always) + summary (proposable long_text) render; secret_field
-    // (ai_proposable: false) and portrait (entity_ref) are excluded.
-    expect(box("Body")).toBeInTheDocument();
-    expect(box("Summary")).toBeInTheDocument();
-    expect(queryBox("Secret")).not.toBeInTheDocument();
-    expect(queryBox("Portrait")).not.toBeInTheDocument();
+    // ADR-0067 S2: which fields the commit extracts is authored in the
+    // prompt's own Jinja (field_contract), not a picker here.
+    expect(queryBox(/Restrict to specific fields/)).not.toBeInTheDocument();
   });
 
   it("headless is orthogonal to the mode — toggling it alone doesn't change the mode", async () => {

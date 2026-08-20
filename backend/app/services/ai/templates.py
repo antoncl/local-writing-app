@@ -75,6 +75,12 @@ class RenderedTemplate:
     # the prompt is not lore-enabled or selects nothing.
     send_lore_stable: str = ""
     send_lore_volatile: str = ""
+    # ADR-0067 S2: the field descriptors registered via `{% do
+    # field_contract.store(f) %}` during this render, in insertion order. Set by
+    # `build_preview` from `env.field_contract.stored`; persisted on the chat
+    # (`ChatSession.field_contract_stored`) beside `used_node_ids` so the commit
+    # reads the SAME set back instead of re-rendering a separate extractor.
+    field_contract_stored: list[dict[str, Any]] = field(default_factory=list)
 
 
 class RoleExtension(Extension):

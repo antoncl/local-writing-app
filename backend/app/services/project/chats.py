@@ -281,6 +281,15 @@ class ChatSessionsMixin:
                 if request.used_node_hints is None
                 else request.used_node_hints
             ),
+            # ADR-0067 S2: the field-contract set the lock render registered,
+            # preserved like `used_node_ids`. None from the request = "leave the
+            # captured value alone" (general saves), so only the lock-render
+            # save (which carries it from the preview response) sets it.
+            field_contract_stored=(
+                existing.field_contract_stored
+                if request.field_contract_stored is None
+                else request.field_contract_stored
+            ),
             pinned=request.pinned,
             created_at=existing.created_at,
             updated_at=self._utcnow_iso(),

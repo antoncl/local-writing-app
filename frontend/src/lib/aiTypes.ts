@@ -158,6 +158,11 @@ export type AIPreviewResponse = {
   used_node_ids?: string[];
   // ADR-0060 §5: per-node volatility priors from use(node, "stable"|"volatile").
   used_node_hints?: Record<string, string>;
+  // ADR-0067 S2: the field descriptors this render registered via
+  // `{% do field_contract.store(f) %}`, captured at the lock render and
+  // persisted as the chat's field_contract_stored — the commit reads it back
+  // instead of re-rendering a separate extractor.
+  field_contract_stored?: Record<string, unknown>[];
   // ADR-0061 S2: the live body's effective inputs (own ∪ every `{% include %}`d
   // snippet's) + any same-name/different-type conflict across those snippets.
   // Populated only when the request set `resolve_effective_inputs`; the author
@@ -343,6 +348,10 @@ export type ChatSession = {
   used_node_ids?: string[];
   // ADR-0060 §5: per-node volatility priors, captured beside used_node_ids.
   used_node_hints?: Record<string, string>;
+  // ADR-0067 S2: the field descriptors this chat's lock render registered via
+  // field_contract, captured beside used_node_ids/used_node_hints and stable
+  // thereafter. The commit reads this back as the shape to extract.
+  field_contract_stored?: Record<string, unknown>[];
   // V2: running USD cost (display as EUR via money.ts). null when the chat
   // has no priced cost yet (fresh, or unpriced-model turns) — the footer
   // hides rather than showing a fabricated €0.00 (#697).
@@ -409,6 +418,9 @@ export type SaveChatSessionRequest = {
   used_node_ids?: string[];
   // ADR-0060 §5: per-node volatility priors, echoed on save like used_node_ids.
   used_node_hints?: Record<string, string>;
+  // ADR-0067 S2: the field-contract set the lock render registered, echoed on
+  // save like used_node_ids.
+  field_contract_stored?: Record<string, unknown>[];
   pinned: boolean;
   context_items: ChatSessionContextItem[];
   messages: ChatSessionMessage[];

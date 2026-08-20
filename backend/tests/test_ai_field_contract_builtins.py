@@ -1,13 +1,17 @@
-"""ADR-0067 S3: the node-writing built-ins register their field set inline via
+"""ADR-0067 S3/S2: the node-writing built-ins register their field set inline via
 `{% do field_contract.store(f) %}` at chat-start render. This guards that each
-built-in registers exactly the set today's extractor would produce — every
-proposable field except `body` (which the commit envelope carries on its own
-axis), intersected with the prompt's allow-list — so S2 can read the same
-authored set back at commit without re-deriving it.
+built-in registers the set its commit envelope must offer:
+- `summarize-scene` narrows to exactly `["summary"]` — its own tighter loop.
+- The revise-family built-ins register the FULL proposable set, INCLUDING
+  `body` (ADR-0067 §4 flip, S2): the registered set is the commit's whole
+  write ceiling now — there is no separate type-level body axis inside the
+  envelope — so a prompt that wants body committed must register it like any
+  other field, and these built-ins do (an unfiltered `fields(e) if
+  f.proposable` loop).
 
-The registration is invisible (`{% do %}` emits nothing) and the extraction path
-is unchanged in S3; this inspects the per-render accumulator (`env.field_contract`)
-directly, the same slot S2 will persist on the chat.
+The registration is invisible (`{% do %}` emits nothing); this inspects the
+per-render accumulator (`env.field_contract`) directly, the same slot S2
+persists on the chat and reads back at commit.
 """
 
 from __future__ import annotations
@@ -44,12 +48,12 @@ class FieldContractBuiltinsTests(unittest.TestCase):
         env.from_string(prompt.body).render(inputs=inputs)
         return list(env.field_contract.stored)
 
-    def _proposable_non_body_ids(self, entry_type: str) -> set[str]:
-        """The set today's extractor produces for a type: every proposable field
-        except `body`. Computed off the same `fields()` roster the templates loop."""
+    def _proposable_ids(self, entry_type: str) -> set[str]:
+        """The full proposable roster for a type (body included) — computed
+        off the same `fields()` roster the templates loop."""
         env = create_environment_for_project(self.service)
         roster = env.globals["fields"](entry_type)
-        return {f["id"] for f in roster if f.get("proposable") and f["id"] != "body"}
+        return {f["id"] for f in roster if f.get("proposable")}
 
     def _scene_id(self) -> str:
         structure = self.service.create_structure_node(
@@ -71,39 +75,38 @@ class FieldContractBuiltinsTests(unittest.TestCase):
         stored = self._stored("builtin-summarize-scene", {"entry": self._scene_id()})
         self.assertEqual([f["id"] for f in stored], ["summary"])
 
-    # --- revise-entry: the full proposable-minus-body set, both branches ---
-    def test_revise_entry_create_registers_proposable_non_body(self) -> None:
+    # --- revise-entry: the FULL proposable set, including body, both branches ---
+    def test_revise_entry_create_registers_full_proposable_set(self) -> None:
         stored = self._stored(
             "builtin-revise-entry", {"entry": "", "entry_type": "lore:character"}
         )
         ids = {f["id"] for f in stored}
-        self.assertEqual(ids, self._proposable_non_body_ids("lore:character"))
-        self.assertNotIn("body", ids)
-        self.assertTrue(ids)  # a lore:character has proposable fields to register
+        self.assertEqual(ids, self._proposable_ids("lore:character"))
+        self.assertIn("body", ids)  # ADR-0067 §4: registered like any other field
 
-    def test_revise_entry_revise_registers_proposable_non_body(self) -> None:
+    def test_revise_entry_revise_registers_full_proposable_set(self) -> None:
         note = self.service.create_lore_entry(
             CreateLoreEntryRequest(title="Alderman Vane", entry_type="lore:note")
         )
         stored = self._stored("builtin-revise-entry", {"entry": note.id, "entry_type": ""})
         ids = {f["id"] for f in stored}
-        self.assertEqual(ids, self._proposable_non_body_ids("lore:note"))
-        self.assertNotIn("body", ids)
+        self.assertEqual(ids, self._proposable_ids("lore:note"))
+        self.assertIn("body", ids)
 
     # --- the two plot revises: same generic filter, real subjects ---
-    def test_revise_plot_card_registers_proposable_non_body(self) -> None:
+    def test_revise_plot_card_registers_full_proposable_set(self) -> None:
         card = self.service.create_card(CreateCardRequest(title="The Ambush"))
         stored = self._stored("builtin-revise-plot-card", {"entry": card.id})
         ids = {f["id"] for f in stored}
-        self.assertEqual(ids, self._proposable_non_body_ids("plot:card"))
-        self.assertNotIn("body", ids)
+        self.assertEqual(ids, self._proposable_ids("plot:card"))
+        self.assertIn("body", ids)
 
-    def test_revise_plotline_registers_proposable_non_body(self) -> None:
+    def test_revise_plotline_registers_full_proposable_set(self) -> None:
         line = self.service.create_plotline(CreatePlotlineRequest(title="Romance"))
         stored = self._stored("builtin-revise-plotline", {"entry": line.id})
         ids = {f["id"] for f in stored}
-        self.assertEqual(ids, self._proposable_non_body_ids("plot:plotline"))
-        self.assertNotIn("body", ids)
+        self.assertEqual(ids, self._proposable_ids("plot:plotline"))
+        self.assertIn("body", ids)
 
 
 if __name__ == "__main__":

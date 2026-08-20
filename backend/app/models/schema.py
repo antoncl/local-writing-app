@@ -182,18 +182,19 @@ class PromptCommit(BaseModel):
     Present ⇒ the conversation gains a Commit button that extracts its result to
     the target node as a reviewable patch. `review` is how that result is reviewed
     (`visual_diff` = per-run adopt against the current entry; `replace` = a plain
-    current→proposed swap). `fields` is an optional allow-list of what the commit
-    extracts — `body` counts as a field, so its absence means fields-only; omit
-    `fields` entirely for the default (body + every proposable field). `target`
-    (ADR-0063 S1) is the entry_type FQN the commit *creates* — declaring it makes
-    the chat a create brainstorm for that type regardless of how it was launched;
-    unset ⇒ today's behaviour (revise the seeded `entry`, or create the launch's
-    `entry_type`). Kept lenient (`str`, not a `Literal`) so a hand-edited layer
-    stays readable; the save paths validate the values
-    (`_validate_metadata_schema_definition`)."""
+    current→proposed swap). `target` (ADR-0063 S1) is the entry_type FQN the
+    commit *creates* — declaring it makes the chat a create brainstorm for that
+    type regardless of how it was launched; unset ⇒ today's behaviour (revise
+    the seeded `entry`, or create the launch's `entry_type`). Kept lenient
+    (`str`, not a `Literal`) so a hand-edited layer stays readable; the save
+    paths validate the values (`_validate_metadata_schema_definition`).
+
+    `fields` — the old static allow-list of what the commit extracts — retired
+    with ADR-0067 S2: a prompt now narrows what it extracts by authoring its
+    own `field_contract` loop (registered fields, read back at commit), not a
+    schema-declared list."""
 
     review: str = "visual_diff"
-    fields: list[str] | None = None
     target: str | None = None
 
 

@@ -196,7 +196,7 @@
 
 <ViewNodeList
   {view}
-  mode={appearance?.mode ?? undefined}
+  mode={appearance?.mode ?? paneViews.defaultModeFor("assistant")}
   density={appearance?.density ?? undefined}
   active={(entry) => focusedDocument?.type === "assistant" && focusedDocument.id === entry.id}
   onClick={(entry) => onOpenEntry(entry.id)}

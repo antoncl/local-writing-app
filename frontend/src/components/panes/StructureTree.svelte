@@ -318,7 +318,7 @@
 <ViewNodeList
   bind:this={list}
   {view}
-  mode={appearance?.mode ?? "tree"}
+  mode={appearance?.mode ?? paneViews.defaultModeFor(config.kind)}
   density={appearance?.density ?? undefined}
   active={isActiveNode}
   collapsed={collapse.collapsed}

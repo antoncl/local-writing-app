@@ -91,3 +91,16 @@ describe("paneViews — view appearance (ADR-0069)", () => {
     expect(paneViews.appearanceFor("lore")).toEqual({ density: "compact" });
   });
 });
+
+describe("paneViews.defaultModeFor — single-source pane default (#1196)", () => {
+  it("the structure trees default to tree, the card-list panes to card", () => {
+    // Both StructureTree kinds render as trees; every card-list switcher pane
+    // is a card. The Layout control resolves the same value to pick which toggle
+    // option reads as selected before the user chooses one.
+    expect(paneViews.defaultModeFor("manuscript")).toBe("tree");
+    expect(paneViews.defaultModeFor("research")).toBe("tree");
+    expect(paneViews.defaultModeFor("lore")).toBe("card");
+    expect(paneViews.defaultModeFor("assistant")).toBe("card");
+    expect(paneViews.defaultModeFor("chat")).toBe("card");
+  });
+});

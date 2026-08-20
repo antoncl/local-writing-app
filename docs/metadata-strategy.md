@@ -280,23 +280,22 @@ cards.
 
 ## Field Types
 
-Initial field types should stay small:
-
-- `text`
-- `long_text`
-- `number`
-- `boolean`
-- `date`
-- `select`
-- `multi_select`
-- `entity_ref`
-- `entity_ref_list`
-- `tags`
-- `computed`
+The canonical set of field types is the `MetadataFieldDefinition.type` literal
+in `backend/app/models/schema.py` — that is the source of truth, not this
+section (which drifted from it once). Broadly the types group into: simple
+scalars (`text`, `long_text`, `number`, `boolean`, `color`), fixed-option
+choices (`select` for one, `multi_select` for several), references to other
+nodes (`entity_ref`, `entity_ref_list`), free-form `tags`, an ordered `list`
+whose item shape is a single scalar or a reusable group (#698), and app-derived
+`computed`. `date` is retained so older projects still load and render, but it
+is deliberately kept out of the type picker.
 
 Computed fields are visible to the UI and search layer, but their values are
 derived by the app. For example, `word_count` is computed from a scene body and
 should not be hand-edited or stored as canonical metadata.
+
+The writer-facing explanation of these types — how to choose one without knowing
+the model — lives in [Custom fields](custom-fields.md).
 
 ## Search
 

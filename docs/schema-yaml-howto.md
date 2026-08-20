@@ -13,6 +13,11 @@ and hard-refresh the browser. The schema layering does a structural
 merge with the built-ins — you only have to write the keys you're
 changing, not a complete entry type.
 
+> New to fields? [Custom fields](custom-fields.md) explains what each field type
+> is and how to pick one in the app's **Custom Data** editor, in plain language
+> — start there. This page is for the advanced edits that editor doesn't cover
+> yet.
+
 ---
 
 ## Global chapter numbering — "Chapter 1, 2, 3" across the whole manuscript

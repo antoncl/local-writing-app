@@ -19,7 +19,7 @@ from app.models import (
     SaveChatSessionRequest,
 )
 from app.services.ai.chat import _staged_set_block, expand_and_prepare_chat_blocks
-from app.services.ai.helpers import _format_staged_set_block
+from app.services.ai.lore_block import _format_staged_set_block
 
 
 class StagedSetBlockFormatTests(unittest.TestCase):

@@ -54,7 +54,7 @@ def _staged_set_block(project: ProjectService, staged_set_id: str) -> str:
     """
     if not staged_set_id:
         return ""
-    from app.services.ai.helpers import _format_staged_set_block
+    from app.services.ai.lore_block import _format_staged_set_block
 
     try:
         staged = project.read_mutation_set_entry(staged_set_id)
@@ -164,10 +164,10 @@ def _lore_cache_blocks(
     provider adapter maps it to a ttl/breakpoint (ADR-0060 §5).
     """
     from app.services.ai.helpers import (
-        _format_lore_block,
         _relevant_lore_ids,
         _tier_lore_ids,
     )
+    from app.services.ai.lore_block import _format_lore_block
     from app.services.ai.sessions import default_registry
 
     scene = _chat_resolution_scene(project, chat)

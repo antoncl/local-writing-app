@@ -31,7 +31,7 @@ from app.models import ChatSessionContextItem, ChatSessionJournalEntry
 from app.services.ai.helpers import (
     _alias_match,
     _attr_or_item,
-    _safe_read_lore,
+    _safe_read_node,
     _textual_one_hop,
 )
 
@@ -113,7 +113,7 @@ def _make_entries(
     """
     out: list[ChatSessionJournalEntry] = []
     for entry_id in sorted(entry_ids):
-        entry = _safe_read_lore(project, entry_id)
+        entry = _safe_read_node(project, entry_id)
         if entry is None:
             continue
         title = _attr_or_item(entry, "title") or ""

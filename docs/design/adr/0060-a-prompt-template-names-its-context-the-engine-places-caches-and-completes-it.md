@@ -18,6 +18,13 @@
 - Citations pinned to `master@cb9d2828`. Line numbers rot; **function/symbol names and file paths are the
   durable references.**
 
+## Amendment 1 (2026-08-19) — includes are role-less; the check must know the live helper set
+
+Two prompt-language gaps surfaced while working the prompt-output model (ADR-0065 Amendment 1 / ADR-0067):
+
+- **An include carries no `{% role %}`; the includer assigns the role.** Today an include that holds its own `{% role %}` block errors when it lands inside the includer's `{% role %}` (nested roles). The workable rule: an **include is a role-less fragment** (raw text), and it is the **includer** that wraps `{% include %}` in the proper `{% role "system" %}` / `{% role "user" %}`. This removes the nested-role error for shared boilerplate (a house-style voice, a settings block). (The include mechanism itself is ADR-0061; this is the role constraint on it. In the UI it is surfaced as "include," not "snippet" — see the ADR-0062 amendment. Note: the output field contract is **not** an include — it is authored inline via the `field_contract` accumulator, ADR-0067.)
+- **The check must derive its known helpers from the live registry, not a stale list.** The prompt template check (the render/diagnostics that flag template errors) rejects legitimate ADR-0060 helpers — e.g. any use of `use()` flags as an error — because its notion of "known globals" drifted from what `register_helpers` (`services/ai/helpers.py`) actually installs. The fix is structural: the check's known-helper/known-global set must be **derived from the same registry the runtime uses** (so it can never drift again), and it must recognise the additions ADR-0067 makes — the `field_contract` accumulator and the newly-enabled `{% do %}` construct. A helper the engine provides, or a tag it enables, must never be an error in the check that guards the same engine.
+
 ## Context
 
 A prompt template is a Jinja2 body (`body_language: jinja2`) rendered by a `SandboxedEnvironment`

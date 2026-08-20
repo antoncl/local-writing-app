@@ -145,13 +145,18 @@ class ViewsMixin:
         return self.read_view(node_id)
 
     def update_view_ui(self, view_id: str, request: UpdateViewUiRequest) -> ViewNode:
-        """Lock-free fold/ui write (ADR-0036): rewrites ONLY the `ui` blob,
-        preserving spec/layout/title/system. It takes no
+        """Lock-free ui write (ADR-0036): MERGES the provided `ui` fields into the
+        stored blob, preserving spec/layout/title/system. It takes no
         base_revision and does not consult the spec revision, so a fold toggle
         never 409s against a concurrent designer save — the two lifecycles are
         independent. A `view_default_<kind>` id with no file yet MATERIALIZES the
         read-only system default view (§5): the pane's default (unselected) view
-        is real-on-disk the moment the user first folds it."""
+        is real-on-disk the moment the user first folds it.
+
+        The merge (only fields the request actually set are overwritten) keeps
+        `ViewUiState`'s two independent writers from clobbering each other: the
+        fold writer sends `collapsed`, the appearance control (ADR-0069) sends
+        `appearance`, and neither wipes the other's field on this shared blob."""
         if view_id.startswith(DEFAULT_VIEW_ID_PREFIX) and self._build_node_index().by_id.get(view_id) is None:
             return self._materialize_default_view(view_id, request.ui)
         path = self._path_for_node_id(view_id, "view")
@@ -160,6 +165,13 @@ class ViewsMixin:
         spec = self._parse_view_spec(front_matter.get("spec"))
         if spec is None:
             raise ProjectServiceError(f"View {node_id} has no valid spec.", 422)
+        # Merge onto the stored ui so an appearance write preserves `collapsed`
+        # and vice-versa. `model_fields_set` is exactly the keys the request JSON
+        # carried, so an omitted field is left untouched (ADR-0069).
+        existing_ui = self._parse_view_ui(front_matter.get("ui")) or ViewUiState()
+        merged_ui = existing_ui.model_copy(
+            update={key: getattr(request.ui, key) for key in request.ui.model_fields_set}
+        )
         self._write_view_file(
             path,
             node_id,
@@ -167,7 +179,7 @@ class ViewsMixin:
             self._view_entry_type(front_matter),
             spec,
             self._parse_view_layout(front_matter.get("layout")),
-            ui=request.ui,
+            ui=merged_ui,
             system=self._view_system(front_matter),
         )
         return self.read_view(node_id)
@@ -301,9 +313,10 @@ class ViewsMixin:
         # / programmatic views clean (they fall back to auto-layout on open).
         if layout is not None:
             extra["layout"] = layout.model_dump(exclude_none=True)
-        # Fold/ui state (ADR-0036) — only when non-empty; `_write_node_entry_file`
-        # skips falsy extra values, so an empty collapsed list drops cleanly.
-        if ui is not None and ui.collapsed:
+        # Fold/ui state (ADR-0036) — only when it carries something: a collapsed
+        # set OR a chosen appearance (ADR-0069). An all-empty ui drops cleanly, but
+        # an appearance with no collapsed groups (the common case) must still write.
+        if ui is not None and (ui.collapsed or ui.appearance):
             extra["ui"] = ui.model_dump(exclude_none=True)
         # `system` marks the read-only default view; only write it when true
         # (default False needs no on-disk footprint).

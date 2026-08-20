@@ -49,6 +49,10 @@
   // differs is inherited and gets a level pill (#313).
   const ownLayerId = $derived($projectLayerIdStore);
 
+  // The view's chosen render layout (ADR-0069), set by the control beside the
+  // view selector. Absent axes fall back to ViewNodeList's own defaults.
+  const appearance = $derived(paneViews.appearanceFor("lore"));
+
   // Add-child menu is a ViewNodeList feature (mode-agnostic; #112 4c-iv). The
   // "+" button lives in the pane header (App's loreActions), so we bind the list
   // instance and re-expose its imperative add-menu handles for that button. The
@@ -163,6 +167,8 @@
 <ViewNodeList
   bind:this={list}
   {view}
+  mode={appearance?.mode ?? undefined}
+  density={appearance?.density ?? undefined}
   searchPlaceholder="Search entries, tags, aliases"
   bind:searchValue={searchQuery}
   filter={(entry, query) => entrySearchText(entry).includes(query)}

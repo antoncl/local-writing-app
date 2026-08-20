@@ -82,6 +82,8 @@
     schema,
     referenceIndex: $referenceIndexStore,
   });
+  // The view's chosen render layout (ADR-0069); absent axes keep the pane default.
+  const appearance = $derived(paneViews.appearanceFor("assistant"));
   // Drag expresses MANUAL order, so it is offered exactly when the view has not
   // taken ordering out of the author's hands: a `sort` other than manual, or a
   // named-handle shape whose members are not one sequence, means the position a
@@ -194,6 +196,8 @@
 
 <ViewNodeList
   {view}
+  mode={appearance?.mode ?? undefined}
+  density={appearance?.density ?? undefined}
   active={(entry) => focusedDocument?.type === "assistant" && focusedDocument.id === entry.id}
   onClick={(entry) => onOpenEntry(entry.id)}
   onReorder={canReorder ? reorder : undefined}

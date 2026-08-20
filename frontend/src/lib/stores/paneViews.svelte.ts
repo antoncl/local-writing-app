@@ -15,7 +15,7 @@
 import { api } from "@/lib/api";
 import { defaultView } from "@/lib/views/evaluateView";
 import { builtinSpecFor, isBuiltinExtraViewId } from "@/lib/views/builtinViews";
-import type { MetadataSchema, ViewNodeSummary, ViewSpec } from "@/lib/types";
+import type { MetadataSchema, ViewAppearance, ViewNodeSummary, ViewSpec } from "@/lib/types";
 
 const STORAGE_PREFIX = "paneView.selected."; // + kind
 
@@ -60,6 +60,9 @@ class PaneViewsController {
   // Full specs by view id — reactive so a designer edit (reload) re-evaluates
   // panes even when the selection id is unchanged.
   specs = $state<Map<string, ViewSpec>>(new Map());
+  // A view's chosen render layout by view id (ADR-0069), from its `ui.appearance`.
+  // Reactive so the pane re-renders at the new mode/density the moment it changes.
+  appearances = $state<Map<string, ViewAppearance>>(new Map());
 
   #loadedPath: string | null = null;
 
@@ -100,8 +103,15 @@ class PaneViewsController {
     // The list summary already carries each view's spec (#95), so evaluation
     // is synchronous with no per-view fetch.
     const map = new Map<string, ViewSpec>();
-    for (const v of entries) if (v.spec) map.set(v.id, v.spec);
+    const appearanceMap = new Map<string, ViewAppearance>();
+    for (const v of entries) {
+      if (v.spec) map.set(v.id, v.spec);
+      // Retain the ui.appearance the summary already ships (ADR-0069) — reload()
+      // dropped `v.ui` before, so a saved layout was invisible to the pane.
+      if (v.ui?.appearance) appearanceMap.set(v.id, v.ui.appearance);
+    }
     this.specs = map;
+    this.appearances = appearanceMap;
 
     // Drop any selection that no longer resolves — but keep frontend-synthesized
     // built-in extras, which are never in the backend spec map.
@@ -115,6 +125,7 @@ class PaneViewsController {
     this.views = {};
     this.selected = {};
     this.specs = new Map();
+    this.appearances = new Map();
   }
 
   viewsFor(kind: string): ViewNodeSummary[] {
@@ -150,6 +161,51 @@ class PaneViewsController {
       if (spec) return spec;
     }
     return defaultView(kind, schema);
+  }
+
+  // The render layout a pane should apply (ADR-0069): the resolved view's stored
+  // `ui.appearance`, or null when it has set none (⇒ the pane keeps its default
+  // mode/density). Keyed the same way fold state is — the selected view, or the
+  // pane's `view_default_<kind>`.
+  appearanceFor(kind: string): ViewAppearance | null {
+    return this.appearances.get(this.resolvedViewId(kind)) ?? null;
+  }
+
+  // Set (part of) the resolved view's appearance and persist it. Merges the
+  // patch onto the current appearance so the control can set `mode` and
+  // `density` independently. The write carries ONLY `appearance`; the backend
+  // merges it into the ui blob, so a saved fold state (`collapsed`) survives
+  // (ADR-0069). Optimistic — reverts the local map if the write fails.
+  async setAppearance(kind: string, patch: Partial<ViewAppearance>): Promise<void> {
+    const id = this.resolvedViewId(kind);
+    const prior = this.appearances.get(id) ?? null;
+    const next: ViewAppearance = { ...(prior ?? {}), ...patch };
+    this.appearances = new Map(this.appearances).set(id, next);
+    try {
+      await api.updateViewUi(id, { appearance: next });
+    } catch {
+      // Restore the prior value (or drop the key if there was none).
+      const reverted = new Map(this.appearances);
+      if (prior) reverted.set(id, prior);
+      else reverted.delete(id);
+      this.appearances = reverted;
+    }
+  }
+
+  // Clear the resolved view's appearance back to the pane default (ADR-0069).
+  // Sends `appearance: null`, which the /ui merge drops from the blob.
+  async clearAppearance(kind: string): Promise<void> {
+    const id = this.resolvedViewId(kind);
+    const prior = this.appearances.get(id) ?? null;
+    if (!prior) return;
+    const dropped = new Map(this.appearances);
+    dropped.delete(id);
+    this.appearances = dropped;
+    try {
+      await api.updateViewUi(id, { appearance: null });
+    } catch {
+      this.appearances = new Map(this.appearances).set(id, prior);
+    }
   }
 }
 

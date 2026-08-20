@@ -128,6 +128,7 @@
     row,
     groupHeader,
     mode = "card",
+    density,
     searchPlaceholder = null,
     searchValue = $bindable(""),
     searchDebounceMs = 0,
@@ -158,6 +159,10 @@
     // (caret + count pill + tier panel). Real nodes never route here.
     groupHeader?: Snippet<[GroupCtx]>;
     mode?: "card" | "tree";
+    // Density passthrough to NodeList (ADR-0066 axis; ADR-0069). Undefined ⇒
+    // NodeList's own default (comfortable). Sourced by a pane from the view's
+    // `ui.appearance` (ADR-0069), the same way `mode` is.
+    density?: "comfortable" | "compact" | "dense";
     // When set, NodeList renders a SearchInput; pair with `filter` to prune.
     searchPlaceholder?: string | null;
     searchValue?: string;
@@ -468,7 +473,7 @@
 {/if}
 
 <div class="tree-keys" use:treeKeyboard>
-  <NodeList {mode} {searchPlaceholder} bind:searchValue {searchDebounceMs} {isEmpty} {whenEmpty}>
+  <NodeList {mode} {density} {searchPlaceholder} bind:searchValue {searchDebounceMs} {isEmpty} {whenEmpty}>
     <ViewNodeTree
       groups={effectiveGroups}
       depth={0}

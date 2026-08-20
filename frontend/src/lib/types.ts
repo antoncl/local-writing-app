@@ -643,10 +643,19 @@ export type ViewLayout = { nodes: ViewLayoutNode[]; edges: ViewLayoutEdge[] };
 // a prose/code body. Mirrors backend ViewNode (models_views.py). Carries the
 // metadata/computed_metadata slots so it satisfies EditableDocument
 // structurally; both are empty in v1 (the view has no schema fields).
-// Non-semantic per-view UI state (ADR-0036) — today just the collapsed
-// ViewGroup.key set (`node:<id>` / `group:<seg>`). Persisted on the lock-free
-// /ui endpoint, independent of the spec revision-lock.
-export type ViewUiState = { collapsed: string[] };
+// A view's chosen render layout — the ADR-0066 NodeList axes it carries
+// (ADR-0069). NOT on the ViewSpec (ADR-0037 §3 keeps the spec presentation-free);
+// it rides the ui channel, set by a control beside the view selector. Either
+// field absent ⇒ the pane's default for that axis.
+export type ViewAppearance = {
+  mode?: "card" | "tree" | null;
+  density?: "comfortable" | "compact" | "dense" | null;
+};
+
+// Non-semantic per-view UI state (ADR-0036) — the collapsed ViewGroup.key set
+// (`node:<id>` / `group:<seg>`) plus the view's chosen `appearance` (ADR-0069).
+// Persisted on the lock-free /ui endpoint, independent of the spec revision-lock.
+export type ViewUiState = { collapsed: string[]; appearance?: ViewAppearance | null };
 
 export type ViewNode = {
   id: string;

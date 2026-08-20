@@ -6,6 +6,7 @@
   import { chatSummariesToEvalNodes, type ChatEvalNode } from "@/lib/views/chatNodes";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { referenceIndexStore } from "@/lib/stores/references";
+  import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { formatCostEur } from "@/lib/utils/money";
 
   let {
@@ -43,6 +44,8 @@
   // entities") chats. The lift is shared with the view-designer preview.
   const chatNodes = $derived(chatSummariesToEvalNodes(sessions, promptEntries, schema));
   const view = $derived({ spec: viewSpec, universe: chatNodes, schema, referenceIndex: $referenceIndexStore });
+  // The view's chosen render layout (ADR-0069); absent axes keep the pane default.
+  const appearance = $derived(paneViews.appearanceFor("chat"));
 
   function chatSessionPromptTitle(session: ChatSessionSummary): string {
     if (!session.prompt_entry_id) return "";
@@ -58,6 +61,8 @@
 
 <ViewNodeList
   {view}
+  mode={appearance?.mode ?? undefined}
+  density={appearance?.density ?? undefined}
   active={(node) => activeChatId === node.id}
   onClick={(node) => onOpenChat(node.id)}
   row={chatRow}

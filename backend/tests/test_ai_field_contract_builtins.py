@@ -27,6 +27,9 @@ from app.models import (
     CreateLoreEntryRequest,
     CreatePlotlineRequest,
     CreateStructureNodeRequest,
+    MetadataFieldDefinition,
+    SaveLoreEntryRequest,
+    UpsertMetadataFieldRequest,
 )
 from app.services.ai.helpers import _field_value, create_environment_for_project
 
@@ -131,6 +134,41 @@ class FieldContractBuiltinsTests(unittest.TestCase):
         # Body and title are shown above, never as bullet items in the field list.
         self.assertNotIn("(body):", rendered)
         self.assertNotIn("(title):", rendered)
+
+    def test_revise_entry_long_text_field_renders_as_a_block_not_a_bullet(self) -> None:
+        """A custom long_text field's multi-paragraph value gets its own block, so
+        the paragraphs stay intact instead of breaking out of a bullet line. Scalar
+        fields remain compact bullets. Guards the case the built-in target types
+        don't exercise but real projects do (a "Backstory" on a character etc.)."""
+        layer = self.service.read_metadata_schema_layers().layers[-1].id
+        self.service.upsert_metadata_field(
+            UpsertMetadataFieldRequest(
+                layer_id=layer,
+                field_id="backstory",
+                field=MetadataFieldDefinition(name="Backstory", type="long_text"),
+                entry_type="lore:note",
+            )
+        )
+        note = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Alderman Vane", entry_type="lore:note")
+        )
+        self.service.save_lore_entry(
+            note.id,
+            SaveLoreEntryRequest(
+                title="Alderman Vane",
+                body="A grasping man.",
+                entry_type="lore:note",
+                metadata={"aliases": ["The Alderman"], "backstory": "First paragraph.\n\nSecond paragraph."},
+            ),
+        )
+        rendered = self._render("builtin-revise-entry", {"entry": note.id, "entry_type": ""})
+        # long_text → its own labelled block, with both paragraphs preserved.
+        self.assertIn("**Backstory (backstory)**", rendered)
+        self.assertIn("First paragraph.\n\nSecond paragraph.", rendered)
+        # ...and NOT crammed onto a bullet line.
+        self.assertNotIn("(backstory): First paragraph.", rendered)
+        # A scalar field stays a compact bullet.
+        self.assertIn("- Aliases (aliases): The Alderman", rendered)
 
 
 class FieldValueHelperTests(unittest.TestCase):

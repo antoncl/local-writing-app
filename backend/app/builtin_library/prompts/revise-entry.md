@@ -52,10 +52,17 @@ _(This entry has no body yet.)_
 
 ### Fields to develop
 {# Show what the entry holds today, read straight from the fields registered
-   above so this can never drift from what the commit writes. Body and title are
-   shown above, so skip them here. #}
+   above so this can't drift from what the commit writes. Body and title are
+   shown above, so skip them here. A long-form field gets its own block so its
+   text isn't crammed onto a bullet line; everything else is a compact bullet. #}
 {% for f in field_contract.stored if f.id not in ["body", "title"] %}
+{% if f.type == "long_text" %}
+
+**{{ f.label }} ({{ f.id }})**
+{{ field_value(e, f) }}
+{% else %}
 - {{ f.label }} ({{ f.id }}): {{ field_value(e, f) }}
+{% endif %}
 {% endfor %}
 {% else %}
 {# Register the fields this prompt writes — the full proposable set of the type

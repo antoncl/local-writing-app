@@ -103,14 +103,17 @@ class ReviseEntryLoreGateTests(unittest.TestCase):
         self.assertIn("body (Body)", rendered)  # enumerated in the field list
         self.assertIn("do not restate", rendered.lower())  # body's steering description
 
-    def test_revise_render_shows_body_once_not_as_empty_field(self) -> None:
-        # #1067: in revise mode the body is shown as the entry's own prose
-        # (`e.body`), never ALSO as an empty `### Body (body)` long_text field
-        # header — body is filtered from the long_text value display.
+    def test_revise_render_delivers_subject_via_use_not_inline_body(self) -> None:
+        # #1220: the subject is delivered via use() — a backend-placed context
+        # block carrying every field and the body at their current values — not
+        # baked into the rendered system prompt. So its body prose is NOT inline
+        # (mirroring how lore context is never inlined, above); instead the
+        # subject id is registered for the backend to place and cache.
         subject = self._make_note("Alderman Vane", body="A city councilman.")
-        rendered, _ = self._render({"entry": subject, "entry_type": ""})
-        self.assertIn("A city councilman.", rendered)  # the real body prose, shown once
-        self.assertNotIn("### Body (body)", rendered)  # not a duplicate empty field header
+        rendered, env = self._render({"entry": subject, "entry_type": ""})
+        self.assertNotIn("A city councilman.", rendered)  # body not inline
+        self.assertIn(subject, env.used_nodes)  # use()'d for backend placement
+        self.assertNotIn("### Body (body)", rendered)  # nor as a duplicate field header
 
     def test_brainstorm_seed_does_not_inherit_manuscript_pov(self) -> None:
         # #1076: a first-person project must NOT push the metadata-field

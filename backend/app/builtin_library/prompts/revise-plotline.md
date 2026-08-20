@@ -25,9 +25,9 @@ context_strategy:
 
 {% set e = entry(inputs.entry) %}
 {% role "system" %}
-{# ADR-0067 S2: register the FULL proposable set this prompt commits,
-   INCLUDING body — the registered set is the commit's write ceiling (§4), so
-   body must be in it to be written. Emits nothing. #}
+{# Register the fields this prompt may write. The commit reads this same set
+   back as the exact shape it will save; `proposable` includes body (the
+   description) and skips the reference/computed fields. Emits nothing. #}
 {% for f in fields(e) if f.proposable %}{% do field_contract.store(f) %}{% endfor %}
 You are an ideation partner helping the author shape a plotline, working toward a concrete, committable result. A plotline is a story thread and its beat roster — the requirements the story wants met, in order. Your job here is the thread's *structure*, not any one card: whether the beats are the right beats, in the right order, named for what they do; whether the description says what this thread is and the job it does. Brainstorm with the author — ask questions, suggest a missing beat or a redundant one, point out where the roster and the written cards have drifted apart — but steer toward a committable roster and description, and don't circle. Once you have enough, propose a concrete draft in prose and say it's ready to commit; stop asking questions past that point.
 
@@ -43,13 +43,7 @@ Reason from the board below. Each plotline lists the beats it wants — the requ
 {% else %}
 _(This plotline has no description yet.)_
 {% endif %}
-{% set current = fields(e) | selectattr("proposable") | rejectattr("id", "equalto", "title") | rejectattr("id", "equalto", "body") | list %}
-{% if current %}
 
 ### Fields to develop
-{% for f in current %}
-{% set val = e.metadata.get(f.id) %}
-- {{ f.label }} ({{ f.id }}): {% if f.type == "list" %}{% if val %}{{ val | json }}{% else %}_(empty)_{% endif %}{% elif val is sequence and val is not string %}{{ val | join(", ") or "_(empty)_" }}{% elif val is none or val == "" %}_(empty)_{% else %}{{ val }}{% endif %}
-{% endfor %}
-{% endif %}
+{{ field_contract.render }}
 {% endrole %}

@@ -42,8 +42,11 @@
     detail?: string | null;
     active?: boolean;
     stripeColor?: string | null;
-    // Tree indent. Resolved to `padding-left: depth * 26px` (ADR-0066
-    // Amendment 1 — raised from 14 so a nested level steps clearly).
+    // Tree indent. Resolved to `margin-left: depth * 26px` (ADR-0066
+    // Amendment 1 — raised from 14 so a nested level steps clearly, and margin
+    // rather than padding so the whole border box shifts right: the curved
+    // kind-stripe is an inset box-shadow on the border box, so padding would
+    // leave it stranded at the pane's far left while the content indented).
     depth?: number;
     onClick?: (event: MouseEvent) => void;
     onDblClick?: (event: MouseEvent) => void;
@@ -169,7 +172,12 @@
     nested,
   }: Props = $props();
 
-  const indentStyle = $derived(depth > 0 ? `padding-left: ${depth * 26}px` : "");
+  // margin-left (not padding) so the border box — and the inset box-shadow
+  // stripe painted on it — indent together. `width: auto` lets the row stretch
+  // to fill its container's cell minus the margin (both its containers — the
+  // NodeList grid and the tier-panel flex column — stretch by default), instead
+  // of the base `width: 100%` overflowing the cell by the margin amount.
+  const indentStyle = $derived(depth > 0 ? `margin-left: ${depth * 26}px; width: auto` : "");
   const stripeStyle = $derived(stripeColor ? `--row-stripe: ${stripeColor}` : "");
   const rootStyle = $derived([indentStyle, stripeStyle].filter(Boolean).join("; "));
   // Effective mode: header rows always bare; otherwise explicit variant

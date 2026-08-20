@@ -388,7 +388,7 @@
                 aria-label={`Detach ${tab.label}`}
                 onclick={() => detachTab(tab.id)}
               >
-                <i class="ti ti-layout-sidebar-right-expand" aria-hidden="true"></i>
+                <i class="ti ti-arrow-bar-to-right" aria-hidden="true"></i>
               </button>
             {/if}
           </div>
@@ -402,7 +402,7 @@
               aria-label={`Reattach ${tab.label}`}
               onclick={() => reattachTab(tab.id)}
             >
-              <i class="ti ti-layout-sidebar-right-collapse" aria-hidden="true"></i>
+              <i class="ti ti-arrow-bar-to-left" aria-hidden="true"></i>
             </button>
           </div>
         {/if}

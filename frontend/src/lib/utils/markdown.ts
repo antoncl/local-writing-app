@@ -6,6 +6,10 @@ const turndown = new TurndownService({
   headingStyle: "atx",
   codeBlockStyle: "fenced",
   bulletListMarker: "-",
+  // Scene breaks (#1239): pin the on-disk representation of an <hr> to the
+  // conventional fiction dinkus rather than leaving it to the library default,
+  // so a `---` input rule and an inserted rule both settle to `* * *`.
+  hr: "* * *",
 });
 
 turndown.use(gfm);

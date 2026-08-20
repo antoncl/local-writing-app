@@ -28,7 +28,7 @@ from app.models import (
     CreatePlotlineRequest,
     CreateStructureNodeRequest,
 )
-from app.services.ai.helpers import create_environment_for_project
+from app.services.ai.helpers import _field_value, create_environment_for_project
 
 
 class FieldContractBuiltinsTests(unittest.TestCase):
@@ -47,6 +47,14 @@ class FieldContractBuiltinsTests(unittest.TestCase):
         env = create_environment_for_project(self.service)
         env.from_string(prompt.body).render(inputs=inputs)
         return list(env.field_contract.stored)
+
+    def _render(self, prompt_id: str, inputs: dict) -> str:
+        """Render a built-in prompt body to its final text (the string the model
+        sees), so a display loop that references a bad key surfaces as a
+        StrictUndefined error rather than passing silently."""
+        prompt = self.service.read_prompt_entry(prompt_id)
+        env = create_environment_for_project(self.service)
+        return env.from_string(prompt.body).render(inputs=inputs)
 
     def _proposable_ids(self, entry_type: str) -> set[str]:
         """The full proposable roster for a type (body included) — computed
@@ -107,6 +115,58 @@ class FieldContractBuiltinsTests(unittest.TestCase):
         ids = {f["id"] for f in stored}
         self.assertEqual(ids, self._proposable_ids("plot:plotline"))
         self.assertIn("body", ids)
+
+    # --- the display drives off the registered set (#1220) ---
+    def test_revise_entry_display_lists_registered_fields_not_body_or_title(self) -> None:
+        """The `### Fields to develop` list iterates `field_contract.stored`, so it
+        shows every registered field EXCEPT body and title (shown above as the prose
+        block and the section heading). Rendering also proves the loop's keys are
+        valid — a bad descriptor key would raise under StrictUndefined."""
+        note = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Alderman Vane", entry_type="lore:note")
+        )
+        rendered = self._render("builtin-revise-entry", {"entry": note.id, "entry_type": ""})
+        # A registered, developable field appears with its (empty) value.
+        self.assertIn("(aliases): _(empty)_", rendered)
+        # Body and title are shown above, never as bullet items in the field list.
+        self.assertNotIn("(body):", rendered)
+        self.assertNotIn("(title):", rendered)
+
+
+class FieldValueHelperTests(unittest.TestCase):
+    """`field_value(e, f)` (#1220): the read-back value formatter the revise
+    built-ins show beside each registered field. One tested place for the by-type
+    formatting the prompts used to open-code and copy-paste."""
+
+    class _Entry:
+        def __init__(self, data: dict) -> None:
+            self.metadata = data
+
+    def _value(self, data: dict, field: dict) -> str:
+        return _field_value(self._Entry(data), field)
+
+    def test_unset_and_blank_render_empty(self) -> None:
+        self.assertEqual(self._value({}, {"id": "x", "type": "text"}), "_(empty)_")
+        self.assertEqual(self._value({"x": ""}, {"id": "x", "type": "text"}), "_(empty)_")
+
+    def test_zero_and_false_are_shown_not_treated_as_empty(self) -> None:
+        self.assertEqual(self._value({"n": 0}, {"id": "n", "type": "number"}), "0")
+        self.assertEqual(self._value({"b": False}, {"id": "b", "type": "boolean"}), "False")
+
+    def test_scalar_renders_as_is(self) -> None:
+        self.assertEqual(self._value({"s": "draft"}, {"id": "s", "type": "select"}), "draft")
+
+    def test_multi_value_is_comma_joined(self) -> None:
+        got = self._value({"a": ["Grey Pilgrim", "Mithrandir"]}, {"id": "a", "type": "multi_select"})
+        self.assertEqual(got, "Grey Pilgrim, Mithrandir")
+
+    def test_list_field_renders_as_json_and_empty_list_is_empty(self) -> None:
+        self.assertEqual(self._value({"l": ["one"]}, {"id": "l", "type": "list"}), '["one"]')
+        self.assertEqual(self._value({"l": []}, {"id": "l", "type": "list"}), "_(empty)_")
+
+    def test_missing_entry_or_field_id_is_empty(self) -> None:
+        self.assertEqual(_field_value(None, {"id": "x", "type": "text"}), "_(empty)_")
+        self.assertEqual(self._value({"x": "v"}, {"type": "text"}), "_(empty)_")
 
 
 if __name__ == "__main__":

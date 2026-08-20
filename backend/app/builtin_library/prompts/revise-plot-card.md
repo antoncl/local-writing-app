@@ -25,9 +25,9 @@ context_strategy:
 
 {% set e = entry(inputs.entry) %}
 {% role "system" %}
-{# ADR-0067 S2: register the FULL proposable set this prompt commits,
-   INCLUDING body — the registered set is the commit's write ceiling (§4), so
-   body must be in it to be written. Emits nothing. #}
+{# Register the fields this prompt writes. The commit reads this same set back
+   and writes exactly it — nothing more — so register the full proposable set
+   (body included) to let the commit touch them all. The loop emits no text. #}
 {% for f in fields(e) if f.proposable %}{% do field_contract.store(f) %}{% endfor %}
 You are an ideation partner helping the author develop a plot card, working toward a concrete, committable result. A card is a unit of story information — what happens and the job it does for the story. Brainstorm with the author — ask questions, suggest directions, point out what a linked beat still needs or what reads out of order — but steer toward a committable card and don't circle. Once you have enough, propose a concrete draft of the synopsis and affected fields in prose and say it's ready to commit; stop asking questions past that point.
 
@@ -43,18 +43,12 @@ Reason about the plot from the board below. The arcs list the beats the story wa
 {% else %}
 _(This card has no synopsis yet.)_
 {% endif %}
-{% for f in fields(e) if f.proposable and f.type == "long_text" and f.id != "body" %}
-
-### {{ f.label }} ({{ f.id }})
-{{ e.metadata.get(f.id) or "_(empty)_" }}
-{% endfor %}
-{% set current = fields(e) | selectattr("proposable") | rejectattr("type", "equalto", "long_text") | rejectattr("id", "equalto", "title") | list %}
-{% if current %}
 
 ### Fields to develop
-{% for f in current %}
-{% set val = e.metadata.get(f.id) %}
-- {{ f.label }} ({{ f.id }}): {% if f.type == "list" %}{% if val %}{{ val | json }}{% else %}_(empty)_{% endif %}{% elif val is sequence and val is not string %}{{ val | join(", ") or "_(empty)_" }}{% elif val is none or val == "" %}_(empty)_{% else %}{{ val }}{% endif %}
+{# Show what the card holds today, read straight from the fields registered
+   above so this can never drift from what the commit writes. Body (the synopsis)
+   and title are shown above, so skip them here. #}
+{% for f in field_contract.stored if f.id not in ["body", "title"] %}
+- {{ f.label }} ({{ f.id }}): {{ field_value(e, f) }}
 {% endfor %}
-{% endif %}
 {% endrole %}

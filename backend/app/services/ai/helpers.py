@@ -329,6 +329,32 @@ def _fields(project: ProjectService, schema: Any, value: Any) -> list[dict[str, 
     return catalog
 
 
+def _field_value(entry: Any, field: Any) -> str:
+    """Backing the `field_value(e, f)` Jinja global — an entry's CURRENT value for
+    one field, formatted for display in a prompt.
+
+    The read-back companion to `fields()`: a revise prompt lists the registered
+    fields and shows what the entry holds in each today, so the model develops the
+    real starting point rather than guessing. `field` is a descriptor from
+    `fields()` / `field_contract.stored`. Formatting mirrors how the field reads:
+    a `list` field as its JSON, any other multi-value (tags, multi-select) comma-
+    joined, a scalar as-is — so a `0` or a `False` shows as itself, not as empty.
+    An unset value renders as `_(empty)_` so the model sees a field to fill, never
+    a blank line.
+    """
+    field_id = field.get("id") if isinstance(field, dict) else None
+    if entry is None or not field_id:
+        return "_(empty)_"
+    value = entry.metadata.get(field_id)
+    if value is None or value == "":
+        return "_(empty)_"
+    if field.get("type") == "list":
+        return json.dumps(value, ensure_ascii=False) if value else "_(empty)_"
+    if isinstance(value, (list, tuple)):
+        return ", ".join(str(item) for item in value) or "_(empty)_"
+    return str(value)
+
+
 def _type_name(schema: Any, entry_type: Any) -> str:
     """The human name of an entry_type FQN for a prompt instruction (ADR-0060 §7,
     was `entry_type_label`; ADR-0046 §6.4 create mode: "draft a new
@@ -499,6 +525,10 @@ def register_helpers(
     # ADR-0060 §3: the one clearly-named book-start read, ignoring every mutation.
     env.globals["original"] = lambda value: _coerce_entry_ref(project, schema, value)
     env.globals["fields"] = lambda value: _fields(project, schema, value)
+    # The read-back companion to `fields()` (#1220): an entry's current value for
+    # one field, so a revise prompt can show `{{ field_value(e, f) }}` beside each
+    # registered field instead of open-coding a per-type value formatter.
+    env.globals["field_value"] = lambda entry, field: _field_value(entry, field)
     env.globals["type_name"] = lambda value: _type_name(schema, value)
     env.globals["full_outline"] = lambda: _full_outline(project)
     env.globals["full_text"] = lambda: _full_text(project)

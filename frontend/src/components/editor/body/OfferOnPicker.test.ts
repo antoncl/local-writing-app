@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
-// The offer_on authoring picker (ADR-0054 §4 / S4b, reworked #903). The tree
-// model itself is unit-tested in offerOnTree.test.ts; this pins the component's
-// render + interaction contract: it renders one row per hostable subject, a
-// parent-covered type shows checked-but-disabled, and a toggle fires onChange.
+// The offer_on authoring picker (ADR-0054 §4 / S4b, reworked #903, un-curated +
+// grouped in #1199). The tree model itself is unit-tested in offerOnTree.test.ts;
+// this pins the component's render + interaction contract: it renders one row
+// per opens_in-editor subject under a kind header, a parent-covered type shows
+// checked-but-disabled, and a toggle fires onChange.
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import OfferOnPicker from "./OfferOnPicker.svelte";
@@ -18,7 +19,7 @@ const SCHEMA = {
     "manuscript:scene": { name: "Scene", kind: "manuscript", fields: [] },
     "manuscript:act": { name: "Act", kind: "manuscript", fields: [] },
     "plot:card": { name: "Card", kind: "plot", fields: [] },
-    "plot:board": { name: "Board", kind: "plot", fields: [] },
+    "plot:board": { name: "Board", kind: "plot", fields: [], opens_in: "board" },
     "prompt:general": { name: "General", kind: "prompt", fields: [] },
   },
   fields: {},
@@ -27,15 +28,22 @@ const SCHEMA = {
 // The closed <details> may report children hidden depending on the DOM impl.
 const box = (name: string) => screen.getByRole("checkbox", { name: new RegExp(`^${name}$`), hidden: true });
 
-describe("OfferOnPicker (#903)", () => {
-  it("renders a row per hostable subject and none of the dead targets", () => {
+describe("OfferOnPicker (#1199)", () => {
+  it("renders a row per opens_in-editor subject and none of the non-editor targets", () => {
     render(OfferOnPicker, { props: { metadataSchema: SCHEMA, offerOn: [] } });
-    // Lore (root + 3 leaves) + Scene + Card + prompt General (#711) = 7.
-    expect(screen.getAllByRole("checkbox", { hidden: true })).toHaveLength(7);
-    expect(screen.queryByText("Act")).not.toBeInTheDocument();
+    // Lore (root + 3 leaves) + Scene + Act (opens_in defaults to editor) + Card
+    // + prompt General (#711) = 8. Board (opens_in: board) is excluded.
+    expect(screen.getAllByRole("checkbox", { hidden: true })).toHaveLength(8);
     expect(screen.queryByText("Board")).not.toBeInTheDocument();
-    // prompt is a host now (#711 — meta-prompting), so General DOES render.
+    // Act now surfaces — #1199 restores the wide "opens in an editor" set.
+    expect(screen.getByText("Act")).toBeInTheDocument();
     expect(screen.getByText("General")).toBeInTheDocument();
+  });
+
+  it("renders a kind header per group", () => {
+    const { container } = render(OfferOnPicker, { props: { metadataSchema: SCHEMA, offerOn: [] } });
+    const headers = [...container.querySelectorAll(".offer-on-kind-header")].map((el) => el.textContent);
+    expect(headers).toEqual(["Lore", "Manuscript", "Plot", "Prompt"]);
   });
 
   it("a type covered by a checked parent is on but disabled", () => {
@@ -70,14 +78,13 @@ describe("OfferOnPicker (#903)", () => {
     expect(screen.queryAllByRole("checkbox", { hidden: true })).toHaveLength(0);
   });
 
-  it("a stale non-host id (from an older picker) renders no row and doesn't inflate the count", () => {
-    // manuscript:act is a real type but not under the manuscript:scene host root, so it is
-    // never offered — and must not count toward the badge.
+  it("a stale non-editor id (from hand-edited offer_on) renders no row and doesn't inflate the count", () => {
+    // plot:board opens_in "board" — never offered — and must not count toward the badge.
     const { container } = render(OfferOnPicker, {
-      props: { metadataSchema: SCHEMA, offerOn: ["lore:character", "manuscript:act"] },
+      props: { metadataSchema: SCHEMA, offerOn: ["lore:character", "plot:board"] },
     });
-    expect(screen.getAllByRole("checkbox", { hidden: true })).toHaveLength(7);
-    expect(screen.queryByText("Act")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("checkbox", { hidden: true })).toHaveLength(8);
+    expect(screen.queryByText("Board")).not.toBeInTheDocument();
     const badge = container.querySelector(".offer-on-editor > summary > small");
     expect(badge?.textContent).toBe("1");
   });

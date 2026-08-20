@@ -197,6 +197,7 @@ class MetadataSchemaInheritanceMixin:
             "body_editor",
             "body_language",
             "body_shape",
+            "opens_in",
             "default_body",
             "default_inputs",
             "color",

@@ -836,6 +836,12 @@ export type EntryTypeDefinition = {
   // None → fall back to (none if !has_body, code if body_editor=="code",
   // else prose). See decisions-node-editor-body-spec.
   body_shape?: BodyShape | null;
+  // Class-level, inherited down the parent chain (like has_body/body_shape).
+  // The surface a node of this type opens in: "editor" = a NodeEditor with a
+  // metadata rail (the only surface that can host a Conversations list / be
+  // an offer_on target); "tree_container"/"board"/"dialog" are non-editor
+  // surfaces. Default "editor".
+  opens_in?: "editor" | "tree_container" | "board" | "dialog";
   // Type-level palette swatch id. Inherits from parent unless set.
   // Resolves to a hex via the machine palette. See colors.ts.
   color?: string | null;

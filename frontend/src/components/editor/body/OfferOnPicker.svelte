@@ -41,7 +41,9 @@
   // Count the directly-chosen host targets, not the raw array — so a stale
   // non-host id left by an older picker (which renders no row) can't inflate the
   // badge, and a parent "all" target counts as one, not once per covered child.
-  const selectedCount = $derived(rows.filter((row) => row.state === "checked").length);
+  const selectedCount = $derived(
+    rows.filter((row) => row.type === "target" && row.state === "checked").length,
+  );
 
   // Native checkboxes have no `indeterminate` attribute — set it imperatively.
   // Mirrors NodePickerConfigEditor's action so the tri-state parent reads right.
@@ -54,7 +56,7 @@
     };
   }
 
-  function toggle(row: OfferOnRow): void {
+  function toggle(row: Extract<OfferOnRow, { type: "target" }>): void {
     // "covered" rows are offered via an ancestor — not independently editable.
     if (readOnly || row.state === "covered") return;
     offerOn =
@@ -74,22 +76,26 @@
     <p class="muted offer-on-empty">No subject types defined yet.</p>
   {:else}
     <div class="offer-on-tree" role="group" aria-label="Show in ＋New on">
-      {#each rows as row (row.id)}
-        <label
-          class="offer-on-row"
-          class:covered={row.state === "covered"}
-          style="--depth: {row.depth}"
-          title={row.id}
-        >
-          <input
-            type="checkbox"
-            checked={row.state === "checked" || row.state === "covered"}
-            use:indeterminateBinding={row.state === "indeterminate"}
-            disabled={readOnly || row.state === "covered"}
-            onchange={() => toggle(row)}
-          />
-          <span class="offer-on-row-name" class:root={row.depth === 0}>{row.name}</span>
-        </label>
+      {#each rows as row (row.type === "header" ? `h:${row.kind}` : `t:${row.id}`)}
+        {#if row.type === "header"}
+          <div class="offer-on-kind-header">{row.label}</div>
+        {:else}
+          <label
+            class="offer-on-row"
+            class:covered={row.state === "covered"}
+            style="--depth: {row.depth}"
+            title={row.id}
+          >
+            <input
+              type="checkbox"
+              checked={row.state === "checked" || row.state === "covered"}
+              use:indeterminateBinding={row.state === "indeterminate"}
+              disabled={readOnly || row.state === "covered"}
+              onchange={() => toggle(row)}
+            />
+            <span class="offer-on-row-name" class:root={row.depth === 0}>{row.name}</span>
+          </label>
+        {/if}
       {/each}
     </div>
   {/if}
@@ -132,6 +138,20 @@
   }
   .offer-on-tree {
     margin: 6px 0 2px;
+  }
+  /* Section header per kind — quiet, non-selectable, same treatment as
+     NodePickerConfigEditor's per-kind tree bar. */
+  .offer-on-kind-header {
+    padding: 4px 6px 2px;
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-3);
+  }
+  .offer-on-kind-header:not(:first-child) {
+    margin-top: 4px;
+    border-top: 1px solid var(--divider);
   }
   /* Left-aligned, scannable rows; hierarchy shown by indent (depth). The raw
      entry_type id lives in the row `title`, not a chip — the human name carries

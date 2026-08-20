@@ -180,6 +180,9 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "parent": "research:base",
             "fields": [],
             "has_body": False,
+            # A research topic is a tree container (folder-like grouping node),
+            # not something that opens in a NodeEditor.
+            "opens_in": "tree_container",
         },
         "research:note": {
             # Research note — prose body + tags. Aliases / related_entries
@@ -206,6 +209,9 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             # deal `subject` gets on chat:chat_session. Unset ⇒ reusable template.
             "fields": ["target_entity"],
             "has_body": False,
+            # Mutation sets are authored/applied through a dialog, not a
+            # NodeEditor.
+            "opens_in": "dialog",
         },
         "plot:base": {
             # Abstract root for the `plot` kind, mirroring lore:base / prompt:base
@@ -295,6 +301,8 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "parent": "plot:base",
             "fields": [],
             "has_body": False,
+            # The plot board opens as its own canvas surface, not a NodeEditor.
+            "opens_in": "board",
         },
         "prompt:base": {
             "name": "Prompt",

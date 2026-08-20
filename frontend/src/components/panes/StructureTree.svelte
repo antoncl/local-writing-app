@@ -340,7 +340,7 @@
 
 {#snippet addMenu({ parentId, close }: { parentId: string | null; close: () => void })}
   <span class="row-add-popover-heading">{parentId === null ? "Add at root" : "Add child"}</span>
-  <NodeList isEmpty={false}>
+  <NodeList density="dense" isEmpty={false}>
     {#each entryTypeChoicesByKind(schema, config.kind) as choice (choice.id)}
       <NodeRow title={choice.name} onClick={() => { addTreeChild(parentId, choice.id); close(); }} />
     {/each}

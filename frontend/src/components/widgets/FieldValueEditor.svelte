@@ -44,6 +44,9 @@
      *  value (mutation rows, view params) leave it false and keep the 2-state
      *  toggle, so an untouched row never *looks* unset while saving `false`. */
     allowUnset?: boolean;
+    /** Rail-embedded: forwarded to ReferencePicker so a ref field's picker drops
+     *  its duplicate titled header (the rail already shows the label, #1216). */
+    embedded?: boolean;
     ariaLabel?: string;
     loreEntries?: LoreEntrySummary[];
     promptEntries?: PromptEntrySummary[];
@@ -71,6 +74,7 @@
     onChange,
     readOnly = false,
     allowUnset = false,
+    embedded = false,
     ariaLabel,
     loreEntries = [],
     promptEntries = [],
@@ -162,6 +166,7 @@
     {value}
     ariaLabel={label}
     {allowUnset}
+    {embedded}
     {loreEntries}
     {promptEntries}
     {structure}
@@ -181,6 +186,7 @@
 {:else if field.type === "entity_ref" || field.type === "entity_ref_list"}
   <ReferencePicker
     {field}
+    {embedded}
     value={metadataReferenceValue(field, value)}
     excludeId={excludeId}
     ariaLabel={label}

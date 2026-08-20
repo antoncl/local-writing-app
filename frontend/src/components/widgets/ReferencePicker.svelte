@@ -45,6 +45,12 @@
     // Read-only display (#64): resolved reference rows stay visible + navigable,
     // but the Add/Change trigger and per-row remove buttons are hidden.
     readOnly = false,
+    // Rail-embedded (#1216): the metadata rail already prints the field's icon +
+    // label on the row, so the picker drops its own titled header (which
+    // otherwise repeats the label) and shows just the caret/count/add strip.
+    // Off everywhere else — standalone surfaces (chat diff, draft card) rely on
+    // the picker's own title.
+    embedded = false,
     // In-memory data sources used by the embedded NodePicker.
     structure = null,
     // Research tree (sibling to manuscript) — threaded to the picker.
@@ -61,6 +67,7 @@
     excludeId?: string | null;
     ariaLabel?: string;
     readOnly?: boolean;
+    embedded?: boolean;
     structure?: StructureDocument | null;
     researchStructure?: StructureDocument | null;
     loreEntries?: LoreEntrySummary[];
@@ -200,47 +207,77 @@
   }
 </script>
 
-<section class="reference-picker" aria-label={ariaLabel}>
-  <NodeRow
-    title={ariaLabel || "References"}
-    groupHeader
-    collapsed={!expanded}
-    onClick={() => (expanded = !expanded)}
-  >
-    {#snippet leading()}
-      <GroupCaret collapsed={!expanded} />
-    {/snippet}
-    {#snippet trailing()}
-      <CountPill count={selectedRefs.length} />
-      {#if !readOnly}
-        <span class="reference-picker-trigger">
-          <NodePicker
-            hideChips
-            config={pickerConfig}
-            value={selectedRefs.filter((r) => !r.missing)}
-            excludeIds={pickerExcludeIds}
-            affordance={multi || selectedRefs.length === 0 ? "add" : "change"}
-            label={ariaLabel}
-            structure={structure}
-            researchStructure={researchStructure}
-            loreEntries={loreEntries}
-            promptEntries={promptEntries}
-            plotEntries={$plotlineEntriesStore}
-            assistantEntries={$assistantEntriesStore}
-            onChange={handlePickerChange}
-          />
-        </span>
-      {/if}
-    {/snippet}
-    {#snippet nested()}
-      <ViewNodeList result={nodeSet(refNodes)} mode="tree" row={refRow}>
-        {#snippet whenEmpty()}
-          <p class="muted">No references.</p>
-        {/snippet}
-      </ViewNodeList>
-    {/snippet}
-  </NodeRow>
+<section class="reference-picker" class:embedded aria-label={ariaLabel}>
+  {#if embedded}
+    <!-- Rail-embedded (#1216): the field row already shows the label, so skip
+         the picker's titled header and render just the caret/count/add strip —
+         no duplicate label, expand/collapse preserved. -->
+    <div class="reference-picker-head">
+      <button
+        type="button"
+        class="reference-picker-toggle"
+        aria-expanded={expanded}
+        aria-label={`${expanded ? "Collapse" : "Expand"} ${ariaLabel || "references"}`}
+        onclick={() => (expanded = !expanded)}
+      >
+        <GroupCaret collapsed={!expanded} />
+        <CountPill count={selectedRefs.length} />
+      </button>
+      {@render addTrigger()}
+    </div>
+    {#if expanded}
+      {@render refList()}
+    {/if}
+  {:else}
+    <NodeRow
+      title={ariaLabel || "References"}
+      groupHeader
+      collapsed={!expanded}
+      onClick={() => (expanded = !expanded)}
+    >
+      {#snippet leading()}
+        <GroupCaret collapsed={!expanded} />
+      {/snippet}
+      {#snippet trailing()}
+        <CountPill count={selectedRefs.length} />
+        {@render addTrigger()}
+      {/snippet}
+      {#snippet nested()}
+        {@render refList()}
+      {/snippet}
+    </NodeRow>
+  {/if}
 </section>
+
+{#snippet addTrigger()}
+  {#if !readOnly}
+    <span class="reference-picker-trigger">
+      <NodePicker
+        hideChips
+        config={pickerConfig}
+        value={selectedRefs.filter((r) => !r.missing)}
+        excludeIds={pickerExcludeIds}
+        affordance={multi || selectedRefs.length === 0 ? "add" : "change"}
+        label={ariaLabel}
+        structure={structure}
+        researchStructure={researchStructure}
+        loreEntries={loreEntries}
+        promptEntries={promptEntries}
+        plotEntries={$plotlineEntriesStore}
+        assistantEntries={$assistantEntriesStore}
+        onChange={handlePickerChange}
+      />
+    </span>
+  {/if}
+{/snippet}
+
+{#snippet refList()}
+  <ViewNodeList result={nodeSet(refNodes)} mode="tree" row={refRow}>
+    {#snippet whenEmpty()}
+      <p class="muted">No references.</p>
+    {/snippet}
+  </ViewNodeList>
+{/snippet}
 
 {#snippet refRow(ref: RefNode, ctx: RowCtx<RefNode>)}
   {@const hex = ref.missing ? null : pillHexFor(ref)}
@@ -275,6 +312,24 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
+  }
+
+  /* Embedded (rail) header: a compact caret + count + add strip in place of the
+     titled group-header row, so the field label isn't repeated (#1216). */
+  .reference-picker-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .reference-picker-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0;
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
   }
 
   /* Matches the backlinks pill recipe so the two surfaces share a vocabulary.

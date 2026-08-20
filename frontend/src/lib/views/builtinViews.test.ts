@@ -9,18 +9,13 @@ const CHAT_SCHEMA = {
   fields: {},
 } as unknown as MetadataSchema;
 
-// A schema carrying both the chat root and the prompt types the lift resolves a
-// seed disposition against — general (chat_panel) vs revise:entry (chat_panel +
-// commit → "Revise entities"). Used for the end-to-end evaluate below.
+// A schema carrying the chat root — the seed disposition the lift resolves against
+// is read off each prompt INSTANCE's own `context_strategy` now (ADR-0065 S3), set
+// directly on the fixtures below: a plain general (chat) vs one that commits
+// (→ "Revise entities"). Used for the end-to-end evaluate below.
 const EVAL_SCHEMA = {
   entry_types: {
     "chat:chat_session": { name: "Chat", kind: "chat" },
-    "prompt:general": { name: "General", kind: "prompt", prompt: { context_strategy: {} } },
-    "prompt:revise:entry": {
-      name: "Revise entry",
-      kind: "prompt",
-      prompt: { context_strategy: { output: { handler: "extract_to_node", commit: { review: "visual_diff" } } } },
-    },
   },
   fields: {
     title: { name: "Title", type: "text", category: "intrinsic" },
@@ -68,7 +63,15 @@ describe("builtinViews (ADR-0051 S6 follow-up)", () => {
 describe("Openable chats — evaluated over lifted chats end to end (#960)", () => {
   const prompts: PromptEntrySummary[] = [
     { id: "p_general", title: "General", body: "", entry_type: "prompt:general", metadata: {}, inputs: [] },
-    { id: "p_revise", title: "Revise", body: "", entry_type: "prompt:revise:entry", metadata: {}, inputs: [] },
+    {
+      id: "p_revise",
+      title: "Revise",
+      body: "",
+      entry_type: "prompt:general",
+      metadata: {},
+      inputs: [],
+      context_strategy: { output: { handler: "extract_to_node", commit: { review: "visual_diff" } } },
+    },
   ] as unknown as PromptEntrySummary[];
   const chat = (id: string, promptId: string): ChatSessionSummary =>
     ({ id, title: id, entry_type: "chat:chat_session", subject: "", prompt_entry_id: promptId }) as unknown as ChatSessionSummary;

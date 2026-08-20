@@ -74,7 +74,7 @@ class BuiltinLibraryTests(unittest.TestCase):
                     title="Roleplay",
                     body="hijacked",
                     base_revision="",
-                    entry_type="prompt:roleplay",
+                    entry_type="prompt:general",
                     metadata={},
                 ),
             )
@@ -130,7 +130,7 @@ class BuiltinLibraryTests(unittest.TestCase):
                     title="Roleplay",
                     body="hijacked",
                     base_revision="",
-                    entry_type="prompt:roleplay",
+                    entry_type="prompt:general",
                     metadata={},
                 ),
             )

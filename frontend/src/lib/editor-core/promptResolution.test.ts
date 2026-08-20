@@ -9,27 +9,42 @@ import {
   promptOnAccept,
   type PromptResolutionContext,
 } from "@/lib/editor-core/promptResolution";
-import type { MetadataSchema, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
+import type {
+  MetadataSchema,
+  PromptContextStrategy,
+  PromptEntrySummary,
+  PromptInputDefinition,
+} from "@/lib/types";
 
-function prompt(id: string, entryType: string): PromptEntrySummary {
-  return { id, title: id, body: "", entry_type: entryType, metadata: {}, inputs: [] };
+// ADR-0065 S3: invocability + surface are the INSTANCE's own `context_strategy`,
+// never a schema-type lookup — so a fixture prompt carries its strategy directly.
+function prompt(
+  id: string,
+  entryType: string,
+  contextStrategy?: PromptContextStrategy | null,
+): PromptEntrySummary {
+  return {
+    id,
+    title: id,
+    body: "",
+    entry_type: entryType,
+    metadata: {},
+    inputs: [],
+    context_strategy: contextStrategy ?? null,
+  };
 }
 
-// prompt:a / prompt:b use the inline handler (cursor surface); prompt:chat is a
-// general conversation (an empty output block), so the surface filter partitions
-// them and the hidden filter removes one.
-const schema = {
-  entry_types: {
-    "prompt:a": { prompt: { context_strategy: { output: { handler: "inline" } } } },
-    "prompt:b": { prompt: { context_strategy: { output: { handler: "inline" } } } },
-    "prompt:chat": { prompt: { context_strategy: {} } },
-  },
-} as unknown as MetadataSchema;
+// A placeholder, non-null schema — `metadataSchema` only gates filterPromptRoster's
+// "no schema yet" short-circuit here; surface/invocability no longer reads it.
+const schema = { entry_types: {}, fields: {} } as unknown as MetadataSchema;
 
 function ctx(over: Partial<PromptResolutionContext> = {}): PromptResolutionContext {
   return {
     metadataSchema: schema,
-    promptEntries: [prompt("p-a", "prompt:a"), prompt("p-b", "prompt:b")],
+    promptEntries: [
+      prompt("p-a", "prompt:general", { output: { handler: "inline" } }),
+      prompt("p-b", "prompt:general", { output: { handler: "inline" } }),
+    ],
     loreEntries: [],
     availableScenes: [],
     ...over,
@@ -37,37 +52,22 @@ function ctx(over: Partial<PromptResolutionContext> = {}): PromptResolutionConte
 }
 
 describe("promptOnAccept — the declared accept-time mark-stamp (#954)", () => {
-  // roleplay declares the capability; a roleplay sub-type inherits it (resolved
-  // schema carries it); continuation declares none.
-  const onAcceptSchema = {
-    entry_types: {
-      "prompt:continuation": { prompt: { context_strategy: { output: { handler: "inline" } } } },
-      "prompt:roleplay": {
-        prompt: {
-          context_strategy: {
-            output: { handler: "inline", on_accept: { mark: "character", from_input: "character" } },
-          },
-        },
-      },
-    },
-  } as unknown as MetadataSchema;
-  const rpCtx = (): PromptResolutionContext => ({
-    metadataSchema: onAcceptSchema,
-    promptEntries: [],
-    loreEntries: [],
-    availableScenes: [],
-  });
-
-  it("returns the declared mark + fromInput for a prompt whose type declares on_accept", () => {
-    expect(promptOnAccept(rpCtx(), prompt("p", "prompt:roleplay"))).toEqual({
+  // roleplay declares the capability on its own instance; a plain inline prompt
+  // (was "continuation") declares none.
+  it("returns the declared mark + fromInput for a prompt whose instance declares on_accept", () => {
+    const roleplay = prompt("p", "prompt:general", {
+      output: { handler: "inline", on_accept: { mark: "character", from_input: "character" } },
+    });
+    expect(promptOnAccept(ctx(), roleplay)).toEqual({
       mark: "character",
       fromInput: "character",
     });
   });
 
-  it("returns null for a prompt whose type declares no on_accept", () => {
-    expect(promptOnAccept(rpCtx(), prompt("p", "prompt:continuation"))).toBeNull();
-    expect(promptOnAccept(rpCtx(), null)).toBeNull();
+  it("returns null for a prompt whose instance declares no on_accept", () => {
+    const plainInline = prompt("p", "prompt:general", { output: { handler: "inline" } });
+    expect(promptOnAccept(ctx(), plainInline)).toBeNull();
+    expect(promptOnAccept(ctx(), null)).toBeNull();
   });
 });
 
@@ -129,6 +129,9 @@ describe("hidePromptEntries (ADR-0049 #682)", () => {
 // a character both the revise prompt and impersonate. `offer_on` (where a prompt
 // is offered) replaces the old inference from context_pick input targets.
 describe("offer_on filter (ADR-0054 §4/S4)", () => {
+  // Only the SUBJECT types need ancestry here (entryTypeIsA walks these) — the
+  // prompts' own invocation surface is now instance-driven (ADR-0065 S3), set
+  // directly on each `offered()` fixture below.
   const isaSchema = {
     entry_types: {
       "lore:base": {},
@@ -136,8 +139,6 @@ describe("offer_on filter (ADR-0054 §4/S4)", () => {
       "plot:base": {},
       "plot:card": { parent: "plot:base" },
       "plot:plotline": { parent: "plot:base" },
-      "prompt:chat": { prompt: { context_strategy: {} } },
-      "prompt:append": { prompt: { context_strategy: { output: { handler: "inline" } } } },
     },
   } as unknown as MetadataSchema;
 
@@ -151,8 +152,22 @@ describe("offer_on filter (ADR-0054 §4/S4)", () => {
     };
   }
 
-  function offered(id: string, entryType: string, offerOn: string[]): PromptEntrySummary {
-    return { id, title: id, body: "", entry_type: entryType, metadata: {}, inputs: [], offer_on: offerOn };
+  function offered(
+    id: string,
+    entryType: string,
+    offerOn: string[],
+    contextStrategy?: PromptContextStrategy | null,
+  ): PromptEntrySummary {
+    return {
+      id,
+      title: id,
+      body: "",
+      entry_type: entryType,
+      metadata: {},
+      inputs: [],
+      offer_on: offerOn,
+      context_strategy: contextStrategy ?? null,
+    };
   }
 
   // Chat prompts differing only by their offer_on allow-list.
@@ -205,7 +220,9 @@ describe("offer_on filter (ADR-0054 §4/S4)", () => {
     });
 
     it("excludes an inline (non-conversation) prompt even when its offer_on matches (eligibility axis)", () => {
-      const appendP = offered("p-app", "prompt:append", ["lore:character"]);
+      const appendP = offered("p-app", "prompt:general", ["lore:character"], {
+        output: { handler: "inline" },
+      });
       const c = isaCtx({ promptEntries: [appendP, impersonateP] });
       expect(promptEntriesOfferedOn(c, "lore:character").map((e) => e.id)).toEqual(["p-imp"]);
     });

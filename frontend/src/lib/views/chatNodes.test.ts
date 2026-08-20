@@ -1,22 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { chatSummariesToEvalNodes, seedDispositionFieldDef } from "./chatNodes";
-import type { ChatSessionSummary, MetadataSchema, PromptEntrySummary } from "@/lib/types";
+import type { ChatSessionSummary, MetadataSchema, PromptContextStrategy, PromptEntrySummary } from "@/lib/types";
 
-// A schema whose prompt types decide openability: the brainstorm declares a
-// `commit` (ADR-0054 §2), the plain chat does not.
+// A placeholder, non-null schema — openability is decided by each prompt
+// INSTANCE's own `context_strategy` now (ADR-0065 S3), set directly below: the
+// brainstorm declares a `commit` (ADR-0054 §2), the plain chat does not.
 const SCHEMA = {
-  entry_types: {
-    "prompt:general": { name: "General", kind: "prompt", prompt: { context_strategy: {} } },
-    "prompt:revise:entry": {
-      name: "Revise entry",
-      kind: "prompt",
-      prompt: { context_strategy: { output: { handler: "extract_to_node", commit: { review: "visual_diff" } } } },
-    },
-  },
+  entry_types: {},
   fields: {},
 } as unknown as MetadataSchema;
 
-function prompt(id: string, entryType: string): PromptEntrySummary {
+function prompt(
+  id: string,
+  entryType: string,
+  contextStrategy?: PromptContextStrategy | null,
+): PromptEntrySummary {
   return {
     id,
     title: id,
@@ -24,11 +22,16 @@ function prompt(id: string, entryType: string): PromptEntrySummary {
     entry_type: entryType,
     metadata: {},
     inputs: [],
+    context_strategy: contextStrategy ?? null,
     source_layer_id: "layer_project",
     source_layer_label: "Project",
     is_library: false,
   } as unknown as PromptEntrySummary;
 }
+
+const COMMIT_STRATEGY: PromptContextStrategy = {
+  output: { handler: "extract_to_node", commit: { review: "visual_diff" } },
+};
 
 function chat(id: string, promptId: string, subject = ""): ChatSessionSummary {
   return {
@@ -47,7 +50,7 @@ function chat(id: string, promptId: string, subject = ""): ChatSessionSummary {
 }
 
 describe("chatSummariesToEvalNodes (ADR-0051 S6 follow-up)", () => {
-  const prompts = [prompt("p_general", "prompt:general"), prompt("p_revise", "prompt:revise:entry")];
+  const prompts = [prompt("p_general", "prompt:general"), prompt("p_revise", "prompt:general", COMMIT_STRATEGY)];
 
   it("derives seed_disposition from the seeding prompt's disposition label", () => {
     const nodes = chatSummariesToEvalNodes(
@@ -81,7 +84,7 @@ describe("seedDispositionFieldDef — the designer computed field (#960)", () =>
     // The stamped values are exactly these choices, so a designer filter matches.
     const nodes = chatSummariesToEvalNodes(
       [chat("g", "p_general"), chat("b", "p_revise")],
-      [prompt("p_general", "prompt:general"), prompt("p_revise", "prompt:revise:entry")],
+      [prompt("p_general", "prompt:general"), prompt("p_revise", "prompt:general", COMMIT_STRATEGY)],
       SCHEMA,
     );
     const stamped = nodes.map((n) => n.metadata.seed_disposition);

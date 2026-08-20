@@ -37,7 +37,7 @@ class AIInvocationLogEndpointTests(unittest.TestCase):
             "/api/ai/invocations",
             json={
                 "prompt_entry_id": "prompt_1",
-                "prompt_entry_type": "prompt:continuation",
+                "prompt_entry_type": "prompt:general",
                 "scene_id": "scene_1",
                 "provider": "anthropic",
                 "model": "claude-opus-4-7",

@@ -820,10 +820,9 @@
   // The active prompt's `output` (ADR-0054): `.kind` is the disposition; a
   // `.commit` marks a brainstorm that extracts to its `entry` target
   // (`.commit.review` how it's reviewed, `.commit.fields` what it extracts).
-  let activeOutput = $derived(
-    metadataSchema?.entry_types[activePromptEntry?.entry_type ?? ""]?.prompt?.context_strategy
-      ?.output ?? null,
-  );
+  // Read off the prompt INSTANCE's own `context_strategy` (ADR-0065 S3) — never
+  // the entry-type's, which no longer carries per-prompt behavior.
+  let activeOutput = $derived(activePromptEntry?.context_strategy?.output ?? null);
   // The subject's entry_type when the revise target is a lore entity, else ""
   // (ADR-0055 §4a). A lore subject is time-travel-aware (ADR-0013), so only it
   // may stage a timeline mutation set; a scene / plot-card subject isn't in the

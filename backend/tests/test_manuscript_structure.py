@@ -242,10 +242,10 @@ class ManuscriptStructureTests(MetadataValidationBase):
         self.assertEqual(schema.entry_types["lore:character"].color, "slate-blue")
         self.assertEqual(schema.entry_types["lore:location"].color, "slate-blue")
         self.assertEqual(schema.entry_types["lore:item"].color, "slate-blue")
-        self.assertEqual(schema.entry_types["prompt:continuation"].color, "warm-brown")
+        # ADR-0065 S3 collapsed the sub-typed prompt hierarchy down to
+        # base/general/snippet — both inherit `color` through one parent link.
         self.assertEqual(schema.entry_types["prompt:general"].color, "warm-brown")
-        # Inherited through two parent links (roleplay → continuation → prompt).
-        self.assertEqual(schema.entry_types["prompt:roleplay"].color, "warm-brown")
+        self.assertEqual(schema.entry_types["prompt:snippet"].color, "warm-brown")
 
     def test_counter_among_siblings_for_acts(self) -> None:
         from app.models import CreateStructureNodeRequest

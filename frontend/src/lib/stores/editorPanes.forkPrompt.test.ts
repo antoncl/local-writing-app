@@ -15,7 +15,12 @@ const LIBRARY: PromptEntry = {
   title: "Roleplay",
   body: "shipped body",
   revision: "",
-  entry_type: "prompt:roleplay",
+  // ADR-0065 S3: roleplay collapsed to prompt:general, its old behavior now an
+  // instance context_strategy (inline + the accept-time character mark-stamp).
+  entry_type: "prompt:general",
+  context_strategy: {
+    output: { handler: "inline", on_accept: { mark: "character", from_input: "character" } },
+  },
   metadata: {},
   inputs: [],
   computed_metadata: {},

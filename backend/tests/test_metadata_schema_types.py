@@ -434,13 +434,12 @@ class MetadataSchemaTypeTests(MetadataValidationBase):
         self.assertEqual(scene.body_language, "markdown")
 
     def test_prompt_subtypes_inherit_code_and_jinja2(self) -> None:
+        # ADR-0065 S3 collapsed the concrete sub-types (continuation/roleplay/
+        # revise/revise:scene/revise:entry/revise:scene_summary) into instance
+        # `context_strategy` — only these three remain.
         schema = self.service.read_metadata_schema()
         for type_id in (
             "prompt:base",
-            "prompt:continuation",
-            "prompt:revise",
-            "prompt:revise:scene",
-            "prompt:revise:entry",
             "prompt:general",
             "prompt:snippet",
         ):

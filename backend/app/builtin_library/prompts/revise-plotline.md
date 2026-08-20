@@ -1,7 +1,7 @@
 ---
 id: builtin-revise-plotline
 title: Revise plotline
-entry_type: prompt:revise:entry
+entry_type: prompt:general
 offer_on:
 - plot:plotline
 inputs:
@@ -16,6 +16,11 @@ inputs:
         type: plot:plotline
     multiple: false
     presets: []
+context_strategy:
+  output:
+    handler: extract_to_node
+    commit:
+      review: visual_diff
 ---
 
 {% set e = entry(inputs.entry) %}

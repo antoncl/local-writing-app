@@ -1018,12 +1018,31 @@ class DefaultRoleResolutionTests(unittest.TestCase):
 
     def test_base_types_default_to_system(self) -> None:
         self.assertEqual(self._resolve("prompt:general"), "system")
-        self.assertEqual(self._resolve("prompt:continuation"), "system")
+        # ADR-0065 S3: prompt:snippet declares no default_role of its own, and
+        # nothing up its chain does either — falls back to the universal default.
+        self.assertEqual(self._resolve("prompt:snippet"), "system")
 
     def test_child_inherits_base_envelope_via_ancestry(self) -> None:
-        # revise:entry declares no default_role of its own; it inherits from the
-        # abstract prompt:revise up the parent chain.
-        self.assertEqual(self._resolve("prompt:revise:entry"), "system")
+        # A schema-declared child that sets no default_role of its own inherits
+        # the value declared up its `parent:` chain, not just the fallback.
+        schema_path = self.root / "metadata.schema.yaml"
+        data = self.service._read_yaml(schema_path)
+        data.setdefault("entry_types", {})["prompt:custom_parent"] = {
+            "name": "Custom Parent",
+            "kind": "prompt",
+            "parent": "prompt:base",
+            "abstract": True,
+            "has_body": True,
+            "prompt": {"default_role": "assistant"},
+        }
+        data["entry_types"]["prompt:custom_child"] = {
+            "name": "Custom Child",
+            "kind": "prompt",
+            "parent": "prompt:custom_parent",
+            "has_body": True,
+        }
+        self.service._write_yaml(schema_path, data)
+        self.assertEqual(self._resolve("prompt:custom_child"), "assistant")
 
     def test_empty_and_unknown_fall_back_to_system(self) -> None:
         self.assertEqual(self._resolve(""), "system")

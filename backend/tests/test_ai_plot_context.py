@@ -159,12 +159,13 @@ class RevisePlotCardPromptTests(_PlotAiContextBase):
     def test_the_prompt_ships_in_the_library_as_a_commit_brainstorm(self) -> None:
         entries = {e.id: e for e in self.service.list_prompt_entries().entries}
         self.assertIn(_PROMPT_ID, entries)
-        # The plot-card brainstorm is an INSTANCE of `prompt:revise:entry` (#954), not
-        # its own sub-type: its commit disposition is identical, and its plot-card
-        # target/body are per-instance (front matter). Same move as `impersonate`.
-        self.assertEqual(entries[_PROMPT_ID].entry_type, "prompt:revise:entry")
-        schema = self.service.read_metadata_schema()
-        output = schema.entry_types["prompt:revise:entry"].prompt.context_strategy.output
+        # The plot-card brainstorm is a `prompt:general` carrying an instance
+        # `context_strategy` (#954, ADR-0065 S3), not its own sub-type: its commit
+        # disposition is identical to `revise-entry`/`revise-plotline`, and its
+        # plot-card target/body are per-instance (front matter). Same move as
+        # `impersonate`.
+        self.assertEqual(entries[_PROMPT_ID].entry_type, "prompt:general")
+        output = self.service.read_prompt_entry(_PROMPT_ID).context_strategy.output
         # ADR-0054 §2 / ADR-0065: the brainstorm is the `extract_to_node` handler + a
         # `commit`, not a distinct disposition.
         self.assertEqual(output.handler, "extract_to_node")

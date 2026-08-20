@@ -14,7 +14,13 @@ import Chats from "./Chats.svelte";
 import { defaultView } from "@/lib/views/evaluateView";
 import { builtinViews } from "@/lib/views/builtinViews";
 import { metadataSchemaStore } from "@/lib/stores/schema";
-import type { ChatSessionSummary, MetadataSchema, PromptEntrySummary, ViewSpec } from "@/lib/types";
+import type {
+  ChatSessionSummary,
+  MetadataSchema,
+  PromptContextStrategy,
+  PromptEntrySummary,
+  ViewSpec,
+} from "@/lib/types";
 
 // The chat kind's root type + its `subject` field. `defaultView("chat", …)`
 // resolves the roster to `descendants_of chat:chat_session` off this root; drop
@@ -112,21 +118,20 @@ describe("Chats pane — designable view (ADR-0051 S6)", () => {
 });
 
 describe("Chats pane — Openable built-in view (ADR-0051 S6 follow-up)", () => {
-  // Extend the schema with the two prompt types that decide openability.
+  // Only the chat root is needed now — openability is decided by each seeding
+  // prompt INSTANCE's own `context_strategy` (ADR-0065 S3), set directly below.
   const OPENABLE_SCHEMA = {
     entry_types: {
       "chat:chat_session": { name: "Chat", kind: "chat" },
-      "prompt:general": { name: "General", kind: "prompt", prompt: { context_strategy: {} } },
-      "prompt:revise:entry": {
-        name: "Revise entry",
-        kind: "prompt",
-        prompt: { context_strategy: { output: { handler: "extract_to_node", commit: { review: "visual_diff" } } } },
-      },
     },
     fields: {},
   } as unknown as MetadataSchema;
 
-  function prompt(id: string, entryType: string): PromptEntrySummary {
+  const COMMIT_STRATEGY: PromptContextStrategy = {
+    output: { handler: "extract_to_node", commit: { review: "visual_diff" } },
+  };
+
+  function prompt(id: string, entryType: string, contextStrategy?: PromptContextStrategy | null): PromptEntrySummary {
     return {
       id,
       title: id,
@@ -134,6 +139,7 @@ describe("Chats pane — Openable built-in view (ADR-0051 S6 follow-up)", () => 
       entry_type: entryType,
       metadata: {},
       inputs: [],
+      context_strategy: contextStrategy ?? null,
       source_layer_id: "layer_project",
       source_layer_label: "Project",
       is_library: false,
@@ -154,7 +160,7 @@ describe("Chats pane — Openable built-in view (ADR-0051 S6 follow-up)", () => 
         chat("c_free", "Freeform Chat"), // no seeding prompt
       ],
       spec,
-      [prompt("p_general", "prompt:general"), prompt("p_revise", "prompt:revise:entry")],
+      [prompt("p_general", "prompt:general"), prompt("p_revise", "prompt:general", COMMIT_STRATEGY)],
     );
     expect(screen.getByText("General Chat")).toBeInTheDocument();
     expect(screen.getByText("Freeform Chat")).toBeInTheDocument();

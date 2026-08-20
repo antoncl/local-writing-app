@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from app.models.base import (
     MetadataValue,
 )
-from app.models.schema import PromptInputDefinition
+from app.models.schema import PromptContextStrategy, PromptInputDefinition
 
 
 class StructureNode(BaseModel):
@@ -624,6 +624,16 @@ class PromptEntrySummary(BaseModel):
     # handler — the only ones launched from that menu); inert on the others.
     # Intentionally lenient — unknown ids simply never match, like `commit.fields`.
     offer_on: list[str] = Field(default_factory=list)
+    # The prompt's behavior contract (ADR-0065 S3): which OutputHandler runs its
+    # result, plus the optional commit / on_accept capability. Was on the
+    # entry-type's PromptEntryTypeExtras; now lives per-instance where the body
+    # that assumes it lives, so the sub-type taxonomy could collapse to
+    # {base, general, snippet}. Its `output` picks the handler; absent (or no
+    # handler) = a plain conversation. Invocability itself is the entry_type — a
+    # `prompt:snippet` is import-only — not the presence of this key (the writer
+    # drops an empty one). Dispatch reads it here, never off the type;
+    # round-tripped through front-matter on save exactly like `inputs`/`offer_on`.
+    context_strategy: PromptContextStrategy | None = None
     source_layer_id: str = ""
     source_layer_label: str = ""
     # Whether this prompt is shipped by the app-owned built-in Library (#674 /
@@ -671,6 +681,9 @@ class PromptEntry(BaseModel):
     # See PromptEntrySummary.offer_on (ADR-0054 §4/S4) — carried on the open
     # document so a clone/save round-trips it verbatim.
     offer_on: list[str] = Field(default_factory=list)
+    # See PromptEntrySummary.context_strategy (ADR-0065 S3) — the instance behavior
+    # contract, carried on the open document so a clone/save round-trips it.
+    context_strategy: PromptContextStrategy | None = None
     computed_metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     source_layer_id: str = ""
     source_layer_label: str = ""
@@ -700,6 +713,10 @@ class SavePromptEntryRequest(BaseModel):
     # ADR-0054 §4/S4: carried on save so an edit does not strip the prompt's
     # "show this prompt on…" allow-list (a field with no authoring UI yet, S4b).
     offer_on: list[str] = Field(default_factory=list)
+    # ADR-0065 S3: carried on save so an edit does not strip the prompt's behavior
+    # contract (the instance context_strategy). No authoring UI yet — that is D's
+    # Setup tab — so a save round-trips whatever the front-matter held.
+    context_strategy: PromptContextStrategy | None = None
 
 
 class MutationSetRow(BaseModel):

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { MetadataSchema, PromptEntrySummary } from "@/lib/types";
+import type { MetadataSchema, PromptContextStrategy, PromptEntrySummary } from "@/lib/types";
 import type { PromptResolutionContext } from "@/lib/editor-core/promptResolution";
 import {
   CHAT_DISPOSITION_LABEL,
@@ -11,29 +11,19 @@ import {
   REVISE_ENTITIES_DISPOSITION_LABEL,
 } from "@/lib/views/promptNodes";
 
-// Each prompt sub-type carries a `context_strategy.output` (ADR-0054 §1/§2); the
-// disposition is read off it. A type with no output is a snippet (no invocation
-// contract). Roleplay inherits continuation's append_to_body — the schema the
-// frontend receives resolves that inheritance, so we model it here as if resolved.
-const SCHEMA = {
-  entry_types: {
-    "prompt:continuation": { name: "Continuation", prompt: { context_strategy: { output: { handler: "inline" } } } },
-    "prompt:revise:scene": { name: "Revise scene", prompt: { context_strategy: { output: { handler: "inline", destination: "selection" } } } },
-    "prompt:general": { name: "General", prompt: { context_strategy: {} } },
-    "prompt:revise:entry": {
-      name: "Revise entry",
-      prompt: { context_strategy: { output: { handler: "extract_to_node", commit: { review: "visual_diff" } } } },
-    },
-    // A snippet carries NO context_strategy — that absence (vs general's empty one) is
-    // what makes it non-invocable (ADR-0065).
-    "prompt:snippet": { name: "Snippet" },
-    "prompt:broken": { name: "Broken", prompt: { context_strategy: { output: { handler: "who_knows" } } } },
-  },
-  fields: {},
-} as unknown as MetadataSchema;
+// ADR-0065 S3: each prompt INSTANCE carries its own `context_strategy.output`; the
+// disposition is read off it, never a schema-type lookup. Invocability is the
+// entry_type — only `prompt:snippet` is uninvocable, whatever its (usually absent)
+// config; every other entry_type defaults to a plain conversation with no strategy.
+const SCHEMA = { entry_types: {}, fields: {} } as unknown as MetadataSchema;
 
-function prompt(id: string, entry_type: string, title = id): PromptEntrySummary {
-  return { id, title, body: "", entry_type, metadata: {}, inputs: [] };
+function prompt(
+  id: string,
+  entry_type: string,
+  title = id,
+  contextStrategy?: PromptContextStrategy | null,
+): PromptEntrySummary {
+  return { id, title, body: "", entry_type, metadata: {}, inputs: [], context_strategy: contextStrategy ?? null };
 }
 
 const ctx: PromptResolutionContext = {
@@ -43,37 +33,56 @@ const ctx: PromptResolutionContext = {
   availableScenes: [],
 };
 
+const INLINE_CURSOR: PromptContextStrategy = { output: { handler: "inline" } };
+const INLINE_SELECTION: PromptContextStrategy = {
+  output: { handler: "inline", destination: "selection" },
+};
+const COMMIT: PromptContextStrategy = {
+  output: { handler: "extract_to_node", commit: { review: "visual_diff" } },
+};
+const BROKEN: PromptContextStrategy = { output: { handler: "who_knows" } };
+
 describe("dispositionFor — the five shelves (#951)", () => {
   it("maps each output disposition to its shelf", () => {
-    expect(dispositionFor(ctx, prompt("a", "prompt:continuation")).label).toBe("Continue");
-    expect(dispositionFor(ctx, prompt("b", "prompt:revise:scene")).label).toBe("Revise prose");
+    expect(dispositionFor(ctx, prompt("a", "prompt:general", "a", INLINE_CURSOR)).label).toBe("Continue");
+    expect(dispositionFor(ctx, prompt("b", "prompt:general", "b", INLINE_SELECTION)).label).toBe(
+      "Revise prose",
+    );
     expect(dispositionFor(ctx, prompt("c", "prompt:general")).label).toBe("Chat");
-    expect(dispositionFor(ctx, prompt("d", "prompt:revise:entry")).label).toBe("Revise entities");
+    expect(dispositionFor(ctx, prompt("d", "prompt:general", "d", COMMIT)).label).toBe(
+      "Revise entities",
+    );
   });
 
   it("shelves a no-contract prompt (and any unregistered handler) under Snippets", () => {
-    // A snippet declares no output — the definition of 'no invocation contract'.
+    // A snippet is uninvocable by entry_type alone (ADR-0065 S3) — the definition
+    // of 'no invocation contract', regardless of context_strategy.
     expect(dispositionFor(ctx, prompt("e", "prompt:snippet")).label).toBe("Snippets");
-    // A misconfigured concrete type (a non-empty but unregistered handler) can't be
+    // A misconfigured instance (a non-empty but unregistered handler) can't be
     // invoked either → Snippets, not a crash.
-    expect(dispositionFor(ctx, prompt("f", "prompt:broken")).label).toBe("Snippets");
-    // An entry_type absent from the schema resolves to no output → Snippets.
-    expect(dispositionFor(ctx, prompt("g", "prompt:ghost")).label).toBe("Snippets");
+    expect(dispositionFor(ctx, prompt("f", "prompt:general", "f", BROKEN)).label).toBe("Snippets");
+    // A snippet stays uninvocable even if it happens to carry a context_strategy —
+    // invocability is the entry_type, never the presence/shape of the strategy.
+    expect(dispositionFor(ctx, prompt("g", "prompt:snippet", "g", INLINE_CURSOR)).label).toBe(
+      "Snippets",
+    );
   });
 
   it("has commit distinguish Revise entities from a plain Chat on the same chat_panel", () => {
     expect(dispositionFor(ctx, prompt("c", "prompt:general")).label).toBe("Chat");
-    expect(dispositionFor(ctx, prompt("d", "prompt:revise:entry")).label).toBe("Revise entities");
+    expect(dispositionFor(ctx, prompt("d", "prompt:general", "d", COMMIT)).label).toBe(
+      "Revise entities",
+    );
   });
 });
 
 describe("promptSummariesToGroupNodes — the pane lift", () => {
   it("stamps the disposition label into metadata for group_by to bucket on", () => {
-    const [node] = promptSummariesToGroupNodes([prompt("a", "prompt:continuation")], SCHEMA);
+    const [node] = promptSummariesToGroupNodes([prompt("a", "prompt:general", "a", INLINE_CURSOR)], SCHEMA);
     expect(node.metadata[DISPOSITION_FIELD]).toBe("Continue");
     // The summary's own fields survive the lift.
     expect(node.id).toBe("a");
-    expect(node.entry_type).toBe("prompt:continuation");
+    expect(node.entry_type).toBe("prompt:general");
   });
 
   it("clusters the roster into shelf order (first-seen == rank), preserving intra-shelf order", () => {
@@ -81,10 +90,10 @@ describe("promptSummariesToGroupNodes — the pane lift", () => {
     const roster = [
       prompt("snip", "prompt:snippet"),
       prompt("gen", "prompt:general"),
-      prompt("cont-b", "prompt:continuation", "Beta"),
-      prompt("brainstorm", "prompt:revise:entry"),
-      prompt("cont-a", "prompt:continuation", "Alpha"),
-      prompt("revise", "prompt:revise:scene"),
+      prompt("cont-b", "prompt:general", "Beta", INLINE_CURSOR),
+      prompt("brainstorm", "prompt:general", "brainstorm", COMMIT),
+      prompt("cont-a", "prompt:general", "Alpha", INLINE_CURSOR),
+      prompt("revise", "prompt:general", "revise", INLINE_SELECTION),
     ];
     const order = promptSummariesToGroupNodes(roster, SCHEMA).map((n) => n.metadata[DISPOSITION_FIELD]);
     // Shelves appear in rank order…
@@ -97,7 +106,7 @@ describe("promptSummariesToGroupNodes — the pane lift", () => {
   });
 
   it("does not mutate the caller's entries", () => {
-    const original = prompt("a", "prompt:continuation");
+    const original = prompt("a", "prompt:general", "a", INLINE_CURSOR);
     promptSummariesToGroupNodes([original], SCHEMA);
     expect(original.metadata).toEqual({});
   });
@@ -125,7 +134,7 @@ describe("dispositionFieldDef — the designer computed field (#960)", () => {
     // so a rename of the shelf labels can't drift them out of sync.
     expect(CHAT_DISPOSITION_LABEL).toBe(dispositionFor(ctx, prompt("c", "prompt:general")).label);
     expect(REVISE_ENTITIES_DISPOSITION_LABEL).toBe(
-      dispositionFor(ctx, prompt("d", "prompt:revise:entry")).label,
+      dispositionFor(ctx, prompt("d", "prompt:general", "d", COMMIT)).label,
     );
   });
 });

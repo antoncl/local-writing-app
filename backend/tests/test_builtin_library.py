@@ -301,6 +301,24 @@ class BuiltinLibraryTests(unittest.TestCase):
         self.assertIn("Square brackets", joined)  # meta-comment snippet pulled in
         self.assertIn("The room was cold.", joined)  # the selection is the user turn
 
+    def test_describe_prompt_renders_with_no_senses_picked(self) -> None:
+        """The senses input is optional: with none picked it must still render
+        (the `is defined` guard holds under StrictUndefined) and drop the
+        sense-specific clause rather than error."""
+        from app.services.ai.helpers import create_environment_for_project
+        from app.services.ai.templates import render_template
+
+        body = self.service.read_prompt_entry("builtin-describe").body
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            body,
+            context={"selection": "The room was cold.", "inputs": {}},
+            env=env,
+        )
+        joined = "\n".join(m.text for m in out.messages)
+        self.assertIn("sensory detail", joined)
+        self.assertNotIn("drawing especially on", joined)
+
     def test_prose_settings_snippet_renders_pov_and_tense_only(self) -> None:
         """#1076: the prose-generation snippet surfaces POV + tense (for
         manuscript-prose prompts), and nothing else."""

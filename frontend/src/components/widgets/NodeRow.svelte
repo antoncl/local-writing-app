@@ -394,6 +394,16 @@
     padding: 4px 6px;
   }
 
+  /* A non-clickable tree row renders its text directly (no click button), so
+     it must carry the same padding the button would — otherwise a static row
+     (a picked picker candidate, a selected-ref chip) sits shorter than its
+     clickable siblings. A row's height must not depend on `clickable`. Dense
+     is exempt: there the padding lives on the row itself (the click button is
+     padding:0), so static and clickable already match. */
+  .node-row.variant-tree:not(.density-dense) > .node-row-text {
+    padding: 4px 6px;
+  }
+
   .node-row-text {
     display: grid;
     gap: 3px;

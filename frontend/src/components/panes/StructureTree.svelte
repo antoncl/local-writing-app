@@ -136,6 +136,9 @@
   // Research (persistCollapse=false) never binds → the same set stays ephemeral.
   const collapse = new CollapseState();
   const resolvedViewId = $derived(paneViews.resolvedViewId(config.kind));
+  // The view's chosen render layout (ADR-0069); absent axes keep the pane
+  // defaults (tree, comfortable). Only the Draft pane exposes the control.
+  const appearance = $derived(paneViews.appearanceFor(config.kind));
   $effect(() => {
     if (config.persistCollapse) void collapse.bind(resolvedViewId);
   });
@@ -315,7 +318,8 @@
 <ViewNodeList
   bind:this={list}
   {view}
-  mode="tree"
+  mode={appearance?.mode ?? "tree"}
+  density={appearance?.density ?? undefined}
   active={isActiveNode}
   collapsed={collapse.collapsed}
   onReorder={config.supportsDrag ? handleReorder : undefined}

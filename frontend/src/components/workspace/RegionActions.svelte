@@ -12,6 +12,7 @@
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import type { PanelId } from "@/lib/types";
   import ViewSwitcher from "@/components/widgets/ViewSwitcher.svelte";
+  import ViewAppearanceControl from "@/components/widgets/ViewAppearanceControl.svelte";
 
   let { id }: { id: PanelId } = $props();
 
@@ -21,6 +22,7 @@
 {#if entry}
   {#if entry.view?.switcher}
     <ViewSwitcher kind={entry.view.kind} schema={$metadataSchemaStore} />
+    <ViewAppearanceControl kind={entry.view.kind} />
   {/if}
   {@render entry.actions?.()}
 {/if}

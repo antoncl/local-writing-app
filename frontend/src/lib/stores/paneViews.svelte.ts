@@ -191,6 +191,22 @@ class PaneViewsController {
       this.appearances = reverted;
     }
   }
+
+  // Clear the resolved view's appearance back to the pane default (ADR-0069).
+  // Sends `appearance: null`, which the /ui merge drops from the blob.
+  async clearAppearance(kind: string): Promise<void> {
+    const id = this.resolvedViewId(kind);
+    const prior = this.appearances.get(id) ?? null;
+    if (!prior) return;
+    const dropped = new Map(this.appearances);
+    dropped.delete(id);
+    this.appearances = dropped;
+    try {
+      await api.updateViewUi(id, { appearance: null });
+    } catch {
+      this.appearances = new Map(this.appearances).set(id, prior);
+    }
+  }
 }
 
 export const paneViews = new PaneViewsController();

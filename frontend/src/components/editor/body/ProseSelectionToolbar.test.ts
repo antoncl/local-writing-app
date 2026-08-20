@@ -88,6 +88,8 @@ describe("ProseSelectionToolbar (#1223)", () => {
     });
     expect(screen.getByText("Paragraph")).toBeInTheDocument();
     expect(screen.getByText("Quote")).toBeInTheDocument();
+    // A leaf-only dropdown keeps scroll (no `has-submenus`), so a tall menu caps + scrolls.
+    expect(screen.getByText("Paragraph").closest(".toolbar-menu-popover")).not.toHaveClass("has-submenus");
     await fireEvent.mouseDown(screen.getByText("Quote"));
     expect(onRun).toHaveBeenCalledOnce();
   });
@@ -101,6 +103,10 @@ describe("ProseSelectionToolbar (#1223)", () => {
     expect(screen.getByText("Row")).toBeInTheDocument();
     expect(screen.getByText("Delete table")).toBeInTheDocument();
     expect(screen.queryByText("Insert above")).not.toBeInTheDocument();
+
+    // A submenu-hosting dropdown opts out of scroll (overflow:auto would sprout a
+    // scrollbar when a submenu flies out sideways) via `has-submenus`.
+    expect(screen.getByText("Row").closest(".toolbar-menu-popover")).toHaveClass("has-submenus");
 
     await fireEvent.mouseEnter(screen.getByText("Row"));
     expect(screen.getByText("Insert above")).toBeInTheDocument();

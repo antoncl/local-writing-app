@@ -132,7 +132,7 @@
 
 {#snippet addMenu({ close }: { parentId: string | null; close: () => void })}
   <span class="row-add-popover-heading">New prompt</span>
-  <NodeList isEmpty={entryTypeChoicesByKind($metadataSchemaStore, "prompt").length === 0}>
+  <NodeList density="dense" isEmpty={entryTypeChoicesByKind($metadataSchemaStore, "prompt").length === 0}>
     {#each entryTypeChoicesByKind($metadataSchemaStore, "prompt") as choice (choice.id)}
       <NodeRow title={choice.name} onClick={() => { onNewEntry(choice.id); close(); }} />
     {/each}

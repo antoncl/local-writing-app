@@ -194,7 +194,7 @@
 
 {#snippet addMenu({ close }: { parentId: string | null; close: () => void })}
   <span class="row-add-popover-heading">New entry</span>
-  <NodeList isEmpty={entryTypeChoicesByKind($metadataSchemaStore, "lore").length === 0}>
+  <NodeList density="dense" isEmpty={entryTypeChoicesByKind($metadataSchemaStore, "lore").length === 0}>
     {#each entryTypeChoicesByKind($metadataSchemaStore, "lore") as choice (choice.id)}
       <NodeRow title={choice.name} onClick={() => { treeActions.newLoreEntry(choice.id); close(); }} />
     {/each}
@@ -204,7 +204,7 @@
   </NodeList>
   {#if brainstormPrompt}
     <span class="row-add-popover-heading">Brainstorm new…</span>
-    <NodeList isEmpty={false}>
+    <NodeList density="dense" isEmpty={false}>
       {#each entryTypeChoicesByKind($metadataSchemaStore, "lore") as choice (choice.id)}
         <NodeRow
           title={`✨ Draft ${choice.name}`}

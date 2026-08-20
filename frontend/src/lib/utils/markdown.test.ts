@@ -84,6 +84,32 @@ describe("markdown round-trip — GFM tables", () => {
   });
 });
 
+describe("markdown round-trip — scene breaks (horizontalRule)", () => {
+  // Scene breaks are inserted via the slash menu (#1239) and settle to the
+  // dinkus turndown is now pinned to emit. The invariant: whatever thematic
+  // break a writer typed, the file settles to `* * *` and stops drifting.
+  it("keeps a `* * *` scene break byte-stable", async () => {
+    expect(await roundTrip("* * *")).toBe("* * *");
+  });
+
+  it("normalizes other thematic breaks to `* * *`, then holds", async () => {
+    for (const input of ["---", "***", "___"]) {
+      const once = await roundTrip(input);
+      expect(once).toBe("* * *");
+      expect(await roundTrip(once)).toBe(once); // no further drift
+    }
+  });
+
+  it("preserves a scene break between two paragraphs", async () => {
+    const md = "The door closed.\n\n* * *\n\nMorning came.";
+    const once = await roundTrip(md);
+    expect(once).toContain("The door closed.");
+    expect(once).toContain("* * *");
+    expect(once).toContain("Morning came.");
+    expect(await roundTrip(once)).toBe(once);
+  });
+});
+
 describe("markdown round-trip — content-bearing markers stay byte-stable", () => {
   // Todo and character markers wrap prose, so they survive the serializer alone.
   const markers = [

@@ -566,6 +566,12 @@
       },
       {
         group: "Insert",
+        label: "Scene break",
+        description: "Insert a centered section break (* * *).",
+        run: () => editor?.chain().focus().setHorizontalRule().run(),
+      },
+      {
+        group: "Insert",
         label: "Table",
         description: "Pick a size — or type \"/table NxM\" (rows × cols).",
         run: (args) => {

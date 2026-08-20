@@ -746,6 +746,29 @@ button.row-action-add.active {
   line-height: 1.25;
 }
 
+/* Scene break (#1239): the horizontalRule node reads as a quiet centered dinkus
+   (`* * *`, matching what is saved to disk), not the browser-default beveled
+   line. The trailing letter-spacing adds a phantom gap on the right, so an
+   equal padding-left recenters the glyph group. */
+.editor-body hr {
+  border: 0;
+  height: auto;
+  margin: 1.7em 0;
+  text-align: center;
+  color: var(--text-3);
+  font-family: var(--serif);
+}
+
+.editor-body hr::before {
+  content: "* * *";
+  padding-left: 0.5em;
+  letter-spacing: 0.5em;
+}
+
+.editor-body hr.ProseMirror-selectednode {
+  color: var(--text-2);
+}
+
 .editor-body table {
   table-layout: fixed;
   border-collapse: collapse;

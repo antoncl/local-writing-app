@@ -38,7 +38,6 @@ from app.services.ai.sessions import AISession
 from app.services.error_log import append_error_line
 
 if TYPE_CHECKING:
-    from app.models import MutationSetRow
     from app.services.project_service import ProjectService
 
 # Sentinel distinguishing "the `at=` anchor was omitted" (use the prompt's
@@ -197,7 +196,7 @@ def _coerce_entry_ref_as_of(
     if scene_ref is None:
         return ref
     scene_id = scene_ref.id
-    base = _safe_read_lore(project, ref.id)
+    base = _safe_read_node(project, ref.id)
     if base is None:
         return ref
     try:
@@ -610,9 +609,15 @@ def _collect_lore_refs_from_metadata(metadata: Any) -> set[str]:
     return found
 
 
-def _safe_read_lore(project: ProjectService, entry_id: str) -> Any:
+def _safe_read_node(project: ProjectService, node_id: str) -> Any:
+    """Best-effort read of any node by id (lore, scene, plot card, …).
+
+    `use()` accepts any Node (ADR-0060 §2), so the lore-context renderer must be
+    able to load whatever it was handed — not lore alone. Dispatches through the
+    kind-resolving `read_node`; a missing or unreadable id yields None, and the
+    caller skips it, exactly as the lore-only reader did before."""
     try:
-        return project.read_lore_entry(entry_id)
+        return project.read_node(node_id)
     except Exception:
         return None
 
@@ -732,18 +737,24 @@ def _relevant_lore_ids(
     - `"explicit"`: only the lore directly referenced via entity_ref fields.
     - `"pinned_only"`: empty for now (pin UI ships in a later milestone).
 
-    `use()` selections (`used_ids`) join the SAME direct channel as the scene's
-    structural entity_ref picks — deduped by id, subject to the one `never`
-    chokepoint — never a second matcher (ADR-0057 anti-goal).
+    `use()` selections (`used_ids`) are EXACT — deduped by id and subject to the
+    one `never` chokepoint, but never fan-out seeds (the scene's own refs are the
+    only expansion roots) and never a second matcher (ADR-0057 anti-goal). The
+    1-hop graph fan-out stays the implicit `use_lore()` path's job (#1230).
     """
     if mode == "pinned_only":
         return []
     scene_metadata = _attr_or_item(scene, "metadata")
-    direct = _collect_lore_refs_from_metadata(scene_metadata) | set(used_ids or [])
+    scene_refs = _collect_lore_refs_from_metadata(scene_metadata)
+    used = set(used_ids or [])
     if mode == "explicit":
-        ids = sorted(direct)
+        ids = sorted(scene_refs | used)
     else:
-        ids = sorted(_implicit_lore_ids(project, scene, direct, journal))
+        # `use()`'d ids are EXACT: they join the final set but are NOT fan-out
+        # seeds. Only the scene's own structural/textual refs expand one hop —
+        # that stays the implicit `use_lore()` path's job. An author who wants a
+        # use()'d node's neighbours loops its refs and use()s them in the template.
+        ids = sorted(_implicit_lore_ids(project, scene, scene_refs, journal) | used)
     # Chokepoint filter: drop any "never"-policy entries that may have arrived via
     # explicit refs or structural expansion. Single source of authority for that rule.
     never_ids = _never_lore_ids(project)
@@ -766,6 +777,10 @@ def _relevant_lore(
     snapshots touched revisions for the upcoming commit; the send path's per-turn
     stable/volatile split lives in `_tier_lore_ids` (ADR-0060 §5 retired the
     `partition=` two-call form)."""
+    # Function-level import: `lore_block` imports leaf accessors from this module,
+    # so keeping this out of the module header avoids an import cycle.
+    from app.services.ai.lore_block import _format_lore_block
+
     ids = _relevant_lore_ids(project, scene, mode, journal, used_ids)
     if session is not None:
         _snapshot_revisions(project, ids, session)
@@ -798,7 +813,7 @@ def _implicit_lore_ids(
 
     expanded = set(found)
     for entry_id in list(found):
-        entry = _safe_read_lore(project, entry_id)
+        entry = _safe_read_node(project, entry_id)
         if entry is None:
             continue
         expanded |= _collect_lore_refs_from_metadata(_attr_or_item(entry, "metadata"))
@@ -833,7 +848,7 @@ def _tier_lore_ids(
     stable_ids: list[str] = []
     volatile_ids: list[str] = []
     for entry_id in ids:
-        entry = _safe_read_lore(project, entry_id)
+        entry = _safe_read_node(project, entry_id)
         if entry is None:
             continue
         revision = _attr_or_item(entry, "revision") or ""
@@ -857,7 +872,7 @@ def _snapshot_revisions(
     project: ProjectService, entry_ids: list[str], session: AISession
 ) -> None:
     for entry_id in entry_ids:
-        entry = _safe_read_lore(project, entry_id)
+        entry = _safe_read_node(project, entry_id)
         if entry is None:
             continue
         revision = _attr_or_item(entry, "revision") or ""
@@ -974,7 +989,7 @@ def _textual_one_hop(
     """
     bodies: list[str] = []
     for entry_id in entry_ids:
-        entry = _safe_read_lore(project, entry_id)
+        entry = _safe_read_node(project, entry_id)
         if entry is None:
             continue
         body = _attr_or_item(entry, "body")
@@ -996,143 +1011,6 @@ def _name_appears(name: str, words: set[str], haystack_lower: str) -> bool:
         pattern = r"\b" + re.escape(name_lower) + r"\b"
         return re.search(pattern, haystack_lower) is not None
     return name_lower in words
-
-
-def _format_lore_block(
-    project: ProjectService,
-    entry_ids: list[str],
-    scene: Any = None,
-    position: int | None = None,
-    index: Any = None,
-) -> str:
-    """Render lore entries as an XML block.
-
-    Each entry becomes `<{entry_type} name="..." aliases="...">body</...>`,
-    all wrapped in `<lore>...</lore>`. Anthropic specifically recommends XML
-    tags for context structure; the format helps models locate entities
-    unambiguously without losing the natural prose body.
-
-    This is the single field-value choke-point through which both explicit and
-    implicit lore context flow (ADR-0006). When `scene` is given, each entry's
-    rendered fields (name/aliases/body/summary) are resolved to their
-    **effective value at that (scene, position)** via `effective_state`, so an
-    earlier scene sees the old value and a later one the new — the redaction the
-    feature exists for (#33). Without a scene it renders base state unchanged
-    (e.g. the chat journal path until a resolution scene is supplied, §4.2).
-    Pass a prebuilt mutations `index` to avoid a re-scan per call.
-    """
-    if not entry_ids:
-        return ""
-    scene_id = _scene_id_of(scene) if scene is not None else None
-    if scene_id and index is None:
-        try:
-            index = project.build_mutations_index()
-        except Exception:
-            index = None
-    chunks: list[str] = []
-    for entry_id in entry_ids:
-        entry = _safe_read_lore(project, entry_id)
-        if entry is None:
-            continue
-        overrides: dict[str, str | list[str]] = {}
-        if scene_id and index is not None:
-            try:
-                overrides = project.effective_state(entry_id, scene_id, position, index)
-            except Exception:
-                overrides = {}
-        entry_type = _attr_or_item(entry, "entry_type") or "lore:base"
-        # Tag from the bare local key (the whole key after the kind), not the
-        # kind-qualified FQN — a `<character>` tag reads cleaner to the model than
-        # `<lore_character>`. `split(":", 1)[-1]` strips only the kind, so a nested
-        # key keeps its remaining segments (`lore:character:villain` →
-        # `character:villain` → `character_villain`); the `:` isn't XML-tag-legal,
-        # so `_xml_safe_tag` maps it to `_` (mirrors context_presets.py).
-        tag = _xml_safe_tag(str(entry_type).split(":", 1)[-1])
-        title = str(
-            overrides["title"]
-            if "title" in overrides
-            else (_attr_or_item(entry, "title") or entry_id)
-        )
-        aliases = _effective_aliases(entry, overrides)
-        body = _effective_body(entry, overrides)
-        chunks.append(_render_lore_xml_entry(tag, title, aliases, body))
-    if not chunks:
-        return ""
-    return "<lore>\n" + "\n\n".join(chunks) + "\n</lore>"
-
-
-def _format_staged_set_block(
-    label: str,
-    target_entry_type: str,
-    rows: list[MutationSetRow],
-) -> str:
-    """Render a chat's OWNED staged mutation set as an XML context block (ADR-0055 S4).
-
-    A committing brainstorm stages a position-free mutation set pinned to its
-    subject and OWNS it (the chat->set edge). That set is seeded here into the AI
-    context on every send, so reopening the conversation continues refining the
-    SAME change instead of restarting. The block names the change and lists its
-    `(field, op, value)` rows; the writer still authors WHERE it lands
-    (placement) — the AI proposes the content, never the position.
-
-    Returns "" when there is nothing to seed (no rows, or every row is
-    field-less), so the caller appends no empty block.
-    """
-    clean = [row for row in rows if getattr(row, "field", "")]
-    if not clean:
-        return ""
-    attrs: list[str] = []
-    if label:
-        attrs.append(f"label={quoteattr(label)}")
-    if target_entry_type:
-        attrs.append(f"target_type={quoteattr(target_entry_type)}")
-    attr_str = (" " + " ".join(attrs)) if attrs else ""
-    lines = "\n".join(
-        f"  <mutation field={quoteattr(row.field)} op={quoteattr(row.op or 'replace')}>"
-        f"{xml_escape(str(row.value or ''))}</mutation>"
-        for row in clean
-    )
-    return f"<staged_change{attr_str}>\n{lines}\n</staged_change>"
-
-
-def _effective_aliases(entry: Any, overrides: dict[str, str | list[str]]) -> list[str]:
-    """Aliases for the XML block, honoring a live `aliases` mutation over the
-    base list. A collection override resolves to a `list[str]` (ADR-0009); a
-    legacy whole-`replace` override is a comma-separated string."""
-    if "aliases" in overrides:
-        raw = overrides["aliases"]
-        items = raw if isinstance(raw, list) else str(raw).split(",")
-        return [str(a).strip() for a in items if str(a).strip()]
-    raw = _get_field(entry, "aliases") or []
-    if isinstance(raw, list):
-        return [str(a).strip() for a in raw if str(a).strip()]
-    return []
-
-
-def _effective_body(entry: Any, overrides: dict[str, str | list[str]]) -> str:
-    """Body for the XML block: a live `body` mutation, else base body, else a
-    (possibly mutated) summary."""
-    if "body" in overrides:
-        body = str(overrides["body"]).strip()
-    else:
-        body = str(_attr_or_item(entry, "body") or "").strip()
-    if not body:
-        summary = overrides["summary"] if "summary" in overrides else _get_field(entry, "summary")
-        if isinstance(summary, str) and summary.strip():
-            body = summary.strip()
-    return body
-
-
-def _render_lore_xml_entry(
-    tag: str, title: str, aliases: list[str], body: str
-) -> str:
-    attrs = [f"name={quoteattr(title)}"]
-    if aliases:
-        attrs.append(f"aliases={quoteattr(', '.join(aliases))}")
-    attr_str = " ".join(attrs)
-    if body:
-        return f"<{tag} {attr_str}>\n{xml_escape(body)}\n</{tag}>"
-    return f"<{tag} {attr_str} />"
 
 
 _XML_TAG_FALLBACK = "lore_entry"
@@ -1374,7 +1252,7 @@ def _character_titles(project: ProjectService, other_ids: set[str]) -> dict[str,
     """
     titles: dict[str, str] = {}
     for cid in other_ids:
-        loaded = _safe_read_lore(project, cid)
+        loaded = _safe_read_node(project, cid)
         title = getattr(loaded, "title", None) if loaded else None
         titles[cid] = str(title) if title else cid
     return titles

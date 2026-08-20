@@ -27,9 +27,9 @@ from app.models import (
 )
 from app.services.ai.helpers import (
     _coerce_entry_ref_as_of,
-    _format_lore_block,
     create_environment_for_project,
 )
+from app.services.ai.lore_block import _format_lore_block
 
 
 class MutationResolutionTests(unittest.TestCase):

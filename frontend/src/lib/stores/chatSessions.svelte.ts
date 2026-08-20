@@ -64,6 +64,10 @@ class ChatSessions {
       // to name the chat "<subject> — <prompt>" instead of a bare prompt title.
       subject?: string;
       subjectTitle?: string;
+      // A mode-appropriate chat name that replaces the prompt's own title
+      // wholesale (not the "<subject> — <prompt>" join) — e.g. a create-mode
+      // brainstorm names itself "Draft <Type>" rather than "Revise entry" (#695).
+      titleOverride?: string;
     } = {},
   ): Promise<void> {
     const { assistantId = "", parentPaneId = null, subjectTitle = "" } = opts;
@@ -78,7 +82,7 @@ class ChatSessions {
       const subject = opts.subject || (sceneId ?? "");
       // Name the chat after its subject so brainstorming two entries with the
       // same prompt no longer yields two identically-titled chats.
-      const title = subjectTitle ? `${subjectTitle} — ${entry.title}` : entry.title;
+      const title = opts.titleOverride?.trim() || (subjectTitle ? `${subjectTitle} — ${entry.title}` : entry.title);
       const session = await api.createChatSession({
         prompt_entry_id: entry.id,
         assistant_id: assistantId,

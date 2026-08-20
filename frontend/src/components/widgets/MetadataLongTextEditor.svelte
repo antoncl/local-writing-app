@@ -161,28 +161,44 @@
     font-size: var(--fs-sm);
   }
 
+  /* The prose surface reads like the manuscript body editor (#546). Despite the
+     shared TipTap document model, this field previously inherited the sans UI
+     font at --fs-md, so long_text prose — the intrinsic Body field included —
+     read as chrome, not prose. Match the body editor's serif / prose-size / 1.65
+     typography; the container chrome (border, toolbar, scrollbox cap) stays, as
+     that frames it as a rail field rather than making it a different editor. */
   :global(.metadata-long-text-body) {
     min-height: 96px;
     max-height: 260px;
     padding: 8px 10px;
     overflow: auto;
     outline: none;
-    font-size: var(--fs-md);
+    font-family: var(--serif);
+    font-size: var(--fs-prose);
     font-weight: 400;
-    line-height: 1.45;
+    line-height: 1.65;
   }
 
   :global(.metadata-long-text-body p) {
-    margin: 0 0 0.65em;
+    margin: 0 0 1em;
   }
 
   :global(.metadata-long-text-body p:last-child) {
     margin-bottom: 0;
   }
 
+  /* Headings and tables mirror the body editor's own treatment: a tight heading
+     line-height, and tabular data in the sans face at --fs-lg (the body editor
+     switches tables out of the prose serif) rather than inheriting it. */
+  :global(.metadata-long-text-body :is(h1, h2, h3)) {
+    line-height: 1.25;
+  }
+
   :global(.metadata-long-text-body table) {
     width: 100%;
     border-collapse: collapse;
+    font-family: var(--sans);
+    font-size: var(--fs-lg);
   }
 
   :global(.metadata-long-text-body td),

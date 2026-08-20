@@ -15,6 +15,7 @@
   import {
     isToolbarSeparator,
     isToolbarSubmenu,
+    verticalDropFit,
     type FloatingMenuState,
     type ToolbarAction,
     type ToolbarMenuEntry,
@@ -36,16 +37,39 @@
   let submenuFlip = $state(false);
   const SUBMENU_WIDTH = 178;
 
+  // Dropdown open direction + height cap, measured from the trigger so a menu
+  // opens toward the room and never clips off-screen (#1227) — decoupled from
+  // the toolbar's own above/below placement. One top-level dropdown is open at a
+  // time, so a single set of values suffices; submenus track their own.
+  let dropUp = $state(false);
+  let menuMaxHeight = $state(320);
+  let submenuFlipUp = $state(false);
+  let submenuMaxHeight = $state(320);
+
   // A closed (or switched) top-level dropdown collapses any open submenu.
   $effect(() => {
     void openMenuId;
     openSubmenuId = null;
   });
 
+  // Measure when a top-level dropdown is about to OPEN (not on close/toggle-off).
+  function measureDropdown(actionId: string, event: MouseEvent) {
+    if (openMenuId === actionId) return; // toggling closed — nothing to place
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    const fit = verticalDropFit(rect.top, rect.bottom, window.innerHeight);
+    dropUp = fit.up;
+    menuMaxHeight = fit.maxHeight;
+  }
+
   function openSubmenu(entry: ToolbarMenuEntry, event: MouseEvent) {
     openSubmenuId = entry.id;
     const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
     submenuFlip = rect.right + SUBMENU_WIDTH > window.innerWidth;
+    // A submenu opens beside its parent row, extending downward from ~its top;
+    // fit it the same way so it never clips the bottom.
+    const fit = verticalDropFit(rect.top, rect.top, window.innerHeight);
+    submenuFlipUp = fit.up;
+    submenuMaxHeight = fit.maxHeight;
   }
 </script>
 
@@ -70,13 +94,14 @@
             type="button"
             onmousedown={(e) => {
               e.preventDefault();
+              measureDropdown(action.id, e);
               onToggleMenu(action.id);
             }}
           >
             {action.label}
           </button>
           {#if openMenuId === action.id}
-            <div class:below={menu.placement === "below"} class="toolbar-menu-popover">
+            <div class:drop-up={dropUp} class="toolbar-menu-popover" style={`max-height: ${menuMaxHeight}px`}>
               {#each action.items as entry (entry.id)}
                 {#if isToolbarSeparator(entry)}
                   <div class="toolbar-menu-sep" aria-hidden="true"></div>
@@ -93,7 +118,7 @@
                         submenuFlip = e.currentTarget.getBoundingClientRect().right + SUBMENU_WIDTH > window.innerWidth;
                       }}>{entry.label}</button>
                     {#if openSubmenuId === entry.id}
-                      <div class:flip={submenuFlip} class="toolbar-submenu-popover">
+                      <div class:flip={submenuFlip} class:flip-up={submenuFlipUp} class="toolbar-submenu-popover" style={`max-height: ${submenuMaxHeight}px`}>
                         {#each entry.items as sub (sub.id)}
                           {#if isToolbarSeparator(sub)}
                             <div class="toolbar-menu-sep" aria-hidden="true"></div>
@@ -206,7 +231,9 @@
 
   /* Dropdown + submenu popovers: a padded card of rounded hover items, so a
      side-flyout submenu is never clipped (no overflow:hidden) and the Table
-     menu's groups read as a menu, not a button strip. */
+     menu's groups read as a menu, not a button strip. overflow-y:auto + the
+     measured max-height (inline) mean a menu taller than the room scrolls
+     instead of clipping (#1227). */
   .toolbar-menu-popover,
   .toolbar-submenu-popover {
     position: absolute;
@@ -218,10 +245,19 @@
     border-radius: 8px;
     background: var(--toolbar-surface);
     box-shadow: var(--toolbar-elev);
+    overflow-y: auto;
   }
 
+  /* Opens downward by default (toward the content); .drop-up flips it above the
+     trigger. Direction is measured per-open (#1227), not tied to the toolbar's
+     own above/below placement. */
   .toolbar-menu-popover {
     left: 0;
+    top: calc(100% + 6px);
+  }
+
+  .toolbar-menu-popover.drop-up {
+    top: auto;
     bottom: calc(100% + 6px);
   }
 
@@ -231,11 +267,6 @@
   .selection-toolbar > .toolbar-menu:last-child .toolbar-menu-popover {
     left: auto;
     right: 0;
-  }
-
-  .toolbar-menu-popover.below {
-    top: calc(100% + 6px);
-    bottom: auto;
   }
 
   .toolbar-submenu {
@@ -251,6 +282,13 @@
   .toolbar-submenu-popover.flip {
     left: auto;
     right: calc(100% + 5px);
+  }
+
+  /* Submenu near the viewport bottom: anchor its bottom to the parent row and
+     open upward instead of clipping (#1227). */
+  .toolbar-submenu-popover.flip-up {
+    top: auto;
+    bottom: -6px;
   }
 
   .toolbar-menu-popover button,

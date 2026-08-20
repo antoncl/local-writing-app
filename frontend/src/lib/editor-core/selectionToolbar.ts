@@ -60,3 +60,22 @@ export function isToolbarSeparator(e: ToolbarMenuEntry): e is ToolbarSeparator {
 export function isToolbarSubmenu(e: ToolbarMenuEntry): e is ToolbarSubmenu {
   return "items" in e;
 }
+
+// Decide which way a dropdown should open and how tall it may be before it must
+// scroll, so it never clips off-screen (#1227). Given the anchor's top/bottom
+// viewport edges (a trigger button, or a submenu's parent row) and the viewport
+// height, it prefers opening DOWNWARD — the conventional direction — and flips
+// up only when down genuinely lacks room and up has more. `maxHeight` is the
+// space on the chosen side (floored so the menu stays usable and scrolls rather
+// than clips). Pure, so it's unit-tested without layout.
+export function verticalDropFit(
+  anchorTop: number,
+  anchorBottom: number,
+  viewportHeight: number,
+  { margin = 10, typical = 300, minHeight = 120 }: { margin?: number; typical?: number; minHeight?: number } = {},
+): { up: boolean; maxHeight: number } {
+  const below = viewportHeight - anchorBottom - margin;
+  const above = anchorTop - margin;
+  const up = below < typical && above > below;
+  return { up, maxHeight: Math.max(minHeight, Math.round(up ? above : below)) };
+}

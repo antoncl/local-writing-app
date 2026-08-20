@@ -104,3 +104,77 @@ Mockup: [`../mockups/0066-nesting-legibility.html`](../mockups/0066-nesting-legi
 - **A1-S3** — serif node-vs-bucket rule (conditional header font).
 - **A1-S4** — wire `stripeColor` on member rows in the panes that skipped it.
 - **A1-S5** — SchemaTreePane: add depth indent + an interactive caret.
+
+## Amendment 2 — real-node parents get the frame (2026-08-20, Anton)
+
+**Amendment 1 delivered the pass but deferred the mockup's "House Vane"** (#1191):
+a Lore **Nest** parent — a lore entry that contains other entries — should read
+as a **serif node header sitting in its own tinted, guide-rail'd panel**, the way
+the approved mockup drew it. Amendment 1 gave a Nest the stronger 26px indent and
+its enclosing bucket's rail, but the Nest parent itself stayed a plain sans row
+and its children stayed flat siblings with no panel. This amendment closes that.
+
+It splits cleanly in two, and the first half is nearly free:
+
+**Decisions:**
+
+1. **A Nest parent is a real-node header → serif, for free.** Lore's `entryRow`
+   marks a parent (`ctx.collapsible`) as `groupHeader` **and** passes
+   `dataNodeId={entry.id}`. Amendment 1's serif rule
+   (`.group-header[data-node-id]`) then renders it serif with **no new
+   mechanism** — the same treatment StructureTree's Act/Chapter already get
+   (they were always `groupHeader` + `dataNodeId`; Lore Nest parents simply never
+   were). A childless lore entry stays a plain leaf row (no `groupHeader`).
+
+2. **A real-node parent's children render inside a tier panel — opt-in per
+   consumer.** `ViewNodeTree` currently renders a real-node parent's children as
+   flat siblings (`depth + 1`). This amendment wraps that recursion in the shared
+   `.node-row-group-children` panel (tint + guide rail + the deepened tiers from
+   Amendment 1), so the members read as *contained by* the parent — matching the
+   mockup. The wrap is **opt-in** via a `ViewNodeList` / `ViewNodeTree` flag
+   (`frameParents`), because `ViewNodeTree` is shared. The panel's CSS moves from
+   NodeRow-scoped to `:global` (still authored in NodeRow, its one home) so the
+   second emitter renders an identical panel — no duplicated tokens.
+
+3. **Lore opts in; StructureTree stays flat.** The manuscript structure tree
+   keeps its lean, flat outline — nested tinted Act → Chapter → Scene panels
+   would be visually heavy and were never in the mockup. So `frameParents` is
+   **on for Lore, off (default) for StructureTree** and every other current
+   consumer. The serif parent from decision 1 is independent of the panel, so
+   StructureTree's serif Act/Chapter headers are unchanged either way.
+
+**Anti-goals:**
+
+- **No new `NodeRow` prop.** Decision 1 reuses `groupHeader` + `dataNodeId` + the
+  Amendment-1 serif rule; decision 2's flag lives on `ViewNodeList`/`ViewNodeTree`
+  (the list widgets), not on the row.
+- **Not a change to any other pane.** `frameParents` defaults off, so only Lore
+  moves; StructureTree, the pickers, and the editor panels render exactly as they
+  do after Amendment 1.
+- **Not a grammar / view-evaluator change.** Presentation only — `ViewNodeTree`
+  wraps what it already renders; the ViewResult is untouched.
+- **No pre-1.0 migration** — presentation only.
+
+**Interactions to get right (implementation notes, not decisions):**
+
+- A `groupHeader` carries a bottom hairline rule; on a framed Nest parent that
+  rule sits **between** the parent and its panel below — the intended
+  header→panel seam. It must not double with the panel's top edge (the panel's
+  `margin-top: -2px` tucks under the header, exactly as a bucket header + panel
+  already do).
+- The Nest parent's caret + count-pill trailing already exist in Lore's
+  `entryRow` (gated on `ctx.collapsible`); with `groupHeader` they keep working.
+- Nested framing: a Nest inside a type bucket puts a real-node panel *inside* a
+  bucket panel — the CSS tier deepening (`tier1 → tier2 → tier3`) handles the
+  depth tint, and going `:global` keeps it working even for a Nest inside a Nest
+  (both panels now emitted by `ViewNodeTree`).
+
+**Blast radius:** `ViewNodeTree` (the opt-in wrap), `ViewNodeList` (pass the flag
+through), `NodeRow` (panel CSS → `:global`), and `Lore.svelte` (`entryRow` sets
+`groupHeader` + `dataNodeId` for parents; the pane passes `frameParents`).
+StructureTree, pickers, and editor panels are untouched (flag off).
+
+- **A2-S1** — Lore Nest parent → serif node header (decision 1; `groupHeader` +
+  `dataNodeId` on collapsible entries). Tiny, self-contained.
+- **A2-S2** — `frameParents` opt-in panel in `ViewNodeTree`/`ViewNodeList` (panel
+  CSS → `:global` in NodeRow); enable it for Lore (decision 2/3).

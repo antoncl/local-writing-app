@@ -101,7 +101,12 @@
             {action.label}
           </button>
           {#if openMenuId === action.id}
-            <div class:drop-up={dropUp} class="toolbar-menu-popover" style={`max-height: ${menuMaxHeight}px`}>
+            <div
+              class:drop-up={dropUp}
+              class:has-submenus={action.items.some(isToolbarSubmenu)}
+              class="toolbar-menu-popover"
+              style={`max-height: ${menuMaxHeight}px`}
+            >
               {#each action.items as entry (entry.id)}
                 {#if isToolbarSeparator(entry)}
                   <div class="toolbar-menu-sep" aria-hidden="true"></div>
@@ -246,6 +251,14 @@
     background: var(--toolbar-surface);
     box-shadow: var(--toolbar-elev);
     overflow-y: auto;
+  }
+
+  /* A dropdown that hosts submenus (the Table menu) can't scroll: overflow-y:auto
+     promotes overflow-x to auto too, which sprouts a scrollbar the moment a
+     submenu flies out sideways. It's short and its submenus carry their own
+     height caps, so let it overflow visibly instead. */
+  .toolbar-menu-popover.has-submenus {
+    overflow: visible;
   }
 
   /* Opens downward by default (toward the content); .drop-up flips it above the

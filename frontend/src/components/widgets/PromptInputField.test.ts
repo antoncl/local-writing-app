@@ -91,6 +91,18 @@ describe("PromptInputField — shared value types delegate to FieldValueEditor (
     expect(onChange).toHaveBeenLastCalledWith(JSON.stringify([]));
   });
 
+  it("list renders one scalar item input per value plus the add control (synthesized scalar shape)", () => {
+    const input = def({ type: "list", name: "beats", label: "Beats" });
+    render(PromptInputField, {
+      props: { input, value: JSON.stringify(["escape", "betrayal"]), onChange: vi.fn() },
+    });
+    // The synthesized one-member scalar list drives ListValueEditor: a text input
+    // per item, plus the "+ Add item" row.
+    expect(screen.getByDisplayValue("escape")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("betrayal")).toBeInTheDocument();
+    expect(screen.getByText("+ Add item")).toBeInTheDocument();
+  });
+
   it("multi_select decodes an existing JSON-array value as the active selection", async () => {
     const onChange = vi.fn();
     const input = def({

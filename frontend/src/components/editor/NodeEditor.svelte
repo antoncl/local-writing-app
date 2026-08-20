@@ -959,13 +959,16 @@
         {recentlySaved}
         {onAuthoringLayerChange}
       />
-      {#if todoStatusHint || (documentKind === "manuscript" && (lastInvocationCostUsd != null || characterCostRowsView.length > 0)) || rollupCostKind}
+      {#if todoStatusHint || documentKind === "manuscript" || rollupCostKind}
         <div class="editor-hint">
           {#if todoStatusHint}
             <span class="editor-hint-text">{todoStatusHint}</span>
           {/if}
           {#if documentKind === "manuscript"}
             <div class="editor-hint-costs">
+              <span class="word-count-chip" title="Live word count for this scene.">
+                {liveWordCount.toLocaleString()} {liveWordCount === 1 ? "word" : "words"}
+              </span>
               {#each characterCostRowsView as row (row.id)}
                 <span
                   class="character-cost-chip"
@@ -1320,7 +1323,11 @@
      row. Phase C added the persisted ai_invocations log; this chip stays
      as the session/last-call view, and `character-cost-chip` carries the
      per-character all-time totals from the log. */
-  .continuation-cost-chip {
+  .continuation-cost-chip,
+  /* The live word count (#1237): the same quiet, muted treatment as the cost
+     chips — present for a glance, never loud (a scene shows it even with no AI
+     costs yet). The value also lives in the `word_count` metadata field. */
+  .word-count-chip {
     color: var(--text-3);
     font-size: var(--fs-xs);
     white-space: nowrap;

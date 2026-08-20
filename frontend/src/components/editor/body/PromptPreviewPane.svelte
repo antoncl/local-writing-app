@@ -14,13 +14,12 @@
   import { api } from "@/lib/api";
   import { formatCostEur, formatTokens } from "@/lib/utils/money";
   import { coerceInputValue, friendlyTemplateError } from "@/lib/utils/promptInputs";
+  import { promptPreviewDrafts } from "@/lib/stores/promptPreviewDrafts.svelte";
   import type {
-    AIPreviewResponse,
     DocumentKind,
     EditableDocument,
     LoreEntrySummary,
     PromptEntrySummary,
-    PromptInputConflict,
     PromptInputDefinition,
     StructureDocument,
   } from "@/lib/types";
@@ -75,11 +74,14 @@
 
   const isPrompt = (): boolean => documentKind === "prompt" && !!scene;
 
-  let promptPreviewSceneId = $state("");
-  let promptPreviewInputDrafts: Record<string, string> = $state({});
-  let promptPreviewResult: AIPreviewResponse | null = $state(null);
-  let promptPreviewRunning = $state(false);
-  let promptPreviewError: string | null = $state(null);
+  // ADR-0062 Amendment 2 / D1: the preview's input values + render state live in a
+  // per-document store, not in this component, so a detached preview (a second
+  // instance for the same prompt) shares one record instead of starting empty and
+  // wiping the author's typed inputs. Keyed by the open prompt's document id; the
+  // "__unattached__" bucket only holds the inert non-prompt case (isPrompt gates
+  // every use). All `record.*` below is the shared, reactive state.
+  const record = $derived(promptPreviewDrafts.entryFor(loadedSceneId ?? "__unattached__"));
+
   let promptPreviewPaneHeight = $state(280); // px; persisted only in memory for now.
   let promptPreviewCollapsed = $state(true);
   // In `fill` mode the pane always shows its full contents; otherwise the
@@ -87,7 +89,6 @@
   // the raw collapse flag, so a filled pane ignores the (irrelevant) toggle.
   const previewExpanded = $derived(fill || !promptPreviewCollapsed);
   let promptPreviewDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-  let promptPreviewLastRenderKey = "";
 
   // The prompt's OWN inputs (what the editor edits), read straight off the open
   // doc so this re-fires as they change in the editor section below.
@@ -102,7 +103,6 @@
   // moment of opening a prompt are unchanged). The resolver stays the single
   // source; this is only which set the panel displays. `effectiveInputs` is a
   // bind-out prop (S3b) so the editor's inherited tier reads the same live set.
-  let promptPreviewConflicts: PromptInputConflict[] = $state([]);
   const promptPreviewDeclaredInputs = $derived(
     !isPrompt()
       ? []
@@ -114,26 +114,27 @@
   // Reset preview when the underlying entry changes. The default-filler
   // reactive below idempotently seeds any input that's still missing — needed
   // because the schema (which carries the input definitions) can arrive in a
-  // different tick from the entry itself.
-  let promptPreviewSeededEntryId: string | null = null;
+  // different tick from the entry itself. The seed guard (`record.seededEntryId`)
+  // lives on the shared record, so a second instance for the same document (a
+  // detached preview) sees it already seeded and reuses the drafts.
   $effect(() => {
-    if (loadedSceneId && loadedSceneId !== promptPreviewSeededEntryId) {
-      promptPreviewResult = null;
-      promptPreviewError = null;
-      promptPreviewLastRenderKey = "";
+    if (loadedSceneId && loadedSceneId !== record.seededEntryId) {
+      record.result = null;
+      record.error = null;
+      record.lastRenderKey = "";
       diagnostics = [];
       // Drop the previous entry's resolved set — fall back to the new entry's own
       // inputs until its first render resolves includes (ADR-0061 S2).
       effectiveInputs = [];
       inputProvenance = {};
-      promptPreviewConflicts = [];
-      promptPreviewInputDrafts = seedInputDrafts(promptPreviewDeclaredInputs);
-      promptPreviewSeededEntryId = loadedSceneId;
+      record.conflicts = [];
+      record.inputDrafts = seedInputDrafts(promptPreviewDeclaredInputs);
+      record.seededEntryId = loadedSceneId;
     }
   });
   $effect(() => {
     let changed = false;
-    const next: Record<string, string> = { ...promptPreviewInputDrafts };
+    const next: Record<string, string> = { ...record.inputDrafts };
     for (const input of promptPreviewDeclaredInputs) {
       if (next[input.name] === undefined) {
         // No boolean→"false" fallback: an input with no declared default
@@ -146,13 +147,13 @@
         changed = true;
       }
     }
-    if (changed) promptPreviewInputDrafts = next;
+    if (changed) record.inputDrafts = next;
   });
 
   const promptPreviewMissingRequired = $derived(
     promptPreviewDeclaredInputs.filter((i) => {
       if (!i.required) return false;
-      const v = promptPreviewInputDrafts[i.name];
+      const v = record.inputDrafts[i.name];
       return v === undefined || v === null || (typeof v === "string" && !v.trim());
     }),
   );
@@ -172,14 +173,14 @@
   // controls the explicit binding by marking a scene ★ in any context_pick
   // input — that wins backend-side (preview.py:_find_marked_target_scene_id).
   $effect(() => {
-    if (isPrompt() && !promptPreviewSceneId && availableScenes.length > 0) {
-      promptPreviewSceneId = availableScenes[0].id;
+    if (isPrompt() && !record.sceneId && availableScenes.length > 0) {
+      record.sceneId = availableScenes[0].id;
     }
   });
 
   // Auto re-render on any preview-relevant change. Debounced.
   $effect(() => {
-    schedulePromptPreviewRender(rawBody, promptPreviewSceneId, JSON.stringify(promptPreviewInputDrafts));
+    schedulePromptPreviewRender(rawBody, record.sceneId, JSON.stringify(record.inputDrafts));
   });
 
   function schedulePromptPreviewRender(_body: string, _scene: string, _inputs: string): void {
@@ -194,25 +195,25 @@
   async function runPromptPreview(): Promise<void> {
     if (!isPrompt()) return;
     if (!rawBody.trim()) {
-      promptPreviewResult = null;
-      promptPreviewError = null;
-      promptPreviewLastRenderKey = "";
+      record.result = null;
+      record.error = null;
+      record.lastRenderKey = "";
       return;
     }
     const inputs: Record<string, unknown> = {};
     for (const declared of promptPreviewDeclaredInputs) {
-      const raw = promptPreviewInputDrafts[declared.name] ?? "";
+      const raw = record.inputDrafts[declared.name] ?? "";
       const coerced = coerceInputValue(raw, declared.type);
       if (coerced !== null && coerced !== "") inputs[declared.name] = coerced;
     }
-    const key = JSON.stringify({ rawBody, promptPreviewSceneId, inputs });
-    if (key === promptPreviewLastRenderKey && !promptPreviewError) return;
-    promptPreviewLastRenderKey = key;
-    promptPreviewRunning = true;
+    const key = JSON.stringify({ rawBody, sceneId: record.sceneId, inputs });
+    if (key === record.lastRenderKey && !record.error) return;
+    record.lastRenderKey = key;
+    record.running = true;
     try {
       const result = await api.aiPreview({
         template_source: rawBody,
-        target_scene_id: promptPreviewSceneId || "",
+        target_scene_id: record.sceneId || "",
         inputs,
         commit: false,
         // ADR-0061 S2: resolve the live body's effective inputs (own ∪ includes)
@@ -221,21 +222,21 @@
         own_inputs: promptPreviewOwnInputs,
         resolve_effective_inputs: true,
       });
-      promptPreviewResult = result;
+      record.result = result;
       // Adopt the resolved set + provenance + any include-type conflict (returned
       // even when the render errored, so the form appears before the body renders).
       effectiveInputs = result.effective_inputs ?? [];
       inputProvenance = result.input_provenance ?? {};
-      promptPreviewConflicts = result.input_conflicts ?? [];
+      record.conflicts = result.input_conflicts ?? [];
       // Render errors come back as 200 + result.error (the endpoint is
       // exploratory; auto-firing it before required inputs are filled
       // would otherwise look like an HTTP failure). HttpError is still
       // possible for non-render failures (project not open, 5xx, etc.).
       if (result.error) {
-        promptPreviewError = friendlyTemplateError(
+        record.error = friendlyTemplateError(
           result.error,
           promptPreviewDeclaredInputs,
-          promptPreviewInputDrafts,
+          record.inputDrafts,
         );
         const line = result.error.line;
         diagnostics = typeof line === "number" && line > 0
@@ -245,19 +246,19 @@
                 ? result.error.col
                 : undefined,
               severity: "error",
-              message: promptPreviewError ?? result.error.message,
+              message: record.error ?? result.error.message,
             }]
           : [];
       } else {
-        promptPreviewError = null;
+        record.error = null;
         diagnostics = [];
       }
     } catch (e) {
       // Falls here only for non-render failures (e.g. project closed, 5xx).
-      promptPreviewError = (e as Error).message || "Render failed.";
+      record.error = (e as Error).message || "Render failed.";
       diagnostics = [];
     } finally {
-      promptPreviewRunning = false;
+      record.running = false;
     }
   }
 
@@ -316,24 +317,24 @@
       </button>
     {/if}
     <div class="prompt-preview-pane-meta">
-      {#if promptPreviewRunning}
+      {#if record.running}
         <span class="prompt-preview-status">rendering…</span>
-      {:else if promptPreviewResult}
-        <span class="prompt-preview-status">{promptPreviewResult.messages.length} msg · {promptPreviewResult.char_count} chars</span>
-        {#if promptPreviewResult.estimated_tokens}
+      {:else if record.result}
+        <span class="prompt-preview-status">{record.result.messages.length} msg · {record.result.char_count} chars</span>
+        {#if record.result.estimated_tokens}
           <span class="prompt-preview-cost" title="Estimated tokens (universal tokenizer; provider-specific counts may vary slightly).">
-            · {formatTokens(promptPreviewResult.estimated_tokens)} tok
+            · {formatTokens(record.result.estimated_tokens)} tok
           </span>
         {/if}
-        {#if promptPreviewResult.estimated_cost_usd != null}
+        {#if record.result.estimated_cost_usd != null}
           <span class="prompt-preview-cost" title="Estimated input cost (output cost depends on the response; not included).">
-            · {formatCostEur(promptPreviewResult.estimated_cost_usd)}
+            · {formatCostEur(record.result.estimated_cost_usd)}
           </span>
         {/if}
       {/if}
       {#if previewExpanded}
-        <button type="button" disabled={promptPreviewRunning || !rawBody.trim()} onclick={runPromptPreview}>
-          {promptPreviewRunning ? "Rendering…" : "Render now"}
+        <button type="button" disabled={record.running || !rawBody.trim()} onclick={runPromptPreview}>
+          {record.running ? "Rendering…" : "Render now"}
         </button>
       {/if}
     </div>
@@ -349,7 +350,7 @@
             <small class="prompt-preview-inputs-hint">use in template as <code>&lbrace;&lbrace; input.&lt;name&gt; &rbrace;&rbrace;</code></small>
           </div>
           {#each promptPreviewDeclaredInputs as inputDef (inputDef.name)}
-            {@const draft = promptPreviewInputDrafts[inputDef.name]}
+            {@const draft = record.inputDrafts[inputDef.name]}
             {@const isMissing = inputDef.required && (draft === undefined || draft === null || (typeof draft === "string" && !draft.trim()))}
             <label class="prompt-preview-field" class:missing-required={isMissing}>
               <span class="prompt-preview-field-label">
@@ -372,7 +373,7 @@
                 researchStructure={researchStructure}
                 loreEntries={loreEntries}
                 promptEntries={promptEntries}
-                onChange={(next) => promptPreviewInputDrafts = {...promptPreviewInputDrafts, [inputDef.name]: next}}
+                onChange={(next) => record.inputDrafts = {...record.inputDrafts, [inputDef.name]: next}}
               />
             </label>
           {/each}
@@ -381,10 +382,10 @@
     </div>
 
     <div class="prompt-preview-pane-body">
-      {#if promptPreviewConflicts.length > 0}
+      {#if record.conflicts.length > 0}
         <div class="prompt-preview-error" role="alert">
           <strong>Input type conflict</strong>
-          {#each promptPreviewConflicts as conflict (conflict.name)}
+          {#each record.conflicts as conflict (conflict.name)}
             <p>
               <code>{conflict.name}</code> is declared with different types across included
               snippets ({conflict.types.join(", ")}). Included snippets must agree on an
@@ -393,8 +394,8 @@
           {/each}
         </div>
       {/if}
-      {#if promptPreviewError}
-        <p class="prompt-preview-error">{promptPreviewError}</p>
+      {#if record.error}
+        <p class="prompt-preview-error">{record.error}</p>
       {/if}
       {#if promptPreviewMissingRequired.length > 0}
         <p class="prompt-preview-required-notice">
@@ -405,11 +406,11 @@
 
       {#if !rawBody.trim()}
         <p class="prompt-preview-empty muted">Type a template above to see the rendered output here.</p>
-      {:else if promptPreviewResult}
-        {#if promptPreviewResult.warnings.length > 0}
+      {:else if record.result}
+        {#if record.result.warnings.length > 0}
           <div class="prompt-preview-warnings">
             <strong>Warnings</strong>
-            {#each promptPreviewResult.warnings as warning}
+            {#each record.result.warnings as warning}
               <p>{warning}</p>
             {/each}
           </div>
@@ -417,7 +418,7 @@
         <!-- ADR-0060 §6: the send-path composition the model will receive — the
              system prefix, the tier-tagged lore the backend places (visible again),
              then the uncached conversation turns. -->
-        {#each promptPreviewResult.cache_blocks as block}
+        {#each record.result.cache_blocks as block}
           <div class="prompt-preview-message prompt-preview-message-{block.role}">
             <header class="prompt-preview-message-role">
               <span>{block.label}</span>
@@ -434,7 +435,7 @@
             {#if block.text}<pre class="prompt-preview-block">{block.text}</pre>{/if}
           </div>
         {/each}
-      {:else if !promptPreviewRunning && !promptPreviewError}
+      {:else if !record.running && !record.error}
         <p class="prompt-preview-empty muted">Waiting for first render…</p>
       {/if}
     </div>

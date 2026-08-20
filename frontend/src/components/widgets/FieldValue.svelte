@@ -38,6 +38,9 @@
      *  an absent boolean reads dimmed "not set" rather than "off". Other surfaces
      *  leave it false (a concrete value is always present). */
     allowUnset?: boolean;
+    /** Rail-embedded: forwarded to ReferencePicker so a read-only ref field's
+     *  picker drops its duplicate titled header (the rail shows the label, #1216). */
+    embedded?: boolean;
     // Context the read-only widgets need to resolve a value's display:
     // ReferencePicker needs the rosters to turn a ref id into a title/link; TagChip
     // needs knownTags for its hue; ListValueEditor takes the matcher for highlights.
@@ -56,6 +59,7 @@
     value,
     ariaLabel,
     allowUnset = false,
+    embedded = false,
     loreEntries = [],
     promptEntries = [],
     structure = null,
@@ -114,6 +118,7 @@
   <ReferencePicker
     {field}
     readOnly
+    {embedded}
     value={metadataReferenceValue(field, value)}
     excludeId={excludeId}
     ariaLabel={label}

@@ -437,6 +437,7 @@
                       {field}
                       readOnly={true}
                       allowUnset={true}
+                      embedded={true}
                       value={displayValue(fieldId)}
                       ariaLabel={fieldLabel}
                       loreEntries={loreEntries}
@@ -507,6 +508,7 @@
                 {field}
                 {readOnly}
                 allowUnset={true}
+                embedded={true}
                 value={displayValue(fieldId)}
                 ariaLabel={fieldLabel}
                 loreEntries={loreEntries}

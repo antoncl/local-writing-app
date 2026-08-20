@@ -140,27 +140,28 @@ describe("schema_type editor is ephemeral, never rehydrated (#168)", () => {
   });
 });
 
-// ADR-0062 S2: a detached prompt preview (`preview:<editorPaneId>`) is the same
+// ADR-0062 D2 (formerly the Preview-only `preview:<editorPaneId>`, S2): a
+// detached prompt editor sub-tab (`subtab:<tabId>:<editorPaneId>`) is the same
 // zombie shape — a live view of an open editor, reconstructed only while that
 // editor is mounted. It must never survive a reload, exactly like schema_type.
-describe("detached prompt preview is ephemeral, never rehydrated (ADR-0062 S2)", () => {
-  it("strips a preview:<paneId> tab on serialize but keeps its neighbour", () => {
-    const previewGroup = group("g-prev", ["preview:editor_abc123"]);
+describe("detached prompt editor sub-tab is ephemeral, never rehydrated (ADR-0062 D2)", () => {
+  it("strips a subtab:<tabId>:<paneId> tab on serialize but keeps its neighbour", () => {
+    const subtabGroup = group("g-sub", ["subtab:preview:editor_abc123"]);
     const tree = split(
       "root",
       "row",
-      [group(G_EDITOR, ["editor_abc123"]), previewGroup, group(G_SIDE, ["lore"])],
+      [group(G_EDITOR, ["editor_abc123"]), subtabGroup, group(G_SIDE, ["lore"])],
       [0.4, 0.3, 0.3],
     );
 
     const snapshot = serialize(tree, G_EDITOR, null);
     const tabs = flattenPanels(snapshot.root);
-    expect(tabs).not.toContain("preview:editor_abc123");
+    expect(tabs).not.toContain("subtab:preview:editor_abc123");
     // Editor docs are ephemeral too; the self-sufficient region survives.
     expect(tabs).toContain("lore");
   });
 
-  it("drops a persisted preview:<paneId> tab on load", () => {
+  it("drops a persisted subtab:<tabId>:<paneId> tab on load", () => {
     const legacy = JSON.stringify({
       version: 1,
       root: {
@@ -169,7 +170,7 @@ describe("detached prompt preview is ephemeral, never rehydrated (ADR-0062 S2)",
         dir: "row",
         children: [
           { kind: "group", id: G_EDITOR, tabs: [], active: null },
-          { kind: "group", id: "g-prev", tabs: ["preview:editor_abc123"], active: "preview:editor_abc123" },
+          { kind: "group", id: "g-sub", tabs: ["subtab:preview:editor_abc123"], active: "subtab:preview:editor_abc123" },
           { kind: "group", id: G_SIDE, tabs: ["lore"], active: "lore" },
         ],
         sizes: [0.4, 0.3, 0.3],
@@ -181,7 +182,7 @@ describe("detached prompt preview is ephemeral, never rehydrated (ADR-0062 S2)",
     const restored = deserialize(legacy);
     expect(restored).not.toBeNull();
     const tabs = flattenPanels(restored!.root);
-    expect(tabs).not.toContain("preview:editor_abc123");
+    expect(tabs).not.toContain("subtab:preview:editor_abc123");
     expect(tabs).toContain("lore");
   });
 });

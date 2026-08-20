@@ -22,6 +22,7 @@
     surfaceForStrategy,
   } from "@/lib/editor-core/promptResolution";
   import { onDestroy } from "svelte";
+  import type { Snippet } from "svelte";
   import CodeEditor from "@/components/widgets/CodeEditor.svelte";
   import EntryInputsEditor from "@/components/editor/body/EntryInputsEditor.svelte";
   import OfferOnPicker from "@/components/editor/body/OfferOnPicker.svelte";
@@ -46,8 +47,9 @@
     // --- Inputs the parent owns (state lifted up; bind:'d by NodeEditor) ---
     rawBody?: string;
     entryInputDrafts?: EntryInputDraft[];
-    // This editor's own workspace pane id (ADR-0062 S2) — the key for a detached
-    // Preview pane (`preview:<hostPaneId>`) and the parent it's subordinate to.
+    // This editor's own workspace pane id (ADR-0062 D2) — the key for a
+    // detached sub-tab pane (`subtab:<tabId>:<hostPaneId>`) and the parent
+    // it's subordinate to.
     hostPaneId?: string | null;
     // The prompt's `offer_on` allow-list (ADR-0054 §4 / S4b), authored via the
     // OfferOnPicker below. Bound to NodeEditor's offerOnDraft; only rendered for
@@ -252,95 +254,99 @@
     inheritedInputsFrom(promptEffectiveInputs, promptInputProvenance, promptEntries),
   );
 
-  // --- Prompt editor sub-tabs (ADR-0062 §1) -------------------------------
-  // Edit = the code‖preview loop (side by side); Setup = Inputs + Offered-on,
-  // off the main column. Both panels stay MOUNTED across switches (CSS-hidden,
-  // not {#if}) so a trip to Setup never tears down CodeMirror's undo history or
-  // the live preview. S2 will refine Edit into detachable Template/Preview
-  // sub-tabs; S1 ships them as a fixed split (tabs-alone would break the loop).
-  type PromptTab = "edit" | "setup";
-  let activePromptTab = $state<PromptTab>("edit");
-  function selectPromptTab(tab: PromptTab): void {
-    activePromptTab = tab;
-    cheatsheetPopoverOpen = false; // its trigger lives on the Edit toolbar
-  }
+  // --- Prompt editor sub-tabs (ADR-0062 §1/S2 Amendment 2 "D2") -----------
+  // Three peer tabs — Template / Preview / Setup — each detachable into its
+  // own subordinate workspace pane via a header glyph OR a drag-out gesture.
+  // Docked tabs stay MOUNTED across switches (CSS-hidden, not {#if}) so a trip
+  // to Setup never tears down CodeMirror's undo history or the live preview.
+  type PromptTab = "template" | "preview" | "setup";
+  const PROMPT_TABS: { id: PromptTab; label: string }[] = [
+    { id: "template", label: "Template" },
+    { id: "preview", label: "Preview" },
+    { id: "setup", label: "Setup" },
+  ];
+  let detachedTabs = $state<PromptTab[]>([]);
+  const isDetached = (tab: PromptTab): boolean => detachedTabs.includes(tab);
+  const dockedTabs = $derived(PROMPT_TABS.filter((t) => !isDetached(t.id)));
+  // Husk invariant: never detach the last docked tab — the editor pane can't
+  // be left empty.
+  const canDetach = $derived(dockedTabs.length > 1);
 
-  // Code column's share of the split width (preview gets the rest). Persisted
-  // globally — a preferred balance is an author habit, not a per-prompt property.
-  const SPLIT_PREF_KEY = "lwa.editor.promptSplit";
-  function loadSplitRatio(): number {
-    try {
-      const raw = localStorage.getItem(SPLIT_PREF_KEY);
-      const n = raw ? Number.parseFloat(raw) : Number.NaN;
-      return Number.isFinite(n) && n >= 0.2 && n <= 0.8 ? n : 0.5;
-    } catch {
-      return 0.5;
-    }
-  }
-  let codeFlex = $state(loadSplitRatio());
-  let splitContainerEl: HTMLDivElement | undefined = $state();
-
-  function startSplitDrag(event: MouseEvent): void {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    const container = splitContainerEl;
-    if (!container) return;
-    const rect = container.getBoundingClientRect();
-    // House pattern (AGENTS.md): document-level move/up, write the fraction live
-    // for smooth drag, commit to localStorage on release.
-    function onMove(e: MouseEvent): void {
-      const frac = (e.clientX - rect.left) / rect.width;
-      codeFlex = Math.max(0.2, Math.min(0.8, frac));
-    }
-    function onUp(): void {
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
-      try {
-        localStorage.setItem(SPLIT_PREF_KEY, String(codeFlex));
-      } catch {
-        // Best-effort — a blocked localStorage just means it won't persist.
-      }
-    }
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
-  }
-
-  // --- Preview detach (ADR-0062 S2) ---------------------------------------
-  // The Preview is defined once as the `previewPane` snippet below. Docked, it
-  // renders inline in the split; detached, the SAME snippet is registered under
-  // `preview:<hostPaneId>` and RegionBody renders it in a subordinate workspace
-  // pane beside the editor. Svelte 5 carries the snippet's reactive reads across
-  // that boundary (the SchemaPanes pattern), so a detached preview stays live
-  // as-you-type and its bound-out signals (diagnostics / effective-inputs) keep
-  // feeding the docked gutter and Setup tab — no per-document store needed. The
-  // pane is subordinate (closes with the editor) and ephemeral (never restored).
-  const previewPaneId = $derived(hostPaneId ? `preview:${hostPaneId}` : null);
-  let previewDetached = $state(false);
-
-  function detachPreview(): void {
-    const id = previewPaneId;
-    if (!id || !hostPaneId) return;
-    previewDetached = true;
-    // Tile it to the right of the editor's own group — full height and width
-    // beside the code — and tie its lifetime to this editor pane.
-    openSubordinatePane(id, hostPaneId, reattachPreview, { beside: hostPaneId, edge: "right" });
-  }
-
-  function reattachPreview(): void {
-    previewDetached = false;
-    if (previewPaneId) closeSubordinatePane(previewPaneId);
-  }
-
-  // Guardrails: if the pane's document is swapped for a non-prompt while the
-  // preview is detached, fold it back (the snippet would render nothing). And on
-  // teardown, drop the pane + link — the editor-close cascade covers the common
-  // case, this covers CodeBodyView unmounting while its pane stays open.
+  let activePromptTab = $state<PromptTab>("template");
+  // Keep the active tab a DOCKED one: if it detaches, fall to the first docked tab.
   $effect(() => {
-    if (previewDetached && !isPrompt()) reattachPreview();
+    if (isDetached(activePromptTab) && dockedTabs.length > 0) activePromptTab = dockedTabs[0].id;
+  });
+  function selectPromptTab(tab: PromptTab): void {
+    if (isDetached(tab)) return;
+    activePromptTab = tab;
+    cheatsheetPopoverOpen = false; // its trigger lives on the Template toolbar
+  }
+
+  // A detached tab's subordinate-pane id — ephemeral (workspaceLayout.serialize's
+  // isEphemeralTab treats any `subtab:` id the same as the old `preview:` one):
+  // it's a live view of this editor's draft state, reconstructed only while the
+  // editor is mounted, so it's stripped on serialize and dropped on load.
+  const subtabPaneId = (tab: PromptTab): string | null =>
+    hostPaneId ? `subtab:${tab}:${hostPaneId}` : null;
+
+  function detachTab(tab: PromptTab): void {
+    const id = subtabPaneId(tab);
+    if (!id || !hostPaneId || !canDetach || isDetached(tab)) return;
+    detachedTabs = [...detachedTabs, tab];
+    // Tile it beside the editor's own group — full height, to the right — and
+    // tie its lifetime to this editor pane.
+    openSubordinatePane(id, hostPaneId, () => reattachTab(tab), { beside: hostPaneId, edge: "right" });
+  }
+
+  function reattachTab(tab: PromptTab): void {
+    detachedTabs = detachedTabs.filter((t) => t !== tab);
+    const id = subtabPaneId(tab);
+    if (id) closeSubordinatePane(id); // idempotent — also the pane's own onClose
+  }
+
+  // Drag a tab OUT of the strip to detach (secondary to the glyph, honors the
+  // originally-expected gesture). Detaches only when the drag ends outside the
+  // strip's rect, and only when canDetach — a click-without-drag still selects.
+  let tabStripEl: HTMLDivElement | undefined = $state();
+  let draggingTab: PromptTab | null = null;
+  function onTabDragStart(e: DragEvent, tab: PromptTab): void {
+    if (!canDetach) {
+      e.preventDefault();
+      return;
+    }
+    e.dataTransfer?.setData("text/plain", tab);
+    draggingTab = tab;
+  }
+  function onTabDragEnd(e: DragEvent): void {
+    const tab = draggingTab;
+    draggingTab = null;
+    const r = tabStripEl?.getBoundingClientRect();
+    if (!tab || !r) return;
+    const outside = e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+    if (outside) detachTab(tab);
+  }
+
+  // Fold every detached tab back if the doc stops being a prompt (the body
+  // would render nothing), and drop all detached panes on teardown — the
+  // editor-close cascade covers the common case, this covers CodeBodyView
+  // unmounting while its pane stays open.
+  $effect(() => {
+    if (!isPrompt() && detachedTabs.length > 0) for (const tab of [...detachedTabs]) reattachTab(tab);
   });
   onDestroy(() => {
-    if (previewPaneId) closeSubordinatePane(previewPaneId);
+    for (const tab of detachedTabs) {
+      const id = subtabPaneId(tab);
+      if (id) closeSubordinatePane(id);
+    }
   });
+
+  // Resolve a tab id to its body snippet. Referenced here and from the detached
+  // RegionRegistrar registrations below; the snippet bindings themselves are
+  // declared in the markup, but Svelte hoists them into the component's scope.
+  function bodyFor(tab: PromptTab): Snippet<[ViewSpec | undefined]> {
+    return tab === "template" ? templateBody : tab === "preview" ? previewBody : setupBody;
+  }
 
   // rawBody change propagation: CodeEditor's bind:value updates our
   // `rawBody`, which (because the parent uses bind:rawBody) updates the
@@ -350,108 +356,76 @@
 </script>
 
 {#if isPrompt()}
-  <!-- ADR-0062 §1: the prompt editor is a sub-tabbed shell. Edit holds the
-       code‖preview loop side by side; Setup holds Inputs + Offered-on off the
-       main column. One top-level element so it lands in .editor-panel's 1fr
-       grid row and drives its own internal split. -->
+  <!-- ADR-0062 §1 / D2: the prompt editor is a three-tab shell — Template /
+       Preview / Setup — each detachable into its own subordinate pane via the
+       header glyph or a drag-out. One top-level element so it lands in
+       .editor-panel's 1fr grid row. -->
   <div class="prompt-editor-shell">
-    <div class="tab-strip" role="tablist" aria-label="Prompt editor sections">
-      <button
-        type="button"
-        class="tab-strip-tab"
-        class:active={activePromptTab === "edit"}
-        role="tab"
-        aria-selected={activePromptTab === "edit"}
-        onclick={() => selectPromptTab("edit")}
-      >Edit</button>
-      <button
-        type="button"
-        class="tab-strip-tab"
-        class:active={activePromptTab === "setup"}
-        role="tab"
-        aria-selected={activePromptTab === "setup"}
-        onclick={() => selectPromptTab("setup")}
-      >Setup</button>
-    </div>
-
-    <!-- Edit panel — kept MOUNTED across tab switches (CSS-hidden, not {#if}) so
-         CodeMirror's undo history and the live preview survive a trip to Setup. -->
-    <div class="prompt-tabpanel" class:hidden={activePromptTab !== "edit"} role="tabpanel" aria-label="Edit">
-      <div class="prompt-split" bind:this={splitContainerEl}>
-        <div class="prompt-split-code" style="flex-grow: {previewDetached ? 1 : codeFlex};">
-          <div class="editor-wrap raw-body-wrap">
-            <div class="raw-body-editor">
-              <!-- Belt-and-braces (#368): keyed per document id so a CodeMirror
-                   instance's undo history and mount-fixed language extension can never
-                   span documents. No in-pane document switch exists today (one tab per
-                   document; panes are torn down on close), so this only guards a future
-                   pane-model change. It does NOT cover a same-id external reload (none
-                   exists for code bodies today) — that would need a state reset, not a
-                   remount, exactly like ProseBodyView's loadScene boundary. -->
-              {#key scene?.id}
-                <CodeEditor bind:value={rawBody} language={rawBodyLanguage} lineWrapping={lineWrapEnabled} {readOnly} diagnostics={promptPreviewDiagnostics} />
-              {/key}
-            </div>
-            <div class="raw-body-toolbar">
-      <button
-        type="button"
-        class="prompt-wrap-button"
-        class:active={lineWrapEnabled}
-        role="switch"
-        aria-checked={lineWrapEnabled}
-        title={lineWrapEnabled ? "Soft-wrap is on — long lines wrap to fit. Click to turn off." : "Soft-wrap is off — long lines scroll horizontally. Click to turn on."}
-        aria-label="Toggle line wrapping"
-        onclick={toggleLineWrap}
-      >Wrap</button>
-      {#if canRestoreDefaultBody && !readOnly}
-        <button
-          type="button"
-          class="prompt-restore-default-button"
-          title="Replace this body with the type's default template. Ctrl+Z to undo."
-          aria-label="Restore default body"
-          onclick={restoreDefaultBody}
-        >Restore default body</button>
-      {/if}
-      <button
-        type="button"
-        class="prompt-help-button"
-        bind:this={helpButtonEl}
-        class:active={cheatsheetPopoverOpen}
-        title="Variables & helpers — what you can reference in &lbrace;&lbrace; … &rbrace;&rbrace; and &lbrace;% … %&rbrace;"
-        aria-label="Show variables and helpers reference"
-        aria-expanded={cheatsheetPopoverOpen}
-        onclick={toggleCheatsheetPopover}
-      >?</button>
-      {#if previewPaneId}
-        <button
-          type="button"
-          class="prompt-wrap-button"
-          class:active={previewDetached}
-          title={previewDetached
-            ? "Reattach the preview into this editor's split."
-            : "Detach the preview into its own pane beside the editor."}
-          aria-label={previewDetached ? "Reattach preview" : "Detach preview"}
-          onclick={previewDetached ? reattachPreview : detachPreview}
-        >{previewDetached ? "Reattach preview" : "Detach preview"}</button>
-      {/if}
-            </div>
-          </div>
-        </div>
-        {#if !previewDetached}
-          <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <div class="tab-strip" role="tablist" aria-label="Prompt editor sections" bind:this={tabStripEl}>
+      {#each PROMPT_TABS as tab (tab.id)}
+        {#if !isDetached(tab.id)}
           <div
-            class="prompt-split-gutter"
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="Resize preview"
-            onmousedown={startSplitDrag}
-          ></div>
-          <div class="prompt-split-preview" style="flex-grow: {1 - codeFlex};">
-            {@render previewPane(undefined)}
+            class="tab-strip-tab-wrap"
+            role="presentation"
+            class:active={activePromptTab === tab.id}
+            draggable={canDetach}
+            ondragstart={(e) => onTabDragStart(e, tab.id)}
+            ondragend={onTabDragEnd}
+          >
+            <button
+              type="button"
+              class="tab-strip-tab"
+              class:active={activePromptTab === tab.id}
+              role="tab"
+              aria-selected={activePromptTab === tab.id}
+              onclick={() => selectPromptTab(tab.id)}
+            >{tab.label}</button>
+            {#if canDetach}
+              <button
+                type="button"
+                class="tab-detach-glyph"
+                title={`Detach ${tab.label} into its own pane`}
+                aria-label={`Detach ${tab.label}`}
+                onclick={() => detachTab(tab.id)}
+              >
+                <i class="ti ti-arrow-bar-to-right" aria-hidden="true"></i>
+              </button>
+            {/if}
+          </div>
+        {:else}
+          <div class="tab-strip-tab-wrap detached">
+            <span class="tab-strip-tab detached-label">{tab.label}</span>
+            <button
+              type="button"
+              class="tab-detach-glyph"
+              title={`Reattach ${tab.label}`}
+              aria-label={`Reattach ${tab.label}`}
+              onclick={() => reattachTab(tab.id)}
+            >
+              <i class="ti ti-arrow-bar-to-left" aria-hidden="true"></i>
+            </button>
           </div>
         {/if}
-      </div>
+      {/each}
     </div>
+
+    <!-- Docked tabpanels stay MOUNTED across switches (CSS-hidden, not {#if})
+         so CodeMirror's undo history and the live preview survive a trip to
+         Setup. A detached tab is NOT rendered here — its body renders in the
+         subordinate pane via the RegionRegistrar below. -->
+    {#each PROMPT_TABS as tab (tab.id)}
+      {#if !isDetached(tab.id)}
+        <div
+          class="prompt-tabpanel"
+          class:hidden={activePromptTab !== tab.id}
+          class:prompt-setup={tab.id === "setup"}
+          role="tabpanel"
+          aria-label={tab.label}
+        >
+          {@render bodyFor(tab.id)(undefined)}
+        </div>
+      {/if}
+    {/each}
 
     {#if cheatsheetPopoverOpen}
     <div class="prompt-help-popover" role="dialog" aria-label="Variables and helpers" style="top: {popoverPos.top}px; right: {popoverPos.right}px;">
@@ -504,46 +478,6 @@
       </div>
     </div>
     {/if}
-
-    <!-- Setup panel — Inputs + Offered-on, off the main loop (ADR-0062 §1).
-         Also kept mounted (CSS-hidden) so its drafts don't re-seed on switch. -->
-    <div class="prompt-tabpanel prompt-setup" class:hidden={activePromptTab !== "setup"} role="tabpanel" aria-label="Setup">
-      <!-- Dependency advisory (ADR-0061 §5): a snippet whose fields other prompts /
-           chats depend on. Advisory only, never a gate; absent for a prompt nothing
-           includes (the count is 0/0). -->
-      {#if dependentsNote}
-        <p class="entry-inputs-dependents">
-          <i class="ti ti-info-circle" aria-hidden="true"></i>
-          Used by {dependentsNote} — changing these fields may affect them.
-        </p>
-      {/if}
-
-      <!-- A Library prompt's declared inputs are shown but locked: `inert` blocks
-           every control and drops the subtree from the tab order, so there is no
-           edit that could 409 on save. Clone to edit. -->
-      <div class="entry-inputs-host" class:read-only={readOnly} inert={readOnly || undefined}>
-        <EntryInputsEditor
-          bind:entryInputDrafts
-          {inheritedInputs}
-          {nextInputDraftId}
-          {entrySlugify}
-          {onInputsChange}
-        />
-      </div>
-
-      {#if showOfferOnPicker}
-        <!-- Locked (Library prompt) the same way as the inputs host: `inert` blocks
-             interaction + drops it from the tab order; clone to edit. -->
-        <div class="entry-inputs-host" class:read-only={readOnly} inert={readOnly || undefined}>
-          <OfferOnPicker
-            bind:offerOn
-            {metadataSchema}
-            {readOnly}
-            onChange={onOfferOnChange}
-          />
-        </div>
-      {/if}
-    </div>
   </div>
 {:else}
   <!-- Non-prompt code body (e.g. a snippet / structure file): just the editor. -->
@@ -556,11 +490,60 @@
   </div>
 {/if}
 
-<!-- The Preview, defined once (ADR-0062 S2). Rendered inline in the split when
-     docked; registered under `preview:<hostPaneId>` and rendered by RegionBody
-     in a subordinate pane when detached. `_spec` is the RegionBody view-spec arg
-     (unused — this is not an explicit-view pane). -->
-{#snippet previewPane(_spec: ViewSpec | undefined)}
+<!-- The three peer tab bodies, each defined once (ADR-0062 D2). Rendered
+     inline (CSS-hidden when not active) while docked; registered under
+     `subtab:<tabId>:<hostPaneId>` and rendered by RegionBody in a subordinate
+     pane when detached. `_spec` is the RegionBody view-spec arg (unused — none
+     of these is an explicit-view pane). -->
+{#snippet templateBody(_spec: ViewSpec | undefined)}
+  <div class="editor-wrap raw-body-wrap">
+    <div class="raw-body-editor">
+      <!-- Belt-and-braces (#368): keyed per document id so a CodeMirror
+           instance's undo history and mount-fixed language extension can never
+           span documents. No in-pane document switch exists today (one tab per
+           document; panes are torn down on close), so this only guards a future
+           pane-model change. It does NOT cover a same-id external reload (none
+           exists for code bodies today) — that would need a state reset, not a
+           remount, exactly like ProseBodyView's loadScene boundary. -->
+      {#key scene?.id}
+        <CodeEditor bind:value={rawBody} language={rawBodyLanguage} lineWrapping={lineWrapEnabled} {readOnly} diagnostics={promptPreviewDiagnostics} />
+      {/key}
+    </div>
+    <div class="raw-body-toolbar">
+      <button
+        type="button"
+        class="prompt-wrap-button"
+        class:active={lineWrapEnabled}
+        role="switch"
+        aria-checked={lineWrapEnabled}
+        title={lineWrapEnabled ? "Soft-wrap is on — long lines wrap to fit. Click to turn off." : "Soft-wrap is off — long lines scroll horizontally. Click to turn on."}
+        aria-label="Toggle line wrapping"
+        onclick={toggleLineWrap}
+      >Wrap</button>
+      {#if canRestoreDefaultBody && !readOnly}
+        <button
+          type="button"
+          class="prompt-restore-default-button"
+          title="Replace this body with the type's default template. Ctrl+Z to undo."
+          aria-label="Restore default body"
+          onclick={restoreDefaultBody}
+        >Restore default body</button>
+      {/if}
+      <button
+        type="button"
+        class="prompt-help-button"
+        bind:this={helpButtonEl}
+        class:active={cheatsheetPopoverOpen}
+        title="Variables & helpers — what you can reference in &lbrace;&lbrace; … &rbrace;&rbrace; and &lbrace;% … %&rbrace;"
+        aria-label="Show variables and helpers reference"
+        aria-expanded={cheatsheetPopoverOpen}
+        onclick={toggleCheatsheetPopover}
+      >?</button>
+    </div>
+  </div>
+{/snippet}
+
+{#snippet previewBody(_spec: ViewSpec | undefined)}
   <PromptPreviewPane
     fill
     bind:diagnostics={promptPreviewDiagnostics}
@@ -578,12 +561,66 @@
   />
 {/snippet}
 
-{#if isPrompt() && previewPaneId}
-  <RegionRegistrar
-    regions={{
-      [previewPaneId]: { title: "Preview", body: previewPane, closable: true, onClose: reattachPreview },
-    }}
-  />
+{#snippet setupBody(_spec: ViewSpec | undefined)}
+  <!-- Dependency advisory (ADR-0061 §5): a snippet whose fields other prompts /
+       chats depend on. Advisory only, never a gate; absent for a prompt nothing
+       includes (the count is 0/0). -->
+  {#if dependentsNote}
+    <p class="entry-inputs-dependents">
+      <i class="ti ti-info-circle" aria-hidden="true"></i>
+      Used by {dependentsNote} — changing these fields may affect them.
+    </p>
+  {/if}
+
+  <!-- A Library prompt's declared inputs are shown but locked: `inert` blocks
+       every control and drops the subtree from the tab order, so there is no
+       edit that could 409 on save. Clone to edit. -->
+  <div class="entry-inputs-host" class:read-only={readOnly} inert={readOnly || undefined}>
+    <EntryInputsEditor
+      bind:entryInputDrafts
+      {inheritedInputs}
+      {nextInputDraftId}
+      {entrySlugify}
+      {onInputsChange}
+    />
+  </div>
+
+  {#if showOfferOnPicker}
+    <!-- Locked (Library prompt) the same way as the inputs host: `inert` blocks
+         interaction + drops it from the tab order; clone to edit. -->
+    <div class="entry-inputs-host" class:read-only={readOnly} inert={readOnly || undefined}>
+      <OfferOnPicker
+        bind:offerOn
+        {metadataSchema}
+        {readOnly}
+        onChange={onOfferOnChange}
+      />
+    </div>
+  {/if}
+{/snippet}
+
+<!-- Register each DETACHED tab's body into the panel registry, one
+     RegionRegistrar per tab keyed by tab id: RegionRegistrar syncs its whole
+     `regions` map once, on mount, so a single long-lived registrar can't pick
+     up a later-detached sibling — an `{#each}` over `detachedTabs` mounts a
+     fresh registrar exactly when a tab detaches and tears it down exactly when
+     it reattaches. -->
+{#if isPrompt() && hostPaneId}
+  {#each detachedTabs as tab (tab)}
+    {@const id = subtabPaneId(tab)}
+    {#if id}
+      <RegionRegistrar
+        regions={{
+          [id]: {
+            title: PROMPT_TABS.find((t) => t.id === tab)!.label,
+            body: bodyFor(tab),
+            closable: true,
+            onClose: () => reattachTab(tab),
+          },
+        }}
+      />
+    {/if}
+  {/each}
 {/if}
 
 <style>
@@ -772,7 +809,7 @@
     flex: none;
     align-self: center;
   }
-  /* --- ADR-0062 §1: sub-tabbed shell + code‖preview split --- */
+  /* --- ADR-0062 §1/D2: three-tab shell, each tab detachable --- */
   .prompt-editor-shell {
     display: flex;
     flex-direction: column;
@@ -784,6 +821,51 @@
     flex: none;
     padding: 0 var(--sp-2);
   }
+  /* A docked tab + its detach glyph, or a detached tab's muted placeholder +
+     reattach glyph. Shares the .tab-strip-tab visual vocabulary; the wrap only
+     adds the flex row + glyph-reveal behavior. */
+  .tab-strip-tab-wrap {
+    display: flex;
+    align-items: center;
+  }
+  .tab-detach-glyph {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    margin-left: -2px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-3);
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+    font-size: var(--fs-xs);
+    opacity: 0;
+    transition: opacity var(--t-fast);
+  }
+  .tab-strip-tab-wrap:hover > .tab-detach-glyph,
+  .tab-strip-tab-wrap.active > .tab-detach-glyph,
+  .tab-strip-tab-wrap.detached > .tab-detach-glyph {
+    opacity: 1;
+  }
+  .tab-detach-glyph:hover {
+    background: var(--panel);
+    color: var(--text);
+  }
+  /* A detached tab's placeholder — a muted, non-interactive label (selecting it
+     does nothing; use the glyph to bring it back). */
+  .tab-strip-tab-wrap.detached {
+    opacity: 0.55;
+  }
+  .tab-strip-tab.detached-label {
+    padding: 6px 12px;
+    font-size: var(--fs-md);
+    color: var(--text-3);
+    cursor: default;
+  }
   .prompt-tabpanel {
     flex: 1;
     min-width: 0;
@@ -794,36 +876,9 @@
   .prompt-tabpanel.hidden {
     display: none;
   }
-  .prompt-split {
-    flex: 1;
-    min-width: 0;
-    min-height: 0;
-    display: flex;
-    flex-direction: row;
-  }
-  .prompt-split-code,
-  .prompt-split-preview {
-    flex-basis: 0;
-    min-width: 0;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-  }
-  .prompt-split-code > .editor-wrap {
+  .prompt-tabpanel > .editor-wrap {
     flex: 1;
     min-height: 0;
-  }
-  /* The drag handle between code and preview — the shell's gutter vocabulary
-     (var(--sp-1) bar, accent on hover), one column-resize cursor. */
-  .prompt-split-gutter {
-    flex: none;
-    width: var(--sp-1);
-    cursor: col-resize;
-    background: var(--divider);
-    transition: background var(--t-fast);
-  }
-  .prompt-split-gutter:hover {
-    background: var(--accent);
   }
   .prompt-setup {
     overflow-y: auto;

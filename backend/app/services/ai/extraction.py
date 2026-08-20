@@ -9,9 +9,11 @@
 # small fresh context. Length-independent by construction.
 #
 # The contract is a Jinja template rendered through the ordinary preview pipeline,
-# so it reuses `fields` and the entry helpers rather than re-deriving the
-# field descriptors in Python (the seed templates' item-shape logic is non-trivial
-# — one source of it, not two). `DEFAULT_EXTRACTION_TEMPLATE` is the ONE generated
+# so it reuses `fields` and the entry helpers. It registers each field on the
+# `field_contract` accumulator (ADR-0067 S1) and renders their descriptor list via
+# `{{ field_contract.render }}` — the ONE source of the item-shape logic (which is
+# non-trivial), shared with any authored prompt that builds a contract the same
+# way, not re-derived per template. `DEFAULT_EXTRACTION_TEMPLATE` is the ONE generated
 # contract (body + all proposable fields); a prompt that needs a narrower shape sets
 # `commit.fields`, an allow-list that filters which descriptors the template
 # enumerates (ADR-0054 §2). `body` is just another field in that list, so its absence
@@ -80,11 +82,7 @@ Reply with ONLY a JSON object, with no preamble, no commentary, and no code fenc
 {% endif %}- "fields": {% if inputs.creating %}{% if inputs.title_allowed %}ALWAYS include "title". {% endif %}Add any other field the conversation set, {% else %}include a field ONLY when the conversation changed it, {% endif %}keyed by its field id. For tags / multi_select give a JSON array of strings; for a select field use one of its listed options exactly; for an ordered-list field give the complete new list in its stated item shape (the whole list, in order); otherwise give the field's complete new value.{% if not inputs.creating %}{% if inputs.title_allowed %} You may also propose a new "title".{% endif %} Use {} if nothing changed.{% endif %}
 
 The fields you may set:
-{% for f in fields(inputs.entry_type) if f.proposable and f.id != "body" and (inputs.commit_fields is none or f.id in inputs.commit_fields) %}
-- {{ f.id }} ({{ f.label }}) — {{ f.type }}{% if f.options %}; one of: {{ f.options | join(", ") }}{% endif %}{% if f.description %} — {{ f.description }}{% endif %}{% if f.get("items") %}{% if f.item_scalar %}; a JSON array of {{ f["items"][0].type }} values{% if f["items"][0].options %}, each one of: {{ f["items"][0].options | join(", ") }}{% endif %}{% else %}; a JSON array of objects, each with keys: {% for m in f["items"] %}{{ m.key }} ({{ m.type }}{% if m.options %}; one of: {{ m.options | join(", ") }}{% endif %}){% if not loop.last %}, {% endif %}{% endfor %}{% endif %}{% endif %}
-{% else %}
-- (none{% if inputs.body_allowed %} beyond title/body{% endif %})
-{% endfor %}
+{% for f in fields(inputs.entry_type) if f.proposable and f.id != "body" and (inputs.commit_fields is none or f.id in inputs.commit_fields) %}{% do field_contract.store(f) %}{% endfor %}{% if field_contract.stored %}{{ field_contract.render }}{% else %}- (none{% if inputs.body_allowed %} beyond title/body{% endif %}){% endif %}
 
 Output only that JSON object. It is parsed, validated against the entry's schema, and reviewed against the current entry before anything is saved.
 {% endrole %}"""

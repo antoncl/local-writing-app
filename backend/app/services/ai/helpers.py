@@ -32,6 +32,7 @@ from app.services.ai.entry_patch import (
     is_proposable_field,
 )
 from app.services.ai.entry_ref import EntryRef
+from app.services.ai.field_contract import FieldContract
 from app.services.ai.plot_prompt_context import render_plot_context
 from app.services.ai.sessions import AISession
 from app.services.error_log import append_error_line
@@ -432,6 +433,16 @@ def register_helpers(
     # last hint.
     used_hints_slot: dict[str, str] = {}
     env.used_hints = used_hints_slot  # type: ignore[attr-defined]
+
+    # ADR-0067 S1: the field contract accumulator. A prompt registers the fields
+    # it commits to producing via `{% do field_contract.store(f) %}` and renders
+    # their descriptor list with `{{ field_contract.render }}`; the commit path
+    # reads `.stored` back as the shape to enforce (S2). One instance per render,
+    # exposed as a global (for the template) and as an env attribute (for the
+    # read-back) — the same per-render lifetime as `used_nodes` above.
+    field_contract = FieldContract()
+    env.field_contract = field_contract  # type: ignore[attr-defined]
+    env.globals["field_contract"] = field_contract
 
     env.globals["last_words"] = last_words
     env.globals["pov"] = lambda scene: _pov(project, schema, scene)

@@ -20,6 +20,8 @@
   import { referenceIndexStore } from "@/lib/stores/references";
   import { mutationSetEntriesStore, openNewMutationSet, openEditMutationSet } from "@/lib/stores/mutationSets";
   import { pinnedSetsFor } from "@/lib/views/pinnedSets";
+  import { resolveColor } from "@/lib/utils/colors";
+  import { metadataSchemaStore } from "@/lib/stores/schema";
   import type { MutationSetEntrySummary } from "@/lib/types";
 
   let {
@@ -38,6 +40,8 @@
   let pinned = $derived(
     pinnedSetsFor(entityId, $referenceIndexStore, $mutationSetEntriesStore),
   );
+
+  const schema = $derived($metadataSchemaStore);
 
   let expanded = $state(true);
   let error = $state("");
@@ -100,7 +104,12 @@
 {/if}
 
 {#snippet pinnedRow(set: MutationSetEntrySummary, rowCtx: RowCtx<MutationSetEntrySummary>)}
-  <NodeRow title={set.title || "Untitled change"} depth={rowCtx.depth} onClick={rowCtx.onClick}>
+  <NodeRow
+    title={set.title || "Untitled change"}
+    depth={rowCtx.depth}
+    stripeColor={resolveColor(null, set.entry_type, "mutation_set", schema)?.hex ?? null}
+    onClick={rowCtx.onClick}
+  >
     {#snippet trailing()}
       <CountPill count={set.row_count} />
     {/snippet}

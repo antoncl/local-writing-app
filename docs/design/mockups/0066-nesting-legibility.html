@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Nested lists — legibility pass</title>
+<style>
+  :root {
+    --sans: "Segoe UI", system-ui, sans-serif;
+    --serif: Georgia, "Times New Roman", serif;
+    --fs-xs: 11px; --fs-sm: 12px; --fs-md: 13px; --fs-lg: 15px; --fs-xl: 16px;
+
+    --surface: #ffffff; --board: #f4f6f5; --panel: #edf3f1; --inset: #f1f5f3;
+    --border: #cbd6d2; --border-strong: #b4c2bc; --divider: #e2e8e5;
+    --text: #242424; --text-2: #4d5753; --text-3: #74817b;
+    --accent: #2f6f5e; --accent-soft: #edf6f2;
+
+    --tier1: #ebf1ee; --tier2: #dde7e3;          /* current (near-invisible) */
+    --p-tier1: #e6efe9; --p-tier2: #d6e4dd; --p-tier3: #c4d7cd;  /* proposed */
+    --p-guide: #bfcdc6;
+
+    --stripe-a: #b5651d; --stripe-b: #3a7ca5;
+    --shadow2: rgba(36,36,36,.10);
+
+    --gutter: 22px;    /* fixed caret slot — every row reserves it, so titles align */
+    --indent: 26px;    /* per-level indent step */
+  }
+  .dark {
+    --surface: #1f2522; --board: #181c1a; --panel: #20272a; --inset: #242a28;
+    --border: #3a4541; --border-strong: #4a5651; --divider: #2a322f;
+    --text: #e8edeb; --text-2: #a9b6b0; --text-3: #7e8a84;
+    --accent: #6cc4a6; --accent-soft: #1f3a32;
+    --tier1: #29322e; --tier2: #333e39;
+    --p-tier1: #29322e; --p-tier2: #333e39; --p-tier3: #404d47;
+    --p-guide: #46534c;
+    --stripe-a: #d08a45; --stripe-b: #5fa3cc;
+    --shadow2: rgba(0,0,0,.5);
+  }
+
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:var(--sans); color:var(--text); background:var(--board);
+         padding:28px 24px 40px; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:1120px; margin:0 auto; }
+  .topbar { display:flex; align-items:baseline; justify-content:space-between; gap:16px; }
+  h1 { font-family:var(--serif); font-weight:700; font-size:26px; margin:0; letter-spacing:-.01em; }
+  .lede { color:var(--text-2); font-size:var(--fs-md); margin:6px 0 22px; max-width:66ch; line-height:1.5; }
+  .theme-btn { font:600 var(--fs-sm)/1 var(--sans); color:var(--text-2); background:var(--surface);
+               border:1px solid var(--border); border-radius:8px; padding:8px 12px; cursor:pointer; white-space:nowrap; }
+  .theme-btn:hover { border-color:var(--border-strong); }
+
+  .cols { display:grid; grid-template-columns:1fr 1fr; gap:20px; align-items:start; }
+  @media (max-width:860px){ .cols{ grid-template-columns:1fr; } }
+  .col-head { display:flex; align-items:center; gap:8px; margin:0 0 10px; }
+  .tag { font-size:var(--fs-xs); font-weight:700; text-transform:uppercase; letter-spacing:.06em; padding:2px 8px; border-radius:999px; }
+  .tag.before { color:var(--text-3); background:var(--inset); border:1px solid var(--divider); }
+  .tag.after  { color:var(--accent); background:var(--accent-soft); border:1px solid transparent; }
+  .col-head h2 { font-family:var(--serif); font-size:var(--fs-lg); font-weight:700; margin:0; }
+
+  .pane { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:10px; box-shadow:0 1px 2px var(--shadow2); }
+
+  /* ---- shared row skeleton ---- */
+  .row { position:relative; display:flex; align-items:center; width:100%; border-radius:8px; min-height:30px; }
+  .title { font-size:var(--fs-md); font-weight:600; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .detail { font-size:var(--fs-sm); color:var(--text-3); margin-left:8px; }
+  .count { margin-left:auto; font-size:var(--fs-xs); font-weight:600; color:var(--text-3); background:var(--surface);
+           border:1px solid var(--border); border-radius:999px; padding:1px 8px; }
+  .grouphdr > .title { font-family:var(--serif); font-size:var(--fs-xl); font-weight:700; }
+  .grouphdr.sub > .title { font-family:var(--sans); font-size:var(--fs-md); font-weight:700; }
+  /* PROPOSED serif rule (ADR-0030 × 0066): a category/synthetic BUCKET header is
+     the tool → sans; a header that names a real work NODE → serif. */
+  .after .grouphdr > .title { font-family:var(--sans); font-size:var(--fs-lg); font-weight:700; color:var(--text-2); }
+  .after .grouphdr.node > .title { font-family:var(--serif); font-size:var(--fs-lg); font-weight:700; color:var(--text); }
+
+  /* ============ BEFORE (today) ============ */
+  .before .row { padding:5px 8px; gap:6px; }
+  .before .grouphdr { border-bottom:1px solid var(--divider); }
+  .before .kids { background:var(--tier1); border-radius:10px; padding:8px; margin-top:4px; display:flex; flex-direction:column; gap:3px; }
+  .before .kids .kids { background:var(--tier2); }
+  .before .sub-in { padding-left:14px; }
+  .before .caret { width:14px; color:var(--text-3); font-size:var(--fs-xs); line-height:1; cursor:pointer; flex:none; text-align:center; }
+  .before .caret::before { content:"▾"; } .before .caret.collapsed::before { content:"▸"; }
+  .before .lead-pad { width:14px; flex:none; }
+
+  /* ============ AFTER (proposed) ============ */
+  .after .row { padding:6px 8px; }
+  .after .row.member.striped { box-shadow: inset 4px 0 0 0 var(--rc, var(--stripe-a)); }
+  /* fixed caret gutter on EVERY row → leaf + sub-group titles share one left edge */
+  .after .gutter { width:var(--gutter); height:22px; flex:none; display:inline-flex; align-items:center; justify-content:center; margin-right:4px; }
+  .after .caret { width:22px; height:22px; display:inline-flex; align-items:center; justify-content:center;
+                  color:var(--text-2); cursor:pointer; border-radius:6px; transition:background .1s; }
+  .after .caret:hover { background:var(--inset); color:var(--text); }
+  .after .caret svg { width:13px; height:13px; transform:rotate(90deg); transition:transform .12s ease; }
+  .after .caret.collapsed svg { transform:rotate(0deg); }
+  /* one indent step + a quiet guide rail per level; tint deepens per depth */
+  .after .kids { position:relative; margin-left:var(--indent); padding:3px 0 3px 10px;
+                 background:var(--p-tier1); border-radius:8px; margin-top:3px; display:flex; flex-direction:column; gap:2px; }
+  .after .kids .kids { background:var(--p-tier2); }
+  .after .kids .kids .kids { background:var(--p-tier3); }
+  .after .kids::before { content:""; position:absolute; left:2px; top:4px; bottom:4px; width:2px; border-radius:2px; background:var(--p-guide); }
+
+  /* ---- legend ---- */
+  .legend { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:16px 24px; margin:26px 2px 0; padding-top:18px; border-top:1px solid var(--divider); }
+  .legend .item { font-size:var(--fs-sm); color:var(--text-2); line-height:1.5; }
+  .legend .item b { color:var(--text); display:block; margin-bottom:3px; font-size:var(--fs-md); }
+  .swatch { display:inline-flex; gap:16px; align-items:center; margin-top:8px; }
+  .swatch .lbl { font-size:var(--fs-xs); color:var(--text-3); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <h1>Nested lists — reading at a glance</h1>
+    <button class="theme-btn" id="themeToggle">◑ Toggle theme</button>
+  </div>
+  <p class="lede">Rev 2 — every row reserves a fixed caret gutter, so a sub-group header (<b>House&nbsp;Vane</b>)
+     lines up with its sibling members and its parent group's content edge; the per-level indent is stronger.
+     Toggle theme, click carets.</p>
+
+  <div class="cols">
+    <!-- ============ BEFORE ============ -->
+    <div>
+      <div class="col-head"><span class="tag before">Today</span><h2>Barely distinguishable</h2></div>
+      <div class="pane before">
+        <div class="row grouphdr"><span class="caret" data-t></span><span class="title">Characters</span><span class="count">3</span></div>
+        <div class="kids" data-kids>
+          <div class="row"><span class="lead-pad"></span><span class="title" style="font-weight:600">Aria Vane</span><span class="detail">Protagonist</span></div>
+          <div class="row"><span class="lead-pad"></span><span class="title" style="font-weight:600">Corwin Blackwood</span><span class="detail">Antagonist</span></div>
+          <div class="row grouphdr sub" style="border:none"><span class="caret" data-t></span><span class="title">House Vane</span><span class="count">2</span></div>
+          <div class="kids" data-kids>
+            <div class="row sub-in"><span class="lead-pad"></span><span class="title" style="font-weight:600">Lyle Vane</span></div>
+            <div class="row sub-in"><span class="lead-pad"></span><span class="title" style="font-weight:600">Mira Vane</span></div>
+          </div>
+        </div>
+        <div class="row grouphdr" style="margin-top:6px"><span class="caret" data-t></span><span class="title">Locations</span><span class="count">2</span></div>
+        <div class="kids" data-kids>
+          <div class="row"><span class="lead-pad"></span><span class="title" style="font-weight:600">The Causeway</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ AFTER ============ -->
+    <div>
+      <div class="col-head"><span class="tag after">Proposed · rev 2</span><h2>Nesting reads instantly</h2></div>
+      <div class="pane after">
+        <div class="row grouphdr"><span class="gutter"><span class="caret" data-t><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 5l8 7-8 7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span></span><span class="title">Characters</span><span class="count">3</span></div>
+        <div class="kids" data-kids>
+          <div class="row member striped" style="--rc:var(--stripe-a)"><span class="gutter"></span><span class="title">Aria Vane</span><span class="detail">Protagonist</span></div>
+          <div class="row member striped" style="--rc:var(--stripe-a)"><span class="gutter"></span><span class="title">Corwin Blackwood</span><span class="detail">Antagonist</span></div>
+          <div class="row grouphdr node"><span class="gutter"><span class="caret" data-t><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 5l8 7-8 7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span></span><span class="title">House Vane</span><span class="count">2</span></div>
+          <div class="kids" data-kids>
+            <div class="row member striped" style="--rc:var(--stripe-a)"><span class="gutter"></span><span class="title">Lyle Vane</span></div>
+            <div class="row member striped" style="--rc:var(--stripe-a)"><span class="gutter"></span><span class="title">Mira Vane</span></div>
+          </div>
+        </div>
+        <div class="row grouphdr" style="margin-top:6px"><span class="gutter"><span class="caret" data-t><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 5l8 7-8 7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span></span><span class="title">Locations</span><span class="count">2</span></div>
+        <div class="kids" data-kids>
+          <div class="row member striped" style="--rc:var(--stripe-b)"><span class="gutter"></span><span class="title">The Causeway</span></div>
+        </div>
+      </div>
+      <p class="lede" style="margin:12px 2px 0; max-width:46ch; font-size:var(--fs-sm)">
+        Dotted line = where <b>House Vane</b> and its siblings (Aria, Corwin) now share one left edge — the
+        parent group's content edge. Its own children indent one full step further.</p>
+    </div>
+  </div>
+
+  <div class="legend">
+    <div class="item"><b>Caret + gutter</b>A real chevron in a 22px hit slot that <i>every</i> row reserves — so leaf
+      and sub-group titles align on one vertical line.
+      <span class="swatch"><span class="lbl">was</span><span class="before"><span class="caret" style="color:var(--text-3)">▾</span></span>
+      <span class="lbl">now</span><span class="after"><span class="caret"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 5l8 7-8 7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span></span></span></div>
+    <div class="item"><b>Indent</b>14px → <b>26px per level</b>, with a quiet guide rail marking each level's left.</div>
+    <div class="item"><b>Tier tint</b>Light steps deepened so the panel is visible; dark was already widened in 0066.</div>
+    <div class="item"><b>Kind-stripe</b>Every member row carries its kind colour — wired in the panes that skipped it (chat included).</div>
+  </div>
+</div>
+
+<script>
+  const C = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 5l8 7-8 7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  document.querySelectorAll('.caret').forEach(c => { if (c.textContent.trim() === '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 5l8 7-8 7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>') c.innerHTML = C; });
+  document.querySelectorAll('.caret[data-t]').forEach(c => {
+    c.addEventListener('click', () => {
+      const kids = c.closest('.row').nextElementSibling;
+      if (!kids || !kids.classList.contains('kids')) return;
+      c.classList.toggle('collapsed');
+      kids.style.display = c.classList.contains('collapsed') ? 'none' : '';
+    });
+  });
+  document.getElementById('themeToggle').addEventListener('click', () => {
+    document.documentElement.classList.toggle('dark'); document.body.classList.toggle('dark');
+  });
+</script>
+</body>
+</html>

@@ -28,6 +28,7 @@
   import PromptMenu from "@/components/editor/PromptMenu.svelte";
   import { buildPromptMenuTree } from "@/lib/editor-core/promptMenuTree";
   import { nodeSet } from "@/lib/views/viewResult";
+  import { resolveColor } from "@/lib/utils/colors";
   import { chatSessions } from "@/lib/stores/chatSessions.svelte";
   import { chatSessionsStore } from "@/lib/stores/chats";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
@@ -203,7 +204,12 @@
 {/if}
 
 {#snippet conversationRow(session: ChatSessionSummary, rowCtx: RowCtx<ChatSessionSummary>)}
-  <NodeRow title={session.title || "Untitled chat"} depth={rowCtx.depth} onClick={rowCtx.onClick}>
+  <NodeRow
+    title={session.title || "Untitled chat"}
+    depth={rowCtx.depth}
+    stripeColor={resolveColor(null, session.entry_type, "chat", metadataSchema)?.hex ?? null}
+    onClick={rowCtx.onClick}
+  >
     {#snippet detailSlot()}
       <small>
         {session.message_count} message{session.message_count === 1 ? "" : "s"} · {session.updated_at.slice(0, 16).replace("T", " ")}

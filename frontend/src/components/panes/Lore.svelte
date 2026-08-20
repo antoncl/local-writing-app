@@ -218,10 +218,10 @@
   >
     {#snippet leading()}
       <!-- A real-node parent (a Nest tree header that IS a lore entry) stays a
-           real NodeRow — collapsible via its own caret, still openable. -->
-      {#if ctx.collapsible}
-        <RowCaret collapsed={ctx.collapsed} toggle={ctx.toggle} />
-      {/if}
+           real NodeRow — collapsible via its own caret, still openable. A leaf
+           reserves the same caret gutter (empty) so its title aligns on the
+           parent group's content edge (ADR-0066 Amendment 1). -->
+      <RowCaret collapsible={ctx.collapsible} collapsed={ctx.collapsed} toggle={ctx.toggle} />
     {/snippet}
     {#snippet trailing()}
       {#if ctx.collapsible}

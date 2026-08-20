@@ -74,3 +74,33 @@ A writer opens a deep character tree in a *compact* NodeList: the group header r
 - **S4 — the dense step.** Tighter rounded cards, the one curved-stripe rule, no dividers.
 
 Then, separately and behind approval, **#1175** reduces NodePicker onto the settled rows.
+
+## Amendment 1 — the nesting-legibility pass (2026-08-20, Anton)
+
+**This ADR shipped its *mechanisms* but the panes never got the legibility pass, so nested lists still don't read at a glance.** Dogfooding the lore pane surfaced it: decision 3 ("the frame outweighs its leaves — children carry **indent + a stronger tier tint**") only ever landed as the bigger serif header + the *dark* `--tier` widening. The **indent was never increased** (it stayed the pre-existing `depth*14`), the **light `--tier` steps were never touched** (still `#ebf1ee`… — near-invisible), the **collapse caret stayed an 11px `▾` glyph**, and several panes (chat/Conversations, PinnedSets, MutationTimeline, Backlinks, Prompts, Chats) **never wired the kind-stripe** at all. So a light comfortable pane shows almost no change, and you can't tell nested from not.
+
+This amendment also **resolves an internal tension in the original**: the user journey said "a flat lore list … stays comfortable, unchanged from today," but decision 3 *changes* grouped panes. The "unchanged" was too strong — **grouped panes do get the legibility treatment**; only an ungrouped flat list stays as-is.
+
+Mockup: [`../mockups/0066-nesting-legibility.html`](../mockups/0066-nesting-legibility.html) (approved with Anton over three rounds).
+
+**Decisions:**
+
+1. **The caret is a real chevron with a real hit target.** Replace the 11px `▾` text glyph (`GroupCaret`/`RowCaret` default `size="sm"`) with a sized chevron (~13px) in a ~22px interactive slot with a hover state. `StructureTree`'s existing `size="md"` caret + hit gutter is the reference for "correct."
+2. **Every row reserves a fixed caret gutter.** A leaf/member row reserves the same caret slot a group header uses (empty), so **leaf and sub-group titles align on one vertical left edge** — a sub-group header (a Nest that IS a real node) no longer gets shoved right by its caret; it sits flush with its sibling members and the parent group's content edge. This is `StructureTree`'s `.tree-caret-gutter` (#484) generalised to every nesting surface.
+3. **Indent steps clearly, per level.** Raise the child indent (~`depth*14` → ~`depth*26`) and add a **single quiet guide rail** per level. The rail is one 2px line at the level's left, **not** `├─└─` connectors — the schematic tree stays rejected (original "why / rejected").
+4. **The light `--tier` steps are deepened** so a grouped panel is actually visible in light (dark was already widened here). This finally delivers decision 3's "stronger tier tint" — the shared tokens live in one place (`NodeRow`'s `--tier1/2/3`), so it is largely a one-file change.
+5. **Member rows carry the kind-stripe everywhere.** A member row that has a kind colour passes it to `stripeColor`, so the curved inset band shows in every pane — not only where it happened to be wired. The ViewNodeList consumers that skipped it already receive `ctx.stripeColor` for free (~one line each). Where a pane already puts the kind colour in a **trailing type-pill** (Backlinks, ReferencePicker's present refs), the pill stays and the stripe is added only where colour is currently *absent*.
+6. **Serif names the work; sans names the tool (ADR-0030 × this ADR).** This ADR's decision 3 made *every* group header `--fs-xl` serif; that over-applied — a **category / synthetic BUCKET header** ("Characters", a disposition bucket, the picker's "Scenes"/"Lore") is a tool label → **sans**. Serif is kept only for a header that **names a real work node** — a manuscript Act/Chapter, or a Nest header that *is* a lore entry. So the serif-vs-sans of a group header is now conditional on **real node vs synthetic bucket**, not on "is it a group header."
+
+**Anti-goals (unchanged / reaffirmed):**
+- **Not a schematic / structural-inspector tree.** The guide rail is a single quiet rule, never `├─└─` connectors or mono `[count]`.
+- **Not new NodeRow props.** The caret gutter, indent, tint, and serif rule are NodeRow-internal (a bucket-vs-node signal the row can derive from what it already knows — `groupHeader` + whether it hosts a real node); the stripe is the existing `stripeColor`, just passed by more callers.
+- **No pre-1.0 migration** — presentation only.
+
+**Blast radius (from the pane audit):** the caret, gutter, indent, and light-tint are **central** — `GroupCaret`/`RowCaret` and `NodeRow`'s `--tier`/indent, a handful of files. The stripe is **~8 one-line** edits across the ViewNodeList consumers. **SchemaTreePane is the one outlier** — it nests with no `depth` prop *and* has no collapse caret at all; giving it real indent + an interactive caret is its own slice.
+
+- **A1-S1** — caret + gutter (GroupCaret/RowCaret redesign; every row reserves the slot).
+- **A1-S2** — indent + guide rail + deepened light tiers (NodeRow, one-file-ish).
+- **A1-S3** — serif node-vs-bucket rule (conditional header font).
+- **A1-S4** — wire `stripeColor` on member rows in the panes that skipped it.
+- **A1-S5** — SchemaTreePane: add depth indent + an interactive caret.

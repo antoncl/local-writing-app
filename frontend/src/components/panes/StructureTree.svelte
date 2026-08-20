@@ -520,22 +520,14 @@
 
   /* Fixed-width caret slot on both leaf and container rows so a title's
      horizontal position tracks depth only, never whether that particular row
-     happens to have a caret (#484). */
+     happens to have a caret (#484). Width matches the md RowCaret's self-
+     reserved slot so a leaf's empty gutter aligns with a container's caret
+     (ADR-0066 Amendment 1 — RowCaret now owns the hit-target radius + hover). */
   .tree-caret-gutter {
     flex: none;
-    width: 20px;
+    width: 24px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-  }
-
-  /* Drafts-tree-only hit-target affordance for the enlarged (size="md")
-     caret; other RowCaret consumers are untouched. */
-  .tree-caret-gutter :global(.row-caret) {
-    border-radius: 4px;
-  }
-
-  .tree-caret-gutter :global(.row-caret):hover {
-    background: var(--inset);
   }
 </style>

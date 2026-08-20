@@ -148,8 +148,8 @@
         : { sources: [{ kind: "lore" }] }) as NodePickerConfig,
       // `list` item shape (#698): "group:<id>" or "scalar:<type>". A field
       // that isn't already a list seeds EMPTY — switching a field's type to
-      // Ordered list must not silently persist a shape the author never
-      // chose; the Done button stays disabled until they pick one.
+      // List must not silently persist a shape the author never chose; the
+      // Done button stays disabled until they pick one.
       itemShape: f?.item_group
         ? `group:${f.item_group}`
         : f?.item_type

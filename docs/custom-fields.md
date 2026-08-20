@@ -25,11 +25,11 @@ what you'll see in the type picker.
 - A simple yes or no — *introduced?*, *still alive?* → **Checkbox**
 - A colour to tint the Entry in lists and on boards → **Colour**
 - **One** choice from a set you decide — a status of *Alive / Dead / Missing* → **Select**
-- **Several** choices from a set you decide — roles from *Protagonist / Ally / Villain* → **List**
+- **Several** choices from a set you decide — roles from *Protagonist / Ally / Villain* → **Select, Multiple**
 - Loose labels you invent as you go and reuse for filtering — themes, moods → **Tags**
 - A link to **one** other Entry — a character's home → **Entry Reference**
 - Links to **several** other Entries — a character's allies → **Entry Reference, Multiple**
-- A growing list you keep adding to — aliases, goals, relationships → **Ordered list**
+- A growing list you keep adding to — aliases, goals, relationships → **List**
 - A value the app works out for you — a word count → **Computed**
 
 If two of these feel interchangeable, the next two sections pull the confusing
@@ -45,21 +45,21 @@ ones apart.
 | **Checkbox** | a yes/no flag | "Introduced?" |
 | **Colour** | a swatch to tint the Entry | the character's colour on the board |
 | **Select** | one option from a fixed set | "Status": *Alive* |
-| **List** | several options from a fixed set | "Roles": *Ally*, *Comic relief* |
+| **Select, Multiple** | several options from a fixed set | "Roles": *Ally*, *Comic relief* |
 | **Tags** | free labels you make up and reuse | "protagonist", "arc-2" |
 | **Entry Reference** | a link to one other Entry | "Home" → a location |
 | **Entry Reference, Multiple** | links to several Entries | "Allies" → other characters |
-| **Ordered list** | a list you keep adding to, in order | "Aliases", "Goals" |
+| **List** | a list you keep adding to, in order | "Aliases", "Goals" |
 | **Computed** | a value the app fills in | "Word count" |
 
-## Select vs List vs Tags vs Ordered list — telling the "list-ish" types apart
+## Select, Tags, and List — telling the "list-like" types apart
 
-Four types can all look like "a list of things." The difference is *where the
+Several types can all look like "a list of things." The difference is *where the
 choices come from* and *whether the list grows*:
 
-- **Select** and **List** both draw from a **fixed set of options you define once**
-  on the field. The only difference between them is how many you may pick:
-  **Select** is exactly one, **List** is several. Reach for these when the
+- **Select** and **Select, Multiple** both draw from a **fixed set of options you
+  define once** on the field. The only difference is how many you may pick:
+  **Select** is exactly one, **Select, Multiple** several. Reach for these when the
   choices are known and shared — a status, a set of roles, the factions in your
   world. When you define the field you also write the options (and can give each
   a colour).
@@ -67,20 +67,20 @@ choices come from* and *whether the list grows*:
   need it, and it becomes available to reuse everywhere. Reach for Tags when you
   want to sprinkle loose, evolving labels across many Entries and filter by them
   later, without committing to a list of allowed values up front.
-- **Ordered list** is for a collection that **keeps growing and whose order
+- **List** is for a collection that **keeps growing and whose order
   matters** — a character's aliases in the order they were used, a plotline's
-  beats in sequence. Unlike Select/List it isn't a pick-from-options control;
+  beats in sequence. Unlike the Select types it isn't a pick-from-options control;
   it's a list you add items to freely. And its items can be more than single
   values — see the next section.
 
 A quick way to choose: *Is there a fixed set of allowed values?* If yes and you
-pick one, **Select**; if yes and you pick several, **List**. If the labels are
-open-ended, **Tags**. If it's an open, ordered collection you build up over time,
-**Ordered list**.
+pick one, **Select**; if yes and you pick several, **Select, Multiple**. If the
+labels are open-ended, **Tags**. If it's an open, ordered collection you build up
+over time, **List**.
 
-## Ordered lists and their item shape
+## Lists and their item shape
 
-When you choose **Ordered list**, the app asks one more question: **what is each
+When you choose **List**, the app asks one more question: **what is each
 item?** You answer it once, with the *Items are…* dropdown, and there are two
 kinds of answer.
 
@@ -95,7 +95,7 @@ together. A character's *relationships*, where each item has a *person*, a
 item — you need a few pieces per entry.
 
 Groups are defined **once**, under **Groups**, and reused — so the same shape
-(say, Goal / Motivation / Obstacle) can back an Ordered list here and be applied
+(say, Goal / Motivation / Obstacle) can back a List here and be applied
 elsewhere without redrawing it each time. In the *Items are…* dropdown your
 existing groups appear together, above the single-value options. If a group
 isn't offered, it's because one of its sub-fields is a type that can't sit inside

@@ -628,9 +628,10 @@ class PromptEntrySummary(BaseModel):
     # result, plus the optional commit / on_accept capability. Was on the
     # entry-type's PromptEntryTypeExtras; now lives per-instance where the body
     # that assumes it lives, so the sub-type taxonomy could collapse to
-    # {base, general, snippet}. Presence marks the prompt INVOCABLE (a snippet has
-    # none → import-only); dispatch reads it here, never off the type. Seeded from
-    # the type's default at create (a new `general` gets `{}` — invocable chat),
+    # {base, general, snippet}. Its `output` picks the handler; absent (or no
+    # handler) = a plain conversation. Invocability itself is the entry_type — a
+    # `prompt:snippet` is import-only — not the presence of this key (the writer
+    # drops an empty one). Dispatch reads it here, never off the type;
     # round-tripped through front-matter on save exactly like `inputs`/`offer_on`.
     context_strategy: PromptContextStrategy | None = None
     source_layer_id: str = ""

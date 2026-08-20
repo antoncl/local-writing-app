@@ -186,10 +186,12 @@ class PromptEntriesMixin:
                 initial_body = entry_type_def.default_body
                 initial_inputs = list(entry_type_def.default_inputs)
                 # ADR-0065 S3: the type carries the create-time default behavior
-                # contract; the instance owns it from here. `general` ships an empty
-                # one (a plain conversation — the writer drops it), a future type
-                # could ship an inline/extract default.
-                initial_context_strategy = entry_type_def.context_strategy
+                # contract (under `prompt`, like `default_role`); the instance owns
+                # it from here. `general` ships an empty one (a plain conversation —
+                # the writer drops it), a future type could ship an inline/extract
+                # default.
+                if entry_type_def.prompt:
+                    initial_context_strategy = entry_type_def.prompt.context_strategy
             initial_metadata = self._initial_metadata_from_defaults(request.entry_type, schema)
         except Exception:
             pass

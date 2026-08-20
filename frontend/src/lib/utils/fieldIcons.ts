@@ -68,15 +68,17 @@ export function fieldTypeLabel(type: MetadataFieldType): string {
     boolean: "Checkbox",
     date: "Date",
     select: "Select",
-    multi_select: "List",
+    multi_select: "Select, Multiple",
     entity_ref: "Entry Reference",
     entity_ref_list: "Entry Reference, Multiple",
     tags: "Tags",
     computed: "Computed",
     color: "Colour",
-    // "Ordered list", not "List": multi_select already owns the bare
-    // "List" label, and the ADR-0048 §6 noun for this type is ordered.
-    list: "Ordered list",
+    // Plain "List" — the type a writer actually calls a list (an ordered
+    // collection you add items to). multi_select now takes "Select, Multiple"
+    // (mirroring entity_ref_list = "Entry Reference, Multiple"), which frees
+    // the bare "List" for this type (#1209).
+    list: "List",
   };
   return labels[type] ?? type;
 }

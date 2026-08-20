@@ -1,6 +1,6 @@
 # ADR-0069: A view's appearance is ui state, set at the view selector
 
-- Status: **Proposed** (re-review — supersedes the first draft's "on the spec"
+- Status: **Accepted** (re-review — supersedes the first draft's "on the spec"
   design) — 2026-08-20 (Anton). Design for #1190.
 - Concern: letting the user choose **how a view's output is rendered** — the
   ADR-0066 `mode` (card/tree) + `density` axes — **per view**, without touching

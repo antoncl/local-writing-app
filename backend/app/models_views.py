@@ -315,17 +315,32 @@ class ViewLayout(BaseModel):
     edges: list[ViewLayoutEdge] = Field(default_factory=list)
 
 
+class ViewAppearance(BaseModel):
+    """A view's chosen render layout — the ADR-0066 NodeList axes it carries
+    (ADR-0069). Deliberately NOT on the ViewSpec: ADR-0037 §3 keeps the spec
+    presentation-free, so appearance rides the ui channel instead, set by a
+    control beside the view selector. Stored VERBATIM like the rest of ui state —
+    the backend never acts on it; the frontend feeds it to NodeList. Either field
+    absent ⇒ the pane's default for that axis."""
+
+    mode: Literal["card", "tree"] | None = None
+    density: Literal["comfortable", "compact", "dense"] | None = None
+
+
 class ViewUiState(BaseModel):
     """Non-semantic per-view UI state — a presentation sibling of `spec`, like
-    `layout` (ADR-0036). Today just the collapsed group set for a ViewNodeList;
-    the extension point for future per-view UI (scroll, density). The backend
-    stores `collapsed` VERBATIM — it never parses a key, never evaluates, never
-    prunes (ADR-0025: views evaluate frontend-side); the frontend owns pruning
-    inert keys. Written/read on the lock-free `/ui` endpoint, independent of the
-    spec revision-lock so a fold toggle never contends with a designer save."""
+    `layout` (ADR-0036). The collapsed group set for a ViewNodeList, plus the
+    view's chosen `appearance` (ADR-0069) — the extension point this docstring
+    always named. The backend stores both VERBATIM — it never parses a key,
+    never evaluates, never prunes (ADR-0025: views evaluate frontend-side); the
+    frontend owns pruning inert keys. Written/read on the lock-free `/ui`
+    endpoint, independent of the spec revision-lock so a fold toggle never
+    contends with a designer save."""
 
     # Collapsed ViewGroup.key set (`node:<id>` / `group:<seg>`); absent ⇒ expanded.
     collapsed: list[str] = Field(default_factory=list)
+    # Chosen render layout (ADR-0069); absent ⇒ pane default.
+    appearance: ViewAppearance | None = None
 
 
 class ViewNodeSummary(BaseModel):

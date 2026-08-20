@@ -1220,9 +1220,12 @@ export const api = {
       method: "DELETE",
     });
   },
-  // Lock-free fold/ui write (ADR-0036). Rewrites ONLY the view's `ui` blob; a
-  // `view_default_<kind>` id with no file yet materializes the system default.
-  updateViewUi(viewId: string, ui: ViewUiState) {
+  // Lock-free ui write (ADR-0036). MERGES the given fields into the view's `ui`
+  // blob (a `view_default_<kind>` id with no file yet materializes the system
+  // default). Pass only the field you own — `collapsed` (fold state) or
+  // `appearance` (ADR-0069) — and the backend leaves the other untouched, so the
+  // two independent writers never clobber each other.
+  updateViewUi(viewId: string, ui: Partial<ViewUiState>) {
     return request<ViewNode>(`/views/${encodeURIComponent(viewId)}/ui`, {
       method: "PUT",
       body: JSON.stringify({ ui }),

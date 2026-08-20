@@ -506,6 +506,43 @@ class ViewUiStateTests(unittest.TestCase):
         self.client.put(f"/api/views/{created['id']}/ui", json={"ui": {"collapsed": []}})
         self.assertIsNone(self.client.get(f"/api/views/{created['id']}").json().get("ui"))
 
+    def test_appearance_persists_without_any_collapsed(self) -> None:
+        # ADR-0069: a chosen layout with no collapsed groups (the common case) must
+        # still write the ui blob — the old collapsed-only emptiness check dropped it.
+        created = self._create("Styled", {"kind": "lore", "expr": {"tagged": "x"}})
+        res = self.client.put(
+            f"/api/views/{created['id']}/ui",
+            json={"ui": {"appearance": {"mode": "tree", "density": "compact"}}},
+        )
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertEqual(res.json()["ui"]["appearance"], {"mode": "tree", "density": "compact"})
+        got = self.client.get(f"/api/views/{created['id']}").json()
+        self.assertEqual(got["ui"]["appearance"], {"mode": "tree", "density": "compact"})
+        # The summary ships it too, so a pane applies the layout without a per-view fetch.
+        listed = self.client.get("/api/views").json()["entries"]
+        summary = next(v for v in listed if v["id"] == created["id"])
+        self.assertEqual(summary["ui"]["appearance"]["mode"], "tree")
+
+    def test_ui_writers_merge_and_do_not_clobber(self) -> None:
+        # ADR-0069: appearance and collapsed are two independent writers of one
+        # lock-free blob. Each PUT carries only its field; the merge must preserve
+        # the other's. Order-independent, both directions.
+        created = self._create("Merge", {"kind": "lore", "expr": {"tagged": "x"}})
+        self.client.put(f"/api/views/{created['id']}/ui", json={"ui": {"collapsed": ["node:a"]}})
+        self.client.put(
+            f"/api/views/{created['id']}/ui",
+            json={"ui": {"appearance": {"mode": "card"}}},
+        )
+        after_appearance = self.client.get(f"/api/views/{created['id']}").json()["ui"]
+        self.assertEqual(after_appearance["collapsed"], ["node:a"])  # not clobbered
+        self.assertEqual(after_appearance["appearance"]["mode"], "card")
+
+        # A later fold write carries only collapsed and must keep the appearance.
+        self.client.put(f"/api/views/{created['id']}/ui", json={"ui": {"collapsed": ["node:a", "node:b"]}})
+        after_fold = self.client.get(f"/api/views/{created['id']}").json()["ui"]
+        self.assertEqual(after_fold["collapsed"], ["node:a", "node:b"])
+        self.assertEqual(after_fold["appearance"]["mode"], "card")  # not clobbered
+
     def test_system_view_rejects_spec_edit_but_allows_ui(self) -> None:
         # Hand-write a system view file (materialization is a later slice; the
         # read-only guard must already hold so a system default can't be edited).

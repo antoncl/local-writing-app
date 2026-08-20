@@ -36,16 +36,6 @@
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
 
-  // Resolve a ref's color via the full chain: instance (not carried on
-  // NodePickerRef today — that's a Phase 4 surface) → entry-type → parent
-  // chain → kind-default. Returns an inline CSS custom property string;
-  // the chip / monogram CSS reads `--chip-base` and derives the soft tint
-  // via color-mix(). Empty string falls back to the neutral chip.
-  function colorStyleForRef(ref: { kind: string; entry_type?: string }): string {
-    const swatch = resolveColor(null, ref.entry_type, ref.kind, metadataSchema);
-    return swatch ? `--chip-base: ${swatch.hex};` : "";
-  }
-
   // The resolved kind/sub-type hex for a ref, or null — fed to NodeRow's
   // `stripeColor` so a candidate row carries the one curved stripe (ADR-0068:
   // the stripe is the row's single colour treatment; no monogram).
@@ -525,39 +515,48 @@
        chips drifting above it. Empty bar persists with just the
        trigger so the affordance is always present. -->
   <div class="ctx-context-bar" class:chips-hidden={hideChips}>
-    {#if !hideChips}
-    {#each value as ref (refKey(ref))}
-      <span
-        class="ctx-chip"
-        class:ctx-chip-preset={ref.kind === "preset"}
-        class:ctx-chip-target={ref.target}
-        style={colorStyleForRef(ref)}
-      >
-        {#if compact}
-          <span class="ctx-chip-dot" aria-hidden="true"></span>
-        {/if}
-        {#if ref.kind === "manuscript" && allowTargetMarking}
-          <button
-            type="button"
-            class="ctx-chip-star"
-            aria-pressed={ref.target ?? false}
-            aria-label={ref.target ? `Unmark ${ref.title} as target scene` : `Mark ${ref.title} as target scene`}
-            title={ref.target ? "★ Target — binds to `scene` in the template. Click to unmark." : "Mark as target — binds to `scene` in the template."}
-            onclick={() => toggleTarget(ref)}
-          >{ref.target ? "★" : "☆"}</button>
-        {/if}
-        {#if !compact}
-          <span class="ctx-chip-tag">{chipLabel(ref)}</span>
-        {/if}
-        <strong class="ctx-chip-title">{ref.title}</strong>
-        <button
-          type="button"
-          class="ctx-chip-remove"
-          aria-label="Remove {ref.title}"
-          onclick={() => remove(refKey(ref))}
-        >×</button>
-      </span>
-    {/each}
+    {#if !hideChips && value.length > 0}
+      <!-- ADR-0068 S2: picked refs render as NodeRows (stripe + type pill +
+           delete, ★ for target scenes), matching ReferencePicker — not
+           bespoke .ctx-chip pills. -->
+      <div class="ctx-chips">
+        <NodeList mode="tree" density={compact ? "dense" : "compact"}>
+          {#each value as ref (refKey(ref))}
+            {@const hex = hexForRef(ref)}
+            <NodeRow
+              title={ref.title}
+              stripeColor={ref.target ? "var(--star)" : hex}
+              clickable={false}
+            >
+              {#snippet trailing()}
+                <span
+                  class="ctx-type-pill"
+                  class:has-color={!!hex}
+                  style={hex ? `--chip-base: ${hex}` : ""}
+                >{chipLabel(ref)}</span>
+                {#if ref.kind === "manuscript" && allowTargetMarking}
+                  <button
+                    type="button"
+                    class="row-action-pin"
+                    class:active={ref.target}
+                    aria-pressed={ref.target ?? false}
+                    aria-label={ref.target ? `Unmark ${ref.title} as target scene` : `Mark ${ref.title} as target scene`}
+                    title={ref.target ? "★ Target — binds to `scene` in the template. Click to unmark." : "Mark as target — binds to `scene` in the template."}
+                    onclick={() => toggleTarget(ref)}
+                  >{ref.target ? "★" : "☆"}</button>
+                {/if}
+                <button
+                  type="button"
+                  class="row-action-delete"
+                  aria-label="Remove {ref.title}"
+                  title="Remove"
+                  onclick={() => remove(refKey(ref))}
+                >×</button>
+              {/snippet}
+            </NodeRow>
+          {/each}
+        </NodeList>
+      </div>
     {/if}
 
     <div class="ctx-picker-anchor">
@@ -715,128 +714,36 @@
     border-radius: 9px;
   }
 
-  /* --- Chip ------------------------------------------------------- */
+  /* --- Picked refs (ADR-0068 S2: NodeRows, not bespoke chips) -------- */
 
-  .ctx-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 8px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    font-size: var(--fs-sm);
-    line-height: 1.2;
-    color: var(--text);
-    /* --chip-base is set inline per chip by colorStyleForRef() — see the
-       script. The tag-pill color uses the base directly; the tag-pill
-       background is a soft tint derived via color-mix. When unset, the
-       chip falls back to a neutral border-only treatment. */
-    --chip-tag-color: var(--chip-base, var(--text-3));
-    --chip-tag-bg: var(--inset);
+  .ctx-chips {
+    /* Full-width row in the bar so the picked-ref list stacks above the
+       trigger, which flows onto the next wrap line. */
+    flex: 1 1 100%;
+    min-width: 0;
   }
 
-  .ctx-chip[style*="--chip-base"] {
-    --chip-tag-bg: color-mix(in srgb, var(--chip-base) 12%, white 88%);
-  }
-
-  :global([data-theme="dark"]) .ctx-chip[style*="--chip-base"] {
-    --chip-tag-color: color-mix(in srgb, var(--chip-base) 75%, white 25%);
-    --chip-tag-bg: color-mix(in srgb, var(--chip-base) 18%, black 82%);
-  }
-
-  /* Preset chips reverse the polarity — pale base-tint background so the
-     whole-document inclusion reads visually distinct from item chips. */
-  .ctx-chip-preset {
-    background: color-mix(in srgb, var(--chip-base, var(--text-3)) 12%, white 88%);
-    --chip-tag-color: var(--chip-base, var(--text-3));
-    --chip-tag-bg: var(--surface);
-  }
-
-  :global([data-theme="dark"]) .ctx-chip-preset {
-    background: color-mix(in srgb, var(--chip-base, var(--text-3)) 18%, black 82%);
-  }
-
-  /* ★-bound scene gets a full gold-tint chip — loudest treatment in the
-     strip, because this scene fills the template's `scene` variable. */
-  .ctx-chip-target {
-    background: var(--star-soft);
-    border-color: var(--star);
-    --chip-tag-color: var(--star);
-    --chip-tag-bg: var(--surface);
-  }
-
-  .ctx-chip-tag {
+  /* Trailing type label on a picked-ref row — mirrors ReferencePicker's
+     .ref-type-pill: neutral by default, a soft wash of the kind hue when
+     coloured (--chip-base set inline; the color-mix wash is per-instance,
+     which the style-token guard leaves alone). */
+  .ctx-type-pill {
+    flex: none;
     font-size: var(--fs-xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    color: var(--chip-tag-color);
-    background: var(--chip-tag-bg);
-    border-radius: 4px;
-    padding: 1px 5px;
-    line-height: 1.3;
-  }
-
-  .ctx-chip-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--chip-tag-color);
-    flex: none;
-  }
-
-  .ctx-chip-target .ctx-chip-dot {
-    background: var(--star);
-  }
-
-  .ctx-chip-title {
-    font-weight: 600;
-  }
-
-  .ctx-chip-star {
-    appearance: none;
-    border: none;
-    background: transparent;
-    cursor: pointer;
-    padding: 0;
-    font-size: var(--fs-md);
     color: var(--text-3);
-    line-height: 1;
-    opacity: 0.55;
-    transition: color 80ms linear, opacity 80ms linear;
-  }
-
-  .ctx-chip-star:hover {
-    color: var(--star);
-    opacity: 1;
-  }
-
-  .ctx-chip-star[aria-pressed="true"] {
-    color: var(--star);
-    opacity: 1;
-  }
-
-  .ctx-chip-target .ctx-chip-star {
-    color: var(--star);
-    opacity: 1;
-  }
-
-  .ctx-chip-remove {
-    appearance: none;
-    border: none;
-    background: transparent;
-    color: var(--text-3);
-    font-size: var(--fs-md);
-    line-height: 1;
-    padding: 0 2px;
-    cursor: pointer;
-    border-radius: 3px;
-  }
-
-  .ctx-chip-remove:hover {
     background: var(--inset);
-    color: var(--text);
+    border-radius: 4px;
+    padding: 1px 6px;
+    line-height: 1.35;
+    white-space: nowrap;
+  }
+
+  .ctx-type-pill.has-color {
+    color: var(--chip-base);
+    background: color-mix(in srgb, var(--chip-base) 12%, transparent);
   }
 
   /* --- Trigger ----------------------------------------------------- */

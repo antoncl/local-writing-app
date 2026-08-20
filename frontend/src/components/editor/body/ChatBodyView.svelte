@@ -843,6 +843,13 @@
   let assistantScope = $derived(assistantScopeTags(activePromptEntry));
   let scopedDefaultId = $derived(scopedDefaultAssistantId(assistantEntries, assistantScope, defaultAssistantId));
   let declaredInputs = $derived(activePromptEntry ? effectivePromptInputs(activePromptEntry) : []);
+  // ADR-0046 §6.4 create mode: the revise-target picker (`entry`) is meaningless
+  // when drafting a NEW entry — and filling it would silently flip the flow to
+  // revise — so drop it from the strip. The hidden `entry_type` still reaches the
+  // template via the persisted drafts; revise mode keeps the picker (#695).
+  let strippedInputs = $derived(
+    commit.isCreateBrainstorm ? declaredInputs.filter((i) => i.name !== "entry") : declaredInputs,
+  );
   // A hidden input is launch-set, not user-authored (ADR-0046 §6.4) and has no
   // widget in the strip — so it must never gate Send, or an unset one would
   // disable the button with nothing for the user to fill.
@@ -892,9 +899,9 @@
       bind:scrollEl={chatScrollEl}
     />
 
-    {#if declaredInputs.length > 0}
+    {#if strippedInputs.some((i) => !i.hidden)}
       <ChatInputsStrip
-        {declaredInputs}
+        declaredInputs={strippedInputs}
         {isLocked}
         bind:hidden={chatInputsHidden}
         {chatInputDrafts}

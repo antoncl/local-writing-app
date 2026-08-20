@@ -89,9 +89,14 @@
   } satisfies PromptResolutionContext);
   const brainstormPrompt = $derived(promptEntriesWithCommit(brainstormCtx)[0] ?? null);
 
-  function launchBrainstorm(entryType: string): void {
+  function launchBrainstorm(entryType: string, typeName: string): void {
     if (!brainstormPrompt) return;
-    void chatSessions.openChatFromPromptEntry(brainstormPrompt, { entry_type: entryType }, null);
+    // Name the chat for what it does — "Draft <Type>", matching the menu action —
+    // rather than the dual-mode prompt's "Revise entry" title, which reads wrong
+    // for a create flow (#695).
+    void chatSessions.openChatFromPromptEntry(brainstormPrompt, { entry_type: entryType }, null, {
+      titleOverride: `Draft ${typeName}`,
+    });
   }
 
   // Every NodeList is backed by a view (ADR-0022), and the view is authoritative
@@ -202,9 +207,8 @@
     <NodeList isEmpty={false}>
       {#each entryTypeChoicesByKind($metadataSchemaStore, "lore") as choice (choice.id)}
         <NodeRow
-          title={choice.name}
-          detail="Draft with AI"
-          onClick={() => { launchBrainstorm(choice.id); close(); }}
+          title={`✨ Draft ${choice.name}`}
+          onClick={() => { launchBrainstorm(choice.id, choice.name); close(); }}
         />
       {/each}
     </NodeList>

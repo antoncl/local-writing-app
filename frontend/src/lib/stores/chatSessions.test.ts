@@ -42,3 +42,22 @@ describe("openChatFromPromptEntry — reverse-index refresh (ADR-0051 S3)", () =
     expect(refreshReferenceIndexInBackground).not.toHaveBeenCalled();
   });
 });
+
+describe("openChatFromPromptEntry — chat title (#695)", () => {
+  it("titleOverride names the chat wholesale, replacing the dual-mode prompt title", async () => {
+    // A create-mode brainstorm names itself "Draft <Type>" rather than inheriting
+    // the prompt's "Revise entry" title, which reads wrong for a create flow.
+    await chatSessions.openChatFromPromptEntry(PROMPT, {}, null, { titleOverride: "Draft Character" });
+    expect(api.createChatSession).toHaveBeenCalledWith(expect.objectContaining({ title: "Draft Character" }));
+  });
+
+  it("falls back to '<subject> — <prompt>' when no override is given (revise launch)", async () => {
+    await chatSessions.openChatFromPromptEntry(PROMPT, {}, null, { subjectTitle: "Aurora" });
+    expect(api.createChatSession).toHaveBeenCalledWith(expect.objectContaining({ title: "Aurora — Revise entry" }));
+  });
+
+  it("falls back to the bare prompt title when neither override nor subject is given", async () => {
+    await chatSessions.openChatFromPromptEntry(PROMPT, {}, null, {});
+    expect(api.createChatSession).toHaveBeenCalledWith(expect.objectContaining({ title: "Revise entry" }));
+  });
+});

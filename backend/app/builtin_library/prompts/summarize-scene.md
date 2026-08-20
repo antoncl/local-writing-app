@@ -1,7 +1,7 @@
 ---
 id: builtin-summarize-scene
 title: Summarize scene
-entry_type: prompt:revise:scene_summary
+entry_type: prompt:general
 offer_on:
 - manuscript:scene
 inputs:
@@ -16,6 +16,13 @@ inputs:
         type: manuscript:scene
     multiple: false
     presets: []
+context_strategy:
+  output:
+    handler: extract_to_node
+    commit:
+      review: replace
+      fields:
+      - summary
 ---
 
 {% set e = entry(inputs.entry) %}

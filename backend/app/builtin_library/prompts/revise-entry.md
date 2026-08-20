@@ -1,7 +1,7 @@
 ---
 id: builtin-revise-entry
 title: Revise entry
-entry_type: prompt:revise:entry
+entry_type: prompt:general
 offer_on:
 - lore:base
 inputs:
@@ -24,6 +24,11 @@ inputs:
   label: Entry type
   required: false
   hidden: true
+context_strategy:
+  output:
+    handler: extract_to_node
+    commit:
+      review: visual_diff
 ---
 
 {% set e = entry(inputs.entry) %}

@@ -13,30 +13,18 @@ import { chatSessionsStore } from "@/lib/stores/chats";
 import { referenceIndexStore } from "@/lib/stores/references";
 import { editorPanes } from "@/lib/stores/editorPanes.svelte";
 import { chatSessions } from "@/lib/stores/chatSessions.svelte";
-import type { ChatSessionSummary, MetadataSchema, PromptEntrySummary } from "@/lib/types";
+import type { ChatSessionSummary, MetadataSchema, PromptContextStrategy, PromptEntrySummary } from "@/lib/types";
 
-// Two chat_panel prompt types: one carries a `commit` (a brainstorm), one does
-// not (a plain conversation, e.g. impersonate). Under the offer_on model (ADR-0054
-// §4/S4) BOTH are offerable — commit is orthogonal; what gates the ＋New menu is
-// the chat_panel disposition plus an `offer_on` allow-list that admits the
-// subject. A non-chat_panel type is included to prove the eligibility gate.
-const SCHEMA = {
-  entry_types: {
-    "prompt:revise": {
-      name: "Revise",
-      prompt: { context_strategy: { output: { handler: "extract_to_node", commit: { review: "visual_diff" } } } },
-    },
-    "prompt:scenechat": {
-      name: "Scene chat",
-      prompt: { context_strategy: {} },
-    },
-    "prompt:inline": {
-      name: "Inline",
-      prompt: { context_strategy: { output: { handler: "inline" } } },
-    },
-  },
-  fields: {},
-} as unknown as MetadataSchema;
+// ADR-0065 S3: a prompt's disposition is its own INSTANCE `context_strategy`, not
+// a schema-type lookup — so the fixtures below (chatPrompt / revisePlotline) set
+// it directly. Under the offer_on model (ADR-0054 §4/S4) both a committing
+// brainstorm and a plain conversation (e.g. impersonate) are offerable — commit
+// is orthogonal; what gates the ＋New menu is the `conversation` surface plus an
+// `offer_on` allow-list that admits the subject. An inline (non-conversation)
+// strategy is used to prove the eligibility gate.
+const SCHEMA = { entry_types: {}, fields: {} } as unknown as MetadataSchema;
+
+const INLINE_STRATEGY: PromptContextStrategy = { output: { handler: "inline" } };
 
 function chat(over: Partial<ChatSessionSummary>): ChatSessionSummary {
   return {
@@ -53,24 +41,27 @@ function chat(over: Partial<ChatSessionSummary>): ChatSessionSummary {
   };
 }
 
-// A chat_panel prompt declaring which subject types it is offered on (ADR-0054
-// §4/S4). `entry_type` picks the disposition: `prompt:revise` carries a commit,
-// `prompt:scenechat` is a plain conversation, `prompt:inline` is append_to_body
-// (never a conversation). Membership in the ＋New menu is `offer_on` + chat_panel.
+// A prompt declaring which subject types it is offered on (ADR-0054 §4/S4). The
+// instance's own `context_strategy` picks the disposition (ADR-0065 S3): absent
+// (default here) is a plain conversation (commit orthogonal to eligibility, so a
+// committing brainstorm needs no different fixture); `INLINE_STRATEGY` is
+// append_to_body (never a conversation). Membership in the ＋New menu is
+// `offer_on` + the `conversation` surface.
 function chatPrompt(
   id: string,
   title: string,
   offerOn: string[],
-  entryType = "prompt:revise",
+  contextStrategy?: PromptContextStrategy | null,
 ): PromptEntrySummary {
   return {
     id,
     title,
     body: "",
-    entry_type: entryType,
+    entry_type: "prompt:general",
     metadata: {},
     inputs: [],
     offer_on: offerOn,
+    context_strategy: contextStrategy ?? null,
   } as unknown as PromptEntrySummary;
 }
 
@@ -149,7 +140,7 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
       id: "p-revise-plotline",
       title: "Revise plotline",
       body: "",
-      entry_type: "prompt:revise",
+      entry_type: "prompt:general",
       metadata: {},
       inputs: [{ name: "entry", type: "context_pick", label: "Plotline", required: true }],
       offer_on: ["plot:plotline"],
@@ -176,7 +167,7 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
         subjectTitle: "Hero",
         subjectEntryType: "lore:character",
         asOfScene: "scene_ch12",
-        promptEntries: [chatPrompt("p-imp", "Impersonate", ["lore:character"], "prompt:scenechat")],
+        promptEntries: [chatPrompt("p-imp", "Impersonate", ["lore:character"])],
         metadataSchema: SCHEMA,
         hostPaneId: "pane-1",
       },
@@ -196,7 +187,7 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
   it("omits as_of when the slider is at book-start, keeping inputs clean", async () => {
     const spawn = vi.spyOn(chatSessions, "openChatFromPromptEntry").mockResolvedValue(undefined);
     // renderPanel leaves asOfScene at its "" default (base / book-start).
-    renderPanel([chatPrompt("p-imp", "Impersonate", ["lore:character"], "prompt:scenechat")]);
+    renderPanel([chatPrompt("p-imp", "Impersonate", ["lore:character"])]);
     await fireEvent.click(screen.getByRole("button", { name: /New/ }));
     await tick();
     await fireEvent.click(screen.getByRole("menuitem", { name: "Impersonate" }));
@@ -274,7 +265,7 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
     // commit-only filter (#842).
     renderPanel([
       chatPrompt("p-revise", "Brainstorm a revision", ["lore:character"]),
-      chatPrompt("p-chat", "Chat here", ["lore:character"], "prompt:scenechat"),
+      chatPrompt("p-chat", "Chat here", ["lore:character"]),
     ]);
     await fireEvent.click(screen.getByRole("button", { name: /New/ }));
     await tick();
@@ -286,7 +277,9 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
     // An append_to_body prompt is launched from the editor, never a card's ＋New;
     // declaring offer_on on it must not surface it here. Nothing else to start →
     // ＋New hides (resume list still renders).
-    const { container } = renderPanel([chatPrompt("p-inline", "Inline draft", ["lore:character"], "prompt:inline")]);
+    const { container } = renderPanel([
+      chatPrompt("p-inline", "Inline draft", ["lore:character"], INLINE_STRATEGY),
+    ]);
     expect(container.querySelector(".conv-new")).toBeNull();
     expect(container.querySelector(".entry-conversations")).not.toBeNull();
   });
@@ -294,7 +287,7 @@ describe("ConversationsPanel (ADR-0051 S3)", () => {
   it("hides ＋New when no prompt is offered on this subject (ADR-0054 §4/S4)", () => {
     // A chat prompt whose offer_on does not admit this subject → nothing to
     // start, so ＋New does not render (resume list only).
-    const { container } = renderPanel([chatPrompt("p-chat", "Chat here", ["plot:card"], "prompt:scenechat")]);
+    const { container } = renderPanel([chatPrompt("p-chat", "Chat here", ["plot:card"])]);
     expect(container.querySelector(".conv-new")).toBeNull();
     // The panel still renders — there are chats to resume.
     expect(container.querySelector(".entry-conversations")).not.toBeNull();

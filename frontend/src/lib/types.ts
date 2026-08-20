@@ -180,6 +180,12 @@ export type PromptEntrySummary = {
   // this prompt on…" allow-list, read off the node like `inputs`. Empty/absent =
   // offered nowhere (opt-in). Consumed by `promptEntriesOfferedOn`.
   offer_on?: string[];
+  // The prompt's behavior contract (ADR-0065 S3): which OutputHandler runs its
+  // result, plus the optional commit / on_accept capability. Was read off the
+  // entry-TYPE's `context_strategy`; now lives per-instance here. Dispatch reads
+  // it off the entry, never the type. Absent = a plain conversation prompt;
+  // invocability itself is the entry_type (`prompt:snippet` = import-only).
+  context_strategy?: PromptContextStrategy | null;
   source_layer_id?: string;
   source_layer_label?: string;
   // True when this prompt is shipped by the app-owned built-in Library
@@ -212,6 +218,11 @@ export type PromptEntry = {
   // See PromptEntrySummary.offer_on — carried on the open document so a save
   // round-trips it verbatim (no authoring UI yet; S4b).
   offer_on?: string[];
+  // See PromptEntrySummary.context_strategy (ADR-0065 S3) — the instance's own
+  // behavior contract, carried on the open document so CodeBodyView/ChatBodyView
+  // can read it without a schema-type lookup. No authoring UI here (that's D);
+  // savePromptEntry doesn't send it back, so the backend preserves it verbatim.
+  context_strategy?: PromptContextStrategy | null;
   computed_metadata: EntryMetadata;
   source_layer_id?: string;
   source_layer_label?: string;

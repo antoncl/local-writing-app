@@ -32,7 +32,7 @@ const ROSTER = [
 ];
 
 const prompt = (assistant_tags?: unknown): PromptEntrySummary =>
-  ({ id: "p", title: "P", entry_type: "prompt:continuation", metadata: assistant_tags === undefined ? {} : { assistant_tags } }) as PromptEntrySummary;
+  ({ id: "p", title: "P", entry_type: "prompt:general", metadata: assistant_tags === undefined ? {} : { assistant_tags } }) as PromptEntrySummary;
 
 describe("assistantScopeTags", () => {
   it("reads array and CSV forms; empty when absent", () => {

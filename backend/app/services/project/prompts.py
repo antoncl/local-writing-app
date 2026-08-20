@@ -31,6 +31,7 @@ from app.models import (
     SavePromptEntryRequest,
     SnippetDependents,
 )
+from app.models.schema import PromptContextStrategy
 from app.services.ai.effective_inputs import SnippetSource
 from app.services.project.errors import ProjectServiceError
 
@@ -75,6 +76,7 @@ class PromptEntriesMixin:
                     metadata=self._normalise_metadata(front_matter.get("metadata"), entry.path),
                     inputs=self._parse_prompt_inputs(front_matter.get("inputs")),
                     offer_on=self._parse_offer_on(front_matter.get("offer_on")),
+                    context_strategy=self._parse_context_strategy(front_matter.get("context_strategy")),
                     source_layer_id=entry.source_layer_id,
                     source_layer_label=entry.source_layer_label,
                     is_library=entry.is_library,
@@ -176,12 +178,18 @@ class PromptEntriesMixin:
         initial_body = ""
         initial_inputs: list[PromptInputDefinition] = []
         initial_metadata: dict[str, MetadataValue] = {}
+        initial_context_strategy: PromptContextStrategy | None = None
         try:
             schema = self.read_metadata_schema()
             entry_type_def = schema.entry_types.get(request.entry_type)
             if entry_type_def:
                 initial_body = entry_type_def.default_body
                 initial_inputs = list(entry_type_def.default_inputs)
+                # ADR-0065 S3: the type carries the create-time default behavior
+                # contract; the instance owns it from here. `general` ships an empty
+                # one (a plain conversation — the writer drops it), a future type
+                # could ship an inline/extract default.
+                initial_context_strategy = entry_type_def.context_strategy
             initial_metadata = self._initial_metadata_from_defaults(request.entry_type, schema)
         except Exception:
             pass
@@ -193,8 +201,8 @@ class PromptEntriesMixin:
             entry_type=request.entry_type,
             metadata=initial_metadata,
             inputs=initial_inputs,
+            context_strategy=initial_context_strategy,
         )
-        inputs_payload = [i.model_dump(exclude_none=True) for i in entry.inputs]
         self._write_node_entry_file(
             self._filepath_for_new_node(root / "prompts", request.title),
             entry.id,
@@ -202,7 +210,7 @@ class PromptEntriesMixin:
             entry.entry_type,
             entry.metadata,
             entry.body,
-            extra={"inputs": inputs_payload} if inputs_payload else None,
+            extra=self._prompt_front_matter_extra(entry.inputs, [], entry.context_strategy),
             omit_empty_metadata=True,
         )
         return self.read_prompt_entry(entry_id)
@@ -239,6 +247,7 @@ class PromptEntriesMixin:
             metadata=metadata,
             inputs=self._parse_prompt_inputs(front_matter.get("inputs")),
             offer_on=self._parse_offer_on(front_matter.get("offer_on")),
+            context_strategy=self._parse_context_strategy(front_matter.get("context_strategy")),
             computed_metadata={},
             source_layer_id=index_entry.source_layer_id if index_entry else "",
             source_layer_label=index_entry.source_layer_label if index_entry else "",
@@ -294,6 +303,7 @@ class PromptEntriesMixin:
                 metadata=source.metadata,
                 inputs=source.inputs,
                 offer_on=source.offer_on,
+                context_strategy=source.context_strategy,
                 base_revision=clone.revision,
             ),
         )
@@ -308,7 +318,6 @@ class PromptEntriesMixin:
             raise ProjectServiceError("Prompt changed on disk after it was opened.", 409)
         self._check_entry_type_kind(request.entry_type, "prompt")
         metadata = self._normalise_metadata(request.metadata, path)
-        inputs_payload = [i.model_dump(exclude_none=True) for i in request.inputs]
         self._write_node_entry_file(
             path,
             node_id,
@@ -316,9 +325,12 @@ class PromptEntriesMixin:
             request.entry_type,
             metadata,
             request.body,
-            # `offer_on` rides the same `extra` merge as `inputs`; the writer skips
-            # an empty list, so a prompt with none carries no key (ADR-0054 §4/S4).
-            extra={"inputs": inputs_payload, "offer_on": self._parse_offer_on(request.offer_on)},
+            # `inputs`, `offer_on`, and `context_strategy` ride the same `extra`
+            # merge; the writer skips empties, so a prompt with none carries no key
+            # (ADR-0054 §4/S4, ADR-0065 S3).
+            extra=self._prompt_front_matter_extra(
+                request.inputs, request.offer_on, request.context_strategy
+            ),
             omit_empty_metadata=True,
         )
         self._maybe_rename_node_file(path, request.title)
@@ -339,6 +351,40 @@ class PromptEntriesMixin:
         if not isinstance(raw, list):
             return []
         return [item for item in raw if isinstance(item, str) and item]
+
+    @staticmethod
+    def _prompt_front_matter_extra(
+        inputs: list[PromptInputDefinition],
+        offer_on: list[str],
+        context_strategy: PromptContextStrategy | None,
+    ) -> dict[str, Any]:
+        """The prompt-node front-matter `extra` block (ADR-0065 S3). The writer
+        drops empty values, so a plain prompt carries none of these keys; a
+        `general` with no output config drops `context_strategy` too (invocability
+        is the entry_type, not this key)."""
+        return {
+            "inputs": [i.model_dump(exclude_none=True) for i in inputs],
+            "offer_on": [o for o in offer_on if isinstance(o, str) and o],
+            "context_strategy": (
+                context_strategy.model_dump(exclude_none=True) if context_strategy else None
+            ),
+        }
+
+    @staticmethod
+    def _parse_context_strategy(raw: Any) -> PromptContextStrategy | None:
+        """Normalise a prompt node's `context_strategy` front-matter to the model
+        (ADR-0065 S3). Absent or malformed ⇒ None (a plain `general` conversation,
+        or a `snippet` — invocability is the entry_type, not this). Lenient like
+        `_parse_prompt_inputs`: a bad block degrades to None rather than failing the
+        load; the save path validates a well-formed one."""
+        from pydantic import ValidationError
+
+        if not isinstance(raw, dict):
+            return None
+        try:
+            return PromptContextStrategy.model_validate(raw)
+        except ValidationError:
+            return None
 
     @staticmethod
     def _parse_prompt_inputs(raw: Any) -> list[PromptInputDefinition]:

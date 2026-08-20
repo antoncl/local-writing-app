@@ -76,22 +76,14 @@ class PromptMetadataWrapperTests(unittest.TestCase):
             {"author_note": "keep me"},
         )
 
-    def test_creating_a_revise_entry_seeds_its_inputs(self) -> None:
-        """`create_prompt_entry` seeds a type's `default_inputs` onto the new
-        node. The shipped *body* is no longer seeded — it lives in the built-in
-        Library and is obtained by cloning (ADR-0049 §7) — so a fresh instance
-        starts with an empty body but its two declared inputs: the optional
-        `entry` context_pick (revise mode) and a hidden `entry_type` text input
-        (create mode)."""
-        created = self.service.create_prompt_entry(
-            type("R", (), {"title": "Revise entry", "entry_type": "prompt:revise:entry"})()
-        )
-        entry = self.service.read_prompt_entry(created.id)
-        # The shipped body is not copied on create anymore (§7); it comes from
-        # cloning the Library node instead.
-        self.assertEqual(entry.body.strip(), "")
-        # default_inputs landed: the optional `entry` pick + the hidden
-        # `entry_type` that drives create mode.
+    def test_revise_entry_declares_its_inputs_in_its_own_front_matter(self) -> None:
+        """ADR-0065 S3 collapsed `prompt:revise:entry` into `prompt:general` — its
+        `default_inputs` (the optional `entry` context_pick + hidden `entry_type`
+        text input) no longer exist at the type level, since `create_prompt_entry`
+        can't seed from a deleted type. The shipped built-in Library node instead
+        declares the two inputs itself, in its own front matter, and a clone
+        carries them across (ADR-0049 §7)."""
+        entry = self.service.read_prompt_entry("builtin-revise-entry")
         inputs = {i.name: i for i in entry.inputs}
         self.assertEqual(list(inputs), ["entry", "entry_type"])
         self.assertEqual(inputs["entry"].type, "context_pick")

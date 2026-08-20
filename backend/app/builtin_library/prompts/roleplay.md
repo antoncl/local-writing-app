@@ -1,7 +1,7 @@
 ---
 id: builtin-roleplay
 title: Roleplay
-entry_type: prompt:roleplay
+entry_type: prompt:general
 inputs:
 - name: character
   type: context_pick
@@ -14,6 +14,12 @@ inputs:
         type: lore:character
     multiple: false
     presets: []
+context_strategy:
+  output:
+    handler: inline
+    on_accept:
+      mark: character
+      from_input: character
 ---
 
 {% set char = entry(inputs.character) %}

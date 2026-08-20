@@ -59,15 +59,27 @@ export function surfaceForStrategy(
   return output?.handler ? null : "conversation";
 }
 
+// A `prompt:snippet` is import-only — never invocable — so it has no surface,
+// whatever its (usually absent) config. Post-collapse (ADR-0065 S3) invocability
+// is the entry_type, not the presence of a `context_strategy`.
+export function isSnippetType(entry_type: string): boolean {
+  return entry_type === "prompt:snippet";
+}
+
 // The discovery surface a prompt is offered on. REPLACES the old `effectiveOutputKind`
-// read every discovery filter used.
+// read every discovery filter used. Reads the prompt's OWN `context_strategy`
+// (ADR-0065 S3), not the entry-type's: a snippet is uninvocable (null); a `general`
+// with no output handler is a plain `conversation`; otherwise the instance output
+// resolves via `surfaceForStrategy` (inline→destination, extract_to_node→conversation,
+// an unknown handler→null/misconfigured).
 export function promptSurfaceFor(
   ctx: PromptResolutionContext,
   entry: PromptEntrySummary,
 ): PromptSurface | null {
-  return surfaceForStrategy(
-    ctx.metadataSchema?.entry_types[entry.entry_type]?.prompt?.context_strategy,
-  );
+  if (isSnippetType(entry.entry_type)) return null;
+  const strategy = entry.context_strategy;
+  if (!strategy?.output?.handler) return "conversation";
+  return surfaceForStrategy(strategy);
 }
 
 // True iff the prompt declares a `commit` (ADR-0054 §2) — i.e. it is an
@@ -79,8 +91,7 @@ export function promptDeclaresCommit(
   ctx: PromptResolutionContext,
   entry: PromptEntrySummary,
 ): boolean {
-  const definition = ctx.metadataSchema?.entry_types[entry.entry_type];
-  return !!definition?.prompt?.context_strategy?.output?.commit;
+  return !!entry.context_strategy?.output?.commit;
 }
 
 // Drop the writer's hidden built-in Library prompts (ADR-0049 slice 3) from a
@@ -351,20 +362,18 @@ export function resolvePromptPositionalArgs(
   };
 }
 
-// The accept-time mark-stamp a prompt's type declares (#954, Lever 2), or null.
+// The accept-time mark-stamp a prompt declares (#954, Lever 2), or null.
 // Present ⇒ accepting an inline suggestion from this prompt wraps it in `mark`,
 // keyed to the lore id in the context_pick input `fromInput`. This REPLACES the
-// `entry_type == "prompt:roleplay"` branch: the behaviour is read off the type's
-// declared capability, exactly as `promptDeclaresCommit` reads `output.commit` —
-// so a roleplay sub-type still stamps (it inherits the type's `on_accept`) without
-// any name being special-cased in code.
+// `entry_type == "prompt:roleplay"` branch: the behaviour is read off the prompt's
+// own `context_strategy` (ADR-0065 S3), exactly as `promptDeclaresCommit` reads
+// `output.commit` — so a roleplay prompt still stamps (it carries the `on_accept`)
+// without any name being special-cased in code.
 export function promptOnAccept(
   ctx: PromptResolutionContext,
   entry: PromptEntrySummary | null | undefined,
 ): { mark: string; fromInput: string } | null {
-  if (!entry) return null;
-  const onAccept =
-    ctx.metadataSchema?.entry_types[entry.entry_type]?.prompt?.context_strategy?.output?.on_accept;
+  const onAccept = entry?.context_strategy?.output?.on_accept;
   if (!onAccept?.mark || !onAccept.from_input) return null;
   return { mark: onAccept.mark, fromInput: onAccept.from_input };
 }

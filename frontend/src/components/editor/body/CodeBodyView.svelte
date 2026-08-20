@@ -18,6 +18,7 @@
   import {
     dependencyAdvisoryText,
     inheritedInputsFrom,
+    isSnippetType,
     surfaceForStrategy,
   } from "@/lib/editor-core/promptResolution";
   import { onDestroy } from "svelte";
@@ -33,6 +34,7 @@
     EditableDocument,
     EntryBodyLanguage,
     LoreEntrySummary,
+    PromptEntry,
     PromptEntrySummary,
     PromptInputDefinition,
     SnippetDependents,
@@ -104,17 +106,22 @@
 
   const isPrompt = (): boolean => documentKind === "prompt" && !!scene;
 
-  // The offer_on picker is gated to CONVERSATION prompts (ADR-0065) — those ＋New
-  // launches a conversation for: a handler-less `general` chat OR an `extract_to_node`
-  // brainstorm. `surfaceForStrategy` is the shared rule (a snippet has no strategy →
-  // null; the inline handler → cursor/selection), so an author never sees a targeting
-  // control that provably does nothing on an inline prompt or a snippet.
+  // The offer_on picker is gated to CONVERSATION prompts (ADR-0065 S3) — those
+  // ＋New launches a conversation for: a handler-less `general` chat OR an
+  // `extract_to_node` brainstorm. Reads the OPEN prompt node's own `context_strategy`
+  // (never the entry-type's — invocability moved to the instance), gated by
+  // `isSnippetType` first (a snippet is always import-only, whatever its config)
+  // exactly like `promptSurfaceFor` — so an author never sees a targeting control
+  // that provably does nothing on an inline prompt or a snippet.
   const promptStrategy = $derived(
-    isPrompt() && metadataSchema && scene
-      ? (metadataSchema.entry_types[scene.entry_type]?.prompt?.context_strategy ?? null)
-      : null,
+    isPrompt() && scene ? ((scene as unknown as PromptEntry).context_strategy ?? null) : null,
   );
-  const showOfferOnPicker = $derived(surfaceForStrategy(promptStrategy) === "conversation");
+  const showOfferOnPicker = $derived(
+    isPrompt() &&
+      !!scene &&
+      !isSnippetType(scene.entry_type) &&
+      (!promptStrategy?.output?.handler || surfaceForStrategy(promptStrategy) === "conversation"),
+  );
 
   // --- Dependency advisory (ADR-0061 §5 / S3a) ---
   // "used by N prompts / M chats — changing these fields may affect them."

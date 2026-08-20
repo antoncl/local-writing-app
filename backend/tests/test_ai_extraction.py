@@ -184,9 +184,11 @@ class ExtractionContractTests(unittest.TestCase):
 
     def test_shipped_scene_summary_commit_is_fields_only(self) -> None:
         # The built-in scene-summary prompt carries `commit.fields: ["summary"]`
-        # (ADR-0054 §2) — summary only, never the manuscript body.
-        schema = self.service.read_metadata_schema()
-        output = schema.entry_types["prompt:revise:scene_summary"].prompt.context_strategy.output
+        # (ADR-0054 §2) — summary only, never the manuscript body. Collapsed
+        # sub-types (ADR-0065 S3): the built-in is now `prompt:general` and the
+        # commit config lives on the instance's `context_strategy`.
+        prompt = self.service.read_prompt_entry("builtin-summarize-scene")
+        output = prompt.context_strategy.output
         self.assertIsNotNone(output)
         assert output.commit is not None
         self.assertEqual(output.commit.fields, ["summary"])

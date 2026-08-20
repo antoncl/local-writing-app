@@ -8,9 +8,10 @@ deterministic detector:
   `plot_context()` helper and reports the *semantic* weak spots the structural
   detector can't see. Launched from the board, not a subject's ＋New menu, so it
   carries no `offer_on`.
-- `revise-plotline` — the plotline-level FIXER. An instance of `prompt:revise:entry`
-  (identical `extract_to_node` + `commit` handler as `revise-plot-card`), offered on
-  `plot:plotline`, whose committable surface is the thread's beat roster + description.
+- `revise-plotline` — the plotline-level FIXER. A `prompt:general` carrying the same
+  `extract_to_node` + `commit` instance `context_strategy` as `revise-plot-card`
+  (ADR-0065 S3), offered on `plot:plotline`, whose committable surface is the
+  thread's beat roster + description.
 
 These prove the two prompts ship, route to the right handler, render their
 board context, and — for the fixer — that a returned patch validates for a plotline
@@ -60,10 +61,9 @@ class DiagnosePlotPromptTests(_DiagnosticPromptBase):
         # Reuses `prompt:general` (like impersonate): no output handler, no commit —
         # a conversation that reports, never a brainstorm that patches.
         self.assertEqual(entry.entry_type, "prompt:general")
-        strategy = self.service.read_metadata_schema().entry_types["prompt:general"].prompt.context_strategy
-        # general has a context_strategy (invocable) but no output block — no handler.
-        self.assertIsNotNone(strategy)
-        self.assertIsNone(strategy.output)
+        # Collapsed sub-types (ADR-0065 S3): diagnose-plot is a bare invocable
+        # general — no context_strategy needed on the instance.
+        self.assertIsNone(entry.context_strategy)
 
     def test_it_is_offered_nowhere_and_needs_no_subject(self) -> None:
         # No offer_on: it never appears in a subject's ＋New menu — the board
@@ -113,11 +113,12 @@ class RevisePlotlinePromptTests(_DiagnosticPromptBase):
         entries = self._summaries()
         self.assertIn(_REVISE_PLOTLINE, entries)
         entry = entries[_REVISE_PLOTLINE]
-        # Same disposition as revise-plot-card — an instance of prompt:revise:entry,
+        # Same disposition as revise-plot-card — a `prompt:general` carrying an
+        # `extract_to_node` + `commit` instance `context_strategy` (ADR-0065 S3),
         # differing only in offer_on + body (the plotline target).
-        self.assertEqual(entry.entry_type, "prompt:revise:entry")
+        self.assertEqual(entry.entry_type, "prompt:general")
         self.assertEqual(entry.offer_on, ["plot:plotline"])
-        output = self.service.read_metadata_schema().entry_types["prompt:revise:entry"].prompt.context_strategy.output
+        output = self.service.read_prompt_entry(_REVISE_PLOTLINE).context_strategy.output
         self.assertEqual(output.handler, "extract_to_node")
         self.assertIsNotNone(output.commit)
 

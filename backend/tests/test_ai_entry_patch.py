@@ -743,17 +743,18 @@ class SceneSummaryPromptTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
-    def test_entry_type_declares_replace_review_and_targets_a_scene(self) -> None:
-        schema = self.service.read_metadata_schema()
-        etype = schema.entry_types["prompt:revise:scene_summary"]
-        self.assertFalse(etype.abstract)
-        self.assertEqual(etype.parent, "prompt:revise")
-        assert etype.prompt is not None and etype.prompt.context_strategy is not None
+    def test_instance_declares_replace_review_and_targets_a_scene(self) -> None:
+        # ADR-0065 S3 collapsed `prompt:revise:scene_summary` into `prompt:general`
+        # — the commit config that used to live on the type now rides the shipped
+        # node's own instance `context_strategy`.
+        prompt = self.service.read_prompt_entry("builtin-summarize-scene")
+        self.assertEqual(prompt.entry_type, "prompt:general")
+        assert prompt.context_strategy is not None
         # A brainstorm chat with a commit (ADR-0054 §2 / ADR-0065): the handler is
         # `extract_to_node` and the review + extraction ride on the `commit`. The first
         # non-default `review` value — `replace`, not `visual_diff` — is the signal
         # that flips the review off the run-diff engine (S5-next).
-        output = etype.prompt.context_strategy.output
+        output = prompt.context_strategy.output
         assert output is not None and output.commit is not None
         self.assertEqual(output.handler, "extract_to_node")
         self.assertEqual(output.commit.review, "replace")
@@ -761,16 +762,16 @@ class SceneSummaryPromptTests(unittest.TestCase):
         # scene summary is `summary` only, never the manuscript body).
         self.assertEqual(output.commit.fields, ["summary"])
         # REVISE-ONLY: a required `entry` input targeting a scene (no create mode).
-        inputs = {i.name: i for i in etype.default_inputs}
+        inputs = {i.name: i for i in prompt.inputs}
         self.assertEqual(list(inputs), ["entry"])
         self.assertTrue(inputs["entry"].required)
         self.assertEqual(inputs["entry"].type, "context_pick")
         sources = (inputs["entry"].target or {}).get("sources") or [{}]
-        self.assertEqual(sources[0].get("kind"), "manuscript")
+        self.assertEqual(sources[0].get("kind"), "scene")
 
-    def test_shipped_prompt_resolves_with_the_type(self) -> None:
+    def test_shipped_prompt_resolves_as_general(self) -> None:
         prompt = self.service.read_prompt_entry("builtin-summarize-scene")
-        self.assertEqual(prompt.entry_type, "prompt:revise:scene_summary")
+        self.assertEqual(prompt.entry_type, "prompt:general")
 
     def test_template_hands_the_scene_prose_but_carries_no_contract(self) -> None:
         # ADR-0051 S4: the goal-directed seed hands the model the scene's prose and

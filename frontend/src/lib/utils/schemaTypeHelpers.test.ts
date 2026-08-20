@@ -221,22 +221,25 @@ describe("kindEntryTypeOptions", () => {
 });
 
 describe("nestingLocalPrefix (#600 — roll a sub-type id nested under its parent)", () => {
+  // A hierarchy-nesting utility test, independent of ADR-0065's prompt-dispatch
+  // collapse — the fixture just needs SOME custom-authored nested types under
+  // "prompt", not the (now-deleted) built-in sub-types, so it uses fictional ones.
   const PROMPT_SCHEMA = {
     version: 1,
     entry_types: {
       "prompt:base": { name: "Prompt", kind: "prompt", abstract: true },
-      "prompt:revise": { name: "Revise", kind: "prompt", parent: "prompt:base", abstract: true },
-      "prompt:revise:scene": { name: "Revise Scene", kind: "prompt", parent: "prompt:revise" },
+      "prompt:variant": { name: "Variant", kind: "prompt", parent: "prompt:base", abstract: true },
+      "prompt:variant:scene": { name: "Variant Scene", kind: "prompt", parent: "prompt:variant" },
     },
     fields: {},
   } as unknown as MetadataSchema;
 
   it("nests under a concrete parent's local key", () => {
-    expect(nestingLocalPrefix(PROMPT_SCHEMA, "prompt", "prompt:revise")).toBe("revise");
+    expect(nestingLocalPrefix(PROMPT_SCHEMA, "prompt", "prompt:variant")).toBe("variant");
   });
 
   it("keeps the parent's full nested local path for a grandchild", () => {
-    expect(nestingLocalPrefix(PROMPT_SCHEMA, "prompt", "prompt:revise:scene")).toBe("revise:scene");
+    expect(nestingLocalPrefix(PROMPT_SCHEMA, "prompt", "prompt:variant:scene")).toBe("variant:scene");
   });
 
   it("stays flat under the kind's abstract root or no parent", () => {

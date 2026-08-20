@@ -632,86 +632,22 @@ class LoreAndPromptTests(MetadataValidationBase):
             {"kinds": ["lore"], "entry_types": {"lore": ["character"]}},
         )
 
-    def test_default_schema_seeds_four_prompt_bases(self) -> None:
-        """continuation/general/snippet are concrete bases with preset output
-        handlers; users instantiate them directly or sub-type them to add
-        personality. `revise` is abstract (ADR-0046 §5) and splits symmetrically
-        into `revise:scene` (today's scene revise) + `revise:entry` (the lore
-        brainstorm commit) — the handlers differ (`revise:scene` is the `inline`
-        handler at the selection; `revise:entry` is `extract_to_node` + a `commit`),
-        so no *handler* is hoisted onto the base — only the shared `default_role`
-        envelope (ADR-0060 §4). Inputs live on the instance (not the type)."""
+    def test_default_schema_seeds_the_collapsed_prompt_bases(self) -> None:
+        """ADR-0065 S3 collapsed continuation/roleplay/revise/revise:scene/
+        revise:entry/revise:scene_summary into a single `prompt:general` type —
+        only `base` (abstract), `general`, and `snippet` remain. The behavior
+        contract (handler, commit, on_accept, target) that used to live on those
+        sub-types now lives per-INSTANCE, on `context_strategy` (proven below by
+        round-tripping the same shapes through create/save on `general`
+        instances, exactly as the shipped built-ins carry them —
+        test_builtin_library / test_offer_on pin the shipped shapes)."""
         schema = self.service.read_metadata_schema()
-        for type_id in ("prompt:continuation", "prompt:general", "prompt:snippet"):
+        for type_id in ("prompt:general", "prompt:snippet"):
             self.assertIn(type_id, schema.entry_types)
             self.assertEqual(schema.entry_types[type_id].kind, "prompt")
             self.assertEqual(schema.entry_types[type_id].parent, "prompt:base")
             self.assertFalse(schema.entry_types[type_id].abstract, msg=type_id)
-
-        continuation_prompt = schema.entry_types["prompt:continuation"].prompt
-        assert continuation_prompt is not None
-        assert continuation_prompt.context_strategy is not None
-        continuation_output = continuation_prompt.context_strategy.output
-        assert continuation_output is not None
-        self.assertEqual(continuation_output.handler, "inline")
-        self.assertIsNone(
-            continuation_output.commit
-        )  # the inline handler carries no commit
-
-        # `revise` is now the abstract parent of the two concrete flavours. It
-        # carries only the shared `default_role` envelope (ADR-0060 §4) — no
-        # disposition (no context_strategy); that stays on the concrete children.
-        revise = schema.entry_types["prompt:revise"]
-        self.assertTrue(revise.abstract)
-        self.assertEqual(revise.parent, "prompt:base")
-        assert revise.prompt is not None and revise.prompt.context_strategy is None
-        self.assertEqual(revise.prompt.default_role, "system")
-
-        revise_scene = schema.entry_types["prompt:revise:scene"]
-        self.assertFalse(revise_scene.abstract)
-        self.assertEqual(revise_scene.parent, "prompt:revise")
-        assert (
-            revise_scene.prompt is not None
-            and revise_scene.prompt.context_strategy is not None
-        )
-        revise_scene_output = revise_scene.prompt.context_strategy.output
-        assert revise_scene_output is not None
-        self.assertEqual(revise_scene_output.handler, "inline")
-        self.assertEqual(revise_scene_output.destination, "selection")
-        self.assertIsNone(revise_scene_output.commit)
-        self.assertEqual(
-            revise_scene.prompt.context_strategy.target,
-            {"required": True, "kind": "manuscript"},
-        )
-
-        revise_entry = schema.entry_types["prompt:revise:entry"]
-        self.assertFalse(revise_entry.abstract)
-        self.assertEqual(revise_entry.parent, "prompt:revise")
-        assert (
-            revise_entry.prompt is not None
-            and revise_entry.prompt.context_strategy is not None
-        )
-        revise_entry_output = revise_entry.prompt.context_strategy.output
-        assert (
-            revise_entry_output is not None and revise_entry_output.commit is not None
-        )
-        self.assertEqual(revise_entry_output.handler, "extract_to_node")
-        self.assertEqual(revise_entry_output.commit.review, "visual_diff")
-        # The entry rides in as an `entry` input (loaded via entry(input.entry)),
-        # NOT as context_strategy.target — a lore id there would drive a scene
-        # resolution (read_scene) and 404. The shipped body itself lives in the
-        # built-in Library now (ADR-0049 §7), so the body-wiring assertions moved
-        # to test_builtin_library; here we pin the type's shape and default_inputs.
-        self.assertIsNone(revise_entry.prompt.context_strategy.target)
-        # Slice 4 (§6.4): the prompt has both a revise and a create mode. `entry`
-        # is OPTIONAL (present ⇒ revise, absent ⇒ create) and a hidden `entry_type`
-        # names the kind to draft; the shipped body branches on `input.entry`.
-        inputs = {i.name: i for i in revise_entry.default_inputs}
-        self.assertEqual(list(inputs), ["entry", "entry_type"])
-        self.assertEqual(inputs["entry"].type, "context_pick")
-        self.assertFalse(inputs["entry"].required)
-        self.assertEqual(inputs["entry_type"].type, "text")
-        self.assertTrue(inputs["entry_type"].hidden)
+        self.assertTrue(schema.entry_types["prompt:base"].abstract)
 
         general_prompt = schema.entry_types["prompt:general"].prompt
         assert general_prompt is not None
@@ -719,24 +655,120 @@ class LoreAndPromptTests(MetadataValidationBase):
         # has none) but no output block — no handler, so the response stays in the chat.
         assert general_prompt.context_strategy is not None
         self.assertIsNone(general_prompt.context_strategy.output)
+        self.assertEqual(general_prompt.default_role, "system")
 
         self.assertIsNone(schema.entry_types["prompt:snippet"].prompt)
+
+        # The `inline` handler (the old `continuation` disposition), reused on a
+        # `general` instance.
+        continuation = self.service.create_prompt_entry(
+            CreatePromptEntryRequest(title="Continuation", entry_type="prompt:general")
+        )
+        continuation = self.service.save_prompt_entry(
+            continuation.id,
+            SavePromptEntryRequest(
+                title="Continuation",
+                body="",
+                base_revision=continuation.revision,
+                entry_type="prompt:general",
+                metadata={},
+                context_strategy=PromptContextStrategy.model_validate(
+                    {"target": {"required": True, "kind": "manuscript"}, "output": {"handler": "inline"}}
+                ),
+            ),
+        )
+        assert continuation.context_strategy is not None
+        continuation_output = continuation.context_strategy.output
+        assert continuation_output is not None
+        self.assertEqual(continuation_output.handler, "inline")
+        self.assertIsNone(continuation_output.commit)  # the inline handler carries no commit
+
+        # The `inline` + `selection` disposition (the old `revise:scene`).
+        revise_scene = self.service.create_prompt_entry(
+            CreatePromptEntryRequest(title="Revise scene", entry_type="prompt:general")
+        )
+        revise_scene = self.service.save_prompt_entry(
+            revise_scene.id,
+            SavePromptEntryRequest(
+                title="Revise scene",
+                body="",
+                base_revision=revise_scene.revision,
+                entry_type="prompt:general",
+                metadata={},
+                context_strategy=PromptContextStrategy.model_validate(
+                    {
+                        "target": {"required": True, "kind": "manuscript"},
+                        "output": {"handler": "inline", "destination": "selection"},
+                    }
+                ),
+            ),
+        )
+        assert revise_scene.context_strategy is not None
+        revise_scene_output = revise_scene.context_strategy.output
+        assert revise_scene_output is not None
+        self.assertEqual(revise_scene_output.handler, "inline")
+        self.assertEqual(revise_scene_output.destination, "selection")
+        self.assertIsNone(revise_scene_output.commit)
+        self.assertEqual(
+            revise_scene.context_strategy.target, {"required": True, "kind": "manuscript"}
+        )
+
+        # The `extract_to_node` + `commit` disposition (the old `revise:entry`),
+        # with the `entry`/`entry_type` inputs — moved from the deleted type's
+        # `default_inputs` onto the instance's own `inputs` (ADR-0049 §7 shape,
+        # pinned on the shipped node in test_prompt_metadata_wrapper).
+        revise_entry = self.service.create_prompt_entry(
+            CreatePromptEntryRequest(title="Revise entry", entry_type="prompt:general")
+        )
+        revise_entry = self.service.save_prompt_entry(
+            revise_entry.id,
+            SavePromptEntryRequest(
+                title="Revise entry",
+                body="",
+                base_revision=revise_entry.revision,
+                entry_type="prompt:general",
+                metadata={},
+                inputs=[
+                    PromptInputDefinition(
+                        name="entry", type="context_pick", label="Entry", required=False
+                    ),
+                    PromptInputDefinition(
+                        name="entry_type", type="text", label="Entry type", required=False, hidden=True
+                    ),
+                ],
+                context_strategy=PromptContextStrategy.model_validate(
+                    {"output": {"handler": "extract_to_node", "commit": {"review": "visual_diff"}}}
+                ),
+            ),
+        )
+        assert revise_entry.context_strategy is not None
+        revise_entry_output = revise_entry.context_strategy.output
+        assert revise_entry_output is not None and revise_entry_output.commit is not None
+        self.assertEqual(revise_entry_output.handler, "extract_to_node")
+        self.assertEqual(revise_entry_output.commit.review, "visual_diff")
+        # The entry rides in as an `entry` input (loaded via entry(input.entry)),
+        # NOT as context_strategy.target — a lore id there would drive a scene
+        # resolution (read_scene) and 404.
+        self.assertIsNone(revise_entry.context_strategy.target)
+        inputs = {i.name: i for i in revise_entry.inputs}
+        self.assertEqual(list(inputs), ["entry", "entry_type"])
+        self.assertEqual(inputs["entry"].type, "context_pick")
+        self.assertFalse(inputs["entry"].required)
+        self.assertEqual(inputs["entry_type"].type, "text")
+        self.assertTrue(inputs["entry_type"].hidden)
 
     def test_roleplay_declares_its_character_stamp_as_an_on_accept_capability(
         self,
     ) -> None:
-        # #957 (Lever 2): roleplay is a continuation that DECLARES its accept-time
-        # character-stamp as a capability (`output.on_accept`), not an
-        # `entry_type == roleplay` code branch. It redeclares its full context
-        # strategy (the parent-merge is shallow), so it stays the inline handler.
-        schema = self.service.read_metadata_schema()
-        roleplay = schema.entry_types["prompt:roleplay"]
-        self.assertFalse(roleplay.abstract)
-        self.assertEqual(roleplay.parent, "prompt:continuation")
-        assert (
-            roleplay.prompt is not None and roleplay.prompt.context_strategy is not None
-        )
-        roleplay_output = roleplay.prompt.context_strategy.output
+        # #957 (Lever 2): roleplay DECLARES its accept-time character-stamp as a
+        # capability (`output.on_accept`), not an `entry_type == roleplay` code
+        # branch — ADR-0065 S3 moved that declaration onto the shipped node's own
+        # instance `context_strategy`, since roleplay is now a `prompt:general`
+        # instance (not its own sub-type).
+        roleplay = self.service.read_prompt_entry("builtin-roleplay")
+        self.assertEqual(roleplay.entry_type, "prompt:general")
+        assert roleplay.context_strategy is not None
+        roleplay_output = roleplay.context_strategy.output
         assert roleplay_output is not None and roleplay_output.on_accept is not None
         self.assertEqual(roleplay_output.handler, "inline")
         self.assertEqual(roleplay_output.on_accept.mark, "character")

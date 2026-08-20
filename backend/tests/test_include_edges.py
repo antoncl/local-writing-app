@@ -83,7 +83,7 @@ class IncludeEdgeTests(unittest.TestCase):
     def test_reverse_index_lists_every_includer(self) -> None:
         snippet = self._save_prompt("Villain Voice", "{{ input.menace }}", "prompt:snippet")
         first = self._save_prompt("Revise", '{% include "Villain Voice" %}', "prompt:general")
-        second = self._save_prompt("Draft", '{% include "Villain Voice" %}', "prompt:continuation")
+        second = self._save_prompt("Draft", '{% include "Villain Voice" %}', "prompt:general")
 
         index = self.service._build_node_index()
         # Sorted by (src, field_id) like every reverse-edge list — so assert on a set.

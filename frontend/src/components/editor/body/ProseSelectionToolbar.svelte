@@ -225,6 +225,14 @@
     bottom: calc(100% + 6px);
   }
 
+  /* The rightmost top-level menu (the Table menu when in a table) anchors its
+     dropdown to the right so it opens inward instead of clipping off the frame
+     edge; its submenus flip left in turn (.toolbar-submenu-popover.flip). */
+  .selection-toolbar > .toolbar-menu:last-child .toolbar-menu-popover {
+    left: auto;
+    right: 0;
+  }
+
   .toolbar-menu-popover.below {
     top: calc(100% + 6px);
     bottom: auto;

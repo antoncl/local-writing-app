@@ -72,9 +72,9 @@
     type FloatingMenuState,
     type ToolbarAction,
   } from "@/lib/editor-core/selectionToolbar";
+  import { buildTableMenuAction } from "@/lib/editor-core/tableMenuActions";
   import ProseSlashMenu from "./ProseSlashMenu.svelte";
   import ProseSelectionToolbar from "./ProseSelectionToolbar.svelte";
-  import ProseTableToolbar from "./ProseTableToolbar.svelte";
   import ProseAIToolbar from "./ProseAIToolbar.svelte";
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
@@ -211,8 +211,11 @@
   let editor: Editor | null = $state(null);
   let loadedSceneId: string | null = $state(null);
   let selectionMenu: FloatingMenuState = $state({ visible: false, x: 0, y: 0, wordCount: 0, placement: "above" });
+  // The action list is selection-dependent (formatting only with a text
+  // selection; Table only in a table), so it's recomputed by updateSelectionMenu
+  // rather than a $derived — the source (editor.state.selection) isn't reactive.
+  let selectionToolbarActions: ToolbarAction[] = $state([]);
   let slashMenu: SlashMenuState = $state({ visible: false, x: 0, y: 0, selectedIndex: 0, mode: "commands", gridRows: 1, gridCols: 1 });
-  let tableMenu: { visible: boolean; x: number; y: number } = $state({ visible: false, x: 0, y: 0 });
   let openToolbarMenuId: string | null = $state(null);
   let reconcilingTodoAnchors = false;
   let reconcilingMutationIds = false;
@@ -326,7 +329,6 @@
     updateLiveWordCount();
     syncEditorEmpty();
     updateSelectionMenu();
-    updateTableMenu();
     publishImplicitContext();
   }
 
@@ -681,60 +683,28 @@
     editor.commands.focus();
   }
 
-  function findCurrentTableElement(): HTMLElement | null {
-    if (!editor) return null;
-    const { selection } = editor.state;
-    let node: Node | null = editor.view.domAtPos(selection.from).node;
-    while (node && node !== document.body) {
-      if (node instanceof HTMLElement && node.tagName === "TABLE") return node;
-      node = node.parentNode;
-    }
-    return null;
-  }
-
-  function updateTableMenu() {
-    if (!editor || !editorFrame || documentKind !== "manuscript" || !editor.isFocused) {
-      if (tableMenu.visible) tableMenu = { ...tableMenu, visible: false };
-      return;
-    }
-    if (!editor.isActive("table")) {
-      if (tableMenu.visible) tableMenu = { ...tableMenu, visible: false };
-      return;
-    }
-    const tableEl = findCurrentTableElement();
-    if (!tableEl) {
-      if (tableMenu.visible) tableMenu = { ...tableMenu, visible: false };
-      return;
-    }
-    const tableRect = tableEl.getBoundingClientRect();
-    const frameBounds = editorFrame.getBoundingClientRect();
-    const toolbarHeight = 36;
-    const above = tableRect.top - frameBounds.top - toolbarHeight - 4;
-    const below = tableRect.bottom - frameBounds.top + 6;
-    const y = above >= 4 ? above : below;
-    tableMenu = {
-      visible: true,
-      x: tableRect.left - frameBounds.left + editorFrame.scrollLeft,
-      y: y + editorFrame.scrollTop,
-    };
-  }
-
   // ---------- Selection toolbar ----------
+  // One floating menu (#1223): shown on a non-empty text selection OR when the
+  // caret is in a table. The general formatting group needs a selection; the
+  // Table group needs a table — so the action list is built to match, and the
+  // menu hides only when neither applies.
   function updateSelectionMenu() {
     if (!editor || !editorFrame) return;
     const { selection } = editor.state;
-    if (selection.empty || !editor.isFocused) {
+    const inTable = documentKind === "manuscript" && editor.isActive("table");
+    const selectedText = selection.empty
+      ? ""
+      : editor.state.doc.textBetween(selection.from, selection.to, " ").trim();
+    const hasText = selectedText.length > 0;
+    if (!editor.isFocused || (!hasText && !inTable)) {
       hideSelectionMenu();
       return;
     }
 
-    const selectedText = editor.state.doc.textBetween(selection.from, selection.to, " ").trim();
-    if (!selectedText) {
-      hideSelectionMenu();
-      return;
-    }
-
-    const anchorRect = getVisibleSelectionRect() ?? getSelectionEndpointRect();
+    // Anchor to the selection when there is one, else to the caret (in-table
+    // with an empty selection). getVisibleSelectionRect returns null for an
+    // empty range, so the caret endpoint is the fallback.
+    const anchorRect = (hasText ? getVisibleSelectionRect() : null) ?? getSelectionEndpointRect();
     if (!anchorRect) {
       hideSelectionMenu();
       return;
@@ -756,7 +726,7 @@
     const unclampedX = (anchorRect.left + anchorRect.right) / 2;
     const minX = Math.max(frameBounds.left, 0) + toolbarHalfWidth;
     const maxX = Math.min(frameBounds.right, window.innerWidth) - toolbarHalfWidth;
-    const wordCount = countWords(selectedText);
+    const wordCount = hasText ? countWords(selectedText) : 0;
     selectionMenu = {
       visible: true,
       x: minX <= maxX ? clamp(unclampedX, minX, maxX) : (Math.max(frameBounds.left, 0) + Math.min(frameBounds.right, window.innerWidth)) / 2,
@@ -764,6 +734,7 @@
       wordCount,
       placement,
     };
+    selectionToolbarActions = getSelectionToolbarActions(hasText, inTable);
     openToolbarMenuId = null;
     closeSlashMenu();
   }
@@ -917,106 +888,59 @@
     return editor.state.schema.nodes.paragraph.create(null, content);
   }
 
-  function getSelectionToolbarActions(): ToolbarAction[] {
+  // Builds the unified menu (#1223). The general formatting group (B/I/S,
+  // Revise, Style, To-do) applies to a text selection; the Table menu applies
+  // in a table. Both can be present (a selection inside a table).
+  function getSelectionToolbarActions(hasText: boolean, inTable: boolean): ToolbarAction[] {
     if (!editor) return [];
-    const reviseEntries = promptEntriesForSurface(promptCtx, "selection");
-    const reviseAction: ToolbarAction | null =
-      reviseEntries.length === 0
-        ? null
-        : reviseEntries.length === 1
-          ? {
-              kind: "button",
-              id: `ai-revise:${reviseEntries[0].id}`,
-              label: `✨ ${reviseEntries[0].title}`,
-              run: () => focusAndRun(() => aiSuggestion.runPromptEntry(reviseEntries[0])),
-            }
-          : {
-              kind: "menu",
-              id: "ai-revise",
-              label: "✨ Revise",
-              items: reviseEntries.map((entry) => ({
-                id: `ai-revise:${entry.id}`,
-                label: entry.title,
-                run: () => focusAndRun(() => aiSuggestion.runPromptEntry(entry)),
-              })),
-            };
-    return [
-      {
-        kind: "button",
-        id: "bold",
-        label: "B",
-        run: () => void editor?.chain().focus().toggleBold().run(),
-      },
-      {
-        kind: "button",
-        id: "italic",
-        label: "I",
-        run: () => void editor?.chain().focus().toggleItalic().run(),
-      },
-      {
-        kind: "button",
-        id: "strike",
-        label: "S",
-        run: () => void editor?.chain().focus().toggleStrike().run(),
-      },
-      ...(reviseAction ? [reviseAction] : []),
-      {
-        kind: "menu",
-        id: "heading",
-        label: "Heading",
-        items: [
-          {
-            id: "paragraph",
-            label: "Paragraph",
-            run: () => editor?.chain().focus().setParagraph().run(),
-          },
-          {
-            id: "heading-1",
-            label: "Heading 1",
-            run: () => applySelectionHeading(1),
-          },
-          {
-            id: "heading-2",
-            label: "Heading 2",
-            run: () => applySelectionHeading(2),
-          },
-          {
-            id: "heading-3",
-            label: "Heading 3",
-            run: () => applySelectionHeading(3),
-          },
-        ],
-      },
-      {
-        kind: "menu",
-        id: "list",
-        label: "List",
-        items: [
-          {
-            id: "bullet-list",
-            label: "Bullet List",
-            run: () => applySelectionBlockWrap("bulletList"),
-          },
-          {
-            id: "numbered-list",
-            label: "Numbered List",
-            run: () => applySelectionBlockWrap("orderedList"),
-          },
-        ],
-      },
-      {
-        kind: "button",
-        id: "quote",
-        label: "Quote",
-        run: () => applySelectionBlockWrap("blockquote"),
-      },
-      {
-        kind: "button",
-        id: "todo",
-        label: "TODO",
-        run: markSelectionAsTodo,
-      },
-    ];
+    const actions: ToolbarAction[] = [];
+    if (hasText) {
+      const reviseEntries = promptEntriesForSurface(promptCtx, "selection");
+      const reviseAction: ToolbarAction | null =
+        reviseEntries.length === 0
+          ? null
+          : reviseEntries.length === 1
+            ? {
+                kind: "button",
+                id: `ai-revise:${reviseEntries[0].id}`,
+                label: `✨ ${reviseEntries[0].title}`,
+                run: () => focusAndRun(() => aiSuggestion.runPromptEntry(reviseEntries[0])),
+              }
+            : {
+                kind: "menu",
+                id: "ai-revise",
+                label: "✨ Revise",
+                items: reviseEntries.map((entry) => ({
+                  id: `ai-revise:${entry.id}`,
+                  label: entry.title,
+                  run: () => focusAndRun(() => aiSuggestion.runPromptEntry(entry)),
+                })),
+              };
+      actions.push(
+        { kind: "button", id: "bold", label: "B", run: () => void editor?.chain().focus().toggleBold().run() },
+        { kind: "button", id: "italic", label: "I", run: () => void editor?.chain().focus().toggleItalic().run() },
+        { kind: "button", id: "strike", label: "S", run: () => void editor?.chain().focus().toggleStrike().run() },
+        ...(reviseAction ? [reviseAction] : []),
+        {
+          kind: "menu",
+          id: "style",
+          label: "Style",
+          items: [
+            { id: "paragraph", label: "Paragraph", run: () => editor?.chain().focus().setParagraph().run() },
+            { id: "heading-1", label: "Heading 1", run: () => applySelectionHeading(1) },
+            { id: "heading-2", label: "Heading 2", run: () => applySelectionHeading(2) },
+            { id: "heading-3", label: "Heading 3", run: () => applySelectionHeading(3) },
+            { separator: true, id: "style-sep" },
+            { id: "bullet-list", label: "Bullet list", run: () => applySelectionBlockWrap("bulletList") },
+            { id: "numbered-list", label: "Numbered list", run: () => applySelectionBlockWrap("orderedList") },
+            { id: "quote", label: "Quote", run: () => applySelectionBlockWrap("blockquote") },
+          ],
+        },
+        { kind: "button", id: "todo", label: "TODO", run: markSelectionAsTodo },
+      );
+    }
+    if (inTable) actions.push(buildTableMenuAction(editor, setCellAlign));
+    return actions;
   }
 
   // ---------- TODO anchors ----------
@@ -1239,7 +1163,6 @@
       // edits below run on that second pass.
       syncEditorEmpty();
       updateSelectionMenu();
-      updateTableMenu();
       updateSlashMenuFromContent();
       syncTodoAnchorDomState(true);
       updateLiveWordCount();
@@ -1252,14 +1175,12 @@
 
   function handleEditorSelectionUpdate() {
     updateSelectionMenu();
-    updateTableMenu();
     if (aiSuggestion.suggestionId) aiSuggestion.updateToolbarPosition();
     refreshSlashFilterText();
   }
 
   function handleEditorBlur() {
     hideSelectionMenu();
-    tableMenu = { ...tableMenu, visible: false };
   }
 
 
@@ -1382,7 +1303,6 @@
   $effect.pre(() => {
     clampSlashSelectedIndex(filteredSlashCommands.length);
   });
-  let selectionToolbarActions = $derived(editor ? getSelectionToolbarActions() : []);
   // Reset the per-scene cost tally when the active scene changes. Reading
   // scene?.id directly so Svelte tracks the dependency
   // ([[feedback-svelte5-reactivity-traps]] — function calls in `$:` don't).
@@ -1479,8 +1399,6 @@
     onHoverCommand={(index) => (slashMenu = { ...slashMenu, selectedIndex: index })}
     onHoverGrid={(rows, cols) => (slashMenu = { ...slashMenu, gridRows: rows, gridCols: cols })}
   />
-
-  <ProseTableToolbar menu={tableMenu} {editor} onAlign={setCellAlign} />
 
   <div bind:this={editorElement}></div>
 </div>

@@ -167,7 +167,7 @@
 <ViewNodeList
   bind:this={list}
   {view}
-  mode={appearance?.mode ?? undefined}
+  mode={appearance?.mode ?? paneViews.defaultModeFor("lore")}
   density={appearance?.density ?? undefined}
   frameParents
   searchPlaceholder="Search entries, tags, aliases"

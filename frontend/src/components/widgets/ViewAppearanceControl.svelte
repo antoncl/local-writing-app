@@ -11,7 +11,15 @@
 
   let open = $state(false);
   const appearance = $derived(paneViews.appearanceFor(kind));
+  // `isSet` = the view carries an EXPLICIT layout (drives the has-appearance tint
+  // and the Reset affordance) — keyed on stored state only.
   const isSet = $derived(!!(appearance?.mode || appearance?.density));
+  // The EFFECTIVE axes drive which toggle option reads as selected: a mode/
+  // density toggle is always in one state, so before the user picks anything the
+  // control shows the pane's default (#1196), resolved from the same single
+  // source the pane renders through. Density's default is comfortable everywhere.
+  const effectiveMode = $derived(appearance?.mode ?? paneViews.defaultModeFor(kind));
+  const effectiveDensity = $derived(appearance?.density ?? "comfortable");
 
   const MODES: { value: "card" | "tree"; label: string }[] = [
     { value: "card", label: "Cards" },
@@ -53,10 +61,10 @@
           {#each MODES as m (m.value)}
             <button
               class="va-option"
-              class:selected={appearance?.mode === m.value}
+              class:selected={effectiveMode === m.value}
               type="button"
               role="menuitemradio"
-              aria-checked={appearance?.mode === m.value}
+              aria-checked={effectiveMode === m.value}
               onclick={() => void paneViews.setAppearance(kind, { mode: m.value })}
             >{m.label}</button>
           {/each}
@@ -68,10 +76,10 @@
           {#each DENSITIES as d (d.value)}
             <button
               class="va-option"
-              class:selected={appearance?.density === d.value}
+              class:selected={effectiveDensity === d.value}
               type="button"
               role="menuitemradio"
-              aria-checked={appearance?.density === d.value}
+              aria-checked={effectiveDensity === d.value}
               onclick={() => void paneViews.setAppearance(kind, { density: d.value })}
             >{d.label}</button>
           {/each}

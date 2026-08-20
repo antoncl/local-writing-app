@@ -171,6 +171,20 @@ class PaneViewsController {
     return this.appearances.get(this.resolvedViewId(kind)) ?? null;
   }
 
+  // The mode a pane renders in when the view has stored none (ADR-0069). The
+  // structure trees — the manuscript outline and the research tree, both rendered
+  // by StructureTree — default to "tree"; every card-list pane (lore, assistants,
+  // chats) defaults to "card". This is the single source for that default: a pane
+  // feeds it to its ViewNodeList `mode`, and the Layout control resolves the same
+  // value to decide which toggle option reads as selected before the user picks
+  // one — so the control can never show a default the pane doesn't actually
+  // render (#1196). (Research has no switcher, so the control never asks about it;
+  // StructureTree still resolves it, hence it belongs here too.) Density has no
+  // per-kind default (comfortable everywhere), so it needs no analogue.
+  defaultModeFor(kind: string): "card" | "tree" {
+    return kind === "manuscript" || kind === "research" ? "tree" : "card";
+  }
+
   // Set (part of) the resolved view's appearance and persist it. Merges the
   // patch onto the current appearance so the control can set `mode` and
   // `density` independently. The write carries ONLY `appearance`; the backend

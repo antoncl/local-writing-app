@@ -61,7 +61,7 @@
 
 <ViewNodeList
   {view}
-  mode={appearance?.mode ?? undefined}
+  mode={appearance?.mode ?? paneViews.defaultModeFor("chat")}
   density={appearance?.density ?? undefined}
   active={(node) => activeChatId === node.id}
   onClick={(node) => onOpenChat(node.id)}

@@ -26,6 +26,7 @@
   import CodeEditor from "@/components/widgets/CodeEditor.svelte";
   import EntryInputsEditor from "@/components/editor/body/EntryInputsEditor.svelte";
   import OfferOnPicker from "@/components/editor/body/OfferOnPicker.svelte";
+  import PromptOutputEditor from "@/components/editor/body/PromptOutputEditor.svelte";
   import PromptPreviewPane from "@/components/editor/body/PromptPreviewPane.svelte";
   import RegionRegistrar from "@/components/workspace/RegionRegistrar.svelte";
   import { closeSubordinatePane, openSubordinatePane } from "@/lib/utils/subordinatePane";
@@ -35,6 +36,7 @@
     EditableDocument,
     EntryBodyLanguage,
     LoreEntrySummary,
+    PromptContextStrategy,
     PromptEntry,
     PromptEntrySummary,
     PromptInputDefinition,
@@ -55,6 +57,11 @@
     // OfferOnPicker below. Bound to NodeEditor's offerOnDraft; only rendered for
     // a conversation prompt (the surface ＋New lists).
     offerOn?: string[];
+    // The prompt's instance `context_strategy` (ADR-0065 S3 / ADR-0062 D3),
+    // authored via the PromptOutputEditor below. Bound to NodeEditor's
+    // contextStrategyDraft; rendered for every non-snippet prompt (unlike
+    // offerOn, which only shows for a conversation surface).
+    contextStrategy?: PromptContextStrategy | null;
     // --- Read-only context from parent ---
     scene?: EditableDocument | null;
     documentKind?: DocumentKind;
@@ -80,6 +87,8 @@
     onInputsChange?: () => void;
     // Outbound: the offer_on allow-list changed (S4b) → parent emits its save.
     onOfferOnChange?: () => void;
+    // Outbound: context_strategy.output changed (ADR-0062 D3) → parent emits its save.
+    onContextStrategyChange?: () => void;
   }
 
   let {
@@ -87,6 +96,7 @@
     entryInputDrafts = $bindable([]),
     hostPaneId = null,
     offerOn = $bindable([]),
+    contextStrategy = $bindable(null),
     scene = null,
     documentKind = "prompt",
     structure = null,
@@ -101,6 +111,7 @@
     readOnly = false,
     onInputsChange,
     onOfferOnChange,
+    onContextStrategyChange,
   }: Props = $props();
 
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
@@ -123,6 +134,14 @@
       !!scene &&
       !isSnippetType(scene.entry_type) &&
       (!promptStrategy?.output?.handler || surfaceForStrategy(promptStrategy) === "conversation"),
+  );
+
+  // The output editor (ADR-0062 D3) is gated like offerOn's picker — non-snippet
+  // prompts only (a snippet is import-only, whatever it carries) — but NOT
+  // narrowed to the conversation surface: it's what AUTHORS the handler that
+  // decides the surface in the first place.
+  const showOutputEditor = $derived(
+    isPrompt() && !!scene && !isSnippetType(scene.entry_type),
   );
 
   // --- Dependency advisory (ADR-0061 §5 / S3a) ---
@@ -584,6 +603,19 @@
       {onInputsChange}
     />
   </div>
+
+  {#if showOutputEditor}
+    <!-- Locked (Library prompt) the same way as the inputs host: `inert` blocks
+         interaction + drops it from the tab order; clone to edit. -->
+    <div class="entry-inputs-host" class:read-only={readOnly} inert={readOnly || undefined}>
+      <PromptOutputEditor
+        bind:contextStrategy
+        {metadataSchema}
+        {readOnly}
+        onChange={onContextStrategyChange}
+      />
+    </div>
+  {/if}
 
   {#if showOfferOnPicker}
     <!-- Locked (Library prompt) the same way as the inputs host: `inert` blocks

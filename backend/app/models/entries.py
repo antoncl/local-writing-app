@@ -713,9 +713,10 @@ class SavePromptEntryRequest(BaseModel):
     # ADR-0054 §4/S4: carried on save so an edit does not strip the prompt's
     # "show this prompt on…" allow-list (a field with no authoring UI yet, S4b).
     offer_on: list[str] = Field(default_factory=list)
-    # ADR-0065 S3: carried on save so an edit does not strip the prompt's behavior
-    # contract (the instance context_strategy). No authoring UI yet — that is D's
-    # Setup tab — so a save round-trips whatever the front-matter held.
+    # ADR-0065 S3 / ADR-0062 D3: carried on save so an edit does not strip the
+    # prompt's behavior contract (the instance context_strategy). The Setup tab's
+    # `PromptOutputEditor` authors `output`; anything else on the block (e.g. the
+    # unauthored `target`) still round-trips verbatim.
     context_strategy: PromptContextStrategy | None = None
 
 

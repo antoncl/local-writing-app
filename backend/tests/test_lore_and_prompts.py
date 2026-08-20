@@ -825,6 +825,55 @@ class LoreAndPromptTests(MetadataValidationBase):
         assert reread.prompt.context_strategy is not None
         self.assertIsNone(reread.prompt.context_strategy.output)
 
+    def test_output_headless_round_trips_and_stays_off_disk_when_unset(self) -> None:
+        # ADR-0062 D3: `headless` is a sibling axis of `handler`, modelled
+        # three-valued (`bool | None`) so it never litters front matter when off —
+        # `_prompt_front_matter_extra` dumps with `exclude_none`, so only
+        # `headless: true` ever lands on disk.
+        headless_entry = self.service.create_prompt_entry(
+            CreatePromptEntryRequest(title="Headless brainstorm", entry_type="prompt:general")
+        )
+        saved = self.service.save_prompt_entry(
+            headless_entry.id,
+            SavePromptEntryRequest(
+                title="Headless brainstorm",
+                body="",
+                base_revision=headless_entry.revision,
+                entry_type="prompt:general",
+                metadata={},
+                context_strategy=PromptContextStrategy.model_validate(
+                    {"output": {"handler": "extract_to_node", "headless": True, "commit": {"review": "replace"}}}
+                ),
+            ),
+        )
+        assert saved.context_strategy is not None
+        assert saved.context_strategy.output is not None
+        self.assertTrue(saved.context_strategy.output.headless)
+        reread = self.service.read_prompt_entry(headless_entry.id)
+        assert reread.context_strategy is not None and reread.context_strategy.output is not None
+        self.assertTrue(reread.context_strategy.output.headless)
+        path = self.service._build_node_index().by_id[headless_entry.id].path
+        self.assertIn("headless: true", path.read_text(encoding="utf-8"))
+
+        # Unset (None) never lands on disk at all — an inline prompt with no
+        # headless key given stays absent, not `headless: false`.
+        plain_entry = self.service.create_prompt_entry(
+            CreatePromptEntryRequest(title="Plain inline", entry_type="prompt:general")
+        )
+        self.service.save_prompt_entry(
+            plain_entry.id,
+            SavePromptEntryRequest(
+                title="Plain inline",
+                body="",
+                base_revision=plain_entry.revision,
+                entry_type="prompt:general",
+                metadata={},
+                context_strategy=PromptContextStrategy.model_validate({"output": {"handler": "inline"}}),
+            ),
+        )
+        plain_path = self.service._build_node_index().by_id[plain_entry.id].path
+        self.assertNotIn("headless", plain_path.read_text(encoding="utf-8"))
+
     def _save_prompt(
         self,
         title: str,

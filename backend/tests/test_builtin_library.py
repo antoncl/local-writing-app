@@ -27,7 +27,27 @@ from app.services.project.errors import ProjectServiceError
 from app.services.project.node_index_gate import node_index_gate
 from app.services.project_service import ProjectService
 
-LIBRARY_IDS = {"builtin-roleplay", "builtin-revise-entry"}
+LIBRARY_IDS = {
+    "builtin-roleplay",
+    "builtin-revise-entry",
+    # The inline selection-revise set (the ✨ Revise menu, shipped non-empty).
+    "builtin-shorten",
+    "builtin-expand",
+    "builtin-rephrase",
+    "builtin-tighten-grammar",
+    "builtin-describe",
+    "builtin-show-dont-tell",
+}
+
+# The six built-in revise prompts, offered on any manuscript prose selection.
+REVISE_IDS = [
+    "builtin-shorten",
+    "builtin-expand",
+    "builtin-rephrase",
+    "builtin-tighten-grammar",
+    "builtin-describe",
+    "builtin-show-dont-tell",
+]
 
 
 class BuiltinLibraryTests(unittest.TestCase):
@@ -245,6 +265,41 @@ class BuiltinLibraryTests(unittest.TestCase):
         # bleed into metadata-field brainstorms (#1076).
         self.assertNotIn("Narrative POV", text)
         self.assertNotIn("Tense", text)
+
+    def test_builtin_revise_prompts_target_the_selection_surface(self) -> None:
+        """The six shipped revise prompts are inline selection prompts that pull
+        in the shared author-directions snippet — so the ✨ Revise menu is
+        non-empty out of the box and every one replaces the selection."""
+        entries = self._summaries()
+        for pid in REVISE_IDS:
+            self.assertIn(pid, entries, f"{pid} should resolve out of the box")
+            entry = self.service.read_prompt_entry(pid)
+            self.assertTrue(entry.is_library)
+            self.assertIsNotNone(entry.context_strategy)
+            output = entry.context_strategy.output
+            self.assertEqual(output.handler, "inline")
+            self.assertEqual(output.destination, "selection")
+            self.assertIn('{% include "builtin-meta-comment" %}', entry.body)
+            self.assertIn("{{ selection }}", entry.body)
+
+    def test_describe_prompt_renders_selection_senses_and_snippet(self) -> None:
+        """The Describe prompt exercises the whole lane end to end: the new
+        multi_select input renders as a list, the shared snippet resolves, and the
+        selection lands as the user turn."""
+        from app.services.ai.helpers import create_environment_for_project
+        from app.services.ai.templates import render_template
+
+        body = self.service.read_prompt_entry("builtin-describe").body
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            body,
+            context={"selection": "The room was cold.", "inputs": {"senses": ["sight", "sound"]}},
+            env=env,
+        )
+        joined = "\n".join(m.text for m in out.messages)
+        self.assertIn("sight, sound", joined)  # multi_select input joined into the instruction
+        self.assertIn("Square brackets", joined)  # meta-comment snippet pulled in
+        self.assertIn("The room was cold.", joined)  # the selection is the user turn
 
     def test_prose_settings_snippet_renders_pov_and_tense_only(self) -> None:
         """#1076: the prose-generation snippet surfaces POV + tense (for

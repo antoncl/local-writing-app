@@ -83,9 +83,16 @@
   --board: #f4f6f5;
   --panel: #edf3f1;
   --inset: #f1f5f3;
-  --tier1: #ebf1ee;
-  --tier2: #dde7e3;
-  --tier3: #cddbd5;
+  /* Deepened per ADR-0066 Amendment 1: the old light steps sat ~1–2% off
+     --surface and the grouped-panel tint read as near-invisible in light
+     (the dark steps were already widened). Each step now clears the surface
+     and the one below it by a legible margin, matching the dark side. */
+  --tier1: #e6efe9;
+  --tier2: #d6e4dd;
+  --tier3: #c4d7cd;
+  /* Guide rail marking a nested tier panel's left edge (one quiet 2px line,
+     never ├─└─ connectors) — ADR-0066 Amendment 1. */
+  --tier-rail: #bfcdc6;
   --border: #cbd6d2;
   --border-strong: #b4c2bc;
   --divider: #e2e8e5;
@@ -228,6 +235,8 @@
   --tier1: #29322e;
   --tier2: #333e39;
   --tier3: #404d47;
+  /* Guide rail on the dark side (ADR-0066 Amendment 1). */
+  --tier-rail: #46534c;
   --border: #3a4541;
   --border-strong: #4a5651;
   --divider: #2a322f;

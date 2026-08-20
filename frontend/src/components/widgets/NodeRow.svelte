@@ -42,7 +42,8 @@
     detail?: string | null;
     active?: boolean;
     stripeColor?: string | null;
-    // Tree indent. Resolved to `padding-left: depth * 14px`.
+    // Tree indent. Resolved to `padding-left: depth * 26px` (ADR-0066
+    // Amendment 1 — raised from 14 so a nested level steps clearly).
     depth?: number;
     onClick?: (event: MouseEvent) => void;
     onDblClick?: (event: MouseEvent) => void;
@@ -168,7 +169,7 @@
     nested,
   }: Props = $props();
 
-  const indentStyle = $derived(depth > 0 ? `padding-left: ${depth * 14}px` : "");
+  const indentStyle = $derived(depth > 0 ? `padding-left: ${depth * 26}px` : "");
   const stripeStyle = $derived(stripeColor ? `--row-stripe: ${stripeColor}` : "");
   const rootStyle = $derived([indentStyle, stripeStyle].filter(Boolean).join("; "));
   // Effective mode: header rows always bare; otherwise explicit variant
@@ -577,19 +578,35 @@
     font-size: var(--fs-md);
   }
 
-  /* Group-header treatment: serif title + a hairline rule below. The
-     chapter-divider look from the Editorial Card direction. Trailing
-     count pills are styled by the caller (they aren't button affordances).
-     The frame outweighs its leaves (ADR-0066): the header title steps UP to
-     --fs-xl serif so an expandable container never reads quieter than the
-     leaves it holds — at every density (headers are exempt from the
-     compact/dense leaf recession below). */
-  .node-row.group-header > .node-row-click .node-row-text :global(strong),
-  .node-row.group-header > .node-row-text :global(strong) {
+  /* Group-header treatment: a prominent title + a hairline rule below. The
+     chapter-divider look from the Editorial Card direction. Trailing count
+     pills are styled by the caller (they aren't button affordances). The frame
+     outweighs its leaves (ADR-0066): a header title is 700 weight at --fs-lg so
+     an expandable container never reads quieter than the leaves it holds — at
+     every density (headers are exempt from the compact/dense leaf recession
+     below).
+
+     Serif names the work; sans names the tool (ADR-0030 × ADR-0066 Amendment 1,
+     decision 6). A header that names a REAL work node — one carrying node
+     identity, so `data-node-id` is present (a manuscript Act/Chapter, a Nest
+     header that IS a lore entry) — is serif in full --text. A synthetic /
+     category BUCKET header (a lore-type group, a disposition bucket, the
+     picker's "Scenes"/"Lore") carries no node identity → sans, quieter
+     --text-2. The split is derived from `data-node-id`, not a new prop. */
+  .node-row.group-header[data-node-id] > .node-row-click .node-row-text :global(strong),
+  .node-row.group-header[data-node-id] > .node-row-text :global(strong) {
     font-family: var(--serif);
-    font-size: var(--fs-xl);
+    font-size: var(--fs-lg);
     font-weight: 700;
     color: var(--text);
+  }
+
+  .node-row.group-header:not([data-node-id]) > .node-row-click .node-row-text :global(strong),
+  .node-row.group-header:not([data-node-id]) > .node-row-text :global(strong) {
+    font-family: var(--sans);
+    font-size: var(--fs-lg);
+    font-weight: 700;
+    color: var(--text-2);
   }
 
   /* Leaf recession — the other half of "the frame outweighs its leaves".
@@ -618,6 +635,7 @@
      the radius matches the card variant so a card-variant entry inside
      the panel sits cleanly within the tier. */
   .node-row-group-children {
+    position: relative;
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -626,6 +644,21 @@
     border-radius: 10px;
     margin-top: -2px;
     margin-bottom: 8px;
+  }
+
+  /* A single quiet guide rail marking the nested level's left edge — one 2px
+     line, never ├─└─ connectors (ADR-0066 Amendment 1, decision 3). Sits just
+     inside the panel's rounded left edge. */
+  .node-row-group-children::before {
+    content: "";
+    position: absolute;
+    left: 3px;
+    top: 6px;
+    bottom: 6px;
+    width: 2px;
+    border-radius: 2px;
+    background: var(--tier-rail);
+    pointer-events: none;
   }
 
   /* Nested tier panels darken slightly per depth level so deeply

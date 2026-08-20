@@ -18,7 +18,9 @@
 
   import NodeList from "@/components/widgets/NodeList.svelte";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
+  import RowCaret from "@/components/widgets/RowCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
+  import { SvelteSet } from "svelte/reactivity";
   import { resolveColor } from "@/lib/utils/colors";
   import { fieldTypeLabel } from "@/lib/utils/fieldIcons";
   import {
@@ -83,6 +85,15 @@
   function typeSourceFor(typeId: string) {
     return metadataSchemaOverview?.entry_type_sources[typeId] ?? null;
   }
+
+  // Ephemeral collapse state for the type tree (ADR-0066 Amendment 1, S5): the
+  // pane previously had no way to collapse a type's fields/sub-types. View-only
+  // state, so it lives here (the tree data still comes from the parent).
+  const collapsedTypes = new SvelteSet<string>();
+  function toggleType(typeId: string): void {
+    if (collapsedTypes.has(typeId)) collapsedTypes.delete(typeId);
+    else collapsedTypes.add(typeId);
+  }
 </script>
 
 <div class="pane-content schema-list">
@@ -120,6 +131,7 @@
   {@const typeSwatch = resolveColor(null, node.id, node.definition.kind, metadataSchema)}
   {@const stripeHex = typeSwatch?.hex ?? null}
   {@const childCount = fieldEntries.length + node.children.length}
+  {@const isCollapsed = collapsedTypes.has(node.id)}
   <NodeRow
     title={node.label}
     detail={`${node.id}${node.definition.abstract ? " · Abstract" : ""}`}
@@ -127,7 +139,7 @@
     stripeColor={stripeHex}
     active={selectedSchemaTypeId === node.id}
     ariaLabel={`${node.label} detail type — ${sourceBadgeLabel(typeSource)}`}
-    collapsed={childCount === 0}
+    collapsed={childCount === 0 || isCollapsed}
     draggable={!typeSource?.built_in}
     onClick={() => onOpenType(node.id)}
     ondragstart={() => {
@@ -142,6 +154,16 @@
       onDropTypeOnParent(node.id);
     }}
   >
+    {#snippet leading()}
+      <!-- Interactive collapse for a type with fields/sub-types; a childless
+           type reserves the same gutter (empty) so titles align (S5). -->
+      <RowCaret
+        collapsible={childCount > 0}
+        collapsed={isCollapsed}
+        toggle={() => toggleType(node.id)}
+        size="md"
+      />
+    {/snippet}
     {#snippet trailing()}
       <CountPill count={childCount} title={`${fieldEntries.length} field${fieldEntries.length === 1 ? "" : "s"}, ${node.children.length} sub-type${node.children.length === 1 ? "" : "s"}`} />
       <button class="row-action-add" type="button" title={`Add sub-type to ${node.label}`} aria-label={`Add sub-type to ${node.label}`} onclick={() => onCreateType(schemaTypeLayerId || projectSchemaLayerId(), node.id)}>+</button>
@@ -157,6 +179,11 @@
           ariaLabel={`Field ${fieldId} — ${sourceBadgeLabel(fieldSource)}`}
           onClick={() => { onOpenType(node.id); onOpenField(fieldId, node.id); }}
         >
+          {#snippet leading()}
+            <!-- Reserve the caret gutter so a field's title aligns with a
+                 sibling sub-type's caret'd title (S5). -->
+            <RowCaret collapsible={false} size="md" />
+          {/snippet}
           {#snippet detailSlot()}
             <small>{fieldId}</small>
           {/snippet}

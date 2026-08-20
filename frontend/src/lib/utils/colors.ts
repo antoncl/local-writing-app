@@ -40,6 +40,11 @@ const KIND_DEFAULT_SWATCH: Record<string, string> = {
   snippet: "warm-brown",
   preset: "graphite",
   assistant: "graphite",
+  // Chat is a Node kind like the rest and had no default here, so a chat row
+  // resolved to null and showed no kind-stripe (ADR-0066 Amendment 1, decision
+  // 5). Graphite matches the `--k-graphite /* chat */` token already reserved
+  // for it in styles.css; it groups visually with the other tool/meta kinds.
+  chat: "graphite",
   project: "violet",
   research: "teal",
   prompt: "indigo",

@@ -11,6 +11,7 @@
   import { promptSummariesToGroupNodes, type PromptGroupNode } from "@/lib/views/promptNodes";
   import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
   import { inheritedLayerLabel } from "@/lib/utils/provenance";
+  import { resolveColor } from "@/lib/utils/colors";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
   import {
@@ -151,6 +152,7 @@
     layerLabel={inheritedLayerLabel(entry, $projectLayerIdStore)}
     depth={ctx.depth}
     active={ctx.active}
+    stripeColor={resolveColor(null, entry.entry_type, "prompt", schema)?.hex ?? null}
     dimmed={hiddenSet.has(entry.id)}
     onClick={ctx.onClick}
     onmousedown={(event) => event.stopPropagation()}

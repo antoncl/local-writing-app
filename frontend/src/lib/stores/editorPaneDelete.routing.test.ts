@@ -13,7 +13,7 @@ import { createEmptyEditorPane, type EditorPaneState, type DocumentRef } from "@
 import { confirmService } from "@/lib/stores/confirmService.svelte";
 import { setResearchStructure } from "@/lib/stores/structure";
 import { api } from "@/lib/api";
-import type { EditableDocument, StructureDocument } from "@/lib/types";
+import type { EditableDocument, StructureDocument, PlotBoardProjection } from "@/lib/types";
 
 const NODE_ID = "node_doomed";
 
@@ -125,6 +125,26 @@ describe("editorPaneDelete: per-kind delete routing", () => {
     const deleteScene = vi.spyOn(api, "deleteScene");
     await deleteVia(paneFor("view", "view:base"));
     expect(deleteView).toHaveBeenCalledWith(NODE_ID);
+    expect(deleteScene).not.toHaveBeenCalled();
+  });
+
+  it("plotline → api.deletePlotline (via the store's deletePlotline), never api.deleteScene", async () => {
+    // A plotline is a `plot` node, not a scene, so api.deleteScene would 404. The
+    // branch delegates to plotlines.deletePlotline, which deletes then refreshes
+    // the board (refreshPlotBoard → getPlotBoardProjection); keep that off the net.
+    const deletePlotline = vi.spyOn(api, "deletePlotline").mockResolvedValue({ entries: [] });
+    vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue({
+      board_id: "b",
+      board_revision: "r",
+      layout: {},
+      plotlines: [],
+      containers: [],
+      cards: [],
+      diagnostics: [],
+    } as unknown as PlotBoardProjection);
+    const deleteScene = vi.spyOn(api, "deleteScene");
+    await deleteVia(paneFor("plotline", "plot:plotline"));
+    expect(deletePlotline).toHaveBeenCalledWith(NODE_ID);
     expect(deleteScene).not.toHaveBeenCalled();
   });
 

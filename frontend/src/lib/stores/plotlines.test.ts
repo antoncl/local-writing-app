@@ -3,9 +3,17 @@
 // and the board (its colour/beats feed cards' tint + badges), unlike a card's board-only
 // refresh; these tests pin that shape and the fetch-fresh / create-then-PUT behaviour.
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { get } from "svelte/store";
 import { api } from "@/lib/api";
-import { plotlineStateOf, getPlotlineState, restorePlotlineState, recreatePlotline } from "./plotlines";
-import type { PlotlineEntry, PlotBoardProjection } from "@/lib/types";
+import {
+  plotlineStateOf,
+  getPlotlineState,
+  restorePlotlineState,
+  recreatePlotline,
+  deletePlotline,
+  plotlineEntriesStore,
+} from "./plotlines";
+import type { PlotlineEntry, PlotlineSummary, PlotBoardProjection } from "@/lib/types";
 
 const plotline = (metadata: PlotlineEntry["metadata"] = {}): PlotlineEntry => ({
   id: "p1",
@@ -73,5 +81,23 @@ describe("plotlines undo substrate", () => {
       source_template_id: "tpl1",
       instance_beats: [{ beat_id: "b1", title: "Meet" }],
     });
+  });
+});
+
+// The forward delete (#868) — distinct from the undo substrate above. Both the
+// board-node "Delete plotline" and the editor-pane delete route through this one
+// function, so pin its two effects: it adopts the roster the delete returns
+// (no second round-trip) and refreshes the board (dangling card tints clear).
+describe("deletePlotline (#868)", () => {
+  it("adopts the returned roster and refreshes the board", async () => {
+    const kept = [{ id: "p2", title: "Kept" }] as unknown as PlotlineSummary[];
+    const del = vi
+      .spyOn(api, "deletePlotline")
+      .mockResolvedValue({ entries: kept } as Awaited<ReturnType<typeof api.deletePlotline>>);
+    const board = vi.spyOn(api, "getPlotBoardProjection").mockResolvedValue(projection());
+    await deletePlotline("p1");
+    expect(del).toHaveBeenCalledWith("p1");
+    expect(get(plotlineEntriesStore)).toEqual(kept);
+    expect(board).toHaveBeenCalledTimes(1);
   });
 });

@@ -502,6 +502,11 @@
         // beat), deletes, so Ctrl+Z restores it "with its beats and every card badge
         // that pointed at it."
         await undoRecorder.deletePlotline(id, () => deletePlotline(id));
+        // Close a NodeEditor pane open on this plotline ("Open in editor", the node's
+        // onOpenInEditor → editorPanes.openPlotline): the node is gone, so the pane
+        // would 404 on its next save. Mirrors removeCard / editorPaneDelete (#861).
+        const openPane = editorPanes.panes.find((p) => p.document?.id === id);
+        if (openPane) editorPanes.tearDown(openPane.id);
       },
     });
   }

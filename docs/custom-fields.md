@@ -1,0 +1,142 @@
+# Custom fields
+
+> User guide. How to add your own fields to Entries — what a field is, and how to
+> pick the right **type** (and, for lists, the right **item shape**) without
+> needing to know anything technical.
+
+Every Entry in your Lore — a character, a location, an item — can carry
+**fields**: the pieces of information you want to keep about it. A character's
+age, a location's ruler, whether a faction has been introduced yet. The app
+comes with a few fields, and you add your own in **Custom Data**.
+
+Each field has three things: a **name** (what you call it), a **type** (what kind
+of value it holds), and a few options. Picking the type is the only choice that
+ever feels technical — so this guide is mostly about that. The short version:
+**decide what you're recording, and the type follows.**
+
+## What are you recording?
+
+Find the row that matches, and use that type. The names in **bold** are exactly
+what you'll see in the type picker.
+
+- A short word or phrase — an epithet, a ruler's name → **Text**
+- A longer passage — an appearance, a backstory → **Long Text**
+- A quantity — an age, a population → **Number**
+- A simple yes or no — *introduced?*, *still alive?* → **Checkbox**
+- A colour to tint the Entry in lists and on boards → **Colour**
+- **One** choice from a set you decide — a status of *Alive / Dead / Missing* → **Select**
+- **Several** choices from a set you decide — roles from *Protagonist / Ally / Villain* → **List**
+- Loose labels you invent as you go and reuse for filtering — themes, moods → **Tags**
+- A link to **one** other Entry — a character's home → **Entry Reference**
+- Links to **several** other Entries — a character's allies → **Entry Reference, Multiple**
+- A growing list you keep adding to — aliases, goals, relationships → **Ordered list**
+- A value the app works out for you — a word count → **Computed**
+
+If two of these feel interchangeable, the next two sections pull the confusing
+ones apart.
+
+## Quick reference
+
+| Type | Use it when you want… | Example on a character |
+| --- | --- | --- |
+| **Text** | a short line of words | "Epithet": *the Grey* |
+| **Long Text** | a paragraph or more | "Appearance" |
+| **Number** | a quantity you might compare or total | "Age": *34* |
+| **Checkbox** | a yes/no flag | "Introduced?" |
+| **Colour** | a swatch to tint the Entry | the character's colour on the board |
+| **Select** | one option from a fixed set | "Status": *Alive* |
+| **List** | several options from a fixed set | "Roles": *Ally*, *Comic relief* |
+| **Tags** | free labels you make up and reuse | "protagonist", "arc-2" |
+| **Entry Reference** | a link to one other Entry | "Home" → a location |
+| **Entry Reference, Multiple** | links to several Entries | "Allies" → other characters |
+| **Ordered list** | a list you keep adding to, in order | "Aliases", "Goals" |
+| **Computed** | a value the app fills in | "Word count" |
+
+## Select vs List vs Tags vs Ordered list — telling the "list-ish" types apart
+
+Four types can all look like "a list of things." The difference is *where the
+choices come from* and *whether the list grows*:
+
+- **Select** and **List** both draw from a **fixed set of options you define once**
+  on the field. The only difference between them is how many you may pick:
+  **Select** is exactly one, **List** is several. Reach for these when the
+  choices are known and shared — a status, a set of roles, the factions in your
+  world. When you define the field you also write the options (and can give each
+  a colour).
+- **Tags** are **free labels with no fixed set** — you type a new one whenever you
+  need it, and it becomes available to reuse everywhere. Reach for Tags when you
+  want to sprinkle loose, evolving labels across many Entries and filter by them
+  later, without committing to a list of allowed values up front.
+- **Ordered list** is for a collection that **keeps growing and whose order
+  matters** — a character's aliases in the order they were used, a plotline's
+  beats in sequence. Unlike Select/List it isn't a pick-from-options control;
+  it's a list you add items to freely. And its items can be more than single
+  values — see the next section.
+
+A quick way to choose: *Is there a fixed set of allowed values?* If yes and you
+pick one, **Select**; if yes and you pick several, **List**. If the labels are
+open-ended, **Tags**. If it's an open, ordered collection you build up over time,
+**Ordered list**.
+
+## Ordered lists and their item shape
+
+When you choose **Ordered list**, the app asks one more question: **what is each
+item?** You answer it once, with the *Items are…* dropdown, and there are two
+kinds of answer.
+
+**A single value.** Each item is one simple value, all of the same type — a list
+of **Text** aliases, a list of **Number** measurements, a list of **Select**
+choices. Pick this when every item is just one thing.
+
+**A group.** Each item is a small bundle of several sub-fields that belong
+together. A character's *relationships*, where each item has a *person*, a
+*kind*, and *notes*. A plotline's *beats*, where each has a *goal*, a
+*motivation*, and an *obstacle*. Pick this when a single value can't capture one
+item — you need a few pieces per entry.
+
+Groups are defined **once**, under **Groups**, and reused — so the same shape
+(say, Goal / Motivation / Obstacle) can back an Ordered list here and be applied
+elsewhere without redrawing it each time. In the *Items are…* dropdown your
+existing groups appear together, above the single-value options. If a group
+isn't offered, it's because one of its sub-fields is a type that can't sit inside
+a list yet (links to other Entries and Tags are the exceptions in this version).
+
+You can't leave the item shape unset — a list has to know what its items are
+before you can save it.
+
+## Names, descriptions, and defaults
+
+A few more options round out a field, and none of them are technical:
+
+- **Description** — a sentence on what the field is for. Worth writing: it reminds
+  *you* later, and it's given to the AI when it brainstorms or drafts the Entry,
+  so a clear description leads to better suggestions.
+- **AI may write this field** — a toggle for whether the AI is allowed to fill the
+  field in for you. Turn it off for anything you'd rather own by hand.
+- **Section** — an optional heading that groups related fields together in the
+  Entry's panel, so a long list of fields stays tidy.
+- **Default for new entries** — an optional starting value every new Entry of this
+  type begins with, so you're not filling the same thing in each time.
+
+## A note on Computed fields
+
+**Computed** fields are filled in by the app, not by you — a word count, a
+counter, a running cost. When you choose Computed you pick *what* to calculate
+from a short menu; you never write a formula, and the field is read-only. If you
+just want to record a number yourself, use **Number** instead.
+
+## Fields change over the story
+
+Defining a field sets what it *can* hold — not a value frozen for all time. Any
+field can take a different value partway through the manuscript (a character's
+status changing mid-scene, an alliance forming), and the story remembers the
+change from that point forward. You don't declare any of that when you define the
+field; it's a separate authoring feature. See **[Mid-scene lore changes
+(mutations)](mutations.md)**.
+
+## See also
+
+- **[Mid-scene lore changes (mutations)](mutations.md)** — recording how a field's
+  value changes as the story unfolds.
+- **[Editing `metadata.schema.yaml` by hand](schema-yaml-howto.md)** — for power
+  users who want to do things the Custom Data editor doesn't cover yet.

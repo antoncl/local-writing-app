@@ -229,12 +229,20 @@ class PromptOutput(BaseModel):
     backend-owned (`HANDLER_KEYS` / `INLINE_DESTINATIONS`), validated on save; kept
     `str` here so an unknown value is a soft validation error, not an unreadable layer.
     `commit` is meaningful only under `extract_to_node`, and `on_accept` only under
-    `inline` — the validator rejects each on any other."""
+    `inline` — the validator rejects each on any other.
+    `headless` (ADR-0062 Am.2) is orthogonal to `handler` — "no chat loop", not "no
+    interaction": a headless run still gathers required inputs and still presents
+    its result for review, it just skips the back-and-forth conversation. Modelled
+    three-valued (`bool | None`, not `bool = False`) so front matter stays tidy —
+    `_prompt_front_matter_extra` serialises via `model_dump(exclude_none=True)`, so
+    `None` is dropped and only `headless: true` ever lands on disk. Consumers read
+    it truthy, so `None`/absent behaves exactly as false."""
 
     handler: str = ""
     destination: str = ""
     commit: PromptCommit | None = None
     on_accept: PromptOnAccept | None = None
+    headless: bool | None = None
 
 
 class PromptContextStrategy(BaseModel):

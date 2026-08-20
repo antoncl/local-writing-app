@@ -942,6 +942,11 @@ export const api = {
         // Round-trip the "show this prompt on…" allow-list so a body/inputs edit
         // never strips it (ADR-0054 §4/S4; no authoring UI yet).
         offer_on: entry.offer_on ?? [],
+        // Round-trip the behavior contract (ADR-0065 S3 / ADR-0062 D3) — the
+        // writer rebuilds front matter from these arguments (not a merge), so
+        // omitting this silently wipes a forked prompt's output/commit config
+        // on the next autosave.
+        context_strategy: entry.context_strategy ?? null,
       }),
     });
   },

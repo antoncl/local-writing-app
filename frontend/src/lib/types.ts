@@ -220,8 +220,10 @@ export type PromptEntry = {
   offer_on?: string[];
   // See PromptEntrySummary.context_strategy (ADR-0065 S3) — the instance's own
   // behavior contract, carried on the open document so CodeBodyView/ChatBodyView
-  // can read it without a schema-type lookup. No authoring UI here (that's D);
-  // savePromptEntry doesn't send it back, so the backend preserves it verbatim.
+  // can read it without a schema-type lookup. `PromptOutputEditor` (ADR-0062 D3)
+  // authors `output`; `savePromptEntry` sends the whole block back on every save
+  // (the writer rebuilds front matter from its arguments, not a merge — omitting
+  // it would silently wipe it).
   context_strategy?: PromptContextStrategy | null;
   computed_metadata: EntryMetadata;
   source_layer_id?: string;
@@ -793,6 +795,11 @@ export type PromptOutput = {
   destination?: string;
   commit?: PromptCommit | null;
   on_accept?: PromptOnAccept | null;
+  // Orthogonal to `handler` (ADR-0062 Am.2): "no chat loop", not "no
+  // interaction" — a headless run still gathers required inputs and still
+  // presents its result for review. Absent/false = today's chat-loop
+  // behaviour for every handler.
+  headless?: boolean;
 };
 
 export type PromptContextStrategy = {

@@ -10,6 +10,7 @@
 import type {
   EditableDocument,
   EntryMetadata,
+  PromptContextStrategy,
   PromptInputDefinition,
 } from "@/lib/types";
 
@@ -39,6 +40,12 @@ export type EditorPaneState = {
   // ＋New menu (ADR-0054 §4 / S4b `offer_on`). Prompt-only, like draftInputs;
   // ignored for other kinds. Persisted in the entry's YAML on save.
   draftOfferOn: string[];
+  // The prompt's instance `context_strategy` (ADR-0065 S3 / ADR-0062 D3): which
+  // OutputHandler runs its result, plus commit/on_accept/headless. Prompt-only,
+  // like draftInputs/draftOfferOn; ignored for other kinds. Persisted in the
+  // entry's YAML on save — a save that omits it strips a forked prompt's output
+  // config (the wipe bug D3 closes), so this must always ride the save doc.
+  draftContextStrategy: PromptContextStrategy | null;
   saving: boolean;
   // True for ~2s after a successful save so the pane chip can briefly show
   // "Saved". Reset whenever the pane becomes dirty again.
@@ -76,6 +83,7 @@ export function createEmptyEditorPane(id: string): EditorPaneState {
     draftMetadata: {},
     draftInputs: [],
     draftOfferOn: [],
+    draftContextStrategy: null,
     saving: false,
     recentlySaved: false,
     saveError: false,
@@ -120,6 +128,7 @@ export function isEditorPaneDirty(
   metadata: EntryMetadata,
   inputs?: PromptInputDefinition[],
   offerOn?: string[],
+  contextStrategy?: PromptContextStrategy | null,
 ): boolean {
   if (!scene) return false;
   if (title !== scene.title) return true;
@@ -139,6 +148,14 @@ export function isEditorPaneDirty(
   const sceneOfferOn = (scene as { offer_on?: string[] }).offer_on;
   if (offerOn !== undefined && sceneOfferOn !== undefined) {
     if (JSON.stringify(offerOn) !== JSON.stringify(sceneOfferOn)) return true;
+  }
+  // Prompt-only: context_strategy is the instance behavior contract (output
+  // mode, headless, commit/on_accept — ADR-0065 S3 / ADR-0062 D3). Same guarded
+  // compare — a non-prompt scene carries no context_strategy key at all, so
+  // editing this draft can never mark such a pane dirty.
+  const sceneContextStrategy = (scene as { context_strategy?: PromptContextStrategy | null }).context_strategy;
+  if (contextStrategy !== undefined && sceneContextStrategy !== undefined) {
+    if (JSON.stringify(contextStrategy ?? null) !== JSON.stringify(sceneContextStrategy ?? null)) return true;
   }
   return false;
 }

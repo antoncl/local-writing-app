@@ -67,6 +67,7 @@ import type {
   LoreEntry,
   PlotlineEntry,
   PlotTemplate,
+  PromptContextStrategy,
   PromptEntry,
   PromptInputDefinition,
   ProjectNode,
@@ -253,6 +254,7 @@ class EditorPanesController {
     metadata: EntryMetadata,
     inputs?: PromptInputDefinition[],
     offerOn?: string[],
+    contextStrategy?: PromptContextStrategy | null,
   ): void {
     // View panes self-persist (ViewBodyView owns a debounced PUT /api/views/{id})
     // and drive their save-state flags via `setViewSaveState`. Their draft-* fields
@@ -265,7 +267,8 @@ class EditorPanesController {
       if (pane.id !== id) return pane;
       const nextInputs = inputs ?? pane.draftInputs;
       const nextOfferOn = offerOn ?? pane.draftOfferOn;
-      const nextDirty = isView ? pane.dirty : isEditorPaneDirty(pane.scene, title, body, status, entryType, metadata, nextInputs, nextOfferOn);
+      const nextContextStrategy = contextStrategy !== undefined ? contextStrategy : pane.draftContextStrategy; // null is a real cleared value
+      const nextDirty = isView ? pane.dirty : isEditorPaneDirty(pane.scene, title, body, status, entryType, metadata, nextInputs, nextOfferOn, nextContextStrategy);
       return {
         ...pane,
         dirty: nextDirty,
@@ -278,6 +281,7 @@ class EditorPanesController {
         draftMetadata: cloneMetadata(metadata),
         draftInputs: JSON.parse(JSON.stringify(nextInputs ?? [])),
         draftOfferOn: [...(nextOfferOn ?? [])],
+        draftContextStrategy: nextContextStrategy ? JSON.parse(JSON.stringify(nextContextStrategy)) : null,
       };
     });
     // The generic autosave is a no-op for views (saveEditorPane returns early), so
@@ -319,25 +323,16 @@ class EditorPanesController {
         scene: refreshedDocument,
         draftMetadata: cloneMetadata(draftMetadata),
         draftStatus: documentStatus(refreshedDocument),
+        // Prompt drafts (inputs/offerOn/contextStrategy) ride along too — a
+        // baseline refresh mustn't silently strand an unsaved edit held in them.
         dirty: isEditorPaneDirty(
-          refreshedDocument,
-          pane.draftTitle,
-          pane.draftMarkdown,
-          pane.draftStatus,
-          pane.draftEntryType,
-          draftMetadata,
-          // Pass the prompt drafts too: a baseline refresh (tag rename, schema
-          // edit) that leaves title/body/metadata untouched must not silently
-          // clear `dirty` while an unsaved inputs / offer_on edit is still held
-          // in the draft — that would strand the edit until the pane re-dirties.
-          pane.draftInputs,
-          pane.draftOfferOn,
+          refreshedDocument, pane.draftTitle, pane.draftMarkdown, pane.draftStatus, pane.draftEntryType,
+          draftMetadata, pane.draftInputs, pane.draftOfferOn, pane.draftContextStrategy,
         ),
       };
     });
     this.metadataReloadsByPane = { ...this.metadataReloadsByPane, ...nextReloads };
   }
-
 
   async close(id: string): Promise<void> {
     const pane = this.panes.find((candidate) => candidate.id === id);
@@ -555,7 +550,7 @@ class EditorPanesController {
         ...(documentKind === "manuscript" ? { status: pane.draftStatus } : {}),
         entry_type: pane.draftEntryType,
         metadata: cloneMetadata(pane.draftMetadata),
-        ...(documentKind === "prompt" ? { inputs: pane.draftInputs, offer_on: pane.draftOfferOn } : {}),
+        ...(documentKind === "prompt" ? { inputs: pane.draftInputs, offer_on: pane.draftOfferOn, context_strategy: pane.draftContextStrategy } : {}),
       };
       let savedDocument: EditableDocument;
       if (documentKind === "lore") {
@@ -631,6 +626,7 @@ class EditorPanesController {
           candidate.draftMetadata,
           candidate.draftInputs,
           candidate.draftOfferOn,
+          candidate.draftContextStrategy,
         );
         return {
           ...candidate,
@@ -1063,6 +1059,7 @@ class EditorPanesController {
                 ? {
                     draftInputs: JSON.parse(JSON.stringify((entry as PromptEntry).inputs ?? [])),
                     draftOfferOn: [...((entry as PromptEntry).offer_on ?? [])],
+                    draftContextStrategy: (entry as PromptEntry).context_strategy ?? null,
                   }
                 : {}),
               saving: false,

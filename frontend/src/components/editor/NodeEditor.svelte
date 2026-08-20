@@ -26,7 +26,7 @@
   import { formatCostEur } from "@/lib/utils/money";
   import { sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import { resolveColor } from "@/lib/utils/colors";
-  import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataSchema, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
+  import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataSchema, PromptContextStrategy, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
   import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { readOnlyInPlace } from "@/lib/utils/provenance";
@@ -94,7 +94,7 @@
     // with it). Null when the host isn't a tiled pane (e.g. a test mount).
     hostPaneId?: string | null;
     // INTERNAL on: listeners (to still-legacy MetadataPanel/*BodyView) are unchanged.
-    onChange?: ((payload: { title: string; body: string; status: string; entryType: string; metadata: EntryMetadata; inputs?: PromptInputDefinition[]; offer_on?: string[] }) => void) | undefined;
+    onChange?: ((payload: { title: string; body: string; status: string; entryType: string; metadata: EntryMetadata; inputs?: PromptInputDefinition[]; offer_on?: string[]; context_strategy?: PromptContextStrategy | null }) => void) | undefined;
     onFocus?: (() => void) | undefined;
     onCustomData?: ((payload: { entryType: string; kind: DocumentKind }) => void) | undefined;
     onNavigate?: ((payload: { id: string; kind: string }) => void) | undefined;
@@ -344,6 +344,14 @@
   let offerOnDraft = $state<string[]>([]);
   let lastOfferOnSceneId: string | null = null;
 
+  // The context_strategy.output draft (ADR-0062 D3) — the mode + headless +
+  // commit/on_accept sub-form authored in CodeBodyView's PromptOutputEditor.
+  // Mirrors offerOnDraft: reseeded from the open prompt on a scene switch,
+  // emitted in `emitChange` alongside it. Round-tripping this on every save is
+  // what closes the wipe bug (a save that omits it strips a forked prompt's
+  // output config, see api.ts savePromptEntry).
+  let contextStrategyDraft = $state<PromptContextStrategy | null>(null);
+
 
   let backlinksReq = 0;
   // Backlinks = the open node's referrers (#194): membership from the in-memory
@@ -388,6 +396,7 @@
       metadata: cloneMetadata(metadata),
       inputs: documentKind === "prompt" ? promptDrafts.toCanonical() : undefined,
       offer_on: documentKind === "prompt" ? [...offerOnDraft] : undefined,
+      context_strategy: documentKind === "prompt" ? contextStrategyDraft : undefined,
     });
   }
 
@@ -659,6 +668,7 @@
       lastOfferOnSceneId = null;
     } else if (scene.id !== lastOfferOnSceneId) {
       offerOnDraft = [...((scene as unknown as { offer_on?: string[] }).offer_on ?? [])];
+      contextStrategyDraft = (scene as unknown as { context_strategy?: PromptContextStrategy | null }).context_strategy ?? null;
       lastOfferOnSceneId = scene.id;
     }
   });
@@ -1028,6 +1038,8 @@
         onInputsChange={emitChange}
         bind:offerOn={offerOnDraft}
         onOfferOnChange={emitChange}
+        bind:contextStrategy={contextStrategyDraft}
+        onContextStrategyChange={emitChange}
       />
     </div>
   {/if}

@@ -102,10 +102,7 @@ def create_environment() -> SandboxedEnvironment:
     effect and emits nothing — the correct construct for the side-effecting helpers
     (`{% do use(node) %}` records a lore pick; `{% do field_contract.store(f) %}`
     registers a field, ADR-0067). Without it the author's `{% do … %}` raises an
-    `unknown tag 'do'` syntax error against the check. `{% cache_break %}` was
-    retired (ADR-0060 §5), so a template still using it now raises a Jinja
-    `TemplateSyntaxError` (unknown tag) — surfaced to the author, not silently
-    rendered.
+    `unknown tag 'do'` syntax error against the check.
     """
     return SandboxedEnvironment(
         autoescape=False,

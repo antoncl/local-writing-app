@@ -31,6 +31,10 @@
   import { resolveColor } from "@/lib/utils/colors";
   import { pickerMembership } from "@/lib/utils/pickerSources";
   import { portalToBody } from "@/lib/actions/portal";
+  import NodeRow from "@/components/widgets/NodeRow.svelte";
+  import NodeList from "@/components/widgets/NodeList.svelte";
+  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
+  import CountPill from "@/components/widgets/CountPill.svelte";
 
   // Resolve a ref's color via the full chain: instance (not carried on
   // NodePickerRef today — that's a Phase 4 surface) → entry-type → parent
@@ -40,6 +44,13 @@
   function colorStyleForRef(ref: { kind: string; entry_type?: string }): string {
     const swatch = resolveColor(null, ref.entry_type, ref.kind, metadataSchema);
     return swatch ? `--chip-base: ${swatch.hex};` : "";
+  }
+
+  // The resolved kind/sub-type hex for a ref, or null — fed to NodeRow's
+  // `stripeColor` so a candidate row carries the one curved stripe (ADR-0068:
+  // the stripe is the row's single colour treatment; no monogram).
+  function hexForRef(ref: { kind: string; entry_type?: string }): string | null {
+    return resolveColor(null, ref.entry_type, ref.kind, metadataSchema)?.hex ?? null;
   }
 
   let {
@@ -380,29 +391,6 @@
     return displayName ?? subType ?? KIND_LABEL_SINGULAR[ref.kind] ?? ref.kind;
   }
 
-  // Compute item tag (the small "Scene" / "Character" / "Preset" label
-  // shown alongside a result in the unified menu). Mirrors chipLabel
-  // for selected items, but for a tree item we have the full ref-shape
-  // info ready at render time.
-  function itemTag(kind: NodePickerRef["kind"], entryType?: string): string {
-    if (kind === "preset") return KIND_LABEL_SINGULAR.preset;
-    const sub = entryType && entryType !== kind ? entryType : null;
-    const displayName = sub ? metadataSchema?.entry_types[sub]?.name : null;
-    return displayName ?? sub ?? KIND_LABEL_SINGULAR[kind] ?? kind;
-  }
-
-  // One-letter monogram for an item row's leading square. Prefers the
-  // first letter of the sub-type display name (so "Character" → C,
-  // "Location" → L, custom "Faction" → F), falls back to entry_type id,
-  // then to the kind initial. Stable + informative for user-defined
-  // sub-types without an icon set.
-  function itemMonogram(kind: NodePickerRef["kind"], entryType?: string): string {
-    if (kind === "preset") return "P";
-    const sub = entryType && entryType !== kind ? entryType : null;
-    const displayName = sub ? metadataSchema?.entry_types[sub]?.name : null;
-    const source = displayName || sub || KIND_LABEL_SINGULAR[kind] || kind;
-    return source.charAt(0).toUpperCase();
-  }
 
   // Aggregate visible groups for the unified menu. Each group renders
   // as a collapsible <details> with a header and a flat item list.
@@ -411,10 +399,10 @@
   const excludeIdSet = $derived(new Set(excludeIds));
 
   const visibleGroups = $derived.by(() => {
-    type Group = { id: string; label: string; items: Array<{ ref: NodePickerRef; tag: string; monogram: string }> };
+    type Group = { id: string; label: string; items: NodePickerRef[] };
     const groups: Group[] = [];
-    const dropExcluded = <T extends { ref: NodePickerRef }>(items: T[]): T[] =>
-      excludeIdSet.size === 0 ? items : items.filter((i) => !excludeIdSet.has(i.ref.id));
+    const dropExcluded = (items: NodePickerRef[]): NodePickerRef[] =>
+      excludeIdSet.size === 0 ? items : items.filter((r) => !excludeIdSet.has(r.id));
 
     const matchingPresets = allowedPresets.filter((id) => {
       const meta = PRESET_META[id] ?? { title: id, tooltip: "" };
@@ -427,11 +415,7 @@
         label: "Presets",
         items: matchingPresets.map((presetId) => {
           const meta = PRESET_META[presetId] ?? { title: presetId, tooltip: "" };
-          return {
-            ref: { id: presetId, kind: "preset" as const, title: meta.title },
-            tag: itemTag("preset"),
-            monogram: itemMonogram("preset"),
-          };
+          return { id: presetId, kind: "preset" as const, title: meta.title };
         }),
       });
     }
@@ -439,9 +423,7 @@
     if (allowedKinds.includes("manuscript")) {
       const items = dropExcluded(
         filteredScenes.map((s) => ({
-          ref: { id: s.id, kind: "manuscript" as const, title: s.title, entry_type: s.entry_type },
-          tag: itemTag("manuscript", s.entry_type),
-          monogram: itemMonogram("manuscript", s.entry_type),
+          id: s.id, kind: "manuscript" as const, title: s.title, entry_type: s.entry_type,
         })),
       );
       if (items.length > 0) groups.push({ id: "scenes", label: "Scenes", items });
@@ -451,9 +433,7 @@
       const loreItems = dropExcluded(
         loreGroups.flatMap((g) =>
           g.entries.map((entry) => ({
-            ref: { id: entry.id, kind: "lore" as const, title: entry.title, entry_type: entry.entry_type },
-            tag: itemTag("lore", entry.entry_type),
-            monogram: itemMonogram("lore", entry.entry_type),
+            id: entry.id, kind: "lore" as const, title: entry.title, entry_type: entry.entry_type,
           })),
         ),
       );
@@ -465,9 +445,7 @@
     if (allowedKinds.includes("snippet")) {
       const items = dropExcluded(
         snippetEntries.map((s) => ({
-          ref: { id: s.id, kind: "snippet" as const, title: s.title, entry_type: s.entry_type },
-          tag: itemTag("snippet", s.entry_type),
-          monogram: itemMonogram("snippet", s.entry_type),
+          id: s.id, kind: "snippet" as const, title: s.title, entry_type: s.entry_type,
         })),
       );
       if (items.length > 0) groups.push({ id: "snippets", label: "Snippets", items });
@@ -476,9 +454,7 @@
     if (allowedKinds.includes("research")) {
       const items = dropExcluded(
         filteredResearchNotes.map((n) => ({
-          ref: { id: n.id, kind: "research" as const, title: n.title, entry_type: n.entry_type },
-          tag: itemTag("research", n.entry_type),
-          monogram: itemMonogram("research", n.entry_type),
+          id: n.id, kind: "research" as const, title: n.title, entry_type: n.entry_type,
         })),
       );
       if (items.length > 0) groups.push({ id: "research", label: "Research", items });
@@ -487,9 +463,7 @@
     if (allowedKinds.includes("assistant")) {
       const items = dropExcluded(
         assistantCandidates.map((a) => ({
-          ref: { id: a.id, kind: "assistant" as const, title: a.title, entry_type: a.entry_type },
-          tag: itemTag("assistant", a.entry_type),
-          monogram: itemMonogram("assistant", a.entry_type),
+          id: a.id, kind: "assistant" as const, title: a.title, entry_type: a.entry_type,
         })),
       );
       if (items.length > 0) groups.push({ id: "assistants", label: "Assistants", items });
@@ -498,9 +472,7 @@
     if (allowedKinds.includes("plot")) {
       const items = dropExcluded(
         plotCandidates.map((p) => ({
-          ref: { id: p.id, kind: "plot" as const, title: p.title, entry_type: p.entry_type },
-          tag: itemTag("plot", p.entry_type),
-          monogram: itemMonogram("plot", p.entry_type),
+          id: p.id, kind: "plot" as const, title: p.title, entry_type: p.entry_type,
         })),
       );
       if (items.length > 0) groups.push({ id: "plotlines", label: "Plotlines", items });
@@ -529,26 +501,18 @@
     return itemCount <= collapseThreshold;
   }
 
-  // Render a title as alternating plain/highlighted spans for the
-  // current search term. Empty search → single plain segment.
-  function highlightSegments(title: string, query: string): Array<{ text: string; match: boolean }> {
-    const q = query.trim();
-    if (!q) return [{ text: title, match: false }];
-    const lower = title.toLowerCase();
-    const needle = q.toLowerCase();
-    const out: Array<{ text: string; match: boolean }> = [];
-    let i = 0;
-    while (i < title.length) {
-      const found = lower.indexOf(needle, i);
-      if (found < 0) {
-        out.push({ text: title.slice(i), match: false });
-        break;
-      }
-      if (found > i) out.push({ text: title.slice(i, found), match: false });
-      out.push({ text: title.slice(found, found + needle.length), match: true });
-      i = found + needle.length;
-    }
-    return out;
+  // Per-group open state. Native <details> gave this for free; composing
+  // NodeRow group headers means tracking it. Default follows
+  // groupOpenByDefault (all open while searching, else collapsed past the
+  // threshold); an explicit user toggle overrides that default. Search
+  // always wins (every surviving group opens), matching the old behaviour.
+  let openOverride = $state<Record<string, boolean>>({});
+  function isGroupOpen(group: { id: string; items: unknown[] }): boolean {
+    if (search.trim()) return true;
+    return openOverride[group.id] ?? groupOpenByDefault(group.items.length, false);
+  }
+  function toggleGroup(group: { id: string; items: unknown[] }): void {
+    openOverride[group.id] = !isGroupOpen(group);
   }
 </script>
 
@@ -667,39 +631,45 @@
             </div>
           {/if}
         {:else}
-          {#each visibleGroups as group (group.id)}
-            {@const isOpen = groupOpenByDefault(group.items.length, search.length > 0)}
-            <details class="ctx-group" open={isOpen}>
-              <summary class="ctx-group-bar">
-                <span class="ctx-group-chevron" aria-hidden="true">▾</span>
-                <span class="ctx-group-label">{group.label}</span>
-                <span class="ctx-group-count">{group.items.length}</span>
-              </summary>
-              <div class="ctx-group-items">
-                {#each group.items as item (item.ref.id + ":" + item.ref.kind)}
-                  {@const picked = isPicked(item.ref)}
-                  <button
-                    type="button"
-                    class="ctx-item"
-                    disabled={picked}
-                    title={picked ? "Already added" : ""}
-                    style={colorStyleForRef(item.ref)}
-                    onclick={() => add(item.ref)}
-                  >
-                    <span class="ctx-item-mono" aria-hidden="true">{item.monogram}</span>
-                    <span class="ctx-item-title">
-                      {#each highlightSegments(item.ref.title, search) as seg}
-                        {#if seg.match}<mark>{seg.text}</mark>{:else}{seg.text}{/if}
-                      {/each}
-                    </span>
-                    {#if picked && !compact}
-                      <span class="ctx-item-added">✓ Added</span>
-                    {/if}
-                  </button>
-                {/each}
-              </div>
-            </details>
-          {/each}
+          <!-- ADR-0068: candidates compose NodeRow/NodeList. Each kind is a
+               groupHeader NodeRow (caret + count) over a nested list of
+               stripe-coloured candidate rows; a picked row dims and stops
+               being clickable, with a trailing ✓ Added. -->
+          <NodeList mode="tree" density={compact ? "dense" : "compact"}>
+            {#each visibleGroups as group (group.id)}
+              <NodeRow
+                title={group.label}
+                groupHeader
+                collapsed={!isGroupOpen(group)}
+                onClick={() => toggleGroup(group)}
+              >
+                {#snippet leading()}
+                  <GroupCaret collapsed={!isGroupOpen(group)} />
+                {/snippet}
+                {#snippet trailing()}
+                  <CountPill count={group.items.length} />
+                {/snippet}
+                {#snippet nested()}
+                  <NodeList mode="tree" density={compact ? "dense" : "compact"}>
+                    {#each group.items as ref (ref.id + ":" + ref.kind)}
+                      {@const picked = isPicked(ref)}
+                      <NodeRow
+                        title={ref.title}
+                        stripeColor={hexForRef(ref)}
+                        dimmed={picked}
+                        clickable={!picked}
+                        onClick={() => add(ref)}
+                      >
+                        {#snippet trailing()}
+                          {#if picked}<span class="ctx-added">✓ Added</span>{/if}
+                        {/snippet}
+                      </NodeRow>
+                    {/each}
+                  </NodeList>
+                {/snippet}
+              </NodeRow>
+            {/each}
+          </NodeList>
         {/if}
       </div>
     {/if}
@@ -1019,155 +989,19 @@
     color: var(--text);
   }
 
-  /* --- Groups ------------------------------------------------------ */
-
-  .ctx-group {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .ctx-group-bar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 9px;
-    background: var(--panel);
-    border-radius: 7px;
-    cursor: pointer;
-    list-style: none;
-    user-select: none;
-  }
-
-  .ctx-group-bar::-webkit-details-marker {
-    display: none;
-  }
-
-  .ctx-group-chevron {
-    color: var(--text-3);
-    font-size: var(--fs-xs);
-    width: 10px;
-    display: inline-block;
-    transition: transform 0.1s;
-  }
-
-  .ctx-group:not([open]) > .ctx-group-bar .ctx-group-chevron {
-    transform: rotate(-90deg);
-  }
-
-  .ctx-group-label {
-    font-size: var(--fs-xs);
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
-    color: var(--text-2);
-  }
-
-  .ctx-group-count {
-    margin-left: auto;
+  /* Candidates now compose NodeRow/NodeList (ADR-0068); the group bars,
+     item buttons, monogram tiles, and highlight <mark> styles are gone.
+     The one picker-local row style left is the "✓ Added" trailing badge. */
+  .ctx-added {
+    flex: none;
     font-size: var(--fs-xs);
     font-weight: 600;
-    color: var(--text-3);
-    background: var(--surface);
-    border: 1px solid var(--border);
+    color: var(--accent-emphasis);
+    background: var(--accent-soft);
     border-radius: 999px;
     padding: 1px 8px;
     line-height: 1.3;
-  }
-
-  .ctx-group-items {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-  }
-
-  /* --- Items ------------------------------------------------------- */
-
-  .ctx-item {
-    appearance: none;
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    padding: 6px 9px;
-    border: none;
-    background: transparent;
-    border-radius: 7px;
-    cursor: pointer;
-    text-align: left;
-    font-family: inherit;
-    color: var(--text);
-    /* --chip-base is set inline by colorStyleForRef() on the item
-       button; monogram color/background derive from it. Falls back to
-       neutral inset when unset. */
-    --mono-color: var(--chip-base, var(--text-3));
-    --mono-bg: var(--inset);
-  }
-
-  .ctx-item[style*="--chip-base"] {
-    --mono-bg: color-mix(in srgb, var(--chip-base) 12%, white 88%);
-  }
-
-  :global([data-theme="dark"]) .ctx-item[style*="--chip-base"] {
-    --mono-color: color-mix(in srgb, var(--chip-base) 75%, white 25%);
-    --mono-bg: color-mix(in srgb, var(--chip-base) 18%, black 82%);
-  }
-
-  .ctx-item:hover:not(:disabled) {
-    background: var(--panel);
-  }
-
-  .ctx-item:disabled {
-    opacity: 0.55;
-    cursor: default;
-  }
-
-  .ctx-item-mono {
-    width: 20px;
-    height: 20px;
-    flex: none;
-    border-radius: 6px;
-    background: var(--mono-bg);
-    color: var(--mono-color);
-    font-size: var(--fs-xs);
-    font-weight: 700;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    line-height: 1;
-  }
-
-  .ctx-menu.compact .ctx-item-mono {
-    width: 19px;
-    height: 19px;
-    font-size: var(--fs-xs);
-  }
-
-  .ctx-item-title {
-    flex: 1;
-    font-size: var(--fs-md);
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  .ctx-item-title mark {
-    background: var(--accent-soft);
-    color: var(--accent-emphasis);
-    border-radius: 2px;
-    padding: 0 1px;
-    font-weight: 600;
-  }
-
-  .ctx-item-added {
-    flex: none;
-    font-size: var(--fs-xs);
-    font-weight: 600;
-    color: var(--accent-emphasis);
-    background: var(--accent-soft);
-    border-radius: 999px;
-    padding: 1px 8px;
-    line-height: 1.3;
   }
 
   /* --- Empty states ------------------------------------------------ */

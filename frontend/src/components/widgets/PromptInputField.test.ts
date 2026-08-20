@@ -53,3 +53,69 @@ describe("PromptInputField — onChange callback (runes port of the `change` eve
     expect(onChange).toHaveBeenLastCalledWith("");
   });
 });
+
+describe("PromptInputField — shared value types delegate to FieldValueEditor (#1225)", () => {
+  it("multi_select renders option chips and encodes the selection as a JSON array", async () => {
+    const onChange = vi.fn();
+    const input = def({
+      type: "multi_select",
+      name: "senses",
+      label: "Senses",
+      options: [
+        { value: "sight", label: "Sight" },
+        { value: "sound", label: "Sound" },
+      ],
+    });
+    render(PromptInputField, { props: { input, value: "[]", onChange } });
+    // The FieldValueEditor chip widget renders one toggle per option.
+    await fireEvent.click(screen.getByRole("button", { name: "Sight" }));
+    // Wire form is the JSON array the backend coercer expects — not "Sight".
+    expect(onChange).toHaveBeenLastCalledWith(JSON.stringify(["sight"]));
+  });
+
+  it("multi_select shows a scalar default (stored bare, not JSON) as the active selection", async () => {
+    const onChange = vi.fn();
+    const input = def({
+      type: "multi_select",
+      name: "senses",
+      options: [
+        { value: "sight", label: "Sight" },
+        { value: "sound", label: "Sound" },
+      ],
+    });
+    // The author's default is stored as the bare value "sight" and seeded via
+    // String() — the widget must still render it selected, not drop it.
+    render(PromptInputField, { props: { input, value: "sight", onChange } });
+    await fireEvent.click(screen.getByRole("button", { name: "Sight" }));
+    // Toggling the (correctly selected) chip clears it → empty array.
+    expect(onChange).toHaveBeenLastCalledWith(JSON.stringify([]));
+  });
+
+  it("list renders one scalar item input per value plus the add control (synthesized scalar shape)", () => {
+    const input = def({ type: "list", name: "beats", label: "Beats" });
+    render(PromptInputField, {
+      props: { input, value: JSON.stringify(["escape", "betrayal"]), onChange: vi.fn() },
+    });
+    // The synthesized one-member scalar list drives ListValueEditor: a text input
+    // per item, plus the "+ Add item" row.
+    expect(screen.getByDisplayValue("escape")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("betrayal")).toBeInTheDocument();
+    expect(screen.getByText("+ Add item")).toBeInTheDocument();
+  });
+
+  it("multi_select decodes an existing JSON-array value as the active selection", async () => {
+    const onChange = vi.fn();
+    const input = def({
+      type: "multi_select",
+      name: "senses",
+      options: [
+        { value: "sight", label: "Sight" },
+        { value: "sound", label: "Sound" },
+      ],
+    });
+    render(PromptInputField, { props: { input, value: JSON.stringify(["sound"]), onChange } });
+    // Toggling the already-selected chip clears it back to an empty array.
+    await fireEvent.click(screen.getByRole("button", { name: "Sound" }));
+    expect(onChange).toHaveBeenLastCalledWith(JSON.stringify([]));
+  });
+});

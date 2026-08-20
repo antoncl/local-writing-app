@@ -1,10 +1,53 @@
 import type { OptionDraft } from "@/components/schema/SelectOptionsEditor.svelte";
+import { FIELD_TYPE_CHOICES, fieldTypeLabel } from "@/lib/utils/fieldIcons";
+import { coerceStringList } from "@/lib/utils/schemaTypeHelpers";
 import type {
+  MetadataFieldType,
   NodePickerConfig,
   PreviewErrorInfo,
   PromptInputDefinition,
   PromptInputType,
 } from "@/lib/types";
+
+// The prompt-input type catalog, derived from the metadata field catalog so the
+// two can't drift (#1225 / [[decisions-inputs-fields-uniformity]]): every
+// authorable metadata *value* type minus `computed` (derived, never entered;
+// `date` is already absent from FIELD_TYPE_CHOICES), plus the two prompt-only
+// invocation types. Ordered types first (matching the field picker), pickers last.
+export const PROMPT_INPUT_TYPE_CHOICES: PromptInputType[] = [
+  ...FIELD_TYPE_CHOICES.filter(
+    (t): t is Exclude<MetadataFieldType, "computed" | "date"> => t !== "computed" && t !== "date",
+  ),
+  "context_pick",
+  "scene_ref",
+];
+
+const PROMPT_ONLY_INPUT_LABELS: Record<"context_pick" | "scene_ref", string> = {
+  context_pick: "Context Picker",
+  scene_ref: "Scene Reference",
+};
+
+// Human label for a prompt-input type. Shared value types reuse the metadata
+// field label (one source of truth); the two prompt-only types add their own.
+export function promptInputTypeLabel(type: PromptInputType): string {
+  if (type === "context_pick" || type === "scene_ref") return PROMPT_ONLY_INPUT_LABELS[type];
+  return fieldTypeLabel(type);
+}
+
+// The list-shaped value types: their runtime value is a JSON-encoded array on
+// the wire (like entity_ref_list), so coerceInputValue parses them to a real
+// array for the template. multi_select / tags store a scalar-string list; `list`
+// stores a scalar list (v1 is scalar-only).
+const LIST_SHAPED_INPUT_TYPES = new Set<PromptInputType>([
+  "multi_select",
+  "tags",
+  "list",
+  "entity_ref_list",
+]);
+
+export function isListShapedInputType(type: PromptInputType): boolean {
+  return LIST_SHAPED_INPUT_TYPES.has(type);
+}
 
 // Editor-side form state for one declared input on a prompt. Persisted shape
 // is PromptInputDefinition (see ./types); EntryInputDraft is the in-memory
@@ -50,14 +93,23 @@ export function coerceInputValue(raw: string, type: PromptInputDefinition["type"
     if (trimmed === "") return null;
     return trimmed.toLowerCase() === "true";
   }
-  if (type === "entity_ref_list") {
+  if (isListShapedInputType(type)) {
+    // multi_select / tags / list / entity_ref_list carry a JSON array on the
+    // wire (the widget encodes edits that way), so the template's `inputs.<name>`
+    // is a real list, not the literal string "[...]".
     if (!trimmed) return null;
     try {
       const parsed = JSON.parse(trimmed);
-      return Array.isArray(parsed) ? parsed : null;
+      if (Array.isArray(parsed)) return parsed;
     } catch {
-      return null;
+      // Not JSON — fall through to the scalar/comma path below.
     }
+    // A scalar ("sight") or comma-string default: DefaultValueEditor emits a bare
+    // option value and the seeders String() it, so an untouched default arrives
+    // here un-encoded. Coerce it to a list via the shared value→list normaliser
+    // rather than dropping it. Empty → unset.
+    const list = coerceStringList(trimmed);
+    return list.length > 0 ? list : null;
   }
   return trimmed;
 }

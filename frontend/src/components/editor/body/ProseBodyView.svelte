@@ -568,7 +568,13 @@
         group: "Insert",
         label: "Scene break",
         description: "Insert a centered section break (* * *).",
-        run: () => editor?.chain().focus().setHorizontalRule().run(),
+        // Clear the "/scene break" trigger text FIRST, like insertTableFromGrid:
+        // setHorizontalRule moves the caret past the rule, so the run-then-clear
+        // order runSlashCommand uses for block transforms would strand the text.
+        run: () => {
+          clearSlashTrigger();
+          editor?.chain().focus().setHorizontalRule().run();
+        },
       },
       {
         group: "Insert",

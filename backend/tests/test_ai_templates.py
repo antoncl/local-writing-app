@@ -39,6 +39,20 @@ class TemplateEngineTests(unittest.TestCase):
         with self.assertRaises(TemplateSyntaxError):
             render_template('{% role "system" %}a{% cache_break %}b{% endrole %}')
 
+    def test_do_tag_evaluates_side_effect_and_emits_nothing(self) -> None:
+        # ADR-0060 Am.1: `{% do %}` (jinja2.ext.do) is installed, so a
+        # side-effecting statement renders instead of raising `unknown tag 'do'`.
+        # It emits nothing — the correct construct for helpers like `use()` and
+        # `field_contract.store()` that record state and return "".
+        sink: list[int] = []
+        out = render_template(
+            '{% role "system" %}{% do sink.append(1) %}kept{% endrole %}',
+            {"sink": sink},
+        )
+        self.assertEqual(len(out.messages), 1)
+        self.assertEqual(out.messages[0].blocks[0].text, "kept")
+        self.assertEqual(sink, [1])
+
     def test_bare_text_outside_role_warns(self) -> None:
         out = render_template(
             'leaked text{% role "system" %}sys{% endrole %}'

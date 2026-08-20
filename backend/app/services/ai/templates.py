@@ -97,16 +97,22 @@ class RoleExtension(Extension):
 def create_environment() -> SandboxedEnvironment:
     """Create a sandboxed Jinja2 env with the prompt extensions installed.
 
-    Only `{% role %}` remains; `{% cache_break %}` was retired (ADR-0060 §5), so a
-    template still using it now raises a Jinja `TemplateSyntaxError` (unknown tag) —
-    surfaced to the author, not silently rendered.
+    `{% role %}` and `{% do %}` are the installed statement tags. `{% do %}`
+    (Jinja's `ext.do`, ADR-0060 Am.1) evaluates an expression purely for its side
+    effect and emits nothing — the correct construct for the side-effecting helpers
+    (`{% do use(node) %}` records a lore pick; `{% do field_contract.store(f) %}`
+    registers a field, ADR-0067). Without it the author's `{% do … %}` raises an
+    `unknown tag 'do'` syntax error against the check. `{% cache_break %}` was
+    retired (ADR-0060 §5), so a template still using it now raises a Jinja
+    `TemplateSyntaxError` (unknown tag) — surfaced to the author, not silently
+    rendered.
     """
     return SandboxedEnvironment(
         autoescape=False,
         trim_blocks=True,
         lstrip_blocks=True,
         keep_trailing_newline=False,
-        extensions=[RoleExtension],
+        extensions=[RoleExtension, "jinja2.ext.do"],
         undefined=StrictUndefined,
     )
 

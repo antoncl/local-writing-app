@@ -202,8 +202,7 @@
     <NodeList isEmpty={false}>
       {#each entryTypeChoicesByKind($metadataSchemaStore, "lore") as choice (choice.id)}
         <NodeRow
-          title={choice.name}
-          detail="Draft with AI"
+          title={`✨ Draft ${choice.name}`}
           onClick={() => { launchBrainstorm(choice.id); close(); }}
         />
       {/each}

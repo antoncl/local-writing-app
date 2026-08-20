@@ -622,7 +622,7 @@ class PromptEntrySummary(BaseModel):
     # an empty list means "offered nowhere" (opt-in, no implicit everywhere-match).
     # Only meaningful on conversation prompts (those with no `inline` output
     # handler — the only ones launched from that menu); inert on the others.
-    # Intentionally lenient — unknown ids simply never match, like `commit.fields`.
+    # Intentionally lenient — unknown ids simply never match.
     offer_on: list[str] = Field(default_factory=list)
     # The prompt's behavior contract (ADR-0065 S3): which OutputHandler runs its
     # result, plus the optional commit / on_accept capability. Was on the

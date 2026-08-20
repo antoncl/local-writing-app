@@ -324,6 +324,13 @@ class AIPreviewResponse(BaseModel):
     # keyed by id. Captured at the lock render beside `used_node_ids` and persisted
     # so the send path's tiering reads them. Empty when no node carried a hint.
     used_node_hints: dict[str, str] = Field(default_factory=dict)
+    # ADR-0067 S2: the field descriptors this render registered via
+    # `{% do field_contract.store(f) %}`, in insertion order. Captured at the lock
+    # render alongside `used_node_ids` and persisted as the chat's
+    # `field_contract_stored`, so the commit reads the SAME set back instead of
+    # re-rendering a separate extractor contract. Empty when the prompt never
+    # called `field_contract.store`.
+    field_contract_stored: list[dict[str, Any]] = Field(default_factory=list)
     # ADR-0061 S2: the effective inputs of the previewed body — its own inputs ∪
     # the transitive union of every `{% include %}`-ed snippet's inputs — plus any
     # same-name/different-type conflict across those snippets. Populated only when
@@ -552,6 +559,13 @@ class ChatSession(BaseModel):
     # the lock render beside `used_node_ids` and stable thereafter. The send path's
     # `_tier_lore_ids` reads them as a revision-bounded placement bias. Empty = none.
     used_node_hints: dict[str, str] = Field(default_factory=dict)
+    # ADR-0067 S2: the field descriptors this chat's lock render registered via
+    # `field_contract`, captured beside `used_node_ids`/`used_node_hints` and
+    # stable thereafter. The commit (`run_entry_patch_extraction`) reads this
+    # back as the shape to extract — no re-render, no re-parse. Empty for a
+    # chat whose prompt never called `field_contract.store` (a plain
+    # conversation, or one authored before ADR-0067).
+    field_contract_stored: list[dict[str, Any]] = Field(default_factory=list)
     # V2: running USD cost for this chat session, in the provider's currency
     # (USD; frontend converts to EUR for display). Re-derived on read as the
     # sum of this chat's priced ai_invocations rows. None — not 0.0 — when the
@@ -652,6 +666,11 @@ class SaveChatSessionRequest(BaseModel):
     # None = "leave the captured value alone"; a dict (even {}) is the new value.
     # Only the lock-render save carries it (from the preview response).
     used_node_hints: dict[str, str] | None = None
+    # ADR-0067 S2: the field-contract set the lock render registered, echoed like
+    # `used_node_ids`. None = "leave the captured value alone" (general saves);
+    # a list (even []) is the new value. Only the lock-render save carries it
+    # (from the preview response's `field_contract_stored`).
+    field_contract_stored: list[dict[str, Any]] | None = None
     # V2: optional incremental cost update. When provided (typically by
     # the chat panel after a successful AI turn), it's ADDED to the
     # persisted cost_usd_total. Omit on plain renames / message-list saves.
@@ -725,19 +744,19 @@ class AIEntryPatch(BaseModel):
 
 
 class ExtractEntryPatchRequest(BaseModel):
-    """POST /api/ai/entry-patch/{node_id}/extract body — ADR-0051 S4.
+    """POST /api/ai/entry-patch/{node_id}/extract body — ADR-0051 S4 / ADR-0067 S2.
 
-    A fresh, self-instructed extraction over the transcript, replacing the
-    finalize-replay: the server rebuilds the format contract from the target's
-    schema and runs it as its own pass, so the contract no longer rides a frozen
-    seed prompt up a growing context. `messages` is the visible transcript;
-    `commit_fields` is the prompt's `commit.fields` allow-list (ADR-0054 §2) that
-    narrows the generated contract — None uses the full body + field-catalog
-    contract, a list restricts it to those targets (`body` counts as a field)."""
+    The commit runs as a **cached continuation** of the chat itself: `chat_id`
+    is the chat's real id, so the server reads back the field set its lock
+    render registered (`ChatSession.field_contract_stored`) and continues the
+    SAME cached system prefix + lore rather than re-shipping the transcript
+    under a freshly-rendered contract. `messages` is the visible transcript,
+    sent as ordinary conversation history (the provider call is stateless per
+    request, same as every other turn of this chat)."""
 
     messages: list[ChatMessage] = Field(default_factory=list)
     assistant_id: str | None = None
-    commit_fields: list[str] | None = None
+    chat_id: str = Field(min_length=1)
 
 
 class ExtractEntryDraftRequest(ExtractEntryPatchRequest):

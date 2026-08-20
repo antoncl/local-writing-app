@@ -264,19 +264,18 @@
   let promptOutputSurface = $state(seed.outputSurface);
   // ADR-0065: a conversation prompt's commit is authorable — its presence (does
   // this chat offer a Commit button → is it a brainstorm) and its review mode. Its
-  // other properties have no UI: `commit.fields` (the built-in scene-summary's
-  // `[summary]`) today, and a deferred `commit.target` tomorrow (the ADR models
-  // `commit` as a growable object). We capture the whole initial commit and, on
-  // rebuild, override only what we author — so an edit here never strips a sub-key
-  // this editor doesn't yet surface (the invariant S2's review restored).
+  // other properties (e.g. `commit.target`, ADR-0063 S1) have no UI here. We
+  // capture the whole initial commit and, on rebuild, override only what we
+  // author — so an edit here never strips a sub-key this editor doesn't yet
+  // surface (the invariant S2's review restored).
   let promptCommitEnabled = $state(seed.commitEnabled);
   let promptCommitReview = $state(seed.commitReview);
   const promptCommitInitial: PromptCommit =
     untrack(() => initialPrompt?.context_strategy?.output?.commit) ?? {};
   // #957: on_accept (the roleplay character-stamp) has no authoring control yet, so
   // capture it verbatim and re-emit it on save — the same round-trip that keeps
-  // commit's `fields` alive. Without this, editing a type that declares on_accept
-  // (roleplay) would silently drop the stamp.
+  // commit's other sub-keys alive. Without this, editing a type that declares
+  // on_accept (roleplay) would silently drop the stamp.
   const promptOnAcceptInitial = untrack(() => initialPrompt?.context_strategy?.output?.on_accept) ?? null;
 
   // --- Unsaved-changes tracking (#68) --------------------------------------
@@ -325,7 +324,7 @@
     // ADR-0065: a commit rides only on a conversation (the backend rejects it on the
     // inline handler), and makes that conversation an `extract_to_node` brainstorm.
     // Spread the captured initial commit first, then override the one property we
-    // author, so `fields`/`target` (and any future sub-key) survive verbatim.
+    // author, so `target` (and any future sub-key) survives verbatim.
     const commit: PromptCommit | null =
       isConversation && promptCommitEnabled
         ? { ...promptCommitInitial, review: promptCommitReview }

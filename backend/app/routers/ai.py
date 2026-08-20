@@ -303,6 +303,10 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
         used_node_ids=rendered.used_node_ids,
         # ADR-0060 §5: the per-node volatility priors from `use(node, hint)`.
         used_node_hints=rendered.used_node_hints,
+        # ADR-0067 S2: the field descriptors this render registered via
+        # `field_contract`, captured here so the lock-render save can persist
+        # them as the chat's `field_contract_stored`.
+        field_contract_stored=rendered.field_contract_stored,
         # ADR-0061 S2: the live body's effective inputs + any include-type
         # conflict (empty unless the request asked to resolve them).
         effective_inputs=effective_inputs,

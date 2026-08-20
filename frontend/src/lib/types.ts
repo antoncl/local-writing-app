@@ -763,15 +763,15 @@ export type PromptInputDefinition = {
 
 // The optional commit capability of an `extract_to_node` prompt (ADR-0054 §2 /
 // ADR-0065): the conversation gains a Commit button that extracts its result to a target node as
-// a reviewable patch. `review` is how it's reviewed; `fields` is the optional
-// allow-list of what the commit extracts (`body` counts as a field, so its absence
-// is fields-only; omit `fields` for the default body + every proposable field).
-// `target` (ADR-0063 S1) is the entry_type the commit CREATES — declaring it makes
-// the chat a create brainstorm for that type regardless of how it was launched;
-// unset is today's behaviour (revise the seeded entry, or create the launch's type).
+// a reviewable patch. `review` is how it's reviewed. `target` (ADR-0063 S1) is
+// the entry_type the commit CREATES — declaring it makes the chat a create
+// brainstorm for that type regardless of how it was launched; unset is today's
+// behaviour (revise the seeded entry, or create the launch's type).
+// `fields` — the old static allow-list of what the commit extracts — retired
+// with ADR-0067 S2: a prompt now narrows what it extracts by authoring its own
+// `field_contract` loop, read back at commit.
 export type PromptCommit = {
   review?: string;
-  fields?: string[] | null;
   target?: string | null;
 };
 

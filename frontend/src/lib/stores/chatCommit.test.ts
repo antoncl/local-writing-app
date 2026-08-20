@@ -7,13 +7,15 @@ import { treeActions } from "@/lib/stores/treeActions.svelte";
 import type { AIEntryPatch, EntryPatchExtraction, MutationSetEntry } from "@/lib/types";
 
 // The chat-pane end of the ADR-0046 loop (#849 extracted it from ChatBodyView;
-// ADR-0051 S4 made the commit a fresh server-side extraction): it posts the
-// transcript to the extraction endpoint, then publishes the returned patch to the
-// cross-pane `entryBrainstorm` store (revise) or holds a whole draft (create).
-// These tests pin what the wiring could silently break: the launch-mode
-// derivations, what's posted to the endpoint (assistant / history / the
-// `commit.fields` allow-list), the `replace` body strip (the producer-side half of
-// the S5-next prose-safety guarantee), cost attribution, and the guards.
+// ADR-0051 S4 made the commit a server-side extraction; ADR-0067 S2 made it a
+// cached CONTINUATION of the chat itself, reading back the field set the
+// chat's own lock render registered): it posts the transcript + chat_id to the
+// extraction endpoint, then publishes the returned patch to the cross-pane
+// `entryBrainstorm` store (revise) or holds a whole draft (create). These
+// tests pin what the wiring could silently break: the launch-mode derivations,
+// what's posted to the endpoint (assistant / history / chat_id), the `replace`
+// body strip (the producer-side half of the S5-next prose-safety guarantee),
+// cost attribution, and the guards.
 
 // The whole module is mocked, so re-export a HttpError shaped like the real one
 // (defined INSIDE the hoisted factory to dodge the class TDZ) — the controller's
@@ -91,6 +93,7 @@ function makeDeps(over: Partial<ChatCommitDeps> = {}): ChatCommitDeps {
   return {
     getAssistantId: () => "asst-1",
     getHistory: () => [{ role: "user", content: "brainstorm turn" }],
+    getChatId: () => "chat_1",
     addTurnCost: vi.fn(async () => {}),
     setError: vi.fn(),
     setNotice: vi.fn(),
@@ -134,13 +137,6 @@ describe("ChatCommitController — launch-mode derivations", () => {
     c.inputDrafts = { entry_type: "lore:character", entry: "lore-1" };
     expect(c.isCreateBrainstorm).toBe(false);
   });
-
-  it("commitFields is the output.commit.fields allow-list, else null", () => {
-    const { c } = makeController();
-    expect(c.commitFields).toBeNull();
-    c.output = { handler: "extract_to_node", commit: { review: "replace", fields: ["summary"] } };
-    expect(c.commitFields).toEqual(["summary"]);
-  });
 });
 
 // ADR-0063 S1: a prompt DECLARES the entry_type its commit creates. A declared
@@ -182,7 +178,7 @@ describe("ChatCommitController — commit.target (ADR-0063 S1)", () => {
     expect(extractDraft).toHaveBeenCalledWith("lore:character", {
       messages: [{ role: "user", content: "brainstorm turn" }],
       assistant_id: "asst-1",
-      commit_fields: null,
+      chat_id: "chat_1",
     });
   });
 });
@@ -218,33 +214,34 @@ describe("ChatCommitController — commitToEntry", () => {
     expect(extractPatch).not.toHaveBeenCalled();
   });
 
-  it("posts the transcript, assistant, and commit.fields allow-list to the extraction endpoint", async () => {
+  it("posts the transcript, assistant, and the chat's own id to the extraction endpoint", async () => {
     const { c } = reviseController();
-    c.output = { handler: "extract_to_node", commit: { review: "replace", fields: ["summary"] } };
+    c.output = { handler: "extract_to_node", commit: { review: "replace" } };
     extractPatch.mockResolvedValue(okResult({ fields: { bio: "x" } }));
 
     await c.commitToEntry();
 
-    // The whole point of S4: the commit is one call to the extraction endpoint,
-    // carrying the transcript (pure input), the assistant, and the prompt's
-    // commit.fields allow-list (null → the server's default full contract).
+    // The whole point of S4/ADR-0067 S2: the commit is one call to the
+    // extraction endpoint, carrying the transcript (pure input), the
+    // assistant, and the chat's own id — so the server can read back the
+    // field set the chat's lock render registered and continue the same
+    // cached conversation.
     expect(extractPatch).toHaveBeenCalledWith("lore-1", {
       messages: [{ role: "user", content: "brainstorm turn" }],
       assistant_id: "asst-1",
-      commit_fields: ["summary"],
+      chat_id: "chat_1",
     });
   });
 
-  it("publishes a visual_diff proposal (default contract, no allow-list) and names the target", async () => {
+  it("publishes a visual_diff proposal and names the target", async () => {
     const { c, deps } = reviseController({ entryTitle: () => "Captain Vale" });
     extractPatch.mockResolvedValue(okResult({ body: "revised prose", fields: { bio: "new" } }));
 
     await c.commitToEntry();
 
-    // No allow-list on a plain revise → commit_fields is null (server default).
     expect(extractPatch).toHaveBeenCalledWith(
       "lore-1",
-      expect.objectContaining({ commit_fields: null }),
+      expect.objectContaining({ chat_id: "chat_1" }),
     );
     expect(entryBrainstorm.proposalFor("lore-1")).toEqual({
       body: "revised prose",
@@ -357,7 +354,7 @@ describe("ChatCommitController — create mode", () => {
     expect(extractDraft).toHaveBeenCalledWith("lore:character", {
       messages: [{ role: "user", content: "brainstorm turn" }],
       assistant_id: "asst-1",
-      commit_fields: null,
+      chat_id: "chat_1",
     });
     expect(c.draftProposal).toEqual({ body: "a life", fields: { name: "Vale" } });
     expect(c.draftDropped).toEqual(["id"]);
@@ -492,7 +489,7 @@ describe("ChatCommitController — stageToPendingSet", () => {
     expect(extractPatch).toHaveBeenCalledWith("lore-1", {
       messages: [{ role: "user", content: "brainstorm turn" }],
       assistant_id: "asst-1",
-      commit_fields: null,
+      chat_id: "chat_1",
     });
     // A set pinned to the subject, carrying the patch as replace rows.
     expect(createSet).toHaveBeenCalledWith({

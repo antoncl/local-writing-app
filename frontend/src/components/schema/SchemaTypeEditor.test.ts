@@ -6,7 +6,7 @@
 // (the backend rejects a commit on the inline handler); (b) a handler-less general
 // chat saves as an empty `context_strategy` (no output block) — its presence is what
 // marks it INVOCABLE vs a snippet (ADR-0065), so it must not collapse to no strategy;
-// and (c) `commit.fields` / `on_accept` have no UI but must ride through verbatim.
+// and (c) `commit.target` / `on_accept` have no UI but must ride through verbatim.
 //
 // The surface is seeded through `initialPrompt` rather than by driving the Output
 // <select>: that select carries an empty `value=""` option that the happy-dom /
@@ -74,10 +74,10 @@ describe("SchemaTypeEditor commit authoring (ADR-0054 S3 / ADR-0065)", () => {
     });
   });
 
-  it("preserves the commit.fields allow-list verbatim through an unrelated edit", async () => {
+  it("preserves commit.target verbatim through an unrelated edit", async () => {
     const onSaveType = vi.fn();
     mount(
-      promptWith({ handler: "extract_to_node", commit: { review: "replace", fields: ["summary"] } }),
+      promptWith({ handler: "extract_to_node", commit: { review: "replace", target: "lore:character" } }),
       onSaveType,
     );
 
@@ -86,17 +86,17 @@ describe("SchemaTypeEditor commit authoring (ADR-0054 S3 / ADR-0065)", () => {
     const review = screen.getByRole("combobox", { name: /Review as/ }) as HTMLSelectElement;
     expect(review.value).toBe("replace");
 
-    // Change only the review mode — fields has no UI and must ride through.
+    // Change only the review mode — target has no UI here and must ride through.
     await fireEvent.change(review, { target: { value: "visual_diff" } });
     expect(await savedStrategy(onSaveType)).toEqual({
-      output: { handler: "extract_to_node", commit: { review: "visual_diff", fields: ["summary"] } },
+      output: { handler: "extract_to_node", commit: { review: "visual_diff", target: "lore:character" } },
     });
   });
 
-  it("drops the whole commit (fields included) when the author turns it off", async () => {
+  it("drops the whole commit (target included) when the author turns it off", async () => {
     const onSaveType = vi.fn();
     mount(
-      promptWith({ handler: "extract_to_node", commit: { review: "replace", fields: ["summary"] } }),
+      promptWith({ handler: "extract_to_node", commit: { review: "replace", target: "lore:character" } }),
       onSaveType,
     );
 
@@ -136,7 +136,7 @@ describe("SchemaTypeEditor on_accept round-trip (#957)", () => {
 
   it("preserves an inline prompt's on_accept mark-stamp through a save", async () => {
     // on_accept (the roleplay character-stamp) has no authoring control, so it must
-    // ride through a save verbatim — the same guarantee as commit.fields. Without
+    // ride through a save verbatim — the same guarantee as commit.target. Without
     // this, editing roleplay's type would silently drop the stamp.
     const onSaveType = vi.fn();
     mount(promptWith({ handler: "inline", on_accept: { ...onAccept } }), onSaveType);

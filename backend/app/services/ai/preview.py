@@ -395,6 +395,11 @@ def build_preview(
     # ADR-0060 §5: carry the per-node volatility priors (set by `use(node, hint)`)
     # so the chat can persist `used_node_hints` and the send path's tiering reads them.
     rendered.used_node_hints = dict(getattr(env, "used_hints", {}) or {})
+    # ADR-0067 S2: carry the registered field-contract set off the env (set by
+    # `{% do field_contract.store(f) %}`) onto the rendered result, so the chat
+    # can persist `field_contract_stored` and the commit reads it back instead
+    # of re-rendering a separate extractor.
+    rendered.field_contract_stored = list(getattr(getattr(env, "field_contract", None), "stored", None) or [])
     # ADR-0060 §6: compute the send-path lore the model will receive so the
     # cache-aware preview can surface it (templates no longer emit lore). Only for a
     # lore-enabled prompt; `scene` is the same as-of anchor the send path resolves.

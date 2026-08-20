@@ -1,17 +1,17 @@
-// offer_on tree model (#903). Pins the three things the rework hinges on:
-// the host filter (only conversation-hostable subjects surface, structurally —
-// via section roots, not a denylist), the exact-id + coverage selection model
-// (a parent target covers its descendants), and the dedupe on select.
+// offer_on tree model (#903, un-curated + grouped in #1199). Pins the things
+// the rework hinges on: the opens_in-derived host filter (only entry_types that
+// resolve to opens_in === "editor" surface, structurally — via the schema, not
+// a hardcoded list), the header-per-kind grouping, and the exact-id + coverage
+// selection model (a parent target covers its descendants).
 import { describe, expect, it } from "vitest";
-import { offerOnRows, selectTarget, deselectTarget } from "./offerOnTree";
+import { offerOnRows, selectTarget, deselectTarget, type OfferOnRow } from "./offerOnTree";
 import type { MetadataSchema } from "@/lib/types";
 
-// A realistic host schema: lore has an abstract root + concrete leaves + a
-// deprecated one; scene and plot each have their host types (manuscript:scene /
-// plot:card / plot:plotline — plotlines joined the hosts in S7b) alongside
-// NON-host siblings (act/chapter, board/template) that must never surface. prompt
-// is a host (#711 — meta-prompting, a code body the run-diff reviews); view is a
-// body-less non-host kind that must stay curated out.
+// A realistic host schema, mirroring the shape of the real default schema:
+// each multi-type kind has an abstract root; research/plot/mutation_set carry
+// a non-editor override (tree_container/board/dialog); assistant/chat/project/
+// view are single-type kinds that inherit the "editor" default (the wide set
+// #1199 restores). lore:old is deprecated (dropped entirely, subtree included).
 const SCHEMA = {
   version: 1,
   entry_types: {
@@ -20,69 +20,127 @@ const SCHEMA = {
     "lore:item": { name: "Item", kind: "lore", parent: "lore:base", fields: [] },
     "lore:location": { name: "Location", kind: "lore", parent: "lore:base", fields: [] },
     "lore:old": { name: "Old", kind: "lore", parent: "lore:base", deprecated: true, fields: [] },
-    "manuscript:scene": { name: "Scene", kind: "manuscript", fields: [] },
-    "manuscript:act": { name: "Act", kind: "manuscript", fields: [] },
-    "manuscript:chapter": { name: "Chapter", kind: "manuscript", fields: [] },
-    "plot:card": { name: "Card", kind: "plot", fields: [] },
-    "plot:board": { name: "Board", kind: "plot", fields: [] },
-    "plot:plotline": { name: "Plotline", kind: "plot", fields: [] },
-    "plot:template": { name: "Plot template", kind: "plot", fields: [] },
-    "prompt:general": { name: "General", kind: "prompt", fields: [] },
-    "view:board": { name: "View", kind: "view", fields: [] },
+
+    "manuscript:base": { name: "Manuscript", kind: "manuscript", abstract: true, fields: [] },
+    "manuscript:act": { name: "Act", kind: "manuscript", parent: "manuscript:base", fields: [] },
+    "manuscript:chapter": { name: "Chapter", kind: "manuscript", parent: "manuscript:base", fields: [] },
+    "manuscript:scene": { name: "Scene", kind: "manuscript", parent: "manuscript:base", fields: [] },
+
+    "plot:base": { name: "Plot", kind: "plot", abstract: true, fields: [] },
+    "plot:card": { name: "Card", kind: "plot", parent: "plot:base", fields: [] },
+    "plot:plotline": { name: "Plotline", kind: "plot", parent: "plot:base", fields: [] },
+    "plot:template": { name: "Plot template", kind: "plot", parent: "plot:base", fields: [] },
+    "plot:board": { name: "Board", kind: "plot", parent: "plot:base", fields: [], opens_in: "board" },
+
+    "research:base": { name: "Research", kind: "research", abstract: true, fields: [] },
+    "research:topic": {
+      name: "Topic",
+      kind: "research",
+      parent: "research:base",
+      fields: [],
+      opens_in: "tree_container",
+    },
+    "research:note": { name: "Note", kind: "research", parent: "research:base", fields: [] },
+
+    "prompt:base": { name: "Prompt", kind: "prompt", abstract: true, fields: [] },
+    "prompt:general": { name: "General", kind: "prompt", parent: "prompt:base", fields: [] },
+
+    "mutation_set:mutation_set": { name: "Mutation set", kind: "mutation_set", fields: [], opens_in: "dialog" },
+
+    "assistant:assistant": { name: "Assistant", kind: "assistant", fields: [] },
+    "chat:chat_session": { name: "Chat", kind: "chat", fields: [] },
+    "project:project": { name: "Project", kind: "project", fields: [] },
+    "view:view": { name: "View", kind: "view", fields: [] },
   },
   fields: {},
 } as unknown as MetadataSchema;
 
-const ids = (offerOn: string[]) => offerOnRows(SCHEMA, offerOn).map((r) => r.id);
-const stateOf = (offerOn: string[], id: string) =>
-  offerOnRows(SCHEMA, offerOn).find((r) => r.id === id)?.state;
+const rowsOf = (offerOn: string[]) => offerOnRows(SCHEMA, offerOn);
+const ids = (offerOn: string[]) =>
+  rowsOf(offerOn)
+    .filter((r): r is Extract<OfferOnRow, { type: "target" }> => r.type === "target")
+    .map((r) => r.id);
+const headers = (offerOn: string[]) =>
+  rowsOf(offerOn)
+    .filter((r): r is Extract<OfferOnRow, { type: "header" }> => r.type === "header")
+    .map((r) => r.kind);
+const stateOf = (offerOn: string[], id: string) => {
+  const row = rowsOf(offerOn).find((r) => r.type === "target" && r.id === id);
+  return row && row.type === "target" ? row.state : undefined;
+};
+const depthOf = (offerOn: string[], id: string) => {
+  const row = rowsOf(offerOn).find((r) => r.type === "target" && r.id === id);
+  return row && row.type === "target" ? row.depth : undefined;
+};
 
-describe("offerOnRows — host filter (#903)", () => {
-  it("offers all lore/prompt plus the manuscript:scene / plot:card / plot:plotline subtrees", () => {
-    // The abstract lore root is kept (the natural 'all lore' target); the
-    // deprecated lore type and every non-host sibling are gone. plot:plotline joined
-    // in S7b (revise-plotline), a sibling after plot:card; prompt joined in #711
-    // (meta-prompting) as a body-authoring host, a section after the plot hosts.
-    expect(ids([])).toEqual([
-      "lore:base",
-      "lore:character",
-      "lore:item",
-      "lore:location",
-      "manuscript:scene",
-      "plot:card",
-      "plot:plotline",
-      "prompt:general",
-    ]);
+describe("offerOnRows — opens_in-derived host filter (#1199)", () => {
+  it("offers research (topic absent, note present)", () => {
+    const shown = new Set(ids([]));
+    expect(shown.has("research:note")).toBe(true);
+    expect(shown.has("research:topic")).toBe(false);
+    // research:base (abstract root) is kept as the "all of research" grouping row.
+    expect(shown.has("research:base")).toBe(true);
   });
 
-  it("keeps containers and body-less non-host kinds out (view)", () => {
+  it("offers the wide editor set — acts/chapters/assistant/chat/view/project", () => {
     const shown = new Set(ids([]));
-    for (const dead of ["manuscript:act", "manuscript:chapter", "plot:board", "plot:template", "lore:old", "view:board"]) {
-      expect(shown.has(dead)).toBe(false);
+    for (const id of [
+      "manuscript:act",
+      "manuscript:chapter",
+      "assistant:assistant",
+      "chat:chat_session",
+      "view:view",
+      "project:project",
+    ]) {
+      expect(shown.has(id)).toBe(true);
     }
   });
 
-  it("offers plot:plotline as a selectable host (S7b)", () => {
-    expect(stateOf([], "plot:plotline")).toBe("unchecked");
-    expect(stateOf(["plot:plotline"], "plot:plotline")).toBe("checked");
-    // A depth-0 section root like the other plot host, not nested under plot:card.
-    expect(offerOnRows(SCHEMA, []).find((r) => r.id === "plot:plotline")?.depth).toBe(0);
+  it("keeps non-editor surfaces out (plot:board, mutation_set)", () => {
+    const shown = new Set(ids([]));
+    expect(shown.has("plot:board")).toBe(false);
+    expect(shown.has("mutation_set:mutation_set")).toBe(false);
+    // mutation_set has no eligible concrete type, so its kind header is dropped too.
+    expect(headers([])).not.toContain("mutation_set");
   });
 
-  it("offers prompt as a body-authoring host — meta-prompting (#711)", () => {
-    // #711 acceptance: an author can target a prompt. Its code body is reviewed by
-    // the same run-diff as prose, so prompt is a first-class offer_on host, a
-    // depth-0 section selectable like any other.
+  it("drops the deprecated lore subtree entirely", () => {
+    expect(ids([])).not.toContain("lore:old");
+  });
+
+  it("still offers prompt — meta-prompting (#711)", () => {
     expect(stateOf([], "prompt:general")).toBe("unchecked");
     expect(stateOf(["prompt:general"], "prompt:general")).toBe("checked");
-    expect(offerOnRows(SCHEMA, []).find((r) => r.id === "prompt:general")?.depth).toBe(0);
+  });
+});
+
+describe("offerOnRows — grouping", () => {
+  it("emits one header per eligible kind, in stable order", () => {
+    expect(headers([])).toEqual([
+      "lore",
+      "manuscript",
+      "plot",
+      "research",
+      "prompt",
+      "assistant",
+      "chat",
+      "project",
+      "view",
+    ]);
   });
 
-  it("nests lore leaves one level under the root", () => {
-    const rows = offerOnRows(SCHEMA, []);
-    expect(rows.find((r) => r.id === "lore:base")?.depth).toBe(0);
-    expect(rows.find((r) => r.id === "lore:character")?.depth).toBe(1);
-    expect(rows.find((r) => r.id === "manuscript:scene")?.depth).toBe(0);
+  it("Title-cases the kind for the header label", () => {
+    const first = rowsOf([])[0];
+    expect(first).toEqual({ type: "header", kind: "lore", label: "Lore" });
+  });
+
+  it("nests each kind's is-a tree under its header, root at depth 0", () => {
+    expect(depthOf([], "lore:base")).toBe(0);
+    expect(depthOf([], "lore:character")).toBe(1);
+    expect(depthOf([], "manuscript:base")).toBe(0);
+    expect(depthOf([], "manuscript:scene")).toBe(1);
+    // A single-type kind's only member renders at depth 0 (it IS the root).
+    expect(depthOf([], "assistant:assistant")).toBe(0);
   });
 
   it("no schema → nothing to offer", () => {
@@ -92,7 +150,9 @@ describe("offerOnRows — host filter (#903)", () => {
 
 describe("offerOnRows — selection state", () => {
   it("all unchecked with an empty allow-list", () => {
-    expect(offerOnRows(SCHEMA, []).every((r) => r.state === "unchecked")).toBe(true);
+    expect(
+      rowsOf([]).every((r) => r.type === "header" || r.state === "unchecked"),
+    ).toBe(true);
   });
 
   it("a parent target covers its descendants", () => {

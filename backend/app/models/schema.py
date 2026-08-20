@@ -358,6 +358,12 @@ class EntryTypeDefinition(BaseModel):
     # "view" routes to the Svelte Flow view designer (0.5.0 step 3, #80).
     # See decisions-node-editor-modularization + decisions-node-editor-body-spec.
     body_shape: Literal["prose", "code", "chat", "none", "view"] | None = None
+    # Class-level, inherited down the parent chain (like has_body/body_shape).
+    # The surface a node of this type opens in: "editor" = a NodeEditor with a
+    # metadata rail (the only surface that can host a Conversations list / be
+    # an offer_on target); "tree_container", "board", "dialog" are non-editor
+    # surfaces. Default "editor" — most entry_types open in a NodeEditor.
+    opens_in: Literal["editor", "tree_container", "board", "dialog"] = "editor"
     # Starter content for new entries of this type. Used by
     # create_prompt_entry as the initial body so authoring a
     # `roleplay` (or any future type with conventions worth showing off)

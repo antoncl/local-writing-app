@@ -470,6 +470,41 @@ class MetadataSchemaTypeTests(MetadataValidationBase):
         self.assertEqual(note.body_editor, "code")
         self.assertEqual(note.body_language, "plain")
 
+    def test_research_topic_opens_in_tree_container(self) -> None:
+        # research:topic is a tree container, not a NodeEditor target (#1199).
+        schema = self.service.read_metadata_schema()
+        topic = schema.entry_types["research:topic"]
+        self.assertEqual(topic.opens_in, "tree_container")
+
+    def test_concrete_type_inherits_default_opens_in_editor(self) -> None:
+        # A concrete type that doesn't override opens_in inherits "editor"
+        # from its base (mirrors has_body/body_shape inheritance).
+        schema = self.service.read_metadata_schema()
+        character = schema.entry_types["lore:character"]
+        self.assertEqual(character.opens_in, "editor")
+
+    def test_layer_can_override_opens_in(self) -> None:
+        # A child type overriding a base's opens_in wins over the inherited
+        # value.
+        self.service._write_yaml(
+            self.root / "metadata.schema.yaml",
+            {
+                "version": 1,
+                "entry_types": {
+                    "lore:research_note": {
+                        "name": "Research Note",
+                        "kind": "lore",
+                        "parent": "lore:base",
+                        "fields": [],
+                        "opens_in": "dialog",
+                    }
+                },
+            },
+        )
+        schema = self.service.read_metadata_schema()
+        note = schema.entry_types["lore:research_note"]
+        self.assertEqual(note.opens_in, "dialog")
+
 
 if __name__ == "__main__":
     unittest.main()

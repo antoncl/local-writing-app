@@ -52,13 +52,20 @@ STATUS_STALE = "STALE"      # clean and fully merged — safe to remove
 
 
 def _git(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", *args],
-        cwd=str(cwd) if cwd else None,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
+    """Run a git command, capturing output. A timeout or a missing `git` becomes
+    a failed result (returncode 1) rather than an exception, so every caller's
+    existing returncode check handles it gracefully — a slow `git fetch` warns
+    and falls back to the local ref instead of crashing the whole run."""
+    try:
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(cwd) if cwd else None,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return subprocess.CompletedProcess(args, returncode=1, stdout="", stderr=str(exc))
 
 
 @dataclass

@@ -47,9 +47,12 @@ describe("coerceInputValue — the new list-shaped types parse to real arrays", 
     expect(coerceInputValue("   ", "tags")).toBeNull();
   });
 
-  it("returns null for malformed / non-array JSON rather than a bad string", () => {
-    expect(coerceInputValue("not json", "list")).toBeNull();
-    expect(coerceInputValue('{"a":1}', "multi_select")).toBeNull();
+  it("coerces an untouched scalar/comma default to a list (DefaultValueEditor emits a bare value)", () => {
+    // A multi_select default is stored as the bare option value "sight" and
+    // seeded via String(); it must still reach the template as ["sight"], not
+    // be dropped by a strict JSON.parse. A comma-string default splits.
+    expect(coerceInputValue("sight", "multi_select")).toEqual(["sight"]);
+    expect(coerceInputValue("a, b", "tags")).toEqual(["a", "b"]);
   });
 
   it("leaves scalar types (select / color) as trimmed strings", () => {

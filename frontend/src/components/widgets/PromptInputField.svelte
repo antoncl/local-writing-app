@@ -12,6 +12,7 @@
   import ReferencePicker from "@/components/widgets/ReferencePicker.svelte";
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
   import { isListShapedInputType } from "@/lib/utils/promptInputs";
+  import { coerceStringList } from "@/lib/utils/schemaTypeHelpers";
   import type {
     GroupMember,
     NodePickerConfig,
@@ -113,12 +114,16 @@
 
   function decodeFieldValue(raw: string): MetadataValue {
     if (isListShapedInputType(input.type)) {
+      if (!raw) return [];
       try {
-        const parsed = JSON.parse(raw || "[]");
-        return Array.isArray(parsed) ? parsed : [];
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
       } catch {
-        return [];
+        // Not JSON — an untouched scalar/comma default; coerce below.
       }
+      // A scalar ("sight") or comma default arrives un-encoded (the seeders
+      // String() it); coerce to a list so it shows selected instead of empty.
+      return coerceStringList(raw);
     }
     return raw ?? "";
   }

@@ -73,6 +73,24 @@ describe("PromptInputField — shared value types delegate to FieldValueEditor (
     expect(onChange).toHaveBeenLastCalledWith(JSON.stringify(["sight"]));
   });
 
+  it("multi_select shows a scalar default (stored bare, not JSON) as the active selection", async () => {
+    const onChange = vi.fn();
+    const input = def({
+      type: "multi_select",
+      name: "senses",
+      options: [
+        { value: "sight", label: "Sight" },
+        { value: "sound", label: "Sound" },
+      ],
+    });
+    // The author's default is stored as the bare value "sight" and seeded via
+    // String() — the widget must still render it selected, not drop it.
+    render(PromptInputField, { props: { input, value: "sight", onChange } });
+    await fireEvent.click(screen.getByRole("button", { name: "Sight" }));
+    // Toggling the (correctly selected) chip clears it → empty array.
+    expect(onChange).toHaveBeenLastCalledWith(JSON.stringify([]));
+  });
+
   it("multi_select decodes an existing JSON-array value as the active selection", async () => {
     const onChange = vi.fn();
     const input = def({

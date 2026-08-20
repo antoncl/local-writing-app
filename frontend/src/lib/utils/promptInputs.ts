@@ -1,5 +1,6 @@
 import type { OptionDraft } from "@/components/schema/SelectOptionsEditor.svelte";
 import { FIELD_TYPE_CHOICES, fieldTypeLabel } from "@/lib/utils/fieldIcons";
+import { coerceStringList } from "@/lib/utils/schemaTypeHelpers";
 import type {
   MetadataFieldType,
   NodePickerConfig,
@@ -93,16 +94,22 @@ export function coerceInputValue(raw: string, type: PromptInputDefinition["type"
     return trimmed.toLowerCase() === "true";
   }
   if (isListShapedInputType(type)) {
-    // multi_select / tags / list / entity_ref_list all carry a JSON array on the
-    // wire; parse it so the template's `inputs.<name>` is a real list, not the
-    // literal string "[...]" (preview.py leaves scalar-array strings untouched).
+    // multi_select / tags / list / entity_ref_list carry a JSON array on the
+    // wire (the widget encodes edits that way), so the template's `inputs.<name>`
+    // is a real list, not the literal string "[...]".
     if (!trimmed) return null;
     try {
       const parsed = JSON.parse(trimmed);
-      return Array.isArray(parsed) ? parsed : null;
+      if (Array.isArray(parsed)) return parsed;
     } catch {
-      return null;
+      // Not JSON — fall through to the scalar/comma path below.
     }
+    // A scalar ("sight") or comma-string default: DefaultValueEditor emits a bare
+    // option value and the seeders String() it, so an untouched default arrives
+    // here un-encoded. Coerce it to a list via the shared value→list normaliser
+    // rather than dropping it. Empty → unset.
+    const list = coerceStringList(trimmed);
+    return list.length > 0 ? list : null;
   }
   return trimmed;
 }

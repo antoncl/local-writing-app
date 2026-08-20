@@ -60,6 +60,7 @@
     tokenizeSlashArgs,
     matchesSlashFilter,
     filterSlashCommands,
+    slashCommandToken,
   } from "@/lib/editor-core/slashParsing";
   import {
     TABLE_GRID_MAX_ROWS,
@@ -598,7 +599,12 @@
           group: "AI",
           label: entry.title,
           description: promptEntryDescription(promptCtx, entry),
-          autocompleteTo: entry.entry_type,
+          // Colon-free token from the title, NOT the entry_type: since the FQN
+          // change (#77) entry_type is `kind:key` (e.g. `prompt:general`), and a
+          // colon fails the slash grammar and strands the menu (#1215). The
+          // title round-trips the label-based filter; roleplay's key is
+          // `general` but its title is "Roleplay", so only the title matches.
+          autocompleteTo: slashCommandToken(entry.title),
           run: (args?: string[]) => {
             clearSlashTrigger();
             const resolved = args && args.length > 0

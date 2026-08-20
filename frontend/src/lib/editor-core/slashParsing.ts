@@ -6,6 +6,27 @@
 const SLASH_COMMAND_PATTERN = /^[a-zA-Z0-9_-]*$/;
 const SLASH_WITH_ARGS_PATTERN = /^([a-zA-Z0-9_-]+)\s+(.*)$/;
 
+/**
+ * A colon-free slash token derived from a command's display title, safe to
+ * insert into the document on Tab-autocomplete.
+ *
+ * The AI slash commands used to autocomplete to the prompt's `entry_type`, but
+ * since the kind-qualified FQN change (#77) that value is `kind:key` (e.g.
+ * `prompt:general`). A colon fails `SLASH_COMMAND_PATTERN`, so inserting it
+ * stranded the whole menu (#1215). Reduce the title to the grammar's charset and
+ * lowercase it so the completed token both parses and round-trips the
+ * case-insensitive command filter (a single-word title like "Roleplay" →
+ * "roleplay" exact-matches its own label). Returns "" for a title with no
+ * usable characters; callers fall back to the label.
+ */
+export function slashCommandToken(title: string): string {
+  return title
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 /** Split a "/command args" body (the "/" already stripped) into command + raw args. */
 export function parseSlashBody(text: string): { command: string; args: string } | null {
   if (SLASH_COMMAND_PATTERN.test(text)) return { command: text, args: "" };

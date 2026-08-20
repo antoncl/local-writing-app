@@ -1,6 +1,7 @@
 # ADR-0068: A picker composes NodeRow through its existing slots
 
 - Status: **Accepted** — 2026-08-20 (Anton). Design for #1175.
+- **Amendment 1 (2026-08-20, PR #1184):** the "no change to NodeRow's contract" claim holds for the *contract* (no prop added), but one NodeRow **CSS** change did land — the reduction surfaced a latent bug (a non-clickable tree row rendered ~8px shorter than a clickable one, because the tree row's padding lived on the click button), so a picked candidate looked smaller. Fixed by pinning a NodeRow **invariant: a row's height must not depend on `clickable`** — a non-clickable tree row's text now carries the same padding the button would (dense exempt; padding is on the row there). Read "NodeRow is unchanged" below as "no new props; one CSS invariant fix."
 - Concern: reducing the hand-rolled `NodePicker` onto the shared `NodeRow` / `NodeList` widgets — and, in doing so, deciding what (if anything) `NodeRow`'s contract must grow.
 - Follows: ADR-0066 (a NodeList sets its density; the NodeRow adapts — the `dense` capability was landed *for this*), the UI widget taxonomy (NodeRow / NodeList + the color-system widgets; "one canonical widget per role", "one color treatment per row"), ADR-0023 (`NodePickerConfig` = sources + mechanics — the picker's config contract, unchanged here)
 - Relates: #1175 (this is its design); ReferencePicker (already composes NodeRow — the precedent this generalizes)

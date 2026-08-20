@@ -44,19 +44,27 @@
 
   type Handler = "" | "inline" | "extract_to_node";
 
-  const MODES: { id: Handler; label: string }[] = [
-    { id: "", label: "Conversation" },
-    { id: "inline", label: "Inline suggestion" },
-    { id: "extract_to_node", label: "Brainstorm / commit" },
+  const MODES: { id: Handler; label: string; hint: string }[] = [
+    { id: "", label: "Conversation", hint: "a plain chat about this subject; the reply stays in the conversation" },
+    { id: "inline", label: "Inline suggestion", hint: "streams a draft into the prose editor to accept or reject" },
+    { id: "extract_to_node", label: "Brainstorm / commit", hint: "a chat whose result you commit to a node as a reviewable patch" },
   ];
-  const DESTINATIONS: { id: "cursor" | "selection"; label: string }[] = [
-    { id: "cursor", label: "Continue at cursor" },
-    { id: "selection", label: "Replace selection" },
+  const DESTINATIONS: { id: "cursor" | "selection"; label: string; hint: string }[] = [
+    { id: "cursor", label: "Continue at cursor", hint: "writes a continuation at the caret" },
+    { id: "selection", label: "Replace selection", hint: "rewrites the selected prose in place" },
   ];
-  const REVIEWS: { id: "visual_diff" | "replace"; label: string }[] = [
-    { id: "visual_diff", label: "Visual diff" },
-    { id: "replace", label: "Replace" },
+  const REVIEWS: { id: "visual_diff" | "replace"; label: string; hint: string }[] = [
+    { id: "visual_diff", label: "Visual diff", hint: "adopt the result field-by-field against the current entry" },
+    { id: "replace", label: "Replace", hint: "a plain current → proposed swap" },
   ];
+
+  // The persistent "when to pick this" line under the mode control — the lasting
+  // cue the per-option hover tooltips can't be (hover is undiscoverable on touch).
+  const MODE_HINTS: Record<Handler, string> = {
+    "": "Pick Conversation for a back-and-forth that doesn't write anywhere on its own.",
+    inline: "Pick Inline suggestion to draft prose directly into the editor.",
+    extract_to_node: "Pick Brainstorm / commit to workshop a node, then commit the result as a reviewable change.",
+  };
 
   const output = $derived(contextStrategy?.output ?? null);
   const handler = $derived((output?.handler ?? "") as Handler);
@@ -71,6 +79,7 @@
   // The one cell with no runtime yet (E lands the one-shot produce path) —
   // annotate it so the author doesn't think it silently no-ops.
   const headlessExtractNote = $derived(handler === "extract_to_node" && headless);
+  const modeHint = $derived(MODE_HINTS[handler]);
 
   // Rebuild the whole context_strategy from a candidate output, dropping to
   // null when it's entirely empty (a plain conversation) — matching the
@@ -173,11 +182,15 @@
 
   <div class="prompt-output-mode">
     <SegmentedControl items={MODES} value={handler} ariaLabel="Output mode" onSelect={setHandler} />
-    <label class="prompt-output-headless">
+    <label
+      class="prompt-output-headless"
+      title="Run headlessly — one-shot, no chat loop. Still collects required inputs and shows the result for review; it just skips the back-and-forth conversation."
+    >
       <input type="checkbox" checked={headless} disabled={readOnly} onchange={() => toggleHeadless()} />
       Run headlessly
     </label>
   </div>
+  <p class="prompt-output-mode-hint">{modeHint}</p>
   {#if headlessExtractNote}
     <p class="prompt-output-note">
       <i class="ti ti-info-circle" aria-hidden="true"></i>
@@ -295,6 +308,13 @@
     gap: 12px;
     margin: 6px 0;
     flex-wrap: wrap;
+  }
+  /* Persistent "when to pick this" cue under the mode control (discoverability,
+     #1200) — a lasting line, not only the per-option hover tooltip. */
+  .prompt-output-mode-hint {
+    margin: 0 0 6px;
+    font-size: var(--fs-xs);
+    color: var(--text-3);
   }
   .prompt-output-headless {
     display: inline-flex;

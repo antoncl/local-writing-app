@@ -55,6 +55,14 @@ describe("PromptOutputEditor (ADR-0062 D3)", () => {
     expect(queryBox("Commit button (extract to a node)")).not.toBeInTheDocument();
   });
 
+  it("shows a persistent mode hint that updates when the mode changes (#1200)", async () => {
+    render(PromptOutputEditor, { props: { contextStrategy: null, metadataSchema: null } });
+    expect(screen.getByText(/Pick Conversation/i)).toBeInTheDocument();
+    await fireEvent.click(btn("Inline suggestion"));
+    expect(screen.getByText(/Pick Inline suggestion/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Pick Conversation/i)).not.toBeInTheDocument();
+  });
+
   it("switching to Inline reveals the destination + on_accept sub-form and emits", async () => {
     const onChange = vi.fn();
     render(PromptOutputEditor, { props: { contextStrategy: null, metadataSchema: null, onChange } });

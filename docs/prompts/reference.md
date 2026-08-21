@@ -53,6 +53,18 @@ A group is also a **nested accessor** on a node: `entry(x).GMO.Goal` reads the `
 | `plot_context(as_of=node)` | `str` — the spoiler-gated plot-board recap up to `as_of` (a card/scene). Derived and emitted, like `story_so_far`. |
 | `last_words(text, n)` | `str` — the trailing `n` words of a string (pure helper). |
 
+### Field contract
+
+`field_contract` (ADR-0067) is an object, not a call — one instance per render.
+A prompt that asks the model to **produce** field values declares which fields it
+commits to, so the commit path can enforce that shape:
+
+| Access | Effect |
+| --- | --- |
+| `{% do field_contract.store(f) %}` | Register a field the prompt commits to producing. `f` is a `fields()` descriptor, so a group loop stores each member: `{% for f in fields(e) if f.group == "GMO" %}{% do field_contract.store(f) %}{% endfor %}`. |
+| `{{ field_contract.render }}` | Render the stored descriptors as the field roster shown to the model. |
+| `field_contract.stored` | The registered set, read back by the commit path as the shape to enforce. An empty contract commits nothing. |
+
 ## Filters
 
 | Filter | Returns |
@@ -66,6 +78,7 @@ Standard Jinja filters (`join`, `length`, `default`, …) work as usual.
 | Tag | Effect |
 | --- | --- |
 | `{% role "system"\|"user"\|"assistant" %}…{% endrole %}` | Marks the wrapped content's message role. An override: un-roled prose is homed to the base type's default role (usually `system`), so a prose-only prompt just works. |
+| `{% do … %}` | Evaluates an expression for its side effect and emits nothing (Jinja's `ext.do`) — the construct for the side-effecting helpers: `{% do use(node) %}` records a lore pick, `{% do field_contract.store(f) %}` registers a field. |
 | `{% include "snippet-id" %}` | Inlines a `prompt:snippet` node by id (e.g. `builtin-project-settings`). |
 
 ## Retired

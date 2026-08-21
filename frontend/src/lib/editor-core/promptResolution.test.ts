@@ -309,6 +309,29 @@ describe("resolvePromptPositionalArgs — slash positional args (#1276)", () => 
     expect(res.satisfied).toBe(true);
     expect(JSON.parse(res.inputs!.character as string)[0].id).toBe("char_1");
   });
+
+  it("maps earlier slots 1:1 and only a final context_pick input absorbs the rest", () => {
+    const twoInput = {
+      ...roleplay(),
+      inputs: [{ name: "tone", type: "text", required: false }, characterInput],
+    } as unknown as PromptEntrySummary;
+    const c = ctx({ loreEntries: [lore("char_1", "Annie Oakley", "lore:character")] });
+    const res = resolvePromptPositionalArgs(c, twoInput, ["gruff", "Annie", "Oakley"]);
+    expect(res.satisfied).toBe(true);
+    expect(res.inputs!.tone).toBe("gruff");
+    expect(JSON.parse(res.inputs!.character as string)[0].id).toBe("char_1");
+  });
+
+  it("a final scalar input does NOT absorb trailing tokens (takes one, ignores extra)", () => {
+    const numPrompt = {
+      ...prompt("np", "prompt:general", { output: { handler: "inline" } }),
+      inputs: [{ name: "count", type: "number", required: true }],
+    } as unknown as PromptEntrySummary;
+    const res = resolvePromptPositionalArgs(ctx(), numPrompt, ["5", "6"]);
+    // Joining would make "5 6" → invalid number → unresolved; single-token wins.
+    expect(res.satisfied).toBe(true);
+    expect(res.unresolved).toEqual([]);
+  });
 });
 
 describe("inheritedInputsFrom — the editor's inherited tier (ADR-0061 S3b)", () => {

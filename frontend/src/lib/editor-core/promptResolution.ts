@@ -343,11 +343,15 @@ export function resolvePromptPositionalArgs(
   for (let i = 0; i < declared.length; i++) {
     if (i >= args.length) break;
     const input = declared[i];
-    // The final declared input absorbs any remaining tokens, so an unquoted
-    // multi-word value (`/roleplay Annie Oakley`) resolves without quotes —
-    // the tokenizer split it into ["Annie", "Oakley"], and only the trailing
-    // slot is ambiguous, so joining there is safe. Earlier slots stay 1:1.
-    const raw = i === declared.length - 1 ? args.slice(i).join(" ") : args[i];
+    // A final `context_pick` input absorbs any remaining tokens, so an unquoted
+    // multi-word NAME (`/roleplay Annie Oakley`) resolves without quotes — the
+    // tokenizer split it into ["Annie", "Oakley"], and only that trailing name
+    // slot is ambiguous. Scalar inputs never join (joining would turn a valid
+    // `5` into `"5 6"`); earlier slots always stay 1:1.
+    const raw =
+      i === declared.length - 1 && input.type === "context_pick"
+        ? args.slice(i).join(" ")
+        : args[i];
     const label = input.label || input.name;
     if (input.type === "context_pick") {
       const target = input.target as NodePickerConfig | null | undefined;

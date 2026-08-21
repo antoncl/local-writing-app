@@ -54,6 +54,12 @@
   --r-lg: 10px; /* panes, dialogs, popovers */
   --r-pill: 999px;
 
+  /* — reading measure — the max width of the centered prose column (#1246), so a
+     wide Details rail eats the gutter rather than the line length. Shared by the
+     live editor and the read-only scrub/snapshot overlay so the measure never
+     jumps between them. — */
+  --prose-measure: 72ch;
+
   /* — elevation — full box-shadow recipes so background + border +
      shadow travel together; level 0 is flat (border only, no shadow).
      Raw rgba() shadows are defects. — */
@@ -720,6 +726,12 @@ button.row-action-add.active {
      so the body always extends to at least the wrap's height. */
   flex: 1 0 auto;
   width: 100%;
+  /* The centered reading column the editor was always meant to have (#1246):
+     capped at --prose-measure and centred, so a wide Details rail eats the
+     gutter rather than the line length, and the .editor-wrap gutter-click that
+     falls through to focus the editor finally has a gutter to click. */
+  max-width: var(--prose-measure);
+  margin-inline: auto;
   padding: 10px 56px 46px;
   box-sizing: border-box;
   outline: none;

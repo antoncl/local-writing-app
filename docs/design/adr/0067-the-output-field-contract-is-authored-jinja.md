@@ -1,7 +1,7 @@
 # ADR-0067: The output field-contract is authored Jinja, rendered at chat-start and at commit
 
-- Status: **Proposed** — 2026-08-19
-- Issue: (to file) · Pre-1.0 (no release milestone)
+- Status: **Accepted** — 2026-08-19 (Anton). Shipped in full: the `field_contract` accumulator (#1181), read-back at commit (#1208), and the built-ins re-authored onto it (#1206).
+- Issue: #1181 / #1208 / #1206 · Pre-1.0 (no release milestone)
 - Follows: ADR-0065 (two prompt kinds; a `general` prompt's output is a config area — this ADR is where its *field* scope lives), ADR-0063 (commit runs a previewable extractor — this ADR is its S3, "the field contract is authored Jinja," and it retires the *separate* extractor prompt), ADR-0060 (the prompt language — the helper surface + `{% do %}` this adds to), ADR-0059 (`ai_proposable` gates which fields may be proposed), ADR-0026 (`fields()` — the roster this builds on)
 - **Retracts** ADR-0065 §Grounding's "NO new Jinja helper or token is required" verdict.
 

@@ -250,15 +250,31 @@ async def run_entry_patch_extraction(
             error=f"Couldn't read the chat to commit: {exc.message}",
         )
 
+    # The write ceiling both the envelope's ASK and the post-validate ENFORCE
+    # read from — the same `stored` set, so they can't drift (ADR-0067 §4).
+    allowed_ids = {f.get("id") for f in chat.field_contract_stored if isinstance(f, dict)}
+    if not allowed_ids:
+        # #1221: an empty contract means the ceiling admits nothing, so the
+        # commit can only ever produce an empty patch. Fail with an
+        # author-fixable message instead of silently committing nothing — and
+        # before rendering an envelope or spending a model call that cannot
+        # yield anything usable.
+        return EntryPatchExtraction(
+            patch=None,
+            cost_usd=None,
+            ok=False,
+            error=(
+                "This prompt commits to a node but registered no fields, so it can "
+                "only produce an empty change. Add a field_contract loop "
+                "(e.g. {% do field_contract.store(f) %}) to declare what it may write."
+            ),
+        )
     envelope = render_extraction_envelope(
         project,
         entry_type=entry_type,
         creating=creating,
         stored=chat.field_contract_stored,
     )
-    # The write ceiling both the envelope's ASK and the post-validate ENFORCE
-    # read from — the same `stored` set, so they can't drift (ADR-0067 §4).
-    allowed_ids = {f.get("id") for f in chat.field_contract_stored if isinstance(f, dict)}
     turn_messages = _messages_with_cue(request.messages, envelope)
 
     chat_reply = await run_chat_turn(

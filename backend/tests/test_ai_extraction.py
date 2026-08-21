@@ -483,6 +483,26 @@ class ExtractEndpointTests(unittest.TestCase):
         self.assertEqual(body["patch"]["fields"], {"bio": "fixed"})
         self.assertIn("title", body["patch"]["dropped"])
 
+    def test_empty_contract_fails_loudly_without_calling_the_model(self) -> None:
+        # #1221: an empty write ceiling can only ever yield an empty patch
+        # (_constrain_to_registered_fields drops everything). Instead of silently
+        # committing nothing, the commit fails with an author-fixable message —
+        # and short-circuits BEFORE spending a model call that couldn't produce
+        # anything.
+        chat_id = self._make_chat(stored=[])
+        with self._mock_chat(_chat_reply('{"fields": {"bio": "ignored"}}')) as mock_chat:
+            resp = self.client.post(
+                f"/api/ai/entry-patch/{self.hero.id}/extract",
+                json={"messages": [], "assistant_id": None, "chat_id": chat_id},
+            )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        body = resp.json()
+        self.assertFalse(body["ok"])
+        self.assertIsNone(body["patch"])
+        self.assertIsNone(body["cost_usd"])
+        self.assertIn("no fields", (body["error"] or "").lower())
+        mock_chat.assert_not_called()
+
     def test_missing_chat_is_a_clean_failure_not_a_500(self) -> None:
         with self._mock_chat(_chat_reply("{}")):
             resp = self.client.post(
@@ -496,7 +516,7 @@ class ExtractEndpointTests(unittest.TestCase):
         self.assertIn("chat", (body["error"] or "").lower())
 
     def test_garbled_reply_round_trips_as_a_patch(self) -> None:
-        chat_id = self._make_chat()
+        chat_id = self._make_chat(stored=self._stored_full_proposable_set())
         with self._mock_chat(_chat_reply("not json at all")):
             resp = self.client.post(
                 f"/api/ai/entry-patch/{self.hero.id}/extract",
@@ -537,7 +557,7 @@ class ExtractEndpointTests(unittest.TestCase):
         self.assertIn("could not be read", retry_sent.messages[-1].content)
 
     def test_retry_also_garbled_stays_garbled_and_sums_cost(self) -> None:
-        chat_id = self._make_chat()
+        chat_id = self._make_chat(stored=self._stored_full_proposable_set())
         first = _chat_reply("nope, not json", cost_usd=0.01)
         second = _chat_reply("still not json", cost_usd=0.02)
         with self._mock_chat_sequence(first, second) as mock_chat:
@@ -553,7 +573,7 @@ class ExtractEndpointTests(unittest.TestCase):
 
     def test_clean_first_reply_is_not_retried(self) -> None:
         # A good first reply must not incur the extra call.
-        chat_id = self._make_chat()
+        chat_id = self._make_chat(stored=self._stored_with_ids("bio"))
         reply = _chat_reply('{"fields": {"bio": "New."}}', cost_usd=0.01)
         with self._mock_chat_sequence(reply) as mock_chat:
             resp = self.client.post(
@@ -564,7 +584,7 @@ class ExtractEndpointTests(unittest.TestCase):
         self.assertEqual(mock_chat.call_count, 1)
 
     def test_model_returning_nothing_is_ok_false_no_patch(self) -> None:
-        chat_id = self._make_chat()
+        chat_id = self._make_chat(stored=self._stored_full_proposable_set())
         with self._mock_chat(_chat_reply("", ok=False, cost_usd=0.0)):
             resp = self.client.post(
                 f"/api/ai/entry-patch/{self.hero.id}/extract",

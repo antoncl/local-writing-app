@@ -900,6 +900,12 @@
       {/key}
     {/if}
     {#if documentKind === "lore" && scene?.id}
+      <!-- The mutation scrubber lives with Details (#1249): the metadata fields
+           are what mutate, so the time-travel strip docks wherever the rail
+           docks, beside the timeline it shares an ordered dataset with. -->
+      {#if scrub.units.length > 0}
+        <MutationScrubber units={scrub.units} index={scrub.index} onScrub={(index) => void scrub.scrubTo(index)} />
+      {/if}
       <MutationTimeline
         units={scrub.units}
         activeIndex={scrub.index}
@@ -1139,12 +1145,9 @@
     <EditorRail bind:open={railOpen} label={`${documentLabel} details`} content={metaContent} />
   {/if}
 
-  {#if documentKind === "lore" && scene && scrub.units.length > 0}
-    <MutationScrubber units={scrub.units} index={scrub.index} onScrub={(index) => void scrub.scrubTo(index)} />
-  {/if}
-
-  <!-- Foot-docked, and only on scenes: the scrubber's slot is free here, so
-       there is no competition for the dock and no mode to collide with. -->
+  <!-- Foot-docked, and only on scenes: snapshots are about the prose, so the
+       strip stays with the body (the mutation scrubber travels with Details —
+       it renders inside the rail, #1249). -->
   {#if documentKind === "manuscript" && scene && bodyShape === "prose"}
     <SnapshotStrip strip={snapshots} />
   {/if}

@@ -42,7 +42,7 @@ vi.mock("@/lib/api", () => {
 });
 
 vi.mock("@/lib/stores/treeActions.svelte", () => ({
-  treeActions: { createLoreEntryFromDraft: vi.fn() },
+  treeActions: { createNodeFromDraft: vi.fn() },
 }));
 
 const extractPatch = vi.mocked(api.extractEntryPatch);
@@ -50,7 +50,7 @@ const extractDraft = vi.mocked(api.extractEntryDraft);
 const createSet = vi.mocked(api.createMutationSetEntry);
 const getSet = vi.mocked(api.getMutationSetEntry);
 const saveSet = vi.mocked(api.saveMutationSetEntry);
-const createFromDraft = vi.mocked(treeActions.createLoreEntryFromDraft);
+const createFromDraft = vi.mocked(treeActions.createNodeFromDraft);
 
 // A minimal created-set stub — the stage path only reads `.id`.
 const madeSet = (id: string): MutationSetEntry => ({

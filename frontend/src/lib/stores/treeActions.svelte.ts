@@ -29,6 +29,8 @@ import { refreshLoreEntries, setLoreEntries } from "@/lib/stores/lore";
 import { refreshPromptEntries } from "@/lib/stores/prompts";
 import { refreshAssistantEntries } from "@/lib/stores/assistants";
 import { refreshPlotTemplates } from "@/lib/stores/plotTemplates";
+import { refreshPlotBoard } from "@/lib/stores/plotBoard";
+import { refreshPlotlines } from "@/lib/stores/plotlines";
 import { refreshTodos } from "@/lib/stores/todos";
 import { refreshChatSessions } from "@/lib/stores/chats";
 import { metadataSchemaStore } from "@/lib/stores/schema";
@@ -39,8 +41,8 @@ import {
 } from "@/lib/utils/treeHelpers";
 import type { TreeConfig } from "@/components/panes/StructureTree.svelte";
 import type {
+  EntryMetadata,
   EntryPatch,
-  LoreEntry,
   LoreEntrySummary,
   StructureNode,
   StructureNodeDeletePreview,
@@ -63,23 +65,87 @@ class TreeActions {
     });
   }
 
-  // ADR-0046 §6.4: create a lore entry from an AI brainstorm draft. No prior
-  // state to diff, so this is the *create branch of the same patch* — mint the
-  // typed entry through the existing create path, merge the reviewed draft
-  // (title + structured/long-text fields + body) onto it, and PUT once, then
-  // open it for normal editing. `title` is the one proposed field the save
-  // treats top-level; everything else is metadata (references / computed are
-  // already excluded from the validated patch, §4).
-  // Returns the created entry's {id, title}, or null when no entry was minted.
-  // Captured the moment the save lands, NOT gated on run()'s overall outcome:
-  // a failure in the post-create steps (roster refresh, pane open) must still
-  // report the entry that now exists, so the caller clears its draft (a
-  // surviving Create button would mint a duplicate) and stamps the creating
-  // chat's `subject` + retitle (#983: the brainstorm that generated an entry
-  // is that entry's first conversation). run() surfaces the error either way.
-  async createLoreEntryFromDraft(
+  // ADR-0046 §6.4 / ADR-0048 §5 (#1120): create a node from an AI brainstorm
+  // draft, for any flat kind the commit can target — lore entries and plot
+  // cards / plotlines. No prior state to diff, so this is the *create branch of
+  // the same patch*: mint the empty typed node through its existing create
+  // path, merge the reviewed draft (title + structured/long-text fields + body)
+  // onto it, PUT once, then refresh the roster and open it. `title` is the one
+  // proposed field the save treats top-level; everything else is metadata
+  // (references / computed are already excluded from the validated patch, §4).
+  //
+  // Structural kinds (manuscript scenes, research notes) are out: a flat draft
+  // carries no tree position, so their create needs a parent this flow can't
+  // supply — an unsupported target fails with a clear message, not a 422.
+  // Returns the created node's {id, title}, or null when none was minted.
+  async createNodeFromDraft(
     entryType: string,
     patch: EntryPatch,
+  ): Promise<{ id: string; title: string } | null> {
+    const kind = entryType.split(":")[0];
+    if (kind === "lore") {
+      // createLoreEntry takes the entry_type, so every lore sub-type mints
+      // correctly through the same path.
+      return this.#mintFromDraft(entryType, patch, {
+        create: (title) => api.createLoreEntry(title, entryType),
+        save: (entry, body) => api.saveLoreEntry(entry, body),
+        refresh: () => refreshLoreEntries(),
+        open: (id) => editorPanes.openLore(id),
+      });
+    }
+    // Plot creates match EXACTLY, not by is-a: createCard/createPlotline mint a
+    // base plot:card / plot:plotline and can't set a sub-type, so routing a
+    // sub-type target here would silently create the wrong type. Let a sub-type
+    // fall through to the clear refusal below instead. (Lore differs above
+    // because createLoreEntry carries the entry_type through.)
+    if (entryType === "plot:card") {
+      return this.#mintFromDraft(entryType, patch, {
+        create: (title) => api.createCard(title),
+        save: (entry, body) => api.saveCard(entry, body),
+        refresh: () => refreshPlotBoard(),
+        open: (id) => editorPanes.openPlotCard(id),
+      });
+    }
+    if (entryType === "plot:plotline") {
+      return this.#mintFromDraft(entryType, patch, {
+        create: (title) => api.createPlotline(title),
+        save: (entry, body) => api.savePlotline(entry, body),
+        refresh: async () => {
+          await Promise.all([refreshPlotBoard(), refreshPlotlines()]);
+        },
+        open: (id) => editorPanes.openPlotline(id),
+      });
+    }
+    // A flat brainstorm draft can only create a flat node. Surface the
+    // unsupported kind through run()'s error path rather than letting the
+    // lore endpoint 422 on a foreign entry_type.
+    await this.run(async () => {
+      throw new Error(
+        `Can't create a ${entryTypeName(entryType, get(metadataSchemaStore))} from a ` +
+          `brainstorm draft — only lore entries and plot cards or plotlines can be ` +
+          `created this way.`,
+      );
+    });
+    return null;
+  }
+
+  // The kind-generic create-from-draft core: every flat kind mints the same
+  // way, differing only in the create/save/refresh/open four passed as `ops`.
+  // `minted` is captured the moment the save lands, NOT gated on run()'s
+  // overall outcome: a failure in the post-create steps (roster refresh, pane
+  // open) must still report the node that now exists, so the caller clears its
+  // draft (a surviving Create button would mint a duplicate) and stamps the
+  // creating chat's `subject` + retitle (#983: the brainstorm that generated a
+  // node is that node's first conversation). run() surfaces the error either way.
+  async #mintFromDraft<T extends { id: string; title: string; metadata: EntryMetadata }>(
+    entryType: string,
+    patch: EntryPatch,
+    ops: {
+      create: (title: string) => Promise<T>;
+      save: (entry: T, body: string) => Promise<T>;
+      refresh: () => Promise<void>;
+      open: (id: string) => Promise<void>;
+    },
   ): Promise<{ id: string; title: string } | null> {
     let minted: { id: string; title: string } | null = null;
     await this.run(async () => {
@@ -89,15 +155,12 @@ class TreeActions {
       delete fields.title;
       const finalTitle =
         proposedTitle || `New ${entryTypeName(entryType, get(metadataSchemaStore))}`;
-      const created = await api.createLoreEntry(finalTitle, entryType);
-      const merged: LoreEntry = {
-        ...created,
-        metadata: { ...created.metadata, ...fields },
-      };
-      const saved = await api.saveLoreEntry(merged, patch.body ?? "");
+      const created = await ops.create(finalTitle);
+      const merged: T = { ...created, metadata: { ...created.metadata, ...fields } };
+      const saved = await ops.save(merged, patch.body ?? "");
       minted = { id: saved.id, title: saved.title };
-      await refreshLoreEntries();
-      await editorPanes.openLore(saved.id);
+      await ops.refresh();
+      await ops.open(saved.id);
       this.setStatus(`Created "${saved.title}"`);
     });
     return minted;

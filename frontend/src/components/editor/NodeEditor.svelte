@@ -1,8 +1,8 @@
 <script lang="ts">
 
-  import { onDestroy } from "svelte";
   import RegionRegistrar from "@/components/workspace/RegionRegistrar.svelte";
   import { closeSubordinatePane, openSubordinatePane } from "@/lib/utils/subordinatePane";
+  import { workspaceLayout } from "@/lib/stores/workspaceLayout.svelte";
   import BacklinksPanel from "@/components/editor/BacklinksPanel.svelte";
   import MutationTimeline from "@/components/editor/MutationTimeline.svelte";
   import MutationScrubber from "@/components/editor/MutationScrubber.svelte";
@@ -662,41 +662,33 @@
   });
 
   // ---- Detach Details into a subordinate pane (ADR-0062 reuse, #1258) --------
-  // The rail's content is a live view of THIS editor's metadata + scrub /
-  // snapshot controllers, so a detached pane copies the prompt sub-tab pattern:
-  // register the same `metaContent` snippet under an ephemeral, host-scoped id,
-  // tile it beside the editor, and tie its lifetime to this editor pane. No
-  // per-document store is needed (unlike the prompt preview, whose input drafts
-  // lived in the pane) — every metadata field already emits up into `metadata`
-  // here on change, so the pane is a view, never a second owner.
-  let detailsDetached = $state(false);
+  // A detached pane copies the prompt sub-tab pattern: register the same
+  // `metaContent` snippet under an ephemeral, host-scoped id and tile it beside
+  // the editor. It needs no per-document store — every metadata field emits up
+  // into `metadata` here, so the pane is a live view, never a second owner.
   const detailsPaneId = $derived(hostPaneId ? `details:${hostPaneId}` : null);
+  // Detached-ness is DERIVED from the layout, not held as `$state`: dragging the
+  // pane can restructure the tree and remount this editor, which would reset a
+  // local flag (snapping the rail back + orphaning the pane). The layout survives
+  // that remount, so the husk stays and the new instance re-registers the content.
+  const detailsDetached = $derived(!!detailsPaneId && workspaceLayout.isPlaced(detailsPaneId));
   // Offer detach only where there is a host pane AND a rail to tear out.
   let canDetachDetails = $derived(!!hostPaneId && !!scene && !!metadataSchema && !railIsPane);
 
   function detachDetails(): void {
-    const id = detailsPaneId;
-    if (!id || !hostPaneId || detailsDetached || !canDetachDetails) return;
-    detailsDetached = true;
-    openSubordinatePane(id, hostPaneId, reattachDetails, { beside: hostPaneId, edge: "right" });
+    if (!detailsPaneId || !hostPaneId || detailsDetached || !canDetachDetails) return;
+    openSubordinatePane(detailsPaneId, hostPaneId, reattachDetails, { beside: hostPaneId, edge: "right" });
   }
   function reattachDetails(): void {
-    if (!detailsDetached) return;
-    detailsDetached = false;
-    const id = detailsPaneId;
-    if (id) closeSubordinatePane(id); // idempotent — also the pane's own onClose
+    if (detailsPaneId) closeSubordinatePane(detailsPaneId); // idempotent; also the pane's own onClose
   }
 
-  // Fold Details back if the node stops having a rail — a none-shape node renders
-  // metadata as the whole pane (`railIsPane`), which would double-mount the
-  // snippet. Drop the pane on unmount too: the editor-close cascade covers the
-  // common case, this covers NodeEditor unmounting while its pane stays open
-  // (mirrors CodeBodyView's sub-tab teardown).
+  // Fold Details back if the node stops having a rail (a none-shape node renders
+  // metadata as the whole pane, which would double-mount the snippet). Teardown
+  // on editor close is the subordinatePanes cascade's job, not ours — so a
+  // transient remount leaves the pane in place rather than tearing it down.
   $effect(() => {
     if (railIsPane && detailsDetached) reattachDetails();
-  });
-  onDestroy(() => {
-    if (detailsDetached && hostPaneId) closeSubordinatePane(`details:${hostPaneId}`);
   });
   let characterCostRowsView = $derived(characterCostRows(characterCostUsd, loreEntries, metadataSchema));
   // All-time rollup costs surfaced as a single chip in the header hint.
@@ -964,10 +956,12 @@
 {/snippet}
 
 <!-- The detached Details pane renders the SAME `metaContent`; this thin wrapper
-     only adapts its signature to the region body contract (`ViewSpec` arg, which
-     metadata ignores) so it can register in the panel registry. -->
+     adapts its signature to the region body contract (`ViewSpec` arg, which
+     metadata ignores) and supplies the scroll container the docked rail's
+     `.rail-scroll` gives it — without it the pane clips tall metadata with no
+     scrollbar (#1258 follow-up). -->
 {#snippet detailsPaneBody(_spec: ViewSpec | undefined)}
-  {@render metaContent()}
+  <div class="details-pane-scroll">{@render metaContent()}</div>
 {/snippet}
 
 <!-- Register the detached pane's content while Details is torn out (#1258). A
@@ -1325,6 +1319,14 @@
     overflow: auto;
     overscroll-behavior: contain;
     padding: 18px 0;
+  }
+
+  /* Detached Details pane (#1258): the scroll container the docked rail's
+     `.rail-scroll` supplies, so tall metadata scrolls instead of clipping. */
+  .details-pane-scroll {
+    height: 100%;
+    overflow: auto;
+    overscroll-behavior: contain;
   }
 
   .editor-header {

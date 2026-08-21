@@ -93,7 +93,12 @@ class TreeActions {
         open: (id) => editorPanes.openLore(id),
       });
     }
-    if (entryType === "plot:card" || entryType.startsWith("plot:card:")) {
+    // Plot creates match EXACTLY, not by is-a: createCard/createPlotline mint a
+    // base plot:card / plot:plotline and can't set a sub-type, so routing a
+    // sub-type target here would silently create the wrong type. Let a sub-type
+    // fall through to the clear refusal below instead. (Lore differs above
+    // because createLoreEntry carries the entry_type through.)
+    if (entryType === "plot:card") {
       return this.#mintFromDraft(entryType, patch, {
         create: (title) => api.createCard(title),
         save: (entry, body) => api.saveCard(entry, body),
@@ -101,7 +106,7 @@ class TreeActions {
         open: (id) => editorPanes.openPlotCard(id),
       });
     }
-    if (entryType === "plot:plotline" || entryType.startsWith("plot:plotline:")) {
+    if (entryType === "plot:plotline") {
       return this.#mintFromDraft(entryType, patch, {
         create: (title) => api.createPlotline(title),
         save: (entry, body) => api.savePlotline(entry, body),

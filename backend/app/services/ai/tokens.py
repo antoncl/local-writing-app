@@ -13,6 +13,7 @@ this facade.
 from __future__ import annotations
 
 from app.services.ai.profiles import ModelDescriptor
+from app.services.ai.profiles.base import _CACHE_WRITE_MULTIPLIER
 from app.services.ai.profiles.registry import profile_for
 from app.services.machine_settings import MachineSettings
 
@@ -105,9 +106,45 @@ def estimate_input_cost(
     return tokens * descriptor.cost_in_per_mtok / 1_000_000
 
 
+def estimate_send_cost(
+    stable_tokens: int,
+    other_tokens: int,
+    descriptor: ModelDescriptor | None,
+    caches: bool,
+) -> tuple[float | None, float | None]:
+    """Cache-aware input-cost estimate (#1052): `(settled, first)`.
+
+    `stable_tokens` are the cacheable prefix (the system prompt + stable lore);
+    `other_tokens` are the never-cached rest (volatile lore + the conversation
+    turns). On a model that caches, the stable prefix prices as a cache **read**
+    on a settled repeat send (the cache is warm) and as a cache **write** on the
+    first send — or after any change invalidates the prefix; everything else is
+    full rate in both. When the model does not cache — or has no input price —
+    both figures collapse to the flat estimate (`settled == first`), so callers
+    can treat an equal pair as "no cache effect to surface". Mirrors the cache
+    model `compute_cost` uses on the actuals; output cost is excluded (unknown
+    pre-send), as with `estimate_input_cost`.
+    """
+    if descriptor is None or descriptor.cost_in_per_mtok is None:
+        return None, None
+    cost_in = descriptor.cost_in_per_mtok / 1_000_000
+    other = other_tokens * cost_in
+    if not caches:
+        flat = stable_tokens * cost_in + other
+        return flat, flat
+    read_mult = (
+        descriptor.cache_read_multiplier
+        if descriptor.cache_read_multiplier is not None
+        else 1.0
+    )
+    stable = stable_tokens * cost_in
+    return stable * read_mult + other, stable * _CACHE_WRITE_MULTIPLIER + other
+
+
 __all__ = [
     "count_tokens",
     "count_tokens_per_block",
     "descriptor_for",
     "estimate_input_cost",
+    "estimate_send_cost",
 ]

@@ -1019,6 +1019,11 @@ class PreviewCostEstimateTests(unittest.TestCase):
         # cost > 0 for non-empty input.
         self.assertIsNotNone(body["estimated_cost_usd"])
         self.assertGreater(body["estimated_cost_usd"], 0.0)
+        # #1052: cache-aware — this is an explicit-caching model with a stable
+        # system prefix, so the FIRST send (cache writes on that prefix) costs
+        # strictly more than a settled send (cache reads).
+        self.assertIsNotNone(body["estimated_first_cost_usd"])
+        self.assertGreater(body["estimated_first_cost_usd"], body["estimated_cost_usd"])
 
     def test_unknown_model_yields_null_cost_but_keeps_provider_model(self) -> None:
         # phantom assistant references a model not in the bake-in.
@@ -1033,6 +1038,7 @@ class PreviewCostEstimateTests(unittest.TestCase):
         self.assertEqual(body["model"], "not-a-real-model")
         self.assertEqual(body["caching_style"], "explicit")
         self.assertIsNone(body["estimated_cost_usd"])
+        self.assertIsNone(body["estimated_first_cost_usd"])
         # Tokens still count even when cost can't be calculated.
         self.assertGreater(body["estimated_tokens"], 0)
 

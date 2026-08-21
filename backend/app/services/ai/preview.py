@@ -518,7 +518,12 @@ class PreviewEstimate:
     caching_style: str | None
     estimated_tokens: int
     cache_blocks: list[PreviewCacheBlock]
+    # `estimated_cost_usd` is the SETTLED input cost — a repeat send with a warm
+    # cache (stable prefix priced as cache reads); `estimated_first_cost_usd` is
+    # the FIRST send (stable prefix priced as cache writes). Equal when the model
+    # doesn't cache (#1052). Both None when pricing is unknown.
     estimated_cost_usd: float | None
+    estimated_first_cost_usd: float | None
 
 
 def _preview_send_blocks(
@@ -604,13 +609,17 @@ async def estimate_preview_tokens_and_cost(
 
     cache_blocks = _preview_send_blocks(rendered, _count)
     estimated_tokens = sum(b.tokens for b in cache_blocks)
-    estimated_cost_usd: float | None = None
-    if descriptor is not None:
-        # Distinguish "no pricing known" (None) from "pricing known, zero
-        # tokens" (0.0). When descriptor exists but cost is 0, that means
-        # either zero-length input or pricing-not-published — surface 0.0
-        # so the UI can show "€0.0000" rather than "—".
-        estimated_cost_usd = ai_tokens.estimate_input_cost(estimated_tokens, descriptor)
+    # Cache-aware cost (#1052): the stable prefix (system + stable lore) is the
+    # cacheable part; volatile lore and the conversation turns are never cached.
+    # Price the prefix as cache reads (settled) vs writes (first send) when the
+    # model caches. `descriptor` present with a zero rate still yields 0.0, not
+    # None — the UI shows "€0.0000" rather than "—" (a known-free call, #697).
+    stable_tokens = sum(b.tokens for b in cache_blocks if b.tier == "stable")
+    other_tokens = estimated_tokens - stable_tokens
+    caches = caching_style in ("auto", "explicit")
+    estimated_cost_usd, estimated_first_cost_usd = ai_tokens.estimate_send_cost(
+        stable_tokens, other_tokens, descriptor, caches
+    )
 
     return PreviewEstimate(
         provider=provider,
@@ -619,4 +628,5 @@ async def estimate_preview_tokens_and_cost(
         estimated_tokens=estimated_tokens,
         cache_blocks=cache_blocks,
         estimated_cost_usd=estimated_cost_usd,
+        estimated_first_cost_usd=estimated_first_cost_usd,
     )

@@ -105,7 +105,11 @@
         aria-label={side === "bottom" ? "Dock details to the right" : "Dock details to the bottom"}
         onclick={toggleSide}
       >
-        <i class={`ti ${side === "bottom" ? "ti-layout-sidebar-right" : "ti-layout-bottombar"}`} aria-hidden="true"></i>
+        <!-- Directional chevron: down = dock to the bottom, right = dock to the
+             right. The `ti-layout-*` dock glyphs are in the tabler CSS but absent
+             from the font the app loads (they render zero-width, #1251); chevrons
+             are verified to render. -->
+        <i class={`ti ${side === "bottom" ? "ti-chevron-right" : "ti-chevron-down"}`} aria-hidden="true"></i>
       </button>
       <button
         class="rail-icon-btn"

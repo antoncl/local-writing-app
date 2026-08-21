@@ -33,6 +33,7 @@
     class="ai-inline-toolbar"
     class:ai-inline-toolbar-loading={generating}
     class:ai-inline-toolbar-error={error && !suggestionId}
+    class:ai-inline-toolbar-below={position.placement === "below"}
     style={`left: ${position.x}px; top: ${position.y}px;`}
   >
     {#if generating}
@@ -88,7 +89,15 @@
     z-index: 30;
     white-space: nowrap;
     user-select: none;
-    transform: translateY(-2px);
+    /* `top` anchors at the suggestion's first-line top; lift the toolbar fully
+       clear of that line so it never occludes the generated prose (#1275). */
+    transform: translateY(calc(-100% - 4px));
+  }
+
+  /* Flip: `top` anchors at the first line's BOTTOM (set by the controller when
+     there's no room above), so drop the toolbar just under it. */
+  .ai-inline-toolbar-below {
+    transform: translateY(4px);
   }
 
   .ai-toolbar-btn {

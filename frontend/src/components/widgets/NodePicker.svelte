@@ -810,7 +810,12 @@
     border-radius: 11px;
     box-shadow: var(--elev-2);
     padding: 10px;
-    z-index: 100;
+    /* Above modal backdrops (InputsDialog's scrim is z-index 1000): this
+       picker is launched from inside the inputs dialog, so a lower value
+       let the scrim paint over the menu and swallow every click (#1274).
+       10000 matches the sibling body-portaled popovers — TagPicker,
+       SwatchPicker, ColoredSelect — which all float above modals. */
+    z-index: 10000;
     display: flex;
     flex-direction: column;
     gap: 7px;

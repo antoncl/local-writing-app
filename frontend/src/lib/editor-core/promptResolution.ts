@@ -12,9 +12,11 @@ import {
   outputHandlerFor,
   type InlineDestination,
 } from "@/lib/editor-core/outputHandlers";
+import { pickerMembership } from "@/lib/utils/pickerSources";
 import type {
   LoreEntrySummary,
   MetadataSchema,
+  NodePickerConfig,
   PromptContextStrategy,
   PromptEntrySummary,
   PromptInputDefinition,
@@ -275,26 +277,36 @@ export function defaultPromptForSurface(
 }
 
 // Resolve a positional-string token against a context_pick input.
+//
+// The target is the input's `NodePickerConfig` (`{ sources: [...] }`) — the same
+// shape the visual picker filters on. `pickerMembership` reduces it to the
+// `{ kinds, entryTypes }` subset (entry_types are FQNs, e.g. `lore:character`),
+// and we gate candidates by it. An earlier version read `target.kind` /
+// `target.entry_type`, keys that don't exist on this shape, so the gate never
+// ran and a title could match across any kind (#1276).
 export function resolveContextPickToken(
   ctx: PromptResolutionContext,
   token: string,
-  target: { kind?: string; entry_type?: string } | null | undefined,
+  target: NodePickerConfig | null | undefined,
 ): string | null {
   const lower = token.toLowerCase();
-  const wantKind = target?.kind;
-  const wantEntryType = target?.entry_type;
+  const { kinds, entryTypes } = pickerMembership(target);
+  const wantKinds = new Set(kinds); // empty ⇒ no kind constraint
+  const loreTypes = entryTypes["lore"]; // FQNs, or undefined ⇒ any lore type
 
   type Cand = { id: string; kind: "lore" | "manuscript"; title: string; entry_type?: string };
   const candidates: Cand[] = [];
 
-  if (!wantKind || wantKind === "lore") {
+  if (wantKinds.size === 0 || wantKinds.has("lore")) {
     for (const lore of ctx.loreEntries) {
       if (lore.title.toLowerCase() !== lower) continue;
-      if (wantEntryType && lore.entry_type !== wantEntryType) continue;
+      if (loreTypes && loreTypes.length > 0 && !loreTypes.includes(lore.entry_type)) continue;
       candidates.push({ id: lore.id, kind: "lore", title: lore.title, entry_type: lore.entry_type });
     }
   }
-  if (!wantKind || wantKind === "manuscript") {
+  if (wantKinds.size === 0 || wantKinds.has("manuscript")) {
+    // availableScenes carries no entry_type here, so manuscript is gated by
+    // kind only — sufficient, since scenes are the sole pickable manuscript node.
     for (const sc of ctx.availableScenes) {
       if (sc.title.toLowerCase() !== lower) continue;
       candidates.push({ id: sc.id, kind: "manuscript", title: sc.title });
@@ -328,13 +340,21 @@ export function resolvePromptPositionalArgs(
   const inputs: Record<string, unknown> = {};
   const filledNames = new Set<string>();
   const unresolved: Array<{ name: string; label: string; token: string }> = [];
-  const limit = Math.min(declared.length, args.length);
-  for (let i = 0; i < limit; i++) {
+  for (let i = 0; i < declared.length; i++) {
+    if (i >= args.length) break;
     const input = declared[i];
-    const raw = args[i];
+    // A final `context_pick` input absorbs any remaining tokens, so an unquoted
+    // multi-word NAME (`/roleplay Annie Oakley`) resolves without quotes — the
+    // tokenizer split it into ["Annie", "Oakley"], and only that trailing name
+    // slot is ambiguous. Scalar inputs never join (joining would turn a valid
+    // `5` into `"5 6"`); earlier slots always stay 1:1.
+    const raw =
+      i === declared.length - 1 && input.type === "context_pick"
+        ? args.slice(i).join(" ")
+        : args[i];
     const label = input.label || input.name;
     if (input.type === "context_pick") {
-      const target = input.target as { kind?: string; entry_type?: string } | null | undefined;
+      const target = input.target as NodePickerConfig | null | undefined;
       const resolved = resolveContextPickToken(ctx, raw, target);
       if (resolved === null) {
         unresolved.push({ name: input.name, label, token: raw });

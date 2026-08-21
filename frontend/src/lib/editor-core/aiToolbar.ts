@@ -6,7 +6,19 @@
 
 import type { ChatUsage } from "@/lib/types";
 
-export type AiToolbarPosition = { x: number; y: number; visible: boolean };
+// `placement` is where the toolbar sits relative to the suggestion's first
+// line: "above" (the default — lifted clear of the prose) or "below" (the
+// flip used when the suggestion starts too near the top of the scroll content
+// for the toolbar to fit above without being clipped). `y` is the content-space
+// anchor edge for that placement — the line's top when above, its bottom when
+// below. Absent placement is treated as "above" (only the hidden reset states
+// omit it, where it doesn't matter).
+export type AiToolbarPosition = {
+  x: number;
+  y: number;
+  visible: boolean;
+  placement?: "above" | "below";
+};
 
 export type AiSuggestionMeta = {
   provider: string;

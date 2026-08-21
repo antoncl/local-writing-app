@@ -114,9 +114,19 @@ export class AiSuggestionController {
     try {
       const coords = editor.view.coordsAtPos(pos);
       const frameBounds = editorFrame.getBoundingClientRect();
+      const x = coords.left - frameBounds.left + editorFrame.scrollLeft;
+      const topAbove = coords.top - frameBounds.top + editorFrame.scrollTop;
+      // The toolbar renders ABOVE the suggestion's first line so it never
+      // occludes the prose (#1275). When the line sits too close to the top of
+      // the scroll content to fit the toolbar above it (`overflow: auto` on
+      // .editor-wrap would clip it), flip it below that line instead. 40px is a
+      // conservative one-row toolbar height + gap.
+      const TOOLBAR_CLEARANCE = 40;
+      const placeBelow = topAbove < TOOLBAR_CLEARANCE;
       this.toolbarPosition = {
-        x: coords.left - frameBounds.left + editorFrame.scrollLeft,
-        y: coords.top - frameBounds.top + editorFrame.scrollTop,
+        x,
+        y: placeBelow ? coords.bottom - frameBounds.top + editorFrame.scrollTop : topAbove,
+        placement: placeBelow ? "below" : "above",
         visible: true,
       };
     } catch {

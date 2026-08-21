@@ -7,9 +7,11 @@ import {
   promptEntriesOfferedOn,
   promptOffersOn,
   promptOnAccept,
+  resolvePromptPositionalArgs,
   type PromptResolutionContext,
 } from "@/lib/editor-core/promptResolution";
 import type {
+  LoreEntrySummary,
   MetadataSchema,
   PromptContextStrategy,
   PromptEntrySummary,
@@ -247,6 +249,65 @@ describe("dependencyAdvisoryText — the snippet dependency alert line (ADR-0061
     expect(dependencyAdvisoryText({ prompt_count: 0, chat_count: 0 })).toBe("");
     expect(dependencyAdvisoryText(null)).toBe("");
     expect(dependencyAdvisoryText(undefined)).toBe("");
+  });
+});
+
+describe("resolvePromptPositionalArgs — slash positional args (#1276)", () => {
+  // A roleplay-style prompt: one required context_pick input targeting lore
+  // characters. `target` is the NodePickerConfig `{ sources }` shape the runtime
+  // picker filters on (typed loosely on the input, cast at the read seam).
+  const characterInput = {
+    name: "character",
+    type: "context_pick",
+    required: true,
+    target: { sources: [{ kind: "lore", expr: { type: "lore:character" } }] },
+  } as unknown as PromptInputDefinition;
+
+  const roleplay = (): PromptEntrySummary => ({
+    ...prompt("rp", "prompt:general", { output: { handler: "inline" } }),
+    inputs: [characterInput],
+  });
+
+  const lore = (id: string, title: string, entryType: string): LoreEntrySummary => ({
+    id,
+    title,
+    body: "",
+    entry_type: entryType,
+    metadata: {},
+  });
+
+  it("resolves an unquoted multi-word name — the sole input absorbs both tokens", () => {
+    const c = ctx({ loreEntries: [lore("lore_1", "Annie Oakley", "lore:character")] });
+    const res = resolvePromptPositionalArgs(c, roleplay(), ["Annie", "Oakley"]);
+    expect(res.satisfied).toBe(true);
+    expect(res.unresolved).toEqual([]);
+    expect(JSON.parse(res.inputs!.character as string)).toEqual([
+      { id: "lore_1", kind: "lore", title: "Annie Oakley", entry_type: "lore:character" },
+    ]);
+  });
+
+  it("still resolves a single-token name", () => {
+    const c = ctx({ loreEntries: [lore("lore_2", "Bob", "lore:character")] });
+    expect(resolvePromptPositionalArgs(c, roleplay(), ["Bob"]).satisfied).toBe(true);
+  });
+
+  it("gates by the target entry_type — a same-named non-character lore entry does not match (#1276 dead gating)", () => {
+    const c = ctx({ loreEntries: [lore("loc_1", "Annie Oakley", "lore:location")] });
+    const res = resolvePromptPositionalArgs(c, roleplay(), ["Annie", "Oakley"]);
+    expect(res.satisfied).toBe(false);
+    expect(res.unresolved.map((u) => u.token)).toEqual(["Annie Oakley"]);
+  });
+
+  it("disambiguates two same-named entries by the target entry_type", () => {
+    const c = ctx({
+      loreEntries: [
+        lore("loc_1", "Annie Oakley", "lore:location"),
+        lore("char_1", "Annie Oakley", "lore:character"),
+      ],
+    });
+    const res = resolvePromptPositionalArgs(c, roleplay(), ["Annie", "Oakley"]);
+    expect(res.satisfied).toBe(true);
+    expect(JSON.parse(res.inputs!.character as string)[0].id).toBe("char_1");
   });
 });
 

@@ -35,53 +35,37 @@ context_strategy:
 {% set draft_type = inputs.entry_type if inputs.entry_type is defined else "" %}
 {% role "system" %}
 {% if e %}
-{# ADR-0067 S2: register the FULL proposable set this prompt commits (the
-   entry's own type), INCLUDING body — the registered set is the commit's
-   write ceiling (§4), so body must be in it to be written. Emits nothing. #}
+{# Register the fields this prompt may write. The commit reads this same set
+   back as the exact shape it will save, so what the author is told to develop
+   and what gets written can never drift. `proposable` skips computed and
+   reference fields; body is proposable, so it's included. Emits nothing. #}
 {% for f in fields(e) if f.proposable %}{% do field_contract.store(f) %}{% endfor %}
-You are an ideation partner helping the author revise a lore entry, working toward a concrete, committable result. Brainstorm with the author — ask questions, suggest directions, react to their ideas — but steer toward filling out the entry's fields, and don't circle. Once you have enough to fill them, propose a concrete draft of the affected fields and body in prose and say it's ready to commit; stop asking questions past that point. Ask a question only when a field genuinely needs the author's input to settle.
+You are an ideation partner helping the author revise **{{ e.title }}**, working toward a concrete, committable result. Brainstorm with the author — ask questions, suggest directions, react to their ideas — but steer toward filling out the entry's fields, and don't circle. Once you have enough to fill them, propose a concrete draft of the affected fields and body in prose and say it's ready to commit; stop asking questions past that point. Ask a question only when a field genuinely needs the author's input to settle.
 
 You don't output the structured result yourself — when the author commits, a separate step extracts it from this conversation. Keep the discussion in prose.
 
-## The entry under revision: {{ e.title }}
-{% if e.body %}
-{{ e.body }}
-{% else %}
-_(This entry has no body yet.)_
-{% endif %}
-{% for f in fields(e) if f.proposable and f.type == "long_text" and f.id != "body" %}
+These are the fields you can develop:
+{{ field_contract.render }}
 
-### {{ f.label }} ({{ f.id }})
-{{ e.metadata.get(f.id) or "_(empty)_" }}
-{% endfor %}
-{% set current = fields(e) | selectattr("proposable") | rejectattr("type", "equalto", "long_text") | rejectattr("id", "equalto", "title") | list %}
-{% if current %}
-
-### Fields to develop
-{% for f in current %}
-{% set val = e.metadata.get(f.id) %}
-- {{ f.label }} ({{ f.id }}): {% if f.type == "list" %}{% if val %}{{ val | json }}{% else %}_(empty)_{% endif %}{% elif val is sequence and val is not string %}{{ val | join(", ") or "_(empty)_" }}{% elif val is none or val == "" %}_(empty)_{% else %}{{ val }}{% endif %}
-{% endfor %}
-{% endif %}
+The entry's current content — every field and its body — is provided to you as context.
+{# `use()` delivers the entry itself as a context block the backend places and
+   caches: one delivery, every field at its current value, correctly typed.
+   Never re-format the fields by hand here. #}
+{{ use(e) }}
 {% else %}
-{# ADR-0067 S2: register the FULL proposable set of the type being created,
-   INCLUDING body — the registered set is the commit's write ceiling (§4).
-   Emits nothing. #}
+{# Create mode: no entry exists yet, so register the target type's writable
+   fields directly and describe them for the model to draft from scratch. #}
 {% for f in fields(draft_type) if f.proposable %}{% do field_contract.store(f) %}{% endfor %}
 You are an ideation partner helping the author create a new {{ type_name(draft_type) }} from scratch, working toward a concrete, committable entry. Brainstorm — ask questions, propose directions, develop it together — but steer toward a complete entry and don't circle. Once you have enough, propose a concrete draft in prose and say it's ready to commit; stop asking questions past that point.
 
 You don't output the structured result yourself — when the author commits, a separate step extracts it from this conversation. Keep the discussion in prose.
 
 The {{ type_name(draft_type) }} has these fields to develop:
-{% for f in fields(draft_type) if f.proposable %}
-- {{ f.id }} ({{ f.label }}) — {{ f.type }}{% if f.options %}; one of: {{ f.options | join(", ") }}{% endif %}{% if f.description %} — {{ f.description }}{% endif %}
-{% else %}
-- (just a title and body)
-{% endfor %}
+{{ field_contract.render }}
 {% endif %}
-{# Established lore (world rules, premise, setting, and anything marked
-   always-in-context) is placed by the backend, tiered stable/volatile — see
-   docs/design/context-caching.md §4. use_lore() only flips the lore gate. #}
+{# The scene's established lore (world rules, premise, setting, anything marked
+   always-in-context) is selected and placed by the backend; use_lore() just
+   turns that on for this prompt. #}
 {{ use_lore() }}
 {% include "builtin-project-settings" %}
 {% endrole %}

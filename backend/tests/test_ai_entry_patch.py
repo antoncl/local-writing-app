@@ -538,30 +538,28 @@ class FieldRosterFromTypeTests(unittest.TestCase):
             CreateLoreEntryRequest(title="Seren", entry_type="lore:character")
         )
         revise_mode = template.render(inputs={"entry": hero.id, "entry_type": ""})
-        self.assertIn("entry under revision", revise_mode)
+        self.assertIn("revise **Seren**", revise_mode)  # took the revise branch
         self.assertNotIn("create a new", revise_mode)
-        # The revise branch shows the fields to develop as the north-star (the
-        # current-values appendix), but no format contract — that's the extraction
-        # endpoint's job now (S4).
+        # The revise branch names the fields to develop (the contract, driven off
+        # `field_contract`), but no format contract — that's the extraction
+        # endpoint's job now (S4). Current values are delivered via use(), below.
         self.assertIn("allegiance", revise_mode)
-        self.assertIn("Fields to develop", revise_mode)
+        self.assertIn("fields you can develop", revise_mode)
         self.assertIn("ready to commit", revise_mode)
         self.assertNotIn('"fields"', revise_mode)
 
-    def test_revise_appendix_shows_current_structured_values(self) -> None:
-        # So a genuine revise is informed, the appendix now lists the entry's
-        # current non-long-text values (#653). Cover every render branch: a
-        # scalar string as-is, a list joined, a falsy-but-set number (0) and
-        # boolean (False) rendered rather than swallowed, and an unset field
-        # shown as empty — the exact distinctions a naive `val or "…"` loses.
+    def test_revise_delivers_current_values_via_use(self) -> None:
+        # #1220: a genuine revise is informed by the entry's current values — but
+        # they are delivered through the use() block the backend places (every
+        # field, correctly typed, including long_text and body), not printed into
+        # the prompt text. So the render registers the subject for use() and does
+        # NOT inline the raw values; the per-type value formatting those values get
+        # is covered by the lore_block renderer tests (#1230), not here.
         schema_path = self.root / "metadata.schema.yaml"
         data = self.service._read_yaml(schema_path)
         data["fields"]["aliases"] = {"name": "Aliases", "type": "multi_select"}
-        data["fields"]["age"] = {"name": "Age", "type": "number"}
-        data["fields"]["deceased"] = {"name": "Deceased", "type": "boolean"}
-        data["fields"]["epithet"] = {"name": "Epithet", "type": "text"}
         character = data["entry_types"]["lore:character"]
-        character["fields"] = ["aliases", "age", "deceased", "epithet", *character["fields"]]
+        character["fields"] = ["aliases", *character["fields"]]
         self.service._write_yaml(schema_path, data)
 
         hero = self.service.create_lore_entry(
@@ -573,13 +571,7 @@ class FieldRosterFromTypeTests(unittest.TestCase):
                 title="Seren",
                 body="A knight.",
                 entry_type="lore:character",
-                metadata={
-                    "allegiance": "order",
-                    "aliases": ["The Grey", "Wanderer"],
-                    "age": 0,
-                    "deceased": False,
-                    # `epithet` deliberately left unset.
-                },
+                metadata={"allegiance": "order", "aliases": ["The Grey", "Wanderer"]},
             ),
         )
         # The shipped revise:entry body lives in the built-in Library now
@@ -589,11 +581,12 @@ class FieldRosterFromTypeTests(unittest.TestCase):
         rendered = env.from_string(prompt.body).render(
             inputs={"entry": hero.id, "entry_type": ""}
         )
-        self.assertIn("Allegiance (allegiance): order", rendered)
-        self.assertIn("Aliases (aliases): The Grey, Wanderer", rendered)
-        self.assertIn("Age (age): 0", rendered)
-        self.assertIn("Deceased (deceased): False", rendered)
-        self.assertIn("Epithet (epithet): _(empty)_", rendered)
+        self.assertIn(hero.id, env.used_nodes)  # subject registered for use()
+        # The raw current values are NOT baked into the prompt text — they ride
+        # the backend block. ("order" would appear as an allegiance *option* in the
+        # field descriptors, so assert on an alias value, which is not an option.)
+        self.assertNotIn("The Grey", rendered)
+        self.assertNotIn("A knight.", rendered)  # body not inline either
 
 
 class KindAgnosticSeamTests(unittest.TestCase):

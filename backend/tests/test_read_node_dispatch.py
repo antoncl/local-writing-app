@@ -1,7 +1,8 @@
 """Phase 3b-ii/iii: read_node / save_node / delete_node dispatchers
 resolve kind via the node index and route to the right per-kind
-methods. Covers all five indexed kinds (scene, lore, prompt,
-assistant, chat) — project is singleton and not routed through these
+methods. read_node covers every readable kind (scene, lore, prompt,
+assistant, chat, view, plot card/plotline/template); save/delete cover
+their indexed kinds — project is singleton and not routed through these
 unified entrypoints."""
 
 from __future__ import annotations
@@ -14,12 +15,19 @@ from project_fixtures import open_test_project
 
 from app.models import (
     AssistantEntry,
+    CardEntry,
     ChatSession,
     CreateAssistantEntryRequest,
+    CreateCardRequest,
     CreateChatSessionRequest,
+    CreatePlotlineRequest,
+    CreatePlotTemplateRequest,
     LoreEntry,
+    PlotlineEntry,
+    PlotTemplate,
     PromptEntry,
     SaveAssistantEntryRequest,
+    SaveCardRequest,
     SaveChatSessionRequest,
     SaveLoreEntryRequest,
     SavePromptEntryRequest,
@@ -82,6 +90,48 @@ class ReadNodeDispatchTests(unittest.TestCase):
         result = self.service.read_node(created.id)
         self.assertIsInstance(result, ChatSession)
         self.assertEqual(result.id, created.id)
+
+    def test_dispatches_to_plot_card_reader(self) -> None:
+        # #1243: plot nodes read through their per-entry_type readers, not
+        # read_lore_entry. Before the fix, `plot` fell through to a 422 and
+        # `use(card)` silently delivered nothing.
+        created = self.service.create_card(CreateCardRequest(title="A Card"))
+        result = self.service.read_node(created.id)
+        self.assertIsInstance(result, CardEntry)
+        self.assertEqual(result.id, created.id)
+
+    def test_dispatches_to_plotline_reader(self) -> None:
+        created = self.service.create_plotline(CreatePlotlineRequest(title="A Thread"))
+        result = self.service.read_node(created.id)
+        self.assertIsInstance(result, PlotlineEntry)
+        self.assertEqual(result.id, created.id)
+
+    def test_dispatches_to_plot_template_reader(self) -> None:
+        created = self.service.create_plot_template(
+            CreatePlotTemplateRequest(title="A Template")
+        )
+        result = self.service.read_node(created.id)
+        self.assertIsInstance(result, PlotTemplate)
+        self.assertEqual(result.id, created.id)
+
+    def test_plot_card_delivers_its_fields_through_the_lore_block(self) -> None:
+        # The regression the issue names: `use(card)` records a selection, the
+        # send-path renders it via `_format_lore_block` → read_node. With the
+        # plot kind unhandled the node was skipped and the block came back
+        # empty; now the card renders as any other node does.
+        from app.services.ai.lore_block import _format_lore_block
+
+        card = self.service.create_card(CreateCardRequest(title="They Meet"))
+        self.service.save_card(
+            card.id,
+            SaveCardRequest(
+                title="They Meet", body="She spills his coffee.", metadata={}
+            ),
+        )
+        block = _format_lore_block(self.service, [card.id])
+        self.assertIn("<card", block)  # tag is the entry_type's bare local key
+        self.assertIn('name="They Meet"', block)
+        self.assertIn("She spills his coffee.", block)  # the synopsis (body)
 
     def test_unknown_node_id_raises_404(self) -> None:
         with self.assertRaises(ProjectServiceError) as ctx:

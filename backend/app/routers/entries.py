@@ -182,9 +182,10 @@ _SAVE_NODE_REQUEST_BY_KIND: dict[str, type] = {
 def get_node(project: CurrentProject, node_id: str):
     """Dispatches by kind via the node index. Returns the kind-specific
     Pydantic model — Scene | LoreEntry | PromptEntry | AssistantEntry |
-    ChatSession. No response_model declared because FastAPI can't pick
-    a single model for a heterogeneous union; the underlying readers
-    each emit their canonical shape."""
+    ChatSession | ViewNode | CardEntry | PlotlineEntry | PlotTemplate. No
+    response_model declared because FastAPI can't pick a single model for a
+    heterogeneous union; the underlying readers each emit their canonical
+    shape."""
     with translate_errors():
         return project.read_node(node_id)
 

@@ -294,65 +294,91 @@ export class ChatCommitController {
     this.deps.setNotice(null);
     this.committing = true;
     try {
-      const patch = await this.extractPatch(
-        entryId,
-        "Couldn't read the model's response as a change — ask it to finalize again.",
-      );
+      const host = this.stageExtractHost(entryId, entryType);
+      const patch = await extractHandler.produce(host);
       if (!patch) return;
-      const rows = patchToRows(patch);
-      if (rows.length === 0) {
-        this.deps.setNotice("The model proposed no changes to stage.");
-        return;
-      }
-      const subject = this.deps.entryTitle(entryId) ?? "the entry";
-      // The edge is singular (§4): if the chat already owns a set, refine THAT
-      // set in place — a whole re-extraction replaces its rows — rather than
-      // minting a second, orphaned one. Only a *deleted* owned set (404) falls
-      // through to a fresh mint; any other load failure (transient, 5xx) aborts
-      // via the outer catch rather than silently minting a duplicate. `onStaged`
-      // runs only on a first stage, so a refine never rewrites the correct edge.
-      const ownedId = this.deps.getStagedSetId();
-      let existing: MutationSetEntry | null = null;
-      if (ownedId) {
-        try {
-          existing = await api.getMutationSetEntry(ownedId);
-        } catch (e) {
-          if (!(e instanceof HttpError && e.status === 404)) throw e;
-          existing = null; // the owned set was deleted — stage a fresh one below
-        }
-      }
-      let updated = false;
-      if (existing) {
-        await api.saveMutationSetEntry({
-          ...existing,
-          target_entry_type: entryType,
-          target_entity: entryId,
-          rows,
-        });
-        updated = true;
-      } else {
-        const set = await api.createMutationSetEntry({
-          title: `Staged change — ${subject}`,
-          target_entry_type: entryType,
-          target_entity: entryId,
-          rows,
-        });
-        await this.deps.onStaged(set.id);
-      }
-      const dropped =
-        patch.dropped.length > 0
-          ? ` Ignored ${patch.dropped.length} field(s) the model couldn't set legally: ${patch.dropped.join(", ")}.`
-          : "";
-      const count = `${rows.length} change${rows.length > 1 ? "s" : ""}`;
-      this.deps.setNotice(
-        `${updated ? "Updated the staged change" : "Staged"} to ${subject} (${count}) — ` +
-          `review it under pending changes on the card, then place it from a scene.${dropped}`,
-      );
+      await extractHandler.apply(patch, host);
     } catch (e) {
       this.deps.setError((e as Error).message);
     } finally {
       this.committing = false;
     }
+  }
+
+  // The `extract_to_node` host for the STAGE destination: the same fresh
+  // transcript extraction the revise commit runs, but `apply` mints/refines a
+  // subject-pinned mutation set instead of proposing a base-write. Routing it
+  // through the handler keeps the chat pane's extract+review contract in a single
+  // seam (#1126) — only the publish destination differs.
+  private stageExtractHost(entryId: string, entryType: string): ExtractHost {
+    return {
+      extract: () =>
+        this.extractPatch(
+          entryId,
+          "Couldn't read the model's response as a change — ask it to finalize again.",
+        ),
+      publish: (patch) => this.publishStage(entryId, entryType, patch),
+    };
+  }
+
+  // Publish an extracted patch as a subject-pinned mutation set (ADR-0055 §4a/§6):
+  // the AI authors *what* changes and *to whom*, never *where* — the set has no
+  // scene and no position; the writer later PLACES it in prose (§5, S4b). A patch
+  // that proposes nothing is surfaced, never a silent no-op.
+  private async publishStage(
+    entryId: string,
+    entryType: string,
+    patch: AIEntryPatch,
+  ): Promise<void> {
+    const rows = patchToRows(patch);
+    if (rows.length === 0) {
+      this.deps.setNotice("The model proposed no changes to stage.");
+      return;
+    }
+    const subject = this.deps.entryTitle(entryId) ?? "the entry";
+    // The edge is singular (§4): if the chat already owns a set, refine THAT
+    // set in place — a whole re-extraction replaces its rows — rather than
+    // minting a second, orphaned one. Only a *deleted* owned set (404) falls
+    // through to a fresh mint; any other load failure (transient, 5xx) aborts
+    // via the caller's catch rather than silently minting a duplicate. `onStaged`
+    // runs only on a first stage, so a refine never rewrites the correct edge.
+    const ownedId = this.deps.getStagedSetId();
+    let existing: MutationSetEntry | null = null;
+    if (ownedId) {
+      try {
+        existing = await api.getMutationSetEntry(ownedId);
+      } catch (e) {
+        if (!(e instanceof HttpError && e.status === 404)) throw e;
+        existing = null; // the owned set was deleted — stage a fresh one below
+      }
+    }
+    let updated = false;
+    if (existing) {
+      await api.saveMutationSetEntry({
+        ...existing,
+        target_entry_type: entryType,
+        target_entity: entryId,
+        rows,
+      });
+      updated = true;
+    } else {
+      const set = await api.createMutationSetEntry({
+        title: `Staged change — ${subject}`,
+        target_entry_type: entryType,
+        target_entity: entryId,
+        rows,
+      });
+      await this.deps.onStaged(set.id);
+    }
+    const dropped =
+      patch.dropped.length > 0
+        ? ` Ignored ${patch.dropped.length} field(s) the model couldn't set legally: ${patch.dropped.join(", ")}.`
+        : "";
+    const count = `${rows.length} change${rows.length > 1 ? "s" : ""}`;
+    this.deps.setNotice(
+      `${updated ? "Updated the staged change" : "Staged"} to ${subject} (${count}) — ` +
+        `review it under pending changes on the card, then place it from a scene.${dropped}`,
+    );
   }
 
   // Create mode (ADR-0046 §6.4 / ADR-0051 S4): a fresh extraction against the
@@ -365,29 +391,49 @@ export class ChatCommitController {
     this.deps.setNotice(null);
     this.committing = true;
     try {
-      const patch = await this.runExtraction(
-        () =>
-          api.extractEntryDraft(entryType, {
-            messages: this.deps.getHistory(),
-            assistant_id: this.deps.getAssistantId() || null,
-            chat_id: this.deps.getChatId(),
-          }),
-        "Couldn't read the model's response as an entry — ask it to finalize again.",
-      );
+      const host = this.draftExtractHost(entryType);
+      const patch = await extractHandler.produce(host);
       if (!patch) return;
-      const hasBody = patch.body != null;
-      const hasFields = Object.keys(patch.fields).length > 0;
-      if (!hasBody && !hasFields) {
-        this.deps.setNotice("The model proposed no entry to create.");
-        return;
-      }
-      this.draftDropped = patch.dropped;
-      this.draftProposal = { body: patch.body, fields: patch.fields };
+      await extractHandler.apply(patch, host);
     } catch (e) {
       this.deps.setError((e as Error).message);
     } finally {
       this.committing = false;
     }
+  }
+
+  // The `extract_to_node` host for CREATE mode (ADR-0046 §6.4): a fresh extraction
+  // against the target entry_type (no entry is read, so `extractEntryDraft` not
+  // `extractEntryPatch`), whose `apply` holds the whole draft for the review card —
+  // nothing is written until the author clicks Create. Same handler seam as
+  // revise/stage (#1126); only the source and the held-draft destination differ.
+  private draftExtractHost(entryType: string): ExtractHost {
+    return {
+      extract: () =>
+        this.runExtraction(
+          () =>
+            api.extractEntryDraft(entryType, {
+              messages: this.deps.getHistory(),
+              assistant_id: this.deps.getAssistantId() || null,
+              chat_id: this.deps.getChatId(),
+            }),
+          "Couldn't read the model's response as an entry — ask it to finalize again.",
+        ),
+      publish: (patch) => this.publishDraft(patch),
+    };
+  }
+
+  // Hold an extracted patch as the create-mode draft for the review card. A patch
+  // that proposes nothing is surfaced, never a silent no-op.
+  private publishDraft(patch: AIEntryPatch): void {
+    const hasBody = patch.body != null;
+    const hasFields = Object.keys(patch.fields).length > 0;
+    if (!hasBody && !hasFields) {
+      this.deps.setNotice("The model proposed no entry to create.");
+      return;
+    }
+    this.draftDropped = patch.dropped;
+    this.draftProposal = { body: patch.body, fields: patch.fields };
   }
 
   async createDraft(): Promise<void> {

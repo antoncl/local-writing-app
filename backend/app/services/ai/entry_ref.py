@@ -155,7 +155,46 @@ class EntryRef:
         # attributes out of this path.
         if name.startswith("_"):
             raise AttributeError(name)
-        return self.metadata.get(name)
+        return self._resolve(name)
+
+    def __getitem__(self, key: str) -> Any:
+        # Subscript mirrors attribute access, so a group / field whose label is
+        # not a Python identifier stays reachable: `entry["Antagonist GMO"].Goal`.
+        return self._resolve(str(key))
+
+    def _resolve(self, name: str) -> Any:
+        # A set field wins (backward compatible — `e.home_planet`), then a group
+        # label (`e.GMO` → a view over the fields tagged with that section label,
+        # so `e.GMO.Goal` reads a member #784), then a bare metadata read (None
+        # for an unset / unknown field, as before).
+        md = self.metadata
+        if name in md:
+            return md.get(name)
+        group = self._group_view(name)
+        if group is not None:
+            return group
+        return md.get(name)
+
+    def _group_view(self, name: str) -> Any:
+        """A view over the fields whose section label is `name`, or None.
+
+        Lets a template read a group's members as `entry.GMO.Goal` — the group by
+        the label it was designed with, each member by its field name (or id).
+        None when the entry's type has no field in a group of that label, so the
+        caller falls through to a plain field read (#784)."""
+        if self._schema is None:
+            return None
+        entry_type = self.entry_type
+        definition = self._schema.entry_types.get(entry_type) if entry_type else None
+        if definition is None:
+            return None
+        members = [
+            (field_id, field_def)
+            for field_id in definition.fields
+            if (field_def := self._schema.fields.get(field_id)) is not None
+            and getattr(field_def, "group", None) == name
+        ]
+        return _GroupView(self, members) if members else None
 
     def __str__(self) -> str:
         return self.title or self._id
@@ -173,6 +212,55 @@ class EntryRef:
 
     def __repr__(self) -> str:
         return f"<EntryRef {self._id!r}>"
+
+
+class _GroupView:
+    """A view over one node's fields that share a section label (#784).
+
+    Returned by `EntryRef.<group label>` (or `["…"]`). A member is read by its
+    field name or its id — `entry.GMO.Goal` and `entry.GMO.goal` both resolve —
+    reusing the owning `EntryRef.metadata` read, so an `entity_ref` member wraps
+    to an `EntryRef` like any field. An unknown member is None (subscript raises
+    KeyError, the mapping convention). Iterating yields the member ids.
+    """
+
+    __slots__ = ("_ref", "_members")
+
+    def __init__(self, ref: EntryRef, members: list[tuple[str, Any]]) -> None:
+        self._ref = ref
+        self._members = members
+
+    def _value(self, name: str, default: Any = None) -> Any:
+        for field_id, field_def in self._members:
+            if field_id == name or getattr(field_def, "name", None) == name:
+                return self._ref.metadata.get(field_id)
+        return default
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return self._value(name)
+
+    def __getitem__(self, key: str) -> Any:
+        value = self._value(str(key), default=_MISSING)
+        if value is _MISSING:
+            raise KeyError(key)
+        return value
+
+    def __contains__(self, key: object) -> bool:
+        return any(
+            field_id == key or getattr(field_def, "name", None) == key
+            for field_id, field_def in self._members
+        )
+
+    def __iter__(self):
+        return (field_id for field_id, _ in self._members)
+
+    def __len__(self) -> int:
+        return len(self._members)
+
+    def __bool__(self) -> bool:
+        return bool(self._members)
 
 
 class _EntryMetadataView:

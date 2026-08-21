@@ -247,7 +247,8 @@ def _fields(project: ProjectService, schema: Any, value: Any) -> list[dict[str, 
     """Backing the `fields()` Jinja global (ADR-0060 §3, was `field_catalog`).
 
     Returns the **full** field roster of a lore type as `{id, label, type,
-    options, description, proposable}` descriptors, in the type's display order.
+    options, description, group, proposable}` descriptors, in the type's display
+    order.
     Nothing is hidden and nothing is enforced: `proposable` is an **advisory**
     flag (structurally `false` for computed / reference / hidden fields) that the
     template reads and decides on — `{% for f in fields(x) if f.proposable %}` is
@@ -300,6 +301,13 @@ def _fields(project: ProjectService, schema: Any, value: Any) -> list[dict[str, 
             # proposes on-target values. Always present (None when unset) so the
             # template can test `f.description` without hitting StrictUndefined.
             "description": field.description,
+            # The field's section label (#784), so a template can reason about
+            # fields BY their group — `{% for f in fields(e) if f.group == "GMO" %}`
+            # renders an applied struct (Goal/Motivation/Obstacle) as one block.
+            # It is the same `group` an L2 group application stamps on its members
+            # and a manual section header uses; None when ungrouped. Always present
+            # so the template can test `f.group` without hitting StrictUndefined.
+            "group": field.group,
             # Advisory (ADR-0060 §3): whether it makes sense to ask the AI to
             # compute a value — `false` for computed / reference / hidden fields.
             # The template decides what to do with it; the roster is never
@@ -326,6 +334,37 @@ def _fields(project: ProjectService, schema: Any, value: Any) -> list[dict[str, 
             ]
         catalog.append(descriptor)
     return catalog
+
+
+def _field_value(project: ProjectService, schema: Any, entity: Any, field: Any) -> Any:
+    """Backing the `field_value(entity, field)` Jinja global (#784).
+
+    The value of one field on `entity`, addressed by id — the dynamic-access
+    companion to `fields()`. `fields(e)` yields descriptors (`id`, `label`,
+    `type`, `group`, …); `field_value(e, f)` reads the value for a descriptor OR
+    a bare id, so a template can iterate a group and render each member's value
+    without reaching through a `.metadata` map::
+
+        {% for f in fields(e) if f.group == "GMO" %}
+        {{ f.label }}: {{ field_value(e, f) }}
+        {% endfor %}
+
+    `title` / `body` are the node's intrinsic top-level values; every other id is
+    a field on the node. An `entity_ref` value wraps to an `EntryRef` (the same
+    resolution `e.<field>` gives), so `field_value(e, "patron").title` works.
+    Returns None when the entity or the field id can't be resolved.
+    """
+    ref = _coerce_entry_ref(project, schema, entity)
+    if ref is None:
+        return None
+    field_id = field.get("id") if isinstance(field, dict) else str(field)
+    if not field_id:
+        return None
+    if field_id == "title":
+        return ref.title
+    if field_id == "body":
+        return ref.body
+    return ref.metadata.get(field_id)
 
 
 def _type_name(schema: Any, entry_type: Any) -> str:
@@ -498,6 +537,7 @@ def register_helpers(
     # ADR-0060 §3: the one clearly-named book-start read, ignoring every mutation.
     env.globals["original"] = lambda value: _coerce_entry_ref(project, schema, value)
     env.globals["fields"] = lambda value: _fields(project, schema, value)
+    env.globals["field_value"] = lambda entity, field: _field_value(project, schema, entity, field)
     env.globals["type_name"] = lambda value: _type_name(schema, value)
     env.globals["full_outline"] = lambda: _full_outline(project)
     env.globals["full_text"] = lambda: _full_text(project)

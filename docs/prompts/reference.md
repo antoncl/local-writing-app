@@ -37,7 +37,10 @@ scene-less prompt reads book-start values, so `entry(x) == original(x)` there.
 | --- | --- |
 | `entry(x, at=scene, position=n)` | A node resolved as of the prompt's scene (or the explicit `at=` scene; `at=None` forces book-start; `position=` is a within-scene cursor). `entry_type` inferred from `x`. Accepts an id, a node, or a `context_pick` value (first pick). |
 | `original(x)` | The same node at **book-start**, ignoring every mutation. |
-| `fields(x)` | The **full** field roster of a node or an `entry_type` FQN — a list of descriptors, each `{id, label, type, options, description, proposable}` (plus `items` for list fields). `proposable` is advisory; the template chooses what to show. |
+| `fields(x)` | The **full** field roster of a node or an `entry_type` FQN — a list of descriptors, each `{id, label, type, options, description, group, proposable}` (plus `items` for list fields). `group` is the field's section label (an applied struct like `GMO`, or a manual header; `None` when ungrouped), so a template can group by it: `{% for f in fields(e) if f.group == "GMO" %}`. `proposable` is advisory; the template chooses what to show. |
+| `field_value(entity, field)` | The value of one field on `entity`, by id — the read-back companion to `fields()`. `field` is a bare id or a `fields()` descriptor, so a group loop reads each member's value: `{% for f in fields(e) if f.group == "GMO" %}{{ f.label }}: {{ field_value(e, f) }}{% endfor %}`. `title`/`body` return the node's intrinsics; an `entity_ref` value wraps to a node (so `field_value(e, "patron").title` works). `None` when unresolved. |
+
+A group is also a **nested accessor** on a node: `entry(x).GMO.Goal` reads the `Goal` member of the group whose section label is `GMO` — the group by its designed label, the member by its field name or id (`entry(x).GMO.goal` works too). Use `["…"]` when a label is not an identifier (`entry(x)["Antagonist GMO"].Goal`). An unknown group or member is `None`.
 | `type_name(x)` | `str` — a type's human name (from an `entry_type` FQN). |
 | `pov(scene)` | The scene's POV character (`lore:character`) or `None`. |
 | `is_a(node, entry_type)` | `bool` — kind-of test against the type's `parent:` chain. |

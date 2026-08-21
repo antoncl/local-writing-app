@@ -209,6 +209,26 @@ export class ChatCommitController {
     );
   }
 
+  // The commit-lifecycle shell every `extract_to_node` destination shares
+  // (#1263): reset error/notice, hold the `committing` flag, run the handler's
+  // produce → apply, surface a failure. Each caller supplies only its guard and
+  // its ExtractHost (revise / stage / draft); a `produce` that returns null has
+  // already reported why, so it just stops.
+  private async runExtractCommit(host: ExtractHost): Promise<void> {
+    this.deps.setError(null);
+    this.deps.setNotice(null);
+    this.committing = true;
+    try {
+      const patch = await extractHandler.produce(host);
+      if (!patch) return;
+      await extractHandler.apply(patch, host);
+    } catch (e) {
+      this.deps.setError((e as Error).message);
+    } finally {
+      this.committing = false;
+    }
+  }
+
   // Commit the brainstorm to its target entry (ADR-0046 slice 3 / ADR-0051 S4).
   // The extraction runs a fresh, server-rebuilt contract over the transcript and
   // returns a validated EntryPatch, handed to the entry's pane for the
@@ -218,22 +238,12 @@ export class ChatCommitController {
     if (this.running || this.committing || !this.isCommitChat) return;
     const entryId = this.commitTargetEntryId;
     if (!entryId) {
+      // Set-and-return BEFORE runExtractCommit, so its setError(null) reset
+      // never runs on this path and the message survives.
       this.deps.setError("This brainstorm has no target entry to commit to.");
       return;
     }
-    this.deps.setError(null);
-    this.deps.setNotice(null);
-    this.committing = true;
-    try {
-      const host = this.reviseExtractHost(entryId);
-      const patch = await extractHandler.produce(host);
-      if (!patch) return;
-      await extractHandler.apply(patch, host);
-    } catch (e) {
-      this.deps.setError((e as Error).message);
-    } finally {
-      this.committing = false;
-    }
+    await this.runExtractCommit(this.reviseExtractHost(entryId));
   }
 
   // The `extract_to_node` host for a revise commit (ADR-0065): `produce` runs the
@@ -288,21 +298,9 @@ export class ChatCommitController {
   // the writer later PLACES it in prose (§5, S4b). Nothing overwrites the entry.
   async stageToPendingSet(): Promise<void> {
     if (this.running || this.committing || !this.canStage) return;
-    const entryId = this.commitTargetEntryId;
-    const entryType = this.subjectEntryType;
-    this.deps.setError(null);
-    this.deps.setNotice(null);
-    this.committing = true;
-    try {
-      const host = this.stageExtractHost(entryId, entryType);
-      const patch = await extractHandler.produce(host);
-      if (!patch) return;
-      await extractHandler.apply(patch, host);
-    } catch (e) {
-      this.deps.setError((e as Error).message);
-    } finally {
-      this.committing = false;
-    }
+    await this.runExtractCommit(
+      this.stageExtractHost(this.commitTargetEntryId, this.subjectEntryType),
+    );
   }
 
   // The `extract_to_node` host for the STAGE destination: the same fresh
@@ -386,20 +384,7 @@ export class ChatCommitController {
   // Nothing is written until the author clicks Create.
   async commitDraft(): Promise<void> {
     if (this.running || this.committing || !this.isCreateBrainstorm) return;
-    const entryType = this.draftEntryType;
-    this.deps.setError(null);
-    this.deps.setNotice(null);
-    this.committing = true;
-    try {
-      const host = this.draftExtractHost(entryType);
-      const patch = await extractHandler.produce(host);
-      if (!patch) return;
-      await extractHandler.apply(patch, host);
-    } catch (e) {
-      this.deps.setError((e as Error).message);
-    } finally {
-      this.committing = false;
-    }
+    await this.runExtractCommit(this.draftExtractHost(this.draftEntryType));
   }
 
   // The `extract_to_node` host for CREATE mode (ADR-0046 §6.4): a fresh extraction

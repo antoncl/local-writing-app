@@ -108,7 +108,10 @@
   }
   .effective-body-content {
     padding: 12px 24px 24px;
-    max-width: 72ch;
+    /* Same centered measure as the live editor (#1246) so scrubbing / parking a
+       snapshot never jumps the column width or position. */
+    max-width: var(--prose-measure);
+    margin-inline: auto;
     font-size: var(--fs-lg);
     line-height: 1.65;
     color: var(--text);

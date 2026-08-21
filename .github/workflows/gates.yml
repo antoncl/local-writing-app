@@ -84,6 +84,14 @@ jobs:
       - name: runes guard
         run: git ls-files 'frontend/src/*.svelte' | xargs -r python scripts/check_svelte_runes.py
 
+      # The prompt Jinja vocabulary is defined once (helpers.py / templates.py);
+      # the reference, the editor "?" help and (soon) completion all mirror it.
+      # This holds reference.md to the registration so a new helper/filter/tag
+      # can't ship undocumented (#1270). No file args — it reads three fixed
+      # files and compares the whole set.
+      - name: prompt-vocab drift gate
+        run: python scripts/check_prompt_vocab_docs.py
+
       # Escape hatches may shrink, never grow. PR-only: it is a diff-against-base
       # question, and master has no base to compare with.
       - name: exemption ratchet

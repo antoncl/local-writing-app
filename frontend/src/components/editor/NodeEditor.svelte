@@ -1088,11 +1088,14 @@
   </section>
 
   {#if bodyShape === "none"}
-    {#if scene && metadataSchema}
+    <!-- `!detailsDetached`: if the shape flips to none while Details is detached,
+         the fold-back effect reattaches next tick — this gate keeps metaContent
+         single-mounted through that one tick (not inline + detached pane, #1258). -->
+    {#if scene && metadataSchema && !detailsDetached}
       <div class="editor-pane-meta">
         {@render metaContent()}
       </div>
-    {:else}
+    {:else if !scene || !metadataSchema}
       <FieldsOnlyView />
     {/if}
   {/if}

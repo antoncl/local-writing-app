@@ -31,12 +31,18 @@ export function isEditorPanelId(id: string): boolean {
 // ever exist as freshly-opened, state-backed tabs.
 export function isEphemeralTab(id: string): boolean {
   // A detached prompt editor sub-tab (`subtab:<tabId>:<editorPaneId>`,
-  // ADR-0062 D2 — formerly just the Preview's `preview:<editorPaneId>`, S2) is
-  // the same shape as schema_type: its content is a live view of an open
-  // editor's draft, reconstructed only while that editor is mounted. A
+  // ADR-0062 D2 — formerly just the Preview's `preview:<editorPaneId>`, S2) and
+  // a detached Details rail (`details:<editorPaneId>`, #1258) are the same shape
+  // as schema_type: the content is a live view of an open editor (its metadata /
+  // scrub controllers), reconstructed only while that editor is mounted. A
   // restored one would be a blank zombie, so it is stripped on serialize and
   // dropped on load.
-  return isEditorPanelId(id) || id === "schema_type" || id.startsWith("subtab:");
+  return (
+    isEditorPanelId(id) ||
+    id === "schema_type" ||
+    id.startsWith("subtab:") ||
+    id.startsWith("details:")
+  );
 }
 
 // Where a region lands when opened and not already placed. Editor docs are not

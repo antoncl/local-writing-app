@@ -186,3 +186,48 @@ describe("detached prompt editor sub-tab is ephemeral, never rehydrated (ADR-006
     expect(tabs).toContain("lore");
   });
 });
+
+// #1258: a detached Details rail (`details:<editorPaneId>`) is the same zombie
+// shape — a live view of an open editor's metadata + scrub controllers, rebuilt
+// only while that editor is mounted. It must never survive a reload.
+describe("detached Details rail is ephemeral, never rehydrated (#1258)", () => {
+  it("strips a details:<paneId> tab on serialize but keeps its neighbour", () => {
+    const detailsGroup = group("g-det", ["details:editor_abc123"]);
+    const tree = split(
+      "root",
+      "row",
+      [group(G_EDITOR, ["editor_abc123"]), detailsGroup, group(G_SIDE, ["lore"])],
+      [0.4, 0.3, 0.3],
+    );
+
+    const snapshot = serialize(tree, G_EDITOR, null);
+    const tabs = flattenPanels(snapshot.root);
+    expect(tabs).not.toContain("details:editor_abc123");
+    expect(tabs).toContain("lore");
+  });
+
+  it("drops a persisted details:<paneId> tab on load", () => {
+    const legacy = JSON.stringify({
+      version: 1,
+      root: {
+        kind: "split",
+        id: "root",
+        dir: "row",
+        children: [
+          { kind: "group", id: G_EDITOR, tabs: [], active: null },
+          { kind: "group", id: "g-det", tabs: ["details:editor_abc123"], active: "details:editor_abc123" },
+          { kind: "group", id: G_SIDE, tabs: ["lore"], active: "lore" },
+        ],
+        sizes: [0.4, 0.3, 0.3],
+      },
+      activeEditorGroupId: G_EDITOR,
+      activePreset: "writing",
+    });
+
+    const restored = deserialize(legacy);
+    expect(restored).not.toBeNull();
+    const tabs = flattenPanels(restored!.root);
+    expect(tabs).not.toContain("details:editor_abc123");
+    expect(tabs).toContain("lore");
+  });
+});

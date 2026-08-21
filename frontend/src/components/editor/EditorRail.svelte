@@ -28,6 +28,9 @@
     open = $bindable(true),
     label,
     content,
+    detached = false,
+    onDetach,
+    onReattach,
   }: {
     /** Bindable so the collapse/expand affordance lives with the rail while the
      *  shell reconciles it with per-body-shape defaults (chat opens collapsed). */
@@ -35,6 +38,15 @@
     /** `${documentLabel} details`, for the landmark. */
     label: string;
     content: Snippet;
+    /** The rail's content has been torn out into its own subordinate pane
+     *  (ADR-0062 reuse, #1258). The rail itself shows only a reattach husk; the
+     *  content renders in the detached pane, so it is NOT rendered here. */
+    detached?: boolean;
+    /** Tear the rail's content out into its own pane. Absent ⇒ no detach glyph
+     *  (the shell only wires it where a host pane exists). */
+    onDetach?: () => void;
+    /** Fold the detached pane back into the rail. */
+    onReattach?: () => void;
   } = $props();
 
   const side = $derived(layout.side);
@@ -79,7 +91,22 @@
 
 <svelte:window onmousemove={onResizeMove} onmouseup={endResize} />
 
-{#if open}
+{#if detached}
+  <!-- Detached: the content lives in its own subordinate pane (#1258). The rail
+       keeps only a husk edge-tab that folds it back — the counterpart to the
+       prompt sub-tab's in-strip reattach glyph. -->
+  <button
+    class="rail-tab detached"
+    class:bottom={side === "bottom"}
+    type="button"
+    title="Reattach details"
+    aria-label="Reattach details"
+    onclick={() => onReattach?.()}
+  >
+    <i class="ti ti-arrow-bar-to-left" aria-hidden="true"></i>
+    <span class="rail-tab-label">Details</span>
+  </button>
+{:else if open}
   <aside
     class="editor-rail"
     class:bottom={side === "bottom"}
@@ -111,6 +138,20 @@
              are verified to render. -->
         <i class={`ti ${side === "bottom" ? "ti-chevron-right" : "ti-chevron-down"}`} aria-hidden="true"></i>
       </button>
+      {#if onDetach}
+        <!-- Tear Details out into its own subordinate pane (#1258), the same
+             gesture the prompt editor's sub-tabs use. `ti-arrow-bar-to-right` is
+             verified to render (the `ti-layout-*` dock glyphs are not, #1251). -->
+        <button
+          class="rail-icon-btn"
+          type="button"
+          title="Detach details into its own pane"
+          aria-label="Detach details into its own pane"
+          onclick={() => onDetach?.()}
+        >
+          <i class="ti ti-arrow-bar-to-right" aria-hidden="true"></i>
+        </button>
+      {/if}
       <button
         class="rail-icon-btn"
         type="button"

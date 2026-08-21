@@ -1,5 +1,8 @@
 <script lang="ts">
 
+  import { onDestroy } from "svelte";
+  import RegionRegistrar from "@/components/workspace/RegionRegistrar.svelte";
+  import { closeSubordinatePane, openSubordinatePane } from "@/lib/utils/subordinatePane";
   import BacklinksPanel from "@/components/editor/BacklinksPanel.svelte";
   import MutationTimeline from "@/components/editor/MutationTimeline.svelte";
   import MutationScrubber from "@/components/editor/MutationScrubber.svelte";
@@ -27,7 +30,7 @@
   import { formatCostEur } from "@/lib/utils/money";
   import { sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import { resolveColor } from "@/lib/utils/colors";
-  import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataSchema, PromptContextStrategy, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
+  import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataSchema, PromptContextStrategy, PromptEntrySummary, PromptInputDefinition, ViewSpec } from "@/lib/types";
   import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { readOnlyInPlace } from "@/lib/utils/provenance";
@@ -657,6 +660,44 @@
     const collapsed = !railOpen;
     if (editorRailLayout.collapsed !== collapsed) editorRailLayout.setCollapsed(collapsed);
   });
+
+  // ---- Detach Details into a subordinate pane (ADR-0062 reuse, #1258) --------
+  // The rail's content is a live view of THIS editor's metadata + scrub /
+  // snapshot controllers, so a detached pane copies the prompt sub-tab pattern:
+  // register the same `metaContent` snippet under an ephemeral, host-scoped id,
+  // tile it beside the editor, and tie its lifetime to this editor pane. No
+  // per-document store is needed (unlike the prompt preview, whose input drafts
+  // lived in the pane) — every metadata field already emits up into `metadata`
+  // here on change, so the pane is a view, never a second owner.
+  let detailsDetached = $state(false);
+  const detailsPaneId = $derived(hostPaneId ? `details:${hostPaneId}` : null);
+  // Offer detach only where there is a host pane AND a rail to tear out.
+  let canDetachDetails = $derived(!!hostPaneId && !!scene && !!metadataSchema && !railIsPane);
+
+  function detachDetails(): void {
+    const id = detailsPaneId;
+    if (!id || !hostPaneId || detailsDetached || !canDetachDetails) return;
+    detailsDetached = true;
+    openSubordinatePane(id, hostPaneId, reattachDetails, { beside: hostPaneId, edge: "right" });
+  }
+  function reattachDetails(): void {
+    if (!detailsDetached) return;
+    detailsDetached = false;
+    const id = detailsPaneId;
+    if (id) closeSubordinatePane(id); // idempotent — also the pane's own onClose
+  }
+
+  // Fold Details back if the node stops having a rail — a none-shape node renders
+  // metadata as the whole pane (`railIsPane`), which would double-mount the
+  // snippet. Drop the pane on unmount too: the editor-close cascade covers the
+  // common case, this covers NodeEditor unmounting while its pane stays open
+  // (mirrors CodeBodyView's sub-tab teardown).
+  $effect(() => {
+    if (railIsPane && detailsDetached) reattachDetails();
+  });
+  onDestroy(() => {
+    if (detailsDetached && hostPaneId) closeSubordinatePane(`details:${hostPaneId}`);
+  });
   let characterCostRowsView = $derived(characterCostRows(characterCostUsd, loreEntries, metadataSchema));
   // All-time rollup costs surfaced as a single chip in the header hint.
   // character_cost lives on lore character entries, project_cost on the
@@ -922,6 +963,29 @@
   {/if}
 {/snippet}
 
+<!-- The detached Details pane renders the SAME `metaContent`; this thin wrapper
+     only adapts its signature to the region body contract (`ViewSpec` arg, which
+     metadata ignores) so it can register in the panel registry. -->
+{#snippet detailsPaneBody(_spec: ViewSpec | undefined)}
+  {@render metaContent()}
+{/snippet}
+
+<!-- Register the detached pane's content while Details is torn out (#1258). A
+     fresh registrar mounts on detach and tears down on reattach — same shape as
+     CodeBodyView's sub-tab registration. -->
+{#if detailsDetached && detailsPaneId}
+  <RegionRegistrar
+    regions={{
+      [detailsPaneId]: {
+        title: "Details",
+        body: detailsPaneBody,
+        closable: true,
+        onClose: reattachDetails,
+      },
+    }}
+  />
+{/if}
+
 
 <div
   class="editor-panel"
@@ -1142,7 +1206,14 @@
   {/if}
 
   {#if scene && metadataSchema && !railIsPane}
-    <EditorRail bind:open={railOpen} label={`${documentLabel} details`} content={metaContent} />
+    <EditorRail
+      bind:open={railOpen}
+      label={`${documentLabel} details`}
+      content={metaContent}
+      detached={detailsDetached}
+      onDetach={canDetachDetails ? detachDetails : undefined}
+      onReattach={reattachDetails}
+    />
   {/if}
 
   <!-- Foot-docked, and only on scenes: snapshots are about the prose, so the

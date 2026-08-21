@@ -5,6 +5,7 @@
   import MutationScrubber from "@/components/editor/MutationScrubber.svelte";
   import SnapshotStrip from "@/components/editor/SnapshotStrip.svelte";
   import EditorRail from "@/components/editor/EditorRail.svelte";
+  import { editorRailLayout } from "@/lib/stores/editorRailLayout.svelte";
   import ReadOnlyBodyOverlay from "@/components/editor/body/ReadOnlyBodyOverlay.svelte";
   import EntryRevisionReview from "@/components/editor/body/EntryRevisionReview.svelte";
   import ReplaceReviewCard from "@/components/editor/body/ReplaceReviewCard.svelte";
@@ -620,8 +621,10 @@
       }
       loadedSceneId = scene.id;
       // Chat and the view designer start with the rail collapsed to its
-      // edge-tab so the body owns full width; every other shape opens it.
-      railOpen = nextBodyShape !== "chat" && nextBodyShape !== "view";
+      // edge-tab so the body owns full width; every other shape uses the
+      // author's persisted per-project preference (#1246).
+      railOpen =
+        nextBodyShape === "chat" || nextBodyShape === "view" ? false : !editorRailLayout.collapsed;
     }
   });
   $effect.pre(() => {
@@ -645,6 +648,15 @@
     }
   });
   let railIsPane = $derived(bodyShape === "none");
+  let railSide = $derived(editorRailLayout.side);
+  // Persist the collapse toggle per project (#1246) — but only for shapes that
+  // honour the stored preference. Chat/view force-collapse on load and the
+  // fields-only pane has no rail, so neither should overwrite the preference.
+  $effect(() => {
+    if (!scene || railIsPane || bodyShape === "chat" || bodyShape === "view") return;
+    const collapsed = !railOpen;
+    if (editorRailLayout.collapsed !== collapsed) editorRailLayout.setCollapsed(collapsed);
+  });
   let characterCostRowsView = $derived(characterCostRows(characterCostUsd, loreEntries, metadataSchema));
   // All-time rollup costs surfaced as a single chip in the header hint.
   // character_cost lives on lore character entries, project_cost on the
@@ -910,8 +922,8 @@
   class:body-hidden={bodyShape === "none"}
   class:waiting={snapshots.slow}
   class:has-rail={scene && !railIsPane}
-  class:rail-collapsed={scene && !railIsPane && !railOpen}
-  class:rail-pane={scene && railIsPane}
+  class:rail-right={scene && !railIsPane && railSide === "right"}
+  class:rail-bottom={scene && !railIsPane && railSide === "bottom"}
 >
   <section class="editor-header">
     {#if scene}
@@ -1201,21 +1213,32 @@
     cursor: progress;
   }
 
-  .editor-panel.has-rail {
+  /* Right dock: two columns. Header/body/footer stack in column 1; the recessed
+     rail spans all rows in column 2. `> :global(*)` pins EVERY direct child to
+     column 1 (body views are child components, so a scoped `> *` would miss
+     them); the `.editor-rail`/`.rail-tab` overrides reclaim column 2. `:global()`
+     adds no specificity, so those still outrank the `> *` rule. */
+  .editor-panel.has-rail.rail-right {
     grid-template-columns: minmax(0, 1fr) auto;
   }
-  .editor-panel.has-rail > :global(*) {
+  .editor-panel.has-rail.rail-right > :global(*) {
     grid-column: 1;
     min-width: 0;
   }
-  /* `:global` because these elements belong to `EditorRail` now. The placement
-     rule stays here, with the grid that defines the columns — the parent owns
-     where its children sit. `:global()` adds no specificity, so this still
-     outranks the `> *` rule above exactly as it did. */
-  .editor-panel.has-rail > :global(.editor-rail),
-  .editor-panel.has-rail > :global(.rail-tab) {
+  .editor-panel.has-rail.rail-right > :global(.editor-rail),
+  .editor-panel.has-rail.rail-right > :global(.rail-tab) {
     grid-column: 2;
     grid-row: 1 / -1;
+  }
+
+  /* Bottom dock (#1246): a single column. The rail flows as a full-width row in
+     its DOM position (after the body views, above the footer), so long-text
+     fields get the whole editor width. No column pinning needed. */
+  .editor-panel.has-rail.rail-bottom {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .editor-panel.has-rail.rail-bottom > :global(*) {
+    min-width: 0;
   }
 
   /* none-shape: the rail IS the pane (assistant / project / structure_node). */

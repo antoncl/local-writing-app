@@ -82,6 +82,7 @@
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { focusedDocumentStore } from "@/lib/stores/editorFocus";
   import { workspaceLayout, isEditorPanelId } from "@/lib/stores/workspaceLayout.svelte";
+  import { editorRailLayout } from "@/lib/stores/editorRailLayout.svelte";
   import { type PresetName } from "@/lib/stores/workspaceLayout.serialize";
   import { layoutPresets } from "@/lib/stores/layoutPresets.svelte";
   import RegionRegistrar from "@/components/workspace/RegionRegistrar.svelte";
@@ -324,6 +325,7 @@
     projectPath = nextProject.root_path;
     openProjectHidden(projectPath);
     workspaceLayout.loadForProject(projectPath);
+    editorRailLayout.loadForProject(projectPath);
     layoutPresets.load();
     projectTitle = nextProject.title;
     aiSettings.seedFromProject(nextProject);

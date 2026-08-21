@@ -1,21 +1,28 @@
 <script lang="ts">
-  // The metadata rail — the editor shell's right-hand sidecar.
+  // The metadata rail — the editor shell's Details sidecar.
   //
-  // Extracted from `NodeEditor` in #409. The shell was 8 lines from the
-  // file-size guard's hard cap, and this slice adds a compare axis to it; the
-  // rail is the cleanest thing to lift out because it is a *sidecar* in the
-  // shell + body-views + sidecars decomposition, not a split invented to buy
-  // lines (`decisions-node-editor-modularization`).
+  // Extracted from `NodeEditor` in #409. It docks either to the right (a width
+  // column) or the bottom (a full-width row) — the latter so the long-text
+  // metadata fields get the whole editor width instead of a cramped column
+  // (#1246). Side + size live in the per-project `editorRailLayout` store, so a
+  // writer's preferred layout survives reloads and scene switches.
   //
-  // It owns its own width: a left-edge drag handle, clamped so the rail can be
-  // made slimmer or wider but never collapses the body, persisted across
-  // sessions. Document-level mousemove/mouseup deliberately, the same as the
-  // pane drag in App.svelte — the pointer leaves a 7px handle constantly.
+  // It owns its own size: a drag handle on the inner edge (left when right-docked,
+  // top when bottom-docked), clamped so the rail can never collapse the body.
+  // Document-level mousemove/mouseup deliberately, the same as the pane drag in
+  // App.svelte — the pointer leaves the 7px handle constantly.
   //
   // The content is a snippet rather than props: the rail does not know or care
   // what a metadata panel needs, and threading its long prop list through here
   // would make this component a second place to maintain that list.
   import type { Snippet } from "svelte";
+  import {
+    editorRailLayout as layout,
+    RAIL_WIDTH_MIN,
+    RAIL_WIDTH_MAX,
+    RAIL_HEIGHT_MIN,
+    RAIL_HEIGHT_MAX,
+  } from "@/lib/stores/editorRailLayout.svelte";
 
   let {
     open = $bindable(true),
@@ -23,56 +30,85 @@
     content,
   }: {
     /** Bindable so the collapse/expand affordance lives with the rail while the
-     *  shell can still reset it per document (a chat pane opens collapsed). */
+     *  shell reconciles it with per-body-shape defaults (chat opens collapsed). */
     open?: boolean;
     /** `${documentLabel} details`, for the landmark. */
     label: string;
     content: Snippet;
   } = $props();
 
-  const RAIL_MIN = 220;
-  const RAIL_MAX = 560;
-  function loadRailWidth(): number {
-    const stored = Number(localStorage.getItem("editorRailWidth"));
-    return Number.isFinite(stored) && stored >= RAIL_MIN && stored <= RAIL_MAX ? stored : 280;
-  }
-  let railWidth = $state(loadRailWidth());
-  let railEl: HTMLElement | undefined = $state();
-  let railResizing = $state(false);
-  let railRightEdge = 0;
+  const side = $derived(layout.side);
 
-  function startRailResize(event: MouseEvent) {
+  let railEl: HTMLElement | undefined = $state();
+  let resizing = $state(false);
+  // The fixed edge the drag measures from: the rail's right edge (right dock) or
+  // its bottom edge (bottom dock). Dragging the inner handle toward that edge
+  // grows the rail.
+  let anchorEdge = 0;
+
+  function startResize(event: MouseEvent) {
     event.preventDefault();
-    railResizing = true;
-    railRightEdge = railEl ? railEl.getBoundingClientRect().right : event.clientX + railWidth;
+    resizing = true;
+    const rect = railEl?.getBoundingClientRect();
+    anchorEdge =
+      side === "bottom"
+        ? (rect?.bottom ?? event.clientY + layout.height)
+        : (rect?.right ?? event.clientX + layout.width);
   }
-  function onRailResizeMove(event: MouseEvent) {
-    if (!railResizing) return;
-    // The rail sits on the right edge; dragging its left handle leftward widens it.
-    railWidth = Math.min(RAIL_MAX, Math.max(RAIL_MIN, railRightEdge - event.clientX));
+  function onResizeMove(event: MouseEvent) {
+    if (!resizing) return;
+    // Live-set the store state during the drag (drives the layout reactively);
+    // persistence happens once on mouseup so we don't hammer localStorage.
+    if (side === "bottom") {
+      layout.height = Math.min(RAIL_HEIGHT_MAX, Math.max(RAIL_HEIGHT_MIN, anchorEdge - event.clientY));
+    } else {
+      layout.width = Math.min(RAIL_WIDTH_MAX, Math.max(RAIL_WIDTH_MIN, anchorEdge - event.clientX));
+    }
   }
-  function endRailResize() {
-    if (!railResizing) return;
-    railResizing = false;
-    localStorage.setItem("editorRailWidth", String(railWidth));
+  function endResize() {
+    if (!resizing) return;
+    resizing = false;
+    if (side === "bottom") layout.setHeight(layout.height);
+    else layout.setWidth(layout.width);
+  }
+
+  function toggleSide() {
+    layout.setSide(side === "right" ? "bottom" : "right");
   }
 </script>
 
-<svelte:window onmousemove={onRailResizeMove} onmouseup={endRailResize} />
+<svelte:window onmousemove={onResizeMove} onmouseup={endResize} />
 
 {#if open}
-  <aside class="editor-rail" class:resizing={railResizing} style={`width: ${railWidth}px`} bind:this={railEl} aria-label={label}>
+  <aside
+    class="editor-rail"
+    class:bottom={side === "bottom"}
+    class:resizing
+    style={side === "bottom" ? `height: ${layout.height}px` : `width: ${layout.width}px`}
+    bind:this={railEl}
+    aria-label={label}
+  >
     <button
       class="rail-resize"
+      class:bottom={side === "bottom"}
       type="button"
       title="Drag to resize details"
       aria-label="Resize details rail"
-      onmousedown={startRailResize}
+      onmousedown={startResize}
     ></button>
     <div class="rail-head">
       <span class="rail-head-label">Details</span>
       <button
-        class="rail-collapse"
+        class="rail-icon-btn"
+        type="button"
+        title={side === "bottom" ? "Dock to the right" : "Dock to the bottom"}
+        aria-label={side === "bottom" ? "Dock details to the right" : "Dock details to the bottom"}
+        onclick={toggleSide}
+      >
+        <i class={`ti ${side === "bottom" ? "ti-layout-sidebar-right" : "ti-layout-bottombar"}`} aria-hidden="true"></i>
+      </button>
+      <button
+        class="rail-icon-btn"
         type="button"
         title="Collapse details"
         aria-label="Collapse details"
@@ -86,9 +122,11 @@
     </div>
   </aside>
 {:else}
-  <!-- Collapsed: a 34px vertical edge-tab that reopens the rail. -->
+  <!-- Collapsed: an edge-tab that reopens the rail — vertical on the right, a
+       horizontal bar along the bottom. -->
   <button
     class="rail-tab"
+    class:bottom={side === "bottom"}
     type="button"
     title="Show details"
     aria-label="Show details"
@@ -110,7 +148,16 @@
     border-left: 1px solid var(--divider);
   }
 
-  /* Left-edge drag handle to widen/narrow the rail. */
+  /* Bottom dock: a full-width row instead of a side column. Height is inline; the
+     border moves to the top edge. */
+  .editor-rail.bottom {
+    width: auto;
+    border-left: 0;
+    border-top: 1px solid var(--divider);
+  }
+
+  /* Drag handle: left edge for the right dock (col-resize), top edge for the
+     bottom dock (row-resize). */
   .rail-resize {
     position: absolute;
     top: 0;
@@ -126,26 +173,26 @@
     z-index: 5;
   }
 
-  .rail-resize:hover {
-    background: linear-gradient(
-      to right,
-      transparent 0 2px,
-      var(--accent) 2px 4px,
-      transparent 4px
-    );
+  .rail-resize.bottom {
+    top: -3px;
+    left: 0;
+    width: 100%;
+    height: 7px;
+    cursor: row-resize;
+  }
+
+  .rail-resize:hover,
+  .editor-rail.resizing .rail-resize {
+    background: linear-gradient(to right, transparent 0 2px, var(--accent) 2px 4px, transparent 4px);
+  }
+
+  .rail-resize.bottom:hover,
+  .editor-rail.resizing .rail-resize.bottom {
+    background: linear-gradient(to bottom, transparent 0 2px, var(--accent) 2px 4px, transparent 4px);
   }
 
   .editor-rail.resizing {
     user-select: none;
-  }
-
-  .editor-rail.resizing .rail-resize {
-    background: linear-gradient(
-      to right,
-      transparent 0 2px,
-      var(--accent) 2px 4px,
-      transparent 4px
-    );
   }
 
   .rail-head {
@@ -154,7 +201,7 @@
     gap: 7px;
     flex: 0 0 auto;
     padding: 10px 12px;
-    border-bottom: 1px solid var(--divider, var(--divider));
+    border-bottom: 1px solid var(--divider);
   }
 
   .rail-head-label {
@@ -163,10 +210,10 @@
     font-weight: 800;
     letter-spacing: 0.09em;
     text-transform: uppercase;
-    color: var(--text-3, var(--text-3));
+    color: var(--text-3);
   }
 
-  .rail-collapse {
+  .rail-icon-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -182,7 +229,7 @@
     cursor: pointer;
   }
 
-  .rail-collapse:hover {
+  .rail-icon-btn:hover {
     background: var(--surface);
     border-color: var(--divider);
     color: var(--text-2);
@@ -195,7 +242,8 @@
     overscroll-behavior: contain;
   }
 
-  /* Collapsed: a 34px vertical edge-tab that reopens the rail. */
+  /* Collapsed edge-tab. Right dock: a 34px vertical tab. Bottom dock: a short
+     horizontal bar reading left-to-right. */
   .rail-tab {
     display: flex;
     flex-direction: column;
@@ -211,6 +259,15 @@
     cursor: pointer;
   }
 
+  .rail-tab.bottom {
+    flex-direction: row;
+    justify-content: center;
+    width: auto;
+    padding: 6px 0;
+    border-left: 0;
+    border-top: 1px solid var(--divider);
+  }
+
   .rail-tab:hover {
     color: var(--text);
     background: var(--panel);
@@ -222,5 +279,9 @@
     font-weight: 700;
     letter-spacing: 0.09em;
     text-transform: uppercase;
+  }
+
+  .rail-tab.bottom .rail-tab-label {
+    writing-mode: horizontal-tb;
   }
 </style>

@@ -305,7 +305,12 @@ class AIPreviewResponse(BaseModel):
     # Pre-send input-side cost in USD. Frontend converts to EUR for
     # display (see decisions_currency_display). Null when no assistant
     # is bound or pricing is unknown (Ollama, live discovery failure).
+    # `estimated_cost_usd` is the SETTLED cost (warm cache — cache reads);
+    # `estimated_first_cost_usd` is the FIRST send (cache writes). Equal when
+    # the model doesn't cache, so the frontend shows the delta only when they
+    # differ (#1052).
     estimated_cost_usd: float | None = None
+    estimated_first_cost_usd: float | None = None
     # When an assistant is bound, surface its provider/model so the
     # frontend can label the estimate. Null otherwise.
     provider: str | None = None

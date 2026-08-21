@@ -332,8 +332,14 @@
           </span>
         {/if}
         {#if record.result.estimated_cost_usd != null}
-          <span class="prompt-preview-cost" title="Estimated input cost (output cost depends on the response; not included).">
+          <span
+            class="prompt-preview-cost"
+            title="Estimated input cost on a settled send (warm cache — cache reads). The parenthetical is the first send (cache writes). Output cost depends on the response and isn't included."
+          >
             · {formatCostEur(record.result.estimated_cost_usd)}
+            {#if record.result.estimated_first_cost_usd != null && record.result.estimated_first_cost_usd !== record.result.estimated_cost_usd}
+              ({formatCostEur(record.result.estimated_first_cost_usd)} first send)
+            {/if}
           </span>
         {/if}
       {/if}

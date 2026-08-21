@@ -293,6 +293,7 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
         estimated_tokens=estimate.estimated_tokens,
         cache_blocks=estimate.cache_blocks,
         estimated_cost_usd=estimate.estimated_cost_usd,
+        estimated_first_cost_usd=estimate.estimated_first_cost_usd,
         provider=estimate.provider,
         model=estimate.model,
         caching_style=estimate.caching_style,

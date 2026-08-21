@@ -145,7 +145,11 @@ export type AIPreviewResponse = {
   // assistant or pricing unknown.
   estimated_tokens?: number;
   cache_blocks?: PreviewCacheBlock[];
+  // Settled input cost (warm cache — cache reads). #1052.
   estimated_cost_usd?: number | null;
+  // First-send input cost (cache writes); equals estimated_cost_usd when the
+  // model doesn't cache, so the UI shows the delta only when they differ.
+  estimated_first_cost_usd?: number | null;
   provider?: string | null;
   model?: string | null;
   caching_style?: "none" | "auto" | "explicit" | null;

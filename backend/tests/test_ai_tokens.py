@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from app.services import machine_settings as ms
 from app.services.ai import tokens as token_service
 from app.services.ai.profiles import CapabilityTier, ModelDescriptor
@@ -205,6 +207,61 @@ def test_estimate_input_cost_negative_tokens_returns_zero():
 def test_estimate_input_cost_basic():
     # 1M tokens at $3/Mtok → $3.
     assert token_service.estimate_input_cost(1_000_000, _desc(3.0)) == 3.0
+
+
+# --- estimate_send_cost (cache-aware, #1052) ---------------------------
+
+
+def _desc_cache(cost_in: float | None, read_mult: float | None) -> ModelDescriptor:
+    return ModelDescriptor(
+        id="t",
+        display_name="T",
+        provider="t",
+        context_window=100_000,
+        tier=CapabilityTier.BALANCED,
+        cost_in_per_mtok=cost_in,
+        cache_read_multiplier=read_mult,
+    )
+
+
+def test_estimate_send_cost_no_pricing_returns_none_pair():
+    assert token_service.estimate_send_cost(1000, 1000, None, True) == (None, None)
+    assert token_service.estimate_send_cost(1000, 1000, _desc(None), True) == (None, None)
+
+
+def test_estimate_send_cost_non_caching_model_is_flat():
+    # caches=False → the stable prefix is NOT discounted; settled == first == flat.
+    settled, first = token_service.estimate_send_cost(1_000_000, 1_000_000, _desc(3.0), False)
+    assert settled == first == 6.0
+
+
+def test_estimate_send_cost_prices_the_stable_prefix_by_tier():
+    # 1M stable + 1M other at $3/Mtok, read multiplier 0.1: the stable prefix is
+    # a cache READ on a settled send (0.1×) and a WRITE on the first send (1.25×);
+    # the other tokens are full rate in both.
+    settled, first = token_service.estimate_send_cost(
+        1_000_000, 1_000_000, _desc_cache(3.0, 0.1), True
+    )
+    assert settled == pytest.approx(3.0 * 0.1 + 3.0)  # read prefix + other
+    assert first == pytest.approx(3.0 * 1.25 + 3.0)  # write prefix + other
+
+
+def test_estimate_send_cost_read_mult_defaults_to_one():
+    # A caching model with no cache_read_multiplier: reads are full rate, so only
+    # the first-send write premium (1.25×) shows.
+    settled, first = token_service.estimate_send_cost(
+        1_000_000, 0, _desc_cache(3.0, None), True
+    )
+    assert settled == pytest.approx(3.0)
+    assert first == pytest.approx(3.75)
+
+
+def test_estimate_send_cost_no_stable_prefix_is_flat_even_when_caching():
+    # An all-volatile send has nothing cacheable, so settled == first.
+    settled, first = token_service.estimate_send_cost(
+        0, 1_000_000, _desc_cache(3.0, 0.1), True
+    )
+    assert settled == first == pytest.approx(3.0)
 
 
 def test_estimate_input_cost_small_amount():

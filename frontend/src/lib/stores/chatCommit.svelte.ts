@@ -399,7 +399,7 @@ export class ChatCommitController {
       // draft must survive a 409 / offline rejection); a post-create step
       // failure still returns the id, so an entry that exists always clears
       // the draft — a surviving Create button would mint a duplicate.
-      const created = await treeActions.createLoreEntryFromDraft(this.draftEntryType, proposal);
+      const created = await treeActions.createNodeFromDraft(this.draftEntryType, proposal);
       // A chat switch while the create was in flight reset this controller
       // (applyChatSession → reset()): the host now feeds a different chat, so
       // the subject write-back would stamp THAT chat with this brainstorm's

@@ -577,6 +577,7 @@
     {promptEntries}
     {availableScenes}
     {loadedSceneId}
+    outputHandler={promptStrategy?.output?.handler ?? ""}
   />
 {/snippet}
 

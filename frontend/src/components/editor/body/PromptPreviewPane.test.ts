@@ -5,7 +5,7 @@
 // (visible again now that templates no longer emit it), then the uncached
 // conversation turns. This pins that the tiered blocks + their lore text render.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent } from "@/lib/test/component";
+import { render, screen, fireEvent, within } from "@/lib/test/component";
 
 vi.mock("@/lib/api", () => ({ api: { aiPreview: vi.fn() } }));
 import { api } from "@/lib/api";
@@ -71,6 +71,59 @@ describe("PromptPreviewPane", () => {
     expect(screen.getByText("volatile")).toBeTruthy();
     // ...and the lore is visible again (the point of the slice).
     expect(screen.getByText(/Honor Harrington/)).toBeTruthy();
+  });
+
+  // #1252: an extract_to_node prompt whose render registers no field_contract can
+  // only ever commit an empty change — warn the author here, at authoring time.
+  // Each case uses a DISTINCT scene id: the preview record is a persistent
+  // per-document store, so a shared id would reuse the prior case's cached result.
+  // The pane keys its (persistent) preview record by `loadedSceneId`, so each case
+  // needs a distinct one — otherwise the shared record + identical rawBody hits the
+  // render dedup and reuses the prior case's result.
+  const commitProps = (id: string, outputHandler: string) => ({
+    rawBody: '{% role "system" %}Revise it.{% endrole %}',
+    documentKind: "prompt" as const,
+    scene: { id, title: "Scene", body: "" } as never,
+    loadedSceneId: id,
+    outputHandler,
+  });
+
+  // Expand the (collapsed-by-default) pane and flush the debounced render — the
+  // same path the send-path test above uses, which reliably fires api.aiPreview.
+  async function renderExpanded(props: Record<string, unknown>) {
+    const rendered = render(PromptPreviewPane, { props });
+    await fireEvent.click(screen.getByRole("button", { name: /preview/i }));
+    await vi.advanceTimersByTimeAsync(1000);
+    return rendered;
+  }
+
+  it("lints an extract_to_node prompt that registers no fields (#1252)", async () => {
+    (api.aiPreview as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...PREVIEW,
+      field_contract_stored: [],
+    });
+    const { container } = await renderExpanded(commitProps("commit-empty", "extract_to_node"));
+    expect(within(container).getByText(/declares no fields/)).toBeTruthy();
+  });
+
+  it("does not lint once the extract_to_node prompt registers a field", async () => {
+    (api.aiPreview as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...PREVIEW,
+      field_contract_stored: [{ id: "bio" }],
+    });
+    const { container } = await renderExpanded(commitProps("commit-filled", "extract_to_node"));
+    expect(within(container).queryByText(/declares no fields/)).toBeNull();
+  });
+
+  it("does not lint a non-commit prompt with no field_contract", async () => {
+    // A plain chat / snippet has no output handler and legitimately registers no
+    // fields — it must never be nagged.
+    (api.aiPreview as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...PREVIEW,
+      field_contract_stored: [],
+    });
+    const { container } = await renderExpanded(commitProps("commit-nohandler", ""));
+    expect(within(container).queryByText(/declares no fields/)).toBeNull();
   });
 
   // ADR-0061 S2: the panel renders the EFFECTIVE inputs the resolver returns, so

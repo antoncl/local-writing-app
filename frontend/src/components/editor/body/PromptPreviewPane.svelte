@@ -54,6 +54,10 @@
     // It's then always expanded, drops the collapse caret + vertical resize
     // handle, and stretches to fill instead of carrying a pixel height.
     fill?: boolean;
+    // The open prompt's output handler (#1252): when it commits to a node
+    // (`extract_to_node`) but the render registers no field_contract, the commit
+    // can only produce an empty change — lint it here, at authoring time.
+    outputHandler?: string;
   }
 
   let {
@@ -70,6 +74,7 @@
     effectiveInputs = $bindable([]),
     inputProvenance = $bindable({}),
     fill = false,
+    outputHandler = "",
   }: Props = $props();
 
   const isPrompt = (): boolean => documentKind === "prompt" && !!scene;
@@ -407,12 +412,24 @@
       {#if !rawBody.trim()}
         <p class="prompt-preview-empty muted">Type a template above to see the rendered output here.</p>
       {:else if record.result}
-        {#if record.result.warnings.length > 0}
+        {@const emptyCommitContract =
+          outputHandler === "extract_to_node" &&
+          record.result.rendered &&
+          (record.result.field_contract_stored?.length ?? 0) === 0}
+        {#if record.result.warnings.length > 0 || emptyCommitContract}
           <div class="prompt-preview-warnings">
             <strong>Warnings</strong>
             {#each record.result.warnings as warning}
               <p>{warning}</p>
             {/each}
+            {#if emptyCommitContract}
+              <p>
+                This prompt commits to a node but declares no fields, so it can only produce an
+                empty change. Add a field_contract loop
+                (<code>{"{% do field_contract.store(f) %}"}</code>) so the commit has fields to
+                write.
+              </p>
+            {/if}
           </div>
         {/if}
         <!-- ADR-0060 §6: the send-path composition the model will receive — the

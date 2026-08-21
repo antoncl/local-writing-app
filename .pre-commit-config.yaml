@@ -62,10 +62,18 @@ repos:
         name: prompt-vocab drift (reference.md matches registered globals/filters/tags, #1270)
         entry: python scripts/check_prompt_vocab_docs.py
         language: system
-        # Whole-invariant check over three fixed files, not a per-file check —
-        # it ignores the staged list, so trigger it whenever either side moves.
+        # Whole-invariant check over fixed files, not a per-file check — it
+        # ignores the staged list, so trigger it whenever any input moves.
         pass_filenames: false
-        files: ^(backend/app/services/ai/(helpers|templates)\.py|docs/prompts/reference\.md|scripts/check_prompt_vocab_docs\.py)$
+        files: ^(backend/app/services/ai/(helpers|templates)\.py|docs/prompts/reference\.md|scripts/(check_prompt_vocab_docs|prompt_vocab)\.py)$
+
+      - id: prompt-vocab-manifest
+        name: prompt-vocab manifest (promptVocab.json regenerated from reference.md, #1270)
+        entry: python scripts/gen_prompt_vocab.py --check
+        language: system
+        # Same shape: regen the bundle in memory and diff the committed file.
+        pass_filenames: false
+        files: ^(docs/prompts/reference\.md|scripts/(gen_prompt_vocab|prompt_vocab)\.py|frontend/src/lib/generated/promptVocab\.json)$
 
       # The advisory `ruff-complexity` hook was retired in #76: C901 and
       # PLR0912/13/15 are now in the blocking `select` in backend/pyproject.toml,

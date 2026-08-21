@@ -26,10 +26,14 @@ export function openSubordinatePane(
   close: () => void,
   opts: { beside?: PanelId; edge?: Edge } = {},
 ): void {
-  workspaceLayout.ensureVisible(paneId);
-  if (opts.beside) {
-    const group = workspaceLayout.groupOf(opts.beside);
-    if (group) workspaceLayout.dropOnEdge(paneId, group.id, opts.edge ?? "right");
+  const besideGroup = opts.beside ? workspaceLayout.groupOf(opts.beside) : null;
+  if (besideGroup) {
+    // Place it directly beside the host's group. `placeBeside` (not
+    // `ensureVisible` + `dropOnEdge`) so the pane never transits an unrelated
+    // home group and flips that column's active tab (#1258 follow-up).
+    workspaceLayout.placeBeside(paneId, besideGroup.id, opts.edge ?? "right");
+  } else {
+    workspaceLayout.ensureVisible(paneId);
   }
   if (hostPaneId) subordinatePanes.register(paneId, hostPaneId, close);
   else subordinatePanes.unregister(paneId);

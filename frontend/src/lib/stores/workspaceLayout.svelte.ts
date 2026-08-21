@@ -337,6 +337,52 @@ class WorkspaceLayout {
     this.#schedulePersist();
   }
 
+  // Place a NOT-yet-tiled panel beside a target group, in its own fresh group
+  // (#1258 follow-up). Unlike `dropOnEdge` this has no source group to splice
+  // from, so it never disturbs an unrelated home group's active tab — the bug
+  // where routing a subordinate pane through `ensureVisible` (which homes it in
+  // the side column and flips that column's active tab) leaked into the UI.
+  //
+  // It also *wraps* the target in a dedicated sub-split rather than inserting as
+  // a parent-row sibling: that binds the pane to its host's slot, so pruning it
+  // (reattach or host-close) collapses the sub-split and returns the space to the
+  // host, instead of redistributing it across every column.
+  placeBeside(panelId: PanelId, targetGroupId: string, edge: "left" | "right" | "top" | "bottom"): void {
+    if (!this.groupById(targetGroupId)) {
+      this.ensureVisible(panelId);
+      return;
+    }
+    // Already tiled (e.g. a re-detach after a drag): a move, not a fresh place.
+    if (this.groupOf(panelId)) {
+      this.dropOnEdge(panelId, targetGroupId, edge);
+      return;
+    }
+    this.#markCustom();
+    const fresh = group(this.#newId("g"), [panelId]);
+    const dir: SplitDir = edge === "left" || edge === "right" ? "row" : "col";
+    const before = edge === "left" || edge === "top";
+    this.#wrapBeside(targetGroupId, fresh, dir, before);
+    this.focus(panelId);
+    this.#schedulePersist();
+  }
+
+  // Wrap the group `neighbourId` in a fresh sub-split of `dir` holding it and
+  // `fresh` (always wraps — the caller wants the pair kept as a unit, so pruning
+  // one returns its slot to the other; see `placeBeside`).
+  #wrapBeside(neighbourId: string, fresh: TabGroup, dir: SplitDir, before: boolean): void {
+    const replaceIn = (node: LayoutNode): LayoutNode => {
+      if (node.kind === "group") {
+        if (node.id !== neighbourId) return node;
+        const pair = before ? [fresh, node] : [node, fresh];
+        return split(this.#newId("s"), dir, pair, [0.5, 0.5]);
+      }
+      node.children = node.children.map(replaceIn);
+      return node;
+    };
+    const next = replaceIn(this.root);
+    this.root = next.kind === "split" ? next : split("root", "row", [next], [1]);
+  }
+
   // Drop a tab onto an edge of a target group → create a new group holding the
   // panel and place it on that edge, wrapping the target in a split of the right
   // orientation (or extending an existing one).

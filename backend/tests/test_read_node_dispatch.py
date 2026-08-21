@@ -22,6 +22,7 @@ from app.models import (
     CreateChatSessionRequest,
     CreatePlotlineRequest,
     CreatePlotTemplateRequest,
+    EntryTypeDefinition,
     LoreEntry,
     PlotlineEntry,
     PlotTemplate,
@@ -33,6 +34,7 @@ from app.models import (
     SavePromptEntryRequest,
     SaveSceneRequest,
     Scene,
+    UpsertMetadataEntryTypeRequest,
 )
 from app.models_views import CreateViewRequest, SaveViewRequest, ViewNode, ViewSpec
 from app.services.project_service import ProjectServiceError
@@ -112,6 +114,30 @@ class ReadNodeDispatchTests(unittest.TestCase):
         )
         result = self.service.read_node(created.id)
         self.assertIsInstance(result, PlotTemplate)
+        self.assertEqual(result.id, created.id)
+
+    def test_dispatches_a_plot_card_subtype_by_is_a(self) -> None:
+        # A user can define a sub-type of plot:card (the layered schema + the
+        # readers' is-a family guard both allow it). read_node must dispatch it
+        # to read_card by is-a, not exact match — else use() would silently
+        # skip subtyped cards, reintroducing the #1243 no-op for them.
+        layer_id = self.service._metadata_schema_layer_id(self.root)
+        self.service.upsert_metadata_entry_type(
+            UpsertMetadataEntryTypeRequest(
+                layer_id=layer_id,
+                entry_type_id="plot:card:romance",
+                entry_type=EntryTypeDefinition(
+                    name="Romance Card", kind="plot", parent="plot:card"
+                ),
+                allow_existing=False,
+            )
+        )
+        created = self.service.create_card(
+            CreateCardRequest(title="A Tryst", entry_type="plot:card:romance")
+        )
+        self.assertEqual(created.entry_type, "plot:card:romance")
+        result = self.service.read_node(created.id)
+        self.assertIsInstance(result, CardEntry)
         self.assertEqual(result.id, created.id)
 
     def test_plot_card_delivers_its_fields_through_the_lore_block(self) -> None:

@@ -484,10 +484,11 @@ class ExtractEndpointTests(unittest.TestCase):
         self.assertIn("title", body["patch"]["dropped"])
 
     def test_empty_contract_fails_loudly_without_calling_the_model(self) -> None:
-        # #1221: an empty write ceiling can only ever yield an empty patch (the
-        # #constrain filter drops everything). Instead of silently committing
-        # nothing, the commit fails with an author-fixable message — and short-
-        # circuits BEFORE spending a model call that couldn't produce anything.
+        # #1221: an empty write ceiling can only ever yield an empty patch
+        # (_constrain_to_registered_fields drops everything). Instead of silently
+        # committing nothing, the commit fails with an author-fixable message —
+        # and short-circuits BEFORE spending a model call that couldn't produce
+        # anything.
         chat_id = self._make_chat(stored=[])
         with self._mock_chat(_chat_reply('{"fields": {"bio": "ignored"}}')) as mock_chat:
             resp = self.client.post(

@@ -10,8 +10,7 @@
   import EditorRail from "@/components/editor/EditorRail.svelte";
   import { editorRailLayout } from "@/lib/stores/editorRailLayout.svelte";
   import ReadOnlyBodyOverlay from "@/components/editor/body/ReadOnlyBodyOverlay.svelte";
-  import EntryRevisionReview from "@/components/editor/body/EntryRevisionReview.svelte";
-  import ReplaceReviewCard from "@/components/editor/body/ReplaceReviewCard.svelte";
+  import EntryReviewOverlay from "@/components/editor/body/EntryReviewOverlay.svelte";
   import ConversationsPanel from "@/components/editor/ConversationsPanel.svelte";
   import PinnedSetsPanel from "@/components/editor/PinnedSetsPanel.svelte";
   import { LoreScrubController } from "@/lib/stores/loreScrub.svelte";
@@ -27,9 +26,9 @@
   import ChatBodyView from "@/components/editor/body/ChatBodyView.svelte";
   import ViewBodyView from "@/components/editor/body/ViewBodyView.svelte";
   import { PromptInputDraftsController } from "@/lib/stores/promptInputDrafts.svelte";
-  import { formatCostEur } from "@/lib/utils/money";
+  import EditorCostHint from "@/components/editor/EditorCostHint.svelte";
+  import { characterCostRows, rollupCostFor } from "@/lib/editor-core/characterCost";
   import { sceneMarkdownToHtml } from "@/lib/utils/markdown";
-  import { resolveColor } from "@/lib/utils/colors";
   import type { AssistantEntrySummary, Backlink, BodyShape, DocumentKind, EditableDocument, EntryBodyLanguage, EntryMetadata, EntryTypeDefinition, MetadataSchema, PromptContextStrategy, PromptEntrySummary, PromptInputDefinition, ViewSpec } from "@/lib/types";
   import type { ViewSaveState } from "@/lib/editor-core/editorPaneModel";
   import { metadataSchemaStore } from "@/lib/stores/schema";
@@ -39,17 +38,7 @@
   import { backlinksFor } from "@/lib/views/backlinks";
   import { effectiveFieldLabel } from "@/lib/utils/schemaTypeHelpers";
   import { mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
-
-  // Effective body shape for an entry type. Falls back through the
-  // legacy has_body / body_editor pair when body_shape is absent
-  // (existing on-disk schemas don't carry it). See
-  // decisions-node-editor-modularization + decisions-node-editor-body-spec.
-  export function deriveBodyShape(def: EntryTypeDefinition | null | undefined): BodyShape {
-    if (def?.body_shape) return def.body_shape;
-    if (def?.has_body === false) return "none";
-    if (def?.body_editor === "code") return "code";
-    return "prose";
-  }
+  import { deriveBodyShape, documentLabelFor } from "@/lib/editor-core/documentPresentation";
 
   // Data sources for context_pick inputs in the prompt preview / inputs
   
@@ -290,40 +279,6 @@
   // ai_invocations log. ProseBodyView owns the state; the footer reads it.
   let characterCostUsd: Record<string, number> = $state({});
 
-  type CharacterCostRow = { id: string; title: string; cost: number; color: string };
-
-  function characterCostRows(
-    map: Record<string, number>,
-    lore: typeof loreEntries,
-    schema: MetadataSchema | null,
-  ): CharacterCostRow[] {
-    const rows: CharacterCostRow[] = [];
-    for (const [id, cost] of Object.entries(map)) {
-      if (typeof cost !== "number" || cost <= 0) continue;
-      const entry = lore.find((e) => e.id === id);
-      const title = entry?.title || id;
-      const instance =
-        entry && typeof entry.metadata?.color === "string"
-          ? (entry.metadata.color as string)
-          : null;
-      const swatch = resolveColor(instance, entry?.entry_type, "lore", schema);
-      let color: string;
-      if (swatch) {
-        color = swatch.hex;
-      } else {
-        let hash = 0;
-        for (let i = 0; i < id.length; i++) {
-          hash = (hash * 31 + id.charCodeAt(i)) | 0;
-        }
-        const hue = ((hash % 360) + 360) % 360;
-        color = `hsl(${hue}, 62%, 48%)`;
-      }
-      rows.push({ id, title, cost, color });
-    }
-    rows.sort((a, b) => b.cost - a.cost);
-    return rows;
-  }
-
   let lastMetadataReloadToken = $state(0);
   let lastTitleReloadToken = $state(0);
   let backlinks: Backlink[] = $state([]);
@@ -406,10 +361,6 @@
 
   function cloneMetadata(value: EntryMetadata) {
     return JSON.parse(JSON.stringify(value ?? {})) as EntryMetadata;
-  }
-
-  function metadataEqual(left: EntryMetadata, right: EntryMetadata) {
-    return JSON.stringify(left ?? {}) === JSON.stringify(right ?? {});
   }
 
   function updateStatus(value: string) {
@@ -691,22 +642,7 @@
     if (railIsPane && detailsDetached) reattachDetails();
   });
   let characterCostRowsView = $derived(characterCostRows(characterCostUsd, loreEntries, metadataSchema));
-  // All-time rollup costs surfaced as a single chip in the header hint.
-  // character_cost lives on lore character entries, project_cost on the
-  // project node — backend populates both via `computed_metadata`.
-  // Trust the computed field as the surface contract; render only when
-  // the kind matches and the number is non-zero.
-  let rollupCostKind = $derived((() => {
-    if (!scene) return null;
-    const computed = scene.computed_metadata as Record<string, unknown> | undefined;
-    if (documentKind === "lore" && typeof computed?.character_cost === "number" && computed.character_cost > 0) {
-      return { kind: "character" as const, value: computed.character_cost as number };
-    }
-    if (documentKind === "project" && typeof computed?.project_cost === "number" && computed.project_cost > 0) {
-      return { kind: "project" as const, value: computed.project_cost as number };
-    }
-    return null;
-  })());
+  let rollupCostKind = $derived(rollupCostFor(scene, documentKind));
   $effect.pre(() => {
     promptDrafts.reseed(scene, documentKind);
     if (documentKind !== "prompt" || !scene) {
@@ -717,26 +653,7 @@
       lastOfferOnSceneId = scene.id;
     }
   });
-  // Friendly noun for this document kind — the type-header label ("<label> type"), the
-  // rail's aria-label, the title aria-labels. A map, not a scene-defaulting ternary, so
-  // every kind reads correctly: the plot kinds (card / plotline / arc / template) were
-  // all mislabelled "Scene type" (#737 follow-on).
-  const DOCUMENT_LABELS: Record<string, string> = {
-    scene: "Scene",
-    lore: "Entry",
-    structure_node: "Node",
-    chat: "Chat",
-    research: "Note",
-    prompt: "Prompt",
-    assistant: "Assistant",
-    view: "View",
-    project: "Project",
-    snippet: "Snippet",
-    plot_card: "Card",
-    plotline: "Plotline",
-    plot_template: "Template",
-  };
-  let documentLabel = $derived(DOCUMENT_LABELS[documentKind] ?? "Scene");
+  let documentLabel = $derived(documentLabelFor(documentKind));
 
   // Fields whose value comes from a layer override (#314), passed to the rail so
   // it can lead them with the `ti-versions` mark. The picker itself lives in
@@ -822,53 +739,6 @@
 <!-- Metadata + backlinks, rendered into either the side rail (prose/code/
      chat) or the whole pane (none-shape). Defined once as a snippet so the
      long prop list isn't duplicated across the two host slots. -->
-{#snippet reviewOverlay()}
-  <!-- The brainstorm commit reviewed on the (frozen) node. Like the snapshot
-       overlay, the live body stays mounted and hidden beneath; adopting writes
-       through the same emitChange autosave (body + metadata in one PUT). Shared by
-       the prose AND code body branches (#711) — the run-diff reads a prompt's
-       template exactly as it reads prose. Two presentations, chosen by the
-       launching prompt's `commit.review` carried on the proposal (ADR-0054 §2). -->
-  {#key entryReview.proposal}
-    {#if entryReview.proposal?.reviewMode === "replace"}
-      <!-- `replace`: a whole-field swap (a scene summary regenerated from the
-           body) — a plain current→proposed card, no run-diff (a regenerated value
-           has no meaningful per-run diff). Replace adopts ONLY the shown long_text
-           fields via `acceptFields` — never the body or a structured flip — so the
-           write set equals what the card displays and a scene's prose can't be
-           rewritten. -->
-      <ReplaceReviewCard
-        fields={entryReview.fields}
-        onReplace={() => {
-          entryReview.acceptFields();
-          void entryReview.commit();
-        }}
-        onDiscard={() => entryReview.abandon()}
-      />
-    {:else}
-      <!-- ADR-0046 slice 3: the per-run adopt flip (body + each long_text field),
-           plus the structured rail flips and the A/S/B judge axis. -->
-      <EntryRevisionReview
-        currentBody={entryReview.currentBody()}
-        proposedBody={entryReview.proposal?.body ?? null}
-        fields={entryReview.fields}
-        hasChanges={entryReview.hasPendingChanges}
-        view={entryReview.view}
-        onView={(v) => entryReview.setView(v)}
-        onToggleView={(v) => entryReview.toggleView(v)}
-        onBodyResolved={(v) => entryReview.setBodyResolution(v)}
-        onFieldResolved={(id, v) => entryReview.setFieldResolution(id, v)}
-        onAcceptAll={() => {
-          entryReview.acceptAll();
-          void entryReview.commit();
-        }}
-        onDone={() => entryReview.commit()}
-        onDiscard={() => entryReview.abandon()}
-      />
-    {/if}
-  {/key}
-{/snippet}
-
 {#snippet metaContent()}
   {#if metadataSchema}
     <MetadataPanel
@@ -1035,47 +905,15 @@
         {recentlySaved}
         {onAuthoringLayerChange}
       />
-      {#if todoStatusHint || documentKind === "manuscript" || rollupCostKind}
-        <div class="editor-hint">
-          {#if todoStatusHint}
-            <span class="editor-hint-text">{todoStatusHint}</span>
-          {/if}
-          {#if documentKind === "manuscript"}
-            <div class="editor-hint-costs">
-              <span class="word-count-chip" title="Live word count for this scene.">
-                {liveWordCount.toLocaleString()} {liveWordCount === 1 ? "word" : "words"}
-              </span>
-              {#each characterCostRowsView as row (row.id)}
-                <span
-                  class="character-cost-chip"
-                  title={`Roleplay cost attributed to ${row.title} in this scene (all sessions).`}
-                  style={`--character-color: ${row.color}`}
-                >
-                  <span class="character-cost-dot" aria-hidden="true"></span>
-                  <span class="character-cost-name">{row.title}</span>
-                  <span class="character-cost-amount">{formatCostEur(row.cost)}</span>
-                </span>
-              {/each}
-              {#if lastInvocationCostUsd != null}
-                <span class="continuation-cost-chip" title="Last continuation invocation cost · running total for this scene this session. Resets on reload or scene switch.">
-                  last {formatCostEur(lastInvocationCostUsd)} · session {formatCostEur(sceneSessionCostUsd)}
-                </span>
-              {/if}
-            </div>
-          {:else if rollupCostKind}
-            <div class="editor-hint-costs">
-              <span
-                class="node-rollup-cost-chip"
-                title={rollupCostKind.kind === "character"
-                  ? "All-time AI cost attributed to this character across every scene."
-                  : "Whole-project AI cost across every invocation."}
-              >
-                {rollupCostKind.kind === "character" ? "character" : "project"} cost {formatCostEur(rollupCostKind.value)}
-              </span>
-            </div>
-          {/if}
-        </div>
-      {/if}
+      <EditorCostHint
+        {todoStatusHint}
+        {documentKind}
+        {liveWordCount}
+        characterCosts={characterCostRowsView}
+        {lastInvocationCostUsd}
+        {sceneSessionCostUsd}
+        rollupCost={rollupCostKind}
+      />
     {:else}
       <h2>Select a scene</h2>
     {/if}
@@ -1098,7 +936,7 @@
       <!-- A commit brainstorm reviewed on a code-bodied node (a prompt template —
            #711). Same overlay as prose; the raw body stays mounted and hidden
            beneath (frozen diff base), thawing to the adopted text on commit. -->
-      {@render reviewOverlay()}
+      <EntryReviewOverlay review={entryReview} />
     {/if}
     <div class="code-body-host" class:hidden={reviewing}>
       <CodeBodyView
@@ -1145,7 +983,7 @@
         onRunClick={(regionId, kind) => snapshots.adopt(regionId, kind)}
       />
     {:else if entryReview.hasReview && entryReview.proposal}
-      {@render reviewOverlay()}
+      <EntryReviewOverlay review={entryReview} />
     {/if}
     <div
       class="prose-body-host"
@@ -1413,80 +1251,5 @@
   .title-input:focus {
     border-bottom-color: var(--accent);
     outline: none;
-  }
-
-  .editor-hint-text {
-    flex: 1 1 auto;
-    min-width: 0;
-  }
-
-  /* Per-scene continuation cost rollup. Frontend-only — resets on reload
-     / scene switch. Sits in the trailing cost cluster on the footer hint
-     row. Phase C added the persisted ai_invocations log; this chip stays
-     as the session/last-call view, and `character-cost-chip` carries the
-     per-character all-time totals from the log. */
-  .continuation-cost-chip,
-  /* The live word count (#1237): the same quiet, muted treatment as the cost
-     chips — present for a glance, never loud (a scene shows it even with no AI
-     costs yet). The value also lives in the `word_count` metadata field. */
-  .word-count-chip {
-    color: var(--text-3);
-    font-size: var(--fs-xs);
-    white-space: nowrap;
-    cursor: default;
-    flex: 0 0 auto;
-  }
-
-  /* Single-value rollup chip for character_cost / project_cost (lore
-     character entries and the project node respectively). Same muted
-     tone as the scene cost chips so the editor hint row stays calm. */
-  .node-rollup-cost-chip {
-    color: var(--text-3);
-    font-size: var(--fs-xs);
-    white-space: nowrap;
-    cursor: default;
-    flex: 0 0 auto;
-    font-variant-numeric: tabular-nums;
-  }
-
-  /* Trailing cluster on the editor footer hint row. Holds the
-     per-character roleplay-cost chips and the continuation chip. */
-  .editor-hint-costs {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    flex: 0 1 auto;
-    min-width: 0;
-  }
-
-  /* Per-character cost chip — colored dot + character name + cost.
-     Backed by the persisted ai_invocations log; character color resolves
-     from the lore entry (or a deterministic hue when unset). */
-  .character-cost-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-    white-space: nowrap;
-    cursor: default;
-  }
-
-  .character-cost-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--character-color, var(--text-3));
-    flex: 0 0 auto;
-  }
-
-  .character-cost-name {
-    color: var(--text);
-  }
-
-  .character-cost-amount {
-    font-variant-numeric: tabular-nums;
   }
 </style>

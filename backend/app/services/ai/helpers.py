@@ -857,20 +857,21 @@ def _implicit_lore_ids(
             if isinstance(jid, str) and jid:
                 found.add(jid)
 
-    # One structural hop through each found entry's own entity_ref metadata. This
-    # is an AUTOMATIC route, so — like the alias/textual scans (which run through
-    # `_alias_match`) — it honors context_policy: a transitive ref to a
-    # `manual_only` (or `never`) entry is NOT pulled in by fan-out. `manual_only`
-    # means "explicit picker only", so it stays reachable via the scene's own refs
-    # (already in `found`) or use(), just not by riding another entry's refs (#1024).
-    non_auto = _never_lore_ids(project) | _manual_only_lore_ids(project)
+    # One structural hop through each found entry's own entity_ref metadata. Like
+    # the alias/textual scans (which run through `_alias_match`), this AUTOMATIC
+    # route honors `manual_only` ("explicit picker only"): a transitive ref to such
+    # an entry is NOT fanned in — it stays reachable via the scene's own refs
+    # (already in `found`) or use() (#1024). `never` needs no filter here: the
+    # chokepoint in `_relevant_lore_ids` is its single enforcement point and drops
+    # it from the final set regardless of route. One lore scan, computed once.
+    manual_only_ids = _manual_only_lore_ids(project)
     expanded = set(found)
     for entry_id in list(found):
         entry = _safe_read_node(project, entry_id)
         if entry is None:
             continue
         hop_refs = _collect_lore_refs_from_metadata(_attr_or_item(entry, "metadata"))
-        expanded |= hop_refs - non_auto
+        expanded |= hop_refs - manual_only_ids
     # Textual depth-1 only runs when the journal is absent; otherwise the
     # journal already carries those expansions.
     if journal is None:

@@ -200,11 +200,10 @@ function buildBlock(
 
 function buildDecorations(
   doc: PMNode,
+  beats: Beat[],
   revealed: Set<number>,
-  markType: MarkType,
   colorForId: (id: string) => string,
 ): DecorationSet {
-  const beats = findBeats(doc, markType);
   const decos: Decoration[] = [];
   for (const beat of beats) {
     const open = revealed.has(beat.to);
@@ -246,57 +245,54 @@ export function createInteriorityPlugin(colorForId: (id: string) => string): Plu
             const markType = markTypeOf(state.doc);
             if (!markType) return EMPTY;
             const revealed = new Set<number>();
+            const beats = findBeats(state.doc, markType);
             return {
-              decorations: buildDecorations(state.doc, revealed, markType, colorForId),
+              decorations: buildDecorations(state.doc, beats, revealed, colorForId),
               revealed,
-              hasBeats: findBeats(state.doc, markType).length > 0,
+              hasBeats: beats.length > 0,
             };
           },
           apply: (tr: Transaction, old: InteriorityState, _oldState, newState) => {
             const markType = markTypeOf(newState.doc);
             if (!markType) return EMPTY;
 
+            const toggle = tr.getMeta(TOGGLE_ONE) as number | undefined;
+            const wantRevealAll = Boolean(tr.getMeta(REVEAL_ALL));
+            const wantCollapseAll = Boolean(tr.getMeta(COLLAPSE_ALL));
+            const changed = typeof toggle === "number" || wantRevealAll || wantCollapseAll;
+
+            // Nothing relevant happened (e.g. a bare selection change) — keep
+            // the set and its decorations without walking the doc.
+            if (!tr.docChanged && !changed) return old;
+
+            // One doc walk per rebuild, shared by reveal-all, prune, and build.
+            const beats = findBeats(newState.doc, markType);
+            const ends = new Set(beats.map((b) => b.to));
+
             // Map reveal anchors through the edit so they follow their beats.
             let revealed = old.revealed;
             if (tr.docChanged) {
               const mapped = new Set<number>();
-              for (const pos of old.revealed) {
-                const next = tr.mapping.map(pos, -1);
-                mapped.add(next);
-              }
+              for (const pos of old.revealed) mapped.add(tr.mapping.map(pos, -1));
               revealed = mapped;
             }
-
-            const toggle = tr.getMeta(TOGGLE_ONE) as number | undefined;
-            let changed = false;
             if (typeof toggle === "number") {
               revealed = new Set(revealed);
               if (revealed.has(toggle)) revealed.delete(toggle);
               else revealed.add(toggle);
-              changed = true;
             }
-            if (tr.getMeta(REVEAL_ALL)) {
-              revealed = new Set(findBeats(newState.doc, markType).map((b) => b.to));
-              changed = true;
-            }
-            if (tr.getMeta(COLLAPSE_ALL)) {
-              revealed = new Set();
-              changed = true;
-            }
+            if (wantRevealAll) revealed = new Set(ends);
+            if (wantCollapseAll) revealed = new Set();
 
-            if (!tr.docChanged && !changed) return old;
-
-            // Drop anchors that no longer land on a beat end (beat deleted).
-            const beats = findBeats(newState.doc, markType);
+            // Drop anchors that no longer land on a beat end (beat deleted/edited).
             if (revealed.size) {
-              const ends = new Set(beats.map((b) => b.to));
               const pruned = new Set<number>();
               for (const pos of revealed) if (ends.has(pos)) pruned.add(pos);
               revealed = pruned;
             }
 
             return {
-              decorations: buildDecorations(newState.doc, revealed, markType, colorForId),
+              decorations: buildDecorations(newState.doc, beats, revealed, colorForId),
               revealed,
               hasBeats: beats.length > 0,
             };

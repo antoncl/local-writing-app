@@ -7,6 +7,7 @@
   import TableHeader from "@tiptap/extension-table-header";
   import TableRow from "@tiptap/extension-table-row";
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "@/lib/utils/markdown";
+  import { stateAtDocumentBoundary } from "@/lib/editor-core/documentBoundary";
   import { ImplicitContextHighlight, REBUILD_META } from "@/lib/editor-core/implicitContextHighlight";
   import type { CompiledMatcher } from "@/lib/editor-core/implicitContextMatcher";
   import { sanitizePastedHtml } from "@/lib/utils/sanitizePastedHtml";
@@ -110,6 +111,12 @@
     applyingExternalValue = true;
     const html = await sceneMarkdownToHtml(nextValue || "");
     editor.commands.setContent(html || "<p></p>", false);
+    // An external value push is a boundary, not an edit: rebuild the state so
+    // undo history starts empty. Without this, a same-id external replacement —
+    // notably "reset to inherited" re-seeding this still-mounted editor — lands
+    // on the live undo stack, so Ctrl+Z resurrects the cleared override and
+    // autosave re-persists it (#691, the #368 pattern applied to this widget).
+    editor.view.updateState(stateAtDocumentBoundary(editor.state));
     loadedValue = nextValue || "";
     lastExternalValue = nextValue || "";
     pendingLocalValue = null;

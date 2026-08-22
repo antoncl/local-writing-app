@@ -6,14 +6,16 @@
 // drift from what the backend registers. `inputs.<name>` completes from the
 // prompt's own declared inputs, read live through a getter.
 //
-// Scope (slice 1): the manifest vocabulary + declared inputs. Schema-driven field
-// names (`scene.<field>`, `entry(inputs.x).<field>`) are a follow-up — this slice
-// deliberately declines to complete past a `.` so it never guesses a wrong field.
+// Field names past a `.` (`scene.<field>`, `project.<field>`,
+// `entry(inputs.x).<field>`) are resolved from the live metadata schema; a base
+// whose type can't be known statically (a literal `entry("id")`, a reference
+// chain) declines rather than guessing a wrong field.
 
 import type { Completion, CompletionContext, CompletionResult, CompletionSource } from "@codemirror/autocomplete";
 
 import promptVocabData from "@/lib/generated/promptVocab.json";
-import type { PromptInputDefinition } from "@/lib/types";
+import type { MetadataSchema, NodePickerConfig, PromptInputDefinition } from "@/lib/types";
+import { pickerMembership } from "@/lib/utils/pickerSources";
 
 type VocabKind = "variable" | "helper" | "filter" | "tag";
 type VocabSymbol = { name: string; kind: VocabKind; signature: string; summary: string };
@@ -53,6 +55,52 @@ const ROLE_OPTIONS: Completion[] = [...ROLE_SIGNATURE.matchAll(/"(\w+)"/g)].map(
 const VALID_WORD = /^\w*$/;
 const VALID_ROLE = /^"?\w*$/;
 
+// --- schema-driven field names ----------------------------------------------
+
+// The always-present node intrinsics (reference.md's degrade-to set), offered on
+// any resolvable node base alongside its schema fields.
+const INTRINSIC_FIELDS: Completion[] = ["title", "body", "entry_type", "id"].map((name) => ({
+  label: name,
+  type: "property",
+  detail: "intrinsic",
+}));
+
+// Well-known entry_type keys — the app uses these literals directly (no constant).
+const SCENE_TYPE = "manuscript:scene";
+const PROJECT_TYPE = "project:project";
+
+function fieldOptions(schema: MetadataSchema, entryType: string): Completion[] {
+  const options: Completion[] = [];
+  for (const id of schema.entry_types[entryType]?.fields ?? []) {
+    const field = schema.fields[id];
+    // Skip what a template can't meaningfully read: computed fields, the
+    // intrinsics (offered separately), and fields hidden by default.
+    if (!field || field.type === "computed" || field.category === "intrinsic" || field.hidden) continue;
+    options.push({
+      label: id,
+      type: "property",
+      detail: field.name !== id ? field.name : undefined,
+      info: field.description ?? undefined,
+    });
+  }
+  return options;
+}
+
+// The entry_type a member-access base resolves to, or null when it can't be known
+// statically (an untyped/ambiguous input, a literal id, a reference chain).
+function resolveEntryType(base: string, inputs: PromptInputDefinition[], schema: MetadataSchema): string | null {
+  if (base === "scene") return schema.entry_types[SCENE_TYPE] ? SCENE_TYPE : null;
+  if (base === "project") return schema.entry_types[PROJECT_TYPE] ? PROJECT_TYPE : null;
+  const inputName = base.match(/^entry\(\s*inputs\.(\w+)\s*\)$/)?.[1];
+  if (inputName) {
+    const target = inputs.find((input) => input.name === inputName)?.target;
+    if (!target) return null;
+    const fqns = Object.values(pickerMembership(target as unknown as NodePickerConfig).entryTypes).flat();
+    return fqns.length === 1 ? fqns[0] : null; // one unambiguous type, or decline
+  }
+  return null;
+}
+
 type Region = { kind: "expr" | "tag"; from: number };
 
 // The innermost `{{`/`{%` still open at `pos` (windowed — a template block is
@@ -72,10 +120,14 @@ function openRegion(context: CompletionContext): Region | null {
 }
 
 /**
- * Build the completion source. `getInputs` is read on every keystroke so the
- * `inputs.<name>` list stays live as the prompt's declared inputs change.
+ * Build the completion source. `getInputs` and `getSchema` are read on every
+ * keystroke so `inputs.<name>` and `<node>.<field>` stay live as the prompt's
+ * declared inputs and the project schema change.
  */
-export function makePromptCompletionSource(getInputs: () => PromptInputDefinition[]): CompletionSource {
+export function makePromptCompletionSource(
+  getInputs: () => PromptInputDefinition[],
+  getSchema: () => MetadataSchema | null,
+): CompletionSource {
   return (context: CompletionContext): CompletionResult | null => {
     const region = openRegion(context);
     if (region === null) return null;
@@ -115,9 +167,25 @@ export function makePromptCompletionSource(getInputs: () => PromptInputDefinitio
       return { from: word ? word.from : context.pos, options: FILTER_OPTIONS, validFor: VALID_WORD };
     }
 
-    // Member access (`scene.`, `entry(x).`, …) is the schema-driven follow-up —
-    // decline rather than offer the wrong (top-level) names after a dot.
-    if (context.matchBefore(/[\w)\]"']\.\w*/)) return null;
+    // Member access `<base>.<partial>` — offer the base type's fields when the
+    // type resolves (scene / project / a typed `entry(inputs.x)`), otherwise
+    // decline (never offer top-level names after a dot).
+    if (context.matchBefore(/[\w)\]"']\.\w*/)) {
+      const typed = context.matchBefore(/(?:scene|project|entry\([^)]*\))\.\w*/);
+      const schema = getSchema();
+      if (typed && schema) {
+        const dot = typed.text.lastIndexOf(".");
+        const entryType = resolveEntryType(typed.text.slice(0, dot), getInputs(), schema);
+        if (entryType) {
+          return {
+            from: typed.from + dot + 1,
+            options: [...INTRINSIC_FIELDS, ...fieldOptions(schema, entryType)],
+            validFor: VALID_WORD,
+          };
+        }
+      }
+      return null;
+    }
 
     // A bare identifier in an expression (or a tag's expression part) → the
     // variables and helpers.

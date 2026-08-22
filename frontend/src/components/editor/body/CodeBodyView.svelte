@@ -283,9 +283,13 @@
     inheritedInputsFrom(promptEffectiveInputs, promptInputProvenance, promptEntries),
   );
 
-  // Jinja code-completion (#30), built once — it reads the effective inputs live
-  // through the getter, so `inputs.<name>` stays current without re-registering.
-  const promptCompletionSource = makePromptCompletionSource(() => promptEffectiveInputs);
+  // Jinja code-completion (#30), built once — it reads the effective inputs and
+  // the project schema live through getters, so `inputs.<name>` and
+  // `<node>.<field>` stay current without re-registering.
+  const promptCompletionSource = makePromptCompletionSource(
+    () => promptEffectiveInputs,
+    () => metadataSchema,
+  );
 
   // --- Prompt editor sub-tabs (ADR-0062 §1/S2 Amendment 2 "D2") -----------
   // Three peer tabs — Template / Preview / Setup — each detachable into its

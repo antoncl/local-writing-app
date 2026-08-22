@@ -49,6 +49,29 @@ describe("makePromptCompletionSource", () => {
     expect(result).toContain("include");
   });
 
+  it("offers the role values inside {% role %}, not the whole vocabulary", () => {
+    const result = labels(run("{% role ", { explicit: true }));
+    expect(result).toEqual(['"system"', '"user"', '"assistant"']);
+    expect(result).not.toContain("entry");
+  });
+
+  it("replaces from the opening quote when a role value is being typed", () => {
+    const result = run('{% role "us');
+    expect(labels(result)).toContain('"user"');
+    // replaces the `"us` the author started, rather than appending
+    expect(result?.from).toBe("{% role ".length);
+  });
+
+  it("completes an expression inside {% do %} (it wraps an expression)", () => {
+    const result = labels(run("{% do us"));
+    expect(result).toContain("use");
+    expect(result).toContain("entry");
+  });
+
+  it("offers nothing manifest-driven in a non-expression tag argument", () => {
+    expect(run("{% include ", { explicit: true })).toBeNull();
+  });
+
   it("offers filters after a pipe", () => {
     expect(labels(run("{{ value | js"))).toContain("json");
   });

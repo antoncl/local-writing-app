@@ -41,7 +41,17 @@ const EXPRESSION_OPTIONS = VOCAB.filter((s) => s.kind === "variable" || s.kind =
 const FILTER_OPTIONS = VOCAB.filter((s) => s.kind === "filter").map(toCompletion);
 const TAG_OPTIONS = VOCAB.filter((s) => s.kind === "tag").map(toCompletion);
 
+// The role tag takes a fixed enum, not an expression. Parse the values straight
+// out of its documented signature (`{% role "system"|"user"|"assistant" %}`) so
+// they stay in sync with the manifest rather than being hardcoded here.
+const ROLE_SIGNATURE = VOCAB.find((s) => s.kind === "tag" && s.name === "role")?.signature ?? "";
+const ROLE_OPTIONS: Completion[] = [...ROLE_SIGNATURE.matchAll(/"(\w+)"/g)].map((m) => ({
+  label: `"${m[1]}"`,
+  type: "constant",
+}));
+
 const VALID_WORD = /^\w*$/;
+const VALID_ROLE = /^"?\w*$/;
 
 type Region = { kind: "expr" | "tag"; from: number };
 
@@ -81,10 +91,22 @@ export function makePromptCompletionSource(getInputs: () => PromptInputDefinitio
       return { from: inputAccess.from + dot + 1, options, validFor: VALID_WORD };
     }
 
-    // `{% <tag>` — only while the tag keyword itself is being typed.
-    if (region.kind === "tag" && /^\{%\s*\w*$/.test(head)) {
-      const word = context.matchBefore(/\w*$/);
-      return { from: word ? word.from : context.pos, options: TAG_OPTIONS, validFor: VALID_WORD };
+    if (region.kind === "tag") {
+      // `{% <tag>` — the tag keyword itself is still being typed.
+      if (/^\{%\s*\w*$/.test(head)) {
+        const word = context.matchBefore(/\w*$/);
+        return { from: word ? word.from : context.pos, options: TAG_OPTIONS, validFor: VALID_WORD };
+      }
+      // Past the keyword — dispatch on which tag it is. `role` takes a fixed
+      // enum, so offer only its values (never the whole expression vocabulary).
+      // `do` wraps an expression, so it falls through to expression completion;
+      // other tags (`include`, control flow) get nothing manifest-driven here.
+      const keyword = head.match(/^\{%\s*(\w+)/)?.[1];
+      if (keyword === "role") {
+        const partial = context.matchBefore(/"?\w*/);
+        return { from: partial ? partial.from : context.pos, options: ROLE_OPTIONS, validFor: VALID_ROLE };
+      }
+      if (keyword !== "do") return null;
     }
 
     // `value | <filter>`.

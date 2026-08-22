@@ -15,6 +15,7 @@
 <script lang="ts">
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { workspaceLayout } from "@/lib/stores/workspaceLayout.svelte";
   import {
     dependencyAdvisoryText,
     inheritedInputsFrom,
@@ -254,6 +255,14 @@
     cheatsheetPopoverOpen = !cheatsheetPopoverOpen;
   }
 
+  // The "?" no longer lists the vocabulary — completion (Ctrl-Space) surfaces it
+  // in context, and this opens the narrative guide. "writing-prompts" is the
+  // first bundled guide, so the viewer opens to it (#1272/#1273).
+  function openGuide(): void {
+    cheatsheetPopoverOpen = false;
+    workspaceLayout.ensureVisible("guide");
+  }
+
   // Gutter diagnostics for the CodeEditor — written by PromptPreviewPane's
   // render pipeline (bound below) and fed to the editor's `diagnostics` prop.
   let promptPreviewDiagnostics: {
@@ -452,53 +461,19 @@
     {/each}
 
     {#if cheatsheetPopoverOpen}
-    <div class="prompt-help-popover" role="dialog" aria-label="Variables and helpers" style="top: {popoverPos.top}px; right: {popoverPos.right}px;">
+    <div class="prompt-help-popover" role="dialog" aria-label="Prompt help" style="top: {popoverPos.top}px; right: {popoverPos.right}px;">
       <header class="prompt-help-popover-header">
-        <strong>Variables &amp; helpers</strong>
-        <small>what you can reference in <code>&lbrace;&lbrace; … &rbrace;&rbrace;</code> and <code>&lbrace;% … %&rbrace;</code></small>
+        <strong>Prompt help</strong>
         <button type="button" class="prompt-help-popover-close" aria-label="Close" onclick={() => (cheatsheetPopoverOpen = false)}>×</button>
       </header>
-      <div class="prompt-cheatsheet-body">
-        <section>
-          <h4>Variables</h4>
-          <dl>
-            <dt><code>scene</code></dt>
-            <dd>The target scene. <code>scene.title</code>, <code>scene.body</code>, <code>scene.entry_type</code>, <code>scene.&lt;field&gt;</code> for any field on the scene (e.g. <code>scene.summary</code>, <code>scene.pov.title</code>). Entity-ref fields auto-resolve.</dd>
-            <dt><code>project</code></dt>
-            <dd>Project info. <code>project.title</code>, <code>project.&lt;field&gt;</code> for any authored project field (e.g. <code>project.spelling</code>); <code>project.metadata</code> is the whole map.</dd>
-            <dt><code>text_before</code> / <code>text_after</code></dt>
-            <dd>Body markdown around the cursor in the current scene. Empty string when not dispatched from an editor.</dd>
-            <dt><code>selection</code></dt>
-            <dd>The selected text in the editor, or empty string.</dd>
-            <dt><code>date</code></dt>
-            <dd>Today as an ISO string (e.g. <code>2026-06-20</code>). Also <code>date.today</code> and <code>date.iso</code>.</dd>
-            <dt><code>input.&lt;id&gt;</code></dt>
-            <dd>The value of an input declared on this prompt (see the Inputs panel below).</dd>
-          </dl>
-        </section>
-        <section>
-          <h4>Helpers</h4>
-          <dl>
-            <dt><code>pov(scene)</code></dt>
-            <dd>POV character as an EntryRef, or <code>None</code> when the scene has no <code>pov</code> ref.</dd>
-            <dt><code>use(node[, "stable"|"volatile"])</code> / <code>use_lore()</code></dt>
-            <dd>Select a node into context — the backend places, dedups, tiers and caches it (emits nothing). The optional hint biases its cache tier. <code>use_lore()</code> just enables the scene's implicit lore. You never paste lore text yourself.</dd>
-            <dt><code>story_so_far(scene)</code></dt>
-            <dd>XML <code>&lt;story_so_far&gt;</code> of prior scenes' summaries (scenes 1…n-1) in reading order.</dd>
-            <dt><code>last_words(text, n)</code></dt>
-            <dd>Trailing <code>n</code> words of a string. Pure helper — useful for continuation prompts.</dd>
-            <dt><code>full_outline()</code></dt>
-            <dd>Nested list of outline nodes (<code>.title</code>, <code>.summary</code>, <code>.children</code>) — the whole book's shape.</dd>
-            <dt><code>full_text()</code></dt>
-            <dd>Every scene's prose in manuscript order (<code>.title</code>, <code>.body</code>). Heavy.</dd>
-            <dt><code>entry(x[, at=scene])</code> / <code>original(x)</code></dt>
-            <dd>Resolve a node — <code>entry(x)</code> as of the prompt's scene (or <code>at=</code> another scene), <code>original(x)</code> at book-start. Walk its fields by attribute: <code>&lbrace;&lbrace; entry(scene.pov).allegiance &rbrace;&rbrace;</code>. Accepts an id, a ref, or a <code>context_pick</code> value — <code>&lbrace;&lbrace; entry(inputs.character).title &rbrace;&rbrace;</code>.</dd>
-            <dt><code>fields(x)</code> / <code>type_name(x)</code></dt>
-            <dd><code>fields(x)</code> is the full field roster of a node or type — each descriptor has <code>id</code>, <code>label</code>, <code>type</code>, <code>options</code>, <code>description</code>, <code>proposable</code>. <code>type_name(x)</code> is a type's human name.</dd>
-            <dt><code>character_turns(scene, character)</code></dt>
-            <dd>Reconstructs the scene as alternating chat turns for the Roleplay sub-type: focus character → <code>assistant</code> turns, others → <code>user</code> prefixed <code>[Name]:</code>, untagged narration → plain <code>user</code>. No markers yet → whole body as one user message. <strong>Use OUTSIDE any <code>&lbrace;% role %&rbrace;</code> block</strong> — emits its own role boundaries. See <code>docs/roleplay.md</code>.</dd>
-          </dl>
-        </section>
+      <div class="prompt-help-body">
+        <p>
+          Inside <code>&lbrace;&lbrace; … &rbrace;&rbrace;</code> or <code>&lbrace;% … %&rbrace;</code>, press
+          <kbd>Ctrl</kbd>+<kbd>Space</kbd> to autocomplete variables, helpers, filters and tags.
+        </p>
+        <button type="button" class="prompt-help-guide-link" onclick={openGuide}>
+          Open the Writing prompts guide →
+        </button>
       </div>
     </div>
     {/if}
@@ -558,8 +533,8 @@
         class="prompt-help-button"
         bind:this={helpButtonEl}
         class:active={cheatsheetPopoverOpen}
-        title="Variables & helpers — what you can reference in &lbrace;&lbrace; … &rbrace;&rbrace; and &lbrace;% … %&rbrace;"
-        aria-label="Show variables and helpers reference"
+        title="Prompt help — autocomplete and the Writing prompts guide"
+        aria-label="Prompt help"
         aria-expanded={cheatsheetPopoverOpen}
         onclick={toggleCheatsheetPopover}
       >?</button>
@@ -726,13 +701,11 @@
   }
   .prompt-help-popover {
     position: fixed;
-    width: min(720px, calc(100vw - 24px));
-    max-height: 70vh;
-    overflow-y: auto;
+    width: min(320px, calc(100vw - 24px));
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 6px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+    box-shadow: var(--elev-2);
     padding: 12px 16px;
     z-index: 100;
     font-size: var(--fs-md);
@@ -746,20 +719,9 @@
     border-bottom: 1px solid var(--divider);
   }
   .prompt-help-popover-header > strong {
+    flex: 1;
     color: var(--text);
     font-size: var(--fs-md);
-  }
-  .prompt-help-popover-header > small {
-    color: var(--text-3);
-    font-size: var(--fs-xs);
-    flex: 1;
-  }
-  .prompt-help-popover-header > small > code {
-    background: var(--inset);
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    padding: 0 4px;
-    font-family: var(--mono);
   }
   .prompt-help-popover-close {
     width: 22px;
@@ -777,56 +739,40 @@
     background: var(--panel);
     color: var(--text);
   }
-  .prompt-cheatsheet-body {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-    margin-top: 8px;
-  }
-  .prompt-cheatsheet-body h4 {
-    margin: 0 0 6px;
-    font-size: var(--fs-sm);
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+  .prompt-help-body p {
+    margin: 0 0 10px;
     color: var(--text-2);
+    font-size: var(--fs-sm);
+    line-height: 1.5;
   }
-  .prompt-cheatsheet-body dl {
-    margin: 0;
-    display: grid;
-    gap: 4px 8px;
-  }
-  .prompt-cheatsheet-body dt {
-    margin: 0;
-  }
-  .prompt-cheatsheet-body dt > code {
-    background: var(--surface);
+  .prompt-help-body code {
+    background: var(--inset);
     border: 1px solid var(--border);
     border-radius: 3px;
     padding: 0 4px;
     font-family: var(--mono);
-    font-size: var(--fs-sm);
-    color: var(--accent-deep);
+    font-size: var(--fs-xs);
   }
-  .prompt-cheatsheet-body dd {
-    margin: 0 0 6px;
-    color: var(--text-2);
-    font-size: var(--fs-sm);
-    line-height: 1.45;
-  }
-  .prompt-cheatsheet-body dd > code {
-    background: var(--surface);
+  .prompt-help-body kbd {
+    background: var(--inset);
     border: 1px solid var(--border);
     border-radius: 3px;
-    padding: 0 3px;
+    padding: 0 5px;
     font-family: var(--mono);
     font-size: var(--fs-xs);
-    color: var(--accent-deep);
+    color: var(--text);
   }
-  @media (max-width: 720px) {
-    .prompt-cheatsheet-body {
-      grid-template-columns: 1fr;
-    }
+  .prompt-help-guide-link {
+    display: inline-block;
+    padding: 0;
+    background: transparent;
+    border: none;
+    color: var(--accent-emphasis);
+    font-size: var(--fs-sm);
+    cursor: pointer;
+  }
+  .prompt-help-guide-link:hover {
+    text-decoration: underline;
   }
   /* A locked (Library) prompt's inputs are dimmed to read as non-editable;
      `inert` on the element does the actual interaction blocking. */

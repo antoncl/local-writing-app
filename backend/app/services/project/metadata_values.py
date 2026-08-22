@@ -37,7 +37,7 @@ from app.services.ai.entry_patch import (
 from app.services.color_snap import nearest_swatch_id
 from app.services.machine_settings import palette as machine_palette
 from app.services.project.errors import ProjectServiceError
-from app.services.project.node_index import NodeIndex
+from app.services.project.node_index import NodeIndex, NodeIndexEntry
 from app.services.project.references import REFERENCE_BEARING_KINDS
 
 log = logging.getLogger(__name__)
@@ -747,12 +747,20 @@ class MetadataValuesMixin:
         return chats
 
     def _purge_references_to(self, purge_ids: set[str], root: Path) -> None:
-        """Walk every reference-bearing entry in the project. For each, strip
-        any reference value matching one of ``purge_ids`` and write the file
-        back if it changed. Called after node deletes so cross-entity
-        references stay in sync without waiting for a per-entry open+save
-        round-trip (which is what the read-side healer in
+        """Walk every reference-bearing entry, strip any reference value matching
+        one of ``purge_ids``, and write back the ones that changed. Called after
+        node deletes so cross-entity references stay in sync without waiting for a
+        per-entry open+save round-trip (which is what the read-side healer in
         ``_strip_dangling_references`` does as a fallback).
+
+        Each node is read **front matter only** to decide (#823); the full file,
+        with its body, is read only for the nodes that actually change. A chat is a
+        reference-bearing Node whose body is an entire transcript, so the old
+        unconditional full read paged in every chat's transcript on every delete
+        just to find no edge to strip. The check stays deliberately GLOBAL — over
+        `metadata.items()` against `schema.fields`, not the node's entry_type
+        membership — so it matches the read-side healer and still reaches a value
+        left under a field the node's type no longer lists.
 
         **Every kind the index draws edges from** (`REFERENCE_BEARING_KINDS`),
         not the `{"scene", "lore"}` allow-list this carried until #345. The old
@@ -806,24 +814,43 @@ class MetadataValuesMixin:
             # ProjectServiceError, so the loop's guard would not catch it).
             index.by_id.pop(chat_id, None)
         for entry in list(index.by_id.values()):
-            if entry.kind not in REFERENCE_BEARING_KINDS:
-                continue
-            try:
-                front_matter, body = self._read_markdown_with_front_matter(entry.path, strict=True)
-            except ProjectServiceError:
-                continue
-            raw_metadata = front_matter.get("metadata")
-            if not isinstance(raw_metadata, dict):
-                continue
-            try:
-                normalised = self._normalise_metadata(raw_metadata, entry.path)
-            except ProjectServiceError:
-                continue
-            cleaned, changed = self._purge_metadata_refs(normalised, schema, purge_ids)
-            if not changed:
-                continue
-            front_matter["metadata"] = cleaned
-            self._write_markdown_with_front_matter(entry.path, front_matter, body)
+            if entry.kind in REFERENCE_BEARING_KINDS:
+                self._purge_entry_metadata(entry, schema, purge_ids)
+
+    def _purge_entry_metadata(
+        self, entry: NodeIndexEntry, schema: MetadataSchema, purge_ids: set[str]
+    ) -> None:
+        """Strip ``purge_ids`` from one reference-bearing node and rewrite its
+        file if anything changed. Reads front matter only to decide; pays for the
+        body only when the node actually changes (#823). A file that fails to
+        parse — or is removed by a concurrent delete between the two reads — is
+        skipped, never raised, so one bad or racing file cannot abort the purge.
+        """
+        # Read front matter only to decide: the body — a chat's whole transcript
+        # — is never paged in for a node that holds no purge ref.
+        try:
+            front_matter = self._read_front_matter_only(entry.path, strict=True)
+        except ProjectServiceError:
+            return
+        raw_metadata = front_matter.get("metadata")
+        if not isinstance(raw_metadata, dict):
+            return
+        try:
+            normalised = self._normalise_metadata(raw_metadata, entry.path)
+        except ProjectServiceError:
+            return
+        cleaned, changed = self._purge_metadata_refs(normalised, schema, purge_ids)
+        if not changed:
+            return
+        # Only a changed node pays for its body: re-read the whole file so
+        # everything below the front matter is preserved, then write the cleaned
+        # mapping back over it.
+        try:
+            front_matter, body = self._read_markdown_with_front_matter(entry.path, strict=True)
+        except ProjectServiceError:
+            return
+        front_matter["metadata"] = cleaned
+        self._write_markdown_with_front_matter(entry.path, front_matter, body)
 
     def _validate_reference_target(
         self,

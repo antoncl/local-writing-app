@@ -51,7 +51,7 @@ anchor you have:
 | --- | --- |
 | `scene` | The scene the prompt runs on. `scene.title`, `scene.body`, `scene.pov`, `scene.summary`, and any field you've defined. |
 | `project` | The project. `project.title`, and authored fields like `project.spelling`. |
-| `inputs` | Anything the prompt asks *you* for (see **Inputs**, below). |
+| `inputs` | Anything the prompt asks *you* for (see [Inputs](#inputs), below). |
 | `selection` | The prose you had selected, when the prompt was run on a selection. |
 | `text_before` / `text_after` | The prose on either side of your cursor. |
 | `date` | Today's date. |
@@ -59,7 +59,8 @@ anchor you have:
 ## Reading your story's data
 
 Every node — a scene, a character, a location — has **fields** determined by its
-type. Read them with a dot:
+type (you define these in the [Custom fields](#guide:custom-fields) guide). Read
+them with a dot:
 
 ```jinja
 {{ scene.pov.title }} is the POV character; the summary is: {{ scene.summary }}.

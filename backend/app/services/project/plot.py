@@ -750,8 +750,20 @@ class PlotMixin:
         for scene_id, title in self._manuscript_scene_nodes():
             if scene_id in carded_scene_ids:
                 continue
-            card = self.create_card(CreateCardRequest(title=title))
-            self._set_card_scene(card, scene_id)
+            # One validated write per scene: mint the card already attached to its
+            # scene via seed_metadata, instead of create_card + _set_card_scene —
+            # two writes per scene, each re-resolving the node index on its
+            # read-back. Calling _create_plot_folder_node directly writes once and
+            # skips those read-backs; the write funnel maintains the index memo in
+            # place (#392), so the only forced resolve is the trailing list_cards().
+            # The `scene` ref is normalised/validated exactly as a save would (#747).
+            self._create_plot_folder_node(
+                title=title,
+                requested_entry_type="",
+                default_entry_type="plot:card",
+                noun="card",
+                seed_metadata={"scene": scene_id},
+            )
             carded_scene_ids.add(scene_id)
         return self.list_cards()
 

@@ -21,6 +21,7 @@ from unittest.mock import patch
 
 from layer_fixtures import declare_full_chain
 from plot_fixtures import PlotTestCase
+from project_fixtures import open_test_project
 
 from app.models import (
     CreateCardRequest,
@@ -489,6 +490,57 @@ class CardOperationTests(PlotTestCase):
         self.assertEqual({c.metadata.get("scene") for c in cards}, all_scenes)
         self.assertEqual(sum(1 for c in cards if c.metadata.get("scene") == kept), 1)
         self.assertIn(fresh, {c.metadata.get("scene") for c in cards})
+
+    def _seed_fresh_project_and_count_rebuilds(self, scene_count: int) -> tuple[int, int]:
+        # A separate project per call (not self.service) so the two scene counts
+        # don't share manuscript state. Node-index calls are counted only across
+        # seed_cards_from_manuscript() itself, not the scene setup above it.
+        temp_dir = TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        root = Path(temp_dir.name).resolve() / "project"
+        service = open_test_project(root, "Perf Project")
+        structure = service.read_structure()
+        doc = service.create_structure_node(
+            CreateStructureNodeRequest(title="Chapter", entry_type="manuscript:chapter", parent_id=structure.root.id)
+        )
+        chapter_id = next(c.id for c in doc.root.children if c.type == "manuscript:chapter" and c.title == "Chapter")
+        for i in range(scene_count):
+            service.create_scene(CreateSceneRequest(title=f"Scene {i}", parent_id=chapter_id))
+
+        calls = 0
+        original = service._build_node_index
+
+        def counting(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            return original(*args, **kwargs)
+
+        with patch.object(service, "_build_node_index", side_effect=counting):
+            result = service.seed_cards_from_manuscript()
+        # Attachment preserved: every minted card carries its own scene ref.
+        # (A fresh project pre-seeds one scene, so the count is relative to what
+        # this helper added, not a bare `scene_count`.)
+        self.assertEqual(len(result.entries), scene_count + 1)
+        for card in result.entries:
+            self.assertTrue(card.metadata.get("scene"))
+        return calls, len(result.entries)
+
+    def test_seed_index_lookups_scale_one_to_one_with_scenes_not_writes(self) -> None:
+        # _create_plot_folder_node (unchanged, per #747) validates the seeded
+        # `scene` ref through _validate_reference_target, which needs exactly one
+        # _build_node_index() lookup per scene to confirm the id exists — that
+        # one-per-scene cost is inherent to the validated-write path and not what
+        # this fix removes. What it removes is the *second* multiplier: the old
+        # create_card + _set_card_scene loop cost ~3 lookups per scene (create's
+        # read-back, save's own validation, save's read-back — see the diagnostic
+        # in this PR's description), a genuine O(N) x O(N) node-index touch. This
+        # fix does exactly one lookup per scene, so the *delta* in call count
+        # between two runs must equal exactly the delta in scene count — not some
+        # multiple of it — as scenes scale up.
+        few_calls, few_scenes = self._seed_fresh_project_and_count_rebuilds(2)
+        many_calls, many_scenes = self._seed_fresh_project_and_count_rebuilds(6)
+        self.assertEqual(many_calls - few_calls, many_scenes - few_scenes)
+        self.assertLess(many_calls, many_scenes * 2)  # nowhere near the old ~3x/scene
 
     # ----- cardinality invariants (ADR §S5) -------------------------------
 

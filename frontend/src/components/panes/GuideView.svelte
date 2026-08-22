@@ -18,6 +18,41 @@
     guides.find((guide) => guide.id === selectedId) ?? guides[0],
   );
   const html = $derived(selected ? (md.parse(selected.markdown) as string) : "");
+
+  function slugify(text: string): string {
+    return text
+      .toLowerCase()
+      .trim()
+      .replace(/[^\w]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  }
+
+  // A rendered guide link must never navigate the whole app away (#1285). This
+  // action intercepts clicks on the prose and routes them: `#guide:<id>` switches
+  // guide, `#anchor` scrolls to the heading whose text matches, an external URL
+  // opens in a new tab, and anything else (a relative doc path) is neutralised.
+  function guideLinks(node: HTMLElement) {
+    const onClick = (event: MouseEvent) => {
+      const anchor = (event.target as HTMLElement).closest("a");
+      if (!anchor) return;
+      event.preventDefault();
+      const href = anchor.getAttribute("href") ?? "";
+      if (href.startsWith("#guide:")) {
+        const id = href.slice("#guide:".length);
+        if (guides.some((guide) => guide.id === id)) selectedId = id;
+      } else if (href.length > 1 && href.startsWith("#")) {
+        const slug = href.slice(1);
+        const target = [...node.querySelectorAll("h1, h2, h3, h4")].find(
+          (heading) => slugify(heading.textContent ?? "") === slug,
+        );
+        target?.scrollIntoView({ behavior: "smooth", block: "start" });
+      } else if (/^https?:\/\//.test(href)) {
+        window.open(href, "_blank", "noopener,noreferrer");
+      }
+    };
+    node.addEventListener("click", onClick);
+    return { destroy: () => node.removeEventListener("click", onClick) };
+  }
 </script>
 
 <div class="guide-view">
@@ -37,7 +72,7 @@
         {/each}
       </nav>
     {/if}
-    <article class="guide-prose">
+    <article class="guide-prose" use:guideLinks>
       <!-- eslint-disable-next-line svelte/no-at-html-tags — trusted first-party guide markdown -->
       {@html html}
     </article>

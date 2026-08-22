@@ -58,6 +58,9 @@
     onOpenPlotTemplates = () => {},
     onOpenPlotBoard = () => {},
     onOpenMutations = () => {},
+    // In-app guides (#1271). Reads in a workspace region, so project-gated like
+    // the panes above even though the content itself is app-level.
+    onOpenGuides = () => {},
     // Loose-scene import — its own home now (#635), a rare project action.
     onOpenImport = () => {},
     // Manage tags — the one home for both vocabularies (#247 PR-3b), retiring the
@@ -104,6 +107,7 @@
     onOpenPlotTemplates?: () => void;
     onOpenPlotBoard?: () => void;
     onOpenMutations?: () => void;
+    onOpenGuides?: () => void;
     onOpenImport?: () => void;
     onManageAllTags?: () => void;
     projectOpen?: boolean;
@@ -319,6 +323,10 @@
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={() => runAction(onOpenMutations)}>Mutations</button>
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={() => runAction(onOpenImport)}>Import documents…</button>
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={() => runAction(onManageAllTags)}>Manage all tags…</button>
+
+        <div class="switcher-divider" role="separator"></div>
+        <div class="switcher-section-label">Help</div>
+        <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={() => runAction(onOpenGuides)}>Guides</button>
 
         <div class="switcher-divider" role="separator"></div>
         <div class="switcher-section-label">Layout</div>

@@ -98,6 +98,12 @@ jobs:
       - name: prompt-vocab manifest (regen-clean)
         run: python scripts/gen_prompt_vocab.py --check
 
+      # The in-app guide viewer (#1271) renders guides bundled from docs/ — this
+      # fails if the committed frontend/src/lib/generated/guides.ts wasn't
+      # regenerated after a source guide changed.
+      - name: guides bundle (regen-clean)
+        run: python scripts/gen_guides.py --check
+
       # Escape hatches may shrink, never grow. PR-only: it is a diff-against-base
       # question, and master has no base to compare with.
       - name: exemption ratchet

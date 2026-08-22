@@ -13,6 +13,7 @@
   import PlotTemplates from "@/components/panes/PlotTemplates.svelte";
   import PlotBoardPane from "@/components/panes/PlotBoardPane.svelte";
   import Mutations from "@/components/panes/Mutations.svelte";
+  import GuideView from "@/components/panes/GuideView.svelte";
   import MutationSetEditor from "@/components/editor/body/MutationSetEditor.svelte";
   import {
     openNewMutationSet,
@@ -619,6 +620,10 @@
     workspaceLayout.ensureVisible("mutations");
   }
 
+  function openGuidePane() {
+    workspaceLayout.ensureVisible("guide");
+  }
+
   function openAssistantsPane() {
     void refreshAssistantEntries();
     workspaceLayout.ensureVisible("assistants");
@@ -807,6 +812,7 @@
   onOpenPlotTemplates={openPlotTemplatesPane}
   onOpenPlotBoard={openPlotBoardPane}
   onOpenMutations={openMutationsPane}
+  onOpenGuides={openGuidePane}
   onOpenImport={openImportDocs}
   onManageAllTags={() => (tagsManagerOpen = true)}
   {inheritRows}
@@ -867,6 +873,7 @@
       chats: { title: "Chats", body: chatsBody, actions: chatsActions, view: { kind: "chat", switcher: true }, closable: true, onClose: closeRegion("chats") },
       todo: { title: "TODO", body: todoBody, actions: todoBarActions },
       search: { title: "Search", body: searchBody },
+      guide: { title: "Guides", body: guideBody, closable: true, onClose: closeRegion("guide") },
     }}
   />
 
@@ -988,6 +995,12 @@
     <div class="pane-content schema-list">
       <Mutations />
     </div>
+  {/snippet}
+
+  {#snippet guideBody()}
+    <!-- No .pane-content: GuideView owns its own reading layout (fixed picker +
+         scrolling serif prose), filling the tile via `.ws-doc > *:last-child`. -->
+    <GuideView />
   {/snippet}
 
   {#snippet assistantsActions()}

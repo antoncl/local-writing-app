@@ -1310,6 +1310,7 @@
     {promptEntries}
     {loreEntries}
     availableScenes={flattenStructureScenes(structure?.root)}
+    onFlush={(id) => editorPanes.flushSceneIfDirty(id)}
     onFinalized={(restored) => editorPanes.reconcileSceneFromServer(restored)}
   />
   {#if tagsManagerOpen}

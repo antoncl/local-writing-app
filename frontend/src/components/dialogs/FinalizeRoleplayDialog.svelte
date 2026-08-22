@@ -22,11 +22,16 @@
     promptEntries = [],
     loreEntries = [],
     availableScenes = [],
+    onFlush = undefined,
     onFinalized = undefined,
   }: {
     promptEntries?: PromptEntrySummary[];
     loreEntries?: LoreEntrySummary[];
     availableScenes?: { id: string; title: string }[];
+    // Flush the scene's pending (autosave-debounced) edits to disk before the
+    // projection reads it — the finalize source and the safety-net snapshot must
+    // see the author's latest words, not the ~6s-stale disk copy.
+    onFlush?: (sceneId: string) => Promise<void>;
     onFinalized?: (scene: Scene) => void;
   } = $props();
 
@@ -93,6 +98,9 @@
     phase = "generating";
     abortController = new AbortController();
     try {
+      // Push the editor's latest words to disk first, so the projection (and the
+      // safety-net snapshot it takes on Apply) sees them, not the stale copy.
+      await onFlush?.(scene.id);
       for await (const ev of api.aiGenerateStream(
         {
           template_source: entry.body,

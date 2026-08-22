@@ -113,11 +113,16 @@ class ExtractionEnvelopeTests(unittest.TestCase):
         # Revise title handling, not create's — title is IN the registered set.
         self.assertIn("You may also propose a new", envelope)
         self.assertNotIn("ALWAYS include", envelope)
+        # #1058: title is named once, by its own clause — never ALSO as a
+        # descriptor row, exactly like body above.
+        self.assertNotIn("- title (", envelope)
 
     def test_envelope_uses_per_type_label_and_renders_descriptions(self) -> None:
         # #1009: the intrinsic title field is presented by its per-type label —
         # "Name" on lore — not the shared field def's global "Title", so the
-        # model isn't told to fill a "Title" when drafting a character.
+        # model isn't told to fill a "Title" when drafting a character. #1058
+        # moved that label off a standalone descriptor row and into title's own
+        # clause, so it is now named exactly once.
         # #1004: a field's author description rides into the envelope so the
         # model knows what the field is FOR.
         schema_path = self.root / "metadata.schema.yaml"
@@ -130,8 +135,9 @@ class ExtractionEnvelopeTests(unittest.TestCase):
             creating=True,
             stored=self._stored("lore:character"),
         )
-        self.assertIn("title (Name)", envelope)  # #1009 per-type label wins
-        self.assertNotIn("title (Title)", envelope)
+        self.assertIn('"title" (the Name)', envelope)  # #1009 label, now in the title clause
+        self.assertNotIn("(the Title)", envelope)  # never the generic field-def label
+        self.assertNotIn("- title (", envelope)  # #1058: not also a descriptor row
         self.assertIn("The character's backstory in brief.", envelope)  # #1004
 
     def test_revise_envelope_makes_the_body_conditional(self) -> None:
@@ -247,7 +253,8 @@ class ExtractionEnvelopeTests(unittest.TestCase):
         )
         self.assertIn('"body"', envelope)  # the top-level clause is offered
         self.assertNotIn("- body (", envelope)  # never a fields-descriptor line
-        self.assertIn("- (none beyond title/body)", envelope)  # nothing else was registered
+        # Only body was registered (not title), so the fallback names body alone.
+        self.assertIn("- (none beyond body)", envelope)
 
     def test_create_envelope_omits_title_when_not_registered(self) -> None:
         # Title is a NORMAL registered field now — no structural create-mode
@@ -277,6 +284,20 @@ class ExtractionEnvelopeTests(unittest.TestCase):
         )
         self.assertIn("ALWAYS include", envelope)
         self.assertIn("bio", envelope)
+
+    def test_title_only_stored_set_names_title_once_via_its_clause(self) -> None:
+        # #1058: with title the sole registered field, it is named once — in its
+        # own clause, carrying the per-type label — and the "fields you may set"
+        # list has no descriptor row for it, so the fallback reports title alone.
+        envelope = render_extraction_envelope(
+            self.service,
+            entry_type="lore:character",
+            creating=True,
+            stored=self._stored("lore:character", ids=["title"]),
+        )
+        self.assertIn('ALWAYS include "title" (the Name)', envelope)  # clause carries the label
+        self.assertNotIn("- title (", envelope)  # never also a descriptor row
+        self.assertIn("- (none beyond title)", envelope)  # fallback names title alone
 
 
 class ShippedPromptFieldContractTests(unittest.TestCase):

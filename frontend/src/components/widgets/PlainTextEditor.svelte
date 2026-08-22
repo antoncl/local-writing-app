@@ -12,6 +12,7 @@
   import { onMount, untrack } from "svelte";
   import { Editor } from "@tiptap/core";
   import StarterKit from "@tiptap/starter-kit";
+  import { stateAtDocumentBoundary } from "@/lib/editor-core/documentBoundary";
   import { ImplicitContextHighlight, REBUILD_META } from "@/lib/editor-core/implicitContextHighlight";
   import type { CompiledMatcher } from "@/lib/editor-core/implicitContextMatcher";
 
@@ -195,6 +196,11 @@
         })),
       };
       editor.commands.setContent(doc, false);
+      // An external value push is a boundary, not an edit: rebuild the state so
+      // undo history starts empty. Otherwise a same-id external replacement
+      // (e.g. the chat composer's clear-on-send) lands on the undo stack and
+      // Ctrl+Z resurrects the sent text (#691, the #368 pattern).
+      editor.view.updateState(stateAtDocumentBoundary(editor.state));
       isEmpty = editor.isEmpty;
       lastExternalValue = nextValue || "";
       pendingLocalValue = null;

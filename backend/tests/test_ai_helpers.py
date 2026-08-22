@@ -124,6 +124,21 @@ class InteriorityPrivacyTests(unittest.TestCase):
         parts = _thread_parts([("c1", "She fired.", "")], focus_id="c1", titles={})
         self.assertEqual(parts, [_role_block("assistant", "She fired.")])
 
+    def test_consecutive_focus_beats_keep_interiority_separated(self) -> None:
+        # Two beats in a row for the same character (a normal roleplay flow):
+        # the first beat's interiority must not run into the second's prose.
+        segments = [("c1", "She aims.", "Steady."), ("c1", "She fires.", "Now.")]
+        parts = _thread_parts(segments, focus_id="c1", titles={})
+        self.assertEqual(
+            parts,
+            [
+                _role_block(
+                    "assistant",
+                    "She aims.\n\n[[interiority]]\n\nSteady.\n\nShe fires.\n\n[[interiority]]\n\nNow.",
+                ),
+            ],
+        )
+
     def test_split_body_captures_and_decodes_interiority(self) -> None:
         body = (
             "Narration. "

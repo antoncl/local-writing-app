@@ -1367,7 +1367,12 @@ def _with_interiority(text: str, internal: str) -> str:
     `[[interiority]]`-delimited shape the model emits, so a replayed focus turn
     matches how the beat was generated. No interiority → the external prose
     unchanged.
+
+    The trailing blank line matters when a character has two consecutive beats:
+    the buffer joins coalesced spans directly, so without it one beat's
+    interiority would run into the next beat's prose. It is stripped off the
+    turn as a whole by `flush`, so a lone beat is unaffected.
     """
     if not internal.strip():
         return text
-    return f"{text}\n\n{INTERIORITY_MARKER}\n\n{internal}"
+    return f"{text}\n\n{INTERIORITY_MARKER}\n\n{internal}\n\n"

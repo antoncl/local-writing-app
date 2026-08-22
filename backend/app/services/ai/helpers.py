@@ -798,7 +798,11 @@ def _relevant_lore_ids(
         # use()'d node's neighbours loops its refs and use()s them in the template.
         ids = sorted(_implicit_lore_ids(project, scene, scene_refs, journal) | used)
     # Chokepoint filter: drop any "never"-policy entries that may have arrived via
-    # explicit refs or structural expansion. Single source of authority for that rule.
+    # explicit refs or structural expansion. `never` is excluded from EVERY route —
+    # even an explicit scene ref or use(). `manual_only` is NOT filtered here: it
+    # stays reachable via the scene's own refs and use() (the explicit picker), and
+    # is instead kept out of the AUTOMATIC one-hop fan-out in `_implicit_lore_ids`
+    # (#1024). Single source of authority for the `never` rule.
     never_ids = _never_lore_ids(project)
     if never_ids:
         ids = [eid for eid in ids if eid not in never_ids]
@@ -853,12 +857,21 @@ def _implicit_lore_ids(
             if isinstance(jid, str) and jid:
                 found.add(jid)
 
+    # One structural hop through each found entry's own entity_ref metadata. Like
+    # the alias/textual scans (which run through `_alias_match`), this AUTOMATIC
+    # route honors `manual_only` ("explicit picker only"): a transitive ref to such
+    # an entry is NOT fanned in — it stays reachable via the scene's own refs
+    # (already in `found`) or use() (#1024). `never` needs no filter here: the
+    # chokepoint in `_relevant_lore_ids` is its single enforcement point and drops
+    # it from the final set regardless of route. One lore scan, computed once.
+    manual_only_ids = _manual_only_lore_ids(project)
     expanded = set(found)
     for entry_id in list(found):
         entry = _safe_read_node(project, entry_id)
         if entry is None:
             continue
-        expanded |= _collect_lore_refs_from_metadata(_attr_or_item(entry, "metadata"))
+        hop_refs = _collect_lore_refs_from_metadata(_attr_or_item(entry, "metadata"))
+        expanded |= hop_refs - manual_only_ids
     # Textual depth-1 only runs when the journal is absent; otherwise the
     # journal already carries those expansions.
     if journal is None:
@@ -997,6 +1010,15 @@ def _never_lore_ids(project: ProjectService) -> set[str]:
     from every assembly path — implicit matcher, explicit ref, structural
     expansion. The author has said 'don't put this in front of the model.'"""
     return _lore_ids_with_policy(project, "never")
+
+
+def _manual_only_lore_ids(project: ProjectService) -> set[str]:
+    """Return lore IDs whose context_policy is `manual_only` — "explicit picker
+    only". Kept OUT of the automatic transitive routes: the alias/textual scans
+    exclude it via `_alias_match`, and `_implicit_lore_ids` subtracts this set
+    from the structural one-hop fan-out (#1024). It stays reachable via the
+    scene's own entity_refs and via use() — the explicit picks."""
+    return _lore_ids_with_policy(project, "manual_only")
 
 
 def _lore_ids_with_policy(project: ProjectService, policy: str) -> set[str]:

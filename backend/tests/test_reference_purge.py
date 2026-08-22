@@ -722,5 +722,56 @@ class PurgeStaysInTheCallersProjectTests(unittest.TestCase):
         self.assertNotIn("shared", honor.read_text(encoding="utf-8"))
 
 
+class PurgeReadsBodiesOnlyForChangedNodesTests(ReferencePurgeTestCase):
+    """#823: the purge decides from front matter alone, so the full-file read
+    that pages in a node's body — a chat's whole transcript — happens only for a
+    node that actually changes. Index build reads front matter only
+    (`_read_front_matter_only`); inside the purge, `_read_markdown_with_front_matter`
+    is reached solely to fetch a changed file's body before rewriting it, so a
+    spy on it captures exactly the body reads the fix set out to avoid.
+    """
+
+    def test_unchanged_nodes_never_have_their_body_read(self) -> None:
+        self._write_lore(self.root, "seren", "Seren")
+        self._write_lore(self.root, "honor", "Honor", refs=["seren"])
+        # Reference-bearing nodes that hold NO ref to seren. The old unconditional
+        # full read opened each one's whole file — for a chat, its entire
+        # transcript — only to find nothing to strip.
+        self._write_lore(self.root, "nimitz", "Nimitz")
+        chat = self.service.create_chat_session(CreateChatSessionRequest(title="Talk"))
+        self.service.save_chat_session(
+            chat.id,
+            SaveChatSessionRequest(
+                title="Talk",
+                messages=[{"role": "user", "content": "tell me about seren"}],
+            ),
+        )
+
+        # Delete through the node primitive so the index the purge rebuilds
+        # reflects the gone id (mirrors the delete routes).
+        self.service._delete_node_file(self.root / "lore" / "seren.md")
+
+        bodies_read: list[Path] = []
+        real_reader = self.service._read_markdown_with_front_matter
+
+        def spy(path: Path, *args: object, **kwargs: object):
+            bodies_read.append(Path(path).resolve())
+            return real_reader(path, *args, **kwargs)
+
+        self.service._read_markdown_with_front_matter = spy  # type: ignore[method-assign]
+        try:
+            self.service._purge_references_to({"seren"}, self.root)
+        finally:
+            self.service._read_markdown_with_front_matter = real_reader  # type: ignore[method-assign]
+
+        # The changed node's body IS read, to preserve it when the file is rewritten.
+        self.assertIn((self.root / "lore" / "honor.md").resolve(), bodies_read)
+        # Unchanged reference-bearing nodes never have their body paged in.
+        self.assertNotIn((self.root / "lore" / "nimitz.md").resolve(), bodies_read)
+        self.assertNotIn((self.root / "chats" / f"{chat.id}.md").resolve(), bodies_read)
+        # And the reference was actually stripped from disk (not just healed on read).
+        self.assertNotIn("seren", (self.root / "lore" / "honor.md").read_text(encoding="utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main()

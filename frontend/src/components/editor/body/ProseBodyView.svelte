@@ -30,7 +30,11 @@
   import TableCell from "@tiptap/extension-table-cell";
   import TableHeader from "@tiptap/extension-table-header";
   import TableRow from "@tiptap/extension-table-row";
-  import { stateAtDocumentBoundary } from "@/lib/editor-core/documentBoundary";
+  import {
+    minimalReplaceTransaction,
+    parseHtmlToDoc,
+    stateAtDocumentBoundary,
+  } from "@/lib/editor-core/documentBoundary";
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import { sanitizePastedHtml } from "@/lib/utils/sanitizePastedHtml";
   import {
@@ -317,27 +321,35 @@
     return editorHtmlToSceneMarkdown(editor.getHTML());
   }
 
-  export async function loadScene(nextScene: EditableDocument): Promise<void> {
+  export async function loadScene(
+    nextScene: EditableDocument,
+    mode: "boundary" | "reconcile" = "boundary",
+  ): Promise<void> {
     const sceneId = nextScene.id;
-    // Drop any pending AI suggestion state when changing documents.
     aiSuggestion.reset();
     const html = await sceneMarkdownToHtml(nextScene.body || "");
     if (!editor || scene?.id !== sceneId) return;
-    editor.commands.setContent(html || "<p></p>", false);
+    // #694: a same-id reconcile (embedded-TODO write-back) applies the change as a
+    // minimal-diff transaction (addToHistory:false) so the author's undo trail and
+    // edits outside the changed range survive. Everything else — a true switch,
+    // snapshot restore, roleplay finalize — keeps the #368 boundary that empties
+    // history (an undoable whole-doc reload IS the clobber #368 fixed).
+    // (Residual, #694: keystrokes typed during the flush→reconcile window are still
+    // dropped — closing that needs a baseline + step rebase, out of A1's scope.)
+    const reconcile = mode === "reconcile" && loadedSceneId === sceneId;
+    if (reconcile) {
+      const newDoc = parseHtmlToDoc(html || "<p></p>", editor.state.schema);
+      const tr = minimalReplaceTransaction(editor.state, newDoc);
+      if (tr) editor.view.dispatch(tr);
+    } else {
+      editor.commands.setContent(html || "<p></p>", false);
+    }
     loadedSceneId = sceneId;
     enforceUniqueTodoAnchors();
     syncTodoAnchorDomState(true);
-    // A document load is a state boundary, not an edit: rebuild the state so
-    // undo history starts empty — Ctrl+Z must never walk this buffer back
-    // across what the load replaced (#368). The reachable trigger is the
-    // SAME-id server reconcile (snapshot restore, embedded-TODO write-backs
-    // via reconcileSceneFromServer), where an undoable reload would resurrect
-    // stale content and autosave it. Deliberate cost: a reconcile therefore
-    // also discards the scene's in-session undo trail — the alternatives are
-    // worse (an undoable reload IS the clobber; addToHistory:false leaves the
-    // prior steps as silent no-op undos). Sits after the anchor
-    // normalizations above so their transactions are not undoable either.
-    editor.view.updateState(stateAtDocumentBoundary(editor.state));
+    if (!reconcile) {
+      editor.view.updateState(stateAtDocumentBoundary(editor.state));
+    }
     updateLiveWordCount();
     syncEditorEmpty();
     updateSelectionMenu();
@@ -1040,7 +1052,7 @@
     const markType = editor.state.schema.marks.todoAnchor;
     if (!markType) return false;
 
-    let transaction = editor.state.tr;
+    let transaction = editor.state.tr.setMeta("addToHistory", false);
     editor.state.doc.descendants((node, position) => {
       if (!node.isText) return true;
       for (const mark of node.marks) {

@@ -7,10 +7,27 @@ import { history, redo, undo, undoDepth } from "@tiptap/pm/history";
 import { EditorState, type Transaction } from "@tiptap/pm/state";
 import { schema } from "@tiptap/pm/schema-basic";
 
-import { stateAtDocumentBoundary } from "./documentBoundary";
+import { minimalReplaceTransaction, stateAtDocumentBoundary } from "./documentBoundary";
 
 function stateWithHistory(): EditorState {
   return EditorState.create({ schema, plugins: [history()] });
+}
+
+/** Build a `doc` node with one paragraph per string. */
+function docWithParagraphs(...texts: string[]) {
+  return schema.node(
+    "doc",
+    null,
+    texts.map((text) => schema.node("paragraph", null, [schema.text(text)])),
+  );
+}
+
+/** The position right before paragraph `index`'s closing tag — where "append
+ * to the end of this paragraph's text" lands. */
+function paragraphTextEnd(doc: ReturnType<typeof docWithParagraphs>, index: number): number {
+  let pos = 0;
+  for (let i = 0; i < index; i++) pos += doc.child(i).nodeSize;
+  return pos + doc.child(index).nodeSize - 1;
 }
 
 function type(state: EditorState, text: string): EditorState {
@@ -94,5 +111,56 @@ describe("stateAtDocumentBoundary (#368)", () => {
     const redone = run(undone.state, redo);
     expect(redone.applied).toBe(true);
     expect(redone.state.doc.textContent).toBe("scene A and new words");
+  });
+});
+
+describe("minimalReplaceTransaction (#694)", () => {
+  it("returns null when the documents are already identical", () => {
+    const docA = docWithParagraphs("one", "two", "three");
+    const state = EditorState.create({ schema, doc: docA });
+    const sameDoc = docWithParagraphs("one", "two", "three");
+
+    expect(minimalReplaceTransaction(state, sameDoc)).toBeNull();
+  });
+
+  it("replaces only the changed range", () => {
+    const docA = docWithParagraphs("one", "two", "three");
+    const docB = docWithParagraphs("one", "two", "THREE changed");
+    const state = EditorState.create({ schema, doc: docA });
+
+    const tr = minimalReplaceTransaction(state, docB);
+    expect(tr).not.toBeNull();
+    const next = state.apply(tr!);
+    expect(next.doc.eq(docB)).toBe(true);
+  });
+
+  it("undo trail survives a reconcile — the diff never lands on the undo stack, and undo reverts only the prior user edit", () => {
+    const docA = docWithParagraphs("one", "two", "three");
+    let state = EditorState.create({ schema, doc: docA, plugins: [history()] });
+
+    // A user edit to paragraph ONE — a normal, undoable transaction.
+    const p1End = paragraphTextEnd(state.doc, 0);
+    state = state.apply(state.tr.insertText(" EDITED", p1End));
+    expect(undoDepth(state)).toBe(1);
+
+    // The reconcile: paragraph THREE changes server-side (e.g. a TODO toggle
+    // strips a marker). Apply it the same way ProseBodyView does — a
+    // minimal-diff transaction dispatched via a plain state.apply.
+    const docB = docWithParagraphs("one EDITED", "two", "three RECONCILED");
+    const tr = minimalReplaceTransaction(state, docB);
+    expect(tr).not.toBeNull();
+    state = state.apply(tr!);
+
+    // The diff itself must NOT land on the undo stack.
+    expect(undoDepth(state)).toBe(1);
+    expect(state.doc.eq(docB)).toBe(true);
+
+    // Undo reverts the paragraph-ONE edit; paragraph THREE's reconciled
+    // change remains — the #694 guarantee that a TODO toggle no longer
+    // discards the author's undo trail.
+    const undone = run(state, undo);
+    expect(undone.applied).toBe(true);
+    expect(undone.state.doc.child(0).textContent).toBe("one");
+    expect(undone.state.doc.child(2).textContent).toBe("three RECONCILED");
   });
 });

@@ -90,7 +90,7 @@ class TodoActions {
       for (const item of completedEmbedded) {
         await editorPanes.flushSceneIfDirty(item.scene_id);
         const scene = await api.deleteEmbeddedTodo(item.scene_id, item.todo_id);
-        await editorPanes.reconcileSceneFromServer(scene);
+        await editorPanes.reconcileSceneFromServer(scene, "reconcile");
       }
       if (completedEmbedded.length > 0) await refreshEmbeddedTodos();
       const deletedCount = completedTodos.length + completedEmbedded.length;
@@ -125,7 +125,7 @@ class TodoActions {
     await this.run(async () => {
       await editorPanes.flushSceneIfDirty(sceneId);
       const scene = await mutate();
-      await editorPanes.reconcileSceneFromServer(scene);
+      await editorPanes.reconcileSceneFromServer(scene, "reconcile");
       await refreshEmbeddedTodos();
     });
   }

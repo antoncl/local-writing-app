@@ -135,6 +135,18 @@ export class ChatCommitController {
   draftDropped = $state<string[]>([]);
   creatingDraft = $state(false);
 
+  // #986: the chat this in-flight commit belongs to, snapshotted at entry. The
+  // extraction spans seconds; if the user switches chat mid-flight the host feeds
+  // a different active chat, so the write-backs (cost, staged_set edge, subject
+  // stamp) would land on the WRONG chat and silently corrupt it. They no-op when
+  // this token has moved. Safe as a single field because only one commit runs at
+  // a time (the `committing` / `creatingDraft` guards).
+  private commitOriginChatId = "";
+
+  private chatUnchanged(): boolean {
+    return this.deps.getChatId() === this.commitOriginChatId;
+  }
+
   constructor(private readonly deps: ChatCommitDeps) {}
 
   /** A chat carrying a `commit` (ADR-0054 §2) extracts its result to a
@@ -181,7 +193,10 @@ export class ChatCommitController {
     garbledMessage: string,
   ): Promise<AIEntryPatch | null> {
     const result = await extract();
-    if (typeof result.cost_usd === "number") await this.deps.addTurnCost(result.cost_usd);
+    // #986: the chat switched during the extraction — attributing this
+    // extraction's cost to the now-active chat is the corruption; skip it.
+    if (typeof result.cost_usd === "number" && this.chatUnchanged())
+      await this.deps.addTurnCost(result.cost_usd);
     if (!result.ok || !result.patch) {
       this.deps.setError(result.error || "The model returned nothing to commit.");
       return null;
@@ -243,6 +258,7 @@ export class ChatCommitController {
       this.deps.setError("This brainstorm has no target entry to commit to.");
       return;
     }
+    this.commitOriginChatId = this.deps.getChatId();
     await this.runExtractCommit(this.reviseExtractHost(entryId));
   }
 
@@ -298,6 +314,7 @@ export class ChatCommitController {
   // the writer later PLACES it in prose (§5, S4b). Nothing overwrites the entry.
   async stageToPendingSet(): Promise<void> {
     if (this.running || this.committing || !this.canStage) return;
+    this.commitOriginChatId = this.deps.getChatId();
     await this.runExtractCommit(
       this.stageExtractHost(this.commitTargetEntryId, this.subjectEntryType),
     );
@@ -328,6 +345,11 @@ export class ChatCommitController {
     entryType: string,
     patch: AIEntryPatch,
   ): Promise<void> {
+    // #986: the chat switched during the extraction — the host now feeds a
+    // different chat, so minting a set + `onStaged` would clobber THAT chat's
+    // singular staged_set edge. Abort silently; the origin chat is no longer in
+    // the pane, and a stray notice would land on the wrong one.
+    if (!this.chatUnchanged()) return;
     const rows = patchToRows(patch);
     if (rows.length === 0) {
       this.deps.setNotice("The model proposed no changes to stage.");
@@ -384,6 +406,7 @@ export class ChatCommitController {
   // Nothing is written until the author clicks Create.
   async commitDraft(): Promise<void> {
     if (this.running || this.committing || !this.isCreateBrainstorm) return;
+    this.commitOriginChatId = this.deps.getChatId();
     await this.runExtractCommit(this.draftExtractHost(this.draftEntryType));
   }
 
@@ -424,6 +447,7 @@ export class ChatCommitController {
   async createDraft(): Promise<void> {
     if (!this.draftProposal || this.creatingDraft) return;
     const proposal = this.draftProposal;
+    this.commitOriginChatId = this.deps.getChatId();
     this.creatingDraft = true;
     try {
       // Null only when no entry was minted (run() swallows the error and the
@@ -431,11 +455,12 @@ export class ChatCommitController {
       // failure still returns the id, so an entry that exists always clears
       // the draft — a surviving Create button would mint a duplicate.
       const created = await treeActions.createNodeFromDraft(this.draftEntryType, proposal);
-      // A chat switch while the create was in flight reset this controller
-      // (applyChatSession → reset()): the host now feeds a different chat, so
-      // the subject write-back would stamp THAT chat with this brainstorm's
-      // entry. Skip it — the draft is already gone with the old chat's state.
-      if (this.draftProposal !== proposal) return;
+      // #986: a chat switch while the create was in flight — whether or not it
+      // also reset this controller (applyChatSession → reset()) — means the host
+      // now feeds a different chat, so the subject write-back would stamp THAT
+      // chat with this brainstorm's entry. Skip it via the shared chat-id token;
+      // the draft is already gone with the old chat's state.
+      if (!this.chatUnchanged()) return;
       if (created) {
         // The entry exists, so the draft is spent regardless of how the stamp
         // goes. Note reset() releases creatingDraft while onCreated is still

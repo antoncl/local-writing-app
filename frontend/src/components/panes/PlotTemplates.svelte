@@ -116,7 +116,13 @@
       <!-- ADR-0049: a shipped Library template is used in place, cloned to own, or
            hidden (§2). All three affordances key on `is_library`, not the label —
            an owned clone has nothing to clone or hide. A revealed hidden row
-           (under "Show hidden") swaps clone+hide for a single un-hide. -->
+           (under "Show hidden") swaps clone+hide for a single un-hide.
+           TRIPWIRE (#723): this Library-shelf UI — the clone/hide/unhide block
+           and the "Show N hidden" footer + .hidden-toggle style — is duplicated
+           near-verbatim in Prompts.svelte. Kept as two copies on purpose: with
+           only two tenants the shared-widget boundary is a guess. Adding a THIRD
+           Library surface? Extract a shared LibraryShelf widget first and route
+           all three through it — see #723. -->
       {#if entry.is_library}
         {#if hiddenSet.has(entry.id)}
           <button

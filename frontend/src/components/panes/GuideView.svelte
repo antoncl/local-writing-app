@@ -1,17 +1,23 @@
 <script lang="ts">
   // The in-app guide viewer (#1271). Renders the bundled first-party guides
   // (generated from docs/ by scripts/gen_guides.py) as a reading surface inside
-  // a region. Guides are trusted first-party markdown, so a plain marked.parse
-  // is enough — no sanitiser (that is the untrusted-chat path, chatMessageRender).
-  import { marked } from "marked";
+  // a region. Guides are trusted first-party markdown, so a plain parse is
+  // enough — no sanitiser (that is the untrusted-chat path, chatMessageRender).
+  //
+  // Own Marked instance (defaults: GFM on), not the shared global singleton, so
+  // guide rendering is immune to any global marked config elsewhere — the same
+  // isolation chatMessageRender uses.
+  import { Marked } from "marked";
 
   import { guides, type Guide } from "@/lib/generated/guides";
+
+  const md = new Marked();
 
   let selectedId = $state(guides[0]?.id ?? "");
   const selected = $derived<Guide | undefined>(
     guides.find((guide) => guide.id === selectedId) ?? guides[0],
   );
-  const html = $derived(selected ? (marked.parse(selected.markdown) as string) : "");
+  const html = $derived(selected ? (md.parse(selected.markdown) as string) : "");
 </script>
 
 <div class="guide-view">

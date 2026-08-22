@@ -6,6 +6,7 @@
     // just that lib slice on top of the ES2022 target + DOM defaults.
     "lib": ["ES2022", "ES2024.Promise", "DOM", "DOM.Iterable"],
     "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
     "strict": true,
     "isolatedModules": true,
     "useDefineForClassFields": true,

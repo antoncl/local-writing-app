@@ -388,20 +388,6 @@ describe("ChatCommitController — create mode", () => {
     expect(deps.onCreated).toHaveBeenCalledWith("lore_new", "Vale");
   });
 
-  it("skips the subject stamp when the controller was reset mid-create (chat switch)", async () => {
-    // Switching chat sessions while the create is in flight runs
-    // applyChatSession → commit.reset(); the resumed createDraft must not
-    // stamp the newly-hosted chat with this brainstorm's entry.
-    const { c, deps } = createController();
-    c.draftProposal = { body: "x", fields: {} };
-    createFromDraft.mockImplementationOnce(async () => {
-      c.reset();
-      return { id: "lore_new", title: "X" };
-    });
-    await c.createDraft();
-    expect(deps.onCreated).not.toHaveBeenCalled();
-  });
-
   it("reset clears a pending draft", () => {
     const { c } = createController();
     c.draftProposal = { body: "x", fields: {} };
@@ -411,6 +397,73 @@ describe("ChatCommitController — create mode", () => {
     expect(c.draftProposal).toBeNull();
     expect(c.draftDropped).toEqual([]);
     expect(c.creatingDraft).toBe(false);
+  });
+});
+
+// #986: the extraction spans seconds — if the user switches chat in the pane
+// mid-flight, the host feeds a DIFFERENT active chat, and a write-back
+// (cost / staged_set edge / subject stamp) minted from the stale extraction
+// would land on the wrong chat. Each commit path snapshots `getChatId()` at
+// entry and no-ops its write-back(s) when it's moved by the time the
+// extraction resolves. Simulated here by flipping a mutable `getChatId`
+// return value from inside the extraction/create mock, the way the real
+// switch would race it.
+describe("ChatCommitController — #986 chat switch during an in-flight commit", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("stage: a chat switch mid-extraction skips the set write-back and the cost", async () => {
+    let activeChatId = "chat_1";
+    const { c, deps } = makeController({ getChatId: () => activeChatId });
+    c.output = { handler: "extract_to_node", commit: { review: "visual_diff" } };
+    c.inputDrafts = { entry: "lore-1" };
+    c.subjectEntryType = "lore:character";
+    extractPatch.mockImplementation(async () => {
+      activeChatId = "chat_2"; // the user switched chat while this extraction ran
+      return okResult({ fields: { condition: "werewolf" } }, 0.03);
+    });
+
+    await c.stageToPendingSet();
+
+    expect(createSet).not.toHaveBeenCalled();
+    expect(deps.onStaged).not.toHaveBeenCalled();
+    expect(deps.addTurnCost).not.toHaveBeenCalled();
+  });
+
+  it("commitToEntry: a chat switch mid-extraction skips the cost attribution", async () => {
+    // The revise publish itself has no chat write-back (it only touches the
+    // cross-pane entryBrainstorm store), so cost is the only gated effect.
+    let activeChatId = "chat_1";
+    const { c, deps } = makeController({ getChatId: () => activeChatId });
+    c.output = { handler: "extract_to_node", commit: { review: "visual_diff" } };
+    c.inputDrafts = { entry: "lore-1" };
+    extractPatch.mockImplementation(async () => {
+      activeChatId = "chat_2";
+      return okResult({ fields: { bio: "x" } }, 0.05);
+    });
+
+    await c.commitToEntry();
+
+    expect(deps.addTurnCost).not.toHaveBeenCalled();
+  });
+
+  it("createDraft: a chat switch mid-create skips the subject stamp; no switch still stamps it", async () => {
+    let activeChatId = "chat_1";
+    const { c, deps } = makeController({ getChatId: () => activeChatId });
+    c.output = { handler: "extract_to_node", commit: { review: "visual_diff" } };
+    c.inputDrafts = { entry_type: "lore:character" };
+
+    c.draftProposal = { body: "a life", fields: { name: "Vale" } };
+    createFromDraft.mockImplementationOnce(async () => {
+      activeChatId = "chat_2"; // switched while the create was in flight
+      return { id: "lore_new", title: "Vale" };
+    });
+    await c.createDraft();
+    expect(deps.onCreated).not.toHaveBeenCalled();
+
+    c.draftProposal = { body: "a life", fields: { name: "Vale" } };
+    createFromDraft.mockResolvedValueOnce({ id: "lore_new2", title: "Vale" });
+    await c.createDraft();
+    expect(deps.onCreated).toHaveBeenCalledWith("lore_new2", "Vale");
   });
 });
 

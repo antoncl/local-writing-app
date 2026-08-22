@@ -22,9 +22,9 @@ All of these before anything else:
   for the version (`0.9.0`, `1.0.0`, …) is the ledger — drive it to zero, don't
   eyeball it.
 - **Gates are green on `master` at the real head SHA.** Open the actual CI run
-  for the commit you will tag — `gh pr checks` can show a green table for an
-  earlier SHA (see `reference_gh_checks_can_report_a_stale_sha` in memory). A
-  green *table* is not a green *run*.
+  for the commit you will tag — `gh pr checks` can report a green table for an
+  *earlier* SHA, so filter the runs by head SHA and check per job. A green
+  *table* is not a green *run*.
 - **The exemption ratchet is clean** — no new grandfathered entries, widened
   ignores, or added skips snuck in (`scripts/check_exemptions.py`).
 - **Pre-release backlog sweep.** Walk the *open* issues (`gh issue list --state

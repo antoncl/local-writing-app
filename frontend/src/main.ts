@@ -1,6 +1,5 @@
 import { mount } from "svelte";
 import App from "./App.svelte";
-import "katex/dist/katex.min.css";
 import "./lib/icons/generated/tabler-subset.css";
 import "./styles.css";
 

@@ -5,7 +5,7 @@
   scroll-to-bottom during streaming exactly as before.
 -->
 <script lang="ts">
-  import { renderChatContent } from "@/lib/utils/chatMessageRender";
+  import { renderChatContent, containsMath, ensureKatexLoaded } from "@/lib/utils/chatMessageRender";
   import { formatCostEur } from "@/lib/utils/money";
   import type { ChatMessage } from "@/lib/types";
 
@@ -18,6 +18,28 @@
   }
 
   let { chatHistory, chatRunning, assistantName = "Assistant", scrollEl = $bindable(null) }: Props = $props();
+
+  let katexReady = $state(false);
+
+  // Load KaTeX only when a visible message contains math, then flip the signal
+  // so the transcript re-renders with real math (see `render` below).
+  $effect(() => {
+    const needsMath = chatHistory.some(
+      (m) => containsMath(m.content) || containsMath(m.thinking),
+    );
+    if (needsMath && !katexReady) {
+      void ensureKatexLoaded().then(() => {
+        katexReady = true;
+      });
+    }
+  });
+
+  // Read `katexReady` so the `{@html}` blocks below re-run once KaTeX finishes
+  // loading (Svelte 5 tracks the reactive read during template render).
+  function render(text: string): string {
+    void katexReady;
+    return renderChatContent(text);
+  }
 </script>
 
 <div class="cbv-messages" bind:this={scrollEl} aria-label="Chat history">
@@ -32,14 +54,14 @@
       {#if message.thinking}
         <details class="cbv-thinking" open={chatRunning && i === chatHistory.length - 1 && !message.content}>
           <summary>Thinking</summary>
-          <div class="cbv-message-rendered">{@html renderChatContent(message.thinking)}</div>
+          <div class="cbv-message-rendered">{@html render(message.thinking)}</div>
         </details>
       {/if}
       {#if chatRunning && i === chatHistory.length - 1 && message.role === "assistant" && !message.content && !message.thinking}
         <div class="cbv-message-content cbv-typing">…thinking</div>
       {:else if message.content}
         {#if message.role === "assistant"}
-          <div class="cbv-message-content cbv-message-rendered">{@html renderChatContent(message.content)}</div>
+          <div class="cbv-message-content cbv-message-rendered">{@html render(message.content)}</div>
         {:else}
           <div class="cbv-message-content">{message.content}</div>
         {/if}

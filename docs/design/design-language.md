@@ -190,6 +190,12 @@ lexicon grows by PR, never ad hoc:
 | `◐ / ☀ / ☾` | theme cycle (system / light / dark — stateful) |
 | `▤` | view — a rendered arrangement of the node set (Views switcher) |
 | `⤢` | zoom — maximize a workspace tile to fill the shell / restore it (toggle; accent-tinted while active — a shell affordance, see below) |
+| eye (stroked, inline SVG) | interiority — a character's private inner state on a roleplay beat (ADR-0070). Used identically as a per-beat reveal handle and as a shell toggle (accent-tinted while active). Kept clear of `▤` view. |
+
+The one **inline-SVG** entry is the interiority eye: the meaning wanted a
+stroked "look inside" mark no single Unicode glyph carried without colliding
+with `▤` view, and one inline path costs nothing against the glyph-atlas budget
+(§ above) — so it is added here by PR like any other, not spent ad hoc.
 
 Every glyph control carries an `aria-label` and a tooltip — the tooltip is the
 word. Compounds (`+>`) stay banned: if no single lexicon glyph is self-evident

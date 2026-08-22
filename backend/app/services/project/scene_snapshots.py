@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
-from app.models import Snapshot, SnapshotDetail, SnapshotList, Witness
+from app.models import SaveSceneRequest, Snapshot, SnapshotDetail, SnapshotList, Witness
 from app.models.snapshots import UNREADABLE_WITNESS_VERSION
 from app.services.atomic_io import atomic_write_bytes
 from app.services.migrations import CURRENT_VERSION
@@ -438,6 +438,44 @@ class SceneSnapshotsMixin:
         self._update_scene_title_in_structure(node_id, str(front_matter.get("title") or node_id))
         self._remove_missing_scene_todo_anchors(node_id, body)
         return self.read_scene(node_id)
+
+    def finalize_scene(
+        self, scene_id: str, body: str, dynamic_context: list[str] | None = None
+    ) -> Scene:
+        """Project a roleplay scene to its finished prose (ADR-0070 S3), in place.
+
+        Like `restore_snapshot`, this captures FIRST and overwrites second, in one
+        operation — a failure between the two leaves an extra snapshot and an
+        untouched scene, never the reverse. The projection is destructive (the
+        scene is the only record of the beats + interiority; there is no node
+        holding a richer copy), so the snapshot is the safety net.
+
+        The capture is `kept`, not `thinned`: a finalize is a deliberate,
+        once-per-scene act, and its safety net must never be evicted by the
+        keep-last-five policy the way an ordinary session snapshot can be.
+
+        `body` is the AI-produced clean prose; everything else on the scene
+        (title, status, entry_type, metadata — including `pov`) is preserved. The
+        write goes through `save_scene`, so front matter, the manuscript title,
+        the node index and TODO anchors update exactly as an ordinary save.
+        """
+        root = self._require_project()
+        path = self._path_for_node_id(scene_id, "manuscript")
+        node_id = self._node_id_for_path(path)
+        current = self.read_scene(node_id)
+        # Safety net BEFORE the destructive projection (see docstring).
+        self._capture(root, node_id, path, retention="kept", dynamic_context=dynamic_context)
+        return self.save_scene(
+            scene_id,
+            SaveSceneRequest(
+                title=current.title,
+                body=body,
+                status=current.status,
+                entry_type=current.entry_type,
+                metadata=current.metadata,
+                dynamic_context=dynamic_context,
+            ),
+        )
 
     def _atomic_write_bytes(self, path: Path, data: bytes) -> None:
         """`_atomic_write` for bytes. Restore must not go through the text

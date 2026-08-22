@@ -805,6 +805,18 @@ export const api = {
       { method: "POST" },
     );
   },
+  /** Finalize a roleplay scene (ADR-0070 S3): capture a `kept` safety-net
+   *  snapshot, then replace the body with the AI-produced clean prose — in ONE
+   *  call, the same #395 reason `restoreSnapshot` is (a client-side
+   *  capture-then-write can half-fail). The AI generation ran beforehand through
+   *  the ordinary generate path, so the finalize prompt stays author-
+   *  customizable; this only commits the reviewed result. */
+  finalizeScene(sceneId: string, body: string, dynamicContext?: string[]) {
+    return request<Scene>(`/scenes/${encodeURIComponent(sceneId)}/finalize`, {
+      method: "POST",
+      body: JSON.stringify({ body, ...(dynamicContext ? { dynamic_context: dynamicContext } : {}) }),
+    });
+  },
   /** Pin an automatic snapshot: flip `retention` from thinned to kept so it
    *  survives thinning without re-capturing it (ADR-0043 Amendment 1).
    *  Idempotent — pinning an already-kept snapshot returns it unchanged. */

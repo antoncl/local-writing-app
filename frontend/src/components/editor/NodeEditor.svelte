@@ -108,6 +108,10 @@
     // reload. The pane store owns the document lifecycle; the card does not.
     onFlushScene?: (() => Promise<void>) | undefined;
     onSceneRestored?: ((restored: import("@/lib/types").Scene) => void | Promise<void>) | undefined;
+    // Roleplay presence (ADR-0070 S3): fires when this scene's editor gains or
+    // loses roleplay beats, so the shell (App → ≡ menu) can enable/disable the
+    // "Finalize roleplay…" action. `hasInteriorityBeats` otherwise dead-ends here.
+    onInteriorityChange?: ((hasBeats: boolean) => void) | undefined;
     // AI-review freeze (#634 / ADR-0046). A lore brainstorm proposal makes the
     // entry a frozen save-on-Done transaction: the host asks the pane controller
     // to suppress autosave for the review's life (committer non-null) or resume it
@@ -147,6 +151,7 @@
     onResetField = undefined,
     onFlushScene = undefined,
     onSceneRestored = undefined,
+    onInteriorityChange = undefined,
     onReviewFreeze = undefined,
     onFlushReviewCommit = undefined
   }: Props = $props();
@@ -211,6 +216,12 @@
   // to settle.
   const snapshots = new SnapshotStripController();
   let snapshotParked = $derived(documentKind === "manuscript" && snapshots.parked !== null);
+
+  // Forward roleplay-beat presence to the shell (ADR-0070 S3) so App can gate the
+  // ≡-menu Finalize action. hasInteriorityBeats is bound out of ProseBodyView.
+  $effect(() => {
+    onInteriorityChange?.(hasInteriorityBeats);
+  });
 
   $effect(() => {
     snapshots.flushScene = onFlushScene ?? null;

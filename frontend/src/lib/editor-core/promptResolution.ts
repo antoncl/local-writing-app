@@ -10,6 +10,7 @@ import { coerceInputValue } from "@/lib/utils/promptInputs";
 import {
   inlineDestinationFor,
   outputHandlerFor,
+  FINALIZE_OUTPUT_HANDLER,
   type InlineDestination,
 } from "@/lib/editor-core/outputHandlers";
 import { pickerMembership } from "@/lib/utils/pickerSources";
@@ -56,6 +57,11 @@ export function surfaceForStrategy(
 ): PromptSurface | null {
   if (!strategy) return null;
   const output = strategy.output ?? null;
+  // The finalize projection (ADR-0070 S3) is a recognized behaviour but a SCENE
+  // ACTION invoked from its own modal — it has no editor discovery surface, so
+  // it is excluded from the slash menu / toolbar / chat picker here. Checked
+  // before the registry so it is honestly "no editor surface", not "misconfigured".
+  if (output?.handler === FINALIZE_OUTPUT_HANDLER) return null;
   const handler = outputHandlerFor(output);
   if (handler) return handler.key === "inline" ? inlineDestinationFor(output) : "conversation";
   return output?.handler ? null : "conversation";
@@ -135,6 +141,19 @@ export function promptEntriesForSurface(
   surface: PromptSurface,
 ): PromptEntrySummary[] {
   return filterPromptRoster(ctx, (entry) => promptSurfaceFor(ctx, entry) === surface);
+}
+
+// A prompt is a finalize prompt (ADR-0070 S3) iff it declares the finalize output
+// handler. Customization is "pick your prompt": the built-in and any clone or
+// hand-authored finalize prompt all carry the handler and all list together.
+export function isFinalizePrompt(entry: PromptEntrySummary): boolean {
+  return entry.context_strategy?.output?.handler === FINALIZE_OUTPUT_HANDLER;
+}
+
+// The finalize prompts as a discovery roster (hidden built-ins dropped, sorted by
+// title) — the finalize picker modal's list.
+export function finalizePromptRoster(ctx: PromptResolutionContext): PromptEntrySummary[] {
+  return filterPromptRoster(ctx, isFinalizePrompt);
 }
 
 // The brainstorm prompts — those declaring a `commit` (ADR-0054 §2) — as a

@@ -62,6 +62,11 @@ COMPUTED_FUNCTIONS: tuple[str, ...] = AUTHORABLE_COMPUTED_FUNCTIONS + BUILTIN_CO
 HANDLER_KEYS: tuple[str, ...] = (
     "inline",
     "extract_to_node",
+    # A scene action, not an editor-surface prompt (ADR-0070 S3): the roleplay
+    # finalize/cleanup projection. Recognized here (so it validates and lists in
+    # the finalize picker), but deliberately absent from the frontend editor
+    # handler registry — it is invoked from its own modal, never the slash menu.
+    "finalize_scene",
 )
 
 # The inline handler's destination — WHERE in the prose editor it streams (ADR-0065 §3):

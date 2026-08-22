@@ -116,6 +116,12 @@
       "summary": "The scene's POV character (`lore:character`) or `None`."
     },
     {
+      "name": "roleplay_beats",
+      "kind": "helper",
+      "signature": "roleplay_beats(scene)",
+      "summary": "`str` — the roleplay scene laid out **beat by beat** for a finalize/cleanup prompt: each beat's speaker, its observable text, and (decoded) its private interiority. POV-agnostic; the finalize prompt decides whose interiority survives via `pov(scene)`. A scene with no beat markers returns its body unchanged."
+    },
+    {
       "name": "story_so_far",
       "kind": "helper",
       "signature": "story_so_far(scene)",

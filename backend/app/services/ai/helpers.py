@@ -545,6 +545,7 @@ def register_helpers(
     env.globals["character_turns"] = (
         lambda scene, character: _character_turns(project, schema, scene, character)
     )
+    env.globals["roleplay_beats"] = lambda scene: _roleplay_beats(project, scene)
     env.globals["is_a"] = lambda node, entry_type: _is_a(project, schema, node, entry_type)
     # The spoiler-gated plot-board context (ADR-0048 S8b) — a plot-card brainstorm
     # renders `{{ plot_context(as_of=e.id) }}` so the model reasons over the board
@@ -1376,3 +1377,36 @@ def _with_interiority(text: str, internal: str) -> str:
     if not internal.strip():
         return text
     return f"{text}\n\n{INTERIORITY_MARKER}\n\n{internal}\n\n"
+
+
+def _roleplay_beats(project: ProjectService, scene: Any) -> str:
+    """Lay out a roleplay scene's beats for a finalize/cleanup prompt (ADR-0070
+    S3): each beat's speaker, its observable text, and — decoded — its private
+    interiority, so the finalize prompt can project the scene to one character's
+    POV (keeping that character's interiority as narration, cutting the rest).
+
+    Unlike `character_turns`, this is POV-agnostic and not a chat thread: it emits
+    one readable block naming every character's beats and interiority, and the
+    finalize prompt decides whose interiority survives via `pov(scene)`. A scene
+    with no markers (not roleplayed) returns its body unchanged.
+    """
+    body = _scene_body_text(scene)
+    segments = _split_body_by_character_markers(body)
+    if not any(seg[0] for seg in segments):
+        return body
+    ids = {seg[0] for seg in segments if seg[0]}
+    titles = _character_titles(project, ids)
+    lines: list[str] = []
+    for char_id, text, internal in segments:
+        text = text.strip()
+        if not char_id:
+            if text:
+                lines.append(f"[Narration] {text}")
+            continue
+        name = titles.get(char_id, char_id)
+        if text:
+            lines.append(f"[{name}] {text}")
+        internal = internal.strip()
+        if internal:
+            lines.append(f"[{name} — interiority] {internal}")
+    return "\n\n".join(lines)

@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   dependencyAdvisoryText,
+  finalizePromptRoster,
   hidePromptEntries,
   inheritedInputsFrom,
+  isFinalizePrompt,
   promptEntriesForSurface,
   promptEntriesOfferedOn,
   promptOffersOn,
   promptOnAccept,
+  promptSurfaceFor,
   resolvePromptPositionalArgs,
   type PromptResolutionContext,
 } from "@/lib/editor-core/promptResolution";
@@ -70,6 +73,42 @@ describe("promptOnAccept — the declared accept-time mark-stamp (#954)", () => 
     const plainInline = prompt("p", "prompt:general", { output: { handler: "inline" } });
     expect(promptOnAccept(ctx(), plainInline)).toBeNull();
     expect(promptOnAccept(ctx(), null)).toBeNull();
+  });
+});
+
+describe("finalize prompts (ADR-0070 S3)", () => {
+  const finalize = prompt("fin", "prompt:general", { output: { handler: "finalize_scene" } });
+  const finalizeClone = prompt("fin-mine", "prompt:general", {
+    output: { handler: "finalize_scene" },
+  });
+  const inlinePrompt = prompt("inl", "prompt:general", { output: { handler: "inline" } });
+
+  it("identifies a prompt by the finalize output handler", () => {
+    expect(isFinalizePrompt(finalize)).toBe(true);
+    expect(isFinalizePrompt(inlinePrompt)).toBe(false);
+  });
+
+  it("has NO editor discovery surface — it is a modal-invoked scene action", () => {
+    // Excluded from every editor surface so it never leaks into the slash menu;
+    // the ordinary inline prompt beside it still discovers normally.
+    expect(promptSurfaceFor(ctx(), finalize)).toBeNull();
+    const both = ctx({ promptEntries: [finalize, inlinePrompt] });
+    expect(promptEntriesForSurface(both, "cursor").map((p) => p.id)).toEqual(["inl"]);
+    expect(promptEntriesForSurface(both, "conversation")).toEqual([]);
+  });
+
+  it("finalizePromptRoster lists every finalize prompt (built-in + clones), sorted", () => {
+    const roster = finalizePromptRoster(
+      ctx({ promptEntries: [inlinePrompt, finalizeClone, finalize] }),
+    );
+    expect(roster.map((p) => p.id)).toEqual(["fin", "fin-mine"]);
+  });
+
+  it("drops hidden built-in finalize prompts from the roster", () => {
+    const roster = finalizePromptRoster(
+      ctx({ promptEntries: [finalize, finalizeClone], hiddenPromptIds: new Set(["fin"]) }),
+    );
+    expect(roster.map((p) => p.id)).toEqual(["fin-mine"]);
   });
 });
 

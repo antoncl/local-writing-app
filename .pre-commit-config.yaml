@@ -65,7 +65,7 @@ repos:
         # Whole-invariant check over fixed files, not a per-file check — it
         # ignores the staged list, so trigger it whenever any input moves.
         pass_filenames: false
-        files: ^(backend/app/services/ai/(helpers|templates)\.py|docs/prompts/reference\.md|scripts/(check_prompt_vocab_docs|prompt_vocab)\.py)$
+        files: ^(backend/app/services/ai/(helpers|templates|preview)\.py|docs/prompts/reference\.md|scripts/(check_prompt_vocab_docs|prompt_vocab)\.py)$
 
       - id: prompt-vocab-manifest
         name: prompt-vocab manifest (promptVocab.json regenerated from reference.md, #1270)

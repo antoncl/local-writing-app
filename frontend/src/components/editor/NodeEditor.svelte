@@ -549,8 +549,8 @@
   // reloadScene re-seeds the TipTap doc from a server scene (the controller
   // calls it to reconcile an open pane after an out-of-band embedded-TODO
   // mutation, GH #45); highlightEmbeddedTodo scrolls to a marker.
-  export function reloadScene(nextScene: EditableDocument) {
-    return proseBodyView?.loadScene(nextScene);
+  export function reloadScene(nextScene: EditableDocument, mode: "boundary" | "reconcile" = "boundary") {
+    return proseBodyView?.loadScene(nextScene, mode);
   }
 
   export function highlightEmbeddedTodo(todoId: string) {

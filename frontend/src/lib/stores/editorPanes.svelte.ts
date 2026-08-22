@@ -87,7 +87,7 @@ export type MetadataReloadSignal = { token: number; metadata: EntryMetadata; sta
 // editor-pane loop. Embedded-TODO *mutations* no longer route through here — they
 // go through intentful backend endpoints and reconcile the open pane (GH #45).
 interface EditorPaneComponentHandle {
-  reloadScene: (scene: EditableDocument) => void | Promise<void>;
+  reloadScene: (scene: EditableDocument, mode?: "boundary" | "reconcile") => void | Promise<void>;
   highlightEmbeddedTodo: (todoId: string) => void;
 }
 
@@ -1463,7 +1463,7 @@ class EditorPanesController {
     return allSaved;
   }
 
-  async reconcileSceneFromServer(scene: Scene): Promise<void> {
+  async reconcileSceneFromServer(scene: Scene, mode: "boundary" | "reconcile" = "boundary"): Promise<void> {
     const pane = this.paneForScene(scene.id);
     if (!pane) return;
     this.#autosave.cancel(pane.id);
@@ -1482,7 +1482,7 @@ class EditorPanesController {
           }
         : candidate,
     );
-    await this.editorPaneComponents[pane.id]?.reloadScene(scene);
+    await this.editorPaneComponents[pane.id]?.reloadScene(scene, mode);
   }
 
   highlightEmbeddedTodoInOpenPane(sceneId: string, todoId: string): void {

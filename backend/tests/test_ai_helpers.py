@@ -17,6 +17,7 @@ from app.services.ai.helpers import (
     _relevant_lore_ids,
     _role_block,
     _scene_body_text,
+    _split_body_by_character_markers,
     _thread_parts,
     _tier_lore_ids,
     create_environment_for_project,
@@ -74,11 +75,11 @@ class ThreadPartsTests(unittest.TestCase):
 
     def test_routes_by_focus_and_coalesces_same_role(self) -> None:
         segments = [
-            (None, "Narr. "),
-            ("c1", "Hi "),
-            ("c1", "there "),
-            ("c2", "Yo"),
-            (None, " end"),
+            (None, "Narr. ", ""),
+            ("c1", "Hi ", ""),
+            ("c1", "there ", ""),
+            ("c2", "Yo", ""),
+            (None, " end", ""),
         ]
         parts = _thread_parts(segments, focus_id="c1", titles={"c2": "Bob"})
         self.assertEqual(
@@ -91,11 +92,52 @@ class ThreadPartsTests(unittest.TestCase):
         )
 
     def test_other_character_falls_back_to_id_without_title(self) -> None:
-        parts = _thread_parts([("c9", "hey")], focus_id="c1", titles={})
+        parts = _thread_parts([("c9", "hey", "")], focus_id="c1", titles={})
         self.assertEqual(parts, [_role_block("user", "[c9]: hey")])
 
     def test_whitespace_only_turn_is_dropped(self) -> None:
-        self.assertEqual(_thread_parts([(None, "   ")], focus_id="c1", titles={}), [])
+        self.assertEqual(_thread_parts([(None, "   ", "")], focus_id="c1", titles={}), [])
+
+
+class InteriorityPrivacyTests(unittest.TestCase):
+    """ADR-0070: a beat's interiority is per-character private. The focus
+    character's own interiority is folded back into their `assistant` turns;
+    every other character's is stripped from their `[Name]: ` turns.
+    """
+
+    def test_focus_character_keeps_own_interiority(self) -> None:
+        segments = [("c1", "She fired.", "I can't miss now.")]
+        parts = _thread_parts(segments, focus_id="c1", titles={})
+        self.assertEqual(
+            parts,
+            [_role_block("assistant", "She fired.\n\n[[interiority]]\n\nI can't miss now.")],
+        )
+
+    def test_other_character_interiority_is_stripped(self) -> None:
+        # Bill's private thought must never reach Annie's (c1's) reconstruction.
+        segments = [("c2", "He tips his hat.", "She'll never outdraw me.")]
+        parts = _thread_parts(segments, focus_id="c1", titles={"c2": "Bill"})
+        self.assertEqual(parts, [_role_block("user", "[Bill]: He tips his hat.")])
+        self.assertNotIn("outdraw", parts[0])
+
+    def test_no_interiority_leaves_focus_prose_unchanged(self) -> None:
+        parts = _thread_parts([("c1", "She fired.", "")], focus_id="c1", titles={})
+        self.assertEqual(parts, [_role_block("assistant", "She fired.")])
+
+    def test_split_body_captures_and_decodes_interiority(self) -> None:
+        body = (
+            "Narration. "
+            "<!-- character:id=c1;internal=I%20can%27t%20miss. -->She fired.<!-- /character -->"
+            "<!-- character:id=c2 -->He grins.<!-- /character -->"
+        )
+        self.assertEqual(
+            _split_body_by_character_markers(body),
+            [
+                (None, "Narration. ", ""),
+                ("c1", "She fired.", "I can't miss."),
+                ("c2", "He grins.", ""),
+            ],
+        )
 
 
 class _Obj:

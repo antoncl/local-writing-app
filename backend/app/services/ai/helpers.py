@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import re
 from typing import TYPE_CHECKING, Any
+from urllib.parse import unquote
 from xml.sax.saxutils import escape as xml_escape
 from xml.sax.saxutils import quoteattr
 
@@ -1173,37 +1174,54 @@ def _collect_scene_text(
 # ----- Character-thread reconstruction --------------------------------------
 
 # Matches the comment-marker pair the frontend writes when accepting a
-# roleplay continuation (see frontend/src/markdown.ts). The wrapper is
-# preserved across save/reload as plain markdown; we re-discover it
-# here to split the body into per-character segments at send time.
+# roleplay continuation (see frontend/src/lib/utils/markdown.ts). The wrapper
+# is preserved across save/reload as plain markdown; we re-discover it here to
+# split the body into per-character segments at send time.
+#
+# A beat may also carry its character's PRIVATE interiority (ADR-0070) as an
+# optional `;internal=<url-encoded>` field on the opening marker — hidden inner
+# state bound to the beat. It is included only on the FOCUS character's own
+# turns and stripped from every other character's (see `_thread_parts`).
 CHARACTER_SPAN_PATTERN = re.compile(
-    r"<!--\s*character:id=([A-Za-z0-9_-]+)\s*-->([\s\S]*?)<!--\s*/character\s*-->",
+    r"<!--\s*character:id=([A-Za-z0-9_-]+)(?:;internal=(\S*))?\s*-->"
+    r"([\s\S]*?)<!--\s*/character\s*-->",
 )
 
+# The delimiter separating a beat's external prose from its interiority in the
+# generation stream and in a replayed focus turn. ADR-0070: keep in lockstep
+# with `INTERIORITY_MARKER` in frontend/src/lib/editor-core/interiority.ts and
+# the literal in backend/app/builtin_library/prompts/roleplay.md.
+INTERIORITY_MARKER = "[[interiority]]"
 
-def _split_body_by_character_markers(body: str) -> list[tuple[str | None, str]]:
-    """Return [(character_id | None, text), …] for the body.
 
-    Text outside any character marker becomes a (None, text) segment.
+def _split_body_by_character_markers(
+    body: str,
+) -> list[tuple[str | None, str, str]]:
+    """Return [(character_id | None, text, internal), …] for the body.
+
+    Text outside any character marker becomes a (None, text, "") segment.
     Text inside `<!-- character:id=X -->…<!-- /character -->` becomes
-    (X, text). Empty segments are dropped.
+    (X, text, internal), where `internal` is the decoded interiority payload
+    from the optional `;internal=` field ("" when absent). Empty text segments
+    are dropped.
     """
     if not body:
         return []
-    segments: list[tuple[str | None, str]] = []
+    segments: list[tuple[str | None, str, str]] = []
     cursor = 0
     for match in CHARACTER_SPAN_PATTERN.finditer(body):
         before = body[cursor:match.start()]
         if before:
-            segments.append((None, before))
+            segments.append((None, before, ""))
         char_id = match.group(1)
-        text = match.group(2)
+        internal = unquote(match.group(2)) if match.group(2) else ""
+        text = match.group(3)
         if text:
-            segments.append((char_id, text))
+            segments.append((char_id, text, internal))
         cursor = match.end()
     tail = body[cursor:]
     if tail:
-        segments.append((None, tail))
+        segments.append((None, tail, ""))
     return segments
 
 
@@ -1305,6 +1323,12 @@ def _thread_parts(
     focus character's spans become `assistant`, other characters' become `user`
     prefixed `[Name]: `, untagged narration is plain `user`. Consecutive
     same-role segments coalesce into one turn.
+
+    Interiority (ADR-0070) is per-character private: the focus character's own
+    interiority is folded back into their `assistant` turns (in the same
+    `[[interiority]]`-delimited shape the model produces, so the replayed
+    conversation is self-consistent), while every OTHER character's interiority
+    is dropped from their `[Name]: ` turns — no cross-character leak.
     """
     parts: list[str] = []
     current_role: str | None = None
@@ -1318,11 +1342,12 @@ def _thread_parts(
                 parts.append(_role_block(current_role, joined))
         buffer = []
 
-    for char_id, text in segments:
+    for char_id, text, internal in segments:
         if char_id and char_id == focus_id:
             role = "assistant"
-            content = text
+            content = _with_interiority(text, internal)
         elif char_id:
+            # Another character's beat — interiority stripped (privacy).
             role = "user"
             content = f"[{titles.get(char_id, char_id)}]: {text}"
         else:
@@ -1335,3 +1360,14 @@ def _thread_parts(
         buffer.append(content)
     flush()
     return parts
+
+
+def _with_interiority(text: str, internal: str) -> str:
+    """Fold a focus beat's interiority back onto its external prose in the same
+    `[[interiority]]`-delimited shape the model emits, so a replayed focus turn
+    matches how the beat was generated. No interiority → the external prose
+    unchanged.
+    """
+    if not internal.strip():
+        return text
+    return f"{text}\n\n{INTERIORITY_MARKER}\n\n{internal}"

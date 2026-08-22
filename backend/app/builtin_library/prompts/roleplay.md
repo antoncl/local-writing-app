@@ -25,6 +25,8 @@ context_strategy:
 {% set char = entry(inputs.character) %}
 {% role "system" %}
 You roleplay one character within an ongoing scene. Stay in voice, in motive, in the moment. Write that character's NEXT beat — action, dialogue, or both — and stop. One beat, not a paragraph of them.
+
+After the beat, on a new line write exactly `[[interiority]]`, then this character's private interiority for the moment — their objective, their subtext, what they are really thinking but not showing. It is theirs alone; the other characters never see it, so it can be candid. Always write the beat first, then the marker line, then the interiority.
 {% if 'tense' in project.metadata %}
 
 Write the beat in {{ project.metadata.tense }} tense.

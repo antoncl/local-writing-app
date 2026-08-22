@@ -36,7 +36,12 @@ turndown.addRule("characterMark", {
     const element = node as HTMLElement;
     const id = element.dataset.character;
     if (!id) return content;
-    return `<!-- character:id=${id} -->${content}<!-- /character -->`;
+    // ADR-0070: a beat may carry its character's private interiority as an
+    // optional `;internal=<url-encoded>` field. Absent when empty, so plain
+    // beats keep their old marker shape.
+    const internal = element.dataset.internal ?? "";
+    const suffix = internal ? `;internal=${encodeURIComponent(internal)}` : "";
+    return `<!-- character:id=${id}${suffix} -->${content}<!-- /character -->`;
   },
 });
 turndown.addRule("mutationMark", {
@@ -174,9 +179,15 @@ function markEmbeddedTodos(markdown: string): string {
 
 function markEmbeddedCharacters(markdown: string): string {
   return markdown.replace(
-    /<!--\s*character:id=([A-Za-z0-9_-]+)\s*-->([\s\S]*?)<!--\s*\/character\s*-->/g,
-    (_match, characterId: string, content: string) => {
-      return `<span data-character="${escapeAttribute(characterId)}">${content}</span>`;
+    /<!--\s*character:id=([A-Za-z0-9_-]+)(?:;internal=(\S*))?\s*-->([\s\S]*?)<!--\s*\/character\s*-->/g,
+    (_match, characterId: string, internal: string | undefined, content: string) => {
+      // ADR-0070: decode the optional interiority payload onto data-internal so
+      // the character mark carries it back into the editor (kept hidden — no UI
+      // until S2). Mirrors the turndown rule above.
+      const internalAttr = internal
+        ? ` data-internal="${escapeAttribute(decodeNote(internal))}"`
+        : "";
+      return `<span data-character="${escapeAttribute(characterId)}"${internalAttr}>${content}</span>`;
     },
   );
 }

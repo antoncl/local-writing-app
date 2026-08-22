@@ -46,12 +46,12 @@ class LoreAndPromptTests(MetadataValidationBase):
             schema.entry_types["lore:base"].own_fields,
             ["aliases", "tags", "related_entries", "color", "context_policy"],
         )
-        # Test fixture adds home_place to character (see _add_home_place_to_character_schema).
-        # The seed ships character with `character_cost` (Phase C2 cross-kind
-        # cost dispatch); the fixture layer adds home_place on top.
+        # Character ships a reasonable out-of-the-box field set (#1316):
+        # role + pronouns + home_place, plus character_cost (Phase C2
+        # cross-kind cost dispatch).
         self.assertEqual(
             schema.entry_types["lore:character"].own_fields,
-            ["character_cost", "home_place"],
+            ["role", "pronouns", "home_place", "character_cost"],
         )
         self.assertEqual(schema.fields["aliases"].type, "multi_select")
         self.assertEqual(schema.fields["tags"].type, "tags")

@@ -114,7 +114,7 @@ express**. v1 leaves:
 | **type** | `entry_type = lore:character` (exact) | live |
 | **descendants-of** | `lore:character` and every entry_type inheriting from it (`parent:` chains, `schema.py` inheritance resolution) | live |
 | **tag** | tagged `gotham` | live |
-| **field predicate** | `pov = honor`, `status ≠ draft`, `locations includes kitchen` | live |
+| **field predicate** | `pov = honor`, `status ≠ draft`, `characters includes honor` | live |
 | **hand-picked** | an explicit node list, chosen via NodePicker | **static** |
 
 Notes:

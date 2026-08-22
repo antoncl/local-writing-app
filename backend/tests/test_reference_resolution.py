@@ -22,22 +22,8 @@ class ReferenceResolutionTests(unittest.TestCase):
         self.root = self.base / "test"
         self.service = ProjectService.created_at(self.root, "Test Project")
         declare_full_chain(self.service, self.root, self.base)
-        # See MetadataValidationTests for the rationale — home_place is
-        # a test-only field on Character.
-        schema_path = self.root / "metadata.schema.yaml"
-        data = self.service._read_yaml(schema_path)
-        data.setdefault("fields", {})["home_place"] = {
-            "name": "Home Place",
-            "type": "entity_ref",
-            "target": {"entry_type": "lore:location"},
-        }
-        character = data["entry_types"].get("lore:character") or {}
-        fields = list(character.get("fields") or [])
-        if "home_place" not in fields:
-            fields.insert(0, "home_place")
-            character["fields"] = fields
-            data["entry_types"]["lore:character"] = character
-        self.service._write_yaml(schema_path, data)
+        # `home_place` is a built-in entity_ref field on Character (#1316),
+        # used below to exercise the ref-graph / backlink machinery.
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
@@ -169,7 +155,7 @@ class ReferenceResolutionTests(unittest.TestCase):
                 base_revision=scene.revision,
                 status=scene.status,
                 entry_type="manuscript:scene",
-                metadata={"characters": [seren.id], "locations": [taverna.id]},
+                metadata={"characters": [seren.id], "location": taverna.id},
             ),
         )
 
@@ -185,7 +171,7 @@ class ReferenceResolutionTests(unittest.TestCase):
 
         taverna_backlinks = self.service._backlinks_to_targets({taverna.id})
         sources = {(link.id, link.field_id) for link in taverna_backlinks}
-        self.assertEqual(sources, {(seren.id, "home_place"), (scene_id, "locations")})
+        self.assertEqual(sources, {(seren.id, "home_place"), (scene_id, "location")})
 
     def test_backlinks_returns_empty_for_unknown_id(self) -> None:
         self.assertEqual(

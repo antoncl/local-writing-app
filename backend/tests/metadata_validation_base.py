@@ -25,11 +25,8 @@ class MetadataValidationBase(unittest.TestCase):
         self.root = self.world / "test"
         self.service = ProjectService.created_at(self.root, "Test Project")
         self._set_projects_base_folder(self.base)
-        # Several tests use `home_place` as a single-ref field on
-        # Character to exercise validation + ref-graph behaviour. The
-        # seed no longer ships it (was cruft polluting real entries);
-        # re-add it locally so tests stay hermetic.
-        self._add_home_place_to_character_schema(self.root)
+        # `home_place` is a built-in entity_ref field on Character (#1316);
+        # tests that exercise validation / ref-graph behaviour use it directly.
         first_scene_path = next((self.root / "scenes").glob("*.md"))
         self.scene_id = self.service._read_front_matter_only(
             first_scene_path, strict=True
@@ -40,22 +37,6 @@ class MetadataValidationBase(unittest.TestCase):
 
     def _set_projects_base_folder(self, path: Path) -> None:
         declare_full_chain(self.service, self.root, path)
-
-    def _add_home_place_to_character_schema(self, root: Path) -> None:
-        schema_path = root / "metadata.schema.yaml"
-        data = self.service._read_yaml(schema_path)
-        data.setdefault("fields", {})["home_place"] = {
-            "name": "Home Place",
-            "type": "entity_ref",
-            "target": {"entry_type": "lore:location"},
-        }
-        character = data["entry_types"].get("lore:character") or {}
-        fields = list(character.get("fields") or [])
-        if "home_place" not in fields:
-            fields.insert(0, "home_place")
-            character["fields"] = fields
-            data["entry_types"]["lore:character"] = character
-        self.service._write_yaml(schema_path, data)
 
     def _schema_with_output(self, output: object) -> MetadataSchema:
         prompt: dict[str, object] = {

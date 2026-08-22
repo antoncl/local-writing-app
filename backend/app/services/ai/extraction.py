@@ -86,12 +86,14 @@ def render_extraction_envelope(
     revise built-ins' unfiltered loop); one that doesn't (the scene-summary
     prompt's `f.id == "summary"` loop) gets no body clause and no title clause
     at all — the registered set narrows EVERYTHING, including those two.
-    `body` is excluded from the per-field "fields you may set" descriptor list
-    even when registered: it commits as the envelope's own top-level `"body"`
-    key, not a fields entry (mirrors the pre-S2 contract's `f.id != "body"`
-    filter). Reuses `FieldContract` (`store`/`render`) for the descriptor
-    formatting, so the lines here are byte-identical in shape to what the
-    chat-start system message already showed the model (ADR-0067 §3).
+    `body` and `title` are both excluded from the per-field "fields you may set"
+    descriptor list even when registered: `body` commits as the envelope's own
+    top-level `"body"` key (mirrors the pre-S2 contract's `f.id != "body"`
+    filter), and `title` is named once by its own clause — carrying its per-type
+    label (#1009) — rather than a second time as a descriptor row (#1058). The
+    remaining fields reuse `FieldContract` (`store`/`render`) for the descriptor
+    formatting, so their lines are byte-identical in shape to what the chat-start
+    system message already showed the model (ADR-0067 §3).
     """
     stored_ids = {f.get("id") for f in stored if isinstance(f, dict)}
     body_allowed = "body" in stored_ids
@@ -99,11 +101,24 @@ def render_extraction_envelope(
     body_description = _body_description(project_service) if body_allowed else None
 
     fc = FieldContract()
+    title_label: str | None = None
     for f in stored:
+        # title and body each commit via their own dedicated clause below, never
+        # also as a "fields you may set" descriptor — listing them there too would
+        # name the field to the model twice (#1058). body commits as the top-level
+        # "body" key; title via the ALWAYS-include / may-propose clause, which now
+        # carries title's per-type label (#1009), so dropping its descriptor row
+        # loses nothing.
+        if isinstance(f, dict) and f.get("id") == "title":
+            title_label = f.get("label")
+            continue
         if isinstance(f, dict) and f.get("id") == "body":
             continue
         fc.store(f)
     descriptors = fc.render
+    # The label reads naturally per type ("Name" for a character); when it is the
+    # generic "Title", the parenthetical would just echo the key, so omit it.
+    title_hint = f' (the {title_label})' if title_label and title_label != "Title" else ""
 
     shape = (
         '{"body": "<the markdown body>", "fields": {"<field id>": <value>}}'
@@ -134,7 +149,7 @@ def render_extraction_envelope(
     fields_clause = '- "fields": '
     if creating:
         if title_allowed:
-            fields_clause += 'ALWAYS include "title". '
+            fields_clause += f'ALWAYS include "title"{title_hint}. '
         fields_clause += "Add any other field the conversation set, "
     else:
         fields_clause += "include a field ONLY when the conversation changed it, "
@@ -147,12 +162,17 @@ def render_extraction_envelope(
     )
     if not creating:
         if title_allowed:
-            fields_clause += ' You may also propose a new "title".'
+            fields_clause += f' You may also propose a new "title"{title_hint}.'
         fields_clause += " Use {} if nothing changed."
     lines.append(fields_clause)
     lines.append("")
     lines.append("The fields you may set:")
-    lines.append(descriptors if descriptors else f"- (none{' beyond title/body' if body_allowed else ''})")
+    if descriptors:
+        lines.append(descriptors)
+    else:
+        offered = [name for name, ok in (("title", title_allowed), ("body", body_allowed)) if ok]
+        beyond = f" beyond {'/'.join(offered)}" if offered else ""
+        lines.append(f"- (none{beyond})")
     lines.append("")
     lines.append(
         "Output only that JSON object. It is parsed, validated against the "

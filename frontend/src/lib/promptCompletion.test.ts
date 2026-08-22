@@ -68,8 +68,10 @@ describe("makePromptCompletionSource", () => {
     expect(result).toContain("entry");
   });
 
-  it("offers nothing manifest-driven in a non-expression tag argument", () => {
-    expect(run("{% include ", { explicit: true })).toBeNull();
+  it("completes an expression inside control-flow tags (if / for / set)", () => {
+    expect(labels(run("{% if sc"))).toContain("scene");
+    expect(labels(run("{% for x in fu"))).toContain("full_outline");
+    expect(labels(run("{% set y = en"))).toContain("entry");
   });
 
   it("offers filters after a pipe", () => {

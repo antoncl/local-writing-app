@@ -97,16 +97,15 @@ export function makePromptCompletionSource(getInputs: () => PromptInputDefinitio
         const word = context.matchBefore(/\w*$/);
         return { from: word ? word.from : context.pos, options: TAG_OPTIONS, validFor: VALID_WORD };
       }
-      // Past the keyword — dispatch on which tag it is. `role` takes a fixed
-      // enum, so offer only its values (never the whole expression vocabulary).
-      // `do` wraps an expression, so it falls through to expression completion;
-      // other tags (`include`, control flow) get nothing manifest-driven here.
+      // Past the keyword — `role` takes a fixed enum, so offer only its values,
+      // never the whole expression vocabulary. Every other tag argument wraps an
+      // expression (`do`, `if`, `for`, `set`, …), so it falls through to
+      // expression completion below.
       const keyword = head.match(/^\{%\s*(\w+)/)?.[1];
       if (keyword === "role") {
         const partial = context.matchBefore(/"?\w*/);
         return { from: partial ? partial.from : context.pos, options: ROLE_OPTIONS, validFor: VALID_ROLE };
       }
-      if (keyword !== "do") return null;
     }
 
     // `value | <filter>`.

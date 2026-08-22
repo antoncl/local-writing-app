@@ -13,11 +13,22 @@ Conventions:
 
 Adding a migration:
 1. Bump CURRENT_VERSION.
-2. Append `(version, "short description", migrator_fn)` to MIGRATIONS.
+2. Append `RootMigration(version, "short description", migrator_fn)` to MIGRATIONS.
 3. `migrator_fn(root: Path) -> None` mutates files in place; raise on failure.
 
 Defensive reads are still the default for additive changes. Only add a migration
 when failing to migrate would break something downstream.
+
+Two shapes (ADR-0071 §1): `RootMigration` is for project-shaped changes — folders,
+cross-file moves, `*.structure.yaml`, the schema — its `fn` mutates the project
+root. `DocumentMigration` is for content transforms of one document in isolation
+— its `fn` takes/returns a `MigratableDocument` and never sees the root or
+sibling files. Reach for `DocumentMigration` when the content that needs
+migrating doesn't always live under the project tree: a snapshot restored later
+(ADR-0043) only has the document body to migrate against, so only the document
+shape can reach it. `migrate_document` applies the `DocumentMigration` subladder
+to a single document; the project-wide pass that runs it over every owned
+document is slice 2 (#366).
 """
 
 from __future__ import annotations
@@ -25,8 +36,10 @@ from __future__ import annotations
 import logging
 import zipfile
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -47,6 +60,45 @@ SKIP_FROM_BACKUP = {".migration-backups", ".cache", "snapshots"}
 logger = logging.getLogger(__name__)
 
 MigrationFn = Callable[[Path], None]
+
+
+@dataclass(frozen=True)
+class MigratableDocument:
+    """One document's content in isolation (ADR-0071 §1): the entire parsed
+    front-matter mapping + the markdown body — exactly what
+    _read_markdown_with_front_matter yields. A DocumentMigrationFn transforms this
+    and nothing else: no root, no filesystem, no sibling documents."""
+
+    front_matter: dict[str, Any]
+    body: str
+
+
+DocumentMigrationFn = Callable[[MigratableDocument], MigratableDocument]
+
+
+@dataclass(frozen=True)
+class RootMigration:
+    """A project-shaped step (folders, cross-file moves, *.structure.yaml, the
+    schema): fn mutates the project ROOT in place (ADR-0071 §1)."""
+
+    version: int
+    description: str
+    fn: MigrationFn
+
+
+@dataclass(frozen=True)
+class DocumentMigration:
+    """A content step: fn transforms ONE document in isolation (ADR-0071 §1/§3).
+    Must be idempotent (re-applying to an already-migrated document is a no-op —
+    ADR-0071 §2) and authored against the KNOWN format at its version transition,
+    never reading the live schema."""
+
+    version: int
+    description: str
+    fn: DocumentMigrationFn
+
+
+MigrationStep = RootMigration | DocumentMigration
 
 
 def _create_snippets_folder(root: Path) -> None:
@@ -77,7 +129,6 @@ def _create_research_structure(root: Path) -> None:
     )
 
 
-# Each tuple: (target_version, description, function)
 # Migrations run in registry order. Version numbers are history and are never
 # reused or renumbered, so a retired step leaves a gap. Two gaps now: 3 (create
 # project.md) was removed with #343 — it wrote a constant `id: project`, which
@@ -86,9 +137,9 @@ def _create_research_structure(root: Path) -> None:
 # that would run it are recreated from scratch, so it had already served its
 # purpose and was pure carrying cost. A folder sitting at a retired version is
 # carried forward by the remaining steps and the final stamp-to-CURRENT_VERSION.
-MIGRATIONS: list[tuple[int, str, MigrationFn]] = [
-    (2, "create snippets/ folder for snippet node kind", _create_snippets_folder),
-    (5, "create research/ folder and research.structure.yaml", _create_research_structure),
+MIGRATIONS: list[MigrationStep] = [
+    RootMigration(2, "create snippets/ folder for snippet node kind", _create_snippets_folder),
+    RootMigration(5, "create research/ folder and research.structure.yaml", _create_research_structure),
 ]
 
 
@@ -117,8 +168,19 @@ def write_project_version(root: Path, version: int) -> None:
     manifest_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
 
-def pending_migrations(current: int) -> list[tuple[int, str, MigrationFn]]:
-    return [m for m in MIGRATIONS if current < m[0] <= CURRENT_VERSION]
+def pending_migrations(current: int) -> list[MigrationStep]:
+    return [m for m in MIGRATIONS if current < m.version <= CURRENT_VERSION]
+
+
+def migrate_document(doc: MigratableDocument, from_version: int) -> MigratableDocument:
+    """Apply the document-scoped subladder from `from_version` to CURRENT_VERSION,
+    in version order, over one body — no root, no service (ADR-0071 §4). The
+    isolated entry point behind the snapshot restore (slice 3) and the project
+    document pass (slice 2)."""
+    for step in MIGRATIONS:
+        if isinstance(step, DocumentMigration) and from_version < step.version <= CURRENT_VERSION:
+            doc = step.fn(doc)
+    return doc
 
 
 def backup_project(root: Path, from_version: int) -> Path:
@@ -169,14 +231,23 @@ def migrate_project(root: Path) -> list[str]:
         backup_project(root, current)
 
     applied: list[str] = []
-    for target_version, description, migrator in pending:
-        try:
-            migrator(root)
-        except Exception:
-            logger.exception("Migration to v%s failed", target_version)
-            raise
-        write_project_version(root, target_version)
-        applied.append(f"v{target_version}: {description}")
+    for step in pending:
+        if isinstance(step, RootMigration):
+            try:
+                step.fn(root)
+            except Exception:
+                logger.exception("Migration to v%s failed", step.version)
+                raise
+        else:  # DocumentMigration
+            # Document-scoped steps are run by the ProjectService document pass over
+            # every owned document (ADR-0071 §4, slice 2), not by this root runner.
+            # None may be registered before that pass lands — fail loud if one is.
+            raise RuntimeError(
+                f"DocumentMigration v{step.version} cannot run in migrate_project — "
+                "the ProjectService document pass (ADR-0071 §4, #366 slice 2) is not wired yet."
+            )
+        write_project_version(root, step.version)
+        applied.append(f"v{step.version}: {step.description}")
 
     # No migrations ran but the stamp was behind (e.g., pre-framework project
     # under CURRENT_VERSION=1 with empty registry). Stamp it forward so future

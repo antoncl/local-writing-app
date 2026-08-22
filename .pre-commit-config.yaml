@@ -75,6 +75,13 @@ repos:
         pass_filenames: false
         files: ^(docs/prompts/reference\.md|scripts/(gen_prompt_vocab|prompt_vocab)\.py|frontend/src/lib/generated/promptVocab\.json)$
 
+      - id: guides-bundle
+        name: guides bundle (guides.ts regenerated from docs/, #1271)
+        entry: python scripts/gen_guides.py --check
+        language: system
+        pass_filenames: false
+        files: ^(docs/custom-fields\.md|scripts/gen_guides\.py|frontend/src/lib/generated/guides\.ts)$
+
       # The advisory `ruff-complexity` hook was retired in #76: C901 and
       # PLR0912/13/15 are now in the blocking `select` in backend/pyproject.toml,
       # so the `ruff` hook above enforces them like any other rule. No separate

@@ -23,6 +23,7 @@ OUT = REPO / "frontend" / "src" / "lib" / "generated" / "guides.ts"
 # The guides surfaced in-app, in display order. Each is {id, title, source doc}.
 # #1272 adds the consolidated prompt-scripting guide here.
 GUIDES = [
+    {"id": "writing-prompts", "title": "Writing prompts", "source": "docs/prompts/guide.md"},
     {"id": "custom-fields", "title": "Custom fields", "source": "docs/custom-fields.md"},
 ]
 

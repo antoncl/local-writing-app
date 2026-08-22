@@ -135,16 +135,28 @@ class AnthropicProfile(ProviderProfile):
     def extract_usage(self, raw_response: Any, model_id: str) -> UsageMetrics:
         # Anthropic's response.usage:
         #   input_tokens (excludes cache reads/writes — fresh full-rate input)
-        #   cache_creation_input_tokens (written this call)
+        #   cache_creation_input_tokens (written this call — all TTLs)
         #   cache_read_input_tokens (served from cache, discounted)
         #   output_tokens
+        # With the extended-cache-TTL beta the write total also breaks down by
+        # TTL under `cache_creation` (`ephemeral_1h_input_tokens` /
+        # `ephemeral_5m_input_tokens`). We read the 1h portion so `compute_cost`
+        # can bill it at the higher premium (#814); absent (older SDK / no beta)
+        # it stays 0 and every write bills at the 5m rate, as before.
         usage = getattr(raw_response, "usage", None)
         if usage is None:
             return UsageMetrics()
+        breakdown = getattr(usage, "cache_creation", None)
+        cache_write_1h = (
+            int(getattr(breakdown, "ephemeral_1h_input_tokens", 0) or 0)
+            if breakdown is not None
+            else 0
+        )
         return UsageMetrics(
             input_tokens=int(getattr(usage, "input_tokens", 0) or 0),
             cached_input_tokens=int(getattr(usage, "cache_read_input_tokens", 0) or 0),
             cache_write_tokens=int(getattr(usage, "cache_creation_input_tokens", 0) or 0),
+            cache_write_tokens_1h=cache_write_1h,
             output_tokens=int(getattr(usage, "output_tokens", 0) or 0),
         )
 

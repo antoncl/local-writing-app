@@ -89,14 +89,21 @@ class UsageMetrics:
     input_tokens: int = 0
     cached_input_tokens: int = 0
     cache_write_tokens: int = 0
+    # Subset of `cache_write_tokens` written at the 1-hour TTL (Anthropic prices
+    # these at ~2x input vs ~1.25x for 5-minute). 0 when the provider doesn't
+    # report a per-TTL breakdown, in which case every write bills at the 5m rate
+    # (the prior, understating behaviour). Never exceeds `cache_write_tokens`.
+    cache_write_tokens_1h: int = 0
     output_tokens: int = 0
 
 
-# Anthropic's 5min-TTL cache-write premium is 1.25x input rate; 1hour is 2x.
-# We bake in the conservative 5min default — overestimating writes is safer
-# than underestimating, and explicit-TTL refinement can come later when the
-# UI actually distinguishes them.
+# Anthropic cache-write premiums over the base input rate: a 5-minute-TTL write
+# is ~1.25x, a 1-hour-TTL write ~2x. A chat writes the stable system prefix at
+# 1h and the volatile journal at 5m, so billing every write at 1.25x understates
+# any turn that (re)writes the 1h prefix (#814). `cache_write_tokens_1h` carries
+# the 1h portion; the remainder is billed at the 5m rate.
 _CACHE_WRITE_MULTIPLIER = 1.25
+_CACHE_WRITE_MULTIPLIER_1H = 2.0
 
 
 def compute_cost(usage: UsageMetrics, descriptor: ModelDescriptor) -> float | None:
@@ -124,10 +131,15 @@ def compute_cost(usage: UsageMetrics, descriptor: ModelDescriptor) -> float | No
         if descriptor.cache_read_multiplier is not None
         else 1.0
     )
+    # Cache writes split by TTL: the 1h portion at the higher premium, the rest
+    # (5m) at the lower one. `cache_write_tokens_1h` is 0 when the provider gives
+    # no per-TTL breakdown, so this reduces to the all-5m rate (#814).
+    cache_write_5m = max(usage.cache_write_tokens - usage.cache_write_tokens_1h, 0)
     return (
         usage.input_tokens * cost_in
         + usage.cached_input_tokens * cost_in * cache_read_mult
-        + usage.cache_write_tokens * cost_in * _CACHE_WRITE_MULTIPLIER
+        + cache_write_5m * cost_in * _CACHE_WRITE_MULTIPLIER
+        + usage.cache_write_tokens_1h * cost_in * _CACHE_WRITE_MULTIPLIER_1H
         + usage.output_tokens * cost_out
     )
 

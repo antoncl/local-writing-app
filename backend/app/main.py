@@ -16,6 +16,7 @@ import atexit
 import traceback
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from importlib.metadata import version as _pkg_version
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -51,7 +52,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     node_index_gate.flush()
 
 
-app = FastAPI(title="Local Writing Service", version="0.8.0", lifespan=lifespan)
+# Version is derived from the installed package metadata (backend/pyproject.toml),
+# never hand-copied here — one backend literal, so a release bump can't leave the
+# OpenAPI docs reporting a stale version. `scripts/check_version_sync.py` holds
+# that literal equal to frontend/package.json (#1299).
+app = FastAPI(
+    title="Local Writing Service",
+    version=_pkg_version("local-writing-service"),
+    lifespan=lifespan,
+)
 app.add_middleware(
     CORSMiddleware,
     # Local-first: the backend only ever binds 127.0.0.1 (never network-exposed),

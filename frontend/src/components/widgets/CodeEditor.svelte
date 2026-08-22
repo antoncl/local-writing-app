@@ -6,6 +6,7 @@
   import { jinja2 } from "@codemirror/legacy-modes/mode/jinja2";
   import { json as jsonLang } from "@codemirror/lang-json";
   import { lintGutter, setDiagnostics, type Diagnostic } from "@codemirror/lint";
+  import type { CompletionSource } from "@codemirror/autocomplete";
 
   let {
     value = $bindable(),
@@ -25,12 +26,18 @@
     // Compartment. `EditorView.editable.of(false)` also drops the caret so the
     // surface reads as a viewer, not a focusable-but-inert field.
     readOnly = false,
+    // Optional CodeMirror completion source, registered on the jinja2 language
+    // only (#30). Captured at mount; a stable source that reads live state
+    // through closures (e.g. the prompt's declared inputs) keeps completions
+    // current without re-registering.
+    completionSource = undefined,
   }: {
     value: string;
     language?: "jinja2" | "json" | "markdown" | "plain";
     lineWrapping?: boolean;
     diagnostics?: { line: number; col?: number; severity: "error" | "warning"; message: string }[];
     readOnly?: boolean;
+    completionSource?: CompletionSource;
   } = $props();
 
   let host: HTMLDivElement;
@@ -45,7 +52,13 @@
   onMount(() => {
     const extensions = [basicSetup, lintGutter()];
     if (language === "jinja2") {
-      extensions.push(StreamLanguage.define(jinja2));
+      const jinjaLanguage = StreamLanguage.define(jinja2);
+      extensions.push(jinjaLanguage);
+      // basicSetup already enables the autocompletion UI; this registers our
+      // source for the jinja language so it drives it (no second autocompletion).
+      if (completionSource) {
+        extensions.push(jinjaLanguage.data.of({ autocomplete: completionSource }));
+      }
     } else if (language === "json") {
       extensions.push(jsonLang());
     }

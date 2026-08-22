@@ -24,6 +24,7 @@
   import { onDestroy } from "svelte";
   import type { Snippet } from "svelte";
   import CodeEditor from "@/components/widgets/CodeEditor.svelte";
+  import { makePromptCompletionSource } from "@/lib/promptCompletion";
   import EntryInputsEditor from "@/components/editor/body/EntryInputsEditor.svelte";
   import OfferOnPicker from "@/components/editor/body/OfferOnPicker.svelte";
   import PromptOutputEditor from "@/components/editor/body/PromptOutputEditor.svelte";
@@ -272,6 +273,10 @@
   const inheritedInputs = $derived(
     inheritedInputsFrom(promptEffectiveInputs, promptInputProvenance, promptEntries),
   );
+
+  // Jinja code-completion (#30), built once — it reads the effective inputs live
+  // through the getter, so `inputs.<name>` stays current without re-registering.
+  const promptCompletionSource = makePromptCompletionSource(() => promptEffectiveInputs);
 
   // --- Prompt editor sub-tabs (ADR-0062 §1/S2 Amendment 2 "D2") -----------
   // Three peer tabs — Template / Preview / Setup — each detachable into its
@@ -525,7 +530,7 @@
            exists for code bodies today) — that would need a state reset, not a
            remount, exactly like ProseBodyView's loadScene boundary. -->
       {#key scene?.id}
-        <CodeEditor bind:value={rawBody} language={rawBodyLanguage} lineWrapping={lineWrapEnabled} {readOnly} diagnostics={promptPreviewDiagnostics} />
+        <CodeEditor bind:value={rawBody} language={rawBodyLanguage} lineWrapping={lineWrapEnabled} {readOnly} diagnostics={promptPreviewDiagnostics} completionSource={promptCompletionSource} />
       {/key}
     </div>
     <div class="raw-body-toolbar">

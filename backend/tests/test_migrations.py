@@ -11,6 +11,10 @@ from app.services import migrations
 from app.services.migrations import (
     BACKUP_DIRNAME,
     CURRENT_VERSION,
+    DocumentMigration,
+    MigratableDocument,
+    RootMigration,
+    migrate_document,
     migrate_project,
     read_project_version,
 )
@@ -73,7 +77,7 @@ class MigrationFrameworkTests(unittest.TestCase):
         original_current = migrations.CURRENT_VERSION
         try:
             migrations.MIGRATIONS.clear()
-            migrations.MIGRATIONS.append((99, "test sentinel migration", fake_migration))
+            migrations.MIGRATIONS.append(RootMigration(99, "test sentinel migration", fake_migration))
             migrations.CURRENT_VERSION = 99
 
             applied = migrate_project(self.root)
@@ -155,7 +159,7 @@ class MigrationFrameworkTests(unittest.TestCase):
         original_current = migrations.CURRENT_VERSION
         try:
             migrations.MIGRATIONS.clear()
-            migrations.MIGRATIONS.append((42, "noop", fake_migration))
+            migrations.MIGRATIONS.append(RootMigration(42, "noop", fake_migration))
             migrations.CURRENT_VERSION = 42
 
             reopened_service = ProjectService.opened_at(self.root)
@@ -168,6 +172,78 @@ class MigrationFrameworkTests(unittest.TestCase):
             migrations.MIGRATIONS.clear()
             migrations.MIGRATIONS.extend(original_registry)
             migrations.CURRENT_VERSION = original_current
+
+
+class DocumentMigrationFrameworkTests(unittest.TestCase):
+    """migrate_document (ADR-0071 §1/§4): the isolated, no-root entry point.
+    None of these tests touch a project root or tmp_path — a DocumentMigration
+    only ever sees a MigratableDocument."""
+
+    def _register_document_step(self, version: int, fn) -> tuple[list, int]:
+        """Monkeypatch a single DocumentMigration into MIGRATIONS with
+        CURRENT_VERSION raised to its version; returns the state to restore."""
+        original_registry = list(migrations.MIGRATIONS)
+        original_current = migrations.CURRENT_VERSION
+        migrations.MIGRATIONS.clear()
+        migrations.MIGRATIONS.append(DocumentMigration(version, "rename status to state", fn))
+        migrations.CURRENT_VERSION = version
+        return original_registry, original_current
+
+    def _restore(self, original_registry: list, original_current: int) -> None:
+        migrations.MIGRATIONS.clear()
+        migrations.MIGRATIONS.extend(original_registry)
+        migrations.CURRENT_VERSION = original_current
+
+    def test_migrate_document_applies_a_document_step_with_no_root(self) -> None:
+        def rename_status_to_state(doc: MigratableDocument) -> MigratableDocument:
+            front_matter = dict(doc.front_matter)
+            front_matter["state"] = front_matter.pop("status")
+            return MigratableDocument(front_matter, doc.body + "\nmigrated")
+
+        original_registry, original_current = self._register_document_step(99, rename_status_to_state)
+        try:
+            doc = MigratableDocument({"id": "x", "status": "draft"}, "body text")
+            result = migrate_document(doc, from_version=98)
+            self.assertEqual(result.front_matter, {"id": "x", "state": "draft"})
+            self.assertEqual(result.body, "body text\nmigrated")
+        finally:
+            self._restore(original_registry, original_current)
+
+    def test_migrate_document_skips_steps_at_or_below_from_version(self) -> None:
+        def rename_status_to_state(doc: MigratableDocument) -> MigratableDocument:
+            front_matter = dict(doc.front_matter)
+            front_matter["state"] = front_matter.pop("status")
+            return MigratableDocument(front_matter, doc.body + "\nmigrated")
+
+        original_registry, original_current = self._register_document_step(99, rename_status_to_state)
+        try:
+            doc = MigratableDocument({"id": "x", "status": "draft"}, "body text")
+            result = migrate_document(doc, from_version=99)
+            self.assertEqual(result.front_matter, {"id": "x", "status": "draft"})
+            self.assertEqual(result.body, "body text")
+        finally:
+            self._restore(original_registry, original_current)
+
+    def test_registry_steps_are_typed_root_or_document(self) -> None:
+        for step in migrations.MIGRATIONS:
+            self.assertIsInstance(step, RootMigration)
+
+        def noop(doc: MigratableDocument) -> MigratableDocument:
+            return MigratableDocument(dict(doc.front_matter), doc.body)
+
+        original_registry, original_current = self._register_document_step(99, noop)
+        try:
+            # A RootMigration in the registry is ignored by migrate_document; only
+            # the DocumentMigration we just registered is dispatched to.
+            migrations.MIGRATIONS.insert(
+                0, RootMigration(50, "root step ignored by migrate_document", lambda root: None)
+            )
+            doc = MigratableDocument({"id": "x"}, "body")
+            result = migrate_document(doc, from_version=0)
+            self.assertEqual(result.front_matter, {"id": "x"})
+            self.assertEqual(result.body, "body")
+        finally:
+            self._restore(original_registry, original_current)
 
 
 class ResearchStructureMigrationTests(unittest.TestCase):

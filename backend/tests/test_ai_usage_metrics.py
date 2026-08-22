@@ -89,6 +89,23 @@ def test_compute_cost_applies_cache_write_premium():
     assert compute_cost(usage, desc) == pytest.approx(3.75)
 
 
+def test_compute_cost_bills_1h_cache_writes_at_higher_premium():
+    # #814: the 1h portion of cache writes bills at 2x input, the rest (5m) at
+    # 1.25x. 1M total, 400k at 1h:
+    #   600k*3e-6*1.25 + 400k*3e-6*2.0 = 2.25 + 2.40 = 4.65
+    desc = _desc(cost_in=3.0, cost_out=15.0)
+    usage = UsageMetrics(cache_write_tokens=1_000_000, cache_write_tokens_1h=400_000)
+    assert compute_cost(usage, desc) == pytest.approx(4.65)
+
+
+def test_compute_cost_all_1h_cache_writes():
+    # The understated #814 case: a turn that rewrites only the 1h system prefix.
+    # Every write at 1h → 2x across the board (was 1.25x = 3.75 before the fix).
+    desc = _desc(cost_in=3.0, cost_out=15.0)
+    usage = UsageMetrics(cache_write_tokens=1_000_000, cache_write_tokens_1h=1_000_000)
+    assert compute_cost(usage, desc) == pytest.approx(6.0)
+
+
 def test_compute_cost_combines_all_token_slots():
     # Anthropic-style: 100 fresh + 1000 cache-read + 50 cache-write + 200 out
     # cost = 100*3e-6 + 1000*3e-6*0.25 + 50*3e-6*1.25 + 200*15e-6
@@ -154,6 +171,30 @@ def test_anthropic_extract_usage_full_shape():
     assert usage.cache_write_tokens == 45
     assert usage.cached_input_tokens == 8000
     assert usage.output_tokens == 300
+    # No per-TTL `cache_creation` breakdown on this response → 1h portion 0, so
+    # every write bills at the 5m rate (the pre-#814 behaviour, preserved).
+    assert usage.cache_write_tokens_1h == 0
+
+
+def test_anthropic_extract_usage_reads_1h_cache_breakdown():
+    # #814: with the extended-cache-TTL beta the write total splits by TTL under
+    # `cache_creation`; we surface the 1h portion so compute_cost bills it at 2x.
+    profile = AnthropicProfile(api_key="")
+    response = SimpleNamespace(
+        usage=SimpleNamespace(
+            input_tokens=120,
+            cache_creation_input_tokens=1000,
+            cache_read_input_tokens=0,
+            output_tokens=300,
+            cache_creation=SimpleNamespace(
+                ephemeral_1h_input_tokens=700,
+                ephemeral_5m_input_tokens=300,
+            ),
+        )
+    )
+    usage = profile.extract_usage(response, "claude-sonnet-4-6")
+    assert usage.cache_write_tokens == 1000  # total across TTLs, unchanged
+    assert usage.cache_write_tokens_1h == 700
 
 
 def test_anthropic_extract_usage_missing_cache_fields():

@@ -21,10 +21,8 @@ Rewrite the whole scene as clean, finished narrative prose:
 {% endif %}
 - Leave none of the beat scaffolding behind — no interiority notes, no attribution labels, no markers. Just the finished prose.
 - Keep the events, the dialogue, and their order. This is a cleanup and a point-of-view projection, not a new draft.
-{% if 'tense' in project.metadata %}
-- Write in {{ project.metadata.tense }} tense.
-{% endif %}
 
+{% include "builtin-prose-settings" %}
 Return only the finished prose.
 {% endrole %}
 

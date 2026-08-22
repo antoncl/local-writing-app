@@ -795,6 +795,66 @@ class RelevantLoreHelperTests(_HelperFixtureBase):
         self.assertIn(self.nimitz["id"], ids)   # exact include
         self.assertNotIn(pavel["id"], ids)      # no fan-out through a use()'d node
 
+    def test_manual_only_lore_via_structural_expansion_is_excluded(self) -> None:
+        # #1024: a manual_only entry reachable via an entity_ref (structural
+        # one-hop through Honor's related_entries) must NOT leak into an implicit
+        # render — manual_only means "explicit picker only". Nimitz, an `auto`
+        # entry on the same hop, still arrives.
+        secret = self._make_lore(
+            title="Grayson Conclave",
+            entry_type="lore:character",
+            metadata={"aliases": [], "context_policy": "manual_only"},
+            body="A secret cabal.",
+        )
+        self._update_lore(
+            self.honor["id"],
+            entry_type="lore:character",
+            metadata={
+                "aliases": ["The Salamander"],
+                "related_entries": [self.nimitz["id"], secret["id"]],
+            },
+            body="Captain of the Fearless. Treecat-adopted.",
+        )
+        scene_one = self.service.read_scene(self.scene_one_node.scene_id)
+        ids = _relevant_lore_ids(self.service, scene_one, "implicit", None, None)
+        self.assertIn(self.honor["id"], ids)     # direct scene ref
+        self.assertIn(self.nimitz["id"], ids)    # `auto`, arrives via structural hop
+        self.assertNotIn(secret["id"], ids)      # manual_only: not fanned in (#1024)
+        # And its content never reaches a rendered block (its title may still show
+        # as a bare ref label inside Honor's related_entries — that is how
+        # entity_ref fields render for any policy; #1024 is about the entry's
+        # CONTENT being pulled into context, which it now is not).
+        self.assertNotIn("A secret cabal", self._lore(scene_one))
+
+    def test_manual_only_lore_is_included_when_used(self) -> None:
+        # #1024: use() is exactly the explicit-picker route manual_only DOES
+        # allow. A use()'d manual_only id joins the set even though structural
+        # expansion drops it — otherwise manual_only would collapse into never.
+        secret = self._make_lore(
+            title="Grayson Conclave",
+            entry_type="lore:character",
+            metadata={"aliases": [], "context_policy": "manual_only"},
+            body="A secret cabal.",
+        )
+        self._update_lore(
+            self.honor["id"],
+            entry_type="lore:character",
+            metadata={
+                "aliases": ["The Salamander"],
+                "related_entries": [self.nimitz["id"], secret["id"]],
+            },
+            body="Captain of the Fearless. Treecat-adopted.",
+        )
+        scene_one = self.service.read_scene(self.scene_one_node.scene_id)
+        # Without use(): excluded via the structural route.
+        implicit_ids = _relevant_lore_ids(self.service, scene_one, "implicit", None, None)
+        self.assertNotIn(secret["id"], implicit_ids)
+        # With use(): the explicit picker overrides manual_only.
+        used_ids = _relevant_lore_ids(
+            self.service, scene_one, "implicit", None, [secret["id"]]
+        )
+        self.assertIn(secret["id"], used_ids)
+
     def test_format_lore_block_renders_non_lore_node(self) -> None:
         # #1230: use() accepts any Node; the renderer must load a non-lore node
         # (a scene) and deliver it, not silently skip it as the lore-only reader

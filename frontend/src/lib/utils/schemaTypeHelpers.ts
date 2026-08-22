@@ -478,14 +478,15 @@ export function buildNodeTypeTree(
   for (const children of Object.values(childrenByParent)) {
     children.sort(compareByName);
   }
+  const sortedRoots = roots.sort(compareByName);
+  // Pin the kind's canonical root (`<kind>:base` when the kind defines one) to the
+  // front; the rest stay name-sorted. Prepending — not replacing — keeps any extra
+  // parentless type of the kind in the tree instead of dropping it (#734).
+  const base = kindRootEntryTypeId(schema, kind);
   const rootIds =
-    kind === "lore" && entryTypes["lore:base"]
-      ? ["lore:base"]
-      : kind === "prompt" && entryTypes["prompt:base"]
-        ? ["prompt:base"]
-        : kind === "research" && entryTypes["research:base"]
-          ? ["research:base"]
-          : roots.sort(compareByName);
+    base != null && sortedRoots.includes(base)
+      ? [base, ...sortedRoots.filter((id) => id !== base)]
+      : sortedRoots;
   const fieldsRegistry = schema?.fields ?? {};
   const buildNode = (typeId: string, depth: number): NodeTypeTreeNode | null => {
     const definition = entryTypes[typeId];

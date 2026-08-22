@@ -1,5 +1,5 @@
 import { Marked } from "marked";
-import katex from "katex";
+import type katexNs from "katex";
 import DOMPurify from "dompurify";
 
 type MathToken = {
@@ -8,20 +8,46 @@ type MathToken = {
   tex: string;
 };
 
-function renderMath(tex: string, displayMode: boolean): string {
-  try {
-    return katex.renderToString(tex, {
-      displayMode,
-      throwOnError: false,
-      output: "htmlAndMathml",
-      strict: false,
+let katex: typeof katexNs | null = null;
+let katexLoad: Promise<void> | null = null;
+
+// Cheap pre-check: an unescaped `$` is the only thing that can start math.
+// Keeps a math-free message from ever triggering the KaTeX download.
+const MATH_DELIMITER = /(?<!\\)\$/;
+export function containsMath(text: string | null | undefined): boolean {
+  return !!text && MATH_DELIMITER.test(text);
+}
+
+// Idempotent lazy load of KaTeX JS + CSS. Resolves once the module is ready;
+// callers re-render afterwards so the escaped-fallback placeholders upgrade
+// to real math.
+export function ensureKatexLoaded(): Promise<void> {
+  if (katex) return Promise.resolve();
+  if (!katexLoad) {
+    katexLoad = Promise.all([
+      import("katex"),
+      import("katex/dist/katex.min.css"),
+    ]).then(([mod]) => {
+      katex = mod.default;
     });
-  } catch {
-    const safe = tex.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    return displayMode
-      ? `<pre class="katex-error">${safe}</pre>`
-      : `<code class="katex-error">${safe}</code>`;
   }
+  return katexLoad;
+}
+
+function renderMath(tex: string, displayMode: boolean): string {
+  if (katex) {
+    try {
+      return katex.renderToString(tex, {
+        displayMode, throwOnError: false, output: "htmlAndMathml", strict: false,
+      });
+    } catch {
+      // fall through to escaped fallback
+    }
+  }
+  const safe = tex.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return displayMode
+    ? `<pre class="katex-error">${safe}</pre>`
+    : `<code class="katex-error">${safe}</code>`;
 }
 
 const marked = new Marked({ gfm: true, breaks: true });

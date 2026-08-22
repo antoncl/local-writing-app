@@ -55,12 +55,9 @@ class _HelperFixtureBase(unittest.TestCase):
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve() / "project"
         self.service = ProjectService.created_at(self.root, "Helper Tests")
-        # Several tests in this file use `home_place` as a convenient
-        # single-ref field on Character to exercise EntryRef / ref-graph
-        # behaviour. The seed schema no longer ships it (it was test
-        # cruft polluting real Character entries) — re-add it locally
-        # so the tests stay hermetic.
-        self._add_home_place_to_character_schema()
+
+        # `home_place` is a built-in entity_ref field on Character (#1316),
+        # so the tests below can use it directly with no local schema setup.
 
         # Lore: Honor Harrington (character), Manticore (place), Nimitz (character)
         self.honor = self._make_lore(
@@ -138,27 +135,6 @@ class _HelperFixtureBase(unittest.TestCase):
         self.temp_dir.cleanup()
 
     # ---- helpers for setup ----
-
-    def _add_home_place_to_character_schema(self) -> None:
-        """Inject a `home_place: entity_ref(place)` field onto Character
-        in the project's schema. Used by tests that need a single-ref
-        field on Character to test EntryRef / ref-graph machinery.
-        Writes directly to the schema YAML rather than going through the
-        upsert APIs to keep setup terse."""
-        schema_path = self.root / "metadata.schema.yaml"
-        data = self.service._read_yaml(schema_path)
-        data.setdefault("fields", {})["home_place"] = {
-            "name": "Home Place",
-            "type": "entity_ref",
-            "target": {"entry_type": "lore:location"},
-        }
-        character = data["entry_types"].get("lore:character") or {}
-        fields = list(character.get("fields") or [])
-        if "home_place" not in fields:
-            fields.insert(0, "home_place")
-            character["fields"] = fields
-            data["entry_types"]["lore:character"] = character
-        self.service._write_yaml(schema_path, data)
 
     def _make_lore(self, *, title: str, entry_type: str, metadata: dict, body: str) -> dict:
         created = self.service.create_lore_entry(
@@ -979,8 +955,8 @@ class ContextPolicyTests(_HelperFixtureBase):
         self.assertNotIn('name="Manticore"', self._render_scene_one())
 
     def test_manual_only_appears_via_explicit_ref(self) -> None:
-        # manual_only still respects explicit picks. Ref Manticore via a
-        # `locations` entity_ref_list on scene_one.
+        # manual_only still respects explicit picks. Ref Manticore via the
+        # `location` entity_ref on scene_one.
         self._set_policy(self.manticore["id"], "manual_only")
         self._update_scene(
             self.scene_one_node.scene_id,
@@ -989,7 +965,7 @@ class ContextPolicyTests(_HelperFixtureBase):
             metadata={
                 "summary": "Honor takes the Salamander into battle.",
                 "characters": [self.honor["id"]],
-                "locations": [self.manticore["id"]],
+                "location": self.manticore["id"],
             },
             body="Scene one body.",
         )

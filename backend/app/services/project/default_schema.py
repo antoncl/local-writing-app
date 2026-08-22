@@ -113,7 +113,18 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Scene",
             "kind": "manuscript",
             "parent": "manuscript:base",
-            "fields": ["status", "pov", "characters", "locations", "dynamics", "word_count", "cost"],
+            "fields": [
+                "status",
+                "pov",
+                "characters",
+                "location",
+                "tags",
+                "pov_mode",
+                "tense",
+                "dynamics",
+                "word_count",
+                "cost",
+            ],
             "has_body": True,
             "color": "forest",
         },
@@ -138,16 +149,16 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "name": "Character",
             "kind": "lore",
             "parent": "lore:base",
-            "fields": ["character_cost"],
+            "fields": ["role", "pronouns", "home_place", "character_cost"],
         },
         "lore:location": {
             # Local key aligned to its "Location" display (#85); the old key
             # was `place`, a documented key/display mismatch scar removed in
-            # the pre-1.0 FQN cleanup. Matches the `locations` field on scene.
+            # the pre-1.0 FQN cleanup. Matches the `location` field on scene.
             "name": "Location",
             "kind": "lore",
             "parent": "lore:base",
-            "fields": [],
+            "fields": ["location_type", "region"],
         },
         "lore:item": {
             "name": "Item",
@@ -549,6 +560,8 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 {"value": "revised", "color": "amber"},
                 {"value": "complete", "color": "moss"},
             ],
+            # New scenes open at the start of the workflow rather than blank.
+            "default": "draft",
         },
         "summary": {
             "name": "Summary",
@@ -722,19 +735,58 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
             "type": "entity_ref",
             "picker_config": {"sources": [{"kind": "lore", "expr": {"type": "lore:character"}}]},
         },
-        "locations": {
-            "name": "Locations",
+        "location": {
+            "name": "Location",
             "description": (
-                "Where this scene takes place — references to existing location "
-                "entries."
+                "Where this scene takes place — a reference to an existing "
+                "location entry."
             ),
-            "type": "entity_ref_list",
+            "type": "entity_ref",
             "picker_config": {"sources": [{"kind": "lore", "expr": {"type": "lore:location"}}]},
         },
+        "role": {
+            "name": "Role",
+            "description": (
+                "This character's role in the story — the protagonist, the "
+                "antagonist, a supporting player, or a minor walk-on."
+            ),
+            "type": "select",
+            "options": ["protagonist", "antagonist", "supporting", "minor"],
+        },
+        "pronouns": {
+            "name": "Pronouns",
+            "description": (
+                "The pronouns this character goes by. A starter set — add your own "
+                "options per project for anyone these don't fit."
+            ),
+            "type": "select",
+            "options": ["He/Him", "She/Her", "They/Them"],
+        },
         "home_place": {
-            # No default type includes this field, so it reaches no tooltip or AI
-            # catalog today; a description is added when a type adopts it.
+            # Adopted by lore:character (#1316): where the character is from.
             "name": "Home Place",
+            "description": (
+                "Where this character is from or based — a reference to an "
+                "existing location entry."
+            ),
+            "type": "entity_ref",
+            "picker_config": {"sources": [{"kind": "lore", "expr": {"type": "lore:location"}}]},
+        },
+        "location_type": {
+            "name": "Location type",
+            "description": (
+                "What kind of place this is — a settlement, a single building, a "
+                "wider region, or a landmark."
+            ),
+            "type": "select",
+            "options": ["settlement", "building", "region", "landmark"],
+        },
+        "region": {
+            "name": "Region",
+            "description": (
+                "The larger place that contains this one — a reference to another "
+                "location entry (e.g. the city a building sits in)."
+            ),
             "type": "entity_ref",
             "picker_config": {"sources": [{"kind": "lore", "expr": {"type": "lore:location"}}]},
         },

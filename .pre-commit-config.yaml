@@ -82,6 +82,15 @@ repos:
         pass_filenames: false
         files: ^(docs/(custom-fields|prompts/guide)\.md|scripts/gen_guides\.py|frontend/src/lib/generated/guides\.ts)$
 
+      - id: version-sync
+        name: version sync (backend pyproject == frontend package.json, #1299)
+        entry: python scripts/check_version_sync.py
+        language: system
+        # Whole-invariant check over two fixed files — ignore the staged list,
+        # trigger whenever either version literal moves.
+        pass_filenames: false
+        files: ^(backend/pyproject\.toml|frontend/package\.json)$
+
       # The advisory `ruff-complexity` hook was retired in #76: C901 and
       # PLR0912/13/15 are now in the blocking `select` in backend/pyproject.toml,
       # so the `ruff` hook above enforces them like any other rule. No separate

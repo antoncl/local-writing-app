@@ -104,6 +104,11 @@ jobs:
       - name: guides bundle (regen-clean)
         run: python scripts/gen_guides.py --check
 
+      # The backend and frontend release versions must agree (#1299) — a bump
+      # that moves one and forgets the other ships mismatched halves.
+      - name: version sync
+        run: python scripts/check_version_sync.py
+
       # Escape hatches may shrink, never grow. PR-only: it is a diff-against-base
       # question, and master has no base to compare with.
       - name: exemption ratchet

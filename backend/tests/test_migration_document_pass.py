@@ -13,6 +13,7 @@ the end-of-ladder stamp + backup for a mixed root+document migration.
 from __future__ import annotations
 
 import unittest
+import zipfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -34,6 +35,7 @@ from app.services.migrations import (
     migrate_document,
     read_project_version,
 )
+from app.services.project.errors import ProjectServiceError
 from app.services.project.overrides import OVERRIDE_ENTRY_TYPE, OVERRIDES_FOLDER
 from app.services.project_service import ProjectService
 
@@ -276,6 +278,86 @@ class ProjectDocumentPassTests(unittest.TestCase):
             self.assertEqual(hero_front["metadata"]["urgency"], "medium")
         finally:
             migrations.write_project_version = original_write
+            self._restore(original_registry, original_current)
+
+    # --- failure recovery (review finding, #366 slice 2) ---------------------
+
+    def test_failed_document_migration_leaves_project_rerunnable(self) -> None:
+        """A step that raises on one document must leave the stamp unmoved,
+        the pre-migration content recoverable from the backup, and a retry
+        (with the step fixed) must converge — including over any document
+        that was already rewritten before the failure (idempotency)."""
+        _ally_path, hero_path, scene_path, override_path = self._seed_owned_documents()
+        scene_front, _ = self.service._read_markdown_with_front_matter(scene_path, strict=True)
+        scene_id = scene_front["id"]
+
+        state = {"raise": True}
+
+        def _rename_but_raise_on_scene(doc: MigratableDocument) -> MigratableDocument:
+            if state["raise"] and doc.front_matter.get("id") == scene_id:
+                raise RuntimeError("simulated failure on the scene document")
+            return _rename_priority_to_urgency(doc)
+
+        original_registry, original_current = self._register_steps(
+            [DocumentMigration(99, "rename priority to urgency (raises on scene)", _rename_but_raise_on_scene)],
+            99,
+        )
+        try:
+            from_version = read_project_version(self.root)
+            with self.assertRaises(ProjectServiceError):
+                ProjectService.opened_at(self.root)
+            # The stamp is written once, at the end of the whole ladder — a
+            # step raising mid-pass must leave it unmoved, not at 99.
+            self.assertEqual(read_project_version(self.root), from_version)
+
+            backup_dir = self.root / BACKUP_DIRNAME
+            backups = list(backup_dir.glob(f"v{from_version}-*.zip"))
+            self.assertTrue(backups)
+            with zipfile.ZipFile(backups[0]) as archive:
+                entry_name = next(name for name in archive.namelist() if name.endswith(hero_path.name))
+                backed_up_content = archive.read(entry_name).decode("utf-8")
+            self.assertIn("priority", backed_up_content)
+
+            # Flip the fixture to the non-raising rename-everything version and
+            # retry: the project must converge to 99, migrating both documents
+            # — including any left mid-ladder by the failed run.
+            state["raise"] = False
+            ProjectService.opened_at(self.root)
+            self.assertEqual(read_project_version(self.root), 99)
+
+            hero_front, _ = self.service._read_markdown_with_front_matter(hero_path, strict=True)
+            self.assertIn("urgency", hero_front["metadata"])
+            self.assertNotIn("priority", hero_front["metadata"])
+
+            scene_front, _ = self.service._read_markdown_with_front_matter(scene_path, strict=True)
+            self.assertIn("urgency", scene_front["metadata"])
+            self.assertNotIn("priority", scene_front["metadata"])
+        finally:
+            self._restore(original_registry, original_current)
+        self.assertTrue(override_path.exists())
+
+    def test_completed_migration_is_noop_on_reopen(self) -> None:
+        """Once a document pass has converged and stamped CURRENT_VERSION,
+        re-opening the same project must not touch any file again —
+        `pending_migrations` is empty, so the doc pass does not run."""
+        _ally_path, hero_path, scene_path, override_path = self._seed_owned_documents()
+        paths = [hero_path, scene_path, override_path]
+
+        original_registry, original_current = self._register_steps(
+            [DocumentMigration(99, "rename priority to urgency", _rename_priority_to_urgency)], 99
+        )
+        try:
+            ProjectService.opened_at(self.root)
+            self.assertEqual(read_project_version(self.root), 99)
+            before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in paths}
+
+            ProjectService.opened_at(self.root)
+
+            for path in paths:
+                after = (path.read_bytes(), path.stat().st_mtime_ns)
+                self.assertEqual(after, before[path], path)
+            self.assertEqual(read_project_version(self.root), 99)
+        finally:
             self._restore(original_registry, original_current)
 
 

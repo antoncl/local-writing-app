@@ -243,7 +243,7 @@
       // the author sees underlined, not a rescan.
       dynamic_context: scene?.id ? implicitContextFor(scene.id) : undefined,
     });
-    return snapshots.load(documentKind === "manuscript" ? (scene?.id ?? null) : null);
+    return snapshots.load(documentKind === "manuscript" ? sceneId : null);
   });
 
   // The rail flips with the body (§F). Kept apart from `effectiveOverrides`:

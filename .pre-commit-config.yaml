@@ -80,7 +80,7 @@ repos:
         entry: python scripts/gen_guides.py --check
         language: system
         pass_filenames: false
-        files: ^(docs/custom-fields\.md|scripts/gen_guides\.py|frontend/src/lib/generated/guides\.ts)$
+        files: ^(docs/(custom-fields|prompts/guide)\.md|scripts/gen_guides\.py|frontend/src/lib/generated/guides\.ts)$
 
       # The advisory `ruff-complexity` hook was retired in #76: C901 and
       # PLR0912/13/15 are now in the blocking `select` in backend/pyproject.toml,

@@ -61,7 +61,15 @@
   // Escape/ArrowLeft ascend one level while drilled in; at the root they fall
   // through to the Popover (Escape closes it). stopPropagation keeps the Popover's
   // window listener from closing the whole menu when we only meant to go up.
-  function onItemKeydown(event: KeyboardEvent): void {
+  // ArrowRight mirrors Enter/click on a group item — descend via the same
+  // `activate` a click already calls. `node` is only passed for the drill-down
+  // items (not the ‹ Back row), so ArrowRight there is a no-op.
+  function onItemKeydown(event: KeyboardEvent, node?: MenuNode): void {
+    if (event.key === "ArrowRight" && node && node.children.length > 0) {
+      event.preventDefault();
+      activate(node);
+      return;
+    }
     if (resolved.path.length === 0) return;
     if (event.key === "Escape" || event.key === "ArrowLeft") {
       event.preventDefault();
@@ -101,7 +109,7 @@
     aria-haspopup={node.children.length > 0 ? "menu" : undefined}
     use:focusOnNav={i === 0}
     onclick={() => activate(node)}
-    onkeydown={onItemKeydown}
+    onkeydown={(event) => onItemKeydown(event, node)}
   >
     <span class="pm-label">{node.label}</span>
     {#if node.children.length > 0}<span class="pm-caret" aria-hidden="true">›</span>{/if}

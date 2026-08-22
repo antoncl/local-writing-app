@@ -21,6 +21,7 @@
   // This one anchors in-flow against a `position: relative` wrapper the caller
   // provides, which is all the chrome dropdowns need.
   import type { Snippet } from "svelte";
+  import { rovingMenu } from "@/lib/utils/rovingMenu";
 
   let {
     // Two-way: overlay-click and Escape flip this back to false in the caller.
@@ -165,6 +166,7 @@
     aria-labelledby={labelledby}
     style={panelStyle}
     use:focusInto={modal}
+    use:rovingMenu
   >
     {@render children()}
   </div>

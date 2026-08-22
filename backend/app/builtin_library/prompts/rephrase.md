@@ -10,6 +10,7 @@ context_strategy:
 {% role "system" %}
 Rewrite the passage the reader sends in fresh words — vary the sentence shapes and diction while keeping the same meaning, the same story beats, the author's voice, and the tense. Offer a genuine alternative, not a light reshuffle. Return only the revised prose, with no preamble or explanation.
 
+{% include "builtin-prose-settings" %}
 {% include "builtin-meta-comment" %}
 {% endrole %}
 {% role "user" %}

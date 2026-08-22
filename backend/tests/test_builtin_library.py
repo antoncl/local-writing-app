@@ -259,8 +259,8 @@ class BuiltinLibraryTests(unittest.TestCase):
         )
         text = out.messages[0].text
         self.assertIn("## Project settings", text)
-        self.assertIn("Jane Roe", text)
-        self.assertIn("metric", text)
+        # Each setting is its own bullet line (not jammed onto one line).
+        self.assertIn("- Author: Jane Roe\n- Measurement system: metric", text)
         # POV / tense are prose-generation settings — excluded here so they don't
         # bleed into metadata-field brainstorms (#1076).
         self.assertNotIn("Narrative POV", text)
@@ -346,9 +346,53 @@ class BuiltinLibraryTests(unittest.TestCase):
         )
         text = out.messages[0].text
         self.assertIn("## Prose style", text)
-        self.assertIn("Narrative POV", text)
-        self.assertIn("Tense", text)
+        # Each setting is its own bullet line (not jammed onto one line).
+        self.assertIn("- Narrative POV: first\n- Tense: past", text)
         self.assertNotIn("Jane Roe", text)  # general facts stay out of the prose snippet
+
+    def test_prose_settings_snippet_prefers_scene_over_project(self) -> None:
+        """#1321: pov_mode / tense resolve scene-first — a scene's own value wins,
+        and a field the scene leaves blank falls back to the project's."""
+        from app.models import SaveProjectNodeRequest, SaveSceneRequest
+        from app.services.ai.helpers import create_environment_for_project
+        from app.services.ai.templates import render_template
+
+        # Project sets both; the scene overrides only pov_mode, leaving tense blank.
+        current = self.service.read_project_node()
+        self.service.save_project_node(
+            SaveProjectNodeRequest(
+                title=current.title,
+                body="",
+                entry_type=current.entry_type,
+                metadata={"pov_mode": "first", "tense": "past"},
+            )
+        )
+        scene_path = next((self.root / "scenes").glob("*.md"))
+        scene_id = self.service._read_front_matter_only(scene_path, strict=True)["id"]
+        scene = self.service.read_scene(scene_id)
+        self.service.save_scene(
+            scene_id,
+            SaveSceneRequest(
+                title=scene.title,
+                body=scene.body,
+                base_revision=scene.revision,
+                status=scene.status,
+                entry_type="manuscript:scene",
+                metadata={"pov_mode": "third_limited"},
+            ),
+        )
+        scene = self.service.read_scene(scene_id)
+        env = create_environment_for_project(self.service)
+        out = render_template(
+            '{% role "system" %}{% include "builtin-prose-settings" %}{% endrole %}',
+            context={"project": self.service.current_project(), "scene": scene},
+            env=env,
+        )
+        text = out.messages[0].text
+        # Scene override wins for pov_mode; project fallback fills the blank tense —
+        # each on its own bullet line.
+        self.assertIn("- Narrative POV: third_limited\n- Tense: past", text)
+        self.assertNotIn("first", text)  # the project's pov_mode did NOT win
 
     def test_project_settings_snippet_is_inert_without_a_project(self) -> None:
         """Rendered in a context that does not define `project` (e.g. the unit

@@ -26,8 +26,8 @@ entry_type: prompt:snippet
 {%- if ns.rows %}
 ## Project settings
 Honor these project-wide settings in everything you write.
-{% for label, val in ns.rows -%}
-- {{ label }}: {% if val is sequence and val is not string %}{{ val | join(", ") }}{% else %}{{ val }}{% endif %}
-{% endfor -%}
-{%- endif -%}
+{% for label, val in ns.rows %}- {{ label }}: {{ (val | join(", ")) if (val is sequence and val is not string) else val }}
+{% endfor %}
+
+{% endif -%}
 {%- endif -%}

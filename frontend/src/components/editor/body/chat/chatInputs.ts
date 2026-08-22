@@ -7,9 +7,12 @@ import type { NodePickerRef, PromptEntrySummary, PromptInputDefinition } from "@
 // ---- cost-estimate + TTL strip state ----
 // Per-slot TTL in seconds; drives the TTL countdown chips. Slots not in this
 // table get 5 min. Single source of truth (the App.svelte copy was retired).
+// Only slots that are actually stamped (`cache_write_times[slot]`) ever render a
+// chip — today just `system` (the turn handler stamps only that). Don't add a
+// slot here without a code path that stamps it, or it defines a chip that can
+// never count down (the dead `lore: 300` slot removed in #815).
 export const SLOT_TTL_SECONDS: Record<string, number> = {
   system: 3600,
-  lore: 300,
 };
 
 export function defaultDraftFor(input: PromptInputDefinition): string {

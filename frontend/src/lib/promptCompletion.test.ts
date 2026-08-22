@@ -1,17 +1,46 @@
 import { CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
 import { EditorState } from "@codemirror/state";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { makePromptCompletionSource } from "./promptCompletion";
-import type { PromptInputDefinition } from "./types";
+import type { MetadataSchema, PromptInputDefinition } from "./types";
 
-const input = (name: string): PromptInputDefinition => ({ name }) as unknown as PromptInputDefinition;
+// `entry(inputs.x)` resolution goes through pickerMembership; mock it so the test
+// controls which entry_type(s) an input's target declares.
+const hoisted = vi.hoisted(() => ({ entryTypes: {} as Record<string, string[]> }));
+vi.mock("@/lib/utils/pickerSources", () => ({
+  pickerMembership: () => ({ kinds: [], entryTypes: hoisted.entryTypes }),
+}));
 
-function run(doc: string, opts: { inputs?: PromptInputDefinition[]; explicit?: boolean } = {}): CompletionResult | null {
+const SCHEMA = {
+  version: 1,
+  entry_types: {
+    "manuscript:scene": { fields: ["summary", "pov", "internal"] },
+    "project:project": { fields: ["spelling"] },
+    "lore:character": { fields: ["goal", "secret"] },
+  },
+  fields: {
+    summary: { name: "Summary", type: "text" },
+    pov: { name: "POV", type: "entity_ref" },
+    internal: { name: "Internal", type: "text", hidden: true },
+    spelling: { name: "Spelling", type: "text" },
+    goal: { name: "Goal", type: "text" },
+    secret: { name: "Secret", type: "computed" },
+  },
+} as unknown as MetadataSchema;
+
+const input = (name: string, target?: unknown): PromptInputDefinition =>
+  ({ name, target: target ?? null }) as unknown as PromptInputDefinition;
+
+function run(
+  doc: string,
+  opts: { inputs?: PromptInputDefinition[]; explicit?: boolean; schema?: MetadataSchema | null } = {},
+): CompletionResult | null {
   const state = EditorState.create({ doc });
   const context = new CompletionContext(state, doc.length, opts.explicit ?? false);
+  const schema = opts.schema === undefined ? SCHEMA : opts.schema;
   // The source is synchronous; CompletionSource's type permits a Promise, so narrow.
-  return makePromptCompletionSource(() => opts.inputs ?? [])(context) as CompletionResult | null;
+  return makePromptCompletionSource(() => opts.inputs ?? [], () => schema)(context) as CompletionResult | null;
 }
 
 const labels = (result: CompletionResult | null): string[] => (result ? result.options.map((o) => o.label) : []);
@@ -78,9 +107,36 @@ describe("makePromptCompletionSource", () => {
     expect(labels(run("{{ value | js"))).toContain("json");
   });
 
-  it("declines member access (schema field names are a follow-up)", () => {
-    expect(run("{{ scene.")).toBeNull();
-    expect(run("{{ entry(x).ho")).toBeNull();
+  it("completes scene fields (plus intrinsics), filtering hidden and computed", () => {
+    const result = labels(run("{{ scene."));
+    expect(result).toContain("summary");
+    expect(result).toContain("pov");
+    expect(result).not.toContain("internal"); // hidden
+    expect(result).toContain("title"); // intrinsic
+    expect(result).toContain("body");
+    expect(run("{{ scene.")?.from).toBe("{{ scene.".length);
+  });
+
+  it("completes project fields after project.", () => {
+    expect(labels(run("{{ project."))).toContain("spelling");
+  });
+
+  it("resolves entry(inputs.x) fields via the input's declared target type", () => {
+    hoisted.entryTypes = { lore: ["lore:character"] };
+    const result = labels(run("{{ entry(inputs.hero).", { inputs: [input("hero", {})] }));
+    expect(result).toContain("goal");
+    expect(result).not.toContain("secret"); // computed
+    expect(result).toContain("title"); // intrinsic
+  });
+
+  it("declines member access it cannot resolve to a single type", () => {
+    hoisted.entryTypes = { lore: ["lore:character", "lore:place"] };
+    expect(run("{{ entry(inputs.hero).", { inputs: [input("hero", {})] })).toBeNull(); // ambiguous
+    expect(run("{{ entry(inputs.hero).", { inputs: [input("hero")] })).toBeNull(); // untyped input
+    expect(run('{{ entry("honor").ho')).toBeNull(); // literal id — needs the node index
+    expect(run("{{ scene.pov.ti")).toBeNull(); // reference chain
+    expect(run("{{ foo.bar")).toBeNull(); // unknown base
+    expect(run("{{ scene.", { schema: null })).toBeNull(); // no schema loaded
   });
 
   it("stays quiet at an empty expression position unless explicitly invoked", () => {

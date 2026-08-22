@@ -10,13 +10,13 @@ reference itself silently lost the ADR-0067 ``field_contract`` global and the
 invariant at the one mechanical seam — *surfaced vocabulary ≡ registered
 vocabulary* — so the "added a helper, forgot the docs" class cannot land.
 
-Scope (MVP, #1270): the symbols registered through a single seam — ``env.globals``
-and ``env.filters`` (``helpers.py``) and the custom statement tags
-(``templates.py``). Render-context variables (``scene``, ``inputs``, …) are not
-registered through one seam and stay out of scope until the manifest phase.
+Scope: every symbol bound through a mechanical seam — ``env.globals`` and
+``env.filters`` (``helpers.py``), the custom statement tags (``templates.py``),
+and the render-context variables (the ``context`` dict in ``preview.py``, #1280).
+All are held to what ``reference.md`` documents.
 
 Run: ``python scripts/check_prompt_vocab_docs.py`` (no arguments — it reads the
-three fixed files). Exits non-zero, naming each mismatch, on drift.
+fixed source files). Exits non-zero, naming each mismatch, on drift.
 """
 
 from __future__ import annotations
@@ -33,6 +33,7 @@ from prompt_vocab import load_reference, names_by_kind, parse_reference  # noqa:
 REPO = Path(__file__).resolve().parents[1]
 HELPERS = REPO / "backend" / "app" / "services" / "ai" / "helpers.py"
 TEMPLATES = REPO / "backend" / "app" / "services" / "ai" / "templates.py"
+PREVIEW = REPO / "backend" / "app" / "services" / "ai" / "preview.py"
 
 # Globals wired for the machinery and never written by a template author, so not
 # part of the author-facing contract. Empty today; a home for a future internal
@@ -45,6 +46,7 @@ BUILTIN_TAGS: frozenset[str] = frozenset({"include"})
 # A parser that silently returns an empty set would pass this gate vacuously, so
 # each side is sanity-checked to contain these known-present symbols first.
 _SANITY_HELPERS: frozenset[str] = frozenset({"entry", "fields", "use", "field_contract"})
+_SANITY_VARS: frozenset[str] = frozenset({"scene", "inputs"})
 
 
 # --- code side (the registration is the source of truth) ---------------------
@@ -88,6 +90,26 @@ def _registered_tags(templates_src: str) -> set[str]:
     return tags
 
 
+def _context_keys(preview_src: str) -> set[str]:
+    """String keys of the ``context = {...}`` dict bound for template rendering.
+
+    That dict (built once in ``preview.py`` and handed to ``render_template``) is
+    the single seam where render-context variables become real, the variable
+    analogue of ``env.globals``.
+    """
+    tree = ast.parse(preview_src)
+    keys: set[str] = set()
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict)):
+            continue
+        if not any(isinstance(target, ast.Name) and target.id == "context" for target in node.targets):
+            continue
+        for key in node.value.keys:
+            if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                keys.add(key.value)
+    return keys
+
+
 # The doc side is parsed by scripts/prompt_vocab.py — the one reference.md parser
 # both this gate and the manifest generator share (so they cannot disagree).
 
@@ -100,9 +122,11 @@ class Vocab(NamedTuple):
 
     env_globals: set[str]
     env_filters: set[str]
+    env_vars: set[str]
     tags: set[str]
     doc_helpers: set[str]
     doc_filters: set[str]
+    doc_vars: set[str]
 
 
 def _sanity_problems(v: Vocab) -> list[str]:
@@ -112,6 +136,10 @@ def _sanity_problems(v: Vocab) -> list[str]:
         problems.append(f"parser sanity: env.globals parse looks wrong ({sorted(v.env_globals)})")
     if not _SANITY_HELPERS.issubset(v.doc_helpers):
         problems.append(f"parser sanity: reference.md Helpers parse looks wrong ({sorted(v.doc_helpers)})")
+    if not _SANITY_VARS.issubset(v.env_vars):
+        problems.append(f"parser sanity: preview.py context parse looks wrong ({sorted(v.env_vars)})")
+    if not _SANITY_VARS.issubset(v.doc_vars):
+        problems.append(f"parser sanity: reference.md Variables parse looks wrong ({sorted(v.doc_vars)})")
     if "json" not in v.env_filters or "role" not in v.tags:
         problems.append("parser sanity: filter/tag parse looks wrong")
     return problems
@@ -128,6 +156,10 @@ def _diff_problems(v: Vocab, md: str) -> list[str]:
         problems.append(f"filter `{name}` is registered but not documented in reference.md")
     for name in sorted(v.doc_filters - v.env_filters):
         problems.append(f"filter `{name}` is documented but not registered (renamed/retired?)")
+    for name in sorted(v.env_vars - v.doc_vars):
+        problems.append(f"variable `{name}` is bound (preview.py context) but not documented in reference.md")
+    for name in sorted(v.doc_vars - v.env_vars):
+        problems.append(f"variable `{name}` is documented in reference.md but not bound in preview.py context")
     for name in sorted(v.tags - BUILTIN_TAGS):
         if not re.search(r"\{%\s*" + re.escape(name) + r"\b", md):
             problems.append(f"tag `{{% {name} %}}` is registered but not documented in reference.md")
@@ -137,14 +169,17 @@ def _diff_problems(v: Vocab, md: str) -> list[str]:
 def _collect_problems() -> list[str]:
     helpers_src = HELPERS.read_text(encoding="utf-8")
     templates_src = TEMPLATES.read_text(encoding="utf-8")
+    preview_src = PREVIEW.read_text(encoding="utf-8")
     md = load_reference()
     documented = names_by_kind(parse_reference(md))
     vocab = Vocab(
         env_globals=_env_keys(helpers_src, "globals"),
         env_filters=_env_keys(helpers_src, "filters"),
+        env_vars=_context_keys(preview_src),
         tags=_registered_tags(templates_src),
         doc_helpers=documented["helper"],
         doc_filters=documented["filter"],
+        doc_vars=documented["variable"],
     )
     sanity = _sanity_problems(vocab)
     if sanity:
@@ -163,7 +198,7 @@ def main() -> int:
             "truth), or move a retired symbol to the Retired section."
         )
         return 1
-    print("prompt vocabulary: reference.md matches the registered globals/filters/tags")
+    print("prompt vocabulary: reference.md matches the registered globals/filters/tags/variables")
     return 0
 
 

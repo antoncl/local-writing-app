@@ -8,6 +8,7 @@
   import { referenceIndexStore } from "@/lib/stores/references";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { formatCostEur } from "@/lib/utils/money";
+  import { formatChatRosterDetail } from "@/lib/utils/chatRoster";
 
   let {
     sessions,
@@ -97,7 +98,7 @@
         </small>
       {/if}
       <small>
-        {session.message_count} message{session.message_count === 1 ? "" : "s"} · {session.updated_at.slice(0, 16).replace("T", " ")}
+        {formatChatRosterDetail(session.message_count, session.updated_at)}
         {#if (session.cost_usd_total ?? 0) > 0}
           · <span class="chat-session-cost">{formatCostEur(session.cost_usd_total ?? 0)}</span>
         {/if}

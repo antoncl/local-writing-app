@@ -29,6 +29,7 @@
   import { buildPromptMenuTree } from "@/lib/editor-core/promptMenuTree";
   import { nodeSet } from "@/lib/views/viewResult";
   import { resolveColor } from "@/lib/utils/colors";
+  import { formatChatRosterDetail } from "@/lib/utils/chatRoster";
   import { chatSessions } from "@/lib/stores/chatSessions.svelte";
   import { chatSessionsStore } from "@/lib/stores/chats";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
@@ -211,9 +212,7 @@
     onClick={rowCtx.onClick}
   >
     {#snippet detailSlot()}
-      <small>
-        {session.message_count} message{session.message_count === 1 ? "" : "s"} · {session.updated_at.slice(0, 16).replace("T", " ")}
-      </small>
+      <small>{formatChatRosterDetail(session.message_count, session.updated_at)}</small>
     {/snippet}
   </NodeRow>
 {/snippet}

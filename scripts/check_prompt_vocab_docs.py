@@ -27,10 +27,12 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from prompt_vocab import load_reference, names_by_kind, parse_reference  # noqa: E402
+
 REPO = Path(__file__).resolve().parents[1]
 HELPERS = REPO / "backend" / "app" / "services" / "ai" / "helpers.py"
 TEMPLATES = REPO / "backend" / "app" / "services" / "ai" / "templates.py"
-REFERENCE = REPO / "docs" / "prompts" / "reference.md"
 
 # Globals wired for the machinery and never written by a template author, so not
 # part of the author-facing contract. Empty today; a home for a future internal
@@ -86,47 +88,8 @@ def _registered_tags(templates_src: str) -> set[str]:
     return tags
 
 
-# --- doc side (reference.md, parsed defensively) -----------------------------
-
-
-def _section(md: str, header: str) -> str:
-    """The text under a ``## Header`` up to the next top-level ``## `` heading.
-
-    ``### `` subheadings stay inside their parent, so the Field-contract subtable
-    counts as part of Helpers.
-    """
-    start = md.find(header)
-    if start == -1:
-        return ""
-    rest = md[start + len(header) :]
-    end = rest.find("\n## ")
-    return rest if end == -1 else rest[:end]
-
-
-def _first_cells(section: str) -> list[str]:
-    """First-column code-span cells of every table row (skips header/separator)."""
-    return re.findall(r"^\|\s*`([^`]+)`", section, re.MULTILINE)
-
-
-def _documented_helpers(md: str) -> set[str]:
-    """Leading identifier of each Helpers-section row (``entry(x)`` -> ``entry``)."""
-    names: set[str] = set()
-    for cell in _first_cells(_section(md, "## Helpers")):
-        match = re.match(r"[a-z_][a-z0-9_]*", cell)
-        if match:  # rows like `{% … %}` / `{{ … }}` start with `{` and are skipped
-            names.add(match.group())
-    return names
-
-
-def _documented_filters(md: str) -> set[str]:
-    """Filter name of each Filters-section row (``value \\| json`` -> ``json``)."""
-    names: set[str] = set()
-    for cell in _first_cells(_section(md, "## Filters")):
-        tail = re.split(r"\s*\\?\|\s*", cell)[-1].strip()
-        match = re.match(r"[a-z_][a-z0-9_]*", tail)
-        if match:
-            names.add(match.group())
-    return names
+# The doc side is parsed by scripts/prompt_vocab.py — the one reference.md parser
+# both this gate and the manifest generator share (so they cannot disagree).
 
 
 # --- comparison --------------------------------------------------------------
@@ -174,13 +137,14 @@ def _diff_problems(v: Vocab, md: str) -> list[str]:
 def _collect_problems() -> list[str]:
     helpers_src = HELPERS.read_text(encoding="utf-8")
     templates_src = TEMPLATES.read_text(encoding="utf-8")
-    md = REFERENCE.read_text(encoding="utf-8")
+    md = load_reference()
+    documented = names_by_kind(parse_reference(md))
     vocab = Vocab(
         env_globals=_env_keys(helpers_src, "globals"),
         env_filters=_env_keys(helpers_src, "filters"),
         tags=_registered_tags(templates_src),
-        doc_helpers=_documented_helpers(md),
-        doc_filters=_documented_filters(md),
+        doc_helpers=documented["helper"],
+        doc_filters=documented["filter"],
     )
     sanity = _sanity_problems(vocab)
     if sanity:

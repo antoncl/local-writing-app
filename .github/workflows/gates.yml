@@ -92,6 +92,12 @@ jobs:
       - name: prompt-vocab drift gate
         run: python scripts/check_prompt_vocab_docs.py
 
+      # The bundled manifest that completion (#30) and the "?" help (#1273) will
+      # consume is generated from reference.md — this fails if the committed
+      # frontend/src/lib/generated/promptVocab.json wasn't regenerated (#1270).
+      - name: prompt-vocab manifest (regen-clean)
+        run: python scripts/gen_prompt_vocab.py --check
+
       # Escape hatches may shrink, never grow. PR-only: it is a diff-against-base
       # question, and master has no base to compare with.
       - name: exemption ratchet

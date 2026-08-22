@@ -3,11 +3,13 @@ import type { MetadataSchema } from "@/lib/types";
 import {
   asSchemaKind,
   AUTHORABLE_COMPUTED_FUNCTIONS,
+  buildNodeTypeTree,
   coerceStringList,
   computedSpecFor,
   isMetadataValuePresent,
   kindEntryTypeFqns,
   kindEntryTypeOptions,
+  kindRootEntryTypeId,
   nestingLocalPrefix,
   normalizeListFieldValue,
   resolveSchemaScope,
@@ -317,5 +319,82 @@ describe("computed-function vocabulary + spec mapping (#353)", () => {
       scope: "whatever",
     });
     expect(computedSpecFor("future_fn", "")).toEqual({ function: "future_fn" });
+  });
+});
+
+describe("buildNodeTypeTree — roots route through kindRootEntryTypeId (#734)", () => {
+  it("built-in-like: a kind with `<kind>:base` collapses to a single root with its children nested", () => {
+    const BASE_SCHEMA = {
+      version: 1,
+      entry_types: {
+        "lore:base": { name: "Lore", kind: "lore", abstract: true },
+        "lore:character": { name: "Character", kind: "lore", parent: "lore:base" },
+        "lore:place": { name: "Place", kind: "lore", parent: "lore:base" },
+      },
+      fields: {},
+    } as unknown as MetadataSchema;
+    const tree = buildNodeTypeTree(BASE_SCHEMA, "lore");
+    expect(tree.map((node) => node.id)).toEqual(["lore:base"]);
+    expect(tree[0].children.map((node) => node.id)).toEqual(["lore:character", "lore:place"]);
+  });
+
+  it("orphan-fix: a second parentless type of the kind is prepended-to, not dropped by, the `:base` root", () => {
+    // The old code REPLACED roots with ["lore:base"] whenever lore:base existed,
+    // silently dropping lore:extra (a parentless lore type with no relation to
+    // lore:base). Routing through kindRootEntryTypeId + prepend keeps both.
+    const ORPHAN_SCHEMA = {
+      version: 1,
+      entry_types: {
+        "lore:base": { name: "Lore", kind: "lore", abstract: true },
+        "lore:character": { name: "Character", kind: "lore", parent: "lore:base" },
+        "lore:extra": { name: "Extra", kind: "lore" },
+      },
+      fields: {},
+    } as unknown as MetadataSchema;
+    const tree = buildNodeTypeTree(ORPHAN_SCHEMA, "lore");
+    expect(tree.map((node) => node.id)).toEqual(["lore:base", "lore:extra"]);
+  });
+
+  it("no `:base`: a kind whose only root is a single concrete type stays a single root", () => {
+    const ASSISTANT_SCHEMA = {
+      version: 1,
+      entry_types: {
+        "assistant:assistant": { name: "Assistant", kind: "assistant" },
+      },
+      fields: {},
+    } as unknown as MetadataSchema;
+    const tree = buildNodeTypeTree(ASSISTANT_SCHEMA, "assistant");
+    expect(tree.map((node) => node.id)).toEqual(["assistant:assistant"]);
+  });
+
+  it("no `:base`, two concrete parentless types: both appear", () => {
+    // With no `:base`, kindRootEntryTypeId pins whichever parentless type of the
+    // kind it meets first (schema iteration order) to the front; the rest stay
+    // name-sorted. The point of this case is that NEITHER type is dropped.
+    const TWO_ROOT_SCHEMA = {
+      version: 1,
+      entry_types: {
+        "assistant:alpha": { name: "Alpha", kind: "assistant" },
+        "assistant:zebra": { name: "Zebra", kind: "assistant" },
+      },
+      fields: {},
+    } as unknown as MetadataSchema;
+    const tree = buildNodeTypeTree(TWO_ROOT_SCHEMA, "assistant");
+    expect(tree.map((node) => node.id).sort()).toEqual(["assistant:alpha", "assistant:zebra"]);
+  });
+});
+
+describe("kindRootEntryTypeId (#734)", () => {
+  it("prefers `<kind>:base` when it exists", () => {
+    expect(kindRootEntryTypeId(SCHEMA, "lore")).toBe("lore:base");
+  });
+
+  it("falls back to the first parentless type of the kind when there is no `:base`", () => {
+    expect(kindRootEntryTypeId(SCHEMA, "manuscript")).toBe("manuscript:scene");
+  });
+
+  it("returns null for a kind with no types, or an absent schema", () => {
+    expect(kindRootEntryTypeId(SCHEMA, "prompt")).toBeNull();
+    expect(kindRootEntryTypeId(null, "lore")).toBeNull();
   });
 });

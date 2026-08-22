@@ -20,6 +20,7 @@
     asSchemaKind,
     buildSchemaFieldSections,
     computedSpecFor,
+    kindRootEntryTypeId,
     resolveSchemaScope,
     schemaKindForDocumentKind,
     SCHEMA_KIND_META,
@@ -311,11 +312,7 @@
   }
 
   function defaultSchemaParentType(kind: SchemaKind) {
-    if (kind === "lore" && metadataSchema?.entry_types["lore:base"]) return "lore:base";
-    if (kind === "prompt" && metadataSchema?.entry_types["prompt:base"]) return "prompt:base";
-    if (kind === "research" && metadataSchema?.entry_types["research:base"]) return "research:base";
-    if (kind === "plot" && metadataSchema?.entry_types["plot:base"]) return "plot:base";
-    return "";
+    return kindRootEntryTypeId(metadataSchema, kind) ?? "";
   }
 
   function openSchemaForCustomData(entryType: string, documentKind: DocumentKind, ownerPaneId: string | null = null) {

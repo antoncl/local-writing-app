@@ -1060,6 +1060,57 @@ button.row-action-add.active {
   border-radius: 2px;
 }
 
+/* Roleplay interiority (ADR-0070 S2). The eye handle hugs a beat's end; a click
+   reveals that beat's private interiority as a distinct tinted block — only the
+   interiority is tinted, so the eye can skim straight to it. Both carry the
+   beat's --character-color so the tint matches its underline. */
+.editor-body .interiority-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15em;
+  height: 1.15em;
+  margin-left: 1px;
+  padding: 0;
+  vertical-align: baseline;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--character-color, var(--text-3));
+  opacity: 0.5;
+  cursor: pointer;
+}
+.editor-body .interiority-handle svg {
+  width: 0.9em;
+  height: 0.9em;
+}
+.editor-body .interiority-handle:hover,
+.editor-body .interiority-handle[aria-expanded="true"] {
+  opacity: 1;
+  background: color-mix(in oklab, var(--character-color, var(--text-3)) 14%, transparent);
+}
+.editor-body .interiority-block {
+  margin: var(--sp-1) 0;
+  padding: var(--sp-1) var(--sp-2);
+  border-left: 2px solid var(--character-color, var(--text-3));
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--character-color, var(--text-3)) 10%, transparent);
+}
+.editor-body .interiority-block-text {
+  display: block;
+  width: 100%;
+  margin: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-style: italic;
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+  overflow: hidden;
+}
+
 /* Mid-scene lore-mutation pill (#33). A point marker ("the change happens
    here"), so it's a compact inline chip — a distinct violet, deliberately
    unlike the teal character/context marks and the amber TODO anchors. The

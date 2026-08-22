@@ -23,6 +23,7 @@
   import FieldsOnlyView from "@/components/editor/body/FieldsOnlyView.svelte";
   import CodeBodyView from "@/components/editor/body/CodeBodyView.svelte";
   import ProseBodyView from "@/components/editor/body/ProseBodyView.svelte";
+  import { INTERIORITY_EYE_SVG } from "@/lib/editor-core/interiorityReveal";
   import ChatBodyView from "@/components/editor/body/ChatBodyView.svelte";
   import ViewBodyView from "@/components/editor/body/ViewBodyView.svelte";
   import { PromptInputDraftsController } from "@/lib/stores/promptInputDrafts.svelte";
@@ -178,6 +179,10 @@
   // (word_count) + the editor-hint string can read them.
   let liveWordCount = $state(0);
   let editorEmpty = $state(true);
+  // Roleplay interiority (ADR-0070 S2): buffer holds ≥1 beat (gates the shell
+  // toggle) / any beat currently revealed (drives its adaptive-stateful look).
+  let hasInteriorityBeats = $state(false);
+  let interiorityRevealed = $state(false);
   // Metadata rail (body-spec Section A). Per body shape: prose/code open,
   // chat collapses to a 34px edge-tab, none turns the rail into the pane.
   // `railOpen` is the user-toggleable state for the side rail; reset per
@@ -894,6 +899,24 @@
             <input class="title-input" aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()}`} placeholder={documentNameLabel} bind:value={title} oninput={handleTitleInput} />
           {/if}
         </label>
+        <!-- Interiority reveal (ADR-0070 S2): a shell affordance, present only
+             while the scene holds roleplay. Adaptive-stateful — quiet eye when
+             idle, gaining the name "Interiority" + a tint while revealing. The
+             shortcut lives in the tooltip, never as a compound on the button. -->
+        {#if hasInteriorityBeats}
+          <button
+            type="button"
+            class="interiority-toggle"
+            class:active={interiorityRevealed}
+            aria-pressed={interiorityRevealed}
+            aria-label="Interiority — reveal every beat"
+            title="Interiority — reveal every beat  (Alt+I)"
+            onclick={() => proseBodyView?.toggleInteriority()}
+          >
+            <span class="tg-glyph" aria-hidden="true">{@html INTERIORITY_EYE_SVG}</span>
+            {#if interiorityRevealed}<span class="tg-name">Interiority</span>{/if}
+          </button>
+        {/if}
       </div>
       <!-- Layer override authoring (#314 / ADR-0042): choose which level this
            inherited entry's edits write to. Renders only for an inherited lore
@@ -993,6 +1016,8 @@
         bind:this={proseBodyView}
       bind:liveWordCount
       bind:editorEmpty
+      bind:hasInteriorityBeats
+      bind:interiorityRevealed
       bind:lastInvocationCostUsd
       bind:sceneSessionCostUsd
       bind:characterCostUsd
@@ -1180,6 +1205,44 @@
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 4px 8px;
     align-items: center;
+  }
+
+  /* Interiority reveal toggle (ADR-0070 S2) — a shell affordance in the title
+     row's right column. Adaptive-stateful: quiet eye when idle; gains the name
+     "Interiority" + an accent tint while revealing (mirrors the ⤢/theme
+     shell-affordance pattern in design-language.md §5). */
+  .interiority-toggle {
+    justify-self: end;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 6px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-3);
+    cursor: pointer;
+    font-size: var(--fs-sm);
+  }
+  .interiority-toggle .tg-glyph {
+    display: inline-flex;
+    width: 16px;
+    height: 16px;
+  }
+  .interiority-toggle .tg-glyph :global(svg) {
+    width: 16px;
+    height: 16px;
+  }
+  .interiority-toggle:hover {
+    color: var(--text-2);
+    background: var(--inset);
+  }
+  .interiority-toggle.active {
+    color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .interiority-toggle .tg-name {
+    font-weight: 600;
   }
 
   /* ---- Time-travel overlay chrome (#64) ---------------------------------- */

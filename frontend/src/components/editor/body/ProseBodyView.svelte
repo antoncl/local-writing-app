@@ -38,6 +38,12 @@
     REBUILD_META,
     implicitContextIds,
   } from "@/lib/editor-core/implicitContextHighlight";
+  import {
+    InteriorityReveal,
+    interiorityHasBeats,
+    interiorityAnyRevealed,
+    toggleAllInteriority,
+  } from "@/lib/editor-core/interiorityReveal";
   import { setImplicitContext } from "@/lib/stores/implicitContext.svelte";
   import { createSceneEffectiveMatcher } from "@/lib/editor-core/sceneEffectiveMatcher.svelte";
   import {
@@ -121,6 +127,10 @@
     // string in the parent can read them.
     liveWordCount?: number;
     editorEmpty?: boolean;
+    // Roleplay interiority (ADR-0070): whether the buffer holds any beat (gates
+    // the shell toggle) and whether any beat is currently revealed (its state).
+    hasInteriorityBeats?: boolean;
+    interiorityRevealed?: boolean;
     // values lives here, but the chip lives in the shell header).
     lastInvocationCostUsd?: number | null;
     sceneSessionCostUsd?: number;
@@ -148,6 +158,8 @@
     documentLabel = "Scene",
     liveWordCount = $bindable(0),
     editorEmpty = $bindable(true),
+    hasInteriorityBeats = $bindable(false),
+    interiorityRevealed = $bindable(false),
     lastInvocationCostUsd = $bindable(null),
     sceneSessionCostUsd = $bindable(0),
     characterCostUsd = $bindable({}),
@@ -386,6 +398,21 @@
       return;
     }
     liveWordCount = countWords(editor.state.doc.textBetween(0, editor.state.doc.content.size, " "));
+  }
+
+  // Mirror the interiority plugin's state out to the shell (NodeEditor) so it
+  // can render + drive the roleplay-only reveal toggle (ADR-0070 S2).
+  function updateInteriorityState() {
+    if (!editor) return;
+    const has = interiorityHasBeats(editor.state);
+    const any = interiorityAnyRevealed(editor.state);
+    if (has !== hasInteriorityBeats) hasInteriorityBeats = has;
+    if (any !== interiorityRevealed) interiorityRevealed = any;
+  }
+
+  // Shell toggle entry point: reveal-all / collapse-all.
+  export function toggleInteriority(): void {
+    if (editor) toggleAllInteriority(editor.view);
   }
 
   function syncEditorEmpty() {
@@ -1073,6 +1100,21 @@
       return true;
     }
 
+    // Alt+I toggles roleplay interiority reveal-all (ADR-0070 S2) — the shortcut
+    // the shell toggle's tooltip advertises. Only when the buffer holds a beat.
+    if (
+      event.key.toLowerCase() === "i" &&
+      event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.shiftKey &&
+      interiorityHasBeats(view.state)
+    ) {
+      event.preventDefault();
+      toggleAllInteriority(view);
+      return true;
+    }
+
     if (slashMenu.visible && slashMenu.mode === "table-grid") {
       if (event.key === "ArrowDown") {
         event.preventDefault();
@@ -1237,6 +1279,7 @@
         AlignedTableHeader,
         AlignedTableCell,
         ImplicitContextHighlight.configure({ matcher: implicitContextMatcher }),
+        InteriorityReveal.configure({ colorForId: characterColorFromId }),
       ],
       content: "",
       editorProps: {
@@ -1278,6 +1321,9 @@
       onUpdate: ({ transaction }) => handleEditorUpdate(transaction),
       onSelectionUpdate: handleEditorSelectionUpdate,
       onBlur: handleEditorBlur,
+      // Reveal toggles are meta-only transactions (no doc change), so onUpdate
+      // wouldn't catch them — sync interiority state on every transaction.
+      onTransaction: () => updateInteriorityState(),
     });
 
     if (scene) {

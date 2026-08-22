@@ -32,6 +32,7 @@
   import MachineSettingsDialog from "@/components/dialogs/MachineSettingsDialog.svelte";
   import ImportDocumentsModal from "@/components/dialogs/ImportDocumentsModal.svelte";
   import ConfirmModal from "@/components/dialogs/ConfirmModal.svelte";
+  import FinalizeRoleplayDialog from "@/components/dialogs/FinalizeRoleplayDialog.svelte";
   import AIPolicyModal from "@/components/dialogs/AIPolicyModal.svelte";
   import ValidateModal from "@/components/dialogs/ValidateModal.svelte";
   import PlainTextEditor from "@/components/widgets/PlainTextEditor.svelte";
@@ -92,6 +93,7 @@
     computeDraftTitleOverrides,
   } from "@/lib/editor-core/editorPaneModel";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
+  import { roleplayPresence } from "@/lib/stores/roleplayPresence.svelte";
   import { flushDirtyPanesOnHide } from "@/lib/stores/editorPaneSave";
   import { entryBrainstorm } from "@/lib/stores/entryBrainstorm.svelte";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
@@ -145,6 +147,8 @@
   let appState = $state<AppState>({ name: "needsProject" });
   // One "Manage tags" home governs both vocabularies (#247 PR-3b).
   let tagsManagerOpen = $state(false);
+  // The finalize-roleplay modal (ADR-0070 S3), opened imperatively from the ≡ menu.
+  let finalizeDialog = $state<FinalizeRoleplayDialog | null>(null);
   // "Import documents" (#635) — the loose-scene adoption surface, opened from the
   // app menu. Its list comes from its own read, not the validation report.
   let importDocsOpen = $state(false);
@@ -743,6 +747,9 @@
     focusedDocumentStore.set(focusedEditorPane?.document ?? null);
   });
   let activeScene = $derived(focusedEditorPane?.document?.type === "manuscript" ? focusedEditorPane.scene : null);
+  // The ≡-menu "Finalize roleplay…" action is enabled only when the focused scene
+  // actually holds roleplay beats (ADR-0070 S3), surfaced per-pane from its editor.
+  let canFinalizeRoleplay = $derived(!!activeScene && roleplayPresence.has(focusedEditorPane?.id));
   let todos = $derived($todosStore);
   // The rebuildable embedded-todo index (GH #45); the Todo pane reads it directly,
   // and each editor pane derives its own status hint from the matching scene.
@@ -815,6 +822,8 @@
   onOpenGuides={openGuidePane}
   onOpenImport={openImportDocs}
   onManageAllTags={() => (tagsManagerOpen = true)}
+  canFinalize={canFinalizeRoleplay}
+  onFinalizeRoleplay={() => activeScene && finalizeDialog?.open(activeScene)}
   {inheritRows}
   inheritSaving={projectSession.declarationSaving}
   onToggleInherit={(path) =>
@@ -1193,6 +1202,7 @@
           if (editorPane.scene) await editorPanes.flushSceneIfDirty(editorPane.scene.id);
         }}
         onSceneRestored={(restored) => editorPanes.reconcileSceneFromServer(restored)}
+        onInteriorityChange={(has) => roleplayPresence.set(editorPane.id, has)}
         onReviewFreeze={(entryId, committer) =>
           committer
             ? void editorPanes.beginReviewLock(entryId, committer)
@@ -1295,6 +1305,14 @@
     onRepair={repairProject}
   />
 
+  <FinalizeRoleplayDialog
+    bind:this={finalizeDialog}
+    {promptEntries}
+    {loreEntries}
+    availableScenes={flattenStructureScenes(structure?.root)}
+    onFlush={(id) => editorPanes.flushSceneIfDirty(id)}
+    onFinalized={(restored) => editorPanes.reconcileSceneFromServer(restored)}
+  />
   {#if tagsManagerOpen}
     <TagManagerDialog onClose={() => (tagsManagerOpen = false)} />
   {/if}

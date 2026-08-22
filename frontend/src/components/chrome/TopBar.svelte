@@ -66,6 +66,11 @@
     // Manage tags — the one home for both vocabularies (#247 PR-3b), retiring the
     // per-pane "Tags…" buttons. Project-scoped: the rosters need an open project.
     onManageAllTags = () => {},
+    // Finalize roleplay (ADR-0070 S3) — a SCENE-scoped action, unlike the
+    // project-scoped items above: enabled only when the focused scene holds
+    // roleplay beats (`canFinalize`), it opens the finalize modal.
+    onFinalizeRoleplay = () => {},
+    canFinalize = false,
     projectOpen = false,
     // Theme toggle. Current preference + a callback that cycles to the
     // next one. The button shows an icon for the current state and a
@@ -110,6 +115,8 @@
     onOpenGuides?: () => void;
     onOpenImport?: () => void;
     onManageAllTags?: () => void;
+    onFinalizeRoleplay?: () => void;
+    canFinalize?: boolean;
     projectOpen?: boolean;
     themePref?: ThemePreference;
     onCycleTheme?: () => void;
@@ -323,6 +330,10 @@
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={() => runAction(onOpenMutations)}>Mutations</button>
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={() => runAction(onOpenImport)}>Import documents…</button>
         <button type="button" class="switcher-item" role="menuitem" disabled={!projectOpen} onclick={() => runAction(onManageAllTags)}>Manage all tags…</button>
+
+        <div class="switcher-divider" role="separator"></div>
+        <div class="switcher-section-label">Scene</div>
+        <button type="button" class="switcher-item" role="menuitem" disabled={!canFinalize} onclick={() => runAction(onFinalizeRoleplay)}>Finalize roleplay…</button>
 
         <div class="switcher-divider" role="separator"></div>
         <div class="switcher-section-label">Help</div>

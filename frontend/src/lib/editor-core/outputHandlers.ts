@@ -43,7 +43,13 @@ import type {
   PromptOutput,
 } from "@/lib/types";
 
-export type OutputHandlerKey = "inline" | "extract_to_node";
+export type OutputHandlerKey = "inline" | "extract_to_node" | "finalize_scene";
+
+// The roleplay finalize/cleanup projection (ADR-0070 S3). A recognized output
+// behaviour (mirrors backend HANDLER_KEYS) but a SCENE ACTION, not an editor
+// invocation — it runs from its own modal, so it is intentionally absent from
+// `_REGISTRY` and resolves to no editor surface (see `surfaceForStrategy`).
+export const FINALIZE_OUTPUT_HANDLER = "finalize_scene";
 export type OutputSource = "scan" | "transcript";
 export type OutputReview = "inline_mark" | "patch_diff";
 export type OutputActivation = "inline" | "conversation";
@@ -167,9 +173,12 @@ export const extractHandler: OutputHandler<ExtractHost, AIEntryPatch> = {
 
 // ── registry + routing ──────────────────────────────────────────────────────
 
-// The registry — the single import-time seam (ADR-0058). A new output behaviour
-// is a new handler object + one line here, never a new core branch.
-const _REGISTRY: Record<OutputHandlerKey, OutputHandler> = {
+// The registry — the single import-time seam (ADR-0058). A new EDITOR output
+// behaviour is a new handler object + one line here, never a new core branch.
+// `Partial` because not every recognized handler runs on an editor surface:
+// `finalize_scene` (ADR-0070 S3) is a scene action invoked from its own modal,
+// so it is deliberately absent and `outputHandlerFor` resolves it to null.
+const _REGISTRY: Partial<Record<OutputHandlerKey, OutputHandler>> = {
   inline: inlineHandler as OutputHandler,
   extract_to_node: extractHandler as OutputHandler,
 };

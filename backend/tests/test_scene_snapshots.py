@@ -399,6 +399,41 @@ class RestoreTests(SnapshotTestCase):
         self.service.restore_snapshot(self.scene_id, automatic[-1].id)
         self.assertEqual(self.service.read_scene(self.scene_id).body.strip(), "The afternoon rewrite.")
 
+    # ----- finalize / cleanup projection (ADR-0070 S3) ----------------------
+
+    def test_finalize_snapshots_kept_then_replaces_body(self) -> None:
+        """Finalize is destructive but safe: it captures a `kept` snapshot of the
+        pre-finalize scene (beats + interiority markers intact), then overwrites
+        the body with the AI's clean prose."""
+        self._save("A beat. <!-- character:id=annie;internal=x -->She fired.<!-- /character -->")
+        result = self.service.finalize_scene(self.scene_id, "She fired, and did not look back.")
+
+        self.assertEqual(result.body.strip(), "She fired, and did not look back.")
+        self.assertEqual(
+            self.service.read_scene(self.scene_id).body.strip(),
+            "She fired, and did not look back.",
+        )
+
+        kept = [r for r in self._snapshots() if r.retention == "kept"]
+        self.assertEqual(len(kept), 1, "finalize must leave exactly one kept safety-net snapshot")
+        detail = self.service.read_snapshot(self.scene_id, kept[0].id)
+        self.assertIn("character:id=annie", detail.body)
+
+    def test_finalize_preserves_title_and_status(self) -> None:
+        """Only the body is projected; the rest of the scene survives."""
+        self.service.save_scene(
+            self.scene_id,
+            SaveSceneRequest(
+                title="The Tide", body="messy beats", status="revised",
+                entry_type="manuscript:scene",
+            ),
+        )
+        self.service.finalize_scene(self.scene_id, "clean prose")
+        scene = self.service.read_scene(self.scene_id)
+        self.assertEqual(scene.body.strip(), "clean prose")
+        self.assertEqual(scene.title, "The Tide")
+        self.assertEqual(scene.status, "revised")
+
     def test_restores_own_capture_is_thinned_and_can_evict_the_oldest(self) -> None:
         """Stated in ADR-0043 rather than defended against: restoring costs the
         author their oldest automatic snapshot when five are already held."""

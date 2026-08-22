@@ -528,6 +528,16 @@ class SaveSceneRequest(BaseModel):
     dynamic_context: list[str] | None = None
 
 
+class FinalizeSceneRequest(BaseModel):
+    """Commit the finalize/cleanup projection (ADR-0070 S3): the AI-produced
+    clean prose replaces the scene body in place. The backend snapshots first
+    (`kept`) then writes; everything but the body is preserved. `dynamic_context`
+    is passed through to that safety-net snapshot, same semantics as a save."""
+
+    body: str
+    dynamic_context: list[str] | None = None
+
+
 class LoreEntrySummary(BaseModel):
     id: str
     title: str

@@ -227,7 +227,8 @@ on every subsequent step of the session.
   feedback (Claude memory, per the note above); read the linked memos before
   touching the areas they name.
 - `docs/development/` — `code-standards.md` (the rules a change must meet),
-  plus worktree and quality-gate mechanics (the *why* behind the rules above).
+  worktree and quality-gate mechanics (the *why* behind the rules above), and
+  `releasing.md` (the runbook for cutting a version — read before tagging a release).
 - GitHub Issues are the canonical backlog (`gh issue list`); milestones hold the
   roadmap. Do not invent backlog files.
 - `docs/` — deep dives: `metadata-strategy.md`, `ai-model-selection.md`,

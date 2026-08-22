@@ -104,10 +104,6 @@
     margin: 8px 0;
   }
 
-  .todo-checkbox {
-    width: auto;
-  }
-
   .todo-text {
     min-width: 0;
     min-height: 68px;

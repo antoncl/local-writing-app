@@ -127,7 +127,6 @@
 
   .select-all input,
   .doc-row input {
-    width: auto;
     flex: none;
     margin: 0;
   }

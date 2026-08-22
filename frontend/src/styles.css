@@ -435,11 +435,21 @@ button.add-affordance:hover {
 
 input,
 select {
-  width: 100%;
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 8px 9px;
   background: var(--surface);
+}
+
+/* `width: 100%` is for text-like fields, not checkboxes/radios: a stretched
+   checkbox takes the whole flex line and squeezes its label to nothing, and the
+   failure is invisible to svelte-check / vitest / the a11y tree (#463). Scope the
+   full-width rule so those controls keep their natural size — no per-site
+   `width: auto` workaround needed. (flex:none can't fix it: basis auto reads the
+   width back.) */
+input:not([type="checkbox"]):not([type="radio"]),
+select {
+  width: 100%;
 }
 
 textarea {

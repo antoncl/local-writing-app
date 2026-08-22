@@ -560,9 +560,6 @@
     color: var(--text-3);
     background: var(--app-bg);
   }
-  .scene-metadata :global(input[type="checkbox"]) {
-    width: auto;
-  }
 
   /* Type header */
   .rail-type {
@@ -972,7 +969,6 @@
     text-align: left;
   }
   .fr-val :global(input[type="checkbox"]) {
-    width: auto;
     padding: 0;
   }
 </style>

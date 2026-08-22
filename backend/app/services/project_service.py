@@ -23,7 +23,6 @@ from app.models import (
 from app.scope import WorkScope
 from app.services.atomic_io import atomic_write_text
 from app.services.machine_settings import touch_recent_project
-from app.services.migrations import migrate_project
 from app.services.project.ai_invocations import AiInvocationsMixin
 from app.services.project.assistant_tags import AssistantTagsMixin
 from app.services.project.assistants import AssistantEntriesMixin
@@ -44,6 +43,7 @@ from app.services.project.lore import LoreEntriesMixin
 from app.services.project.lore_mutations import LoreMutationsMixin
 from app.services.project.manuscript import ManuscriptMixin
 from app.services.project.metadata_values import MetadataValuesMixin
+from app.services.project.migration_runner import MigrationRunnerMixin
 from app.services.project.mutation_sets import MutationSetEntriesMixin
 from app.services.project.node_index_gate import node_index_gate
 from app.services.project.node_index_patch import NodeIndexPatchMixin
@@ -98,6 +98,7 @@ class ProjectService(
     MetadataSchemaInheritanceMixin,
     MetadataSchemaValidationMixin,
     MetadataValuesMixin,
+    MigrationRunnerMixin,
     NodeIndexPatchMixin,
     LayerOverridesMixin,
     NodeOpsMixin,
@@ -177,11 +178,12 @@ class ProjectService(
         root = root_path.expanduser().resolve()
         if not (root / "project.yaml").exists():
             raise ProjectServiceError("No project.yaml found in that folder.", 404)
+        service = cls(WorkScope(root=root))  # lightweight; seams for the doc pass (ADR-0071 §4)
         try:
-            migrations = migrate_project(root)
+            applied = service._run_migrations()
         except Exception as exc:  # noqa: BLE001
             raise ProjectServiceError(f"Project migration failed: {exc}", 500) from exc
-        return cls(WorkScope(root=root, migrations_applied=tuple(migrations)))
+        return cls(WorkScope(root=root, migrations_applied=tuple(applied)))
 
     @classmethod
     def create(cls, root_path: Path, title: str, inherits: list[str] | None = None) -> ProjectInfo:

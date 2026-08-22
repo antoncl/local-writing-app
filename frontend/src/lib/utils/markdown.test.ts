@@ -116,6 +116,11 @@ describe("markdown round-trip — content-bearing markers stay byte-stable", () 
     ["an embedded todo", "<!-- embedded-todo:id=todo1;status=open;note= -->fix this line<!-- /embedded-todo -->"],
     ["a done todo with a note", "<!-- embedded-todo:id=todo2;status=done;note=check%20the%20date -->the date<!-- /embedded-todo -->"],
     ["a character mark", "<!-- character:id=lore_1 -->Mira<!-- /character -->"],
+    [
+      // The canonical on-disk encoding — encodeURIComponent leaves `'` literal.
+      "a character beat carrying interiority",
+      "<!-- character:id=lore_1;internal=I%20can't%20miss. -->She fired.<!-- /character -->",
+    ],
   ] as const;
 
   for (const [label, md] of markers) {
@@ -127,6 +132,16 @@ describe("markdown round-trip — content-bearing markers stay byte-stable", () 
   it("keeps a character mark intact when it sits inside a sentence", async () => {
     const md = "The lighthouse kept <!-- character:id=lore_1 -->Mira<!-- /character --> awake.";
     expect(await roundTrip(md)).toBe(md);
+  });
+
+  it("decodes a beat's interiority onto data-internal (ADR-0070)", async () => {
+    // The payload rides the mark hidden — no UI until S2 — but must be present
+    // for the backend's per-character privacy filter to find it.
+    const html = await sceneMarkdownToHtml(
+      "<!-- character:id=lore_1;internal=I%20can%27t%20miss. -->She fired.<!-- /character -->",
+    );
+    expect(html).toContain('data-character="lore_1"');
+    expect(html).toContain('data-internal="I can\'t miss."');
   });
 });
 

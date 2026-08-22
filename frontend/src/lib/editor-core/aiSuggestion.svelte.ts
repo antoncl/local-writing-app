@@ -31,6 +31,7 @@ import {
   type InlineHost,
   type OutputRun,
 } from "@/lib/editor-core/outputHandlers";
+import { splitInteriority, visibleExternal } from "@/lib/editor-core/interiority";
 import type {
   ChatUsage,
   DocumentKind,
@@ -74,6 +75,10 @@ export class AiSuggestionController {
   #lastInvokedEntryId: string | null = null;
   #lastInvokedInputs: Record<string, unknown> = {};
   #lastInvokedAssistantId = "";
+  // The private interiority split off the last completed generation (ADR-0070),
+  // held between stream-done and accept so it can be stamped onto the beat's
+  // character mark. Null when the run carried no interiority.
+  #pendingInternal: string | null = null;
 
   #deps: AiSuggestionDeps;
 
@@ -87,6 +92,7 @@ export class AiSuggestionController {
     this.meta = null;
     this.#suggestionOriginal = null;
     this.#anchorPos = null;
+    this.#pendingInternal = null;
     this.error = null;
     this.toolbarPosition = { x: 0, y: 0, visible: false };
   }
@@ -216,7 +222,10 @@ export class AiSuggestionController {
     if (range) {
       let chain = editor.chain().focus().setTextSelection(range).unsetMark("aiSuggestion");
       if (characterId && onAccept) {
-        chain = chain.setMark(onAccept.mark, { characterId });
+        // ADR-0070: bind the beat's private interiority to the same character
+        // mark, so it rides with the beat (and dies with it on rewind).
+        const internal = this.#pendingInternal ?? "";
+        chain = chain.setMark(onAccept.mark, { characterId, internal });
       }
       chain.setTextSelection(range.to).run();
     }
@@ -225,6 +234,7 @@ export class AiSuggestionController {
     this.meta = null;
     this.#suggestionOriginal = null;
     this.#anchorPos = null;
+    this.#pendingInternal = null;
     this.error = null;
     this.toolbarPosition = { x: 0, y: 0, visible: false };
   }
@@ -282,6 +292,7 @@ export class AiSuggestionController {
     this.meta = null;
     this.#suggestionOriginal = null;
     this.#anchorPos = null;
+    this.#pendingInternal = null;
     this.error = null;
     this.toolbarPosition = { x: 0, y: 0, visible: false };
   }
@@ -394,6 +405,12 @@ export class AiSuggestionController {
     const { from, to, selectionText, textBefore, textAfter, destination } = gathered;
     const { entry, inputs, assistantId, scene } = run;
 
+    // A beat-marking prompt (roleplay, via on_accept) may deliver two parts —
+    // visible prose then `[[interiority]]` then private inner state (ADR-0070).
+    // Only the external part is ever rendered; the internal is stashed for accept.
+    const carriesInteriority = Boolean(promptOnAccept(this.#deps.getPromptCtx(), entry));
+    this.#pendingInternal = null;
+
     const suggestionId = `ai-${this.#nextSuggestionId++}`;
     let startPos = from;
     let streamingActive = false;
@@ -445,7 +462,8 @@ export class AiSuggestionController {
           ensureStreamingStarted();
           if (streamErrored) break;
           if (!editor) break;
-          this.#renderStreamingSuggestion(startPos, accumulated, suggestionId);
+          const visible = carriesInteriority ? visibleExternal(accumulated) : accumulated;
+          this.#renderStreamingSuggestion(startPos, visible, suggestionId);
         } else if (ev.type === "done") {
           lastMeta = {
             provider: ev.provider,
@@ -482,7 +500,14 @@ export class AiSuggestionController {
         }
       }
       if (!streamErrored) {
-        if (!accumulated.trim()) {
+        // Split the completed output into the visible beat and its private
+        // interiority (ADR-0070). Non-roleplay runs carry no interiority, so
+        // `external` is the whole text and `internal` is empty.
+        const { external, internal } = carriesInteriority
+          ? splitInteriority(accumulated)
+          : { external: accumulated, internal: "" };
+        this.#pendingInternal = carriesInteriority ? internal : null;
+        if (!external.trim()) {
           this.error = "Model returned empty output.";
         } else if (lastMeta) {
           this.meta = {
@@ -490,7 +515,7 @@ export class AiSuggestionController {
             model: lastMeta.model,
             latency_ms: lastMeta.latency_ms,
             truncated: lastMeta.truncated,
-            wordCount: countWords(accumulated),
+            wordCount: countWords(external),
             usage: lastMeta.usage,
             cost_usd: lastMeta.cost_usd,
           };

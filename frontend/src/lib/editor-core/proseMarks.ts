@@ -65,6 +65,16 @@ export function createCharacterMark({ colorForId, titleForId }: CharacterMarkRes
             };
           },
         },
+        // The character's private interiority for this beat (ADR-0070) — hidden
+        // inner state bound to the beat, carried through the markdown round-trip
+        // (markdown.ts) and kept per-character-private by the backend
+        // (character_turns). No reveal UI yet (S2); it just rides the mark.
+        internal: {
+          default: "",
+          parseHTML: (element) => element.getAttribute("data-internal") ?? "",
+          renderHTML: (attributes) =>
+            attributes.internal ? { "data-internal": String(attributes.internal) } : {},
+        },
       };
     },
     parseHTML() {

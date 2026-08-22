@@ -121,7 +121,6 @@
   }
 
   .confirm-modal-dsa input {
-    width: auto;
     margin: 0;
   }
 </style>

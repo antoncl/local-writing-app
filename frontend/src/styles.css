@@ -433,7 +433,15 @@ button.add-affordance:hover {
   background: var(--surface);
 }
 
-input,
+/* Text-like fields only — checkboxes and radios must NOT get text-field chrome.
+   Two failures the old blanket `input` rule caused, both invisible to
+   svelte-check / vitest / the a11y tree (#463): a stretched checkbox takes the
+   whole flex line and squeezes its label to nothing, and the border/`--surface`
+   background paints the control as a near-invisible dark box in dark mode while
+   suppressing the native checkmark. Excluding them lets the native control
+   render (and it stays dark-mode-aware via the `color-scheme` set on :root); no
+   per-site `width: auto` / `border: none` workaround is needed. */
+input:not([type="checkbox"]):not([type="radio"]),
 select {
   width: 100%;
   border: 1px solid var(--border);

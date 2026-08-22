@@ -57,9 +57,4 @@
     font-size: var(--fs-md);
   }
 
-  /* The global `input, select { width: 100% }` (styles.css) stretches a radio
-     to fill its flex label, distorting these controls. Reset the width. */
-  .ai-policy label input[type="radio"] {
-    width: auto;
-  }
 </style>

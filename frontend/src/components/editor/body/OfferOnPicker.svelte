@@ -170,12 +170,10 @@
   .offer-on-row:hover {
     background: var(--surface);
   }
-  /* The global `input, select { width: 100% }` (styles.css) would blow a bare
-     checkbox out to full width and shove the label off the right edge — reset it
-     to a natural-size native control. */
+  /* Bare native checkbox: strip the shared text-field chrome (border/bg/padding
+     from styles.css). Width is scoped away from checkboxes globally now (#463). */
   .offer-on-row > input[type="checkbox"] {
     flex: none;
-    width: auto;
     min-width: 0;
     margin: 0;
     padding: 0;

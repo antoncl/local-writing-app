@@ -335,7 +335,6 @@
   }
   .prompt-output-commit-toggle > input {
     flex: none;
-    width: auto;
     margin: 0;
   }
 </style>

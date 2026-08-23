@@ -46,6 +46,17 @@ with open(_ident_file, "w", encoding="utf-8") as _f:
     _f.write(build_identity())
 datas += [(_ident_file, ".")]
 
+# Bake the build stamp: the commit this binary is frozen at (ADR-0072 S6, #1362).
+# CI sets GITHUB_SHA for every step; a local freeze has none -> empty -> the
+# runtime reads it back as None ("no stamp"). The nightly update check compares
+# this because every nightly reports the same version string.
+from app.services.build_info import BUILD_STAMP_FILENAME  # noqa: E402
+
+_stamp_file = os.path.join(tempfile.mkdtemp(), BUILD_STAMP_FILENAME)
+with open(_stamp_file, "w", encoding="utf-8") as _f:
+    _f.write(os.environ.get("GITHUB_SHA", ""))
+datas += [(_stamp_file, ".")]
+
 # The app mark on the Windows exe + its Add/Remove-Programs entry (ADR-0072 S5).
 # macOS gets .icns via the dmg build; other platforms take PyInstaller's default.
 _exe_icon = None

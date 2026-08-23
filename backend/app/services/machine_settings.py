@@ -10,7 +10,14 @@ from typing import Any, get_args
 import yaml
 from pydantic import BaseModel, Field
 
-from app.models import AIPolicy, AssistantTag, DisplaySettings, RecentProject, Swatch
+from app.models import (
+    AIPolicy,
+    AssistantTag,
+    DisplaySettings,
+    RecentProject,
+    Swatch,
+    UpdateChannel,
+)
 from app.services.project.errors import ProjectServiceError
 
 APP_NAME = "local-writing-app"
@@ -127,6 +134,11 @@ class MachineSettings(BaseModel):
     # supported only for a single trusted user on a trusted private network.
     bind_host: str = ""
     bind_port: int = 0
+    # Which GitHub Releases channel this install checks for updates (ADR-0072
+    # S6, #1362). `stable` follows tagged `v*` releases; `nightly` follows the
+    # rolling bleeding-edge prerelease. Default `stable` — an unconfigured
+    # install should not be told a nightly is newer than its release.
+    update_channel: UpdateChannel = "stable"
 
 
 def config_dir() -> Path:
@@ -254,6 +266,29 @@ def bind_address() -> tuple[str | None, int | None]:
     raw_port = data.get("bind_port")
     port = raw_port if isinstance(raw_port, int) and raw_port > 0 else None
     return (host, port)
+
+
+def update_channel() -> UpdateChannel:
+    """The configured update channel, read directly from config.yaml (ADR-0072 S6).
+
+    A raw read, not `load_settings()`, for the same reason `default_ai_policy()`
+    is: the update-check endpoint reads this, and a read path must not be able to
+    write (load_settings materialises assistant files and tops up the palette).
+
+    Falls back to `stable` for anything unset/blank/unreadable/out-of-set — the
+    same fail-safe default as the model field: never silently follow nightly.
+    """
+    path = config_path()
+    if not path.exists():
+        return "stable"
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (yaml.YAMLError, OSError, UnicodeDecodeError):
+        return "stable"
+    if not isinstance(data, dict):
+        return "stable"
+    value = data.get("update_channel")
+    return value if value in get_args(UpdateChannel) else "stable"
 
 
 def palette() -> list[Swatch]:
@@ -560,7 +595,7 @@ def merge_update(current: MachineSettings, patch: dict[str, Any]) -> MachineSett
     # Plain scalar passthroughs: set when present and non-null. `ai_policy`'s
     # Literal bound on MachineSettings rejects a bad value at the final
     # model_validate, so an out-of-set string never persists.
-    for key in ("default_provider", "ai_policy"):
+    for key in ("default_provider", "ai_policy", "update_channel"):
         if key in patch and patch[key] is not None:
             base[key] = patch[key]
     if "default_models" in patch and isinstance(patch["default_models"], dict):

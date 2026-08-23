@@ -33,6 +33,7 @@ from app.routers import (
     project,
     scenes,
     snapshots,
+    updates,
 )
 from app.runtime import root_from_header
 from app.services.error_log import append_error_line
@@ -130,6 +131,7 @@ app.include_router(plot.router)
 app.include_router(entries.router)
 app.include_router(machine_settings.router)
 app.include_router(ai.router)
+app.include_router(updates.router)
 
 
 def mount_frontend(app: FastAPI, dist_dir: Path | None) -> None:

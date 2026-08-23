@@ -35,6 +35,7 @@ from app.models import (
     UpdateProjectSettingsRequest,
 )
 from app.runtime import CurrentProject, translate_errors
+from app.services.build_info import build_stamp
 from app.services.project_service import ProjectService
 
 router = APIRouter()
@@ -63,7 +64,14 @@ def app_version() -> AppVersion:
     # slice S6) polls it. NOTE: the frozen build (S3) must bundle the dist
     # metadata so importlib.metadata can resolve it; no guard here, mirroring
     # main.py's existing unguarded call.
-    return AppVersion(version=_pkg_version("local-writing-service"))
+    #
+    # `build` is the commit this binary was frozen at (S6): `None` in a source
+    # run, the SHA in a frozen build. The nightly update check compares it,
+    # because every nightly reports the same version string.
+    return AppVersion(
+        version=_pkg_version("local-writing-service"),
+        build=build_stamp(),
+    )
 
 
 # The two routes below are the only ones that do NOT take `CurrentProject`:

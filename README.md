@@ -9,10 +9,10 @@ nothing phones home.
 
 ## Getting it
 
-**Windows installer:** from 0.9.5 on, grab it from
-[Releases](https://github.com/antoncl/local-writing-app/releases) — download,
-run, write. Prefer to build it yourself, or curious how it's put together?
-→ [Running from source](docs/running-from-source.md).
+Installers for **Windows, macOS, and Linux** are on the
+[latest release](https://github.com/antoncl/local-writing-app/releases/latest) —
+download, run, write. Prefer to build it yourself, or curious how it's put
+together? → [Running from source](docs/running-from-source.md).
 
 ## Why
 
@@ -102,10 +102,9 @@ folder is safe to commit or share.
 ## Status
 
 Pre-1.0 and moving. It's the app I write in, so it's stable in the paths I use
-daily and rougher at the edges. Before 0.9.5, storage-format changes are made
-without migrations — recreate test projects rather than expecting old ones to
-open; from 0.9.5 on, projects migrate forward and your data is meant to last.
-Issues and milestones on GitHub are the real backlog.
+daily and rougher at the edges. Since 0.9.5, storage-format changes migrate
+your projects forward — your data is meant to last. Issues and milestones on
+GitHub are the real backlog.
 
 ## License
 

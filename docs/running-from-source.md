@@ -1,8 +1,8 @@
 # Running from source
 
 For the keenly interested. If you just want to write, the
-[Windows installer](https://github.com/antoncl/local-writing-app/releases)
-(0.9.5 and later) is the short path.
+[installers](https://github.com/antoncl/local-writing-app/releases/latest)
+(Windows, macOS, Linux) are the short path.
 
 ## How it's put together
 

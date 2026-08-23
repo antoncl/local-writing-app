@@ -216,43 +216,11 @@ def prune_old_backups(root: Path, keep: int = KEEP_BACKUPS) -> None:
 
 
 def migrate_project(root: Path) -> list[str]:
-    """Run pending migrations on the project.
-
-    Returns a list of human-readable descriptions of applied migrations.
-    Empty list means the project was already at the current version.
+    """Run pending migrations for the project at `root`. Thin entry point — the
+    orchestration (root steps + the document pass) lives on
+    ProjectService._run_migrations (ADR-0071 §4), which needs the service's seams.
     """
-    if not (root / "project.yaml").exists():
-        return []
+    from app.scope import WorkScope
+    from app.services.project_service import ProjectService
 
-    current = read_project_version(root)
-    pending = pending_migrations(current)
-
-    if pending:
-        backup_project(root, current)
-
-    applied: list[str] = []
-    for step in pending:
-        if isinstance(step, RootMigration):
-            try:
-                step.fn(root)
-            except Exception:
-                logger.exception("Migration to v%s failed", step.version)
-                raise
-        else:  # DocumentMigration
-            # Document-scoped steps are run by the ProjectService document pass over
-            # every owned document (ADR-0071 §4, slice 2), not by this root runner.
-            # None may be registered before that pass lands — fail loud if one is.
-            raise RuntimeError(
-                f"DocumentMigration v{step.version} cannot run in migrate_project — "
-                "the ProjectService document pass (ADR-0071 §4, #366 slice 2) is not wired yet."
-            )
-        write_project_version(root, step.version)
-        applied.append(f"v{step.version}: {step.description}")
-
-    # No migrations ran but the stamp was behind (e.g., pre-framework project
-    # under CURRENT_VERSION=1 with empty registry). Stamp it forward so future
-    # registrations behave correctly.
-    if current < CURRENT_VERSION and not pending:
-        write_project_version(root, CURRENT_VERSION)
-
-    return applied
+    return ProjectService(WorkScope(root=root))._run_migrations()

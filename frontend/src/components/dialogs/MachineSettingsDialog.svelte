@@ -100,14 +100,17 @@
   let updateResult = $state<UpdateCheck | null>(null);
   let updateError = $state(false);
   async function runUpdateCheck() {
-    if (updateChecking) return;
+    if (updateChecking || channelDirty) return;
     updateChecking = true;
     updateResult = null;
     updateError = false;
     try {
-      updateResult = await api.checkForUpdate();
+      const result = await api.checkForUpdate();
+      // A channel switch during the request makes this verdict stale — drop it
+      // rather than show a saved-channel result under a "Save to check" nudge.
+      if (!channelDirty) updateResult = result;
     } catch {
-      updateError = true;
+      if (!channelDirty) updateError = true;
     } finally {
       updateChecking = false;
     }

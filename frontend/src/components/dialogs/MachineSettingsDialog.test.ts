@@ -233,4 +233,26 @@ describe("MachineSettingsDialog — updates tab (ADR-0072 S7)", () => {
     expect(screen.getByText(/Save to check on the/)).toBeInTheDocument();
     expect(api.checkForUpdate).not.toHaveBeenCalled();
   });
+
+  it("drops an in-flight result if the channel changed before it resolved", async () => {
+    // A deferred check: switch channel mid-flight, then resolve — the stale
+    // saved-channel verdict must not surface under the "Save to check" nudge.
+    let resolveCheck!: (v: UpdateCheck) => void;
+    (api.checkForUpdate as Mock).mockReturnValue(
+      new Promise<UpdateCheck>((r) => (resolveCheck = r)),
+    );
+    mount("off");
+    await openUpdatesTab();
+    await fireEvent.click(checkBtn()); // in flight
+    await fireEvent.click(channelRadio(/Bleeding edge/)); // switch mid-flight
+    resolveCheck({
+      ...UP_TO_DATE,
+      update_available: true,
+      latest: "v9.9.10",
+      latest_url: "https://example.test/releases/v9.9.10",
+    });
+    await Promise.resolve(); // let the awaited assignment run
+    expect(screen.queryByRole("link", { name: /release page/ })).toBeNull();
+    expect(screen.getByText(/Save to check on the/)).toBeInTheDocument();
+  });
 });

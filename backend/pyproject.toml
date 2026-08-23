@@ -27,6 +27,9 @@ dev = [
   "pytest-timeout>=2.3",
   "httpx>=0.28",  # FastAPI TestClient dependency
 ]
+build = [
+  "pyinstaller>=6.10",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

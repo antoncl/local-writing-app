@@ -94,3 +94,21 @@ def test_version_endpoint_reports_running_version() -> None:
     body = response.json()
     assert body == {"version": _pkg_version("local-writing-service")}
     assert body["version"]  # non-empty
+
+
+def test_frontend_dist_dir_uses_frozen_meipass(tmp_path, monkeypatch) -> None:
+    import app.services.frontend_assets as fa
+
+    frozen = tmp_path / "frontend_dist"
+    frozen.mkdir()
+    monkeypatch.setattr(fa.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(fa.sys, "_MEIPASS", str(tmp_path), raising=False)
+    assert fa.frontend_dist_dir() == frozen
+
+
+def test_frontend_dist_dir_frozen_but_missing_is_none(tmp_path, monkeypatch) -> None:
+    import app.services.frontend_assets as fa
+
+    monkeypatch.setattr(fa.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(fa.sys, "_MEIPASS", str(tmp_path), raising=False)  # no frontend_dist subdir
+    assert fa.frontend_dist_dir() is None

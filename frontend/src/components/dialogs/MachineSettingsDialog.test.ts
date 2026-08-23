@@ -3,6 +3,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
 import { reactive } from "@/lib/test/reactive.svelte";
 
+// The dialog fetches the running app version (ADR-0072 S2) on first open —
+// stub it so the mount is hermetic (#973's network guard fails any test that
+// lets a real fetch through).
+vi.mock("@/lib/api", () => ({
+  api: {
+    getVersion: vi.fn(async () => ({ version: "9.9.9" })),
+  },
+}));
+
 import type { MachineSettingsDraft, MachineSettingsView } from "@/lib/types";
 import type { AIHealthResponse } from "@/lib/aiTypes";
 import MachineSettingsDialog from "@/components/dialogs/MachineSettingsDialog.svelte";
@@ -143,5 +152,12 @@ describe("MachineSettingsDialog — health names the resolved assistant (#336)",
     expect(line.textContent).toContain("✗");
     expect(line.textContent).toContain("Creative");
     expect(line.textContent).toContain("not configured");
+  });
+});
+
+describe("MachineSettingsDialog — running app version (ADR-0072 S2)", () => {
+  it("fetches and shows the running version once the dialog is open", async () => {
+    mount("off");
+    expect(await screen.findByText("Version 9.9.9")).toBeInTheDocument();
   });
 });

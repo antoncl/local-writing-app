@@ -12,6 +12,7 @@
     ProviderCredentialsView,
   } from "@/lib/types";
   import type { AIPolicyDraft } from "@/lib/stores/aiSettings.svelte";
+  import { api } from "@/lib/api";
   import Modal from "@/components/dialogs/Modal.svelte";
   import PolicyRadioGroup from "@/components/widgets/PolicyRadioGroup.svelte";
   import ProjectsFolderPicker from "@/components/widgets/ProjectsFolderPicker.svelte";
@@ -69,6 +70,16 @@
   let policyDraft = $state<AIPolicyDraft>("off");
   let policyWasOpen = $state(false);
   let applyingPolicy = $state(false);
+
+  // The running app version (ADR-0072 §6). Fetched once on first open — it's a
+  // static app constant, unrelated to the editable draft, so it isn't threaded
+  // through the parent's settings load.
+  let appVersion = $state<string | null>(null);
+  $effect(() => {
+    if (open && appVersion === null) {
+      api.getVersion().then((v) => (appVersion = v.version)).catch(() => {});
+    }
+  });
   // Snapshot the stored policy on each open→shown transition only; our own apply
   // re-syncs `settings` from the parent, and re-seeding on that would be a no-op
   // anyway (draft already equals the saved value).
@@ -284,6 +295,9 @@
         {/if}
       </div>
 
+      {#if appVersion}
+        <p class="muted app-version">Version {appVersion}</p>
+      {/if}
       <p class="muted stored-at">Stored locally at: <code>{settings?.config_path}</code></p>
 
       {#snippet actions()}
@@ -309,6 +323,11 @@
 
   .stored-at {
     font-size: var(--fs-sm);
+  }
+
+  .app-version {
+    font-size: var(--fs-sm);
+    margin-bottom: 0;
   }
 
   /* The app-wide AI policy section (#746). The radio group itself is the shared

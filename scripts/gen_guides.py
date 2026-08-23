@@ -21,10 +21,11 @@ REPO = Path(__file__).resolve().parents[1]
 OUT = REPO / "frontend" / "src" / "lib" / "generated" / "guides.ts"
 
 # The guides surfaced in-app, in display order. Each is {id, title, source doc}.
-# #1272 adds the consolidated prompt-scripting guide here; #172 bundles the
-# remaining user-facing howtos. Writing prompts stays first so the prompt
-# editor's "?" (which opens the pane at the default guide) still lands on it.
+# Getting started is first, so it is the viewer's default landing guide (#172).
+# The prompt editor's "?" no longer relies on order — it asks the viewer for the
+# "writing-prompts" guide by id (see GuideView / guideTarget, partial #1295).
 GUIDES = [
+    {"id": "getting-started", "title": "Getting started", "source": "docs/getting-started.md"},
     {"id": "writing-prompts", "title": "Writing prompts", "source": "docs/prompts/guide.md"},
     {"id": "custom-fields", "title": "Custom fields", "source": "docs/custom-fields.md"},
     {"id": "context-picker", "title": "Context picker", "source": "docs/context-picker.md"},

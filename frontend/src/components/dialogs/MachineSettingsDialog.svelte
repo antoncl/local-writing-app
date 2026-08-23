@@ -230,6 +230,17 @@
                 onclick={applyPolicy}
               >{applyingPolicy ? "Applying…" : "Apply"}</button>
             </div>
+            {#if policyDirty}
+              <!--
+                The Apply is deliberately separate from the batched Save (widening
+                AI access must never ride a stray Save). That safety is easy to
+                miss, though, so once the choice differs from the saved policy we
+                say plainly that Save won't carry it (#1382).
+              -->
+              <p class="policy-unapplied" role="status">
+                Not applied yet — press <strong>Apply</strong>. Saving other settings won't change AI access.
+              </p>
+            {/if}
           </section>
 
           <p class="muted">Your cloud subscriptions. Keys are masked on read — a provider stays configured until you remove it, and rotating a key replaces it.</p>
@@ -417,6 +428,17 @@
         {/if}
       </div>
 
+      {#if policyDirty && activeTab !== "ai"}
+        <!--
+          Same reminder as the AI tab's inline hint, surfaced from any other tab
+          so an unapplied AI-access change is impossible to miss on the way to
+          Save (#1382). Suppressed on the AI tab itself, where the inline hint by
+          the Apply button already says it.
+        -->
+        <p class="policy-unapplied" role="status">
+          AI access change not applied — press <strong>Apply</strong> on the AI tab.
+        </p>
+      {/if}
       {#if appVersion}
         <p class="muted app-version">Version {appVersion}</p>
       {/if}
@@ -462,6 +484,14 @@
 
   .app-policy h3 {
     margin: 0;
+  }
+
+  /* The unapplied-AI-access reminder (#1382): the amber --warn role — visible
+     without alarming, matching the "quiet writing desk" restraint. */
+  .policy-unapplied {
+    margin: 0;
+    color: var(--warn);
+    font-size: var(--fs-sm);
   }
 
   .health-check {

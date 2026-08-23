@@ -16,6 +16,7 @@
   import { api } from "@/lib/api";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { workspaceLayout } from "@/lib/stores/workspaceLayout.svelte";
+  import { guideTarget } from "@/lib/stores/guideTarget.svelte";
   import {
     dependencyAdvisoryText,
     inheritedInputsFrom,
@@ -256,10 +257,13 @@
   }
 
   // The "?" no longer lists the vocabulary — completion (Ctrl-Space) surfaces it
-  // in context, and this opens the narrative guide. "writing-prompts" is the
-  // first bundled guide, so the viewer opens to it (#1272/#1273).
+  // in context, and this opens the narrative guide. It targets "writing-prompts"
+  // explicitly rather than relying on it being the first bundled guide, since
+  // Getting started is now the default landing (#172); the request steers the
+  // viewer to the prompting guide (#1272/#1273, partial #1295).
   function openGuide(): void {
     cheatsheetPopoverOpen = false;
+    guideTarget.request("writing-prompts");
     workspaceLayout.ensureVisible("guide");
   }
 

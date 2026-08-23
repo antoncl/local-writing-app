@@ -10,6 +10,7 @@
   import { Marked } from "marked";
 
   import { guides, type Guide } from "@/lib/generated/guides";
+  import { guideTarget } from "@/lib/stores/guideTarget.svelte";
 
   const md = new Marked();
 
@@ -18,6 +19,18 @@
     guides.find((guide) => guide.id === selectedId) ?? guides[0],
   );
   const html = $derived(selected ? (md.parse(selected.markdown) as string) : "");
+
+  // Honor a one-shot "open at this guide" request (e.g. the prompt editor's "?",
+  // which wants Writing prompts regardless of which guide is first). Reading
+  // requestedId tracks it; applying then consuming resets it to null, and the
+  // guard makes the re-run after consume() a no-op — no loop, no dependency.
+  $effect(() => {
+    const id = guideTarget.requestedId;
+    if (id && guides.some((guide) => guide.id === id)) {
+      selectedId = id;
+      guideTarget.consume();
+    }
+  });
 
   function slugify(text: string): string {
     return text

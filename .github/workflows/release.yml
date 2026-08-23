@@ -153,6 +153,30 @@ jobs:
             ./dist/local-writing-app/local-writing-app --self-check
           fi
 
+      # Browser-level wiring smoke (#1352): drive a real browser through ~5 core
+      # flows (boot, rehydrate, create via wizard, type+autosave, settings)
+      # against THIS platform's frozen binary. Closes the frozen × browser-wiring
+      # seam the unit/component/integration layers structurally can't reach —
+      # same-origin serving, the `/api` base, a bundle that actually boots.
+      # Playwright owns the binary's lifecycle via its webServer (E2E_FROZEN_BIN).
+      - name: Install Playwright browser (chromium)
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Smoke — browser E2E against the frozen binary
+        working-directory: frontend
+        run: npx playwright test
+        env:
+          E2E_FROZEN_BIN: ${{ runner.os == 'Windows' && '../dist/local-writing-app/local-writing-app.exe' || '../dist/local-writing-app/local-writing-app' }}
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ matrix.platform }}
+          path: frontend/playwright-report
+          if-no-files-found: ignore
+
       - name: Package the onedir into a zip
         shell: bash
         run: python -c "import shutil,os; shutil.make_archive('local-writing-app-'+os.environ['PLAT'], 'zip', 'dist', 'local-writing-app')"

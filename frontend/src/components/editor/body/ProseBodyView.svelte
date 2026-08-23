@@ -1430,6 +1430,7 @@
   class:empty-editor={editorEmpty}
   class:lore-editor={documentKind === "lore"}
   class="editor-wrap"
+  data-testid="prose-editor"
   bind:this={editorFrame}
   onmousedown={(event) => {
     // Click landed on the wrap itself (the gutter around the centered

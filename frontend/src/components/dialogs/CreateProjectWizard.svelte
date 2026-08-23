@@ -104,7 +104,12 @@
         {:else if wizard.currentStep.id === "location"}
           <label>
             Project name
-            <input type="text" bind:value={wizard.title} placeholder="Honor's First Command" />
+            <input
+              type="text"
+              data-testid="wizard-project-name"
+              bind:value={wizard.title}
+              placeholder="Honor's First Command"
+            />
           </label>
 
           <label>
@@ -112,6 +117,7 @@
             <div class="path-picker-row">
               <input
                 type="text"
+                data-testid="wizard-project-folder"
                 bind:value={wizard.pickedFolder}
                 placeholder={wizard.defaultProjectsFolder || "C:\\path\\to\\writing"}
                 on:change={() => wizard.reloadCandidates()}

@@ -53,6 +53,13 @@ if sys.platform == "win32":
     _win_ico = os.path.join(_repo_root, "packaging", "icons", "icon.ico")
     _exe_icon = _win_ico if os.path.isfile(_win_ico) else None
 
+# macOS .app icon — built from icon-1024.png by packaging/macos/make-icns.sh
+# before this spec runs (ADR-0072 S5).
+_bundle_icon = None
+if sys.platform == "darwin":
+    _icns = os.path.join(_repo_root, "packaging", "icons", "icon.icns")
+    _bundle_icon = _icns if os.path.isfile(_icns) else None
+
 a = Analysis(  # noqa: F821
     [os.path.join(SPECPATH, "entry.py")],  # noqa: F821
     pathex=[_backend],
@@ -84,3 +91,14 @@ coll = COLLECT(  # noqa: F821
     a.datas,
     name="local-writing-app",
 )
+
+# macOS: wrap the onedir in a .app bundle for the drag-to-Applications dmg
+# (ADR-0072 S5). Unsigned/experimental. The onedir COLLECT above is untouched,
+# so the --self-check smoke and the zip still use it.
+if sys.platform == "darwin":
+    app = BUNDLE(  # noqa: F821
+        coll,
+        name="Local Writing App.app",
+        icon=_bundle_icon,
+        bundle_identifier="com.localwritingapp.app",
+    )

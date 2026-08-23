@@ -125,6 +125,16 @@ jobs:
       - name: Install backend + build extra (pyinstaller)
         run: python -m pip install -e "backend[build]"
 
+      # macOS only: build the .icns before the freeze so the spec's BUNDLE
+      # embeds it in the .app (ADR-0072 S5).
+      - name: Prepare the macOS icon (.icns)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x packaging/macos/make-icns.sh
+          packaging/macos/make-icns.sh
+
       - name: Build the frozen artifact (frontend build + PyInstaller)
         run: python packaging/build.py
 
@@ -226,6 +236,26 @@ jobs:
         with:
           name: linux-x64-appimage
           path: local-writing-app-linux-x64.AppImage
+          if-no-files-found: error
+
+      # macOS only: a drag-to-Applications .dmg from the .app the spec's BUNDLE
+      # produced (ADR-0072 S5/§10). Unsigned/experimental — Gatekeeper warns.
+      - name: Build the macOS dmg
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x packaging/macos/make-dmg.sh
+          packaging/macos/make-dmg.sh "local-writing-app-${PLAT}.dmg"
+        env:
+          PLAT: ${{ matrix.platform }}
+
+      - name: Upload the macOS dmg (workflow artifact)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-dmg
+          path: local-writing-app-${{ matrix.platform }}.dmg
           if-no-files-found: error
 
   publish:

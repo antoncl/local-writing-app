@@ -34,9 +34,13 @@ export function edgeClass(sourceId: string, nodes: Node<FlowData>[], schema: Met
   return outputPayload(gn, fieldDef) === "value-set" ? "value-wire" : undefined;
 }
 
+// Assign both the stroke class (node-set vs value-set) and the render type. A
+// normal wire uses the custom `ViewEdge` (which carries the × remove affordance,
+// #172); a recursion self-loop keeps `SelfLoopEdge` (custom routing, no ×).
 export function tagEdge(e: Edge, nodes: Node<FlowData>[], schema: MetadataSchema | null): Edge {
   const cls = edgeClass(e.source, nodes, schema);
-  return (e.class ?? undefined) === cls ? e : { ...e, class: cls };
+  const type = e.source === e.target ? "selfloop" : "wire";
+  return (e.class ?? undefined) === cls && e.type === type ? e : { ...e, class: cls, type };
 }
 
 export function hydrateGraph(node: ViewNode, schema: MetadataSchema | null): { nodes: Node<FlowData>[]; edges: Edge[] } {
@@ -51,7 +55,7 @@ export function hydrateGraph(node: ViewNode, schema: MetadataSchema | null): { n
       target: e.target,
       sourceHandle: e.source_handle ?? undefined,
       targetHandle: e.target_handle ?? undefined,
-      type: e.source === e.target ? "selfloop" : undefined,
+      type: e.source === e.target ? "selfloop" : "wire",
     }));
     // A persisted layout is authored in the first-class idiom (#271 retired the
     // bare-predicate-leaf → `All → Filter` canonicalization), so it hydrates as-is.
@@ -67,7 +71,7 @@ export function hydrateGraph(node: ViewNode, schema: MetadataSchema | null): { n
       target: e.target,
       sourceHandle: e.sourceHandle ?? undefined,
       targetHandle: e.targetHandle ?? undefined,
-      type: e.source === e.target ? "selfloop" : undefined,
+      type: e.source === e.target ? "selfloop" : "wire",
       class: edgeClass(e.source, nodes, schema),
     })),
   };

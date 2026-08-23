@@ -23,6 +23,7 @@
   import { themePreference } from "@/lib/utils/theme";
   import ViewFlowNode from "./view/ViewFlowNode.svelte";
   import SelfLoopEdge from "./view/SelfLoopEdge.svelte";
+  import ViewEdge from "./view/ViewEdge.svelte";
   import ViewportFit from "./view/ViewportFit.svelte";
   import ParamMark from "./view/ParamMark.svelte";
   import ViewGlyph from "./view/ViewGlyph.svelte";
@@ -203,7 +204,7 @@
   // emits on a viewport CHANGE, so it stays undefined until the first pan/zoom.
   let canvasEl = $state<HTMLDivElement | undefined>(undefined);
   const nodeTypes = { viewNode: ViewFlowNode };
-  const edgeTypes = { selfloop: SelfLoopEdge };
+  const edgeTypes = { selfloop: SelfLoopEdge, wire: ViewEdge };
 
   let addCounter = 0;
   let hydrating = false;
@@ -535,6 +536,7 @@
     (): DesignerContext => ({
       updateNodeData,
       removeNode,
+      removeEdge,
       expandedId,
       toggleExpanded,
       kind,
@@ -600,6 +602,16 @@
     // Self-report the cascade at the instant of death (§1): edge deletions +
     // the node, one transaction — one Ctrl+Z brings it all back, same id (§6).
     if (doomed) undoCtl.recordDelete([doomed], incident);
+  }
+  // The × on a wire (ViewEdge) — the discoverable counterpart to select+Delete.
+  // Mirrors removeNode: drop the edge and self-report it as one undo step. Plain
+  // wire removal needs no re-lowering/orphan sweep (unlike updateNodeData) —
+  // dropping an input just narrows the target, which graphToSpec already tolerates.
+  function removeEdge(id: string): void {
+    const doomed = flowEdges.find((e) => e.id === id);
+    if (!doomed) return;
+    flowEdges = flowEdges.filter((e) => e.id !== id);
+    undoCtl.recordDelete([], [doomed]);
   }
   // The delete key's counterpart: SvelteFlow removed the selection internally
   // and hands over exactly what died — record it the same way. (The output

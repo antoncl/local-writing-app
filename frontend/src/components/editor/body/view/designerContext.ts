@@ -27,6 +27,8 @@ export type DesignerContext = {
   // node mutation, wired back to the shell's bound Svelte Flow arrays
   updateNodeData: (id: string, patch: Partial<ViewNodeData>) => void;
   removeNode: (id: string) => void;
+  // Remove a single connection by edge id — the × affordance on ViewEdge.
+  removeEdge: (id: string) => void;
   // Which node is expanded to its full editor (§A, #220). A node's header is a
   // toggle (`toggleExpanded`); a canvas-background click clears it. Independent
   // of Svelte Flow selection, so clicking a header a second time collapses.

@@ -67,4 +67,27 @@ describe("GuideView", () => {
     );
     expect(guideTarget.requestedId).toBeNull();
   });
+
+  it("sets reference-kind guides apart under a Reference heading (#1296)", () => {
+    render(GuideView);
+    flushSync();
+    // The terse lookup is bundled but grouped, not mixed into the narrative tabs.
+    expect(screen.getByText("Reference")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Prompt reference" }),
+    ).toBeInTheDocument();
+    // It is not the default landing — that stays the first narrative guide.
+    expect(screen.getByRole("button", { current: "page" })).not.toHaveTextContent(
+      "Prompt reference",
+    );
+  });
+
+  it("opens at the reference by id, so a guide's #guide:reference link resolves", () => {
+    guideTarget.request("reference");
+    render(GuideView);
+    flushSync();
+    expect(screen.getByRole("button", { current: "page" })).toHaveTextContent(
+      "Prompt reference",
+    );
+  });
 });

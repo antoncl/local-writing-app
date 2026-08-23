@@ -1,9 +1,9 @@
 <svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Local Writing App">
   <title>Local Writing App</title>
   <rect x="4" y="4" width="120" height="120" rx="27" fill="#efe7d6"/>
-  <polygon points="64,26 103,66 25,66" fill="#2c2620"/>
-  <rect x="38" y="63" width="52" height="39" fill="#2c2620"/>
-  <rect x="49" y="72" width="30" height="6" rx="3" fill="#efe7d6"/>
-  <rect x="49" y="82" width="23" height="6" rx="3" fill="#efe7d6"/>
-  <rect x="49" y="92" width="30" height="6" rx="3" fill="#efe7d6"/>
+  <rect x="30" y="58" width="68" height="45" rx="4" fill="#2c2620"/>
+  <polygon points="64,30 105,64 23,64" fill="#2c2620"/>
+  <rect x="45" y="72" width="38" height="6" rx="3" fill="#efe7d6"/>
+  <rect x="45" y="82" width="30" height="6" rx="3" fill="#efe7d6"/>
+  <rect x="45" y="92" width="38" height="6" rx="3" fill="#efe7d6"/>
 </svg>

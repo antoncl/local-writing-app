@@ -20,12 +20,15 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 OUT = REPO / "frontend" / "src" / "lib" / "generated" / "guides.ts"
 
-# The guides surfaced in-app, in display order. Each is {id, title, source doc}.
+# The guides surfaced in-app, in display order. Each is {id, title, source doc}
+# plus an optional `kind`: "guide" (narrative, the default) or "reference" (a
+# terse lookup contract). GuideView groups references under their own picker
+# heading so a dense contract doesn't read as a learning guide (#1296).
 # Getting started is first, so it is the viewer's default landing guide (#172).
 # The prompt editor's "?" no longer relies on order — it asks the viewer for the
-# "writing-prompts" guide by id (see GuideView / guideTarget, partial #1295).
-# Order is a reading flow, not history: intro, then world-building (lore, its
-# fields, mid-scene changes), then organizing (views), then the AI guides.
+# "writing-prompts" guide by id (see GuideView / guideTarget, #1295).
+# Narrative order is a reading flow: intro, then world-building (lore, its fields,
+# mid-scene changes), then organizing (views), then the AI guides; references last.
 GUIDES = [
     {"id": "getting-started", "title": "Getting started", "source": "docs/getting-started.md"},
     {"id": "lore", "title": "Lore", "source": "docs/lore.md"},
@@ -35,6 +38,7 @@ GUIDES = [
     {"id": "writing-prompts", "title": "Writing prompts", "source": "docs/prompts/guide.md"},
     {"id": "context-picker", "title": "Context picker", "source": "docs/context-picker.md"},
     {"id": "roleplay", "title": "Roleplay", "source": "docs/roleplay.md"},
+    {"id": "reference", "title": "Prompt reference", "source": "docs/prompts/reference.md", "kind": "reference"},
 ]
 
 _HEADER = (
@@ -49,6 +53,7 @@ def render() -> str:
         {
             "id": guide["id"],
             "title": guide["title"],
+            "kind": guide.get("kind", "guide"),
             "markdown": (REPO / guide["source"]).read_text(encoding="utf-8"),
         }
         for guide in GUIDES
@@ -56,7 +61,7 @@ def render() -> str:
     body = json.dumps(bundle, ensure_ascii=False, indent=2)
     return (
         _HEADER
-        + "\nexport type Guide = { id: string; title: string; markdown: string };\n\n"
+        + '\nexport type Guide = { id: string; title: string; kind: "guide" | "reference"; markdown: string };\n\n'
         + f"export const guides: Guide[] = {body};\n"
     )
 

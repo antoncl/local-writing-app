@@ -7,7 +7,7 @@ fills in from your story.
 
 This guide walks through how to write one. It teaches the ideas with worked
 examples; for the exhaustive list of every variable and helper, see the prompt
-**reference** (`docs/prompts/reference.md`).
+**[reference](#guide:reference)**.
 
 ## The three pieces
 
@@ -177,7 +177,7 @@ Common fragments live as **snippets** — include one by id:
 
 ## Where to look next
 
-- The prompt **reference** (`docs/prompts/reference.md`) — every variable,
-  helper, filter, and tag with its exact shape.
+- The prompt **[reference](#guide:reference)** — every variable, helper, filter,
+  and tag with its exact shape.
 - Your prompt's **Preview** tab shows the assembled messages (and their token
   cost) as you edit — the fastest way to see what a change does.

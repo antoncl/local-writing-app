@@ -20,6 +20,11 @@
   );
   const html = $derived(selected ? (md.parse(selected.markdown) as string) : "");
 
+  // Narrative guides read as a learning flow; references are terse lookup
+  // contracts. Split them so the picker can set the two apart (#1296).
+  const narrativeGuides = $derived(guides.filter((g) => g.kind !== "reference"));
+  const referenceGuides = $derived(guides.filter((g) => g.kind === "reference"));
+
   // Honor a one-shot "open at this guide" request (e.g. the prompt editor's "?",
   // which wants Writing prompts regardless of which guide is first). Reading
   // requestedId tracks it; applying then consuming resets it to null, and the
@@ -72,17 +77,26 @@
   {#if guides.length === 0}
     <p class="guide-empty">No guides are bundled yet.</p>
   {:else}
+    {#snippet navItem(guide: Guide)}
+      <button
+        type="button"
+        class="guide-nav-item"
+        class:active={guide.id === selected?.id}
+        aria-current={guide.id === selected?.id ? "page" : undefined}
+        onclick={() => (selectedId = guide.id)}
+      >{guide.title}</button>
+    {/snippet}
     {#if guides.length > 1}
       <nav class="guide-nav" aria-label="Guides">
-        {#each guides as guide (guide.id)}
-          <button
-            type="button"
-            class="guide-nav-item"
-            class:active={guide.id === selected?.id}
-            aria-current={guide.id === selected?.id ? "page" : undefined}
-            onclick={() => (selectedId = guide.id)}
-          >{guide.title}</button>
+        {#each narrativeGuides as guide (guide.id)}
+          {@render navItem(guide)}
         {/each}
+        {#if referenceGuides.length > 0}
+          <span class="guide-nav-heading">Reference</span>
+          {#each referenceGuides as guide (guide.id)}
+            {@render navItem(guide)}
+          {/each}
+        {/if}
       </nav>
     {/if}
     <article class="guide-prose" use:guideLinks>
@@ -125,6 +139,17 @@
   .guide-nav-item.active {
     background: var(--inset);
     color: var(--text);
+  }
+  /* A quiet label setting the reference lookups apart from the narrative guides
+     (#1296). Sits inline in the wrapping nav, before the reference items. */
+  .guide-nav-heading {
+    align-self: center;
+    margin-left: var(--sp-2);
+    font-family: var(--sans);
+    font-size: var(--fs-xs);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-2);
   }
 
   .guide-empty {

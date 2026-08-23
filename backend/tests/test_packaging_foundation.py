@@ -112,3 +112,30 @@ def test_frontend_dist_dir_frozen_but_missing_is_none(tmp_path, monkeypatch) -> 
     monkeypatch.setattr(fa.sys, "frozen", True, raising=False)
     monkeypatch.setattr(fa.sys, "_MEIPASS", str(tmp_path), raising=False)  # no frontend_dist subdir
     assert fa.frontend_dist_dir() is None
+
+
+def test_build_identity_reads_frozen_stamp(tmp_path, monkeypatch) -> None:
+    import app.services.project.node_index_snapshot as nis
+
+    (tmp_path / nis.FROZEN_IDENTITY_FILENAME).write_text("deadbeefcafe0001", encoding="utf-8")
+    monkeypatch.setattr(nis.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(nis.sys, "_MEIPASS", str(tmp_path), raising=False)
+    # lru_cache: clear so the frozen branch runs, not a cached live digest.
+    nis.build_identity.cache_clear()
+    try:
+        assert nis.build_identity() == "deadbeefcafe0001"
+    finally:
+        nis.build_identity.cache_clear()  # don't leak the frozen value into other tests
+
+
+def test_build_identity_frozen_missing_stamp_raises(tmp_path, monkeypatch) -> None:
+    import app.services.project.node_index_snapshot as nis
+
+    monkeypatch.setattr(nis.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(nis.sys, "_MEIPASS", str(tmp_path), raising=False)  # no stamp file
+    nis.build_identity.cache_clear()
+    try:
+        with pytest.raises(RuntimeError, match=nis.FROZEN_IDENTITY_FILENAME):
+            nis.build_identity()
+    finally:
+        nis.build_identity.cache_clear()

@@ -1177,6 +1177,9 @@ export type SaveProjectNodeRequest = {
 // The running application version (ADR-0072 S2), from `GET /api/version`.
 export type AppVersion = {
   version: string;
+  // The commit this binary was frozen at (ADR-0072 S6); null in a source run
+  // or a frozen build with no baked stamp. The nightly update check compares it.
+  build: string | null;
 };
 
 // Machine-settings wire types live in ./machineTypes (#763.5) — extracted to
@@ -1190,6 +1193,8 @@ export type {
   MachineSettingsView,
   MachineSettingsUpdate,
   MachineSettingsDraft,
+  UpdateChannel,
+  UpdateCheck,
 } from "./machineTypes";
 
 // AI wire types live in ./aiTypes (#763.5) — extracted to keep this barrel

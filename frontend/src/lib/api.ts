@@ -50,6 +50,7 @@ import type {
   MoveLoreNoteToResearchResponse,
   MachineSettingsUpdate,
   MachineSettingsView,
+  UpdateCheck,
   MetadataFieldDefinition,
   MetadataGroupDefinition,
   MetadataSchema,
@@ -418,6 +419,11 @@ export const api = {
   },
   getVersion() {
     return request<AppVersion>("/version");
+  },
+  // Poll GitHub Releases for a newer build on the configured channel (ADR-0072
+  // S6). Never throws for "offline" — that comes back as `reachable: false`.
+  checkForUpdate() {
+    return request<UpdateCheck>("/updates/check");
   },
   updateMachineSettings(update: MachineSettingsUpdate) {
     return request<MachineSettingsView>("/settings/machine", {

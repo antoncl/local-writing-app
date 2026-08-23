@@ -159,6 +159,7 @@ class ProjectSession {
         default_projects_folder: settings.default_projects_folder ?? "",
         palette: (settings.palette ?? []).map((s) => ({ ...s })),
         display: { ...settings.display },
+        update_channel: settings.update_channel,
       };
       this.machineSettingsOpen = true;
     });
@@ -187,6 +188,7 @@ class ProjectSession {
         default_projects_folder: draft.default_projects_folder,
         palette: draft.palette,
         display: draft.display,
+        update_channel: draft.update_channel,
       };
       this.machineSettings = await api.updateMachineSettings(update);
       this.recentProjects = this.machineSettings.recent_projects ?? [];

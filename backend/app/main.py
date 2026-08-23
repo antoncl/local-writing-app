@@ -32,6 +32,7 @@ from app.routers import (
     plot,
     project,
     scenes,
+    session,
     snapshots,
     updates,
 )
@@ -132,6 +133,7 @@ app.include_router(entries.router)
 app.include_router(machine_settings.router)
 app.include_router(ai.router)
 app.include_router(updates.router)
+app.include_router(session.router)
 
 
 def mount_frontend(app: FastAPI, dist_dir: Path | None) -> None:

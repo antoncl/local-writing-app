@@ -105,6 +105,24 @@ import type {
 // backend port — so dev never proxies and streaming responses stay unbuffered.
 const baseUrl = import.meta.env.VITE_API_BASE ?? "/api";
 
+// A WebSocket URL for a backend path, derived from the same base the HTTP client
+// uses so both dev (an absolute cross-origin base) and the packaged app (the
+// relative same-origin `/api`) reach the backend. A relative base resolves
+// against the page origin; either way http(s) swaps to ws(s).
+function apiWsUrl(path: string): string {
+  const url = new URL(`${baseUrl}${path}`, window.location.href);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
+}
+
+// Open the session-presence WebSocket (#1378). The raw socket primitive lives
+// here with the rest of the backend transport — ADR-0056's http-client-guard
+// keeps network I/O in this one module; the presence controller in
+// lib/sessionPresence.ts only drives the returned socket's lifecycle.
+export function openSessionPresenceSocket(): WebSocket {
+  return new WebSocket(apiWsUrl("/session/live"));
+}
+
 // The open project's root, carried on every request so the backend resolves the
 // request's scope from the request itself (#413 / ADR-0045) rather than from a
 // process-wide record of what was last opened. Set on a successful open/create

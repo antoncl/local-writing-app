@@ -8,6 +8,7 @@ slice S3) will add a `sys._MEIPASS` branch here and nowhere else.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 
@@ -19,7 +20,11 @@ def frontend_dist_dir() -> Path | None:
     regex in main.py). When a build exists (packaged product, or a local
     `npm run build`), the same server serves it and the UI is same-origin.
     """
-    # backend/app/services/frontend_assets.py -> parents: [0]=services [1]=app
-    # [2]=backend [3]=<repo root>
+    # Frozen build (PyInstaller, ADR-0072 S3): the bundle is collected beside
+    # the app under _MEIPASS/frontend_dist.
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        candidate = Path(sys._MEIPASS) / "frontend_dist"
+        return candidate if candidate.is_dir() else None
+    # Source run: backend/app/services/frontend_assets.py -> parents[3] = <repo>.
     candidate = Path(__file__).resolve().parents[3] / "frontend" / "dist"
     return candidate if candidate.is_dir() else None

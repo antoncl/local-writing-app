@@ -152,6 +152,8 @@ def test_nightly_no_build_yet(monkeypatch) -> None:
     assert result.reachable is True
     assert result.update_available is False
     assert result.detail == "no nightly build yet"
+    # No link to a page that doesn't exist yet.
+    assert result.latest_url is None
 
 
 # --- channel accessor + endpoint -------------------------------------------

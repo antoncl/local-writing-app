@@ -85,7 +85,6 @@ def _check_nightly(client: httpx.Client, result: UpdateCheck) -> None:
     # resolves straight to the commit SHA, whereas `target_commitish` can come
     # back as the branch name ("master") depending on how the release was cut.
     response = client.get(f"{_API}/git/refs/tags/nightly")
-    result.latest_url = _NIGHTLY_PAGE
     if response.status_code == 404:
         result.detail = "no nightly build yet"
         return
@@ -96,6 +95,10 @@ def _check_nightly(client: httpx.Client, result: UpdateCheck) -> None:
     if not isinstance(sha, str) or not sha:
         result.detail = "nightly ref has no commit"
         return
+    # Only now that the ref exists: point at the page, so a "no nightly yet"
+    # result never carries a link to a release page that 404s (mirrors the
+    # stable path, which sets latest_url only on the 200 response).
+    result.latest_url = _NIGHTLY_PAGE
     result.latest = sha[:12]
     if not result.current_build:
         # A source run, or a frozen build with no stamp: we can see the nightly

@@ -2,13 +2,17 @@
 
 A fiction-writing app that runs entirely on your own machine, stores your work as
 plain files you can read without it, and treats AI as an optional tool you point
-at your prose — not a service you rent.
-
-It's two processes: a Python/FastAPI service on `127.0.0.1:8787` that owns the
-project files, and a Svelte 5 + TipTap browser UI that talks to it. Nothing
-phones home. There is no account, no server, and no sync.
+at your prose — not a service you rent. No account, no subscription, no sync —
+nothing phones home.
 
 ![The manuscript tree, a scene in the editor, and its metadata](site/assets/editor.png)
+
+## Getting it
+
+**Windows installer:** from 0.9.5 on, grab it from
+[Releases](https://github.com/antoncl/local-writing-app/releases) — download,
+run, write. Prefer to build it yourself, or curious how it's put together?
+→ [Running from source](docs/running-from-source.md).
 
 ## Why
 
@@ -95,39 +99,6 @@ diff, and version-control the whole thing without this app. API credentials are
 *not* stored in the project — they live in per-machine config, so a project
 folder is safe to commit or share.
 
-## Running it
-
-**Installer (Windows):** from 0.9.5 on, grab the installer from
-[Releases](https://github.com/antoncl/local-writing-app/releases) — download,
-run, write. Everything below is for running from source.
-
-Requires Python 3.11+ and Node 20+. Windows is the developed-on platform; nothing
-is deliberately Windows-only, but the paths below use PowerShell.
-
-Backend:
-
-```powershell
-cd backend
-python -m venv .venv
-.venv\Scripts\python -m pip install -e .
-.venv\Scripts\python -m uvicorn app.main:app --reload --port 8787
-```
-
-Frontend, in a second terminal:
-
-```powershell
-cd frontend
-npm install
-npm run dev
-```
-
-Open the Vite URL it prints. The frontend expects the backend at
-`http://127.0.0.1:8787`.
-
-AI is off until you turn it on: set a project's policy to `local-only` or
-`cloud-allowed` in the Project pane, and add provider keys (or an Ollama host) in
-machine settings.
-
 ## Status
 
 Pre-1.0 and moving. It's the app I write in, so it's stable in the paths I use
@@ -135,10 +106,6 @@ daily and rougher at the edges. Before 0.9.5, storage-format changes are made
 without migrations — recreate test projects rather than expecting old ones to
 open; from 0.9.5 on, projects migrate forward and your data is meant to last.
 Issues and milestones on GitHub are the real backlog.
-
-Quality gates (lint, type-check, tests, file-size and design-token guards) run as
-git hooks and in GitHub Actions; `CLAUDE.md` documents the layout and the rules
-in more depth than this README.
 
 ## License
 

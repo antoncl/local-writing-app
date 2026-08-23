@@ -24,13 +24,17 @@ OUT = REPO / "frontend" / "src" / "lib" / "generated" / "guides.ts"
 # Getting started is first, so it is the viewer's default landing guide (#172).
 # The prompt editor's "?" no longer relies on order — it asks the viewer for the
 # "writing-prompts" guide by id (see GuideView / guideTarget, partial #1295).
+# Order is a reading flow, not history: intro, then world-building (lore, its
+# fields, mid-scene changes), then organizing (views), then the AI guides.
 GUIDES = [
     {"id": "getting-started", "title": "Getting started", "source": "docs/getting-started.md"},
-    {"id": "writing-prompts", "title": "Writing prompts", "source": "docs/prompts/guide.md"},
+    {"id": "lore", "title": "Lore", "source": "docs/lore.md"},
     {"id": "custom-fields", "title": "Custom fields", "source": "docs/custom-fields.md"},
+    {"id": "mutations", "title": "Mutations", "source": "docs/mutations.md"},
+    {"id": "views", "title": "Views", "source": "docs/views.md"},
+    {"id": "writing-prompts", "title": "Writing prompts", "source": "docs/prompts/guide.md"},
     {"id": "context-picker", "title": "Context picker", "source": "docs/context-picker.md"},
     {"id": "roleplay", "title": "Roleplay", "source": "docs/roleplay.md"},
-    {"id": "mutations", "title": "Mutations", "source": "docs/mutations.md"},
 ]
 
 _HEADER = (

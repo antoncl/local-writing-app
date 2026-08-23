@@ -7,7 +7,7 @@
 // Writing prompts even though it is no longer the first guide.
 import { afterEach, describe, expect, it } from "vitest";
 import { flushSync } from "svelte";
-import { render, screen } from "@/lib/test/component";
+import { render, screen, fireEvent } from "@/lib/test/component";
 import GuideView from "./GuideView.svelte";
 import { guides } from "@/lib/generated/guides";
 import { guideTarget } from "@/lib/stores/guideTarget.svelte";
@@ -38,6 +38,33 @@ describe("GuideView", () => {
     expect(active).not.toHaveTextContent(guides[0].title);
     // The request is one-shot: applying it clears it, so a later plain open
     // (Help → Guides) keeps the default and a second "?" click re-fires.
+    expect(guideTarget.requestedId).toBeNull();
+  });
+
+  it("re-fires a repeated request within one open viewer (second '?' click)", async () => {
+    // Mount once, steer to Writing prompts (first "?"), consumed.
+    guideTarget.request("writing-prompts");
+    render(GuideView);
+    flushSync();
+    expect(screen.getByRole("button", { current: "page" })).toHaveTextContent(
+      "Writing prompts",
+    );
+
+    // User browses away to another guide by clicking its tab.
+    await fireEvent.click(screen.getByRole("button", { name: "Mutations" }));
+    flushSync();
+    expect(screen.getByRole("button", { current: "page" })).toHaveTextContent(
+      "Mutations",
+    );
+
+    // A second "?" click requests the same id again. Because the first was
+    // consumed (→ null), null → "writing-prompts" is a real change, so the
+    // effect re-fires and steers back — the behaviour consume() exists to enable.
+    guideTarget.request("writing-prompts");
+    flushSync();
+    expect(screen.getByRole("button", { current: "page" })).toHaveTextContent(
+      "Writing prompts",
+    );
     expect(guideTarget.requestedId).toBeNull();
   });
 });

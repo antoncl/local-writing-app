@@ -28,13 +28,16 @@ OUT = REPO / "frontend" / "src" / "lib" / "generated" / "guides.ts"
 # The prompt editor's "?" no longer relies on order — it asks the viewer for the
 # "writing-prompts" guide by id (see GuideView / guideTarget, #1295).
 # Narrative order is a reading flow: intro, then world-building (lore, its fields,
-# mid-scene changes), then organizing (views), then the AI guides; references last.
+# mid-scene changes), then organizing (views) and plotting, then turning AI on and
+# the AI guides (prompts, context, roleplay); references last.
 GUIDES = [
     {"id": "getting-started", "title": "Getting started", "source": "docs/getting-started.md"},
     {"id": "lore", "title": "Lore", "source": "docs/lore.md"},
     {"id": "custom-fields", "title": "Custom fields", "source": "docs/custom-fields.md"},
     {"id": "mutations", "title": "Mutations", "source": "docs/mutations.md"},
     {"id": "views", "title": "Views", "source": "docs/views.md"},
+    {"id": "plotting", "title": "Plotting", "source": "docs/plotting.md"},
+    {"id": "ai-setup", "title": "Turning on AI", "source": "docs/ai-setup.md"},
     {"id": "writing-prompts", "title": "Writing prompts", "source": "docs/prompts/guide.md"},
     {"id": "context-picker", "title": "Context picker", "source": "docs/context-picker.md"},
     {"id": "roleplay", "title": "Roleplay", "source": "docs/roleplay.md"},

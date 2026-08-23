@@ -26,8 +26,11 @@ from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import CreateStructureNodeRequest, SaveSceneRequest
+from app.services import migrations
 from app.services.migrations import (
     CURRENT_VERSION,
+    DocumentMigration,
+    MigratableDocument,
     migrate_project,
     write_project_version,
 )
@@ -468,6 +471,48 @@ class RestoreTests(SnapshotTestCase):
             [n.title for n in self.service.read_structure().root.children if n.id == node_id],
             ["The Tide"],
         )
+
+    # ----- version-gated restore (ADR-0071 §7, #366 slice 3) -----------------
+
+    def test_behind_version_restore_runs_the_document_ladder_and_leaves_the_record_immutable(
+        self,
+    ) -> None:
+        """A snapshot captured under an older schema is migrated over on the
+        way OUT of the store, not at rest: the restored scene reflects both the
+        snapshot's own content and the migration, while the stored `.md`/`.yaml`
+        bytes never move."""
+        self._save("Original words.")
+        record = self.service.capture_snapshot(self.scene_id)
+        self.assertEqual(record.schema_version, CURRENT_VERSION)
+        stored_md = (self._store() / f"{record.id}.md").read_bytes()
+        stored_yaml = (self._store() / f"{record.id}.yaml").read_bytes()
+
+        def _append_migration_marker(doc: MigratableDocument) -> MigratableDocument:
+            return MigratableDocument(doc.front_matter, doc.body + "\n[migrated]\n")
+
+        original_registry = list(migrations.MIGRATIONS)
+        original_current = migrations.CURRENT_VERSION
+        migrations.MIGRATIONS.clear()
+        migrations.MIGRATIONS.append(
+            DocumentMigration(99, "append a migration marker", _append_migration_marker)
+        )
+        migrations.CURRENT_VERSION = 99
+        try:
+            self._save("Something else entirely.")
+            restored = self.service.restore_snapshot(self.scene_id, record.id)
+            self.assertIn("Original words.", restored.body)
+            self.assertIn("[migrated]", restored.body)
+            self.assertIn("Original words.", self.service.read_scene(self.scene_id).body)
+            self.assertIn("[migrated]", self.service.read_scene(self.scene_id).body)
+        finally:
+            migrations.MIGRATIONS.clear()
+            migrations.MIGRATIONS.extend(original_registry)
+            migrations.CURRENT_VERSION = original_current
+
+        # The stored record is untouched — the ladder ran on the way out, not
+        # at rest (ADR-0043 immutability).
+        self.assertEqual((self._store() / f"{record.id}.md").read_bytes(), stored_md)
+        self.assertEqual((self._store() / f"{record.id}.yaml").read_bytes(), stored_yaml)
 
 
 class DeletionTests(SnapshotTestCase):

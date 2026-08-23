@@ -1,0 +1,214 @@
+# Release CD (ADR-0072 S4, #1346). Builds the frozen product across platforms
+# and publishes to GitHub Releases on two channels:
+#   - Stable: a tag push (v*) -> a normal release for that tag.
+#   - Bleeding edge: a nightly schedule -> a single rolling `nightly` prerelease,
+#     built ONLY when master advanced past the last one (SHA compare, not a time
+#     window), so a quiet night is a few seconds of the gate job and nothing else.
+#
+# This ships raw zipped onedir artifacts (one per platform). Native installers
+# are S5; the auto-update client is S6/S7; macOS stays unsigned/experimental.
+#
+# Pre-merge verification: the paths-filtered pull_request trigger runs the full
+# build matrix (never the publish job) on every packaging change, so a real
+# runner build on windows/macOS/linux-x64/linux-arm64 is exercised before merge.
+# workflow_dispatch (dry_run) also triggers a manual build with no publish.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  # Build-only validation (never publishes) whenever the packaging surface
+  # changes — this is what catches a platform-specific freeze break (a missing
+  # runtime dep, a mac/arm hidden import) before it reaches a release.
+  pull_request:
+    paths:
+      - 'packaging/**'
+      - '.github/workflows/release.yml'
+      - 'backend/pyproject.toml'
+  schedule:
+    - cron: '0 5 * * *'   # ~05:00 UTC nightly
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Build only, upload workflow artifacts, do NOT publish a release'
+        type: boolean
+        default: true
+
+# Least privilege by default; only `publish` escalates to write (releases + tag).
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false   # never cancel a publishing run mid-flight
+
+jobs:
+  # Decide whether to build, and on which channel. The nightly no-op lives here:
+  # if HEAD already equals the commit the `nightly` tag points at, skip entirely.
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.decide.outputs.should_build }}
+      channel: ${{ steps.decide.outputs.channel }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # need full history + tags to compare against `nightly`
+      - id: decide
+        shell: bash
+        run: |
+          set -euo pipefail
+          event="${{ github.event_name }}"
+          if [ "$event" = "push" ]; then
+            # A v* tag push -> stable.
+            echo "channel=stable"      >> "$GITHUB_OUTPUT"
+            echo "should_build=true"   >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$event" = "pull_request" ]; then
+            # Build-only validation; the publish job refuses this channel.
+            echo "channel=pr"        >> "$GITHUB_OUTPUT"
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # schedule or workflow_dispatch -> nightly channel, with the skip check.
+          echo "channel=nightly" >> "$GITHUB_OUTPUT"
+          head="$(git rev-parse HEAD)"
+          if nightly_sha="$(git rev-parse -q --verify refs/tags/nightly)"; then
+            if [ "$head" = "$nightly_sha" ]; then
+              echo "No new commits since the last nightly ($head) — skipping build."
+              echo "should_build=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "master advanced ($nightly_sha -> $head) — building."
+          else
+            echo "No nightly tag yet — building the first one."
+          fi
+          echo "should_build=true" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: gate
+    if: needs.gate.outputs.should_build == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            platform: windows-x64
+          - runner: macos-latest
+            platform: macos-arm64
+          - runner: ubuntu-latest
+            platform: linux-x64
+          - runner: ubuntu-24.04-arm
+            platform: linux-arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          # 3.12 (not gates' 3.14): the matrix hits macOS + linux-arm64, where
+          # mature wheels for the Rust-backed deps (pydantic-core, tiktoken) are
+          # far more certain than on 3.14. Pinned for reproducible releases.
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend (from the lockfile)
+        run: npm ci --prefix frontend
+
+      - name: Install backend + build extra (pyinstaller)
+        run: python -m pip install -e "backend[build]"
+
+      - name: Build the frozen artifact (frontend build + PyInstaller)
+        run: python packaging/build.py
+
+      # Prove the frozen binary actually RUNS on this platform (imports resolve):
+      # `--help` drives the full import chain (entry -> app.server -> app.main)
+      # then argparse exits 0. A missing hidden import fails here, per-platform.
+      - name: Smoke — the frozen binary runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            ./dist/local-writing-app/local-writing-app.exe --help
+          else
+            ./dist/local-writing-app/local-writing-app --help
+          fi
+
+      - name: Package the onedir into a zip
+        shell: bash
+        run: python -c "import shutil,os; shutil.make_archive('local-writing-app-'+os.environ['PLAT'], 'zip', 'dist', 'local-writing-app')"
+        env:
+          PLAT: ${{ matrix.platform }}
+
+      - name: Upload the platform zip (workflow artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}
+          path: local-writing-app-${{ matrix.platform }}.zip
+          if-no-files-found: error
+
+  publish:
+    needs: [gate, build]
+    # Publishes only for a real tag push or nightly schedule. Never for a PR
+    # (build-only validation) or a dry-run dispatch.
+    if: >-
+      needs.gate.outputs.should_build == 'true' &&
+      needs.gate.outputs.channel != 'pr' &&
+      github.event.inputs.dry_run != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create/update releases and move the `nightly` tag
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts   # -> artifacts/<platform>/local-writing-app-<platform>.zip
+
+      # Fail loudly if the matrix somehow produced no zips (each build job uploads
+      # one artifact folder; download-artifact lays them out as artifacts/<name>/).
+      - name: Verify artifacts present
+        shell: bash
+        run: |
+          set -euo pipefail
+          count=$(find artifacts -name '*.zip' | wc -l)
+          echo "found $count platform zip(s)"
+          test "$count" -ge 1
+
+      - name: Publish stable release
+        if: needs.gate.outputs.channel == 'stable'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" artifacts/*/*.zip \
+            --title "$GITHUB_REF_NAME" \
+            --notes "Frozen builds for $GITHUB_REF_NAME. Unsigned; macOS is experimental."
+
+      - name: Publish/update the rolling nightly prerelease
+        if: needs.gate.outputs.channel == 'nightly'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Move the rolling tag to this commit (the gate compares against it).
+          git tag -f nightly "$GITHUB_SHA"
+          git push -f origin refs/tags/nightly
+          # Recreate the prerelease so its assets and target commit are fresh.
+          # (delete keeps the tag by default — we just moved it above.)
+          gh release delete nightly --yes 2>/dev/null || true
+          gh release create nightly artifacts/*/*.zip \
+            --prerelease \
+            --title "Nightly (bleeding edge)" \
+            --notes "The latest build from master. Unsigned; macOS is experimental."

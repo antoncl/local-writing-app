@@ -6,6 +6,13 @@ requires-python = ">=3.11"
 dependencies = [
   "anthropic>=0.40.0",
   "fastapi>=0.115.0",
+  # A genuine RUNTIME dependency: every provider profile
+  # (services/ai/profiles/*.py) drives its health check / calls through
+  # httpx.AsyncClient, imported at app-load via the provider registry. It is
+  # NOT pulled transitively any more — anthropic/openai moved to `httpx2` — so a
+  # frozen build without this line ModuleNotFound's on the AI import chain (the
+  # `[dev]`-only listing masked it, since dev installs it for TestClient too).
+  "httpx>=0.28",
   "jinja2>=3.1.0",
   "openai>=1.50.0",
   "pydantic>=2.8.0",
@@ -25,7 +32,6 @@ dev = [
   # A hung test must fail with a traceback, not sit there until the CI job's
   # 20-minute wall clock kills it and tells you nothing (#352 follow-up).
   "pytest-timeout>=2.3",
-  "httpx>=0.28",  # FastAPI TestClient dependency
 ]
 build = [
   "pyinstaller>=6.10",

@@ -46,7 +46,10 @@ User=${RUN_USER}
 # Bind the LAN so the headless box is reachable. NO AUTH — trusted network only.
 Environment=LWA_HOST=0.0.0.0
 Environment=LWA_PORT=${PORT}
-ExecStart=${INSTALL_DIR}/${APP_NAME}
+# --no-browser: a headless box has no display to open one on. The 0.0.0.0 bind
+# above already makes this non-loopback (so the launcher skips the browser), but
+# the flag says it outright and survives someone narrowing the bind to loopback.
+ExecStart=${INSTALL_DIR}/${APP_NAME} --no-browser
 Restart=on-failure
 RestartSec=2
 

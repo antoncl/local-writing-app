@@ -9,6 +9,12 @@ Bind precedence (ADR-0072 §3): CLI flag -> env (LWA_HOST/LWA_PORT) -> machine
 settings -> loopback default. Binding a non-loopback host is an explicit opt-in
 and logs a no-authentication warning at startup (the "say so at the point of
 choice" obligation for the CLI/env path).
+
+On a loopback desktop launch it also opens the default browser at the app's URL
+(#1365), so the installed product answers "where is the app?" without the
+optional pywebview shell (ADR-0072 §7/S8). Skipped for a non-loopback (LAN/Pi)
+bind, for `--no-browser`/`LWA_NO_BROWSER`, and for `--self-check` — a headless
+server must never try to pop a browser.
 """
 
 from __future__ import annotations
@@ -17,6 +23,7 @@ import argparse
 import ipaddress
 import logging
 import os
+import threading
 
 import uvicorn
 
@@ -60,6 +67,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Open a throwaway project in-process to verify the runtime, then exit (0 ok, 1 failed).",
     )
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Don't open a browser window on startup (for a server/headless run).",
+    )
     return parser
 
 
@@ -68,6 +80,58 @@ def resolve_bind(args: argparse.Namespace) -> tuple[str, int]:
     host = args.host or os.environ.get("LWA_HOST") or settings_host or DEFAULT_HOST
     port = args.port or _env_port() or settings_port or DEFAULT_PORT
     return host, port
+
+
+def _env_flag(name: str) -> bool:
+    """A truthy env flag: set and not one of the obvious 'off' spellings."""
+    raw = os.environ.get(name)
+    return raw is not None and raw.strip().lower() not in ("", "0", "false", "no", "off")
+
+
+def _should_open_browser(args: argparse.Namespace, host: str) -> bool:
+    """Whether to pop the browser on this launch (#1365).
+
+    Only for a loopback desktop run: a non-loopback bind is the LAN/Pi server,
+    which is headless and must never open a browser — the same boundary the
+    no-auth warning uses. `--no-browser` / `LWA_NO_BROWSER` force it off (the
+    systemd server unit passes the flag; a desktop user never has to).
+    """
+    if args.no_browser or _env_flag("LWA_NO_BROWSER"):
+        return False
+    return _is_loopback(host)
+
+
+def _open_browser_when_ready(host: str, port: int, *, timeout: float = 30.0) -> None:
+    """Wait for the server to accept connections, then open the default browser.
+
+    Runs in a daemon thread (so it neither blocks the server nor outlives it) and
+    polls a TCP connect rather than sleeping a fixed delay — a frozen cold start
+    can take a few seconds, and opening the URL before the socket is bound would
+    load an error page. Best-effort throughout: no display, no browser, or a
+    server that never comes up all end quietly. The server is the product and
+    comes up regardless (ADR-0072 §7).
+    """
+    import contextlib
+    import socket
+    import time
+    import webbrowser
+
+    # A 0.0.0.0 bind never reaches this (non-loopback), but normalise defensively:
+    # you connect to a concrete address, not the wildcard.
+    connect_host = "127.0.0.1" if host in ("0.0.0.0", "") else host
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection((connect_host, port), timeout=1.0):
+                break
+        except OSError:
+            time.sleep(0.2)
+    else:
+        return  # never came up within the budget — don't open a dead URL
+    # Opening a browser is a convenience, never fatal: no display, no registered
+    # browser, or a launcher that errors must not take the server down with it.
+    with contextlib.suppress(Exception):
+        webbrowser.open(f"http://{connect_host}:{port}")
 
 
 def self_check() -> int:
@@ -114,6 +178,12 @@ def main(argv: list[str] | None = None) -> None:
             host,
             port,
         )
+    if _should_open_browser(args, host):
+        # Daemon thread: opens the browser once the socket is live, then dies with
+        # the process. Started before the blocking uvicorn.run below.
+        threading.Thread(
+            target=_open_browser_when_ready, args=(host, port), daemon=True
+        ).start()
     uvicorn.run(app, host=host, port=port)
 
 

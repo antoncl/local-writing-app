@@ -86,6 +86,61 @@ def test_is_loopback() -> None:
     assert _is_loopback("192.168.1.5") is False
 
 
+def test_should_open_browser_matrix(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.server as server
+
+    monkeypatch.delenv("LWA_NO_BROWSER", raising=False)
+
+    def args(argv: list[str]):
+        return server._build_parser().parse_args(argv)
+
+    # A loopback desktop launch with no opt-out → open the browser (#1365).
+    assert server._should_open_browser(args([]), "127.0.0.1") is True
+    assert server._should_open_browser(args([]), "localhost") is True
+    # A non-loopback bind is the LAN/Pi server — headless, never open a browser.
+    assert server._should_open_browser(args([]), "0.0.0.0") is False
+    assert server._should_open_browser(args([]), "192.168.1.5") is False
+    # Explicit opt-outs win even on loopback (the systemd unit passes the flag).
+    assert server._should_open_browser(args(["--no-browser"]), "127.0.0.1") is False
+    monkeypatch.setenv("LWA_NO_BROWSER", "1")
+    assert server._should_open_browser(args([]), "127.0.0.1") is False
+    # An explicit "off" spelling of the env var is not a suppression.
+    monkeypatch.setenv("LWA_NO_BROWSER", "0")
+    assert server._should_open_browser(args([]), "127.0.0.1") is True
+
+
+def test_open_browser_when_ready_opens_once_listening(monkeypatch: pytest.MonkeyPatch) -> None:
+    import socket
+
+    import app.server as server
+
+    opened: list[str] = []
+    monkeypatch.setattr("webbrowser.open", lambda url: opened.append(url))
+
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen()
+    port = srv.getsockname()[1]
+    try:
+        server._open_browser_when_ready("127.0.0.1", port, timeout=3.0)
+    finally:
+        srv.close()
+    assert opened == [f"http://127.0.0.1:{port}"]
+
+
+def test_open_browser_when_ready_gives_up_if_never_listening(monkeypatch: pytest.MonkeyPatch) -> None:
+    import socket
+
+    import app.server as server
+
+    opened: list[str] = []
+    monkeypatch.setattr("webbrowser.open", lambda url: opened.append(url))
+    # Nothing ever binds → the poll must time out and never open a dead URL.
+    monkeypatch.setattr(socket, "create_connection", lambda *a, **k: (_ for _ in ()).throw(OSError("refused")))
+    server._open_browser_when_ready("127.0.0.1", 59999, timeout=0.3)
+    assert opened == []
+
+
 def test_self_check_opens_a_project() -> None:
     # The self-check drives the real service layer (create a temp project, read
     # structure/lore/prompts), so a green run here means the runtime paths the

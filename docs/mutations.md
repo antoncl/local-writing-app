@@ -1,8 +1,6 @@
 # Mid-scene lore changes (mutations)
 
-> User guide. *This feature ships across 0.4.0 (v1.0 landed; v1.1 in progress).* Design lives in
-> `docs/design/mid-scene-lore-mutations.md` (+ the v1.1 doc and ADRs) — you don't need it to use the
-> feature.
+> User guide — everything below is a shipped feature; you don't need any design docs to use it.
 
 ## What this is
 
@@ -67,7 +65,7 @@ split the scene at the rename, or record the rename at the very start/end of the
 > This limit is called out here rather than left implicit; when authoring a name/alias change the
 > `/mutate` form also flags it inline with a link back to this section.
 
-## Appending, and why fragments must stand alone (v1.1)
+## Appending, and why fragments must stand alone
 
 Text fields (including an entry's body) can take an **Append** change instead of a replace: the
 fragment is added after whatever the field says at that point.
@@ -102,9 +100,9 @@ still leaves a coherent set. The stand-alone rule matters mainly for appended pr
 > the v2 linked-mutations design — tracked in
 > [#73](https://github.com/antoncl/local-writing-app/issues/73).
 
-## Reusing a set of changes (v1.1)
+## Reusing a set of changes
 
 A recurring transformation (a werewolf's dusk change: appearance + abilities + name) can be saved as
-a **mutation set** and re-applied to any character in one step, instead of retyping it. See the
-v1.1 notes; the short version: mark a change "reusable" when you author it, or manage sets in the
-Mutations list, then `/mutate` → pick a character → **apply a set**.
+a **mutation set** and re-applied to any character in one step, instead of retyping it. The short
+version: mark a change "reusable" when you author it, or manage sets in the Mutations list, then
+`/mutate` → pick a character → **apply a set**.

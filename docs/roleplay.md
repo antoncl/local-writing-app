@@ -93,7 +93,7 @@ You are playing {{ char.title }}.
 
 ## Caching
 
-You don't manage caching in the template. The per-character persona (the system block) is a stable prefix, and the backend places lore tiered stable/volatile, so the cacheable prefix stays intact as beats accumulate — see [context-caching.md](design/context-caching.md) §4. Bob's reconstructed thread only changes when spans *before his last own beat* mutate; Alice's interleaved turns extend the tail but leave Bob's cached prefix intact, so Bob's invocations after Alice's are cache hits on the persona + setup. Same for Alice.
+You don't manage caching in the template. The per-character persona (the system block) is a stable prefix, and the backend places lore tiered stable/volatile, so the cacheable prefix stays intact as beats accumulate. Bob's reconstructed thread only changes when spans *before his last own beat* mutate; Alice's interleaved turns extend the tail but leave Bob's cached prefix intact, so Bob's invocations after Alice's are cache hits on the persona + setup. Same for Alice.
 
 ## Inputs reference
 

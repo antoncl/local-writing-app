@@ -46,6 +46,10 @@ class ClientErrorReport(BaseModel):
     detail: str | None = None
 
 
+class AppVersion(BaseModel):
+    version: str
+
+
 class AncestorCandidate(BaseModel):
     """One folder between the configured base and the open project (#309).
 

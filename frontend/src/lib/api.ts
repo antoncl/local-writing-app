@@ -17,6 +17,7 @@ import type {
   AIProviderModelList,
   AITierResolution,
   AncestorCandidate,
+  AppVersion,
   AssistantEntry,
   AssistantEntryList,
   AIPolicy,
@@ -414,6 +415,9 @@ export const api = {
   },
   getMachineSettings() {
     return request<MachineSettingsView>("/settings/machine");
+  },
+  getVersion() {
+    return request<AppVersion>("/version");
   },
   updateMachineSettings(update: MachineSettingsUpdate) {
     return request<MachineSettingsView>("/settings/machine", {

@@ -81,3 +81,16 @@ def test_is_loopback() -> None:
     assert _is_loopback("localhost") is True
     assert _is_loopback("0.0.0.0") is False
     assert _is_loopback("192.168.1.5") is False
+
+
+def test_version_endpoint_reports_running_version() -> None:
+    from importlib.metadata import version as _pkg_version
+
+    from app.main import app
+
+    client = TestClient(app)
+    response = client.get("/api/version")
+    assert response.status_code == 200
+    body = response.json()
+    assert body == {"version": _pkg_version("local-writing-service")}
+    assert body["version"]  # non-empty

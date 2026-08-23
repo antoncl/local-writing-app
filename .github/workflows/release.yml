@@ -156,6 +156,32 @@ jobs:
           path: local-writing-app-${{ matrix.platform }}.zip
           if-no-files-found: error
 
+      # Linux only: also ship a server tarball (onedir + systemd installer) for
+      # the headless-Pi target (ADR-0072 §8). tar.gz preserves the executable
+      # bit and symlinks that a zip drops.
+      - name: Package Linux server tarball
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          staging="local-writing-app-${PLAT}-server"
+          mkdir -p "$staging"
+          cp -a dist/local-writing-app "$staging/"
+          cp packaging/linux/install-server.sh "$staging/"
+          cp packaging/linux/README-server.md "$staging/"
+          chmod +x "$staging/install-server.sh"
+          tar -czf "${staging}.tar.gz" "$staging"
+        env:
+          PLAT: ${{ matrix.platform }}
+
+      - name: Upload the Linux server tarball (workflow artifact)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-server
+          path: local-writing-app-${{ matrix.platform }}-server.tar.gz
+          if-no-files-found: error
+
   publish:
     needs: [gate, build]
     # Publishes only for a real tag push or nightly schedule. Never for a PR
@@ -178,13 +204,16 @@ jobs:
 
       # Fail loudly if the matrix somehow produced no zips (each build job uploads
       # one artifact folder; download-artifact lays them out as artifacts/<name>/).
-      - name: Verify artifacts present
+      - name: Collect release assets
+        id: assets
         shell: bash
         run: |
           set -euo pipefail
-          count=$(find artifacts -name '*.zip' | wc -l)
-          echo "found $count platform zip(s)"
-          test "$count" -ge 1
+          mapfile -t files < <(find artifacts -type f \( -name '*.zip' -o -name '*.tar.gz' \) | sort)
+          echo "found ${#files[@]} asset(s):"
+          printf '  %s\n' "${files[@]}"
+          test "${#files[@]}" -ge 1
+          printf '%s\n' "${files[@]}" > "$RUNNER_TEMP/assets.txt"
 
       - name: Publish stable release
         if: needs.gate.outputs.channel == 'stable'
@@ -193,7 +222,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh release create "$GITHUB_REF_NAME" artifacts/*/*.zip \
+          mapfile -t files < "$RUNNER_TEMP/assets.txt"
+          gh release create "$GITHUB_REF_NAME" "${files[@]}" \
             --title "$GITHUB_REF_NAME" \
             --notes "Frozen builds for $GITHUB_REF_NAME. Unsigned; macOS is experimental."
 
@@ -204,13 +234,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mapfile -t files < "$RUNNER_TEMP/assets.txt"
           # Move the rolling tag to this commit (the gate compares against it).
           git tag -f nightly "$GITHUB_SHA"
           git push -f origin refs/tags/nightly
           # Recreate the prerelease so its assets and target commit are fresh.
           # (delete keeps the tag by default — we just moved it above.)
           gh release delete nightly --yes 2>/dev/null || true
-          gh release create nightly artifacts/*/*.zip \
+          gh release create nightly "${files[@]}" \
             --prerelease \
             --title "Nightly (bleeding edge)" \
             --notes "The latest build from master. Unsigned; macOS is experimental."

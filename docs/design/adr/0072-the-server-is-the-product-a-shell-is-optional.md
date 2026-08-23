@@ -4,8 +4,8 @@
 - Verified against `269d500f` (2026-08-23).
 - Feature: #173 (packaging & installers, the last pre-public 0.9.5 pillar) · Follows: ADR-0056
   (a boundary is a choke point) · Relates: ADR-0047 (settings live behind the `≡` menu),
-  ADR-0071 (the migration mechanism a real install will eventually run) · Touches: #161
-  (detach-to-OS-window — scoped **out**, §9)
+  ADR-0071 (the migration mechanism a real install will eventually run) · Retires: #161
+  (detach-to-OS-window — closed won't-fix, §9)
 - Supersedes nothing. Establishes the distribution topology the app has never had.
 
 ## Problem
@@ -150,14 +150,15 @@ per-distro package zoo:
 Per-distro native packages (`.deb`/`.rpm` for every distribution) are the proliferation trap the
 "Linux has a thousand flavors" problem warns against; AppImage + tarball covers effectively everyone.
 
-### 9 — #161 (detach a tab to its own OS window) is out of scope, and stays a droppable nice-to-have
+### 9 — #161 (detach a tab to its own OS window) is killed
 
 #161 presupposes a native multi-window shell and **cannot work on the headless Pi** (no display), so
-it can never be load-bearing. It must not be allowed to pull the shell choice (§7) toward a heavier
-multi-window toolchain (Tauri/Electron): the baseline job is *install, run, update*, and detach is a
-desktop-only enhancement at most. #161 is **not** in the #173 baseline. If detach later proves to be
-something worth having, *that* is the moment to weigh a heavier shell against it — on evidence, not
-speculatively now. (Per Anton: if it causes any problems, it is dropped outright.)
+it can never be load-bearing — and letting it pull the shell (§7) toward a heavier multi-window
+toolchain (Tauri/Electron) would trade the whole baseline (*install, run, update*, everywhere
+including headless) for a desktop-only nicety. **Decision: #161 is closed won't-fix** (Anton,
+2026-08-23). The shell stays deliberately **single-window** (§7), so nothing is built that a dropped
+detach would strand. If a detach need ever reappears on real evidence, it is a fresh decision weighed
+against the shell then — not a debt carried now.
 
 ### 10 — The Mac carve-out: build it, ship it experimental-unsigned, defer signing
 
@@ -225,8 +226,15 @@ signing/notarization mechanism is **not** designed here — it is a later decisi
 - **A body-format or storage change now has an install to migrate.** The moment real users install,
   the recreate-projects escape hatch is gone — which is exactly why ADR-0071 built the migration
   mechanism ahead of this. This ADR is what makes that pre-work load-bearing.
-- **#161 stays parked** (§9); the shell (§7) is intentionally single-window so nothing has to be
-  un-built if detach is dropped for good.
+- **#161 is retired won't-fix** (§9); the shell (§7) is intentionally single-window, so nothing is
+  built that the dropped detach would strand.
+- **Packaging needs an app icon, and none exists today** — not even a browser favicon (`index.html`
+  has no `<link rel="icon">`; the only icon assets are the in-app Tabler UI *glyph* font, not a
+  product mark). One master mark derives every consumed format: the favicon for the served UI (the
+  browser/Pi path), the window+taskbar icon for the shell (§7), and `.ico`/`.icns`/PNG for the
+  installers (§4/§5) and the PyInstaller `--icon`. It feeds S1 (favicon) and S3/S5 (freeze/installers).
+  The mark itself is a **design decision owned by the design language (ADR-0030), not this ADR** — the
+  plumbing is in scope, the artwork is not.
 
 ## Slices
 

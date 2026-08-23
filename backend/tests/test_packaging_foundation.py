@@ -1,0 +1,83 @@
+"""ADR-0072 slice S1 — "one process, one origin" (#1340).
+
+Covers the frontend-mount seam (`mount_frontend`) and the product entrypoint's
+bind-address resolution (`app/server.py`), independently of any real built
+frontend or real machine config.yaml.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from app.main import mount_frontend
+from app.server import _is_loopback, resolve_bind
+
+
+def test_mount_frontend_serves_index_and_leaves_api(tmp_path: Path) -> None:
+    dist_dir = tmp_path / "dist"
+    dist_dir.mkdir()
+    (dist_dir / "index.html").write_text("<h1>hi</h1>", encoding="utf-8")
+
+    app = FastAPI()
+
+    @app.get("/api/ping")
+    def ping() -> dict[str, bool]:
+        return {"ok": True}
+
+    mount_frontend(app, dist_dir)
+    client = TestClient(app)
+
+    index_response = client.get("/")
+    assert index_response.status_code == 200
+    assert "hi" in index_response.text
+
+    api_response = client.get("/api/ping")
+    assert api_response.status_code == 200
+    assert api_response.json() == {"ok": True}
+
+    missing_response = client.get("/assets-that-dont-exist")
+    assert missing_response.status_code == 404
+
+
+def test_mount_frontend_none_is_noop() -> None:
+    app = FastAPI()
+    mount_frontend(app, None)
+    client = TestClient(app)
+    # No frontend mounted and no routes registered -> a plain 404, not a crash.
+    assert client.get("/").status_code == 404
+
+
+def test_resolve_bind_precedence(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.server as server
+
+    monkeypatch.delenv("LWA_HOST", raising=False)
+    monkeypatch.delenv("LWA_PORT", raising=False)
+    monkeypatch.setattr(server, "bind_address", lambda: ("192.168.1.5", 9000))
+
+    # CLI flag wins over everything.
+    assert resolve_bind(["--host", "10.0.0.1", "--port", "1234"]) == ("10.0.0.1", 1234)
+
+    # Env wins over settings when no CLI flag.
+    monkeypatch.setenv("LWA_HOST", "10.0.0.2")
+    monkeypatch.setenv("LWA_PORT", "4321")
+    assert resolve_bind([]) == ("10.0.0.2", 4321)
+
+    # Settings used when no flag/env.
+    monkeypatch.delenv("LWA_HOST", raising=False)
+    monkeypatch.delenv("LWA_PORT", raising=False)
+    assert resolve_bind([]) == ("192.168.1.5", 9000)
+
+    # Default loopback when everything is unset.
+    monkeypatch.setattr(server, "bind_address", lambda: (None, None))
+    assert resolve_bind([]) == ("127.0.0.1", 8787)
+
+
+def test_is_loopback() -> None:
+    assert _is_loopback("127.0.0.1") is True
+    assert _is_loopback("localhost") is True
+    assert _is_loopback("0.0.0.0") is False
+    assert _is_loopback("192.168.1.5") is False

@@ -42,6 +42,13 @@ export default defineConfig(({ command, mode }) => {
   // Anton's stack, unchanged: pinned and strict, so a stale server holding
   // 5173 surfaces as an error instead of silently drifting to another port.
   const server = { host: "127.0.0.1", port: 5173, strictPort: true };
+  // api.ts now defaults to a relative `/api` (ADR-0072 §1). Anton's default
+  // stack is served by Vite, so Vite proxies `/api` to his backend on :8787.
+  // The `--mode claude` stack overrides api.ts with an absolute VITE_API_BASE
+  // (its own derived backend port), so it must NOT get this proxy.
+  if (mode !== "claude") {
+    server.proxy = { "/api": { target: "http://127.0.0.1:8787", changeOrigin: false } };
+  }
   const define = {};
 
   if (mode === "claude") {

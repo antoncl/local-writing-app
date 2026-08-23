@@ -14,6 +14,9 @@ dependencies = [
   "uvicorn[standard]>=0.30.0"
 ]
 
+[project.scripts]
+local-writing-app = "app.server:main"
+
 [project.optional-dependencies]
 dev = [
   "ruff>=0.15",

@@ -182,6 +182,25 @@ jobs:
           path: local-writing-app-${{ matrix.platform }}-server.tar.gz
           if-no-files-found: error
 
+      # Windows only: wrap the onedir in an Inno Setup installer (ADR-0072 S5) —
+      # per-user (no admin), Start-menu shortcut, uninstaller, app icon.
+      - name: Build the Windows installer (Inno Setup)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          $version = python -c "import tomllib; print(tomllib.load(open('backend/pyproject.toml','rb'))['project']['version'])"
+          Write-Host "installer version: $version"
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging\windows\installer.iss "/DMyAppVersion=$version"
+
+      - name: Upload the Windows installer (workflow artifact)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-installer
+          path: dist-installer/local-writing-app-windows-x64-setup.exe
+          if-no-files-found: error
+
   publish:
     needs: [gate, build]
     # Publishes only for a real tag push or nightly schedule. Never for a PR
@@ -209,7 +228,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t files < <(find artifacts -type f \( -name '*.zip' -o -name '*.tar.gz' \) | sort)
+          mapfile -t files < <(find artifacts -type f | sort)
           echo "found ${#files[@]} asset(s):"
           printf '  %s\n' "${files[@]}"
           test "${#files[@]}" -ge 1

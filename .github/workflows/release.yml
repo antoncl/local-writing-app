@@ -122,7 +122,10 @@ jobs:
       - name: Install frontend (from the lockfile)
         run: npm ci --prefix frontend
 
+      # Non-Linux freezes on the host. Linux freezes inside a glibc-2.31 container
+      # (below), which installs its own copy — so the host install is win/mac only.
       - name: Install backend + build extra (pyinstaller)
+        if: runner.os != 'Linux'
         run: python -m pip install -e "backend[build]"
 
       # macOS only: build the .icns before the freeze so the spec's BUNDLE
@@ -135,8 +138,38 @@ jobs:
           chmod +x packaging/macos/make-icns.sh
           packaging/macos/make-icns.sh
 
+      # Non-Linux: freeze on the host runner.
       - name: Build the frozen artifact (frontend build + PyInstaller)
+        if: runner.os != 'Linux'
         run: python packaging/build.py
+
+      # Linux: freeze inside a glibc-2.31 container (#1376). PyInstaller binaries
+      # link glibc, which is forward-compatible only, so a binary frozen on the
+      # runner's glibc 2.39 fails on any older distro — including a Raspberry Pi on
+      # Debian Bullseye (glibc 2.31) and even current Pi OS Bookworm (2.36).
+      # `python:3.12-bullseye` is Debian 11 + Python 3.12 (glibc 2.31), so the
+      # frozen binary runs on Bullseye and everything newer. Node from the host
+      # `npm ci` (mounted, same Linux arch) is reused; the container just adds a
+      # node binary + the build extra, then runs the same `build.py`. Runs natively
+      # on each runner's arch (arm64 runner → arm64 image), no emulation.
+      - name: Build the frozen artifact (Linux, in a glibc-2.31 container)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # -e GITHUB_SHA: docker run does NOT inherit host env, and the spec bakes
+          # $GITHUB_SHA as the build stamp (S6a) the nightly channel compares — pass
+          # it through or Linux builds ship a blank stamp.
+          docker run --rm -e GITHUB_SHA -v "$PWD":/src -w /src python:3.12-bullseye bash -c '
+            set -euo pipefail
+            curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
+            apt-get install -y --no-install-recommends nodejs
+            python -m pip install -e "backend[build]"
+            python packaging/build.py
+          '
+          # The container writes dist/ as root; hand it back to the runner user so
+          # the host packaging steps (tar/zip/appimage) can read and repack it.
+          sudo chown -R "$(id -u):$(id -g)" dist
 
       # Prove the frozen binary actually WORKS on this platform: --self-check
       # imports the full chain AND opens a throwaway project through the real
@@ -144,6 +177,7 @@ jobs:
       # is the guard for the frozen x real-project class of bug that --help /
       # health can't reach (#1350; caught httpx + node-index build_identity late).
       - name: Smoke — the frozen binary opens a project (--self-check)
+        if: runner.os != 'Linux'
         shell: bash
         run: |
           set -euo pipefail
@@ -152,6 +186,19 @@ jobs:
           else
             ./dist/local-writing-app/local-writing-app --self-check
           fi
+
+      # Linux: self-check INSIDE a glibc-2.31 container, not on the host. Running it
+      # on the runner's glibc 2.39 always passes (forward-compat) and proves nothing
+      # about the floor — that blind spot is exactly what shipped the Pi break
+      # (#1376). debian:11 is the oldest glibc we target; if a future change raises
+      # the floor above it, this fails in CI instead of on a user's Pi.
+      - name: Smoke — frozen binary self-check on the glibc-2.31 floor (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD":/src -w /src debian:11 \
+            ./dist/local-writing-app/local-writing-app --self-check
 
       # Browser-level wiring smoke (#1352): drive a real browser through ~5 core
       # flows (boot, rehydrate, create via wizard, type+autosave, settings)

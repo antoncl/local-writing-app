@@ -14,6 +14,9 @@ Installers for **Windows, macOS, and Linux** are on the
 download, run, write. Prefer to build it yourself, or curious how it's put
 together? → [Running from source](docs/running-from-source.md).
 
+There's also a [website](https://antoncl.github.io/local-writing-app/) — the
+same pitch in nicer clothes, fit for sharing.
+
 ## Why
 
 **I'm opposed to everything having to be a paid subscription.** Writing software

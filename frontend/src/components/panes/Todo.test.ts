@@ -62,4 +62,16 @@ describe("Todo pane — rows render", () => {
     await fireEvent.click(screen.getByLabelText("Toggle TODO"));
     expect(onToggleTodo).toHaveBeenCalledWith(item);
   });
+
+  // Browser writing-assistant hardening (GH #1330). The fix is invisible without
+  // an extension mounted, so guard the two DOM invariants it rests on: the
+  // editable field stays wrapped in `.todo-text-stack` (injection contained in
+  // grid column 2, keeping the checkbox aligned) and carries the Grammarly
+  // opt-out. A regression here would only surface with an extension enabled.
+  it("keeps the file-TODO field wrapped and extension-opted-out", () => {
+    render(Todo, { props: { ...baseProps(), todos: [fileTodo("t1", "Buy milk")] } });
+    const field = screen.getByDisplayValue("Buy milk");
+    expect(field.closest(".todo-text-stack")).not.toBeNull();
+    expect(field).toHaveAttribute("data-gramm", "false");
+  });
 });

@@ -39,7 +39,7 @@
 </script>
 
 <div class="todo-entry">
-  <textarea bind:value={newTodo} placeholder="Add a file-level TODO description" rows="3" onkeydown={(event) => event.key === "Enter" && event.ctrlKey && onAddTodo()}></textarea>
+  <textarea bind:value={newTodo} placeholder="Add a file-level TODO description" rows="3" data-gramm="false" data-gramm_editor="false" onkeydown={(event) => event.key === "Enter" && event.ctrlKey && onAddTodo()}></textarea>
   <button onclick={onAddTodo}>Add</button>
 </div>
 {#if embeddedTodos.length > 0}
@@ -56,6 +56,8 @@
         title="Edit embedded TODO note"
         placeholder={item.text}
         rows="3"
+        data-gramm="false"
+        data-gramm_editor="false"
         onblur={(event) => onUpdateEmbeddedTodoNote(item, event.currentTarget.value)}
       ></textarea>
       <button class="todo-link" type="button" onclick={() => onOpenEmbeddedTodo(item)}>
@@ -73,16 +75,20 @@
 {#each todos as item}
   <div class:done={item.status === "done"} class="todo-item">
     <input class="todo-checkbox" type="checkbox" checked={item.status === "done"} aria-label="Toggle TODO" onchange={() => onToggleTodo(item)} />
-    <textarea
-      class="todo-text"
-      value={item.text}
-      aria-label="TODO description"
-      title="Edit TODO description"
-      placeholder="Describe this TODO"
-      rows="3"
-      onblur={(event) => onUpdateTodoText(item, event.currentTarget.value)}
-      onkeydown={(event) => onTodoTextKeydown(event, item)}
-    ></textarea>
+    <div class="todo-text-stack">
+      <textarea
+        class="todo-text"
+        value={item.text}
+        aria-label="TODO description"
+        title="Edit TODO description"
+        placeholder="Describe this TODO"
+        rows="3"
+        data-gramm="false"
+        data-gramm_editor="false"
+        onblur={(event) => onUpdateTodoText(item, event.currentTarget.value)}
+        onkeydown={(event) => onTodoTextKeydown(event, item)}
+      ></textarea>
+    </div>
     {#if item.scene_id}
       <button class="todo-link compact" type="button" onclick={() => onOpenFileTodo(item)}>Open Scene</button>
     {:else}
@@ -102,6 +108,17 @@
     align-items: start;
     gap: 8px;
     margin: 8px 0;
+  }
+
+  /* Browser writing-assistant extensions (ProWritingAid, Grammarly, …) attach to
+     the editable `.todo-text` field and inject overlay DOM into this row. Two
+     defences keep the checkbox aligned: the textarea is wrapped in
+     `.todo-text-stack` so injection is contained in column 2, and every real
+     child is pinned to an explicit column so an element injected as a direct
+     child of `.todo-item` auto-places into a spare row instead of shifting these.
+     Identical to plain auto-placement when no extension is present. See GH #1330. */
+  .todo-checkbox {
+    grid-column: 1;
   }
 
   .todo-text {
@@ -133,6 +150,7 @@
   }
 
   .todo-text-stack {
+    grid-column: 2;
     display: grid;
     gap: 4px;
     min-width: 0;
@@ -169,11 +187,13 @@
   }
 
   .todo-link.compact {
+    grid-column: 3;
     width: auto;
     white-space: nowrap;
   }
 
   .todo-item small {
+    grid-column: 3;
     color: var(--star);
     font-size: var(--fs-xs);
     font-weight: 700;
@@ -181,6 +201,7 @@
   }
 
   .todo-delete {
+    grid-column: 4;
     padding: 3px 7px;
     border-color: var(--danger-border);
     color: var(--danger);

@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { makeTempDir, openSeededProject } from "./helpers";
+import { makeTempDir, openSeededProject, setDefaultProjectsFolder } from "./helpers";
 
 // Thin browser-E2E smoke (#1352): the assembled product boots in a real browser
 // and the frontend↔backend wiring holds un-mocked. Boot-and-wiring only — never
@@ -19,9 +19,13 @@ test.describe("assembled-product smoke (#1352)", () => {
     await expect(page.getByTestId("no-project")).toHaveCount(0);
   });
 
-  test("creates a project through the wizard", async ({ page }) => {
-    // The wizard builds the project folder under this parent from the name.
+  test("creates a project through the wizard", async ({ page, request }) => {
+    // The wizard builds the project folder under this parent from the name. Seed
+    // it as the machine's default projects folder so the wizard opens on its
+    // "location" step, not the first-run "root" (choose-folder) step — which is
+    // what a fresh machine (and every CI runner) would otherwise show first.
     const parent = makeTempDir();
+    await setDefaultProjectsFolder(request, parent);
     await page.goto("/");
     await page.getByRole("button", { name: /Open a project/ }).click();
     await page.getByRole("menuitem", { name: /New project/ }).click();

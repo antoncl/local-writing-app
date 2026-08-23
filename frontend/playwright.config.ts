@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // Thin browser-E2E smoke (#1352). This proves the *assembled* product boots in a
@@ -35,6 +37,21 @@ const venvPython =
     : `${backendDir}/.venv/bin/python`;
 const python = existsSync(venvPython) ? venvPython : "python";
 
+// Isolate the backend's machine config (config.yaml: recents, default projects
+// folder, palette) to a throwaway dir. Two reasons: tests must never read or
+// POLLUTE the real machine settings (create/open push onto recents on disk), and
+// a fresh, empty config makes the create wizard's first step deterministic. The
+// backend resolves its config dir from these platform vars (machine_settings.py:
+// config_dir → APPDATA on win, HOME on mac, XDG_CONFIG_HOME on linux). Applies to
+// the managed webServer only; the E2E_BASE_URL mode is the caller's to isolate.
+const isolatedConfigHome = mkdtempSync(join(tmpdir(), "lwa-e2e-cfg-"));
+const configEnv: Record<string, string> =
+  process.platform === "win32"
+    ? { APPDATA: isolatedConfigHome }
+    : process.platform === "darwin"
+      ? { HOME: isolatedConfigHome }
+      : { XDG_CONFIG_HOME: isolatedConfigHome };
+
 export default defineConfig({
   testDir: "./e2e",
   // `.e2e.ts` (not `.spec.ts`) keeps these files out of vitest's default globs,
@@ -61,7 +78,7 @@ export default defineConfig({
         command: frozenBin ? `"${frozenBin}"` : `${python} -m app.server`,
         cwd: frozenBin ? undefined : backendDir,
         url: baseURL,
-        env: { LWA_HOST: "127.0.0.1", LWA_PORT: String(port) },
+        env: { LWA_HOST: "127.0.0.1", LWA_PORT: String(port), ...configEnv },
         reuseExistingServer: !process.env.CI,
         timeout: 120_000,
         stdout: "pipe",

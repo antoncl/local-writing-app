@@ -34,6 +34,20 @@ export async function createProjectViaApi(
   return res.json();
 }
 
+// Seed the machine's default projects folder (isolated per playwright.config.ts),
+// so the create wizard opens on its "location" step rather than the first-run
+// "root" step that appears when no folder is set. The folder must already exist —
+// the backend validates it (#429).
+export async function setDefaultProjectsFolder(
+  request: APIRequestContext,
+  folder: string,
+): Promise<void> {
+  const res = await request.put("/api/settings/machine", {
+    data: { default_projects_folder: folder },
+  });
+  expect(res.ok(), `set default projects folder → ${res.status()}: ${await res.text()}`).toBeTruthy();
+}
+
 // Add a scene to an open project via the API, so a scene-editor flow has
 // something to open without driving the structure tree.
 export async function createSceneViaApi(

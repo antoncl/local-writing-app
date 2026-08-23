@@ -128,17 +128,19 @@ jobs:
       - name: Build the frozen artifact (frontend build + PyInstaller)
         run: python packaging/build.py
 
-      # Prove the frozen binary actually RUNS on this platform (imports resolve):
-      # `--help` drives the full import chain (entry -> app.server -> app.main)
-      # then argparse exits 0. A missing hidden import fails here, per-platform.
-      - name: Smoke — the frozen binary runs
+      # Prove the frozen binary actually WORKS on this platform: --self-check
+      # imports the full chain AND opens a throwaway project through the real
+      # service layer (node index, schema, built-in Library), exiting 0/1. This
+      # is the guard for the frozen x real-project class of bug that --help /
+      # health can't reach (#1350; caught httpx + node-index build_identity late).
+      - name: Smoke — the frozen binary opens a project (--self-check)
         shell: bash
         run: |
           set -euo pipefail
           if [ "${{ runner.os }}" = "Windows" ]; then
-            ./dist/local-writing-app/local-writing-app.exe --help
+            ./dist/local-writing-app/local-writing-app.exe --self-check
           else
-            ./dist/local-writing-app/local-writing-app --help
+            ./dist/local-writing-app/local-writing-app --self-check
           fi
 
       - name: Package the onedir into a zip

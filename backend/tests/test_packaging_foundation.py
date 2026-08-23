@@ -54,26 +54,29 @@ def test_mount_frontend_none_is_noop() -> None:
 def test_resolve_bind_precedence(monkeypatch: pytest.MonkeyPatch) -> None:
     import app.server as server
 
+    def bind(argv: list[str]) -> tuple[str, int]:
+        return resolve_bind(server._build_parser().parse_args(argv))
+
     monkeypatch.delenv("LWA_HOST", raising=False)
     monkeypatch.delenv("LWA_PORT", raising=False)
     monkeypatch.setattr(server, "bind_address", lambda: ("192.168.1.5", 9000))
 
     # CLI flag wins over everything.
-    assert resolve_bind(["--host", "10.0.0.1", "--port", "1234"]) == ("10.0.0.1", 1234)
+    assert bind(["--host", "10.0.0.1", "--port", "1234"]) == ("10.0.0.1", 1234)
 
     # Env wins over settings when no CLI flag.
     monkeypatch.setenv("LWA_HOST", "10.0.0.2")
     monkeypatch.setenv("LWA_PORT", "4321")
-    assert resolve_bind([]) == ("10.0.0.2", 4321)
+    assert bind([]) == ("10.0.0.2", 4321)
 
     # Settings used when no flag/env.
     monkeypatch.delenv("LWA_HOST", raising=False)
     monkeypatch.delenv("LWA_PORT", raising=False)
-    assert resolve_bind([]) == ("192.168.1.5", 9000)
+    assert bind([]) == ("192.168.1.5", 9000)
 
     # Default loopback when everything is unset.
     monkeypatch.setattr(server, "bind_address", lambda: (None, None))
-    assert resolve_bind([]) == ("127.0.0.1", 8787)
+    assert bind([]) == ("127.0.0.1", 8787)
 
 
 def test_is_loopback() -> None:
@@ -81,6 +84,16 @@ def test_is_loopback() -> None:
     assert _is_loopback("localhost") is True
     assert _is_loopback("0.0.0.0") is False
     assert _is_loopback("192.168.1.5") is False
+
+
+def test_self_check_opens_a_project() -> None:
+    # The self-check drives the real service layer (create a temp project, read
+    # structure/lore/prompts), so a green run here means the runtime paths the
+    # frozen --self-check exercises are sound. In a source run this is not a
+    # frozen test, but it locks the self-check itself against regressions.
+    from app.server import self_check
+
+    assert self_check() == 0
 
 
 def test_version_endpoint_reports_running_version() -> None:

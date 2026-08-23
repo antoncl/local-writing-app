@@ -51,20 +51,61 @@ def _is_loopback(host: str) -> bool:
         return False
 
 
-def resolve_bind(argv: list[str] | None = None) -> tuple[str, int]:
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="local-writing-app")
     parser.add_argument("--host", default=None, help="Bind host (overrides env/settings).")
     parser.add_argument("--port", type=int, default=None, help="Bind port (overrides env/settings).")
-    args = parser.parse_args(argv)
+    parser.add_argument(
+        "--self-check",
+        action="store_true",
+        help="Open a throwaway project in-process to verify the runtime, then exit (0 ok, 1 failed).",
+    )
+    return parser
 
+
+def resolve_bind(args: argparse.Namespace) -> tuple[str, int]:
     settings_host, settings_port = bind_address()
     host = args.host or os.environ.get("LWA_HOST") or settings_host or DEFAULT_HOST
     port = args.port or _env_port() or settings_port or DEFAULT_PORT
     return host, port
 
 
+def self_check() -> int:
+    """Exercise the assembled runtime end-to-end, in-process; return 0 ok / 1 failed.
+
+    Create a throwaway project and read it back through the service layer — the
+    real node-index, schema, and built-in Library paths. These break in a frozen
+    build in ways `--help` or a health ping never touch (a data file left
+    unbundled, the node-index identity computed from source that isn't on disk),
+    so this is what a per-platform CI smoke — and a user's "is my install
+    healthy?" check — runs (#1350).
+    """
+    import tempfile
+    import traceback
+    from pathlib import Path
+
+    from app.services.project_service import ProjectService
+
+    print("self-check: opening a throwaway project through the real runtime...")
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            service = ProjectService.created_at(Path(tmp) / "self-check-project", "self-check")
+            service.read_structure()       # node-index build identity + schema resolution
+            service.list_lore_entries()     # node-index load
+            service.list_prompt_entries()   # built-in Library resolution
+    except Exception as exc:
+        print(f"self-check: FAILED - {type(exc).__name__}: {exc}")
+        traceback.print_exc()
+        return 1
+    print("self-check: OK")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> None:
-    host, port = resolve_bind(argv)
+    args = _build_parser().parse_args(argv)
+    if args.self_check:
+        raise SystemExit(self_check())
+    host, port = resolve_bind(args)
     if not _is_loopback(host):
         logger.warning(
             "Binding %s:%s — reachable on your network. This app has NO "

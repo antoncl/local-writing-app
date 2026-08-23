@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local Writing App — local-first fiction writing</title>
+<meta name="description" content="A fiction-writing app that runs entirely on your own machine, stores your work as plain files, and treats AI as an optional tool you point at your prose — not a service you rent.">
+<link rel="canonical" href="https://antoncl.github.io/local-writing-app/">
+<meta property="og:title" content="Local Writing App">
+<meta property="og:description" content="Local-first fiction writing: manuscript, lore, plot boards, and optional AI. Plain files on your disk — no account, no subscription, works fully offline.">
+<meta property="og:image" content="https://antoncl.github.io/local-writing-app/assets/social-preview.png">
+<meta property="og:url" content="https://antoncl.github.io/local-writing-app/">
+<meta property="og:type" content="website">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<style>
+  /* One committed look: the app's "quiet writing desk" — paper ground, serif
+     for the work, sans for the tool, one quiet green accent. */
+  :root {
+    --paper: #faf9f5;
+    --card: #ffffff;
+    --ink: #21272b;
+    --ink-2: #4b5560;
+    --ink-3: #77808a;
+    --accent: #2c5f50;
+    --accent-emphasis: #234e43;
+    --accent-soft: #e7efeb;
+    --hairline: #e3e1da;
+    --serif: Georgia, "Times New Roman", serif;
+    --sans: "Segoe UI", system-ui, -apple-system, sans-serif;
+    --mono: Consolas, ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 17px;
+    line-height: 1.65;
+  }
+  a { color: var(--accent-emphasis); }
+  h1, h2, h3 { font-family: var(--serif); font-weight: 600; line-height: 1.25; }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 0 24px; }
+
+  header.hero { padding: 72px 0 40px; text-align: center; }
+  .hero h1 { font-size: 44px; letter-spacing: -0.01em; }
+  .hero .tagline {
+    font-family: var(--serif);
+    font-size: 22px;
+    color: var(--ink-2);
+    max-width: 720px;
+    margin: 20px auto 0;
+  }
+  .hero .plain {
+    color: var(--ink-3);
+    max-width: 640px;
+    margin: 14px auto 0;
+    font-size: 16px;
+  }
+  .cta { margin-top: 32px; display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-block;
+    padding: 11px 22px;
+    border-radius: 6px;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 16px;
+  }
+  .btn-solid { background: var(--accent); color: #fff; }
+  .btn-solid:hover { background: var(--accent-emphasis); }
+  .btn-outline { border: 1px solid var(--accent); color: var(--accent-emphasis); }
+  .btn-outline:hover { background: var(--accent-soft); }
+  .cta-note { margin-top: 12px; font-size: 14px; color: var(--ink-3); }
+
+  .shot { margin: 40px auto 0; }
+  .shot img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    box-shadow: 0 18px 44px rgba(35, 50, 45, 0.14);
+  }
+  .shot figcaption { margin-top: 10px; font-size: 14px; color: var(--ink-3); text-align: center; }
+
+  section { padding: 56px 0 0; }
+  section h2 { font-size: 30px; margin-bottom: 8px; }
+  .lede { color: var(--ink-2); max-width: 760px; }
+
+  .pillars { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; margin-top: 28px; }
+  .pillar {
+    background: var(--card);
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    padding: 22px 24px;
+  }
+  .pillar h3 { font-size: 19px; margin-bottom: 8px; }
+  .pillar p { font-size: 15.5px; color: var(--ink-2); }
+
+  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px 28px; margin-top: 28px; }
+  .feature h3 { font-size: 17px; margin-bottom: 4px; }
+  .feature h3::before { content: "— "; color: var(--accent); }
+  .feature p { font-size: 15px; color: var(--ink-2); }
+
+  pre.tree {
+    background: var(--card);
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    padding: 18px 22px;
+    font-family: var(--mono);
+    font-size: 13.5px;
+    line-height: 1.6;
+    overflow-x: auto;
+    margin-top: 24px;
+    color: var(--ink-2);
+  }
+  pre.tree .c { color: var(--ink-3); }
+
+  footer {
+    margin-top: 80px;
+    padding: 28px 0 44px;
+    border-top: 1px solid var(--hairline);
+    font-size: 14.5px;
+    color: var(--ink-3);
+    text-align: center;
+  }
+  footer a { color: var(--ink-2); }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <h1>Local Writing App</h1>
+    <p class="tagline">A fiction-writing app that runs entirely on your own machine, stores your work as plain files you can read without it, and treats AI as an optional tool you point at your prose — not a service you rent.</p>
+    <p class="plain">No account. No subscription. No sync. Nothing phones home.</p>
+    <div class="cta">
+      <a class="btn btn-solid" href="https://github.com/antoncl/local-writing-app/releases">Download for Windows</a>
+      <a class="btn btn-outline" href="https://github.com/antoncl/local-writing-app">View on GitHub</a>
+    </div>
+    <p class="cta-note">Free and open source (MIT). The installer ships with 0.9.5 — until then, it runs from source.</p>
+    <figure class="shot">
+      <img src="assets/editor.png" alt="The manuscript tree, a scene open in the editor, and the metadata rail" width="1600" height="1000">
+      <figcaption>The manuscript tree, a scene in the editor, and its metadata — all of it plain files on your disk.</figcaption>
+    </figure>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>Why this exists</h2>
+    <div class="pillars">
+      <div class="pillar">
+        <h3>Your manuscript is not a rental</h3>
+        <p>Writing software has drifted into rented access to your own work — stop paying and you're locked out. This is a program you run. If the project were abandoned tomorrow, the copy on your disk keeps working, and the license lets anyone pick it up.</p>
+      </div>
+      <div class="pillar">
+        <h3>Fully offline, plain files</h3>
+        <p>Scenes and lore are Markdown with YAML front matter; structure is a handful of YAML files. You can read, grep, diff, and version-control a project without this app. With a local model via Ollama, even the AI runs with the network switched off.</p>
+      </div>
+      <div class="pillar">
+        <h3>AI as a tool, not a ghostwriter</h3>
+        <p>No "write my novel" button. The model gets context you authored — lore, scenes, outline — through prompts you wrote and can read. You pick the provider and model per task, see the token cost of every call, and the permission model fails closed.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>What it does</h2>
+    <div class="features">
+      <div class="feature">
+        <h3>Manuscript</h3>
+        <p>Acts, chapters, and scenes with drag-reordering. Scenes are Markdown files behind a WYSIWYG editor; identity lives in front matter, so renaming files never breaks anything.</p>
+      </div>
+      <div class="feature">
+        <h3>Lore</h3>
+        <p>Characters, places, and anything else — typed entries with fields, tags, references, and backlinks. Mid-scene mutations let a fact change partway through the story, with a timeline showing the effective state at any point.</p>
+      </div>
+      <div class="feature">
+        <h3>Plot boards</h3>
+        <p>Plotlines and cards laid out against the manuscript, so structure is something you can see and rearrange, not just imagine.</p>
+      </div>
+      <div class="feature">
+        <h3>Views</h3>
+        <p>Every list is backed by a small set-algebra query — union, intersection, relational nesting over lore links — authored in a drag-and-drop designer, with parameters, grouping, and trees.</p>
+      </div>
+      <div class="feature">
+        <h3>Layered metadata schema</h3>
+        <p>Model world / series / book levels purely by folder depth: nearer schema layers override farther ones, and node types, fields, and inheritance are authored in-app.</p>
+      </div>
+      <div class="feature">
+        <h3>AI, when you want it</h3>
+        <p>Anthropic, OpenAI, OpenRouter, or local models via Ollama. Prompts are Jinja2 templates stored as project files; chats are project nodes; per-call token and cost accounting rolls up to a project total.</p>
+      </div>
+    </div>
+    <figure class="shot">
+      <img src="assets/lore.png" alt="A lore entry with typed fields, references, and backlinks" width="1600" height="1000" loading="lazy">
+      <figcaption>A lore entry: typed fields, references to other entries, and backlinks from the scenes that mention it.</figcaption>
+    </figure>
+    <figure class="shot">
+      <img src="assets/plot.png" alt="The plot board with cards on plotlines, laid out against acts and chapters" width="1600" height="1000" loading="lazy">
+      <figcaption>The plot board: cards on plotlines, laid out against the acts and chapters they belong to.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>A project is a folder</h2>
+    <p class="lede">Everything the app knows about your story lives in files you can open in any editor. Caches are disposable; credentials never enter the project, so a folder is safe to commit or share.</p>
+    <pre class="tree">my-novel/
+├─ project.yaml               <span class="c"># manifest: title, AI policy, UI preferences</span>
+├─ manuscript.structure.yaml  <span class="c"># act / chapter / scene ordering</span>
+├─ metadata.schema.yaml       <span class="c"># this layer's schema contributions</span>
+├─ todo.yaml
+├─ scenes/                    <span class="c"># Markdown + YAML front matter</span>
+├─ lore/
+├─ prompts/                   <span class="c"># Jinja2 templates, editable in-app</span>
+├─ research/  chats/  views/
+└─ .cache/                    <span class="c"># disposable, always rebuildable</span></pre>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>MIT licensed · <a href="https://github.com/antoncl/local-writing-app">Source on GitHub</a> · <a href="https://github.com/antoncl/local-writing-app/issues">Issues</a></p>
+  </div>
+</footer>
+
+</body>
+</html>

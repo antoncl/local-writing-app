@@ -8,6 +8,8 @@ It's two processes: a Python/FastAPI service on `127.0.0.1:8787` that owns the
 project files, and a Svelte 5 + TipTap browser UI that talks to it. Nothing
 phones home. There is no account, no server, and no sync.
 
+![The manuscript tree, a scene in the editor, and its metadata](site/assets/editor.png)
+
 ## Why
 
 **I'm opposed to everything having to be a paid subscription.** Writing software
@@ -41,6 +43,13 @@ canonical identity, so renaming files never breaks anything.
 backlinks. Mid-scene *mutations* let a fact change partway through the story, with
 a timeline and scrubber showing the effective state at any point.
 
+![A lore entry with typed fields, references, and backlinks](site/assets/lore.png)
+
+**Plot boards.** Plotlines and cards laid out against the manuscript, so
+structure is something you can see and rearrange rather than just imagine.
+
+![The plot board: cards on plotlines, laid out against acts and chapters](site/assets/plot.png)
+
 **Layered metadata schema.** The app ships a minimal built-in schema, then merges
 every `metadata.schema.yaml` from your projects base folder down to the open
 project — nearer folders override farther ones. You model world / series / book
@@ -62,8 +71,7 @@ up to a project total.
 **Also:** research notes with their own tree, project- and scene-anchored TODOs,
 tags, full-project search, an assistant roster, and a saveable pane layout.
 
-Deliberately absent: export to Word/PDF/EPUB, collaboration, cloud sync, an
-installer.
+Deliberately absent: export to Word/PDF/EPUB, collaboration, cloud sync.
 
 ## Project format
 
@@ -88,6 +96,10 @@ diff, and version-control the whole thing without this app. API credentials are
 folder is safe to commit or share.
 
 ## Running it
+
+**Installer (Windows):** from 0.9.5 on, grab the installer from
+[Releases](https://github.com/antoncl/local-writing-app/releases) — download,
+run, write. Everything below is for running from source.
 
 Requires Python 3.11+ and Node 20+. Windows is the developed-on platform; nothing
 is deliberately Windows-only, but the paths below use PowerShell.
@@ -119,9 +131,10 @@ machine settings.
 ## Status
 
 Pre-1.0 and moving. It's the app I write in, so it's stable in the paths I use
-daily and rougher at the edges. Storage-format changes before 1.0 are made
+daily and rougher at the edges. Before 0.9.5, storage-format changes are made
 without migrations — recreate test projects rather than expecting old ones to
-open. Issues and milestones on GitHub are the real backlog.
+open; from 0.9.5 on, projects migrate forward and your data is meant to last.
+Issues and milestones on GitHub are the real backlog.
 
 Quality gates (lint, type-check, tests, file-size and design-token guards) run as
 git hooks and in GitHub Actions; `CLAUDE.md` documents the layout and the rules

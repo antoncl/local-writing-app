@@ -8,12 +8,15 @@ import { reactive } from "@/lib/test/reactive.svelte";
 // lets a real fetch through).
 vi.mock("@/lib/api", () => ({
   api: {
-    getVersion: vi.fn(async () => ({ version: "9.9.9" })),
+    getVersion: vi.fn(async () => ({ version: "9.9.9", build: null })),
+    checkForUpdate: vi.fn(),
   },
 }));
 
-import type { MachineSettingsDraft, MachineSettingsView } from "@/lib/types";
+import type { Mock } from "vitest";
+import type { MachineSettingsDraft, MachineSettingsView, UpdateCheck } from "@/lib/types";
 import type { AIHealthResponse } from "@/lib/aiTypes";
+import { api } from "@/lib/api";
 import MachineSettingsDialog from "@/components/dialogs/MachineSettingsDialog.svelte";
 
 // The app-wide AI policy (#746) is deliberately NOT part of the batched draft:
@@ -35,6 +38,7 @@ function view(ai_policy: MachineSettingsView["ai_policy"]): MachineSettingsView 
     palette: [],
     display: DISPLAY,
     ai_policy,
+    update_channel: "stable",
     config_path: "C:/config.yaml",
   };
 }
@@ -50,6 +54,7 @@ function draft(): MachineSettingsDraft {
     default_projects_folder: "",
     palette: [],
     display: { ...DISPLAY },
+    update_channel: "stable",
   };
 }
 
@@ -159,5 +164,95 @@ describe("MachineSettingsDialog — running app version (ADR-0072 S2)", () => {
   it("fetches and shows the running version once the dialog is open", async () => {
     mount("off");
     expect(await screen.findByText("Version 9.9.9")).toBeInTheDocument();
+  });
+});
+
+describe("MachineSettingsDialog — updates tab (ADR-0072 S7)", () => {
+  const UP_TO_DATE: UpdateCheck = {
+    channel: "stable",
+    current_version: "9.9.9",
+    current_build: null,
+    update_available: false,
+    latest: "v9.9.9",
+    latest_url: null,
+    reachable: true,
+    detail: null,
+  };
+
+  const openUpdatesTab = () => fireEvent.click(screen.getByRole("tab", { name: "Updates" }));
+  const channelRadio = (name: RegExp) => screen.getByRole("radio", { name }) as HTMLInputElement;
+  const checkBtn = () => screen.getByRole("button", { name: /Check for updates/ }) as HTMLButtonElement;
+
+  it("seeds the channel radios from the draft", async () => {
+    mount("off");
+    await openUpdatesTab();
+    expect(channelRadio(/Stable/).checked).toBe(true);
+    expect(channelRadio(/Bleeding edge/).checked).toBe(false);
+  });
+
+  it("links to the release page when a newer version exists", async () => {
+    (api.checkForUpdate as Mock).mockResolvedValue({
+      ...UP_TO_DATE,
+      update_available: true,
+      latest: "v9.9.10",
+      latest_url: "https://example.test/releases/v9.9.10",
+    });
+    mount("off");
+    await openUpdatesTab();
+    await fireEvent.click(checkBtn());
+    const link = (await screen.findByRole("link", { name: /release page/ })) as HTMLAnchorElement;
+    expect(link.href).toContain("v9.9.10");
+  });
+
+  it("reports 'on the latest' when nothing is newer", async () => {
+    (api.checkForUpdate as Mock).mockResolvedValue(UP_TO_DATE);
+    mount("off");
+    await openUpdatesTab();
+    await fireEvent.click(checkBtn());
+    expect(await screen.findByText(/on the latest version/)).toBeInTheDocument();
+  });
+
+  it("reports an unreachable check calmly (offline), never as an error", async () => {
+    (api.checkForUpdate as Mock).mockResolvedValue({
+      ...UP_TO_DATE,
+      reachable: false,
+      latest: null,
+      detail: "offline",
+    });
+    mount("off");
+    await openUpdatesTab();
+    await fireEvent.click(checkBtn());
+    expect(await screen.findByText(/Couldn't reach GitHub/)).toBeInTheDocument();
+  });
+
+  it("blocks the check on an unsaved channel change and nudges a Save", async () => {
+    mount("off"); // saved channel is stable
+    await openUpdatesTab();
+    await fireEvent.click(channelRadio(/Bleeding edge/)); // draft now diverges
+    expect(checkBtn().disabled).toBe(true);
+    expect(screen.getByText(/Save to check on the/)).toBeInTheDocument();
+    expect(api.checkForUpdate).not.toHaveBeenCalled();
+  });
+
+  it("drops an in-flight result if the channel changed before it resolved", async () => {
+    // A deferred check: switch channel mid-flight, then resolve — the stale
+    // saved-channel verdict must not surface under the "Save to check" nudge.
+    let resolveCheck!: (v: UpdateCheck) => void;
+    (api.checkForUpdate as Mock).mockReturnValue(
+      new Promise<UpdateCheck>((r) => (resolveCheck = r)),
+    );
+    mount("off");
+    await openUpdatesTab();
+    await fireEvent.click(checkBtn()); // in flight
+    await fireEvent.click(channelRadio(/Bleeding edge/)); // switch mid-flight
+    resolveCheck({
+      ...UP_TO_DATE,
+      update_available: true,
+      latest: "v9.9.10",
+      latest_url: "https://example.test/releases/v9.9.10",
+    });
+    await Promise.resolve(); // let the awaited assignment run
+    expect(screen.queryByRole("link", { name: /release page/ })).toBeNull();
+    expect(screen.getByText(/Save to check on the/)).toBeInTheDocument();
   });
 });

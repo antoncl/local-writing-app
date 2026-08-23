@@ -10,6 +10,7 @@
     MachineSettingsDraft,
     MachineSettingsView,
     ProviderCredentialsView,
+    UpdateCheck,
   } from "@/lib/types";
   import type { AIPolicyDraft } from "@/lib/stores/aiSettings.svelte";
   import { api } from "@/lib/api";
@@ -71,14 +72,56 @@
   let policyWasOpen = $state(false);
   let applyingPolicy = $state(false);
 
-  // The running app version (ADR-0072 §6). Fetched once on first open — it's a
-  // static app constant, unrelated to the editable draft, so it isn't threaded
-  // through the parent's settings load.
+  // The running app version + build stamp (ADR-0072 §6). Fetched once on first
+  // open — a static app constant, unrelated to the editable draft, so it isn't
+  // threaded through the parent's settings load. `build` is the frozen commit
+  // (null in a source run); the Updates tab shows it, the footer shows version.
   let appVersion = $state<string | null>(null);
+  let appBuild = $state<string | null>(null);
   $effect(() => {
     if (open && appVersion === null) {
-      api.getVersion().then((v) => (appVersion = v.version)).catch(() => {});
+      api
+        .getVersion()
+        .then((v) => {
+          appVersion = v.version;
+          appBuild = v.build;
+        })
+        .catch(() => {});
     }
+  });
+
+  // The update check (ADR-0072 S6). On demand — never on open — so the dialog
+  // makes no network call the user didn't ask for. The check runs against the
+  // *saved* channel (the backend reads config.yaml), so a switched-but-unsaved
+  // channel prompts a Save first (see the tab). `checkForUpdate` returns
+  // `reachable: false` for offline rather than throwing; a genuine failure
+  // (a 500) is the only catch path.
+  let updateChecking = $state(false);
+  let updateResult = $state<UpdateCheck | null>(null);
+  let updateError = $state(false);
+  async function runUpdateCheck() {
+    if (updateChecking || channelDirty) return;
+    updateChecking = true;
+    updateResult = null;
+    updateError = false;
+    try {
+      const result = await api.checkForUpdate();
+      // A channel switch during the request makes this verdict stale — drop it
+      // rather than show a saved-channel result under a "Save to check" nudge.
+      if (!channelDirty) updateResult = result;
+    } catch {
+      if (!channelDirty) updateError = true;
+    } finally {
+      updateChecking = false;
+    }
+  }
+  // The saved channel the last/next check runs against. A draft edit that
+  // diverges from it makes the readout stale, so we clear it and nudge a Save.
+  const savedChannel = $derived(settings?.update_channel ?? "stable");
+  const channelDirty = $derived(!!draft && draft.update_channel !== savedChannel);
+  $effect(() => {
+    // Reading channelDirty registers the dep; clear a now-stale result.
+    if (channelDirty) updateResult = null;
   });
   // Snapshot the stored policy on each open→shown transition only; our own apply
   // re-syncs `settings` from the parent, and re-seeding on that would be a no-op
@@ -111,17 +154,23 @@
   // (prose display), Palette (reusable colours), Storage (the projects root).
   // Writing and Palette are separate tabs so neither runs tall — the palette
   // alone can be dozens of swatches.
-  type SettingsTab = "ai" | "writing" | "palette" | "storage";
+  type SettingsTab = "ai" | "writing" | "palette" | "storage" | "updates";
   const TABS: { key: SettingsTab; label: string }[] = [
     { key: "ai", label: "AI" },
     { key: "writing", label: "Writing" },
     { key: "palette", label: "Palette" },
     { key: "storage", label: "Storage" },
+    { key: "updates", label: "Updates" },
   ];
   let activeTab = $state<SettingsTab>("ai");
-  // Land on the first tab whenever the dialog reopens, never a stale one.
+  // Land on the first tab whenever the dialog reopens, never a stale one, and
+  // drop any update-check readout so a reopen never shows a stale verdict.
   $effect(() => {
-    if (!open) activeTab = "ai";
+    if (!open) {
+      activeTab = "ai";
+      updateResult = null;
+      updateError = false;
+    }
   });
 
   // The AI tab presents providers via the shared ProviderSubscriptions surface,
@@ -292,6 +341,79 @@
               project switcher reads recent projects from this config too.
             </small>
           </label>
+        {:else if activeTab === "updates"}
+          <section class="updates-surface">
+            <h3>Updates</h3>
+            <p class="muted">
+              This app checks GitHub for new releases on the channel you choose. Checking is manual —
+              nothing is ever downloaded or installed on its own. When something newer exists, you get
+              a link to its release page.
+            </p>
+
+            <fieldset class="channel-group">
+              <legend>Channel</legend>
+              <label class="choice-row">
+                <input type="radio" value="stable" bind:group={draft.update_channel} />
+                <span class="choice-text">
+                  Stable
+                  <small class="muted">Tagged releases. The recommended channel.</small>
+                </span>
+              </label>
+              <label class="choice-row">
+                <input type="radio" value="nightly" bind:group={draft.update_channel} />
+                <span class="choice-text">
+                  Bleeding edge
+                  <small class="muted">The latest build from the main branch — newer, less tested.</small>
+                </span>
+              </label>
+            </fieldset>
+
+            <div class="version-lines muted">
+              <span>Version {appVersion ?? "…"}</span>
+              {#if appBuild}<span>Build <code>{appBuild.slice(0, 12)}</code></span>{/if}
+            </div>
+
+            <div class="button-row">
+              <button
+                type="button"
+                disabled={updateChecking || channelDirty}
+                title={channelDirty
+                  ? "Save to check on the selected channel"
+                  : "Check GitHub for a newer release"}
+                onclick={runUpdateCheck}
+              >{updateChecking ? "Checking…" : "Check for updates"}</button>
+            </div>
+            {#if channelDirty}
+              <small class="muted">
+                Save to check on the
+                <strong>{draft.update_channel === "nightly" ? "Bleeding edge" : "Stable"}</strong>
+                channel.
+              </small>
+            {/if}
+
+            {#if updateError}
+              <p class="update-result fail">Couldn't check for updates. Try again.</p>
+            {:else if updateResult}
+              {#if !updateResult.reachable}
+                <p class="update-result info">
+                  Couldn't reach GitHub{updateResult.detail ? ` — ${updateResult.detail}` : ""}. You may be offline.
+                </p>
+              {:else if updateResult.update_available}
+                <p class="update-result ok">
+                  A newer {updateResult.channel === "nightly" ? "build" : "version"} is available{updateResult.latest
+                    ? `: ${updateResult.latest}`
+                    : ""}.
+                  {#if updateResult.latest_url}
+                    <a href={updateResult.latest_url} target="_blank" rel="noopener noreferrer">Open the release page ↗</a>
+                  {/if}
+                </p>
+              {:else if updateResult.detail}
+                <p class="update-result info">{updateResult.detail}.</p>
+              {:else}
+                <p class="update-result ok">You're on the latest {updateResult.channel === "nightly" ? "build" : "version"}.</p>
+              {/if}
+            {/if}
+          </section>
         {/if}
       </div>
 
@@ -427,6 +549,97 @@
     align-items: center;
     gap: 8px;
     font-size: var(--fs-sm);
+  }
+
+  /* Updates tab (ADR-0072 S7). Mirrors .writing-surface: a bordered card with a
+     heading, the channel radios, the version/build lines, and the check readout. */
+  .updates-surface {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 0;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+  }
+
+  .updates-surface h3 {
+    margin: 0;
+    font-size: var(--fs-md);
+    font-weight: 600;
+  }
+
+  .updates-surface p.muted {
+    margin: 0;
+    font-size: var(--fs-sm);
+  }
+
+  .channel-group {
+    margin: 0;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    display: grid;
+    gap: 8px;
+  }
+
+  .channel-group legend {
+    padding: 0 4px;
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+  }
+
+  /* The radios sit top-aligned against a two-line label (name + hint). */
+  .channel-group .choice-row {
+    align-items: flex-start;
+  }
+
+  .choice-text {
+    display: grid;
+    gap: 2px;
+  }
+
+  .choice-text small {
+    font-size: var(--fs-sm);
+  }
+
+  .version-lines {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    font-size: var(--fs-sm);
+  }
+
+  .update-result {
+    margin: 0;
+    padding: 8px 10px;
+    border-radius: 4px;
+    font-size: var(--fs-md);
+    line-height: 1.4;
+  }
+
+  .update-result.ok {
+    background: var(--accent-soft);
+    color: var(--accent-deep);
+    border: 1px solid var(--accent-soft2);
+  }
+
+  .update-result.fail {
+    background: var(--danger-soft);
+    color: var(--danger);
+    border: 1px solid var(--danger-border);
+  }
+
+  .update-result.info {
+    background: var(--inset);
+    color: var(--text-2);
+    border: 1px solid var(--border);
+  }
+
+  .update-result a {
+    color: inherit;
+    font-weight: 600;
   }
 
   /* The frame's `.machine-settings-modal` class lives on Modal's own <div>

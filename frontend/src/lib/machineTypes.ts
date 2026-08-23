@@ -30,6 +30,26 @@ export type Swatch = {
 // Per-user prose-presentation prefs (#127 / #575), applied as CSS vars on :root.
 export type DisplaySettings = { ui_scale: number; paragraph_align: "left" | "justify"; paragraph_indent: boolean };
 
+// Which GitHub Releases channel this install follows for updates (ADR-0072 S6).
+// `stable` = tagged releases; `nightly` = the rolling bleeding-edge prerelease.
+export type UpdateChannel = "stable" | "nightly";
+
+// The result of an update check (`GET /api/updates/check`, ADR-0072 S6). Mirrors
+// the backend UpdateCheck: `reachable=false` is "couldn't check" (offline / rate-
+// limited), never an error; `update_available` is only ever true on a positive
+// comparison, so an unreachable check leaves it false. `latest`/`latest_url` are
+// null when there's nothing newer to point at.
+export type UpdateCheck = {
+  channel: UpdateChannel;
+  current_version: string;
+  current_build: string | null;
+  update_available: boolean;
+  latest: string | null;
+  latest_url: string | null;
+  reachable: boolean;
+  detail: string | null;
+};
+
 export type MachineSettingsView = {
   version: number;
   providers: ProviderCredentialsView;
@@ -42,6 +62,8 @@ export type MachineSettingsView = {
   // The application-global default AI policy (#746) — the chain's outermost
   // fallback. No "inherit": it IS the floor.
   ai_policy: AIPolicy;
+  // The update channel this install follows (ADR-0072 S6).
+  update_channel: UpdateChannel;
   config_path: string;
 };
 
@@ -54,6 +76,7 @@ export type MachineSettingsUpdate = {
   palette?: Swatch[];
   display?: DisplaySettings;
   ai_policy?: AIPolicy;
+  update_channel?: UpdateChannel;
 };
 
 // Editor-side draft for MachineSettingsDialog. Flat (provider keys hoisted
@@ -69,4 +92,7 @@ export type MachineSettingsDraft = {
   default_projects_folder: string;
   palette: Swatch[];
   display: DisplaySettings;
+  // The update channel (ADR-0072 S6). A plain preference — unlike ai_policy it
+  // rides the batched Save, so it lives on the draft.
+  update_channel: UpdateChannel;
 };

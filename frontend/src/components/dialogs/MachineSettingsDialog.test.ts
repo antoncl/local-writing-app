@@ -109,6 +109,23 @@ describe("MachineSettingsDialog — app-wide AI policy (#746)", () => {
     expect(onSave).toHaveBeenCalledTimes(1); // the batched save ran
     expect(onApplyPolicy).not.toHaveBeenCalled(); // but the permission did NOT ride along
   });
+
+  it("warns once the choice differs that Save won't apply it (#1382)", async () => {
+    mount("off");
+    expect(screen.queryByRole("status")).toBeNull(); // nothing changed yet — no nag
+    await fireEvent.click(radio("Cloud allowed"));
+    expect(screen.getByRole("status").textContent).toContain("Not applied");
+  });
+
+  it("surfaces the unapplied reminder from other tabs too (#1382)", async () => {
+    mount("off");
+    await fireEvent.click(radio("Cloud allowed"));
+    // The AI tab shows the inline hint by the Apply button...
+    expect(screen.getByRole("status").textContent).toContain("Not applied");
+    // ...and moving toward Save via another tab still carries the reminder.
+    await fireEvent.click(screen.getByRole("tab", { name: "Storage" }));
+    expect(screen.getByRole("status").textContent).toContain("AI access change not applied");
+  });
 });
 
 describe("MachineSettingsDialog — health names the resolved assistant (#336)", () => {

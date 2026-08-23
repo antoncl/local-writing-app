@@ -35,7 +35,7 @@
   <input
     type="text"
     value={value}
-    placeholder="C:\path\to\writing"
+    placeholder="Choose a folder…"
     oninput={(event) => onChange(event.currentTarget.value)}
   />
   <button type="button" onclick={() => (pickerOpen = true)}>Browse…</button>

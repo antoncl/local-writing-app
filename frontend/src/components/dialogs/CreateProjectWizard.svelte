@@ -108,7 +108,7 @@
               type="text"
               data-testid="wizard-project-name"
               bind:value={wizard.title}
-              placeholder="Honor's First Command"
+              placeholder="The name of your project"
             />
           </label>
 

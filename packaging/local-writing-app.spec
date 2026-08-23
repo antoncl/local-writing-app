@@ -46,7 +46,14 @@ with open(_ident_file, "w", encoding="utf-8") as _f:
     _f.write(build_identity())
 datas += [(_ident_file, ".")]
 
-a = Analysis(
+# The app mark on the Windows exe + its Add/Remove-Programs entry (ADR-0072 S5).
+# macOS gets .icns via the dmg build; other platforms take PyInstaller's default.
+_exe_icon = None
+if sys.platform == "win32":
+    _win_ico = os.path.join(_repo_root, "packaging", "icons", "icon.ico")
+    _exe_icon = _win_ico if os.path.isfile(_win_ico) else None
+
+a = Analysis(  # noqa: F821
     [os.path.join(SPECPATH, "entry.py")],  # noqa: F821
     pathex=[_backend],
     binaries=binaries,
@@ -69,6 +76,7 @@ exe = EXE(  # noqa: F821
     console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
+    icon=_exe_icon,
 )
 coll = COLLECT(  # noqa: F821
     exe,

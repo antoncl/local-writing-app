@@ -21,10 +21,15 @@ REPO = Path(__file__).resolve().parents[1]
 OUT = REPO / "frontend" / "src" / "lib" / "generated" / "guides.ts"
 
 # The guides surfaced in-app, in display order. Each is {id, title, source doc}.
-# #1272 adds the consolidated prompt-scripting guide here.
+# #1272 adds the consolidated prompt-scripting guide here; #172 bundles the
+# remaining user-facing howtos. Writing prompts stays first so the prompt
+# editor's "?" (which opens the pane at the default guide) still lands on it.
 GUIDES = [
     {"id": "writing-prompts", "title": "Writing prompts", "source": "docs/prompts/guide.md"},
     {"id": "custom-fields", "title": "Custom fields", "source": "docs/custom-fields.md"},
+    {"id": "context-picker", "title": "Context picker", "source": "docs/context-picker.md"},
+    {"id": "roleplay", "title": "Roleplay", "source": "docs/roleplay.md"},
+    {"id": "mutations", "title": "Mutations", "source": "docs/mutations.md"},
 ]
 
 _HEADER = (

@@ -15,6 +15,12 @@ On a loopback desktop launch it also opens the default browser at the app's URL
 optional pywebview shell (ADR-0072 §7/S8). Skipped for a non-loopback (LAN/Pi)
 bind, for `--no-browser`/`LWA_NO_BROWSER`, and for `--self-check` — a headless
 server must never try to pop a browser.
+
+That same loopback desktop launch also *quits* when its last browser tab closes
+(#1378), so a non-technical user closing the app's tab isn't left with a server
+running in the background. It is armed under the exact same condition that opens
+the browser: a LAN/Pi/systemd server is meant to outlive any tab, so shutting it
+down because a browser closed would be a bug.
 """
 
 from __future__ import annotations
@@ -29,6 +35,7 @@ import uvicorn
 
 from app.main import app
 from app.services.machine_settings import bind_address
+from app.services.session_presence import presence
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8787
@@ -134,6 +141,29 @@ def _open_browser_when_ready(host: str, port: int, *, timeout: float = 30.0) -> 
         webbrowser.open(f"http://{connect_host}:{port}")
 
 
+def _arm_auto_shutdown(server: uvicorn.Server, *, poll_interval: float = 1.0) -> None:
+    """Stop the server once the last browser tab closes (#1378) — desktop launch only.
+
+    Armed on the same loopback desktop condition that opens the browser: a
+    LAN/Pi/systemd server is meant to outlive any tab, so quitting because a
+    browser closed would be a bug. A daemon thread polls the shared presence
+    tracker (fed by the `/api/session/live` sockets) and asks uvicorn to stop
+    gracefully — setting `should_exit` from another thread is uvicorn's supported
+    programmatic stop, and the graceful stop still runs the node-index flush.
+    """
+    import time
+
+    def _watch() -> None:
+        while not server.should_exit:
+            if presence.should_shutdown():
+                logger.info("Last browser tab closed — stopping the desktop server (#1378).")
+                server.should_exit = True
+                return
+            time.sleep(poll_interval)
+
+    threading.Thread(target=_watch, daemon=True).start()
+
+
 def self_check() -> int:
     """Exercise the assembled runtime end-to-end, in-process; return 0 ok / 1 failed.
 
@@ -178,13 +208,19 @@ def main(argv: list[str] | None = None) -> None:
             host,
             port,
         )
+    # Build the Server ourselves (rather than uvicorn.run) so the auto-shutdown
+    # watcher has a handle to stop gracefully via `should_exit`.
+    server = uvicorn.Server(uvicorn.Config(app, host=host, port=port))
     if _should_open_browser(args, host):
-        # Daemon thread: opens the browser once the socket is live, then dies with
-        # the process. Started before the blocking uvicorn.run below.
+        # One loopback-desktop condition, two consequences: open the browser once
+        # the socket is live, and quit when the last tab closes (#1365/#1378).
+        # Both are daemon threads that die with the process; started before the
+        # blocking run below.
         threading.Thread(
             target=_open_browser_when_ready, args=(host, port), daemon=True
         ).start()
-    uvicorn.run(app, host=host, port=port)
+        _arm_auto_shutdown(server)
+    server.run()
 
 
 if __name__ == "__main__":

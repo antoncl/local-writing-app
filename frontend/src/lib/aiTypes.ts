@@ -22,6 +22,16 @@ export type AIHealthResponse = {
   assistant_name?: string | null;
 };
 
+// Model-less Ollama host reachability check (#1380): "can this machine reach the
+// daemon / is the firewall open?", independent of any pulled model.
+export type OllamaHostHealth = {
+  host: string;
+  reachable: boolean;
+  latency_ms: number;
+  version?: string | null;
+  error?: string | null;
+};
+
 export type AIProviderInfo = {
   name: string;
   display_name: string;

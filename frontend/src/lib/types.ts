@@ -1204,6 +1204,7 @@ export type {
 export type {
   AIPolicy,
   AIHealthResponse,
+  OllamaHostHealth,
   AIProviderInfo,
   AIProviderList,
   AICapabilityTier,

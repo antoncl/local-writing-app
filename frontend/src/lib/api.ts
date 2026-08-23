@@ -13,6 +13,7 @@ import type {
   EntryPatchExtraction,
   AIGenerateRequest,
   AIHealthResponse,
+  OllamaHostHealth,
   AIProviderList,
   AIProviderModelList,
   AITierResolution,
@@ -472,6 +473,16 @@ export const api = {
         provider: provider ?? null,
         model: model ?? null,
       }),
+    });
+  },
+  // Model-less reachability probe of the Ollama host — "can this machine reach
+  // the daemon / is the firewall open?" — tests the typed host so a user can
+  // check before saving (#1380). Never throws for "offline"; that's `reachable:
+  // false` with a hint.
+  checkOllamaHost(host: string) {
+    return request<OllamaHostHealth>("/ai/ollama/health", {
+      method: "POST",
+      body: JSON.stringify({ host }),
     });
   },
   aiPreview(payload: AIPreviewRequest) {

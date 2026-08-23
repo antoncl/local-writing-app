@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
-from app.models import AIHealthResponse, AIPolicy
+from app.models import AIHealthResponse, AIPolicy, OllamaHostHealth
 from app.services.ai.profiles import UsageMetrics
 from app.services.ai.profiles.base import (
     ChatCall,
@@ -105,6 +105,29 @@ def health_check(
         ok=True,
         latency_ms=int((time.perf_counter() - started) * 1000),
         policy=policy,
+    )
+
+
+def check_ollama_host(host: str) -> OllamaHostHealth:
+    """Model-less reachability check for an Ollama host (#1380).
+
+    Unlike `health_check` (which needs a provider + model, so it only exercises a
+    configured assistant), this just asks whether the daemon answers — the
+    firewall/connectivity question a user with no local Ollama still wants tested.
+    A blank host falls back to the daemon's default, matching `from_settings`.
+    """
+    from app.services.ai.profiles.ollama import _DEFAULT_OLLAMA_HOST, OllamaProfile
+
+    effective = host.strip() or _DEFAULT_OLLAMA_HOST
+    profile = OllamaProfile(effective)
+    started = time.perf_counter()
+    reachable, version, error = profile.ping_host()
+    return OllamaHostHealth(
+        host=effective,
+        reachable=reachable,
+        latency_ms=int((time.perf_counter() - started) * 1000),
+        version=version,
+        error=error,
     )
 
 

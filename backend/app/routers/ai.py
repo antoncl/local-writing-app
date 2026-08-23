@@ -28,6 +28,8 @@ from app.models import (
     EntryPatchExtraction,
     ExtractEntryDraftRequest,
     ExtractEntryPatchRequest,
+    OllamaHostHealth,
+    OllamaHostHealthRequest,
     PreviewContentBlock,
     PreviewErrorInfo,
     PreviewMessage,
@@ -114,6 +116,14 @@ def ai_health(project: CurrentProject, request: AIHealthRequest) -> AIHealthResp
         result.assistant_id = assistant.id
         result.assistant_name = assistant.title
     return result
+
+
+@router.post("/api/ai/ollama/health", response_model=OllamaHostHealth)
+def ollama_host_health(request: OllamaHostHealthRequest) -> OllamaHostHealth:
+    # No project scope and no policy: this is a pure connectivity probe of the
+    # machine's Ollama host, testing the value typed into Settings so a user can
+    # check their firewall before saving (#1380).
+    return ai_providers.check_ollama_host(request.host)
 
 
 def _descriptor_to_wire(descriptor: ModelDescriptor) -> AIModelInfo:

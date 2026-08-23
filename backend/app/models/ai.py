@@ -144,6 +144,27 @@ class AIHealthResponse(BaseModel):
     assistant_name: str | None = None
 
 
+class OllamaHostHealthRequest(BaseModel):
+    # The host to probe — the value typed into the Ollama-host field, so a user
+    # can test connectivity before saving. Blank falls back to the default host.
+    host: str = ""
+
+
+class OllamaHostHealth(BaseModel):
+    """A model-less reachability check for an Ollama host (#1380).
+
+    Answers "can this machine reach the Ollama daemon?" — the firewall/address
+    question — independent of whether any model has been pulled, unlike the
+    assistant health check which needs a provider+model.
+    """
+
+    host: str
+    reachable: bool
+    latency_ms: int
+    version: str | None = None
+    error: str | None = None
+
+
 class AIProviderInfo(BaseModel):
     """Lightweight provider listing for the picker's provider dropdown."""
 

@@ -9,6 +9,7 @@
     AIPolicy,
     MachineSettingsDraft,
     MachineSettingsView,
+    OllamaHostHealth,
     ProviderCredentialsView,
     UpdateCheck,
   } from "@/lib/types";
@@ -134,6 +135,37 @@
   });
   const policyDirty = $derived(policyDraft !== (settings?.ai_policy ?? "off"));
 
+  // Ollama host reachability check (#1380) — model-less, so it answers the
+  // firewall/connectivity question even on a box with no local Ollama. Tests the
+  // value currently typed (not the saved one) so a user can iterate before
+  // saving; the readout is cleared when the host is edited so it never goes stale.
+  let ollamaChecking = $state(false);
+  let ollamaResult = $state<OllamaHostHealth | null>(null);
+  async function runOllamaCheck() {
+    if (ollamaChecking) return;
+    // Pin the host under test: the field stays editable during the request, so a
+    // verdict that resolves after the host changed is stale and must be dropped
+    // (mirrors the updates tab's in-flight guard).
+    const testedHost = draft?.ollama_host ?? "";
+    ollamaChecking = true;
+    ollamaResult = null;
+    try {
+      const result = await api.checkOllamaHost(testedHost);
+      if ((draft?.ollama_host ?? "") === testedHost) ollamaResult = result;
+    } catch {
+      if ((draft?.ollama_host ?? "") === testedHost) {
+        ollamaResult = {
+          host: testedHost,
+          reachable: false,
+          latency_ms: 0,
+          error: "The check couldn't run.",
+        };
+      }
+    } finally {
+      ollamaChecking = false;
+    }
+  }
+
   async function applyPolicy() {
     // The floor has no "inherit" stop; guard so the type stays honest and a
     // stray value can never widen past the three real policies (fails-closed).
@@ -170,6 +202,7 @@
       activeTab = "ai";
       updateResult = null;
       updateError = false;
+      ollamaResult = null;
     }
   });
 
@@ -260,8 +293,33 @@
 
           <label>
             Ollama host
-            <input type="text" bind:value={draft.ollama_host} placeholder="http://127.0.0.1:11434" />
+            <input
+              type="text"
+              bind:value={draft.ollama_host}
+              placeholder="http://127.0.0.1:11434"
+              oninput={() => (ollamaResult = null)}
+            />
           </label>
+          <!--
+            A model-less reachability check for the host (#1380): unlike the
+            assistant "Test connection" above (which needs a provider + model),
+            this just asks whether the daemon answers — the connectivity/firewall
+            question a user with no local Ollama still wants tested.
+          -->
+          <div class="button-row">
+            <button type="button" disabled={ollamaChecking} onclick={runOllamaCheck}>
+              {ollamaChecking ? "Testing…" : "Test Ollama host"}
+            </button>
+          </div>
+          {#if ollamaResult}
+            <p class="ai-health-result" class:ok={ollamaResult.reachable} class:fail={!ollamaResult.reachable}>
+              {#if ollamaResult.reachable}
+                ✓ Reached {ollamaResult.host}{#if ollamaResult.version} · Ollama {ollamaResult.version}{/if} · {ollamaResult.latency_ms} ms
+              {:else}
+                ✗ {ollamaResult.error}
+              {/if}
+            </p>
+          {/if}
 
           {#if health}
             <section class="health-check">

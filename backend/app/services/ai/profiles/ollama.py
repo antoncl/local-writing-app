@@ -80,6 +80,40 @@ class OllamaProfile(OpenAICompatibleProfile):
         self._cache = descriptors
         return descriptors
 
+    def ping_host(
+        self, *, timeout: float = 4.0, transport: httpx.BaseTransport | None = None
+    ) -> tuple[bool, str | None, str | None]:
+        """Model-less reachability check — returns (reachable, version, error).
+
+        Hits the native `/api/version` (no model, no key), so it answers the
+        firewall/connectivity question — "can this machine reach the daemon?" —
+        independent of whether any model has been pulled (#1380). `transport` is
+        for tests to inject a mock; production leaves it None.
+        """
+        try:
+            with httpx.Client(timeout=timeout, transport=transport) as client:
+                response = client.get(f"{self._base}/api/version")
+                response.raise_for_status()
+                payload = response.json()
+        except httpx.HTTPStatusError as exc:
+            return False, None, f"Host answered with HTTP {exc.response.status_code}."
+        except httpx.HTTPError:
+            # Connect refused / DNS / timeout — the firewall/address case.
+            return (
+                False,
+                None,
+                f"Couldn't reach {self._base} — check the host is running and "
+                "reachable (address, port, firewall).",
+            )
+        except ValueError:
+            # Reached something on that address, but it didn't answer like Ollama.
+            return True, None, "Reached the host, but it didn't respond like Ollama."
+        if not isinstance(payload, dict):
+            # Valid JSON, but not Ollama's `{"version": ...}` shape.
+            return True, None, "Reached the host, but it didn't respond like Ollama."
+        version = str(payload.get("version") or "") or None
+        return True, version, None
+
     def caching_style(self, model_id: str) -> CachingStyle:
         # Ollama doesn't cache server-side via the OpenAI-compat shim.
         return "none"

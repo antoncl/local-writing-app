@@ -10,11 +10,12 @@ vi.mock("@/lib/api", () => ({
   api: {
     getVersion: vi.fn(async () => ({ version: "9.9.9", build: null })),
     checkForUpdate: vi.fn(),
+    checkOllamaHost: vi.fn(),
   },
 }));
 
 import type { Mock } from "vitest";
-import type { MachineSettingsDraft, MachineSettingsView, UpdateCheck } from "@/lib/types";
+import type { MachineSettingsDraft, MachineSettingsView, OllamaHostHealth, UpdateCheck } from "@/lib/types";
 import type { AIHealthResponse } from "@/lib/aiTypes";
 import { api } from "@/lib/api";
 import MachineSettingsDialog from "@/components/dialogs/MachineSettingsDialog.svelte";
@@ -271,5 +272,86 @@ describe("MachineSettingsDialog — updates tab (ADR-0072 S7)", () => {
     await Promise.resolve(); // let the awaited assignment run
     expect(screen.queryByRole("link", { name: /release page/ })).toBeNull();
     expect(screen.getByText(/Save to check on the/)).toBeInTheDocument();
+  });
+});
+
+describe("MachineSettingsDialog — Ollama host reachability check (#1380)", () => {
+  const readout = () => document.querySelector(".ai-health-result");
+
+  it("probes the host and shows a reachable readout with version + latency", async () => {
+    (api.checkOllamaHost as Mock).mockResolvedValue({
+      host: "http://box:11434",
+      reachable: true,
+      latency_ms: 12,
+      version: "0.5.1",
+      error: null,
+    });
+    mount("cloud-allowed");
+    await fireEvent.click(screen.getByRole("button", { name: "Test Ollama host" }));
+    await screen.findByText(
+      (_t, el) => (el?.classList.contains("ai-health-result") ?? false),
+    );
+    expect(readout()?.textContent).toContain("http://box:11434");
+    expect(readout()?.textContent).toContain("0.5.1");
+    expect(readout()?.classList.contains("ok")).toBe(true);
+  });
+
+  it("shows an unreachable readout calmly (a firewall/connectivity hint)", async () => {
+    (api.checkOllamaHost as Mock).mockResolvedValue({
+      host: "http://box:11434",
+      reachable: false,
+      latency_ms: 0,
+      version: null,
+      error: "Couldn't reach http://box:11434 — check the host is running and reachable (address, port, firewall).",
+    });
+    mount("cloud-allowed");
+    await fireEvent.click(screen.getByRole("button", { name: "Test Ollama host" }));
+    await screen.findByText(
+      (_t, el) => (el?.classList.contains("ai-health-result") ?? false),
+    );
+    expect(readout()?.textContent).toContain("Couldn't reach");
+    expect(readout()?.classList.contains("fail")).toBe(true);
+  });
+
+  it("clears a stale readout when the host is edited", async () => {
+    (api.checkOllamaHost as Mock).mockResolvedValue({
+      host: "http://box:11434",
+      reachable: true,
+      latency_ms: 5,
+      version: null,
+      error: null,
+    });
+    mount("cloud-allowed");
+    await fireEvent.click(screen.getByRole("button", { name: "Test Ollama host" }));
+    await screen.findByText(
+      (_t, el) => (el?.classList.contains("ai-health-result") ?? false),
+    );
+    // Editing the host invalidates the verdict — it must not linger and mislead.
+    await fireEvent.input(screen.getByRole("textbox", { name: "Ollama host" }), {
+      target: { value: "http://other:11434" },
+    });
+    expect(readout()).toBeNull();
+  });
+
+  it("drops an in-flight verdict if the host changed before it resolved", async () => {
+    let resolveCheck!: (v: OllamaHostHealth) => void;
+    (api.checkOllamaHost as Mock).mockReturnValue(
+      new Promise<OllamaHostHealth>((r) => (resolveCheck = r)),
+    );
+    mount("cloud-allowed");
+    await fireEvent.click(screen.getByRole("button", { name: "Test Ollama host" })); // in flight
+    // Change the host before the verdict lands — the pending result is now stale.
+    await fireEvent.input(screen.getByRole("textbox", { name: "Ollama host" }), {
+      target: { value: "http://changed:11434" },
+    });
+    resolveCheck({
+      host: "http://box:11434",
+      reachable: true,
+      latency_ms: 3,
+      version: null,
+      error: null,
+    });
+    await Promise.resolve(); // let the awaited assignment run (and be skipped)
+    expect(readout()).toBeNull();
   });
 });

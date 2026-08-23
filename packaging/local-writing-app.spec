@@ -1,6 +1,8 @@
 # PyInstaller spec — the frozen product (ADR-0072 S3, #1344). Onedir.
 # Build from repo root:  pyinstaller packaging/local-writing-app.spec --noconfirm
 import os
+import sys
+import tempfile
 
 from PyInstaller.utils.hooks import collect_all, collect_data_files, copy_metadata
 
@@ -28,6 +30,21 @@ for _pkg in ("uvicorn", "tiktoken"):
     datas += _d
     binaries += _b
     hiddenimports += _h
+
+# Bake the node-index build identity: the frozen app can't walk its own source
+# .py (they're archived), so compute node_index_snapshot.build_identity() here —
+# the source IS on disk in the build env — and ship the digest as data for the
+# runtime to read (ADR-0072 freeze fix, #1348).
+sys.path.insert(0, _backend)
+from app.services.project.node_index_snapshot import (  # noqa: E402
+    FROZEN_IDENTITY_FILENAME,
+    build_identity,
+)
+
+_ident_file = os.path.join(tempfile.mkdtemp(), FROZEN_IDENTITY_FILENAME)
+with open(_ident_file, "w", encoding="utf-8") as _f:
+    _f.write(build_identity())
+datas += [(_ident_file, ".")]
 
 a = Analysis(
     [os.path.join(SPECPATH, "entry.py")],  # noqa: F821

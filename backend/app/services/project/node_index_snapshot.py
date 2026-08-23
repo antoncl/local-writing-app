@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -81,6 +82,9 @@ def build_identity() -> str:
     the digest and costs one rebuild. That is the right side to err on for a
     derived file, and the digest is computed once per process.
     """
+    baked = _frozen_build_identity()
+    if baked is not None:
+        return baked
     digest = hashlib.sha256()
     for path in source_files():
         # The name matters as well as the bytes: renaming a module changes what
@@ -88,6 +92,34 @@ def build_identity() -> str:
         digest.update(path.name.encode("utf-8"))
         digest.update(path.read_bytes())
     return digest.hexdigest()[:16]
+
+
+# The bundled file a frozen build reads its identity from (ADR-0072 freeze fix).
+FROZEN_IDENTITY_FILENAME = "node_index_build_identity.txt"
+
+
+def _frozen_build_identity() -> str | None:
+    """The build identity baked in at freeze time, or None in a source run.
+
+    In a PyInstaller build the source `.py` are packed into the archive, not laid
+    out on disk, so `source_files()` cannot walk them. The spec computes this same
+    digest at freeze time (where the source IS present) and ships it as data; a
+    frozen run reads it here instead of walking source. Semantics are unchanged —
+    a code change still changes the digest and rebuilds the cache — because the
+    baked value is exactly what the live walk would have produced for that source.
+    """
+    if not (getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS")):
+        return None
+    stamp = Path(sys._MEIPASS) / FROZEN_IDENTITY_FILENAME
+    if not stamp.is_file():
+        # A frozen build that shipped without the stamp is a packaging defect;
+        # fail loudly rather than fall through to source_files() (which would
+        # raise a less legible "directory missing" error).
+        raise RuntimeError(
+            f"Frozen build is missing {FROZEN_IDENTITY_FILENAME}: the node-index "
+            "build identity cannot be computed."
+        )
+    return stamp.read_text(encoding="utf-8").strip()
 
 
 def source_files() -> list[Path]:

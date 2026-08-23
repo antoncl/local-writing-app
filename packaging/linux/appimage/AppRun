@@ -1,0 +1,6 @@
+#!/bin/sh
+# AppImage entry point (ADR-0072 S5). Runs the frozen onedir binary bundled
+# under app/. The app is a local server — it starts on 127.0.0.1:8787; open that
+# in a browser (a native window is the S8 shell's job).
+HERE="$(dirname "$(readlink -f "$0")")"
+exec "$HERE/app/local-writing-app" "$@"

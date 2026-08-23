@@ -121,6 +121,12 @@ class MachineSettings(BaseModel):
     # project that could carry it. No `inherit` — this IS the floor. Seeds `off`
     # (fail-closed, decisions_ai_permission_fails_closed).
     ai_policy: AIPolicy = "off"
+    # The address the product entrypoint (app/server.py) binds when run as the
+    # packaged app (ADR-0072 §3). Empty host / 0 port = unset -> loopback
+    # default. A non-loopback host exposes an app that has NO authentication;
+    # supported only for a single trusted user on a trusted private network.
+    bind_host: str = ""
+    bind_port: int = 0
 
 
 def config_dir() -> Path:
@@ -224,6 +230,30 @@ def projects_root() -> Path | None:
         return Path(raw).expanduser().resolve()
     except (OSError, ValueError):
         return None
+
+
+def bind_address() -> tuple[str | None, int | None]:
+    """The configured bind host/port, read directly from config.yaml (ADR-0072 §3).
+
+    Read directly rather than through `load_settings()` for the same reason
+    `projects_root()` is: this runs at process startup and a read path must not
+    write (load_settings has side effects). Returns (None, None) components for
+    anything unset/blank/unreadable, so the caller falls through to its default.
+    """
+    path = config_path()
+    if not path.exists():
+        return (None, None)
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (yaml.YAMLError, OSError, UnicodeDecodeError):
+        return (None, None)
+    if not isinstance(data, dict):
+        return (None, None)
+    raw_host = data.get("bind_host")
+    host = raw_host.strip() if isinstance(raw_host, str) and raw_host.strip() else None
+    raw_port = data.get("bind_port")
+    port = raw_port if isinstance(raw_port, int) and raw_port > 0 else None
+    return (host, port)
 
 
 def palette() -> list[Swatch]:

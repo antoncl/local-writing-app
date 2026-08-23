@@ -52,6 +52,15 @@ export default defineConfig(({ command, mode }) => {
     server.port = Number.isInteger(assigned) && assigned > 0 ? assigned : 0;
     server.strictPort = server.port !== 0;
     define["import.meta.env.VITE_API_BASE"] = JSON.stringify(claudeBackendBase());
+  } else if (command === "serve") {
+    // Dev serve (Anton's stack): keep the pre-ADR-0072 behaviour EXACTLY — talk
+    // to the backend on :8787 cross-origin, the same absolute base api.ts baked
+    // in before. This is deliberately a build-time define, not a dev proxy: a
+    // proxy would route the streaming chat response (response.body reader over a
+    // backend StreamingResponse) through Vite, risking dev-only buffering. Only
+    // the production build (no define) falls through to api.ts's same-origin
+    // `/api`, which the packaged backend serves itself (ADR-0072 §1).
+    define["import.meta.env.VITE_API_BASE"] = JSON.stringify("http://127.0.0.1:8787/api");
   }
 
   // Fail the production build on any warning, so a regression like a CSS

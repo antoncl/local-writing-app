@@ -17,9 +17,11 @@ import traceback
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from importlib.metadata import version as _pkg_version
+from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.routers import (
     ai,
@@ -34,6 +36,7 @@ from app.routers import (
 )
 from app.runtime import root_from_header
 from app.services.error_log import append_error_line
+from app.services.frontend_assets import frontend_dist_dir
 from app.services.machine_settings import error_log_dir
 from app.services.project.node_index_gate import node_index_gate
 
@@ -127,3 +130,19 @@ app.include_router(plot.router)
 app.include_router(entries.router)
 app.include_router(machine_settings.router)
 app.include_router(ai.router)
+
+
+def mount_frontend(app: FastAPI, dist_dir: Path | None) -> None:
+    """Serve the built frontend from the app's own origin (ADR-0072 §1).
+
+    Mounted at "/" AFTER every router, so the exact `/api/...` routes and the
+    built-in `/docs`/`/openapi.json` win their paths and this catch-all serves
+    the bundle (index.html + assets) for everything else. `html=True` returns
+    index.html for "/". Skipped when no build is present (a dev run), leaving
+    the API-only behaviour the Vite dev server expects.
+    """
+    if dist_dir is not None:
+        app.mount("/", StaticFiles(directory=dist_dir, html=True), name="frontend")
+
+
+mount_frontend(app, frontend_dist_dir())

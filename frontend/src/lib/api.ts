@@ -95,10 +95,13 @@ import type {
   ViewUiState,
 } from "@/lib/types";
 
-// Backend base URL. Defaults to the shared dev backend on :8787; an isolated
-// instance (e.g. Claude's testbench on :8788) overrides it via VITE_API_BASE
-// with `vite --mode claude` loading `.env.claude`.
-const baseUrl = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8787/api";
+// Backend base URL. Defaults to a same-origin relative path (ADR-0072 §1): in
+// the packaged product the backend serves this bundle, so `/api` reaches it
+// with no baked-in address. Only the production build takes this default; both
+// dev stacks bake an absolute VITE_API_BASE at build time (vite.config.js) —
+// Anton's serve talks to :8787 cross-origin, `--mode claude` to its own derived
+// backend port — so dev never proxies and streaming responses stay unbuffered.
+const baseUrl = import.meta.env.VITE_API_BASE ?? "/api";
 
 // The open project's root, carried on every request so the backend resolves the
 // request's scope from the request itself (#413 / ADR-0045) rather than from a

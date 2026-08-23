@@ -40,6 +40,7 @@ def _build_settings_view(masked: dict[str, Any]) -> MachineSettingsView:
         palette=masked.get("palette", []),
         display=masked.get("display", {}),
         ai_policy=masked.get("ai_policy", "off"),
+        update_channel=masked.get("update_channel", "stable"),
         config_path=str(machine_settings_service.config_path()),
     )
 

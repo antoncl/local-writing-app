@@ -105,7 +105,9 @@ def test_version_endpoint_reports_running_version() -> None:
     response = client.get("/api/version")
     assert response.status_code == 200
     body = response.json()
-    assert body == {"version": _pkg_version("local-writing-service")}
+    # `build` is None in a source run (no baked stamp); the version is the
+    # running package version. (The nightly update check compares `build`, S6.)
+    assert body == {"version": _pkg_version("local-writing-service"), "build": None}
     assert body["version"]  # non-empty
 
 

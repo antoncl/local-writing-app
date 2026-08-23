@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.models.base import (
     AIPolicy,
+    UpdateChannel,
 )
 from app.models.schema import PromptInputDefinition
 
@@ -85,6 +86,9 @@ class MachineSettingsView(BaseModel):
     # The application-global default AI policy (#746) — resolved at the top of
     # every project's inheritance chain.
     ai_policy: AIPolicy = "off"
+    # The update channel this install follows (ADR-0072 S6). Round-trips through
+    # the settings dialog so the S7 UI can show/switch it.
+    update_channel: UpdateChannel = "stable"
     config_path: str
 
 
@@ -113,6 +117,9 @@ class MachineSettingsUpdate(BaseModel):
     # explicit gesture, never folded into the batched settings Save
     # (decisions_ai_permission_fails_closed).
     ai_policy: AIPolicy | None = None
+    # The update channel (ADR-0072 S6). None = leave untouched. A plain
+    # preference, so — unlike ai_policy — it rides the batched settings Save.
+    update_channel: UpdateChannel | None = None
 
 
 class AIHealthRequest(BaseModel):

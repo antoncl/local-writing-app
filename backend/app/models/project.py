@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from app.models.base import (
     AIPolicy,
     MetadataValue,
+    UpdateChannel,
 )
 from app.models.schema import MetadataSchema
 
@@ -48,6 +49,34 @@ class ClientErrorReport(BaseModel):
 
 class AppVersion(BaseModel):
     version: str
+    # The commit this binary was frozen at (ADR-0072 S6, #1362). `None` for a
+    # source run and for a frozen build with no baked stamp. The nightly update
+    # check compares this — not `version`, which every nightly reports the same.
+    build: str | None = None
+
+
+class UpdateCheck(BaseModel):
+    """The result of polling GitHub Releases for a newer build (ADR-0072 S6).
+
+    `reachable=False` is the offline / rate-limited / API-error case: it is not
+    an error the UI should alarm about — a check that couldn't reach GitHub just
+    reports "couldn't check", never "you're up to date". `update_available` is
+    only ever `True` on a positive comparison, so an unreachable check or an
+    unknown build stamp both leave it `False`.
+    """
+
+    channel: UpdateChannel
+    current_version: str
+    current_build: str | None = None
+    update_available: bool = False
+    # What the channel's latest points at: a `v*` tag on stable, a short commit
+    # on nightly. `None` when unreachable or the release doesn't exist yet.
+    latest: str | None = None
+    # The release page to open (option A: notify + link, no self-replacing binary).
+    latest_url: str | None = None
+    reachable: bool = True
+    # A short human note when a check can't produce a verdict (offline, no stamp).
+    detail: str | None = None
 
 
 class AncestorCandidate(BaseModel):

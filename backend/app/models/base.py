@@ -39,6 +39,12 @@ def _normalize_select_options(value: Any) -> list[Any]:
 AIPolicy = Literal["off", "local-only", "cloud-allowed"]
 
 
+# Which GitHub Releases channel this install follows for update checks (ADR-0072
+# S6, #1362). `stable` = tagged `v*` releases; `nightly` = the rolling bleeding-
+# edge prerelease. Choosing one *is* "subscribing" — there is no separate opt-in.
+UpdateChannel = Literal["stable", "nightly"]
+
+
 MetadataValue = str | int | float | bool | None | list[Any] | dict[str, Any]
 
 

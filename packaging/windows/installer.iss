@@ -34,11 +34,9 @@ ArchitecturesInstallIn64BitMode=x64compatible
 Source: "..\..\dist\local-writing-app\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
 Source: "{#IconSrc}"; DestDir: "{app}"; DestName: "icon.ico"; Flags: ignoreversion
 
-[Icons]
-Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExe}"; IconFilename: "{app}\icon.ico"
-
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
 
 [Icons]
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExe}"; IconFilename: "{app}\icon.ico"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExe}"; IconFilename: "{app}\icon.ico"; Tasks: desktopicon

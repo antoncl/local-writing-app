@@ -1174,6 +1174,11 @@ export type SaveProjectNodeRequest = {
   metadata?: Record<string, unknown>;
 };
 
+// The running application version (ADR-0072 S2), from `GET /api/version`.
+export type AppVersion = {
+  version: string;
+};
+
 // Machine-settings wire types live in ./machineTypes (#763.5) — extracted to
 // keep this barrel under the file-size cap; re-exported so `@/lib/types` stays
 // the one import surface.

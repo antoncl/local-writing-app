@@ -1,12 +1,14 @@
 """Project, structure, and research-structure routes (#170 main.py split)."""
 from __future__ import annotations
 
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
 from fastapi import APIRouter, Query
 
 from app.models import (
     AncestorCandidate,
+    AppVersion,
     ClientErrorReport,
     CreateDirectoryRequest,
     CreateProjectRequest,
@@ -51,6 +53,17 @@ def log_client_error(project: CurrentProject, report: ClientErrorReport) -> None
 @router.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@router.get("/api/version", response_model=AppVersion)
+def app_version() -> AppVersion:
+    # The running application version, from installed package metadata — the
+    # same source main.py uses for the FastAPI `version=`. A dedicated endpoint
+    # (health stays a bare liveness probe) because the auto-updater (ADR-0072
+    # slice S6) polls it. NOTE: the frozen build (S3) must bundle the dist
+    # metadata so importlib.metadata can resolve it; no guard here, mirroring
+    # main.py's existing unguarded call.
+    return AppVersion(version=_pkg_version("local-writing-service"))
 
 
 # The two routes below are the only ones that do NOT take `CurrentProject`:

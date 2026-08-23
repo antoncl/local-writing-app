@@ -83,6 +83,19 @@ def test_is_loopback() -> None:
     assert _is_loopback("192.168.1.5") is False
 
 
+def test_version_endpoint_reports_running_version() -> None:
+    from importlib.metadata import version as _pkg_version
+
+    from app.main import app
+
+    client = TestClient(app)
+    response = client.get("/api/version")
+    assert response.status_code == 200
+    body = response.json()
+    assert body == {"version": _pkg_version("local-writing-service")}
+    assert body["version"]  # non-empty
+
+
 def test_frontend_dist_dir_uses_frozen_meipass(tmp_path, monkeypatch) -> None:
     import app.services.frontend_assets as fa
 

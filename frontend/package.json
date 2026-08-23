@@ -1,7 +1,7 @@
 {
   "name": "local-writing-app",
   "private": true,
-  "version": "0.9.0",
+  "version": "0.9.5",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --configLoader runner",

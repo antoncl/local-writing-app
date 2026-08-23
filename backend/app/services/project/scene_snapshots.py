@@ -38,8 +38,8 @@ from pydantic import ValidationError
 
 from app.models import SaveSceneRequest, Snapshot, SnapshotDetail, SnapshotList, Witness
 from app.models.snapshots import UNREADABLE_WITNESS_VERSION
+from app.services import migrations
 from app.services.atomic_io import atomic_write_bytes
-from app.services.migrations import CURRENT_VERSION
 from app.services.project.errors import ProjectServiceError
 
 if TYPE_CHECKING:
@@ -334,7 +334,7 @@ class SceneSnapshotsMixin:
             # When the CONTENT was written. What the strip lays out by (#458).
             "content_written_at": content_written_at,
             "retention": retention,
-            "schema_version": CURRENT_VERSION,
+            "schema_version": migrations.CURRENT_VERSION,
         }
         # `None` means the build failed, and then no witness is written at all.
         # Storing an empty one instead made the comparison accept it as real and
@@ -414,7 +414,7 @@ class SceneSnapshotsMixin:
         root = self._require_project()
         path = self._path_for_node_id(scene_id, "manuscript")
         node_id = self._node_id_for_path(path)
-        self._require_snapshot(root, node_id, snapshot_id)
+        record = self._require_snapshot(root, node_id, snapshot_id)
 
         # No dynamic context: this route has no prose editor behind it, so the
         # implicit set is *not observed* rather than empty. The witness records
@@ -423,7 +423,26 @@ class SceneSnapshotsMixin:
         self._capture(root, node_id, path, retention="thinned")
 
         stored = self._snapshots_dir(root, node_id) / f"{snapshot_id}.md"
-        self._atomic_write_bytes(path, stored.read_bytes())
+        if record.schema_version == migrations.CURRENT_VERSION:
+            # ADR-0043: prose is restored byte-exact when the snapshot is already
+            # at the current schema (the common case).
+            self._atomic_write_bytes(path, stored.read_bytes())
+        else:
+            # ADR-0071 §7: the snapshot predates the current schema — migrate its
+            # body over one document on the way out, leaving the immutable stored
+            # record untouched. Today the document subladder is empty, so this
+            # branch is unreachable in practice; it is wired for the first
+            # post-gateway content migration, with no new call-site to remember.
+            front_matter, body = self._read_markdown_with_front_matter(stored, strict=True)
+            migrated = migrations.migrate_document(
+                migrations.MigratableDocument(front_matter, body), record.schema_version
+            )
+            self._write_markdown_with_front_matter(path, migrated.front_matter, migrated.body)
+        # (unchanged below) — the explicit structural index write still runs for
+        # both branches; the byte branch bypassed the write hook, the migrate
+        # branch's `_write_markdown_with_front_matter` also went through it, and
+        # re-running the structural patch is idempotent.
+        #
         # `_atomic_write_bytes` deliberately bypasses the text writer, so it also
         # bypasses the change-gate hook on `_atomic_write` — a restore that
         # changed the scene's title, entry_type, or a reference field would

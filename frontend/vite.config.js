@@ -42,13 +42,6 @@ export default defineConfig(({ command, mode }) => {
   // Anton's stack, unchanged: pinned and strict, so a stale server holding
   // 5173 surfaces as an error instead of silently drifting to another port.
   const server = { host: "127.0.0.1", port: 5173, strictPort: true };
-  // api.ts now defaults to a relative `/api` (ADR-0072 §1). Anton's default
-  // stack is served by Vite, so Vite proxies `/api` to his backend on :8787.
-  // The `--mode claude` stack overrides api.ts with an absolute VITE_API_BASE
-  // (its own derived backend port), so it must NOT get this proxy.
-  if (mode !== "claude") {
-    server.proxy = { "/api": { target: "http://127.0.0.1:8787", changeOrigin: false } };
-  }
   const define = {};
 
   if (mode === "claude") {
@@ -59,6 +52,15 @@ export default defineConfig(({ command, mode }) => {
     server.port = Number.isInteger(assigned) && assigned > 0 ? assigned : 0;
     server.strictPort = server.port !== 0;
     define["import.meta.env.VITE_API_BASE"] = JSON.stringify(claudeBackendBase());
+  } else if (command === "serve") {
+    // Dev serve (Anton's stack): keep the pre-ADR-0072 behaviour EXACTLY — talk
+    // to the backend on :8787 cross-origin, the same absolute base api.ts baked
+    // in before. This is deliberately a build-time define, not a dev proxy: a
+    // proxy would route the streaming chat response (response.body reader over a
+    // backend StreamingResponse) through Vite, risking dev-only buffering. Only
+    // the production build (no define) falls through to api.ts's same-origin
+    // `/api`, which the packaged backend serves itself (ADR-0072 §1).
+    define["import.meta.env.VITE_API_BASE"] = JSON.stringify("http://127.0.0.1:8787/api");
   }
 
   // Fail the production build on any warning, so a regression like a CSS

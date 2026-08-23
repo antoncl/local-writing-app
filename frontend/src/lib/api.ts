@@ -97,9 +97,10 @@ import type {
 
 // Backend base URL. Defaults to a same-origin relative path (ADR-0072 §1): in
 // the packaged product the backend serves this bundle, so `/api` reaches it
-// with no baked-in address. In dev, Vite proxies `/api` to the backend
-// (vite.config.js); the isolated `--mode claude` stack overrides this with an
-// absolute VITE_API_BASE (its backend is on a different, derived port).
+// with no baked-in address. Only the production build takes this default; both
+// dev stacks bake an absolute VITE_API_BASE at build time (vite.config.js) —
+// Anton's serve talks to :8787 cross-origin, `--mode claude` to its own derived
+// backend port — so dev never proxies and streaming responses stay unbuffered.
 const baseUrl = import.meta.env.VITE_API_BASE ?? "/api";
 
 // The open project's root, carried on every request so the backend resolves the

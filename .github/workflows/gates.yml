@@ -173,3 +173,43 @@ jobs:
 
       - name: vitest
         run: npm test --prefix frontend
+
+  # Browser-level wiring smoke (#1352). The every-PR half of the E2E strategy:
+  # the built bundle served by the real backend (same-origin `/api`, exactly what
+  # ships) driven through ~5 core flows in a real browser. Catches wiring
+  # regressions — a broken bundle, the `api.ts` base, CORS — that the vitest
+  # component tests (network-guard forbids real I/O) can't see. The frozen-binary
+  # half runs in release.yml. Same specs, two targets.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'   # matches the pytest job
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend (from the lockfile)
+        run: npm ci --prefix frontend
+
+      - name: Build the bundle the backend serves at /
+        run: npm run build --prefix frontend
+
+      - name: Install backend (editable, with dev extras)
+        run: python -m pip install -e "backend[dev]"
+
+      - name: Install Playwright browser (chromium)
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      # Playwright starts the backend (python -m app.server) as its webServer.
+      - name: Browser E2E smoke (built bundle + source backend)
+        working-directory: frontend
+        run: npx playwright test

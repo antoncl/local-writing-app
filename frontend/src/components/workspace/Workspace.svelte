@@ -39,7 +39,7 @@
      group is CSS-promoted (WorkspaceNode: `.ws-group.zoomed`) to fill this
      positioned container, painting over the tiles beneath — which stay mounted,
      so restoring re-tiles exactly. -->
-<div class="workspace">
+<div class="workspace" data-testid="workspace">
   <WorkspaceNode node={workspaceLayout.root} />
 </div>
 

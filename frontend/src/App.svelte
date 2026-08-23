@@ -848,7 +848,7 @@
       actions={editorDocActions}
     />
   {:else}
-    <div class="welcome">
+    <div class="welcome" data-testid="no-project">
       <!-- The Project pane is gone (#417 slice 6); this is the only remaining
            no-project state, inlined here rather than routed through a pane that
            could vanish. Once a project opens, the tiled Workspace takes over. -->

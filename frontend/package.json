@@ -9,6 +9,7 @@
     "preview": "vite preview --host 127.0.0.1 --configLoader runner",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "icons:build": "node scripts/build-tabler-subset.mjs"
   },
   "dependencies": {
@@ -31,6 +32,7 @@
     "turndown-plugin-gfm": "^1.0.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@sveltejs/vite-plugin-svelte": "^5.0.3",
     "@tabler/icons": "^3.45.0",
     "@tabler/icons-webfont": "^3.45.0",

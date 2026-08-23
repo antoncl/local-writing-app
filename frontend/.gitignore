@@ -1,0 +1,6 @@
+# Playwright E2E outputs (#1352) — tool-generated, never tracked. node_modules
+# and dist are handled by the machine's global excludes; this covers the outputs
+# of a brand-new tool nothing else ignores yet.
+/test-results/
+/playwright-report/
+/playwright/.cache/

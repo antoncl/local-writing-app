@@ -201,6 +201,33 @@ jobs:
           path: dist-installer/local-writing-app-windows-x64-setup.exe
           if-no-files-found: error
 
+      # linux-x64 only: a desktop AppImage (ADR-0072 §8). The Pi/server target
+      # uses the tarball above; arm64 desktops are rare, so no arm AppImage.
+      - name: Build the Linux AppImage (desktop)
+        if: matrix.platform == 'linux-x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf AppDir
+          mkdir -p AppDir/app
+          cp -a dist/local-writing-app/. AppDir/app/
+          cp packaging/icons/icon-256.png AppDir/local-writing-app.png
+          cp packaging/linux/appimage/local-writing-app.desktop AppDir/local-writing-app.desktop
+          cp packaging/linux/appimage/AppRun AppDir/AppRun
+          chmod +x AppDir/AppRun AppDir/app/local-writing-app
+          wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
+          chmod +x appimagetool
+          # --appimage-extract-and-run: run appimagetool without FUSE (CI has none).
+          ./appimagetool --appimage-extract-and-run AppDir local-writing-app-linux-x64.AppImage
+
+      - name: Upload the Linux AppImage (workflow artifact)
+        if: matrix.platform == 'linux-x64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x64-appimage
+          path: local-writing-app-linux-x64.AppImage
+          if-no-files-found: error
+
   publish:
     needs: [gate, build]
     # Publishes only for a real tag push or nightly schedule. Never for a PR

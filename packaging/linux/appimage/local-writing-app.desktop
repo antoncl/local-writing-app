@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Local Writing App
+Comment=A local-first fiction-writing app
+Exec=local-writing-app
+Icon=local-writing-app
+Categories=Office;Utility;
+Terminal=false

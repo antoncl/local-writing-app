@@ -19,6 +19,7 @@ function model(partial: Partial<AIModelInfo> & { id: string }): AIModelInfo {
     cost_in_per_mtok: 1,
     family: "",
     free: false,
+    verified: true,
     ...partial,
   };
 }

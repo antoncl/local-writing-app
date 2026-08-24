@@ -142,11 +142,54 @@ def test_anthropic_marks_bakein_models_missing_from_live_as_deprecated(monkeypat
     assert by_id["claude-sonnet-4-6"].deprecated is True
 
 
+def test_anthropic_surfaces_live_only_models_as_unverified(monkeypatch):
+    # ADR-0073 S4: a live model newer than the audit file is SHOWN (not dropped),
+    # marked unverified with a derived tier and the provider's live display name.
+    _patch_async_client(
+        monkeypatch,
+        "app.services.ai.profiles.anthropic",
+        payload={
+            "data": [
+                {"id": "claude-haiku-4-5-20251001"},  # baked → stays verified
+                {"id": "claude-opus-5-20260101", "display_name": "Opus 5"},  # live-only
+            ]
+        },
+    )
+    profile = AnthropicProfile(api_key="sk-test")
+    by_id = {m.id: m for m in asyncio.run(profile.list_models())}
+    new = by_id["claude-opus-5-20260101"]
+    assert new.verified is False
+    assert new.display_name == "Opus 5"
+    assert isinstance(new.tier, CapabilityTier)
+    assert new.deprecated is False
+    # A baked model keeps its audited status.
+    assert by_id["claude-haiku-4-5-20251001"].verified is True
+
+
 def test_openai_falls_back_to_bakein_without_key():
     profile = OpenAIProfile(api_key="")
     models = asyncio.run(profile.list_models())
     ids = {m.id for m in models}
     assert "gpt-4o" in ids
+
+
+def test_openai_surfaces_live_only_model_as_unverified(monkeypatch):
+    # A live-only id surfaces unverified; with no live display name the raw id is
+    # used as the name, and the tier is a best-effort derivation (BALANCED here —
+    # the shared reasoning marker only catches the slash form `/o3`, not a bare
+    # native `o3`, an accepted best-effort limit for an unverified row).
+    _patch_async_client(
+        monkeypatch,
+        "app.services.ai.profiles.openai",
+        payload={"data": [{"id": "gpt-4o"}, {"id": "gpt-5-turbo"}]},
+    )
+    profile = OpenAIProfile(api_key="sk-test")
+    by_id = {m.id: m for m in asyncio.run(profile.list_models())}
+    new = by_id["gpt-5-turbo"]
+    assert new.verified is False
+    assert new.display_name == "gpt-5-turbo"
+    assert new.tier == CapabilityTier.BALANCED
+    assert by_id["gpt-4o"].verified is True
 
 
 def test_ollama_returns_empty_on_unreachable_host(monkeypatch):

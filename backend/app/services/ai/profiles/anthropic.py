@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from app.services.ai.profiles._loader import baked_in_for, mark_deprecated
+from app.services.ai.profiles._loader import baked_in_for, merge_live_catalogue
 from app.services.ai.profiles.base import (
     CachingStyle,
     ChatCall,
@@ -61,6 +61,7 @@ class AnthropicProfile(ProviderProfile):
     name = "anthropic"
     display_name = "Anthropic"
     key_prefixes = ("sk-ant-",)
+    live_catalog = True
 
     def __init__(self, api_key: str) -> None:
         self._api_key = api_key
@@ -97,21 +98,15 @@ class AnthropicProfile(ProviderProfile):
             self._cache = baked
             return baked
 
-        live_ids = {row["id"] for row in payload.get("data") or [] if row.get("id")}
-        # Merge: bake-in is the source of tier/cost truth; live confirms
-        # existence. A baked-in model that no longer appears live is marked
-        # deprecated (gives the picker a chance to suggest the successor).
-        # A live model not in bake-in is hidden until someone adds tier
-        # data — the alternative is showing a model with no tier in the
-        # picker, which breaks the resolver.
-        merged: list[ModelDescriptor] = []
-        for descriptor in baked:
-            if descriptor.id in live_ids or descriptor.deprecated:
-                merged.append(descriptor)
-                continue
-            # Live API says this model no longer exists. Mark deprecated
-            # in-place so the picker shows a warning.
-            merged.append(mark_deprecated(descriptor))
+        # Bake-in is the source of tier/cost truth; live confirms existence and
+        # (ADR-0073 S4, live_catalog) surfaces models newer than the audit file
+        # as unverified rows instead of hiding them.
+        merged = merge_live_catalogue(
+            "anthropic",
+            baked,
+            payload.get("data") or [],
+            surface_live_only=self.live_catalog,
+        )
         self._cache = merged
         return merged
 

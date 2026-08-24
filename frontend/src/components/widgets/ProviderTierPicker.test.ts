@@ -24,6 +24,22 @@ vi.mock("@/lib/api", () => {
         cost_in_per_mtok: 3,
         family: "claude",
         free: false,
+        verified: true,
+      },
+      {
+        // Live-only, no baked audit entry (ADR-0073 S4) — pricier than
+        // claude-bal so the balanced tier still resolves to claude-bal.
+        id: "claude-unlisted",
+        display_name: "Claude Unlisted",
+        provider: "anthropic",
+        context_window: 200000,
+        tier: "balanced",
+        capabilities: [],
+        deprecated: false,
+        cost_in_per_mtok: 10,
+        family: "claude",
+        free: false,
+        verified: false,
       },
     ],
     openai: [
@@ -38,6 +54,7 @@ vi.mock("@/lib/api", () => {
         cost_in_per_mtok: 2,
         family: "gpt",
         free: false,
+        verified: true,
       },
     ],
   };
@@ -154,5 +171,13 @@ describe("ProviderTierPicker — the model View (ADR-0073 S3)", () => {
         expect.objectContaining({ provider: "anthropic", model: "claude-bal" }),
       ),
     );
+  });
+
+  it("badges a live-only (unverified) model as 'new'", async () => {
+    // ADR-0073 S4: a model surfaced from live discovery with no baked-in audit
+    // entry carries verified=false and must read as new in the row.
+    render(ProviderTierPicker, { props: { policy: "cloud-allowed", onChange: vi.fn() } });
+    await screen.findByText("Claude Unlisted");
+    expect(screen.getByText("new")).toBeTruthy();
   });
 });

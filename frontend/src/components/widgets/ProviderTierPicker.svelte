@@ -269,6 +269,9 @@
   function modelRowTags(m: AIModelInfo): string[] {
     const tags: string[] = [m.tier];
     if (m.free) tags.push("free");
+    // ADR-0073 S4: a live model with no hand-audited entry, tier derived — flag
+    // it so the user knows its metadata is unverified.
+    if (!m.verified) tags.push("new");
     if (m.deprecated) tags.push("deprecated");
     return tags;
   }

@@ -90,6 +90,13 @@ class ModelDescriptor:
     cost_in_per_mtok: float | None = None
     cost_out_per_mtok: float | None = None
     cache_read_multiplier: float | None = None
+    # ADR-0073 S4: False marks a model surfaced from LIVE discovery that has no
+    # hand-audited baked-in entry — an Anthropic/OpenAI model newer than the
+    # audit file, shown with a derived tier and its raw id as the name so Refresh
+    # stops hiding it. Baked-in rows (and the live-primary OpenRouter/Ollama
+    # catalogues, which have no audit list to be absent from) stay True. The
+    # picker badges the False ones "new".
+    verified: bool = True
 
     @property
     def family(self) -> str:
@@ -358,6 +365,14 @@ class ProviderProfile(ABC):
     # to spot a key pasted into the wrong provider's field — each provider
     # declares only its own; specificity (longest prefix) resolves overlap.
     key_prefixes: tuple[str, ...] = ()
+
+    # ADR-0073 S4: does this provider's live catalogue authoritatively list every
+    # model the account can reach? When True, `list_models` surfaces live models
+    # with no baked-in audit entry (marked unverified) instead of dropping them,
+    # so Refresh is honest. All four current providers set True; the flag exists
+    # so a future provider with an unreliable/partial live listing can opt out
+    # (stay baked-in-only) without a special case in the merge.
+    live_catalog: bool = False
 
     def configured_key(self) -> str:
         """The API key this profile holds, or '' when it needs none. The

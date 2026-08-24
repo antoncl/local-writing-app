@@ -142,6 +142,7 @@ def _descriptor_to_wire(descriptor: ModelDescriptor) -> AIModelInfo:
         cache_read_multiplier=descriptor.cache_read_multiplier,
         family=descriptor.family,
         free=descriptor.free,
+        verified=descriptor.verified,
     )
 
 

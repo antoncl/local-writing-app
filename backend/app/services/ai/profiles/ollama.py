@@ -35,6 +35,7 @@ _DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434"
 class OllamaProfile(OpenAICompatibleProfile):
     name = "ollama"
     display_name = "Ollama"
+    live_catalog = True  # /api/tags is the authoritative local list.
 
     def __init__(self, host: str) -> None:
         # Host is per-machine from MachineSettings.providers.ollama_host

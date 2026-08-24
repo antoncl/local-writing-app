@@ -6,6 +6,7 @@ for the rationale and the conversation that fed it.
 from __future__ import annotations
 
 import logging
+import re
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -52,6 +53,24 @@ CachingStyle = Literal["none", "auto", "explicit"]
 """
 
 
+def family_from_id(model_id: str) -> str:
+    """The catalogue family a model groups under (ADR-0073 S3) — a slim,
+    presentation-neutral facet derived from the id, no curation table.
+
+    Slash-namespaced ids (OpenRouter `qwen/qwen-2.5-72b`, `anthropic/claude-…`)
+    group by the vendor prefix; a native id groups by its leading alphabetic
+    run before the first digit or separator (`claude-3-5-sonnet` → `claude`,
+    `gpt-4o` → `gpt`, `o3` → `o`). Lower-cased so `Qwen/…` and `qwen/…` land in
+    one bucket.
+    """
+
+    ident = model_id.strip().lower()
+    if "/" in ident:
+        return ident.split("/", 1)[0]
+    match = re.match(r"[a-z]+", ident)
+    return match.group(0) if match else ident
+
+
 @dataclass
 class ModelDescriptor:
     """One row in a provider's catalogue. Fields that are unknown at
@@ -71,6 +90,20 @@ class ModelDescriptor:
     cost_in_per_mtok: float | None = None
     cost_out_per_mtok: float | None = None
     cache_read_multiplier: float | None = None
+
+    @property
+    def family(self) -> str:
+        """The catalogue family (id-derived) the picker groups by."""
+
+        return family_from_id(self.id)
+
+    @property
+    def free(self) -> bool:
+        """A genuinely-free model — input priced at exactly 0 (OpenRouter
+        `:free` routes, kept since #1386). Unknown pricing (`None`, e.g. a
+        provider that doesn't publish it, or local Ollama) is NOT free."""
+
+        return self.cost_in_per_mtok == 0.0
 
 
 @dataclass

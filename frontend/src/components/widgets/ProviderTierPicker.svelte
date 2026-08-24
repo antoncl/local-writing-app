@@ -14,6 +14,13 @@
   import { onMount } from "svelte";
   import { api } from "@/lib/api";
   import { eligibleProviders, PROVIDER_DISPLAY_NAMES } from "@/lib/utils/aiProviders";
+  import NodeRow from "@/components/widgets/NodeRow.svelte";
+  import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
+  import {
+    modelInfoToEvalNodes,
+    modelPickerView,
+    type ModelEvalNode,
+  } from "@/lib/views/modelNodes";
   import type {
     AICapabilityTier,
     AIModelInfo,
@@ -237,6 +244,34 @@
   const providerNotEligible = $derived(
     Boolean(provider) && !providers.some((p) => p.name === provider),
   );
+
+  // ADR-0073 S3: the "Advanced" exact-model list is a fixed, read-only built-in
+  // View over the provider's live catalogue — the app's own View machinery, not
+  // a bespoke dropdown. Grouped by family, searchable (the ~300-model OpenRouter
+  // wall was the reported pain), each row badged with tier/free plus a
+  // context/price detail line. No drag/rename/add handlers are wired, so the
+  // ViewNodeList interactivity gates stay dormant (read-only).
+  const modelView = $derived({
+    spec: modelPickerView(),
+    universe: modelInfoToEvalNodes(models),
+    schema: null,
+  });
+
+  function modelMatches(node: ModelEvalNode, query: string): boolean {
+    // `query` arrives pre-normalized (trimmed + lowercased) from ViewNodeList.
+    return (
+      node.id.toLowerCase().includes(query) ||
+      node.display_name.toLowerCase().includes(query) ||
+      node.family.toLowerCase().includes(query)
+    );
+  }
+
+  function modelRowTags(m: AIModelInfo): string[] {
+    const tags: string[] = [m.tier];
+    if (m.free) tags.push("free");
+    if (m.deprecated) tags.push("deprecated");
+    return tags;
+  }
 </script>
 
 <div class="provider-tier-picker">
@@ -284,45 +319,59 @@
   </label>
 
   <details bind:open={advancedOpen} class="ptp-advanced">
-    <summary>Advanced</summary>
-    <label class="ptp-row">
-      <span class="ptp-label">Model</span>
-      <select
-        value={model}
-        onchange={(e) => onModelChange((e.currentTarget as HTMLSelectElement).value)}
+    <summary>Advanced — browse all models</summary>
+    {#if model && !models.some((m) => m.id === model)}
+      <!-- Persisted model not in the current catalogue — surface it so the user
+           sees what the entry is bound to, even though it's effectively orphaned
+           (provider may have sunset it, or live discovery is offline). -->
+      <p class="ptp-orphan">
+        Bound to <code>{model}</code>, which isn't in the current catalogue.
+      </p>
+    {/if}
+    <div class="ptp-model-list">
+      <ViewNodeList
+        view={modelView}
+        density="compact"
+        searchPlaceholder="Search models…"
+        filter={modelMatches}
+        active={(node) => node.id === model}
+        onClick={(node) => onModelChange(node.id)}
+        row={modelRow}
       >
-        {#if model && !models.some((m) => m.id === model)}
-          <!-- Persisted model not in current catalogue — show it so
-               the user can see what the entry is currently bound to,
-               but it's effectively orphaned (provider may have
-               sunset it, or live discovery is offline). -->
-          <option value={model}>{model} (unknown)</option>
-        {/if}
-        {#each models as m (m.id)}
-          <option value={m.id}>
-            {m.display_name}{m.deprecated ? " (deprecated)" : ""}{m.cost_in_per_mtok ? ` · ${fmtCost(m.cost_in_per_mtok)}` : ""}
-          </option>
-        {/each}
-      </select>
-    </label>
+        {#snippet whenEmpty()}
+          <p class="ptp-nudge">
+            {modelsLoading ? "Loading models…" : modelsError || "No models."}
+          </p>
+        {/snippet}
+      </ViewNodeList>
+    </div>
     <div class="ptp-meta">
       <button type="button" class="ptp-refresh" onclick={() => loadModels(true)} disabled={modelsLoading}>
         Refresh models
       </button>
-      {#if model}
-        {@const current = models.find((m) => m.id === model)}
-        {#if current}
-          <small class="ptp-model-detail">
-            {current.context_window > 0 ? `${(current.context_window / 1000).toFixed(0)}k context` : ""}
-            {#if current.capabilities.includes("caching")} · caches{/if}
-            {#if current.capabilities.includes("vision")} · vision{/if}
-            {#if current.capabilities.includes("thinking")} · thinks{/if}
-          </small>
-        {/if}
-      {/if}
     </div>
   </details>
 </div>
+
+{#snippet modelRow(m: ModelEvalNode, ctx: RowCtx<ModelEvalNode>)}
+  <NodeRow
+    title={m.display_name}
+    depth={ctx.depth}
+    active={ctx.active}
+    onClick={ctx.onClick}
+    tags={modelRowTags(m)}
+  >
+    {#snippet detailSlot()}
+      <small class="ptp-model-detail">
+        {m.context_window > 0 ? `${(m.context_window / 1000).toFixed(0)}k context` : ""}
+        {#if m.cost_in_per_mtok}{m.context_window > 0 ? " · " : ""}{fmtCost(m.cost_in_per_mtok)}{/if}
+        {#if m.capabilities.includes("vision")} · vision{/if}
+        {#if m.capabilities.includes("thinking")} · thinks{/if}
+        {#if m.capabilities.includes("caching")} · caches{/if}
+      </small>
+    {/snippet}
+  </NodeRow>
+{/snippet}
 
 <style>
   .provider-tier-picker {
@@ -401,5 +450,24 @@
   .ptp-model-detail {
     font-size: var(--fs-sm);
     color: var(--text-3);
+  }
+
+  .ptp-model-list {
+    margin-top: 6px;
+    max-height: 320px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+  }
+
+  .ptp-orphan {
+    margin: 6px 0 0;
+    font-size: var(--fs-sm);
+    color: var(--text-3);
+  }
+
+  .ptp-orphan code {
+    font-family: var(--mono);
   }
 </style>

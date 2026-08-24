@@ -193,6 +193,12 @@ class AIModelInfo(BaseModel):
     cost_in_per_mtok: float | None = None
     cost_out_per_mtok: float | None = None
     cache_read_multiplier: float | None = None
+    # Slim, id-derived facets the model-picker View groups/badges on (ADR-0073
+    # S3). `family` = the catalogue bucket (vendor prefix or leading token);
+    # `free` = input priced at exactly 0. Both are derived on the descriptor,
+    # not stored — this is just their wire mirror.
+    family: str = ""
+    free: bool = False
 
 
 class AIProviderModelList(BaseModel):

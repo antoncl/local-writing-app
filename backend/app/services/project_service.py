@@ -295,8 +295,14 @@ class ProjectService(
         backlinks.sort(key=lambda link: (link.kind, link.title.lower(), link.field_id))
         return backlinks
 
-    def _check_entry_type_kind(self, entry_type: str, expected_kind: str) -> None:
-        schema = self.read_metadata_schema()
+    def _check_entry_type_kind(
+        self, entry_type: str, expected_kind: str, *, schema: MetadataSchema | None = None
+    ) -> None:
+        # `schema` lets a machine-scope write (the first-run assistant hire, which
+        # has no project open, #1402) validate against the built-in schema; a
+        # normal project-scoped write passes nothing and resolves the open chain.
+        if schema is None:
+            schema = self.read_metadata_schema()
         definition = schema.entry_types.get(entry_type)
         if definition is None:
             raise ProjectServiceError(f"Unknown entry_type {entry_type}.", 422)

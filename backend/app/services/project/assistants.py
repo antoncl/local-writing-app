@@ -37,6 +37,7 @@ from app.models import (
     AssistantEntryList,
     AssistantEntrySummary,
     CreateAssistantEntryRequest,
+    MetadataSchema,
     ReorderAssistantsRequest,
     SaveAssistantEntryRequest,
     UnlistAssistantRequest,
@@ -431,9 +432,20 @@ class AssistantEntriesMixin:
             source_layer_label=index_entry.source_layer_label,
         )
 
+    def _assistant_write_schema(self) -> MetadataSchema:
+        """The schema an assistant create/save validates against. An assistant is
+        machine-global (#332): when a project is open we resolve its chain (a
+        project layer may declare a custom assistant sub-type), but the wizard's
+        first-run hire runs with no project open (#1402), so fall back to the
+        built-in machine-layer schema — which already declares
+        `assistant:assistant` — rather than `_require_project()`-ing a 409."""
+        return self.read_metadata_schema() if self.root_path is not None else self.builtin_metadata_schema()
+
     def create_assistant_entry(self, request: CreateAssistantEntryRequest) -> AssistantEntry:
         target_folder = self._assistant_layer_folder_for_id(request.layer_id)
-        self._check_entry_type_kind(request.entry_type, "assistant")
+        self._check_entry_type_kind(
+            request.entry_type, "assistant", schema=self._assistant_write_schema()
+        )
         entry_id = self._new_id("assistant")
         target_folder.mkdir(parents=True, exist_ok=True)
         path = self._filepath_for_new_node(target_folder, request.title)
@@ -473,7 +485,8 @@ class AssistantEntriesMixin:
         current_revision = self._revision(path)
         if request.base_revision and request.base_revision != current_revision:
             raise ProjectServiceError("Assistant changed on disk after it was opened.", 409)
-        self._check_entry_type_kind(request.entry_type, "assistant")
+        write_schema = self._assistant_write_schema()
+        self._check_entry_type_kind(request.entry_type, "assistant", schema=write_schema)
         metadata = self._normalise_metadata(request.metadata, path)
         # Drop DERIVED keys before they reach disk (#333). The roster stamps
         # `listed`/`position` into `computed_metadata`; a client that spreads
@@ -492,7 +505,7 @@ class AssistantEntriesMixin:
         # both. That is the regression this narrower form exists to avoid.
         computed = {
             field_id
-            for field_id, field in self.read_metadata_schema().fields.items()
+            for field_id, field in write_schema.fields.items()
             if field.type == "computed"
         }
         metadata = {k: v for k, v in metadata.items() if k not in computed}

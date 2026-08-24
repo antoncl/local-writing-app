@@ -36,6 +36,8 @@ vi.mock("@/lib/api", () => {
         capabilities: [],
         deprecated: false,
         cost_in_per_mtok: 2,
+        family: "gpt",
+        free: false,
       },
     ],
   };

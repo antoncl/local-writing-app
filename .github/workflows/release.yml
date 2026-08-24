@@ -26,7 +26,12 @@ on:
       - '.github/workflows/release.yml'
       - 'backend/pyproject.toml'
   schedule:
-    - cron: '0 5 * * *'   # ~05:00 UTC nightly
+    # 23:00 UTC = 00:00 CET (winter) / 01:00 CEST (summer) — midnight in
+    # European local time, so a fresh nightly is ready by morning. GitHub cron
+    # is UTC-only with no DST handling, so a single time drifts ±1h across the
+    # year; that's immaterial for a nightly. Don't "fix" the drift with two
+    # month-gated crons.
+    - cron: '0 23 * * *'
   workflow_dispatch:
     inputs:
       dry_run:

@@ -419,11 +419,25 @@ class ProjectSession {
   async rehydrate(): Promise<void> {
     await this.loadMachineSettings();
     const lastPath = this.readLastProject();
+    let opened = false;
     if (lastPath) {
-      const opened = await this.openProjectAt(lastPath);
+      opened = await this.openProjectAt(lastPath);
       if (!opened) {
         this.forgetLastProject();
       }
+    }
+    // First-run onboarding (#1400): a genuine fresh install lands here with no
+    // project reopened and no machine root configured. Guide the author into
+    // setup — open the create wizard, whose blocking root-folder step is step 1
+    // — instead of a blank "No project open" screen. `needsRootFolder` (an empty
+    // default_projects_folder) is the canonical first-run signal, so every
+    // returning user (root always set) is untouched. Gating on a non-null
+    // `machineSettings` means an offline boot (settings unread) doesn't force a
+    // wizard whose folder step can't reach the backend. Both awaits above have
+    // settled, so `opened` is authoritative — no wizard flash for a returning
+    // user with a valid last project.
+    if (!opened && this.machineSettings && createWizard.needsRootFolder) {
+      createWizard.start();
     }
   }
 }

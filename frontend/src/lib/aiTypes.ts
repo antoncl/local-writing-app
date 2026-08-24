@@ -56,6 +56,12 @@ export type AIModelInfo = {
   cost_in_per_mtok?: number | null;
   cost_out_per_mtok?: number | null;
   cache_read_multiplier?: number | null;
+  // Id-derived facets the model-picker View groups/badges on (ADR-0073 S3).
+  // `family` = the catalogue bucket (vendor prefix or leading token); `free` =
+  // input priced at exactly 0. Always present on the wire (backend derives
+  // them), so required here.
+  family: string;
+  free: boolean;
 };
 
 export type AIProviderModelList = {

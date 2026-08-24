@@ -140,6 +140,8 @@ def _descriptor_to_wire(descriptor: ModelDescriptor) -> AIModelInfo:
         cost_in_per_mtok=descriptor.cost_in_per_mtok,
         cost_out_per_mtok=descriptor.cost_out_per_mtok,
         cache_read_multiplier=descriptor.cache_read_multiplier,
+        family=descriptor.family,
+        free=descriptor.free,
     )
 
 

@@ -22,6 +22,8 @@ vi.mock("@/lib/api", () => {
         capabilities: [],
         deprecated: false,
         cost_in_per_mtok: 3,
+        family: "claude",
+        free: false,
       },
     ],
     openai: [
@@ -127,5 +129,28 @@ describe("ProviderTierPicker — policy scoping (ADR-0073 S2)", () => {
     expect(
       screen.getByText(/OpenRouter \(not allowed by policy\)/),
     ).toBeTruthy();
+  });
+});
+
+describe("ProviderTierPicker — the model View (ADR-0073 S3)", () => {
+  it("renders the catalogue as rows through ViewNodeList, and a click emits the model", async () => {
+    // The Advanced exact-model list is no longer a <select> but a read-only
+    // built-in View. A pane that DISPLAYS data owes a mount test that the rows
+    // actually render (#642): assert the model surfaces as a row, then that
+    // clicking it reports that model id through onChange.
+    const onChange = vi.fn();
+    render(ProviderTierPicker, { props: { policy: "cloud-allowed", onChange } });
+
+    // The row renders the model's display name (its EvalNode `title`), sourced
+    // from the mocked catalogue for the default provider.
+    const row = await screen.findByText("Claude Balanced");
+    onChange.mockClear();
+    await fireEvent.click(row);
+
+    await vi.waitFor(() =>
+      expect(onChange).toHaveBeenCalledWith(
+        expect.objectContaining({ provider: "anthropic", model: "claude-bal" }),
+      ),
+    );
   });
 });

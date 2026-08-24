@@ -129,8 +129,9 @@ class OpenRouterProfile(OpenAICompatibleProfile):
         descriptors = [
             _row_to_descriptor(row) for row in payload.get("data") or []
         ]
-        # Filter out null-pricing rows (free-tier promo entries that don't
-        # map cleanly to a tier).
+        # Drop only rows with no usable input price (missing/unparseable — they
+        # can't be tiered). Genuinely free models (price "0" → 0.0) are kept:
+        # `0.0 is not None` (#1386).
         descriptors = [d for d in descriptors if d.cost_in_per_mtok is not None]
         self._cache = descriptors
         return descriptors
@@ -278,8 +279,15 @@ def _row_to_descriptor(row: dict) -> ModelDescriptor:
 
 
 def _per_mtok(raw) -> float | None:
-    """OpenRouter prices are USD per token as a string. Convert to USD
-    per 1M tokens, or None when missing/zero."""
+    """OpenRouter prices are USD per token as a string. Convert to USD per 1M
+    tokens.
+
+    Returns `0.0` for a genuinely **free** model (OpenRouter reports its `:free`
+    routes with price "0") so the caller can keep it, and `None` only when the
+    price is missing or unparseable. This distinction matters: free models are
+    among the most useful options for a local-first, cost-conscious user, so
+    conflating "free" with "unknown" — and dropping both — hid them (#1386).
+    """
 
     if raw is None or raw == "":
         return None
@@ -287,7 +295,7 @@ def _per_mtok(raw) -> float | None:
         value = float(raw)
     except (TypeError, ValueError):
         return None
-    if value <= 0:
+    if value < 0:
         return None
     return value * 1_000_000
 

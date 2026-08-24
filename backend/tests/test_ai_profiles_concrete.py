@@ -247,6 +247,14 @@ def test_openrouter_parses_pricing_and_buckets_tier(monkeypatch):
                     "architecture": {"input_modalities": ["text"]},
                     "supported_parameters": [],
                 },
+                {
+                    "id": "vendor/unpriced",
+                    "name": "Unpriced",
+                    "context_length": 8000,
+                    "pricing": {},
+                    "architecture": {"input_modalities": ["text"]},
+                    "supported_parameters": [],
+                },
             ]
         },
     )
@@ -254,9 +262,12 @@ def test_openrouter_parses_pricing_and_buckets_tier(monkeypatch):
     models = asyncio.run(profile.list_models())
     by_id = {m.id: m for m in models}
 
-    # Free-tier promo (null pricing after parse) is filtered out — its
-    # tier would be meaningless.
-    assert "free/promo" not in by_id
+    # A genuinely free model (price "0") is KEPT — it's among the most useful
+    # options for a local-first user — and buckets as FAST ($0 < $1). Only rows
+    # with no usable price are dropped, since they can't be tiered (#1386).
+    assert by_id["free/promo"].cost_in_per_mtok == 0.0
+    assert by_id["free/promo"].tier == CapabilityTier.FAST
+    assert "vendor/unpriced" not in by_id
 
     # Cost-bucket tier assignments.
     assert by_id["anthropic/claude-haiku-4.5"].tier == CapabilityTier.FAST

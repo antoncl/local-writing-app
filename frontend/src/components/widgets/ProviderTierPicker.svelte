@@ -13,9 +13,11 @@
 
   import { onMount } from "svelte";
   import { api } from "@/lib/api";
+  import { eligibleProviders, PROVIDER_DISPLAY_NAMES } from "@/lib/utils/aiProviders";
   import type {
     AICapabilityTier,
     AIModelInfo,
+    AIPolicy,
     AIProviderInfo,
   } from "@/lib/types";
 
@@ -24,6 +26,12 @@
     // Empty string = "explicit-model mode" (Advanced is the source of truth).
     tier = $bindable(""),
     model = $bindable(""),
+    // ADR-0073 S2: the caller's resolved AI policy (never "inherit" — the
+    // caller folds that before passing down). Scopes the provider list to what
+    // this policy + this machine's credentials actually permit, and picks the
+    // default for a fresh entry — the picker no longer self-defaults to the
+    // alphabetically-first known provider regardless of policy/credentials.
+    policy,
     // Emitted with the literal provider/tier/model the entry should store; the
     // parent writes all three back (was a `change` CustomEvent before the runes
     // pass). provider/tier/model are `$bindable` because the picker reassigns
@@ -35,6 +43,7 @@
     provider?: string;
     tier?: AICapabilityTier | "";
     model?: string;
+    policy: AIPolicy;
     onChange?: (detail: {
       provider: string;
       tier: AICapabilityTier | "";
@@ -66,16 +75,22 @@
 
   onMount(async () => {
     try {
-      const list = await api.listAIProviders();
-      providers = list.providers;
-      if (!provider && providers.length > 0) {
-        // Default to the first known provider when the entry is fresh.
-        provider = providers[0].name;
-        emitChange();
+      const ms = await api.getMachineSettings();
+      const eligible = eligibleProviders(policy, ms.providers);
+      providers = eligible.map((name) => ({
+        name,
+        display_name: PROVIDER_DISPLAY_NAMES[name] ?? name,
+      }));
+      if (!provider) {
+        // Default a fresh entry to the machine default provider when the
+        // policy permits it, else the first eligible provider — never the
+        // alphabetically-first known provider regardless of policy.
+        provider = eligible.includes(ms.default_provider) ? ms.default_provider : (eligible[0] ?? "");
+        if (provider) emitChange();
       }
     } catch (e) {
-      // Provider listing is local — no network. If this fails the
-      // backend is down; let the parent handle the empty state.
+      // Machine settings is local — no network. If this fails the backend is
+      // down; let the parent handle the empty state.
     }
     if (provider) await loadModels();
   });
@@ -215,23 +230,39 @@
     if (!resolved) return TIER_LABELS[t];
     return `${TIER_LABELS[t]} — ${resolved.display_name}`;
   }
+
+  // A stored provider the current policy no longer permits (e.g. the policy
+  // tightened after the entry was saved) — still offered so editing doesn't
+  // silently drop it, but flagged rather than presented as a live option.
+  const providerNotEligible = $derived(
+    Boolean(provider) && !providers.some((p) => p.name === provider),
+  );
 </script>
 
 <div class="provider-tier-picker">
-  <label class="ptp-row">
-    <span class="ptp-label">Subscription</span>
-    <select
-      value={provider}
-      onchange={(e) => onProviderChange((e.currentTarget as HTMLSelectElement).value)}
-    >
-      {#if providers.length === 0}
-        <option value="">(no providers)</option>
-      {/if}
-      {#each providers as p (p.name)}
-        <option value={p.name}>{p.display_name}</option>
-      {/each}
-    </select>
-  </label>
+  {#if providers.length === 0 && !providerNotEligible}
+    <p class="ptp-nudge">
+      No AI providers available under this project's policy — add a key in
+      Settings, or the policy is off/local-only.
+    </p>
+  {:else}
+    <label class="ptp-row">
+      <span class="ptp-label">Subscription</span>
+      <select
+        value={provider}
+        onchange={(e) => onProviderChange((e.currentTarget as HTMLSelectElement).value)}
+      >
+        {#if providerNotEligible}
+          <option value={provider}>
+            {PROVIDER_DISPLAY_NAMES[provider] ?? provider} (not allowed by policy)
+          </option>
+        {/if}
+        {#each providers as p (p.name)}
+          <option value={p.name}>{p.display_name}</option>
+        {/each}
+      </select>
+    </label>
+  {/if}
 
   <label class="ptp-row">
     <span class="ptp-label">Capability</span>
@@ -321,6 +352,12 @@
   .ptp-status {
     font-size: var(--fs-sm);
     color: var(--text-3);
+  }
+
+  .ptp-nudge {
+    margin: 0;
+    color: var(--text-3);
+    font-size: var(--fs-sm);
   }
 
   .ptp-error {

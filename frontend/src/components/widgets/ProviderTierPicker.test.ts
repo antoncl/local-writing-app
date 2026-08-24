@@ -2,11 +2,14 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@/lib/test/component";
 
-// The picker calls api.listAIProviders() on mount and api.listAIProviderModels()
-// whenever the provider changes. Stub both so the test never reaches a real
-// backend (#973 network guard), and give each provider a DIFFERENT balanced
-// model so a switch can prove the picker resolves against the NEW provider's
-// catalogue (see the fresh-read test below).
+// The picker calls api.getMachineSettings() on mount (ADR-0073 S2 — scoped by
+// policy + credentials, not the flat provider list) and
+// api.listAIProviderModels() whenever the provider changes. Stub both so the
+// test never reaches a real backend (#973 network guard), and give each
+// provider a DIFFERENT balanced model so a switch can prove the picker
+// resolves against the NEW provider's catalogue (see the fresh-read test
+// below). Both cloud keys are set so a "cloud-allowed" policy makes both
+// eligible.
 vi.mock("@/lib/api", () => {
   const modelsByProvider: Record<string, unknown[]> = {
     anthropic: [
@@ -36,11 +39,14 @@ vi.mock("@/lib/api", () => {
   };
   return {
     api: {
-      listAIProviders: vi.fn(async () => ({
-        providers: [
-          { name: "anthropic", display_name: "Anthropic" },
-          { name: "openai", display_name: "OpenAI" },
-        ],
+      getMachineSettings: vi.fn(async () => ({
+        providers: {
+          anthropic_api_key: "sk-ant-real",
+          openai_api_key: "sk-real",
+          openrouter_api_key: "",
+          ollama_host: "http://127.0.0.1:11434",
+        },
+        default_provider: "anthropic",
       })),
       listAIProviderModels: vi.fn(async (provider: string) => ({
         models: modelsByProvider[provider] ?? [],
@@ -54,7 +60,7 @@ import ProviderTierPicker from "@/components/widgets/ProviderTierPicker.svelte";
 describe("ProviderTierPicker — onChange callback (runes port of the `change` event)", () => {
   it("defaults to the first provider on mount and reports it through onChange", async () => {
     const onChange = vi.fn();
-    render(ProviderTierPicker, { props: { onChange } });
+    render(ProviderTierPicker, { props: { policy: "cloud-allowed", onChange } });
 
     // onMount picks the first provider when the entry is fresh and emits it.
     await vi.waitFor(() =>
@@ -71,7 +77,7 @@ describe("ProviderTierPicker — onChange callback (runes port of the `change` e
     // here and would have resolved to the previous provider's model
     // ("claude-bal"); the correct result is the new provider's "gpt-bal".
     const onChange = vi.fn();
-    render(ProviderTierPicker, { props: { onChange } });
+    render(ProviderTierPicker, { props: { policy: "cloud-allowed", onChange } });
     await vi.waitFor(() =>
       expect(onChange).toHaveBeenCalledWith(
         expect.objectContaining({ provider: "anthropic" }),
@@ -88,5 +94,38 @@ describe("ProviderTierPicker — onChange callback (runes port of the `change` e
         model: "gpt-bal",
       }),
     );
+  });
+});
+
+describe("ProviderTierPicker — policy scoping (ADR-0073 S2)", () => {
+  it("shows a calm nudge instead of the provider select when no provider is eligible, without emitting a bogus provider", async () => {
+    const onChange = vi.fn();
+    render(ProviderTierPicker, { props: { policy: "off", onChange } });
+
+    await vi.waitFor(() =>
+      expect(
+        screen.getByText(/No AI providers available under this project's policy/),
+      ).toBeTruthy(),
+    );
+    expect(screen.queryByLabelText("Subscription")).toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("still shows a stored provider the current policy no longer permits, flagged rather than dropped", async () => {
+    const onChange = vi.fn();
+    render(ProviderTierPicker, {
+      props: { provider: "openrouter", policy: "local-only", onChange },
+    });
+
+    // The eligible "ollama" option only appears once the mocked
+    // getMachineSettings() promise resolves — wait for it rather than the
+    // select's `value`, which already reads "openrouter" from the initial
+    // synchronous render (the prop's starting value) before that happens.
+    await screen.findByRole("option", { name: "Ollama" });
+    const subscription = screen.getByLabelText("Subscription") as HTMLSelectElement;
+    expect(subscription.value).toBe("openrouter");
+    expect(
+      screen.getByText(/OpenRouter \(not allowed by policy\)/),
+    ).toBeTruthy();
   });
 });

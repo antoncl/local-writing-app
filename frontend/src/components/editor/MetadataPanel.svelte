@@ -1,6 +1,7 @@
 <script lang="ts">
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
   import ProviderTierPicker from "@/components/widgets/ProviderTierPicker.svelte";
+  import { aiSettings } from "@/lib/stores/aiSettings.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import ColoredSelect from "@/components/widgets/ColoredSelect.svelte";
   import { fieldIconClass } from "@/lib/utils/fieldIcons";
@@ -351,6 +352,7 @@
         provider={metadataValueString(metadata.ai_provider)}
         tier={metadataValueString(metadata.ai_capability_tier) as import("@/lib/types").AICapabilityTier | ""}
         model={metadataValueString(metadata.ai_model)}
+        policy={aiSettings.resolvedPolicy}
         onChange={(detail) => updateAssistantProvider(detail.provider, detail.tier, detail.model)}
       />
     </div>

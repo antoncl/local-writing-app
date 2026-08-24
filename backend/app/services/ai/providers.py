@@ -58,6 +58,14 @@ def _policy_allows(policy: AIPolicy, provider: str) -> tuple[bool, str | None]:
     return True, None
 
 
+# ADR-0073 S2: the public, reason-free form of `_policy_allows` — callers that
+# only need the boolean (the picker's eligibility scoping, the default-
+# assistant resolver's policy-forbidden skip) go through this rather than
+# duplicating the rule.
+def policy_permits(policy: AIPolicy, provider: str) -> bool:
+    return _policy_allows(policy, provider)[0]
+
+
 def health_check(
     *,
     provider_name: str,

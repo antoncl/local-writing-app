@@ -10,7 +10,7 @@
 // non-empty; on read the backend masks a set key to "********", so any non-empty
 // string counts as configured.
 
-import type { ProviderCredentialsView } from "@/lib/types";
+import type { AIPolicy, ProviderCredentialsView } from "@/lib/types";
 
 export type ProviderOption = { id: string; label: string };
 
@@ -70,4 +70,20 @@ export function addableCloudProviders(
     id,
     label: PROVIDER_DISPLAY_NAMES[id],
   }));
+}
+
+// ADR-0073 S2: the providers a picker may offer under a project's resolved AI
+// policy + this machine's credentials — the same rule the backend enforces
+// (`_policy_allows` in `services/ai/providers.py`), re-derived here so the
+// picker never shows a provider the send path would reject. "off" offers
+// nothing; "local-only" offers Ollama alone (a host, not a key — always
+// listed); "cloud-allowed" offers the configured cloud subscriptions first,
+// then Ollama.
+export function eligibleProviders(
+  policy: AIPolicy,
+  credentials: ProviderCredentialsView | null | undefined,
+): string[] {
+  if (policy === "off") return [];
+  if (policy === "local-only") return ["ollama"];
+  return [...configuredCloudProviders(credentials).map((option) => option.id), "ollama"];
 }

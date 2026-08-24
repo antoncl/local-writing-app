@@ -41,6 +41,7 @@ from app.models import (
     SaveAssistantEntryRequest,
     UnlistAssistantRequest,
 )
+from app.services.ai.providers import policy_permits
 from app.services.project.errors import ProjectServiceError
 from app.services.project.layers import LayerVisitor
 from app.services.project.node_index import IndexLayer, NodeIndex, NodeIndexEntry
@@ -602,12 +603,39 @@ class AssistantEntriesMixin:
         # assistant files directly instead of going through create. Keeping the
         # fallback would have meant reaching past the author's own list to pick
         # something they never chose.
+        #
+        # ADR-0073 S2: the topmost listed id is skipped when its provider isn't
+        # permitted under the project's resolved policy — e.g. a cloud assistant
+        # left at the top of the roster after the policy tightened to
+        # local-only. With NO project open, `ai_policy()` raises (the machine-
+        # only roster path) and there is no project policy to enforce, so the
+        # skip does not apply and the topmost resolves exactly as it did pre-S2.
+        try:
+            policy = self.ai_policy()
+        except ProjectServiceError:
+            policy = None
         merged = self.merged_assistant_order()
-        listed = next((entry_id for entry_id in merged.ids if entry_id in index.by_id), None)
-        if listed is None:
-            return None
-        entry = index.by_id.get(listed)
-        return self._read_assistant_from_index_entry(entry) if entry else None
+        for entry_id in merged.ids:
+            index_entry = index.by_id.get(entry_id)
+            if index_entry is None:
+                continue
+            entry = self._read_assistant_from_index_entry(index_entry)
+            if entry is None:
+                continue
+            # A listed entry with no provider configured yet (a fresh
+            # `create_assistant_entry` scaffold) has nothing to judge against
+            # the policy, so it is never skipped on that basis alone — only a
+            # SET, forbidden provider under a real policy disqualifies a candidate.
+            provider = entry.metadata.get("ai_provider")
+            if (
+                policy is not None
+                and isinstance(provider, str)
+                and provider
+                and not policy_permits(policy, provider)
+            ):
+                continue
+            return entry
+        return None
 
     def _read_assistant_from_index_entry(
         self, entry: NodeIndexEntry

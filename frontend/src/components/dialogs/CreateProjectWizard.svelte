@@ -253,6 +253,7 @@
                     <input type="text" bind:value={wizard.hireTitle} placeholder="Drafting assistant" />
                   </label>
                   <ProviderTierPicker
+                    policy={wizard.pickerPolicy}
                     onChange={(detail) =>
                       wizard.setHireProvider(detail.provider, detail.tier, detail.model)}
                   />

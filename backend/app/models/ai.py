@@ -199,6 +199,9 @@ class AIModelInfo(BaseModel):
     # not stored — this is just their wire mirror.
     family: str = ""
     free: bool = False
+    # ADR-0073 S4: False = surfaced from live discovery with no baked-in audit
+    # entry (picker badges it "new").
+    verified: bool = True
 
 
 class AIProviderModelList(BaseModel):

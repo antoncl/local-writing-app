@@ -62,6 +62,9 @@ export type AIModelInfo = {
   // them), so required here.
   family: string;
   free: boolean;
+  // ADR-0073 S4: false = surfaced from live discovery with no baked-in audit
+  // entry (picker badges it "new").
+  verified: boolean;
 };
 
 export type AIProviderModelList = {

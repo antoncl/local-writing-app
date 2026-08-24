@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from app.services.ai.profiles._loader import baked_in_for
+from app.services.ai.profiles._loader import baked_in_for, looks_like_reasoning
 from app.services.ai.profiles.base import (
     CachingStyle,
     Capability,
@@ -62,6 +62,7 @@ class OpenRouterProfile(OpenAICompatibleProfile):
     name = "openrouter"
     display_name = "OpenRouter"
     key_prefixes = ("sk-or-",)
+    live_catalog = True
 
     def __init__(self, api_key: str) -> None:
         self._api_key = api_key
@@ -318,11 +319,11 @@ def _tier_from_cost_and_id(
       of cost (some are cheap, e.g. o3-mini).
     """
 
-    lower = model_id.lower()
     if Capability.THINKING in capabilities:
         return CapabilityTier.REASONING
-    # ID-based heuristics for reasoning markers OpenRouter doesn't flag.
-    if any(token in lower for token in ("/o1", "/o3", "thinking", "fable")):
+    # ID-based heuristics for reasoning markers OpenRouter doesn't flag (shared
+    # with the S4 live-only tier so both agree on what "looks like reasoning").
+    if looks_like_reasoning(model_id):
         return CapabilityTier.REASONING
     if cost_in is None:
         return CapabilityTier.BALANCED

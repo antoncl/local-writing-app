@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from app.services.ai.profiles._loader import baked_in_for, mark_deprecated
+from app.services.ai.profiles._loader import baked_in_for, merge_live_catalogue
 from app.services.ai.profiles.base import (
     CachingStyle,
     ModelDescriptor,
@@ -31,6 +31,7 @@ class OpenAIProfile(OpenAICompatibleProfile):
     name = "openai"
     display_name = "OpenAI"
     key_prefixes = ("sk-",)
+    live_catalog = True
 
     def __init__(self, api_key: str) -> None:
         self._api_key = api_key
@@ -63,13 +64,14 @@ class OpenAIProfile(OpenAICompatibleProfile):
             self._cache = baked
             return baked
 
-        live_ids = {row["id"] for row in payload.get("data") or [] if row.get("id")}
-        merged: list[ModelDescriptor] = []
-        for descriptor in baked:
-            if descriptor.id in live_ids or descriptor.deprecated:
-                merged.append(descriptor)
-                continue
-            merged.append(mark_deprecated(descriptor))
+        # Bake-in stays the tier/cost truth; live_catalog (ADR-0073 S4) surfaces
+        # models newer than the audit file as unverified rows.
+        merged = merge_live_catalogue(
+            "openai",
+            baked,
+            payload.get("data") or [],
+            surface_live_only=self.live_catalog,
+        )
         self._cache = merged
         return merged
 

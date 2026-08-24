@@ -31,6 +31,12 @@ export type AIPolicyDraft = AIPolicy | "inherit";
 class AISettings {
   // ---- Per-project AI settings draft (bound by the Project pane) ----
   policy: AIPolicyDraft = $state("off");
+  // ADR-0073 S2: the open project's RESOLVED policy — `project.ai_policy` is
+  // already the fold's result regardless of `ai_policy_inherited` (only that
+  // flag is UI provenance), so unlike `policy` above this is never "inherit".
+  // MetadataPanel reads this to scope its ProviderTierPicker without
+  // prop-drilling project identity down from App.
+  resolvedPolicy: AIPolicy = $state("off");
 
   // ---- Provider health check ----
   healthResult = $state<AIHealthResponse | null>(null);
@@ -60,6 +66,7 @@ class AISettings {
     // it happens to resolve to (#471) — otherwise an inherited "off" is
     // indistinguishable from one set here, and the clear is invisible.
     this.policy = project.ai_policy_inherited ? "inherit" : project.ai_policy;
+    this.resolvedPolicy = project.ai_policy;
     this.healthResult = null;
     this.projectColor = null;
   }
@@ -93,6 +100,7 @@ class AISettings {
       this.policy = updatedProject.ai_policy_inherited
         ? "inherit"
         : updatedProject.ai_policy;
+      this.resolvedPolicy = updatedProject.ai_policy;
       this.setStatus("Updated AI settings");
     });
   }

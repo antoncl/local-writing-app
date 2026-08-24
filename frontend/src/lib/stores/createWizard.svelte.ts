@@ -179,6 +179,11 @@ class CreateWizard {
     this.aiPolicy === "local-only" || this.aiPolicy === "cloud-allowed",
   );
   providerModeCloud = $derived(this.aiPolicy === "cloud-allowed");
+  // ADR-0073 S2: the resolved policy fed to ProviderTierPicker — never the
+  // wire-only "inherit". showProviderSurface only renders the picker for a
+  // concrete stop, so this is really just a type-narrowing fallback; "off" is
+  // the same resting value aiSliderValue reads for "nothing to inherit".
+  pickerPolicy = $derived<AIPolicy>(this.aiPolicy === "inherit" ? "off" : this.aiPolicy);
   // The raw machine credentials, fed to ProviderSubscriptions (it derives the
   // configured/addable sets itself). Derived from the live machine settings so
   // the chip list updates the moment a credential is written.

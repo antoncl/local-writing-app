@@ -4,6 +4,7 @@ import {
   addableCloudProviders,
   cloudKeyField,
   configuredCloudProviders,
+  eligibleProviders,
 } from "@/lib/utils/aiProviders";
 import type { ProviderCredentialsView } from "@/lib/types";
 
@@ -46,6 +47,35 @@ describe("addableCloudProviders", () => {
   it("excludes providers already configured", () => {
     const providers = { ...EMPTY, anthropic_api_key: "sk-ant-real" };
     expect(addableCloudProviders(providers).map((p) => p.id)).toEqual(["openai", "openrouter"]);
+  });
+});
+
+describe("eligibleProviders", () => {
+  it("is empty under an off policy", () => {
+    expect(eligibleProviders("off", EMPTY)).toEqual([]);
+  });
+
+  it("is ollama-only under local-only, regardless of credentials", () => {
+    expect(eligibleProviders("local-only", EMPTY)).toEqual(["ollama"]);
+    const providers = { ...EMPTY, anthropic_api_key: "sk-ant-real" };
+    expect(eligibleProviders("local-only", providers)).toEqual(["ollama"]);
+  });
+
+  it("lists configured cloud providers then ollama under cloud-allowed", () => {
+    const providers = {
+      ...EMPTY,
+      anthropic_api_key: "sk-ant-real",
+      openrouter_api_key: "sk-or-real",
+    };
+    expect(eligibleProviders("cloud-allowed", providers)).toEqual([
+      "anthropic",
+      "openrouter",
+      "ollama",
+    ]);
+  });
+
+  it("falls back to ollama alone under cloud-allowed with no keys set", () => {
+    expect(eligibleProviders("cloud-allowed", EMPTY)).toEqual(["ollama"]);
   });
 });
 

@@ -132,7 +132,9 @@ class ProjectServiceResolveAssistantTests(unittest.TestCase):
 
     def test_resolve_falls_back_to_topmost(self) -> None:
         # No id → topmost in roster order. With no per-layer .order.yaml the
-        # roster sorts by title, so "Cheap" precedes "Creative".
+        # roster sorts by title, so "Cheap" precedes "Creative". No project is
+        # open here, so ADR-0073 S2's policy skip does not apply (no project
+        # policy to enforce) — the topmost resolves exactly as it did pre-S2.
         result = self.service.resolve_assistant(None)
         assert result is not None
         self.assertEqual(result.id, "cheap")
@@ -368,6 +370,12 @@ class AssistantReorderTests(unittest.TestCase):
             return_value=self.config_dir / "config.yaml",
         )
         self._patcher.start()
+        # ADR-0073 S2: resolve_assistant(None) now skips a listed candidate
+        # whose SET provider the project policy forbids. This class's fixtures
+        # all set `ai_provider: anthropic` and a fresh test project defaults to
+        # "off" — an unrelated confound for tests that are really about roster
+        # ORDER, not policy — so state cloud-allowed here.
+        self.service.update_project_settings(UpdateProjectSettingsRequest(ai_policy="cloud-allowed"))
         # Seed three machine-layer assistants.
         assistants_dir = self.config_dir / "assistants"
         assistants_dir.mkdir(parents=True)

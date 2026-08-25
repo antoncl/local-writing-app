@@ -25,6 +25,7 @@ import { joinPath, slugifyProjectName } from "@/lib/utils/projectPath";
 import { declarationRows, toggledDeclaration } from "@/lib/utils/projectChain";
 import { projectReviewRows } from "@/lib/utils/projectReview";
 import { localeProjectDefaults } from "@/lib/utils/localeDefaults";
+import { providersForPolicy } from "@/lib/utils/aiProviders";
 import { activeSteps, indexOfStep, stepComplete, type WizardStepId } from "@/lib/utils/wizardSteps";
 
 // Zero-value credentials so `machineProviders` is always a concrete
@@ -188,12 +189,16 @@ class CreateWizard {
   showProviderSurface = $derived(
     this.aiPolicy === "local-only" || this.aiPolicy === "cloud-allowed",
   );
-  providerModeCloud = $derived(this.aiPolicy === "cloud-allowed");
   // ADR-0073 S2: the resolved policy fed to ProviderTierPicker — never the
   // wire-only "inherit". showProviderSurface only renders the picker for a
   // concrete stop, so this is really just a type-narrowing fallback; "off" is
   // the same resting value aiSliderValue reads for "nothing to inherit".
   pickerPolicy = $derived<AIPolicy>(this.aiPolicy === "inherit" ? "off" : this.aiPolicy);
+  // The provider ids the chooser may show at this stop — the ONLY thing the
+  // policy slider does to the provider surface: "local-only" → Ollama alone;
+  // "cloud-allowed" → every provider (Ollama + cloud). Moving the slider up just
+  // widens this set; nothing swaps out (#1417). Folds "inherit" via pickerPolicy.
+  providerScope = $derived<string[]>(providersForPolicy(this.pickerPolicy));
   // The raw machine credentials, fed to ProviderSubscriptions (it derives the
   // configured/addable sets itself). Derived from the live machine settings so
   // the chip list updates the moment a credential is written.
@@ -201,7 +206,6 @@ class CreateWizard {
     this.getMachineSettings()?.providers ?? EMPTY_PROVIDER_CREDENTIALS,
   );
   defaultProviderId = $derived(this.getMachineSettings()?.default_provider ?? "");
-  ollamaHost = $derived(this.getMachineSettings()?.providers.ollama_host ?? "");
   // Persisted to the new project only when a concrete policy is stated here;
   // "inherit" writes nothing so the chain resolves it (§7's inheritance law).
   #aiPolicyToPersist = $derived<AIPolicy | undefined>(

@@ -17,6 +17,7 @@
   import ProviderSubscriptions from "@/components/widgets/ProviderSubscriptions.svelte";
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
   import MetadataLongTextEditor from "@/components/widgets/MetadataLongTextEditor.svelte";
+  import { api } from "@/lib/api";
   import { createWizard as wizard } from "@/lib/stores/createWizard.svelte";
   import { assistantEntriesStore, isAssistantListed } from "@/lib/stores/assistants";
   import { resetTargetLabel } from "@/lib/utils/projectReview";
@@ -187,29 +188,26 @@
 
           {#if wizard.showProviderSurface}
             {@const listedAssistants = $assistantEntriesStore.filter(isAssistantListed)}
-            <section class="ai-section" aria-label="Provider">
-              {#if wizard.providerModeCloud}
-                <h3>Your subscriptions</h3>
-                <!--
-                  The shared provider surface (ADR-0047 slice 2 / #616). Add-only
-                  here — `editable` is left false, so first-run setup gets chips +
-                  "+ Add provider" but no rotate/remove. It writes each key
-                  immediately (unlike Settings' batched draft), so onSaveKey goes
-                  through the busy-guarded controller path.
-                -->
-                <ProviderSubscriptions
-                  providers={wizard.machineProviders}
-                  defaultProviderId={wizard.defaultProviderId}
-                  busy={wizard.aiBusy}
-                  onSaveKey={(field, value) => wizard.saveProviderKey(field, value)}
-                />
-              {:else}
-                <h3>Local model</h3>
-                <div class="arow">
-                  <span>Ollama</span><span class="arow-detail">{wizard.ollamaHost}</span>
-                </div>
-                <p class="muted">Change the Ollama host in Machine settings.</p>
-              {/if}
+            <section class="ai-section" aria-label="Providers">
+              <h3>Providers</h3>
+              <!--
+                One provider chooser, scoped by policy (#1417). The slider only
+                widens `allowed`: Local shows Ollama alone; Cloud adds the cloud
+                subscriptions beside it — nothing swaps out. Ollama is just another
+                provider whose credential is a URL (editable inline, with the
+                reachability Test); cloud keys stay add-only here (`editable`
+                false), rotate/remove living in Settings. Writes go straight to the
+                machine layer through the busy-guarded controller; the new book
+                inherits the result.
+              -->
+              <ProviderSubscriptions
+                providers={wizard.machineProviders}
+                allowed={wizard.providerScope}
+                defaultProviderId={wizard.defaultProviderId}
+                busy={wizard.aiBusy}
+                onSaveKey={(field, value) => wizard.saveProviderKey(field, value)}
+                onTestReachability={(_id, value) => api.checkOllamaHost(value)}
+              />
             </section>
 
             <section class="ai-section" aria-label="Assistants">
@@ -573,23 +571,6 @@
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: var(--text-3);
-  }
-
-  /* A read-only detail row (the Local/Ollama host). */
-  .arow {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 5px 8px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--surface);
-    font-size: var(--fs-sm);
-  }
-  .arow-detail {
-    margin-left: auto;
-    color: var(--text-3);
-    font-size: var(--fs-xs);
   }
 
   /* The inline hire draft + "+ Hire" launcher use the shared .inline-form* /

@@ -275,8 +275,19 @@ describe("MachineSettingsDialog — updates tab (ADR-0072 S7)", () => {
   });
 });
 
-describe("MachineSettingsDialog — Ollama host reachability check (#1380)", () => {
-  const readout = () => document.querySelector(".ai-health-result");
+describe("MachineSettingsDialog — Ollama reachability, via the provider chip (#1380/#1417)", () => {
+  // Ollama is now just another provider chip; its host + reachability Test live in
+  // the chip's edit form, not a separate always-visible block.
+  const readout = () => document.querySelector(".test-result");
+
+  async function openOllamaForm(host = "http://box:11434") {
+    // Ollama is always a configured chip (a url provider has a default host).
+    await fireEvent.click(screen.getByRole("button", { name: "Edit Ollama" }));
+    const input = screen.getByRole("textbox", { name: "Host URL" }) as HTMLInputElement;
+    // Test is disabled on an empty host, so type one first.
+    await fireEvent.input(input, { target: { value: host } });
+    return input;
+  }
 
   it("probes the host and shows a reachable readout with version + latency", async () => {
     (api.checkOllamaHost as Mock).mockResolvedValue({
@@ -287,12 +298,11 @@ describe("MachineSettingsDialog — Ollama host reachability check (#1380)", () 
       error: null,
     });
     mount("cloud-allowed");
-    await fireEvent.click(screen.getByRole("button", { name: "Test Ollama host" }));
-    await screen.findByText(
-      (_t, el) => (el?.classList.contains("ai-health-result") ?? false),
-    );
-    expect(readout()?.textContent).toContain("http://box:11434");
+    await openOllamaForm();
+    await fireEvent.click(screen.getByRole("button", { name: "Test host" }));
+    await screen.findByText((_t, el) => el?.classList.contains("test-result") ?? false);
     expect(readout()?.textContent).toContain("0.5.1");
+    expect(readout()?.textContent).toContain("12 ms");
     expect(readout()?.classList.contains("ok")).toBe(true);
   });
 
@@ -305,10 +315,9 @@ describe("MachineSettingsDialog — Ollama host reachability check (#1380)", () 
       error: "Couldn't reach http://box:11434 — check the host is running and reachable (address, port, firewall).",
     });
     mount("cloud-allowed");
-    await fireEvent.click(screen.getByRole("button", { name: "Test Ollama host" }));
-    await screen.findByText(
-      (_t, el) => (el?.classList.contains("ai-health-result") ?? false),
-    );
+    await openOllamaForm();
+    await fireEvent.click(screen.getByRole("button", { name: "Test host" }));
+    await screen.findByText((_t, el) => el?.classList.contains("test-result") ?? false);
     expect(readout()?.textContent).toContain("Couldn't reach");
     expect(readout()?.classList.contains("fail")).toBe(true);
   });
@@ -322,14 +331,11 @@ describe("MachineSettingsDialog — Ollama host reachability check (#1380)", () 
       error: null,
     });
     mount("cloud-allowed");
-    await fireEvent.click(screen.getByRole("button", { name: "Test Ollama host" }));
-    await screen.findByText(
-      (_t, el) => (el?.classList.contains("ai-health-result") ?? false),
-    );
+    const input = await openOllamaForm();
+    await fireEvent.click(screen.getByRole("button", { name: "Test host" }));
+    await screen.findByText((_t, el) => el?.classList.contains("test-result") ?? false);
     // Editing the host invalidates the verdict — it must not linger and mislead.
-    await fireEvent.input(screen.getByRole("textbox", { name: "Ollama host" }), {
-      target: { value: "http://other:11434" },
-    });
+    await fireEvent.input(input, { target: { value: "http://other:11434" } });
     expect(readout()).toBeNull();
   });
 
@@ -339,11 +345,10 @@ describe("MachineSettingsDialog — Ollama host reachability check (#1380)", () 
       new Promise<OllamaHostHealth>((r) => (resolveCheck = r)),
     );
     mount("cloud-allowed");
-    await fireEvent.click(screen.getByRole("button", { name: "Test Ollama host" })); // in flight
+    const input = await openOllamaForm();
+    await fireEvent.click(screen.getByRole("button", { name: "Test host" })); // in flight
     // Change the host before the verdict lands — the pending result is now stale.
-    await fireEvent.input(screen.getByRole("textbox", { name: "Ollama host" }), {
-      target: { value: "http://changed:11434" },
-    });
+    await fireEvent.input(input, { target: { value: "http://changed:11434" } });
     resolveCheck({
       host: "http://box:11434",
       reachable: true,

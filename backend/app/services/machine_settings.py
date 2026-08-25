@@ -99,13 +99,6 @@ PROVIDER_DISPLAY_NAMES = {
 }
 
 
-def _slugify(text: str) -> str:
-    import re
-
-    cleaned = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
-    return cleaned or "assistant"
-
-
 def _seed_palette() -> list[Swatch]:
     return [Swatch(**entry) for entry in DEFAULT_PALETTE]
 
@@ -212,11 +205,10 @@ def projects_root() -> Path | None:
     (`memory/feedback_no_pre_1_0_migrations.md`).
 
     **Read directly rather than through `load_settings()`, deliberately.**
-    That function is a loader, not an accessor: it can *write* assistant files
-    (`_migrate_default_models_to_files_if_empty`) and it mutates the palette
+    That function is a loader, not an accessor: it mutates the palette
     (`_top_up_palette`). This is called from `_metadata_schema_base_folder`,
     i.e. on every layer walk, i.e. on every node-index build. A read path must
-    not be able to write, and a walk must not carry a migration.
+    stay a pure read, and a walk must not carry a loader's side effects.
 
     Derived from `config_path()` like `assistants_dir()`, so the autouse test
     fixture that redirects the config path isolates this too — a test can never
@@ -327,10 +319,9 @@ def default_ai_policy() -> AIPolicy:
     **A raw read, not `load_settings()`, for the same reason `projects_root()`
     is.** This seeds `_resolved_ai_policy`, which runs on every AI route and on
     `current_project()` (project open) — a read/resolve path. `load_settings()`
-    can *write* (`_migrate_default_models_to_files_if_empty`) and mutate the
-    palette (`_top_up_palette`), and a read path must not be able to write. So
-    read the one field directly, isolated by the config-path redirect like
-    `projects_root()`.
+    mutates the palette (`_top_up_palette`), and a read path must stay a pure
+    read. So read the one field directly, isolated by the config-path redirect
+    like `projects_root()`.
 
     Fail-closed: unset, unreadable, or out-of-set is `off`
     (`decisions_ai_permission_fails_closed`)."""
@@ -513,11 +504,11 @@ def merge_assistant_tags(sources: Iterable[str], target: str) -> list[AssistantT
 
 
 def load_settings() -> MachineSettings:
-    """Read config.yaml. Side-effect: on first load after upgrade, when no
-    assistant files exist but the legacy `default_models` matrix does, write
-    one assistant file per (provider, model) pair so the file-backed roster
-    is non-empty going forward. The Slice A inline `assistants` list has been
-    removed — files are canonical."""
+    """Read config.yaml. The Slice A inline `assistants` list has been removed —
+    assistant files are canonical and created explicitly (the create wizard's
+    hire, the Assistants pane's "+"), never auto-seeded (#1413): a fresh install
+    starts with an empty roster and AI calls resolve via the `default_models`
+    fallback until the author hires one."""
     path = config_path()
     if not path.exists():
         settings = MachineSettings()
@@ -538,7 +529,6 @@ def load_settings() -> MachineSettings:
                     settings = MachineSettings.model_validate(data)
                 except Exception:
                     settings = MachineSettings()
-    _migrate_default_models_to_files_if_empty(settings)
     _top_up_palette(settings)
     return settings
 
@@ -646,64 +636,6 @@ def touch_recent_project(root_path: Path, title: str) -> None:
         pass
 
 
-# ----- File-based assistant migration (one-shot) ---------------------------
-
-
-def _migrate_default_models_to_files_if_empty(settings: MachineSettings) -> None:
-    """When no assistant files exist but `default_models` does, materialize
-    the matrix as files (one per non-empty pair). Subsequent runs see the
-    files and skip. The pair matching `default_provider` is seeded first so it
-    is the **topmost** (dynamic default) assistant — the ★ is_default flag is
-    retired (ADR-0024)."""
-    folder = assistants_dir()
-    if folder.exists() and any(folder.glob("*.md")):
-        return
-    pairs: list[tuple[str, str]] = [
-        (provider, model)
-        for provider, model in settings.default_models.items()
-        if model
-    ]
-    if not pairs:
-        return
-    # Topmost = dynamic default: put the default_provider's pair first (stable
-    # sort keeps the rest in order).
-    pairs.sort(key=lambda pm: pm[0] != settings.default_provider)
-    folder.mkdir(parents=True, exist_ok=True)
-    seen_slugs: set[str] = set()
-    for provider, model in pairs:
-        label = PROVIDER_DISPLAY_NAMES.get(provider, provider)
-        title = f"{label}: {model}"
-        base_id = _slugify(title)
-        assistant_id = base_id
-        suffix = 2
-        while assistant_id in seen_slugs:
-            assistant_id = f"{base_id}-{suffix}"
-            suffix += 1
-        seen_slugs.add(assistant_id)
-        metadata: dict[str, Any] = {
-            "ai_provider": provider,
-            "ai_model": model,
-            # Intentionally no `ai_temperature` — let the provider apply its
-            # own default unless the user sets one explicitly. Some newer
-            # models (e.g. claude-opus-4-7) reject an explicit temperature.
-            "ai_max_tokens": 4096,
-        }
-        front: dict[str, Any] = {
-            "id": assistant_id,
-            "title": title,
-            "entry_type": "assistant:assistant",
-            "metadata": metadata,
-        }
-        front_text = yaml.safe_dump(front, sort_keys=False, allow_unicode=True).strip()
-        (folder / f"{assistant_id}.md").write_text(
-            f"---\n{front_text}\n---\n\n", encoding="utf-8"
-        )
-    # These assistant files go straight to disk, outside `ProjectService`'s
-    # `_atomic_write` change-gate, so a node-index memo held for an open project
-    # would not see them (#392). First-run only, so a coarse drop is right:
-    # the machine assistant layer is part of any open project's chain, and the
-    # next resolve rebuilds it. Lazy import keeps this module free of a
-    # service-layer dependency at load.
-    from app.services.project.node_index_gate import node_index_gate
-
-    node_index_gate.invalidate()
+# Assistant files are created explicitly (create-wizard hire / Assistants pane
+# "+"), never auto-seeded — the old first-run `default_models` → files seeder was
+# removed once the wizard hires explicitly (#1413).

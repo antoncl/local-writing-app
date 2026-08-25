@@ -482,11 +482,11 @@ class DefaultAiPolicyReadTests(unittest.TestCase):
                 self._write_config(bad)
                 self.assertEqual(ms.default_ai_policy(), "off")
 
-    def test_does_not_write_the_way_load_settings_would(self) -> None:
-        # A config that arms load_settings()'s assistant-file migration: legacy
-        # default_models present, no assistant files yet. default_ai_policy() must
-        # read the policy WITHOUT triggering that write — a read path must not
-        # write (the rule projects_root() documents).
+    def test_default_ai_policy_reads_without_materializing_assistants(self) -> None:
+        # default_ai_policy() reads the stored policy directly, never routing
+        # through load_settings() — a read path must stay a pure read (the rule
+        # projects_root() documents). With the auto-seed removed (#1413), neither
+        # it nor load_settings() materializes assistant files.
         self._write_config({"ai_policy": "local-only", "default_models": {"ollama": "llama3.2"}})
         assistants = ms.assistants_dir()
 
@@ -496,10 +496,9 @@ class DefaultAiPolicyReadTests(unittest.TestCase):
             "default_ai_policy() must not materialize assistant files",
         )
 
-        # Contrast: load_settings() DOES write here, proving the trigger is armed
-        # and the raw read genuinely avoids it.
+        # load_settings() no longer seeds a default roster either.
         ms.load_settings()
-        self.assertTrue(any(assistants.glob("*.md")))
+        self.assertFalse(assistants.exists() and any(assistants.glob("*.md")))
 
 
 if __name__ == "__main__":

@@ -53,7 +53,7 @@
     title="New Project"
     label="Create project"
     frameClass="create-wizard-modal"
-    frameStyle="--modal-width: 560px; height: 560px; max-height: calc(100vh - 48px); grid-template-rows: auto minmax(0, 1fr) auto;"
+    frameStyle="--modal-width: 560px; height: 640px; max-height: calc(100vh - 48px); grid-template-rows: auto minmax(0, 1fr) auto;"
   >
     <div class="wizard">
       <nav class="wizard-steps" aria-label="Steps">

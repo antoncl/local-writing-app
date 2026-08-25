@@ -457,7 +457,11 @@
 
   .ptp-model-list {
     margin-top: 6px;
-    max-height: 320px;
+    /* A bounded, scrollable sub-panel — kept short so the browse doesn't
+       dominate the wizard's AI step and force a nested double-scroll (#1408).
+       Pairs with the compact-density re-cut (#1406): denser rows keep this
+       shorter panel showing a useful number of models. */
+    max-height: 220px;
     overflow-y: auto;
     border: 1px solid var(--border);
     border-radius: 4px;

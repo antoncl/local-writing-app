@@ -109,8 +109,13 @@
               data-testid="wizard-project-name"
               bind:value={wizard.title}
               placeholder="The name of your project"
+              on:blur={() => wizard.markTitleTouched()}
             />
           </label>
+          {#if wizard.titleError}
+            <!-- A div, not a <p>: Modal's `:global(p)` rule would repaint it grey. -->
+            <div class="wizard-error" role="alert">{wizard.titleError}</div>
+          {/if}
 
           <label>
             Location
@@ -364,7 +369,7 @@
         <button
           type="button"
           class="primary"
-          disabled={!wizard.canAdvance}
+          disabled={!wizard.canComplete}
           on:click={() => wizard.submit()}
         >Create</button>
       {:else}

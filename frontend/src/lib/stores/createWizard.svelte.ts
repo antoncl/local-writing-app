@@ -219,6 +219,33 @@ class CreateWizard {
     }),
   );
 
+  // Authoritative completion gate (#1404). `canAdvance` on the FINAL step
+  // ("describe") is unconditionally true, so it cannot protect the title; Create
+  // instead requires the actual submitted fields (a set root + a title + a
+  // folder) regardless of which step is current. A skipped or invalid earlier
+  // step then can never complete into a backend 422 — the guarantee the sole
+  // location-step gate lost once "location" stopped being the last step.
+  canComplete = $derived(
+    !this.needsRootFolder &&
+      stepComplete("location", {
+        rootFolderDraft: this.rootFolderDraft,
+        title: this.title,
+        pickedFolder: this.pickedFolder,
+      }),
+  );
+
+  // Inline "name required" feedback (#1404): shown only after the field is
+  // touched (blurred) so a freshly-entered step does not nag. Mirrors the
+  // `rootError` channel — the same `.wizard-error` markup renders it.
+  titleTouched = $state(false);
+  titleError = $derived(
+    this.titleTouched && this.title.trim().length === 0 ? "Project name is required." : "",
+  );
+
+  markTitleTouched() {
+    this.titleTouched = true;
+  }
+
   // ---- Review-step derived ----
   // One row per authored project field, resolved over the ticked chain. Pure
   // and tested in projectReview.ts; empty until the prospective resolve lands.
@@ -258,6 +285,7 @@ class CreateWizard {
     this.rootFolderDraft = "";
     this.rootError = "";
     this.title = "";
+    this.titleTouched = false;
     this.pickedFolder = "";
     this.candidates = [];
     this.candidatesLoading = false;
@@ -298,10 +326,6 @@ class CreateWizard {
     if (this.currentStep.id === "root") {
       this.rootError = "";
       await this.onSaveRootFolder(this.rootFolderDraft.trim());
-      // On success the save flips defaultProjectsFolder ⇒ needsRootFolder ⇒ steps
-      // collapses to ["location"]; #stepIndex 0 then already points at it
-      // (isFinalStep true), so no increment is needed and none happens below.
-      //
       // On FAILURE (e.g. the folder does not exist) the host swallows the error
       // into App's toast — which sits behind this modal — and needsRootFolder
       // stays true. Advancing anyway would build a project with no machine root
@@ -310,6 +334,13 @@ class CreateWizard {
         this.rootError = "Couldn't use that folder — check that the path exists.";
         return;
       }
+      // On SUCCESS the save flips needsRootFolder ⇒ the step list drops "root",
+      // shifting "location" into #stepIndex 0. We are therefore ALREADY on
+      // "location" — return WITHOUT incrementing (the collapse is the advance).
+      // Falling through to the increment below skipped straight past "location"
+      // to "ai", leaving the title uncollected → an empty-title 422 (#1404). This
+      // used to be safe only because "location" was once the final step.
+      return;
     }
     if (!this.isFinalStep) {
       this.#stepIndex += 1;
@@ -481,7 +512,9 @@ class CreateWizard {
 
   // ---- Final action ----
   async submit() {
-    if (!this.isFinalStep || !this.canAdvance) return;
+    // canComplete, not canAdvance: the last step's advance gate is always true,
+    // so completion re-checks the actual required fields (#1404).
+    if (!this.isFinalStep || !this.canComplete) return;
     // §7 (#746): on first run the AI-step policy establishes the APP-WIDE
     // default (the machine layer — there is no root project to hold it), and the
     // first project states nothing, inheriting it. On subsequent creation the

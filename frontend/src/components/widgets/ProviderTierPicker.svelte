@@ -55,6 +55,9 @@
       provider: string;
       tier: AICapabilityTier | "";
       model: string;
+      // The chosen model's display name, for a sensible default assistant name
+      // (#1412). "" when nothing resolves yet.
+      modelLabel: string;
     }) => void;
   } = $props();
 
@@ -224,7 +227,8 @@
   }
 
   function emitChange() {
-    onChange({ provider, tier, model });
+    const modelLabel = models.find((m) => m.id === model)?.display_name ?? "";
+    onChange({ provider, tier, model, modelLabel });
   }
 
   function fmtCost(cost: number | null | undefined): string {

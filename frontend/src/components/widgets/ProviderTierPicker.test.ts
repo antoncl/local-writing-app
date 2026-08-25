@@ -113,6 +113,8 @@ describe("ProviderTierPicker — onChange callback (runes port of the `change` e
         provider: "openai",
         tier: "balanced",
         model: "gpt-bal",
+        // The chosen model's display name rides along for the default hire name (#1412).
+        modelLabel: "GPT Balanced",
       }),
     );
   });

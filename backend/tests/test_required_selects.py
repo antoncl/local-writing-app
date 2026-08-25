@@ -72,6 +72,35 @@ class RequiredSelectTests(MetadataValidationBase):
         self.assertNotIn("tier", hero.metadata)  # optional select: never seeded
         self.assertNotIn("context_policy", hero.metadata)  # required select: not seeded
 
+    def test_pre_existing_blank_context_policy_reads_without_error(self) -> None:
+        # The old picker let you choose "(none)", storing context_policy: "". Such
+        # an entry must still READ — healed to absent (→ resolves to auto) — not
+        # 422 the whole read now that blank is invalid (#1421).
+        hero = self._hero()
+        self.service.save_lore_entry(
+            hero.id,
+            SaveLoreEntryRequest(
+                title=hero.title,
+                body=hero.body,
+                base_revision=hero.revision,
+                entry_type="lore:character",
+                metadata={"context_policy": "always"},
+            ),
+        )
+        path = self.service._path_for_node_id(hero.id, "lore")
+        text = path.read_text(encoding="utf-8")
+        path.write_text(text.replace("context_policy: always", "context_policy: ''"), encoding="utf-8")
+        entry = self.service.read_lore_entry(hero.id)  # must not raise
+        self.assertNotIn("context_policy", entry.metadata)
+
+    def test_read_heal_preserves_a_real_value(self) -> None:
+        # Only a blank is healed — a legitimate stored value passes through.
+        schema = self.service.read_metadata_schema()
+        kept = self.service._strip_unknown_metadata_fields(
+            {"context_policy": "always"}, "lore:character", schema
+        )
+        self.assertEqual(kept.get("context_policy"), "always")
+
     def test_new_scene_still_opens_at_draft(self) -> None:
         # Scene `status` is a top-level select with a default; the seeder-skip must
         # not regress its create default (now read from the schema directly).

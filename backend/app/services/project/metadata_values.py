@@ -593,6 +593,13 @@ class MetadataValuesMixin:
                 continue
             if allowed and field_id not in allowed:
                 continue
+            # A required select (one with a schema default) storing a blank is
+            # stale from before the "no blank" rule (#1421) — the old picker let
+            # you choose "(none)". Drop the key on read so it resolves to the
+            # default like a fresh sparse entry, instead of 422-ing the whole
+            # read; the sparse form is written back on the next save.
+            if field.type == "select" and field.default is not None and value in (None, ""):
+                continue
             cleaned[field_id] = self._strip_unknown_list_members(field, value)
         return cleaned
 

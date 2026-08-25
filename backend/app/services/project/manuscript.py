@@ -117,16 +117,22 @@ class ManuscriptMixin:
         for child in node.children:
             self._inject_structure_computed_metadata(child, root, schema, scene_front)
 
+    def _initial_scene_status(self, schema: MetadataSchema) -> str:
+        """The status a new scene opens at. `status` is a top-level Scene field,
+        and its default is authored on the schema (built-in "draft") — read it
+        there directly. The generic seeder skips select defaults (#1421), so the
+        status default no longer flows through the metadata dict; the "draft"
+        floor still applies when no default is authored."""
+        field = schema.fields.get("status")
+        default = field.default if field is not None else None
+        return default if isinstance(default, str) and default else "draft"
+
     def create_scene(self, request: CreateSceneRequest) -> Scene:
         root = self._require_project()
         scene_id = self._new_id("manuscript")
         schema = self.read_metadata_schema()
         initial_metadata = self._initial_metadata_from_defaults("manuscript:scene", schema)
-        # `status` is a top-level Scene field (not in metadata), so resolve
-        # its default separately when one is authored — otherwise keep the
-        # historic "draft" floor so existing flows are unchanged.
-        status_default = initial_metadata.pop("status", None)
-        initial_status = status_default if isinstance(status_default, str) and status_default else "draft"
+        initial_status = self._initial_scene_status(schema)
         scene = Scene(
             id=scene_id,
             title=request.title,
@@ -313,8 +319,7 @@ class ManuscriptMixin:
         structure = self._read_structure(root)
         file_id = self._new_id("manuscript")
         initial_metadata = self._initial_metadata_from_defaults(request.entry_type, schema)
-        status_default = initial_metadata.pop("status", None)
-        initial_status = status_default if isinstance(status_default, str) and status_default else "draft"
+        initial_status = self._initial_scene_status(schema)
         scene = Scene(
             id=file_id,
             title=request.title,

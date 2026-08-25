@@ -1268,7 +1268,11 @@ class LoreAndPromptTests(MetadataValidationBase):
         entry = self.service.create_lore_entry(
             CreateLoreEntryRequest(title="Defaulted", entry_type="lore:character")
         )
-        self.assertEqual(entry.metadata.get("mood"), "calm")
+        # A `select` default is NOT stamped into the file (#1421): it's the
+        # evaluation-time terminal fallback, so front matter stays sparse and an
+        # absent select resolves to its default at read. Non-select defaults still
+        # seed to disk as before (#38).
+        self.assertNotIn("mood", entry.metadata)
         self.assertEqual(entry.metadata.get("age"), 30)
         self.assertEqual(entry.metadata.get("active"), True)
 

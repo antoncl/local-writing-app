@@ -269,6 +269,17 @@ class MetadataValuesMixin:
         node_index: NodeIndex | None = None,
     ) -> list[str]:
         if value is None or value == "":
+            # A select that declares a default is "required": an empty *stored*
+            # value is invalid (#1421). Absence is still fine — an absent key is
+            # never in this loop, and resolves to the default at evaluation; this
+            # only rejects an explicit blank. Every other field treats blank/None
+            # as "unset", which is always valid.
+            if field.type == "select" and field.default is not None:
+                allowed = ", ".join(opt.value for opt in field.options)
+                return [
+                    f"{label} metadata field {field_id} is required and must be "
+                    f"one of: {allowed}."
+                ]
             return []
         if field.type == "computed" and not allow_computed:
             return [f"{label} stores computed metadata field {field_id}; computed fields are derived."]

@@ -248,6 +248,13 @@ class ProjectService(
                 continue
             if field.type == "computed":
                 continue
+            # A `select` default is the *evaluation-time* terminal fallback, not a
+            # value stamped into every new file — front matter stays sparse and an
+            # absent select resolves to its default at read (#1421). Seeding it
+            # here would defeat that. (Scene `status` is a top-level field with its
+            # own create-path default; see create_scene.)
+            if field.type == "select":
+                continue
             out[field_id] = deepcopy(field.default)
         return out
 

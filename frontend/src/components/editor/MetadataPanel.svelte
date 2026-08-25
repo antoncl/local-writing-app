@@ -261,6 +261,21 @@
     return metadataValueString(metadataSchema.fields[fieldId]?.default ?? undefined);
   }
 
+  // Persist a single field edit. A required select (one that declares a default,
+  // #1421) that lands back on its default pops the key instead of writing it, so
+  // front matter stays sparse — the value resolves to the same default at
+  // evaluation. Every other edit writes through unchanged.
+  function writeField(fieldId: string, v: MetadataValue) {
+    const field = metadataSchema.fields[fieldId];
+    const isRequiredSelect =
+      field?.type === "select" && field.default != null && field.default !== "";
+    if (isRequiredSelect && String(v) === String(field.default)) {
+      clearField(fieldId);
+      return;
+    }
+    onMetadataChange?.({ ...metadata, [fieldId]: v });
+  }
+
   function displayValue(fieldId: string): MetadataValue {
     if (isMutated(fieldId)) return effectiveOverrides?.[fieldId] ?? "";
     const flipped = compare?.fields[fieldId];
@@ -523,7 +538,7 @@
                 tagOrigin={tagOrigin}
                 documentKind={documentKind}
                 entryType={entryType}
-                onChange={(v) => onMetadataChange?.({ ...metadata, [fieldId]: v })}
+                onChange={(v) => writeField(fieldId, v)}
                 onNavigate={(payload) => onNavigate?.(payload)}
               />
             {/if}

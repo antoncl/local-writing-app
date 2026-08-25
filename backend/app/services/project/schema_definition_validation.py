@@ -118,6 +118,17 @@ def _field_shape_errors(field_id: str, field: MetadataFieldDefinition, schema: M
         errors.extend(_list_field_schema_errors(field_id, field, schema))
     elif field.item_group is not None or field.item_type is not None:
         errors.append(f"Metadata field {field_id} has item shape settings but is not type list.")
+    # A select's `default` is what makes it "required" (drops the "(none)" pick,
+    # seeds nothing to disk, resolves an absent field at evaluation, #1421). It
+    # must therefore name a real option — otherwise every entry resolves to a
+    # value the field can never legally hold. Soft, like the rest here.
+    if field.type == "select" and field.default is not None and field.options:
+        allowed = {opt.value for opt in field.options}
+        if field.default not in allowed:
+            errors.append(
+                f"Select metadata field {field_id} has default {field.default!r}, "
+                f"which is not one of its options ({', '.join(sorted(allowed))})."
+            )
     return errors
 
 

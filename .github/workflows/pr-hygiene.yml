@@ -1,0 +1,32 @@
+# Blocks a PR whose body doesn't close every issue it resolves (#1419). GitHub
+# auto-closes an issue only when a keyword directly precedes each number, so
+# `Closes #A, #B` closes only #A — a recurring silent leak. See
+# scripts/check_pr_body.py for the two rules.
+#
+# Deliberately its OWN lightweight workflow, not a step in gates.yml: it triggers
+# on `edited` (so fixing the body re-runs the check without a push), and re-running
+# the whole heavy gates matrix on every body edit would be wasteful.
+#
+# To make it blocking, add the `pr-hygiene` check to the `master gates` ruleset's
+# required checks (a repo-settings change; the workflow file cannot require itself).
+name: pr-hygiene
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  pr-hygiene:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+
+      # The script reads the PR body + head branch from $GITHUB_EVENT_PATH, which
+      # Actions sets for us. Stdlib only — no install step.
+      - name: PR-body hygiene (Closes one keyword per issue)
+        run: python scripts/check_pr_body.py

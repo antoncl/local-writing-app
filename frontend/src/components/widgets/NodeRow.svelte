@@ -629,6 +629,44 @@
     color: var(--text-2);
   }
 
+  /* ── Compact (#1406) — the true midpoint between comfortable and dense ──
+     Comfortable's 3 stacked lines (title / detail / tags) become 2 tight ones:
+     the padding tightens (11/14 → 7/12) and the detail line KEEPS its place
+     (dense drops it) but now shares row 2 with the packed tags — title on row 1,
+     `detail | tags` on row 2 with no gap between the lines, halving the card
+     (~74px → ~46px). Card chrome (hover/active/kind-stripe) and the title
+     recession above are untouched; only the geometry changes. Scoped to the card
+     variant (tree-variant compact keeps its own spacing). The tag pack stays
+     width-aware — a trailing affordance narrows the flex text column and the
+     pack compacts against what's left, exactly as before. */
+  .node-row.variant-card.density-compact:not(.group-header) {
+    padding: 7px 12px;
+    border-radius: 9px;
+  }
+  .node-row.variant-card.density-compact:not(.group-header) > .node-row-click .node-row-text,
+  .node-row.variant-card.density-compact:not(.group-header) > .node-row-text {
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 8px;
+    row-gap: 0;
+  }
+  /* Title spans row 1; detail (row 2, truncating) sits beside the packed tags. */
+  .node-row.variant-card.density-compact:not(.group-header) > .node-row-click .node-row-text :global(strong),
+  .node-row.variant-card.density-compact:not(.group-header) > .node-row-text :global(strong) {
+    grid-column: 1 / -1;
+  }
+  .node-row.variant-card.density-compact:not(.group-header) > .node-row-click .node-row-text :global(small),
+  .node-row.variant-card.density-compact:not(.group-header) > .node-row-text :global(small) {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .node-row.variant-card.density-compact:not(.group-header) > .node-row-click .node-row-text .node-row-tags,
+  .node-row.variant-card.density-compact:not(.group-header) > .node-row-text .node-row-tags {
+    grid-column: 2;
+    grid-row: 2;
+    margin-top: 0;
+    align-self: center;
+  }
+
   .node-row.group-header {
     border-bottom: 1px solid var(--divider);
     padding-bottom: 4px;

@@ -269,6 +269,17 @@ class MetadataValuesMixin:
         node_index: NodeIndex | None = None,
     ) -> list[str]:
         if value is None or value == "":
+            # A select that declares a default is "required": an empty *stored*
+            # value is invalid (#1421). Absence is still fine — an absent key is
+            # never in this loop, and resolves to the default at evaluation; this
+            # only rejects an explicit blank. Every other field treats blank/None
+            # as "unset", which is always valid.
+            if field.type == "select" and field.default is not None:
+                allowed = ", ".join(opt.value for opt in field.options)
+                return [
+                    f"{label} metadata field {field_id} is required and must be "
+                    f"one of: {allowed}."
+                ]
             return []
         if field.type == "computed" and not allow_computed:
             return [f"{label} stores computed metadata field {field_id}; computed fields are derived."]
@@ -581,6 +592,13 @@ class MetadataValuesMixin:
             if getattr(field, "category", None) == "intrinsic":
                 continue
             if allowed and field_id not in allowed:
+                continue
+            # A required select (one with a schema default) storing a blank is
+            # stale from before the "no blank" rule (#1421) — the old picker let
+            # you choose "(none)". Drop the key on read so it resolves to the
+            # default like a fresh sparse entry, instead of 422-ing the whole
+            # read; the sparse form is written back on the next save.
+            if field.type == "select" and field.default is not None and value in (None, ""):
                 continue
             cleaned[field_id] = self._strip_unknown_list_members(field, value)
         return cleaned

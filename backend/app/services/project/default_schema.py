@@ -696,7 +696,19 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
                 "(excluded everywhere)."
             ),
             "type": "select",
-            "options": ["always", "auto", "manual_only", "never"],
+            "options": [
+                {"value": "always", "label": "Always include"},
+                {"value": "auto", "label": "Automatic (alias match)"},
+                {"value": "manual_only", "label": "Manual only"},
+                {"value": "never", "label": "Never include"},
+            ],
+            # A required select: "none" is meaningless for an entry's context
+            # policy, so it declares a default. The default is the terminal
+            # fallback applied at *evaluation* (`_entry_context_policy`), never
+            # written to disk — front matter stays sparse, and an absent field
+            # resolves to "auto" (#1421). The default's presence is what makes the
+            # editor drop the "(none)" pick and reject a blank save.
+            "default": "auto",
             # Author-owned cost/visibility knob (ADR-0057): a commit must never
             # set it (ADR-0059 §F). The one built-in field this ADR flips.
             "ai_proposable": False,

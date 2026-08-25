@@ -92,6 +92,16 @@
   const label = $derived(ariaLabel ?? field.name);
   const currentValue = $derived(metadataValueString(value));
 
+  // A select whose schema declares a `default` is "required" (#1421): it never
+  // offers a "(none)" pick, and an absent value shows the default rather than a
+  // blank placeholder. Selects with no default stay optional (blank = unset).
+  const selectRequired = $derived(
+    field.type === "select" && field.default != null && field.default !== "",
+  );
+  const selectDisplayValue = $derived(
+    selectRequired ? currentValue || String(field.default) : currentValue,
+  );
+
   function metadataValueString(v: MetadataValue | undefined): string {
     if (Array.isArray(v)) return v.join(", ");
     if (v === null || v === undefined) return "";
@@ -211,7 +221,13 @@
     {/each}
   </div>
 {:else if field.type === "select"}
-  <ColoredSelect value={currentValue} options={field.options} ariaLabel={label} onChange={(v) => emit(v)} />
+  <ColoredSelect
+    value={selectDisplayValue}
+    options={field.options}
+    allowBlank={!selectRequired}
+    ariaLabel={label}
+    onChange={(v) => emit(v)}
+  />
 {:else if field.type === "boolean"}
   <!-- Tri-state (#522), rail-only via `allowUnset`: an absent boolean reads
        dimmed/indeterminate rather than "off". Authoring surfaces leave `allowUnset`

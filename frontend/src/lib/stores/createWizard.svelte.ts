@@ -76,6 +76,10 @@ class CreateWizard {
   hireProvider = $state("");
   hireTier = $state<AICapabilityTier | "">("");
   hireModel = $state("");
+  // The chosen model's display name (#1412) — the default assistant name when the
+  // author doesn't type one, so the roster reads e.g. "Claude Sonnet 4.6" instead
+  // of a wall of identical "New assistant" rows.
+  hireModelLabel = $state("");
   // Guards the async provider-save / hire / curation buttons.
   aiBusy = $state(false);
 
@@ -278,7 +282,25 @@ class CreateWizard {
     this.reset();
     // Snapshot first-run before the root step can flip it (#746 — see submit()).
     this.#firstRun = this.needsRootFolder;
+    // Returning user (a machine root is already set): seed the Location field
+    // with it so the shown default actually counts (#1410). First run seeds
+    // after the root step instead (next()).
+    this.#seedLocationFromDefault();
     this.open = true;
+  }
+
+  // Default the Location to the machine root so it is a real, usable value rather
+  // than a placeholder the gate ignores (#1410). The Next gate, the "will be
+  // created at" line, and the Inherit list all key off `pickedFolder`, so leaving
+  // it empty kept Next disabled even though the default was displayed. The picker
+  // stays for choosing a DIFFERENT parent (e.g. nesting under an existing
+  // project), not for re-picking the obvious default. No-op once a folder is set.
+  #seedLocationFromDefault() {
+    const root = this.defaultProjectsFolder.trim();
+    if (root && !this.pickedFolder) {
+      this.pickedFolder = root;
+      void this.#loadCandidates(root);
+    }
   }
 
   reset() {
@@ -340,6 +362,10 @@ class CreateWizard {
       // Falling through to the increment below skipped straight past "location"
       // to "ai", leaving the title uncollected → an empty-title 422 (#1404). This
       // used to be safe only because "location" was once the final step.
+      //
+      // First run only reaches a machine root now, so seed the Location with it
+      // here (start() handled the returning-user case) — #1410.
+      this.#seedLocationFromDefault();
       return;
     }
     if (!this.isFinalStep) {
@@ -434,6 +460,7 @@ class CreateWizard {
     this.hireProvider = "";
     this.hireTier = "";
     this.hireModel = "";
+    this.hireModelLabel = "";
   }
 
   setAiPolicy(next: AiPolicyDraft) {
@@ -466,16 +493,24 @@ class CreateWizard {
     this.#resetHireDraft();
   }
 
-  setHireProvider(provider: string, tier: AICapabilityTier | "", model: string) {
+  setHireProvider(
+    provider: string,
+    tier: AICapabilityTier | "",
+    model: string,
+    modelLabel = "",
+  ) {
     this.hireProvider = provider;
     this.hireTier = tier;
     this.hireModel = model;
+    this.hireModelLabel = modelLabel;
   }
 
   async submitHire() {
     await this.#withBusy(async () => {
       await this.onHireAssistant(
-        this.hireTitle.trim() || "New assistant",
+        // Author's name wins; else the model's display name; else a last-resort
+        // generic, so hires read as the models chosen, not identical rows (#1412).
+        this.hireTitle.trim() || this.hireModelLabel.trim() || "New assistant",
         this.hireProvider,
         this.hireTier,
         this.hireModel,

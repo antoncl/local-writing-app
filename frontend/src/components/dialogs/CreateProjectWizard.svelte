@@ -260,7 +260,7 @@
                   <ProviderTierPicker
                     policy={wizard.pickerPolicy}
                     onChange={(detail) =>
-                      wizard.setHireProvider(detail.provider, detail.tier, detail.model)}
+                      wizard.setHireProvider(detail.provider, detail.tier, detail.model, detail.modelLabel)}
                   />
                   <div class="inline-form-actions">
                     <button type="button" on:click={() => wizard.cancelHire()}>Cancel</button>
@@ -457,11 +457,22 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+    /* A hair of horizontal room so a full-width input's browser focus outline
+       (drawn ~2px OUTSIDE its box) doesn't spill past this scroll container and
+       trip a horizontal scrollbar (#1411). */
+    padding-inline: 3px;
   }
 
   .wizard-body label {
     display: grid;
     gap: 6px;
+  }
+
+  /* The resolved project path can be long and unbroken (backslash segments don't
+     wrap on their own); let it break so it can't overflow horizontally (#1411),
+     now that Location defaults to a real path (#1410). */
+  .wizard-body code {
+    overflow-wrap: anywhere;
   }
 
   .wizard-inherits {

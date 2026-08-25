@@ -6,6 +6,7 @@ The script is not part of the backend package, so load it by path.
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -100,3 +101,29 @@ def test_both_rules_can_fire_together():
     # Comma-list AND the branch issue isn't closed.
     errors = lint_pr_body("Closes #10, #11", BRANCH)
     assert len(errors) == 2
+
+
+# ---- The event-parsing seam (the blocking gate's input) -------------------------
+# A wrong field path here would feed lint_pr_body("", "") and pass every PR while
+# looking green, so pin the exact GitHub pull_request payload shape.
+
+
+def test_load_event_extracts_body_and_branch(tmp_path, monkeypatch):
+    event = {"pull_request": {"body": "Closes #1419", "head": {"ref": BRANCH}}}
+    path = tmp_path / "event.json"
+    path.write_text(json.dumps(event), encoding="utf-8")
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(path))
+    assert check_pr_body._load_event() == ("Closes #1419", BRANCH)
+
+
+def test_load_event_null_body_and_missing_ref_are_empty(tmp_path, monkeypatch):
+    # GitHub sends body: null for an empty description; head may lack a ref.
+    path = tmp_path / "event.json"
+    path.write_text(json.dumps({"pull_request": {"body": None, "head": {}}}), encoding="utf-8")
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(path))
+    assert check_pr_body._load_event() == ("", "")
+
+
+def test_load_event_no_path_is_empty(monkeypatch):
+    monkeypatch.delenv("GITHUB_EVENT_PATH", raising=False)
+    assert check_pr_body._load_event() == ("", "")

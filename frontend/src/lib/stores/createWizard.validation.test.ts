@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // #1404: the first-run wizard skipped the LOCATION step (where the title is
 // entered) after saving the root, so it could complete with an empty title and
@@ -121,5 +121,50 @@ describe("createWizard hire name (#1412)", () => {
     await createWizard.submitHire();
 
     expect(names).toEqual(["Drafting assistant", "New assistant"]);
+  });
+});
+
+describe("createWizard locale defaults (#1415)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  async function driveToReview() {
+    for (let i = 0; i < 8 && createWizard.currentStep.id !== "review"; i++) {
+      await createWizard.next();
+    }
+  }
+
+  it("seeds the review overrides from the browser locale", async () => {
+    vi.stubGlobal("navigator", { language: "en-GB" });
+    createWizard.defaultProjectsFolder = "C:/root"; // returning user; start() seeds the folder
+    createWizard.start();
+    createWizard.title = "Book";
+
+    await driveToReview();
+    expect(createWizard.currentStep.id).toBe("review");
+    // #loadReview resolves async (fire-and-forget in next()); wait for the seed.
+    await vi.waitFor(() => expect(createWizard.nodeOverrides.language).toBe("en"));
+    expect(createWizard.nodeOverrides.measurement_system).toBe("metric");
+    expect(createWizard.nodeOverrides.spelling).toBe("en_GB");
+  });
+
+  it("never overrides a field the resolved chain already inherits", async () => {
+    vi.stubGlobal("navigator", { language: "en-US" });
+    // An ancestor already states measurement_system.
+    prospectiveProjectNode.mockResolvedValue({
+      metadata_schema: { fields: [] },
+      metadata: { measurement_system: "metric" },
+      field_sources: { measurement_system: "Universe" },
+    });
+    createWizard.defaultProjectsFolder = "C:/root";
+    createWizard.start();
+    createWizard.title = "Book";
+
+    await driveToReview();
+    await vi.waitFor(() => expect(createWizard.nodeOverrides.language).toBe("en"));
+    // Inherited → left to inherit; the rest still seeded.
+    expect(createWizard.nodeOverrides.measurement_system).toBeUndefined();
+    expect(createWizard.nodeOverrides.spelling).toBe("en_US");
   });
 });

@@ -187,8 +187,10 @@ only appears behind "Add", where a menu is the right shape. Then reorder/hire as
 - *Reorder / un-list* = embed `Assistants.svelte` (drag-reorder + list/unlist) → `POST
   /api/assistants/order` (`assistants.py:226-261`) / `POST /api/assistants/unlist`. Reorder names
   the id in the *local* book's `.order.yaml`, so it is layer-safe by construction.
-- First-run seeds a non-empty roster automatically (`_migrate_default_models_to_files_if_empty`,
-  `machine_settings.py:420-478`).
+- The roster starts empty and is filled by explicit hiring here (and later in the Assistants
+  pane). The old first-run auto-seed of the `default_models` matrix was removed once the wizard
+  hires explicitly — it only added unlisted default-model rows for every provider, configured or
+  not (#1413). AI calls still resolve via the `default_models` fallback until an assistant exists.
 - The ordering-inherits question ADR-0039 flagged as a prerequisite (#332) reads as **settled** in
   that ADR's own verified notes.
 *New:* nothing but wiring these into a step.

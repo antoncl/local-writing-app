@@ -19,10 +19,11 @@ from app.services.project_service import ProjectService
 _ANTHROPIC_CHAT = "app.services.ai.profiles.anthropic.AnthropicProfile.chat"
 
 
-class MigrateDefaultModelsTests(unittest.TestCase):
-    """On first load after upgrade, the loader writes one assistant file per
-    non-empty (provider, model) pair in default_models, then leaves them
-    alone on subsequent loads."""
+class NoAutoSeedAssistantsTests(unittest.TestCase):
+    """#1413: assistants are created explicitly (the create-wizard hire, the
+    Assistants pane's "+"), never auto-seeded from default_models. A fresh load
+    leaves the roster empty; the populated default_models stays for the legacy
+    call-resolver fallback."""
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
@@ -38,32 +39,14 @@ class MigrateDefaultModelsTests(unittest.TestCase):
         self._patcher.stop()
         self.temp_dir.cleanup()
 
-    def test_first_load_writes_one_file_per_pair(self) -> None:
-        ms.load_settings()
+    def test_fresh_load_seeds_no_assistant_files(self) -> None:
+        settings = ms.load_settings()
+        # default_models still ships populated (it's the call-resolver fallback),
+        # but the loader no longer materializes it into files.
+        self.assertTrue(settings.default_models)
         folder = self.config_dir / "assistants"
-        files = sorted(p.name for p in folder.glob("*.md"))
-        self.assertEqual(len(files), 4)  # one per DEFAULT_MODELS entry
-        # The ★ is_default flag is retired (ADR-0024) — no file carries it; the
-        # default_provider (ollama) assistant is instead seeded first so it is
-        # the topmost (dynamic default) row.
-        for p in folder.glob("*.md"):
-            self.assertNotIn("is_default", p.read_text(encoding="utf-8"))
-
-    def test_subsequent_load_is_a_no_op(self) -> None:
-        ms.load_settings()
-        # Sentinel file to prove migration won't re-run.
-        sentinel = self.config_dir / "assistants" / "sentinel.md"
-        sentinel.write_text("placeholder", encoding="utf-8")
-        ms.load_settings()
-        self.assertTrue(sentinel.exists())
-        # No additional .md files appeared.
-        self.assertEqual(len(list((self.config_dir / "assistants").glob("*.md"))), 5)
-
-    def test_empty_default_models_writes_nothing(self) -> None:
-        settings = ms.MachineSettings(default_models={})
-        ms.save_settings(settings)
-        ms.load_settings()
-        self.assertFalse((self.config_dir / "assistants").exists())
+        present = sorted(p.name for p in folder.glob("*.md")) if folder.exists() else []
+        self.assertEqual(present, [])
 
 
 class ProjectServiceResolveAssistantTests(unittest.TestCase):

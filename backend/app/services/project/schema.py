@@ -127,6 +127,16 @@ class MetadataSchemaMixin:
         # layer fingerprints + `build_identity()` and folds only on a miss.
         return schema_cache.resolved_schema(paths, self._build_metadata_schema)
 
+    def builtin_metadata_schema(self) -> MetadataSchema:
+        """The app's built-in schema with NO project layers folded (the empty
+        chain). This is the machine layer's effective schema: a machine-scope
+        write that legitimately runs with no project open — the create wizard's
+        first-run assistant hire (#1402), which is machine-global — validates
+        against this instead of `read_metadata_schema()`, whose open-project
+        merge `_require_project()`s when nothing is open. Cached like any resolved
+        chain (empty path list = the built-in base)."""
+        return schema_cache.resolved_schema([], self._build_metadata_schema)
+
     def _build_metadata_schema(
         self, paths: list[Path], fingerprints: list[schema_cache.Fingerprint]
     ) -> MetadataSchema:

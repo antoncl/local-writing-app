@@ -24,6 +24,7 @@ import type {
 import { joinPath, slugifyProjectName } from "@/lib/utils/projectPath";
 import { declarationRows, toggledDeclaration } from "@/lib/utils/projectChain";
 import { projectReviewRows } from "@/lib/utils/projectReview";
+import { localeProjectDefaults } from "@/lib/utils/localeDefaults";
 import { activeSteps, indexOfStep, stepComplete, type WizardStepId } from "@/lib/utils/wizardSteps";
 
 // Zero-value credentials so `machineProviders` is always a concrete
@@ -112,6 +113,11 @@ class CreateWizard {
   // policy belongs: the app-wide default (first run) or the new project
   // (subsequent). See `submit()`.
   #firstRun = $state(false);
+  // Locale defaults are seeded into the review overrides once per location
+  // (#1415). Reset on `reset()` and whenever the ancestry changes
+  // (`#loadCandidates`), so a new chain re-seeds; kept across Back/forward within
+  // one location so an author's edits and resets are never re-clobbered.
+  #localeSeeded = false;
 
   // ---- Injected host hooks (set in App.onMount) ----
   onError: (message: string) => void = () => {};
@@ -320,6 +326,7 @@ class CreateWizard {
     this.reviewInherited = {};
     this.reviewSources = {};
     this.nodeOverrides = {};
+    this.#localeSeeded = false;
     this.description = "";
     this.#stepIndex = 0;
     this.pickerOpen = false;
@@ -385,6 +392,7 @@ class CreateWizard {
       this.reviewSchema = node.metadata_schema;
       this.reviewInherited = node.metadata;
       this.reviewSources = node.field_sources;
+      this.#seedLocaleDefaults();
     } catch (error) {
       this.reviewSchema = null;
       this.onError(
@@ -392,6 +400,25 @@ class CreateWizard {
       );
     } finally {
       this.reviewLoading = false;
+    }
+  }
+
+  // Seed the review overrides from the browser locale (#1415) — once per
+  // location, only for world-canon fields the resolved chain doesn't already
+  // state, so inheritance and author edits are never clobbered. Each seeded key
+  // renders as a shown, overridable value (a "Reset to default" affordance).
+  #seedLocaleDefaults() {
+    if (this.#localeSeeded) return;
+    this.#localeSeeded = true;
+    const locale = typeof navigator !== "undefined" ? navigator.language : "";
+    const seed: Record<string, MetadataValue> = {};
+    for (const [fieldId, value] of Object.entries(localeProjectDefaults(locale))) {
+      if (value != null && !(fieldId in this.reviewInherited)) {
+        seed[fieldId] = value;
+      }
+    }
+    if (Object.keys(seed).length > 0) {
+      this.nodeOverrides = { ...this.nodeOverrides, ...seed };
     }
   }
 
@@ -423,6 +450,8 @@ class CreateWizard {
     // overrides, whose inherited baseline is about to change.
     this.inherits = [];
     this.nodeOverrides = {};
+    // The new chain resolves fresh, so re-seed locale defaults for it (#1415).
+    this.#localeSeeded = false;
     this.candidatesLoading = true;
     try {
       // The candidates depend only on the parent folder (the walk excludes the

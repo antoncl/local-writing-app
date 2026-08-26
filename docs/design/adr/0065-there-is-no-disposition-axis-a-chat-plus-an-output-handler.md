@@ -29,6 +29,28 @@ Review of the implementation surfaced that this ADR's central slice was never bu
 
 Unchanged: the handler *set* stays closed and backend-owned (§Anti-goals) — the config only *selects* from it; `commit` / `on_accept` stay handler-local; `snippet` is the **include** (see the ADR-0061 amendment: includes are role-less).
 
+## Amendment 2 (2026-08-26) — no prompt behavior lives on the type; `PromptEntryTypeExtras` is removed
+
+Dogfooding surfaced that the type/class still carries prompt *behavior* config — the coupling this ADR exists to remove. §1 ("continuation/revise/… are all `general`, differing only by handler") is right; the implementation kept a per-type bundle, `PromptEntryTypeExtras`, that re-admits behavior on the class. This amendment removes it in full. (Citations pinned to `master@c0ec4e90`; symbol/path names are the durable references.)
+
+**1. The principle, flat.** A prompt *type* carries only **identity and structure** — name, parent, fields, body editor, color, assistant binding. It never carries *what a prompt does*. All per-prompt behavior lives on the **instance** (its body — `{% role %}`, includes — and its `context_strategy`); any universal convention is a **fixed engine rule**. The test is not "is it render-resolved" but "can it vary without minting a new sub-type" — anything on the type can only vary by adding a type, which is the proliferation this ADR kills.
+
+**2. `PromptEntryTypeExtras` is removed entirely**, field by field:
+- `context_strategy` (`.target`, `.output`) — behavior config, already owned per-instance. The create-time seed (`create_prompt_entry`) retires; a new `general` starts with no `context_strategy` = a plain conversation. `.target` was an orphan with no runtime consumer.
+- `model_class` — never wired; model/tier is the **assistant's** (`ai_model` / `ai_capability_tier`, resolved in `call_resolver`), reached from a prompt via `preferred_assistant_id`.
+- `provider_policy` — never wired; off/local-only/cloud-allowed is the **machine→project `AIPolicy`** chain (`providers.py`), not per-type.
+- `system_prompt` — never wired; the system prompt is the rendered template's system-role text (ADR-0060 §4).
+- `inputs` — the type-level copy is unused; the live input seed is the separate top-level `default_inputs`.
+- `default_role` — removed; loose-prose homing becomes a constant (ADR-0060 §4 Amendment 2).
+
+None of `model_class` / `provider_policy` / `context_strategy.target` / `system_prompt` was ever introduced by an ADR — they are stranded fields from the pre-ADR M5.2a "Add Prompts pane and Prompt Type editor" (`a8909529`), superseded by the assistant, the policy chain, and the template. Removal deletes scaffolding, not capability.
+
+**3. The "Prompt defaults" UI is removed** (`SchemaTypeEditor.svelte`) — it authored exactly this bundle, letting a user set values that changed nothing at runtime, a control that lies.
+
+Anti-goals: no per-instance `default_role` (the `{% role %}` override already covers it); no configurable loose-prose homing (it is fixed); the type never regains a behavior field — a genuine *seed* need is its own decision (ADR-0049 §7), not a revived bundle.
+
+Consequences: the bundle, its create-seed, and its type-level `.output` validation retire; a new `general` persists no `context_strategy` (invocability is the entry_type, per `entries.py`); shipped Library prompts are unaffected (they carry their own instance config). **No migration:** pre-1.0 with zero users, there is no persisted user data to carry forward and the app-owned built-in schema is simply re-authored — removal is forward-compatible on read regardless (Pydantic drops the retired keys).
+
 ## Context
 
 ADR-0054 modelled a prompt's output as **two** things: a **disposition** (`output.kind` ∈ `append_to_body` · `replace_selection` · `chat_panel`) and an optional **commit** capability on `chat_panel`; the four concrete bases (continuation / revise / general / snippet) each bundle one. That framing treats the disposition as an axis of independent choices.

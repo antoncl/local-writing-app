@@ -25,6 +25,16 @@ Two prompt-language gaps surfaced while working the prompt-output model (ADR-006
 - **An include carries no `{% role %}`; the includer assigns the role.** Today an include that holds its own `{% role %}` block errors when it lands inside the includer's `{% role %}` (nested roles). The workable rule: an **include is a role-less fragment** (raw text), and it is the **includer** that wraps `{% include %}` in the proper `{% role "system" %}` / `{% role "user" %}`. This removes the nested-role error for shared boilerplate (a house-style voice, a settings block). (The include mechanism itself is ADR-0061; this is the role constraint on it. In the UI it is surfaced as "include," not "snippet" — see the ADR-0062 amendment. Note: the output field contract is **not** an include — it is authored inline via the `field_contract` accumulator, ADR-0067.)
 - **The check must derive its known helpers from the live registry, not a stale list.** The prompt template check (the render/diagnostics that flag template errors) rejects legitimate ADR-0060 helpers — e.g. any use of `use()` flags as an error — because its notion of "known globals" drifted from what `register_helpers` (`services/ai/helpers.py`) actually installs. The fix is structural: the check's known-helper/known-global set must be **derived from the same registry the runtime uses** (so it can never drift again), and it must recognise the additions ADR-0067 makes — the `field_contract` accumulator and the newly-enabled `{% do %}` construct. A helper the engine provides, or a tag it enables, must never be an error in the check that guards the same engine.
 
+## Amendment 2 (2026-08-26) — the default role envelope is not per-type; loose prose homes to a fixed `system`
+
+§4 gave each prompt **base type** a `default_role` envelope resolved up the `parent:` chain. Post-ADR-0065 that is both moot and a smell: there is exactly one non-abstract prompt base (`general`), and it declares `default_role: "system"` — identical to `_resolve_default_role`'s own fallback, so the field does no work. To make loose prose home anywhere else you would have to mint a new sub-type — the proliferation ADR-0065 removes. (§4's base-type list — `continuation`/`revise`/`general`/`snippet` — is itself stale; only `{base, general, snippet}` remain.)
+
+**The rule replacing §4's envelope:** the engine homes un-roled prose to a fixed **`system`**; `{% role %}` stays as the per-body override for the uncommon multi-role prompt — the full range of expression, with nothing on the type.
+
+Mechanically: the per-type `_resolve_default_role` chain-walk and the `default_role` schema field (`PromptEntryTypeExtras.default_role`) are removed; the send path passes the constant `system` to `render_template`. Loose prose is therefore always homed — the legacy warn-and-drop (`default_role=None`) is no longer reachable from the send path. Byte-identical output for every shipped prompt (only `general` declared it, `= system`). Removal of `PromptEntryTypeExtras` in full is recorded in ADR-0065 Amendment 2.
+
+Anti-goal: `default_role` does **not** move to the instance — a prompt wanting a non-system home writes `{% role %}`; the default stays a fixed convention, not a knob.
+
 ## Context
 
 A prompt template is a Jinja2 body (`body_language: jinja2`) rendered by a `SandboxedEnvironment`

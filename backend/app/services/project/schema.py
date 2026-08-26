@@ -282,7 +282,7 @@ class MetadataSchemaMixin:
         (qualified with the declared kind — that FQN is the dict key, the stored
         id, and the value written into a node's `entry_type` front matter).
         Raises 422 on an unknown kind, a malformed id, a kind/prefix mismatch,
-        prompt config on a non-prompt kind, or self-parenting."""
+        or self-parenting."""
         entry_type_id = request.entry_type_id.strip()
         if request.entry_type.kind not in {
             "manuscript", "lore", "prompt", "assistant", "project", "chat", "mutation_set", "view", "plot"
@@ -304,8 +304,6 @@ class MetadataSchemaMixin:
                 f"Node type id kind prefix '{match.group(1)}' must match the node kind '{request.entry_type.kind}'.",
                 422,
             )
-        if request.entry_type.prompt is not None and request.entry_type.kind != "prompt":
-            raise ProjectServiceError("Prompt configuration is only valid on prompt node types.", 422)
         if request.entry_type.parent == fqn:
             raise ProjectServiceError("Node type cannot inherit from itself.", 422)
         return fqn
@@ -341,7 +339,7 @@ class MetadataSchemaMixin:
         overlay stripping. Persist ONLY the fields the caller actually set
         (`exclude_unset`) — Pydantic defaults like body_editor="wysiwyg" would
         otherwise leak onto disk and mask a parent type's inherited values — but
-        preserve the membership, group-applications, and prompt an existing local
+        preserve the membership and group-applications an existing local
         definition already carries when the caller omits them (each managed via
         its own dedicated path)."""
         existing = existing_entry_type if isinstance(existing_entry_type, dict) else {}
@@ -358,10 +356,6 @@ class MetadataSchemaMixin:
             entry_type_data["group_applications"] = deepcopy(existing_applications)
         if not request.entry_type.parent:
             entry_type_data.pop("parent", None)
-        if request.entry_type.prompt is None:
-            existing_prompt = existing.get("prompt")
-            if isinstance(existing_prompt, dict):
-                entry_type_data["prompt"] = deepcopy(existing_prompt)
         return entry_type_data
 
     def _apply_builtin_overlay(

@@ -2,9 +2,9 @@
 // wire types (#763.5). Extracted from types.ts to keep that barrel under the
 // file-size cap; re-exported from `@/lib/types` so it stays the single import
 // surface. A leaf module at runtime: only `AIPolicy` is used back in types.ts
-// (ProjectInfo, PromptEntryTypeExtras), which imports it from here. The lone
-// `import type` below (ADR-0061 S2) is erased at compile time, so it adds no
-// runtime edge — the preview response genuinely carries PromptInputDefinition.
+// (ProjectInfo), which imports it from here. The lone `import type` below
+// (ADR-0061 S2) is erased at compile time, so it adds no runtime edge — the
+// preview response genuinely carries PromptInputDefinition.
 import type { PromptInputDefinition } from "@/lib/types";
 
 export type AIPolicy = "off" | "local-only" | "cloud-allowed";

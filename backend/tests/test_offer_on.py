@@ -65,11 +65,9 @@ class ImpersonateAndOfferOnTests(unittest.TestCase):
         # exists there).
         self.assertEqual(imp.entry_type, "prompt:general")
         self.assertTrue(imp.is_library)
-        gen = self.service.read_metadata_schema().entry_types["prompt:general"]
-        # general has a context_strategy (invocable) but no output block — no handler,
-        # a conversation, not a brainstorm.
-        self.assertIsNotNone(gen.prompt.context_strategy)
-        self.assertIsNone(gen.prompt.context_strategy.output)
+        # Instance-level (ADR-0065 Amendment 2): impersonate carries no
+        # context_strategy of its own — a plain conversation, no handler, no commit.
+        self.assertIsNone(imp.context_strategy)
 
     def test_offer_on_parsed_onto_both_read_models(self) -> None:
         summaries = self._summaries()

@@ -30,7 +30,7 @@ from app.services.ai.helpers import (
 )
 from app.services.ai.profiles.registry import profile_for
 from app.services.ai.sessions import AISession, default_registry
-from app.services.ai.templates import VALID_ROLES, RenderedTemplate, render_template
+from app.services.ai.templates import RenderedTemplate, render_template
 
 if TYPE_CHECKING:
     from app.services.ai.profiles import ModelDescriptor
@@ -229,25 +229,15 @@ def _namespace_for_object_type(context: dict[str, Any], obj_type: str | None) ->
 
 
 def _resolve_default_role(project_service, schema: Any, entry_type: str) -> str:
-    """The default role envelope for un-roled prose (ADR-0060 §4).
+    """The default role envelope for un-roled prose (ADR-0060 §4 Amendment 2).
 
-    Walks the prompt `entry_type`'s `parent:` chain (nearest first) and returns
-    the first declared `prompt.default_role`, clamped to a valid role. Falls back
-    to `system` — the universal default that homes a prose-only prompt — when the
-    type is unknown, declares nothing up the chain, or names an invalid role.
+    A prompt type carries no behavior config, so there is nothing to resolve —
+    un-roled prose always homes to `system`, the same envelope every type used
+    to inherit when it declared no `default_role` of its own. Kept as a
+    function (rather than inlining the constant at the call site) so the
+    `entry_type`/`schema` plumbing stays in one place if a future amendment
+    reintroduces per-type behavior.
     """
-    if not entry_type or schema is None:
-        return "system"
-    try:
-        chain = project_service.entry_type_ancestry(entry_type, schema=schema)
-    except Exception:  # noqa: BLE001
-        return "system"
-    for fqn in chain:
-        definition = schema.entry_types.get(fqn)
-        prompt = getattr(definition, "prompt", None) if definition is not None else None
-        role = getattr(prompt, "default_role", None) if prompt is not None else None
-        if role:
-            return role if role in VALID_ROLES else "system"
     return "system"
 
 
@@ -269,10 +259,9 @@ class PreviewRequest:
     selection: str = ""
     resolution_scene_id: str = ""
     subject: str = ""
-    # ADR-0060 §4: the prompt's entry_type FQN, used only to resolve the base
-    # type's `default_role` envelope for un-roled text. Empty (the default) resolves
-    # to `system`, so a prose-only prompt is still homed even when the caller does
-    # not name a type.
+    # ADR-0060 §4 Amendment 2: the prompt's entry_type FQN. Un-roled prose always
+    # homes to the fixed `system` role now (no type-level envelope to resolve),
+    # so this is plumbing for a future amendment rather than a live lookup key.
     entry_type: str = ""
 
 
@@ -342,7 +331,7 @@ def build_preview(
     except Exception:  # noqa: BLE001
         schema = None
 
-    # ADR-0060 §4: the base type's default role envelope for un-roled prose.
+    # ADR-0060 §4 Amendment 2: the fixed default role envelope for un-roled prose.
     default_role = _resolve_default_role(project_service, schema, request.entry_type)
 
     # Wrap the loaded scene as an EntryRef so templates can write

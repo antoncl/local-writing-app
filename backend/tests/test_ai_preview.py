@@ -101,11 +101,12 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertTrue(body["char_count"] > 0)
         self.assertIsNone(body["session_id"])
 
-    def test_request_entry_type_homes_prose_to_base_default_role(self) -> None:
-        # #1229: the route now threads the request's entry_type into build_preview,
-        # so a custom prompt type's declared default_role (ADR-0060 §4) governs how
-        # un-roled prose is homed. Before the wiring the entry_type never reached
-        # the resolver, so this prose-only source fell back to "system" regardless.
+    def test_request_entry_type_no_longer_affects_default_role(self) -> None:
+        # ADR-0060 §4 Amendment 2: a prompt type carries no `default_role` (or any
+        # other behavior config) anymore, so un-roled prose always homes to the
+        # fixed "system" role — regardless of which entry_type the request names,
+        # and even a custom sub-type declaring stray `prompt`-shaped front matter
+        # (ignored; the schema has no such field) can't change it.
         schema_path = self.root / "metadata.schema.yaml"
         data = self.service._read_yaml(schema_path)
         data.setdefault("entry_types", {})["prompt:general:scripted"] = {
@@ -113,7 +114,6 @@ class PreviewEndpointTests(unittest.TestCase):
             "kind": "prompt",
             "parent": "prompt:general",
             "has_body": True,
-            "prompt": {"default_role": "user"},
         }
         self.service._write_yaml(schema_path, data)
 
@@ -123,19 +123,16 @@ class PreviewEndpointTests(unittest.TestCase):
             return resp.json()
 
         source = "Draft a scene beat."
-        # With the entry_type: prose is homed to the type's "user" envelope.
-        homed = _preview(
+        with_type = _preview(
             {
                 "template_source": source,
                 "target_scene_id": "",
                 "entry_type": "prompt:general:scripted",
             }
         )
-        self.assertEqual(len(homed["messages"]), 1)
-        self.assertEqual(homed["messages"][0]["role"], "user")
-        self.assertEqual(homed["messages"][0]["blocks"][0]["text"], source)
-        # Without it: the resolver's "system" fallback applies — so the "user"
-        # above can only have come from the threaded entry_type, not the source.
+        self.assertEqual(len(with_type["messages"]), 1)
+        self.assertEqual(with_type["messages"][0]["role"], "system")
+        self.assertEqual(with_type["messages"][0]["blocks"][0]["text"], source)
         bare = _preview({"template_source": source, "target_scene_id": ""})
         self.assertEqual(len(bare["messages"]), 1)
         self.assertEqual(bare["messages"][0]["role"], "system")
@@ -1051,8 +1048,9 @@ class PreviewCostEstimateTests(unittest.TestCase):
 
 
 class DefaultRoleResolutionTests(unittest.TestCase):
-    """ADR-0060 §4: `_resolve_default_role` walks the prompt entry_type's parent
-    chain for a declared `default_role`, clamped to a valid role, else `system`."""
+    """ADR-0060 §4 Amendment 2: a prompt type carries no `default_role` (or any
+    other behavior config) anymore, so `_resolve_default_role` is a fixed
+    constant — always "system", regardless of entry_type or schema state."""
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
@@ -1068,59 +1066,9 @@ class DefaultRoleResolutionTests(unittest.TestCase):
         schema = self.service.read_metadata_schema()
         return _resolve_default_role(self.service, schema, entry_type)
 
-    def _add_prompt_type(self, fqn: str, default_role: str) -> None:
-        schema_path = self.root / "metadata.schema.yaml"
-        data = self.service._read_yaml(schema_path)
-        data.setdefault("entry_types", {})[fqn] = {
-            "name": fqn.rsplit(":", 1)[-1].title(),
-            "kind": "prompt",
-            "parent": "prompt:general",
-            "has_body": True,
-            "prompt": {"default_role": default_role},
-        }
-        self.service._write_yaml(schema_path, data)
-
-    def test_base_types_default_to_system(self) -> None:
-        self.assertEqual(self._resolve("prompt:general"), "system")
-        # ADR-0065 S3: prompt:snippet declares no default_role of its own, and
-        # nothing up its chain does either — falls back to the universal default.
-        self.assertEqual(self._resolve("prompt:snippet"), "system")
-
-    def test_child_inherits_base_envelope_via_ancestry(self) -> None:
-        # A schema-declared child that sets no default_role of its own inherits
-        # the value declared up its `parent:` chain, not just the fallback.
-        schema_path = self.root / "metadata.schema.yaml"
-        data = self.service._read_yaml(schema_path)
-        data.setdefault("entry_types", {})["prompt:custom_parent"] = {
-            "name": "Custom Parent",
-            "kind": "prompt",
-            "parent": "prompt:base",
-            "abstract": True,
-            "has_body": True,
-            "prompt": {"default_role": "assistant"},
-        }
-        data["entry_types"]["prompt:custom_child"] = {
-            "name": "Custom Child",
-            "kind": "prompt",
-            "parent": "prompt:custom_parent",
-            "has_body": True,
-        }
-        self.service._write_yaml(schema_path, data)
-        self.assertEqual(self._resolve("prompt:custom_child"), "assistant")
-
-    def test_empty_and_unknown_fall_back_to_system(self) -> None:
-        self.assertEqual(self._resolve(""), "system")
-        self.assertEqual(self._resolve("prompt:nonesuch"), "system")
-
-    def test_declared_non_system_role_is_read(self) -> None:
-        # A custom prompt type overrides the envelope — proves the resolver reads
-        # the declaration rather than always returning "system".
-        self._add_prompt_type("prompt:general:scripted", "user")
-        self.assertEqual(self._resolve("prompt:general:scripted"), "user")
-
-    def test_invalid_declared_role_falls_back_to_system(self) -> None:
-        self._add_prompt_type("prompt:general:bogus", "robot")
-        self.assertEqual(self._resolve("prompt:general:bogus"), "system")
+    def test_always_resolves_to_system(self) -> None:
+        for entry_type in ("", "prompt:general", "prompt:snippet", "prompt:nonesuch"):
+            self.assertEqual(self._resolve(entry_type), "system", entry_type)
 
     def test_build_preview_homes_prose_only_to_default_role(self) -> None:
         # End-to-end through the render path: a prose-only prompt with a named

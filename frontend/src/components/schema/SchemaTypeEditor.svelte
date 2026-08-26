@@ -1,6 +1,4 @@
 <script lang="ts" module>
-  import type { PromptEntryTypeExtras } from "@/lib/types";
-
   // Payload emitted on Save Type — the parent (App) owns persistence and
   // combines this with the read-only context it still holds (kind/parent/
   // abstract/readonly/selectedSchemaTypeId) + the bound save layer. Mirrors
@@ -9,7 +7,6 @@
     typeId: string;
     name: string;
     color: string | null;
-    promptExtras: PromptEntryTypeExtras | null;
   };
 </script>
 
@@ -19,10 +16,10 @@
   // drag, resize, close) stays in App.svelte because it's part of its
   // pane-layout system.
   //
-  // Extracted from App.svelte (#14). The editable type draft (name/id/color
-  // + prompt defaults) and the transient apply-group form are scoped state
-  // here, seeded once from the init* props — the host remounts this component
-  // per opened/created type via a draft-token `{#key}`, so the draft inits
+  // Extracted from App.svelte (#14). The editable type draft (name/id/color)
+  // and the transient apply-group form are scoped state here, seeded once
+  // from the init* props — the host remounts this component per
+  // opened/created type via a draft-token `{#key}`, so the draft inits
   // cleanly without two-way binds. The save layer stays a `bind:` prop
   // because SchemaTreePane shares it. On save we emit onSaveType(payload);
   // App keeps persistence/refresh/confirm + the read-only type context. The
@@ -31,7 +28,6 @@
   // the per-row reveal and the new-draft slot share the same configuration.
 
   import { untrack } from "svelte";
-  import { surfaceForStrategy } from "@/lib/editor-core/promptResolution";
   import SchemaFieldInlineEditor, { type FieldDraftPayload } from "@/components/schema/SchemaFieldInlineEditor.svelte";
   import SchemaFieldRow from "@/components/schema/SchemaFieldRow.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
@@ -52,27 +48,22 @@
     type SchemaKind,
   } from "@/lib/utils/schemaTypeHelpers";
   import type {
-    AIPolicy,
     EntryTypeDefinition,
     MetadataFieldDefinition,
     MetadataSchema,
     MetadataSchemaLayer,
     MetadataSchemaOverview,
-    PromptCommit,
-    PromptContextStrategy,
-    PromptOutput,
   } from "@/lib/types";
 
   // Props (#14 — first runes component). The save layer + the inline-editor
   // reveal/drag state are two-way bound by the parent, so they're `$bindable`;
-  // everything else is one-way. The editable draft + prompt defaults below are
-  // `$state`, seeded once from the init* props (the host remounts per
-  // opened/created type via a draft-token `{#key}`).
+  // everything else is one-way. The editable draft below is `$state`, seeded
+  // once from the init* props (the host remounts per opened/created type via
+  // a draft-token `{#key}`).
   interface Props {
     initialName?: string;
     initialTypeId?: string;
     initialColor?: string | null;
-    initialPrompt?: PromptEntryTypeExtras | null;
     // Two-way bound by the parent:
     schemaTypeLayerId?: string;
     expandedSchemaFieldId?: string | null;
@@ -124,7 +115,6 @@
     initialName = "",
     initialTypeId = "",
     initialColor = null,
-    initialPrompt = null,
     schemaTypeLayerId = $bindable(""),
     expandedSchemaFieldId = $bindable(null),
     fieldDropTarget = $bindable(null),
@@ -170,34 +160,16 @@
     typeFieldSections.map((s) => s.group).filter((g): g is string => Boolean(g)),
   );
 
-  // --- Scoped draft + prompt-default state (#14 Step 4), seeded ONCE from the
-  // init* props. The host remounts this component per opened/created type (a
-  // draft-token `{#key}`), so capturing only the initial prop value is
-  // intentional — `untrack` makes that explicit and silences the
-  // state_referenced_locally lint for the deliberate one-time read. ---
-  const seed = untrack(() => {
-    const cs = initialPrompt?.context_strategy ?? null;
-    return {
-      name: initialName,
-      typeId: initialTypeId,
-      color: initialColor,
-      systemPrompt: initialPrompt?.system_prompt ?? "",
-      modelClass: initialPrompt?.model_class ?? "",
-      providerPolicy: (initialPrompt?.provider_policy ?? "") as AIPolicy | "",
-      contextTargetKind: typeof cs?.target?.kind === "string" ? (cs.target.kind as string) : "",
-      contextTargetRequired: Boolean(cs?.target?.required),
-      // The single writer-facing "surface" choice (ADR-0065), derived from the type's
-      // context_strategy via the shared `surfaceForStrategy`: a present strategy with no
-      // handler is a conversation, the inline handler resolves to its destination, and
-      // no strategy (a snippet, or a base with none) is "" = inherit.
-      outputSurface: (surfaceForStrategy(cs) ?? "") as "" | "cursor" | "selection" | "conversation",
-      // ADR-0065: a conversation prompt may declare a `commit` (turns it into an
-      // extract_to_node brainstorm). We author its presence + review mode; the
-      // `fields` allow-list has no UI and is preserved verbatim below.
-      commitEnabled: cs?.output?.commit != null,
-      commitReview: typeof cs?.output?.commit?.review === "string" ? (cs.output.commit.review as string) : "visual_diff",
-    };
-  });
+  // --- Scoped draft state (#14 Step 4), seeded ONCE from the init* props. The
+  // host remounts this component per opened/created type (a draft-token
+  // `{#key}`), so capturing only the initial prop value is intentional —
+  // `untrack` makes that explicit and silences the state_referenced_locally
+  // lint for the deliberate one-time read. ---
+  const seed = untrack(() => ({
+    name: initialName,
+    typeId: initialTypeId,
+    color: initialColor,
+  }));
 
   let draftName = $state(seed.name);
   // Identifier tracks the name (slug) on edit, but only for editable types; for
@@ -252,130 +224,32 @@
     applyGroupId = availableGroupEntries[0]?.[0] ?? "";
   }
 
-  // --- Prompt-kind defaults (scoped — #14 Step 4). Only the brief + output land
-  // have editing UI here; the rest round-trip through the draft so saving a
-  // prompt type preserves model_class / provider_policy / context target +
-  // scan surface set elsewhere. ---
-  let promptSystemPrompt = $state(seed.systemPrompt);
-  let promptModelClass = $state(seed.modelClass);
-  let promptProviderPolicy = $state<AIPolicy | "">(seed.providerPolicy);
-  let promptContextTargetKind = $state(seed.contextTargetKind);
-  let promptContextTargetRequired = $state(seed.contextTargetRequired);
-  let promptOutputSurface = $state(seed.outputSurface);
-  // ADR-0065: a conversation prompt's commit is authorable — its presence (does
-  // this chat offer a Commit button → is it a brainstorm) and its review mode. Its
-  // other properties (e.g. `commit.target`, ADR-0063 S1) have no UI here. We
-  // capture the whole initial commit and, on rebuild, override only what we
-  // author — so an edit here never strips a sub-key this editor doesn't yet
-  // surface (the invariant S2's review restored).
-  let promptCommitEnabled = $state(seed.commitEnabled);
-  let promptCommitReview = $state(seed.commitReview);
-  const promptCommitInitial: PromptCommit =
-    untrack(() => initialPrompt?.context_strategy?.output?.commit) ?? {};
-  // #957: on_accept (the roleplay character-stamp) has no authoring control yet, so
-  // capture it verbatim and re-emit it on save — the same round-trip that keeps
-  // commit's other sub-keys alive. Without this, editing a type that declares
-  // on_accept (roleplay) would silently drop the stamp.
-  const promptOnAcceptInitial = untrack(() => initialPrompt?.context_strategy?.output?.on_accept) ?? null;
-
   // --- Unsaved-changes tracking (#68) --------------------------------------
   // Field + group edits persist immediately through the parent; only the
-  // type-level draft (name/id/color + prompt defaults) is unsaved until Save
-  // Type. `baseline` starts at the seed and re-snapshots on a successful save,
-  // so `dirty` clears without a remount. The host binds `dirty` and warns
-  // before closing the pane while it's set.
+  // type-level draft (name/id/color) is unsaved until Save Type. `baseline`
+  // starts at the seed and re-snapshots on a successful save, so `dirty`
+  // clears without a remount. The host binds `dirty` and warns before closing
+  // the pane while it's set.
   let baseline = $state({ ...seed });
   function snapshotDraft() {
     return {
       name: draftName,
       typeId: draftTypeId,
       color: draftColor,
-      systemPrompt: promptSystemPrompt,
-      modelClass: promptModelClass,
-      providerPolicy: promptProviderPolicy,
-      contextTargetKind: promptContextTargetKind,
-      contextTargetRequired: promptContextTargetRequired,
-      outputSurface: promptOutputSurface,
-      commitEnabled: promptCommitEnabled,
-      commitReview: promptCommitReview,
     };
   }
   const isDirty = $derived(
-    draftName !== baseline.name ||
-      draftTypeId !== baseline.typeId ||
-      draftColor !== baseline.color ||
-      promptSystemPrompt !== baseline.systemPrompt ||
-      promptModelClass !== baseline.modelClass ||
-      promptProviderPolicy !== baseline.providerPolicy ||
-      promptContextTargetKind !== baseline.contextTargetKind ||
-      promptContextTargetRequired !== baseline.contextTargetRequired ||
-      promptOutputSurface !== baseline.outputSurface ||
-      promptCommitEnabled !== baseline.commitEnabled ||
-      promptCommitReview !== baseline.commitReview,
+    draftName !== baseline.name || draftTypeId !== baseline.typeId || draftColor !== baseline.color,
   );
   $effect(() => {
     dirty = isDirty;
   });
-
-  function buildPromptExtras(): PromptEntryTypeExtras | null {
-    const hasTarget = Boolean(promptContextTargetKind) || promptContextTargetRequired;
-    const isInline = promptOutputSurface === "cursor" || promptOutputSurface === "selection";
-    const isConversation = promptOutputSurface === "conversation";
-    // ADR-0065: a commit rides only on a conversation (the backend rejects it on the
-    // inline handler), and makes that conversation an `extract_to_node` brainstorm.
-    // Spread the captured initial commit first, then override the one property we
-    // author, so `target` (and any future sub-key) survives verbatim.
-    const commit: PromptCommit | null =
-      isConversation && promptCommitEnabled
-        ? { ...promptCommitInitial, review: promptCommitReview }
-        : null;
-    // on_accept rides only on the inline handler (#957), so a non-inline surface drops
-    // it — mirroring how a commit drops off a non-conversation surface.
-    const onAccept = isInline ? promptOnAcceptInitial : null;
-    // Map the surface to the stored handler + destination. A conversation with a commit
-    // is `extract_to_node`; without one it is a handler-less general chat — NO output
-    // block, just a (possibly empty) context_strategy, whose presence is what marks it
-    // invocable vs a snippet (ADR-0065). An inherited surface ("") emits no strategy.
-    const hasSurface = isInline || isConversation;
-    let output: PromptOutput | null = null;
-    if (isInline) {
-      output = {
-        handler: "inline",
-        ...(promptOutputSurface === "selection" ? { destination: "selection" } : {}),
-        ...(onAccept !== null ? { on_accept: onAccept } : {}),
-      };
-    } else if (isConversation && commit !== null) {
-      output = { handler: "extract_to_node", commit };
-    }
-    const contextStrategy: PromptContextStrategy | null = hasTarget || hasSurface
-      ? {
-          ...(hasTarget
-            ? {
-                target: {
-                  ...(promptContextTargetRequired ? { required: true } : {}),
-                  ...(promptContextTargetKind ? { kind: promptContextTargetKind } : {}),
-                },
-              }
-            : {}),
-          ...(output !== null ? { output } : {}),
-        }
-      : null;
-
-    const extras: PromptEntryTypeExtras = {
-      ...(promptSystemPrompt.trim() ? { system_prompt: promptSystemPrompt } : {}),
-      ...(promptModelClass.trim() ? { model_class: promptModelClass.trim() } : {}),
-      ...(promptProviderPolicy ? { provider_policy: promptProviderPolicy } : {}),
-      ...(contextStrategy ? { context_strategy: contextStrategy } : {}),
-    };
-    return Object.keys(extras).length ? extras : null;
-  }
 
   async function submitSaveType() {
     const saved = await onSaveType({
       typeId: draftTypeId.trim(),
       name: draftName,
       color: draftColor,
-      promptExtras: schemaTypeKind === "prompt" ? buildPromptExtras() : null,
     });
     // Re-baseline on success so `dirty` clears without a remount (a failed save
     // — e.g. a blocked rename — returns false and keeps the changes flagged).
@@ -720,42 +594,6 @@
     </section>
   {/if}
 
-  {#if schemaTypeKind === "prompt"}
-    <fieldset class="prompt-fieldset" disabled={schemaTypeReadonly}>
-      <legend>Prompt defaults</legend>
-      <label>
-        Brief
-        <textarea rows="4" bind:value={promptSystemPrompt} placeholder="Optional brief inherited by sub-types — sets the assistant's role."></textarea>
-      </label>
-      <label>
-        Output
-        <select bind:value={promptOutputSurface}>
-          <option value="">(inherit from parent)</option>
-          <option value="cursor">Continue at cursor</option>
-          <option value="selection">Revise selection</option>
-          <option value="conversation">Chat</option>
-        </select>
-        <small>Where AI responses for this prompt type land. Inherited from parent (Continuation / Revise / General) when set there — only override for a top-level sub-type that doesn't inherit one of the bases.</small>
-      </label>
-      {#if promptOutputSurface === "conversation"}
-        <label class="commit-toggle">
-          <input type="checkbox" bind:checked={promptCommitEnabled} />
-          Commit results back to the subject
-        </label>
-        {#if promptCommitEnabled}
-          <label class="commit-review">
-            Review as
-            <select bind:value={promptCommitReview}>
-              <option value="visual_diff">Visual diff</option>
-              <option value="replace">Replace</option>
-            </select>
-            <small>How the committed result is reviewed: a per-run diff against the current entry, or a plain current-to-proposed replacement.</small>
-          </label>
-        {/if}
-      {/if}
-    </fieldset>
-  {/if}
-
   {#if !schemaTypeReadonly}
     <div class="button-row">
       <button type="button" disabled={!schemaTypeLayerId || !draftTypeId.trim() || !draftName.trim()} onclick={submitSaveType}>Save Type</button>
@@ -1027,36 +865,5 @@
   }
   .group-apply-form .sfi-footer {
     flex-basis: 100%;
-  }
-
-  /* Prompt-defaults fieldset (prompt kinds only). */
-  .prompt-fieldset {
-    display: grid;
-    gap: 8px;
-    padding: 10px 12px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--surface);
-  }
-  .prompt-fieldset legend {
-    padding: 0 6px;
-    font-weight: 600;
-    color: var(--accent);
-  }
-  .prompt-fieldset textarea {
-    resize: vertical;
-    width: 100%;
-    box-sizing: border-box;
-    font-family: inherit;
-    min-height: 64px;
-  }
-  /* Commit block (ADR-0054 S3 / ADR-0065) — only shown under a conversation surface. */
-  .prompt-fieldset .commit-toggle {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .prompt-fieldset .commit-review {
-    margin-left: 22px;
   }
 </style>

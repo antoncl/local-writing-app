@@ -610,10 +610,8 @@ class PromptEntrySummary(BaseModel):
     entry_type: str = "prompt:base"
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     # Per-entry input declarations. Each prompt declares the parameters its
-    # template body references via `{{ input.<name> }}`. Used to be on the
-    # entry-type's PromptEntryTypeExtras; now lives where the template that
-    # uses it lives. The Type-level inputs field stays in the model for
-    # backwards-compatibility on read but is no longer consulted at runtime.
+    # template body references via `{{ input.<name> }}`. Instance-level only
+    # (ADR-0065 Amendment 2) — there is no type-level `inputs` to fall back to.
     inputs: list[PromptInputDefinition] = Field(default_factory=list)
     # The prompt's EFFECTIVE inputs (ADR-0061): its own `inputs` plus,
     # transitively, the inputs of every `prompt:snippet` it pulls in with a
@@ -635,11 +633,11 @@ class PromptEntrySummary(BaseModel):
     # Intentionally lenient — unknown ids simply never match.
     offer_on: list[str] = Field(default_factory=list)
     # The prompt's behavior contract (ADR-0065 S3): which OutputHandler runs its
-    # result, plus the optional commit / on_accept capability. Was on the
-    # entry-type's PromptEntryTypeExtras; now lives per-instance where the body
-    # that assumes it lives, so the sub-type taxonomy could collapse to
-    # {base, general, snippet}. Its `output` picks the handler; absent (or no
-    # handler) = a plain conversation. Invocability itself is the entry_type — a
+    # result, plus the optional commit / on_accept capability. Instance-level
+    # only (ADR-0065 Amendment 2) — the type carries no behavior bundle, so the
+    # sub-type taxonomy collapses to {base, general, snippet}. Its `output`
+    # picks the handler; absent (or no handler) = a plain conversation.
+    # Invocability itself is the entry_type — a
     # `prompt:snippet` is import-only — not the presence of this key (the writer
     # drops an empty one). Dispatch reads it here, never off the type;
     # round-tripped through front-matter on save exactly like `inputs`/`offer_on`.

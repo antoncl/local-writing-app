@@ -5,7 +5,6 @@ from typing import Any, Final, Literal, get_args
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.base import (
-    AIPolicy,
     MetadataValue,
     PromptInputType,
     SelectOption,
@@ -251,20 +250,6 @@ class PromptContextStrategy(BaseModel):
     output: PromptOutput | None = None
 
 
-class PromptEntryTypeExtras(BaseModel):
-    system_prompt: str | None = None
-    model_class: str | None = None
-    provider_policy: AIPolicy | None = None
-    inputs: list[PromptInputDefinition] = Field(default_factory=list)
-    context_strategy: PromptContextStrategy | None = None
-    # ADR-0060 §4: the base type's default role envelope. Un-roled prose in a
-    # prompt of this type is sent in a message of this role (`system`/`user`/
-    # `assistant`) instead of being discarded. Resolved up the `parent:` chain
-    # (nearest declaration wins), so concrete children inherit their base's
-    # envelope; unset anywhere in the chain falls back to `system`.
-    default_role: str | None = None
-
-
 class GroupMember(BaseModel):
     """One member field of a reusable group definition (L2 groups).
 
@@ -393,7 +378,6 @@ class EntryTypeDefinition(BaseModel):
     # Schemas keep their definition (so existing files still validate); UI
     # filters by this flag to hide the type from "Add entry" menus.
     deprecated: bool = False
-    prompt: PromptEntryTypeExtras | None = None
     # Reusable group applications (L2). Each expands into generated prefixed
     # fields in the effective schema. Authored on the type; persisted as-is.
     group_applications: list[GroupApplication] = Field(default_factory=list)

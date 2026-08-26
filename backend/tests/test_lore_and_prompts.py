@@ -12,7 +12,6 @@ from app.models import (
     EntryTypeDefinition,
     MetadataFieldDefinition,
     PromptContextStrategy,
-    PromptEntryTypeExtras,
     PromptInputDefinition,
     RenameMetadataFieldRequest,
     SaveLoreEntryRequest,
@@ -497,114 +496,48 @@ class LoreAndPromptTests(MetadataValidationBase):
             [tag.name for tag in self.service.read_known_tags().tags], ["Crew"]
         )
 
-    def test_prompt_subtype_round_trips_with_inputs_and_context_strategy(self) -> None:
-        layer_id = self._project_layer_id()
-        extras = PromptEntryTypeExtras(
-            system_prompt="You are a careful continuation engine.",
-            model_class="balanced",
-            provider_policy="cloud-allowed",
-            inputs=[
-                PromptInputDefinition(
-                    name="words", type="number", default=300, label="Words"
-                ),
-                PromptInputDefinition(
-                    name="beat", type="long_text", label="Beat instruction"
-                ),
-            ],
-            context_strategy=PromptContextStrategy(
-                target={"required": True, "kind": "manuscript"},
-                output={"handler": "inline"},
-            ),
-        )
-        schema = self.service.upsert_metadata_entry_type(
-            UpsertMetadataEntryTypeRequest(
-                layer_id=layer_id,
-                entry_type_id="continue_scene",
-                entry_type=EntryTypeDefinition(
-                    name="Continue Scene",
-                    kind="prompt",
-                    parent="prompt:base",
-                    prompt=extras,
-                ),
-            )
-        )
-
-        stored = schema.entry_types["prompt:continue_scene"]
-        assert stored.prompt is not None
-        self.assertEqual(
-            stored.prompt.system_prompt, "You are a careful continuation engine."
-        )
-        self.assertEqual(stored.prompt.model_class, "balanced")
-        self.assertEqual(stored.prompt.provider_policy, "cloud-allowed")
-        self.assertEqual([i.name for i in stored.prompt.inputs], ["words", "beat"])
-        assert stored.prompt.context_strategy is not None
-        assert stored.prompt.context_strategy.output is not None
-        self.assertEqual(stored.prompt.context_strategy.output.handler, "inline")
-        self.assertEqual(
-            stored.prompt.context_strategy.target,
-            {"required": True, "kind": "manuscript"},
-        )
-
-        on_disk = self.service._read_yaml(self.root / "metadata.schema.yaml")
-        disk_entry = on_disk["entry_types"]["prompt:continue_scene"]
-        self.assertEqual(disk_entry["kind"], "prompt")
-        self.assertEqual(disk_entry["prompt"]["model_class"], "balanced")
-        self.assertEqual(disk_entry["prompt"]["inputs"][0]["name"], "words")
-
-        reread = self.service.read_metadata_schema()
-        rer = reread.entry_types["prompt:continue_scene"]
-        assert rer.prompt is not None
-        self.assertEqual(
-            rer.prompt.system_prompt, "You are a careful continuation engine."
-        )
-        self.assertEqual([i.name for i in rer.prompt.inputs], ["words", "beat"])
-
     def test_prompt_inputs_round_trip_entity_ref_with_target(self) -> None:
         # Per #40 / decisions-inputs-fields-uniformity: entity_ref and
         # entity_ref_list inputs carry their picker constraint as a
         # NodePickerConfig under `target` — same wire shape as context_pick
         # inputs and entity_ref metadata fields' `picker_config`. The legacy
         # `{kind, entry_type}` shape was dropped pre-1.0 per the no-migrations
-        # policy.
-        layer_id = self._project_layer_id()
-        extras = PromptEntryTypeExtras(
-            inputs=[
-                PromptInputDefinition(
-                    name="character",
-                    type="entity_ref",
-                    label="Speaking character",
-                    target={"kinds": ["lore"], "entry_types": {"lore": ["character"]}},
-                    required=True,
-                ),
-                PromptInputDefinition(
-                    name="related",
-                    type="entity_ref_list",
-                    label="Related entries",
-                    target={"kinds": ["lore"]},
-                ),
-                PromptInputDefinition(
-                    name="words",
-                    type="number",
-                    default=300,
-                ),
-            ],
+        # policy. Inputs are instance-only (ADR-0065 Amendment 2), so this
+        # round-trips through a prompt entry's own `inputs`, not the type.
+        entry = self.service.create_prompt_entry(
+            CreatePromptEntryRequest(title="Character chat", entry_type="prompt:general")
         )
-        self.service.upsert_metadata_entry_type(
-            UpsertMetadataEntryTypeRequest(
-                layer_id=layer_id,
-                entry_type_id="character_chat",
-                entry_type=EntryTypeDefinition(
-                    name="Character chat",
-                    kind="prompt",
-                    parent="prompt:general",
-                    prompt=extras,
-                ),
-            )
+        saved = self.service.save_prompt_entry(
+            entry.id,
+            SavePromptEntryRequest(
+                title="Character chat",
+                body="",
+                base_revision=entry.revision,
+                entry_type="prompt:general",
+                metadata={},
+                inputs=[
+                    PromptInputDefinition(
+                        name="character",
+                        type="entity_ref",
+                        label="Speaking character",
+                        target={"kinds": ["lore"], "entry_types": {"lore": ["character"]}},
+                        required=True,
+                    ),
+                    PromptInputDefinition(
+                        name="related",
+                        type="entity_ref_list",
+                        label="Related entries",
+                        target={"kinds": ["lore"]},
+                    ),
+                    PromptInputDefinition(
+                        name="words",
+                        type="number",
+                        default=300,
+                    ),
+                ],
+            ),
         )
-
-        schema = self.service.read_metadata_schema()
-        inputs = schema.entry_types["prompt:character_chat"].prompt.inputs
-        by_name = {i.name: i for i in inputs}
+        by_name = {i.name: i for i in saved.inputs}
 
         self.assertEqual(by_name["character"].type, "entity_ref")
         self.assertEqual(
@@ -620,15 +553,12 @@ class LoreAndPromptTests(MetadataValidationBase):
         self.assertEqual(by_name["words"].type, "number")
         self.assertIsNone(by_name["words"].target)
 
-        # Reload from YAML to confirm the round-trip survives the disk hop.
-        on_disk = self.service._read_yaml(self.root / "metadata.schema.yaml")
-        disk_inputs = on_disk["entry_types"]["prompt:character_chat"]["prompt"][
-            "inputs"
-        ]
-        disk_by_name = {i["name"]: i for i in disk_inputs}
-        self.assertEqual(disk_by_name["character"]["type"], "entity_ref")
+        # Reload from disk to confirm the round-trip survives the file hop.
+        reread = self.service.read_prompt_entry(entry.id)
+        reread_by_name = {i.name: i for i in reread.inputs}
+        self.assertEqual(reread_by_name["character"].type, "entity_ref")
         self.assertEqual(
-            disk_by_name["character"]["target"],
+            reread_by_name["character"].target,
             {"kinds": ["lore"], "entry_types": {"lore": ["character"]}},
         )
 
@@ -648,16 +578,6 @@ class LoreAndPromptTests(MetadataValidationBase):
             self.assertEqual(schema.entry_types[type_id].parent, "prompt:base")
             self.assertFalse(schema.entry_types[type_id].abstract, msg=type_id)
         self.assertTrue(schema.entry_types["prompt:base"].abstract)
-
-        general_prompt = schema.entry_types["prompt:general"].prompt
-        assert general_prompt is not None
-        # A general chat has a context_strategy (marking it INVOCABLE, vs a snippet which
-        # has none) but no output block — no handler, so the response stays in the chat.
-        assert general_prompt.context_strategy is not None
-        self.assertIsNone(general_prompt.context_strategy.output)
-        self.assertEqual(general_prompt.default_role, "system")
-
-        self.assertIsNone(schema.entry_types["prompt:snippet"].prompt)
 
         # The `inline` handler (the old `continuation` disposition), reused on a
         # `general` instance.
@@ -773,57 +693,6 @@ class LoreAndPromptTests(MetadataValidationBase):
         self.assertEqual(roleplay_output.handler, "inline")
         self.assertEqual(roleplay_output.on_accept.mark, "character")
         self.assertEqual(roleplay_output.on_accept.from_input, "character")
-
-    def test_concrete_subtype_inherits_output_from_abstract_base(self) -> None:
-        """A user creates `bob extends general`; the output block is inherited."""
-        layer_id = self._project_layer_id()
-        schema = self.service.upsert_metadata_entry_type(
-            UpsertMetadataEntryTypeRequest(
-                layer_id=layer_id,
-                entry_type_id="bob",
-                entry_type=EntryTypeDefinition(
-                    name="Bob",
-                    kind="prompt",
-                    parent="prompt:general",
-                    prompt=PromptEntryTypeExtras(system_prompt="You are Bob."),
-                ),
-            )
-        )
-
-        bob_prompt = schema.entry_types["prompt:bob"].prompt
-        assert bob_prompt is not None
-        # bob inherits general's context_strategy (present ⇒ invocable) with no output.
-        assert bob_prompt.context_strategy is not None
-        self.assertIsNone(bob_prompt.context_strategy.output)  # general: no handler
-        self.assertEqual(bob_prompt.system_prompt, "You are Bob.")
-
-    def test_saved_general_prompt_stays_invocable_without_an_output_block(self) -> None:
-        # ADR-0065: a `general` chat is marked INVOCABLE by the presence of a
-        # `context_strategy` (vs a `snippet`, which carries no prompt block at all) —
-        # NOT by an output block; it has no handler. The entry-type save path dumps
-        # with exclude_unset/exclude_none AND the read path resolves inheritance, so
-        # this pins that an EMPTY context_strategy survives the whole round-trip —
-        # without it a saved general prompt would collapse into a snippet, invocable
-        # nowhere.
-        layer_id = self._project_layer_id()
-        self.service.upsert_metadata_entry_type(
-            UpsertMetadataEntryTypeRequest(
-                layer_id=layer_id,
-                entry_type_id="chatty",
-                entry_type=EntryTypeDefinition(
-                    name="Chatty",
-                    kind="prompt",
-                    parent="prompt:base",
-                    prompt=PromptEntryTypeExtras(context_strategy=PromptContextStrategy()),
-                ),
-            )
-        )
-        reread = self.service.read_metadata_schema().entry_types["prompt:chatty"]
-        assert reread.prompt is not None
-        # context_strategy present ⇒ invocable (a conversation), not a snippet; no output.
-        self.assertIsNotNone(reread.prompt.context_strategy)
-        assert reread.prompt.context_strategy is not None
-        self.assertIsNone(reread.prompt.context_strategy.output)
 
     def test_output_headless_round_trips_and_stays_off_disk_when_unset(self) -> None:
         # ADR-0062 D3: `headless` is a sibling axis of `handler`, modelled
@@ -971,145 +840,6 @@ class LoreAndPromptTests(MetadataValidationBase):
                     entry_type=EntryTypeDefinition(name="Bogus", kind="bogus"),
                 )
             )
-
-    def test_prompt_extras_rejected_on_non_prompt_kind(self) -> None:
-        layer_id = self._project_layer_id()
-        with self.assertRaisesRegex(ProjectServiceError, "only valid on prompt"):
-            self.service.upsert_metadata_entry_type(
-                UpsertMetadataEntryTypeRequest(
-                    layer_id=layer_id,
-                    entry_type_id="faction",
-                    entry_type=EntryTypeDefinition(
-                        name="Faction",
-                        kind="lore",
-                        parent="lore:base",
-                        prompt=PromptEntryTypeExtras(system_prompt="Nope"),
-                    ),
-                )
-            )
-
-    def test_prompt_input_select_requires_options(self) -> None:
-        layer_id = self._project_layer_id()
-        with self.assertRaisesRegex(ProjectServiceError, "no options"):
-            self.service.upsert_metadata_entry_type(
-                UpsertMetadataEntryTypeRequest(
-                    layer_id=layer_id,
-                    entry_type_id="bad_prompt",
-                    entry_type=EntryTypeDefinition(
-                        name="Bad Prompt",
-                        kind="prompt",
-                        parent="prompt:base",
-                        prompt=PromptEntryTypeExtras(
-                            inputs=[
-                                PromptInputDefinition(
-                                    name="tone", type="select", options=[]
-                                )
-                            ],
-                        ),
-                    ),
-                )
-            )
-
-    def test_prompt_duplicate_input_name_rejected(self) -> None:
-        layer_id = self._project_layer_id()
-        with self.assertRaisesRegex(ProjectServiceError, "duplicate prompt input"):
-            self.service.upsert_metadata_entry_type(
-                UpsertMetadataEntryTypeRequest(
-                    layer_id=layer_id,
-                    entry_type_id="dup_prompt",
-                    entry_type=EntryTypeDefinition(
-                        name="Dup Prompt",
-                        kind="prompt",
-                        parent="prompt:base",
-                        prompt=PromptEntryTypeExtras(
-                            inputs=[
-                                PromptInputDefinition(name="x"),
-                                PromptInputDefinition(name="x"),
-                            ],
-                        ),
-                    ),
-                )
-            )
-
-    def test_prompt_child_inherits_system_prompt_from_parent(self) -> None:
-        layer_id = self._project_layer_id()
-        self.service.upsert_metadata_entry_type(
-            UpsertMetadataEntryTypeRequest(
-                layer_id=layer_id,
-                entry_type_id="house_prompt",
-                entry_type=EntryTypeDefinition(
-                    name="House Prompt",
-                    kind="prompt",
-                    parent="prompt:base",
-                    abstract=True,
-                    prompt=PromptEntryTypeExtras(
-                        system_prompt="House style: terse, no purple prose.",
-                        model_class="balanced",
-                    ),
-                ),
-            )
-        )
-        schema = self.service.upsert_metadata_entry_type(
-            UpsertMetadataEntryTypeRequest(
-                layer_id=layer_id,
-                entry_type_id="house_continue",
-                entry_type=EntryTypeDefinition(
-                    name="House Continue",
-                    kind="prompt",
-                    parent="prompt:house_prompt",
-                    prompt=PromptEntryTypeExtras(
-                        inputs=[
-                            PromptInputDefinition(
-                                name="words", type="number", default=200
-                            )
-                        ],
-                    ),
-                ),
-            )
-        )
-
-        child = schema.entry_types["prompt:house_continue"]
-        assert child.prompt is not None
-        self.assertEqual(
-            child.prompt.system_prompt, "House style: terse, no purple prose."
-        )
-        self.assertEqual(child.prompt.model_class, "balanced")
-        self.assertEqual([i.name for i in child.prompt.inputs], ["words"])
-
-    def test_prompt_extras_preserved_on_partial_update(self) -> None:
-        layer_id = self._project_layer_id()
-        self.service.upsert_metadata_entry_type(
-            UpsertMetadataEntryTypeRequest(
-                layer_id=layer_id,
-                entry_type_id="my_prompt",
-                entry_type=EntryTypeDefinition(
-                    name="My Prompt",
-                    kind="prompt",
-                    parent="prompt:base",
-                    prompt=PromptEntryTypeExtras(
-                        system_prompt="Keep it short.",
-                        inputs=[PromptInputDefinition(name="topic")],
-                    ),
-                ),
-            )
-        )
-        schema = self.service.upsert_metadata_entry_type(
-            UpsertMetadataEntryTypeRequest(
-                layer_id=layer_id,
-                entry_type_id="my_prompt",
-                entry_type=EntryTypeDefinition(
-                    name="Renamed Prompt",
-                    kind="prompt",
-                    parent="prompt:base",
-                ),
-            )
-        )
-
-        stored = schema.entry_types["prompt:my_prompt"]
-        self.assertEqual(stored.name, "Renamed Prompt")
-        assert stored.prompt is not None
-        self.assertEqual(stored.prompt.system_prompt, "Keep it short.")
-        self.assertEqual([i.name for i in stored.prompt.inputs], ["topic"])
 
     def test_prompt_entry_inputs_round_trip(self) -> None:
         # Inputs live on the prompt entry (not the entry-type) — declared and

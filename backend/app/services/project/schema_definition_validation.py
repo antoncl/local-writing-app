@@ -1,10 +1,10 @@
 """Definition-validation slice of the metadata schema (#76 complexity split).
 
 Soft-validates a fully-resolved `MetadataSchema` — entry-type identity (#77),
-parent coherence, group-application and field references, prompt-output
-disposition (ADR-0054), and list item shapes (#698). Every check is a SOFT
-error (returned, never raised): a hand-edited layer must stay readable so the
-save paths can surface the problems rather than 500 on every read.
+parent coherence, group-application and field references, and list item
+shapes (#698). Every check is a SOFT error (returned, never raised): a
+hand-edited layer must stay readable so the save paths can surface the
+problems rather than 500 on every read.
 
 Split out of `schema.py` to burn down `_validate_metadata_schema_definition`
 (C901=27) and keep `schema.py` under the file-size cap. The orchestrator stays
@@ -20,10 +20,7 @@ from app.models import (
     MetadataFieldDefinition,
     MetadataSchema,
 )
-from app.services.project.schema_validation import (
-    ENTRY_TYPE_FQN_RE,
-    validate_prompt_output,
-)
+from app.services.project.schema_validation import ENTRY_TYPE_FQN_RE
 
 
 def _entry_type_identity_errors(entry_type_id: str, entry_type, schema: MetadataSchema) -> list[str]:
@@ -74,34 +71,6 @@ def _entry_type_group_application_errors(entry_type_id: str, entry_type, schema:
         for application in entry_type.group_applications
         if application.group_id not in schema.groups
     ]
-
-
-def _entry_type_prompt_errors(entry_type_id: str, entry_type, known_entry_types: set[str]) -> list[str]:
-    """Prompt-config coherence for one type: a prompt only rides on `kind ==
-    'prompt'`, inputs are unique and (for select) populated, and the output
-    disposition passes ADR-0054 soft-validation. `known_entry_types` lets the
-    output validator resolve a `commit.target` (ADR-0063) against the schema."""
-    if entry_type.prompt is None:
-        return []
-    if entry_type.kind != "prompt":
-        return [f"Entry type {entry_type_id} has prompt configuration but kind is {entry_type.kind}."]
-    errors: list[str] = []
-    seen_inputs: set[str] = set()
-    for input_def in entry_type.prompt.inputs:
-        if input_def.name in seen_inputs:
-            errors.append(f"Entry type {entry_type_id} has duplicate prompt input '{input_def.name}'.")
-        seen_inputs.add(input_def.name)
-        if input_def.type == "select" and not input_def.options:
-            errors.append(f"Entry type {entry_type_id} input '{input_def.name}' is type select but has no options.")
-    # ADR-0065 (+ ADR-0054 §2, #954): the prompt's `output` — its `handler` key,
-    # inline `destination`, optional `commit` (extract_to_node only), and optional
-    # `on_accept` mark-stamp (inline only). Soft-validated in `schema_validation`
-    # (co-located with the closed vocabularies).
-    strategy = entry_type.prompt.context_strategy
-    errors.extend(
-        validate_prompt_output(entry_type_id, strategy.output if strategy else None, known_entry_types)
-    )
-    return errors
 
 
 def _field_shape_errors(field_id: str, field: MetadataFieldDefinition, schema: MetadataSchema) -> list[str]:
@@ -172,9 +141,9 @@ class MetadataSchemaValidationMixin:
     def _validate_metadata_schema_definition(self, schema: MetadataSchema) -> list[str]:
         """Soft-validate a fully-resolved metadata schema. Returns the flat error
         list in a stable order — identity, then field references, then group
-        applications, then prompt config, then field shapes — so callers that
-        join them into a 422 message stay deterministic. Soft, never raising: a
-        hand-edited layer stays readable and the save paths surface the errors."""
+        applications, then field shapes — so callers that join them into a 422
+        message stay deterministic. Soft, never raising: a hand-edited layer
+        stays readable and the save paths surface the errors."""
         errors: list[str] = []
         for entry_type_id, entry_type in schema.entry_types.items():
             errors.extend(_entry_type_identity_errors(entry_type_id, entry_type, schema))
@@ -182,9 +151,6 @@ class MetadataSchemaValidationMixin:
             errors.extend(_entry_type_field_reference_errors(entry_type_id, entry_type, schema))
         for entry_type_id, entry_type in schema.entry_types.items():
             errors.extend(_entry_type_group_application_errors(entry_type_id, entry_type, schema))
-        known_entry_types = set(schema.entry_types)
-        for entry_type_id, entry_type in schema.entry_types.items():
-            errors.extend(_entry_type_prompt_errors(entry_type_id, entry_type, known_entry_types))
         for field_id, field in schema.fields.items():
             errors.extend(_field_shape_errors(field_id, field, schema))
         return errors

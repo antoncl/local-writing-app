@@ -3,9 +3,10 @@
 Templates are Jinja2 with one custom block-level directive:
 
 - `{% role "system" %}…{% endrole %}` — marks the message role for the wrapped
-  content. An override for multi-turn / mixed-role prompts (ADR-0060 §4): text
-  outside any role block is homed to the base type's `default_role` (passed to
-  `render_template`), not discarded, so a prose-only prompt just works.
+  content. An override for multi-turn / mixed-role prompts (ADR-0060 §4
+  Amendment 2): text outside any role block is homed to `default_role` (passed
+  to `render_template`, fixed to `system`), not discarded, so a prose-only
+  prompt just works.
 
 `{% cache_break %}` is **retired** (ADR-0060 §5): the author no longer places cache
 breakpoints. Caching is a provider-neutral volatility ordering the send path
@@ -133,10 +134,11 @@ def render_template(
     variables. Author-mistake warnings (e.g. unknown role names) are collected on
     `RenderedTemplate.warnings` rather than raised.
 
-    `default_role` (ADR-0060 §4) is the prompt base type's default envelope: text
-    outside any `{% role %}` block is emitted as a message of that role, in
-    document order, instead of being discarded. `None` (the caller declared no
-    default) keeps the legacy behaviour — loose text is ignored with a warning.
+    `default_role` (ADR-0060 §4 Amendment 2) is the caller-supplied envelope
+    (the send path always passes the fixed `system`): text outside any
+    `{% role %}` block is emitted as a message of that role, in document
+    order, instead of being discarded. `None` (the caller declared no default)
+    keeps the legacy behaviour — loose text is ignored with a warning.
     """
     env = env or create_environment()
     template = env.from_string(source)

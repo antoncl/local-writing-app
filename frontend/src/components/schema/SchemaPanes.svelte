@@ -46,7 +46,6 @@
     MetadataFieldDefinition,
     MetadataFieldType,
     MetadataValue,
-    PromptEntryTypeExtras,
     SelectOption,
   } from "@/lib/types";
 
@@ -94,9 +93,9 @@
   // so closing the pane warns first (#68).
   let schemaTypeDirty = $state(false);
   // The save layer is shared with SchemaTreePane, so it stays here; the rest of
-  // the type draft (name/id/color + prompt defaults) lives inside
-  // SchemaTypeEditor, which we remount per opened/created type via the draft
-  // token below and seed from the schemaTypeInit* props (#14 Step 4).
+  // the type draft (name/id/color) lives inside SchemaTypeEditor, which we
+  // remount per opened/created type via the draft token below and seed from
+  // the schemaTypeInit* props (#14 Step 4).
   let schemaTypeLayerId = $state("");
   let schemaTypeKind: SchemaKind = $state("lore");
   let schemaTypeParent = $state("");
@@ -109,7 +108,6 @@
   let schemaTypeInitName = $state("");
   let schemaTypeInitId = $state("");
   let schemaTypeInitColor: string | null = $state(null);
-  let schemaTypeInitPrompt: PromptEntryTypeExtras | null = $state(null);
   let schemaTypeDraftToken = $state(0);
 
   // --- Field-row drag-reorder (own fields of a type) --------------------------
@@ -276,7 +274,6 @@
     schemaTypeInitName = "";
     schemaTypeInitId = "";
     schemaTypeInitColor = null;
-    schemaTypeInitPrompt = null;
     schemaTypeDraftToken += 1;
     // A new-type draft is a schema-tree action with no owning editor — the null
     // host clears any stale subordinate link so it isn't auto-closed with an
@@ -306,7 +303,6 @@
     // Seed own-color (pre-inheritance). null = "inherit from parent", which the
     // SwatchPicker renders as the "None" cell.
     schemaTypeInitColor = entryType.own_color ?? null;
-    schemaTypeInitPrompt = entryType.prompt ?? null;
     schemaTypeDraftToken += 1;
     openSubordinatePane("schema_type", ownerPaneId, () => closeSchemaPane("schema_type"));
   }
@@ -640,8 +636,8 @@
     });
   }
 
-  // SchemaTypeEditor owns the editable draft (name/id/color + prompt defaults)
-  // and emits it here; we combine it with the read-only context we still hold
+  // SchemaTypeEditor owns the editable draft (name/id/color) and emits it
+  // here; we combine it with the read-only context we still hold
   // (kind/parent/abstract/readonly/selected) + the bound save layer.
   async function saveSchemaType(payload: TypeDraftPayload): Promise<boolean> {
     if (!schemaTypeLayerId) return false;
@@ -665,7 +661,6 @@
         abstract: schemaTypeAbstract,
         fields: previousTypeId ? (existing?.own_fields ?? existing?.fields ?? []) : [],
         color: payload.color || null,
-        ...(schemaTypeKind === "prompt" ? { prompt: payload.promptExtras } : {}),
       };
       if (previousTypeId && previousTypeId !== nextTypeId) {
         setStatus("Renaming detail types is not available yet");
@@ -838,7 +833,6 @@
     initialName={schemaTypeInitName}
     initialTypeId={schemaTypeInitId}
     initialColor={schemaTypeInitColor}
-    initialPrompt={schemaTypeInitPrompt}
     bind:schemaTypeLayerId
     bind:expandedSchemaFieldId
     bind:fieldDropTarget

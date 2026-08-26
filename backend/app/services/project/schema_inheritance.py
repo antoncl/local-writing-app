@@ -187,8 +187,7 @@ class MetadataSchemaInheritanceMixin:
         self, next_entry_type: dict[str, Any], parent_def: dict[str, Any] | None
     ) -> None:
         """Inherit scalar presentation/body attributes from the resolved parent
-        (child wins on any it declares); deep-merge the parent's prompt config
-        under the child's."""
+        (child wins on any it declares)."""
         if not isinstance(parent_def, dict):
             return
         for inheritable in (
@@ -204,10 +203,6 @@ class MetadataSchemaInheritanceMixin:
         ):
             if inheritable not in next_entry_type and inheritable in parent_def:
                 next_entry_type[inheritable] = parent_def[inheritable]
-        parent_prompt = parent_def.get("prompt")
-        if isinstance(parent_prompt, dict):
-            child_prompt = next_entry_type.get("prompt") if isinstance(next_entry_type.get("prompt"), dict) else {}
-            next_entry_type["prompt"] = {**deepcopy(parent_prompt), **deepcopy(child_prompt)}
 
     def _merge_entry_type_field_overrides(
         self, next_entry_type: dict[str, Any], parent_def: dict[str, Any] | None

@@ -263,10 +263,10 @@ class AIPreviewRequest(BaseModel):
     # prompt-editor preview pane) — token counts still come back, only
     # the cost/cache fields are omitted.
     assistant_id: str | None = None
-    # ADR-0060 §4: the prompt's entry_type FQN. Lets build_preview resolve the
-    # base type's `default_role` envelope for un-roled prose; empty (the default)
-    # falls back to `system`. Sent by the author preview pane, which knows the
-    # type it is editing.
+    # ADR-0060 §4 Amendment 2: the prompt's entry_type FQN. Un-roled prose
+    # always homes to the fixed `system` role now; kept as plumbing in case a
+    # future amendment reintroduces a per-type envelope. Sent by the author
+    # preview pane, which knows the type it is editing.
     entry_type: str = ""
 
 
@@ -466,8 +466,8 @@ class AIGenerateRequest(BaseModel):
     model: str | None = None
     assistant_id: str | None = None
     max_tokens: int | None = None
-    # ADR-0060 §4: the prompt's entry_type FQN, for the base type's `default_role`
-    # envelope (see AIPreviewRequest.entry_type). Empty falls back to `system`.
+    # ADR-0060 §4 Amendment 2: the prompt's entry_type FQN (see
+    # AIPreviewRequest.entry_type). Un-roled prose always homes to `system`.
     entry_type: str = ""
 
 

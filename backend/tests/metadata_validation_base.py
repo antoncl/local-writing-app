@@ -6,10 +6,7 @@ from tempfile import TemporaryDirectory
 
 from layer_fixtures import declare_full_chain
 
-from app.models import (
-    CreateSceneRequest,
-    MetadataSchema,
-)
+from app.models import CreateSceneRequest
 from app.services.project_service import ProjectService
 
 
@@ -37,29 +34,6 @@ class MetadataValidationBase(unittest.TestCase):
 
     def _set_projects_base_folder(self, path: Path) -> None:
         declare_full_chain(self.service, self.root, path)
-
-    def _schema_with_output(self, output: object) -> MetadataSchema:
-        prompt: dict[str, object] = {
-            "name": "Custom",
-            "kind": "prompt",
-            "parent": "prompt:base",
-        }
-        if output is not None:
-            prompt["prompt"] = {"context_strategy": {"output": output}}
-        else:
-            prompt["prompt"] = {"context_strategy": {}}
-        return MetadataSchema.model_validate(
-            {
-                "entry_types": {
-                    "prompt:base": {"name": "Prompt", "kind": "prompt"},
-                    "prompt:custom": prompt,
-                },
-                "fields": {},
-            }
-        )
-
-    def _schema_with_output_handler(self, handler: object) -> MetadataSchema:
-        return self._schema_with_output(None if handler is None else {"handler": handler})
 
     def _first_scene_id(self) -> str:
         first_scene_path = next((self.root / "scenes").glob("*.md"))

@@ -815,14 +815,6 @@ export type PromptContextStrategy = {
   output?: PromptOutput | null;
 };
 
-export type PromptEntryTypeExtras = {
-  system_prompt?: string | null;
-  model_class?: string | null;
-  provider_policy?: AIPolicy | null;
-  inputs?: PromptInputDefinition[];
-  context_strategy?: PromptContextStrategy | null;
-};
-
 export type EntryBodyEditor = "wysiwyg" | "code";
 export type EntryBodyLanguage = "markdown" | "jinja2" | "plain";
 export type BodyShape = "prose" | "code" | "chat" | "none" | "view";
@@ -858,7 +850,6 @@ export type EntryTypeDefinition = {
   own_color?: string | null;
   default_body?: string;
   default_inputs?: PromptInputDefinition[];
-  prompt?: PromptEntryTypeExtras | null;
   // Reusable group applications (L2). Each expands into generated prefixed
   // fields in the effective schema.
   group_applications?: GroupApplication[];
@@ -1199,8 +1190,8 @@ export type {
 
 // AI wire types live in ./aiTypes (#763.5) — extracted to keep this barrel
 // under the file-size cap; re-exported so `@/lib/types` stays the one import
-// surface. `AIPolicy` is imported above for local use (ProjectInfo,
-// PromptEntryTypeExtras) and re-exported here alongside the rest.
+// surface. `AIPolicy` is imported above for local use (ProjectInfo) and
+// re-exported here alongside the rest.
 export type {
   AIPolicy,
   AIHealthResponse,

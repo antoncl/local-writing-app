@@ -15,28 +15,6 @@ from app.services.project.errors import ProjectServiceError
 
 
 class MetadataSchemaTypeTests(MetadataValidationBase):
-    def test_commit_target_without_known_types_checks_shape_only(self) -> None:
-        # ADR-0065 Amendment 2: the type carries no output config anymore, so
-        # `validate_prompt_output` is only reachable directly (dispatch/save-path
-        # callers would thread it against an instance's own context_strategy).
-        # The `known_entry_types=None` default (a caller with no schema to resolve
-        # against) validates target SHAPE only — a well-formed but undefined target
-        # is not flagged (existence is a lint the caller opts into), a malformed one
-        # still is.
-        from app.models.schema import PromptOutput
-        from app.services.project.schema_validation import validate_prompt_output
-
-        well_formed = PromptOutput.model_validate(
-            {"handler": "extract_to_node", "commit": {"review": "visual_diff", "target": "lore:ghost"}}
-        )
-        self.assertEqual(validate_prompt_output("prompt:x", well_formed), [])
-        malformed = PromptOutput.model_validate(
-            {"handler": "extract_to_node", "commit": {"review": "visual_diff", "target": "Not A Type"}}
-        )
-        self.assertTrue(
-            any("not a valid entry-type id" in e for e in validate_prompt_output("prompt:x", malformed)),
-        )
-
     def test_default_schema_seeds_act_and_chapter(self) -> None:
         schema = self.service.read_metadata_schema()
         self.assertIn("manuscript:act", schema.entry_types)

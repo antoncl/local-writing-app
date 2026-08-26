@@ -1049,8 +1049,10 @@ class PreviewCostEstimateTests(unittest.TestCase):
 
 class DefaultRoleResolutionTests(unittest.TestCase):
     """ADR-0060 §4 Amendment 2: a prompt type carries no `default_role` (or any
-    other behavior config) anymore, so `_resolve_default_role` is a fixed
-    constant — always "system", regardless of entry_type or schema state."""
+    other behavior config), so `build_preview` homes un-roled prose to the
+    fixed literal "system" it passes to `render_template` — no per-type or
+    per-entry_type resolution step exists (`_resolve_default_role` was deleted,
+    #1426; it always returned "system" regardless of its args)."""
 
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
@@ -1060,19 +1062,9 @@ class DefaultRoleResolutionTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
-    def _resolve(self, entry_type: str) -> str:
-        from app.services.ai.preview import _resolve_default_role
-
-        schema = self.service.read_metadata_schema()
-        return _resolve_default_role(self.service, schema, entry_type)
-
-    def test_always_resolves_to_system(self) -> None:
-        for entry_type in ("", "prompt:general", "prompt:snippet", "prompt:nonesuch"):
-            self.assertEqual(self._resolve(entry_type), "system", entry_type)
-
     def test_build_preview_homes_prose_only_to_default_role(self) -> None:
-        # End-to-end through the render path: a prose-only prompt with a named
-        # entry_type produces one system message; nothing is discarded.
+        # End-to-end through the render path: a prose-only prompt produces one
+        # system message; nothing is discarded.
         from app.services.ai.preview import PreviewRequest, build_preview
 
         rendered, _ = build_preview(
@@ -1085,7 +1077,6 @@ class DefaultRoleResolutionTests(unittest.TestCase):
                 text_before="",
                 text_after="",
                 commit=False,
-                entry_type="prompt:general",
             ),
         )
         self.assertEqual(len(rendered.messages), 1)

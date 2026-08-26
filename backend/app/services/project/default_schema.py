@@ -47,39 +47,29 @@ BUILTIN_COMPUTED_FUNCTIONS: tuple[str, ...] = (
 )
 COMPUTED_FUNCTIONS: tuple[str, ...] = AUTHORABLE_COMPUTED_FUNCTIONS + BUILTIN_COMPUTED_FUNCTIONS
 
-# The closed vocabulary of output HANDLER keys — `context_strategy.output.handler`,
-# the registry key that selects which OutputHandler runs a prompt's result (ADR-0065).
-# This replaces the old `output.kind` disposition enum: `kind` named WHERE the output
-# landed and everything else (source, review, activation) was derived from it; the
-# handler now OWNS that behaviour, and the key just names which one. The frontend
-# `OutputHandlerKey` union mirrors this. The backend validates a saved prompt type's
-# `output.handler` against this list (`_validate_metadata_schema_definition`).
+# `context_strategy.output.handler` (ADR-0065) is the registry key that selects
+# which OutputHandler runs a prompt's result — `inline` (stream a suggestion into
+# the prose editor), `extract_to_node` (a brainstorm chat whose commit becomes a
+# reviewable node patch), or `finalize_scene` (a scene action, not an
+# editor-surface prompt — ADR-0070 S3's roleplay finalize/cleanup projection,
+# invoked from its own modal, never the slash menu). This replaces the old
+# `output.kind` disposition enum: `kind` named WHERE the output landed and
+# everything else (source, review, activation) was derived from it; the handler
+# now OWNS that behaviour, and the key just names which one.
 #
-# An empty/unset `handler` is legitimate — a prompt with no output handler stays in the
-# conversation (the `general` and `snippet` bases). A brainstorm is not a special kind
-# but `extract_to_node` + a `commit` capability (`PromptCommit`); the built-in brainstorm
-# prompts below are `extract_to_node` with a `commit` block.
-HANDLER_KEYS: tuple[str, ...] = (
-    "inline",
-    "extract_to_node",
-    # A scene action, not an editor-surface prompt (ADR-0070 S3): the roleplay
-    # finalize/cleanup projection. Recognized here (so it validates and lists in
-    # the finalize picker), but deliberately absent from the frontend editor
-    # handler registry — it is invoked from its own modal, never the slash menu.
-    "finalize_scene",
-)
-
-# The inline handler's destination — WHERE in the prose editor it streams (ADR-0065 §3):
-# `cursor` continues at the caret (the old `append_to_body`), `selection` replaces the
-# selected prose (the old `replace_selection`). A destination-sub-choice of one handler,
-# not two handlers. Meaningful only under the `inline` handler; unset defaults to cursor.
-INLINE_DESTINATIONS: tuple[str, ...] = ("cursor", "selection")
-
-# The closed set of commit review modes (ADR-0054 §2 `commit.review`): `visual_diff`
-# is the per-run adopt against the current entry; `replace` is a plain
-# current→proposed swap (a from-scratch regenerate with no meaningful run-diff, e.g.
-# a scene summary). Validated on save alongside `HANDLER_KEYS`.
-COMMIT_REVIEW_MODES: tuple[str, ...] = ("visual_diff", "replace")
+# An empty/unset `handler` is legitimate — a prompt with no output handler stays in
+# the conversation (the `general` and `snippet` bases). A brainstorm is not a
+# special kind but `extract_to_node` + a `commit` capability (`PromptCommit`); the
+# built-in brainstorm prompts below are `extract_to_node` with a `commit` block.
+#
+# None of this — `handler`, the inline `destination` (`cursor`/`selection`), or
+# `commit.review` (`visual_diff`/`replace`) — is validated at rest: the backend
+# parses `context_strategy.output` and `model_dump`s it straight through
+# (`validate_prompt_output` was deleted, #1425). The frontend handler registry
+# (`OutputHandlerKey` in editor-core/outputHandlers.ts) owns the closed
+# vocabulary and fails closed on an unknown value — a prompt with an unrecognized
+# `handler` resolves to no surface, so it simply isn't invocable, not a
+# save-time rejection.
 
 DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
     "version": 1,

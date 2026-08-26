@@ -230,8 +230,9 @@ def _home_loose_text(
 ) -> None:
     """Home un-roled text (ADR-0060 §4).
 
-    Text outside any `{% role %}` block lands in a message of the base type's
-    `default_role`, in document order, instead of being discarded. When no
+    Text outside any `{% role %}` block lands in a message of the
+    caller-supplied `default_role` (`build_preview` always passes the fixed
+    literal "system"), in document order, instead of being discarded. When no
     default is declared (`default_role is None`) the legacy behaviour stands: the
     text is ignored with a warning.
     """

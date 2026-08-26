@@ -197,11 +197,6 @@ def _extract_undefined_ref(message: str) -> tuple[str | None, str | None]:
     return None, None
 
 
-def _extract_undefined_name(message: str) -> str | None:
-    """Back-compat leaf-only accessor (see :func:`_extract_undefined_ref`)."""
-    return _extract_undefined_ref(message)[0]
-
-
 def _namespace_for_object_type(context: dict[str, Any], obj_type: str | None) -> str | None:
     """Reverse-map a Jinja object type name to its render-context namespace.
 
@@ -228,19 +223,6 @@ def _namespace_for_object_type(context: dict[str, Any], obj_type: str | None) ->
     return None
 
 
-def _resolve_default_role(project_service, schema: Any, entry_type: str) -> str:
-    """The default role envelope for un-roled prose (ADR-0060 §4 Amendment 2).
-
-    A prompt type carries no behavior config, so there is nothing to resolve —
-    un-roled prose always homes to `system`, the same envelope every type used
-    to inherit when it declared no `default_role` of its own. Kept as a
-    function (rather than inlining the constant at the call site) so the
-    `entry_type`/`schema` plumbing stays in one place if a future amendment
-    reintroduces per-type behavior.
-    """
-    return "system"
-
-
 @dataclass
 class PreviewRequest:
     """The inputs to one preview render — everything except the project service.
@@ -259,10 +241,6 @@ class PreviewRequest:
     selection: str = ""
     resolution_scene_id: str = ""
     subject: str = ""
-    # ADR-0060 §4 Amendment 2: the prompt's entry_type FQN. Un-roled prose always
-    # homes to the fixed `system` role now (no type-level envelope to resolve),
-    # so this is plumbing for a future amendment rather than a live lookup key.
-    entry_type: str = ""
 
 
 def build_preview(
@@ -331,8 +309,9 @@ def build_preview(
     except Exception:  # noqa: BLE001
         schema = None
 
-    # ADR-0060 §4 Amendment 2: the fixed default role envelope for un-roled prose.
-    default_role = _resolve_default_role(project_service, schema, request.entry_type)
+    # ADR-0060 §4 Amendment 2: the fixed default role envelope for un-roled prose —
+    # a prompt type carries no behavior config, so this is always `system`.
+    default_role = "system"
 
     # Wrap the loaded scene as an EntryRef so templates can write
     # `scene.pov.title` instead of `scene.metadata.pov.title`. The wrapper

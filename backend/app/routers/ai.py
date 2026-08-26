@@ -257,7 +257,6 @@ async def ai_preview(project: CurrentProject, request: AIPreviewRequest) -> AIPr
                     commit=request.commit,
                     resolution_scene_id=request.resolution_scene_id,
                     subject=request.subject,
-                    entry_type=request.entry_type,
                 ),
             )
         except PreviewError as exc:
@@ -359,7 +358,6 @@ async def ai_generate(project: CurrentProject, request: AIGenerateRequest) -> AI
                     selection=request.selection,
                     commit=request.commit,
                     resolution_scene_id=request.resolution_scene_id,
-                    entry_type=request.entry_type,
                 ),
             )
         except PreviewError as exc:
@@ -523,7 +521,6 @@ async def ai_generate_stream(project: CurrentProject, request: AIGenerateRequest
                     selection=request.selection,
                     commit=request.commit,
                     resolution_scene_id=request.resolution_scene_id,
-                    entry_type=request.entry_type,
                 ),
             )
         except PreviewError as exc:

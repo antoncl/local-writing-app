@@ -830,9 +830,9 @@
   let activePromptEntry = $derived(chatPromptEntryId
     ? promptEntries.find((p) => p.id === chatPromptEntryId) ?? null
     : null);
-  // The active prompt's `output` (ADR-0054): `.kind` is the disposition; a
-  // `.commit` marks a brainstorm that extracts to its `entry` target
-  // (`.commit.review` = how it's reviewed; WHAT it extracts is authored in the
+  // The active prompt's `output` (ADR-0054): routing is `outputHandlerFor(output.handler)`
+  // (`PromptOutput` has no `.kind`); a `.commit` marks a brainstorm that extracts to its
+  // `entry` target (`.commit.review` = how it's reviewed; WHAT it extracts is authored in the
   // prompt's own `field_contract` loop, read back at commit — ADR-0067 S2).
   // Read off the prompt INSTANCE's own `context_strategy` (ADR-0065 S3) — never
   // the entry-type's, which no longer carries per-prompt behavior.

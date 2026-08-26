@@ -5,8 +5,9 @@
 // reviewable patch. There are only five, so grouping on it collapses the
 // one-prompt-per-sub-type clutter into five meaningful shelves (#951).
 //
-// `disposition` is DERIVED at render from the entry_type's context_strategy
-// (promptSurfaceFor + promptDeclaresCommit), never stored — the same pattern
+// `disposition` is DERIVED at render from the entry's OWN context_strategy
+// (post-ADR-0065-S3, never the entry_type's — the type carries no per-prompt
+// behavior) (promptSurfaceFor + promptDeclaresCommit), never stored — the same pattern
 // as chatNodes' `seed_disposition` and the Assistants default's `listed`. It goes
 // in `metadata` so the prompt default view's `group_by: [{ field: "disposition" }]`
 // can bucket on it through ordinary field access.

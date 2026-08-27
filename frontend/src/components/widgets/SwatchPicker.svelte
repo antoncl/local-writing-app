@@ -16,9 +16,16 @@
     onChange?: (id: string | null) => void;
     /** Read-only display (#64): the swatch chip renders, the popover never opens. */
     readOnly?: boolean;
+    /**
+     * The resolved inherited colour to preview when `value` is unset (#1440).
+     * Shown as a DASHED placeholder dot so the actual colour is visible while
+     * still reading as "not explicitly set" — clicking a swatch sets an override.
+     * Null → the old empty hatched dot (no inherited colour to show).
+     */
+    placeholderHex?: string | null;
   }
 
-  let { value = $bindable(null), allowNone = true, onChange, readOnly = false }: Props = $props();
+  let { value = $bindable(null), allowNone = true, onChange, readOnly = false, placeholderHex = null }: Props = $props();
 
   let open = $state(false);
   let anchor: HTMLButtonElement | undefined = $state();
@@ -104,16 +111,22 @@
   <button
     type="button"
     class="swatch-trigger"
-    class:empty={!current}
+    class:empty={!current && !placeholderHex}
     class:read-only={readOnly}
-    title={current ? current.label : "No color"}
-    aria-label={current ? `Color: ${current.label}` : "Pick a color"}
+    title={current ? current.label : placeholderHex ? "Inherited color" : "No color"}
+    aria-label={current
+      ? `Color: ${current.label}`
+      : placeholderHex
+        ? "Inherited color — click to set an override"
+        : "Pick a color"}
     disabled={readOnly}
     bind:this={anchor}
     onclick={(e) => { e.stopPropagation(); toggle(); }}
   >
     {#if current}
       <span class="swatch-dot" style="background: {current.hex}"></span>
+    {:else if placeholderHex}
+      <span class="swatch-dot swatch-dot-inherited" style="background: {placeholderHex}"></span>
     {:else}
       <span class="swatch-dot swatch-dot-empty"></span>
     {/if}
@@ -194,6 +207,12 @@
       transparent 0 3px,
       rgba(0, 0, 0, 0.18) 3px 4px
     );
+  }
+  /* Inherited (unset): the resolved colour is shown (inline background) but the
+     ring is dashed so it still reads as "not explicitly set here" (#1440). */
+  .swatch-dot-inherited {
+    border-style: dashed;
+    border-color: var(--text-3);
   }
 
   .swatch-picker-popover {

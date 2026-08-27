@@ -678,7 +678,11 @@
                       >
                         {#snippet trailing()}
                           {#if picked}
-                            <span class="ctx-picked" aria-label="Picked — click to remove">✓</span>
+                            <!-- Visible ✓ is the toggle cue; the sr-only word
+                                 carries the meaning (aria-label on a role-less
+                                 span is unreliably announced). -->
+                            <span class="ctx-picked" aria-hidden="true">✓</span>
+                            <span class="sr-only">Picked</span>
                           {/if}
                         {/snippet}
                       </NodeRow>

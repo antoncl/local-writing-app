@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { builtinViews, builtinSpecFor, isBuiltinExtraViewId } from "./builtinViews";
 import { chatSummariesToEvalNodes } from "./chatNodes";
+import { promptSummariesToGroupNodes } from "./promptNodes";
 import { evaluateView } from "./evaluateView";
 import type { ChatSessionSummary, MetadataSchema, PromptEntrySummary } from "@/lib/types";
 
@@ -105,5 +106,39 @@ describe("Openable chats — evaluated over lifted chats end to end (#960)", () 
     inverted.expr!.filter!.pred!.field!.op = "overlap";
     const kept = evaluateView(inverted, nodes, { schema: EVAL_SCHEMA }).nodes.map((n) => n.id);
     expect(kept).toEqual(["c_brainstorm"]);
+  });
+});
+
+// End-to-end: the "Runnable prompts" spec run through the real evaluator over
+// lifted prompt nodes — proving the stamped `runnable` flag is genuinely
+// filterable, not just present in the spec (mirrors the chat case above).
+describe("Runnable prompts — evaluated over lifted prompts end to end (#1433)", () => {
+  const PROMPT_EVAL_SCHEMA = {
+    entry_types: {
+      "prompt:base": { name: "Prompt" },
+      "prompt:general": { name: "General", parent: "prompt:base" },
+    },
+    fields: {
+      title: { name: "Title", type: "text", category: "intrinsic" },
+      entry_type: { name: "Type", type: "text", category: "intrinsic" },
+      id: { name: "ID", type: "text", category: "intrinsic" },
+    },
+  } as unknown as MetadataSchema;
+
+  const p = (id: string, extra: Partial<PromptEntrySummary> = {}): PromptEntrySummary =>
+    ({ id, title: id, body: "", entry_type: "prompt:general", metadata: {}, inputs: [], ...extra }) as unknown as PromptEntrySummary;
+  const nodes = promptSummariesToGroupNodes(
+    [
+      p("p_chat"), // Chat, no offer_on → runnable
+      p("p_impersonate", { offer_on: ["lore:character"] }), // Chat + offer_on → not
+      p("p_continue", { context_strategy: { output: { handler: "inline" } } }), // Continue → not
+    ],
+    PROMPT_EVAL_SCHEMA,
+  );
+
+  it("keeps only the standalone-runnable prompt (Chat, empty offer_on)", () => {
+    const spec = builtinViews("prompt", PROMPT_EVAL_SCHEMA)[1].spec;
+    const kept = evaluateView(spec, nodes, { schema: PROMPT_EVAL_SCHEMA }).nodes.map((n) => n.id);
+    expect(kept).toEqual(["p_chat"]);
   });
 });

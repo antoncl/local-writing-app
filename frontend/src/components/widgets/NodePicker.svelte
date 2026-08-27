@@ -247,7 +247,17 @@
   // editor's checkbox actually does something (was a silent no-op).
   function flattenScenes(node: StructureNode | undefined): Array<{ id: string; title: string; entry_type: string }> {
     if (!node) return [];
-    const allowed = new Set(membership.entryTypes.scene ?? []);
+    // Manuscript sources store their kind as "manuscript" (the configurator's
+    // KINDS id), so that is the membership key — the earlier `.scene` read was
+    // a key that never exists, leaving this filter a no-op (#1461). The
+    // structural container FQNs are stripped before filtering: until ADR-0074
+    // slice 4 makes containers pickable they gate nothing here, and a config
+    // that selected only Act/Chapter must not blank the scene list.
+    const allowed = new Set(
+      (membership.entryTypes.manuscript ?? []).filter(
+        (fqn) => fqn !== "manuscript:act" && fqn !== "manuscript:chapter",
+      ),
+    );
     const out: Array<{ id: string; title: string; entry_type: string }> = [];
     const walk = (n: StructureNode) => {
       // StructureNode uses `type` — the FQN entry_type ("manuscript:scene" /

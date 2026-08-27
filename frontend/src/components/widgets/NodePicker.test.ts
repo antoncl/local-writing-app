@@ -98,6 +98,75 @@ describe("NodePicker plot source (#742)", () => {
   });
 });
 
+// #1461 (ADR-0074 slice 1): manuscript sources store kind "manuscript", so the
+// scene filter must read entryTypes.manuscript — the old `.scene` read was a
+// key pickerMembership never produces, leaving the author's checkbox a no-op.
+describe("NodePicker manuscript entry-type allowlist (#1461)", () => {
+  const structure = {
+    root: {
+      id: "root",
+      type: "root",
+      title: "Manuscript",
+      children: [
+        {
+          id: "ch1",
+          type: "manuscript:chapter",
+          title: "Chapter One",
+          children: [
+            { id: "n1", type: "manuscript:scene", scene_id: "s1", title: "Plain scene" },
+            {
+              id: "n2",
+              type: "manuscript:scene",
+              scene_id: "s2",
+              title: "Battle scene",
+              entry_type: "manuscript:battle",
+            },
+          ],
+        },
+      ],
+    },
+  } as never;
+
+  it("filters scenes to the config's manuscript scene-type selection", async () => {
+    render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "manuscript", expr: { type: "manuscript:battle" } }] },
+        structure,
+        affordance: "add",
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+
+    expect(screen.getByText("Battle scene")).toBeInTheDocument();
+    expect(screen.queryByText("Plain scene")).toBeNull();
+  });
+
+  it("ignores structural container types until containers are pickable (ADR-0074 slice 4)", async () => {
+    render(NodePicker, {
+      props: {
+        // An act/chapter-only selection gates nothing yet — it must not blank
+        // the scene list (the original dogfooding complaint made worse).
+        config: {
+          sources: [
+            {
+              kind: "manuscript",
+              expr: { union: [{ type: "manuscript:act" }, { type: "manuscript:chapter" }] },
+            },
+          ],
+        },
+        structure,
+        affordance: "add",
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+
+    expect(screen.getByText("Plain scene")).toBeInTheDocument();
+    expect(screen.getByText("Battle scene")).toBeInTheDocument();
+  });
+});
+
 describe("NodePicker onChange callback (runes conversion #49)", () => {
   // The dispatch("change", …) → onChange callback prop is the crux of the runes
   // conversion; lock the payload shape and the multi-select append so a later

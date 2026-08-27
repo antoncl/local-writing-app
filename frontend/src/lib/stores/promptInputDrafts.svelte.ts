@@ -14,12 +14,13 @@
 import type {
   DocumentKind,
   EditableDocument,
-  MetadataValue,
-  NodePickerConfig,
   PromptInputDefinition,
-  SelectOption,
 } from "@/lib/types";
-import { type EntryInputDraft } from "@/lib/utils/promptInputs";
+import {
+  type EntryInputDraft,
+  inputDefinitionToDraft,
+  inputDraftToDefinition,
+} from "@/lib/utils/promptInputs";
 
 export class PromptInputDraftsController {
   // The editor-side form state — bound into CodeBodyView (`bind:entryInputDrafts`).
@@ -64,90 +65,13 @@ export class PromptInputDraftsController {
   }
 
   /** The canonical `PromptInputDefinition[]` for save — rebuilt from the drafts
-   *  on every emit. */
+   *  on every emit. The per-item shaping lives in `inputDraftToDefinition`
+   *  (shared with the autosave dirty-check, #1470). */
   toCanonical(): PromptInputDefinition[] {
-    return this.drafts
-      .filter((d) => d.name)
-      .map((d) => {
-        const out: PromptInputDefinition = {
-          name: d.name,
-          type: d.type,
-        };
-        if (d.label) out.label = d.label;
-        if (d.required) out.required = true;
-        if (d.type === "context_pick" || d.type === "entity_ref" || d.type === "entity_ref_list") {
-          // All three ref-shaped types serialize their picker constraint as
-          // a NodePickerConfig under `target` (per #40 — same wire shape on
-          // both surfaces). `multiple` is derived from the type literal at
-          // runtime (entity_ref → false, entity_ref_list → true), so any
-          // value the editor wrote is non-load-bearing for entity_ref types.
-          // Skip default / options for these types — they don't apply.
-          out.target = d.nodePickerConfig as unknown as Record<string, MetadataValue>;
-          return out;
-        }
-        // Persist a type-matched default so the stored YAML carries a real
-        // boolean / number rather than a stringly value. `undefined` (and a
-        // stray "") means unset → omit `default` entirely (#24).
-        if (d.defaultValue !== undefined && d.defaultValue !== "") {
-          out.default = this.#defaultForStorage(d.defaultValue, d.type);
-        }
-        if (d.type === "select") {
-          // Emit SelectOption objects from the draft list, preserving the
-          // author's label + color picks (used to round-trip-lose them via
-          // the comma-string shape — see decisions-inputs-fields-uniformity).
-          out.options = d.options
-            .filter((o) => o.value.trim() !== "")
-            .map((o) => {
-              const item: SelectOption = { value: o.value.trim() };
-              if (o.label) item.label = o.label;
-              if (o.color) item.color = o.color;
-              return item;
-            });
-        }
-        return out;
-      });
+    return this.drafts.filter((d) => d.name).map(inputDraftToDefinition);
   }
 
   #toDraft(input: PromptInputDefinition): EntryInputDraft {
-    // entity_ref / entity_ref_list / context_pick all carry their picker
-    // constraint as a NodePickerConfig under `target` (post-#40). For other
-    // types, target is unused — start with an empty config.
-    const usesPicker =
-      input.type === "context_pick" || input.type === "entity_ref" || input.type === "entity_ref_list";
-    const nodePickerConfig =
-      usesPicker && input.target && typeof input.target === "object"
-        ? (input.target as unknown as NodePickerConfig)
-        : ({ kinds: [], presets: [] } as NodePickerConfig);
-    return {
-      clientId: this.nextDraftId(),
-      name: input.name,
-      type: input.type,
-      label: input.label ?? "",
-      defaultValue: input.default === undefined || input.default === null ? undefined : String(input.default),
-      // Structured option drafts (value / label / color). Mirrors the field-side
-      // editor — see SelectOptionsEditor + decisions-inputs-fields-uniformity.
-      options: (input.options ?? []).map((o) => ({
-        value: o.value,
-        label: o.label ?? "",
-        color: o.color ?? null,
-        originalValue: o.value,
-      })),
-      required: Boolean(input.required),
-      nodePickerConfig,
-      nameDerived: false,
-    };
-  }
-
-  // Map an editor-side default string onto its stored, type-matched value.
-  // boolean → real bool, number → real number (falls back to the raw string
-  // if unparseable), everything else (text / long_text / select / refs) →
-  // string. Only invoked for a defined, non-empty default (#24).
-  #defaultForStorage(raw: string, type: EntryInputDraft["type"]): MetadataValue {
-    if (type === "boolean") return raw === "true";
-    if (type === "number") {
-      const n = Number(raw);
-      return Number.isFinite(n) ? n : raw;
-    }
-    return raw;
+    return inputDefinitionToDraft(input, this.nextDraftId());
   }
 }

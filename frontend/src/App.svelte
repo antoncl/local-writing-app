@@ -384,9 +384,17 @@
     }
   });
 
-  // Reflect the focused editor document as its group's active tab.
+  // Reflect the focused editor document as its group's active tab — but only
+  // when the focused pane actually *changes* (#1470). `activate()` raises the
+  // tab and pulls DOM focus; firing it on every effect re-run (e.g. a background
+  // autosave re-rendering the pane) yanks focus back from wherever the user has
+  // since moved — the guide, another pane — every few seconds. Guarding on a
+  // real change keeps the tab-sync intent without the theft.
+  let lastActivatedFocusId: string | null = null;
   $effect(() => {
     const focusedId = editorPanes.focusedEditorPaneId;
+    if (focusedId === lastActivatedFocusId) return;
+    lastActivatedFocusId = focusedId;
     if (focusedId && workspaceLayout.isPlaced(focusedId)) workspaceLayout.activate(focusedId);
   });
 

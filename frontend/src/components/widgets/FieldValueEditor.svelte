@@ -183,6 +183,8 @@
     ariaLabel={label}
     {allowUnset}
     {embedded}
+    {controlled}
+    {expanded}
     {loreEntries}
     {promptEntries}
     {structure}

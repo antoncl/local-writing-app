@@ -41,6 +41,11 @@
     /** Rail-embedded: forwarded to ReferencePicker so a read-only ref field's
      *  picker drops its duplicate titled header (the rail shows the label, #1216). */
     embedded?: boolean;
+    /** Controlled rail mode (#1441): forwarded to ReferencePicker so a read-only
+     *  reference field folds into the one rail row too (the field row owns the
+     *  caret; `expanded` is its state), not a second strip. */
+    controlled?: boolean;
+    expanded?: boolean;
     // Context the read-only widgets need to resolve a value's display:
     // ReferencePicker needs the rosters to turn a ref id into a title/link; TagChip
     // needs knownTags for its hue; ListValueEditor takes the matcher for highlights.
@@ -60,6 +65,8 @@
     ariaLabel,
     allowUnset = false,
     embedded = false,
+    controlled = false,
+    expanded = false,
     loreEntries = [],
     promptEntries = [],
     structure = null,
@@ -119,6 +126,8 @@
     {field}
     readOnly
     {embedded}
+    {controlled}
+    {expanded}
     value={metadataReferenceValue(field, value)}
     excludeId={excludeId}
     ariaLabel={label}

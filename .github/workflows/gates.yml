@@ -51,10 +51,18 @@ jobs:
 
       # Deps come from the lock, never a fresh resolve (#1393) — same versions
       # here, on every dev machine, and in the release freeze.
+      #
+      # `pip check`: --no-deps skips the resolver's validation, so a dependency
+      # added to pyproject.toml *without* a relock would otherwise install
+      # cleanly and only fail at import time — possibly as late as the frozen
+      # binary. pip check fails the job instead: the editable app's declared
+      # requirements must be satisfied by the locked set. (Extras aren't
+      # covered — a missing [dev] tool fails its own gate step loudly anyway.)
       - name: Install backend (locked deps + editable app)
         run: |
           python -m pip install -r backend/requirements.lock
           python -m pip install -e backend --no-deps
+          python -m pip check
 
       - name: ruff
         run: python -m ruff check backend scripts .claude/hooks

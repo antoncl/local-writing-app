@@ -293,6 +293,31 @@ class TreeStructureServiceTests(unittest.TestCase):
         self.assertIsNone(TreeStructureService.find_parent(doc, "root"))
         self.assertIsNone(TreeStructureService.find_parent(doc, "missing"))
 
+    def test_collect_descendant_scene_ids_ordered(self) -> None:
+        # ADR-0074 slice 4: reading order, not a set. From the root: A1, A2
+        # (under act A, in stored order), then the standalone B.
+        doc = self._sample_document()
+        root = doc.root
+        self.assertEqual(
+            TreeStructureService.collect_descendant_scene_ids_ordered(root),
+            ["s_a1", "s_a2", "s_b"],
+        )
+        # Rooted at a container (act A) → only its subtree, in order.
+        act = TreeStructureService.find_node(doc, "A")
+        self.assertEqual(
+            TreeStructureService.collect_descendant_scene_ids_ordered(act),
+            ["s_a1", "s_a2"],
+        )
+        # A leaf scene node yields itself; an empty container yields nothing.
+        leaf = TreeStructureService.find_node(doc, "A1")
+        self.assertEqual(
+            TreeStructureService.collect_descendant_scene_ids_ordered(leaf), ["s_a1"]
+        )
+        empty = StructureNode(id="C", type="chapter", title="Empty", children=[])
+        self.assertEqual(
+            TreeStructureService.collect_descendant_scene_ids_ordered(empty), []
+        )
+
     def test_extract_node_removes_and_returns(self) -> None:
         doc = self._sample_document()
         extracted = TreeStructureService.extract_node(doc, "A1")

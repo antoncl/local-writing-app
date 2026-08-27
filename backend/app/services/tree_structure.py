@@ -214,6 +214,23 @@ class TreeStructureService:
             ids.update(TreeStructureService.collect_descendant_ids(child))
         return ids
 
+    @staticmethod
+    def collect_descendant_scene_ids_ordered(node: StructureNode) -> list[str]:
+        """Every `scene_id` under a subtree, in reading order (ADR-0074 slice 4).
+
+        Unlike `collect_leaf_ids` (a set), this preserves document order — the
+        depth-first, children-in-stored-order walk that `full_text()` uses to
+        materialize the manuscript (`ai/helpers.py::_collect_scene_text`). It is
+        the ordered resolver a picked act/chapter/root container expands through:
+        containers carry no `scene_id`, so they contribute only via their
+        descendants."""
+        out: list[str] = []
+        if node.scene_id:
+            out.append(node.scene_id)
+        for child in node.children:
+            out.extend(TreeStructureService.collect_descendant_scene_ids_ordered(child))
+        return out
+
     # ---- helpers ----
 
     @staticmethod

@@ -107,13 +107,13 @@
   }
 
   function onKeydown(event: KeyboardEvent) {
+    // Enter / comma commit the typed text; that's the only key handling here.
+    // Backspace is deliberately NOT wired to delete a chip (#1446) — an empty-field
+    // Backspace dropping the last tag was too easy to trigger by accident. Chips
+    // are removed only via their × button.
     if (event.key === "Enter" || event.key === ",") {
       event.preventDefault();
       crystallize();
-    } else if (event.key === "Backspace" && entryText === "" && chips.length > 0) {
-      // Empty-input backspace removes the last chip — the token-field convention.
-      event.preventDefault();
-      removeTag(chips[chips.length - 1]);
     }
   }
 
@@ -293,9 +293,10 @@
 
   /* The described-by value summary uses the shared .sr-only utility (styles.css). */
 
+  /* The input owns the whole first row (#1446), so typing has full width and the
+     committed chips wrap onto the line below rather than sharing the caret's line. */
   .tag-entry {
-    flex: 0 1 150px;
-    min-width: 90px;
+    flex: 1 0 100%;
     height: 24px;
     padding: 0;
     border: none;

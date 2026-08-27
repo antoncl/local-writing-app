@@ -98,10 +98,14 @@ describe("TagPicker", () => {
     expect(onChange).toHaveBeenLastCalledWith("shifter");
   });
 
-  it("removes the last chip on backspace in an empty input", async () => {
+  it("does NOT remove a chip on backspace in an empty input (#1446)", async () => {
+    // Backspace deleting the last tag was too easy to trigger by accident; a chip
+    // is now removed only via its × button.
     const { onChange, input } = setup({ value: "alpha, shifter" });
     await fireEvent.keyDown(input, { key: "Backspace" });
-    expect(onChange).toHaveBeenLastCalledWith("alpha");
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByText("alpha")).toBeInTheDocument();
+    expect(screen.getByText("shifter")).toBeInTheDocument();
   });
 
   it("adds a tag picked from the + governance popover (project origin)", async () => {

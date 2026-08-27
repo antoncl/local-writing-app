@@ -1012,18 +1012,59 @@ DEFAULT_METADATA_SCHEMA: dict[str, Any] = {
         },
         "ai_provider": {
             "name": "Subscription",
+            "description": (
+                "Which AI subscription this assistant runs on. Its API "
+                "credentials and endpoint come from your machine settings, and "
+                "the choice scopes which models are available below."
+            ),
             "type": "select",
             "options": ["anthropic", "openai", "openrouter", "ollama"],
         },
         "ai_capability_tier": {
             "name": "Capability tier",
+            "description": (
+                "Pick a tier — Fast, Balanced, Premium, Reasoning or Local — and "
+                "the app resolves it to a concrete model for the provider (the "
+                "cheapest that fits). Leave it unset to bind an exact model under "
+                "Advanced instead."
+            ),
             "type": "select",
             "options": ["", "fast", "balanced", "premium", "reasoning", "local"],
         },
-        "ai_model": {"name": "Model", "type": "text"},
-        "ai_temperature": {"name": "Temperature", "type": "number"},
-        "ai_max_tokens": {"name": "Max output tokens", "type": "number"},
-        "ai_thinking": {"name": "Show thinking", "type": "boolean"},
+        "ai_model": {
+            "name": "Model",
+            "description": (
+                "The exact model this assistant runs. Set automatically from the "
+                "capability tier, or pick a specific one under Advanced (which "
+                "switches the tier to Custom)."
+            ),
+            "type": "text",
+        },
+        "ai_temperature": {
+            "name": "Temperature",
+            "description": (
+                "Sampling temperature: higher is more varied and inventive, lower "
+                "more focused and repeatable. Leave blank to use the model's "
+                "default."
+            ),
+            "type": "number",
+        },
+        "ai_max_tokens": {
+            "name": "Max output tokens",
+            "description": (
+                "Upper bound on the length of a single response, in tokens. Leave "
+                "blank to use the model's default."
+            ),
+            "type": "number",
+        },
+        "ai_thinking": {
+            "name": "Show thinking",
+            "description": (
+                "For models that support it, surface the model's reasoning "
+                "alongside its answer."
+            ),
+            "type": "boolean",
+        },
         "preferred_assistant_id": {
             "name": "Preferred assistant",
             "type": "entity_ref",

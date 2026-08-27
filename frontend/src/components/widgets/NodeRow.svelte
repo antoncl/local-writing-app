@@ -250,7 +250,7 @@
      clickable <button> or the static <span>. The tag line binds its width for
      the width-aware pack; the empty probe pill carries the pill's resolved
      font/padding for canvas measurement (no per-tag mirror DOM). -->
-{#snippet textBody()}<span class="node-row-text"><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if tags.length > 0}<span class="node-row-tags" bind:clientWidth={tagsAreaWidth}>{#each visibleTags as tag}<span class="node-row-tag" style={tagStyle(tag)}>{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span><span class="node-row-tag node-row-tag-probe" aria-hidden="true" bind:this={fontProbeEl}></span>{/if}</span>{/snippet}
+{#snippet textBody()}<span class="node-row-text" class:has-tags={tags.length > 0}><strong>{title}</strong>{#if detailSlot}{@render detailSlot()}{:else if detail}<small>{detail}</small>{/if}{#if tags.length > 0}<span class="node-row-tags" bind:clientWidth={tagsAreaWidth}>{#each visibleTags as tag}<span class="node-row-tag" style={tagStyle(tag)}>{tag}</span>{/each}{#if hiddenTagCount > 0}<span class="node-row-tag node-row-tag-overflow">+{hiddenTagCount}</span>{/if}</span><span class="node-row-tag node-row-tag-probe" aria-hidden="true" bind:this={fontProbeEl}></span>{/if}</span>{/snippet}
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <!-- Whitespace between conditional blocks is intentionally absent in
@@ -665,6 +665,19 @@
     grid-row: 2;
     margin-top: 0;
     align-self: center;
+    /* Right-anchored (right-to-left) in compact; the pack fills from the row's
+       right edge. */
+    justify-content: flex-end;
+  }
+  /* A tagged compact row hands the tags the flexible (grid-sized) column so the
+     width-aware pack measures the space it can actually use — an `auto` tags
+     track only reports its current content width, which caps the count even
+     with room to spare (#1450). Detail (col 1) takes content width and truncates.
+     Scoped to `.has-tags` so a detail-only compact row (Chats) keeps the detail
+     on the full-width 1fr column. */
+  .node-row.variant-card.density-compact:not(.group-header) > .node-row-click .node-row-text.has-tags,
+  .node-row.variant-card.density-compact:not(.group-header) > .node-row-text.has-tags {
+    grid-template-columns: minmax(0, auto) minmax(0, 1fr);
   }
 
   .node-row.group-header {

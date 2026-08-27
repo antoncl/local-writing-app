@@ -31,4 +31,16 @@ describe("NodeRow tags", () => {
       expect(p.getAttribute("style") ?? "").toBe("");
     }
   });
+
+  // The compact-density layout hangs off `.node-row-text.has-tags`: only a row
+  // that actually has tags hands its tag column the flexible (measurable) grid
+  // track, so a detail-only compact row is left alone (#1450).
+  it("marks the text area .has-tags only when the row has tags", () => {
+    const withTags = render(NodeRow, { props: { title: "Mara", tags: ["a"] } });
+    expect(withTags.container.querySelector(".node-row-text.has-tags")).not.toBeNull();
+
+    const noTags = render(NodeRow, { props: { title: "Mara" } });
+    expect(noTags.container.querySelector(".node-row-text")).not.toBeNull();
+    expect(noTags.container.querySelector(".node-row-text.has-tags")).toBeNull();
+  });
 });

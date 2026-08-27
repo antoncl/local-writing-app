@@ -658,26 +658,10 @@
     {/if}
   </section>
 
-  {#if mode === "prompt"}
-  <section class="ctx-section">
-    <header class="ctx-section-label">Whole-document presets</header>
-    <div class="ctx-preset-pills">
-      {#each PRESETS as preset (preset.id)}
-        {@const isOn = (config.presets ?? []).includes(preset.id)}
-        <label class="ctx-preset-pill" class:active={isOn} title={preset.tooltip}>
-          <input
-            class="ctx-preset-pill-input sr-only"
-            type="checkbox"
-            checked={isOn}
-            onchange={(e) => togglePreset(preset.id, (e.currentTarget as HTMLInputElement).checked)}
-          />
-          <span class="ctx-preset-pill-check" aria-hidden="true"></span>
-          <span class="ctx-preset-pill-label">{preset.label}</span>
-        </label>
-      {/each}
-    </div>
-  </section>
-  {/if}
+  <!-- Whole-document presets retired (ADR-0074 slice 4b): "Full Novel Text" is
+       now checking the manuscript root in the runtime tree, and "Full Outline"
+       was a rendering, not a pick. Stored `presets` are tolerated but no longer
+       authored here. -->
 
   {#if scenesPickable && mode === "prompt"}
     <section class="ctx-section">
@@ -1297,76 +1281,6 @@
     font-size: var(--fs-xs);
     color: var(--text-3);
     flex: none;
-  }
-
-  /* --- Preset pills ------------------------------------------------ */
-
-  .ctx-preset-pills {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  .ctx-preset-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 7px 13px;
-    border-radius: 999px;
-    border: 1.5px solid var(--border);
-    background: var(--surface);
-    font-size: var(--fs-sm);
-    color: var(--text-2);
-    cursor: pointer;
-    line-height: 1;
-    transition: border-color 80ms linear, background-color 80ms linear, color 80ms linear;
-  }
-
-  .ctx-preset-pill:hover {
-    border-color: var(--border-strong);
-  }
-
-  .ctx-preset-pill.active {
-    border-color: var(--accent);
-    background: var(--accent-soft);
-    color: var(--text);
-  }
-
-  /* .ctx-preset-pill-input carries the shared .sr-only utility (styles.css) to hide
-     the real checkbox off-screen while keeping it focusable; the class remains as the
-     identity hook for the :focus-visible sibling ring below. */
-
-  .ctx-preset-pill-check {
-    width: 15px;
-    height: 15px;
-    border-radius: 4px;
-    border: 1.5px solid var(--border-strong);
-    background: var(--surface);
-    flex: none;
-    position: relative;
-  }
-
-  .ctx-preset-pill.active .ctx-preset-pill-check {
-    background: var(--accent);
-    border-color: var(--accent);
-  }
-
-  .ctx-preset-pill.active .ctx-preset-pill-check::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2.5 6.2 L5 8.5 L9.5 3.8' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
-    background-repeat: no-repeat;
-    background-position: center;
-    background-size: 11px 11px;
-  }
-
-  .ctx-preset-pill-input:focus-visible + .ctx-preset-pill-check {
-    box-shadow: 0 0 0 2px var(--accent-soft);
-  }
-
-  .ctx-preset-pill-label {
-    line-height: 1.2;
   }
 
   /* --- Scene binding block ----------------------------------------- */

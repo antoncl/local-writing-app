@@ -38,6 +38,12 @@
     readTags,
     type SearchFields,
   } from "@/lib/utils/entrySearch";
+  import {
+    flattenManuscript,
+    sceneCountForRef,
+    togglePickAt,
+    type ManuscriptRow,
+  } from "@/lib/utils/manuscriptPickTree";
   import { portalToBody } from "@/lib/actions/portal";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import NodeList from "@/components/widgets/NodeList.svelte";
@@ -130,23 +136,11 @@
   // Membership (kinds + per-kind entry_type whitelist) reduced from the
   // config's `sources` — the pre-evaluator degenerate subset (#78).
   const membership = $derived(pickerMembership(config));
-  // Allowed presets per the author config — empty means no presets shown.
-  const allowedPresets = $derived(config.presets ?? []);
   // Allowed kinds per the author config — empty means no browse section.
+  // `config.presets` is retired (ADR-0074 slice 4b) — tolerated in stored
+  // configs but no longer offered; the manuscript root replaces Full Novel Text.
   const allowedKinds = $derived(membership.kinds as Category[]);
   const allowMultiple = $derived(config.multiple !== false);
-
-  const PRESET_META: Record<string, { title: string; tooltip: string }> = {
-    full_outline: {
-      title: "Full Outline",
-      tooltip:
-        "Include the manuscript outline (acts → chapters → scenes with summaries).",
-    },
-    full_text: {
-      title: "Full Novel Text",
-      tooltip: "Include every scene's prose in manuscript order. Can be large.",
-    },
-  };
 
   function refKey(ref: NodePickerRef): string {
     return `${ref.kind}:${ref.id}`;
@@ -261,43 +255,43 @@
   // Flatten the structure tree's scenes (entries with kind=manuscript) into a
   // searchable list, respecting the per-input sub-type filter so the
   // editor's checkbox actually does something (was a silent no-op).
-  function flattenScenes(
-    node: StructureNode | undefined,
-  ): Array<{ id: string; title: string; entry_type: string; tags: string[] }> {
-    if (!node) return [];
-    // Manuscript sources store their kind as "manuscript" (the configurator's
-    // KINDS id), so that is the membership key — the earlier `.scene` read was
-    // a key that never exists, leaving this filter a no-op (#1461). The
-    // structural container FQNs are stripped before filtering: until ADR-0074
-    // slice 4 makes containers pickable they gate nothing here, and a config
-    // that selected only Act/Chapter must not blank the scene list.
-    const allowed = new Set(
+  // The manuscript group is a tri-state tree (ADR-0074 slice 4b): the root
+  // ("The Manuscript"), acts, and chapters are pickable containers over their
+  // scenes, materialized server-side (slice 4a). Collapse state is local, reset
+  // when the widget re-mounts. A search flattens the tree to matching scenes in
+  // context (the scene's title/tags via the shared matcher).
+  let collapsedManuscriptIds = $state<Set<string>>(new Set());
+  function toggleManuscriptCollapse(id: string) {
+    const next = new Set(collapsedManuscriptIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    collapsedManuscriptIds = next;
+  }
+  const manuscriptRows = $derived.by<ManuscriptRow[]>(() => {
+    if (!structure || !allowedKinds.includes("manuscript")) return [];
+    // The config's scene-subtype allowlist (#1461) — container FQNs stripped, as
+    // they gate scenes, not themselves — combined with the active search match.
+    const allowedSceneTypes = new Set(
       (membership.entryTypes.manuscript ?? []).filter(
         (fqn) => fqn !== "manuscript:act" && fqn !== "manuscript:chapter",
       ),
     );
-    const out: Array<{ id: string; title: string; entry_type: string; tags: string[] }> = [];
-    const walk = (n: StructureNode) => {
-      // StructureNode uses `type` — the FQN entry_type ("manuscript:scene" /
-      // "manuscript:act" / "manuscript:chapter") or the "root" sentinel. An earlier read
-      // used `n.kind`, which is always undefined — so the scene list was
-      // silently empty. scene_id is the canonical id for the scene itself (the
-      // structure node has its own id for the outline position). tags ride along
-      // so the widened search can match a scene by its tag (#1468).
-      if (n.type === "manuscript:scene" && n.scene_id) {
-        const sceneType = (n as unknown as { entry_type?: string }).entry_type ?? "manuscript:scene";
-        if (allowed.size === 0 || allowed.has(sceneType)) {
-          out.push({ id: n.scene_id, title: n.title, entry_type: sceneType, tags: readTags(n.metadata) });
-        }
-      }
-      for (const child of n.children ?? []) walk(child);
+    const searching = isSearchActive(search);
+    const sceneVisible = (n: StructureNode) => {
+      const type = (n as unknown as { entry_type?: string }).entry_type ?? n.type ?? "manuscript:scene";
+      if (allowedSceneTypes.size > 0 && !allowedSceneTypes.has(type)) return false;
+      if (searching) return matchesEntry({ title: n.title, tags: readTags(n.metadata) }, parsedSearch);
+      return true;
     };
-    walk(node);
-    return out;
+    return flattenManuscript(structure, value, collapsedManuscriptIds, {
+      sceneVisible,
+      expandAll: searching,
+    });
+  });
+  function toggleManuscriptPick(nodeId: string) {
+    if (!structure) return;
+    onChange?.({ value: togglePickAt(structure, value, nodeId) });
   }
-
-  const allScenes = $derived(structure ? flattenScenes(structure.root) : []);
-  const filteredScenes = $derived(allScenes.filter((s) => matchesEntry(s, parsedSearch)));
 
   // Flatten the research tree's notes (leaves) into a searchable list.
   // Topics are organizational containers with no body — only notes are
@@ -409,8 +403,19 @@
     preset: "Preset",
   };
 
+  // Manuscript container refs (ADR-0074 slice 4b) carry a structural type the
+  // schema may not name; give them stable fallback pill labels.
+  const CONTAINER_LABEL: Record<string, string> = {
+    root: "Manuscript",
+    "manuscript:act": "Act",
+    "manuscript:chapter": "Chapter",
+  };
+
   function chipLabel(ref: NodePickerRef): string {
     if (ref.kind === "preset") return KIND_LABEL_SINGULAR.preset;
+    if (ref.entry_type && CONTAINER_LABEL[ref.entry_type]) {
+      return metadataSchema?.entry_types[ref.entry_type]?.name ?? CONTAINER_LABEL[ref.entry_type];
+    }
     const subType = ref.entry_type && ref.entry_type !== ref.kind ? ref.entry_type : null;
     const displayName = subType ? metadataSchema?.entry_types[subType]?.name : null;
     return displayName ?? subType ?? KIND_LABEL_SINGULAR[ref.kind] ?? ref.kind;
@@ -429,30 +434,10 @@
     const dropExcluded = (items: NodePickerRef[]): NodePickerRef[] =>
       excludeIdSet.size === 0 ? items : items.filter((r) => !excludeIdSet.has(r.id));
 
-    const matchingPresets = allowedPresets.filter((id) => {
-      const meta = PRESET_META[id] ?? { title: id, tooltip: "" };
-      // Presets have no tags, so a `#tag` query correctly hides them.
-      return matchesEntry({ title: meta.title }, parsedSearch);
-    });
-    if (matchingPresets.length > 0) {
-      groups.push({
-        id: "presets",
-        label: "Presets",
-        items: matchingPresets.map((presetId) => {
-          const meta = PRESET_META[presetId] ?? { title: presetId, tooltip: "" };
-          return { id: presetId, kind: "preset" as const, title: meta.title };
-        }),
-      });
-    }
-
-    if (allowedKinds.includes("manuscript")) {
-      const items = dropExcluded(
-        filteredScenes.map((s) => ({
-          id: s.id, kind: "manuscript" as const, title: s.title, entry_type: s.entry_type,
-        })),
-      );
-      if (items.length > 0) groups.push({ id: "scenes", label: "Scenes", items });
-    }
+    // Presets are retired (ADR-0074 slice 4b): "Full Novel Text" is now checking
+    // the manuscript root in the tri-state tree, and "Full Outline" was a
+    // rendering, not a pick. The manuscript kind renders as the tree
+    // (`manuscriptRows`), not a flat group here.
 
     if (allowedKinds.includes("lore")) {
       const loreItems = dropExcluded(
@@ -506,15 +491,15 @@
     return groups;
   });
 
-  const hasAnyConfigured = $derived(
-    allowedPresets.length > 0 || allowedKinds.length > 0,
-  );
-  const hasAnyResults = $derived(visibleGroups.length > 0);
+  const hasAnyConfigured = $derived(allowedKinds.length > 0);
+  const hasAnyResults = $derived(visibleGroups.length > 0 || manuscriptRows.length > 0);
 
   // Total result count for the search-bar live counter. Reflects the
   // post-filter, post-gating reality so the user can tell when their
   // search has zeroed out before scrolling.
-  const totalVisibleItems = $derived(visibleGroups.reduce((acc, g) => acc + g.items.length, 0));
+  const totalVisibleItems = $derived(
+    visibleGroups.reduce((acc, g) => acc + g.items.length, 0) + manuscriptRows.length,
+  );
 
   const collapseThreshold = $derived(compact ? COLLAPSE_THRESHOLD_COMPACT : COLLAPSE_THRESHOLD_DEFAULT);
 
@@ -564,11 +549,15 @@
               clickable={false}
             >
               {#snippet trailing()}
+                {@const mCount = structure ? sceneCountForRef(structure, ref) : null}
                 <span
                   class="ctx-type-pill"
                   class:has-color={!!hex}
                   style={hex ? `--chip-base: ${hex}` : ""}
                 >{chipLabel(ref)}</span>
+                {#if mCount !== null}
+                  <span class="ctx-count-pill">{mCount} {mCount === 1 ? "scene" : "scenes"}</span>
+                {/if}
                 {#if ref.kind === "manuscript" && allowTargetMarking}
                   <button
                     type="button"
@@ -665,10 +654,57 @@
             </div>
           {/if}
         {:else}
+          <!-- Manuscript tri-state tree (ADR-0074 slice 4b): root / acts /
+               chapters as live containers over their scenes. Rendered above the
+               flat kind groups. -->
+          {#if manuscriptRows.length > 0}
+            <div class="ctx-mtree" role="group" aria-label="Manuscript">
+              {#each manuscriptRows as row (row.id)}
+                <div class="ctx-mrow" style={`--depth:${row.depth}`}>
+                  {#if row.hasChildren}
+                    <button
+                      type="button"
+                      class="ctx-mcaret"
+                      aria-label={row.collapsed ? `Expand ${row.title}` : `Collapse ${row.title}`}
+                      aria-expanded={!row.collapsed}
+                      onclick={() => toggleManuscriptCollapse(row.id)}
+                    >{row.collapsed ? "▸" : "▾"}</button>
+                  {:else}
+                    <span class="ctx-mcaret ctx-mcaret-leaf" aria-hidden="true"></span>
+                  {/if}
+                  <button
+                    type="button"
+                    class="ctx-mtoggle"
+                    class:serif={!row.isScene}
+                    aria-pressed={row.state === "on" || row.state === "implied"}
+                    onclick={() => toggleManuscriptPick(row.id)}
+                  >
+                    <span class={`ctx-mcheck ctx-mcheck-${row.state}`} aria-hidden="true"
+                      >{row.state === "on" || row.state === "implied" ? "✓" : ""}</span
+                    >
+                    <span class="ctx-mtitle">{row.title}</span>
+                    {#if !row.isScene}
+                      <span class="ctx-mcount">{row.sceneCount} {row.sceneCount === 1 ? "scene" : "scenes"}</span>
+                    {/if}
+                    <span class="sr-only"
+                      >{row.state === "on"
+                        ? "Picked"
+                        : row.state === "implied"
+                          ? "Included via a container"
+                          : row.state === "indeterminate"
+                            ? "Partially picked"
+                            : "Not picked"}</span
+                    >
+                  </button>
+                </div>
+              {/each}
+            </div>
+          {/if}
+
           <!-- ADR-0068: candidates compose NodeRow/NodeList. Each kind is a
                groupHeader NodeRow (caret + count) over a nested list of
-               stripe-coloured candidate rows; a picked row dims and stops
-               being clickable, with a trailing ✓ Added. -->
+               stripe-coloured candidate rows; a picked row shows a ✓ and stays
+               clickable to toggle off (ADR-0074 #1464). -->
           <NodeList mode="tree" density={compact ? "dense" : "compact"}>
             {#each visibleGroups as group (group.id)}
               <NodeRow
@@ -953,6 +989,115 @@
     color: var(--accent-emphasis);
     line-height: 1;
     white-space: nowrap;
+  }
+
+  /* Live descendant-scene count on a picked container chip / tree row. */
+  .ctx-count-pill,
+  .ctx-mcount {
+    flex: none;
+    font-size: var(--fs-xs);
+    color: var(--accent-emphasis);
+    background: var(--accent-soft);
+    border-radius: 999px;
+    padding: 1px 8px;
+    line-height: 1.3;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* --- Manuscript tri-state tree (ADR-0074 slice 4b) --------------- */
+  .ctx-mtree {
+    display: flex;
+    flex-direction: column;
+    padding: 2px 0;
+  }
+  .ctx-mrow {
+    display: flex;
+    align-items: center;
+    padding-left: calc(var(--depth, 0) * 16px);
+  }
+  .ctx-mcaret {
+    flex: none;
+    width: 22px;
+    height: 26px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    color: var(--accent);
+    border-radius: var(--r-md);
+    cursor: pointer;
+    font-size: var(--fs-sm);
+    line-height: 1;
+  }
+  .ctx-mcaret:hover {
+    background: var(--inset);
+  }
+  .ctx-mcaret-leaf {
+    cursor: default;
+  }
+  .ctx-mtoggle {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: none;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    padding: 4px 8px;
+    border-radius: var(--r-md);
+    cursor: pointer;
+  }
+  .ctx-mtoggle:hover {
+    background: var(--inset);
+  }
+  .ctx-mtoggle.serif .ctx-mtitle {
+    font-family: var(--serif);
+  }
+  .ctx-mtitle {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ctx-mcheck {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    border: 1.5px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--fs-xs);
+    line-height: 1;
+    color: transparent;
+    position: relative;
+  }
+  .ctx-mcheck-on {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--surface);
+  }
+  .ctx-mcheck-implied {
+    background: var(--accent-soft2);
+    border-color: var(--accent);
+    color: var(--accent-emphasis);
+  }
+  .ctx-mcheck-indeterminate {
+    border-color: var(--accent);
+  }
+  .ctx-mcheck-indeterminate::after {
+    content: "";
+    position: absolute;
+    inset: 4px;
+    background: var(--accent);
+    border-radius: 1px;
   }
 
   /* --- Empty states ------------------------------------------------ */

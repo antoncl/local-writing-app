@@ -181,6 +181,74 @@ describe("NodePicker manuscript entry-type allowlist (#1461)", () => {
   });
 });
 
+// ADR-0074 slice 4b (#1476): the manuscript group is a tri-state tree — root,
+// acts, chapters as live containers over scenes.
+describe("NodePicker manuscript tree (#1476)", () => {
+  const structure = {
+    root: {
+      id: "root",
+      type: "root",
+      title: "The Manuscript",
+      children: [
+        {
+          id: "ch1",
+          type: "manuscript:chapter",
+          title: "Chapter One",
+          children: [
+            { id: "n1", type: "manuscript:scene", scene_id: "s1", title: "Plain scene" },
+            { id: "n2", type: "manuscript:scene", scene_id: "s2", title: "Battle scene" },
+          ],
+        },
+      ],
+    },
+  } as never;
+
+  it("renders the whole-manuscript root and containers over scenes", async () => {
+    render(NodePicker, {
+      props: { config: { sources: [{ kind: "manuscript" }] }, structure, affordance: "add" },
+    });
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+    const menu = document.querySelector(".ctx-menu") as HTMLElement;
+    expect(within(menu).getByText("The Manuscript")).toBeInTheDocument();
+    expect(within(menu).getByText("Chapter One")).toBeInTheDocument();
+    expect(within(menu).getByText("Plain scene")).toBeInTheDocument();
+  });
+
+  it("checking a chapter stores one live container ref", async () => {
+    const onChange = vi.fn();
+    render(NodePicker, {
+      props: { config: { sources: [{ kind: "manuscript" }] }, structure, affordance: "add", onChange },
+    });
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+    const menu = document.querySelector(".ctx-menu") as HTMLElement;
+    await fireEvent.click(within(menu).getByText("Chapter One").closest("button")!);
+    await tick();
+
+    const [detail] = onChange.mock.calls[0];
+    expect(detail.value).toHaveLength(1);
+    expect(detail.value[0]).toMatchObject({ id: "ch1", kind: "manuscript", entry_type: "manuscript:chapter" });
+  });
+
+  it("checking the root stores the whole-manuscript ref", async () => {
+    const onChange = vi.fn();
+    render(NodePicker, {
+      props: { config: { sources: [{ kind: "manuscript" }] }, structure, affordance: "add", onChange },
+    });
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+    const menu = document.querySelector(".ctx-menu") as HTMLElement;
+    await fireEvent.click(within(menu).getByText("The Manuscript").closest("button")!);
+    await tick();
+
+    const [detail] = onChange.mock.calls[0];
+    expect(detail.value).toEqual([
+      expect.objectContaining({ id: "root", kind: "manuscript", entry_type: "root" }),
+    ]);
+  });
+});
+
 describe("NodePicker onChange callback (runes conversion #49)", () => {
   // The dispatch("change", …) → onChange callback prop is the crux of the runes
   // conversion; lock the payload shape and the multi-select append so a later

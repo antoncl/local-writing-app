@@ -148,8 +148,16 @@
     return value.some((existing) => refKey(existing) === refKey(ref));
   }
 
-  function add(ref: NodePickerRef) {
-    if (isPicked(ref)) return;
+  // A candidate row toggles (ADR-0074 #1464): picking an already-picked
+  // candidate unpicks it, so the menu is a set-curation surface rather than an
+  // append-only list — no need to leave the flow to remove. Single-select is
+  // unchanged: a pick replaces the array and closes; re-picking the sole ref
+  // clears it (and leaves the menu open, since nothing was newly bound).
+  function togglePick(ref: NodePickerRef) {
+    if (isPicked(ref)) {
+      remove(refKey(ref));
+      return;
+    }
     const next = allowMultiple ? [...value, ref] : [ref];
     onChange?.({ value: next });
     if (!allowMultiple) close();
@@ -665,12 +673,13 @@
                       <NodeRow
                         title={ref.title}
                         stripeColor={hexForRef(ref)}
-                        dimmed={picked}
-                        clickable={!picked}
-                        onClick={() => add(ref)}
+                        clickable={true}
+                        onClick={() => togglePick(ref)}
                       >
                         {#snippet trailing()}
-                          {#if picked}<span class="ctx-added">✓ Added</span>{/if}
+                          {#if picked}
+                            <span class="ctx-picked" aria-label="Picked — click to remove">✓</span>
+                          {/if}
                         {/snippet}
                       </NodeRow>
                     {/each}
@@ -913,16 +922,15 @@
 
   /* Candidates now compose NodeRow/NodeList (ADR-0068); the group bars,
      item buttons, monogram tiles, and highlight <mark> styles are gone.
-     The one picker-local row style left is the "✓ Added" trailing badge. */
-  .ctx-added {
+     The one picker-local row style left is the picked-candidate check —
+     a toggle cue, not the old inert "✓ Added" badge (ADR-0074 #1464). The
+     row itself stays clickable; this ✓ marks it on. */
+  .ctx-picked {
     flex: none;
-    font-size: var(--fs-xs);
-    font-weight: 600;
+    font-size: var(--fs-sm);
+    font-weight: 700;
     color: var(--accent-emphasis);
-    background: var(--accent-soft);
-    border-radius: 999px;
-    padding: 1px 8px;
-    line-height: 1.3;
+    line-height: 1;
     white-space: nowrap;
   }
 

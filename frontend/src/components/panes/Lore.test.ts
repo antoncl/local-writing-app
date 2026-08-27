@@ -7,7 +7,8 @@
 // pane empty. Also guards the runes conversion (#49): props via `$props()`, the
 // `view` as `$derived`, and the search/add-menu local state.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { render, screen } from "@/lib/test/component";
+import { tick } from "svelte";
+import { render, screen, fireEvent } from "@/lib/test/component";
 import Lore from "./Lore.svelte";
 import { defaultView } from "@/lib/views/evaluateView";
 import { metadataSchemaStore } from "@/lib/stores/schema";
@@ -26,6 +27,10 @@ const SCHEMA = {
 
 function entry(id: string, title: string): LoreEntrySummary {
   return { id, title, body: "", entry_type: "lore:character", metadata: {} };
+}
+
+function tagged(id: string, title: string, body: string, tags: string[]): LoreEntrySummary {
+  return { id, title, body, entry_type: "lore:character", metadata: { tags } };
 }
 
 const noop = () => {};
@@ -54,5 +59,41 @@ describe("Lore pane — default view (#642)", () => {
       el.textContent?.trim(),
     );
     expect(headings).toContain("Character");
+  });
+});
+
+// ADR-0074 slice 3 (#1468): the Lore search gains the app-wide `#` tag-restrictor
+// through the shared parser. Plain queries keep the existing broad match (body
+// included); `#tag` narrows to tags only.
+describe("Lore pane — # tag search (#1468)", () => {
+  const entries = [
+    tagged("l-a", "Aragorn", "a ranger of the north", ["hero", "dunedain"]),
+    tagged("l-b", "Boromir", "captain of gondor", ["hero"]),
+    tagged("l-c", "Gollum", "a wretched creature", ["villain"]),
+  ];
+
+  async function typeSearch(container: HTMLElement, q: string) {
+    const box = container.querySelector('input[type="search"]') as HTMLInputElement;
+    await fireEvent.input(box, { target: { value: q } });
+    await tick();
+  }
+
+  it("a plain query still matches the body (unchanged breadth)", async () => {
+    const { container } = render(Lore, {
+      props: { entries, viewSpec: defaultView("lore", SCHEMA), onOpenEntry: noop },
+    });
+    await typeSearch(container, "gondor"); // body-only hit
+    expect(screen.getByText("Boromir")).toBeInTheDocument();
+    expect(screen.queryByText("Aragorn")).toBeNull();
+  });
+
+  it("#hero restricts to the tag — Gollum (villain) drops, body words don't count", async () => {
+    const { container } = render(Lore, {
+      props: { entries, viewSpec: defaultView("lore", SCHEMA), onOpenEntry: noop },
+    });
+    await typeSearch(container, "#hero");
+    expect(screen.getByText("Aragorn")).toBeInTheDocument();
+    expect(screen.getByText("Boromir")).toBeInTheDocument();
+    expect(screen.queryByText("Gollum")).toBeNull();
   });
 });

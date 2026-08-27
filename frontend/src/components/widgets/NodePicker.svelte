@@ -30,6 +30,13 @@
   } from "@/lib/types";
   import { resolveColor } from "@/lib/utils/colors";
   import { pickerMembership } from "@/lib/utils/pickerSources";
+  import {
+    matchesEntry,
+    parseSearchQuery,
+    readAliases,
+    readTags,
+    type SearchFields,
+  } from "@/lib/utils/entrySearch";
   import { portalToBody } from "@/lib/actions/portal";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import NodeList from "@/components/widgets/NodeList.svelte";
@@ -253,7 +260,9 @@
   // Flatten the structure tree's scenes (entries with kind=manuscript) into a
   // searchable list, respecting the per-input sub-type filter so the
   // editor's checkbox actually does something (was a silent no-op).
-  function flattenScenes(node: StructureNode | undefined): Array<{ id: string; title: string; entry_type: string }> {
+  function flattenScenes(
+    node: StructureNode | undefined,
+  ): Array<{ id: string; title: string; entry_type: string; tags: string[] }> {
     if (!node) return [];
     // Manuscript sources store their kind as "manuscript" (the configurator's
     // KINDS id), so that is the membership key — the earlier `.scene` read was
@@ -266,17 +275,18 @@
         (fqn) => fqn !== "manuscript:act" && fqn !== "manuscript:chapter",
       ),
     );
-    const out: Array<{ id: string; title: string; entry_type: string }> = [];
+    const out: Array<{ id: string; title: string; entry_type: string; tags: string[] }> = [];
     const walk = (n: StructureNode) => {
       // StructureNode uses `type` — the FQN entry_type ("manuscript:scene" /
       // "manuscript:act" / "manuscript:chapter") or the "root" sentinel. An earlier read
       // used `n.kind`, which is always undefined — so the scene list was
       // silently empty. scene_id is the canonical id for the scene itself (the
-      // structure node has its own id for the outline position).
+      // structure node has its own id for the outline position). tags ride along
+      // so the widened search can match a scene by its tag (#1468).
       if (n.type === "manuscript:scene" && n.scene_id) {
         const sceneType = (n as unknown as { entry_type?: string }).entry_type ?? "manuscript:scene";
         if (allowed.size === 0 || allowed.has(sceneType)) {
-          out.push({ id: n.scene_id, title: n.title, entry_type: sceneType });
+          out.push({ id: n.scene_id, title: n.title, entry_type: sceneType, tags: readTags(n.metadata) });
         }
       }
       for (const child of n.children ?? []) walk(child);
@@ -286,21 +296,23 @@
   }
 
   const allScenes = $derived(structure ? flattenScenes(structure.root) : []);
-  const filteredScenes = $derived(filterByTitle(allScenes, search));
+  const filteredScenes = $derived(allScenes.filter((s) => matchesEntry(s, parsedSearch)));
 
   // Flatten the research tree's notes (leaves) into a searchable list.
   // Topics are organizational containers with no body — only notes are
   // pickable as context. Mirrors flattenScenes but for note_id leaves
   // (the model field is named `scene_id` for both trees; on disk the
   // research tree uses `note_id` — see TreeStructureService).
-  function flattenResearchNotes(node: StructureNode | undefined): Array<{ id: string; title: string; entry_type: string }> {
+  function flattenResearchNotes(
+    node: StructureNode | undefined,
+  ): Array<{ id: string; title: string; entry_type: string; tags: string[] }> {
     if (!node) return [];
     const allowed = new Set(membership.entryTypes.research ?? []);
-    const out: Array<{ id: string; title: string; entry_type: string }> = [];
+    const out: Array<{ id: string; title: string; entry_type: string; tags: string[] }> = [];
     const walk = (n: StructureNode) => {
       if (n.type === "research:note" && n.scene_id) {
         if (allowed.size === 0 || allowed.has(n.type)) {
-          out.push({ id: n.scene_id, title: n.title, entry_type: n.type });
+          out.push({ id: n.scene_id, title: n.title, entry_type: n.type, tags: readTags(n.metadata) });
         }
       }
       for (const child of n.children ?? []) walk(child);
@@ -310,13 +322,20 @@
   }
 
   const allResearchNotes = $derived(researchStructure ? flattenResearchNotes(researchStructure.root) : []);
-  const filteredResearchNotes = $derived(filterByTitle(allResearchNotes, search));
+  const filteredResearchNotes = $derived(allResearchNotes.filter((n) => matchesEntry(n, parsedSearch)));
 
-  function filterByTitle<T extends { title: string }>(items: T[], q: string): T[] {
-    if (!q.trim()) return items;
-    const lower = q.toLowerCase();
-    return items.filter((i) => i.title.toLowerCase().includes(lower));
-  }
+  // Search semantics are shared with the Lore pane via entrySearch (#1468):
+  // title + tags + aliases, with a leading `#` restricting to tags. Parsed once;
+  // each candidate source extracts its own {title, tags, aliases} fields.
+  const parsedSearch = $derived(parseSearchQuery(search));
+  const matchesSummary = (item: { title: string; metadata?: Record<string, unknown> | null }): boolean => {
+    const fields: SearchFields = {
+      title: item.title,
+      tags: readTags(item.metadata),
+      aliases: readAliases(item.metadata),
+    };
+    return matchesEntry(fields, parsedSearch);
+  };
 
   // Lore grouped by sub-type, respecting `config.entry_types.lore` filter
   // when set. Empty filter = all sub-types allowed.
@@ -329,7 +348,7 @@
       if (entry.metadata?.context_policy === "never") return false;
       return allowed.size === 0 ? true : allowed.has(entry.entry_type);
     });
-    const filtered = filterByTitle(visible, search);
+    const filtered = visible.filter(matchesSummary);
     const byType: Record<string, LoreEntrySummary[]> = {};
     for (const entry of filtered) {
       (byType[entry.entry_type] ||= []).push(entry);
@@ -347,35 +366,32 @@
   // Hidden Library prompts (ADR-0049 #682) drop out of the snippet picker too —
   // it is a prompt-discovery surface, so it routes through the shared seam.
   const snippetEntries = $derived(
-    filterByTitle(
-      hidePromptEntries(promptEntries, $hiddenLibraryStore).filter((p) => {
+    hidePromptEntries(promptEntries, $hiddenLibraryStore)
+      .filter((p) => {
         const allowed = new Set(membership.entryTypes.snippet ?? []);
         return allowed.size === 0 || allowed.has(p.entry_type);
-      }),
-      search,
-    ),
+      })
+      .filter(matchesSummary),
   );
 
   // Assistants matching the config's per-kind entry_type whitelist + search.
   const assistantCandidates = $derived(
-    filterByTitle(
-      assistantEntries.filter((a) => {
+    assistantEntries
+      .filter((a) => {
         const allowed = new Set(membership.entryTypes.assistant ?? []);
         return allowed.size === 0 || allowed.has(a.entry_type);
-      }),
-      search,
-    ),
+      })
+      .filter(matchesSummary),
   );
 
   // Plotlines matching the config's per-kind entry_type whitelist + search (#742).
   const plotCandidates = $derived(
-    filterByTitle(
-      plotEntries.filter((p) => {
+    plotEntries
+      .filter((p) => {
         const allowed = new Set(membership.entryTypes.plot ?? []);
         return allowed.size === 0 || allowed.has(p.entry_type);
-      }),
-      search,
-    ),
+      })
+      .filter(matchesSummary),
   );
 
   // Chip text resolution. Show the entry-type's display name from the
@@ -414,8 +430,8 @@
 
     const matchingPresets = allowedPresets.filter((id) => {
       const meta = PRESET_META[id] ?? { title: id, tooltip: "" };
-      if (!search.trim()) return true;
-      return meta.title.toLowerCase().includes(search.toLowerCase());
+      // Presets have no tags, so a `#tag` query correctly hides them.
+      return matchesEntry({ title: meta.title }, parsedSearch);
     });
     if (matchingPresets.length > 0) {
       groups.push({
@@ -607,7 +623,7 @@
           <input
             class="ctx-search"
             type="text"
-            placeholder={compact ? "Search…" : "Search scenes, lore, presets…"}
+            placeholder={compact ? "Search…" : "Search titles, tags, aliases…  (#tag)"}
             bind:value={search}
             bind:this={searchInputEl}
           />

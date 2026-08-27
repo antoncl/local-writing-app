@@ -679,17 +679,23 @@ class EntryPatchRoutesTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 404)
 
     def test_old_lore_prefixed_routes_are_gone(self) -> None:
-        # The old POST routes no longer serve the loop, and each is gone in a
-        # DIFFERENT way — assert both exactly so a 404↔405 drift is caught:
-        #   `…/{id}/ai-patch` has no registered subpath at all           → 404
-        #   `/api/lore/ai-draft` is shadowed by GET `/api/lore/{entry_id}`
-        #   (entry_id="ai-draft"), which registers no POST handler        → 405
-        self.assertEqual(
+        # The old POST routes no longer serve the loop. The exact "gone" status is
+        # NOT stable across environments: when a frontend build is present
+        # (`frontend/dist` → `main.py` mounts a `/` SPA StaticFiles catch-all), an
+        # unmatched API path falls through to it and returns 405 (GET/HEAD only)
+        # instead of 404. CI's backend job builds no frontend → 404; a local run
+        # after `npm run build` → 405 (#1428). So assert the mount-independent
+        # invariant — the old route does NOT serve (never a 2xx) — allowing either
+        # code, rather than pinning an exact 404 that flips with local build state.
+        self.assertIn(
             self.client.post(
                 f"/api/lore/{self.hero.id}/ai-patch", json={"raw": "{}"}
             ).status_code,
-            404,
+            (404, 405),
         )
+        # `/api/lore/ai-draft` is shadowed by GET `/api/lore/{entry_id}`
+        # (entry_id="ai-draft"), a specific route that wins over the `/` catch-all
+        # and registers no POST handler → 405 regardless of build state.
         self.assertEqual(
             self.client.post(
                 "/api/lore/ai-draft",

@@ -307,23 +307,30 @@ def test_expand_container_picks_expands_containers_to_ordered_scenes():
 
 def test_expand_container_picks_passes_scenes_and_others_through():
     # A leaf scene (its ref id is the scene_id — find_node misses, so it isn't a
-    # container), a non-manuscript pick, and an unresolved id all pass untouched.
+    # container), a non-manuscript pick, and an unresolved manuscript id all pass
+    # untouched. The unknown id has no entry_type, so it opens the structure but
+    # resolves to nothing and passes through.
     from app.services.ai.preview import _expand_container_picks
 
     stub = _StructureStub(_sample_structure())
     items = [
-        {"id": "s_a1", "kind": "manuscript", "title": "Open"},  # scene ref (scene_id)
+        {"id": "s_a1", "kind": "manuscript", "entry_type": "manuscript:scene", "title": "Open"},
         {"id": "l1", "kind": "lore", "title": "A note"},  # non-manuscript
         {"id": "ghost", "kind": "manuscript"},  # deleted / unknown
     ]
     assert _expand_container_picks(stub, items) == items
 
 
-def test_expand_container_picks_skips_structure_read_without_manuscript_picks():
-    # No manuscript pick → the structure is never loaded (cost avoided).
+def test_expand_container_picks_skips_structure_read_for_scene_only_picks():
+    # The perf gate (the preview re-renders on a debounce): a prompt that picks
+    # only scenes (each tagged manuscript:scene) never loads the structure.
     from app.services.ai.preview import _expand_container_picks
 
     stub = _StructureStub(_sample_structure())
-    lore_only = [{"id": "l1", "kind": "lore"}, {"id": "l2", "kind": "lore"}]
-    assert _expand_container_picks(stub, lore_only) == lore_only
+    scenes_and_lore = [
+        {"id": "s_a1", "kind": "manuscript", "entry_type": "manuscript:scene"},
+        {"id": "s_b", "kind": "manuscript", "entry_type": "manuscript:scene"},
+        {"id": "l1", "kind": "lore"},
+    ]
+    assert _expand_container_picks(stub, scenes_and_lore) == scenes_and_lore
     assert stub.reads == 0

@@ -137,8 +137,17 @@ def _expand_container_picks(
     No dedup: overlapping picks (a container and its own descendant scene) can't
     arise in normal use — the picker's absorb rule is the invariant that
     prevents them — so a straight expansion stays honest rather than masking a
-    frontend bug."""
-    if not any(_is_manuscript_pick(item) for item in items):
+    frontend bug.
+
+    `read_structure()` is not free (it scans every scene's front matter), and
+    the preview pane re-renders on a debounce while editing, so the common case
+    — a prompt that picks only scenes — must not pay it. The `entry_type` tag is
+    a *cheap gate*, not the expansion authority: a scene ref is tagged
+    `manuscript:scene`, so anything manuscript-kind that isn't lets the load
+    through, where the structural test (below) decides. A container ref always
+    carries an act/chapter/root type, never `manuscript:scene`, so it is never
+    gated out."""
+    if not any(_might_be_container(item) for item in items):
         return items
     document = project_service.read_structure()
     out: list[dict[str, Any]] = []
@@ -154,6 +163,14 @@ def _expand_container_picks(
 
 def _is_manuscript_pick(item: dict[str, Any]) -> bool:
     return item.get("kind") == "manuscript" and bool(item.get("id"))
+
+
+def _might_be_container(item: dict[str, Any]) -> bool:
+    """A cheap gate for the structure load: a manuscript pick that is not
+    explicitly tagged a scene might be a container. See `_expand_container_picks`
+    — this only decides whether to look; `_container_node_for_pick` decides what
+    is actually a container."""
+    return _is_manuscript_pick(item) and item.get("entry_type") != "manuscript:scene"
 
 
 def _container_node_for_pick(document, item: dict[str, Any]):

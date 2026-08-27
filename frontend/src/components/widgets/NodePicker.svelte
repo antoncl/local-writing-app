@@ -31,6 +31,7 @@
   import { resolveColor } from "@/lib/utils/colors";
   import { pickerMembership } from "@/lib/utils/pickerSources";
   import {
+    isSearchActive,
     matchesEntry,
     parseSearchQuery,
     readAliases,
@@ -532,7 +533,7 @@
   // always wins (every surviving group opens), matching the old behaviour.
   let openOverride = $state<Record<string, boolean>>({});
   function isGroupOpen(group: { id: string; items: unknown[] }): boolean {
-    if (search.trim()) return true;
+    if (isSearchActive(search)) return true;
     return openOverride[group.id] ?? groupOpenByDefault(group.items.length, false);
   }
   function toggleGroup(group: { id: string; items: unknown[] }): void {

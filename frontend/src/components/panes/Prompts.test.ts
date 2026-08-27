@@ -162,3 +162,47 @@ describe("Prompts pane — Library hide (ADR-0049 slice 3)", () => {
     expect(screen.getByRole("button", { name: /Show 1 hidden/ })).toBeInTheDocument();
   });
 });
+
+describe("Prompts pane — ▶ Run affordance (#1433)", () => {
+  it("shows Run on a runnable (Chat, no offer_on) row, not on a non-runnable one", () => {
+    metadataSchemaStore.set(DISPOSITION_SCHEMA);
+    render(Prompts, {
+      props: {
+        entries: [
+          promptOf("chat", "Free chat", "prompt:general"), // Chat, no offer_on → runnable
+          promptOf("cont", "Continue scene", "prompt:general", { output: { handler: "inline" } }), // Continue → not
+        ],
+        onOpenEntry: noop,
+        onNewEntry: noop,
+        onCloneEntry: noop,
+      },
+    });
+    expect(screen.getByLabelText("Run Free chat")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Run Continue scene")).toBeNull();
+  });
+
+  it("excludes a Chat prompt anchored to a host type via offer_on (e.g. impersonate)", () => {
+    metadataSchemaStore.set(DISPOSITION_SCHEMA);
+    const impersonate = { ...promptOf("imp", "Impersonate", "prompt:general"), offer_on: ["lore:character"] };
+    render(Prompts, {
+      props: { entries: [impersonate], onOpenEntry: noop, onNewEntry: noop, onCloneEntry: noop },
+    });
+    expect(screen.queryByLabelText("Run Impersonate")).toBeNull();
+  });
+
+  it("fires onRunEntry with the prompt id when Run is clicked", async () => {
+    metadataSchemaStore.set(DISPOSITION_SCHEMA);
+    const onRunEntry = vi.fn();
+    render(Prompts, {
+      props: {
+        entries: [promptOf("chat", "Free chat", "prompt:general")],
+        onOpenEntry: noop,
+        onNewEntry: noop,
+        onCloneEntry: noop,
+        onRunEntry,
+      },
+    });
+    await fireEvent.click(screen.getByLabelText("Run Free chat"));
+    expect(onRunEntry).toHaveBeenCalledWith("chat");
+  });
+});

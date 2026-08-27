@@ -8,7 +8,12 @@
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import { entryTypeChoicesByKind } from "@/lib/utils/treeHelpers";
   import { defaultView } from "@/lib/views/evaluateView";
-  import { promptSummariesToGroupNodes, type PromptGroupNode } from "@/lib/views/promptNodes";
+  import {
+    promptSummariesToGroupNodes,
+    RUNNABLE_FIELD,
+    RUNNABLE_LABEL,
+    type PromptGroupNode,
+  } from "@/lib/views/promptNodes";
   import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
   import { inheritedLayerLabel } from "@/lib/utils/provenance";
   import { resolveColor } from "@/lib/utils/colors";
@@ -37,12 +42,16 @@
     // Clone a built-in Library prompt into the project as an editable copy
     // (ADR-0049 §5). Offered only on Library rows via a trailing action.
     onCloneEntry,
+    // Run a standalone-runnable prompt (Chat disposition, empty `offer_on`):
+    // open a fresh chat bound to it. Offered on runnable rows via a ▶ action (#1433).
+    onRunEntry,
   }: {
     entries: PromptEntrySummary[];
     viewSpec?: ViewSpec;
     onOpenEntry: (entryId: string) => void;
     onNewEntry: (entryType: string) => void;
     onCloneEntry: (entryId: string) => void;
+    onRunEntry?: (entryId: string) => void;
   } = $props();
 
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
@@ -158,6 +167,23 @@
     onmousedown={(event) => event.stopPropagation()}
   >
     {#snippet trailing()}
+      <!-- ▶ Run (#1433): a standalone-runnable prompt (Chat, empty offer_on) opens
+           a fresh chat bound to it. Gated on the `runnable` flag the lift stamps —
+           shown on runnable rows in any view, independent of the Library actions
+           below (a runnable Library prompt shows both). -->
+      {#if entry.metadata?.[RUNNABLE_FIELD] === RUNNABLE_LABEL}
+        <button
+          class="reveal-on-hover"
+          type="button"
+          title={`Run “${entry.title}” — open a chat bound to this prompt`}
+          aria-label={`Run ${entry.title}`}
+          onmousedown={(event) => event.stopPropagation()}
+          onclick={(event) => {
+            event.stopPropagation();
+            onRunEntry?.(entry.id);
+          }}
+        ><i class="ti ti-player-play" aria-hidden="true"></i></button>
+      {/if}
       <!-- ADR-0049: a shipped Library prompt is used in place, cloned to own, or
            hidden (§2). All three affordances key on `is_library`, not the label —
            the writer's own prompts have nothing to clone or hide. A revealed

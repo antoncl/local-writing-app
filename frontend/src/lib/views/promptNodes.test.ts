@@ -7,8 +7,11 @@ import {
   DISPOSITION_LABELS,
   dispositionFieldDef,
   dispositionFor,
+  isRunnablePrompt,
   promptSummariesToGroupNodes,
   REVISE_ENTITIES_DISPOSITION_LABEL,
+  RUNNABLE_FIELD,
+  RUNNABLE_LABEL,
 } from "@/lib/views/promptNodes";
 
 // ADR-0065 S3: each prompt INSTANCE carries its own `context_strategy.output`; the
@@ -109,6 +112,32 @@ describe("promptSummariesToGroupNodes — the pane lift", () => {
     const original = prompt("a", "prompt:general", "a", INLINE_CURSOR);
     promptSummariesToGroupNodes([original], SCHEMA);
     expect(original.metadata).toEqual({});
+  });
+});
+
+describe("isRunnablePrompt / the runnable stamp (#1433)", () => {
+  it("is true for a Chat prompt with empty offer_on (standalone-runnable)", () => {
+    expect(isRunnablePrompt(ctx, prompt("chat", "prompt:general"))).toBe(true);
+  });
+
+  it("is false for a Chat prompt anchored to a host type via offer_on (e.g. impersonate)", () => {
+    const impersonate = { ...prompt("imp", "prompt:general"), offer_on: ["lore:character"] };
+    expect(isRunnablePrompt(ctx, impersonate)).toBe(false);
+  });
+
+  it("is false for every non-Chat disposition", () => {
+    expect(isRunnablePrompt(ctx, prompt("cont", "prompt:general", "cont", INLINE_CURSOR))).toBe(false);
+    expect(isRunnablePrompt(ctx, prompt("rev", "prompt:general", "rev", INLINE_SELECTION))).toBe(false);
+    expect(isRunnablePrompt(ctx, prompt("brain", "prompt:general", "brain", COMMIT))).toBe(false);
+    expect(isRunnablePrompt(ctx, prompt("snip", "prompt:snippet"))).toBe(false);
+  });
+
+  it("stamps the runnable flag into metadata (label when runnable, empty otherwise)", () => {
+    const [chatNode] = promptSummariesToGroupNodes([prompt("chat", "prompt:general")], SCHEMA);
+    expect(chatNode.metadata[RUNNABLE_FIELD]).toBe(RUNNABLE_LABEL);
+    const impersonate = { ...prompt("imp", "prompt:general"), offer_on: ["lore:character"] };
+    const [impNode] = promptSummariesToGroupNodes([impersonate], SCHEMA);
+    expect(impNode.metadata[RUNNABLE_FIELD]).toBe("");
   });
 });
 

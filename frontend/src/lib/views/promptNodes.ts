@@ -61,6 +61,23 @@ export function dispositionFor(ctx: PromptResolutionContext, entry: PromptEntryS
 export const CHAT_DISPOSITION_LABEL = CHAT.label;
 export const REVISE_ENTITIES_DISPOSITION_LABEL = REVISE_ENTITIES.label;
 
+// A prompt is RUNNABLE — launchable as a standalone chat with no host context —
+// iff its disposition is Chat (a conversation with no output handler and no
+// commit) AND it is anchored to no host node type (`offer_on` empty). A
+// conversation prompt WITH `offer_on` (e.g. impersonate) is still a Chat, but it
+// is launched FROM its subject, so it is not standalone-runnable. Stamped into
+// `metadata` by the lift so the "Runnable prompts" view filters on it (like
+// `disposition`), and exported as a predicate for the pane's ▶ Run row gate.
+export const RUNNABLE_FIELD = "runnable";
+export const RUNNABLE_LABEL = "runnable";
+
+export function isRunnablePrompt(
+  ctx: PromptResolutionContext,
+  entry: PromptEntrySummary,
+): boolean {
+  return dispositionFor(ctx, entry).label === CHAT.label && (entry.offer_on ?? []).length === 0;
+}
+
 // The five disposition labels in shelf order — the value set the view designer
 // offers when a user filters or groups a prompt view on `disposition`.
 export const DISPOSITION_LABELS = [CONTINUE, REVISE_PROSE, CHAT, REVISE_ENTITIES, SNIPPETS].map(
@@ -104,6 +121,10 @@ export function promptSummariesToGroupNodes(
     .sort((a, b) => a.disp.rank - b.disp.rank)
     .map(({ entry, disp }) => ({
       ...entry,
-      metadata: { ...entry.metadata, [DISPOSITION_FIELD]: disp.label },
+      metadata: {
+        ...entry.metadata,
+        [DISPOSITION_FIELD]: disp.label,
+        [RUNNABLE_FIELD]: isRunnablePrompt(ctx, entry) ? RUNNABLE_LABEL : "",
+      },
     }));
 }

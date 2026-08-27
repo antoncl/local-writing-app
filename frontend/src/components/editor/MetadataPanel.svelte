@@ -4,6 +4,7 @@
   import { aiSettings } from "@/lib/stores/aiSettings.svelte";
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import ColoredSelect from "@/components/widgets/ColoredSelect.svelte";
+  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import { fieldIconClass } from "@/lib/utils/fieldIcons";
   import { resolveColor } from "@/lib/utils/colors";
   import { effectiveFieldLabel, effectiveFieldHidden, metadataValueDisplayString } from "@/lib/utils/schemaTypeHelpers";
@@ -184,6 +185,22 @@
     return out;
   }
   const sections = $derived(buildSections(visibleFieldIds, metadataSchema));
+
+  // Reference fields (#1441) are the rail's collapsible collections: the field
+  // row owns the disclosure caret (in the glyph gutter), and the picker
+  // contributes the count+add on the header line plus the ref list BELOW the
+  // row (controlled ReferencePicker). Expanded state is rail-local, keyed by
+  // field id — persistence is a follow-up.
+  function isRefField(field: MetadataFieldDefinition): boolean {
+    return field.type === "entity_ref" || field.type === "entity_ref_list";
+  }
+  let refExpanded = $state<Record<string, boolean>>({});
+  function isRefExpanded(fieldId: string): boolean {
+    return refExpanded[fieldId] ?? false;
+  }
+  function toggleRef(fieldId: string): void {
+    refExpanded[fieldId] = !isRefExpanded(fieldId);
+  }
 
   // Wide field types take the full rail width (control wraps below the
   // name); compact types keep their control inline on the right.
@@ -394,10 +411,24 @@
         {@const field = metadataSchema.fields[fieldId]}
         {@const fieldLabel = effectiveFieldLabel(metadataSchema, entryType, fieldId)}
         <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field)} class:inherited={isInherited(fieldId)} class:layer-inherited={isLayerInherited(fieldId)} class:mutated={isMutated(fieldId)} class:overridden={isOverridden(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && (compare?.resolve ? !isFlipAdopted(fieldId) : compare?.side === "was")}>
-          <!-- Disclosure gutter — empty on a plain field row, but reserved so the
-               field glyph lines up with the collapsible sections' glyph column
-               (RailSectionHeader): caret · glyph on every rail line (#1438). -->
-          <span class="fr-disc" aria-hidden="true"></span>
+          <!-- Disclosure gutter — reserved so the field glyph lines up with the
+               collapsible sections' glyph column (RailSectionHeader): caret ·
+               glyph on every rail line (#1438). A reference field is itself
+               collapsible, so its caret lives here (#1441); a plain field leaves
+               the gutter empty. -->
+          {#if isRefField(field)}
+            <button
+              type="button"
+              class="fr-disc fr-disc-caret"
+              aria-expanded={isRefExpanded(fieldId)}
+              aria-label={`${isRefExpanded(fieldId) ? "Collapse" : "Expand"} ${fieldLabel}`}
+              onclick={() => toggleRef(fieldId)}
+            >
+              <GroupCaret collapsed={!isRefExpanded(fieldId)} />
+            </button>
+          {:else}
+            <span class="fr-disc" aria-hidden="true"></span>
+          {/if}
           {#if canClearOwn && isOwnClearable(fieldId)}
             <!-- Clear-to-default (#522): the intra-project twin of #517's reset.
                  #517 hangs its "Reset to <source>" gesture off the `ti-versions`
@@ -423,7 +454,7 @@
             <span class="fr-icon"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
           {/if}
           <span class="fr-name" title={field.description || undefined}>{fieldLabel}{#if isMutated(fieldId)}<span class="fr-mutated-marker" title="Changed by here">⤳</span>{/if}</span>
-          <div class="fr-val" title={isLayerInherited(fieldId) && inheritedFromLabel ? `Inherited from ${inheritedFromLabel}` : undefined}>
+          <div class="fr-val" class:fr-val-flat={isRefField(field)} title={isLayerInherited(fieldId) && inheritedFromLabel ? `Inherited from ${inheritedFromLabel}` : undefined}>
             {#if isOverridden(fieldId)}
               {#if canResetOverride}
                 <!-- The `ti-versions` mark PR 2 ships, made interactive (#517):
@@ -533,6 +564,8 @@
                 {readOnly}
                 allowUnset={true}
                 embedded={true}
+                controlled={isRefField(field)}
+                expanded={isRefExpanded(fieldId)}
                 value={displayValue(fieldId)}
                 ariaLabel={fieldLabel}
                 loreEntries={loreEntries}
@@ -691,6 +724,32 @@
   .fr-disc {
     flex: none;
     width: 22px;
+  }
+  /* A reference field is collapsible, so its gutter holds a real caret button
+     (a bare frame around the shared GroupCaret) rather than an empty spacer. */
+  .fr-disc-caret {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 22px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    border-radius: var(--r-sm);
+  }
+  .fr-disc-caret:hover {
+    background: var(--tier1);
+  }
+  /* Reference value area (#1441): a layout no-op so the controlled picker's
+     count+add ride the header line (their own margin-left:auto) and its ref list
+     takes a full-width line BELOW the row — the §3.5 one-row grammar, no second
+     strip. The field row is already flex-wrap (isWide), which the list uses.
+     `.fr-val.fr-val-flat` (not `.fr-val-flat`) so it beats the base `.fr-val`
+     display:flex regardless of source order. */
+  .fr-val.fr-val-flat {
+    display: contents;
   }
   .fr-icon {
     flex: none;

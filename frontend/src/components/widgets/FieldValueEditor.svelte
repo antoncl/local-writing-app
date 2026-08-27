@@ -47,6 +47,10 @@
     /** Rail-embedded: forwarded to ReferencePicker so a ref field's picker drops
      *  its duplicate titled header (the rail already shows the label, #1216). */
     embedded?: boolean;
+    /** Controlled rail mode (#1441): forwarded to ReferencePicker so the field
+     *  row (not the picker) owns the disclosure caret; `expanded` is that state. */
+    controlled?: boolean;
+    expanded?: boolean;
     ariaLabel?: string;
     loreEntries?: LoreEntrySummary[];
     promptEntries?: PromptEntrySummary[];
@@ -75,6 +79,8 @@
     readOnly = false,
     allowUnset = false,
     embedded = false,
+    controlled = false,
+    expanded = false,
     ariaLabel,
     loreEntries = [],
     promptEntries = [],
@@ -197,6 +203,8 @@
   <ReferencePicker
     {field}
     {embedded}
+    {controlled}
+    {expanded}
     value={metadataReferenceValue(field, value)}
     excludeId={excludeId}
     ariaLabel={label}

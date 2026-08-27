@@ -77,3 +77,31 @@ describe("ReferencePicker — embedded header (#1216)", () => {
     expect(screen.getByText("No references.")).toBeInTheDocument();
   });
 });
+
+describe("ReferencePicker — controlled rail mode (#1441)", () => {
+  // The field row owns the caret and drives `expanded`; the picker contributes
+  // no toggle of its own, so the whole reference field reads as ONE rail row
+  // (chevron·glyph·name·count·+Add) with the list below (§3.5 double-render fix).
+  it("controlled: renders no title and no internal caret button", () => {
+    render(ReferencePicker, {
+      props: { field, value: [], ariaLabel: "Characters", readOnly: true, embedded: true, controlled: true, expanded: false },
+    });
+    expect(screen.queryByText("Characters")).not.toBeInTheDocument();
+    // No picker-owned toggle (the field-row gutter carries the caret now).
+    expect(screen.queryByRole("button", { name: /characters/i })).toBeNull();
+  });
+
+  it("controlled: the list follows the `expanded` prop, not an internal click", () => {
+    // Collapsed prop → no list.
+    const collapsed = render(ReferencePicker, {
+      props: { field, value: [], ariaLabel: "Characters", readOnly: true, embedded: true, controlled: true, expanded: false },
+    });
+    expect(collapsed.container.textContent).not.toContain("No references.");
+
+    // Expanded prop → the list renders (driven from outside, no toggle click).
+    render(ReferencePicker, {
+      props: { field, value: [], ariaLabel: "Characters", readOnly: true, embedded: true, controlled: true, expanded: true },
+    });
+    expect(screen.getByText("No references.")).toBeInTheDocument();
+  });
+});

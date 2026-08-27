@@ -51,6 +51,13 @@
     // Off everywhere else — standalone surfaces (chat diff, draft card) rely on
     // the picker's own title.
     embedded = false,
+    // Controlled rail mode (#1441): the field row owns the disclosure caret (in
+    // its glyph gutter) and the label, so the picker renders NO caret — just the
+    // trailing count+add and, below the row, the ref list. `expanded` is then the
+    // field row's state, not the picker's. Only the rail sets this; standalone
+    // and the uncontrolled-embedded (#1216) paths keep their own caret + state.
+    controlled = false,
+    expanded = false,
     // In-memory data sources used by the embedded NodePicker.
     structure = null,
     // Research tree (sibling to manuscript) — threaded to the picker.
@@ -68,6 +75,8 @@
     ariaLabel?: string;
     readOnly?: boolean;
     embedded?: boolean;
+    controlled?: boolean;
+    expanded?: boolean;
     structure?: StructureDocument | null;
     researchStructure?: StructureDocument | null;
     loreEntries?: LoreEntrySummary[];
@@ -79,7 +88,10 @@
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
   const metadataSchema = $derived($metadataSchemaStore);
 
-  let expanded = $state(false);
+  // Uncontrolled open state (standalone + the #1216 embedded caret). In the
+  // controlled rail mode the field row drives it, so `open` reads the prop.
+  let internalOpen = $state(false);
+  const open = $derived(controlled ? expanded : internalOpen);
 
   const multi = $derived(field.type === "entity_ref_list");
   // The field's authored picker_config drives the dropdown directly.
@@ -207,36 +219,57 @@
   }
 </script>
 
-<section class="reference-picker" class:embedded aria-label={ariaLabel}>
-  {#if embedded}
-    <!-- Rail-embedded (#1216): the field row already shows the label, so skip
-         the picker's titled header and render just the caret/count/add strip —
-         no duplicate label, expand/collapse preserved. -->
+<section
+  class="reference-picker"
+  class:embedded
+  class:controlled={embedded && controlled}
+  aria-label={ariaLabel}
+>
+  {#if embedded && controlled}
+    <!-- Controlled rail mode (#1441): the field row owns the caret + label, so
+         we contribute only the trailing count+add (line 1) and, when expanded,
+         the ref list (line 2). `display:contents` on the section (see .controlled)
+         lets both drop straight into the field row's own flex-wrap, so the list
+         sits BELOW the header row instead of as a second strip (the §3.5
+         double-render fix). -->
+    <span class="reference-picker-inline">
+      <CountPill count={selectedRefs.length} />
+      {@render addTrigger()}
+    </span>
+    {#if open}
+      <div class="reference-picker-listblock">
+        {@render refList()}
+      </div>
+    {/if}
+  {:else if embedded}
+    <!-- Rail-embedded (#1216), uncontrolled: the field row already shows the
+         label, so skip the picker's titled header and render just the
+         caret/count/add strip — no duplicate label, expand/collapse preserved. -->
     <div class="reference-picker-head">
       <button
         type="button"
         class="reference-picker-toggle"
-        aria-expanded={expanded}
-        aria-label={`${expanded ? "Collapse" : "Expand"} ${ariaLabel || "references"}`}
-        onclick={() => (expanded = !expanded)}
+        aria-expanded={open}
+        aria-label={`${open ? "Collapse" : "Expand"} ${ariaLabel || "references"}`}
+        onclick={() => (internalOpen = !internalOpen)}
       >
-        <GroupCaret collapsed={!expanded} />
+        <GroupCaret collapsed={!open} />
         <CountPill count={selectedRefs.length} />
       </button>
       {@render addTrigger()}
     </div>
-    {#if expanded}
+    {#if open}
       {@render refList()}
     {/if}
   {:else}
     <NodeRow
       title={ariaLabel || "References"}
       groupHeader
-      collapsed={!expanded}
-      onClick={() => (expanded = !expanded)}
+      collapsed={!open}
+      onClick={() => (internalOpen = !internalOpen)}
     >
       {#snippet leading()}
-        <GroupCaret collapsed={!expanded} />
+        <GroupCaret collapsed={!open} />
       {/snippet}
       {#snippet trailing()}
         <CountPill count={selectedRefs.length} />
@@ -312,6 +345,25 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
+  }
+
+  /* Controlled rail mode (#1441): the section is a layout no-op so its children
+     join the field row's own flex-wrap. The inline count+add ride the header
+     line (pushed right); the list block takes a full line of its own BELOW the
+     header — the single-row grammar, list underneath, no second strip. */
+  .reference-picker.controlled {
+    display: contents;
+  }
+  .reference-picker-inline {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .reference-picker-listblock {
+    flex-basis: 100%;
+    width: 100%;
+    margin-top: 6px;
   }
 
   /* Embedded (rail) header: a compact caret + count + add strip in place of the

@@ -17,6 +17,7 @@
   } from "@/lib/editor-core/promptResolution";
   import { getSwatch, resolveColorForType } from "@/lib/utils/colors";
   import { tagHexResolver } from "@/lib/utils/tags";
+  import { parseSearchQuery, readTags } from "@/lib/utils/entrySearch";
   import { knownTagsStore } from "@/lib/stores/tags";
   import { defaultView } from "@/lib/views/evaluateView";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
@@ -147,14 +148,21 @@
   }
 
   function entryTags(entry: LoreEntrySummary): string[] {
-    const raw = entry.metadata?.tags;
-    if (Array.isArray(raw)) {
-      return raw.map((item) => String(item).trim()).filter(Boolean);
+    // One tag reader shared with the search box and the picker (#1468).
+    return readTags(entry.metadata);
+  }
+
+  // The Lore search filter. A leading `#` is the app-wide tag-restrictor
+  // (ADR-0074): `#heist` matches only on tags, through the same parser the
+  // picker uses so the two surfaces agree. A plain query keeps the existing
+  // broad match (title + body + all metadata) unchanged.
+  function loreSearchFilter(entry: LoreEntrySummary, query: string): boolean {
+    const parsed = parseSearchQuery(query);
+    if (parsed.tagOnly) {
+      if (!parsed.needle) return true;
+      return entryTags(entry).some((t) => t.toLowerCase().includes(parsed.needle));
     }
-    if (typeof raw === "string") {
-      return raw.split(",").map((s) => s.trim()).filter(Boolean);
-    }
-    return [];
+    return entrySearchText(entry).includes(query);
   }
 
   // The row stripe color: a view's soft-color annotation wins over the instance
@@ -184,7 +192,7 @@
   frameParents
   searchPlaceholder="Search entries, tags, aliases"
   bind:searchValue={searchQuery}
-  filter={(entry, query) => entrySearchText(entry).includes(query)}
+  filter={loreSearchFilter}
   active={(entry) => focusedDocument?.type === "lore" && focusedDocument.id === entry.id}
   onClick={(entry) => onOpenEntry(entry.id)}
   row={entryRow}

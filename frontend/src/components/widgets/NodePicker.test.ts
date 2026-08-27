@@ -13,9 +13,23 @@ import { hideLibraryEntry, openProjectHidden } from "@/lib/stores/hiddenLibrary"
 import type { MetadataSchema, PlotlineSummary, PromptEntrySummary } from "@/lib/types";
 
 const SCHEMA = {
-  entry_types: { "prompt:snippet": { name: "Snippet" }, "plot:plotline": { name: "Plotline" } },
+  entry_types: {
+    "prompt:snippet": { name: "Snippet" },
+    "plot:plotline": { name: "Plotline" },
+    "lore:character": { name: "Character", kind: "lore" },
+  },
   fields: {},
 } as unknown as MetadataSchema;
+
+function loreEntry(id: string, title: string, tags: string[], aliases: string[] = []) {
+  return {
+    id,
+    title,
+    body: "",
+    entry_type: "lore:character",
+    metadata: { tags, aliases },
+  } as unknown as import("@/lib/types").LoreEntrySummary;
+}
 
 function snippet(id: string, title: string): PromptEntrySummary {
   return {
@@ -248,5 +262,62 @@ describe("NodePicker candidate toggle (ADR-0074 #1464)", () => {
 
     const [detail] = onChange.mock.calls[0];
     expect(detail.value.map((r: { id: string }) => r.id)).toEqual(["p2"]);
+  });
+});
+
+// ADR-0074 slice 3 (#1468): search widened from title-only to title + tags +
+// aliases, with a leading `#` restricting to tags.
+describe("NodePicker widened search (#1468)", () => {
+  function openWithLore() {
+    const result = render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "lore" }] },
+        loreEntries: [
+          loreEntry("l1", "Mara Voss", ["heist"], ["the counter"]),
+          loreEntry("l2", "Harbormaster Quill", ["harbor"]),
+        ],
+        affordance: "add",
+      },
+    });
+    return result;
+  }
+
+  async function type(q: string) {
+    const box = document.querySelector(".ctx-search") as HTMLInputElement;
+    await fireEvent.input(box, { target: { value: q } });
+    await tick();
+  }
+
+  it("finds an entry by a tag its title does not contain", async () => {
+    openWithLore();
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+    await type("heist");
+    const menu = document.querySelector(".ctx-menu") as HTMLElement;
+    expect(within(menu).getByText("Mara Voss")).toBeInTheDocument();
+    expect(within(menu).queryByText("Harbormaster Quill")).toBeNull();
+  });
+
+  it("finds an entry by an alias", async () => {
+    openWithLore();
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+    await type("counter");
+    const menu = document.querySelector(".ctx-menu") as HTMLElement;
+    expect(within(menu).getByText("Mara Voss")).toBeInTheDocument();
+  });
+
+  it("#tag restricts to tags — a title/alias hit does not count", async () => {
+    openWithLore();
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+    // "voss" is in the title but is not a tag → #voss finds nothing.
+    await type("#voss");
+    let menu = document.querySelector(".ctx-menu") as HTMLElement;
+    expect(within(menu).queryByText("Mara Voss")).toBeNull();
+    // "#harbor" is a real tag → Quill surfaces.
+    await type("#harbor");
+    menu = document.querySelector(".ctx-menu") as HTMLElement;
+    expect(within(menu).getByText("Harbormaster Quill")).toBeInTheDocument();
   });
 });

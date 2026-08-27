@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from layer_fixtures import declare
 from project_fixtures import open_test_project
 
 from app.main import app
@@ -172,6 +173,59 @@ class CreateAssistantLayerPlacementTests(unittest.TestCase):
         # ...even though the curation opinion is still the open project's (a
         # local .order.yaml, but no local assistant file).
         self.assertEqual(list((self.root / "assistants").glob("*.md")), [])
+        self.assertEqual(created.source_layer_label, "Machine")
+
+
+class CreateAssistantInheritsThroughLayersTests(unittest.TestCase):
+    """#1452, through a real universe → book chain (not a flat project): the
+    editor's "inherited" stripe fires when an entry's `source_layer_id` differs
+    from `$projectLayerIdStore` — which is `nearestLayerId`, the LAST schema
+    layer (the open book). So a locally-created assistant must stamp exactly
+    that innermost id (no stripe), and a machine-layer one must stamp the
+    machine id (still inherited). This pins the two ids the frontend compares."""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.base = Path(self._tmp.name).resolve()
+        self.universe = self.base / "universe"
+        self.book = self.base / "book"
+        # Open the book, then declare the universe as its ancestor with the
+        # machine root at `base` so the walk is machine → universe → book.
+        # conftest's autouse fixture already isolates machine settings.
+        self.service = open_test_project(self.book, "Book")
+        declare(self.service, self.book, [self.universe], base=self.base)
+
+    def _nearest_layer_id(self) -> str:
+        # What the frontend reads as $projectLayerIdStore (schema.ts nearestLayerId):
+        # the last entry in the merged layer stack.
+        return self.service.read_metadata_schema_layers().layers[-1].id
+
+    def test_local_create_stamps_the_innermost_layer_so_no_stripe(self) -> None:
+        created = self.service.create_assistant_entry(
+            CreateAssistantEntryRequest(title="Local", layer_id=None)
+        )
+        # Stamped id == the id the frontend compares against → the stripe
+        # (source_layer_id != ownLayerId) does not fire.
+        self.assertEqual(created.source_layer_id, self._nearest_layer_id())
+        # ...and it is the BOOK, not the universe ancestor above it.
+        self.assertEqual(
+            created.source_layer_id, self.service._metadata_schema_layer_id(self.book)
+        )
+        self.assertNotEqual(
+            created.source_layer_id, self.service._metadata_schema_layer_id(self.universe)
+        )
+        self.assertNotEqual(created.source_layer_label, "Machine")
+
+    def test_machine_create_stays_inherited_in_a_layered_project(self) -> None:
+        created = self.service.create_assistant_entry(
+            CreateAssistantEntryRequest(title="Shared", layer_id="")
+        )
+        machine_layer_id = self.service._metadata_schema_layer_id(ms.assistants_dir().parent)
+        # Machine file → machine id, which differs from the innermost id, so the
+        # editor correctly shows "Inherited from Machine".
+        self.assertEqual(created.source_layer_id, machine_layer_id)
+        self.assertNotEqual(created.source_layer_id, self._nearest_layer_id())
         self.assertEqual(created.source_layer_label, "Machine")
 
 

@@ -11,6 +11,7 @@
     StructureNode,
   } from "@/lib/types";
   import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { railSectionCollapse } from "@/lib/stores/railSectionCollapse.svelte";
 
   let {
     backlinks = [],
@@ -29,7 +30,11 @@
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
   const metadataSchema = $derived($metadataSchemaStore);
 
-  let expanded = $state(false);
+  // Open/closed persists (#1444): References defaults collapsed, but the writer's
+  // choice survives node switches ({#key} remount re-reads the store) and reload.
+  const COLLAPSE_KEY = "references";
+  const COLLAPSE_DEFAULT = false;
+  const expanded = $derived(railSectionCollapse.isExpanded(COLLAPSE_KEY, COLLAPSE_DEFAULT));
 
   // A non-view surface (ADR-0035 §3, #256): the backlink list lifts to the
   // degenerate ViewResult via nodeSet() and renders through ViewNodeList like
@@ -75,7 +80,7 @@
     glyph="ti-link"
     count={backlinks.length}
     {expanded}
-    onToggle={() => (expanded = !expanded)}
+    onToggle={() => railSectionCollapse.toggle(COLLAPSE_KEY, COLLAPSE_DEFAULT)}
   />
   {#if expanded}
     <div class="backlinks-list">

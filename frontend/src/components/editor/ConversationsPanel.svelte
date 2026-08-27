@@ -30,6 +30,7 @@
   import { formatChatRosterDetail } from "@/lib/utils/chatRoster";
   import { chatSessions } from "@/lib/stores/chatSessions.svelte";
   import { chatSessionsStore } from "@/lib/stores/chats";
+  import { railSectionCollapse } from "@/lib/stores/railSectionCollapse.svelte";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { referenceIndexStore } from "@/lib/stores/references";
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
@@ -108,8 +109,11 @@
   let menuId = $derived(`conversations-new-menu-${subjectId}`);
 
   // Expanded by default: the point of the surface is that the writer sees an
-  // existing thread to resume before reaching for ＋New.
-  let expanded = $state(true);
+  // existing thread to resume before reaching for ＋New. The choice persists
+  // (#1444) — survives node switches ({#key} remount re-reads) and reload.
+  const COLLAPSE_KEY = "conversations";
+  const COLLAPSE_DEFAULT = true;
+  const expanded = $derived(railSectionCollapse.isExpanded(COLLAPSE_KEY, COLLAPSE_DEFAULT));
   let menuOpen = $state(false);
   let newButton: HTMLButtonElement | null = $state(null);
 
@@ -151,7 +155,7 @@
       glyph="ti-messages"
       count={conversations.length}
       {expanded}
-      onToggle={() => (expanded = !expanded)}
+      onToggle={() => railSectionCollapse.toggle(COLLAPSE_KEY, COLLAPSE_DEFAULT)}
     >
       {#snippet trailing()}
         {#if newPrompts.length > 0}

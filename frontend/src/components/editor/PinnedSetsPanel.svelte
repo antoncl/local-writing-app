@@ -21,6 +21,7 @@
   import { pinnedSetsFor } from "@/lib/views/pinnedSets";
   import { resolveColor } from "@/lib/utils/colors";
   import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { railSectionCollapse } from "@/lib/stores/railSectionCollapse.svelte";
   import type { MutationSetEntrySummary } from "@/lib/types";
 
   let {
@@ -42,7 +43,11 @@
 
   const schema = $derived($metadataSchemaStore);
 
-  let expanded = $state(true);
+  // Open/closed persists (#1444) — survives node switches ({#key} remount
+  // re-reads the store) and reload. Staged changes defaults expanded.
+  const COLLAPSE_KEY = "staged-changes";
+  const COLLAPSE_DEFAULT = true;
+  const expanded = $derived(railSectionCollapse.isExpanded(COLLAPSE_KEY, COLLAPSE_DEFAULT));
   let error = $state("");
 
   function startNew(): void {
@@ -69,7 +74,7 @@
       glyph="ti-stack-2"
       count={pinned.length}
       {expanded}
-      onToggle={() => (expanded = !expanded)}
+      onToggle={() => railSectionCollapse.toggle(COLLAPSE_KEY, COLLAPSE_DEFAULT)}
     >
       {#snippet trailing()}
         <button

@@ -1,6 +1,6 @@
 # ADR-0074: The context picker curates a set of live refs
 
-- Status: **Proposed** — awaiting Anton's review (revision 3; round one: tri-state confirmed, presets retired, tags/views drillable, plot integrated; round two: `#` made an app-wide convention shared with the Lore search, manuscript containers gain the same expand carets as every other container row).
+- Status: **Accepted** — 2026-08-27 (Anton), after two mockup review rounds (round one: tri-state confirmed, presets retired, tags/views drillable, plot integrated; round two: `#` made an app-wide convention shared with the Lore search, manuscript containers gain the same expand carets as every other container row).
 - Concern: the invocation-time context picker (`NodePicker` hosted by `PromptInputField`) — its selection paradigm, what is pickable, and what a picked value stores.
 - Follows: ADR-0068 (the picker composes NodeRow/NodeList — that substrate is kept; this is the feature redesign 0068 explicitly scoped out), ADR-0023 (`NodePickerConfig` = sources + mechanics; its *source* vocabulary is reused here in a second position), ADR-0041 (one view-expr IDL, both runtimes — the resolver this leans on), ADR-0048 (plot boards — plot becomes a context source here; its spoiler gate is bounded below).
 - Relates: the author-time tri-state tree (`NodePickerConfigEditor` / `pickerTree.ts`) whose paradigm this adopts; `docs/context-picker.md` (the v1 howto this partially supersedes).

@@ -124,6 +124,35 @@ def _coerce_entry_ref(
     return None
 
 
+def _use_values(value: Any) -> list[Any]:
+    """Split a `use()` argument into the individual nodes it selects.
+
+    A single pick (an id, EntryRef, or dict) is one node — `[value]`. A
+    multi-select `context_pick` reaches the template as a **list** (the bind
+    layer coerces it to `list[EntryRef]`, ADR-0060 §2), so `use(inputs.picks)`
+    selects EVERY pick — the natural spelling of Journey A's explicit
+    `{% for p in inputs.picks %}{{ use(p) }}{% endfor %}` loop, not just the
+    first. A raw `[...]`-shaped JSON string (an un-coerced picker value) is
+    unwrapped to its elements, mirroring `_coerce_entry_ref`'s own string
+    handling; a non-list JSON string, or unparseable text, stays one value.
+
+    Unlike `entry()` (which resolves a single node and takes `[0]` of a list on
+    purpose), `use()` records — so a list must not silently collapse to its head.
+    """
+    if isinstance(value, list):
+        return list(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            try:
+                parsed = json.loads(stripped)
+            except (ValueError, TypeError):
+                parsed = None
+            if isinstance(parsed, list):
+                return parsed
+    return [value]
+
+
 def _record_use(
     project: ProjectService,
     schema: Any,
@@ -133,17 +162,20 @@ def _record_use(
     used_hints_slot: dict[str, str],
 ) -> None:
     """Record a `use(node[, hint])` call into the per-render slots (ADR-0060 §2/§5):
-    the resolved id into `used_nodes_slot` (deduped, insertion-ordered), and a valid
-    volatility `hint` into `used_hints_slot` keyed by id (last hint wins). A value
-    that doesn't resolve, or an invalid hint, is a no-op. Module-level so the `use`
-    closure in `register_helpers` stays trivial."""
-    ref = _coerce_entry_ref(project, schema, value)
-    if ref is None or not ref.id:
-        return
-    if ref.id not in used_nodes_slot:
-        used_nodes_slot.append(ref.id)
-    if hint in ("stable", "volatile"):
-        used_hints_slot[ref.id] = hint
+    each resolved id into `used_nodes_slot` (deduped, insertion-ordered), and a valid
+    volatility `hint` into `used_hints_slot` keyed by id (last hint wins). A
+    multi-select `context_pick` list selects every pick (each element recorded),
+    with the hint applied to all; a value that doesn't resolve, or an invalid hint,
+    is a no-op. Module-level so the `use` closure in `register_helpers` stays
+    trivial."""
+    for item in _use_values(value):
+        ref = _coerce_entry_ref(project, schema, item)
+        if ref is None or not ref.id:
+            continue
+        if ref.id not in used_nodes_slot:
+            used_nodes_slot.append(ref.id)
+        if hint in ("stable", "volatile"):
+            used_hints_slot[ref.id] = hint
 
 
 def _coerce_str_entry_ref(
@@ -503,14 +535,16 @@ def register_helpers(
     env.globals["use_lore"] = _use_lore
 
     # ADR-0060 §2/§5: `use(node)` / `use(node, "stable"|"volatile")` — "also include
-    # *this* node in context." Coerces its argument to an EntryRef exactly as
-    # `entry()` does (an id, an EntryRef, a dict, or a single context_pick value),
-    # records the resolved id, and flips the lore gate (using a node means the chat
-    # is lore-enabled). The optional second arg is an advisory volatility PRIOR
-    # (ADR-0060 §5): it biases which tier the node starts in but never overrides the
-    # per-revision correctness check (a "stable"-hinted node that changed still
-    # re-writes). Emits nothing — the backend places and caches it — so it composes
-    # inside a loop: `{% for p in inputs.picks %}{{ use(p, "volatile") }}{% endfor %}`.
+    # *this* node in context." Coerces its argument to an EntryRef like `entry()`
+    # (an id, an EntryRef, or a dict) and records the resolved id — but where a
+    # multi-select `context_pick` is a LIST, it records EVERY pick (not `entry()`'s
+    # first-wins), so `use(inputs.picks)` selects them all; `_use_values` owns the
+    # split. Flips the lore gate (using a node means the chat is lore-enabled). The
+    # optional second arg is an advisory volatility PRIOR (ADR-0060 §5): it biases
+    # which tier the node starts in but never overrides the per-revision correctness
+    # check (a "stable"-hinted node that changed still re-writes). Emits nothing —
+    # the backend places and caches it — so it also composes inside a loop:
+    # `{% for p in inputs.picks %}{{ use(p, "volatile") }}{% endfor %}`.
     def _use(value: Any, hint: Any = None) -> str:
         lore_invoked_slot[0] = True
         _record_use(project, schema, value, hint, used_nodes_slot, used_hints_slot)

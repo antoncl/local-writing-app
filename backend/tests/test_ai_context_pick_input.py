@@ -166,6 +166,51 @@ def test_context_pick_input_iterates_as_entry_ref_list(tmp_path, monkeypatch):
     assert rendered.lore_invoked is True
 
 
+def test_use_of_whole_pick_list_selects_every_pick(tmp_path, monkeypatch):
+    # #1466: `use()` on a multi-select context_pick is the natural spelling —
+    # `use(inputs.picks)` must select EVERY pick, matching the explicit loop
+    # form above, not silently keep only the first (the old `_coerce_entry_ref`
+    # `[0]` collapse, which `entry()` still relies on and this must not disturb).
+    monkeypatch.setattr(
+        "app.services.machine_settings.config_path",
+        lambda: tmp_path / "machine_settings.yaml",
+    )
+    from app.models import CreateLoreEntryRequest
+    from app.services.ai.preview import PreviewRequest, build_preview
+    from app.services.project_service import ProjectService
+
+    service = ProjectService.created_at(tmp_path / "project", "Picks")
+    alpha = service.create_lore_entry(
+        CreateLoreEntryRequest(title="Alpha", entry_type="lore:note")
+    )
+    beta = service.create_lore_entry(
+        CreateLoreEntryRequest(title="Beta", entry_type="lore:note")
+    )
+    picks = json.dumps(
+        [
+            {"id": alpha.id, "kind": "lore", "title": "Alpha"},
+            {"id": beta.id, "kind": "lore", "title": "Beta"},
+        ]
+    )
+    rendered, _ = build_preview(
+        service,
+        PreviewRequest(
+            template_source=(
+                '{% role "system" %}{% do use(inputs.picks) %}{% endrole %}'
+            ),
+            target_scene_id="",
+            session_id=None,
+            inputs={"picks": picks},
+            text_before="",
+            text_after="",
+            commit=False,
+        ),
+    )
+    # The whole list — both picks recorded, in order — same as the explicit loop.
+    assert rendered.used_node_ids == [alpha.id, beta.id]
+    assert rendered.lore_invoked is True
+
+
 def test_json_array_of_scalars_is_not_coerced(tmp_path, monkeypatch):
     # ADR-0060 §2: the bind-layer coercion keys on the picker SHAPE (a JSON list
     # of dicts), not merely a `[...]`-looking string. A plain text input whose

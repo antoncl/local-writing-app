@@ -112,7 +112,6 @@
     type="button"
     class="swatch-trigger"
     class:empty={!current && !placeholderHex}
-    class:inherited={!current && !!placeholderHex}
     class:read-only={readOnly}
     title={current ? current.label : placeholderHex ? "Inherited color" : "No color"}
     aria-label={current

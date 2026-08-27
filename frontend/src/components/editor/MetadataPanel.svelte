@@ -5,6 +5,7 @@
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import ColoredSelect from "@/components/widgets/ColoredSelect.svelte";
   import { fieldIconClass } from "@/lib/utils/fieldIcons";
+  import { resolveColor } from "@/lib/utils/colors";
   import { effectiveFieldLabel, effectiveFieldHidden, metadataValueDisplayString } from "@/lib/utils/schemaTypeHelpers";
   import type {
     DocumentKind,
@@ -513,16 +514,18 @@
               <span class="fr-computed" title={computedValue}><span class="fr-computed-text">{computedValue}</span><i class="ti ti-lock" aria-hidden="true"></i></span>
             {:else if field.type === "color"}
               <!-- Color renders at its display_order slot like any field
-                   (ADR-0029 §G) — the hoist is gone. The swatch + the
-                   inherited-default hint (type/kind fallback) live inline. -->
+                   (ADR-0029 §G) — the hoist is gone. When unset, the swatch shows
+                   the RESOLVED inherited color (type → parent → kind default) as a
+                   dashed placeholder, so the actual colour is visible; the label
+                   only has to say it's inherited (#1440). -->
               <SwatchPicker
                 value={metadataValueString(displayValue(fieldId)) || null}
+                placeholderHex={resolveColor(null, entryType, documentKind, metadataSchema)?.hex ?? null}
                 {readOnly}
                 onChange={(id) => (id ? onMetadataChange?.({ ...metadata, [fieldId]: id }) : clearField(fieldId))}
               />
               {#if !metadataValueString(displayValue(fieldId))}
-                {@const inherited = metadataSchema.entry_types[entryType]?.color}
-                <small class="muted">{inherited ? `inherits ${inherited}` : "type / kind default"}</small>
+                <small class="muted">inherited</small>
               {/if}
             {:else}
               <FieldValueEditor

@@ -5,12 +5,13 @@
 // The switcher renders each read-only (Duplicate-to-edit, never Edit/Delete);
 // `paneViews.specFor` resolves an extra's id to its spec here (extras are
 // frontend-synthesized, not backend nodes — a filter/roster carries no fold
-// state to persist). Only `chat` ships an extra today; every other kind keeps
-// its single default, so `defaultView` parity with the backend is untouched.
+// state to persist). `chat` ships "Openable chats" and `prompt` ships "Runnable
+// prompts"; every other kind keeps its single default, so `defaultView` parity
+// with the backend is untouched.
 
 import { defaultView, kindUniverseExpr } from "@/lib/views/evaluateView";
 import { SEED_DISPOSITION_FIELD } from "@/lib/views/chatNodes";
-import { REVISE_ENTITIES_DISPOSITION_LABEL } from "@/lib/views/promptNodes";
+import { REVISE_ENTITIES_DISPOSITION_LABEL, RUNNABLE_FIELD, RUNNABLE_LABEL } from "@/lib/views/promptNodes";
 import type { MetadataSchema, ViewSpec } from "@/lib/types";
 
 export type BuiltinView = { id: string; title: string; spec: ViewSpec };
@@ -48,14 +49,36 @@ function openableChatsSpec(schema?: MetadataSchema | null): ViewSpec {
   };
 }
 
+// "Runnable prompts": the prompts launchable as a standalone chat — the Chat
+// disposition (a conversation with no output handler and no commit) that is also
+// anchored to no host type (`offer_on` empty). The Prompts lift stamps `runnable`
+// per node (promptNodes.isRunnablePrompt); this filters on it, the same way
+// "Openable chats" filters `seed_disposition`. `overlap` is the grammar's
+// set-intersection op (no `eq`/`in`); the stamped scalar reads as a singleton.
+function runnablePromptsSpec(schema?: MetadataSchema | null): ViewSpec {
+  return {
+    kind: "prompt",
+    expr: {
+      filter: {
+        of: kindUniverseExpr("prompt", schema),
+        pred: { field: { key: RUNNABLE_FIELD, op: "overlap", value: [RUNNABLE_LABEL] } },
+      },
+    },
+    sort: { by: "manual" },
+  };
+}
+
 export function builtinViews(kind: string, schema?: MetadataSchema | null): BuiltinView[] {
   const base: BuiltinView = {
     id: `view_default_${kind}`,
-    title: kind === "chat" ? "All chats" : "Default view",
+    title: kind === "chat" ? "All chats" : kind === "prompt" ? "All prompts" : "Default view",
     spec: defaultView(kind, schema),
   };
   if (kind === "chat") {
     return [base, { id: `${BUILTIN_EXTRA_PREFIX}chat_openable`, title: "Openable chats", spec: openableChatsSpec(schema) }];
+  }
+  if (kind === "prompt") {
+    return [base, { id: `${BUILTIN_EXTRA_PREFIX}prompt_runnable`, title: "Runnable prompts", spec: runnablePromptsSpec(schema) }];
   }
   return [base];
 }

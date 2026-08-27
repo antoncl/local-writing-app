@@ -43,6 +43,18 @@ describe("builtinViews (ADR-0051 S6 follow-up)", () => {
     expect(pred?.value).toEqual(["Revise entities"]);
   });
 
+  it("ships two built-in views for prompt: All prompts + Runnable prompts", () => {
+    const views = builtinViews("prompt", null);
+    expect(views.map((v) => v.title)).toEqual(["All prompts", "Runnable prompts"]);
+    expect(views[0].id).toBe("view_default_prompt");
+    expect(isBuiltinExtraViewId(views[1].id)).toBe(true);
+    // Filters on the `runnable` flag the Prompts lift stamps, via overlap (a set op).
+    const pred = views[1].spec.expr?.filter?.pred?.field;
+    expect(pred?.key).toBe("runnable");
+    expect(pred?.op).toBe("overlap");
+    expect(pred?.value).toEqual(["runnable"]);
+  });
+
   it("every other kind ships a single default view (defaultView parity untouched)", () => {
     const lore = builtinViews("lore", null);
     expect(lore).toHaveLength(1);

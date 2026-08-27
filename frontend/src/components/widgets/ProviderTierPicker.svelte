@@ -184,6 +184,18 @@
       (Boolean(model) && Boolean(currentResolvedModel) && model !== currentResolvedModel),
   );
 
+  // The stored model's display name, falling back to the raw id for an orphan
+  // model not in the current catalogue. Drives the Custom-mode dropdown label
+  // and the read-only Model readout so the picked model is ALWAYS visible —
+  // previously an explicit/OpenRouter pick cleared the tier and showed only a
+  // bare "Custom (Advanced)", hiding the very model just chosen (#1453).
+  const resolvedModelName = $derived(
+    models.find((m) => m.id === model)?.display_name ?? "",
+  );
+  const customLabel = $derived(
+    resolvedModelName || model ? `Custom — ${resolvedModelName || model}` : "Custom (Advanced)",
+  );
+
   async function onProviderChange(newProvider: string) {
     provider = newProvider;
     // Switching provider: clear tier + model and reload. The user
@@ -313,7 +325,7 @@
       disabled={modelsLoading || visibleTiers.length === 0}
       onchange={(e) => onTierChange((e.currentTarget as HTMLSelectElement).value as AICapabilityTier | "")}
     >
-      <option value="">{isCustom ? "Custom (Advanced)" : "—"}</option>
+      <option value="">{isCustom ? customLabel : "—"}</option>
       {#each visibleTiers as t (t)}
         <option value={t}>{tierOptionLabel(t)}</option>
       {/each}
@@ -324,6 +336,20 @@
       <small class="ptp-status ptp-error">{modelsError}</small>
     {/if}
   </label>
+
+  {#if model}
+    <!-- Read-only readout of the effective model (#1453): the Capability
+         dropdown shows a friendly label, this line shows the exact model the
+         entry stores and sends — visible for a tier pick and a custom pick
+         alike, without expanding Advanced. -->
+    <div class="ptp-row ptp-model-readout">
+      <span class="ptp-label">Model</span>
+      <span class="ptp-model-value">
+        <span class="ptp-model-name">{resolvedModelName || model}</span>
+        {#if resolvedModelName}<code class="ptp-model-id">{model}</code>{/if}
+      </span>
+    </div>
+  {/if}
 
   <details bind:open={advancedOpen} class="ptp-advanced">
     <summary>Advanced — browse all models</summary>
@@ -406,6 +432,31 @@
   }
 
   .ptp-status {
+    font-size: var(--fs-sm);
+    color: var(--text-3);
+  }
+
+  .ptp-model-value {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+    color: var(--text);
+  }
+
+  .ptp-model-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ptp-model-id {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--mono);
     font-size: var(--fs-sm);
     color: var(--text-3);
   }

@@ -183,3 +183,23 @@ describe("ProviderTierPicker — the model View (ADR-0073 S3)", () => {
     expect(screen.getByText("new")).toBeTruthy();
   });
 });
+
+describe("ProviderTierPicker — picked-model feedback (#1453)", () => {
+  it("names the model in the Capability label and a read-only readout for a custom pick", async () => {
+    // Picking an explicit model that is NOT any tier's resolution (claude-unlisted
+    // is pricier than claude-bal, so 'balanced' resolves to claude-bal) clears the
+    // tier → Custom mode. Previously that showed a bare "Custom (Advanced)" and hid
+    // the very model just chosen; now the label names it and a read-only row shows
+    // the exact id the entry stores.
+    render(ProviderTierPicker, { props: { policy: "cloud-allowed", onChange: vi.fn() } });
+
+    const row = await screen.findByText("Claude Unlisted");
+    await fireEvent.click(row);
+
+    // The Capability dropdown's Custom option names the model instead of "Custom (Advanced)".
+    await screen.findByRole("option", { name: "Custom — Claude Unlisted" });
+    // The read-only readout shows the exact model id (unique to the readout — the
+    // row shows the display name, not the id).
+    await vi.waitFor(() => expect(screen.getByText("claude-unlisted")).toBeTruthy());
+  });
+});

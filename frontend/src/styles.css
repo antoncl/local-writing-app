@@ -879,8 +879,8 @@ button.row-action-add.active {
 }
 .rail-group-label {
   font-size: var(--fs-xs);
-  font-weight: 800;
-  letter-spacing: 0.09em;
+  font-weight: var(--w-semibold);
+  letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--text-3, var(--text-3));
 }

@@ -393,6 +393,10 @@
         {@const field = metadataSchema.fields[fieldId]}
         {@const fieldLabel = effectiveFieldLabel(metadataSchema, entryType, fieldId)}
         <div class="field-row" class:color-row={field.type === "color"} class:wide={isWide(field)} class:inherited={isInherited(fieldId)} class:layer-inherited={isLayerInherited(fieldId)} class:mutated={isMutated(fieldId)} class:overridden={isOverridden(fieldId)} class:flipped={isFlipped(fieldId)} class:flip-was={isFlipped(fieldId) && (compare?.resolve ? !isFlipAdopted(fieldId) : compare?.side === "was")}>
+          <!-- Disclosure gutter — empty on a plain field row, but reserved so the
+               field glyph lines up with the collapsible sections' glyph column
+               (RailSectionHeader): caret · glyph on every rail line (#1438). -->
+          <span class="fr-disc" aria-hidden="true"></span>
           {#if canClearOwn && isOwnClearable(fieldId)}
             <!-- Clear-to-default (#522): the intra-project twin of #517's reset.
                  #517 hangs its "Reset to <source>" gesture off the `ti-versions`
@@ -631,8 +635,8 @@
   }
   .rail-type-label {
     font-size: var(--fs-xs);
-    font-weight: 800;
-    letter-spacing: 0.08em;
+    font-weight: var(--w-semibold);
+    letter-spacing: 0.07em;
     text-transform: uppercase;
     color: var(--text-3);
   }
@@ -668,7 +672,8 @@
   /* L1 section headers live in styles.css (shared with the Detail Type
      editor); only the Field row chrome is scoped per-component. */
 
-  /* Field row: icon · name · value */
+  /* Field row: ‹disclosure gutter› · glyph · name · value — the rail's one row
+     grammar (#1438), shared with RailSectionHeader so glyphs align vertically. */
   .field-row {
     display: flex;
     align-items: center;
@@ -678,6 +683,12 @@
   .field-row.wide {
     flex-wrap: wrap;
   }
+  /* Empty disclosure gutter — same width as GroupCaret (22px) so a field row's
+     glyph sits directly under a section header's glyph. */
+  .fr-disc {
+    flex: none;
+    width: 22px;
+  }
   .fr-icon {
     flex: none;
     width: 24px;
@@ -685,20 +696,19 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 7px;
-    background: var(--inset);
-    border: 1px solid var(--divider);
     color: var(--text-2);
     font-size: var(--fs-md);
   }
   .fr-name {
     flex: 0 1 auto;
     font-size: var(--fs-md);
+    font-weight: var(--w-medium);
     color: var(--text);
     min-width: 78px;
   }
   .fr-val {
     margin-left: auto;
+    min-width: 0;
     display: flex;
     align-items: center;
     gap: 6px;

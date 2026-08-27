@@ -45,6 +45,7 @@ export const UI_GLYPHS: string[] = [
   "layout-sidebar-right-collapse",
   "layout-sidebar-right-expand",
   "lock",
+  "messages",
   "pencil",
   "player-play",
   "plus",

@@ -8,11 +8,10 @@
   // Not a bespoke widget (the smell ADR-0051 names): membership is the same
   // reverse-reference lookup the Conversations panel runs (`pinnedSetsFor` over
   // the in-memory reverse index), and the rows render through NodeRow /
-  // ViewNodeList like every other node list. The header mirrors
-  // ConversationsPanel's disclosure row (a NodeRow trailing slot would flatten
-  // the ＋New button into an icon tile).
+  // ViewNodeList like every other node list. The header is the shared rail
+  // RailSectionHeader (#1438); its ＋New rides the trailing slot.
   import NodeRow from "@/components/widgets/NodeRow.svelte";
-  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
+  import RailSectionHeader from "@/components/editor/RailSectionHeader.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import { nodeSet } from "@/lib/views/viewResult";
@@ -65,24 +64,22 @@
 
 {#if entityEntryType}
   <section class="entry-pinned-sets" aria-label="Staged changes">
-    <div class="ps-header">
-      <button
-        type="button"
-        class="ps-toggle"
-        aria-expanded={expanded}
-        onclick={() => (expanded = !expanded)}
-      >
-        <GroupCaret collapsed={!expanded} />
-        <span class="ps-title">Staged changes</span>
-        <CountPill count={pinned.length} />
-      </button>
-      <button
-        type="button"
-        class="ps-new"
-        title="Stage a new change for this entry"
-        onclick={startNew}
-      >＋ New</button>
-    </div>
+    <RailSectionHeader
+      title="Staged changes"
+      glyph="ti-stack-2"
+      count={pinned.length}
+      {expanded}
+      onToggle={() => (expanded = !expanded)}
+    >
+      {#snippet trailing()}
+        <button
+          type="button"
+          class="ps-new"
+          title="Stage a new change for this entry"
+          onclick={startNew}
+        >＋ New</button>
+      {/snippet}
+    </RailSectionHeader>
     {#if error}
       <p class="ps-error" role="alert">{error}</p>
     {/if}
@@ -119,43 +116,6 @@
 <style>
   .entry-pinned-sets {
     padding-top: 8px;
-  }
-
-  /* Disclosure header — mirrors ConversationsPanel's (serif title + hairline
-     rule), so the two entry-card surfaces read as siblings. */
-  .ps-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    border-bottom: 1px solid var(--divider);
-    padding-bottom: 4px;
-    margin-bottom: 6px;
-  }
-
-  .ps-toggle {
-    flex: 1 1 auto;
-    min-width: 0;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 4px 6px;
-    border: none;
-    border-radius: 4px;
-    background: transparent;
-    color: inherit;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-  }
-  .ps-toggle:hover {
-    background: var(--accent-soft);
-  }
-
-  .ps-title {
-    font-family: var(--serif);
-    font-size: var(--fs-md);
-    font-weight: 700;
-    color: var(--text);
   }
 
   /* A quiet text button, matching ConversationsPanel's ＋New. */

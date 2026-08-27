@@ -252,8 +252,8 @@
   .rail-head-label {
     flex: 1;
     font-size: var(--fs-xs);
-    font-weight: 800;
-    letter-spacing: 0.09em;
+    font-weight: var(--w-semibold);
+    letter-spacing: 0.07em;
     text-transform: uppercase;
     color: var(--text-3);
   }

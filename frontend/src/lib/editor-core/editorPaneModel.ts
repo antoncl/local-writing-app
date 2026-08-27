@@ -13,6 +13,7 @@ import type {
   PromptContextStrategy,
   PromptInputDefinition,
 } from "@/lib/types";
+import { canonicalizeInputDefinitions } from "@/lib/utils/promptInputs";
 
 // A lightweight handle to the open document: which kind it is + its id. The
 // pane resolves the full document into `scene`.
@@ -137,10 +138,19 @@ export function isEditorPaneDirty(
   if (entryType !== scene.entry_type) return true;
   if (!metadataEqual(metadata, scene.metadata ?? {})) return true;
   // Prompt-only: inputs are a per-entry array of definitions. Compare the
-  // serialised form so reordering / type changes are detected.
+  // serialised form so reordering / type changes are detected — but canonicalize
+  // both sides first (#1470): the draft is the editor's minimal save payload,
+  // while the saved `scene` carries the server's filled model defaults (`hidden`,
+  // `required: false`, an empty picker `options`). A raw compare is perpetually
+  // unequal, so the pane would autosave itself forever with no edits.
   const sceneInputs = (scene as { inputs?: PromptInputDefinition[] }).inputs;
   if (inputs !== undefined && sceneInputs !== undefined) {
-    if (JSON.stringify(inputs) !== JSON.stringify(sceneInputs)) return true;
+    if (
+      JSON.stringify(canonicalizeInputDefinitions(inputs)) !==
+      JSON.stringify(canonicalizeInputDefinitions(sceneInputs))
+    ) {
+      return true;
+    }
   }
   // Prompt-only: offer_on is the ＋New targeting allow-list (S4b). Same guarded
   // compare as inputs — a non-prompt scene has no offer_on baseline, so editing

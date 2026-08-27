@@ -3,10 +3,12 @@ import { FIELD_TYPE_CHOICES, fieldTypeLabel } from "@/lib/utils/fieldIcons";
 import { coerceStringList } from "@/lib/utils/schemaTypeHelpers";
 import type {
   MetadataFieldType,
+  MetadataValue,
   NodePickerConfig,
   PreviewErrorInfo,
   PromptInputDefinition,
   PromptInputType,
+  SelectOption,
 } from "@/lib/types";
 
 // The prompt-input type catalog, derived from the metadata field catalog so the
@@ -78,6 +80,101 @@ export type EntryInputDraft = {
   nodePickerConfig: NodePickerConfig;
   nameDerived: boolean;
 };
+
+// ── Draft ⇄ definition canonicalization ────────────────────────────────────
+// One source of truth for the round-trip between the persisted
+// `PromptInputDefinition` and the editor-side `EntryInputDraft`. The store
+// (PromptInputDraftsController) delegates its seed/serialize here, and the
+// autosave dirty-check reuses it to normalise the server's saved copy before
+// comparing (#1470) — otherwise the server's filled model defaults (`hidden`,
+// `required: false`, an empty picker `options`) make a saved input compare
+// unequal to the draft it was saved from, and the pane autosaves forever.
+
+// Map an editor-side default string onto its stored, type-matched value:
+// boolean → real bool, number → real number (raw string if unparseable),
+// everything else (text / long_text / select / refs) → string. Only called for
+// a defined, non-empty default (#24).
+export function defaultForStorage(raw: string, type: PromptInputType): MetadataValue {
+  if (type === "boolean") return raw === "true";
+  if (type === "number") {
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : raw;
+  }
+  return raw;
+}
+
+// A persisted definition → its editor draft. `clientId` is supplied by the
+// caller (the store mints a unique one; canonicalization passes a constant,
+// since the id is never serialized back out).
+export function inputDefinitionToDraft(
+  input: PromptInputDefinition,
+  clientId: string,
+): EntryInputDraft {
+  // context_pick / entity_ref / entity_ref_list all carry their picker
+  // constraint as a NodePickerConfig under `target` (post-#40). Other types
+  // leave it an empty config.
+  const usesPicker =
+    input.type === "context_pick" || input.type === "entity_ref" || input.type === "entity_ref_list";
+  const nodePickerConfig =
+    usesPicker && input.target && typeof input.target === "object"
+      ? (input.target as unknown as NodePickerConfig)
+      : ({ kinds: [], presets: [] } as NodePickerConfig);
+  return {
+    clientId,
+    name: input.name,
+    type: input.type,
+    label: input.label ?? "",
+    defaultValue: input.default === undefined || input.default === null ? undefined : String(input.default),
+    options: (input.options ?? []).map((o) => ({
+      value: o.value,
+      label: o.label ?? "",
+      color: o.color ?? null,
+      originalValue: o.value,
+    })),
+    required: Boolean(input.required),
+    nodePickerConfig,
+    nameDerived: false,
+  };
+}
+
+// An editor draft → the canonical persisted definition (the save payload). Only
+// the fields the editor owns are emitted — an unset default, a false `required`,
+// and a picker's inapplicable `options`/`default` are dropped, so the wire form
+// stays minimal.
+export function inputDraftToDefinition(d: EntryInputDraft): PromptInputDefinition {
+  const out: PromptInputDefinition = { name: d.name, type: d.type };
+  if (d.label) out.label = d.label;
+  if (d.required) out.required = true;
+  if (d.type === "context_pick" || d.type === "entity_ref" || d.type === "entity_ref_list") {
+    // multiple is derived from the type literal at runtime; default/options
+    // don't apply to ref-shaped inputs.
+    out.target = d.nodePickerConfig as unknown as Record<string, MetadataValue>;
+    return out;
+  }
+  if (d.defaultValue !== undefined && d.defaultValue !== "") {
+    out.default = defaultForStorage(d.defaultValue, d.type);
+  }
+  if (d.type === "select") {
+    out.options = d.options
+      .filter((o) => o.value.trim() !== "")
+      .map((o) => {
+        const item: SelectOption = { value: o.value.trim() };
+        if (o.label) item.label = o.label;
+        if (o.color) item.color = o.color;
+        return item;
+      });
+  }
+  return out;
+}
+
+// Normalise saved definitions to the exact shape the editor emits on save, by
+// round-tripping each through the draft form. Used by the autosave dirty-check
+// so a round-tripped save equals the draft it came from (#1470).
+export function canonicalizeInputDefinitions(
+  defs: PromptInputDefinition[],
+): PromptInputDefinition[] {
+  return defs.map((d) => inputDraftToDefinition(inputDefinitionToDraft(d, "")));
+}
 
 export function coerceInputValue(raw: string, type: PromptInputDefinition["type"]): unknown {
   const trimmed = raw.trim();

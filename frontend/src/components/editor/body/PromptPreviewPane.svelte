@@ -24,6 +24,16 @@
     StructureDocument,
   } from "@/lib/types";
 
+  // Design-time preview has no live prose context (#1427): the author is editing
+  // the template, not running it against a real selection. The three runtime
+  // prose slots are sent as visible placeholder tokens so a revise/continue
+  // template renders with its `{{ selection }}` / `{{ text_before }}` /
+  // `{{ text_after }}` position shown, rather than silently empty. Only the
+  // author preview does this — the chat and estimate previews carry real context.
+  const PREVIEW_TEXT_BEFORE = "«text before the cursor»";
+  const PREVIEW_TEXT_AFTER = "«text after the cursor»";
+  const PREVIEW_SELECTION = "«the selected text»";
+
   interface Props {
     // Template source + entry context (read-only from the parent).
     rawBody?: string;
@@ -219,6 +229,9 @@
       const result = await api.aiPreview({
         template_source: rawBody,
         target_scene_id: record.sceneId || "",
+        text_before: PREVIEW_TEXT_BEFORE,
+        text_after: PREVIEW_TEXT_AFTER,
+        selection: PREVIEW_SELECTION,
         inputs,
         commit: false,
         // ADR-0061 S2: resolve the live body's effective inputs (own ∪ includes)

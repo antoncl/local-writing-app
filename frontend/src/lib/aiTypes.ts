@@ -85,6 +85,11 @@ export type AIPreviewRequest = {
   inputs?: Record<string, unknown>;
   text_before?: string;
   text_after?: string;
+  // The three runtime prose slots (mirror AIGenerateRequest). At run time they
+  // carry the live editor context; in the design-time author preview they carry
+  // visible placeholder tokens so a `{{ selection }}` / `{{ text_before }}`
+  // template renders with its slot position shown, not silently empty (#1427).
+  selection?: string;
   commit?: boolean;
   // Explicit mutation resolution scene from a `scene_ref` input (ADR-0012);
   // overrides target_scene_id for effective-state resolution.

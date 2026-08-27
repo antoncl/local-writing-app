@@ -246,3 +246,84 @@ def test_json_array_of_scalars_is_not_coerced(tmp_path, monkeypatch):
     # literal renders — NOT coerced to a 0-length EntryRef list.
     assert "len=10" in text
     assert 'val=["a", "b"]' in text
+
+
+def _sample_structure():
+    from app.models import StructureDocument, StructureNode
+
+    # root → Act A → [scene s_a1, scene s_a2]; standalone scene s_b.
+    return StructureDocument(
+        root=StructureNode(
+            id="root",
+            type="root",
+            title="Manuscript",
+            children=[
+                StructureNode(
+                    id="A",
+                    type="manuscript:act",
+                    title="Act One",
+                    children=[
+                        StructureNode(id="A1", type="manuscript:scene", title="Open", scene_id="s_a1"),
+                        StructureNode(id="A2", type="manuscript:scene", title="Mid", scene_id="s_a2"),
+                    ],
+                ),
+                StructureNode(id="B", type="manuscript:scene", title="Standalone", scene_id="s_b"),
+            ],
+        )
+    )
+
+
+class _StructureStub:
+    """A minimal project_service exposing only read_structure, tracking calls."""
+
+    def __init__(self, document):
+        self._document = document
+        self.reads = 0
+
+    def read_structure(self):
+        self.reads += 1
+        return self._document
+
+
+def test_expand_container_picks_expands_containers_to_ordered_scenes():
+    # ADR-0074 slice 4a: a picked manuscript CONTAINER (act/chapter/root)
+    # materializes to its ordered descendant scenes; the ref carries the
+    # structure-node id, which find_node resolves to a container (no scene_id).
+    from app.services.ai.preview import _expand_container_picks
+
+    stub = _StructureStub(_sample_structure())
+    # An act → its two scenes, in reading order.
+    assert _expand_container_picks(stub, [{"id": "A", "kind": "manuscript"}]) == [
+        {"id": "s_a1", "kind": "manuscript"},
+        {"id": "s_a2", "kind": "manuscript"},
+    ]
+    # The root → every scene in reading order.
+    assert _expand_container_picks(stub, [{"id": "root", "kind": "manuscript"}]) == [
+        {"id": "s_a1", "kind": "manuscript"},
+        {"id": "s_a2", "kind": "manuscript"},
+        {"id": "s_b", "kind": "manuscript"},
+    ]
+
+
+def test_expand_container_picks_passes_scenes_and_others_through():
+    # A leaf scene (its ref id is the scene_id — find_node misses, so it isn't a
+    # container), a non-manuscript pick, and an unresolved id all pass untouched.
+    from app.services.ai.preview import _expand_container_picks
+
+    stub = _StructureStub(_sample_structure())
+    items = [
+        {"id": "s_a1", "kind": "manuscript", "title": "Open"},  # scene ref (scene_id)
+        {"id": "l1", "kind": "lore", "title": "A note"},  # non-manuscript
+        {"id": "ghost", "kind": "manuscript"},  # deleted / unknown
+    ]
+    assert _expand_container_picks(stub, items) == items
+
+
+def test_expand_container_picks_skips_structure_read_without_manuscript_picks():
+    # No manuscript pick → the structure is never loaded (cost avoided).
+    from app.services.ai.preview import _expand_container_picks
+
+    stub = _StructureStub(_sample_structure())
+    lore_only = [{"id": "l1", "kind": "lore"}, {"id": "l2", "kind": "lore"}]
+    assert _expand_container_picks(stub, lore_only) == lore_only
+    assert stub.reads == 0

@@ -31,6 +31,7 @@ from app.services.ai.helpers import (
 from app.services.ai.profiles.registry import profile_for
 from app.services.ai.sessions import AISession, default_registry
 from app.services.ai.templates import RenderedTemplate, render_template
+from app.services.tree_structure import TreeStructureService
 
 if TYPE_CHECKING:
     from app.services.ai.profiles import ModelDescriptor
@@ -108,12 +109,63 @@ def _coerce_input_value(project_service, schema: Any, value: Any) -> Any:
     # Only a context_pick is a list of dicts; a scalar list is a plain value.
     if not all(isinstance(item, dict) for item in parsed):
         return value
+    expanded = _expand_container_picks(project_service, parsed)
     refs: list[EntryRef] = []
-    for item in parsed:
+    for item in expanded:
         ref = _coerce_entry_ref(project_service, schema, item)
         if ref is not None:
             refs.append(ref)
     return refs
+
+
+def _expand_container_picks(
+    project_service, items: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Replace a manuscript **container** pick (the manuscript root, an act, or a
+    chapter) with its ordered descendant scene picks — ADR-0074 slice 4. A picked
+    container stores one live ref; it materializes to its *current* scenes at
+    render time, so a scene added to the container later is included without
+    re-picking. Leaf scene picks, non-manuscript picks, and unresolved ids pass
+    through untouched.
+
+    The container test is structural, not a trust of the ref's `entry_type`: a
+    manuscript-kind pick whose id resolves (via the structure tree) to a node
+    carrying no `scene_id` is a container. Containers are not in the node index
+    (they are structure-YAML nodes, not node files), so this resolves through
+    `read_structure()` — the EntryRef/`read_scene` path cannot see them.
+
+    No dedup: overlapping picks (a container and its own descendant scene) can't
+    arise in normal use — the picker's absorb rule is the invariant that
+    prevents them — so a straight expansion stays honest rather than masking a
+    frontend bug."""
+    if not any(_is_manuscript_pick(item) for item in items):
+        return items
+    document = project_service.read_structure()
+    out: list[dict[str, Any]] = []
+    for item in items:
+        container = _container_node_for_pick(document, item)
+        if container is None:
+            out.append(item)
+            continue
+        for scene_id in TreeStructureService.collect_descendant_scene_ids_ordered(container):
+            out.append({"id": scene_id, "kind": "manuscript"})
+    return out
+
+
+def _is_manuscript_pick(item: dict[str, Any]) -> bool:
+    return item.get("kind") == "manuscript" and bool(item.get("id"))
+
+
+def _container_node_for_pick(document, item: dict[str, Any]):
+    """The container `StructureNode` a pick refers to, or None when the pick is
+    not a manuscript container (a scene leaf, a non-manuscript pick, or an
+    unresolved id — all left for the normal EntryRef coercion)."""
+    if not _is_manuscript_pick(item):
+        return None
+    node = TreeStructureService.find_node(document, str(item["id"]))
+    if node is None or node.scene_id:
+        return None
+    return node
 
 
 class _DateProxy:

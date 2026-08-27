@@ -175,12 +175,15 @@ def _might_be_container(item: dict[str, Any]) -> bool:
 
 def _container_node_for_pick(document, item: dict[str, Any]):
     """The container `StructureNode` a pick refers to, or None when the pick is
-    not a manuscript container (a scene leaf, a non-manuscript pick, or an
-    unresolved id — all left for the normal EntryRef coercion)."""
+    not a manuscript container. A container ref carries the structure-node id, so
+    `find_node` resolves it to a container; a scene ref carries the `scene_id`,
+    which is not a node id, so `find_node` misses and it falls through to the
+    normal EntryRef coercion. Containers are detected by type/children, not
+    `scene_id` — acts and chapters carry their own backing `scene_id`."""
     if not _is_manuscript_pick(item):
         return None
     node = TreeStructureService.find_node(document, str(item["id"]))
-    if node is None or node.scene_id:
+    if node is None or not TreeStructureService.is_container(node):
         return None
     return node
 

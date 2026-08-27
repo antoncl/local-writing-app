@@ -180,7 +180,28 @@ describe("manuscriptPickTree — toggle off and counts", () => {
   it("refForNode builds scene vs container refs", () => {
     const s = refForNode(scene("n1", "s1", "Scene 1"));
     expect(s).toMatchObject({ id: "s1", kind: "manuscript", entry_type: "manuscript:scene" });
-    const c = refForNode(container("C1", "manuscript:chapter", "Ch 1", []));
+    const c = refForNode(container("C1", "manuscript:chapter", "Ch 1", [scene("n1", "s1", "x")]));
     expect(c).toMatchObject({ id: "C1", kind: "manuscript", entry_type: "manuscript:chapter" });
+  });
+
+  it("treats an act/chapter as a container even when it carries its own scene_id", () => {
+    // Real acts/chapters have a backing scene_id; container-vs-scene is by type,
+    // not scene_id. The chapter ref must use the node id and expand, not act
+    // like a leaf scene.
+    const chapterWithBacking = {
+      id: "C1",
+      type: "manuscript:chapter",
+      title: "Ch 1",
+      scene_id: "backing_c1",
+      children: [scene("n1", "s1", "Scene 1"), scene("n2", "s2", "Scene 2")],
+    } as StructureNode;
+    const d = {
+      root: container("root", "root", "The Manuscript", [chapterWithBacking]),
+    } as StructureDocument;
+    expect(refForNode(chapterWithBacking)).toMatchObject({ id: "C1", entry_type: "manuscript:chapter" });
+    expect(sceneCountForRef(d, refForNode(chapterWithBacking))).toBe(2); // scenes, not the backing file
+    // Checking the chapter stores the container ref (id C1), not its backing scene.
+    const next = togglePickAt(d, [], "C1");
+    expect(next.map((r) => r.id)).toEqual(["C1"]);
   });
 });

@@ -32,14 +32,23 @@ export interface ManuscriptRow {
 
 const MANUSCRIPT = "manuscript";
 
+// Manuscript container node types (vs leaf scenes). Acts and chapters carry
+// their own `scene_id` (a backing file), so container-vs-scene is NOT
+// `scene_id is None` — it is the node type, or having children (covering any
+// user-defined container level). Mirrors TreeStructureService.is_container.
+const CONTAINER_TYPES = new Set(["root", "manuscript:act", "manuscript:chapter"]);
+
+function isContainer(node: StructureNode): boolean {
+  return CONTAINER_TYPES.has(node.type) || (node.children?.length ?? 0) > 0;
+}
 function isScene(node: StructureNode): boolean {
-  return !!node.scene_id;
+  return !isContainer(node);
 }
 
-/** The id a ref uses for this node: the scene_id for a scene, the node id for a
- * container. */
+/** The id a ref uses for this node: the scene_id for a leaf scene, the node id
+ * for a container. */
 function refIdFor(node: StructureNode): string {
-  return node.scene_id ?? node.id;
+  return isScene(node) ? (node.scene_id ?? node.id) : node.id;
 }
 
 /** The scene node's instance entry_type (a sub-type like `manuscript:battle`)
@@ -73,8 +82,8 @@ function pickSets(document: StructureDocument, value: NodePickerRef[]): PickSets
   const sceneIds = new Set<string>();
   const containerIds = new Set<string>();
   const walk = (n: StructureNode) => {
-    if (n.scene_id) sceneIds.add(n.scene_id);
-    else containerIds.add(n.id);
+    if (isContainer(n)) containerIds.add(n.id);
+    else if (n.scene_id) sceneIds.add(n.scene_id);
     n.children?.forEach(walk);
   };
   walk(document.root);
@@ -89,7 +98,7 @@ function pickSets(document: StructureDocument, value: NodePickerRef[]): PickSets
 }
 
 function hasAnyScene(node: StructureNode): boolean {
-  if (node.scene_id) return true;
+  if (isScene(node)) return !!node.scene_id;
   return (node.children ?? []).some(hasAnyScene);
 }
 
@@ -97,18 +106,20 @@ function hasAnyScene(node: StructureNode): boolean {
  * container at or below `node` picked. Assumes `node` itself is not covered by
  * an ancestor (the caller handles "implied"). */
 function subtreeHasCoveredScene(node: StructureNode, sets: PickSets): boolean {
-  if (!node.scene_id && sets.containers.has(node.id)) return hasAnyScene(node);
-  if (node.scene_id) return sets.scenes.has(node.scene_id);
-  return (node.children ?? []).some((c) => subtreeHasCoveredScene(c, sets));
+  if (isContainer(node)) {
+    if (sets.containers.has(node.id)) return hasAnyScene(node);
+    return (node.children ?? []).some((c) => subtreeHasCoveredScene(c, sets));
+  }
+  return !!node.scene_id && sets.scenes.has(node.scene_id);
 }
 
 function stateFor(node: StructureNode, sets: PickSets, coveredByAncestor: boolean): PickState {
-  const selfPicked = node.scene_id
-    ? sets.scenes.has(node.scene_id)
-    : sets.containers.has(node.id);
+  const selfPicked = isContainer(node)
+    ? sets.containers.has(node.id)
+    : !!node.scene_id && sets.scenes.has(node.scene_id);
   if (selfPicked) return "on";
   if (coveredByAncestor) return "implied";
-  if (node.scene_id) return "off";
+  if (isScene(node)) return "off";
   return subtreeHasCoveredScene(node, sets) ? "indeterminate" : "off";
 }
 
@@ -166,7 +177,7 @@ export function flattenManuscript(
 }
 
 function countScenes(node: StructureNode): number {
-  if (node.scene_id) return 1;
+  if (isScene(node)) return node.scene_id ? 1 : 0;
   return (node.children ?? []).reduce((n, c) => n + countScenes(c), 0);
 }
 

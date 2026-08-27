@@ -566,7 +566,7 @@ class LoreAndPromptTests(MetadataValidationBase):
         """ADR-0065 S3 collapsed continuation/roleplay/revise/revise:scene/
         revise:entry/revise:scene_summary into a single `prompt:general` type —
         only `base` (abstract), `general`, and `snippet` remain. The behavior
-        contract (handler, commit, on_accept, target) that used to live on those
+        contract (handler, commit, on_accept) that used to live on those
         sub-types now lives per-INSTANCE, on `context_strategy` (proven below by
         round-tripping the same shapes through create/save on `general`
         instances, exactly as the shipped built-ins carry them —
@@ -593,7 +593,7 @@ class LoreAndPromptTests(MetadataValidationBase):
                 entry_type="prompt:general",
                 metadata={},
                 context_strategy=PromptContextStrategy.model_validate(
-                    {"target": {"required": True, "kind": "manuscript"}, "output": {"handler": "inline"}}
+                    {"output": {"handler": "inline"}}
                 ),
             ),
         )
@@ -616,10 +616,7 @@ class LoreAndPromptTests(MetadataValidationBase):
                 entry_type="prompt:general",
                 metadata={},
                 context_strategy=PromptContextStrategy.model_validate(
-                    {
-                        "target": {"required": True, "kind": "manuscript"},
-                        "output": {"handler": "inline", "destination": "selection"},
-                    }
+                    {"output": {"handler": "inline", "destination": "selection"}}
                 ),
             ),
         )
@@ -629,9 +626,6 @@ class LoreAndPromptTests(MetadataValidationBase):
         self.assertEqual(revise_scene_output.handler, "inline")
         self.assertEqual(revise_scene_output.destination, "selection")
         self.assertIsNone(revise_scene_output.commit)
-        self.assertEqual(
-            revise_scene.context_strategy.target, {"required": True, "kind": "manuscript"}
-        )
 
         # The `extract_to_node` + `commit` disposition (the old `revise:entry`),
         # with the `entry`/`entry_type` inputs — moved from the deleted type's
@@ -666,10 +660,8 @@ class LoreAndPromptTests(MetadataValidationBase):
         assert revise_entry_output is not None and revise_entry_output.commit is not None
         self.assertEqual(revise_entry_output.handler, "extract_to_node")
         self.assertEqual(revise_entry_output.commit.review, "visual_diff")
-        # The entry rides in as an `entry` input (loaded via entry(input.entry)),
-        # NOT as context_strategy.target — a lore id there would drive a scene
-        # resolution (read_scene) and 404.
-        self.assertIsNone(revise_entry.context_strategy.target)
+        # The entry rides in as an `entry` input (loaded via entry(input.entry)) —
+        # `context_strategy` carries no target field to drive scene resolution.
         inputs = {i.name: i for i in revise_entry.inputs}
         self.assertEqual(list(inputs), ["entry", "entry_type"])
         self.assertEqual(inputs["entry"].type, "context_pick")

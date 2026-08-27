@@ -107,8 +107,9 @@ export function patchToRows(patch: EntryPatch): MutationSetRow[] {
 
 export class ChatCommitController {
   // ---- fed each render by the host (the derivations below track these) -------
-  /** The active prompt's `output` config (ADR-0054): `.kind` is the disposition;
-   *  a `.commit` marks a brainstorm whose result is extracted to its `entry`
+  /** The active prompt's `output` config (ADR-0054): routing is
+   *  `outputHandlerFor(output.handler)` (`PromptOutput` has no `.kind`); a
+   *  `.commit` marks a brainstorm whose result is extracted to its `entry`
    *  target (`.commit.review` = how it's reviewed; WHAT it extracts is
    *  authored in the prompt's own `field_contract` loop, read back at commit —
    *  ADR-0067 S2). */

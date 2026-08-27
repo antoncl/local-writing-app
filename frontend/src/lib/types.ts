@@ -797,7 +797,9 @@ export type PromptOnAccept = {
 // key (`inline` / `extract_to_node`, or unset for a `general` chat / `snippet`);
 // `destination` is the inline cursor-vs-selection sub-choice (was
 // `append_to_body` / `replace_selection`). `commit` only rides on `extract_to_node`,
-// `on_accept` only on `inline`. Mirrors backend `HANDLER_KEYS` / `INLINE_DESTINATIONS`.
+// `on_accept` only on `inline`. Not validated by the backend at rest — this
+// frontend registry (`OutputHandlerKey` in editor-core/outputHandlers.ts) is the
+// one closed vocabulary; the backend just parses and passes the block through.
 export type PromptOutput = {
   handler?: string;
   destination?: string;
@@ -811,7 +813,6 @@ export type PromptOutput = {
 };
 
 export type PromptContextStrategy = {
-  target?: Record<string, MetadataValue> | null;
   output?: PromptOutput | null;
 };
 

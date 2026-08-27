@@ -16,9 +16,7 @@
   contextStrategyDraft) so the parent's save logic owns serialization;
   `onChange` fires the pane's emitChange. Emits the whole
   `PromptContextStrategy | null` on any edit — null when the output would be
-  entirely empty (a plain conversation carries no output block), while
-  preserving any existing top-level `target` untouched (D3 does not author it,
-  ADR-0063/0067 territory).
+  entirely empty (a plain conversation carries no output block).
 -->
 <script lang="ts">
   import SegmentedControl from "@/components/widgets/SegmentedControl.svelte";
@@ -81,14 +79,12 @@
 
   // Rebuild the whole context_strategy from a candidate output, dropping to
   // null when it's entirely empty (a plain conversation) — matching the
-  // writer's `model_dump(exclude_none=True)` empty-drop. Any top-level
-  // `target` (D3 doesn't author it) rides through untouched either way.
+  // writer's `model_dump(exclude_none=True)` empty-drop.
   function emit(nextOutput: PromptOutput | null): void {
     if (readOnly) return;
     const isEmpty =
       !nextOutput || (!nextOutput.handler && !nextOutput.headless && !nextOutput.commit && !nextOutput.on_accept);
-    const target = contextStrategy?.target;
-    contextStrategy = isEmpty ? (target ? { target } : null) : { ...(target ? { target } : {}), output: nextOutput };
+    contextStrategy = isEmpty ? null : { output: nextOutput };
     onChange?.();
   }
 

@@ -639,8 +639,9 @@ class PromptEntrySummary(BaseModel):
     # picks the handler; absent (or no handler) = a plain conversation.
     # Invocability itself is the entry_type — a
     # `prompt:snippet` is import-only — not the presence of this key (the writer
-    # drops an empty one). Dispatch reads it here, never off the type;
-    # round-tripped through front-matter on save exactly like `inputs`/`offer_on`.
+    # drops an empty one). Dispatch (frontend-owned, ADR-0065) reads it here,
+    # never off the type; round-tripped through front-matter on save exactly
+    # like `inputs`/`offer_on`.
     context_strategy: PromptContextStrategy | None = None
     source_layer_id: str = ""
     source_layer_label: str = ""

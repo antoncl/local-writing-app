@@ -184,9 +184,10 @@ class PromptCommit(BaseModel):
     current→proposed swap). `target` (ADR-0063 S1) is the entry_type FQN the
     commit *creates* — declaring it makes the chat a create brainstorm for that
     type regardless of how it was launched; unset ⇒ today's behaviour (revise
-    the seeded `entry`, or create the launch's `entry_type`). Kept lenient
-    (`str`, not a `Literal`) so a hand-edited layer stays readable; the save
-    paths validate the values (`_validate_metadata_schema_definition`).
+    the seeded `entry`, or create the launch's `entry_type`). Frontend-only
+    dispatch fields (ADR-0065): the backend parses and passes this whole block
+    through unread and unvalidated, so `review`/`target` are kept lenient
+    (`str`, not a `Literal`) — a hand-edited layer stays readable either way.
 
     `fields` — the old static allow-list of what the commit extracts — retired
     with ADR-0067 S2: a prompt now narrows what it extracts by authoring its
@@ -206,8 +207,10 @@ class PromptOnAccept(BaseModel):
     than a hardcoded `entry_type == prompt:roleplay` branch: the mark it stamps
     (`character`) and the input it reads (`character`) are named here, on the
     type, exactly as `commit` names its capability. Meaningful only under the
-    `inline` handler — the validator rejects it elsewhere. Kept lenient (`str`)
-    like the rest; the save paths validate it."""
+    `inline` handler — a frontend-only dispatch field (ADR-0065): the backend
+    parses and passes it through unread, so nothing here rejects it under a
+    different handler; the frontend simply never reads it there. Kept lenient
+    (`str`) like the rest."""
 
     mark: str = ""
     from_input: str = ""
@@ -225,18 +228,25 @@ class PromptOutput(BaseModel):
     it; the handler now owns that behaviour and the key just names which one.
     `destination` is the inline sub-choice — `cursor` (continue at the caret, the old
     `append_to_body`) or `selection` (replace the selection, the old
-    `replace_selection`); meaningful only under `inline`. Both sets are closed and
-    backend-owned (`HANDLER_KEYS` / `INLINE_DESTINATIONS`), validated on save; kept
-    `str` here so an unknown value is a soft validation error, not an unreadable layer.
-    `commit` is meaningful only under `extract_to_node`, and `on_accept` only under
-    `inline` — the validator rejects each on any other.
+    `replace_selection`); meaningful only under `inline`. Frontend-owned dispatch
+    (ADR-0065): the backend parses this whole block and `model_dump`s it straight
+    through — it does not validate `handler`/`destination` at rest. The frontend
+    handler registry (`OutputHandlerKey` / editor-core) owns the closed
+    vocabulary and fails closed on an unknown value — a prompt with an
+    unrecognized `handler` resolves to no surface, so it simply isn't invocable,
+    not a save-time rejection. Kept `str` here (not a `Literal`) so a hand-edited
+    or forward-authored layer never 500s on read. `commit` is meaningful only
+    under `extract_to_node`, and `on_accept` only under `inline`; nothing on the
+    backend enforces that pairing — the frontend's authoring UI
+    (PromptOutputEditor) is what keeps them from co-existing.
     `headless` (ADR-0062 Am.2) is orthogonal to `handler` — "no chat loop", not "no
     interaction": a headless run still gathers required inputs and still presents
     its result for review, it just skips the back-and-forth conversation. Modelled
     three-valued (`bool | None`, not `bool = False`) so front matter stays tidy —
     `_prompt_front_matter_extra` serialises via `model_dump(exclude_none=True)`, so
-    `None` is dropped and only `headless: true` ever lands on disk. Consumers read
-    it truthy, so `None`/absent behaves exactly as false."""
+    `None` is dropped and only `headless: true` ever lands on disk. No runtime
+    consumer yet — an honest forward-declaration (D3 authors it; the
+    `{extract_to_node, headless}` run path arrives later)."""
 
     handler: str = ""
     destination: str = ""
@@ -246,7 +256,6 @@ class PromptOutput(BaseModel):
 
 
 class PromptContextStrategy(BaseModel):
-    target: dict[str, Any] | None = None
     output: PromptOutput | None = None
 
 

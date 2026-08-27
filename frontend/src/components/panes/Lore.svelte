@@ -16,6 +16,8 @@
     type PromptResolutionContext,
   } from "@/lib/editor-core/promptResolution";
   import { getSwatch, resolveColorForType } from "@/lib/utils/colors";
+  import { tagHexResolver } from "@/lib/utils/tags";
+  import { knownTagsStore } from "@/lib/stores/tags";
   import { defaultView } from "@/lib/views/evaluateView";
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
@@ -48,6 +50,11 @@
   // The open project's own (innermost) layer id — a row whose source layer
   // differs is inherited and gets a level pill (#313).
   const ownLayerId = $derived($projectLayerIdStore);
+
+  // Tag chips on a row carry the tag's colour, same as the rail's TagChip (#1447).
+  // Reading `$knownTagsStore` inside the derived expression lets the resolver
+  // re-track when the vocabulary or its colours change.
+  const tagHexFor = $derived(tagHexResolver($knownTagsStore));
 
   // The view's chosen render layout (ADR-0069), set by the control beside the
   // view selector. Absent axes fall back to ViewNodeList's own defaults.
@@ -220,6 +227,7 @@
     title={entry.title}
     detail={entryDetailText(entry)}
     tags={entryTags(entry)}
+    tagColor={tagHexFor}
     layerLabel={inheritedLayerLabel(entry, ownLayerId)}
     depth={ctx.depth}
     active={ctx.active}

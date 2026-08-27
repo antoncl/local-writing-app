@@ -401,6 +401,7 @@
       type="button"
       class="ctx-row-chevron"
       aria-label={collapsed ? "Expand context picker" : "Collapse context picker"}
+      title={collapsed ? "Expand context picker" : "Collapse context picker"}
       aria-expanded={!collapsed}
       onclick={toggleWidgetCollapse}
     >{collapsed ? "▸" : "▾"}</button>
@@ -470,7 +471,20 @@
   </div>
 
   {#if collapsed}
-    <div class="ctx-collapsed-strip">
+    <!-- The whole summary strip is the expand target — the header above is
+         wall-to-wall live controls (label, id, type, toggles), so the
+         "click anywhere on a collapsed row" gesture the other input rows
+         get (EntryInputsEditor) has nowhere to land but here. The chevron
+         stays as the labelled toggle; this is the big-surface alias. -->
+    <!-- No aria-label: the accessible name is the summary content itself
+         (chips / warning), so it doesn't shadow the chevron's name. -->
+    <button
+      type="button"
+      class="ctx-collapsed-strip"
+      title="Expand context picker"
+      aria-expanded="false"
+      onclick={toggleWidgetCollapse}
+    >
       {#if collapsedChips.length === 0}
         <span class="ctx-collapsed-warn">
           <span aria-hidden="true">⚠</span>
@@ -493,7 +507,7 @@
           {/if}
         {/each}
       {/if}
-    </div>
+    </button>
   {/if}
   {/if}
   {#if !collapsed}
@@ -744,13 +758,15 @@
 
   .ctx-row-chevron {
     appearance: none;
-    width: 18px;
-    height: 18px;
+    /* A real hit target — the 18px/fs-xs original was the only expand
+       affordance and easy to miss (#1458). */
+    width: 26px;
+    height: 26px;
     padding: 0;
     border: none;
     background: transparent;
     color: var(--accent);
-    font-size: var(--fs-xs);
+    font-size: var(--fs-md);
     line-height: 1;
     cursor: pointer;
     border-radius: 4px;
@@ -921,12 +937,28 @@
 
   /* --- Collapsed strip --------------------------------------------- */
 
+  /* A <button>: the whole strip toggles expansion (see markup note), so it
+     resets button chrome and takes the quiet hover the row pattern uses. */
   .ctx-collapsed-strip {
+    appearance: none;
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
+    width: 100%;
     padding: 8px 14px 12px;
     align-items: center;
+    border: none;
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    color: inherit;
+    cursor: pointer;
+    /* Sit inside the container's 9px rounded corners. */
+    border-radius: 0 0 8px 8px;
+  }
+
+  .ctx-collapsed-strip:hover {
+    background: var(--inset);
   }
 
   .ctx-collapsed-warn {

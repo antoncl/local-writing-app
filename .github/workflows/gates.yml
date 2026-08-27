@@ -47,10 +47,22 @@ jobs:
         with:
           python-version: '3.14'   # matches the dev venv
           cache: pip
-          cache-dependency-path: backend/pyproject.toml
+          cache-dependency-path: backend/requirements.lock
 
-      - name: Install backend (editable, with dev extras)
-        run: python -m pip install -e "backend[dev]"
+      # Deps come from the lock, never a fresh resolve (#1393) — same versions
+      # here, on every dev machine, and in the release freeze.
+      #
+      # `pip check`: --no-deps skips the resolver's validation, so a dependency
+      # added to pyproject.toml *without* a relock would otherwise install
+      # cleanly and only fail at import time — possibly as late as the frozen
+      # binary. pip check fails the job instead: the editable app's declared
+      # requirements must be satisfied by the locked set. (Extras aren't
+      # covered — a missing [dev] tool fails its own gate step loudly anyway.)
+      - name: Install backend (locked deps + editable app)
+        run: |
+          python -m pip install -r backend/requirements.lock
+          python -m pip install -e backend --no-deps
+          python -m pip check
 
       - name: ruff
         run: python -m ruff check backend scripts .claude/hooks
@@ -136,10 +148,12 @@ jobs:
         with:
           python-version: '3.14'
           cache: pip
-          cache-dependency-path: backend/pyproject.toml
+          cache-dependency-path: backend/requirements.lock
 
-      - name: Install backend (editable, with dev extras)
-        run: python -m pip install -e "backend[dev]"
+      - name: Install backend (locked deps + editable app)
+        run: |
+          python -m pip install -r backend/requirements.lock
+          python -m pip install -e backend --no-deps
 
       # --timeout: a hang is the worst CI failure mode — it burns the wall clock
       # and reports nothing. thread method because Windows has no SIGALRM.
@@ -202,8 +216,10 @@ jobs:
       - name: Build the bundle the backend serves at /
         run: npm run build --prefix frontend
 
-      - name: Install backend (editable, with dev extras)
-        run: python -m pip install -e "backend[dev]"
+      - name: Install backend (locked deps + editable app)
+        run: |
+          python -m pip install -r backend/requirements.lock
+          python -m pip install -e backend --no-deps
 
       - name: Install Playwright browser (chromium)
         working-directory: frontend

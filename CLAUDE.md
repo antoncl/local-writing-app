@@ -23,8 +23,9 @@ backend endpoints: save scene, move node, create todo, …).
 backend/.venv/Scripts/python.exe -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8787 --reload --reload-dir backend
 npm run dev --prefix frontend                                    # Vite dev server on :5173
 
-# First-time backend setup
-cd backend; python -m venv .venv; .venv\Scripts\python -m pip install -e ".[dev]"
+# First-time backend setup — deps come from the lock, never a fresh resolve (#1393)
+cd backend; python -m venv .venv; .venv\Scripts\python -m pip install -r requirements.lock; .venv\Scripts\python -m pip install -e . --no-deps
+# After editing [project.dependencies]: python scripts/relock_backend.py, then reinstall as above
 
 # Gates — run after edits, fix before considering a task done
 backend/.venv/Scripts/python.exe -m pytest backend/tests                    # all backend tests

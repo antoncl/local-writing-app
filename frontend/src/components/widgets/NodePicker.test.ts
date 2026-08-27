@@ -6,7 +6,7 @@
 // in the browser.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { tick } from "svelte";
-import { render, screen, fireEvent } from "@/lib/test/component";
+import { render, screen, fireEvent, within } from "@/lib/test/component";
 import NodePicker from "./NodePicker.svelte";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import { hideLibraryEntry, openProjectHidden } from "@/lib/stores/hiddenLibrary";
@@ -212,5 +212,41 @@ describe("NodePicker onChange callback (runes conversion #49)", () => {
 
     const [detail] = onChange.mock.calls[0];
     expect(detail.value.map((r: { id: string }) => r.id)).toEqual(["p2", "p1"]);
+  });
+});
+
+// ADR-0074 slice 2 (#1464): a candidate row toggles — clicking an
+// already-picked candidate removes it, so you never leave the flow to unpick.
+// The old inert "✓ Added" row (dimmed + non-clickable) is retired.
+describe("NodePicker candidate toggle (ADR-0074 #1464)", () => {
+  it("clicking an already-picked candidate removes it", async () => {
+    const onChange = vi.fn();
+    render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "plot", expr: { type: "plot:plotline" } }] },
+        plotEntries: [plotline("p1", "Main plot"), plotline("p2", "Romance")],
+        value: [
+          { id: "p1", kind: "plot", title: "Main plot" },
+          { id: "p2", kind: "plot", title: "Romance" },
+        ],
+        affordance: "add",
+        onChange,
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+
+    // "Main plot" now renders twice — the candidate row AND the picked chip
+    // (both NodeRows, ADR-0068). Scope to the candidate menu; that picked
+    // candidate is a live, clickable row (not the old inert one), so clicking
+    // it unpicks, leaving the other.
+    const menu = document.querySelector(".ctx-menu")!;
+    expect(menu).not.toBeNull();
+    const row = within(menu as HTMLElement).getByText("Main plot").closest("button")!;
+    await fireEvent.click(row);
+    await tick();
+
+    const [detail] = onChange.mock.calls[0];
+    expect(detail.value.map((r: { id: string }) => r.id)).toEqual(["p2"]);
   });
 });

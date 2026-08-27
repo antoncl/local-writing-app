@@ -1,4 +1,5 @@
 import type { ScopedTag } from "@/lib/types";
+import { getSwatch } from "@/lib/utils/colors";
 
 // The one home for the `split(",").map(trim).filter(Boolean)` idiom (#247/#704):
 // a comma-joined value → trimmed, non-empty tokens, order preserved, NO de-dupe.
@@ -68,4 +69,18 @@ export function tagColorMap(knownTags: ScopedTag[]): Map<string, string> {
     if (tag.color) map.set(tag.name.toLowerCase(), tag.color);
   }
   return map;
+}
+
+// A ready "tag name → hex" resolver for a chip render site (#1447). Folds the
+// roster into a colour map once, then resolves each tag's swatch to a hex — null
+// when the tag carries no colour. This is exactly what NodeRow's `tagColor`
+// callback wants (the rail's TagChip does the same swatch→hex step internally).
+// Call it inside a `$derived` that reads the roster, so the returned closure
+// re-tracks when the vocabulary or its colours change.
+export function tagHexResolver(knownTags: ScopedTag[]): (tag: string) => string | null {
+  const ids = tagColorMap(knownTags);
+  return (tag) => {
+    const id = ids.get(tag.toLowerCase());
+    return id ? (getSwatch(id)?.hex ?? null) : null;
+  };
 }

@@ -8,8 +8,7 @@
   import RowCaret from "@/components/widgets/RowCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
   import { assistantTagsStore, assistantTagsAsScoped } from "@/lib/stores/assistantTags";
-  import { tagColorMap } from "@/lib/utils/tags";
-  import { getSwatch } from "@/lib/utils/colors";
+  import { tagHexResolver } from "@/lib/utils/tags";
   import { isAssistantListed } from "@/lib/stores/assistants";
   import { assistantTagsOf } from "@/lib/chat/assistantScope";
   import { api } from "@/lib/api";
@@ -55,21 +54,9 @@
   // persisted, same as the Lore pane).
 
   // Colored tag chips: name → hex from the machine-global assistant-tag
-  // vocabulary (#88), via the shared `tagColorMap` (lowercase name → swatch id)
-  // resolved to a hex here. Uncolored tags fall back to the neutral chip.
-  const assistantSwatchIds = $derived(tagColorMap(assistantTagsAsScoped($assistantTagsStore)));
-  // Reactive (not const) so the function reference changes when colors update,
-  // re-rendering the rows' chips. `$derived.by` with a synchronous read of
-  // `assistantSwatchIds` inside the returned closure — a plain `$derived` arrow
-  // would never re-track its dependency since creating the function doesn't
-  // read it.
-  const tagHexFor = $derived.by(() => {
-    const ids = assistantSwatchIds;
-    return (tag: string): string | null => {
-      const id = ids.get(tag.toLowerCase());
-      return id ? getSwatch(id)?.hex ?? null : null;
-    };
-  });
+  // vocabulary (#88), via the shared resolver (#1447). Reading the store inside
+  // the derived expression lets the closure re-track when colours change.
+  const tagHexFor = $derived(tagHexResolver(assistantTagsAsScoped($assistantTagsStore)));
 
   // Every NodeList is backed by a view (ADR-0022), and the view is authoritative
   // for its own shape (ADR-0037 §3): any buckets come from the spec's own

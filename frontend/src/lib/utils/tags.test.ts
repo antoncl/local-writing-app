@@ -1,80 +1,48 @@
-import { describe, it, expect } from "vitest";
-import {
-  dedupeList,
-  dedupeTags,
-  foldCaseInsensitive,
-  parseTagList,
-  splitCommaList,
-  tagColorMap,
-} from "@/lib/utils/tags";
+import { describe, it, expect, beforeEach } from "vitest";
+import { setPalette } from "@/lib/utils/colors";
+import { tagColorMap, tagHexResolver } from "@/lib/utils/tags";
 import type { ScopedTag } from "@/lib/types";
 
-describe("splitCommaList", () => {
-  it("splits, trims, and drops empty tokens — WITHOUT de-duping", () => {
-    // Case duplicates survive: the split is policy-free; de-dupe is a caller's step.
-    expect(splitCommaList(" a , b ,, c , A ")).toEqual(["a", "b", "c", "A"]);
-  });
-
-  it("returns an empty list for null / undefined / empty", () => {
-    expect(splitCommaList(null)).toEqual([]);
-    expect(splitCommaList(undefined)).toEqual([]);
-    expect(splitCommaList("")).toEqual([]);
-  });
-});
-
-describe("dedupeList", () => {
-  it("defaults to a CASE-SENSITIVE identity (reference-like lists keep Alpha/alpha)", () => {
-    expect(dedupeList(["Alpha", "alpha", "Alpha", "beta"])).toEqual(["Alpha", "alpha", "beta"]);
-  });
-
-  it("folds case when given the case-insensitive identity, first spelling wins", () => {
-    expect(dedupeList(["Alpha", "alpha", "ALPHA", "beta"], foldCaseInsensitive)).toEqual(["Alpha", "beta"]);
-  });
-
-  it("trims and drops empty entries under either identity", () => {
-    expect(dedupeList([" a ", "", "  ", "a"])).toEqual(["a"]);
-    expect(dedupeList([" a ", "", "  ", "A"], foldCaseInsensitive)).toEqual(["a"]);
-  });
-});
-
-describe("dedupeTags", () => {
-  it("de-dupes an already-tokenised list case-insensitively, first spelling wins", () => {
-    expect(dedupeTags(["Alpha", "alpha", "ALPHA", "beta"])).toEqual(["Alpha", "beta"]);
-  });
-
-  it("trims and drops empty entries", () => {
-    expect(dedupeTags([" a ", "", "  ", "b"])).toEqual(["a", "b"]);
-  });
-});
-
-describe("parseTagList", () => {
-  it("splits, trims, and drops empty tokens", () => {
-    expect(parseTagList(" a , b ,, c ")).toEqual(["a", "b", "c"]);
-  });
-
-  it("de-dupes case-insensitively, keeping the first spelling", () => {
-    expect(parseTagList("Alpha, alpha, ALPHA, beta")).toEqual(["Alpha", "beta"]);
-  });
-
-  it("returns an empty list for null / undefined / empty", () => {
-    expect(parseTagList(null)).toEqual([]);
-    expect(parseTagList(undefined)).toEqual([]);
-    expect(parseTagList("")).toEqual([]);
-  });
-});
-
-const roster: ScopedTag[] = [
-  { name: "Alpha", scope: { sources: [] }, color: "forest" },
-  { name: "beta", scope: { sources: [] }, color: null },
-  { name: "Gamma", scope: { sources: [] } },
+const scope = { sources: [] };
+const tags: ScopedTag[] = [
+  { name: "Protagonist", scope, color: "slate-blue" },
+  { name: "shifter", scope, color: null }, // no colour spent
+  { name: "POV", scope, color: "amber" },
 ];
 
 describe("tagColorMap", () => {
-  it("maps lowercased names to swatch ids, only for coloured tags", () => {
-    const map = tagColorMap(roster);
-    expect(map.get("alpha")).toBe("forest");
-    // A null or absent colour is not a map entry (neutral).
-    expect(map.has("beta")).toBe(false);
-    expect(map.has("gamma")).toBe(false);
+  it("maps only coloured tags, lowercased name → swatch id", () => {
+    const map = tagColorMap(tags);
+    expect(map.get("protagonist")).toBe("slate-blue");
+    expect(map.get("pov")).toBe("amber");
+    expect(map.has("shifter")).toBe(false); // colour: null → omitted
+  });
+});
+
+describe("tagHexResolver", () => {
+  beforeEach(() =>
+    setPalette([
+      { id: "slate-blue", label: "Slate blue", hex: "#5b5ca8" },
+      { id: "amber", label: "Amber", hex: "#c8794a" },
+    ]),
+  );
+
+  it("resolves a coloured tag to its swatch hex, case-insensitively", () => {
+    const hex = tagHexResolver(tags);
+    expect(hex("protagonist")).toBe("#5b5ca8");
+    expect(hex("PROTAGONIST")).toBe("#5b5ca8");
+    expect(hex("POV")).toBe("#c8794a");
+  });
+
+  it("returns null for an uncoloured or unknown tag", () => {
+    const hex = tagHexResolver(tags);
+    expect(hex("shifter")).toBeNull(); // colour: null
+    expect(hex("nonexistent")).toBeNull(); // not in the vocabulary
+  });
+
+  it("returns null when the tag's swatch id isn't in the palette", () => {
+    setPalette([]); // a stale swatch id no longer in the machine palette
+    const hex = tagHexResolver(tags);
+    expect(hex("protagonist")).toBeNull();
   });
 });

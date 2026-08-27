@@ -20,6 +20,7 @@
     StructureDocument,
   } from "@/lib/types";
   import { metadataSchemaStore, projectLayerIdStore } from "@/lib/stores/schema";
+  import { railSectionCollapse } from "@/lib/stores/railSectionCollapse.svelte";
   import { inheritedLayerLabel, fieldProvenance, isFieldOwnClearable } from "@/lib/utils/provenance";
 
   interface Props {
@@ -189,17 +190,16 @@
   // Reference fields (#1441) are the rail's collapsible collections: the field
   // row owns the disclosure caret (in the glyph gutter), and the picker
   // contributes the count+add on the header line plus the ref list BELOW the
-  // row (controlled ReferencePicker). Expanded state is rail-local, keyed by
-  // field id — persistence is a follow-up.
+  // row (controlled ReferencePicker). Expanded state persists per field id
+  // (#1444), so it survives node switches and reload like the rail's sections.
   function isRefField(field: MetadataFieldDefinition): boolean {
     return field.type === "entity_ref" || field.type === "entity_ref_list";
   }
-  let refExpanded = $state<Record<string, boolean>>({});
   function isRefExpanded(fieldId: string): boolean {
-    return refExpanded[fieldId] ?? false;
+    return railSectionCollapse.isExpanded(`field:${fieldId}`, false);
   }
   function toggleRef(fieldId: string): void {
-    refExpanded[fieldId] = !isRefExpanded(fieldId);
+    railSectionCollapse.toggle(`field:${fieldId}`, false);
   }
 
   // Wide field types take the full rail width (control wraps below the

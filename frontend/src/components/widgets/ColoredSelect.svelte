@@ -103,6 +103,7 @@
     class:has-color={!!currentSwatch}
     class:read-only={readOnly}
     aria-label={ariaLabel || current?.label || current?.value || placeholder}
+    title={current ? (current.label ?? current.value) : undefined}
     aria-haspopup={readOnly ? undefined : "listbox"}
     aria-expanded={open}
     disabled={readOnly}
@@ -179,6 +180,8 @@
   .colored-select {
     position: relative;
     display: inline-block;
+    min-width: 0;
+    max-width: 100%;
   }
 
   .colored-select-trigger {
@@ -196,7 +199,12 @@
     color: var(--text);
     cursor: pointer;
     transition: border-color 80ms linear, background-color 80ms linear;
-    min-width: 96px;
+    /* Shrink to the value column instead of wrapping the label to a second line:
+       a long option like "Automatic (alias match)" truncates with an ellipsis and
+       the full text lives in the trigger's title tooltip (#1438). min-width:0 lets
+       the label's ellipsis engage inside the flex row. */
+    min-width: 0;
+    max-width: 100%;
   }
   .colored-select-trigger:hover {
     border-color: var(--accent);
@@ -238,6 +246,10 @@
   .colored-select-label,
   .colored-select-placeholder {
     line-height: 1.2;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .colored-select-placeholder {
     color: var(--text-3);

@@ -14,15 +14,13 @@
   // computed, now shown as a menu so every applicable prompt is reachable, not just
   // the first.
   //
-  // The header is a purpose-built disclosure row, NOT a NodeRow group header: the
-  // ＋New menu is an interactive Popover, and NodeRow styles every <button> in its
-  // trailing slot as a fixed-size icon tile (`.node-row-trailing :global(button)`)
-  // — which would flatten the menu items. Only the LIST reuses NodeRow/ViewNodeList
-  // (the reuse the ADR actually asks for); the header is minor chrome.
+  // The header is the shared rail RailSectionHeader (#1438); the ＋New menu rides
+  // its trailing slot, which — unlike a NodeRow trailing slot — does not flatten
+  // an interactive button into a fixed icon tile. Only the LIST reuses
+  // NodeRow/ViewNodeList (the reuse the ADR actually asks for).
 
   import NodeRow from "@/components/widgets/NodeRow.svelte";
-  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
-  import CountPill from "@/components/widgets/CountPill.svelte";
+  import RailSectionHeader from "@/components/editor/RailSectionHeader.svelte";
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import Popover from "@/components/chrome/Popover.svelte";
   import PromptMenu from "@/components/editor/PromptMenu.svelte";
@@ -148,45 +146,43 @@
 
 {#if conversations.length > 0 || newPrompts.length > 0}
   <section class="entry-conversations" aria-label="Conversations">
-    <div class="conv-header">
-      <button
-        type="button"
-        class="conv-toggle"
-        aria-expanded={expanded}
-        onclick={() => (expanded = !expanded)}
-      >
-        <GroupCaret collapsed={!expanded} />
-        <span class="conv-title">Conversations</span>
-        <CountPill count={conversations.length} />
-      </button>
-      {#if newPrompts.length > 0}
-        <div class="conv-new-wrap">
-          <button
-            bind:this={newButton}
-            type="button"
-            class="conv-new"
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            aria-controls={menuId}
-            title="Start a new conversation about this entry"
-            onclick={() => (menuOpen = !menuOpen)}
-          >＋ New</button>
-          <Popover
-            bind:open={menuOpen}
-            triggerEl={newButton}
-            role="menu"
-            id={menuId}
-            label="Start a new conversation"
-            offset={6}
-            anchor="right"
-            minWidth="200px"
-            maxWidth="320px"
-          >
-            <PromptMenu nodes={newMenu} onSelect={(prompt) => void startNew(prompt)} />
-          </Popover>
-        </div>
-      {/if}
-    </div>
+    <RailSectionHeader
+      title="Conversations"
+      glyph="ti-messages"
+      count={conversations.length}
+      {expanded}
+      onToggle={() => (expanded = !expanded)}
+    >
+      {#snippet trailing()}
+        {#if newPrompts.length > 0}
+          <div class="conv-new-wrap">
+            <button
+              bind:this={newButton}
+              type="button"
+              class="conv-new"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              aria-controls={menuId}
+              title="Start a new conversation about this entry"
+              onclick={() => (menuOpen = !menuOpen)}
+            >＋ New</button>
+            <Popover
+              bind:open={menuOpen}
+              triggerEl={newButton}
+              role="menu"
+              id={menuId}
+              label="Start a new conversation"
+              offset={6}
+              anchor="right"
+              minWidth="200px"
+              maxWidth="320px"
+            >
+              <PromptMenu nodes={newMenu} onSelect={(prompt) => void startNew(prompt)} />
+            </Popover>
+          </div>
+        {/if}
+      {/snippet}
+    </RailSectionHeader>
     {#if expanded}
       <div class="conv-list">
         <ViewNodeList
@@ -220,44 +216,6 @@
 <style>
   .entry-conversations {
     padding-top: 8px;
-  }
-
-  /* Disclosure header — mirrors the group-header treatment (serif title +
-     hairline rule) without borrowing NodeRow, whose trailing slot flattens
-     interactive buttons into icon tiles. */
-  .conv-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    border-bottom: 1px solid var(--divider);
-    padding-bottom: 4px;
-    margin-bottom: 6px;
-  }
-
-  .conv-toggle {
-    flex: 1 1 auto;
-    min-width: 0;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 4px 6px;
-    border: none;
-    border-radius: 4px;
-    background: transparent;
-    color: inherit;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-  }
-  .conv-toggle:hover {
-    background: var(--accent-soft);
-  }
-
-  .conv-title {
-    font-family: var(--serif);
-    font-size: var(--fs-md);
-    font-weight: 700;
-    color: var(--text);
   }
 
   /* The ＋New menu anchors against this relative wrapper (Popover positions in

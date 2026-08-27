@@ -1,7 +1,6 @@
 <script lang="ts">
   import NodeRow from "@/components/widgets/NodeRow.svelte";
-  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
-  import CountPill from "@/components/widgets/CountPill.svelte";
+  import RailSectionHeader from "@/components/editor/RailSectionHeader.svelte";
   import ViewNodeList, { type RowCtx } from "@/components/widgets/ViewNodeList.svelte";
   import { nodeSet } from "@/lib/views/viewResult";
   import { resolveColor } from "@/lib/utils/colors";
@@ -71,19 +70,15 @@
 </script>
 
 <section class="scene-backlinks" aria-label="Incoming references">
-  <NodeRow
+  <RailSectionHeader
     title="References"
-    groupHeader
-    collapsed={!expanded}
-    onClick={() => (expanded = !expanded)}
-  >
-    {#snippet leading()}
-      <GroupCaret collapsed={!expanded} />
-    {/snippet}
-    {#snippet trailing()}
-      <CountPill count={backlinks.length} />
-    {/snippet}
-    {#snippet nested()}
+    glyph="ti-link"
+    count={backlinks.length}
+    {expanded}
+    onToggle={() => (expanded = !expanded)}
+  />
+  {#if expanded}
+    <div class="backlinks-list">
       <ViewNodeList
         result={nodeSet(backlinkNodes)}
         mode="tree"
@@ -94,8 +89,8 @@
           <p class="muted">No incoming references.</p>
         {/snippet}
       </ViewNodeList>
-    {/snippet}
-  </NodeRow>
+    </div>
+  {/if}
 </section>
 
 {#snippet backlinkRow(link: BacklinkNode, ctx: RowCtx<BacklinkNode>)}
@@ -114,6 +109,22 @@
 <style>
   .scene-backlinks {
     padding-top: 8px;
+  }
+
+  /* Tier panel behind the rows — matches NodeRow's grouped-children tint (and
+     the Conversations / Staged-changes lists) so every rail list reads as one
+     grouped surface. */
+  .backlinks-list {
+    padding: 8px;
+    background: var(--tier1);
+    border-radius: 10px;
+  }
+
+  .muted {
+    margin: 0;
+    padding: 2px 4px;
+    color: var(--text-3);
+    font-size: var(--fs-sm);
   }
 
   .backlink-type-pill {

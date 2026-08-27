@@ -119,3 +119,30 @@ describe("PromptInputField — shared value types delegate to FieldValueEditor (
     expect(onChange).toHaveBeenLastCalledWith(JSON.stringify([]));
   });
 });
+
+// #1462 (ADR-0074 slice 1): the context_pick branch must supply plot and
+// assistant candidates from their stores — the #742 pattern ReferencePicker
+// already uses. Before this, a config allowing those kinds listed nothing.
+describe("PromptInputField — context_pick wires the plot/assistant stores (#1462)", () => {
+  it("lists plotline candidates for a plot-sourced context_pick", async () => {
+    const { plotlineEntriesStore } = await import("@/lib/stores/plotlines");
+    plotlineEntriesStore.set([
+      { id: "p1", title: "Main plot", body: "", entry_type: "plot:plotline", metadata: {} } as never,
+    ]);
+    const { tick } = await import("svelte");
+    render(PromptInputField, {
+      props: {
+        input: def({
+          type: "context_pick",
+          target: { sources: [{ kind: "plot", expr: { type: "plot:plotline" } }] },
+        } as never),
+        value: "",
+        onChange: vi.fn(),
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+    expect(screen.getByText("Main plot")).toBeInTheDocument();
+    plotlineEntriesStore.set([]);
+  });
+});

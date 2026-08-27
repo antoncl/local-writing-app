@@ -11,6 +11,12 @@
   import PlainTextEditor from "@/components/widgets/PlainTextEditor.svelte";
   import ReferencePicker from "@/components/widgets/ReferencePicker.svelte";
   import FieldValueEditor from "@/components/widgets/FieldValueEditor.svelte";
+  // Plot + assistant candidates come straight from their stores, the #742
+  // pattern ReferencePicker already uses — hosts thread the per-project
+  // trees/lists, but these two are global stores every host would thread
+  // identically (#1462).
+  import { assistantEntriesStore } from "@/lib/stores/assistants";
+  import { plotlineEntriesStore } from "@/lib/stores/plotlines";
   import { isListShapedInputType } from "@/lib/utils/promptInputs";
   import { coerceStringList } from "@/lib/utils/schemaTypeHelpers";
   import type {
@@ -213,6 +219,8 @@
     researchStructure={researchStructure}
     loreEntries={loreEntries}
     promptEntries={promptEntries}
+    plotEntries={$plotlineEntriesStore}
+    assistantEntries={$assistantEntriesStore}
     onChange={(detail) => onChange(JSON.stringify(detail.value))}
   />
 {:else if input.type === "multi_select" || input.type === "tags" || input.type === "list" || input.type === "color"}

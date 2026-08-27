@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from project_fixtures import open_test_project
 
 from app.main import app
-from app.models import UpdateProjectSettingsRequest
+from app.models import CreateAssistantEntryRequest, UpdateProjectSettingsRequest
 from app.services import machine_settings as ms
 from app.services.ai.profiles.base import ChatOutcome
 from app.services.project.assistants import normalize_assistant_entry_type
@@ -125,6 +125,54 @@ class ProjectServiceResolveAssistantTests(unittest.TestCase):
     def test_resolve_returns_none_for_unknown_id(self) -> None:
         result = self.service.resolve_assistant("ghost")
         self.assertIsNone(result)
+
+
+class CreateAssistantLayerPlacementTests(unittest.TestCase):
+    """#1452: the "+" button (layer_id=None) creates an assistant on the LOCAL
+    layer — the open project — so a fresh assistant is authored where you're
+    working and shows no "Inherited from Machine" provenance. An explicit ""
+    still targets the machine layer (the wizard's cross-project hire)."""
+
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.root = Path(self.temp_dir.name) / "project"
+        self.service = open_test_project(self.root, "Layer Placement Tests")
+        # Isolate the machine roster so the "" case writes to a temp config dir,
+        # never the real %APPDATA% (tests-isolate-machine-config, #1358).
+        self.config_dir = Path(self.temp_dir.name) / "config"
+        self.config_dir.mkdir()
+        self._patcher = patch(
+            "app.services.machine_settings.config_path",
+            return_value=self.config_dir / "config.yaml",
+        )
+        self._patcher.start()
+
+    def tearDown(self) -> None:
+        self._patcher.stop()
+        self.temp_dir.cleanup()
+
+    def test_layer_id_none_creates_in_the_open_project(self) -> None:
+        created = self.service.create_assistant_entry(
+            CreateAssistantEntryRequest(title="Local one", layer_id=None)
+        )
+        # The file lives in the project, and nothing was written to the machine
+        # roster at all.
+        self.assertEqual(len(list((self.root / "assistants").glob("*.md"))), 1)
+        self.assertFalse((self.config_dir / "assistants").exists())
+        # It reads as owned by the project — not "Machine" — so the editor shows
+        # no inherited-from-machine stripe.
+        self.assertNotEqual(created.source_layer_label, "Machine")
+
+    def test_layer_id_empty_still_creates_on_the_machine_layer(self) -> None:
+        created = self.service.create_assistant_entry(
+            CreateAssistantEntryRequest(title="Shared one", layer_id="")
+        )
+        # The FILE lands on the machine layer...
+        self.assertEqual(len(list((self.config_dir / "assistants").glob("*.md"))), 1)
+        # ...even though the curation opinion is still the open project's (a
+        # local .order.yaml, but no local assistant file).
+        self.assertEqual(list((self.root / "assistants").glob("*.md")), [])
+        self.assertEqual(created.source_layer_label, "Machine")
 
 
 class ChatEndpointAssistantTests(unittest.TestCase):

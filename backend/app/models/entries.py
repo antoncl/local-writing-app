@@ -846,9 +846,16 @@ class AssistantEntryList(BaseModel):
 class CreateAssistantEntryRequest(BaseModel):
     title: str = Field(min_length=1)
     entry_type: str = "assistant:assistant"
-    # "" → machine layer (the default). Otherwise the layer-id (project root
-    # hash) where the file should land.
-    layer_id: str = ""
+    # Where the new assistant's file lands (see
+    # ProjectService._assistant_layer_folder_for_id):
+    #   None → the local (innermost) layer, i.e. the open project — degenerates
+    #          to the machine layer when no project is open. The app's "+" sends
+    #          this so a new assistant is authored in the current project (#1452).
+    #   ""   → the machine config dir explicitly (a cross-project roster hire,
+    #          e.g. the create-project wizard). The default, so a caller that
+    #          omits the field keeps the historical machine-layer behaviour.
+    #   else → that layer by id.
+    layer_id: str | None = ""
 
 
 class SaveAssistantEntryRequest(BaseModel):

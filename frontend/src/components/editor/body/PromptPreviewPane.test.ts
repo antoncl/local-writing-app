@@ -170,4 +170,28 @@ describe("PromptPreviewPane", () => {
     expect(screen.getByText(/Input type conflict/i)).toBeTruthy();
     expect(screen.getByText(/different types across included/i)).toBeTruthy();
   });
+
+  // #1427: design-time preview has no live prose context, so the three runtime
+  // prose slots are sent as visible placeholder tokens — a `{{ selection }}`
+  // template renders with its slot position shown, not silently empty.
+  it("sends placeholder tokens for the runtime prose slots (#1427)", async () => {
+    render(PromptPreviewPane, {
+      props: {
+        rawBody: '{% role "system" %}Revise: {{ selection }}{% endrole %}',
+        documentKind: "prompt",
+        scene: { id: "sel", title: "Scene", body: "" } as never,
+        loadedSceneId: "sel",
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: /preview/i }));
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(api.aiPreview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selection: "«the selected text»",
+        text_before: "«text before the cursor»",
+        text_after: "«text after the cursor»",
+      }),
+    );
+  });
 });

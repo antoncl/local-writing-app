@@ -1213,7 +1213,12 @@ export const api = {
   listAssistantEntries() {
     return request<AssistantEntryList>("/assistants");
   },
-  createAssistantEntry(title: string, layerId: string = "") {
+  createAssistantEntry(title: string, layerId: string | null = null) {
+    // `null` (the default the "+" button sends) = the local layer, i.e. the
+    // open project — machine when no project is open. Assistants are a layered
+    // kind (ADR-0039), so a new one belongs in the project you're working in,
+    // not forced onto the machine roster (#1452). An explicit "" still targets
+    // the machine layer (the wizard's cross-project hire).
     return request<AssistantEntry>("/assistants", {
       method: "POST",
       body: JSON.stringify({ title, entry_type: "assistant:assistant", layer_id: layerId }),

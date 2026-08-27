@@ -193,7 +193,7 @@
 >
   {#snippet whenEmpty()}
     {#if entries.length === 0}
-      <p class="muted">No assistants defined yet. Click + to create one in the machine layer.</p>
+      <p class="muted">No assistants defined yet. Click + to create one.</p>
     {:else}
       <p class="muted">No assistants match this view.</p>
     {/if}

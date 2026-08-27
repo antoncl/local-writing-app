@@ -580,23 +580,24 @@
     </p>
   {/if}
 
-  <!-- A Library prompt's declared inputs are shown but locked: `inert` blocks
-       every control and drops the subtree from the tab order, so there is no
-       edit that could 409 on save. Clone to edit. -->
-  <div class="entry-inputs-host" class:read-only={readOnly} inert={readOnly || undefined}>
+  <!-- A Library prompt's declared inputs are shown but locked: the editor renders
+       its body `inert` while keeping the summary toggleable, so the group is
+       viewable (expandable) but not mutable. Clone to edit. -->
+  <div class="entry-inputs-host" class:read-only={readOnly}>
     <EntryInputsEditor
       bind:entryInputDrafts
       {inheritedInputs}
       {nextInputDraftId}
       {entrySlugify}
       {onInputsChange}
+      {readOnly}
     />
   </div>
 
   {#if showOutputEditor}
-    <!-- Locked (Library prompt) the same way as the inputs host: `inert` blocks
-         interaction + drops it from the tab order; clone to edit. -->
-    <div class="entry-inputs-host" class:read-only={readOnly} inert={readOnly || undefined}>
+    <!-- Locked (Library prompt): PromptOutputEditor disables its own controls
+         under `readOnly`, so the group stays viewable + expandable. Clone to edit. -->
+    <div class="entry-inputs-host" class:read-only={readOnly}>
       <PromptOutputEditor
         bind:contextStrategy
         {metadataSchema}
@@ -607,9 +608,9 @@
   {/if}
 
   {#if showOfferOnPicker}
-    <!-- Locked (Library prompt) the same way as the inputs host: `inert` blocks
-         interaction + drops it from the tab order; clone to edit. -->
-    <div class="entry-inputs-host" class:read-only={readOnly} inert={readOnly || undefined}>
+    <!-- Locked (Library prompt): OfferOnPicker disables its own controls under
+         `readOnly`, so the group stays viewable + expandable. Clone to edit. -->
+    <div class="entry-inputs-host" class:read-only={readOnly}>
       <OfferOnPicker
         bind:offerOn
         {metadataSchema}
@@ -782,8 +783,10 @@
   .prompt-help-guide-link:hover {
     text-decoration: underline;
   }
-  /* A locked (Library) prompt's inputs are dimmed to read as non-editable;
-     `inert` on the element does the actual interaction blocking. */
+  /* A locked (Library) prompt's config groups are dimmed to read as
+     non-editable; each editor does the actual interaction blocking under
+     `readOnly` (disabled controls, or an inert body), while its summary stays
+     toggleable so the group can be expanded to inspect it. */
   .entry-inputs-host.read-only {
     opacity: 0.6;
   }

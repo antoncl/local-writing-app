@@ -36,6 +36,11 @@
     entrySlugify: (value: string) => string;
     // Outbound: declared-inputs changed (#14 — replaces inputsChange dispatch).
     onInputsChange?: () => void;
+    // A built-in Library prompt (ADR-0049) is viewable but not editable. The
+    // body is rendered `inert` (blocks every control + drops the subtree from
+    // the tab order, so no edit can 409 on save) while the summary stays
+    // toggleable, so the group can still be expanded to inspect it. Clone to edit.
+    readOnly?: boolean;
   }
 
   let {
@@ -44,6 +49,7 @@
     nextInputDraftId,
     entrySlugify,
     onInputsChange,
+    readOnly = false,
   }: Props = $props();
 
   // The inherited tier excludes any name the author has declared as an OWN input
@@ -202,6 +208,9 @@
     Inputs <small>{entryInputDrafts.length}</small>
     <small class="entry-inputs-hint">declared on this prompt · use as <code>&lbrace;&lbrace; input.&lt;id&gt; &rbrace;&rbrace;</code></small>
   </summary>
+  <!-- Read-only (Library prompt): the whole body is inert — viewable, not
+       mutable — but the summary above stays live so the group can be expanded. -->
+  <div class="entry-inputs-body" inert={readOnly || undefined}>
   {#if entryInputDrafts.length === 0}
     <p class="muted entry-inputs-empty">No inputs yet. Click + to declare one.</p>
   {/if}
@@ -363,6 +372,7 @@
       {/each}
     </div>
   {/if}
+  </div>
 </details>
 
 <style>

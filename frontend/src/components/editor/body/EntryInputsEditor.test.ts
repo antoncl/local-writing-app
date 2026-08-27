@@ -81,3 +81,40 @@ describe("EntryInputsEditor — inherited tier", () => {
     expect(screen.queryByText(/from Villain Voice/)).toBeNull();
   });
 });
+
+// #1431: a built-in Library prompt is viewable but not editable. The body is
+// rendered inert (blocks every control + drops it from the tab order) while the
+// summary stays live, so the group can still be expanded to inspect it — the
+// previous host-level `inert` also froze the summary shut, hiding the config.
+describe("EntryInputsEditor — read-only (Library prompt)", () => {
+  it("renders the body inert while keeping the summary toggleable", () => {
+    const { container } = render(EntryInputsEditor, {
+      props: {
+        entryInputDrafts: ownDrafts("topic"),
+        inheritedInputs: [],
+        nextInputDraftId: noopId,
+        entrySlugify: slug,
+        readOnly: true,
+      },
+    });
+    const body = container.querySelector(".entry-inputs-body");
+    expect(body).toBeTruthy();
+    expect(body?.hasAttribute("inert")).toBe(true);
+    // The summary is a live sibling (not inside the inert body), so the group
+    // stays expandable; the add-input control lives inside the inert body.
+    expect(container.querySelector("details > summary")).toBeTruthy();
+    expect(body?.querySelector(".entry-inputs-add button")).toBeTruthy();
+  });
+
+  it("leaves the body interactive when not read-only", () => {
+    const { container } = render(EntryInputsEditor, {
+      props: {
+        entryInputDrafts: ownDrafts("topic"),
+        inheritedInputs: [],
+        nextInputDraftId: noopId,
+        entrySlugify: slug,
+      },
+    });
+    expect(container.querySelector(".entry-inputs-body")?.hasAttribute("inert")).toBe(false);
+  });
+});

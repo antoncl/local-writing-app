@@ -113,6 +113,18 @@ export function coerceChatInputValue(raw: string, type: PromptInputDefinition["t
   return trimmed;
 }
 
+// #1436: a rendered/loaded conversation is SELF-SUBMITTABLE — sendable with an
+// empty composer — iff its last turn is a `user` message. Then the model has a
+// user turn to answer; the system prompt is a separate wire field, so a
+// system-only render can't be sent alone (the provider rejects it, "messages
+// must not be empty"). A self-contained prompt signals this by ending its
+// template in a `{% role "user" %}` block. Used for the send-button enable state
+// (over the estimate preview) and the send-path guard (over the real history).
+export function endsInUserTurn(messages: { role: string }[] | null | undefined): boolean {
+  if (!messages || messages.length === 0) return false;
+  return messages[messages.length - 1].role === "user";
+}
+
 export type TtlChip = {
   slot: string;
   label: string;

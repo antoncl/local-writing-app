@@ -65,6 +65,7 @@
     coerceChatInputValue,
     decodeChatInputDrafts,
     encodeChatInputDrafts,
+    endsInUserTurn,
     isInputMissing,
     seedInputDraftsFromEntry,
     ttlChipsFor,
@@ -582,6 +583,14 @@
     }
   }
 
+  // #1436: a self-contained prompt is submittable with an EMPTY composer iff its
+  // FINAL rendered section is a user turn — the rendered conversation then ends in
+  // a user message the provider can answer (the system prompt is a separate wire
+  // field, so system-only prose can't be sent alone → "messages must not be
+  // empty"). Read off the estimate preview so the send button knows before the
+  // send-time lock render.
+  const promptEndsInUserTurn = $derived(endsInUserTurn(chatPreviewMessages));
+
   async function sendChat() {
     if (chatRunning || commit.committing) return;
     if (missingRequiredInputs.length > 0) {
@@ -599,12 +608,12 @@
     chatError = null;
     chatNotice = null;
     chatRewound = false;
-    // First-send template render: defer to renderAndLockPromptTemplate
-    // when the chat is bound to a prompt that hasn't been rendered yet
-    // AND that prompt has declared inputs (the indication that the
-    // template needs values plugged in). Gating matches App.svelte's
-    // bespoke sendChat.
-    if (activePromptEntry && !chatSystemPrompt && effectivePromptInputs(activePromptEntry).length > 0) {
+    // First-send template render: render + lock whenever the chat is bound to a
+    // prompt that hasn't been rendered yet (#1436 — no longer gated on declared
+    // inputs, so an input-less self-contained prompt also applies its system
+    // prompt and contributes any `{% role %}` turns, incl. a trailing user turn,
+    // to chatHistory).
+    if (activePromptEntry && !chatSystemPrompt) {
       chatRunning = true;
       try {
         const ok = await renderAndLockPromptTemplate(activePromptEntry);
@@ -617,6 +626,12 @@
         chatRunning = false;
       }
     }
+    // #1436: after the first-send render, an empty composer is valid only when
+    // the prompt supplied a trailing user turn (chatHistory now ends in `user`) —
+    // else the rendered conversation has no user message for the model to answer,
+    // so there is nothing to send. The button reflects this via
+    // promptEndsInUserTurn; this is the authoritative backstop (the real render).
+    if (!text && !endsInUserTurn(chatHistory)) return;
     let userIdx = -1;
     if (text) {
       const userTurn: ChatMessage = { role: "user", content: text };
@@ -1023,11 +1038,11 @@
         disabled={chatRunning
           || commit.committing
           || missingRequiredInputs.length > 0
-          || (!chatInput.trim() && !(activePromptEntry && chatHistory.length === 0))}
+          || (!chatInput.trim() && !(activePromptEntry && chatHistory.length === 0 && promptEndsInUserTurn))}
         title={missingRequiredInputs.length > 0
           ? `Fill required input${missingRequiredInputs.length > 1 ? "s" : ""}: ${missingRequiredInputs.map((i) => i.label || i.name).join(", ")}`
-          : (!chatInput.trim() && activePromptEntry && chatHistory.length === 0)
-            ? "Send the prompt as-is (no extra message)"
+          : (!chatInput.trim() && activePromptEntry && chatHistory.length === 0 && promptEndsInUserTurn)
+            ? "Send the prompt as-is — it ends with a user turn"
             : ""}
         onclick={() => void sendChat()}
       >

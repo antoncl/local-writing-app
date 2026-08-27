@@ -25,6 +25,7 @@ on:
       - 'packaging/**'
       - '.github/workflows/release.yml'
       - 'backend/pyproject.toml'
+      - 'backend/requirements.lock'
   schedule:
     # 23:00 UTC = 00:00 CET (winter) / 01:00 CEST (summer) — midnight in
     # European local time, so a fresh nightly is ready by morning. GitHub cron
@@ -129,9 +130,14 @@ jobs:
 
       # Non-Linux freezes on the host. Linux freezes inside a glibc-2.31 container
       # (below), which installs its own copy — so the host install is win/mac only.
-      - name: Install backend + build extra (pyinstaller)
+      # Deps from the lock (#1393): the freeze bundles whatever is installed, so
+      # an unpinned resolve here would make the shipped binary for a given tag
+      # depend on the build date.
+      - name: Install backend + build extra (locked deps)
         if: runner.os != 'Linux'
-        run: python -m pip install -e "backend[build]"
+        run: |
+          python -m pip install -r backend/requirements.lock
+          python -m pip install -e backend --no-deps
 
       # macOS only: build the .icns before the freeze so the spec's BUNDLE
       # embeds it in the .app (ADR-0072 S5).
@@ -169,7 +175,8 @@ jobs:
             set -euo pipefail
             curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
             apt-get install -y --no-install-recommends nodejs
-            python -m pip install -e "backend[build]"
+            python -m pip install -r backend/requirements.lock
+            python -m pip install -e backend --no-deps
             python packaging/build.py
           '
           # The container writes dist/ as root; hand it back to the runner user so

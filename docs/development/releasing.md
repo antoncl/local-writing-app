@@ -61,6 +61,28 @@ a half-done bump fails the gate rather than shipping mismatched halves.
   witness / workspace-layout `*_VERSION` constants. Those version *on-disk
   formats*, not the release, and move only when a format actually changes.
 
+## 2b. Backend dependency relock — the upgrade cadence lives here
+
+`backend/requirements.lock` pins every install (dev, CI, the freeze) and does
+not move on its own (#1393). A release cut is the moment dependencies move
+forward deliberately:
+
+```
+backend/.venv/Scripts/python.exe scripts/relock_backend.py --upgrade
+backend/.venv/Scripts/python.exe -m pip install -r backend/requirements.lock
+```
+
+Review the lock diff like code — a major bump in it is a decision, not noise —
+then run the full gates on the new set. If a bump breaks something and the fix
+isn't trivial, revert that package (`git checkout -- backend/requirements.lock`
++ `--upgrade-package` the rest, or just hold it) and file an issue; a release
+is not the place to debug an upgrade. Skipping the relock entirely is a valid
+call — say so in the release PR.
+
+**Security exception:** a dependency advisory (GitHub Dependabot alerts watch
+the lockfile) doesn't wait for a release —
+`python scripts/relock_backend.py --upgrade-package NAME`, gates, PR, off-cadence.
+
 ## 3. Smoke test before tagging
 
 Build the shipping artifact and run it once — nothing else forces the thing you

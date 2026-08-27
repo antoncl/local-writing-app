@@ -30,7 +30,8 @@ if VENV_PYTHON is None:
     sys.stderr.write(
         f"venv python not found under {REPO / 'backend' / '.venv'} "
         "(or the primary worktree's venv)\n"
-        'Run: backend/.venv/Scripts/python.exe -m pip install -e "backend[dev]"\n'
+        "Run: backend/.venv/Scripts/python.exe -m pip install -r backend/requirements.lock\n"
+        "     backend/.venv/Scripts/python.exe -m pip install -e backend --no-deps\n"
     )
     raise SystemExit(1)
 

@@ -38,9 +38,14 @@ ruff's weaker defaults.
 One-time setup per clone:
 
 ```powershell
-backend/.venv/Scripts/python.exe -m pip install -e "backend[dev]"
+backend/.venv/Scripts/python.exe -m pip install -r backend/requirements.lock
+backend/.venv/Scripts/python.exe -m pip install -e backend --no-deps
 backend/.venv/Scripts/pre-commit install
 ```
+
+Deps install from `backend/requirements.lock`, never a fresh resolve — same
+versions on every machine, in CI, and in the release freeze (#1393). To move
+them, edit `backend/pyproject.toml` and run `python scripts/relock_backend.py`.
 
 **Not** `… -t pre-push`. If an old clone has one, `pre-commit uninstall -t pre-push`
 removes it.

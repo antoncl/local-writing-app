@@ -3,9 +3,17 @@ name = "local-writing-service"
 version = "0.9.5"
 description = "Local application service for a private fiction writing app"
 requires-python = ">=3.11"
+# These ranges are declared INTENT; the versions every install actually gets
+# come from requirements.lock (#1393). After editing dependencies here, run
+#   python scripts/relock_backend.py
+# to regenerate the lock — this file alone never changes what installs.
 dependencies = [
   "anthropic>=0.40.0",
-  "fastapi>=0.115.0",
+  # <0.141: FastAPI 0.141 relaxed its Starlette pin onto the >=1.4 line, which
+  # changed edge-case routing behaviour (405 where 1.3 returned 404) and is
+  # untested here. Lifting this cap is the deliberate upgrade tracked in #1456,
+  # not a relock side effect.
+  "fastapi>=0.115.0,<0.141",
   # A genuine RUNTIME dependency: every provider profile
   # (services/ai/profiles/*.py) drives its health check / calls through
   # httpx.AsyncClient, imported at app-load via the provider registry. It is
@@ -17,6 +25,9 @@ dependencies = [
   "openai>=1.50.0",
   "pydantic>=2.8.0",
   "pyyaml>=6.0.0",
+  # Transitive via FastAPI, but named to hold the tested minor line: 1.4+
+  # changed routing edge cases (see the fastapi cap above, and #1456).
+  "starlette>=1.3,<1.4",
   "tiktoken>=0.8.0",
   "uvicorn[standard]>=0.30.0"
 ]

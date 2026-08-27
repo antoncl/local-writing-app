@@ -286,7 +286,7 @@ use(node, hint: str | None = None) -> str   # "" — selection side-effect only
 use_lore() -> str                            # "" — enables implicit lore for the scene
 ```
 
-- `node` accepts the same shapes `entry()` does (id, EntryRef, picked ref, list). Reach for `use(inputs.character)` to force a specific picked node into context.
+- `node` accepts an id, an EntryRef, or a picked ref — reach for `use(inputs.character)` to force a specific picked node into context. Handed a **multi-select** `context_pick` (a list), `use()` selects **every** pick, so `use(inputs.places)` pulls them all in one call; this is where it parts ways with `entry()`, which takes only the first of a list. (The explicit `{% for p in inputs.places %}{{ use(p) }}{% endfor %}` loop is equivalent and lets you hint each pick differently.)
 - The optional `hint` is `"stable"` or `"volatile"` — an **advisory** cache-tier prior. It nudges where the backend orders the node in the volatility sequence; correctness (a changed node cannot be served as stable) always wins over the hint.
 - `use_lore()` is the gate for the scene's *implicit* lore: the union of lore the scene references directly, lore whose name appears in the scene summary, and a one-hop expansion. Calling it turns that retrieval on; leaving it out means no implicit lore is pulled.
 

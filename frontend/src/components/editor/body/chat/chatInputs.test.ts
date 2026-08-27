@@ -4,6 +4,7 @@ import {
   coerceChatInputValue,
   decodeChatInputDrafts,
   encodeChatInputDrafts,
+  endsInUserTurn,
   isInputMissing,
   seedSubjectEntryInput,
   ttlChipsFor,
@@ -154,6 +155,23 @@ describe("chat input drafts round-trip (#654)", () => {
     expect(decodeChatInputDrafts(undefined)).toEqual({});
     expect(decodeChatInputDrafts(null)).toEqual({});
     expect(decodeChatInputDrafts({})).toEqual({});
+  });
+});
+
+describe("endsInUserTurn (#1436 — self-submittable prompt)", () => {
+  it("is true when the last rendered turn is a user message", () => {
+    expect(endsInUserTurn([{ role: "system" }, { role: "user" }])).toBe(true);
+  });
+
+  it("is false when the last turn is not user (system-only, or ends in assistant)", () => {
+    expect(endsInUserTurn([{ role: "system" }])).toBe(false);
+    expect(endsInUserTurn([{ role: "user" }, { role: "assistant" }])).toBe(false);
+  });
+
+  it("is false for an empty, null, or undefined conversation", () => {
+    expect(endsInUserTurn([])).toBe(false);
+    expect(endsInUserTurn(null)).toBe(false);
+    expect(endsInUserTurn(undefined)).toBe(false);
   });
 });
 

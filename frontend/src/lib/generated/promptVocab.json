@@ -137,13 +137,13 @@
       "name": "use",
       "kind": "helper",
       "signature": "use(node, \"stable\"|\"volatile\")",
-      "summary": "`\"\"` — **selects** the node into context; the backend places, dedups, tiers, and caches it (the template emits nothing). The optional hint is an advisory cache-tier prior, bounded by per-revision correctness."
+      "summary": "`\"\"` — adds the node to what the AI sees. It prints nothing where you write it: the app fetches the node and includes it for you, with no duplicates. Hand it a whole picker selection to add every pick at once. The optional `\"stable\"`/`\"volatile\"` hint nudges caching and can usually be left off."
     },
     {
       "name": "use_lore",
       "kind": "helper",
       "signature": "use_lore()",
-      "summary": "`\"\"` — enables the scene's implicit lore (the gate); the backend selects and places it."
+      "summary": "`\"\"` — automatically includes the lore relevant to this scene: entries it links to, and entries named in its summary. Call it to turn that on; leave it out for no automatic lore."
     },
     {
       "name": "json",

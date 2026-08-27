@@ -1,24 +1,23 @@
-# Prompt language reference — the typed surface
+# Prompt language reference
 
-This is the **completion contract** for the prompt template language (ADR-0060 §8):
-every variable, helper, filter, and tag, with its declared return type or shape.
-The language guarantees it is completable so the editor's code-completion has a
-stable target — even though the completion UI itself is delivered separately.
+Every variable, helper, filter, and tag you can use in a prompt template, with
+what each one gives you back.
 
-Two rules make it typeable:
+Two things are worth knowing up front:
 
-- **A node's `entry_type` determines its fields.** Field access is uniform
-  attribute access (`node.field`) resolved through the metadata schema; an
-  `entity_ref` field resolves to its target `entry_type`, so completion chains
-  (`entry(x).home_place.title`). `.metadata` is the explicit whole-map escape.
-- **Dynamic arguments infer their type from declarations.** `entry(inputs.character)`
-  completes from the input's declared target `kinds`/`entry_types`; a literal
-  `entry("honor")` from the node index. An untyped or unconstrained argument
-  degrades gracefully to the intrinsics (`id`, `title`, `body`, `entry_type`) —
-  never a wrong guess.
+- **A node's type decides its fields.** You read a field with a dot —
+  `node.field` — and a field that points at another node resolves to that node,
+  so you can keep chaining: `entry(x).home_place.title`. Use `.metadata` when you
+  want the whole field map at once.
+- **The editor completes what it can.** When an input says what it points at,
+  `entry(inputs.character)` completes from that; a literal `entry("honor")`
+  completes from the project's nodes. When the type isn't known, completion falls
+  back to the basics every node has — `id`, `title`, `body`, `entry_type` —
+  rather than guessing.
 
-Everything below is resolved **as of the prompt's one scene** (ADR-0012); a
-scene-less prompt reads book-start values, so `entry(x) == original(x)` there.
+Everything below is read **as of the prompt's scene**. A prompt with no scene
+reads the book's starting values, so `entry(x)` and `original(x)` give the same
+thing.
 
 ## Variables
 
@@ -40,12 +39,12 @@ scene-less prompt reads book-start values, so `entry(x) == original(x)` there.
 | `fields(x)` | The **full** field roster of a node or an `entry_type` FQN — a list of descriptors, each `{id, label, type, options, description, group, proposable}` (plus `items` for list fields). `group` is the field's section label (an applied struct like `GMO`, or a manual header; `None` when ungrouped), so a template can group by it: `{% for f in fields(e) if f.group == "GMO" %}`. `proposable` is advisory; the template chooses what to show. |
 | `field_value(entity, field)` | The value of one field on `entity`, by id — the read-back companion to `fields()`. `field` is a bare id or a `fields()` descriptor, so a group loop reads each member's value: `{% for f in fields(e) if f.group == "GMO" %}{{ f.label }}: {{ field_value(e, f) }}{% endfor %}`. `title`/`body` return the node's intrinsics; an `entity_ref` value wraps to a node (so `field_value(e, "patron").title` works). `None` when unresolved. |
 
-A group is also a **nested accessor** on a node: `entry(x).GMO.Goal` reads the `Goal` member of the group whose section label is `GMO` — the group by its designed label, the member by its field name or id (`entry(x).GMO.goal` works too). Use `["…"]` when a label is not an identifier (`entry(x)["Antagonist GMO"].Goal`). An unknown group or member is `None`.
+If a node's fields are organised into a named group, you can read a member straight off the group: `entry(x).GMO.Goal` reads the `Goal` field of the `GMO` group (`entry(x).GMO.goal` works too). When the group's name has a space, use brackets: `entry(x)["Antagonist GMO"].Goal`. An unknown group or field reads as `None`.
 | `type_name(x)` | `str` — a type's human name (from an `entry_type` FQN). |
 | `pov(scene)` | The scene's POV character (`lore:character`) or `None`. |
 | `is_a(node, entry_type)` | `bool` — kind-of test against the type's `parent:` chain. |
-| `use(node, "stable"\|"volatile")` | `""` — **selects** the node into context; the backend places, dedups, tiers, and caches it (the template emits nothing). The optional hint is an advisory cache-tier prior, bounded by per-revision correctness. |
-| `use_lore()` | `""` — enables the scene's implicit lore (the gate); the backend selects and places it. |
+| `use(node, "stable"\|"volatile")` | `""` — adds the node to what the AI sees. It prints nothing where you write it: the app fetches the node and includes it for you, with no duplicates. Hand it a whole picker selection to add every pick at once. The optional `"stable"`/`"volatile"` hint nudges caching and can usually be left off. |
+| `use_lore()` | `""` — automatically includes the lore relevant to this scene: entries it links to, and entries named in its summary. Call it to turn that on; leave it out for no automatic lore. |
 | `full_outline()` | The manuscript's outline: a nested list of nodes with `.title`, `.summary`, `.children`. |
 | `full_text()` | `str` — every scene's prose in reading order. Heavy — the whole-manuscript escape hatch. For one scene, use the prompt's target `scene` (`scene.body`); `use()` selects **lore**, not scene prose. |
 | `story_so_far(scene)` | `str` — an XML recap of prior scenes' summaries (scenes **1 → n-1**, reading order). A derived, per-scene-deterministic block: it is emitted (not selected) and caches in the stable prefix. |
@@ -56,9 +55,9 @@ A group is also a **nested accessor** on a node: `entry(x).GMO.Goal` reads the `
 
 ### Field contract
 
-`field_contract` (ADR-0067) is an object, not a call — one instance per render.
-A prompt that asks the model to **produce** field values declares which fields it
-commits to, so the commit path can enforce that shape:
+`field_contract` is an object, not a function — one per render. When a prompt
+asks the model to **fill in** field values, it lists the fields it promises to
+produce, so the app can hold the result to that shape:
 
 | Access | Effect |
 | --- | --- |

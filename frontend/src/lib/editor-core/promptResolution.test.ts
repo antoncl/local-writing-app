@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  characterIdFromInputValue,
   dependencyAdvisoryText,
+  entryIdFromPickValue,
   finalizePromptRoster,
   hidePromptEntries,
   inheritedInputsFrom,
@@ -371,6 +373,30 @@ describe("resolvePromptPositionalArgs — slash positional args (#1276)", () => 
     expect(res.satisfied).toBe(true);
     expect(res.unresolved).toEqual([]);
   });
+
+  it("an unsupplied OPTIONAL context_pick reaches the template as a defined empty list, not undefined (#1482)", () => {
+    // Same-prompt cross-surface parity: the dialog ships "[]" for an untouched
+    // optional pick, so the slash path must too — otherwise `inputs.x is defined`
+    // flips between launch surfaces.
+    const optionalPick = { ...characterInput, name: "character", required: false } as PromptInputDefinition;
+    const twoInput = {
+      ...roleplay(),
+      inputs: [{ name: "tone", type: "text", required: false }, optionalPick],
+    } as unknown as PromptEntrySummary;
+    const res = resolvePromptPositionalArgs(ctx(), twoInput, ["gruff"]);
+    expect(res.satisfied).toBe(true);
+    expect(res.inputs!.tone).toBe("gruff");
+    expect(res.inputs!.character).toBe("[]");
+  });
+
+  it("does NOT backfill a REQUIRED unsupplied context_pick — it stays absent so send is blocked (#1482)", () => {
+    const twoInput = {
+      ...roleplay(),
+      inputs: [{ name: "tone", type: "text", required: false }, characterInput],
+    } as unknown as PromptEntrySummary;
+    const res = resolvePromptPositionalArgs(ctx(), twoInput, ["gruff"]);
+    expect("character" in res.inputs!).toBe(false);
+  });
 });
 
 describe("inheritedInputsFrom — the editor's inherited tier (ADR-0061 S3b)", () => {
@@ -395,5 +421,35 @@ describe("inheritedInputsFrom — the editor's inherited tier (ADR-0061 S3b)", (
 
   it("is empty when nothing is inherited", () => {
     expect(inheritedInputsFrom([subject], {}, roster)).toEqual([]);
+  });
+});
+
+// #1482: two readers over the shared picker codec with different tolerance.
+describe("id readers over a context_pick value (#1482)", () => {
+  const ENCODED = '[{"id":"lore_a","kind":"lore","title":"Annie"}]';
+
+  it("characterIdFromInputValue is strict: refs yield an id, a bare string does not", () => {
+    expect(characterIdFromInputValue(ENCODED)).toBe("lore_a");
+    // Misauthored on_accept.from_input pointing at a text input must not
+    // stamp a mark keyed to arbitrary prose.
+    expect(characterIdFromInputValue("some prose")).toBeNull();
+    expect(characterIdFromInputValue("[]")).toBeNull();
+    expect(characterIdFromInputValue(undefined)).toBeNull();
+  });
+
+  it("entryIdFromPickValue is tolerant: chat seeds carry an encoded list OR a legacy bare id", () => {
+    expect(entryIdFromPickValue(ENCODED)).toBe("lore_a");
+    expect(entryIdFromPickValue("lore_a")).toBe("lore_a");
+    expect(entryIdFromPickValue("  lore_a  ")).toBe("lore_a");
+  });
+
+  it("entryIdFromPickValue: an encoded-but-empty list is 'no target', not an id", () => {
+    // The regression: reading the draft as a raw string made "[]" (or the
+    // whole encoded blob) leak out as a node id, corrupting canStage /
+    // commitTargetEntryId.
+    expect(entryIdFromPickValue("[]")).toBe("");
+    expect(entryIdFromPickValue('["not-a-ref"]')).toBe("");
+    expect(entryIdFromPickValue("")).toBe("");
+    expect(entryIdFromPickValue(undefined)).toBe("");
   });
 });

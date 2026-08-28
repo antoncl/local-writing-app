@@ -22,11 +22,13 @@
   import { api } from "@/lib/api";
   import {
     effectivePromptInputs,
+    entryIdFromPickValue,
     promptDeclaresCommit,
     promptEntriesForSurface,
     resolutionSceneIdFromInputs,
     type PromptResolutionContext,
   } from "@/lib/editor-core/promptResolution";
+  import { coerceInputValue, isInputMissing } from "@/lib/utils/promptInputs";
   import PlainTextEditor from "@/components/widgets/PlainTextEditor.svelte";
   import ChatTranscript from "@/components/editor/body/chat/ChatTranscript.svelte";
   import ChatInputsStrip from "@/components/editor/body/chat/ChatInputsStrip.svelte";
@@ -62,11 +64,9 @@
     topmostMatchingAssistant,
   } from "@/lib/chat/assistantScope";
   import {
-    coerceChatInputValue,
     decodeChatInputDrafts,
     encodeChatInputDrafts,
     endsInUserTurn,
-    isInputMissing,
     seedInputDraftsFromEntry,
     ttlChipsFor,
   } from "@/components/editor/body/chat/chatInputs";
@@ -406,8 +406,9 @@
     await persistActiveChat();
   }
 
-  // defaultDraftFor / seedInputDraftsFromEntry / isInputMissing /
-  // coerceChatInputValue moved to chat/chatInputs.ts (#99).
+  // defaultDraftFor / seedInputDraftsFromEntry / isInputMissing moved to
+  // chat/chatInputs.ts (#99); value coercion is the shared coerceInputValue
+  // (#1482 — the chat-local fork skipped container expansion).
 
   async function updateChatInputDraft(name: string, value: string): Promise<void> {
     chatInputDrafts = { ...chatInputDrafts, [name]: value };
@@ -675,7 +676,7 @@
     const inputs: Record<string, unknown> = {};
     for (const input of effectivePromptInputs(entry)) {
       const raw = chatInputDrafts[input.name] ?? "";
-      const coerced = coerceChatInputValue(raw, input.type);
+      const coerced = coerceInputValue(raw, input.type);
       if (coerced !== null && coerced !== "") inputs[input.name] = coerced;
     }
     try {
@@ -761,7 +762,7 @@
     const inputs: Record<string, unknown> = {};
     for (const declared of effectivePromptInputs(entry)) {
       const raw = chatInputDrafts[declared.name] ?? "";
-      const coerced = coerceChatInputValue(raw, declared.type);
+      const coerced = coerceInputValue(raw, declared.type);
       if (coerced !== null && coerced !== "") inputs[declared.name] = coerced;
     }
     try {
@@ -857,9 +858,12 @@
   // may stage a timeline mutation set; a scene / plot-card subject isn't in the
   // lore roster and leaves this "", gating staging off. Doubles as the staged
   // set's target_entry_type.
+  // The `entry` draft may be an encoded context_pick list (revise launches
+  // seed one) or a legacy bare id — read it through the shared decoder, not
+  // as a raw string (#1482). Decoded once, not once per lore entry inside find.
+  let entryDraftTargetId = $derived(entryIdFromPickValue(chatInputDrafts["entry"]));
   let subjectLoreEntryType = $derived(
-    loreEntries.find((entry) => entry.id === (chatInputDrafts["entry"] ?? "").trim())?.entry_type ??
-      "",
+    loreEntries.find((entry) => entry.id === entryDraftTargetId)?.entry_type ?? "",
   );
   // Feed the commit controller (declared up by the state block) its reactive
   // inputs each render — kept next to activeOutput, the derived it consumes.

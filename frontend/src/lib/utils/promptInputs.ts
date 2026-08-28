@@ -5,6 +5,7 @@ import type {
   MetadataFieldType,
   MetadataValue,
   NodePickerConfig,
+  NodePickerRef,
   PreviewErrorInfo,
   PromptInputDefinition,
   PromptInputType,
@@ -49,6 +50,64 @@ const LIST_SHAPED_INPUT_TYPES = new Set<PromptInputType>([
 
 export function isListShapedInputType(type: PromptInputType): boolean {
   return LIST_SHAPED_INPUT_TYPES.has(type);
+}
+
+// ── context_pick value codec ───────────────────────────────────────────────
+// The ONE owner of the `NodePickerRef[] ⇄ wire string` round-trip (#1482).
+// The wire shape of a context_pick `inputs.<name>` is the encoded JSON STRING:
+// the backend's bind layer (preview.py::_coerce_input_value) keys on a string
+// to parse the picks, expand container refs to their current scenes
+// (ADR-0074 S4), and wrap EntryRefs — a pre-decoded array short-circuits all
+// of that. Decoding is for frontend consumers only (widgets, gating, id
+// reads); nothing hand-rolls the JSON.parse anymore.
+
+/** Decode a picker value — the encoded string, an already-decoded array
+ * (persisted chat seeds), or garbage — to the refs it carries. Non-ref
+ * items are dropped; anything unreadable decodes to `[]`. */
+export function decodePickerValue(raw: unknown): NodePickerRef[] {
+  let parsed: unknown = raw;
+  if (typeof raw === "string") {
+    if (!raw.trim()) return [];
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter(
+    (item): item is NodePickerRef =>
+      Boolean(item) &&
+      typeof item === "object" &&
+      typeof (item as { id?: unknown }).id === "string" &&
+      typeof (item as { kind?: unknown }).kind === "string",
+  );
+}
+
+/** Encode picked refs into the canonical wire string. */
+export function encodePickerValue(refs: NodePickerRef[]): string {
+  return JSON.stringify(refs);
+}
+
+/** Is a required input's draft empty? The ONE predicate both the chat
+ * inputs-strip and the invocation dialog gate Send on (#1482) — a
+ * context_pick decodes through the codec (empty list / kind-less refs /
+ * garbage all read as empty), an entity_ref_list is an id-list, everything
+ * else is missing when blank. */
+export function isInputMissing(input: PromptInputDefinition, raw: string | undefined): boolean {
+  if (input.type === "context_pick") {
+    return decodePickerValue(raw).length === 0;
+  }
+  if (input.type === "entity_ref_list") {
+    // An id-list, not a ref-list — plain string[] on the wire.
+    try {
+      const parsed = JSON.parse(raw || "[]");
+      return !Array.isArray(parsed) || parsed.length === 0;
+    } catch {
+      return true;
+    }
+  }
+  return !raw?.trim();
 }
 
 // Editor-side form state for one declared input on a prompt. Persisted shape
@@ -189,6 +248,18 @@ export function coerceInputValue(raw: string, type: PromptInputDefinition["type"
     // coercing "no choice" into false (#24).
     if (trimmed === "") return null;
     return trimmed.toLowerCase() === "true";
+  }
+  if (type === "context_pick") {
+    // Stays the encoded STRING (see the codec note above): the backend's bind
+    // layer needs the string to run container expansion, so decoding here is
+    // the bug, not the coercion — chat's forked coercer pre-decoded to an
+    // array and silently skipped expansion (#1482). Empty is NOT #24-unset:
+    // "no picks" is a value (a defined, empty pick list) — create-mode
+    // brainstorms branch on `entry(inputs.entry)` being falsy
+    // (builtin_library/prompts/revise-entry.md), so an unset pick must reach
+    // the template as [], never as an undefined name. Round-tripping through
+    // the codec normalizes stray shapes.
+    return encodePickerValue(decodePickerValue(trimmed));
   }
   if (isListShapedInputType(type)) {
     // multi_select / tags / list / entity_ref_list carry a JSON array on the

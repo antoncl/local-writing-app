@@ -20,7 +20,7 @@
     resolutionSceneIdFromInputs,
     type PromptResolutionContext,
   } from "@/lib/editor-core/promptResolution";
-  import { coerceInputValue } from "@/lib/utils/promptInputs";
+  import { coerceInputValue, isInputMissing } from "@/lib/utils/promptInputs";
   import { api } from "@/lib/api";
   import type {
     AssistantEntrySummary,
@@ -145,19 +145,6 @@
     return assistantEntries.find((a) => a.id === id)?.title ?? "";
   }
 
-  function refInputDraftValue(input: PromptInputDefinition, raw: string | undefined): string | string[] {
-    if (input.type === "entity_ref_list") {
-      if (!raw) return [];
-      try {
-        const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? parsed : [];
-      } catch {
-        return [];
-      }
-    }
-    return raw ?? "";
-  }
-
   async function fetchEstimate(): Promise<void> {
     const current = entry;
     if (!current) {
@@ -208,15 +195,11 @@
     const current = entry;
     if (!current) return;
     const declared = effectivePromptInputs(current);
-    const missing = declared.filter((input) => {
-      if (!input.required) return false;
-      const raw = drafts[input.name];
-      if (input.type === "entity_ref_list") {
-        const list = refInputDraftValue(input, raw);
-        return !Array.isArray(list) || list.length === 0;
-      }
-      return !raw?.trim();
-    });
+    // The one shared emptiness predicate (#1482) — same rule the chat
+    // inputs-strip gates Send on, so the two surfaces can't disagree.
+    const missing = declared.filter(
+      (input) => input.required && isInputMissing(input, drafts[input.name]),
+    );
     if (missing.length > 0) {
       error = `Missing required: ${missing.map((i) => i.label || i.name).join(", ")}.`;
       return;

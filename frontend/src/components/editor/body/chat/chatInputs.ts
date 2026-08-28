@@ -81,37 +81,13 @@ export function decodeChatInputDrafts(
   return drafts;
 }
 
-export function isInputMissing(input: PromptInputDefinition, raw: string | undefined): boolean {
-  if (input.type === "entity_ref_list" || input.type === "context_pick") {
-    try {
-      const parsed = JSON.parse(raw || "[]");
-      return !Array.isArray(parsed) || parsed.length === 0;
-    } catch {
-      return true;
-    }
-  }
-  return !raw?.trim();
-}
-
-export function coerceChatInputValue(raw: string, type: PromptInputDefinition["type"]): unknown {
-  const trimmed = raw.trim();
-  if (type === "number") {
-    if (trimmed === "") return null;
-    const parsed = Number(trimmed);
-    return Number.isFinite(parsed) ? parsed : trimmed;
-  }
-  if (type === "boolean") return trimmed.toLowerCase() === "true";
-  if (type === "entity_ref_list" || type === "context_pick") {
-    if (!trimmed) return type === "context_pick" ? [] : null;
-    try {
-      const parsed = JSON.parse(trimmed);
-      return Array.isArray(parsed) ? parsed : (type === "context_pick" ? [] : null);
-    } catch {
-      return type === "context_pick" ? [] : null;
-    }
-  }
-  return trimmed;
-}
+// isInputMissing moved to promptInputs.ts (#1482) — one predicate, shared by
+// the chat inputs-strip and the invocation dialog (which used to hand-copy it).
+// coerceChatInputValue is GONE (#1482): it was a fork of promptInputs'
+// coerceInputValue that pre-decoded context_pick values to arrays — which the
+// backend's bind layer short-circuits on, silently skipping ADR-0074 S4
+// container expansion for chat. ChatBodyView now calls the one shared
+// coerceInputValue, so every surface ships the same wire shapes.
 
 // #1436: a rendered/loaded conversation is SELF-SUBMITTABLE — sendable with an
 // empty composer — iff its last turn is a `user` message. Then the model has a

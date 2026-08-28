@@ -17,12 +17,11 @@
   // identically (#1462).
   import { assistantEntriesStore } from "@/lib/stores/assistants";
   import { plotlineEntriesStore } from "@/lib/stores/plotlines";
-  import { isListShapedInputType } from "@/lib/utils/promptInputs";
+  import { decodePickerValue, isListShapedInputType } from "@/lib/utils/promptInputs";
   import { coerceStringList } from "@/lib/utils/schemaTypeHelpers";
   import type {
     GroupMember,
     NodePickerConfig,
-    NodePickerRef,
     LoreEntrySummary,
     MetadataFieldDefinition,
     MetadataFieldType,
@@ -139,19 +138,6 @@
     return v == null ? "" : String(v);
   }
 
-  function decodeContextPickValue(raw: string): NodePickerRef[] {
-    if (!raw) return [];
-    try {
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return [];
-      return parsed.filter(
-        (item): item is NodePickerRef =>
-          item && typeof item === "object" && typeof item.id === "string" && typeof item.kind === "string",
-      );
-    } catch {
-      return [];
-    }
-  }
 </script>
 
 {#if input.type === "long_text"}
@@ -213,7 +199,7 @@
 {:else if input.type === "context_pick"}
   <NodePicker
     config={(input.target ?? {}) as NodePickerConfig}
-    value={decodeContextPickValue(value)}
+    value={decodePickerValue(value)}
     label={input.label || input.name || "Context"}
     structure={structure}
     researchStructure={researchStructure}

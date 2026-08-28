@@ -39,6 +39,7 @@
     type SchemaNode,
   } from "./pickerTree";
   import PickCheck from "@/components/widgets/PickCheck.svelte";
+  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
 
   interface Props {
     config: NodePickerConfig;
@@ -397,7 +398,7 @@
       title={collapsed ? "Expand context picker" : "Collapse context picker"}
       aria-expanded={!collapsed}
       onclick={toggleWidgetCollapse}
-    >{collapsed ? "▸" : "▾"}</button>
+    ><GroupCaret collapsed={collapsed} /></button>
 
     <div class="ctx-row-id-stack">
       <input
@@ -582,7 +583,7 @@
                     aria-label={item.collapsed ? `Expand ${item.name}` : `Collapse ${item.name}`}
                     aria-expanded={!item.collapsed}
                     onclick={() => toggleCollapse(item.id)}
-                  >{item.collapsed ? "▸" : "▾"}</button>
+                  ><GroupCaret collapsed={item.collapsed} /></button>
                 {:else}
                   <span class="ctx-tree-chevron ctx-tree-chevron-leaf" aria-hidden="true"></span>
                 {/if}
@@ -736,16 +737,14 @@
 
   .ctx-row-chevron {
     appearance: none;
-    /* A real hit target — the 18px/fs-xs original was the only expand
-       affordance and easy to miss (#1458). */
+    /* A bare tap target wrapping the shared GroupCaret chevron. The 18px/fs-xs
+       text glyph was easy to miss (#1458); the sized chevron fixes that on its
+       own, so the earlier accent tint / font-size bump is no longer needed. */
     width: 26px;
     height: 26px;
     padding: 0;
     border: none;
     background: transparent;
-    color: var(--accent);
-    font-size: var(--fs-md);
-    line-height: 1;
     cursor: pointer;
     border-radius: 4px;
     display: inline-flex;
@@ -1205,14 +1204,13 @@
   }
 
   .ctx-tree-chevron {
-    width: 15px;
-    height: 16px;
+    /* Bare tap target wrapping the shared GroupCaret; the leaf spacer reuses
+       this width so tree rows align under a container's caret. */
+    width: 22px;
+    height: 22px;
     padding: 0;
     border: none;
     background: transparent;
-    color: var(--text-3);
-    font-size: var(--fs-xs);
-    line-height: 1;
     cursor: pointer;
     border-radius: 3px;
     display: inline-flex;

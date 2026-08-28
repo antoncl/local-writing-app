@@ -107,9 +107,12 @@ def expand_context(
         if pick.kind == "lore" and pick.id:
             in_scope.add(pick.id)
 
-    new_direct = direct_ids - in_scope
-    new_prose = prose_ids - in_scope
-    new_depth1 = depth1_ids - combined_direct - in_scope
+    # Sorted so the persisted journal's entry order is deterministic run-to-run
+    # (these are sets; the final lore set is order-independent, but a stable
+    # journal keeps the chat node's front-matter free of spurious byte diffs).
+    new_direct = sorted(direct_ids - in_scope)
+    new_prose = sorted(prose_ids - in_scope)
+    new_depth1 = sorted(depth1_ids - combined_direct - in_scope)
 
     entries: list[ChatSessionJournalEntry] = []
     entries.extend(_make_entries(project, new_direct, source=source, turn=turn))

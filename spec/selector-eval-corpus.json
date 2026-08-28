@@ -1,0 +1,173 @@
+{
+  "_comment": "Cross-runtime parity corpus for the context-pick selector evaluator (ADR-0074 slice 5). The SAME cases are run by backend/tests/test_selector_eval_parity.py (Python: evaluate_selector_membership) and frontend/src/lib/views/selectorEvalParity.test.ts (TypeScript: evaluateView). Both must return `expected` verbatim. `expected` is in node-array (roster) order, deduped. A change to either evaluator that breaks parity turns its runtime's gate red. Tags live in metadata.tags (list OR comma string); the `schema.entry_types[*].parent` chain drives type/descendants_of.",
+  "schema": {
+    "entry_types": {
+      "lore:base": {},
+      "lore:note": { "parent": "lore:base" },
+      "lore:location": { "parent": "lore:base" },
+      "lore:character": { "parent": "lore:base" },
+      "lore:hero": { "parent": "lore:character" },
+      "plot:base": {},
+      "plot:card": { "parent": "plot:base" }
+    }
+  },
+  "cases": [
+    {
+      "name": "bare tagged selects every tag bearer",
+      "expr": { "tagged": "World-building" },
+      "nodes": [
+        { "id": "a", "entry_type": "lore:note", "metadata": { "tags": ["World-building"] } },
+        { "id": "b", "entry_type": "lore:note", "metadata": { "tags": [] } },
+        { "id": "c", "entry_type": "lore:location", "metadata": { "tags": ["World-building", "Real-world"] } }
+      ],
+      "expected": ["a", "c"]
+    },
+    {
+      "name": "tag intersect type-union is the picker shape",
+      "expr": {
+        "intersect": [
+          { "tagged": "World-building" },
+          { "union": [{ "type": "lore:note" }, { "type": "lore:location" }] }
+        ]
+      },
+      "nodes": [
+        { "id": "note", "entry_type": "lore:note", "metadata": { "tags": ["World-building"] } },
+        { "id": "loc", "entry_type": "lore:location", "metadata": { "tags": ["World-building"] } },
+        { "id": "wrongtag", "entry_type": "lore:note", "metadata": { "tags": ["Real-world"] } },
+        { "id": "wrongtype", "entry_type": "lore:character", "metadata": { "tags": ["World-building"] } }
+      ],
+      "expected": ["note", "loc"]
+    },
+    {
+      "name": "type is exact, not subtype",
+      "expr": { "type": "lore:character" },
+      "nodes": [
+        { "id": "hero", "entry_type": "lore:hero", "metadata": {} },
+        { "id": "char", "entry_type": "lore:character", "metadata": {} }
+      ],
+      "expected": ["char"]
+    },
+    {
+      "name": "descendants_of includes subtypes",
+      "expr": { "descendants_of": "lore:character" },
+      "nodes": [
+        { "id": "hero", "entry_type": "lore:hero", "metadata": {} },
+        { "id": "char", "entry_type": "lore:character", "metadata": {} },
+        { "id": "note", "entry_type": "lore:note", "metadata": {} }
+      ],
+      "expected": ["hero", "char"]
+    },
+    {
+      "name": "tagged matches a comma-string tags value",
+      "expr": { "tagged": "Beta" },
+      "nodes": [
+        { "id": "x", "entry_type": "lore:note", "metadata": { "tags": "Alpha, Beta" } },
+        { "id": "y", "entry_type": "lore:note", "metadata": { "tags": "Alpha" } }
+      ],
+      "expected": ["x"]
+    },
+    {
+      "name": "tagged is case-sensitive",
+      "expr": { "tagged": "world" },
+      "nodes": [{ "id": "x", "entry_type": "lore:note", "metadata": { "tags": ["World"] } }],
+      "expected": []
+    },
+    {
+      "name": "difference keep minus remove",
+      "expr": {
+        "difference": { "keep": { "tagged": "T" }, "remove": { "type": "lore:location" } }
+      },
+      "nodes": [
+        { "id": "a", "entry_type": "lore:note", "metadata": { "tags": ["T"] } },
+        { "id": "b", "entry_type": "lore:location", "metadata": { "tags": ["T"] } }
+      ],
+      "expected": ["a"]
+    },
+    {
+      "name": "complement is universe minus inner",
+      "expr": { "complement": { "tagged": "T" } },
+      "nodes": [
+        { "id": "a", "entry_type": "lore:note", "metadata": { "tags": ["T"] } },
+        { "id": "b", "entry_type": "lore:note", "metadata": { "tags": [] } }
+      ],
+      "expected": ["b"]
+    },
+    {
+      "name": "union dedups and follows roster order",
+      "expr": { "union": [{ "tagged": "T" }, { "type": "lore:note" }] },
+      "nodes": [
+        { "id": "a", "entry_type": "lore:note", "metadata": { "tags": ["T"] } },
+        { "id": "b", "entry_type": "lore:note", "metadata": { "tags": ["T"] } }
+      ],
+      "expected": ["a", "b"]
+    },
+    {
+      "name": "filter keep lowers to intersect",
+      "expr": { "filter": { "of": { "tagged": "T" }, "pred": { "type": "lore:note" } } },
+      "nodes": [
+        { "id": "a", "entry_type": "lore:note", "metadata": { "tags": ["T"] } },
+        { "id": "b", "entry_type": "lore:location", "metadata": { "tags": ["T"] } }
+      ],
+      "expected": ["a"]
+    },
+    {
+      "name": "filter drop lowers to difference",
+      "expr": {
+        "filter": { "of": { "tagged": "T" }, "pred": { "type": "lore:note" }, "mode": "drop" }
+      },
+      "nodes": [
+        { "id": "a", "entry_type": "lore:note", "metadata": { "tags": ["T"] } },
+        { "id": "b", "entry_type": "lore:location", "metadata": { "tags": ["T"] } }
+      ],
+      "expected": ["b"]
+    },
+    {
+      "name": "field overlap on a list value is the plotline shape",
+      "expr": {
+        "intersect": [
+          { "type": "plot:card" },
+          { "field": { "key": "plotline", "op": "overlap", "value": "pl_1" } }
+        ]
+      },
+      "nodes": [
+        { "id": "c1", "entry_type": "plot:card", "metadata": { "plotline": ["pl_1", "pl_2"] } },
+        { "id": "c2", "entry_type": "plot:card", "metadata": { "plotline": ["pl_3"] } }
+      ],
+      "expected": ["c1"]
+    },
+    {
+      "name": "field overlap on a scalar value is whole-value equality",
+      "expr": { "field": { "key": "pov", "op": "overlap", "value": "Bob" } },
+      "nodes": [
+        { "id": "a", "entry_type": "lore:note", "metadata": { "pov": "Bob" } },
+        { "id": "b", "entry_type": "lore:note", "metadata": { "pov": "Bobby" } }
+      ],
+      "expected": ["a"]
+    },
+    {
+      "name": "field set and unset",
+      "expr": { "field": { "key": "pov", "op": "set" } },
+      "nodes": [
+        { "id": "a", "entry_type": "lore:note", "metadata": { "pov": "Bob" } },
+        { "id": "b", "entry_type": "lore:note", "metadata": { "pov": "" } },
+        { "id": "c", "entry_type": "lore:note", "metadata": {} }
+      ],
+      "expected": ["a"]
+    },
+    {
+      "name": "empty expr selects nothing (ADR-0036)",
+      "expr": {},
+      "nodes": [{ "id": "a", "entry_type": "lore:note", "metadata": { "tags": ["T"] } }],
+      "expected": []
+    },
+    {
+      "name": "hand_picked selects by id",
+      "expr": { "hand_picked": ["b", "missing"] },
+      "nodes": [
+        { "id": "a", "entry_type": "lore:note", "metadata": {} },
+        { "id": "b", "entry_type": "lore:note", "metadata": {} }
+      ],
+      "expected": ["b"]
+    }
+  ]
+}

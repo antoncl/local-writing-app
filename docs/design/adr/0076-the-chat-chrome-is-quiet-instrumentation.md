@@ -81,7 +81,7 @@ A writer hits `▶ Run` on a runnable prompt. Chat opens: **one header row** (ti
 
 ## Consequences and slices
 
-No storage change anywhere in this ADR — every decision is presentation and control flow; persistence shapes (`ChatSession`, drafts, cost deltas) are untouched, so post-0.9.5 migration rules are satisfied vacuously.
+One storage change in this ADR, additive (S1 amendment): decision 3 persists per-turn provenance as three optional `ChatSessionMessage` fields (`provider`/`model`/`latency_ms`) so it survives reload alongside the usage/cost it renders with — additive-optional, no migration (the ADR-0074 precedent; older messages simply lack them). Every other decision is presentation and control flow; `ChatSession` itself, drafts, and cost deltas are untouched.
 
 - **S1 — the quiet line** (decisions 1, 3, 6, + the 800→600/token restyle). *Not:* no popover work, no chips work, no change to what the estimate fetch computes.
 - **S2 — one door** (decision 2 + the Context word treatment from decision 9; fixes #1477). *Not:* the pre-lock inputs form does not move into the popover; no tabs; the drill-down lists titles — it does not open entries or become a picker.

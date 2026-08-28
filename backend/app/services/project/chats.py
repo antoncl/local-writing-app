@@ -241,7 +241,18 @@ class ChatSessionsMixin:
         self._guard_chat_preset_lock(existing, request)
         next_journal = self._resolved_chat_journal(existing, request)
         self._record_chat_cost_delta(existing, request)
-        next_cost = 0.0
+        # The save response must carry the same projection read_chat_session
+        # computes — the UI keeps the returned session as its live copy, and a
+        # hardcoded 0.0 here zeroed its session-cost display on every save
+        # (ADR-0076 decision 6). `existing` was projected from the log above,
+        # BEFORE the delta row landed, so adding the accepted delta mirrors the
+        # log exactly; None (unknown total, #697) stays None when no priced
+        # delta arrives. The log remains the source of truth on read; the
+        # persisted snapshot additionally keeps list_chat_sessions' roster
+        # cost current, which the hardcoded 0.0 never did.
+        next_cost = existing.cost_usd_total
+        if request.cost_delta_usd is not None and request.cost_delta_usd > 0:
+            next_cost = (next_cost or 0.0) + float(request.cost_delta_usd)
         next_cache_times = self._touched_cache_write_times(existing, request)
 
         updated = ChatSession(
@@ -360,8 +371,9 @@ class ChatSessionsMixin:
     ) -> None:
         """Phase C2 Slice B: per-turn cost no longer lives on the chat YAML
         — it lands as an ai_invocations row tagged with chat_session_id.
-        cost_usd_total stays at 0 (kept on the model for back-compat
-        round-trips); it re-derives from the unified log on read."""
+        cost_usd_total re-derives from the unified log on read; the value the
+        save path writes/returns is a snapshot of that same projection
+        (see save_chat_session), never a second source of truth."""
         if request.cost_delta_usd is None or request.cost_delta_usd <= 0:
             return
         delta = float(request.cost_delta_usd)

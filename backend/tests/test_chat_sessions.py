@@ -71,7 +71,16 @@ class ChatSessionEndpointTests(unittest.TestCase):
             ],
             "messages": [
                 {"role": "user", "content": "hello"},
-                {"role": "assistant", "content": "hi", "thinking": "reasoning"},
+                {
+                    "role": "assistant",
+                    "content": "hi",
+                    "thinking": "reasoning",
+                    # ADR-0076 decision 3: per-turn provenance round-trips like
+                    # usage/cost_usd.
+                    "provider": "anthropic",
+                    "model": "claude-3-5-sonnet",
+                    "latency_ms": 9600,
+                },
             ],
         }
         response = self.client.put(f"/api/chats/{created['id']}", json=payload)
@@ -83,9 +92,52 @@ class ChatSessionEndpointTests(unittest.TestCase):
         self.assertTrue(body["pinned"])
         self.assertEqual(len(body["messages"]), 2)
         self.assertEqual(body["messages"][1]["thinking"], "reasoning")
+        self.assertEqual(body["messages"][1]["provider"], "anthropic")
+        self.assertEqual(body["messages"][1]["model"], "claude-3-5-sonnet")
+        self.assertEqual(body["messages"][1]["latency_ms"], 9600)
         self.assertEqual(body["context_items"][0]["id"], "scene_1")
         # created_at preserved, updated_at refreshed
         self.assertEqual(body["created_at"], created["created_at"])
+
+        # Round-trips through a GET too — provenance persists to disk, not just
+        # echoed back in the save response.
+        reread = self.client.get(f"/api/chats/{created['id']}").json()
+        self.assertEqual(reread["messages"][1]["provider"], "anthropic")
+        self.assertEqual(reread["messages"][1]["model"], "claude-3-5-sonnet")
+        self.assertEqual(reread["messages"][1]["latency_ms"], 9600)
+
+    def test_save_response_carries_the_projected_cost_total(self) -> None:
+        # ADR-0076 decision 6: the UI keeps the save response as its live
+        # session copy, so the response's cost_usd_total must be the same
+        # projection a GET computes — a hardcoded 0.0 here zeroed the session
+        # display on every save. Fresh chat: no priced row → None, not a
+        # fabricated 0.0 (#697).
+        created = self.client.post("/api/chats", json={"title": "T"}).json()
+        base = {"title": "T", "context_items": [], "messages": []}
+        no_delta = self.client.put(f"/api/chats/{created['id']}", json=base).json()
+        self.assertIsNone(no_delta["cost_usd_total"])
+
+        # A priced delta lands in the log AND the response's total.
+        priced = self.client.put(
+            f"/api/chats/{created['id']}", json={**base, "cost_delta_usd": 0.007}
+        ).json()
+        self.assertAlmostEqual(priced["cost_usd_total"], 0.007)
+
+        # A later delta accumulates, and the save response matches the GET
+        # projection exactly (one truth, two doors).
+        again = self.client.put(
+            f"/api/chats/{created['id']}", json={**base, "cost_delta_usd": 0.003}
+        ).json()
+        self.assertAlmostEqual(again["cost_usd_total"], 0.010)
+        reread = self.client.get(f"/api/chats/{created['id']}").json()
+        self.assertAlmostEqual(reread["cost_usd_total"], 0.010)
+
+        # A zero/absent delta preserves the accrued total instead of zeroing it
+        # (the original defect: the response reset it to 0.0 on every save).
+        renamed = self.client.put(
+            f"/api/chats/{created['id']}", json={**base, "title": "Renamed"}
+        ).json()
+        self.assertAlmostEqual(renamed["cost_usd_total"], 0.010)
 
     def test_message_content_with_a_fence_line_round_trips(self) -> None:
         # A chat's transcript lives in the node body (ADR-0051 S2). A message

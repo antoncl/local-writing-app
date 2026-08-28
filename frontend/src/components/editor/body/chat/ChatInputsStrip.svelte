@@ -103,7 +103,7 @@
   .cbv-inputs-fields { display: flex; flex-direction: column; gap: 8px; }
   .cbv-input-field { display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-sm); }
   .cbv-input-label {
-    font-size: var(--fs-xs); font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-3);
+    font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-3);
   }
   .cbv-required-marker { color: var(--danger); }
   .cbv-input-field.cbv-input-missing > .cbv-input-label { color: var(--danger); }

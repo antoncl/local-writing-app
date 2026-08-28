@@ -107,6 +107,10 @@ export type TtlChip = {
   ttlLabel: string;
   formatted: string;
   expired: boolean;
+  // Raw remaining lifetime — the number `formatted` displays. Carried so
+  // consumers comparing chips (ChatMetaLine's soonest-to-evict pick) never
+  // have to parse the display string back (ADR-0076 S1 review).
+  remainingSec: number;
 };
 
 // Per-slot TTL chips. The caller threads a live `_tick` (unused in the body) as
@@ -128,6 +132,6 @@ export function ttlChipsFor(times: Record<string, string>, _tick: number): TtlCh
     if (remainingSec <= 0) formatted = "expired";
     else if (remainingSec >= 60) formatted = `${Math.floor(remainingSec / 60)}m`;
     else formatted = `${remainingSec}s`;
-    return { slot, label, ttlLabel, formatted, expired: remainingSec <= 0 };
+    return { slot, label, ttlLabel, formatted, expired: remainingSec <= 0, remainingSec };
   });
 }

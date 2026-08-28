@@ -97,7 +97,7 @@
   }
   .edc-head { flex: 0 0 auto; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
   .edc-head strong {
-    font-size: var(--fs-xs); font-weight: 800; letter-spacing: 0.07em;
+    font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.07em;
     text-transform: uppercase; color: var(--accent);
   }
   .edc-title { font-size: var(--fs-md); color: var(--text); font-weight: 600; }

@@ -531,6 +531,12 @@ class ChatSessionMessage(BaseModel):
     # send — historical cost doesn't drift when pricing changes.
     usage: ChatUsage | None = None
     cost_usd: float | None = None
+    # ADR-0076 decision 3: per-turn provenance, stamped from the stream response
+    # alongside usage/cost. Additive-optional — no migration needed (the 0074
+    # precedent): older persisted messages simply lack these.
+    provider: str | None = None
+    model: str | None = None
+    latency_ms: int | None = None
 
 
 class ChatSessionContextItem(BaseModel):

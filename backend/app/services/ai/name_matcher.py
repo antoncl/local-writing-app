@@ -3,7 +3,7 @@
 This is the backend half of ADR-0075 §3 — the Python mirror of the frontend's
 `implicitContextMatcher.ts`. It is intentionally free of any project/scene
 plumbing: given `(entry_id, [names])` pairs and a text, it returns positional
-hits. `helpers._alias_match` layers policy filtering and effective-name
+hits. `lore_selection._alias_match` layers policy filtering and effective-name
 resolution on top; the §5 parity gate drives THESE functions directly against
 the shared corpus, exactly as the vitest suite drives `compileMatcher`.
 

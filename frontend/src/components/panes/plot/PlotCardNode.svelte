@@ -20,6 +20,7 @@
   import { CARD_DRAG_HANDLE_CLASS, type PlotCardData } from "@/lib/plot/plotBoardLayout";
   import { PLOT_CARD_ACTIONS, type PlotCardActions } from "./plotCardActions";
   import { hasPlotBeatDrag, readPlotBeatDrag, setPlotBeatDrag } from "@/lib/plot/plotDnd";
+  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
 
   // Svelte Flow passes the node's id/data/selection state as props.
   let { id, data }: { id?: string; data: PlotCardData; selected?: boolean } = $props();
@@ -392,7 +393,7 @@
                direct realize (the backend's first-container default). -->
           <button role="menuitem" class="menu-item" onclick={() => (menuView = "location")}>
             <i class="ti ti-wand" aria-hidden="true"></i> Realize scene
-            <i class="ti ti-chevron-right chevron" aria-hidden="true"></i>
+            <span class="chevron" aria-hidden="true"><GroupCaret size="xs" collapsed /></span>
           </button>
         {:else}
           <button role="menuitem" class="menu-item" onclick={() => realizeAt(null)}>
@@ -401,7 +402,7 @@
         {/if}
         <button role="menuitem" class="menu-item" onclick={() => (menuView = "plotline")}>
           <i class="ti ti-route" aria-hidden="true"></i> Set plotline
-          <i class="ti ti-chevron-right chevron" aria-hidden="true"></i>
+          <span class="chevron" aria-hidden="true"><GroupCaret size="xs" collapsed /></span>
         </button>
         <!-- on_page is derived from the scene; only an unattached card authors
              off_page (deliberate backstory) vs unwritten (a placeholder to promote). -->
@@ -857,6 +858,8 @@
   }
   .chevron {
     margin-left: auto;
+    display: inline-flex;
+    align-items: center;
   }
   .menu-back {
     color: var(--text-2);

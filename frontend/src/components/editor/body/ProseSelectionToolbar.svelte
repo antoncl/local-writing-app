@@ -20,6 +20,7 @@
     type ToolbarAction,
     type ToolbarMenuEntry,
   } from "@/lib/editor-core/selectionToolbar";
+  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
 
   interface Props {
     menu: FloatingMenuState;
@@ -98,7 +99,7 @@
               onToggleMenu(action.id);
             }}
           >
-            {action.label}
+            {action.label}<GroupCaret size="xs" />
           </button>
           {#if openMenuId === action.id}
             <div
@@ -121,7 +122,7 @@
                         e.preventDefault();
                         openSubmenuId = openSubmenuId === entry.id ? null : entry.id;
                         submenuFlip = e.currentTarget.getBoundingClientRect().right + SUBMENU_WIDTH > window.innerWidth;
-                      }}>{entry.label}</button>
+                      }}>{entry.label}<span class="submenu-caret" aria-hidden="true"><GroupCaret size="xs" collapsed /></span></button>
                     {#if openSubmenuId === entry.id}
                       <div class:flip={submenuFlip} class:flip-up={submenuFlipUp} class="toolbar-submenu-popover" style={`max-height: ${submenuMaxHeight}px`}>
                         {#each entry.items as sub (sub.id)}
@@ -129,7 +130,7 @@
                             <div class="toolbar-menu-sep" aria-hidden="true"></div>
                           {:else if isToolbarSubmenu(sub)}
                             <!-- one submenu level is used in practice; guard the type -->
-                            <button class="has-submenu" type="button" disabled>{sub.label}</button>
+                            <button class="has-submenu" type="button" disabled>{sub.label}<span class="submenu-caret" aria-hidden="true"><GroupCaret size="xs" collapsed /></span></button>
                           {:else}
                             <button
                               class:danger={sub.danger}
@@ -229,9 +230,12 @@
     display: inline-flex;
   }
 
-  .toolbar-menu > button::after {
-    content: " ▾";
-    font-size: var(--fs-xs);
+  .toolbar-menu > button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    --group-caret-color: var(--toolbar-text);
   }
 
   /* Dropdown + submenu popovers: a padded card of rounded hover items, so a
@@ -335,12 +339,12 @@
     color: var(--toolbar-danger-text);
   }
 
-  .toolbar-menu-popover button.has-submenu::after {
-    content: "▸";
+  .submenu-caret {
     margin-left: auto;
     padding-left: 16px;
-    color: var(--toolbar-text-muted);
-    font-size: var(--fs-xs);
+    display: inline-flex;
+    align-items: center;
+    --group-caret-color: var(--toolbar-text-muted);
   }
 
   .toolbar-menu-sep {

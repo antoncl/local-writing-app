@@ -52,7 +52,9 @@
     justify-content: center;
     width: 22px;
     height: 22px;
-    color: var(--text-3);
+    /* --group-caret-color lets a palette surface (e.g. the glass selection
+       toolbar) recolor the chevron; defaults to the normal-surface muted ink. */
+    color: var(--group-caret-color, var(--text-3));
   }
 
   .caret svg {
@@ -76,7 +78,7 @@
   .caret.md {
     width: 24px;
     height: 24px;
-    color: var(--text-2);
+    color: var(--group-caret-color, var(--text-2));
   }
 
   .caret.md svg {

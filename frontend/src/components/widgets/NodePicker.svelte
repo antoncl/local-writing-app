@@ -15,6 +15,7 @@
 
   import { tick } from "svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { knownTagsStore } from "@/lib/stores/tags";
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
   import { hidePromptEntries } from "@/lib/editor-core/promptResolution";
   import { api } from "@/lib/api";
@@ -26,9 +27,11 @@
     MetadataSchema,
     PlotlineSummary,
     PromptEntrySummary,
+    ScopedTag,
     StructureDocument,
     StructureNode,
     ViewNodeSummary,
+    ViewSpec,
   } from "@/lib/types";
   import { resolveColor } from "@/lib/utils/colors";
   import { isViewRef, pickerMembership } from "@/lib/utils/pickerSources";
@@ -60,6 +63,7 @@
   import NodeList from "@/components/widgets/NodeList.svelte";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
+  import PickTree, { type PickTreeRow } from "@/components/widgets/PickTree.svelte";
 
   // The resolved kind/sub-type hex for a ref, or null — fed to NodeRow's
   // `stripeColor` so a candidate row carries the one curved stripe (ADR-0068:
@@ -273,10 +277,7 @@
   // context (the scene's title/tags via the shared matcher).
   let collapsedManuscriptIds = $state<Set<string>>(new Set());
   function toggleManuscriptCollapse(id: string) {
-    const next = new Set(collapsedManuscriptIds);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    collapsedManuscriptIds = next;
+    collapsedManuscriptIds = toggleInSet(collapsedManuscriptIds, id);
   }
   const manuscriptRows = $derived.by<ManuscriptRow[]>(() => {
     if (!structure || !allowedKinds.includes("manuscript")) return [];
@@ -304,22 +305,27 @@
     onChange?.({ value: togglePickAt(structure, value, nodeId) });
   }
 
-  // ---- Saved-view selectors (ADR-0074 slice 5) ----
-  // The author-configured saved-view sources ({view:id}) become tri-state
-  // containers: absorb the whole view as one live ref, or drill in and pick
-  // members. pickerMembership drops view-refs (no `kind`), so they're read
-  // straight off config.sources here.
+  // ---- Selector sections: saved views + tags (ADR-0074 slice 5) ----
+  // Both are tri-state containers over live members. The roster their specs
+  // evaluate against, from this surface's own props.
+  const selectorRoster = $derived(
+    buildSelectorRoster({ schema: metadataSchema, structure, loreEntries, assistantEntries, plotEntries }),
+  );
+
+  // Saved views: pickerMembership drops view-refs (no `kind`), so read them off
+  // config.sources directly. Lazy-loaded when the menu opens; reloaded on config
+  // change; a cancel token drops a stale response.
   const configuredViewIds = $derived((config.sources ?? []).filter(isViewRef).map((s) => s.view));
   let viewSummaries = $state<Map<string, ViewNodeSummary>>(new Map());
-  // Reload when the configured view sources change (not just at mount) — an
-  // author editing the config on a live picker must see the new view. A cancel
-  // token drops a stale response that resolves after the config moved on.
   $effect(() => {
     const ids = configuredViewIds;
     if (ids.length === 0) {
       viewSummaries = new Map();
       return;
     }
+    // Lazy: only fetch once the menu is open (a closed picker never touches the
+    // network), and reload when the configured sources change.
+    if (!open) return;
     let cancelled = false;
     const wanted = new Set(ids);
     api
@@ -330,19 +336,11 @@
         for (const v of list.entries) if (wanted.has(v.id)) map.set(v.id, v);
         viewSummaries = map;
       })
-      .catch(() => {
-        // A views-fetch failure just leaves the section empty — never blocks picking.
-      });
+      .catch(() => {}); // a fetch failure just leaves the section empty
     return () => {
       cancelled = true;
     };
   });
-  // The roster a view's spec evaluates against, from this surface's own props.
-  const selectorRoster = $derived(
-    buildSelectorRoster({ schema: metadataSchema, structure, loreEntries, assistantEntries, plotEntries }),
-  );
-  // One SelectorGroup per configured, loaded view — its live members evaluated
-  // now (re-runs as the roster or a member's fields change).
   const viewGroups = $derived.by<SelectorGroup[]>(() => {
     const groups: SelectorGroup[] = [];
     for (const id of configuredViewIds) {
@@ -353,23 +351,80 @@
     }
     return groups;
   });
-  let collapsedViewIds = $state<Set<string>>(new Set());
-  function toggleViewCollapse(id: string) {
-    const next = new Set(collapsedViewIds);
+
+  // Tags: the scoped known-tag vocabulary (loaded app-wide into knownTagsStore)
+  // becomes per-kind tag selectors ({kind, expr:{tagged}}). A tag is offered for
+  // each allowed kind it is in scope for (empty scope = every kind). Most
+  // context_pick inputs target one kind, so this is usually just "the tags".
+  // Read from the store, not a fetch — no network on the picker's own account.
+  const knownTags = $derived($knownTagsStore);
+  function tagInScopeFor(tag: ScopedTag, kind: string): boolean {
+    const { kinds } = pickerMembership(tag.scope);
+    return kinds.length === 0 || kinds.includes(kind);
+  }
+  // A `tagged` leaf INTERSECTED with the config's entry_type constraint for the
+  // kind, so a tag can't over-match past the picker's scope (a lore:character
+  // input must not pull in a lore:location sharing the tag). The stored spec
+  // drives invocation expansion too, so the constraint lives in the spec, not
+  // just the display filter.
+  function tagSpecFor(kind: string, tag: string): ViewSpec {
+    const fqns = membership.entryTypes[kind] ?? [];
+    const typeExpr =
+      fqns.length === 1
+        ? { type: fqns[0] }
+        : fqns.length > 1
+          ? { union: fqns.map((f) => ({ type: f })) }
+          : null;
+    const expr = typeExpr ? { intersect: [{ tagged: tag }, typeExpr] } : { tagged: tag };
+    return { kind, expr } as ViewSpec;
+  }
+  const tagGroups = $derived.by<SelectorGroup[]>(() => {
+    const groups: SelectorGroup[] = [];
+    for (const kind of allowedKinds) {
+      for (const tag of knownTags) {
+        if (!tagInScopeFor(tag, kind)) continue;
+        const ref: NodePickerRef = {
+          id: `tag:${kind}:${tag.name}`,
+          kind: "tag",
+          title: tag.name,
+          selector: tagSpecFor(kind, tag.name),
+        };
+        const members = membersForSelector(ref, selectorRoster);
+        // Skip a tag that resolves to nothing (a kind with no roster, or no
+        // current in-scope members) — an empty, pickable row is noise.
+        if (members.length > 0) groups.push({ ref, members });
+      }
+    }
+    return groups;
+  });
+
+  // Every selector group, for the picked-chip live counts.
+  const selectorGroups = $derived([...viewGroups, ...tagGroups]);
+
+  function toggleInSet(set: Set<string>, id: string): Set<string> {
+    const next = new Set(set);
     if (next.has(id)) next.delete(id);
     else next.add(id);
-    collapsedViewIds = next;
+    return next;
   }
-  const viewRows = $derived.by<SelectorRow[]>(() => {
-    if (viewGroups.length === 0) return [];
-    if (!isSearchActive(search)) return flattenSelectors(viewGroups, value, collapsedViewIds);
-    // Search filters the tree like the manuscript one: a view survives only if
-    // its title matches (then its whole member set shows) or a member matches
-    // (then just the matching members). A view matching nothing is hidden, so it
-    // never inflates the result counter. Members carry no tags/metadata, so a
-    // `#tag` restrictor only ever matches a view by title.
+  let collapsedViewIds = $state<Set<string>>(new Set());
+  let collapsedTagIds = $state<Set<string>>(new Set());
+  function toggleViewCollapse(id: string) {
+    collapsedViewIds = toggleInSet(collapsedViewIds, id);
+  }
+  function toggleTagCollapse(id: string) {
+    collapsedTagIds = toggleInSet(collapsedTagIds, id);
+  }
+
+  // Search + flatten, shared by both selector sections: a selector survives only
+  // if its title matches (whole member set shows) or a member matches (just
+  // those), so a non-matching selector never inflates the counter. Members carry
+  // no tags, so a `#tag` restrictor matches by title.
+  function selectorRowsFor(groups: SelectorGroup[], collapsedIds: Set<string>): SelectorRow[] {
+    if (groups.length === 0) return [];
+    if (!isSearchActive(search)) return flattenSelectors(groups, value, collapsedIds);
     const searched: SelectorGroup[] = [];
-    for (const g of viewGroups) {
+    for (const g of groups) {
       if (matchesEntry({ title: g.ref.title }, parsedSearch)) {
         searched.push(g);
         continue;
@@ -377,10 +432,14 @@
       const members = g.members.filter((m) => matchesEntry({ title: m.title }, parsedSearch));
       if (members.length > 0) searched.push({ ref: g.ref, members });
     }
-    return flattenSelectors(searched, value, collapsedViewIds, { expandAll: true });
-  });
-  function toggleViewRow(row: SelectorRow) {
-    const g = viewGroups.find((x) => x.ref.id === (row.memberOf ?? row.id));
+    return flattenSelectors(searched, value, collapsedIds, { expandAll: true });
+  }
+  const viewRows = $derived(selectorRowsFor(viewGroups, collapsedViewIds));
+  const tagRows = $derived(selectorRowsFor(tagGroups, collapsedTagIds));
+
+  // Toggle a selector row (container or member) against its group set.
+  function toggleSelectorRow(row: SelectorRow, groups: SelectorGroup[]) {
+    const g = groups.find((x) => x.ref.id === (row.memberOf ?? row.id));
     if (!g) return;
     if (row.isSelector) {
       onChange?.({ value: toggleSelectorGroup(value, g) });
@@ -389,6 +448,46 @@
       if (m) onChange?.({ value: toggleSelectorMember(value, g, m) });
     }
   }
+
+  // Normalize each tri-state source to PickTree rows with bound handlers, so the
+  // shared PickTree renders manuscript, saved views, and tags uniformly.
+  const manuscriptTreeRows = $derived<PickTreeRow[]>(
+    manuscriptRows.map((row) => ({
+      key: row.id,
+      depth: row.depth,
+      hasChildren: row.hasChildren,
+      collapsed: row.collapsed,
+      isContainer: !row.isScene,
+      state: row.state,
+      title: row.title,
+      count: row.isScene ? null : row.sceneCount,
+      countNoun: "scene",
+      onToggle: () => toggleManuscriptPick(row.id),
+      onCollapse: () => toggleManuscriptCollapse(row.id),
+    })),
+  );
+  function selectorTreeRows(
+    rows: SelectorRow[],
+    groups: SelectorGroup[],
+    onCollapse: (id: string) => void,
+    countNoun: string,
+  ): PickTreeRow[] {
+    return rows.map((row) => ({
+      key: row.key,
+      depth: row.depth,
+      hasChildren: row.hasChildren,
+      collapsed: row.collapsed,
+      isContainer: row.isSelector,
+      state: row.state,
+      title: row.title,
+      count: row.isSelector ? row.count : null,
+      countNoun,
+      onToggle: () => toggleSelectorRow(row, groups),
+      onCollapse: () => onCollapse(row.id),
+    }));
+  }
+  const viewTreeRows = $derived(selectorTreeRows(viewRows, viewGroups, toggleViewCollapse, "item"));
+  const tagTreeRows = $derived(selectorTreeRows(tagRows, tagGroups, toggleTagCollapse, "match"));
 
   // Flatten the research tree's notes (leaves) into a searchable list.
   // Topics are organizational containers with no body — only notes are
@@ -594,14 +693,17 @@
 
   const hasAnyConfigured = $derived(allowedKinds.length > 0 || configuredViewIds.length > 0);
   const hasAnyResults = $derived(
-    visibleGroups.length > 0 || manuscriptRows.length > 0 || viewRows.length > 0,
+    visibleGroups.length > 0 || manuscriptRows.length > 0 || viewRows.length > 0 || tagRows.length > 0,
   );
 
   // Total result count for the search-bar live counter. Reflects the
   // post-filter, post-gating reality so the user can tell when their
   // search has zeroed out before scrolling.
   const totalVisibleItems = $derived(
-    visibleGroups.reduce((acc, g) => acc + g.items.length, 0) + manuscriptRows.length + viewRows.length,
+    visibleGroups.reduce((acc, g) => acc + g.items.length, 0) +
+      manuscriptRows.length +
+      viewRows.length +
+      tagRows.length,
   );
 
   const collapseThreshold = $derived(compact ? COLLAPSE_THRESHOLD_COMPACT : COLLAPSE_THRESHOLD_DEFAULT);
@@ -653,7 +755,7 @@
             >
               {#snippet trailing()}
                 {@const mCount = structure ? sceneCountForRef(structure, ref) : null}
-                {@const vCount = memberCountForRef(viewGroups, ref)}
+                {@const vCount = memberCountForRef(selectorGroups, ref)}
                 <span
                   class="ctx-type-pill"
                   class:has-color={!!hex}
@@ -760,103 +862,17 @@
             </div>
           {/if}
         {:else}
-          <!-- One tri-state row, shared by the manuscript tree (ADR-0074 slice
-               4b) and the saved-view selectors (slice 5). `r` is normalized;
-               each section binds its own toggle/collapse. -->
-          {#snippet pickRow(r: {
-            depth: number;
-            hasChildren: boolean;
-            collapsed: boolean;
-            isContainer: boolean;
-            state: string;
-            title: string;
-            count: number | null;
-            countNoun: string;
-          }, onToggle: () => void, onCollapse: () => void)}
-            <div class="ctx-mrow" style={`--depth:${r.depth}`}>
-              {#if r.hasChildren}
-                <button
-                  type="button"
-                  class="ctx-mcaret"
-                  aria-label={r.collapsed ? `Expand ${r.title}` : `Collapse ${r.title}`}
-                  aria-expanded={!r.collapsed}
-                  onclick={onCollapse}
-                >{r.collapsed ? "▸" : "▾"}</button>
-              {:else}
-                <span class="ctx-mcaret ctx-mcaret-leaf" aria-hidden="true"></span>
-              {/if}
-              <button
-                type="button"
-                class="ctx-mtoggle"
-                class:serif={r.isContainer}
-                aria-pressed={r.state === "on" || r.state === "implied"}
-                onclick={onToggle}
-              >
-                <span class={`ctx-mcheck ctx-mcheck-${r.state}`} aria-hidden="true"
-                  >{r.state === "on" || r.state === "implied" ? "✓" : ""}</span
-                >
-                <span class="ctx-mtitle">{r.title}</span>
-                {#if r.count !== null}
-                  <span class="ctx-mcount">{r.count} {r.count === 1 ? r.countNoun : `${r.countNoun}s`}</span>
-                {/if}
-                <span class="sr-only"
-                  >{r.state === "on"
-                    ? "Picked"
-                    : r.state === "implied"
-                      ? "Included via a container"
-                      : r.state === "indeterminate"
-                        ? "Partially picked"
-                        : "Not picked"}</span
-                >
-              </button>
-            </div>
-          {/snippet}
-
-          <!-- Manuscript tri-state tree: root / acts / chapters as live
-               containers over their scenes, above the flat kind groups. -->
-          {#if manuscriptRows.length > 0}
-            <div class="ctx-mtree" role="group" aria-label="Manuscript">
-              {#each manuscriptRows as row (row.id)}
-                {@render pickRow(
-                  {
-                    depth: row.depth,
-                    hasChildren: row.hasChildren,
-                    collapsed: row.collapsed,
-                    isContainer: !row.isScene,
-                    state: row.state,
-                    title: row.title,
-                    count: row.isScene ? null : row.sceneCount,
-                    countNoun: "scene",
-                  },
-                  () => toggleManuscriptPick(row.id),
-                  () => toggleManuscriptCollapse(row.id),
-                )}
-              {/each}
-            </div>
+          <!-- Manuscript tri-state tree (slice 4b) and saved-view selectors
+               (slice 5) render through the shared PickTree, above the flat
+               kind groups. -->
+          {#if manuscriptTreeRows.length > 0}
+            <PickTree rows={manuscriptTreeRows} ariaLabel="Manuscript" />
           {/if}
-
-          <!-- Saved-view selectors (ADR-0074 slice 5): each configured view is a
-               tri-state container — absorb the whole view (one live ref) or drill
-               in and pick members. -->
-          {#if viewRows.length > 0}
-            <div class="ctx-mtree" role="group" aria-label="Saved views">
-              {#each viewRows as row (row.key)}
-                {@render pickRow(
-                  {
-                    depth: row.depth,
-                    hasChildren: row.hasChildren,
-                    collapsed: row.collapsed,
-                    isContainer: row.isSelector,
-                    state: row.state,
-                    title: row.title,
-                    count: row.isSelector ? row.count : null,
-                    countNoun: "item",
-                  },
-                  () => toggleViewRow(row),
-                  () => toggleViewCollapse(row.id),
-                )}
-              {/each}
-            </div>
+          {#if viewTreeRows.length > 0}
+            <PickTree rows={viewTreeRows} ariaLabel="Saved views" />
+          {/if}
+          {#if tagTreeRows.length > 0}
+            <PickTree rows={tagTreeRows} ariaLabel="Tags" />
           {/if}
 
           <!-- ADR-0068: candidates compose NodeRow/NodeList. Each kind is a
@@ -1149,9 +1165,9 @@
     white-space: nowrap;
   }
 
-  /* Live descendant-scene count on a picked container chip / tree row. */
-  .ctx-count-pill,
-  .ctx-mcount {
+  /* Live descendant-scene / member count on a picked container chip. The tree
+     rows' own count badge lives in PickTree.svelte. */
+  .ctx-count-pill {
     flex: none;
     font-size: var(--fs-xs);
     color: var(--accent-emphasis);
@@ -1161,101 +1177,6 @@
     line-height: 1.3;
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
-  }
-
-  /* --- Manuscript tri-state tree (ADR-0074 slice 4b) --------------- */
-  .ctx-mtree {
-    display: flex;
-    flex-direction: column;
-    padding: 2px 0;
-  }
-  .ctx-mrow {
-    display: flex;
-    align-items: center;
-    padding-left: calc(var(--depth, 0) * 16px);
-  }
-  .ctx-mcaret {
-    flex: none;
-    width: 22px;
-    height: 26px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border: none;
-    background: transparent;
-    color: var(--accent);
-    border-radius: var(--r-md);
-    cursor: pointer;
-    font-size: var(--fs-sm);
-    line-height: 1;
-  }
-  .ctx-mcaret:hover {
-    background: var(--inset);
-  }
-  .ctx-mcaret-leaf {
-    cursor: default;
-  }
-  .ctx-mtoggle {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    border: none;
-    background: transparent;
-    color: inherit;
-    text-align: left;
-    padding: 4px 8px;
-    border-radius: var(--r-md);
-    cursor: pointer;
-  }
-  .ctx-mtoggle:hover {
-    background: var(--inset);
-  }
-  .ctx-mtoggle.serif .ctx-mtitle {
-    font-family: var(--serif);
-  }
-  .ctx-mtitle {
-    flex: 1;
-    min-width: 0;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .ctx-mcheck {
-    flex: none;
-    width: 16px;
-    height: 16px;
-    border: 1.5px solid var(--border);
-    border-radius: 4px;
-    background: var(--surface);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: var(--fs-xs);
-    line-height: 1;
-    color: transparent;
-    position: relative;
-  }
-  .ctx-mcheck-on {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: var(--surface);
-  }
-  .ctx-mcheck-implied {
-    background: var(--accent-soft2);
-    border-color: var(--accent);
-    color: var(--accent-emphasis);
-  }
-  .ctx-mcheck-indeterminate {
-    border-color: var(--accent);
-  }
-  .ctx-mcheck-indeterminate::after {
-    content: "";
-    position: absolute;
-    inset: 4px;
-    background: var(--accent);
-    border-radius: 1px;
   }
 
   /* --- Empty states ------------------------------------------------ */

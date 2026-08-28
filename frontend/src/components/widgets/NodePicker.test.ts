@@ -10,6 +10,7 @@ import { render, screen, fireEvent, within } from "@/lib/test/component";
 import NodePicker from "./NodePicker.svelte";
 import { api } from "@/lib/api";
 import { metadataSchemaStore } from "@/lib/stores/schema";
+import { setKnownTags, clearKnownTags } from "@/lib/stores/tags";
 import { hideLibraryEntry, openProjectHidden } from "@/lib/stores/hiddenLibrary";
 import type { MetadataSchema, PlotlineSummary, PromptEntrySummary, ViewNodeSummary } from "@/lib/types";
 
@@ -52,10 +53,17 @@ beforeEach(() => {
   localStorage.clear();
   openProjectHidden("nodepicker-test");
   metadataSchemaStore.set(SCHEMA);
+  // The picker lazily fetches saved views when the menu opens (ADR-0074 slice
+  // 5); default it empty so tests that don't exercise views never touch the
+  // network (#973). Tags come from knownTagsStore (no fetch) — empty by default.
+  vi.spyOn(api, "listViews").mockResolvedValue({ entries: [] });
+  clearKnownTags();
 });
 afterEach(() => {
   openProjectHidden(null);
   localStorage.clear();
+  clearKnownTags();
+  vi.restoreAllMocks();
 });
 
 describe("NodePicker snippet picker — hide filter (ADR-0049 #682)", () => {
@@ -339,6 +347,81 @@ describe("NodePicker saved-view selectors (#1487)", () => {
     expect(within(menu).getByText("Villains")).toBeInTheDocument();
     expect(within(menu).getByText("Vex")).toBeInTheDocument();
     expect(within(menu).queryByText("Nok")).toBeNull();
+  });
+});
+
+// ADR-0074 slice 5 pt.2 (#1491): the scoped known-tag vocabulary becomes
+// per-kind tag selectors — absorb "everything tagged X" as one live ref, or
+// drill in and pick members.
+describe("NodePicker tag selectors (#1491)", () => {
+  const villainTag = { name: "villain", scope: { sources: [{ kind: "lore" }] } };
+
+  function renderWithTags(extra: Record<string, unknown> = {}) {
+    return render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "lore" }], multiple: true },
+        loreEntries: [
+          loreEntry("lore_a", "Vex", ["villain"]),
+          loreEntry("lore_b", "Mara", ["hero"]),
+          loreEntry("lore_c", "Nok", ["villain"]),
+        ],
+        affordance: "add",
+        ...extra,
+      },
+    });
+  }
+  async function openMenu(): Promise<HTMLElement> {
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+    return document.querySelector(".ctx-menu") as HTMLElement;
+  }
+
+  beforeEach(() => {
+    setKnownTags([villainTag] as never);
+  });
+
+  it("renders a scoped tag as a selector over its tagged members", async () => {
+    renderWithTags();
+    const menu = await openMenu();
+    const tags = (await within(menu).findAllByRole("group", { name: "Tags" }))[0];
+    expect(within(tags).getByText("villain")).toBeInTheDocument();
+    // Drill: the villain-tagged lore are its members.
+    expect(within(tags).getByText("Vex")).toBeInTheDocument();
+    expect(within(tags).getByText("Nok")).toBeInTheDocument();
+    // Mara is under the 'hero' tag, not 'villain'.
+    expect(within(tags).queryByText("Mara")).toBeNull();
+  });
+
+  it("checking a tag stores ONE live selector ref (absorb)", async () => {
+    const onChange = vi.fn();
+    renderWithTags({ onChange });
+    const menu = await openMenu();
+    const tags = (await within(menu).findAllByRole("group", { name: "Tags" }))[0];
+    await fireEvent.click(within(tags).getByText("villain").closest("button")!);
+    await tick();
+    const [detail] = onChange.mock.calls[0];
+    expect(detail.value).toHaveLength(1);
+    expect(detail.value[0]).toMatchObject({ id: "tag:lore:villain", kind: "tag", title: "villain" });
+    expect(detail.value[0].selector).toEqual({ kind: "lore", expr: { tagged: "villain" } });
+  });
+
+  it("respects the config's entry_type constraint — a tag can't over-match past scope (#1493 review)", async () => {
+    render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "lore", expr: { type: "lore:character" } }], multiple: true },
+        loreEntries: [
+          loreEntry("lore_a", "Vex", ["villain"]), // a character
+          // A location sharing the 'villain' tag — must NOT be pulled into a
+          // character-restricted input.
+          { ...loreEntry("loc_1", "Dark Keep", ["villain"]), entry_type: "lore:location" },
+        ],
+        affordance: "add",
+      },
+    });
+    const menu = await openMenu();
+    const tags = (await within(menu).findAllByRole("group", { name: "Tags" }))[0];
+    expect(within(tags).getByText("Vex")).toBeInTheDocument();
+    expect(within(tags).queryByText("Dark Keep")).toBeNull();
   });
 });
 

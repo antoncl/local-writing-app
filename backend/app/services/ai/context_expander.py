@@ -53,15 +53,26 @@ def expand_context(
     source: JournalSource = "user_message",
     turn: int = 0,
     scene: Any = None,
+    rendered_text: str = "",
 ) -> list[ChatSessionJournalEntry]:
-    """Scan `text` AND the resolution scene's own prose, expand depth-1,
-    return NEW journal entries.
+    """Scan `text`, the first-turn rendered prompt output, AND the
+    resolution scene's own prose — all in ONE pass — expand depth-1, return
+    NEW journal entries.
 
-    `source` labels how the composer-text direct matches were discovered
-    (the user's typed message vs the rendered prompt output). Direct matches
-    from the scene's own body/long_text fields (ADR-0075 slice 3) always get
-    source="scene_prose"; depth-1 expansions always get
-    source="depth1_expansion" — regardless of `source`.
+    `source` labels the `text` (composer) direct matches — normally
+    "user_message". Direct matches from `rendered_text` (ADR-0075 slice 3b —
+    the locked system prompt's
+    rendered output, e.g. inline `{{ entry('x').name }}` expansions not
+    otherwise visible to the composer/scene surfaces) always get
+    source="rendered_prompt". Direct matches from the scene's own
+    body/long_text fields (ADR-0075 slice 3) always get source="scene_prose";
+    depth-1 expansions always get source="depth1_expansion" — regardless of
+    `source`.
+
+    Three-way precedence when the same entity appears on more than one
+    surface: user_message > rendered_prompt > scene_prose (each surface is
+    matched against what higher-precedence surfaces already matched, so an
+    id is labeled by its single highest-precedence surface).
 
     `scene` is the chat's resolution scene — a plain id string, a loaded
     scene node (EntryRef), or None for a scene-less chat. Passed through to
@@ -77,23 +88,30 @@ def expand_context(
     journal and saving — the expander is pure.
     """
     composer_text = text if isinstance(text, str) else ""
+    rendered = rendered_text if isinstance(rendered_text, str) else ""
 
     # Direct textual matches against title + aliases, resolved under each
     # entity's effective name-set as of the chat's resolution scene (#61).
     direct_ids = _alias_match(project, composer_text, scene=scene) if composer_text.strip() else set()
+    # The first-turn rendered prompt output (ADR-0075 §2/slice 3b) — excludes
+    # anything the composer already matched so an id isn't double-labeled.
+    rendered_ids = (
+        _alias_match(project, rendered, scene=scene) if rendered.strip() else set()
+    ) - direct_ids
     # The scene's own detection surface — body + every long_text field,
     # scanned field-by-field so a name can't false-match across a field
-    # boundary (ADR-0075 §2/slice 3). Excludes anything the composer already
-    # matched so an id isn't double-labeled across two sources in one turn.
-    prose_ids = _scene_prose_ids(project, scene) - direct_ids
-    if not direct_ids and not prose_ids:
+    # boundary (ADR-0075 §2/slice 3). Excludes anything the composer or
+    # rendered prompt already matched so an id isn't double-labeled across
+    # more than one source in one turn.
+    prose_ids = _scene_prose_ids(project, scene) - direct_ids - rendered_ids
+    if not direct_ids and not rendered_ids and not prose_ids:
         return []
 
-    # Depth-1 expansion: scan bodies of ALL direct matches (composer + scene
-    # prose) for further hits. Note: this also re-finds names already in
-    # `combined_direct` if they happen to appear in any direct match's body,
-    # so we subtract combined_direct below.
-    combined_direct = direct_ids | prose_ids
+    # Depth-1 expansion: scan bodies of ALL direct matches (composer +
+    # rendered prompt + scene prose) for further hits. Note: this also
+    # re-finds names already in `combined_direct` if they happen to appear in
+    # any direct match's body, so we subtract combined_direct below.
+    combined_direct = direct_ids | rendered_ids | prose_ids
     depth1_ids = _textual_one_hop(project, combined_direct, scene=scene)
 
     # What's already pinned via explicit picks or earlier journal turns?
@@ -110,11 +128,13 @@ def expand_context(
     # (these are sets; the final lore set is order-independent, but a stable
     # journal keeps the chat node's front-matter free of spurious byte diffs).
     new_direct = sorted(direct_ids - in_scope)
+    new_rendered = sorted(rendered_ids - in_scope)
     new_prose = sorted(prose_ids - in_scope)
     new_depth1 = sorted(depth1_ids - combined_direct - in_scope)
 
     entries: list[ChatSessionJournalEntry] = []
     entries.extend(_make_entries(project, new_direct, source=source, turn=turn))
+    entries.extend(_make_entries(project, new_rendered, source="rendered_prompt", turn=turn))
     entries.extend(_make_entries(project, new_prose, source="scene_prose", turn=turn))
     entries.extend(_make_entries(project, new_depth1, source="depth1_expansion", turn=turn))
     return entries

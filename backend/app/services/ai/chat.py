@@ -69,10 +69,11 @@ def _detect_and_persist_journal(
     chat_id: str,
     messages_list: list[dict],
     scene: Any,
+    system_prompt: str,
 ) -> list[Any]:
     """Run the send-time context expander on the last user message + the
-    scene's own prose (ADR-0075 slice 3), and persist any new detections to
-    the chat's journal.
+    rendered system prompt (ADR-0075 §2/slice 3b) + the scene's own prose
+    (ADR-0075 slice 3), and persist any new detections to the chat's journal.
 
     ADR-0057 §4: the expander is an *input* to the one lore selection — it feeds
     the journal `relevant_lore()` reads, not a rival second selector. It runs
@@ -83,6 +84,13 @@ def _detect_and_persist_journal(
     (`_chat_resolution_scene`) — passed through so a renamed entity is
     detected under its as-of-scene name (#60/#61), and so the scene's body +
     long_text fields are scannable without a second `read_scene`.
+
+    `system_prompt` is the fully-rendered, locked system prompt the caller
+    already has — passed through to `expand_context`'s `rendered_text` as a
+    third scan surface in the SAME pass. The journal's existing dedup
+    (`in_scope`) makes this a first-turn-only detection: once an entity from
+    the (frozen) system prompt is journaled, later turns re-scan the same
+    text but find nothing new.
     """
     from app.services.ai.context_expander import expand_context
 
@@ -102,6 +110,7 @@ def _detect_and_persist_journal(
         source="user_message",
         turn=turn,
         scene=scene,
+        rendered_text=system_prompt,
     )
     if new_entries:
         project.save_chat_session(
@@ -248,7 +257,9 @@ def expand_and_prepare_chat_blocks(
     # turn does exactly one `read_scene` for its resolution scene.
     scene = _chat_resolution_scene(project, chat) if chat.lore_enabled else None
     if chat.lore_enabled:
-        new_entries = _detect_and_persist_journal(project, chat, chat_id, messages_list, scene)
+        new_entries = _detect_and_persist_journal(
+            project, chat, chat_id, messages_list, scene, system_prompt
+        )
         journal_for_send = list(chat.journal) + new_entries
 
     # Slot 1: system + project-stable (per decisions_implicit_context) — the

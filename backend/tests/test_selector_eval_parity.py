@@ -1,0 +1,59 @@
+"""Backend half of the cross-runtime selector-evaluator parity gate.
+
+Runs the shared corpus (`spec/selector-eval-corpus.json`) through the Python
+`evaluate_selector_membership`. The frontend half
+(`frontend/src/lib/views/selectorEvalParity.test.ts`) runs the SAME corpus
+through `evaluateView`. Both must return each case's `expected` verbatim, so the
+two evaluators cannot silently drift — the picker's live count and the AI's
+actual context stay one truth (ADR-0074 slice 5). Add a case here and the
+frontend gate must reproduce it too, and vice versa.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from app.services.ai.selector_eval import (
+    SelectorNode,
+    evaluate_selector_membership,
+    selector_node_tags,
+)
+
+_CORPUS_PATH = Path(__file__).resolve().parents[2] / "spec" / "selector-eval-corpus.json"
+_CORPUS = json.loads(_CORPUS_PATH.read_text(encoding="utf-8"))
+
+
+def _make_is_descendant(entry_types: dict[str, Any]):
+    def is_descendant(entry_type: str, target: str) -> bool:
+        seen: set[str] = set()
+        current: str | None = entry_type
+        while current is not None and current not in seen:
+            if current == target:
+                return True
+            seen.add(current)
+            current = (entry_types.get(current) or {}).get("parent")
+        return False
+
+    return is_descendant
+
+
+_IS_DESCENDANT = _make_is_descendant(_CORPUS["schema"]["entry_types"])
+
+
+@pytest.mark.parametrize("case", _CORPUS["cases"], ids=lambda c: c["name"])
+def test_selector_eval_parity(case: dict[str, Any]) -> None:
+    nodes = [
+        SelectorNode(n["id"], n["entry_type"], selector_node_tags(n.get("metadata")), n.get("metadata") or {})
+        for n in case["nodes"]
+    ]
+    result = evaluate_selector_membership(case["expr"], nodes, is_descendant=_IS_DESCENDANT)
+    assert result == case["expected"]
+
+
+def test_corpus_is_non_trivial() -> None:
+    # A guard against an empty/renamed corpus silently passing the gate.
+    assert len(_CORPUS["cases"]) >= 12

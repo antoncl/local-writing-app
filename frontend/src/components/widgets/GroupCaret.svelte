@@ -10,17 +10,25 @@
   // hit-targets; `xs` (15px) is for a decorative trailing indicator — an
   // "opens a menu" ▾ — where the control itself is the tap target, so the
   // chevron shouldn't carry a hit-target's footprint. The glyph stays 13px.
+  //
+  // `ambient` is for a consumer whose open state lives in the DOM, not a prop —
+  // e.g. a native `<details>`. Rotation then follows the CSS custom property
+  // `--group-caret-open` (0deg = right/closed, 90deg = down/open) instead of
+  // the `collapsed` prop, so the consumer drives it from a `[open]` selector
+  // and manual toggles stay in sync with no state to thread through.
   interface Props {
     collapsed?: boolean;
     size?: "xs" | "sm" | "md";
+    ambient?: boolean;
   }
 
-  let { collapsed = false, size = "sm" }: Props = $props();
+  let { collapsed = false, size = "sm", ambient = false }: Props = $props();
 </script>
 
 <span
   class="caret"
   class:collapsed
+  class:ambient
   class:xs={size === "xs"}
   class:md={size === "md"}
   aria-hidden="true"
@@ -57,6 +65,12 @@
 
   .caret.collapsed svg {
     transform: rotate(0deg);
+  }
+
+  /* Rotation driven by an ancestor's state (e.g. a native <details>[open]),
+     via the --group-caret-open custom property the consumer sets. */
+  .caret.ambient svg {
+    transform: rotate(var(--group-caret-open, 0deg));
   }
 
   .caret.md {

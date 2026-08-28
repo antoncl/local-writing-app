@@ -15,7 +15,7 @@ from project_fixtures import open_test_project
 
 from app.main import app
 from app.models import CreateLoreEntryRequest, SaveLoreEntryRequest
-from app.services.ai.helpers import _alias_match
+from app.services.ai.lore_selection import _alias_match
 
 
 class EffectiveNamesTests(unittest.TestCase):

@@ -28,10 +28,9 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any, Literal
 
 from app.models import ChatSessionContextItem, ChatSessionJournalEntry
-from app.services.ai.helpers import (
+from app.services.ai.helpers import _attr_or_item, _safe_read_node
+from app.services.ai.lore_selection import (
     _alias_match,
-    _attr_or_item,
-    _safe_read_node,
     _scene_prose_ids,
     _textual_one_hop,
 )

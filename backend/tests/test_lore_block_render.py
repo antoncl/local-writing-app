@@ -10,7 +10,8 @@ from __future__ import annotations
 from test_ai_helpers import _HelperFixtureBase
 
 from app.models import SaveLoreEntryRequest
-from app.services.ai.helpers import _relevant_lore, create_environment_for_project
+from app.services.ai.helpers import create_environment_for_project
+from app.services.ai.lore_selection import _relevant_lore
 from app.services.ai.templates import render_template
 
 

@@ -26,7 +26,11 @@ from app.models import (
     UpsertMetadataFieldRequest,
 )
 from app.services.ai.chat import expand_and_prepare_chat_blocks
-from app.services.ai.helpers import _alias_match, _relevant_lore_ids, _scene_prose_ids
+from app.services.ai.lore_selection import (
+    _alias_match,
+    _relevant_lore_ids,
+    _scene_prose_ids,
+)
 from app.services.ai.sessions import default_registry
 
 

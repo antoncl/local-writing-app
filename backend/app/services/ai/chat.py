@@ -171,11 +171,11 @@ def _lore_cache_blocks(
     (`_chat_resolution_scene`) and shared with `_detect_and_persist_journal` —
     avoids a second `read_scene` for the same turn.
     """
-    from app.services.ai.helpers import (
+    from app.services.ai.lore_block import _format_lore_block
+    from app.services.ai.lore_selection import (
         _relevant_lore_ids,
         _tier_lore_ids,
     )
-    from app.services.ai.lore_block import _format_lore_block
     from app.services.ai.sessions import default_registry
 
     index = project.build_mutations_index() if scene is not None else None

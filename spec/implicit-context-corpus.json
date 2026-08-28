@@ -1,0 +1,64 @@
+{
+  "_comment": "ADR-0075 §5 parity corpus. Hand-authored oracle — do NOT regenerate from either matcher. Positions are 0-indexed char offsets, end exclusive. matchedText preserves the input's original casing. Slice 1 = §3 core (longest-match, case-fold, apostrophe-aware boundary matching the FE's CURRENT possessive-blocking behavior). Possessive-attaches and space≡hyphen are slice 2 and are intentionally absent.",
+  "cases": [
+    { "name": "longest-match wins over overlap",
+      "entities": [ {"id":"e_bob","title":"Bob","aliases":[]}, {"id":"e_bobsmith","title":"Bob Smith","aliases":[]} ],
+      "text": "Peter greeted Bob Smith warmly.",
+      "expected": [ {"id":"e_bobsmith","start":14,"end":23,"matchedText":"Bob Smith"} ] },
+
+    { "name": "shorter name alone still matches",
+      "entities": [ {"id":"e_bob","title":"Bob","aliases":[]}, {"id":"e_bobsmith","title":"Bob Smith","aliases":[]} ],
+      "text": "Bob went home.",
+      "expected": [ {"id":"e_bob","start":0,"end":3,"matchedText":"Bob"} ] },
+
+    { "name": "case-insensitive match, original-casing render",
+      "entities": [ {"id":"e_bobsmith","title":"Bob Smith","aliases":[]} ],
+      "text": "i saw BOB SMITH today",
+      "expected": [ {"id":"e_bobsmith","start":6,"end":15,"matchedText":"BOB SMITH"} ] },
+
+    { "name": "substring inside a larger word does not match (boundary)",
+      "entities": [ {"id":"e_ana","title":"Ana","aliases":[]} ],
+      "text": "Banana bread",
+      "expected": [] },
+
+    { "name": "alias matches",
+      "entities": [ {"id":"e_rob","title":"Robert","aliases":["Bobby"]} ],
+      "text": "Bobby waved.",
+      "expected": [ {"id":"e_rob","start":0,"end":5,"matchedText":"Bobby"} ] },
+
+    { "name": "apostrophe inside a token blocks a sub-name (O'Brien does not yield Brien)",
+      "entities": [ {"id":"e_brien","title":"Brien","aliases":[]} ],
+      "text": "O'Brien arrived.",
+      "expected": [] },
+
+    { "name": "a name containing an internal apostrophe matches as a whole",
+      "entities": [ {"id":"e_obrien","title":"O'Brien","aliases":[]} ],
+      "text": "O'Brien arrived.",
+      "expected": [ {"id":"e_obrien","start":0,"end":7,"matchedText":"O'Brien"} ] },
+
+    { "name": "single-word name matches across a hyphen boundary (stable both slices)",
+      "entities": [ {"id":"e_warrior","title":"Warrior","aliases":[]} ],
+      "text": "the code-warrior fought",
+      "expected": [ {"id":"e_warrior","start":9,"end":16,"matchedText":"warrior"} ] },
+
+    { "name": "multi-word name adjacent to punctuation matches",
+      "entities": [ {"id":"e_bobsmith","title":"Bob Smith","aliases":[]} ],
+      "text": "(Bob Smith)",
+      "expected": [ {"id":"e_bobsmith","start":1,"end":10,"matchedText":"Bob Smith"} ] },
+
+    { "name": "two separate hits in one text, in order",
+      "entities": [ {"id":"e_bob","title":"Bob","aliases":[]}, {"id":"e_alice","title":"Alice","aliases":[]} ],
+      "text": "Bob met Alice.",
+      "expected": [ {"id":"e_bob","start":0,"end":3,"matchedText":"Bob"}, {"id":"e_alice","start":8,"end":13,"matchedText":"Alice"} ] },
+
+    { "name": "unicode adjacency — matches whole word",
+      "entities": [ {"id":"e_zoe","title":"Zoë","aliases":[]} ],
+      "text": "Zoë waved",
+      "expected": [ {"id":"e_zoe","start":0,"end":3,"matchedText":"Zoë"} ] },
+
+    { "name": "unicode — a longer word is not a match",
+      "entities": [ {"id":"e_zoe","title":"Zoë","aliases":[]} ],
+      "text": "Zoëlle danced",
+      "expected": [] }
+  ]
+}

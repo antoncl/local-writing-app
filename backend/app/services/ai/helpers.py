@@ -34,6 +34,7 @@ from app.services.ai.entry_patch import (
 )
 from app.services.ai.entry_ref import EntryRef
 from app.services.ai.field_contract import FieldContract
+from app.services.ai.name_matcher import compile_name_matcher, scan_name_matcher
 from app.services.ai.plot_prompt_context import render_plot_context
 from app.services.ai.sessions import AISession
 from app.services.error_log import append_error_line
@@ -969,7 +970,9 @@ def _snapshot_revisions(
 
 
 def _alias_match(project: ProjectService, text: str, scene: Any = None) -> set[str]:
-    """Return lore IDs whose title or aliases appear as words in `text`.
+    """Return lore IDs whose title or aliases appear in `text`, via the pure
+    positional matcher (`compile_name_matcher` / `scan_name_matcher`) — the
+    §3 regex-OR that mirrors `implicitContextMatcher.ts`.
 
     Honors `context_policy`: entries marked `manual_only` or `never` are
     skipped here — the matcher only ever pulls in `auto` (default) entries.
@@ -985,20 +988,17 @@ def _alias_match(project: ProjectService, text: str, scene: Any = None) -> set[s
     except Exception:
         return set()
     effective = _effective_name_map(project, scene)
-    haystack_lower = text.lower()
-    words = set(re.findall(r"[a-z0-9'-]+", haystack_lower))
-    matched: set[str] = set()
+    ordered_entries: list[tuple[str, list[str]]] = []
     for summary in listing.entries:
         if _entry_context_policy(summary) != "auto":
             continue
         entry_id = _attr_or_item(summary, "id")
+        if not entry_id:
+            continue
         candidates = _entry_name_candidates(summary, entry_id, effective)
-        for name in candidates:
-            if _name_appears(name, words, haystack_lower):
-                if entry_id:
-                    matched.add(entry_id)
-                break
-    return matched
+        ordered_entries.append((entry_id, candidates))
+    matcher = compile_name_matcher(ordered_entries)
+    return {hit.entry_id for hit in scan_name_matcher(matcher, text)}
 
 
 def _effective_name_map(project: ProjectService, scene: Any) -> dict[str, list[str]]:
@@ -1096,19 +1096,6 @@ def _textual_one_hop(
     if not bodies:
         return set()
     return _alias_match(project, "\n".join(bodies), scene=scene)
-
-
-def _name_appears(name: str, words: set[str], haystack_lower: str) -> bool:
-    """Match a name against the haystack: single word → token check,
-    multi-word → substring check on a word boundary."""
-    if not name:
-        return False
-    name_lower = name.lower().strip()
-    if " " in name_lower or "-" in name_lower:
-        # Multi-word name: require whole-name substring with word boundary
-        pattern = r"\b" + re.escape(name_lower) + r"\b"
-        return re.search(pattern, haystack_lower) is not None
-    return name_lower in words
 
 
 _XML_TAG_FALLBACK = "lore_entry"

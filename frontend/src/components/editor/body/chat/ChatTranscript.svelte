@@ -7,6 +7,7 @@
 <script lang="ts">
   import { renderChatContent, containsMath, ensureKatexLoaded } from "@/lib/utils/chatMessageRender";
   import { formatCostEur } from "@/lib/utils/money";
+  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import type { ChatMessage } from "@/lib/types";
 
   interface Props {
@@ -53,7 +54,7 @@
       </header>
       {#if message.thinking}
         <details class="cbv-thinking" open={chatRunning && i === chatHistory.length - 1 && !message.content}>
-          <summary>Thinking</summary>
+          <summary><GroupCaret size="xs" ambient />Thinking</summary>
           <div class="cbv-message-rendered">{@html render(message.thinking)}</div>
         </details>
       {/if}
@@ -136,10 +137,12 @@
     max-width: 82%; font-size: var(--fs-sm); color: var(--text-3);
     border: 1px solid var(--divider); border-radius: 9px; background: var(--inset); padding: 5px 11px;
   }
-  .cbv-thinking summary { cursor: pointer; list-style: none; }
+  .cbv-thinking summary {
+    display: flex; align-items: center; gap: 6px; cursor: pointer; list-style: none;
+    --group-caret-open: 0deg;
+  }
   .cbv-thinking summary::-webkit-details-marker { display: none; }
-  .cbv-thinking summary::before { content: "▸  "; color: var(--text-3); }
-  .cbv-thinking[open] summary::before { content: "▾  "; }
+  .cbv-thinking[open] summary { --group-caret-open: 90deg; }
 
   /* 4d · truncation banner. */
   .cbv-truncated {

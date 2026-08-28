@@ -463,11 +463,11 @@ def _preview_lore_tiers(
     `AISession` — the cold turn-1 view (unhinted lore volatile; `use(node,
     "stable")` stable) — and never commits, so it cannot touch a live chat's cache
     baseline. Both tiers resolve as-of `scene`, like the send path."""
-    from app.services.ai.helpers import (
+    from app.services.ai.lore_block import _format_lore_block
+    from app.services.ai.lore_selection import (
         _relevant_lore_ids,
         _tier_lore_ids,
     )
-    from app.services.ai.lore_block import _format_lore_block
     from app.services.ai.sessions import AISession
 
     ids = _relevant_lore_ids(

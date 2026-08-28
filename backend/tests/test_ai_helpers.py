@@ -13,13 +13,15 @@ from app.models import (
 from app.models.project import ProjectInfo
 from app.services.ai.entry_ref import ProjectInfoRef
 from app.services.ai.helpers import (
-    _relevant_lore,
-    _relevant_lore_ids,
-    _tier_lore_ids,
     create_environment_for_project,
     last_words,
 )
 from app.services.ai.lore_block import _format_lore_block
+from app.services.ai.lore_selection import (
+    _relevant_lore,
+    _relevant_lore_ids,
+    _tier_lore_ids,
+)
 from app.services.ai.sessions import AISession
 from app.services.ai.templates import render_template
 from app.services.project_service import ProjectService

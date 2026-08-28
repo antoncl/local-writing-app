@@ -28,8 +28,8 @@ cd backend; python -m venv .venv; .venv\Scripts\python -m pip install -r require
 # After editing [project.dependencies]: python scripts/relock_backend.py, then reinstall as above
 
 # Gates — run after edits, fix before considering a task done
-backend/.venv/Scripts/python.exe -m pytest backend/tests                    # all backend tests
-backend/.venv/Scripts/python.exe -m pytest backend/tests/test_ai_chat.py::test_name -q
+backend/.venv/Scripts/python.exe -m pytest backend/tests                    # all backend tests (parallel by default, -n auto)
+backend/.venv/Scripts/python.exe -m pytest backend/tests/test_ai_chat.py::test_name -q -n0   # -n0: serial, for --pdb / a single test
 backend/.venv/Scripts/python.exe -m ruff check backend                     # config: backend/pyproject.toml
 npm run check --prefix frontend                                            # svelte-check — must stay clean
 npm run build --prefix frontend

@@ -43,6 +43,11 @@ dev = [
   # A hung test must fail with a traceback, not sit there until the CI job's
   # 20-minute wall clock kills it and tells you nothing (#352 follow-up).
   "pytest-timeout>=2.3",
+  # Parallel test execution (#1515). The suite is process-isolation-safe
+  # (per-test tmp_path machine-settings redirect, in-process TestClient, no
+  # fixed ports), so `-n auto` forks one worker per core — the windows-backend
+  # CI job was the ~18-minute pacing bottleneck as a single serial run.
+  "pytest-xdist>=3.6",
 ]
 build = [
   "pyinstaller>=6.10",
@@ -51,6 +56,17 @@ build = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app*"]
+
+[tool.pytest.ini_options]
+# Parallel by default (#1515). The suite is process-isolation-safe (per-test
+# tmp_path machine-settings redirect, in-process TestClient, no fixed ports), so
+# `-n auto` forks one worker per core with no cross-worker races — full suite
+# ~8min serial -> ~1min on a 16-core dev box, and the windows CI job off its
+# ~18min wall clock. Every `pytest` invocation inherits this, local and CI.
+#   Debugging one test? xdist is incompatible with --pdb and spins up a worker
+#   per core for a single case: disable it with `-n0`, e.g.
+#     pytest backend/tests/test_x.py::test_name -n0 --pdb
+addopts = ["-n", "auto"]
 
 [tool.ruff]
 target-version = "py311"

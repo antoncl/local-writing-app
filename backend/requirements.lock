@@ -35,6 +35,8 @@ distlib==0.4.3
     # via virtualenv
 docstring-parser==0.18.0
     # via anthropic
+execnet==2.1.2
+    # via pytest-xdist
 fastapi==0.140.13
     # via local-writing-service (pyproject.toml)
 filelock==3.32.4
@@ -115,7 +117,10 @@ pytest==9.1.1
     # via
     #   local-writing-service (pyproject.toml)
     #   pytest-timeout
+    #   pytest-xdist
 pytest-timeout==2.4.0
+    # via local-writing-service (pyproject.toml)
+pytest-xdist==3.8.0
     # via local-writing-service (pyproject.toml)
 python-discovery==1.5.3
     # via virtualenv

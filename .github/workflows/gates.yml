@@ -129,6 +129,10 @@ jobs:
           git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
           python scripts/check_exemptions.py --base FETCH_HEAD
 
+      # Runs in parallel: `addopts = -n auto` in backend/pyproject.toml forks one
+      # xdist worker per runner core, which is what takes the windows-backend job
+      # off its ~18-minute wall clock (#1515). The default lives in config so a
+      # local run gets it too; no -n flag here, or it would just shadow that.
       # --timeout: a hang is the worst CI failure mode — it burns the wall clock
       # and reports nothing. thread method because Windows has no SIGALRM.
       - name: pytest
@@ -155,6 +159,10 @@ jobs:
           python -m pip install -r backend/requirements.lock
           python -m pip install -e backend --no-deps
 
+      # Runs in parallel: `addopts = -n auto` in backend/pyproject.toml forks one
+      # xdist worker per runner core, which is what takes the windows-backend job
+      # off its ~18-minute wall clock (#1515). The default lives in config so a
+      # local run gets it too; no -n flag here, or it would just shadow that.
       # --timeout: a hang is the worst CI failure mode — it burns the wall clock
       # and reports nothing. thread method because Windows has no SIGALRM.
       - name: pytest

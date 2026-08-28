@@ -184,7 +184,7 @@ lexicon grows by PR, never ad hoc:
 | `✎` | rename / edit in place |
 | `⧉` | duplicate — fork the item into a new editable copy (distinct from `+` create-blank) |
 | `★` | designated / bound — the marked one of a set (gold when active — the one gold) |
-| `▸ / ▾` | collapse / expand |
+| chevron (inline SVG) | collapse / expand — the shared `RowCaret`/`GroupCaret` chevron in a fixed hit-slot, rotating right→down; never a `▸`/`▾` text glyph (ADR-0066 Am. 1) |
 | `⌕` | search |
 | `⚙` | settings |
 | `◐ / ☀ / ☾` | theme cycle (system / light / dark — stateful) |
@@ -192,10 +192,14 @@ lexicon grows by PR, never ad hoc:
 | `⤢` | zoom — maximize a workspace tile to fill the shell / restore it (toggle; accent-tinted while active — a shell affordance, see below) |
 | eye (stroked, inline SVG) | interiority — a character's private inner state on a roleplay beat (ADR-0070). Used identically as a per-beat reveal handle and as a shell toggle (accent-tinted while active). Kept clear of `▤` view. |
 
-The one **inline-SVG** entry is the interiority eye: the meaning wanted a
-stroked "look inside" mark no single Unicode glyph carried without colliding
-with `▤` view, and one inline path costs nothing against the glyph-atlas budget
-(§ above) — so it is added here by PR like any other, not spent ad hoc.
+Two entries are **inline SVG** rather than font glyphs. The collapse/expand
+**chevron** started as a `▸`/`▾` text glyph, but at text size it read as a few
+pixel-clumps and its direction (right vs. down) was ambiguous; it is now a
+rotating SVG chevron in a fixed hit-slot (ADR-0066 Am. 1), so a single path —
+rotated, never a second glyph — carries both states. The **interiority eye**
+wanted a stroked "look inside" mark no single Unicode glyph carried without
+colliding with `▤` view. Each is one inline path — nothing against the
+glyph-atlas budget (§ above) — added here by PR like any other, not spent ad hoc.
 
 Every glyph control carries an `aria-label` and a tooltip — the tooltip is the
 word. Compounds (`+>`) stay banned: if no single lexicon glyph is self-evident

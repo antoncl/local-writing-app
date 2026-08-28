@@ -7,6 +7,7 @@
   // listed — they have no marker to close.
   import { untrack } from "svelte";
   import ReferencePicker from "@/components/widgets/ReferencePicker.svelte";
+  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import { mutationRecordLabel } from "@/lib/editor-core/mutationNodes";
   import {
     groupMutationUnits,
@@ -151,7 +152,9 @@
                     aria-label={expandedUnits.has(unit.unitId) ? "Hide rows" : "Close one row only"}
                     title={expandedUnits.has(unit.unitId) ? "Hide rows" : "Close one row only"}
                     onclick={() => toggleExpanded(unit.unitId)}
-                  >{expandedUnits.has(unit.unitId) ? "▾" : "▸"}</button>
+                  >
+                    <GroupCaret collapsed={!expandedUnits.has(unit.unitId)} />
+                  </button>
                 {/if}
               </div>
               {#if unit.records.length > 1 && expandedUnits.has(unit.unitId)}
@@ -267,6 +270,9 @@
   }
   .close-expand {
     flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     width: 28px;
     border: 1px solid var(--border);
     border-radius: 6px;

@@ -510,7 +510,9 @@ class ChatSessionJournalEntry(BaseModel):
     title: str = ""
     entry_type: str = ""
     added_at_turn: int = 0
-    source: Literal["user_message", "rendered_prompt", "depth1_expansion"] = "user_message"
+    source: Literal[
+        "user_message", "rendered_prompt", "depth1_expansion", "scene_prose"
+    ] = "user_message"
 
 
 class ChatSessionMessage(BaseModel):

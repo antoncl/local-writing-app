@@ -81,3 +81,46 @@ describe("collapse + counts", () => {
     expect(memberCountForRef([GROUP], m("lore_a", "Vex"))).toBeNull();
   });
 });
+
+// ADR-0074 slice 6: a plotline is a selector of kind "plot" — the SAME kind as its
+// card members. This is the case the presence-based isSel MUST handle: a kind-based
+// check (tag/view only) misread the container as a member and duplicated it on
+// uncheck. These pin the round-trip.
+describe("plotline selector — container and members share kind \"plot\"", () => {
+  const plotSpec: ViewSpec = {
+    kind: "plot",
+    expr: { intersect: [{ type: "plot:card" }, { field: { key: "plotline", op: "overlap", value: "p1" } }] },
+  } as ViewSpec;
+  const plRef: NodePickerRef = {
+    id: "plotline:p1",
+    kind: "plot",
+    title: "The Heist",
+    entry_type: "plot:plotline",
+    selector: plotSpec,
+  };
+  const cardM = (id: string, title: string): NodePickerRef => ({ id, kind: "plot", title, entry_type: "plot:card" });
+  const PL_GROUP: SelectorGroup = { ref: plRef, members: [cardM("c1", "Break-in"), cardM("c2", "Getaway")] };
+
+  it("check then uncheck returns to empty — the container is not duplicated (regression)", () => {
+    const checked = toggleSelectorGroup([], PL_GROUP);
+    expect(checked).toEqual([plRef]);
+    const unchecked = toggleSelectorGroup(checked, PL_GROUP);
+    expect(unchecked).toEqual([]); // NOT [plRef, plRef]
+  });
+
+  it("absorbing drops explicit card members it covers, keeping one selector ref", () => {
+    expect(toggleSelectorGroup([cardM("c1", "Break-in")], PL_GROUP)).toEqual([plRef]);
+  });
+
+  it("splitting on an implied card freezes the other cards as explicit refs", () => {
+    const next = toggleSelectorMember([plRef], PL_GROUP, cardM("c1", "Break-in"));
+    expect(next.some((r) => r.selector)).toBe(false);
+    expect(next.map((r) => r.id)).toEqual(["c2"]);
+  });
+
+  it("memberCountForRef reports the plotline's live card count, null for a card member", () => {
+    expect(memberCountForRef([PL_GROUP], plRef)).toBe(2);
+    // A concrete card ref shares kind "plot" but carries no selector → not a selector.
+    expect(memberCountForRef([PL_GROUP], cardM("c1", "Break-in"))).toBeNull();
+  });
+});

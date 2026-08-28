@@ -154,6 +154,35 @@ describe("NodePicker plot source — plotline containers (ADR-0074 slice 6)", ()
     expect(detail.value[0].selector).toMatchObject({ kind: "plot" });
   });
 
+  it("unchecking a picked plotline removes it, does not duplicate it (regression)", async () => {
+    const onChange = vi.fn();
+    cardEntriesStore.set([plotCard("c1", "Break-in", "p1"), plotCard("c2", "Getaway", "p1")]);
+    const spec = {
+      kind: "plot",
+      expr: { intersect: [{ type: "plot:card" }, { field: { key: "plotline", op: "overlap", value: "p1" } }] },
+    };
+    render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "plot", expr: { type: "plot:plotline" } }], multiple: true },
+        plotEntries: [plotline("p1", "The Heist")],
+        // Already picked as a live selector — a kind-based isSel misread this and
+        // re-absorbed on the next click, appending a duplicate.
+        value: [{ id: "plotline:p1", kind: "plot", title: "The Heist", entry_type: "plot:plotline", selector: spec }] as never,
+        affordance: "add",
+        onChange,
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+
+    const plot = (await screen.findAllByRole("group", { name: "Plotlines" }))[0];
+    await fireEvent.click(within(plot).getByText("The Heist").closest("button")!);
+    await tick();
+
+    const [detail] = onChange.mock.calls[0];
+    expect(detail.value).toEqual([]);
+  });
+
   it("drilling in and checking a card stores that explicit (ungated) card ref", async () => {
     const onChange = vi.fn();
     cardEntriesStore.set([plotCard("c1", "Break-in", "p1"), plotCard("c2", "Getaway", "p1")]);

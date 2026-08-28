@@ -14,7 +14,7 @@ export type PickState = "on" | "implied" | "indeterminate" | "off";
 
 /** A selector and its current live members (evaluated by the caller). */
 export interface SelectorGroup {
-  ref: NodePickerRef; // kind "view"/"tag", carries `selector`
+  ref: NodePickerRef; // a selector ref (tag / saved view / plotline) — carries `selector`
   members: NodePickerRef[];
 }
 
@@ -35,8 +35,12 @@ export interface SelectorRow {
   count: number | null;
 }
 
+// A selector ref carries an inline `selector` spec (tag / saved view / plotline);
+// a concrete member does not. Presence-based, matching pickerSelectors.isSelectorRef
+// — so a plotline (kind "plot") is recognized as a selector like tags/views
+// (ADR-0074 slice 6), not misread as a concrete member.
 function isSel(r: NodePickerRef): boolean {
-  return r.kind === "tag" || r.kind === "view";
+  return r.selector != null;
 }
 function sameKind(a: NodePickerRef, b: NodePickerRef): boolean {
   return a.kind === b.kind && a.id === b.id;
@@ -158,9 +162,10 @@ export function flattenSelectors(
 }
 
 /** The member count shown on a picked selector's chip, or null for a non-selector
- * ref. Uses the group's current live member count. */
+ * ref. Uses the group's current live member count. Selector-presence based, so a
+ * plotline chip shows its card count too (ADR-0074 slice 6). */
 export function memberCountForRef(groups: SelectorGroup[], ref: NodePickerRef): number | null {
-  if (ref.kind !== "tag" && ref.kind !== "view") return null;
+  if (ref.selector == null) return null;
   const g = groups.find((x) => x.ref.kind === ref.kind && x.ref.id === ref.id);
   return g ? g.members.length : null;
 }

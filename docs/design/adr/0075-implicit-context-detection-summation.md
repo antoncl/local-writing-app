@@ -206,8 +206,8 @@ session" action) — **visible** auto-injection is fine; hidden is what scares.
 ## 7. Current implementation gap (stated, not hidden)
 
 The design above is the decided target. The send-time pipeline was built
-incrementally and **has not reached it**. As of `fd03deac`, backend detection
-scans only:
+incrementally. Two of its three gaps are now closed (slices 1–2, below); the
+**remaining gap is surface coverage** — backend detection still scans only:
 
 - the **chat composer message** on a chat send (`expand_context`,
   `services/ai/context_expander.py`), and
@@ -219,22 +219,27 @@ highlight's promise (§1) is currently only partly kept, which is the live defec
 `snapshots-and-the-witness.md` §4 names and #447's "why it matters" section
 describes.
 
-There is a **second axis to the gap: the backend matcher is not the §3
-algorithm.** `_alias_match` is a per-entry word-**set membership** test (does any
-of this entry's names appear as a word?), not the positional longest-match
-regex-OR the frontend runs. So it resolves no overlaps and does not honor maximal
-munch: for entities "Bob" and "Bob Smith" over "…Bob Smith", the frontend detects
-only **Bob Smith** while the backend returns **both** — a silent FE/BE divergence
-today. (It also uses standard `\b`, not the apostrophe-aware boundary.) Converging
-the backend onto the §3 spec — a positional regex-OR whose hit set feeds the same
-journal — is part of the authorized work, and the §5 parity gate is what proves
-the convergence rather than trading one silent disagreement for another.
+The **second axis — the backend matcher was not the §3 algorithm — is now
+closed** (slice 1, #1486). `_alias_match` previously did a per-entry word-**set
+membership** test (no overlap resolution, no maximal munch: "Bob" and "Bob Smith"
+over "…Bob Smith" returned **both**, and it used standard `\b`). It now delegates
+to a positional longest-match regex-OR (`services/ai/name_matcher.py`) that
+mirrors the frontend, apostrophe-aware boundary and all, whose hit set feeds the
+same journal. The §5 parity gate proves the convergence rather than trading one
+silent disagreement for another.
 
-Two of the §3 rules are also **not yet implemented on either side**: the frontend
-today *blocks* the possessive (its boundary rejects "Bob" before "'s") and neither
-side unifies space with hyphen. So the possessive and space≡hyphen rules land as a
-lockstep change in both matchers, gated by the same corpus — new behavior, decided
-here, not a description of the current code.
+Two of the §3 rules were **new behavior on both sides** — the frontend used to
+*block* the possessive (its boundary rejected "Bob" before "'s") and neither side
+unified space with hyphen. They **landed as a lockstep change in both matchers**,
+gated by the same corpus, in slice 2 (#1490); the corpus's possessive,
+space≡hyphen, and deterministic-tie-break rows are the standing guard. Case
+folding stays IGNORECASE-based: common accented letters (é/É) fold identically
+across Python and JS, while the rare fold-divergent characters (Greek final sigma
+ς/σ, Turkish İ/ı, ß/ẞ) are an accepted known limitation, not guaranteed identical.
+The `[\s-]+` separator class carries the same caveat: ordinary whitespace and
+non-breaking spaces are treated identically on both sides, but the engines' `\s`
+sets differ on a few exotic characters (e.g. U+FEFF), so a name split by one of
+those is a matching corner both sides are not guaranteed to agree on.
 
 **This ADR authorizes closing that gap** — completing the backend surface
 coverage to §2, behind the §5 parity gate — as follow-up implementation slices.

@@ -488,6 +488,8 @@ describe("NodePicker tag selectors (#1491)", () => {
     const menu = await openMenu();
     const tags = (await within(menu).findAllByRole("group", { name: "Tags" }))[0];
     expect(within(tags).getByText("villain")).toBeInTheDocument();
+    // The count pluralizes correctly — "matches", not the old "matchs" (slice 7a).
+    expect(within(tags).getByText("2 matches")).toBeInTheDocument();
     // Drill: the villain-tagged lore are its members.
     expect(within(tags).getByText("Vex")).toBeInTheDocument();
     expect(within(tags).getByText("Nok")).toBeInTheDocument();

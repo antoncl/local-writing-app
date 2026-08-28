@@ -62,9 +62,7 @@
   import { portalToBody } from "@/lib/actions/portal";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import NodeList from "@/components/widgets/NodeList.svelte";
-  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
-  import CountPill from "@/components/widgets/CountPill.svelte";
-  import PickTree, { type PickTreeRow } from "@/components/widgets/PickTree.svelte";
+  import PickTree, { type PickTreeRow, type PickTreeState } from "@/components/widgets/PickTree.svelte";
 
   // The resolved kind/sub-type hex for a ref, or null — fed to NodeRow's
   // `stripeColor` so a candidate row carries the one curved stripe (ADR-0068:
@@ -492,8 +490,16 @@
     }
   }
 
+  // The curved kind stripe for a tree row (ADR-0066): resolved from its
+  // entry_type (kind derived from the `kind:key` prefix). A type with no colour
+  // (e.g. structural manuscript) yields null — no stripe, correctly.
+  function stripeForType(entryType?: string | null): string | null {
+    if (!entryType) return null;
+    return hexForRef({ kind: entryType.split(":")[0], entry_type: entryType });
+  }
+
   // Normalize each tri-state source to PickTree rows with bound handlers, so the
-  // shared PickTree renders manuscript, saved views, and tags uniformly.
+  // shared PickTree renders every source uniformly (NodeRow + PickCheck + stripe).
   const manuscriptTreeRows = $derived<PickTreeRow[]>(
     manuscriptRows.map((row) => ({
       key: row.id,
@@ -503,6 +509,7 @@
       isContainer: !row.isScene,
       state: row.state,
       title: row.title,
+      stripeColor: stripeForType(row.type),
       count: row.isScene ? null : row.sceneCount,
       countNoun: "scene",
       onToggle: () => toggleManuscriptPick(row.id),
@@ -514,6 +521,7 @@
     groups: SelectorGroup[],
     onCollapse: (id: string) => void,
     countNoun: string,
+    countNounPlural?: string,
   ): PickTreeRow[] {
     return rows.map((row) => ({
       key: row.key,
@@ -523,14 +531,16 @@
       isContainer: row.isSelector,
       state: row.state,
       title: row.title,
+      stripeColor: stripeForType(row.entryType),
       count: row.isSelector ? row.count : null,
       countNoun,
+      countNounPlural,
       onToggle: () => toggleSelectorRow(row, groups),
       onCollapse: () => onCollapse(row.id),
     }));
   }
   const viewTreeRows = $derived(selectorTreeRows(viewRows, viewGroups, toggleViewCollapse, "item"));
-  const tagTreeRows = $derived(selectorTreeRows(tagRows, tagGroups, toggleTagCollapse, "match"));
+  const tagTreeRows = $derived(selectorTreeRows(tagRows, tagGroups, toggleTagCollapse, "match", "matches"));
   const plotlineTreeRows = $derived(selectorTreeRows(plotlineRows, plotlineGroups, togglePlotlineCollapse, "card"));
 
   // Flatten the research tree's notes (leaves) into a searchable list.
@@ -749,18 +759,46 @@
     return itemCount <= collapseThreshold;
   }
 
-  // Per-group open state. Native <details> gave this for free; composing
-  // NodeRow group headers means tracking it. Default follows
-  // groupOpenByDefault (all open while searching, else collapsed past the
-  // threshold); an explicit user toggle overrides that default. Search
-  // always wins (every surviving group opens), matching the old behaviour.
-  let openOverride = $state<Record<string, boolean>>({});
-  function isGroupOpen(group: { id: string; items: unknown[] }): boolean {
-    if (isSearchActive(search)) return true;
-    return openOverride[group.id] ?? groupOpenByDefault(group.items.length, false);
+  // Every source, normalized to one labelled PickTree section (ADR-0074 slice 7a):
+  // the tri-state trees AND the flat kind lists, so the whole menu renders through
+  // one NodeRow-based substrate instead of two divergent ones.
+  function flatGroupToRows(items: NodePickerRef[]): PickTreeRow[] {
+    return items.map((ref) => ({
+      key: `${ref.kind}:${ref.id}`,
+      depth: 0,
+      hasChildren: false,
+      collapsed: false,
+      isContainer: false,
+      state: (isPicked(ref) ? "on" : "off") as PickTreeState,
+      title: ref.title,
+      stripeColor: hexForRef(ref),
+      count: null,
+      countNoun: "",
+      onToggle: () => togglePick(ref),
+      onCollapse: () => {},
+    }));
   }
-  function toggleGroup(group: { id: string; items: unknown[] }): void {
-    openOverride[group.id] = !isGroupOpen(group);
+  type PickSection = { id: string; label: string; rows: PickTreeRow[] };
+  const sections = $derived.by<PickSection[]>(() => {
+    const out: PickSection[] = [];
+    if (manuscriptTreeRows.length > 0) out.push({ id: "manuscript", label: "Manuscript", rows: manuscriptTreeRows });
+    if (plotlineTreeRows.length > 0) out.push({ id: "plotlines", label: "Plotlines", rows: plotlineTreeRows });
+    for (const g of visibleGroups) out.push({ id: g.id, label: g.label, rows: flatGroupToRows(g.items) });
+    if (tagTreeRows.length > 0) out.push({ id: "tags", label: "Tags", rows: tagTreeRows });
+    if (viewTreeRows.length > 0) out.push({ id: "views", label: "Saved views", rows: viewTreeRows });
+    return out;
+  });
+
+  // Section collapse — one map across every section (was the per-flat-group
+  // openOverride). Search expands all; otherwise a heavy section collapses by the
+  // kind threshold, an explicit toggle overriding that default.
+  let collapsedSectionOverride = $state<Record<string, boolean>>({});
+  function sectionCollapsed(id: string, rowCount: number): boolean {
+    if (isSearchActive(search)) return false;
+    return collapsedSectionOverride[id] ?? !groupOpenByDefault(rowCount, false);
+  }
+  function toggleSection(id: string, rowCount: number): void {
+    collapsedSectionOverride[id] = !sectionCollapsed(id, rowCount);
   }
 </script>
 
@@ -895,66 +933,19 @@
             </div>
           {/if}
         {:else}
-          <!-- Manuscript tri-state tree (slice 4b) and saved-view selectors
-               (slice 5) render through the shared PickTree, above the flat
-               kind groups. -->
-          {#if manuscriptTreeRows.length > 0}
-            <PickTree rows={manuscriptTreeRows} ariaLabel="Manuscript" />
-          {/if}
-          {#if plotlineTreeRows.length > 0}
-            <PickTree rows={plotlineTreeRows} ariaLabel="Plotlines" />
-          {/if}
-          {#if viewTreeRows.length > 0}
-            <PickTree rows={viewTreeRows} ariaLabel="Saved views" />
-          {/if}
-          {#if tagTreeRows.length > 0}
-            <PickTree rows={tagTreeRows} ariaLabel="Tags" />
-          {/if}
-
-          <!-- ADR-0068: candidates compose NodeRow/NodeList. Each kind is a
-               groupHeader NodeRow (caret + count) over a nested list of
-               stripe-coloured candidate rows; a picked row shows a ✓ and stays
-               clickable to toggle off (ADR-0074 #1464). -->
-          <NodeList mode="tree" density={compact ? "dense" : "compact"}>
-            {#each visibleGroups as group (group.id)}
-              <NodeRow
-                title={group.label}
-                groupHeader
-                collapsed={!isGroupOpen(group)}
-                onClick={() => toggleGroup(group)}
-              >
-                {#snippet leading()}
-                  <GroupCaret collapsed={!isGroupOpen(group)} />
-                {/snippet}
-                {#snippet trailing()}
-                  <CountPill count={group.items.length} />
-                {/snippet}
-                {#snippet nested()}
-                  <NodeList mode="tree" density={compact ? "dense" : "compact"}>
-                    {#each group.items as ref (ref.id + ":" + ref.kind)}
-                      {@const picked = isPicked(ref)}
-                      <NodeRow
-                        title={ref.title}
-                        stripeColor={hexForRef(ref)}
-                        clickable={true}
-                        onClick={() => togglePick(ref)}
-                      >
-                        {#snippet trailing()}
-                          {#if picked}
-                            <!-- Visible ✓ is the toggle cue; the sr-only word
-                                 carries the meaning (aria-label on a role-less
-                                 span is unreliably announced). -->
-                            <span class="ctx-picked" aria-hidden="true">✓</span>
-                            <span class="sr-only">Picked</span>
-                          {/if}
-                        {/snippet}
-                      </NodeRow>
-                    {/each}
-                  </NodeList>
-                {/snippet}
-              </NodeRow>
-            {/each}
-          </NodeList>
+          <!-- Every source renders through one PickTree section (ADR-0074 slice
+               7a): the tri-state trees (manuscript / plotlines / tags / saved
+               views) AND the flat kind lists (lore / snippets / research /
+               assistants), one labelled, collapsible section each, all on the
+               NodeRow substrate — stripe + leading PickCheck + one caret. -->
+          {#each sections as section (section.id)}
+            <PickTree
+              rows={section.rows}
+              ariaLabel={section.label}
+              collapsed={sectionCollapsed(section.id, section.rows.length)}
+              onToggleSection={() => toggleSection(section.id, section.rows.length)}
+            />
+          {/each}
         {/if}
       </div>
     {/if}
@@ -1187,19 +1178,9 @@
     color: var(--text);
   }
 
-  /* Candidates now compose NodeRow/NodeList (ADR-0068); the group bars,
-     item buttons, monogram tiles, and highlight <mark> styles are gone.
-     The one picker-local row style left is the picked-candidate check —
-     a toggle cue, not the old inert "✓ Added" badge (ADR-0074 #1464). The
-     row itself stays clickable; this ✓ marks it on. */
-  .ctx-picked {
-    flex: none;
-    font-size: var(--fs-sm);
-    font-weight: 700;
-    color: var(--accent-emphasis);
-    line-height: 1;
-    white-space: nowrap;
-  }
+  /* Every candidate row now renders through PickTree → NodeRow (ADR-0074 slice
+     7a): stripe + a leading PickCheck. The old trailing "✓ picked" cue and the
+     bespoke group bars are gone. */
 
   /* Live descendant-scene / member count on a picked container chip. The tree
      rows' own count badge lives in PickTree.svelte. */

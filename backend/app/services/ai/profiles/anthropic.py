@@ -202,17 +202,29 @@ class AnthropicProfile(ProviderProfile):
         return kwargs
 
     def _apply_thinking(self, kwargs: dict, call: ChatCall) -> None:
-        """Enable extended thinking on the streaming request when the caller
-        asked for it and the budget fits under `max_tokens`. Anthropic requires
-        temperature=1 alongside thinking — but only on models that still accept
-        the parameter at all.
+        """Enable extended thinking on the streaming request, picking the mode the
+        model's API generation accepts.
+
+        The same 4.7+/5 families that dropped sampling (`_NO_TEMPERATURE_PREFIXES`)
+        also dropped the fixed-budget thinking mode: on them a
+        `{"type": "enabled", "budget_tokens": N}` request is rejected with a 400,
+        and adaptive thinking (the model paces its own depth) is the only on-mode.
+        4.6 and older still take — in fact require, on 4.5/Haiku — the fixed budget,
+        alongside the temperature=1 those models want when thinking is on. So the
+        temperature gate doubles as the thinking-mode gate.
         """
-        budget = max(1024, min(_ANTHROPIC_THINKING_BUDGET, call.max_tokens - 256))
-        if budget < 1024:
-            return
-        kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
         if anthropic_supports_temperature(call.model):
+            # 4.6 and older: fixed-budget extended thinking + temperature=1.
+            budget = max(1024, min(_ANTHROPIC_THINKING_BUDGET, call.max_tokens - 256))
+            if budget < 1024:
+                return
+            kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
             _set_temperature(kwargs, 1.0)
+        else:
+            # 4.7+/5: enabled+budget_tokens AND temperature both 400. Adaptive is
+            # the only on-mode. Ask for a summary so the app's thinking surface
+            # shows reasoning instead of a silent pause (default here is "omitted").
+            kwargs["thinking"] = {"type": "adaptive", "display": "summarized"}
 
     def chat(self, call: ChatCall) -> ChatOutcome:
         try:

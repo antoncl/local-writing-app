@@ -64,6 +64,7 @@
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import NodeList from "@/components/widgets/NodeList.svelte";
   import PickTree, { type PickTreeRow, type PickTreeState } from "@/components/widgets/PickTree.svelte";
+  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
 
   // The resolved kind/sub-type hex for a ref, or null — fed to NodeRow's
   // `stripeColor` so a candidate row carries the one curved stripe (ADR-0068:
@@ -1076,7 +1077,7 @@
                 <button type="button" class="ctx-axis-row" onclick={() => drillInto(ax.id)}>
                   <span class="ctx-axis-name">{ax.label}</span>
                   <span class="ctx-axis-count">{ax.count}</span>
-                  <span class="ctx-axis-chev" aria-hidden="true">▸</span>
+                  <GroupCaret size="xs" collapsed />
                 </button>
               {/each}
             {:else}
@@ -1329,10 +1330,6 @@
     font-size: var(--fs-sm);
     color: var(--text-3);
     font-variant-numeric: tabular-nums;
-  }
-  .ctx-axis-chev {
-    flex: none;
-    color: var(--accent);
   }
   .ctx-result-head {
     font-family: var(--serif);

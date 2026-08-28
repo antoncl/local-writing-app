@@ -11,6 +11,7 @@
   // caller owns the Popover shell (role="menu", dismiss, Escape-to-close at root).
   import type { MenuNode } from "@/lib/editor-core/promptMenuTree";
   import type { PromptEntrySummary } from "@/lib/types";
+  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
 
   let {
     nodes,
@@ -112,7 +113,7 @@
     onkeydown={(event) => onItemKeydown(event, node)}
   >
     <span class="pm-label">{node.label}</span>
-    {#if node.children.length > 0}<span class="pm-caret" aria-hidden="true">›</span>{/if}
+    {#if node.children.length > 0}<GroupCaret size="xs" collapsed />{/if}
   </button>
 {/each}
 
@@ -144,12 +145,6 @@
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
-  }
-
-  /* The drill-in affordance — a quiet chevron, right-aligned. */
-  .pm-caret {
-    flex: none;
-    color: var(--text-3);
   }
 
   .pm-back {

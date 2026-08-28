@@ -63,6 +63,7 @@
   import SelectOptionsEditor from "@/components/schema/SelectOptionsEditor.svelte";
   import DefaultValueEditor from "@/components/schema/DefaultValueEditor.svelte";
   import ToggleSwitch from "@/components/widgets/ToggleSwitch.svelte";
+  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import {
     DEFAULT_FIELD_GLYPH,
     FIELD_TYPE_CHOICES,
@@ -378,7 +379,7 @@
       >
         <i class={`ti ti-${DEFAULT_FIELD_GLYPH[type] ?? "letter-case"}`} aria-hidden="true"></i>
         <span class="sfi-type-chip-label">{fieldTypeLabel(type)}</span>
-        <i class="ti ti-chevron-down sfi-type-chip-caret" aria-hidden="true"></i>
+        <GroupCaret size="xs" />
       </button>
       {#if typeMenuOpen}
         <div class="sfi-type-grid" class:up={typeFlipUp} role="listbox" aria-label="Field type">
@@ -666,10 +667,6 @@
   }
   .sfi-type-chip-label {
     font-weight: 500;
-  }
-  .sfi-type-chip-caret {
-    font-size: var(--fs-md);
-    opacity: 0.6;
   }
   .sfi-type-grid {
     position: absolute;

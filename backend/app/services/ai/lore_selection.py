@@ -19,7 +19,11 @@ from app.services.ai.helpers import (
     _safe_read_node,
     _scene_id_of,
 )
-from app.services.ai.name_matcher import compile_name_matcher, scan_name_matcher
+from app.services.ai.name_matcher import (
+    CompiledNameMatcher,
+    compile_name_matcher,
+    scan_name_matcher,
+)
 from app.services.ai.sessions import AISession
 
 if TYPE_CHECKING:
@@ -115,12 +119,17 @@ def _implicit_lore_ids(
     # Always-included entries (context_policy = "always") feed every implicit
     # render regardless of mention.
     found = set(direct) | _always_included_lore_ids(project)
+    matcher: CompiledNameMatcher | None = None
     if journal is None:
         # No chat-session journal — helper is the producer of detected context
-        # (one-shot generates, preview, tests). Run the textual scan on the
+        # (one-shot generates, preview, tests). Built once here and threaded
+        # through both the prose scan and the textual one-hop below — the
+        # lore set is fixed for this one detection pass, so there's no need
+        # to recompile the matcher per surface. Run the textual scan on the
         # scene's own prose surface: body + every long_text field (ADR-0075
         # slice 3) — a superset of the old summary-only scan.
-        found |= _scene_prose_ids(project, scene)
+        matcher = _build_scene_matcher(project, scene)
+        found |= _scene_prose_ids(project, scene, matcher=matcher)
     else:
         # Chat-session use: the send-time context expander has already populated
         # the journal with textual detections (incl. depth-1). Trust it.
@@ -147,7 +156,7 @@ def _implicit_lore_ids(
     # Textual depth-1 only runs when the journal is absent; otherwise the
     # journal already carries those expansions.
     if journal is None:
-        expanded |= _textual_one_hop(project, found, scene=scene)
+        expanded |= _textual_one_hop(project, found, scene=scene, matcher=matcher)
     return expanded
 
 
@@ -206,10 +215,13 @@ def _snapshot_revisions(
         session.snapshot(entry_id, revision)
 
 
-def _alias_match(project: ProjectService, text: str, scene: Any = None) -> set[str]:
-    """Return lore IDs whose title or aliases appear in `text`, via the pure
-    positional matcher (`compile_name_matcher` / `scan_name_matcher`) — the
-    §3 regex-OR that mirrors `implicitContextMatcher.ts`.
+def _build_scene_matcher(project: ProjectService, scene: Any = None) -> CompiledNameMatcher:
+    """Compile the `auto`-policy name matcher for `scene` — the same name-set
+    `_alias_match` used to build inline on every call. The lore set is fixed
+    within one detection pass, so callers that scan more than one text (a
+    scene's several prose fields, the composer + rendered prompt + scene
+    prose + depth-1 hop in `expand_context`) should build this ONCE and reuse
+    it via `_scan_matcher_ids`, instead of recompiling per text.
 
     Honors `context_policy`: entries marked `manual_only` or `never` are
     skipped here — the matcher only ever pulls in `auto` (default) entries.
@@ -223,7 +235,7 @@ def _alias_match(project: ProjectService, text: str, scene: Any = None) -> set[s
     try:
         listing = project.list_lore_entries()
     except Exception:
-        return set()
+        return compile_name_matcher([])
     effective = _effective_name_map(project, scene)
     ordered_entries: list[tuple[str, list[str]]] = []
     for summary in listing.entries:
@@ -234,8 +246,28 @@ def _alias_match(project: ProjectService, text: str, scene: Any = None) -> set[s
             continue
         candidates = _entry_name_candidates(summary, entry_id, effective)
         ordered_entries.append((entry_id, candidates))
-    matcher = compile_name_matcher(ordered_entries)
+    return compile_name_matcher(ordered_entries)
+
+
+def _scan_matcher_ids(matcher: CompiledNameMatcher, text: str) -> set[str]:
+    """Scan `text` against a pre-built `matcher`, returning the matched entry
+    ids. The per-text half of the compile-once/scan-many split — pair with
+    `_build_scene_matcher`."""
+    if not isinstance(text, str) or not text:
+        return set()
     return {hit.entry_id for hit in scan_name_matcher(matcher, text)}
+
+
+def _alias_match(project: ProjectService, text: str, scene: Any = None) -> set[str]:
+    """Return lore IDs whose title or aliases appear in `text`, via the pure
+    positional matcher (`compile_name_matcher` / `scan_name_matcher`) — the
+    §3 regex-OR that mirrors `implicitContextMatcher.ts`.
+
+    Thin wrapper over `_build_scene_matcher` + `_scan_matcher_ids` for
+    standalone/single-text callers and tests. Callers scanning more than one
+    text against the same scene's lore set should build the matcher once and
+    call `_scan_matcher_ids` directly instead."""
+    return _scan_matcher_ids(_build_scene_matcher(project, scene), text)
 
 
 def _effective_name_map(project: ProjectService, scene: Any) -> dict[str, list[str]]:
@@ -308,7 +340,10 @@ def _lore_ids_with_policy(project: ProjectService, policy: str) -> set[str]:
 
 
 def _textual_one_hop(
-    project: ProjectService, entry_ids: set[str], scene: Any = None
+    project: ProjectService,
+    entry_ids: set[str],
+    scene: Any = None,
+    matcher: CompiledNameMatcher | None = None,
 ) -> set[str]:
     """Scan the body of each given entry for further textual name matches.
 
@@ -317,6 +352,10 @@ def _textual_one_hop(
     explicit entity_ref linking them. Bodies of newly-discovered entries
     are NOT rescanned — depth strictly 1 — which prevents cascade
     explosions on richly cross-referenced lore.
+
+    `matcher` lets a caller that already built the scene's matcher (e.g.
+    `expand_context`, which scans several surfaces in one detection pass)
+    pass it in and skip recompiling; when omitted, one is built here.
 
     Returns all matches found in the scanned bodies, including the source
     entries themselves when their body mentions their own name; callers
@@ -332,11 +371,16 @@ def _textual_one_hop(
             bodies.append(body)
     if not bodies:
         return set()
-    return _alias_match(project, "\n".join(bodies), scene=scene)
+    if matcher is None:
+        matcher = _build_scene_matcher(project, scene)
+    return _scan_matcher_ids(matcher, "\n".join(bodies))
 
 
 def _scene_prose_ids(
-    project: ProjectService, scene: Any, schema: Any = None
+    project: ProjectService,
+    scene: Any,
+    schema: Any = None,
+    matcher: CompiledNameMatcher | None = None,
 ) -> set[str]:
     """The lore ids textually detected in `scene`'s own prose surface — its
     **body** plus the value of every `long_text` field on its entry_type
@@ -345,12 +389,16 @@ def _scene_prose_ids(
     definition of "the scene's own detection surface", used by both the
     one-shot/preview path and the chat send path so they can't drift.
 
-    Each text is scanned SEPARATELY through `_alias_match` and the id sets are
-    UNIONED — never concatenated — so a multi-word name can't false-match
-    across a field/body boundary (body ending "...Bob" + a field starting
-    "Smith..." must not detect "Bob Smith"). `_alias_match` is the one
-    parity-gated matcher entry point, so this already honors `context_policy`
-    (auto-only) and effective names as-of `scene`.
+    Each text is scanned SEPARATELY and the id sets are UNIONED — never
+    concatenated — so a multi-word name can't false-match across a
+    field/body boundary (body ending "...Bob" + a field starting "Smith..."
+    must not detect "Bob Smith"). The scan honors `context_policy`
+    (auto-only) and effective names as-of `scene` via `_build_scene_matcher`
+    — the same matcher `_alias_match` used to build per-call.
+
+    `matcher` lets a caller that already built the scene's matcher pass it
+    in and skip recompiling; when omitted (the default), one is built here —
+    once for this call, still shared across all of this scene's fields.
     """
     if scene is None:
         return set()
@@ -369,7 +417,11 @@ def _scene_prose_ids(
         value = _get_field(scene, field_id)
         if isinstance(value, str) and value.strip():
             texts.append(value)
+    if not texts:
+        return set()
+    if matcher is None:
+        matcher = _build_scene_matcher(project, scene)
     found: set[str] = set()
     for text in texts:
-        found |= _alias_match(project, text, scene=scene)
+        found |= _scan_matcher_ids(matcher, text)
     return found

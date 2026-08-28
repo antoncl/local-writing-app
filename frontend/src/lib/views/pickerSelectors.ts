@@ -125,7 +125,10 @@ export function expandSelectorRefs(refs: NodePickerRef[], roster: SelectorRoster
 
 // One report per distinct anomaly per session (see below). A debounced estimate
 // re-expands on every keystroke, so a single broken selector must not flood
-// `errors.log` — deduping on the message keeps it to one durable signal.
+// `errors.log` — deduping on the message keeps it to one durable signal. The
+// trade-off is deliberate: an anomaly that recurs after being fixed within the
+// same session is not re-logged (once-ever, never reset). A distinct selector
+// still logs distinctly — the message embeds the ref id.
 const reportedSelectorAnomalies = new Set<string>();
 
 /** The wire seam: expand any selectors in an encoded context_pick value, leaving

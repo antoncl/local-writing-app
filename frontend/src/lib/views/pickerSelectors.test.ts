@@ -231,4 +231,19 @@ describe("selectorExpansionAnomaly + send-time logging", () => {
     expandSelectorsInEncodedValue(draft, noLore);
     expect(reportClientError).toHaveBeenCalledTimes(1);
   });
+
+  it("does NOT log a legitimately empty selector (roster present, matches nothing)", () => {
+    vi.mocked(reportClientError).mockClear();
+    // A tag that matches no lore, over a PRESENT lore roster — an ordinary empty
+    // result, not an anomaly. Must stay silent or every zero-match tag spams the log.
+    const ghost: NodePickerRef = {
+      id: "tag:lore:ghost-nolog",
+      kind: "tag",
+      title: "ghost",
+      selector: { kind: "lore", expr: { tagged: "ghost-nolog" } } as ViewSpec,
+    };
+    const wire = expandSelectorsInEncodedValue(encodePickerValue([ghost]), ROSTER);
+    expect(JSON.parse(wire)).toEqual([]);
+    expect(reportClientError).not.toHaveBeenCalled();
+  });
 });

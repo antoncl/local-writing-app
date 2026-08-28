@@ -29,6 +29,7 @@
     type PromptResolutionContext,
   } from "@/lib/editor-core/promptResolution";
   import { coerceInputValue, isInputMissing } from "@/lib/utils/promptInputs";
+  import { buildSelectorRoster, expandSelectorsInEncodedValue } from "@/lib/views/pickerSelectors";
   import PlainTextEditor from "@/components/widgets/PlainTextEditor.svelte";
   import ChatTranscript from "@/components/editor/body/chat/ChatTranscript.svelte";
   import ChatInputsStrip from "@/components/editor/body/chat/ChatInputsStrip.svelte";
@@ -676,7 +677,9 @@
     const inputs: Record<string, unknown> = {};
     for (const input of effectivePromptInputs(entry)) {
       const raw = chatInputDrafts[input.name] ?? "";
-      const coerced = coerceInputValue(raw, input.type);
+      let coerced = coerceInputValue(raw, input.type);
+      if (input.type === "context_pick")
+        coerced = expandSelectorsInEncodedValue(coerced as string, selectorRoster);
       if (coerced !== null && coerced !== "") inputs[input.name] = coerced;
     }
     try {
@@ -762,7 +765,9 @@
     const inputs: Record<string, unknown> = {};
     for (const declared of effectivePromptInputs(entry)) {
       const raw = chatInputDrafts[declared.name] ?? "";
-      const coerced = coerceInputValue(raw, declared.type);
+      let coerced = coerceInputValue(raw, declared.type);
+      if (declared.type === "context_pick")
+        coerced = expandSelectorsInEncodedValue(coerced as string, selectorRoster);
       if (coerced !== null && coerced !== "") inputs[declared.name] = coerced;
     }
     try {
@@ -810,6 +815,11 @@
   }
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
   let metadataSchema = $derived($metadataSchemaStore);
+  // The roster a context_pick SELECTOR (tag/saved view) evaluates against at
+  // invocation (ADR-0074 slice 5). Built from what this surface has in scope.
+  let selectorRoster = $derived(
+    buildSelectorRoster({ schema: metadataSchema, structure, loreEntries, assistantEntries }),
+  );
   // Discovery context for the chat "Pick a prompt" list. Routing through the
   // shared promptEntriesForSurface seam (#682) drops this project's hidden
   // Library prompts and retires the duplicated inline output.kind filter.

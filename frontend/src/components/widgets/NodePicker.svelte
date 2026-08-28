@@ -393,7 +393,7 @@
   // schema when known; fall back to a sensible singular for the kind.
   // Fixes the inverted-affordance bug where `character` chips read the
   // same as bare `lore` chips because entry_type was missing.
-  const KIND_LABEL_SINGULAR: Record<Category | "preset", string> = {
+  const KIND_LABEL_SINGULAR: Record<NodePickerRef["kind"], string> = {
     manuscript: "Scene",
     lore: "Lore",
     research: "Note",
@@ -401,6 +401,10 @@
     assistant: "Assistant",
     plot: "Plotline",
     preset: "Preset",
+    // Selector refs (ADR-0074 slice 5); the runtime UI arrives with the Saved
+    // Views / Tags sections, but the chip label must resolve now.
+    tag: "Tag",
+    view: "View",
   };
 
   // Manuscript container refs (ADR-0074 slice 4b) carry a structural type the

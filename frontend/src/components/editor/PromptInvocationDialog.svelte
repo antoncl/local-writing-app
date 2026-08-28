@@ -21,6 +21,7 @@
     type PromptResolutionContext,
   } from "@/lib/editor-core/promptResolution";
   import { coerceInputValue, isInputMissing } from "@/lib/utils/promptInputs";
+  import { buildSelectorRoster, expandSelectorsInEncodedValue } from "@/lib/views/pickerSelectors";
   import { api } from "@/lib/api";
   import type {
     AssistantEntrySummary,
@@ -58,6 +59,11 @@
   }: Props = $props();
 
   const metadataSchema = $derived($metadataSchemaStore);
+  // Roster a context_pick selector (tag/saved view) expands against at invocation
+  // (ADR-0074 slice 5).
+  const selectorRoster = $derived(
+    buildSelectorRoster({ schema: metadataSchema, structure, loreEntries, assistantEntries }),
+  );
   // Minimal context for promptEntryDescription (reads metadataSchema only).
   const descCtx = $derived<PromptResolutionContext>({
     metadataSchema,
@@ -156,7 +162,9 @@
     const inputs: Record<string, unknown> = {};
     for (const input of declared) {
       const raw = drafts[input.name] ?? "";
-      const coerced = coerceInputValue(raw, input.type);
+      let coerced = coerceInputValue(raw, input.type);
+      if (input.type === "context_pick")
+        coerced = expandSelectorsInEncodedValue(coerced as string, selectorRoster);
       if (coerced !== null && coerced !== "") inputs[input.name] = coerced;
     }
     try {
@@ -207,7 +215,9 @@
     const values: Record<string, unknown> = {};
     for (const input of declared) {
       const raw = drafts[input.name] ?? "";
-      const coerced = coerceInputValue(raw, input.type);
+      let coerced = coerceInputValue(raw, input.type);
+      if (input.type === "context_pick")
+        coerced = expandSelectorsInEncodedValue(coerced as string, selectorRoster);
       if (coerced !== null && coerced !== "") values[input.name] = coerced;
     }
     const pickedAssistantId = assistantId;

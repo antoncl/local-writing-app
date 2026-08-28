@@ -38,6 +38,7 @@
     flattenForRender,
     type SchemaNode,
   } from "./pickerTree";
+  import PickCheck from "@/components/widgets/PickCheck.svelte";
 
   interface Props {
     config: NodePickerConfig;
@@ -281,21 +282,6 @@
 
   function emit(patch: Partial<NodePickerConfig>) {
     onChange?.({ ...config, ...patch });
-  }
-
-  // Imperative indeterminate setter — Svelte's `indeterminate={...}`
-  // attribute binding has been observed to go stale when the same
-  // input element is reused across re-renders and only the
-  // indeterminate property changes (the `checked` attribute stays
-  // false either way). `use:` runs on every reactive update and
-  // forces the DOM property in lock-step.
-  function indeterminateBinding(node: HTMLInputElement, value: boolean) {
-    node.indeterminate = value;
-    return {
-      update(next: boolean) {
-        node.indeterminate = next;
-      },
-    };
   }
 
   // Schema-derived trees: stable across config edits.
@@ -600,17 +586,18 @@
                 {:else}
                   <span class="ctx-tree-chevron ctx-tree-chevron-leaf" aria-hidden="true"></span>
                 {/if}
-                <label class="ctx-tree-label" class:disabled={!item.hasLeaves || readonly}>
-                  <input
-                    class="ctx-check"
-                    type="checkbox"
-                    checked={item.state === "checked"}
-                    use:indeterminateBinding={item.state === "indeterminate"}
-                    disabled={!item.hasLeaves || readonly}
-                    onchange={() => toggleNode(kind.id, item.id)}
-                  />
+                <button
+                  type="button"
+                  class="ctx-tree-toggle"
+                  class:disabled={!item.hasLeaves || readonly}
+                  aria-pressed={item.state === "indeterminate" ? "mixed" : item.state === "checked"}
+                  aria-label={item.name}
+                  disabled={!item.hasLeaves || readonly}
+                  onclick={() => toggleNode(kind.id, item.id)}
+                >
+                  <PickCheck state={item.state === "checked" ? "on" : item.state === "indeterminate" ? "indeterminate" : "off"} />
                   <span class="ctx-tree-name" class:root={item.depth === 0}>{item.name}</span>
-                </label>
+                </button>
                 {#if item.state === "indeterminate" && item.hasChildren}
                   <span class="ctx-tree-partial-count">{item.pickedCount} of {item.totalLeaves}</span>
                 {/if}
@@ -1006,7 +993,9 @@
     color: var(--text-3);
   }
 
-  /* --- Custom checkbox (used in tree + scene-binding) -------------- */
+  /* --- Custom checkbox — the binary form toggles (Required / Multiple /
+     scene-binding). The tri-state SOURCE tree uses the shared PickCheck (ADR-0074
+     slice 7a), matching the runtime picker; these are plain settings checkboxes. */
 
   .ctx-check {
     appearance: none;
@@ -1041,23 +1030,6 @@
     background-repeat: no-repeat;
     background-position: center;
     background-size: 12px 12px;
-  }
-
-  .ctx-check:indeterminate {
-    background-color: var(--accent-soft);
-    border-color: var(--accent);
-  }
-
-  .ctx-check:indeterminate::after {
-    content: "";
-    position: absolute;
-    left: 3px;
-    right: 3px;
-    top: 50%;
-    height: 2px;
-    margin-top: -1px;
-    background: var(--accent);
-    border-radius: 1px;
   }
 
   .ctx-check:disabled {
@@ -1261,16 +1233,30 @@
     background: transparent;
   }
 
-  .ctx-tree-label {
+  .ctx-tree-toggle {
     display: inline-flex;
     align-items: center;
     gap: 8px;
     cursor: pointer;
     flex: 1;
     min-width: 0;
+    /* Button reset — the toggle carries the pick semantics (aria-pressed) with
+       the shared PickCheck as its visual, matching the runtime picker's rows. */
+    appearance: none;
+    border: none;
+    background: transparent;
+    padding: 2px 4px;
+    border-radius: var(--r-md);
+    text-align: left;
+    color: inherit;
+    font: inherit;
   }
 
-  .ctx-tree-label.disabled {
+  .ctx-tree-toggle:hover:not(.disabled) {
+    background: var(--inset);
+  }
+
+  .ctx-tree-toggle.disabled {
     cursor: not-allowed;
     opacity: 0.6;
   }

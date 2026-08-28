@@ -321,6 +321,59 @@ def test_expand_container_picks_passes_scenes_and_others_through():
     assert _expand_container_picks(stub, items) == items
 
 
+def test_container_pick_materializes_to_its_scenes_end_to_end(tmp_path, monkeypatch):
+    # ADR-0074 slice 4a+4b together: a picked manuscript CONTAINER (here an act,
+    # the shape the tri-state tree emits) reaches the template as its ordered
+    # descendant scenes — proving the frontend's container ref round-trips
+    # through the real build_preview path against a real manuscript, which the
+    # isolated 4a unit test (a stub structure) could not.
+    monkeypatch.setattr(
+        "app.services.machine_settings.config_path",
+        lambda: tmp_path / "machine_settings.yaml",
+    )
+    from app.models import CreateStructureNodeRequest
+    from app.services.ai.preview import PreviewRequest, build_preview
+    from app.services.project_service import ProjectService
+
+    service = ProjectService.created_at(tmp_path / "project", "Picks")
+    structure = service.create_structure_node(
+        CreateStructureNodeRequest(title="Act One", entry_type="manuscript:act")
+    )
+    act = next(c for c in structure.root.children if c.type == "manuscript:act")
+    for title in ("The Departure", "The Arrival"):
+        service.create_structure_node(
+            CreateStructureNodeRequest(title=title, entry_type="manuscript:scene", parent_id=act.id)
+        )
+    doc = service.read_structure()
+    act_node = next(c for c in doc.root.children if c.id == act.id)
+    scene_ids = [c.scene_id for c in act_node.children]
+    assert len(scene_ids) == 2
+
+    # The container ref the tree stores: the act's structure-node id + type.
+    picks = json.dumps([{"id": act.id, "kind": "manuscript", "entry_type": "manuscript:act", "title": "Act One"}])
+    rendered, _ = build_preview(
+        service,
+        PreviewRequest(
+            template_source=(
+                '{% role "system" %}'
+                "count={{ inputs.picks | length }} "
+                "{% for p in inputs.picks %}{{ use(p) }}{% endfor %}"
+                "{% endrole %}"
+            ),
+            target_scene_id="",
+            session_id=None,
+            inputs={"picks": picks},
+            text_before="",
+            text_after="",
+            commit=False,
+        ),
+    )
+    text = "".join(m.text for m in rendered.messages)
+    # The single act pick expanded to both scenes, in reading order.
+    assert "count=2" in text
+    assert rendered.used_node_ids == scene_ids
+
+
 def test_expand_container_picks_skips_structure_read_for_scene_only_picks():
     # The perf gate (the preview re-renders on a debounce): a prompt that picks
     # only scenes (each tagged manuscript:scene) never loads the structure.

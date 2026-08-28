@@ -214,18 +214,25 @@ class TreeStructureService:
             ids.update(TreeStructureService.collect_descendant_ids(child))
         return ids
 
+    # Manuscript container node types (as opposed to leaf scenes). Acts and
+    # chapters carry their own `scene_id` (a backing file), so a node is NOT a
+    # container-vs-scene by `scene_id is None` — it is by type, or by having
+    # children (which covers any user-defined container level).
+    _CONTAINER_TYPES = frozenset({"root", "manuscript:act", "manuscript:chapter"})
+
+    @staticmethod
+    def is_container(node: StructureNode) -> bool:
+        return node.type in TreeStructureService._CONTAINER_TYPES or bool(node.children)
+
     @staticmethod
     def collect_descendant_scene_ids_ordered(node: StructureNode) -> list[str]:
-        """Every `scene_id` under a subtree, in reading order (ADR-0074 slice 4).
-
-        Unlike `collect_leaf_ids` (a set), this preserves document order — the
-        depth-first, children-in-stored-order walk that `full_text()` uses to
-        materialize the manuscript (`ai/helpers.py::_collect_scene_text`). It is
-        the ordered resolver a picked act/chapter/root container expands through:
-        containers carry no `scene_id`, so they contribute only via their
-        descendants."""
+        """Every descendant *scene* `scene_id` under a subtree, in reading order
+        (ADR-0074 slice 4). Leaf scenes only — an act/chapter's own backing file
+        is not a scene, so a picked container materializes the scenes beneath it,
+        not the container's own node. Depth-first, children in stored order (the
+        reading order `full_text()` uses)."""
         out: list[str] = []
-        if node.scene_id:
+        if node.scene_id and not TreeStructureService.is_container(node):
             out.append(node.scene_id)
         for child in node.children:
             out.extend(TreeStructureService.collect_descendant_scene_ids_ordered(child))

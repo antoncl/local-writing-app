@@ -34,7 +34,12 @@
     ViewNodeSummary,
     ViewSpec,
   } from "@/lib/types";
-  import { hexForRef, stripeForType, stripeForNode } from "@/lib/utils/pickerStripes";
+  import {
+    buildInstanceColorMap,
+    hexForRef,
+    stripeForType,
+    stripeForNode,
+  } from "@/lib/utils/pickerStripes";
   import { isViewRef, pickerMembership } from "@/lib/utils/pickerSources";
   import { buildSelectorRoster, membersForSelector } from "@/lib/views/pickerSelectors";
   import {
@@ -312,6 +317,12 @@
   // from the app-wide store like the tag vocabulary, not a prop. `plotEntries`
   // (plotlines) stays the container *source*, not roster members (ADR-0074 S6).
   const cardEntries = $derived($cardEntriesStore);
+  // Ref → instance-colour index (#1528): chips + selector members hold only a ref,
+  // not the entity, so they resolve a node's own metadata.color (a tag's list too).
+  const instanceColorByRef = $derived(buildInstanceColorMap({ loreEntries, cardEntries, structure }));
+  function instanceColorFor(kind: string | undefined, id: string): string | null {
+    return kind ? (instanceColorByRef.get(`${kind}:${id}`) ?? null) : null;
+  }
   const selectorRoster = $derived(
     buildSelectorRoster({ schema: metadataSchema, structure, loreEntries, assistantEntries, cardEntries }),
   );
@@ -536,7 +547,11 @@
       isContainer: row.isSelector,
       state: row.state,
       title: row.title,
-      stripeColor: stripeForType(row.entryType, metadataSchema),
+      // A member honours its node's own metadata.color (#1528, so a custom entry
+      // stands out in a tag's list too); a selector container keeps its type stripe.
+      stripeColor: row.isSelector
+        ? stripeForType(row.entryType, metadataSchema)
+        : stripeForNode(instanceColorFor(row.entryType?.split(":")[0], row.id), row.entryType, metadataSchema),
       count: row.isSelector ? row.count : null,
       countNoun,
       countNounPlural,
@@ -923,9 +938,10 @@
         <NodeList mode="tree" density={compact ? "dense" : "compact"}>
           {#each value as ref (refKey(ref))}
             {@const hex = hexForRef(ref, metadataSchema)}
+            {@const stripeHex = stripeForNode(instanceColorFor(ref.kind, ref.id), ref.entry_type, metadataSchema)}
             <NodeRow
               title={ref.title}
-              stripeColor={ref.target ? "var(--star)" : hex}
+              stripeColor={ref.target ? "var(--star)" : stripeHex}
               clickable={false}
             >
               {#snippet trailing()}

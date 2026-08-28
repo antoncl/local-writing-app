@@ -107,6 +107,15 @@ export function compileMatcher(
   const lookup = new Map<string, MatcherEntry>();
   for (const entry of entries) {
     if (!entry.id || !entry.title) continue;
+    // ADR-0075 §7 / slice 4: the highlight is a promise the entity will be in
+    // the model's context, so it must not decorate entities the backend keeps
+    // OUT of context — skip `never`/`manual_only`. `auto` (detected when named)
+    // and `always` (always-included via `_always_included_lore_ids`) both DO
+    // reach context, so both stay highlighted; unset defaults to `auto`. (This
+    // is broader than the name-matcher's auto-only filter on purpose: `always`
+    // reaches context by a different path, so highlighting it is a true promise.)
+    const policy = entry.metadata?.context_policy;
+    if (policy === "never" || policy === "manual_only") continue;
     const instanceColor = typeof entry.metadata?.color === "string" ? entry.metadata.color : null;
     const swatch = resolveColor(instanceColor, entry.entry_type, "lore", schema);
     lookup.set(entry.id, {

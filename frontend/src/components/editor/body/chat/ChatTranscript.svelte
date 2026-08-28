@@ -85,6 +85,8 @@
           {totalIn} → {message.usage.output_tokens} tok
           {#if cachePct > 0}<span> · {cachePct}% cached</span>{/if}
           {#if message.cost_usd != null}<span> · {formatCostEur(message.cost_usd)}</span>{/if}
+          {#if message.provider}<span> · {message.provider} · {message.model}</span>{/if}
+          {#if message.latency_ms != null}<span> · {(message.latency_ms / 1000).toFixed(1)} s</span>{/if}
         </div>
       {/if}
     </div>
@@ -107,8 +109,8 @@
   .cbv-message-user { align-items: flex-end; }
   .cbv-message-assistant { align-items: flex-start; }
   .cbv-message-role {
-    display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); font-weight: 800;
-    letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); padding: 0 2px;
+    display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); font-weight: 600;
+    letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-3); padding: 0 2px;
   }
   .cbv-role-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--k-graphite); }
   .cbv-message-content {
@@ -157,7 +159,7 @@
     display: inline-flex; flex-wrap: wrap; gap: 5px 6px; align-items: center; font-size: var(--fs-xs);
   }
   .cbv-journal-label {
-    font-size: var(--fs-xs); font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3);
+    font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-3);
   }
   .cbv-journal-chip {
     display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 999px;

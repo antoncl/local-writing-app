@@ -215,6 +215,11 @@ export type ChatMessage = {
   journal_added?: ChatSessionJournalEntry[];
   usage?: ChatUsage | null;
   cost_usd?: number | null;
+  // ADR-0076 decision 3: per-turn provenance, stamped from the stream `done`
+  // event. Renders on the transcript's own meta line, not a floating one.
+  provider?: string;
+  model?: string;
+  latency_ms?: number;
 };
 
 export type AIChatRequest = {
@@ -328,6 +333,10 @@ export type ChatSessionMessage = {
   journal_added?: ChatSessionJournalEntry[];
   usage?: ChatUsage | null;
   cost_usd?: number | null;
+  // ADR-0076 decision 3: additive persisted fields — older chats simply lack them.
+  provider?: string;
+  model?: string;
+  latency_ms?: number;
 };
 
 export type ChatSessionContextItem = {

@@ -34,10 +34,9 @@
   import ChatTranscript from "@/components/editor/body/chat/ChatTranscript.svelte";
   import ChatInputsStrip from "@/components/editor/body/chat/ChatInputsStrip.svelte";
   import ChatJournalScope from "@/components/editor/body/chat/ChatJournalScope.svelte";
-  import ChatEstimateStrip from "@/components/editor/body/chat/ChatEstimateStrip.svelte";
+  import ChatMetaLine from "@/components/editor/body/chat/ChatMetaLine.svelte";
   import ChatComposerBar from "@/components/editor/body/chat/ChatComposerBar.svelte";
   import EntryDraftCard from "@/components/editor/body/chat/EntryDraftCard.svelte";
-  import { formatCostEur } from "@/lib/utils/money";
   import type {
     AssistantEntrySummary,
     ChatMessage,
@@ -119,7 +118,6 @@
   // A non-error status from a commit — "no changes proposed", "ignored N
   // fields" — surfaced so a hidden out-of-band commit is never a silent no-op.
   let chatNotice: string | null = $state(null);
-  let chatLastMeta: { provider: string; model: string; latency_ms: number } | null = $state(null);
   let chatInput = $state("");
   // True when the last send failed (error or empty output) and we restored
   // the typed text to the composer so the user can retry. Without this cue
@@ -168,8 +166,10 @@
   let activeChatJournalFreshIds = $state(new Set<string>());
   let activeChatCacheWriteTimes: Record<string, string> = $state({});
   // V2 cost accounting — pluck the delta off the streaming `done` event
-  // and forward it to the backend on the next persistActiveChat.
-  let pendingTurnCost: number | null = null;
+  // and forward it to the backend on the next persistActiveChat. $state (not
+  // a plain let) so sessionCostUsd below reacts the instant the stream lands
+  // the delta, not only after the round-trip persist resolves (ADR-0076 §6).
+  let pendingTurnCost: number | null = $state(null);
   let pendingTurnCacheWriteSlots: string[] = [];
 
   // The composer instance, for the imperative clear on send (#1083).
@@ -310,7 +310,6 @@
     chatRunning = false;
     chatError = null;
     chatNotice = null;
-    chatLastMeta = null;
     chatInput = "";
     chatRewound = false;
     chatSystemPrompt = "";
@@ -362,8 +361,13 @@
       journal_added: m.journal_added,
       usage: m.usage ?? null,
       cost_usd: m.cost_usd ?? null,
+      // ADR-0076 decision 3: per-turn provenance, so it renders on the
+      // transcript's own meta line instead of a floating cbv-meta paragraph.
+      // Absent on messages persisted before this slice.
+      provider: m.provider ?? undefined,
+      model: m.model ?? undefined,
+      latency_ms: m.latency_ms ?? undefined,
     }));
-    chatLastMeta = null;
     chatError = null;
     chatInput = "";
     chatRewound = false;
@@ -469,6 +473,10 @@
         truncated: !!m.truncated,
         usage: m.usage ?? null,
         cost_usd: m.cost_usd ?? null,
+        // ADR-0076 decision 3: per-turn provenance, echoed through like usage/cost.
+        provider: m.provider ?? undefined,
+        model: m.model ?? undefined,
+        latency_ms: m.latency_ms ?? undefined,
       })),
       // Persist the per-input drafts so a chat round-trips its inputs across a
       // reload (#654) — previously hardcoded `{}`, which the first post-send
@@ -574,8 +582,13 @@
             pendingTurnCacheWriteSlots = [...pendingTurnCacheWriteSlots, "system"];
           }
         }
+        // ADR-0076 decision 3: stamp provider/model/latency onto the message
+        // itself, same as usage/cost above — it renders on the transcript's
+        // own meta line now instead of a floating cbv-meta paragraph below it.
+        chatHistory[idx].provider = ev.provider;
+        chatHistory[idx].model = ev.model;
+        chatHistory[idx].latency_ms = ev.latency_ms;
         chatHistory = chatHistory;
-        chatLastMeta = { provider: ev.provider, model: ev.model, latency_ms: ev.latency_ms };
       } else if (ev.type === "error") {
         errored = true;
         chatError = ev.error || "Unknown error";
@@ -734,7 +747,6 @@
 
   function clearChat() {
     chatHistory = [];
-    chatLastMeta = null;
     chatError = null;
     chatInputsHidden = false;
     // Reset cost-delta + cache-slot stamping so the next persist starts clean.
@@ -914,6 +926,16 @@
     (i) => i.required && !i.hidden && isInputMissing(i, chatInputDrafts[i.name]),
   ));
   let ttlChips = $derived(ttlChipsFor(activeChatCacheWriteTimes, ttlTick));
+  // The session-cost line's number, never lagging the transcript (ADR-0076
+  // decision 6). persistActiveChat refreshes chatSession from the save
+  // response and nulls pendingTurnCost in the same tick (:484-497), so
+  // persisted-total + pending-delta never double-counts a turn's cost and
+  // never lags behind what the transcript already shows (a stream `done`
+  // sets pendingTurnCost before the persist round-trip even starts).
+  let sessionCostUsd = $derived.by(() => {
+    const persisted = chatSession?.cost_usd_total ?? null;
+    return persisted != null || pendingTurnCost != null ? (persisted ?? 0) + (pendingTurnCost ?? 0) : null;
+  });
   // Re-fetch estimate when any input that drives it changes. Each dep
   // read on its own line so Svelte tracks them (see
   // [[feedback-svelte5-reactivity-traps]]).
@@ -976,11 +998,8 @@
       <ChatJournalScope journal={activeChatJournal} freshIds={activeChatJournalFreshIds} />
     {/if}
 
-    <ChatEstimateStrip estimate={chatEstimate} {ttlChips} />
+    <ChatMetaLine estimate={chatEstimate} {ttlChips} {sessionCostUsd} />
 
-    {#if chatLastMeta}
-      <p class="cbv-meta">{chatLastMeta.provider} · {chatLastMeta.model} · {chatLastMeta.latency_ms} ms</p>
-    {/if}
     {#if chatError}
       <p class="cbv-error">{chatError}</p>
     {/if}
@@ -1092,12 +1111,6 @@
         onDiscard={() => commit.reset()}
       />
     {/if}
-
-    {#if chatSession.cost_usd_total != null}
-      <footer class="cbv-foot">
-        Session cost: {formatCostEur(chatSession.cost_usd_total)}
-      </footer>
-    {/if}
   {/if}
 </div>
 
@@ -1168,13 +1181,13 @@
      (#99). */
   /* ChatComposerBar sets flex: 0 0 auto on its own root (.cbv-composer-strip). */
   .cbv-action-row,
-  .cbv-foot,
   :global(.chat-body-view > .cbv-input) {
     flex: 0 0 auto;
   }
 
-  /* Cost-estimate + TTL strips (§7/§8) moved to chat/ChatEstimateStrip.svelte
-     alongside the #1037 composer-feedback split. */
+  /* Cost-estimate + TTL strips (§7/§8) moved to chat/ChatMetaLine.svelte,
+     collapsed into one metadata line alongside the session-cost footer
+     (ADR-0076 S1) — replacing the #1037 composer-feedback split. */
 
   /* ---- 10 · action row ---- */
   .cbv-action-row { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
@@ -1194,10 +1207,5 @@
   .cbv-action-row button.cbv-commit { border-color: var(--accent); color: var(--accent); }
   .cbv-action-row button.cbv-commit:hover {
     background: color-mix(in srgb, var(--accent) 10%, transparent);
-  }
-
-  .cbv-foot {
-    margin: 0; font-size: var(--fs-sm); color: var(--text-3);
-    border-top: 1px solid var(--divider); padding-top: 8px;
   }
 </style>

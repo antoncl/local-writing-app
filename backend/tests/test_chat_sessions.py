@@ -71,7 +71,16 @@ class ChatSessionEndpointTests(unittest.TestCase):
             ],
             "messages": [
                 {"role": "user", "content": "hello"},
-                {"role": "assistant", "content": "hi", "thinking": "reasoning"},
+                {
+                    "role": "assistant",
+                    "content": "hi",
+                    "thinking": "reasoning",
+                    # ADR-0076 decision 3: per-turn provenance round-trips like
+                    # usage/cost_usd.
+                    "provider": "anthropic",
+                    "model": "claude-3-5-sonnet",
+                    "latency_ms": 9600,
+                },
             ],
         }
         response = self.client.put(f"/api/chats/{created['id']}", json=payload)
@@ -83,9 +92,19 @@ class ChatSessionEndpointTests(unittest.TestCase):
         self.assertTrue(body["pinned"])
         self.assertEqual(len(body["messages"]), 2)
         self.assertEqual(body["messages"][1]["thinking"], "reasoning")
+        self.assertEqual(body["messages"][1]["provider"], "anthropic")
+        self.assertEqual(body["messages"][1]["model"], "claude-3-5-sonnet")
+        self.assertEqual(body["messages"][1]["latency_ms"], 9600)
         self.assertEqual(body["context_items"][0]["id"], "scene_1")
         # created_at preserved, updated_at refreshed
         self.assertEqual(body["created_at"], created["created_at"])
+
+        # Round-trips through a GET too — provenance persists to disk, not just
+        # echoed back in the save response.
+        reread = self.client.get(f"/api/chats/{created['id']}").json()
+        self.assertEqual(reread["messages"][1]["provider"], "anthropic")
+        self.assertEqual(reread["messages"][1]["model"], "claude-3-5-sonnet")
+        self.assertEqual(reread["messages"][1]["latency_ms"], 9600)
 
     def test_message_content_with_a_fence_line_round_trips(self) -> None:
         # A chat's transcript lives in the node body (ADR-0051 S2). A message

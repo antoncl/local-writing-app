@@ -417,6 +417,8 @@ def _scene_prose_ids(
         value = _get_field(scene, field_id)
         if isinstance(value, str) and value.strip():
             texts.append(value)
+    if not texts:
+        return set()
     if matcher is None:
         matcher = _build_scene_matcher(project, scene)
     found: set[str] = set()

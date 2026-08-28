@@ -4,13 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <!--
-  ADR-0076 chat mockup — "Chat, Composed".
+  ADR-0076 chat mockup — "Chat, Composed", revision 2.
   The interactive reference the ADR cites. NON-NORMATIVE — the ADR's decisions
-  govern; this shows the recomposed chat pane: one quiet metadata line instead
-  of the estimate/TTL cards + footer, per-turn provenance on the turn, a worded
-  Preview as the single context door, a confirmed Clear separated from Send,
-  Send↔Stop while streaming, and the locked-chip doorway ("New chat with this
-  setup"). Use the state switcher to walk Fresh → Locked → Streaming.
+  govern; this shows the recomposed chat pane: a one-row header (title + setup),
+  one quiet metadata line instead of the estimate/TTL cards + footer, per-turn
+  provenance on the turn, a worded drillable Context door (rev 2: renamed from
+  Preview; tiers expand to their member entries), a confirmed Clear separated
+  from Send, Send↔Stop while streaming, and the locked-chip doorway ("New chat
+  with this setup"). Use the state switcher to walk Fresh → Locked → Streaming.
   Open in a browser and click through it.
 -->
 <title>Chat, Composed</title>
@@ -142,10 +143,16 @@
     font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.07em;
     text-transform: uppercase; color: var(--text-3);
   }
-  .chat-title { font-family: var(--serif); font-size: var(--fs-2xl); font-weight: 700; margin: 0; }
+  .chat-title { font-family: var(--serif); font-size: var(--fs-2xl); font-weight: 700; margin: 0 auto 0 0; }
 
-  /* chips row */
+  /* one-row header: title left, setup right, wraps on narrow panes */
   .chips { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .chat.locked .chip {
+    border-color: transparent; background: transparent;
+    font-size: var(--fs-sm); color: var(--text-2); padding: 3px 4px;
+  }
+  .chat.locked .chip strong { font-weight: 500; }
+  .chat.locked .chip:hover { background: var(--inset); }
   .chip {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 3px 10px; border-radius: var(--r-pill);
@@ -160,14 +167,13 @@
   .chip-prompt .mark { color: var(--accent-emphasis); }
   .chip-anchor { position: relative; }
   .btn-preview {
-    margin-left: auto;
     padding: 2px 8px; font-size: var(--fs-xs); font-weight: 600;
     border: none; border-radius: var(--r-sm); background: transparent;
     color: var(--text-3); cursor: pointer;
   }
   .btn-preview:hover { background: var(--inset); color: var(--text-2); }
   .btn-preview[aria-expanded="true"] { background: var(--accent-soft); color: var(--accent-emphasis); }
-  .preview-anchor { position: relative; margin-left: auto; display: flex; }
+  .preview-anchor { position: relative; display: flex; }
 
   /* transcript */
   .transcript { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 180px; }
@@ -254,6 +260,20 @@
   }
   .pop-preview .kv { display: flex; gap: 6px; font-size: var(--fs-sm); color: var(--text-2); margin-top: 3px; }
   .pop-preview .kv b { font-weight: 600; color: var(--text); }
+  .pop-preview .tier { margin: 0 0 10px; }
+  .pop-preview .tier summary {
+    cursor: pointer; user-select: none; list-style: none;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .pop-preview .tier summary::-webkit-details-marker { display: none; }
+  .pop-preview .tier summary .caps::before { content: "› "; color: var(--text-3); }
+  .pop-preview .tier[open] summary .caps::before { content: "⌄ "; }
+  .tier-entries {
+    margin: 4px 0 0; padding: 2px 0 2px 14px; list-style: none;
+    font-size: var(--fs-sm); color: var(--text-2);
+    border-left: 2px solid var(--divider);
+  }
+  .tier-entries li { padding: 1px 0; }
   .pop-doorway { left: 0; top: calc(100% + 6px); width: 260px; }
   .pop-doorway p { margin: 0 0 8px; font-size: var(--fs-sm); color: var(--text-2); }
   .pop-doorway .btn { width: 100%; background: var(--surface); }
@@ -282,10 +302,10 @@
 <div class="page">
   <header>
     <h1>Chat, Composed</h1>
-    <p>ADR-0076's review mockup. The instrument-panel strips (NEXT&nbsp;TURN&nbsp;EST. card, CACHE&nbsp;TTL card,
-    provider line, session-cost footer) are gone; what remains between the transcript and the composer is
-    one quiet metadata line. Walk the three states below and click <em>Preview</em>, the locked chips,
-    <em>Clear</em>, and <em>Send/Stop</em>.</p>
+    <p>ADR-0076's review mockup, rev 2. The instrument-panel strips (NEXT&nbsp;TURN&nbsp;EST. card, CACHE&nbsp;TTL card,
+    provider line, session-cost footer) are gone; the header is one row; what remains between the transcript
+    and the composer is one quiet metadata line. Walk the three states below and click <em>Context</em>
+    (and expand its tiers), the locked chips, <em>Clear</em>, and <em>Send/Stop</em>.</p>
   </header>
 
   <div class="demo-bar" role="group" aria-label="Mockup state">
@@ -298,12 +318,12 @@
 
   <div class="stage">
     <div class="chat" id="chat">
-      <span class="caps">Title</span>
-      <h2 class="chat-title">General chat</h2>
-
-      <!-- chips row: role marks are Tabler-style annotations (leading), the
-           trailing slot is caret (pickable) or lock (locked → doorway) -->
-      <div class="chips">
+      <!-- one-row header (decision 10): serif title + setup share the row; the
+           TITLE eyebrow is dropped. Role marks are Tabler-style annotations
+           (leading); the trailing slot is caret (pickable) or lock (→ doorway).
+           Locked chips condense to their quiet text form in place. -->
+      <div class="chips header-row">
+        <h2 class="chat-title">General chat</h2>
         <span class="chip-anchor">
           <button class="chip chip-prompt" id="chip-prompt">
             <span class="mark" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8"/></svg></span>
@@ -323,20 +343,28 @@
           </button>
         </span>
         <span class="preview-anchor">
-          <button class="btn-preview" id="btn-preview" aria-expanded="false">Preview</button>
+          <button class="btn-preview" id="btn-preview" aria-expanded="false">Context</button>
           <div class="popover pop-preview" id="pop-preview" hidden>
             <section>
               <span class="caps">System</span>
               <pre>You are a story-development partner for the project "Aetheria"…</pre>
             </section>
-            <section>
-              <span class="caps">Context · stable lore</span>
-              <div class="kv"><b>12 entries</b> · 4.1k tok · cached (1h)</div>
-            </section>
-            <section>
-              <span class="caps">Context · volatile lore</span>
-              <div class="kv"><b>3 entries</b> · 5.0k tok · cached (5m)</div>
-            </section>
+            <!-- each tier drills down to its member entries, by title (D2) -->
+            <details class="tier">
+              <summary><span class="caps">Stable lore</span><span class="kv"><b>12 entries</b> · 4.1k tok · cached (1h)</span></summary>
+              <ul class="tier-entries">
+                <li>Shenzhen Protocol</li><li>Implant</li><li>Augmented Reality</li>
+                <li>Artificial General Intelligence</li><li>Elysian</li><li>VR-Tank</li>
+                <li>Avatar</li><li>Aetheria</li><li>World Boundary Doctrine</li>
+                <li>Story Genre</li><li>Upload Ethics</li><li>Neural Lace</li>
+              </ul>
+            </details>
+            <details class="tier">
+              <summary><span class="caps">Volatile lore</span><span class="kv"><b>3 entries</b> · 5.0k tok · cached (5m)</span></summary>
+              <ul class="tier-entries">
+                <li>Mara Voss</li><li>The Night Count</li><li>Elysian Outage, Day 3</li>
+              </ul>
+            </details>
             <section id="pv-inputs">
               <span class="caps">Inputs (locked)</span>
               <div class="kv"><b>Scene</b> · Ch 2 · The Night Count</div>
@@ -404,12 +432,13 @@
 
     <aside class="notes">
       <div class="note"><span class="d">D1</span> <b>One metadata line.</b> Estimate, cache lifetime, and session total — borderless, <code>--fs-xs</code>, <code>--text-3</code>. The NEXT&nbsp;TURN&nbsp;EST. and CACHE&nbsp;TTL cards and the session-cost footer are gone. Cache-block detail lives behind Preview.</div>
-      <div class="note"><span class="d">D2</span> <b>Preview is the one door.</b> System blocks, context tiers with counts, the locked inputs, and the auto-added journal — one labeled, scrollable document. "Show inputs" and the "In context:" strip are retired post-lock.</div>
+      <div class="note"><span class="d">D2</span> <b>Context is the one door — and it drills.</b> System blocks, context tiers, the locked inputs, and the auto-added journal — one labeled, scrollable document. Each tier expands to its member entries by title ("12 entries" answers <em>which</em> twelve). "Show inputs" and the "In context:" strip are retired post-lock.</div>
       <div class="note"><span class="d">D3</span> <b>Per-turn facts on the turn.</b> provider · model · latency joined the turn's usage/cost line; the floating line above the composer is gone.</div>
       <div class="note"><span class="d">D4</span> <b>Clear confirms.</b> Left-anchored, danger-worded, separated from Send by flexible space; the dialog names the count, the immediate persistence, and the unlock side-effect.</div>
       <div class="note"><span class="d">D5</span> <b>Send becomes Stop.</b> Stopping keeps the partial reply, marked "stopped early". Errors still rewind; stops keep. (Try it in the Streaming state.)</div>
       <div class="note"><span class="d">D8</span> <b>The lock is a doorway.</b> In the locked state, click a chip: the constraint in one line, and "New chat with this setup".</div>
-      <div class="note"><span class="d">D9</span> <b>Lexicon-clean chrome.</b> Emoji retired: Tabler-style role marks lead the chips, the trailing slot is caret-or-lock, and the preview affordance is a word.</div>
+      <div class="note"><span class="d">D9</span> <b>Lexicon-clean chrome.</b> Emoji retired: Tabler-style role marks lead the chips, the trailing slot is caret-or-lock, and the Context door is a word.</div>
+      <div class="note"><span class="d">D10</span> <b>One header row.</b> Title and setup share the row; the TITLE eyebrow is dropped. Once locked, the chips condense to quiet text in place — a running conversation pays one row of header, total.</div>
     </aside>
   </div>
 </div>
@@ -424,6 +453,7 @@
 
   function render() {
     const locked = state !== "fresh";
+    $("chat").classList.toggle("locked", locked);
     $("slot-prompt").innerHTML = locked ? LOCK : CARET;
     $("slot-assistant").innerHTML = locked ? LOCK : CARET;
     $("inputs-form").hidden = locked;

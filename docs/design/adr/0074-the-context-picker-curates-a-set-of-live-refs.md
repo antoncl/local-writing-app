@@ -5,7 +5,7 @@
 - Concern: the invocation-time context picker (`NodePicker` hosted by `PromptInputField`) — its selection paradigm, what is pickable, and what a picked value stores.
 - Follows: ADR-0068 (the picker composes NodeRow/NodeList — that substrate is kept; this is the feature redesign 0068 explicitly scoped out), ADR-0023 (`NodePickerConfig` = sources + mechanics; its *source* vocabulary is reused here in a second position), ADR-0041 (one view-expr IDL, both runtimes — the resolver this leans on), ADR-0048 (plot boards — plot becomes a context source here; its spoiler gate is bounded below).
 - Relates: the author-time tri-state tree (`NodePickerConfigEditor` / `pickerTree.ts`) whose paradigm this adopts; `docs/context-picker.md` (the v1 howto this partially supersedes).
-- Review mockup: "Context Picker, Take Two", rev 3 (interactive artifact; not normative — the decisions below are).
+- Review mockup: "Context Picker, Take Two", rev 3 — [`docs/design/mockups/0074-context-picker-take-two.html`](../mockups/0074-context-picker-take-two.html) (interactive; open in a browser. Not normative — the decisions below are).
 - **Verified against `7e5e3554` (2026-08-27).**
 
 **A context_pick value is a curated set of refs expanded to their current members at invocation time (Amendment 1 — via a structure walk for containers, the view evaluator for selectors) — and the picker is a set-curation surface: toggle and tri-state everywhere, where the manuscript (whole or by act/chapter), a tag, a saved view, and a plotline are each pickable as a single live ref, drillable to their members, with no preset axis and no second query language.**

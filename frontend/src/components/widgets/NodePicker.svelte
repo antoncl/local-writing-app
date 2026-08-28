@@ -141,12 +141,6 @@
   let search = $state("");
   let searchInputEl: HTMLInputElement | null = $state(null);
 
-  // Group-default thresholds: groups larger than this collapse by default
-  // so a 128-scene project doesn't drown the menu. Compact mode is more
-  // aggressive because there's less vertical room.
-  const COLLAPSE_THRESHOLD_DEFAULT = 20;
-  const COLLAPSE_THRESHOLD_COMPACT = 5;
-
   // Membership (kinds + per-kind entry_type whitelist) reduced from the
   // config's `sources` — the pre-evaluator degenerate subset (#78).
   const membership = $derived(pickerMembership(config));
@@ -237,6 +231,7 @@
     open = !open;
     if (open) {
       search = "";
+      activeAxis = null; // always open on the root axis list
       await tick();
       positionMenu();
       searchInputEl?.focus();
@@ -246,6 +241,7 @@
   function close() {
     open = false;
     search = "";
+    activeAxis = null;
   }
 
   function handleViewportShift() {
@@ -749,19 +745,8 @@
       plotlineRows.length,
   );
 
-  const collapseThreshold = $derived(compact ? COLLAPSE_THRESHOLD_COMPACT : COLLAPSE_THRESHOLD_DEFAULT);
-
-  // Search-aware: when the user is searching, expand every surviving
-  // group so they can see what matched. When idle, collapse heavy
-  // groups by their kind-appropriate threshold.
-  function groupOpenByDefault(itemCount: number, isSearching: boolean): boolean {
-    if (isSearching) return true;
-    return itemCount <= collapseThreshold;
-  }
-
-  // Every source, normalized to one labelled PickTree section (ADR-0074 slice 7a):
-  // the tri-state trees AND the flat kind lists, so the whole menu renders through
-  // one NodeRow-based substrate instead of two divergent ones.
+  // A flat kind list (lore / snippet / research / assistant) as leaf PickTree rows —
+  // no container, a binary on/off pick, the kind stripe. Feeds an axis's panel.
   function flatGroupToRows(items: NodePickerRef[]): PickTreeRow[] {
     return items.map((ref) => ({
       key: `${ref.kind}:${ref.id}`,
@@ -778,27 +763,72 @@
       onCollapse: () => {},
     }));
   }
-  type PickSection = { id: string; label: string; rows: PickTreeRow[] };
-  const sections = $derived.by<PickSection[]>(() => {
-    const out: PickSection[] = [];
-    if (manuscriptTreeRows.length > 0) out.push({ id: "manuscript", label: "Manuscript", rows: manuscriptTreeRows });
-    if (plotlineTreeRows.length > 0) out.push({ id: "plotlines", label: "Plotlines", rows: plotlineTreeRows });
-    for (const g of visibleGroups) out.push({ id: g.id, label: g.label, rows: flatGroupToRows(g.items) });
-    if (tagTreeRows.length > 0) out.push({ id: "tags", label: "Tags", rows: tagTreeRows });
-    if (viewTreeRows.length > 0) out.push({ id: "views", label: "Saved views", rows: viewTreeRows });
+  // ---- Drill-in axes (ADR-0074 slice 7b) ----------------------------------
+  // Each source is an AXIS. The root shows a list of axis rows (name · count · ▸);
+  // tapping one drills into its panel — ONE level. A panel is that axis's tri-state
+  // rows (containers keep their inline expand caret). Order matches the configurator:
+  // Manuscript, Lore, Plot, By tag, Saved views, then the flat kinds.
+  type PickAxis = { id: string; label: string; count: number; rows: PickTreeRow[] };
+  const axes = $derived.by<PickAxis[]>(() => {
+    const flat = new Map(visibleGroups.map((g) => [g.id, g] as const));
+    const out: PickAxis[] = [];
+    if (manuscriptTreeRows.length > 0)
+      out.push({ id: "manuscript", label: "Manuscript", count: manuscriptRows[0]?.sceneCount ?? 0, rows: manuscriptTreeRows });
+    const lore = flat.get("lore");
+    if (lore) out.push({ id: "lore", label: "Lore", count: lore.items.length, rows: flatGroupToRows(lore.items) });
+    if (plotlineTreeRows.length > 0)
+      out.push({ id: "plotlines", label: "Plot", count: plotlineGroups.length, rows: plotlineTreeRows });
+    if (tagTreeRows.length > 0) out.push({ id: "tags", label: "By tag", count: tagGroups.length, rows: tagTreeRows });
+    if (viewTreeRows.length > 0) out.push({ id: "views", label: "Saved views", count: viewGroups.length, rows: viewTreeRows });
+    for (const g of visibleGroups) {
+      if (g.id === "lore") continue; // placed above, in configurator order
+      out.push({ id: g.id, label: g.label, count: g.items.length, rows: flatGroupToRows(g.items) });
+    }
     return out;
   });
 
-  // Section collapse — one map across every section (was the per-flat-group
-  // openOverride). Search expands all; otherwise a heavy section collapses by the
-  // kind threshold, an explicit toggle overriding that default.
-  let collapsedSectionOverride = $state<Record<string, boolean>>({});
-  function sectionCollapsed(id: string, rowCount: number): boolean {
-    if (isSearchActive(search)) return false;
-    return collapsedSectionOverride[id] ?? !groupOpenByDefault(rowCount, false);
+  // Navigation: which axis is drilled into (null = the root axis list). A config
+  // exposing exactly ONE axis short-circuits — that axis renders directly, no root
+  // list and no back button, so the common single-kind picker stays one tap.
+  // Stable axis labels, so a drilled-in panel keeps its title even when a search
+  // filters its rows to nothing (the row-derived `axes` drops an empty axis).
+  const AXIS_LABELS: Record<string, string> = {
+    manuscript: "Manuscript",
+    lore: "Lore",
+    plotlines: "Plot",
+    tags: "By tag",
+    views: "Saved views",
+    snippets: "Snippets",
+    research: "Research",
+    assistants: "Assistants",
+  };
+  let activeAxis = $state<string | null>(null);
+  const singleAxis = $derived(axes.length === 1 ? axes[0].id : null);
+  const effectiveAxis = $derived(singleAxis ?? activeAxis);
+  const atRoot = $derived(effectiveAxis === null);
+  const activeAxisLabel = $derived(effectiveAxis ? (AXIS_LABELS[effectiveAxis] ?? effectiveAxis) : "");
+  const activePanelRows = $derived(effectiveAxis ? (axes.find((a) => a.id === effectiveAxis)?.rows ?? []) : []);
+  function drillInto(id: string): void {
+    activeAxis = id;
   }
-  function toggleSection(id: string, rowCount: number): void {
-    collapsedSectionOverride[id] = !sectionCollapsed(id, rowCount);
+  function backToRoot(): void {
+    activeAxis = null;
+  }
+  // Clear every pick belonging to the drilled-in axis (the panel's own selection).
+  const AXIS_KINDS: Record<string, NodePickerRef["kind"][]> = {
+    manuscript: ["manuscript"],
+    lore: ["lore"],
+    plotlines: ["plot"],
+    tags: ["tag"],
+    views: ["view"],
+    snippets: ["snippet"],
+    research: ["research"],
+    assistants: ["assistant"],
+  };
+  function clearActivePanel(): void {
+    if (!effectiveAxis) return;
+    const kinds = new Set(AXIS_KINDS[effectiveAxis] ?? []);
+    onChange?.({ value: value.filter((r) => !kinds.has(r.kind)) });
   }
 </script>
 
@@ -884,68 +914,106 @@
 
     {#if open}
       <div class="ctx-menu" class:compact role="menu" style={menuStyle} use:portalToBody>
-        <label class="ctx-search-wrap" class:has-query={search.length > 0}>
-          <svg class="ctx-search-icon" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-            <circle cx="6" cy="6" r="4.2" stroke="currentColor" stroke-width="1.6" />
-            <line x1="9.2" y1="9.2" x2="12.5" y2="12.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-          </svg>
-          <input
-            class="ctx-search"
-            type="text"
-            placeholder={compact ? "Search…" : "Search titles, tags, aliases…  (#tag)"}
-            bind:value={search}
-            bind:this={searchInputEl}
-          />
-          {#if search.length > 0}
-            <button
-              type="button"
-              class="ctx-search-clear"
-              aria-label="Clear search"
-              onclick={() => (search = "")}
-            >×</button>
-          {:else if hasAnyResults}
-            <span class="ctx-search-count">{totalVisibleItems}{compact ? "" : " items"}</span>
-          {/if}
-        </label>
-
-        {#if !hasAnyConfigured}
+        {#snippet emptySearch()}
           <div class="ctx-empty">
-            <span class="ctx-empty-icon" aria-hidden="true">∅</span>
-            <span class="ctx-empty-title">No content sources configured</span>
-            <span class="ctx-empty-hint">
-              This prompt's author didn't enable any pickable types or presets for this input.
-            </span>
+            <svg class="ctx-empty-icon-svg" width="30" height="30" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="10" cy="10" r="6.5" stroke="currentColor" stroke-width="1.4" />
+              <line x1="15" y1="15" x2="21" y2="21" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+            </svg>
+            <span class="ctx-empty-title">No matches for <strong>"{search}"</strong></span>
+            <span class="ctx-empty-hint">Try a different term, or clear the search to browse.</span>
           </div>
-        {:else if !hasAnyResults}
-          {#if search}
+        {/snippet}
+
+        <!-- Popover head: ← back (when drilled into an axis) + the panel title +
+             the search box (ADR-0074 slice 7b drill-in). -->
+        <div class="ctx-pop-head">
+          {#if effectiveAxis && !singleAxis}
+            <button type="button" class="ctx-back" aria-label="Back to sources" onclick={backToRoot}>←</button>
+          {/if}
+          {#if effectiveAxis}
+            <span class="ctx-panel-title">{activeAxisLabel}</span>
+          {/if}
+          <label class="ctx-search-wrap" class:has-query={search.length > 0}>
+            <svg class="ctx-search-icon" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <circle cx="6" cy="6" r="4.2" stroke="currentColor" stroke-width="1.6" />
+              <line x1="9.2" y1="9.2" x2="12.5" y2="12.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+            </svg>
+            <input
+              class="ctx-search"
+              type="text"
+              placeholder={compact ? "Search…" : "Search titles, tags, aliases…  (#tag)"}
+              bind:value={search}
+              bind:this={searchInputEl}
+            />
+            {#if search.length > 0}
+              <button
+                type="button"
+                class="ctx-search-clear"
+                aria-label="Clear search"
+                onclick={() => (search = "")}
+              >×</button>
+            {:else if hasAnyResults}
+              <span class="ctx-search-count">{totalVisibleItems}{compact ? "" : " items"}</span>
+            {/if}
+          </label>
+        </div>
+
+        <div class="ctx-pop-body">
+          {#if !hasAnyConfigured}
             <div class="ctx-empty">
-              <svg class="ctx-empty-icon-svg" width="30" height="30" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <circle cx="10" cy="10" r="6.5" stroke="currentColor" stroke-width="1.4" />
-                <line x1="15" y1="15" x2="21" y2="21" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
-              </svg>
-              <span class="ctx-empty-title">No matches for <strong>"{search}"</strong></span>
-              <span class="ctx-empty-hint">Try a different term, or clear the search to browse.</span>
+              <span class="ctx-empty-icon" aria-hidden="true">∅</span>
+              <span class="ctx-empty-title">No content sources configured</span>
+              <span class="ctx-empty-hint">
+                This prompt's author didn't enable any pickable types or presets for this input.
+              </span>
             </div>
+          {:else if isSearchActive(search)}
+            <!-- Search is contextual: cross-axis results at root, within-axis when
+                 drilled in (ADR-0074 slice 7b). -->
+            {#if effectiveAxis}
+              {#if activePanelRows.length > 0}
+                <PickTree rows={activePanelRows} ariaLabel={activeAxisLabel} />
+              {:else}
+                {@render emptySearch()}
+              {/if}
+            {:else if axes.length > 0}
+              {#each axes as ax (ax.id)}
+                <div class="ctx-result-head">{ax.label}</div>
+                <PickTree rows={ax.rows} ariaLabel={ax.label} />
+              {/each}
+            {:else}
+              {@render emptySearch()}
+            {/if}
+          {:else if atRoot}
+            <!-- Root: the axis list. Tap an axis to drill into its panel. -->
+            {#if axes.length > 0}
+              {#each axes as ax (ax.id)}
+                <button type="button" class="ctx-axis-row" onclick={() => drillInto(ax.id)}>
+                  <span class="ctx-axis-name">{ax.label}</span>
+                  <span class="ctx-axis-count">{ax.count}</span>
+                  <span class="ctx-axis-chev" aria-hidden="true">▸</span>
+                </button>
+              {/each}
+            {:else}
+              <div class="ctx-empty">
+                <span class="ctx-empty-icon" aria-hidden="true">∅</span>
+                <span class="ctx-empty-title">No pickable items in this project yet</span>
+              </div>
+            {/if}
+          {:else if activePanelRows.length > 0}
+            <!-- Drilled-in panel: the axis's tri-state rows. -->
+            <PickTree rows={activePanelRows} ariaLabel={activeAxisLabel} />
           {:else}
             <div class="ctx-empty">
               <span class="ctx-empty-icon" aria-hidden="true">∅</span>
-              <span class="ctx-empty-title">No pickable items in this project yet</span>
+              <span class="ctx-empty-title">Nothing here yet</span>
             </div>
           {/if}
-        {:else}
-          <!-- Every source renders through one PickTree section (ADR-0074 slice
-               7a): the tri-state trees (manuscript / plotlines / tags / saved
-               views) AND the flat kind lists (lore / snippets / research /
-               assistants), one labelled, collapsible section each, all on the
-               NodeRow substrate — stripe + leading PickCheck + one caret. -->
-          {#each sections as section (section.id)}
-            <PickTree
-              rows={section.rows}
-              ariaLabel={section.label}
-              collapsed={sectionCollapsed(section.id, section.rows.length)}
-              onToggleSection={() => toggleSection(section.id, section.rows.length)}
-            />
-          {/each}
+        </div>
+
+        {#if effectiveAxis && !isSearchActive(search) && activePanelRows.length > 0}
+          <button type="button" class="ctx-clear" onclick={clearActivePanel}>⃠ Clear this panel’s selection</button>
         {/if}
       </div>
     {/if}
@@ -1086,7 +1154,10 @@
     border: 1px solid var(--border);
     border-radius: 11px;
     box-shadow: var(--elev-2);
-    padding: 10px;
+    /* The head (search + back/title) and the per-panel Clear pin; the pop-body
+       scrolls between them (ADR-0074 slice 7b drill-in), so the menu itself
+       clips rather than scrolls and carries no padding of its own. */
+    overflow: hidden;
     /* Above modal backdrops (InputsDialog's scrim is z-index 1000): this
        picker is launched from inside the inputs dialog, so a lower value
        let the scrim paint over the menu and swallow every click (#1274).
@@ -1095,15 +1166,112 @@
     z-index: 10000;
     display: flex;
     flex-direction: column;
-    gap: 7px;
   }
 
   /* `compact` is set on the menu itself (not just the picker root) so it still
      applies once the menu portals to <body>. */
   .ctx-menu.compact {
     width: 280px;
-    padding: 8px;
+  }
+
+  /* --- Drill-in shell: head / body / clear (ADR-0074 slice 7b) ------ */
+  .ctx-pop-head {
+    display: flex;
+    align-items: center;
     gap: 6px;
+    padding: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .ctx-pop-head .ctx-search-wrap {
+    flex: 1;
+    min-width: 0;
+  }
+  .ctx-back {
+    flex: none;
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    color: var(--accent);
+    border-radius: var(--r-md);
+    cursor: pointer;
+    font-size: var(--fs-lg);
+  }
+  .ctx-back:hover {
+    background: var(--inset);
+  }
+  .ctx-panel-title {
+    flex: none;
+    font-family: var(--serif);
+    font-size: var(--fs-lg);
+    white-space: nowrap;
+    padding-right: 2px;
+  }
+  .ctx-pop-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .ctx-axis-row {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 10px;
+    border: none;
+    background: transparent;
+    border-radius: var(--r-md);
+    cursor: pointer;
+    text-align: left;
+    color: var(--text);
+    font: inherit;
+  }
+  .ctx-axis-row:hover {
+    background: var(--inset);
+  }
+  .ctx-axis-name {
+    flex: 1;
+    min-width: 0;
+  }
+  .ctx-axis-count {
+    flex: none;
+    font-size: var(--fs-sm);
+    color: var(--text-3);
+    font-variant-numeric: tabular-nums;
+  }
+  .ctx-axis-chev {
+    flex: none;
+    color: var(--accent);
+  }
+  .ctx-result-head {
+    font-family: var(--serif);
+    font-size: var(--fs-lg);
+    color: var(--text-2);
+    padding: 8px 8px 2px;
+  }
+  .ctx-clear {
+    flex: none;
+    width: 100%;
+    border: none;
+    border-top: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-3);
+    padding: 8px 10px;
+    text-align: left;
+    cursor: pointer;
+    font-size: var(--fs-sm);
+    font-family: inherit;
+  }
+  .ctx-clear:hover {
+    color: var(--text);
+    background: var(--inset);
   }
 
   /* Search input — pill with leading icon + trailing count/clear. */

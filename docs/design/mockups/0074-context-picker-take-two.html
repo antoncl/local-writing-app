@@ -1,0 +1,810 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<!--
+  ADR-0074 context-picker mockup — "Context Picker, Take Two", revision 3.
+  The interactive reference the ADR cites (previously an external artifact,
+  checked in here per ADR-0074). NON-NORMATIVE — the ADR's decisions govern;
+  this shows the drill-in interaction: a root axis list (Manuscript / Plot /
+  Lore / By tag / Saved views) → drill into one axis → its tri-state tree with
+  inline expand carets; search is contextual (cross-axis at root, within-axis
+  when drilled). Open in a browser to click through it.
+-->
+<title>Context Picker, Take Two</title>
+<style>
+  /* ===== App tokens (mirrored from styles.css) ===== */
+  :root {
+    --sans: "Segoe UI", system-ui, sans-serif;
+    --serif: Georgia, "Times New Roman", serif;
+    --fs-xs: 11px; --fs-sm: 12px; --fs-md: 13px; --fs-lg: 15px; --fs-xl: 16px; --fs-2xl: 20px;
+    --r-md: 6px;
+
+    --surface: #ffffff;
+    --panel: #edf3f1;
+    --inset: #f1f5f3;
+    --border: #cbd6d2;
+    --text: #242424;
+    --text-2: #4d5753;
+    --text-3: #74817b;
+    --accent: #2f6f5e;
+    --accent-strong: #234e43;
+    --accent-soft: #edf6f2;
+    --accent-soft2: #dff0ea;
+    --star: #6b5a0c;
+    --k-lore: #5b5ca8;
+    --k-plot: #7a5230;
+    --elev-2: 0 6px 18px rgba(31, 45, 40, 0.18);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --surface: #1f2522;
+      --panel: #20272a;
+      --inset: #242a28;
+      --border: #3a4541;
+      --text: #e8edeb;
+      --text-2: #a9b6b0;
+      --text-3: #7e8a84;
+      --accent: #6cc4a6;
+      --accent-strong: #4ea88c;
+      --accent-soft: #1f3a32;
+      --accent-soft2: #2a4a3f;
+      --star: #d4b94e;
+      --k-lore: #9a9bd6;
+      --k-plot: #c79770;
+      --elev-2: 0 6px 18px rgba(0, 0, 0, 0.45);
+    }
+  }
+  :root[data-theme="dark"] {
+    --surface: #1f2522;
+    --panel: #20272a;
+    --inset: #242a28;
+    --border: #3a4541;
+    --text: #e8edeb;
+    --text-2: #a9b6b0;
+    --text-3: #7e8a84;
+    --accent: #6cc4a6;
+    --accent-strong: #4ea88c;
+    --accent-soft: #1f3a32;
+    --accent-soft2: #2a4a3f;
+    --star: #d4b94e;
+    --k-lore: #9a9bd6;
+    --k-plot: #c79770;
+    --elev-2: 0 6px 18px rgba(0, 0, 0, 0.45);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--panel);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: var(--fs-md);
+    line-height: 1.45;
+  }
+  button { font: inherit; color: inherit; }
+  ::selection { background: var(--accent-soft2); }
+
+  .page {
+    max-width: 1060px;
+    margin: 0 auto;
+    padding: 28px 20px 60px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  header.intro h1 {
+    font-family: var(--serif);
+    font-size: var(--fs-2xl);
+    font-weight: 600;
+    margin: 0 0 6px;
+    text-wrap: balance;
+  }
+  header.intro p { margin: 0; max-width: 62ch; color: var(--text-2); }
+  header.intro .meta { margin-top: 8px; font-size: var(--fs-sm); color: var(--text-3); }
+
+  .stagewrap {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 280px;
+    gap: 20px;
+    align-items: start;
+  }
+  @media (max-width: 880px) { .stagewrap { grid-template-columns: 1fr; } }
+
+  .stage {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--elev-2);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 680px;
+  }
+  .stage-chrome {
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: var(--fs-sm);
+    color: var(--text-3);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .stage-body {
+    flex: 1;
+    position: relative;
+    padding: 16px;
+    display: flex; flex-direction: column; justify-content: flex-end;
+  }
+  .ghost-prose {
+    color: var(--text-3);
+    font-family: var(--serif);
+    font-size: 16px;
+    opacity: 0.5;
+    max-width: 58ch;
+    margin-bottom: 18px;
+    user-select: none;
+  }
+
+  /* ===== Context bar ===== */
+  .ctxbar {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    padding: 6px;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .picked-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 8px 4px 6px;
+    border-radius: var(--r-md);
+    box-shadow: inset 3px 0 0 0 var(--stripe, var(--accent));
+    background: var(--inset);
+  }
+  .picked-row + .picked-row { margin-top: 3px; }
+  .picked-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .type-pill {
+    font-size: var(--fs-xs); color: var(--text-2);
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 999px; padding: 1px 8px; white-space: nowrap;
+  }
+  .count-pill {
+    font-size: var(--fs-xs); color: var(--accent-strong);
+    background: var(--accent-soft); border-radius: 999px; padding: 1px 8px;
+    white-space: nowrap; font-variant-numeric: tabular-nums;
+  }
+  .row-btn {
+    border: none; background: transparent; cursor: pointer;
+    border-radius: 4px; width: 24px; height: 24px;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--text-3); flex: none;
+  }
+  .row-btn:hover { background: var(--accent-soft); color: var(--text); }
+  .row-btn.star.on { color: var(--star); }
+  .ctx-trigger {
+    align-self: flex-start; margin-top: 4px;
+    border: 1px solid var(--border); background: var(--surface);
+    border-radius: var(--r-md); padding: 4px 12px; cursor: pointer; color: var(--text-2);
+  }
+  .ctx-trigger:hover { background: var(--accent-soft); color: var(--text); }
+  .empty-note { color: var(--text-3); font-size: var(--fs-sm); padding: 4px 8px; }
+
+  /* ===== Popover ===== */
+  .popover {
+    position: absolute;
+    left: 16px; bottom: 108px;
+    width: min(460px, calc(100% - 32px));
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--elev-2);
+    display: flex; flex-direction: column;
+    max-height: 500px;
+    overflow: hidden;
+  }
+  .pop-head { display: flex; align-items: center; gap: 6px; padding: 8px; border-bottom: 1px solid var(--border); }
+  .back-btn {
+    border: none; background: transparent; cursor: pointer;
+    border-radius: var(--r-md); width: 30px; height: 30px;
+    display: none; align-items: center; justify-content: center;
+    color: var(--accent); font-size: var(--fs-lg); flex: none;
+  }
+  .popover[data-panel]:not([data-panel="root"]) .back-btn { display: inline-flex; }
+  .back-btn:hover { background: var(--inset); }
+  .pop-search {
+    flex: 1; display: flex; align-items: center; gap: 6px;
+    border: 1px solid var(--border); border-radius: 999px;
+    padding: 4px 12px; background: var(--inset);
+  }
+  .pop-search:focus-within { border-color: var(--accent); }
+  .pop-search input { flex: 1; border: none; background: transparent; outline: none; color: var(--text); font: inherit; min-width: 0; }
+  .pop-search .glyph { color: var(--text-3); }
+  .panel-title { display: none; font-family: var(--serif); font-size: var(--fs-lg); white-space: nowrap; padding-right: 6px; }
+  .popover[data-panel]:not([data-panel="root"]) .panel-title { display: block; }
+
+  .pop-body { overflow-y: auto; padding: 6px; flex: 1; }
+
+  .axis-row {
+    width: 100%; display: flex; align-items: center; gap: 10px;
+    padding: 9px 10px; border: none; background: transparent;
+    border-radius: var(--r-md); cursor: pointer; text-align: left;
+  }
+  .axis-row:hover { background: var(--inset); }
+  .axis-row .axis-name { flex: 1; }
+  .axis-row .axis-count { font-size: var(--fs-sm); color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .axis-row .chev { color: var(--accent); }
+  .axis-sep { border-top: 1px solid var(--border); margin: 6px 4px; }
+
+  .group-h {
+    font-family: var(--serif); font-size: var(--fs-xl);
+    padding: 10px 10px 4px;
+    display: flex; align-items: baseline; gap: 8px;
+  }
+  .group-h .g-count { font-family: var(--sans); font-size: var(--fs-xs); color: var(--text-3); }
+
+  .t-line { display: flex; align-items: center; }
+  .t-line .caret {
+    border: none; background: transparent; cursor: pointer;
+    width: 22px; height: 26px; flex: none;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--accent); border-radius: 4px;
+  }
+  .t-line .caret:hover { background: var(--inset); }
+  .t-line .caret.blank { visibility: hidden; }
+  .t-row {
+    flex: 1; min-width: 0;
+    display: flex; align-items: center; gap: 8px;
+    border: none; background: transparent;
+    padding: 5px 8px;
+    border-radius: var(--r-md);
+    cursor: pointer; text-align: left;
+    box-shadow: inset 3px 0 0 0 var(--stripe, transparent);
+  }
+  .t-row:hover { background: var(--inset); }
+  .t-row .t-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .t-row .t-sub { font-size: var(--fs-xs); color: var(--text-3); white-space: nowrap; }
+  .t-row.implied .t-title { color: var(--text-2); }
+  .t-row.serif .t-title { font-family: var(--serif); }
+
+  .chk {
+    width: 16px; height: 16px; flex: none;
+    border: 1.5px solid var(--border);
+    border-radius: 4px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--surface);
+    color: transparent;
+    font-size: 11px; line-height: 1;
+    position: relative;
+  }
+  .chk.on { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+  .chk.implied { background: var(--accent-soft2); border-color: var(--accent); color: var(--accent-strong); }
+  .chk.ind { border-color: var(--accent); }
+  .chk.ind::after { content: ""; position: absolute; inset: 4px; background: var(--accent); border-radius: 1px; }
+
+  .clear-row {
+    width: 100%; border: none; background: transparent;
+    color: var(--text-3); padding: 8px 10px; text-align: left; cursor: pointer;
+    border-top: 1px solid var(--border); font-size: var(--fs-sm);
+  }
+  .clear-row:hover { color: var(--text); background: var(--inset); }
+  .pop-hint { font-size: var(--fs-xs); color: var(--text-3); padding: 6px 12px 8px; border-top: 1px solid var(--border); }
+  .no-results { color: var(--text-3); padding: 16px 12px; text-align: center; }
+
+  .notes { display: flex; flex-direction: column; gap: 12px; }
+  .note { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+  .note h3 { margin: 0 0 4px; font-family: var(--serif); font-size: var(--fs-lg); font-weight: 600; }
+  .note p { margin: 0; font-size: var(--fs-sm); color: var(--text-2); }
+  .note .tag { color: var(--accent-strong); font-weight: 600; }
+  .theme-toggle {
+    border: 1px solid var(--border); background: var(--surface);
+    border-radius: 999px; padding: 3px 12px; cursor: pointer;
+    font-size: var(--fs-sm); color: var(--text-2);
+  }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <header class="intro">
+    <h1>Context Picker, Take Two</h1>
+    <p>
+      Interactive mockup for ADR-0074, revision 3. Since round one: the Presets axis is
+      <em>gone</em> — “Full Novel Text” is now just checking <em>The Manuscript</em> root;
+      <strong>tags and saved views drill down</strong> to their members with the same tri-state
+      absorb/split semantics as chapters; <strong>Plot</strong> joins as an axis (a plotline is
+      a container of its cards); and the manuscript tree’s acts and chapters now carry the
+      same <strong>expand/collapse carets</strong> as every other container row.
+    </p>
+    <div class="meta">Every color and size is an app token · <button class="theme-toggle" id="themeBtn" type="button">Toggle theme</button></div>
+  </header>
+
+  <div class="stagewrap">
+    <div class="stage">
+      <div class="stage-chrome"><span>Chat — “Evaluate this scene for me”</span><span>mock · rev 3</span></div>
+      <div class="stage-body">
+        <p class="ghost-prose">Ask anything below. Picked context is included with the prompt…</p>
+
+        <div class="popover" id="popover" data-panel="root">
+          <div class="pop-head">
+            <button class="back-btn" id="backBtn" type="button" aria-label="Back">←</button>
+            <span class="panel-title" id="panelTitle"></span>
+            <label class="pop-search">
+              <span class="glyph">⌕</span>
+              <input id="searchBox" type="text" placeholder="Search titles, tags, aliases…  (#tag filters)" aria-label="Search context sources" />
+            </label>
+          </div>
+          <div class="pop-body" id="popBody"></div>
+          <button class="clear-row" id="clearBtn" type="button">⃠ Clear this panel’s selection</button>
+          <div class="pop-hint" id="popHint"></div>
+        </div>
+
+        <div class="ctxbar">
+          <div id="pickedList"></div>
+          <button class="ctx-trigger" type="button">+ Context</button>
+        </div>
+      </div>
+    </div>
+
+    <aside class="notes">
+      <div class="note">
+        <h3>Try these</h3>
+        <p>
+          <span class="tag">Whole novel</span> — Manuscript ▸ check <em>The Manuscript</em>: one ref, “8 scenes”. The old Full-Text preset, as a plain container.<br /><br />
+          <span class="tag">Drilldown</span> — By tag ▸ expand <em>heist-thread</em> with its ▸: members listed, individually pickable. Check the tag, then uncheck one member: the live query splits into explicit picks.<br /><br />
+          <span class="tag">Plot</span> — a plotline is a container of its cards; check it whole or drill in.
+        </p>
+      </div>
+      <div class="note">
+        <h3>What’s deliberate</h3>
+        <p>
+          One tri-state semantics everywhere: whole = one live ref, drill-in for members,
+          unchecking an implied member splits the parent into explicit picks (a deliberate
+          freeze). Every container row — acts and chapters included — carries the same
+          expand caret; search expands everything. A plain query matches titles, tags,
+          and aliases exactly like the Lore pane; <code>#</code> narrows to tags and
+          becomes an app-wide convention (the Lore search gains it too), so the two
+          surfaces stay identical. ★ target-marking unchanged, scene-only.
+        </p>
+      </div>
+      <div class="note">
+        <h3>Not in this mockup</h3>
+        <p>
+          The modal escalation (same panels, re-hosted) — deferred until the popover proves
+          cramped. Parameterized selectors (“by POV”) — v2. The plot kind color is a
+          placeholder; there is no <code>--k-plot</code> token yet.
+        </p>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script>
+(() => {
+  /* ---------- sample project ---------- */
+  const scenes = {};
+  const chapters = {};
+  const acts = {};
+  function scene(id, title, ch, tags) { scenes[id] = { id, title, chapter: ch, tags }; chapters[ch].scenes.push(id); }
+
+  acts.a1 = { id: "a1", title: "Act I — Landfall", chapters: [] };
+  acts.a2 = { id: "a2", title: "Act II — The Ledger", chapters: [] };
+  chapters.c1 = { id: "c1", title: "Ch 1 — Harbor Dues", act: "a1", scenes: [] }; acts.a1.chapters.push("c1");
+  chapters.c2 = { id: "c2", title: "Ch 2 — The Night Count", act: "a1", scenes: [] }; acts.a1.chapters.push("c2");
+  chapters.c3 = { id: "c3", title: "Ch 3 — Salt and Ink", act: "a2", scenes: [] }; acts.a2.chapters.push("c3");
+  scene("s1", "Customs shed at dawn", "c1", ["act-one"]);
+  scene("s2", "Mara counts the crates", "c1", ["act-one", "heist-thread"]);
+  scene("s3", "The harbormaster’s offer", "c2", ["heist-thread"]);
+  scene("s4", "Rooftops over the quay", "c2", ["heist-thread"]);
+  scene("s5", "A forged manifest", "c2", ["act-one"]);
+  scene("s6", "The night count goes wrong", "c2", ["heist-thread", "turning-point"]);
+  scene("s7", "Ledger by lamplight", "c3", []);
+  scene("s8", "The auditor arrives", "c3", ["turning-point"]);
+  const ALL_SCENES = Object.keys(scenes);
+
+  const lore = [
+    { id: "l1", type: "Characters", title: "Mara Voss", tags: ["pov", "smuggler"], aliases: ["the counter"] },
+    { id: "l2", type: "Characters", title: "Harbormaster Quill", tags: ["antagonist"], aliases: [] },
+    { id: "l3", type: "Characters", title: "Auditor Benn", tags: [], aliases: ["the pen"] },
+    { id: "l4", type: "Places", title: "The Customs Shed", tags: ["harbor"], aliases: [] },
+    { id: "l5", type: "Places", title: "Quayside Rookery", tags: ["harbor", "heist-thread"], aliases: [] },
+    { id: "l6", type: "Factions", title: "The Night Counters", tags: ["heist-thread"], aliases: [] },
+  ];
+
+  const plotlines = [
+    { id: "p1", title: "The Heist", cards: [
+      { id: "pc1", title: "The offer is made" },
+      { id: "pc2", title: "Casing the customs shed" },
+      { id: "pc3", title: "The count goes wrong" },
+    ]},
+    { id: "p2", title: "Benn’s Audit", cards: [
+      { id: "pc4", title: "First discrepancy" },
+      { id: "pc5", title: "The ledger trap" },
+    ]},
+  ];
+  const cardIndex = {};
+  for (const pl of plotlines) for (const c of pl.cards) cardIndex[c.id] = { ...c, plotline: pl.id };
+
+  /* tag -> members ({kind:'scene'|'lore', id}) */
+  const tagMembers = {};
+  for (const s of Object.values(scenes)) for (const t of s.tags) (tagMembers[t] ??= []).push({ kind: "scene", id: s.id });
+  for (const e of lore) for (const t of e.tags) (tagMembers[t] ??= []).push({ kind: "lore", id: e.id });
+
+  const views = [
+    { id: "v1", title: "Heist thread, in order", members: [
+      { kind: "scene", id: "s2" }, { kind: "scene", id: "s3" }, { kind: "scene", id: "s4" }, { kind: "scene", id: "s6" },
+    ]},
+    { id: "v2", title: "Everything Mara touches", members: [
+      { kind: "scene", id: "s1" }, { kind: "scene", id: "s2" }, { kind: "scene", id: "s6" },
+      { kind: "lore", id: "l1" }, { kind: "lore", id: "l4" }, { kind: "lore", id: "l5" }, { kind: "lore", id: "l6" },
+    ]},
+  ];
+
+  /* ---------- selection model ---------- */
+  /* ref kinds: root | act | chapter | scene | lore | tag | view | plotline | card */
+  let refs = [{ kind: "scene", id: "s6", target: true }];
+
+  const K = (r) => r.kind + ":" + r.id;
+  const has = (kind, id) => refs.some((r) => r.kind === kind && r.id === id);
+  const drop = (kind, id) => { refs = refs.filter((r) => !(r.kind === kind && r.id === id)); };
+
+  /* which selector refs cover a member?  returns {how:'direct'} | {how:'via', ref, label} | null */
+  function coveredBy(kind, id) {
+    if (has(kind, id)) return { how: "direct" };
+    if (kind === "scene") {
+      const s = scenes[id];
+      if (has("root", "ms")) return { how: "via", ref: { kind: "root", id: "ms" }, label: "The Manuscript" };
+      if (has("chapter", s.chapter)) return { how: "via", ref: { kind: "chapter", id: s.chapter }, label: chapters[s.chapter].title };
+      const aid = chapters[s.chapter].act;
+      if (has("act", aid)) return { how: "via", ref: { kind: "act", id: aid }, label: acts[aid].title };
+    }
+    if (kind === "card") {
+      const pl = cardIndex[id].plotline;
+      if (has("plotline", pl)) return { how: "via", ref: { kind: "plotline", id: pl }, label: plotlines.find((p) => p.id === pl).title };
+    }
+    if (kind === "scene" || kind === "lore") {
+      for (const t of Object.keys(tagMembers)) if (has("tag", t) && tagMembers[t].some((m) => m.kind === kind && m.id === id))
+        return { how: "via", ref: { kind: "tag", id: t }, label: "#" + t };
+      for (const v of views) if (has("view", v.id) && v.members.some((m) => m.kind === kind && m.id === id))
+        return { how: "via", ref: { kind: "view", id: v.id }, label: v.title };
+    }
+    return null;
+  }
+
+  function memberList(ref) {
+    switch (ref.kind) {
+      case "root": return ALL_SCENES.map((id) => ({ kind: "scene", id }));
+      case "act": return acts[ref.id].chapters.flatMap((cid) => chapters[cid].scenes.map((id) => ({ kind: "scene", id })));
+      case "chapter": return chapters[ref.id].scenes.map((id) => ({ kind: "scene", id }));
+      case "tag": return tagMembers[ref.id] ?? [];
+      case "view": return views.find((v) => v.id === ref.id).members;
+      case "plotline": return plotlines.find((p) => p.id === ref.id).cards.map((c) => ({ kind: "card", id: c.id }));
+      default: return [];
+    }
+  }
+
+  /* container state for display */
+  function containerState(kind, id) {
+    if (has(kind, id)) return "on";
+    const members = memberList({ kind, id });
+    // a container can itself be implied (chapter under a checked act/root)
+    if (kind === "chapter" && (has("act", chapters[id].act) || has("root", "ms"))) return "implied";
+    if (kind === "act" && has("root", "ms")) return "implied";
+    const cov = members.filter((m) => coveredBy(m.kind, m.id));
+    if (cov.length === 0) return "off";
+    return "ind";
+  }
+
+  /* toggles */
+  function toggleContainer(kind, id) {
+    const st = containerState(kind, id);
+    if (st === "on") { drop(kind, id); render(); return; }
+    if (st === "implied") {
+      // split the covering ancestor into siblings-of-this + demote
+      if (kind === "chapter") {
+        const aid = chapters[id].act;
+        if (has("root", "ms")) {
+          drop("root", "ms");
+          for (const a of Object.values(acts)) if (a.id !== aid) refs.push({ kind: "act", id: a.id });
+          for (const cid of acts[aid].chapters) if (cid !== id) refs.push({ kind: "chapter", id: cid });
+        } else {
+          drop("act", aid);
+          for (const cid of acts[aid].chapters) if (cid !== id) refs.push({ kind: "chapter", id: cid });
+        }
+      } else if (kind === "act") {
+        drop("root", "ms");
+        for (const a of Object.values(acts)) if (a.id !== id) refs.push({ kind: "act", id: a.id });
+      }
+      render(); return;
+    }
+    // off / ind -> absorb every direct member (and sub-container) pick, store one ref
+    const absorb = (k2, i2) => drop(k2, i2);
+    if (kind === "root") {
+      for (const a of Object.values(acts)) absorb("act", a.id);
+      for (const c of Object.values(chapters)) absorb("chapter", c.id);
+      for (const sid of ALL_SCENES) absorb("scene", sid);
+    } else if (kind === "act") {
+      for (const cid of acts[id].chapters) { absorb("chapter", cid); for (const sid of chapters[cid].scenes) absorb("scene", sid); }
+    } else {
+      for (const m of memberList({ kind, id })) absorb(m.kind, m.id);
+    }
+    refs.push({ kind, id });
+    render();
+  }
+
+  function toggleMember(kind, id) {
+    const cov = coveredBy(kind, id);
+    if (!cov) { refs.push({ kind, id }); render(); return; }
+    if (cov.how === "direct") { drop(kind, id); render(); return; }
+    // covered via a selector: split it into explicit members minus this one
+    const parent = cov.ref;
+    if (parent.kind === "root" || parent.kind === "act") {
+      // demote structurally: root -> acts, act -> chapters, chapter-of-target -> scenes
+      const sid = id, ch = scenes[sid].chapter, aid = chapters[ch].act;
+      if (parent.kind === "root") {
+        drop("root", "ms");
+        for (const a of Object.values(acts)) if (a.id !== aid) refs.push({ kind: "act", id: a.id });
+      } else { drop("act", aid); }
+      for (const cid of acts[aid].chapters) if (cid !== ch) refs.push({ kind: "chapter", id: cid });
+      for (const other of chapters[ch].scenes) if (other !== sid) refs.push({ kind: "scene", id: other });
+    } else {
+      drop(parent.kind, parent.id);
+      for (const m of memberList(parent)) if (!(m.kind === kind && m.id === id)) refs.push({ kind: m.kind, id: m.id });
+    }
+    render();
+  }
+
+  function setTarget(key) { for (const r of refs) r.target = K(r) === key ? !r.target : false; render(); }
+  function removeRef(key) { refs = refs.filter((r) => K(r) !== key); render(); }
+
+  /* ---------- rendering ---------- */
+  const pop = document.getElementById("popover");
+  const body = document.getElementById("popBody");
+  const title = document.getElementById("panelTitle");
+  const hint = document.getElementById("popHint");
+  const search = document.getElementById("searchBox");
+  let panel = "root";
+  // "act:a1", "chapter:c1", "tag:heist-thread", "view:v1", "plotline:p1".
+  // Acts start open, chapters closed — the groupOpenByDefault spirit at
+  // sample size; the real rule is the picker's size threshold.
+  const expanded = new Set(["act:a1", "act:a2"]);
+
+  const PANEL_TITLES = { manuscript: "Manuscript", lore: "Lore", tags: "By tag", views: "Saved views", plot: "Plot" };
+  const HINTS = {
+    root: "Search cuts across every axis — or drill into one.",
+    manuscript: "Checking a container stores one live ref — scenes added later are included automatically. Unchecking one member splits it into explicit picks.",
+    lore: "Grouped by entry type. Click to toggle — picked rows stay clickable.",
+    tags: "A tag is a live query. ▸ shows its members — pick them individually, or check the tag whole.",
+    views: "A saved view is your durable filter — one live ref. ▸ shows what it resolves to today.",
+    plot: "A plotline is a container of its cards — check it whole, or drill to individual cards.",
+  };
+
+  function chk(state) {
+    const cls = state === "on" ? "chk on" : state === "implied" ? "chk implied" : state === "ind" ? "chk ind" : "chk";
+    const mark = state === "on" || state === "implied" ? "✓" : "";
+    return `<span class="${cls}" aria-hidden="true">${mark}</span>`;
+  }
+  const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+
+  function line(caretHtml, rowHtml, indent) {
+    return `<div class="t-line" style="margin-left:${indent || 0}px">${caretHtml}${rowHtml}</div>`;
+  }
+  function caret(key) {
+    const open = expanded.has(key);
+    return `<button type="button" class="caret" data-caret="${key}" aria-label="${open ? "Collapse" : "Expand"}">${open ? "▾" : "▸"}</button>`;
+  }
+  const noCaret = `<span class="caret blank"></span>`;
+  function row(attrs, cls, inner) { return `<button type="button" class="t-row ${cls || ""}" ${attrs}>${inner}</button>`; }
+
+  function memberState(kind, id) {
+    const cov = coveredBy(kind, id);
+    return cov ? (cov.how === "direct" ? "on" : "implied") : "off";
+  }
+  function memberSub(kind, id) {
+    const cov = coveredBy(kind, id);
+    if (cov && cov.how === "via") return "via " + esc(cov.label);
+    if (kind === "scene" && scenes[id].tags[0]) return "#" + scenes[id].tags[0];
+    return "";
+  }
+  function memberTitle(kind, id) {
+    return kind === "scene" ? scenes[id].title : kind === "lore" ? lore.find((e) => e.id === id).title : cardIndex[id].title;
+  }
+  function memberStripe(kind) { return kind === "lore" ? "var(--k-lore)" : kind === "card" ? "var(--k-plot)" : "var(--accent)"; }
+
+  function memberRow(kind, id, indent) {
+    const st = memberState(kind, id);
+    return line(noCaret, row(`data-m="${kind}:${id}" style="--stripe:${memberStripe(kind)}"`, st === "implied" ? "implied" : "",
+      `${chk(st)}<span class="t-title">${esc(memberTitle(kind, id))}</span><span class="t-sub">${memberSub(kind, id)}</span>`), indent);
+  }
+
+  function renderRoot(q) {
+    if (q) return renderSearch(q);
+    const axes = [
+      { p: "manuscript", name: "Manuscript", count: Object.keys(acts).length + " acts · " + ALL_SCENES.length + " scenes" },
+      { p: "plot", name: "Plot", count: plotlines.length + " plotlines" },
+      { p: "lore", name: "Lore", count: lore.length + " entries" },
+      { p: "tags", name: "By tag", count: Object.keys(tagMembers).length + " tags" },
+      { p: "views", name: "Saved views", count: views.length + " views" },
+    ];
+    return axes.map((a) =>
+      `<button type="button" class="axis-row" data-goto="${a.p}">
+        <span class="axis-name">${a.name}</span><span class="axis-count">${a.count}</span><span class="chev">▸</span>
+      </button>`).join("");
+  }
+
+  function manuscriptRows(filterFn) {
+    // Search expands everything (the app's groupOpenByDefault rule);
+    // idle, act/chapter carets collapse like every other container row.
+    let html = "";
+    html += line(noCaret, row(`data-c="root:ms" style="--stripe: var(--accent)"`, "serif",
+      `${chk(containerState("root", "ms"))}<span class="t-title">The Manuscript</span><span class="t-sub">${ALL_SCENES.length} scenes — whole novel</span>`));
+    for (const a of Object.values(acts)) {
+      if (filterFn && !a.chapters.some((cid) => chapters[cid].scenes.some((sid) => filterFn(scenes[sid])))) continue;
+      const aKey = "act:" + a.id;
+      const aOpen = filterFn || expanded.has(aKey);
+      html += line(filterFn ? noCaret : caret(aKey), row(`data-c="act:${a.id}" style="--stripe: var(--accent)"`, "serif",
+        `${chk(containerState("act", a.id))}<span class="t-title">${esc(a.title)}</span><span class="t-sub">${memberList({kind:"act",id:a.id}).length} scenes</span>`), 18);
+      if (!aOpen) continue;
+      for (const cid of a.chapters) {
+        const c = chapters[cid];
+        const ms = c.scenes.filter((sid) => !filterFn || filterFn(scenes[sid]));
+        if (filterFn && ms.length === 0) continue;
+        const cKey = "chapter:" + cid;
+        const cOpen = filterFn || expanded.has(cKey);
+        html += line(filterFn ? noCaret : caret(cKey), row(`data-c="chapter:${cid}"`, "",
+          `${chk(containerState("chapter", cid))}<span class="t-title">${esc(c.title)}</span><span class="t-sub">${c.scenes.length} scenes</span>`), 36);
+        if (!cOpen) continue;
+        for (const sid of ms) html += memberRow("scene", sid, 58);
+      }
+    }
+    return html;
+  }
+
+  function loreRows(filterFn) {
+    let html = "";
+    for (const t of [...new Set(lore.map((e) => e.type))]) {
+      const items = lore.filter((e) => e.type === t && (!filterFn || filterFn(e)));
+      if (items.length === 0) continue;
+      html += `<div class="group-h">${t} <span class="g-count">${items.length}</span></div>`;
+      for (const e of items) html += memberRow("lore", e.id, 0);
+    }
+    return html;
+  }
+
+  function tagRows(q) {
+    const names = Object.keys(tagMembers).sort().filter((t) => !q || t.includes(q));
+    if (names.length === 0) return `<div class="no-results">No tags match.</div>`;
+    let html = "";
+    for (const t of names) {
+      const key = "tag:" + t;
+      html += line(caret(key), row(`data-c="tag:${t}" style="--stripe: var(--accent-strong)"`, "",
+        `${chk(containerState("tag", t))}<span class="t-title">#${esc(t)}</span><span class="t-sub">${tagMembers[t].length} items</span>`));
+      if (expanded.has(key)) for (const m of tagMembers[t]) html += memberRow(m.kind, m.id, 22);
+    }
+    return html;
+  }
+
+  function viewRows() {
+    let html = "";
+    for (const v of views) {
+      const key = "view:" + v.id;
+      html += line(caret(key), row(`data-c="view:${v.id}" style="--stripe: var(--accent)"`, "",
+        `${chk(containerState("view", v.id))}<span class="t-title">▤ ${esc(v.title)}</span><span class="t-sub">${v.members.length} nodes today</span>`));
+      if (expanded.has(key)) for (const m of v.members) html += memberRow(m.kind, m.id, 22);
+    }
+    return html;
+  }
+
+  function plotRows() {
+    let html = "";
+    for (const pl of plotlines) {
+      const key = "plotline:" + pl.id;
+      html += line(caret(key), row(`data-c="plotline:${pl.id}" style="--stripe: var(--k-plot)"`, "serif",
+        `${chk(containerState("plotline", pl.id))}<span class="t-title">${esc(pl.title)}</span><span class="t-sub">${pl.cards.length} cards</span>`));
+      if (expanded.has(key)) for (const c of pl.cards) html += memberRow("card", c.id, 22);
+    }
+    return html;
+  }
+
+  function renderSearch(q) {
+    const tagQuery = q.startsWith("#") ? q.slice(1) : null;
+    if (tagQuery !== null) return `<div class="group-h">Tags <span class="g-count">matching #${esc(tagQuery)}</span></div>` + tagRows(tagQuery);
+    const ql = q.toLowerCase();
+    const sMatch = (s) => s.title.toLowerCase().includes(ql) || s.tags.some((t) => t.includes(ql));
+    const lMatch = (e) => e.title.toLowerCase().includes(ql) || e.tags.some((t) => t.includes(ql)) || e.aliases.some((a) => a.includes(ql));
+    const cMatch = (c) => c.title.toLowerCase().includes(ql);
+    let html = "";
+    if (Object.values(scenes).some(sMatch)) { html += `<div class="group-h">Scenes</div>` + manuscriptRows(sMatch); }
+    if (lore.some(lMatch)) { html += `<div class="group-h">Lore</div>` + loreRows(lMatch); }
+    const cards = Object.values(cardIndex).filter(cMatch);
+    if (cards.length) { html += `<div class="group-h">Plot cards</div>`; for (const c of cards) html += memberRow("card", c.id, 0); }
+    const ts = Object.keys(tagMembers).filter((t) => t.includes(ql));
+    if (ts.length) { html += `<div class="group-h">Tags</div>` + tagRows(ql); }
+    return html || `<div class="no-results">Nothing matches “${esc(q)}” — titles, tags, and aliases are searched.</div>`;
+  }
+
+  function renderPanel() {
+    const q = search.value.trim();
+    pop.dataset.panel = q && panel === "root" ? "root" : panel;
+    title.textContent = PANEL_TITLES[panel] ?? "";
+    hint.textContent = HINTS[q && panel === "root" ? "root" : panel];
+    const ql = q.toLowerCase().replace(/^#/, "");
+    const sMatch = q ? (s) => s.title.toLowerCase().includes(ql) || s.tags.some((t) => t.includes(ql)) : null;
+    const lMatch = q ? (e) => e.title.toLowerCase().includes(ql) || e.tags.some((t) => t.includes(ql)) || e.aliases.some((a) => a.includes(ql)) : null;
+    if (panel === "root") body.innerHTML = renderRoot(q);
+    else if (panel === "manuscript") body.innerHTML = manuscriptRows(sMatch);
+    else if (panel === "lore") body.innerHTML = loreRows(lMatch);
+    else if (panel === "tags") body.innerHTML = tagRows(ql);
+    else if (panel === "views") body.innerHTML = viewRows();
+    else if (panel === "plot") body.innerHTML = plotRows();
+  }
+
+  function refLabel(r) {
+    switch (r.kind) {
+      case "root": return { t: "The Manuscript", pill: "Manuscript", count: ALL_SCENES.length + " scenes", stripe: "var(--accent)" };
+      case "scene": return { t: scenes[r.id].title, pill: "Scene", stripe: "var(--accent)" };
+      case "chapter": return { t: chapters[r.id].title, pill: "Chapter", count: chapters[r.id].scenes.length + " scenes", stripe: "var(--accent)" };
+      case "act": return { t: acts[r.id].title, pill: "Act", count: memberList(r).length + " scenes", stripe: "var(--accent)" };
+      case "lore": { const e = lore.find((x) => x.id === r.id); return { t: e.title, pill: e.type.replace(/s$/, ""), stripe: "var(--k-lore)" }; }
+      case "tag": return { t: "#" + r.id, pill: "Tag", count: tagMembers[r.id].length + " items", stripe: "var(--accent-strong)" };
+      case "view": { const v = views.find((x) => x.id === r.id); return { t: "▤ " + v.title, pill: "View", count: v.members.length + " nodes", stripe: "var(--accent)" }; }
+      case "plotline": { const p = plotlines.find((x) => x.id === r.id); return { t: p.title, pill: "Plotline", count: p.cards.length + " cards", stripe: "var(--k-plot)" }; }
+      case "card": return { t: cardIndex[r.id].title, pill: "Card", stripe: "var(--k-plot)" };
+    }
+  }
+
+  function renderPicked() {
+    const host = document.getElementById("pickedList");
+    if (refs.length === 0) { host.innerHTML = `<div class="empty-note">Nothing picked yet — everything you add shows here, and can be unpicked here or in the menu.</div>`; return; }
+    host.innerHTML = refs.map((r) => {
+      const L = refLabel(r);
+      const key = K(r);
+      const star = r.kind === "scene"
+        ? `<button type="button" class="row-btn star ${r.target ? "on" : ""}" data-star="${key}" title="Mark as target scene" aria-label="Mark as target scene">${r.target ? "★" : "☆"}</button>` : "";
+      const count = L.count ? `<span class="count-pill">${L.count}</span>` : "";
+      return `<div class="picked-row" style="--stripe:${L.stripe}">
+        <span class="picked-title">${esc(L.t)}</span>${count}<span class="type-pill">${L.pill}</span>${star}
+        <button type="button" class="row-btn" data-remove="${key}" title="Remove" aria-label="Remove ${esc(L.t)}">×</button>
+      </div>`;
+    }).join("");
+  }
+
+  function render() { renderPanel(); renderPicked(); }
+
+  /* ---------- events ---------- */
+  body.addEventListener("click", (ev) => {
+    const el = ev.target.closest("button");
+    if (!el) return;
+    if (el.dataset.goto) { panel = el.dataset.goto; search.value = ""; render(); return; }
+    if (el.dataset.caret) {
+      expanded.has(el.dataset.caret) ? expanded.delete(el.dataset.caret) : expanded.add(el.dataset.caret);
+      render(); return;
+    }
+    if (el.dataset.c) { const [k, id] = el.dataset.c.split(":"); return toggleContainer(k, id); }
+    if (el.dataset.m) { const [k, id] = el.dataset.m.split(":"); return toggleMember(k, id); }
+  });
+  document.getElementById("pickedList").addEventListener("click", (ev) => {
+    const el = ev.target.closest("button");
+    if (!el) return;
+    if (el.dataset.remove) return removeRef(el.dataset.remove);
+    if (el.dataset.star) return setTarget(el.dataset.star);
+  });
+  document.getElementById("backBtn").addEventListener("click", () => { panel = "root"; search.value = ""; render(); });
+  document.getElementById("clearBtn").addEventListener("click", () => {
+    if (panel === "manuscript") refs = refs.filter((r) => !["root", "scene", "chapter", "act"].includes(r.kind));
+    else if (panel === "plot") refs = refs.filter((r) => !["plotline", "card"].includes(r.kind));
+    else if (panel === "root") refs = [];
+    else refs = refs.filter((r) => r.kind !== { lore: "lore", tags: "tag", views: "view" }[panel]);
+    render();
+  });
+  search.addEventListener("input", render);
+  document.getElementById("themeBtn").addEventListener("click", () => {
+    const root = document.documentElement;
+    const dark = getComputedStyle(root).getPropertyValue("--surface").trim() === "#1f2522";
+    root.dataset.theme = dark ? "light" : "dark";
+  });
+
+  render();
+})();
+</script>
+
+</body></html>

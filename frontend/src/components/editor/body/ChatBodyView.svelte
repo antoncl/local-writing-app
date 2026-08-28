@@ -33,7 +33,6 @@
   import PlainTextEditor from "@/components/widgets/PlainTextEditor.svelte";
   import ChatTranscript from "@/components/editor/body/chat/ChatTranscript.svelte";
   import ChatInputsStrip from "@/components/editor/body/chat/ChatInputsStrip.svelte";
-  import ChatJournalScope from "@/components/editor/body/chat/ChatJournalScope.svelte";
   import ChatMetaLine from "@/components/editor/body/chat/ChatMetaLine.svelte";
   import ChatComposerBar from "@/components/editor/body/chat/ChatComposerBar.svelte";
   import EntryDraftCard from "@/components/editor/body/chat/EntryDraftCard.svelte";
@@ -68,11 +67,13 @@
   } from "@/lib/chat/assistantScope";
   import {
     decodeChatInputDrafts,
+    displayInputValues,
     encodeChatInputDrafts,
     endsInUserTurn,
     seedInputDraftsFromEntry,
     ttlChipsFor,
   } from "@/components/editor/body/chat/chatInputs";
+  import { findNodeBySceneId } from "@/lib/utils/treeHelpers";
 
   
   interface Props {
@@ -148,7 +149,7 @@
   // render's preview response (whether the prompt actually called
   // relevant_lore()) and echoed on every save so a per-turn persist never
   // drops it. Drives whether the backend send path injects any lore at all.
-  let chatLoreEnabled = false;
+  let chatLoreEnabled = $state(false);
   // ADR-0060 §2: node ids the prompt selected via use(node). Captured from the
   // lock render's preview response and echoed on every save, exactly like
   // chatLoreEnabled — the backend unions them into its one lore selector.
@@ -164,7 +165,6 @@
   let activeChatTitle = "Untitled chat";
   let activeChatPinned = false;
   let activeChatJournal: ChatSessionJournalEntry[] = $state([]);
-  let activeChatJournalFreshIds = $state(new Set<string>());
   let activeChatCacheWriteTimes: Record<string, string> = $state({});
   // V2 cost accounting — pluck the delta off the streaming `done` event
   // and forward it to the backend on the next persistActiveChat. $state (not
@@ -175,9 +175,9 @@
 
   // The composer instance, for the imperative clear on send (#1083).
   let composerRef: { setValue: (v: string) => void; focus: () => void } | null = $state(null);
-  // The 👁 preview popover (and both picker chips) live in ChatComposerBar
-  // (#1086); this view feeds it chatPreviewMessages below and the two pick
-  // callbacks (pickPromptForChat / pickAssistantForChat).
+  // The Context door (and both picker chips) live in ChatComposerBar (#1086);
+  // this view feeds it chatPreviewMessages below and the two pick callbacks
+  // (pickPromptForChat / pickAssistantForChat).
   // The rendered messages from the last successful estimate fetch (system +
   // any templated initial turns). Null when no prompt is bound (freeform: no
   // system message) or the template hasn't rendered yet (unfilled inputs).
@@ -192,8 +192,6 @@
   // types so storage stays string-uniform. Hydrated from session.inputs;
   // persisted on every edit so a half-configured chat survives reload.
   let chatInputDrafts: Record<string, string> = $state({});
-  // Collapse the strip after first send to reclaim space — user can re-expand.
-  let chatInputsHidden = $state(false);
 
   // ---- cost-estimate + TTL strip state ----
   // SLOT_TTL_SECONDS + ttlChipsFor moved to chat/chatInputs.ts (#99).
@@ -322,12 +320,10 @@
     activeChatTitle = "Untitled chat";
     activeChatPinned = false;
     activeChatJournal = [];
-    activeChatJournalFreshIds = new Set();
     activeChatCacheWriteTimes = {};
     pendingTurnCost = null;
     pendingTurnCacheWriteSlots = [];
     chatInputDrafts = {};
-    chatInputsHidden = false;
     commit.reset();
   }
 
@@ -338,7 +334,6 @@
     activeChatTitle = session.title || "Untitled chat";
     activeChatPinned = session.pinned;
     activeChatJournal = Array.isArray(session.journal) ? [...session.journal] : [];
-    activeChatJournalFreshIds = new Set();
     activeChatCacheWriteTimes = { ...(session.cache_write_times ?? {}) };
     chatPromptEntryId = session.prompt_entry_id || "";
     chatAssistantId = session.assistant_id || "";
@@ -377,10 +372,6 @@
     chatInputDrafts = decodeChatInputDrafts(
       (session as unknown as { inputs?: Record<string, unknown> }).inputs,
     );
-    // Collapse the inputs strip by default once the chat is locked (has
-    // turns) — the conversation owns the height; the user can re-expand to
-    // inspect what was sent. Open it for fresh/unlocked chats still being set up.
-    chatInputsHidden = (session.messages || []).length > 0;
   }
 
   // The two pick gestures stay here (they mutate session state + persist); the
@@ -404,7 +395,6 @@
     // (deferred render lets the user edit input drafts freely).
     chatSystemPrompt = "";
     chatInputDrafts = seedInputDraftsFromEntry(entry);
-    chatInputsHidden = false;
     await persistActiveChat();
   }
 
@@ -526,14 +516,6 @@
     const fresh = added.filter((e) => !existingIds.has(e.entry_id));
     if (!fresh.length) return;
     activeChatJournal = [...activeChatJournal, ...fresh];
-    const freshIds = new Set(activeChatJournalFreshIds);
-    for (const e of fresh) freshIds.add(e.entry_id);
-    activeChatJournalFreshIds = freshIds;
-    setTimeout(() => {
-      const next = new Set(activeChatJournalFreshIds);
-      for (const e of fresh) next.delete(e.entry_id);
-      activeChatJournalFreshIds = next;
-    }, 2500);
   }
 
   async function streamAssistantReply(onError: () => void): Promise<void> {
@@ -627,7 +609,6 @@
     // shouldn't force the user to type "Do it").
     const isFirstTurnFromPrompt = !!activePromptEntry && chatHistory.length === 0;
     if (!text && !isFirstTurnFromPrompt) return;
-    const isFirstSubmission = chatHistory.length === 0;
     chatError = null;
     chatNotice = null;
     chatRewound = false;
@@ -677,7 +658,6 @@
     };
     try {
       await streamAssistantReply(rewindUser);
-      if (isFirstSubmission) chatInputsHidden = true;
     } catch (e) {
       chatError = (e as Error).message;
       rewindUser();
@@ -749,7 +729,6 @@
   function clearChat() {
     chatHistory = [];
     chatError = null;
-    chatInputsHidden = false;
     // Reset cost-delta + cache-slot stamping so the next persist starts clean.
     pendingTurnCost = null;
     pendingTurnCacheWriteSlots = [];
@@ -816,6 +795,11 @@
       // Keep the block TEXT (the estimate strip strips it to label/tokens); the
       // preview popover needs it to show the attached lore.
       chatPreviewCacheBlocks = preview.cache_blocks ?? [];
+      // ADR-0076 S2: pre-lock, this fetch is the only place the lore gate is
+      // known — mirror the lock render's capture (~L737) so the Context door's
+      // "lore-enabled" annotation is live while the writer is still filling
+      // inputs. Once locked, the lock render owns it (untouched here).
+      if (!isLocked) chatLoreEnabled = preview.lore_enabled ?? false;
       chatEstimate = {
         tokens: preview.estimated_tokens ?? 0,
         cost_usd: preview.estimated_cost_usd ?? null,
@@ -872,9 +856,6 @@
     void loreEntries;
   });
   $effect.pre(() => {
-    void structure;
-  });
-  $effect.pre(() => {
     void maybeLoadChat(scene?.id ?? null);
   });
   let isLocked = $derived(chatHistory.length > 0);
@@ -919,6 +900,22 @@
   // template via the persisted drafts; revise mode keeps the picker (#695).
   let strippedInputs = $derived(
     commit.isCreateBrainstorm ? declaredInputs.filter((i) => i.name !== "entry") : declaredInputs,
+  );
+  // ADR-0076 S2: id → title, for the Context door's drill-down (tier member
+  // titles) and its locked-inputs section. Lore covers the common ref target;
+  // a scene ref resolves through the manuscript structure (its front-matter
+  // `id` IS the structure node's `scene_id`, not the node id — #201).
+  function titleFor(id: string): string | null {
+    const lore = loreEntries.find((entry) => entry.id === id)?.title;
+    if (lore) return lore;
+    const sceneNode = structure ? findNodeBySceneId(structure.root, id) : null;
+    return sceneNode?.title ?? null;
+  }
+  // ADR-0076 S2: the Context door's "Inputs (locked)" section — filled draft
+  // values as titled text, read-only. Only meaningful once locked (pre-lock the
+  // inputs strip IS the form); rendered by ChatComposerBar.
+  let lockedInputDisplays = $derived(
+    isLocked ? displayInputValues(strippedInputs, chatInputDrafts, { titleFor }) : [],
   );
   // A hidden input is launch-set, not user-authored (ADR-0046 §6.4) and has no
   // widget in the strip — so it must never gate Send, or an unset one would
@@ -972,6 +969,10 @@
       {chatSystemPrompt}
       {chatPreviewMessages}
       previewCacheBlocks={chatPreviewCacheBlocks}
+      loreEnabled={chatLoreEnabled}
+      journal={activeChatJournal}
+      {lockedInputDisplays}
+      {titleFor}
       onPickPrompt={(entry) => void pickPromptForChat(entry)}
       onPickAssistant={(id) => void pickAssistantForChat(id)}
     />
@@ -983,11 +984,9 @@
       bind:scrollEl={chatScrollEl}
     />
 
-    {#if strippedInputs.some((i) => !i.hidden)}
+    {#if !isLocked && strippedInputs.some((i) => !i.hidden)}
       <ChatInputsStrip
         declaredInputs={strippedInputs}
-        {isLocked}
-        bind:hidden={chatInputsHidden}
         {chatInputDrafts}
         {structure}
         {researchStructure}
@@ -996,10 +995,6 @@
         {implicitContextMatcher}
         onDraftChange={(name, value) => void updateChatInputDraft(name, value)}
       />
-    {/if}
-
-    {#if activeChatJournal.length > 0}
-      <ChatJournalScope journal={activeChatJournal} freshIds={activeChatJournalFreshIds} />
     {/if}
 
     <ChatMetaLine estimate={chatEstimate} {ttlChips} {sessionCostUsd} />
@@ -1171,7 +1166,7 @@
     .cbv-busy-dot { animation: none; }
   }
 
-  /* The composer strip (prompt/assistant picker chips + 👁 preview popover) and
+  /* The composer strip (prompt/assistant picker chips + Context door) and
      its styles moved to chat/ChatComposerBar.svelte (#1086). */
 
   /* ---- 4 · messages ---- */
@@ -1180,9 +1175,8 @@
      composer + strips + input + action row at their natural height so only
      the transcript flexes; ChatTranscript's own .cbv-messages carries the
      flex: 1 1 0 that makes it scroll. */
-  /* The inputs strip + journal scope carry their own flex: 0 0 auto now that
-     they live in chat/ChatInputsStrip.svelte + chat/ChatJournalScope.svelte
-     (#99). */
+  /* The inputs strip carries its own flex: 0 0 auto in chat/ChatInputsStrip.svelte
+     (#99). The journal-scope strip retired into the Context door (ADR-0076 S2). */
   /* ChatComposerBar sets flex: 0 0 auto on its own root (.cbv-composer-strip). */
   .cbv-action-row,
   :global(.chat-body-view > .cbv-input) {

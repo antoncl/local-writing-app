@@ -291,6 +291,10 @@ class PreviewCacheBlock(BaseModel):
     tokens: int
     tier: str | None = None
     text: str = ""
+    # ADR-0076 S2: the tier's member entry ids, for the Context door's
+    # drill-down ("12 entries" → which twelve, by title). Additive; empty
+    # for non-lore blocks (system, conversation turns).
+    entry_ids: list[str] = Field(default_factory=list)
 
 
 class PreviewErrorInfo(BaseModel):

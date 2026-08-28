@@ -574,7 +574,12 @@ def build_preview(
     # cache-aware preview can surface it (templates no longer emit lore). Only for a
     # lore-enabled prompt; `scene` is the same as-of anchor the send path resolves.
     if rendered.lore_invoked:
-        rendered.send_lore_stable, rendered.send_lore_volatile = _preview_lore_tiers(
+        (
+            rendered.send_lore_stable,
+            rendered.send_lore_volatile,
+            rendered.send_lore_stable_ids,
+            rendered.send_lore_volatile_ids,
+        ) = _preview_lore_tiers(
             project_service, scene, rendered.used_node_ids, rendered.used_node_hints
         )
 
@@ -586,13 +591,23 @@ def _preview_lore_tiers(
     scene: Any,
     used_node_ids: list[str],
     used_node_hints: dict[str, str],
-) -> tuple[str, str]:
+) -> tuple[str, str, list[str], list[str]]:
     """The send-path lore the model will receive, split into (stable, volatile) XML
-    for the cache-aware preview (ADR-0060 §6). Mirrors the send path's selection +
+    plus their member id lists, for the cache-aware preview (ADR-0060 §6) and the
+    Context door's drill-down (ADR-0076 S2). Mirrors the send path's selection +
     tiering (`_relevant_lore_ids` + `_tier_lore_ids`) but against a FRESH throwaway
     `AISession` — the cold turn-1 view (unhinted lore volatile; `use(node,
     "stable")` stable) — and never commits, so it cannot touch a live chat's cache
-    baseline. Both tiers resolve as-of `scene`, like the send path."""
+    baseline. Both tiers resolve as-of `scene`, like the send path.
+
+    `journal=[]`, not `None` (#1477): `None` selects `_implicit_lore_ids`'s
+    static-scan branch (prose scan + textual one-hop, `lore_selection.py:112-159`),
+    which the SEND path never runs — the preview showed lore the send wouldn't
+    include. `[]` takes the send branch instead (the chat-journal branch, empty
+    journal = the turn-1 floor: always-included + direct refs + one structural
+    hop), matching what a real send would select. A locked chat's own persisted
+    journal is rendered separately, by the Context door's journal section
+    (frontend-side) — this function never sees it."""
     from app.services.ai.lore_block import _format_lore_block
     from app.services.ai.lore_selection import (
         _relevant_lore_ids,
@@ -601,17 +616,17 @@ def _preview_lore_tiers(
     from app.services.ai.sessions import AISession
 
     ids = _relevant_lore_ids(
-        project_service, scene, "implicit", None, list(used_node_ids or [])
+        project_service, scene, "implicit", [], list(used_node_ids or [])
     )
     if not ids:
-        return "", ""
+        return "", "", [], []
     stable_ids, volatile_ids = _tier_lore_ids(
         project_service, ids, AISession(id="preview"), dict(used_node_hints or {})
     )
     index = project_service.build_mutations_index() if scene is not None else None
     stable_xml = _format_lore_block(project_service, stable_ids, scene, index=index)
     volatile_xml = _format_lore_block(project_service, volatile_ids, scene, index=index)
-    return stable_xml, volatile_xml
+    return stable_xml, volatile_xml, stable_ids, volatile_ids
 
 
 def _raise_preview_error_from_template(
@@ -705,11 +720,16 @@ def _preview_send_blocks(
     `count(text)` returns the token count for a block."""
     blocks: list[PreviewCacheBlock] = []
 
-    def add(label: str, role: str, text: str, tier: str | None) -> None:
+    def add(label: str, role: str, text: str, tier: str | None, entry_ids: list[str] | None = None) -> None:
         if text.strip():
             blocks.append(
                 PreviewCacheBlock(
-                    label=label, role=role, tokens=count(text), tier=tier, text=text
+                    label=label,
+                    role=role,
+                    tokens=count(text),
+                    tier=tier,
+                    text=text,
+                    entry_ids=list(entry_ids or []),
                 )
             )
 
@@ -717,8 +737,9 @@ def _preview_send_blocks(
         m.text for m in rendered.messages if m.role == "system" and m.text.strip()
     )
     add("system", "system", system_text, "stable")
-    add("stable lore", "system", rendered.send_lore_stable, "stable")
-    add("volatile lore", "system", rendered.send_lore_volatile, "volatile")
+    # ADR-0076 S2: the tier's member ids ride along for the Context door's drill-down.
+    add("stable lore", "system", rendered.send_lore_stable, "stable", rendered.send_lore_stable_ids)
+    add("volatile lore", "system", rendered.send_lore_volatile, "volatile", rendered.send_lore_volatile_ids)
     for message in rendered.messages:
         if message.role != "system":
             add(message.role, message.role, message.text, None)

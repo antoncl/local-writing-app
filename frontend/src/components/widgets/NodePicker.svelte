@@ -60,6 +60,7 @@
   import NodeList from "@/components/widgets/NodeList.svelte";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import CountPill from "@/components/widgets/CountPill.svelte";
+  import PickTree, { type PickTreeRow } from "@/components/widgets/PickTree.svelte";
 
   // The resolved kind/sub-type hex for a ref, or null — fed to NodeRow's
   // `stripeColor` so a candidate row carries the one curved stripe (ADR-0068:
@@ -389,6 +390,39 @@
       if (m) onChange?.({ value: toggleSelectorMember(value, g, m) });
     }
   }
+
+  // Normalize each tri-state source to PickTree rows with bound handlers, so the
+  // shared PickTree renders manuscript, saved views (and tags, pt.2) uniformly.
+  const manuscriptTreeRows = $derived<PickTreeRow[]>(
+    manuscriptRows.map((row) => ({
+      key: row.id,
+      depth: row.depth,
+      hasChildren: row.hasChildren,
+      collapsed: row.collapsed,
+      isContainer: !row.isScene,
+      state: row.state,
+      title: row.title,
+      count: row.isScene ? null : row.sceneCount,
+      countNoun: "scene",
+      onToggle: () => toggleManuscriptPick(row.id),
+      onCollapse: () => toggleManuscriptCollapse(row.id),
+    })),
+  );
+  const viewTreeRows = $derived<PickTreeRow[]>(
+    viewRows.map((row) => ({
+      key: row.key,
+      depth: row.depth,
+      hasChildren: row.hasChildren,
+      collapsed: row.collapsed,
+      isContainer: row.isSelector,
+      state: row.state,
+      title: row.title,
+      count: row.isSelector ? row.count : null,
+      countNoun: "item",
+      onToggle: () => toggleViewRow(row),
+      onCollapse: () => toggleViewCollapse(row.id),
+    })),
+  );
 
   // Flatten the research tree's notes (leaves) into a searchable list.
   // Topics are organizational containers with no body — only notes are
@@ -760,103 +794,14 @@
             </div>
           {/if}
         {:else}
-          <!-- One tri-state row, shared by the manuscript tree (ADR-0074 slice
-               4b) and the saved-view selectors (slice 5). `r` is normalized;
-               each section binds its own toggle/collapse. -->
-          {#snippet pickRow(r: {
-            depth: number;
-            hasChildren: boolean;
-            collapsed: boolean;
-            isContainer: boolean;
-            state: string;
-            title: string;
-            count: number | null;
-            countNoun: string;
-          }, onToggle: () => void, onCollapse: () => void)}
-            <div class="ctx-mrow" style={`--depth:${r.depth}`}>
-              {#if r.hasChildren}
-                <button
-                  type="button"
-                  class="ctx-mcaret"
-                  aria-label={r.collapsed ? `Expand ${r.title}` : `Collapse ${r.title}`}
-                  aria-expanded={!r.collapsed}
-                  onclick={onCollapse}
-                >{r.collapsed ? "▸" : "▾"}</button>
-              {:else}
-                <span class="ctx-mcaret ctx-mcaret-leaf" aria-hidden="true"></span>
-              {/if}
-              <button
-                type="button"
-                class="ctx-mtoggle"
-                class:serif={r.isContainer}
-                aria-pressed={r.state === "on" || r.state === "implied"}
-                onclick={onToggle}
-              >
-                <span class={`ctx-mcheck ctx-mcheck-${r.state}`} aria-hidden="true"
-                  >{r.state === "on" || r.state === "implied" ? "✓" : ""}</span
-                >
-                <span class="ctx-mtitle">{r.title}</span>
-                {#if r.count !== null}
-                  <span class="ctx-mcount">{r.count} {r.count === 1 ? r.countNoun : `${r.countNoun}s`}</span>
-                {/if}
-                <span class="sr-only"
-                  >{r.state === "on"
-                    ? "Picked"
-                    : r.state === "implied"
-                      ? "Included via a container"
-                      : r.state === "indeterminate"
-                        ? "Partially picked"
-                        : "Not picked"}</span
-                >
-              </button>
-            </div>
-          {/snippet}
-
-          <!-- Manuscript tri-state tree: root / acts / chapters as live
-               containers over their scenes, above the flat kind groups. -->
-          {#if manuscriptRows.length > 0}
-            <div class="ctx-mtree" role="group" aria-label="Manuscript">
-              {#each manuscriptRows as row (row.id)}
-                {@render pickRow(
-                  {
-                    depth: row.depth,
-                    hasChildren: row.hasChildren,
-                    collapsed: row.collapsed,
-                    isContainer: !row.isScene,
-                    state: row.state,
-                    title: row.title,
-                    count: row.isScene ? null : row.sceneCount,
-                    countNoun: "scene",
-                  },
-                  () => toggleManuscriptPick(row.id),
-                  () => toggleManuscriptCollapse(row.id),
-                )}
-              {/each}
-            </div>
+          <!-- Manuscript tri-state tree (slice 4b) and saved-view selectors
+               (slice 5) render through the shared PickTree, above the flat
+               kind groups. -->
+          {#if manuscriptTreeRows.length > 0}
+            <PickTree rows={manuscriptTreeRows} ariaLabel="Manuscript" />
           {/if}
-
-          <!-- Saved-view selectors (ADR-0074 slice 5): each configured view is a
-               tri-state container — absorb the whole view (one live ref) or drill
-               in and pick members. -->
-          {#if viewRows.length > 0}
-            <div class="ctx-mtree" role="group" aria-label="Saved views">
-              {#each viewRows as row (row.key)}
-                {@render pickRow(
-                  {
-                    depth: row.depth,
-                    hasChildren: row.hasChildren,
-                    collapsed: row.collapsed,
-                    isContainer: row.isSelector,
-                    state: row.state,
-                    title: row.title,
-                    count: row.isSelector ? row.count : null,
-                    countNoun: "item",
-                  },
-                  () => toggleViewRow(row),
-                  () => toggleViewCollapse(row.id),
-                )}
-              {/each}
-            </div>
+          {#if viewTreeRows.length > 0}
+            <PickTree rows={viewTreeRows} ariaLabel="Saved views" />
           {/if}
 
           <!-- ADR-0068: candidates compose NodeRow/NodeList. Each kind is a
@@ -1149,9 +1094,9 @@
     white-space: nowrap;
   }
 
-  /* Live descendant-scene count on a picked container chip / tree row. */
-  .ctx-count-pill,
-  .ctx-mcount {
+  /* Live descendant-scene / member count on a picked container chip. The tree
+     rows' own count badge lives in PickTree.svelte. */
+  .ctx-count-pill {
     flex: none;
     font-size: var(--fs-xs);
     color: var(--accent-emphasis);
@@ -1161,101 +1106,6 @@
     line-height: 1.3;
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
-  }
-
-  /* --- Manuscript tri-state tree (ADR-0074 slice 4b) --------------- */
-  .ctx-mtree {
-    display: flex;
-    flex-direction: column;
-    padding: 2px 0;
-  }
-  .ctx-mrow {
-    display: flex;
-    align-items: center;
-    padding-left: calc(var(--depth, 0) * 16px);
-  }
-  .ctx-mcaret {
-    flex: none;
-    width: 22px;
-    height: 26px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border: none;
-    background: transparent;
-    color: var(--accent);
-    border-radius: var(--r-md);
-    cursor: pointer;
-    font-size: var(--fs-sm);
-    line-height: 1;
-  }
-  .ctx-mcaret:hover {
-    background: var(--inset);
-  }
-  .ctx-mcaret-leaf {
-    cursor: default;
-  }
-  .ctx-mtoggle {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    border: none;
-    background: transparent;
-    color: inherit;
-    text-align: left;
-    padding: 4px 8px;
-    border-radius: var(--r-md);
-    cursor: pointer;
-  }
-  .ctx-mtoggle:hover {
-    background: var(--inset);
-  }
-  .ctx-mtoggle.serif .ctx-mtitle {
-    font-family: var(--serif);
-  }
-  .ctx-mtitle {
-    flex: 1;
-    min-width: 0;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .ctx-mcheck {
-    flex: none;
-    width: 16px;
-    height: 16px;
-    border: 1.5px solid var(--border);
-    border-radius: 4px;
-    background: var(--surface);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: var(--fs-xs);
-    line-height: 1;
-    color: transparent;
-    position: relative;
-  }
-  .ctx-mcheck-on {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: var(--surface);
-  }
-  .ctx-mcheck-implied {
-    background: var(--accent-soft2);
-    border-color: var(--accent);
-    color: var(--accent-emphasis);
-  }
-  .ctx-mcheck-indeterminate {
-    border-color: var(--accent);
-  }
-  .ctx-mcheck-indeterminate::after {
-    content: "";
-    position: absolute;
-    inset: 4px;
-    background: var(--accent);
-    border-radius: 1px;
   }
 
   /* --- Empty states ------------------------------------------------ */

@@ -6,10 +6,12 @@
   no single home (so "does the backend scan `long_text` fields?" had no answer a
   reader could find), and an implementation gap hid behind that. This gathers them
   into the one authoritative reference for implicit / dynamic context detection.
-  The qualification is **§7**: it states the current implementation gap plainly and
-  *authorizes* closing it — so this is a summation plus one named, bounded forward
-  step, not a pure record. (Two §3 rules — the possessive and space≡hyphen — are
-  likewise decided here as new behavior; §7 flags them as not-yet-in-the-code.)
+  The qualification is **§7**: it stated the implementation gap plainly and
+  *authorized* closing it — a summation plus one named, bounded forward step, not a
+  pure record. That forward step is **now done**: §7 records the gap closed across
+  slices 1–4. (Two §3 rules — the possessive and space≡hyphen — were likewise
+  decided here as new behavior; §7 tracked them from not-yet-in-the-code to shipped
+  in slice 2.)
 - Verified against `fd03deac` (2026-08-28).
 - Consolidates: the `decisions-implicit-context` design note (2026-06-20);
   ADR-0008 (effective-name-aware matcher); `snapshots-and-the-witness.md` §4
@@ -203,21 +205,21 @@ rival selector: the final set is `{ explicit picks ∪ detected (journal) ∪ al
 entity is surfaced to the author (an audit chip with a "remove + suppress for
 session" action) — **visible** auto-injection is fine; hidden is what scares.
 
-## 7. Current implementation gap (stated, not hidden)
+## 7. Implementation gap — closed (slices 1–4)
 
-The design above is the decided target. The send-time pipeline was built
-incrementally. Two of its three gaps are now closed (slices 1–2, below); the
-**remaining gap is surface coverage** — backend detection still scans only:
+The design above is the decided target, and the send-time pipeline was built
+incrementally toward it. **As of slice 4 the pipeline has reached §2 in full.**
+This section records what the gaps were and how each closed — a summation that
+hid a shortfall would be worse than one that names it.
 
-- the **chat composer message** on a chat send (`expand_context`,
-  `services/ai/context_expander.py`), and
-- the scene **`summary`** on one-shot / preview render (`_implicit_lore_ids`,
-  `services/ai/helpers.py`).
-
-It does **not** yet scan the scene body or the other `long_text` fields. So the
-highlight's promise (§1) is currently only partly kept, which is the live defect
-`snapshots-and-the-witness.md` §4 names and #447's "why it matters" section
-describes.
+The **surface-coverage gap** — backend detection once scanned only the chat
+composer (`expand_context`) and the scene `summary` (`_implicit_lore_ids`), not
+the scene body or the other `long_text` fields — is **closed**: slice 3 (#1495)
+added the scene body + every `long_text` field on both send paths via the shared
+`_scene_prose_ids`, and slice 3b (#1502) added the first-turn rendered prompt
+output (`expand_context`'s `rendered_text`). The highlight's promise (§1), once
+only partly kept — the live defect `snapshots-and-the-witness.md` §4 named and
+#447's "why it matters" section described — is now kept for every scanned surface.
 
 The **second axis — the backend matcher was not the §3 algorithm — is now
 closed** (slice 1, #1486). `_alias_match` previously did a per-entry word-**set
@@ -241,11 +243,13 @@ non-breaking spaces are treated identically on both sides, but the engines' `\s`
 sets differ on a few exotic characters (e.g. U+FEFF), so a name split by one of
 those is a matching corner both sides are not guaranteed to agree on.
 
-**This ADR authorizes closing that gap** — completing the backend surface
-coverage to §2, behind the §5 parity gate — as follow-up implementation slices.
-Until a slice lands, **the UI must not promise more than the backend delivers**:
-where the highlight decorates a surface the backend does not yet scan, that is a
-UI over-promise to tidy in step with the backend work, never ahead of it.
+The mirror-image shortfall was a **UI over-promise**: the highlighter decorated
+names the backend would drop. Slice 4 (#1508) closed it — `compileMatcher` now
+skips `never`/`manual_only` `context_policy` entries, so the highlight decorates
+exactly the entities detection delivers (the surface gating — scene body +
+`long_text` only, never single-line `text` or `aliases` — was already correct).
+With every §2 surface scanned and the highlighter policy-aligned, **the highlight
+is once again a promise the backend keeps**, and this ADR's §7 gap is resolved.
 
 ## Rejected alternatives (consolidated)
 

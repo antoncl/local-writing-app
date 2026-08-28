@@ -40,12 +40,32 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-# Model-id prefixes whose API rejects `temperature` with a 400. Add to
-# this tuple as new families adopt the same constraint.
+# Model-id prefixes whose API rejects `temperature` (sampling was removed on
+# these families — see the Anthropic model docs). Add to this tuple as new
+# families adopt the same constraint. Note: 4.6 and older (incl. Haiku 4.5) still
+# accept temperature.
 _NO_TEMPERATURE_PREFIXES: tuple[str, ...] = (
     "claude-opus-4-7",
     "claude-opus-4-8",
+    "claude-opus-5",
+    "claude-sonnet-5",
+    "claude-fable-5",
+    "claude-mythos-5",
 )
+
+
+def _set_temperature(kwargs: dict, value: float) -> None:
+    """Attach `temperature` to an Anthropic request.
+
+    The anthropic 1.x SDK dropped `temperature` from the typed
+    `messages.create`/`.stream` signatures, so passing it as a top-level kwarg
+    raises `TypeError: unexpected keyword argument 'temperature'`. The endpoint
+    still honours it on the families that allow sampling (Haiku 4.5, Sonnet/Opus
+    4.6 and older), so it goes through the SDK's `extra_body` escape hatch. The
+    families that 400 on it are filtered by `_NO_TEMPERATURE_PREFIXES` before we
+    ever get here.
+    """
+    kwargs.setdefault("extra_body", {})["temperature"] = value
 
 
 def anthropic_supports_temperature(model_id: str) -> bool:
@@ -170,7 +190,7 @@ class AnthropicProfile(ProviderProfile):
         # it. The model gate is a backstop for legacy assistants that pre-date
         # save-time validation; new incompatible combos are refused at save.
         if call.temperature is not None and anthropic_supports_temperature(call.model):
-            kwargs["temperature"] = call.temperature
+            _set_temperature(kwargs, call.temperature)
         # system_blocks (multi-block, per-block cache markers) overrides the
         # single-string system_prompt. Caller picks one or the other.
         if call.system_blocks:
@@ -192,7 +212,7 @@ class AnthropicProfile(ProviderProfile):
             return
         kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
         if anthropic_supports_temperature(call.model):
-            kwargs["temperature"] = 1.0
+            _set_temperature(kwargs, 1.0)
 
     def chat(self, call: ChatCall) -> ChatOutcome:
         try:

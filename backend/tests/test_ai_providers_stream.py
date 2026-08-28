@@ -289,7 +289,42 @@ class AnthropicStreamTests(unittest.TestCase):
             create["thinking"], {"type": "enabled", "budget_tokens": 1024}
         )
         # Anthropic requires temperature=1 when thinking is on (temp-ok model).
-        self.assertEqual(create["temperature"], 1.0)
+        # anthropic 1.x dropped `temperature` from the typed create/stream params,
+        # so it rides in `extra_body`, never top-level (a top-level kwarg raises
+        # TypeError: unexpected keyword argument 'temperature').
+        self.assertNotIn("temperature", create)
+        self.assertEqual(create["extra_body"]["temperature"], 1.0)
+
+    def test_temperature_rides_in_extra_body_not_top_level(self):
+        # Regression: a temp-ok model (Haiku 4.5) with an explicit temperature
+        # must send it via extra_body, or the anthropic 1.x SDK raises
+        # "TypeError: ... unexpected keyword argument 'temperature'".
+        call = ChatCall(
+            model="claude-haiku-4-5",
+            system_prompt="",
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=64,
+            temperature=0.3,
+        )
+        _out, captured = self._run(call, [], usage=_a_usage())
+        create = captured["create"]
+        self.assertNotIn("temperature", create)
+        self.assertEqual(create["extra_body"]["temperature"], 0.3)
+
+    def test_temperature_omitted_for_no_sampling_models(self):
+        # Opus 5 (and the other newest families) 400 on temperature — it must not
+        # be sent at all, not even via extra_body.
+        call = ChatCall(
+            model="claude-opus-5",
+            system_prompt="",
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=64,
+            temperature=0.9,
+        )
+        _out, captured = self._run(call, [], usage=_a_usage())
+        create = captured["create"]
+        self.assertNotIn("temperature", create)
+        self.assertNotIn("temperature", create.get("extra_body", {}))
 
 
 if __name__ == "__main__":

@@ -12,7 +12,9 @@ access to settings and policy. M4.0.
 from __future__ import annotations
 
 import json
+import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date as _date_cls
 from typing import TYPE_CHECKING, Any, NoReturn
@@ -29,9 +31,18 @@ from app.services.ai.helpers import (
     create_environment_for_project,
 )
 from app.services.ai.profiles.registry import profile_for
+from app.services.ai.selector_eval import (
+    SelectorNode,
+    UnsupportedSelectorExpr,
+    evaluate_selector_membership,
+    selector_node_tags,
+)
 from app.services.ai.sessions import AISession, default_registry
 from app.services.ai.templates import RenderedTemplate, render_template
+from app.services.project.errors import ProjectServiceError
 from app.services.tree_structure import TreeStructureService
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from app.services.ai.profiles import ModelDescriptor
@@ -109,13 +120,132 @@ def _coerce_input_value(project_service, schema: Any, value: Any) -> Any:
     # Only a context_pick is a list of dicts; a scalar list is a plain value.
     if not all(isinstance(item, dict) for item in parsed):
         return value
-    expanded = _expand_container_picks(project_service, parsed)
+    # Two live expansions run before coercion, each replacing a non-bare pick
+    # with its current member picks at render time: selector picks (tags / saved
+    # views / plotlines → member nodes) first, then manuscript containers
+    # (chapter/act/root → descendant scenes). Selectors run first so a selector
+    # that resolves to a manuscript container still gets container-expanded.
+    expanded = _expand_selector_picks(project_service, parsed)
+    expanded = _expand_container_picks(project_service, expanded)
     refs: list[EntryRef] = []
     for item in expanded:
         ref = _coerce_entry_ref(project_service, schema, item)
         if ref is not None:
             refs.append(ref)
     return refs
+
+
+# Selector picks the backend can resolve, keyed by `selector.kind` → the roster
+# to evaluate against. Mirrors the frontend `buildSelectorRoster` map. Lore is
+# special-cased (override-aware lister); manuscript selectors are left to the
+# structural container path and are not resolved here.
+_GENERIC_ROSTER_KINDS = frozenset({"plot", "assistant"})
+
+
+def _expand_selector_picks(
+    project_service, items: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Replace a selector pick (a tag / saved view / plotline — `ADR-0074` slice
+    5) with its member node picks, evaluated against the *current* roster at
+    render time. A selector pick carries `{"selector": {"kind", "expr"}}`; its
+    `expr` is resolved by `evaluate_selector_membership` to the same node set the
+    frontend picker shows (parity: `selector_eval`). Bare-id picks and unresolved
+    selectors pass through / drop, never mis-resolve.
+
+    Like `_expand_container_picks` this is intentionally *not* a frontend list
+    handoff (#447): the backend re-derives membership from the stored expr, so
+    the preview, the send, and the picker all agree, and a document tagged later
+    is included without re-picking."""
+    if not any(_is_selector_pick(item) for item in items):
+        return items
+    # The preview re-renders on a debounce, so build each kind's roster (and read
+    # the schema) at most once per expansion — several tag picks over the same
+    # kind must not re-list all lore per pick.
+    schema = project_service.read_metadata_schema()
+    roster_cache: dict[Any, list[SelectorNode] | None] = {}
+
+    def roster_for(kind: Any) -> list[SelectorNode] | None:
+        if kind not in roster_cache:
+            roster_cache[kind] = _selector_roster(project_service, kind)
+        return roster_cache[kind]
+
+    out: list[dict[str, Any]] = []
+    for item in items:
+        if not _is_selector_pick(item):
+            out.append(item)
+            continue
+        out.extend(_selector_member_picks(project_service, item, schema, roster_for))
+    return out
+
+
+def _is_selector_pick(item: Any) -> bool:
+    return isinstance(item, dict) and isinstance(item.get("selector"), dict)
+
+
+def _selector_member_picks(
+    project_service,
+    item: dict[str, Any],
+    schema: Any,
+    roster_for: Callable[[Any], list[SelectorNode] | None],
+) -> list[dict[str, Any]]:
+    selector = item["selector"]
+    kind = selector.get("kind")
+    nodes = roster_for(kind)
+    if nodes is None:
+        logger.warning(
+            "context selector pick %r: unsupported roster kind %r; contributes no members",
+            item.get("id"),
+            kind,
+        )
+        return []
+
+    def is_descendant(entry_type: str, target: str) -> bool:
+        return project_service._entry_type_matches(entry_type, target, schema)
+
+    try:
+        member_ids = evaluate_selector_membership(
+            selector.get("expr"), nodes, is_descendant=is_descendant
+        )
+    except UnsupportedSelectorExpr as exc:
+        logger.warning(
+            "context selector pick %r: unsupported expr (%s); contributes no members",
+            item.get("id"),
+            exc,
+        )
+        return []
+    return [{"id": member_id, "kind": kind} for member_id in member_ids]
+
+
+def _selector_roster(project_service, kind: Any) -> list[SelectorNode] | None:
+    """The candidate nodes a selector of `kind` evaluates against, or None when
+    that kind isn't resolvable here. Lore uses the override-aware lister so a
+    listed value matches what the reader shows (#314); other content kinds read
+    front matter straight off the node index."""
+    if kind == "lore":
+        return [
+            SelectorNode(entry.id, entry.entry_type, selector_node_tags(entry.metadata), entry.metadata)
+            for entry in project_service.list_lore_entries().entries
+        ]
+    if kind in _GENERIC_ROSTER_KINDS:
+        return _generic_roster(project_service, kind)
+    return None
+
+
+def _generic_roster(project_service, kind: str) -> list[SelectorNode]:
+    index = project_service._build_node_index()
+    roster: list[SelectorNode] = []
+    for entry in index.by_id.values():
+        if entry.kind != kind:
+            continue
+        try:
+            front_matter, _ = project_service._read_markdown_with_front_matter(entry.path, strict=True)
+        except ProjectServiceError:
+            continue
+        metadata = project_service._normalise_metadata(front_matter.get("metadata"), entry.path)
+        raw_type = front_matter.get("entry_type")
+        entry_type = raw_type if isinstance(raw_type, str) else entry.entry_type
+        roster.append(SelectorNode(entry.id, entry_type, selector_node_tags(metadata), metadata))
+    return roster
 
 
 def _expand_container_picks(

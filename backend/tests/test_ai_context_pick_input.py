@@ -374,6 +374,85 @@ def test_container_pick_materializes_to_its_scenes_end_to_end(tmp_path, monkeypa
     assert rendered.used_node_ids == scene_ids
 
 
+def test_tag_selector_pick_materializes_to_tagged_lore_end_to_end(tmp_path, monkeypatch):
+    # ADR-0074 slice 5: a picked TAG (a selector pick, the shape the picker emits
+    # — `{kind, expr: intersect[tagged, union[type...]]}`) reaches the template as
+    # its member lore entries, resolved on the backend from the stored expr — NOT
+    # a frontend id handoff (#447). This is the bug from the field report: the tag
+    # resolved to 9 docs in the picker but 0 reached the prompt.
+    monkeypatch.setattr(
+        "app.services.machine_settings.config_path",
+        lambda: tmp_path / "machine_settings.yaml",
+    )
+    from app.models import CreateLoreEntryRequest, SaveLoreEntryRequest
+    from app.services.ai.preview import PreviewRequest, build_preview
+    from app.services.project_service import ProjectService
+
+    service = ProjectService.created_at(tmp_path / "project", "Picks")
+
+    def make(title, entry_type, tags):
+        entry = service.create_lore_entry(CreateLoreEntryRequest(title=title, entry_type=entry_type))
+        return service.save_lore_entry(
+            entry.id,
+            SaveLoreEntryRequest(
+                title=title,
+                body=f"Body of {title}.",
+                base_revision=entry.revision,
+                entry_type=entry_type,
+                metadata={"tags": tags},
+            ),
+        )
+
+    # Two match the tag AND a type in the union; one has the wrong tag; one is
+    # tagged but a type outside the union. Roster order = title-sorted.
+    hit_note = make("Aetheria", "lore:note", ["World-building"])
+    hit_loc = make("Boundary", "lore:location", ["World-building"])
+    make("Cassini", "lore:note", ["Real-world"])  # wrong tag
+    make("Delta", "lore:character", ["World-building"])  # tagged, type not in union
+
+    picks = json.dumps(
+        [
+            {
+                "id": "tag:lore:World-building",
+                "kind": "tag",
+                "title": "World-building",
+                "selector": {
+                    "kind": "lore",
+                    "expr": {
+                        "intersect": [
+                            {"tagged": "World-building"},
+                            {"union": [{"type": "lore:note"}, {"type": "lore:location"}]},
+                        ]
+                    },
+                },
+            }
+        ]
+    )
+    rendered, _ = build_preview(
+        service,
+        PreviewRequest(
+            template_source=(
+                '{% role "system" %}'
+                "count={{ inputs.picks | length }} "
+                "{% for p in inputs.picks %}{{ use(p) }}{% endfor %}"
+                "{% endrole %}"
+            ),
+            target_scene_id="",
+            session_id=None,
+            inputs={"picks": picks},
+            text_before="",
+            text_after="",
+            commit=False,
+        ),
+    )
+    text = "".join(m.text for m in rendered.messages)
+    # The single tag pick expanded to exactly the two matching lore entries, in
+    # roster order — not 0 (the bug), not the wrong-tag/wrong-type entries.
+    assert "count=2" in text
+    assert rendered.used_node_ids == [hit_note.id, hit_loc.id]
+    assert rendered.lore_invoked is True
+
+
 def test_expand_container_picks_skips_structure_read_for_scene_only_picks():
     # The perf gate (the preview re-renders on a debounce): a prompt that picks
     # only scenes (each tagged manuscript:scene) never loads the structure.

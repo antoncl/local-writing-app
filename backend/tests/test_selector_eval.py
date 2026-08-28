@@ -1,0 +1,175 @@
+"""Membership parity for the backend selector evaluator (ADR-0074 slice 5).
+
+These pin the semantics the backend must share with the frontend `evaluateView`
+(`frontend/src/lib/views/evaluateView.ts`): `type` exact vs `descendants_of`
+is_a, `tagged` exact/CSV, set algebra, `filter` desugar, `field` overlap, and
+empty-expr = nothing. A drift here selects the wrong documents for AI context.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from app.services.ai.selector_eval import (
+    SelectorNode,
+    UnsupportedSelectorExpr,
+    evaluate_selector_membership,
+    selector_node_tags,
+)
+
+# A tiny is_a family: lore:hero descends from lore:character.
+_PARENT = {"lore:hero": "lore:character"}
+
+
+def _is_descendant(entry_type: str, target: str) -> bool:
+    seen: set[str] = set()
+    current: str | None = entry_type
+    while current is not None and current not in seen:
+        if current == target:
+            return True
+        seen.add(current)
+        current = _PARENT.get(current)
+    return False
+
+
+def _nodes(*specs: tuple[str, str, tuple[str, ...]]) -> list[SelectorNode]:
+    return [SelectorNode(nid, et, tags, {"tags": list(tags)}) for nid, et, tags in specs]
+
+
+def _run(expr, nodes, **kw) -> list[str]:
+    return evaluate_selector_membership(expr, nodes, is_descendant=_is_descendant, **kw)
+
+
+# --- the shape the tag picker actually emits ------------------------------
+
+
+def test_tag_intersect_with_type_union_is_the_picker_shape():
+    nodes = _nodes(
+        ("l1", "lore:note", ("World-building",)),
+        ("l2", "lore:location", ("World-building",)),
+        ("l3", "lore:character", ("Real-world",)),  # wrong tag
+        ("l4", "lore:chat", ("World-building",)),  # tagged but type not in union
+    )
+    expr = {
+        "intersect": [
+            {"tagged": "World-building"},
+            {"union": [{"type": "lore:note"}, {"type": "lore:location"}]},
+        ]
+    }
+    assert _run(expr, nodes) == ["l1", "l2"]
+
+
+def test_bare_tagged_selects_every_tag_bearer():
+    nodes = _nodes(("a", "lore:note", ("T",)), ("b", "lore:note", ()), ("c", "lore:item", ("T",)))
+    assert _run({"tagged": "T"}, nodes) == ["a", "c"]
+
+
+# --- type (exact) vs descendants_of (is_a) --------------------------------
+
+
+def test_type_is_exact_not_subtype():
+    nodes = _nodes(("hero", "lore:hero", ()), ("char", "lore:character", ()))
+    # `type` matches the exact entry_type only — the hero subtype is excluded.
+    assert _run({"type": "lore:character"}, nodes) == ["char"]
+
+
+def test_descendants_of_includes_subtypes():
+    nodes = _nodes(("hero", "lore:hero", ()), ("char", "lore:character", ()))
+    assert _run({"descendants_of": "lore:character"}, nodes) == ["hero", "char"]
+
+
+# --- tagged normalization (array + CSV, exact/case-sensitive) -------------
+
+
+def test_tagged_matches_csv_stored_tags():
+    # The roster builder normalizes a CSV `tags` string into the tags tuple
+    # (selector_node_tags); the evaluator then matches against that tuple.
+    metadata = {"tags": "Alpha, Beta"}
+    assert selector_node_tags(metadata) == ("Alpha", "Beta")
+    node = SelectorNode("x", "lore:note", selector_node_tags(metadata), metadata)
+    assert _run({"tagged": "Beta"}, [node]) == ["x"]
+
+
+def test_tagged_is_case_sensitive():
+    nodes = _nodes(("x", "lore:note", ("World",)))
+    assert _run({"tagged": "world"}, nodes) == []
+
+
+# --- set algebra ----------------------------------------------------------
+
+
+def test_difference_and_complement():
+    nodes = _nodes(("a", "lore:note", ("T",)), ("b", "lore:note", ()), ("c", "lore:item", ("T",)))
+    assert _run({"difference": {"keep": {"tagged": "T"}, "remove": {"type": "lore:item"}}}, nodes) == ["a"]
+    assert _run({"complement": {"tagged": "T"}}, nodes) == ["b"]
+
+
+def test_output_follows_roster_order_and_dedups():
+    nodes = _nodes(("a", "lore:note", ("T",)), ("b", "lore:note", ("T",)))
+    # union of two overlapping leaves — each node appears once, in roster order.
+    assert _run({"union": [{"tagged": "T"}, {"type": "lore:note"}]}, nodes) == ["a", "b"]
+
+
+# --- filter desugar (ADR-0041 §C) -----------------------------------------
+
+
+def test_filter_keep_lowers_to_intersect():
+    nodes = _nodes(("a", "lore:note", ("T",)), ("b", "lore:item", ("T",)))
+    expr = {"filter": {"of": {"tagged": "T"}, "pred": {"type": "lore:note"}}}
+    assert _run(expr, nodes) == ["a"]
+
+
+def test_filter_drop_lowers_to_difference():
+    nodes = _nodes(("a", "lore:note", ("T",)), ("b", "lore:item", ("T",)))
+    expr = {"filter": {"of": {"tagged": "T"}, "pred": {"type": "lore:note"}, "mode": "drop"}}
+    assert _run(expr, nodes) == ["b"]
+
+
+# --- field predicate (the plotline shape) ---------------------------------
+
+
+def test_field_overlap_on_list_value_matches_plotline():
+    nodes = [
+        SelectorNode("c1", "plot:card", (), {"plotline": ["pl_1", "pl_2"]}),
+        SelectorNode("c2", "plot:card", (), {"plotline": ["pl_3"]}),
+    ]
+    expr = {
+        "intersect": [
+            {"type": "plot:card"},
+            {"field": {"key": "plotline", "op": "overlap", "value": "pl_1"}},
+        ]
+    }
+    assert _run(expr, nodes) == ["c1"]
+
+
+def test_field_set_and_unset():
+    nodes = [
+        SelectorNode("a", "lore:note", (), {"pov": "Bob"}),
+        SelectorNode("b", "lore:note", (), {"pov": ""}),
+        SelectorNode("c", "lore:note", (), {}),
+    ]
+    assert _run({"field": {"key": "pov", "op": "set"}}, nodes) == ["a"]
+    assert _run({"field": {"key": "pov", "op": "unset"}}, nodes) == ["b", "c"]
+
+
+# --- ADR-0036: absent/empty expr selects nothing --------------------------
+
+
+def test_empty_expr_selects_nothing():
+    nodes = _nodes(("a", "lore:note", ("T",)))
+    assert _run({}, nodes) == []
+    assert _run(None, nodes) == []
+
+
+def test_intersect_of_no_children_is_empty():
+    nodes = _nodes(("a", "lore:note", ("T",)))
+    assert _run({"intersect": []}, nodes) == []
+
+
+# --- unsupported operators fail loud (caller fails soft) -------------------
+
+
+@pytest.mark.parametrize("expr", [{"var": "x"}, {"nest": {}}, {"field_of": {}}, {"tagged": {"var": "x"}}])
+def test_unsupported_operators_raise(expr):
+    with pytest.raises(UnsupportedSelectorExpr):
+        _run(expr, _nodes(("a", "lore:note", ())))

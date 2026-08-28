@@ -27,6 +27,7 @@
   import { CARD_DRAG_HANDLE_CLASS, type PlotPlotlineData } from "@/lib/plot/plotBoardLayout";
   import type { MetadataValue, PlotlineEntry } from "@/lib/types";
   import { PLOT_PLOTLINE_ACTIONS, type PlotPlotlineActions } from "./plotPlotlineActions";
+  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
 
   // Svelte Flow passes the node's id/data/selection state as props. `id` is the
   // plotline node id (= the plotline's id) — the key the actions context expands by.
@@ -311,7 +312,7 @@
         <span class="plotline-dot" class:hollow={!accent}></span>
         <span class="plotline-title" title={data.title}>{data.title || "Untitled plotline"}</span>
         <span class="plotline-count" title="Beats">{data.beats.length}</span>
-        <i class="ti ti-chevron-{isExpanded ? 'up' : 'down'} plotline-caret" aria-hidden="true"></i>
+        <GroupCaret size="xs" collapsed={!isExpanded} />
       </button>
       <!-- Actions kebab (#1096): Open-in-editor / Delete without expanding, mirroring the
            plot card's kebab. Quiet until node hover / focus / open (the card idiom). -->
@@ -391,7 +392,7 @@
                       aria-label={detailsOpen.has(beat.key) ? "Hide beat details" : "Show beat details"}
                       onclick={() => toggleDetails(beat.key)}
                     >
-                      <i class="ti ti-chevron-{detailsOpen.has(beat.key) ? 'down' : 'right'}" aria-hidden="true"></i>
+                      <GroupCaret collapsed={!detailsOpen.has(beat.key)} />
                     </button>
                     <input
                       class="beat-title-input"
@@ -615,11 +616,6 @@
     font-size: var(--fs-xs);
     color: var(--text-3);
     font-variant-numeric: tabular-nums;
-  }
-  .plotline-caret {
-    flex: none;
-    font-size: var(--fs-sm);
-    color: var(--text-3);
   }
   /* Actions kebab (#1096): quiet until node hover / focus / menu-open. Sized identically to
      the plot card's kebab (#1100) — icon-plus-padding, not a fixed box — so the dots read the

@@ -11,7 +11,7 @@
     {
       "name": "backend",
       "runtimeExecutable": "backend/.venv/Scripts/python.exe",
-      "runtimeArgs": ["-m", "uvicorn", "app.main:app", "--app-dir", "backend", "--host", "127.0.0.1", "--port", "8787", "--reload", "--reload-dir", "backend"],
+      "runtimeArgs": ["scripts/restart_backend.py"],
       "port": 8787
     },
     {

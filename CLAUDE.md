@@ -19,8 +19,10 @@ backend endpoints: save scene, move node, create todo, …).
 ## Commands
 
 ```powershell
-# Backend (FastAPI on :8787, auto-reload) — canonical invocations in .claude/launch.json
-backend/.venv/Scripts/python.exe -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8787 --reload --reload-dir backend
+# Backend (FastAPI on :8787) — canonical invocations in .claude/launch.json. This
+# reaps any stale/orphaned :8787 server first, then runs a PLAIN uvicorn (no
+# --reload): a single process that stops clean and can't shadow-bind (#364).
+backend/.venv/Scripts/python.exe scripts/restart_backend.py
 npm run dev --prefix frontend                                    # Vite dev server on :5173
 
 # First-time backend setup — deps come from the lock, never a fresh resolve (#1393)
@@ -37,7 +39,9 @@ npm run build --prefix frontend
 
 - After `ruff check --fix`, **re-run** `ruff check` and the tests — an autofix can
   resolve one rule into a new finding.
-- Bare `uvicorn` without `--reload` does **not** pick up Python changes; restart it.
+- The :8787 backend is **plain** (no `--reload`), so Python changes need a
+  restart — re-run `scripts/restart_backend.py`; it reaps the old server first,
+  so `git pull` + restart reliably loads the new code (no reboot, #364).
 
 ## Starting new work
 

@@ -62,6 +62,14 @@ function plotline(id: string, title: string): PlotlineSummary {
   return { id, title, body: "", entry_type: "plot:plotline", metadata: {} };
 }
 
+// Collapse-by-default (#1520): every container (act/chapter, tag, view, plotline,
+// lore entry-type) opens collapsed, so a test that wants to see or click a member
+// first expands the container by its caret ("Expand <title>").
+async function expandGroup(scope: HTMLElement, title: string) {
+  await fireEvent.click(within(scope).getByRole("button", { name: `Expand ${title}` }));
+  await tick();
+}
+
 beforeEach(() => {
   localStorage.clear();
   openProjectHidden("nodepicker-test");
@@ -123,10 +131,12 @@ describe("NodePicker plot source — plotline containers (ADR-0074 slice 6)", ()
     const plot = (await screen.findAllByRole("group", { name: "Plot" }))[0];
     expect(within(plot).getByText("The Heist")).toBeInTheDocument();
     expect(within(plot).getByText("Romance")).toBeInTheDocument();
-    // Drill: The Heist's cards are its members; the Romance card is not.
+    // Collapsed by default (#1520) — expand each plotline to reveal its cards.
+    await expandGroup(plot, "The Heist");
+    await expandGroup(plot, "Romance");
     expect(within(plot).getByText("Break-in")).toBeInTheDocument();
     expect(within(plot).getByText("Getaway")).toBeInTheDocument();
-    expect(within(plot).queryByText("A kiss")).not.toBeNull(); // under Romance, still rendered
+    expect(within(plot).queryByText("A kiss")).not.toBeNull(); // under Romance
   });
 
   it("checking a plotline stores ONE live selector ref, not the plotline node (absorb)", async () => {
@@ -198,6 +208,7 @@ describe("NodePicker plot source — plotline containers (ADR-0074 slice 6)", ()
     await tick();
 
     const plot = (await screen.findAllByRole("group", { name: "Plot" }))[0];
+    await expandGroup(plot, "The Heist");
     await fireEvent.click(within(plot).getByText("Break-in").closest("button")!);
     await tick();
 
@@ -263,6 +274,9 @@ describe("NodePicker manuscript entry-type allowlist (#1461)", () => {
     });
     await fireEvent.click(screen.getByRole("button", { expanded: false }));
     await tick();
+    // Chapter One is collapsed by default (#1520) — open it to reach its scenes.
+    await fireEvent.click(screen.getByRole("button", { name: "Expand Chapter One" }));
+    await tick();
 
     expect(screen.getByText("Battle scene")).toBeInTheDocument();
     expect(screen.queryByText("Plain scene")).toBeNull();
@@ -286,6 +300,9 @@ describe("NodePicker manuscript entry-type allowlist (#1461)", () => {
       },
     });
     await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+    // Chapter One is collapsed by default (#1520) — open it to reach its scenes.
+    await fireEvent.click(screen.getByRole("button", { name: "Expand Chapter One" }));
     await tick();
 
     expect(screen.getByText("Plain scene")).toBeInTheDocument();
@@ -324,6 +341,8 @@ describe("NodePicker manuscript tree (#1476)", () => {
     const menu = document.querySelector(".ctx-menu") as HTMLElement;
     expect(within(menu).getByText("The Manuscript")).toBeInTheDocument();
     expect(within(menu).getByText("Chapter One")).toBeInTheDocument();
+    // The chapter is collapsed by default (#1520); the root stays open.
+    await expandGroup(menu, "Chapter One");
     expect(within(menu).getByText("Plain scene")).toBeInTheDocument();
   });
 
@@ -405,6 +424,8 @@ describe("NodePicker saved-view selectors (#1487)", () => {
     const menu = await openMenu();
     // The view (dropped by pickerMembership) is surfaced, with its tagged members.
     expect(await within(menu).findByText("Villains")).toBeInTheDocument();
+    // Collapsed by default (#1520) — expand the view to reveal its members.
+    await expandGroup(menu, "Villains");
     expect(within(menu).getByText("Vex")).toBeInTheDocument();
     expect(within(menu).getByText("Nok")).toBeInTheDocument();
     // "Mara" is not tagged villain — not a member.
@@ -428,6 +449,7 @@ describe("NodePicker saved-view selectors (#1487)", () => {
     renderWithView({ onChange });
     const menu = await openMenu();
     await within(menu).findByText("Villains");
+    await expandGroup(menu, "Villains");
     await fireEvent.click(within(menu).getByText("Vex").closest("button")!);
     await tick();
     const [detail] = onChange.mock.calls[0];
@@ -493,7 +515,8 @@ describe("NodePicker tag selectors (#1491)", () => {
     expect(within(tags).getByText("villain")).toBeInTheDocument();
     // The count pluralizes correctly — "matches", not the old "matchs" (slice 7a).
     expect(within(tags).getByText("2 matches")).toBeInTheDocument();
-    // Drill: the villain-tagged lore are its members.
+    // Collapsed by default (#1520) — expand the tag to reveal its members.
+    await expandGroup(tags, "villain");
     expect(within(tags).getByText("Vex")).toBeInTheDocument();
     expect(within(tags).getByText("Nok")).toBeInTheDocument();
     // Mara is under the 'hero' tag, not 'villain'.
@@ -534,6 +557,7 @@ describe("NodePicker tag selectors (#1491)", () => {
     await fireEvent.click(within(menu).getByText("By tag").closest("button")!);
     await tick();
     const tags = (await within(menu).findAllByRole("group", { name: "By tag" }))[0];
+    await expandGroup(tags, "villain");
     expect(within(tags).getByText("Vex")).toBeInTheDocument();
     expect(within(tags).queryByText("Dark Keep")).toBeNull();
   });
@@ -555,6 +579,9 @@ describe("NodePicker onChange callback (runes conversion #49)", () => {
       },
     });
     await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+    // Lore is grouped by type; open the "Character" section (#1520).
+    await fireEvent.click(screen.getByRole("button", { name: "Expand Character" }));
     await tick();
 
     await fireEvent.click(screen.getByText("Mara Voss").closest("button")!);
@@ -578,6 +605,9 @@ describe("NodePicker onChange callback (runes conversion #49)", () => {
       },
     });
     await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+    // Lore is grouped by type; open the "Character" section (#1520).
+    await fireEvent.click(screen.getByRole("button", { name: "Expand Character" }));
     await tick();
 
     await fireEvent.click(screen.getByText("Mara Voss").closest("button")!);
@@ -615,6 +645,7 @@ describe("NodePicker candidate toggle (ADR-0074 #1464)", () => {
     // it unpicks, leaving the other.
     const menu = document.querySelector(".ctx-menu")!;
     expect(menu).not.toBeNull();
+    await expandGroup(menu as HTMLElement, "Character");
     const row = within(menu as HTMLElement).getByText("Mara Voss").closest("button")!;
     await fireEvent.click(row);
     await tick();
@@ -712,6 +743,8 @@ describe("NodePicker drill-in navigation (ADR-0074 slice 7b)", () => {
     // Drill into Lore → its entries; the other axis's rows stay out of this panel.
     await fireEvent.click(within(menu).getByText("Lore").closest("button")!);
     await tick();
+    // Drilled into Lore → the "Character" section; open it for the entries (#1520).
+    await expandGroup(menu, "Character");
     expect(within(menu).getByText("Mara Voss")).toBeInTheDocument();
     expect(within(menu).getByText("Quill")).toBeInTheDocument();
     expect(within(menu).queryByText("Rephrase")).toBeNull();
@@ -722,6 +755,7 @@ describe("NodePicker drill-in navigation (ADR-0074 slice 7b)", () => {
     const menu = await openMenu();
     await fireEvent.click(within(menu).getByText("Lore").closest("button")!);
     await tick();
+    await expandGroup(menu, "Character");
     expect(within(menu).getByText("Mara Voss")).toBeInTheDocument();
     await fireEvent.click(within(menu).getByRole("button", { name: "Back to sources" }));
     await tick();
@@ -739,6 +773,7 @@ describe("NodePicker drill-in navigation (ADR-0074 slice 7b)", () => {
     });
     const menu = await openMenu();
     // No drill, no back button — the sole axis renders as the panel.
+    await expandGroup(menu, "Character");
     expect(within(menu).getByText("Mara Voss")).toBeInTheDocument();
     expect(within(menu).queryByRole("button", { name: "Back to sources" })).toBeNull();
   });
@@ -767,7 +802,9 @@ describe("NodePicker drill-in navigation (ADR-0074 slice 7b)", () => {
       },
     });
     const menu = await openMenu();
+    await expandGroup(menu, "Character");
     // The checkbox is its own click target (mouse convenience), not an inert glyph.
+    // The type header carries no check, so the first .ctx-row-check is the entry's.
     const check = menu.querySelector(".ctx-row-check") as HTMLButtonElement;
     expect(check).not.toBeNull();
     await fireEvent.click(check);

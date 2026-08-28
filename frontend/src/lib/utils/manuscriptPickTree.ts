@@ -181,6 +181,21 @@ function countScenes(node: StructureNode): number {
   return (node.children ?? []).reduce((n, c) => n + countScenes(c), 0);
 }
 
+/** The ids of every COLLAPSIBLE manuscript container — acts, chapters, and any
+ * user-defined container level — but NOT the root, which stays open so its acts
+ * always show (the mockup gives the root no caret). Feeds the picker's
+ * collapse-by-default model: a container is collapsed unless the user has
+ * expanded it, so `containers \ expanded` is the collapsed set. */
+export function collapsibleContainerIds(document: StructureDocument): Set<string> {
+  const ids = new Set<string>();
+  const walk = (node: StructureNode, depth: number) => {
+    if (depth > 0 && isContainer(node)) ids.add(node.id);
+    node.children?.forEach((c) => walk(c, depth + 1));
+  };
+  walk(document.root, 0);
+  return ids;
+}
+
 /** The descendant scene count for a picked ref, or null when the ref is not a
  * container (a scene ref shows no count). Used by the picked-list chips. */
 export function sceneCountForRef(document: StructureDocument, ref: NodePickerRef): number | null {

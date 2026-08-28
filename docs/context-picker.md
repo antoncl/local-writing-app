@@ -66,13 +66,17 @@ The picker is a **drill-in popover**:
   drill into it. When a config exposes exactly **one** axis, the picker skips the
   list and opens straight into that panel.
 - **A panel** — a ← back header, the axis name, and that axis's **tri-state tree**.
-  Every container row (act, chapter, plotline, tag, view) carries an expand caret
-  and a checkbox:
+  Containers open **collapsed**, so a panel leads with its top level (acts, tags,
+  plotlines…) instead of a wall of leaves; the manuscript root stays open so its
+  acts show. Every container row (act, chapter, plotline, tag, view) carries an
+  expand caret and a checkbox:
   - **Check a container** to absorb it — one live ref covering all its current
     members.
   - **Expand** it and check individual members to pick them explicitly.
   - Check a container, then **uncheck one member** — the live ref *splits* into
     explicit picks of the rest (a deliberate freeze).
+  - The **Lore** panel groups entries under their entry-type headers (Character,
+    Place…) — a header is a collapsible section, not a pickable container.
 - **Search is contextual** — a query at the root cuts across every axis (grouped
   results); a query inside a panel filters just that axis. A plain query matches
   titles, tags, and aliases; a leading `#` narrows to tags.

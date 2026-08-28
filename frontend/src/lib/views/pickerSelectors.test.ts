@@ -74,15 +74,17 @@ describe("expandSelectorRefs", () => {
     ]);
   });
 
-  it("dedupes by kind+id, keeping the first (explicit) occurrence with its target flag", () => {
-    const value: NodePickerRef[] = [
-      { id: "lore_a", kind: "lore", title: "Vex", target: true },
-      tagSelector, // also yields lore_a
-    ];
-    const expanded = expandSelectorRefs(value, ROSTER);
-    const a = expanded.filter((r) => r.id === "lore_a");
-    expect(a).toHaveLength(1);
-    expect(a[0].target).toBe(true);
+  it("keeps an explicit ref's target flag over a selector member — regardless of order", () => {
+    // Both orders: the concrete ref must win dedup either way (#1488 review).
+    for (const value of [
+      [{ id: "lore_a", kind: "lore", title: "Vex", target: true }, tagSelector] as NodePickerRef[],
+      [tagSelector, { id: "lore_a", kind: "lore", title: "Vex", target: true }] as NodePickerRef[],
+    ]) {
+      const expanded = expandSelectorRefs(value, ROSTER);
+      const a = expanded.filter((r) => r.id === "lore_a");
+      expect(a).toHaveLength(1);
+      expect(a[0].target).toBe(true);
+    }
   });
 
   it("leaves a selector-free value's refs untouched", () => {

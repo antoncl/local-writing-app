@@ -13,7 +13,7 @@
   // Stores only refs (id, kind, title) — bodies are materialized
   // server-side at template render time. See docs/context-picker.md.
 
-  import { onMount, tick } from "svelte";
+  import { tick } from "svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
   import { hidePromptEntries } from "@/lib/editor-core/promptResolution";
@@ -311,17 +311,31 @@
   // straight off config.sources here.
   const configuredViewIds = $derived((config.sources ?? []).filter(isViewRef).map((s) => s.view));
   let viewSummaries = $state<Map<string, ViewNodeSummary>>(new Map());
-  onMount(async () => {
-    if (configuredViewIds.length === 0) return;
-    try {
-      const list = await api.listViews();
-      const wanted = new Set(configuredViewIds);
-      const map = new Map<string, ViewNodeSummary>();
-      for (const v of list.entries) if (wanted.has(v.id)) map.set(v.id, v);
-      viewSummaries = map;
-    } catch {
-      // A views-fetch failure just leaves the section empty — never blocks picking.
+  // Reload when the configured view sources change (not just at mount) — an
+  // author editing the config on a live picker must see the new view. A cancel
+  // token drops a stale response that resolves after the config moved on.
+  $effect(() => {
+    const ids = configuredViewIds;
+    if (ids.length === 0) {
+      viewSummaries = new Map();
+      return;
     }
+    let cancelled = false;
+    const wanted = new Set(ids);
+    api
+      .listViews()
+      .then((list) => {
+        if (cancelled) return;
+        const map = new Map<string, ViewNodeSummary>();
+        for (const v of list.entries) if (wanted.has(v.id)) map.set(v.id, v);
+        viewSummaries = map;
+      })
+      .catch(() => {
+        // A views-fetch failure just leaves the section empty — never blocks picking.
+      });
+    return () => {
+      cancelled = true;
+    };
   });
   // The roster a view's spec evaluates against, from this surface's own props.
   const selectorRoster = $derived(
@@ -348,14 +362,22 @@
   }
   const viewRows = $derived.by<SelectorRow[]>(() => {
     if (viewGroups.length === 0) return [];
-    const searching = isSearchActive(search);
-    // Members carry no tags/metadata (they're refs), so a plain-needle search
-    // filters them by title; a `#tag` restrictor leaves the curated view intact.
-    const memberVisible =
-      searching && !parsedSearch.tagOnly
-        ? (m: NodePickerRef) => matchesEntry({ title: m.title }, parsedSearch)
-        : undefined;
-    return flattenSelectors(viewGroups, value, collapsedViewIds, { expandAll: searching, memberVisible });
+    if (!isSearchActive(search)) return flattenSelectors(viewGroups, value, collapsedViewIds);
+    // Search filters the tree like the manuscript one: a view survives only if
+    // its title matches (then its whole member set shows) or a member matches
+    // (then just the matching members). A view matching nothing is hidden, so it
+    // never inflates the result counter. Members carry no tags/metadata, so a
+    // `#tag` restrictor only ever matches a view by title.
+    const searched: SelectorGroup[] = [];
+    for (const g of viewGroups) {
+      if (matchesEntry({ title: g.ref.title }, parsedSearch)) {
+        searched.push(g);
+        continue;
+      }
+      const members = g.members.filter((m) => matchesEntry({ title: m.title }, parsedSearch));
+      if (members.length > 0) searched.push({ ref: g.ref, members });
+    }
+    return flattenSelectors(searched, value, collapsedViewIds, { expandAll: true });
   });
   function toggleViewRow(row: SelectorRow) {
     const g = viewGroups.find((x) => x.ref.id === (row.memberOf ?? row.id));

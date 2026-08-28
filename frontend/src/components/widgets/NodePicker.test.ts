@@ -322,6 +322,24 @@ describe("NodePicker saved-view selectors (#1487)", () => {
     const [detail] = onChange.mock.calls[0];
     expect(detail.value).toEqual([expect.objectContaining({ id: "lore_a", kind: "lore" })]);
   });
+
+  it("a search matching no member hides the view entirely (#1488 review)", async () => {
+    renderWithView();
+    const menu = await openMenu();
+    await within(menu).findByText("Villains");
+    const box = document.querySelector(".ctx-search") as HTMLInputElement;
+    // A term matching neither the view title nor any member.
+    await fireEvent.input(box, { target: { value: "zzzznope" } });
+    await tick();
+    expect(within(menu).queryByText("Villains")).toBeNull();
+    expect(within(menu).queryByText("Vex")).toBeNull();
+    // A member-name search shows the view with just that member.
+    await fireEvent.input(box, { target: { value: "Vex" } });
+    await tick();
+    expect(within(menu).getByText("Villains")).toBeInTheDocument();
+    expect(within(menu).getByText("Vex")).toBeInTheDocument();
+    expect(within(menu).queryByText("Nok")).toBeNull();
+  });
 });
 
 describe("NodePicker onChange callback (runes conversion #49)", () => {

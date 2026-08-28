@@ -79,9 +79,10 @@ export function membersForSelector(ref: NodePickerRef, roster: SelectorRoster): 
 }
 
 /** Replace every selector ref in `refs` with its current member refs, passing
- * concrete member/container refs through untouched. Deduped by kind+id, first
- * occurrence wins (so an explicit ref keeps its `target` flag over a selector
- * member of the same id). */
+ * concrete member/container refs through untouched. Deduped by kind+id. Concrete
+ * refs are emitted before selector-expanded members regardless of pick order, so
+ * an explicit ref always keeps its `target` flag over a selector member of the
+ * same id (the dedup is order-independent). */
 export function expandSelectorRefs(refs: NodePickerRef[], roster: SelectorRoster): NodePickerRef[] {
   const out: NodePickerRef[] = [];
   const seen = new Set<string>();
@@ -91,13 +92,8 @@ export function expandSelectorRefs(refs: NodePickerRef[], roster: SelectorRoster
     seen.add(key);
     out.push(r);
   };
-  for (const ref of refs) {
-    if (isSelectorRef(ref)) {
-      for (const m of membersForSelector(ref, roster)) push(m);
-    } else {
-      push(ref);
-    }
-  }
+  for (const ref of refs) if (!isSelectorRef(ref)) push(ref);
+  for (const ref of refs) if (isSelectorRef(ref)) for (const m of membersForSelector(ref, roster)) push(m);
   return out;
 }
 

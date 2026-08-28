@@ -452,4 +452,20 @@ describe("id readers over a context_pick value (#1482)", () => {
     expect(entryIdFromPickValue("")).toBe("");
     expect(entryIdFromPickValue(undefined)).toBe("");
   });
+
+  it("both readers skip a SELECTOR ref — its id is a synthetic handle, not a node (#1488)", () => {
+    const selectorFirst = JSON.stringify([
+      { id: "view:v1", kind: "view", title: "Villains", selector: { kind: "lore", expr: { tagged: "villain" } } },
+      { id: "lore_a", kind: "lore", title: "Vex" },
+    ]);
+    // The concrete lore ref is the id, never the "view:v1" handle.
+    expect(characterIdFromInputValue(selectorFirst)).toBe("lore_a");
+    expect(entryIdFromPickValue(selectorFirst)).toBe("lore_a");
+    // A value of ONLY a selector yields no id (not the handle).
+    const onlySelector = JSON.stringify([
+      { id: "view:v1", kind: "view", title: "Villains", selector: { kind: "lore", expr: { tagged: "villain" } } },
+    ]);
+    expect(characterIdFromInputValue(onlySelector)).toBeNull();
+    expect(entryIdFromPickValue(onlySelector)).toBe("");
+  });
 });

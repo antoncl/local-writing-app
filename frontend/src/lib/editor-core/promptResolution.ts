@@ -446,12 +446,19 @@ export function resolutionSceneIdFromInputs(
   return "";
 }
 
-// Pull the first lore id from a context_pick input value. Strict: only a
-// value that decodes to picked refs yields an id — a bare string is NOT
-// treated as an id here, so a misauthored `on_accept.from_input` pointing at
-// a text input can't stamp a mark keyed to arbitrary prose.
+// A ref that resolves to a concrete node id, not a tag/view SELECTOR (whose id
+// is a synthetic `view:…`/`tag:…` handle, not a node — ADR-0074 slice 5).
+function isConcreteRef(r: NodePickerRef): boolean {
+  return r.kind !== "tag" && r.kind !== "view";
+}
+
+// Pull the first concrete node id from a context_pick input value. Strict: only
+// a value that decodes to picked refs yields an id — a bare string is NOT
+// treated as an id here, so a misauthored `on_accept.from_input` pointing at a
+// text input can't stamp a mark keyed to arbitrary prose. Selector refs are
+// skipped — their id is a synthetic handle, never a node.
 export function characterIdFromInputValue(value: unknown): string | null {
-  return decodePickerValue(value)[0]?.id ?? null;
+  return decodePickerValue(value).find(isConcreteRef)?.id ?? null;
 }
 
 // The entry id a chat's revise-target (`entry`) input draft names. Tolerant
@@ -460,8 +467,12 @@ export function characterIdFromInputValue(value: unknown): string | null {
 // (seedSubjectEntryInput), while a scalar-ref launch stores the bare id. An
 // encoded-but-empty list is "no target", not an id.
 export function entryIdFromPickValue(value: unknown): string {
-  const refs = decodePickerValue(value);
-  if (refs.length > 0) return refs[0].id;
+  const concrete = decodePickerValue(value).find(isConcreteRef);
+  if (concrete) return concrete.id;
+  // A value that decoded to refs (even if all selectors) is an encoded list, not
+  // a bare id — so only fall through to the legacy bare-id shape when nothing
+  // decoded at all.
+  if (decodePickerValue(value).length > 0) return "";
   if (typeof value !== "string") return "";
   const trimmed = value.trim();
   if (!trimmed || trimmed.startsWith("[") || trimmed.startsWith("{")) return "";

@@ -392,6 +392,17 @@ export function resolvePromptPositionalArgs(
       filledNames.add(input.name);
     }
   }
+  // Mirror the dialog/preview surface (#1482): an optional context_pick the
+  // user didn't supply reaches the template as a defined empty list, never an
+  // undefined name — otherwise the same prompt's `inputs.x is defined` guard
+  // would flip between the slash and dialog launch paths. Required picks are
+  // left absent so missingRequired can still block.
+  for (const input of declared) {
+    if (input.type !== "context_pick" || input.required) continue;
+    if (filledNames.has(input.name)) continue;
+    if (unresolved.some((u) => u.name === input.name)) continue;
+    inputs[input.name] = encodePickerValue([]);
+  }
   const missingRequired = declared.some(
     (input) => input.required && !filledNames.has(input.name),
   );

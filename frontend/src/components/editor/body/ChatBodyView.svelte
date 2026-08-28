@@ -28,7 +28,7 @@
     resolutionSceneIdFromInputs,
     type PromptResolutionContext,
   } from "@/lib/editor-core/promptResolution";
-  import { coerceInputValue } from "@/lib/utils/promptInputs";
+  import { coerceInputValue, isInputMissing } from "@/lib/utils/promptInputs";
   import PlainTextEditor from "@/components/widgets/PlainTextEditor.svelte";
   import ChatTranscript from "@/components/editor/body/chat/ChatTranscript.svelte";
   import ChatInputsStrip from "@/components/editor/body/chat/ChatInputsStrip.svelte";
@@ -67,7 +67,6 @@
     decodeChatInputDrafts,
     encodeChatInputDrafts,
     endsInUserTurn,
-    isInputMissing,
     seedInputDraftsFromEntry,
     ttlChipsFor,
   } from "@/components/editor/body/chat/chatInputs";
@@ -861,10 +860,10 @@
   // set's target_entry_type.
   // The `entry` draft may be an encoded context_pick list (revise launches
   // seed one) or a legacy bare id — read it through the shared decoder, not
-  // as a raw string (#1482).
+  // as a raw string (#1482). Decoded once, not once per lore entry inside find.
+  let entryDraftTargetId = $derived(entryIdFromPickValue(chatInputDrafts["entry"]));
   let subjectLoreEntryType = $derived(
-    loreEntries.find((entry) => entry.id === entryIdFromPickValue(chatInputDrafts["entry"]))
-      ?.entry_type ?? "",
+    loreEntries.find((entry) => entry.id === entryDraftTargetId)?.entry_type ?? "",
   );
   // Feed the commit controller (declared up by the state block) its reactive
   // inputs each render — kept next to activeOutput, the derived it consumes.

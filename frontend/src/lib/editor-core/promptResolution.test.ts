@@ -373,6 +373,30 @@ describe("resolvePromptPositionalArgs — slash positional args (#1276)", () => 
     expect(res.satisfied).toBe(true);
     expect(res.unresolved).toEqual([]);
   });
+
+  it("an unsupplied OPTIONAL context_pick reaches the template as a defined empty list, not undefined (#1482)", () => {
+    // Same-prompt cross-surface parity: the dialog ships "[]" for an untouched
+    // optional pick, so the slash path must too — otherwise `inputs.x is defined`
+    // flips between launch surfaces.
+    const optionalPick = { ...characterInput, name: "character", required: false } as PromptInputDefinition;
+    const twoInput = {
+      ...roleplay(),
+      inputs: [{ name: "tone", type: "text", required: false }, optionalPick],
+    } as unknown as PromptEntrySummary;
+    const res = resolvePromptPositionalArgs(ctx(), twoInput, ["gruff"]);
+    expect(res.satisfied).toBe(true);
+    expect(res.inputs!.tone).toBe("gruff");
+    expect(res.inputs!.character).toBe("[]");
+  });
+
+  it("does NOT backfill a REQUIRED unsupplied context_pick — it stays absent so send is blocked (#1482)", () => {
+    const twoInput = {
+      ...roleplay(),
+      inputs: [{ name: "tone", type: "text", required: false }, characterInput],
+    } as unknown as PromptEntrySummary;
+    const res = resolvePromptPositionalArgs(ctx(), twoInput, ["gruff"]);
+    expect("character" in res.inputs!).toBe(false);
+  });
 });
 
 describe("inheritedInputsFrom — the editor's inherited tier (ADR-0061 S3b)", () => {

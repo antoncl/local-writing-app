@@ -89,6 +89,27 @@ export function encodePickerValue(refs: NodePickerRef[]): string {
   return JSON.stringify(refs);
 }
 
+/** Is a required input's draft empty? The ONE predicate both the chat
+ * inputs-strip and the invocation dialog gate Send on (#1482) — a
+ * context_pick decodes through the codec (empty list / kind-less refs /
+ * garbage all read as empty), an entity_ref_list is an id-list, everything
+ * else is missing when blank. */
+export function isInputMissing(input: PromptInputDefinition, raw: string | undefined): boolean {
+  if (input.type === "context_pick") {
+    return decodePickerValue(raw).length === 0;
+  }
+  if (input.type === "entity_ref_list") {
+    // An id-list, not a ref-list — plain string[] on the wire.
+    try {
+      const parsed = JSON.parse(raw || "[]");
+      return !Array.isArray(parsed) || parsed.length === 0;
+    } catch {
+      return true;
+    }
+  }
+  return !raw?.trim();
+}
+
 // Editor-side form state for one declared input on a prompt. Persisted shape
 // is PromptInputDefinition (see ./types); EntryInputDraft is the in-memory
 // representation while the user is editing. Kept here (not in NodeEditor)

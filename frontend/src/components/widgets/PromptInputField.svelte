@@ -22,7 +22,6 @@
   import type {
     GroupMember,
     NodePickerConfig,
-    NodePickerRef,
     LoreEntrySummary,
     MetadataFieldDefinition,
     MetadataFieldType,

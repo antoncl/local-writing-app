@@ -4,10 +4,10 @@ import {
   decodeChatInputDrafts,
   encodeChatInputDrafts,
   endsInUserTurn,
-  isInputMissing,
   seedSubjectEntryInput,
   ttlChipsFor,
 } from "./chatInputs";
+import { isInputMissing } from "@/lib/utils/promptInputs";
 
 // Minimal input factory — only the fields the helpers read.
 const input = (type: PromptInputDefinition["type"], extra: Partial<PromptInputDefinition> = {}): PromptInputDefinition =>

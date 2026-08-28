@@ -2,7 +2,6 @@
 // these operate purely on their arguments so they live outside the component
 // and are unit-testable in isolation.
 import { effectivePromptInputs } from "@/lib/editor-core/promptResolution";
-import { decodePickerValue } from "@/lib/utils/promptInputs";
 import type { NodePickerRef, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
 
 // ---- cost-estimate + TTL strip state ----
@@ -82,24 +81,8 @@ export function decodeChatInputDrafts(
   return drafts;
 }
 
-export function isInputMissing(input: PromptInputDefinition, raw: string | undefined): boolean {
-  if (input.type === "context_pick") {
-    // Through the shared codec (#1482) — decode tolerates the encoded string,
-    // a persisted typed seed, and garbage alike.
-    return decodePickerValue(raw).length === 0;
-  }
-  if (input.type === "entity_ref_list") {
-    // An id-list, not a ref-list — plain string[] on the wire.
-    try {
-      const parsed = JSON.parse(raw || "[]");
-      return !Array.isArray(parsed) || parsed.length === 0;
-    } catch {
-      return true;
-    }
-  }
-  return !raw?.trim();
-}
-
+// isInputMissing moved to promptInputs.ts (#1482) — one predicate, shared by
+// the chat inputs-strip and the invocation dialog (which used to hand-copy it).
 // coerceChatInputValue is GONE (#1482): it was a fork of promptInputs'
 // coerceInputValue that pre-decoded context_pick values to arrays — which the
 // backend's bind layer short-circuits on, silently skipping ADR-0074 S4

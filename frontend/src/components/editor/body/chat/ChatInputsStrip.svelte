@@ -6,7 +6,7 @@
 -->
 <script lang="ts">
   import PromptInputField from "@/components/widgets/PromptInputField.svelte";
-  import { isInputMissing } from "@/components/editor/body/chat/chatInputs";
+  import { isInputMissing } from "@/lib/utils/promptInputs";
   import type {
     LoreEntrySummary,
     PromptEntrySummary,

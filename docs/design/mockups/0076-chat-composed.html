@@ -1,0 +1,510 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<!--
+  ADR-0076 chat mockup — "Chat, Composed".
+  The interactive reference the ADR cites. NON-NORMATIVE — the ADR's decisions
+  govern; this shows the recomposed chat pane: one quiet metadata line instead
+  of the estimate/TTL cards + footer, per-turn provenance on the turn, a worded
+  Preview as the single context door, a confirmed Clear separated from Send,
+  Send↔Stop while streaming, and the locked-chip doorway ("New chat with this
+  setup"). Use the state switcher to walk Fresh → Locked → Streaming.
+  Open in a browser and click through it.
+-->
+<title>Chat, Composed</title>
+<style>
+  /* ===== App tokens (mirrored from styles.css) ===== */
+  :root {
+    --sans: "Segoe UI", system-ui, sans-serif;
+    --serif: Georgia, "Times New Roman", serif;
+    --mono: Consolas, ui-monospace, monospace;
+    --fs-xs: 11px; --fs-sm: 12px; --fs-md: 13px; --fs-lg: 15px; --fs-xl: 16px; --fs-2xl: 20px;
+    --r-sm: 4px; --r-md: 6px; --r-lg: 10px; --r-pill: 999px;
+
+    --surface: #ffffff;
+    --panel: #edf3f1;
+    --inset: #f1f5f3;
+    --border: #cbd6d2;
+    --divider: #dde5e2;
+    --text: #242424;
+    --text-2: #4d5753;
+    --text-3: #74817b;
+    --accent: #2f6f5e;
+    --accent-strong: #234e43;
+    --accent-emphasis: #234e43;
+    --accent-soft: #edf6f2;
+    --accent-soft2: #dff0ea;
+    --danger: #b4442f;
+    --danger-soft: #faeeea;
+    --danger-border: #e4bdb2;
+    --k-graphite: #6b7280;
+    --scrim: rgba(31, 45, 40, 0.4);
+    --elev-2: 0 6px 18px rgba(31, 45, 40, 0.18);
+    --elev-3: 0 12px 32px rgba(31, 45, 40, 0.24);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --surface: #1f2522;
+      --panel: #20272a;
+      --inset: #242a28;
+      --border: #3a4541;
+      --divider: #313b37;
+      --text: #e8edeb;
+      --text-2: #a9b6b0;
+      --text-3: #7e8a84;
+      --accent: #6cc4a6;
+      --accent-strong: #4ea88c;
+      --accent-emphasis: #7cc0a1;
+      --accent-soft: #1f3a32;
+      --accent-soft2: #2a4a3f;
+      --danger: #e08a76;
+      --danger-soft: #3a2a26;
+      --danger-border: #5c4038;
+      --k-graphite: #8b93a0;
+      --scrim: rgba(0, 0, 0, 0.5);
+      --elev-2: 0 6px 18px rgba(0, 0, 0, 0.45);
+      --elev-3: 0 12px 32px rgba(0, 0, 0, 0.55);
+    }
+  }
+  :root[data-theme="dark"] {
+    --surface: #1f2522;
+    --panel: #20272a;
+    --inset: #242a28;
+    --border: #3a4541;
+    --divider: #313b37;
+    --text: #e8edeb;
+    --text-2: #a9b6b0;
+    --text-3: #7e8a84;
+    --accent: #6cc4a6;
+    --accent-strong: #4ea88c;
+    --accent-emphasis: #7cc0a1;
+    --accent-soft: #1f3a32;
+    --accent-soft2: #2a4a3f;
+    --danger: #e08a76;
+    --danger-soft: #3a2a26;
+    --danger-border: #5c4038;
+    --k-graphite: #8b93a0;
+    --scrim: rgba(0, 0, 0, 0.5);
+    --elev-2: 0 6px 18px rgba(0, 0, 0, 0.45);
+    --elev-3: 0 12px 32px rgba(0, 0, 0, 0.55);
+  }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0;
+    background: var(--panel);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: var(--fs-md);
+    line-height: 1.45;
+  }
+  button { font: inherit; color: inherit; }
+  ::selection { background: var(--accent-soft2); }
+
+  .page { max-width: 1080px; margin: 0 auto; padding: 24px 16px 64px; }
+  .page > header h1 { font-family: var(--serif); font-size: var(--fs-2xl); font-weight: 700; margin: 0 0 4px; }
+  .page > header p { margin: 0 0 16px; color: var(--text-2); font-size: var(--fs-sm); max-width: 72ch; }
+
+  /* ===== demo controls (not part of the design) ===== */
+  .demo-bar {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin: 0 0 16px; padding: 8px 12px;
+    border: 1px dashed var(--border); border-radius: var(--r-md);
+    font-size: var(--fs-sm); color: var(--text-3);
+  }
+  .demo-bar strong { color: var(--text-2); font-weight: 600; }
+  .demo-bar button {
+    padding: 2px 10px; border: 1px solid var(--border); border-radius: var(--r-pill);
+    background: var(--surface); cursor: pointer; font-size: var(--fs-sm);
+  }
+  .demo-bar button[aria-pressed="true"] {
+    background: var(--accent-soft); border-color: var(--accent); color: var(--accent-emphasis); font-weight: 600;
+  }
+
+  .stage { display: grid; grid-template-columns: minmax(0, 640px) 1fr; gap: 24px; align-items: start; }
+  @media (max-width: 900px) { .stage { grid-template-columns: 1fr; } }
+
+  /* ===== the chat pane ===== */
+  .chat {
+    position: relative;
+    display: flex; flex-direction: column; gap: 10px;
+    background: var(--surface);
+    border: 1px solid var(--border); border-radius: var(--r-lg);
+    box-shadow: inset 3px 0 0 0 var(--k-graphite);
+    padding: 12px 14px 14px 17px;
+    min-height: 540px;
+  }
+
+  .caps {
+    font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.07em;
+    text-transform: uppercase; color: var(--text-3);
+  }
+  .chat-title { font-family: var(--serif); font-size: var(--fs-2xl); font-weight: 700; margin: 0; }
+
+  /* chips row */
+  .chips { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 10px; border-radius: var(--r-pill);
+    border: 1px solid var(--border); background: var(--surface);
+    cursor: pointer; font-size: var(--fs-md);
+  }
+  .chip:hover { background: var(--inset); }
+  .chip strong { font-weight: 600; }
+  .chip .mark { display: inline-flex; color: var(--text-3); }
+  .chip .slot { display: inline-flex; color: var(--text-3); }
+  .chip-prompt { border-color: var(--accent-soft2); background: var(--accent-soft); }
+  .chip-prompt .mark { color: var(--accent-emphasis); }
+  .chip-anchor { position: relative; }
+  .btn-preview {
+    margin-left: auto;
+    padding: 2px 8px; font-size: var(--fs-xs); font-weight: 600;
+    border: none; border-radius: var(--r-sm); background: transparent;
+    color: var(--text-3); cursor: pointer;
+  }
+  .btn-preview:hover { background: var(--inset); color: var(--text-2); }
+  .btn-preview[aria-expanded="true"] { background: var(--accent-soft); color: var(--accent-emphasis); }
+  .preview-anchor { position: relative; margin-left: auto; display: flex; }
+
+  /* transcript */
+  .transcript { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 180px; }
+  .turn { max-width: 85%; display: flex; flex-direction: column; gap: 3px; }
+  .turn-user { align-self: flex-end; align-items: flex-end; }
+  .turn-user .bubble { background: var(--accent-soft); border: 1px solid var(--accent-soft2); }
+  .turn-ai { align-self: flex-start; }
+  .bubble {
+    padding: 8px 12px; border-radius: var(--r-lg);
+    border: 1px solid var(--divider); background: var(--surface);
+    font-size: var(--fs-md);
+  }
+  .speaker { font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-3); }
+  .turn-meta { font-size: var(--fs-xs); color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .turn-meta .mono { font-family: var(--mono); }
+  .thinking { font-size: var(--fs-sm); color: var(--text-3); }
+  .thinking summary { cursor: pointer; user-select: none; }
+  .stopped {
+    font-size: var(--fs-xs); color: var(--text-3); font-style: italic;
+    border-left: 2px solid var(--divider); padding-left: 8px;
+  }
+  .stream-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: 0.3; } }
+
+  /* pre-lock inputs form (kept — it is a form, not telemetry) */
+  .inputs {
+    display: flex; flex-direction: column; gap: 8px;
+    padding: 10px 12px; border: 1px solid var(--divider); border-radius: var(--r-lg);
+    background: var(--inset);
+  }
+  .inputs label { display: flex; flex-direction: column; gap: 3px; }
+  .inputs input[type="text"] {
+    font: inherit; font-size: var(--fs-md); color: var(--text);
+    padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--r-sm);
+    background: var(--surface);
+  }
+
+  /* THE quiet metadata line — no card, reads as metadata (decision 1) */
+  .meta-line {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    font-size: var(--fs-xs); color: var(--text-3);
+    font-variant-numeric: tabular-nums;
+  }
+  .meta-line .mono { font-family: var(--mono); }
+  .meta-line .sep { opacity: 0.6; }
+  .meta-line .warn { color: var(--danger); font-weight: 600; }
+
+  /* composer + action row */
+  .composer {
+    min-height: 60px; padding: 8px 10px;
+    border: 1px solid var(--border); border-radius: var(--r-md);
+    background: var(--inset); font-size: var(--fs-md); color: var(--text-3);
+  }
+  .composer:focus-within { outline: 1px solid var(--accent); }
+  .composer[contenteditable]:empty::before { content: attr(data-placeholder); }
+  .actions { display: flex; align-items: center; gap: 8px; }
+  .actions .space { flex: 1; }
+  .btn {
+    padding: 4px 12px; font-size: var(--fs-md); border-radius: var(--r-md);
+    border: 1px solid var(--border); background: transparent; cursor: pointer;
+  }
+  .btn:hover { background: var(--inset); }
+  .btn-danger { color: var(--danger); border-color: var(--danger-border); }
+  .btn-danger:hover { background: var(--danger-soft); }
+  .btn-solid { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .btn-solid:hover { background: var(--accent-strong); }
+  .btn-stop { background: var(--danger); border-color: var(--danger); color: #fff; font-weight: 600; }
+  .btn[disabled] { opacity: 0.5; cursor: default; }
+
+  /* popovers: --panel, --r-lg, --elev-2 (design language §4) */
+  .popover {
+    position: absolute; z-index: 100;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--r-lg); box-shadow: var(--elev-2);
+    padding: 10px 12px;
+  }
+  .pop-preview { right: 0; top: calc(100% + 6px); width: 340px; max-height: 360px; overflow: auto; }
+  .pop-preview section { margin: 0 0 10px; }
+  .pop-preview section:last-child { margin-bottom: 0; }
+  .pop-preview pre {
+    margin: 4px 0 0; padding: 6px 8px; white-space: pre-wrap;
+    font-family: var(--mono); font-size: var(--fs-xs); color: var(--text-2);
+    background: var(--surface); border: 1px solid var(--divider); border-radius: var(--r-sm);
+  }
+  .pop-preview .kv { display: flex; gap: 6px; font-size: var(--fs-sm); color: var(--text-2); margin-top: 3px; }
+  .pop-preview .kv b { font-weight: 600; color: var(--text); }
+  .pop-doorway { left: 0; top: calc(100% + 6px); width: 260px; }
+  .pop-doorway p { margin: 0 0 8px; font-size: var(--fs-sm); color: var(--text-2); }
+  .pop-doorway .btn { width: 100%; background: var(--surface); }
+
+  /* confirm dialog (surface taxonomy: confirm destruction → dialog) */
+  .scrim {
+    position: absolute; inset: 0; background: var(--scrim);
+    border-radius: var(--r-lg); display: flex; align-items: center; justify-content: center; z-index: 300;
+  }
+  .dialog {
+    width: 320px; background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--r-lg); box-shadow: var(--elev-3); padding: 14px 16px;
+  }
+  .dialog h3 { margin: 0 0 6px; font-size: var(--fs-lg); font-weight: 600; }
+  .dialog p { margin: 0 0 12px; font-size: var(--fs-sm); color: var(--text-2); }
+  .dialog .actions { justify-content: flex-end; }
+
+  /* ===== annotations column ===== */
+  .notes { display: flex; flex-direction: column; gap: 10px; font-size: var(--fs-sm); color: var(--text-2); }
+  .note { padding: 10px 12px; border: 1px solid var(--divider); border-radius: var(--r-md); background: var(--surface); }
+  .note b { color: var(--text); font-weight: 600; }
+  .note .d { display: inline-block; min-width: 20px; font-family: var(--mono); font-size: var(--fs-xs); color: var(--accent-emphasis); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <h1>Chat, Composed</h1>
+    <p>ADR-0076's review mockup. The instrument-panel strips (NEXT&nbsp;TURN&nbsp;EST. card, CACHE&nbsp;TTL card,
+    provider line, session-cost footer) are gone; what remains between the transcript and the composer is
+    one quiet metadata line. Walk the three states below and click <em>Preview</em>, the locked chips,
+    <em>Clear</em>, and <em>Send/Stop</em>.</p>
+  </header>
+
+  <div class="demo-bar" role="group" aria-label="Mockup state">
+    <strong>State:</strong>
+    <button id="st-fresh" aria-pressed="true">Fresh (pre-lock)</button>
+    <button id="st-locked" aria-pressed="false">In conversation (locked)</button>
+    <button id="st-streaming" aria-pressed="false">Streaming</button>
+    <span style="margin-left:auto">theme follows your OS · <button id="theme-toggle">toggle</button></span>
+  </div>
+
+  <div class="stage">
+    <div class="chat" id="chat">
+      <span class="caps">Title</span>
+      <h2 class="chat-title">General chat</h2>
+
+      <!-- chips row: role marks are Tabler-style annotations (leading), the
+           trailing slot is caret (pickable) or lock (locked → doorway) -->
+      <div class="chips">
+        <span class="chip-anchor">
+          <button class="chip chip-prompt" id="chip-prompt">
+            <span class="mark" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8"/></svg></span>
+            <strong>General chat</strong>
+            <span class="slot" id="slot-prompt" aria-hidden="true"></span>
+          </button>
+          <div class="popover pop-doorway" id="pop-doorway" hidden>
+            <p>Locked after the first message — this prompt shapes every turn of the conversation.</p>
+            <button class="btn" onclick="alert('(mock) creates a fresh chat node seeded with the same prompt, assistant, and inputs, and opens it')">New chat with this setup</button>
+          </div>
+        </span>
+        <span class="chip-anchor">
+          <button class="chip" id="chip-assistant">
+            <span class="mark" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a7 7 0 0 1 16 0v1"/></svg></span>
+            <strong>Haiku 4.5</strong>
+            <span class="slot" id="slot-assistant" aria-hidden="true"></span>
+          </button>
+        </span>
+        <span class="preview-anchor">
+          <button class="btn-preview" id="btn-preview" aria-expanded="false">Preview</button>
+          <div class="popover pop-preview" id="pop-preview" hidden>
+            <section>
+              <span class="caps">System</span>
+              <pre>You are a story-development partner for the project "Aetheria"…</pre>
+            </section>
+            <section>
+              <span class="caps">Context · stable lore</span>
+              <div class="kv"><b>12 entries</b> · 4.1k tok · cached (1h)</div>
+            </section>
+            <section>
+              <span class="caps">Context · volatile lore</span>
+              <div class="kv"><b>3 entries</b> · 5.0k tok · cached (5m)</div>
+            </section>
+            <section id="pv-inputs">
+              <span class="caps">Inputs (locked)</span>
+              <div class="kv"><b>Scene</b> · Ch 2 · The Night Count</div>
+              <div class="kv"><b>Focus</b> · upload-ethics thread</div>
+            </section>
+            <section id="pv-journal">
+              <span class="caps">Auto-added this conversation</span>
+              <div class="kv"><b>Shenzhen Protocol</b> · turn 2</div>
+            </section>
+          </div>
+        </span>
+      </div>
+
+      <!-- transcript: per-turn provenance ON the turn (decision 3) -->
+      <div class="transcript">
+        <div class="turn turn-user">
+          <div class="bubble">how many documents have you received for review?</div>
+        </div>
+        <div class="turn turn-ai">
+          <span class="speaker">Haiku 4.5</span>
+          <details class="thinking"><summary>Thinking</summary><div>…</div></details>
+          <div class="bubble" id="ai-bubble">I've received <b>10 lore documents</b> for review: the Shenzhen Protocol, Implant, Augmented Reality, …</div>
+          <div class="stopped" id="ai-stopped" hidden>Stopped early — the reply above is partial.</div>
+          <div class="turn-meta" id="ai-meta"><span class="mono">5.8k → 462 tok</span> <span class="sep">·</span> 38% cached <span class="sep">·</span> <span class="mono">€0.0071</span> <span class="sep">·</span> anthropic <span class="sep">·</span> haiku-4.5 <span class="sep">·</span> 9.6 s</div>
+          <div class="turn-meta" id="ai-streaming-note" hidden><span class="stream-dot"></span> streaming…</div>
+        </div>
+      </div>
+
+      <!-- pre-lock only: the inputs FORM stays (it is not telemetry) -->
+      <div class="inputs" id="inputs-form">
+        <span class="caps">Inputs</span>
+        <label><span class="caps">Focus</span><input type="text" value="upload-ethics thread"></label>
+      </div>
+
+      <!-- decision 1: one quiet metadata line, no cards -->
+      <div class="meta-line" id="meta-line">
+        <span>next turn</span>
+        <span class="mono">~5.0k tok</span><span class="sep">·</span>
+        <span class="mono">€0.0037</span><span class="sep">·</span>
+        <span id="cache-term">cache 57m</span><span class="sep">·</span>
+        <span>session <span class="mono" id="session-cost">€0.0071</span></span>
+      </div>
+
+      <div class="composer" contenteditable="true" data-placeholder="Message… (Ctrl/⌘+Enter to send)"></div>
+
+      <div class="actions">
+        <button class="btn btn-danger" id="btn-clear">Clear</button>
+        <span class="space"></span>
+        <button class="btn btn-solid" id="btn-send">Send</button>
+      </div>
+
+      <!-- Clear confirm: a dialog, per the surface taxonomy -->
+      <div class="scrim" id="clear-scrim" hidden>
+        <div class="dialog" role="alertdialog" aria-labelledby="clear-title">
+          <h3 id="clear-title">Clear this conversation?</h3>
+          <p>Deletes 2 messages from this chat. This persists immediately, and the
+             prompt, assistant, and inputs unlock.</p>
+          <div class="actions">
+            <button class="btn" id="clear-cancel">Cancel</button>
+            <button class="btn btn-danger" id="clear-confirm">Clear conversation</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <aside class="notes">
+      <div class="note"><span class="d">D1</span> <b>One metadata line.</b> Estimate, cache lifetime, and session total — borderless, <code>--fs-xs</code>, <code>--text-3</code>. The NEXT&nbsp;TURN&nbsp;EST. and CACHE&nbsp;TTL cards and the session-cost footer are gone. Cache-block detail lives behind Preview.</div>
+      <div class="note"><span class="d">D2</span> <b>Preview is the one door.</b> System blocks, context tiers with counts, the locked inputs, and the auto-added journal — one labeled, scrollable document. "Show inputs" and the "In context:" strip are retired post-lock.</div>
+      <div class="note"><span class="d">D3</span> <b>Per-turn facts on the turn.</b> provider · model · latency joined the turn's usage/cost line; the floating line above the composer is gone.</div>
+      <div class="note"><span class="d">D4</span> <b>Clear confirms.</b> Left-anchored, danger-worded, separated from Send by flexible space; the dialog names the count, the immediate persistence, and the unlock side-effect.</div>
+      <div class="note"><span class="d">D5</span> <b>Send becomes Stop.</b> Stopping keeps the partial reply, marked "stopped early". Errors still rewind; stops keep. (Try it in the Streaming state.)</div>
+      <div class="note"><span class="d">D8</span> <b>The lock is a doorway.</b> In the locked state, click a chip: the constraint in one line, and "New chat with this setup".</div>
+      <div class="note"><span class="d">D9</span> <b>Lexicon-clean chrome.</b> Emoji retired: Tabler-style role marks lead the chips, the trailing slot is caret-or-lock, and the preview affordance is a word.</div>
+    </aside>
+  </div>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const CARET = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M6 9l6 6 6-6"/></svg>';
+  const LOCK  = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
+
+  let state = "fresh";      // fresh | locked | streaming
+  let stopped = false;
+
+  function render() {
+    const locked = state !== "fresh";
+    $("slot-prompt").innerHTML = locked ? LOCK : CARET;
+    $("slot-assistant").innerHTML = locked ? LOCK : CARET;
+    $("inputs-form").hidden = locked;
+    $("pv-inputs").hidden = !locked;
+    $("pv-journal").hidden = !locked;
+    $("btn-clear").disabled = state === "streaming" || state === "fresh";
+    const send = $("btn-send");
+    if (state === "streaming" && !stopped) {
+      send.textContent = "Stop";
+      send.classList.remove("btn-solid"); send.classList.add("btn-stop");
+      $("ai-streaming-note").hidden = false;
+      $("ai-meta").hidden = true;
+      $("ai-stopped").hidden = true;
+      $("ai-bubble").innerHTML = "I've received <b>10 lore documents</b> for review: the Shenzhen Proto…";
+    } else {
+      send.textContent = "Send";
+      send.classList.add("btn-solid"); send.classList.remove("btn-stop");
+      $("ai-streaming-note").hidden = true;
+      $("ai-meta").hidden = false;
+      $("ai-stopped").hidden = !stopped;
+      $("ai-bubble").innerHTML = stopped
+        ? "I've received <b>10 lore documents</b> for review: the Shenzhen Proto…"
+        : "I've received <b>10 lore documents</b> for review: the Shenzhen Protocol, Implant, Augmented Reality, …";
+      $("ai-meta").innerHTML = stopped
+        ? '<span class="mono">5.8k → 210 tok</span> <span class="sep">·</span> 38% cached <span class="sep">·</span> <span class="mono">€0.0043</span> <span class="sep">·</span> anthropic <span class="sep">·</span> haiku-4.5 <span class="sep">·</span> stopped'
+        : '<span class="mono">5.8k → 462 tok</span> <span class="sep">·</span> 38% cached <span class="sep">·</span> <span class="mono">€0.0071</span> <span class="sep">·</span> anthropic <span class="sep">·</span> haiku-4.5 <span class="sep">·</span> 9.6 s';
+    }
+    // session total can never lag a cost the transcript shows (decision 6)
+    $("session-cost").textContent = state === "fresh" ? "€0.0000" : (stopped ? "€0.0043" : "€0.0071");
+    for (const id of ["st-fresh", "st-locked", "st-streaming"])
+      $(id).setAttribute("aria-pressed", String(id === "st-" + state));
+    closePopovers();
+  }
+
+  function closePopovers() {
+    $("pop-preview").hidden = true;
+    $("btn-preview").setAttribute("aria-expanded", "false");
+    $("pop-doorway").hidden = true;
+  }
+
+  $("st-fresh").onclick = () => { state = "fresh"; stopped = false; render(); };
+  $("st-locked").onclick = () => { state = "locked"; stopped = false; render(); };
+  $("st-streaming").onclick = () => { state = "streaming"; stopped = false; render(); };
+
+  $("btn-preview").onclick = (e) => {
+    e.stopPropagation();
+    const open = $("pop-preview").hidden;
+    closePopovers();
+    $("pop-preview").hidden = !open;
+    $("btn-preview").setAttribute("aria-expanded", String(open));
+  };
+  $("chip-prompt").onclick = (e) => {
+    e.stopPropagation();
+    if (state === "fresh") { alert("(mock) opens the prompt picker — slice 5 re-hosts it on the drill-in popover substrate"); return; }
+    const open = $("pop-doorway").hidden;
+    closePopovers();
+    $("pop-doorway").hidden = !open;
+  };
+  $("chip-assistant").onclick = (e) => {
+    e.stopPropagation();
+    if (state === "fresh") alert("(mock) opens the assistant picker — slice 5 re-hosts it on the drill-in popover substrate");
+    else alert("(mock) same doorway popover as the prompt chip");
+  };
+  $("btn-send").onclick = () => {
+    if (state === "streaming" && !stopped) { stopped = true; render(); }
+  };
+  $("btn-clear").onclick = () => { $("clear-scrim").hidden = false; };
+  $("clear-cancel").onclick = () => { $("clear-scrim").hidden = true; };
+  $("clear-confirm").onclick = () => { $("clear-scrim").hidden = true; state = "fresh"; stopped = false; render(); };
+
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".popover")) closePopovers();
+  });
+  $("theme-toggle").onclick = () => {
+    const r = document.documentElement;
+    const cur = r.getAttribute("data-theme");
+    const prefersDark = matchMedia("(prefers-color-scheme: dark)").matches;
+    r.setAttribute("data-theme", (cur ?? (prefersDark ? "dark" : "light")) === "dark" ? "light" : "dark");
+  };
+
+  render();
+</script>
+</body>
+</html>

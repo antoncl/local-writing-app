@@ -756,6 +756,80 @@ class PreviewEndpointTests(unittest.TestCase):
         self.assertTrue(all(b["tier"] == "volatile" for b in lore))  # cold, unhinted
         self.assertIn("Honor Harrington", "".join(b["text"] for b in lore))
 
+    def test_preview_matches_send_on_scene_summary_lore(self) -> None:
+        # #1477: the preview must show what the wire will carry, and the scene
+        # summary is a long_text field whose entity name-matches are references —
+        # so lore named in the summary is scanned on BOTH the send and the preview
+        # (it moved to the selector's common path). What the send does NOT do is a
+        # static body-hop from scene-derived roots (its depth-1 is conversation-
+        # driven), and the empty-journal preview matches that. So for a scene whose
+        # summary names Nimitz, whose pov structurally refs Honor, and where a third
+        # entry (Whitejaw) is named ONLY inside Nimitz's body:
+        #   - Honor (structural)  -> present
+        #   - Nimitz (summary)    -> present   (the fix: summary reaches the send too)
+        #   - Whitejaw (body-only)-> absent    (no static body-hop; matches the send)
+        whitejaw = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Whitejaw", entry_type="lore:character")
+        )
+        nimitz = self.service.create_lore_entry(
+            CreateLoreEntryRequest(title="Nimitz", entry_type="lore:character")
+        )
+        nimitz_loaded = self.service.read_lore_entry(nimitz.id)
+        self.service.save_lore_entry(
+            nimitz.id,
+            SaveLoreEntryRequest(
+                title=nimitz_loaded.title,
+                body="A treecat. His sister is Whitejaw.",  # body-only mention
+                base_revision=nimitz_loaded.revision,
+                entry_type="lore:character",
+                metadata={},
+            ),
+        )
+        struct = self.service.create_structure_node(
+            CreateStructureNodeRequest(title="The Perch", entry_type="manuscript:scene")
+        )
+        scene_id = next(
+            n.scene_id
+            for n in struct.root.children
+            if n.type == "manuscript:scene" and n.title == "The Perch"
+        )
+        scene = self.service.read_scene(scene_id)
+        self.service.save_scene(
+            scene_id,
+            SaveSceneRequest(
+                title=scene.title,
+                body="",
+                base_revision=scene.revision,
+                status="draft",
+                entry_type="manuscript:scene",
+                # Honor is a structural ref (pov); Nimitz is named in the summary;
+                # Whitejaw is named nowhere on the scene (only in Nimitz's body).
+                metadata={
+                    "summary": "Nimitz watches Honor from the perch.",
+                    "pov": self.honor_id,
+                },
+            ),
+        )
+        self.assertTrue(whitejaw.id)  # created; named only inside Nimitz's body
+        response = self.client.post(
+            "/api/ai/preview",
+            json={
+                "template_source": '{% role "system" %}Write.{% endrole %}{{ use_lore() }}',
+                "target_scene_id": scene_id,
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        lore_text = "".join(
+            b["text"] for b in body["cache_blocks"] if "lore" in b["label"]
+        )
+        # Check for each entry's own rendered element (`name="…"`), not a bare
+        # substring — Nimitz's body text itself contains the word "Whitejaw", so a
+        # substring check would wrongly "find" the un-selected entry.
+        self.assertIn('name="Honor Harrington"', lore_text)  # structural
+        self.assertIn('name="Nimitz"', lore_text)  # summary — the fix
+        self.assertNotIn('name="Whitejaw"', lore_text)  # body-only; no static body-hop
+
     def test_marked_target_in_context_pick_overrides_target_scene_id(self) -> None:
         # NC-style ★ target: a scene flagged target=true in a context_pick
         # input wins over the caller's implicit target_scene_id. Templates

@@ -459,7 +459,20 @@ def _preview_lore_tiers(
     tiering (`_relevant_lore_ids` + `_tier_lore_ids`) but against a FRESH throwaway
     `AISession` — the cold turn-1 view (unhinted lore volatile; `use(node,
     "stable")` stable) — and never commits, so it cannot touch a live chat's cache
-    baseline. Both tiers resolve as-of `scene`, like the send path."""
+    baseline. Both tiers resolve as-of `scene`, like the send path.
+
+    The journal is an EMPTY list, not `None` (#1477). A `None` journal drops the
+    selector into its static body-hop (`_textual_one_hop` over entry BODIES), which
+    the send never does from scene-derived roots — the send's depth-1 is
+    conversation-driven (expand_context over the message). The scene `summary`
+    scan, by contrast, now runs on BOTH paths (it moved to the selector's common
+    path), so the preview and the send agree on it. Passing `[]` takes the same
+    journal branch the send takes, with the turn-1 conversation (empty, nothing
+    typed yet), so the preview shows exactly the message-independent floor a first
+    send starts from — scene refs + `always` policy + the scene summary + `use()`
+    picks + one structural hop — and never invents body-hop entries the wire won't
+    carry. The author's own message then adds to that at send, which is new input
+    the preview couldn't know."""
     from app.services.ai.helpers import (
         _relevant_lore_ids,
         _tier_lore_ids,
@@ -468,7 +481,7 @@ def _preview_lore_tiers(
     from app.services.ai.sessions import AISession
 
     ids = _relevant_lore_ids(
-        project_service, scene, "implicit", None, list(used_node_ids or [])
+        project_service, scene, "implicit", [], list(used_node_ids or [])
     )
     if not ids:
         return "", ""

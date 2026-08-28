@@ -870,22 +870,30 @@ def _relevant_lore(
 def _implicit_lore_ids(
     project: ProjectService, scene: Any, direct: set[str], journal: list[Any] | None
 ) -> set[str]:
-    """The implicit-mode id set: always-included + direct refs + textual alias
-    scan (or the chat journal's pre-detected ids) + one structural hop through
-    each collected entry's own refs (+ a textual hop when there's no journal).
+    """The implicit-mode id set: always-included + direct refs + a scene-summary
+    alias scan + the chat journal's pre-detected ids (when present) + one
+    structural hop through each collected entry's own refs (+ a textual body-hop
+    when there's no journal).
     """
     # Always-included entries (context_policy = "always") feed every implicit
     # render regardless of mention.
     found = set(direct) | _always_included_lore_ids(project)
-    if journal is None:
-        # No chat-session journal — helper is the producer of detected context
-        # (one-shot generates, preview, tests). Run the textual scan on summary.
-        summary = _get_field(scene, "summary") or ""
-        if isinstance(summary, str) and summary.strip():
-            found |= _alias_match(project, summary, scene=scene)
-    else:
-        # Chat-session use: the send-time context expander has already populated
-        # the journal with textual detections (incl. depth-1). Trust it.
+    # The scene summary is a long_text field; entities named in it are references
+    # the model should carry, so it is scanned on EVERY implicit render — a
+    # scene-derived input to the one selector, the same kind of signal as the
+    # structural entity_refs already in `direct`. (#1477: this runs on the send
+    # too, not just the preview/one-shot producer — it extends ADR-0057's input
+    # set, whose send model was structural refs + always + the conversation
+    # journal. It keeps the preview and the send agreeing on the scene-derived
+    # floor.)
+    summary = _get_field(scene, "summary") or ""
+    if isinstance(summary, str) and summary.strip():
+        found |= _alias_match(project, summary, scene=scene)
+    # Chat-session use: the send-time context expander has already populated the
+    # journal with the CONVERSATION's textual detections (message alias-match +
+    # its own depth-1). Fold them in — they are the conversation-derived input,
+    # beside the scene-derived summary/refs above.
+    if journal is not None:
         for entry in journal:
             jid = _attr_or_item(entry, "entry_id")
             if isinstance(jid, str) and jid:
@@ -906,8 +914,12 @@ def _implicit_lore_ids(
             continue
         hop_refs = _collect_lore_refs_from_metadata(_attr_or_item(entry, "metadata"))
         expanded |= hop_refs - manual_only_ids
-    # Textual depth-1 only runs when the journal is absent; otherwise the
-    # journal already carries those expansions.
+    # Textual depth-1 through entry BODIES stays conversation-driven (ADR-0057):
+    # the send gets it from the journal (expand_context's own one-hop over the
+    # message), so it only runs here when the journal is absent — the one-shot /
+    # test producer path. The preview passes an EMPTY journal (not None, #1477),
+    # so it does NOT run this static body-hop and therefore matches the send,
+    # which never does a static body-hop from scene-derived roots either.
     if journal is None:
         expanded |= _textual_one_hop(project, found, scene=scene)
     return expanded

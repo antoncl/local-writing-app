@@ -9,6 +9,7 @@
   import { paneViews } from "@/lib/stores/paneViews.svelte";
   import { editorPanes } from "@/lib/stores/editorPanes.svelte";
   import { builtinViews, type BuiltinView } from "@/lib/views/builtinViews";
+  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import type { MetadataSchema } from "@/lib/types";
 
   interface Props {
@@ -93,7 +94,7 @@
     {:else}
       <span class="view-switcher-glyph" aria-hidden="true">▤</span>
     {/if}
-    <span class="view-switcher-caret" aria-hidden="true">▾</span>
+    <GroupCaret size="xs" />
   </button>
   {#if open}
     <div class="view-switcher-popover" role="listbox">
@@ -181,11 +182,6 @@
      announces state; the idle default shows only the quiet ▤ glyph. */
   .view-switcher-trigger.has-view .view-switcher-label {
     color: var(--accent-strong);
-  }
-
-  .view-switcher-caret {
-    font-size: var(--fs-xs);
-    opacity: 0.7;
   }
 
   .view-switcher-popover {

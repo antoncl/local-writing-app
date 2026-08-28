@@ -8,6 +8,7 @@
   } from "@/lib/utils/projectChain";
   import InheritsFromList from "@/components/widgets/InheritsFromList.svelte";
   import Popover from "./Popover.svelte";
+  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
 
   // The full crumb tooltip: identity, then what its inheritance state means
   // (#417 slice 4). `available`/`stale` are the ancestors #431 used to hide, so
@@ -210,7 +211,7 @@
       aria-expanded={descendOpen}
       aria-controls={descendOpen ? "contains-menu" : undefined}
       title="Open a project inside this one"
-      onclick={toggleDescend}>Contains<span class="descend-caret" aria-hidden="true">▾</span></button>
+      onclick={toggleDescend}>Contains<span class="descend-caret" aria-hidden="true"><GroupCaret size="xs" /></span></button>
   {/if}
 {/snippet}
 
@@ -508,13 +509,14 @@
     flex: none;
     margin-left: 12px;
   }
-  /* The caret carries the "opens a menu" signal (`▾`, the app's established
-     dropdown glyph); it is not part of the underlined word, so it opts out of
-     the link underline. */
+  /* The caret carries the "opens a menu" signal (the shared chevron, size xs);
+     it is not part of the underlined word, so it opts out of the link
+     underline and sits just after "Contains". */
   .project-chain .chain-descend .descend-caret {
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    vertical-align: middle;
     margin-left: 3px;
-    font-size: var(--fs-xs);
     text-decoration: none;
   }
 

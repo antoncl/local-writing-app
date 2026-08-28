@@ -13,10 +13,11 @@
   // Stores only refs (id, kind, title) — bodies are materialized
   // server-side at template render time. See docs/context-picker.md.
 
-  import { tick } from "svelte";
+  import { onMount, tick } from "svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
   import { hidePromptEntries } from "@/lib/editor-core/promptResolution";
+  import { api } from "@/lib/api";
   import type {
     AssistantEntrySummary,
     NodePickerConfig,
@@ -27,9 +28,19 @@
     PromptEntrySummary,
     StructureDocument,
     StructureNode,
+    ViewNodeSummary,
   } from "@/lib/types";
   import { resolveColor } from "@/lib/utils/colors";
-  import { pickerMembership } from "@/lib/utils/pickerSources";
+  import { isViewRef, pickerMembership } from "@/lib/utils/pickerSources";
+  import { buildSelectorRoster, membersForSelector } from "@/lib/views/pickerSelectors";
+  import {
+    flattenSelectors,
+    memberCountForRef,
+    toggleSelectorGroup,
+    toggleSelectorMember,
+    type SelectorGroup,
+    type SelectorRow,
+  } from "@/lib/utils/selectorPickTree";
   import {
     isSearchActive,
     matchesEntry,
@@ -293,6 +304,70 @@
     onChange?.({ value: togglePickAt(structure, value, nodeId) });
   }
 
+  // ---- Saved-view selectors (ADR-0074 slice 5) ----
+  // The author-configured saved-view sources ({view:id}) become tri-state
+  // containers: absorb the whole view as one live ref, or drill in and pick
+  // members. pickerMembership drops view-refs (no `kind`), so they're read
+  // straight off config.sources here.
+  const configuredViewIds = $derived((config.sources ?? []).filter(isViewRef).map((s) => s.view));
+  let viewSummaries = $state<Map<string, ViewNodeSummary>>(new Map());
+  onMount(async () => {
+    if (configuredViewIds.length === 0) return;
+    try {
+      const list = await api.listViews();
+      const wanted = new Set(configuredViewIds);
+      const map = new Map<string, ViewNodeSummary>();
+      for (const v of list.entries) if (wanted.has(v.id)) map.set(v.id, v);
+      viewSummaries = map;
+    } catch {
+      // A views-fetch failure just leaves the section empty — never blocks picking.
+    }
+  });
+  // The roster a view's spec evaluates against, from this surface's own props.
+  const selectorRoster = $derived(
+    buildSelectorRoster({ schema: metadataSchema, structure, loreEntries, assistantEntries, plotEntries }),
+  );
+  // One SelectorGroup per configured, loaded view — its live members evaluated
+  // now (re-runs as the roster or a member's fields change).
+  const viewGroups = $derived.by<SelectorGroup[]>(() => {
+    const groups: SelectorGroup[] = [];
+    for (const id of configuredViewIds) {
+      const summary = viewSummaries.get(id);
+      if (!summary?.spec) continue;
+      const ref: NodePickerRef = { id: `view:${id}`, kind: "view", title: summary.title, selector: summary.spec };
+      groups.push({ ref, members: membersForSelector(ref, selectorRoster) });
+    }
+    return groups;
+  });
+  let collapsedViewIds = $state<Set<string>>(new Set());
+  function toggleViewCollapse(id: string) {
+    const next = new Set(collapsedViewIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    collapsedViewIds = next;
+  }
+  const viewRows = $derived.by<SelectorRow[]>(() => {
+    if (viewGroups.length === 0) return [];
+    const searching = isSearchActive(search);
+    // Members carry no tags/metadata (they're refs), so a plain-needle search
+    // filters them by title; a `#tag` restrictor leaves the curated view intact.
+    const memberVisible =
+      searching && !parsedSearch.tagOnly
+        ? (m: NodePickerRef) => matchesEntry({ title: m.title }, parsedSearch)
+        : undefined;
+    return flattenSelectors(viewGroups, value, collapsedViewIds, { expandAll: searching, memberVisible });
+  });
+  function toggleViewRow(row: SelectorRow) {
+    const g = viewGroups.find((x) => x.ref.id === (row.memberOf ?? row.id));
+    if (!g) return;
+    if (row.isSelector) {
+      onChange?.({ value: toggleSelectorGroup(value, g) });
+    } else {
+      const m = g.members.find((x) => x.id === row.id);
+      if (m) onChange?.({ value: toggleSelectorMember(value, g, m) });
+    }
+  }
+
   // Flatten the research tree's notes (leaves) into a searchable list.
   // Topics are organizational containers with no body — only notes are
   // pickable as context. Mirrors flattenScenes but for note_id leaves
@@ -495,14 +570,16 @@
     return groups;
   });
 
-  const hasAnyConfigured = $derived(allowedKinds.length > 0);
-  const hasAnyResults = $derived(visibleGroups.length > 0 || manuscriptRows.length > 0);
+  const hasAnyConfigured = $derived(allowedKinds.length > 0 || configuredViewIds.length > 0);
+  const hasAnyResults = $derived(
+    visibleGroups.length > 0 || manuscriptRows.length > 0 || viewRows.length > 0,
+  );
 
   // Total result count for the search-bar live counter. Reflects the
   // post-filter, post-gating reality so the user can tell when their
   // search has zeroed out before scrolling.
   const totalVisibleItems = $derived(
-    visibleGroups.reduce((acc, g) => acc + g.items.length, 0) + manuscriptRows.length,
+    visibleGroups.reduce((acc, g) => acc + g.items.length, 0) + manuscriptRows.length + viewRows.length,
   );
 
   const collapseThreshold = $derived(compact ? COLLAPSE_THRESHOLD_COMPACT : COLLAPSE_THRESHOLD_DEFAULT);
@@ -554,6 +631,7 @@
             >
               {#snippet trailing()}
                 {@const mCount = structure ? sceneCountForRef(structure, ref) : null}
+                {@const vCount = memberCountForRef(viewGroups, ref)}
                 <span
                   class="ctx-type-pill"
                   class:has-color={!!hex}
@@ -561,6 +639,8 @@
                 >{chipLabel(ref)}</span>
                 {#if mCount !== null}
                   <span class="ctx-count-pill">{mCount} {mCount === 1 ? "scene" : "scenes"}</span>
+                {:else if vCount !== null}
+                  <span class="ctx-count-pill">{vCount} {vCount === 1 ? "item" : "items"}</span>
                 {/if}
                 {#if ref.kind === "manuscript" && allowTargetMarking}
                   <button
@@ -658,49 +738,101 @@
             </div>
           {/if}
         {:else}
-          <!-- Manuscript tri-state tree (ADR-0074 slice 4b): root / acts /
-               chapters as live containers over their scenes. Rendered above the
-               flat kind groups. -->
+          <!-- One tri-state row, shared by the manuscript tree (ADR-0074 slice
+               4b) and the saved-view selectors (slice 5). `r` is normalized;
+               each section binds its own toggle/collapse. -->
+          {#snippet pickRow(r: {
+            depth: number;
+            hasChildren: boolean;
+            collapsed: boolean;
+            isContainer: boolean;
+            state: string;
+            title: string;
+            count: number | null;
+            countNoun: string;
+          }, onToggle: () => void, onCollapse: () => void)}
+            <div class="ctx-mrow" style={`--depth:${r.depth}`}>
+              {#if r.hasChildren}
+                <button
+                  type="button"
+                  class="ctx-mcaret"
+                  aria-label={r.collapsed ? `Expand ${r.title}` : `Collapse ${r.title}`}
+                  aria-expanded={!r.collapsed}
+                  onclick={onCollapse}
+                >{r.collapsed ? "▸" : "▾"}</button>
+              {:else}
+                <span class="ctx-mcaret ctx-mcaret-leaf" aria-hidden="true"></span>
+              {/if}
+              <button
+                type="button"
+                class="ctx-mtoggle"
+                class:serif={r.isContainer}
+                aria-pressed={r.state === "on" || r.state === "implied"}
+                onclick={onToggle}
+              >
+                <span class={`ctx-mcheck ctx-mcheck-${r.state}`} aria-hidden="true"
+                  >{r.state === "on" || r.state === "implied" ? "✓" : ""}</span
+                >
+                <span class="ctx-mtitle">{r.title}</span>
+                {#if r.count !== null}
+                  <span class="ctx-mcount">{r.count} {r.count === 1 ? r.countNoun : `${r.countNoun}s`}</span>
+                {/if}
+                <span class="sr-only"
+                  >{r.state === "on"
+                    ? "Picked"
+                    : r.state === "implied"
+                      ? "Included via a container"
+                      : r.state === "indeterminate"
+                        ? "Partially picked"
+                        : "Not picked"}</span
+                >
+              </button>
+            </div>
+          {/snippet}
+
+          <!-- Manuscript tri-state tree: root / acts / chapters as live
+               containers over their scenes, above the flat kind groups. -->
           {#if manuscriptRows.length > 0}
             <div class="ctx-mtree" role="group" aria-label="Manuscript">
               {#each manuscriptRows as row (row.id)}
-                <div class="ctx-mrow" style={`--depth:${row.depth}`}>
-                  {#if row.hasChildren}
-                    <button
-                      type="button"
-                      class="ctx-mcaret"
-                      aria-label={row.collapsed ? `Expand ${row.title}` : `Collapse ${row.title}`}
-                      aria-expanded={!row.collapsed}
-                      onclick={() => toggleManuscriptCollapse(row.id)}
-                    >{row.collapsed ? "▸" : "▾"}</button>
-                  {:else}
-                    <span class="ctx-mcaret ctx-mcaret-leaf" aria-hidden="true"></span>
-                  {/if}
-                  <button
-                    type="button"
-                    class="ctx-mtoggle"
-                    class:serif={!row.isScene}
-                    aria-pressed={row.state === "on" || row.state === "implied"}
-                    onclick={() => toggleManuscriptPick(row.id)}
-                  >
-                    <span class={`ctx-mcheck ctx-mcheck-${row.state}`} aria-hidden="true"
-                      >{row.state === "on" || row.state === "implied" ? "✓" : ""}</span
-                    >
-                    <span class="ctx-mtitle">{row.title}</span>
-                    {#if !row.isScene}
-                      <span class="ctx-mcount">{row.sceneCount} {row.sceneCount === 1 ? "scene" : "scenes"}</span>
-                    {/if}
-                    <span class="sr-only"
-                      >{row.state === "on"
-                        ? "Picked"
-                        : row.state === "implied"
-                          ? "Included via a container"
-                          : row.state === "indeterminate"
-                            ? "Partially picked"
-                            : "Not picked"}</span
-                    >
-                  </button>
-                </div>
+                {@render pickRow(
+                  {
+                    depth: row.depth,
+                    hasChildren: row.hasChildren,
+                    collapsed: row.collapsed,
+                    isContainer: !row.isScene,
+                    state: row.state,
+                    title: row.title,
+                    count: row.isScene ? null : row.sceneCount,
+                    countNoun: "scene",
+                  },
+                  () => toggleManuscriptPick(row.id),
+                  () => toggleManuscriptCollapse(row.id),
+                )}
+              {/each}
+            </div>
+          {/if}
+
+          <!-- Saved-view selectors (ADR-0074 slice 5): each configured view is a
+               tri-state container — absorb the whole view (one live ref) or drill
+               in and pick members. -->
+          {#if viewRows.length > 0}
+            <div class="ctx-mtree" role="group" aria-label="Saved views">
+              {#each viewRows as row (row.key)}
+                {@render pickRow(
+                  {
+                    depth: row.depth,
+                    hasChildren: row.hasChildren,
+                    collapsed: row.collapsed,
+                    isContainer: row.isSelector,
+                    state: row.state,
+                    title: row.title,
+                    count: row.isSelector ? row.count : null,
+                    countNoun: "item",
+                  },
+                  () => toggleViewRow(row),
+                  () => toggleViewCollapse(row.id),
+                )}
               {/each}
             </div>
           {/if}

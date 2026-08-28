@@ -8,9 +8,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { tick } from "svelte";
 import { render, screen, fireEvent, within } from "@/lib/test/component";
 import NodePicker from "./NodePicker.svelte";
+import { api } from "@/lib/api";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import { hideLibraryEntry, openProjectHidden } from "@/lib/stores/hiddenLibrary";
-import type { MetadataSchema, PlotlineSummary, PromptEntrySummary } from "@/lib/types";
+import type { MetadataSchema, PlotlineSummary, PromptEntrySummary, ViewNodeSummary } from "@/lib/types";
 
 const SCHEMA = {
   entry_types: {
@@ -246,6 +247,80 @@ describe("NodePicker manuscript tree (#1476)", () => {
     expect(detail.value).toEqual([
       expect.objectContaining({ id: "root", kind: "manuscript", entry_type: "root" }),
     ]);
+  });
+});
+
+// ADR-0074 slice 5 (#1487): an author-configured saved view ({view:id}) renders
+// as a tri-state selector — absorb the whole view (one live ref) or drill in and
+// pick members. pickerMembership drops view-refs, so this pins that the runtime
+// picker surfaces them (the invisible-view bug) and expands their members.
+describe("NodePicker saved-view selectors (#1487)", () => {
+  const villainsView: ViewNodeSummary = {
+    id: "v1",
+    title: "Villains",
+    entry_type: "view:view",
+    view_kind: "lore",
+    spec: { kind: "lore", expr: { tagged: "villain" } },
+  };
+
+  function renderWithView(extra: Record<string, unknown> = {}) {
+    return render(NodePicker, {
+      props: {
+        config: { sources: [{ view: "v1" }], multiple: true },
+        loreEntries: [
+          loreEntry("lore_a", "Vex", ["villain"]),
+          loreEntry("lore_b", "Mara", ["hero"]),
+          loreEntry("lore_c", "Nok", ["villain"]),
+        ],
+        affordance: "add",
+        ...extra,
+      },
+    });
+  }
+
+  async function openMenu(): Promise<HTMLElement> {
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+    return document.querySelector(".ctx-menu") as HTMLElement;
+  }
+
+  beforeEach(() => {
+    vi.spyOn(api, "listViews").mockResolvedValue({ entries: [villainsView] });
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("renders the configured view as a selector over its live members", async () => {
+    renderWithView();
+    const menu = await openMenu();
+    // The view (dropped by pickerMembership) is surfaced, with its tagged members.
+    expect(await within(menu).findByText("Villains")).toBeInTheDocument();
+    expect(within(menu).getByText("Vex")).toBeInTheDocument();
+    expect(within(menu).getByText("Nok")).toBeInTheDocument();
+    // "Mara" is not tagged villain — not a member.
+    expect(within(menu).queryByText("Mara")).toBeNull();
+  });
+
+  it("checking the view stores ONE live selector ref (absorb)", async () => {
+    const onChange = vi.fn();
+    renderWithView({ onChange });
+    const menu = await openMenu();
+    await fireEvent.click((await within(menu).findByText("Villains")).closest("button")!);
+    await tick();
+    const [detail] = onChange.mock.calls[0];
+    expect(detail.value).toHaveLength(1);
+    expect(detail.value[0]).toMatchObject({ id: "view:v1", kind: "view" });
+    expect(detail.value[0].selector).toEqual(villainsView.spec);
+  });
+
+  it("drilling in and checking a member stores that explicit member ref", async () => {
+    const onChange = vi.fn();
+    renderWithView({ onChange });
+    const menu = await openMenu();
+    await within(menu).findByText("Villains");
+    await fireEvent.click(within(menu).getByText("Vex").closest("button")!);
+    await tick();
+    const [detail] = onChange.mock.calls[0];
+    expect(detail.value).toEqual([expect.objectContaining({ id: "lore_a", kind: "lore" })]);
   });
 });
 

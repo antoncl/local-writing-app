@@ -778,14 +778,16 @@ class PreviewEndpointTests(unittest.TestCase):
         system_block = next(b for b in body["cache_blocks"] if b["label"] == "system")
         self.assertEqual(system_block["entry_ids"], [])
 
-    def test_static_scan_artifact_excluded_from_preview_lore_tiers(self) -> None:
-        # #1477: a lore entry mentioned only in the scene's own prose (the static
-        # `_implicit_lore_ids` textual scan, `journal=None`) never reaches the SEND
-        # path — a real send always threads a journal (turn 1 = the persisted
-        # empty journal + this-turn detections, `chat.py:254-263`), which takes
-        # the journal branch, not the prose scan. `_preview_lore_tiers` now passes
-        # `[]`, not `None`, so the preview matches: the prose-only mention drops,
-        # while an `always`-policy entry (unioned in regardless of mode) survives.
+    def test_preview_tiers_mirror_the_sends_turn1_detection(self) -> None:
+        # #1477 (S2 review-corrected): the preview's tiers must match what the
+        # FIRST send would select. A real send runs `expand_context` over the
+        # last user message + the rendered system prompt + the scene's own
+        # prose (ADR-0075 slice 3/3b) and threads the detections in as the
+        # journal — so a scene-prose-mentioned entry IS attached by the very
+        # first send. `_preview_lore_tiers` mirrors that same detector with an
+        # empty composer (the one surface that can't exist yet), never the
+        # legacy `journal=None` static-scan branch no send runs. Both the
+        # prose-mentioned entry and an `always`-policy entry must appear.
         nimitz = self.service.create_lore_entry(
             CreateLoreEntryRequest(title="Nimitz", entry_type="lore:character")
         )
@@ -833,11 +835,15 @@ class PreviewEndpointTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
-        lore_text = "".join(
-            b["text"] for b in body["cache_blocks"] if "lore" in b["label"]
-        )
-        self.assertNotIn("Nimitz", lore_text)
+        lore_blocks = [b for b in body["cache_blocks"] if "lore" in b["label"]]
+        lore_text = "".join(b["text"] for b in lore_blocks)
+        self.assertIn("Nimitz", lore_text)
         self.assertIn("Pavel Young", lore_text)
+        # And the drill-down ids agree with the text (the door's count/list
+        # must be the truth of the payload).
+        all_ids = [i for b in lore_blocks for i in b["entry_ids"]]
+        self.assertIn(nimitz.id, all_ids)
+        self.assertIn(pavel.id, all_ids)
 
     def test_marked_target_in_context_pick_overrides_target_scene_id(self) -> None:
         # NC-style ★ target: a scene flagged target=true in a context_pick

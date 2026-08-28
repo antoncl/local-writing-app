@@ -579,9 +579,7 @@ def build_preview(
             rendered.send_lore_volatile,
             rendered.send_lore_stable_ids,
             rendered.send_lore_volatile_ids,
-        ) = _preview_lore_tiers(
-            project_service, scene, rendered.used_node_ids, rendered.used_node_hints
-        )
+        ) = _preview_lore_tiers(project_service, scene, rendered)
 
     return rendered, session_id
 
@@ -589,8 +587,7 @@ def build_preview(
 def _preview_lore_tiers(
     project_service,
     scene: Any,
-    used_node_ids: list[str],
-    used_node_hints: dict[str, str],
+    rendered: RenderedTemplate,
 ) -> tuple[str, str, list[str], list[str]]:
     """The send-path lore the model will receive, split into (stable, volatile) XML
     plus their member id lists, for the cache-aware preview (ADR-0060 §6) and the
@@ -600,14 +597,19 @@ def _preview_lore_tiers(
     "stable")` stable) — and never commits, so it cannot touch a live chat's cache
     baseline. Both tiers resolve as-of `scene`, like the send path.
 
-    `journal=[]`, not `None` (#1477): `None` selects `_implicit_lore_ids`'s
-    static-scan branch (prose scan + textual one-hop, `lore_selection.py:112-159`),
-    which the SEND path never runs — the preview showed lore the send wouldn't
-    include. `[]` takes the send branch instead (the chat-journal branch, empty
-    journal = the turn-1 floor: always-included + direct refs + one structural
-    hop), matching what a real send would select. A locked chat's own persisted
-    journal is rendered separately, by the Context door's journal section
-    (frontend-side) — this function never sees it."""
+    The journal fed to selection is the send path's own turn-1 detection
+    (#1477, corrected in S2 review): a real send runs `expand_context` over the
+    last user message + the rendered system prompt + the scene's own prose
+    (ADR-0075 slice 3/3b) and threads the detections in as the journal. The
+    preview mirrors that call with an EMPTY composer — the one surface that
+    cannot exist yet — so its tiers match the first send exactly up to whatever
+    the next user message additionally mentions. (`journal=None` is never
+    passed: that selects `_implicit_lore_ids`'s legacy static-scan branch,
+    which no send runs — the original #1477 artifact.) A locked chat's
+    composer-accrued journal entries are rendered by the Context door's own
+    journal section, frontend-side."""
+    from app.services.ai.context_expander import expand_context
+    from app.services.ai.helpers import _safe_read_node
     from app.services.ai.lore_block import _format_lore_block
     from app.services.ai.lore_selection import (
         _relevant_lore_ids,
@@ -615,14 +617,32 @@ def _preview_lore_tiers(
     )
     from app.services.ai.sessions import AISession
 
+    rendered_system_text = "\n\n".join(
+        m.text for m in rendered.messages if m.role == "system" and m.text.strip()
+    )
+    preview_journal = expand_context(
+        project_service,
+        "",  # no composer text exists at preview time
+        existing_journal=[],
+        explicit_picks=[],
+        source="user_message",
+        turn=0,
+        scene=scene,
+        rendered_text=rendered_system_text,
+    )
     ids = _relevant_lore_ids(
-        project_service, scene, "implicit", [], list(used_node_ids or [])
+        project_service, scene, "implicit", preview_journal, list(rendered.used_node_ids or [])
     )
     if not ids:
         return "", "", [], []
     stable_ids, volatile_ids = _tier_lore_ids(
-        project_service, ids, AISession(id="preview"), dict(used_node_hints or {})
+        project_service, ids, AISession(id="preview"), dict(rendered.used_node_hints or {})
     )
+    # The drill-down must list exactly what the block text carries:
+    # `_format_lore_block` silently skips ids whose node can't be read, so
+    # filter the id lists through the same readability check first.
+    stable_ids = [i for i in stable_ids if _safe_read_node(project_service, i) is not None]
+    volatile_ids = [i for i in volatile_ids if _safe_read_node(project_service, i) is not None]
     index = project_service.build_mutations_index() if scene is not None else None
     stable_xml = _format_lore_block(project_service, stable_ids, scene, index=index)
     volatile_xml = _format_lore_block(project_service, volatile_ids, scene, index=index)

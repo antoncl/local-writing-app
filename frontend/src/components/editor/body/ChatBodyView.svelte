@@ -74,6 +74,7 @@
     ttlChipsFor,
   } from "@/components/editor/body/chat/chatInputs";
   import { findNodeBySceneId } from "@/lib/utils/treeHelpers";
+  import { structureNodeTitle } from "@/lib/utils/nodeTitle";
 
   
   interface Props {
@@ -230,7 +231,7 @@
     },
     setError: (message) => (chatError = message),
     setNotice: (message) => (chatNotice = message),
-    entryTitle: (entryId) => loreEntries.find((entry) => entry.id === entryId)?.title ?? null,
+    entryTitle: (entryId) => loreTitle(entryId),
     // The set this chat already owns, read at stage time so a re-stage refines it
     // in place (singular edge, §4) instead of minting an orphan.
     getStagedSetId: () => chatStagedSet,
@@ -463,6 +464,10 @@
         provider: m.provider ?? null,
         model: m.model ?? null,
         latency_ms: m.latency_ms ?? null,
+        // S2: the per-turn journal chips must survive a reload — they are the
+        // transcript's ambient auto-context signal now that the journal strip
+        // is gone (the door carries the roster; the chips carry the moments).
+        journal_added: m.journal_added ?? [],
       })),
       // Persist the per-input drafts so a chat round-trips its inputs across a
       // reload (#654) — previously hardcoded `{}`, which the first post-send
@@ -598,8 +603,8 @@
 
   async function sendChat() {
     if (chatRunning || commit.committing) return;
-    if (missingRequiredInputs.length > 0) {
-      chatError = `Missing required: ${missingRequiredInputs.map((i) => i.label || i.name).join(", ")}.`;
+    if (sendBlockingInputs.length > 0) {
+      chatError = `Missing required: ${sendBlockingInputs.map((i) => i.label || i.name).join(", ")}.`;
       return;
     }
     const text = chatInput.trim();
@@ -749,6 +754,11 @@
   });
 
   async function fetchChatEstimate(): Promise<void> {
+    // Invalidate any in-flight fetch FIRST — including on the early returns.
+    // Bumping after them let a previous chat's response land after a switch to
+    // a promptless chat (same token, isLocked false) and write that chat's
+    // lore gate onto this one (S2 review).
+    const ourToken = ++chatEstimateToken;
     if (!chatPromptEntryId) {
       chatEstimate = null;
       chatPreviewMessages = null;
@@ -762,7 +772,6 @@
       chatPreviewCacheBlocks = [];
       return;
     }
-    const ourToken = ++chatEstimateToken;
     const inputs: Record<string, unknown> = {};
     for (const declared of effectivePromptInputs(entry)) {
       const raw = chatInputDrafts[declared.name] ?? "";
@@ -796,19 +805,25 @@
       // preview popover needs it to show the attached lore.
       chatPreviewCacheBlocks = preview.cache_blocks ?? [];
       // ADR-0076 S2: pre-lock, this fetch is the only place the lore gate is
-      // known — mirror the lock render's capture (~L737) so the Context door's
-      // "lore-enabled" annotation is live while the writer is still filling
-      // inputs. Once locked, the lock render owns it (untouched here).
-      if (!isLocked) chatLoreEnabled = preview.lore_enabled ?? false;
+      // known — mirror the lock render's capture (renderAndLockPromptTemplate)
+      // so the Context door's "lore-enabled" annotation is live while the
+      // writer is still filling inputs. Once the lock render has captured the
+      // authoritative value it owns the field — guard on the SAME signals the
+      // lock sets (system prompt) plus the in-flight send, not just isLocked:
+      // during the first send's persist await the history is still empty, so a
+      // stale estimate resolving in that window would clobber the lock's
+      // capture and persist a wrong gate (S2 review).
+      if (!isLocked && !chatRunning && !chatSystemPrompt) {
+        chatLoreEnabled = preview.lore_enabled ?? false;
+      }
       chatEstimate = {
         tokens: preview.estimated_tokens ?? 0,
         cost_usd: preview.estimated_cost_usd ?? null,
         caching_style: preview.caching_style ?? null,
-        cache_blocks: (preview.cache_blocks ?? []).map((b) => ({
-          label: b.label,
-          tokens: b.tokens,
-          tier: b.tier,
-        })),
+        // The chat's meta line reads only tokens/cost/caching_style; the door
+        // reads the FULL blocks via chatPreviewCacheBlocks above. Nothing chat-
+        // side consumes this field (it exists for InputsDialog's shared type).
+        cache_blocks: [],
       };
     } catch {
       // Non-render failure — same UX.
@@ -850,11 +865,6 @@
       (entry) => !promptDeclaresCommit(promptDiscoveryCtx, entry),
     ),
   );
-  // Suppress unused-prop warnings for props Phase 4c+ wires in (preview
-  // popover, inputs strip, future journal-scope rendering).
-  $effect.pre(() => {
-    void loreEntries;
-  });
   $effect.pre(() => {
     void maybeLoadChat(scene?.id ?? null);
   });
@@ -901,15 +911,26 @@
   let strippedInputs = $derived(
     commit.isCreateBrainstorm ? declaredInputs.filter((i) => i.name !== "entry") : declaredInputs,
   );
+  // The one lore-title lookup — shared by titleFor and the commit
+  // controller's entryTitle (whose null result is a KIND discriminator for
+  // its "the scene"/"the entry" phrasing, so it stays lore-only).
+  function loreTitle(id: string): string | null {
+    return loreEntries.find((entry) => entry.id === id)?.title ?? null;
+  }
   // ADR-0076 S2: id → title, for the Context door's drill-down (tier member
   // titles) and its locked-inputs section. Lore covers the common ref target;
-  // a scene ref resolves through the manuscript structure (its front-matter
-  // `id` IS the structure node's `scene_id`, not the node id — #201).
+  // plot cards come from the app-wide store; a scene ref resolves through the
+  // manuscript structure (its front-matter `id` IS the structure node's
+  // `scene_id`, not the node id — #201) via the one display-title resolver
+  // (`structureNodeTitle` honors a schema `display_template`, like every
+  // other surface that labels a manuscript node).
   function titleFor(id: string): string | null {
-    const lore = loreEntries.find((entry) => entry.id === id)?.title;
+    const lore = loreTitle(id);
     if (lore) return lore;
+    const card = $cardEntriesStore.find((c) => c.id === id)?.title;
+    if (card) return card;
     const sceneNode = structure ? findNodeBySceneId(structure.root, id) : null;
-    return sceneNode?.title ?? null;
+    return sceneNode ? structureNodeTitle(sceneNode, metadataSchema) : null;
   }
   // ADR-0076 S2: the Context door's "Inputs (locked)" section — filled draft
   // values as titled text, read-only. Only meaningful once locked (pre-lock the
@@ -923,6 +944,11 @@
   let missingRequiredInputs = $derived(declaredInputs.filter(
     (i) => i.required && !i.hidden && isInputMissing(i, chatInputDrafts[i.name]),
   ));
+  // Required inputs gate Send only PRE-lock — the first send is what renders
+  // the template from them. Post-lock the system prompt is frozen, so a
+  // later drift (a prompt edited to add a required input) must not brick a
+  // locked chat whose inputs form is no longer mounted (S2 review).
+  let sendBlockingInputs = $derived(isLocked ? [] : missingRequiredInputs);
   let ttlChips = $derived(ttlChipsFor(activeChatCacheWriteTimes, ttlTick));
   // The session-cost line's number (ADR-0076 decision 6): the persisted
   // projection plus the not-yet-persisted delta. A stream `done` sets
@@ -1084,10 +1110,10 @@
         class="primary"
         disabled={chatRunning
           || commit.committing
-          || missingRequiredInputs.length > 0
+          || sendBlockingInputs.length > 0
           || (!chatInput.trim() && !(activePromptEntry && chatHistory.length === 0 && promptEndsInUserTurn))}
-        title={missingRequiredInputs.length > 0
-          ? `Fill required input${missingRequiredInputs.length > 1 ? "s" : ""}: ${missingRequiredInputs.map((i) => i.label || i.name).join(", ")}`
+        title={sendBlockingInputs.length > 0
+          ? `Fill required input${sendBlockingInputs.length > 1 ? "s" : ""}: ${sendBlockingInputs.map((i) => i.label || i.name).join(", ")}`
           : (!chatInput.trim() && activePromptEntry && chatHistory.length === 0 && promptEndsInUserTurn)
             ? "Send the prompt as-is — it ends with a user turn"
             : ""}

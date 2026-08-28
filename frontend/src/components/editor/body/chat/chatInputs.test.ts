@@ -196,7 +196,7 @@ describe("displayInputValues (ADR-0076 S2 — Context door's locked-inputs secti
   it("skips hidden inputs", () => {
     const inputs = [input("text", { name: "secret", hidden: true }), input("text", { name: "visible" })];
     const drafts = { secret: "shh", visible: "shown" };
-    expect(displayInputValues(inputs, drafts, lookup)).toEqual([{ label: "visible", value: "shown" }]);
+    expect(displayInputValues(inputs, drafts, lookup)).toEqual([{ name: "visible", label: "visible", value: "shown" }]);
   });
 
   it("skips empty/whitespace-only drafts", () => {
@@ -213,17 +213,37 @@ describe("displayInputValues (ADR-0076 S2 — Context door's locked-inputs secti
       { id: "lore_unknown", kind: "lore", title: "" },
     ]);
     expect(displayInputValues(inputs, { picks: draft }, lookup)).toEqual([
-      { label: "picks", value: "Own Title · Known Lore · lore_unknown" },
+      { name: "picks", label: "picks", value: "Own Title · Known Lore · lore_unknown" },
+    ]);
+  });
+
+  it("context_pick: a legacy bare-id draft falls back to the raw id, titled when known (S2 review)", () => {
+    // The #1094/#1482 live shape: a revise brainstorm's `entry` seeded as a
+    // bare id. decodePickerValue yields [] — the row must not vanish.
+    const inputs = [input("context_pick", { name: "entry" })];
+    expect(displayInputValues(inputs, { entry: "lore_known" }, lookup)).toEqual([
+      { name: "entry", label: "entry", value: "Known Lore" },
+    ]);
+    expect(displayInputValues(inputs, { entry: "lore_gone" }, lookup)).toEqual([
+      { name: "entry", label: "entry", value: "lore_gone" },
     ]);
   });
 
   it("entity_ref_list: joins titleFor(id) ?? id, and tolerates non-JSON", () => {
     const inputs = [input("entity_ref_list", { name: "refs" })];
     expect(displayInputValues(inputs, { refs: JSON.stringify(["lore_known", "lore_x"]) }, lookup)).toEqual([
-      { label: "refs", value: "Known Lore · lore_x" },
+      { name: "refs", label: "refs", value: "Known Lore · lore_x" },
     ]);
-    expect(displayInputValues(inputs, { refs: "not json" }, lookup)).toEqual([
-      { label: "refs", value: "not json" },
+    // A non-JSON list draft coerces via the shared comma-split, not verbatim.
+    expect(displayInputValues(inputs, { refs: "lore_known, lore_x" }, lookup)).toEqual([
+      { name: "refs", label: "refs", value: "Known Lore · lore_x" },
+    ]);
+  });
+
+  it("list-shaped types (tags/multi_select) never leak the JSON wire form (S2 review)", () => {
+    const inputs = [input("tags", { name: "senses" })];
+    expect(displayInputValues(inputs, { senses: '["sight","sound"]' }, lookup)).toEqual([
+      { name: "senses", label: "senses", value: "sight · sound" },
     ]);
   });
 
@@ -231,8 +251,8 @@ describe("displayInputValues (ADR-0076 S2 — Context door's locked-inputs secti
     const inputs = [input("entity_ref", { name: "ref" }), input("scene_ref", { name: "scene" })];
     const drafts = { ref: "lore_known", scene: "scene_unknown" };
     expect(displayInputValues(inputs, drafts, lookup)).toEqual([
-      { label: "ref", value: "Known Lore" },
-      { label: "scene", value: "scene_unknown" },
+      { name: "ref", label: "ref", value: "Known Lore" },
+      { name: "scene", label: "scene", value: "scene_unknown" },
     ]);
   });
 
@@ -240,8 +260,8 @@ describe("displayInputValues (ADR-0076 S2 — Context door's locked-inputs secti
     const inputs = [input("text", { name: "note" }), input("boolean", { name: "flag" })];
     const drafts = { note: "hello", flag: "true" };
     expect(displayInputValues(inputs, drafts, lookup)).toEqual([
-      { label: "note", value: "hello" },
-      { label: "flag", value: "true" },
+      { name: "note", label: "note", value: "hello" },
+      { name: "flag", label: "flag", value: "true" },
     ]);
   });
 
@@ -249,8 +269,8 @@ describe("displayInputValues (ADR-0076 S2 — Context door's locked-inputs secti
     const inputs = [input("text", { name: "x", label: "Focus" }), input("text", { name: "y" })];
     const drafts = { x: "a", y: "b" };
     expect(displayInputValues(inputs, drafts, lookup)).toEqual([
-      { label: "Focus", value: "a" },
-      { label: "y", value: "b" },
+      { name: "x", label: "Focus", value: "a" },
+      { name: "y", label: "y", value: "b" },
     ]);
   });
 });

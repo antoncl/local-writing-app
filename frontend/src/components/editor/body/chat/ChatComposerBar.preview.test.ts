@@ -29,7 +29,7 @@ const baseProps = {
   previewCacheBlocks: [] as PreviewCacheBlock[],
   loreEnabled: false,
   journal: [] as ChatSessionJournalEntry[],
-  lockedInputDisplays: [] as { label: string; value: string }[],
+  lockedInputDisplays: [] as { name: string; label: string; value: string }[],
   titleFor: (_id: string) => null as string | null,
   onPickPrompt: () => {},
   onPickAssistant: () => {},
@@ -88,7 +88,7 @@ describe("ChatComposerBar Context door", () => {
   it("renders the locked-inputs display pairs", async () => {
     render(ChatComposerBar, {
       ...baseProps,
-      lockedInputDisplays: [{ label: "Focus", value: "upload-ethics thread" }],
+      lockedInputDisplays: [{ name: "focus", label: "Focus", value: "upload-ethics thread" }],
     });
     await openPreview();
     expect(screen.getByText("Inputs (locked)")).toBeInTheDocument();

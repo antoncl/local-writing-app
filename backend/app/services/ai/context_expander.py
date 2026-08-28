@@ -59,9 +59,9 @@ def expand_context(
     resolution scene's own prose — all in ONE pass — expand depth-1, return
     NEW journal entries.
 
-    `source` labels how the composer-text direct matches were discovered
-    (the user's typed message vs the rendered prompt output). Direct matches
-    from `rendered_text` (ADR-0075 slice 3b — the locked system prompt's
+    `source` labels the `text` (composer) direct matches — normally
+    "user_message". Direct matches from `rendered_text` (ADR-0075 slice 3b —
+    the locked system prompt's
     rendered output, e.g. inline `{{ entry('x').name }}` expansions not
     otherwise visible to the composer/scene surfaces) always get
     source="rendered_prompt". Direct matches from the scene's own

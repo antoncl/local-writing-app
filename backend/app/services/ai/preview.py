@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date as _date_cls
 from typing import TYPE_CHECKING, Any, NoReturn
@@ -157,12 +158,23 @@ def _expand_selector_picks(
     is included without re-picking."""
     if not any(_is_selector_pick(item) for item in items):
         return items
+    # The preview re-renders on a debounce, so build each kind's roster (and read
+    # the schema) at most once per expansion — several tag picks over the same
+    # kind must not re-list all lore per pick.
+    schema = project_service.read_metadata_schema()
+    roster_cache: dict[Any, list[SelectorNode] | None] = {}
+
+    def roster_for(kind: Any) -> list[SelectorNode] | None:
+        if kind not in roster_cache:
+            roster_cache[kind] = _selector_roster(project_service, kind)
+        return roster_cache[kind]
+
     out: list[dict[str, Any]] = []
     for item in items:
         if not _is_selector_pick(item):
             out.append(item)
             continue
-        out.extend(_selector_member_picks(project_service, item))
+        out.extend(_selector_member_picks(project_service, item, schema, roster_for))
     return out
 
 
@@ -170,10 +182,15 @@ def _is_selector_pick(item: Any) -> bool:
     return isinstance(item, dict) and isinstance(item.get("selector"), dict)
 
 
-def _selector_member_picks(project_service, item: dict[str, Any]) -> list[dict[str, Any]]:
+def _selector_member_picks(
+    project_service,
+    item: dict[str, Any],
+    schema: Any,
+    roster_for: Callable[[Any], list[SelectorNode] | None],
+) -> list[dict[str, Any]]:
     selector = item["selector"]
     kind = selector.get("kind")
-    nodes = _selector_roster(project_service, kind)
+    nodes = roster_for(kind)
     if nodes is None:
         logger.warning(
             "context selector pick %r: unsupported roster kind %r; contributes no members",
@@ -181,7 +198,6 @@ def _selector_member_picks(project_service, item: dict[str, Any]) -> list[dict[s
             kind,
         )
         return []
-    schema = project_service.read_metadata_schema()
 
     def is_descendant(entry_type: str, target: str) -> bool:
         return project_service._entry_type_matches(entry_type, target, schema)

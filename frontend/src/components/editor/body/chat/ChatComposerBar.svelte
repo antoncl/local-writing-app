@@ -10,7 +10,12 @@
   import { onMount, tick } from "svelte";
   import { assistantTitle, partitionAssistants } from "@/lib/chat/assistantScope";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
-  import type { AssistantEntrySummary, PreviewMessage, PromptEntrySummary } from "@/lib/types";
+  import type {
+    AssistantEntrySummary,
+    PreviewCacheBlock,
+    PreviewMessage,
+    PromptEntrySummary,
+  } from "@/lib/types";
 
   interface Props {
     // A chat with messages locks its prompt + assistant (they repeat every turn).
@@ -30,6 +35,12 @@
     // Post-send: the locked system message. Pre-send: the assembled preview.
     chatSystemPrompt: string;
     chatPreviewMessages: PreviewMessage[] | null;
+    // The send-path cache blocks (system prompt + attached lore tiers) with their
+    // text — what the model ACTUALLY receives next turn. The `use_lore()` gate
+    // emits nothing into the template, so the lore lives only here, not in
+    // `chatSystemPrompt`/`chatPreviewMessages`; the preview must render it or it
+    // looks empty (#1546 follow-up).
+    previewCacheBlocks: PreviewCacheBlock[];
     onPickPrompt: (entry: PromptEntrySummary) => void;
     onPickAssistant: (id: string) => void;
   }
@@ -45,9 +56,15 @@
     scopedDefaultId,
     chatSystemPrompt,
     chatPreviewMessages,
+    previewCacheBlocks,
     onPickPrompt,
     onPickAssistant,
   }: Props = $props();
+
+  // Cache blocks that carry text — the readable system + lore the model sees.
+  const previewBlocksWithText = $derived(
+    (previewCacheBlocks ?? []).filter((b) => b.text && b.text.trim()),
+  );
 
   // ---- prompt-picker UI state (composer chip → dropdown) ----
   let promptPickerOpen = $state(false);
@@ -295,7 +312,19 @@
           >×</button>
         </header>
         <div class="cbv-preview-popover-body">
-          {#if chatSystemPrompt && chatSystemPrompt.trim()}
+          {#if previewBlocksWithText.length > 0}
+            <!-- The real send-path context: the system block(s) AND the attached
+                 lore tiers, each labelled. Without this the lore (which lives only
+                 in a cache block, never the rendered template) is invisible. -->
+            {#each previewBlocksWithText as block}
+              <div class="cbv-preview-message">
+                <header class="cbv-preview-msg-role">
+                  {block.label}{block.tier ? ` · ${block.tier}` : ""}
+                </header>
+                <pre class="cbv-preview-content">{block.text}</pre>
+              </div>
+            {/each}
+          {:else if chatSystemPrompt && chatSystemPrompt.trim()}
             <pre class="cbv-preview-content">{chatSystemPrompt}</pre>
           {:else if chatPreviewMessages && chatPreviewMessages.length > 0}
             {#each chatPreviewMessages as message}

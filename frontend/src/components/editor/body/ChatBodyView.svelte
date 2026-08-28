@@ -46,6 +46,7 @@
     ChatSessionMessage,
     EditableDocument,
     LoreEntrySummary,
+    PreviewCacheBlock,
     PreviewMessage,
     PromptEntrySummary,
     SaveChatSessionRequest,
@@ -180,6 +181,10 @@
   // any templated initial turns). Null when no prompt is bound (freeform: no
   // system message) or the template hasn't rendered yet (unfilled inputs).
   let chatPreviewMessages: PreviewMessage[] | null = $state(null);
+  // The send-path cache blocks (system + attached lore tiers) WITH text — what
+  // the model actually receives. The preview popover renders these so the lore
+  // is visible; it lives only in a cache block, never the rendered template.
+  let chatPreviewCacheBlocks: PreviewCacheBlock[] = $state([]);
 
   // ---- declared-inputs state (filled before first send for prompt-bound chats) ----
   // Per-input draft values keyed by input.name. JSON-encoded for list-shaped
@@ -310,6 +315,7 @@
     chatRewound = false;
     chatSystemPrompt = "";
     chatPreviewMessages = null;
+    chatPreviewCacheBlocks = [];
     chatPromptEntryId = "";
     chatAssistantId = "";
     chatSubject = "";
@@ -754,12 +760,14 @@
     if (!chatPromptEntryId) {
       chatEstimate = null;
       chatPreviewMessages = null;
+      chatPreviewCacheBlocks = [];
       return;
     }
     const entry = promptEntries.find((p) => p.id === chatPromptEntryId);
     if (!entry) {
       chatEstimate = null;
       chatPreviewMessages = null;
+      chatPreviewCacheBlocks = [];
       return;
     }
     const ourToken = ++chatEstimateToken;
@@ -788,9 +796,13 @@
       if (preview.error) {
         chatEstimate = null;
         chatPreviewMessages = null;
+        chatPreviewCacheBlocks = [];
         return;
       }
       chatPreviewMessages = preview.messages ?? null;
+      // Keep the block TEXT (the estimate strip strips it to label/tokens); the
+      // preview popover needs it to show the attached lore.
+      chatPreviewCacheBlocks = preview.cache_blocks ?? [];
       chatEstimate = {
         tokens: preview.estimated_tokens ?? 0,
         cost_usd: preview.estimated_cost_usd ?? null,
@@ -933,6 +945,7 @@
       {scopedDefaultId}
       {chatSystemPrompt}
       {chatPreviewMessages}
+      previewCacheBlocks={chatPreviewCacheBlocks}
       onPickPrompt={(entry) => void pickPromptForChat(entry)}
       onPickAssistant={(id) => void pickAssistantForChat(id)}
     />

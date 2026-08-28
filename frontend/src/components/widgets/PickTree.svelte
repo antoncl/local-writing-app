@@ -3,11 +3,22 @@
   // rows of a single drilled-in axis (Manuscript / Plot / Lore / By tag / Saved
   // views), or one axis's slice of the cross-axis search results. Renders through
   // the app's NodeRow/NodeList substrate (ADR-0066/0068) — every row is a NodeRow
-  // with the kind stripe, one caret for containers, and the tri-state PickCheck in
-  // the leading slot. Purely presentational: the caller normalizes rows and binds
-  // each row's toggle/collapse. The visible panel label lives in the popover head
-  // (drill-in), so this is a bare `role="group"` wrapper — no section header.
+  // with the kind stripe and the tri-state PickCheck in the leading slot.
+  //
+  // Row anatomy (#1520): the collapse caret is a sibling to the LEFT of NodeRow,
+  // and the per-row wrapper carries the depth indent — so NodeRow's kind-stripe
+  // starts after the caret column and hugs the checkbox (the mockup's `.t-row`
+  // treatment), rather than floating orphaned at the panel's far-left edge.
+  //
+  // Three row shapes: a pickable container (act/chapter/tag/view/plotline — caret
+  // + check), a group header (a Lore entry-type — caret + serif title, NO check,
+  // clicking it collapses), and a leaf (scene/member/entry — check, no caret).
+  // Purely presentational: the caller normalizes rows and binds toggle/collapse.
   export type PickTreeState = "on" | "implied" | "indeterminate" | "off";
+
+  // One indent step. Matches the 22px caret column so a child's checkbox sits
+  // exactly one caret-width right of its parent's.
+  const INDENT_STEP = 22;
 
   export interface PickTreeRow {
     /** Stable key for the keyed {#each}. */
@@ -15,8 +26,14 @@
     depth: number;
     hasChildren: boolean;
     collapsed: boolean;
-    /** A container (view/tag/plotline/act/chapter) vs a leaf (scene/member/entry). */
+    /** A container (view/tag/plotline/act/chapter/lore-type) vs a leaf. */
     isContainer: boolean;
+    /** Whether the row carries a tri-state pick control. A Lore entry-type header
+     * is a pure collapsible section (no check) — set false. Defaults to true. */
+    pickable?: boolean;
+    /** Whether the row shows a collapse caret. Defaults to `hasChildren`; set
+     * false for a container that stays open (the manuscript root). */
+    collapsible?: boolean;
     state: PickTreeState;
     title: string;
     /** The kind-colour hex for the row's curved stripe (ADR-0066), or null. */
@@ -53,51 +70,64 @@
     ariaLabel: string;
   }
   const { rows, ariaLabel }: Props = $props();
+
+  // A pickable row carries the tri-state check + aria-pressed; a header does not.
+  const isPickable = (row: PickTreeRow) => row.pickable !== false;
+  // Show a caret only for a collapsible container; leaves and the always-open
+  // root get a same-width spacer so every checkbox lines up in one column.
+  const showsCaret = (row: PickTreeRow) => row.hasChildren && row.collapsible !== false;
+  // A group header (a container with no check) collapses on a title click; a
+  // pickable row toggles its pick.
+  const titleAction = (row: PickTreeRow) => (isPickable(row) ? row.onToggle : row.onCollapse);
 </script>
 
 <div class="ctx-mtree" role="group" aria-label={ariaLabel}>
   <NodeList mode="tree" density="compact">
     {#each rows as row (row.key)}
-      <NodeRow
-        title={row.title}
-        depth={row.depth}
-        stripeColor={row.stripeColor ?? null}
-        selected={rowSelected(row.state)}
-        onClick={row.onToggle}
-      >
-        {#snippet leading()}
-          {#if row.hasChildren}
-            <button
-              type="button"
-              class="ctx-row-caret"
-              aria-label={row.collapsed ? `Expand ${row.title}` : `Collapse ${row.title}`}
-              aria-expanded={!row.collapsed}
-              onclick={row.onCollapse}
-            ><GroupCaret collapsed={row.collapsed} /></button>
-          {:else}
-            <span class="ctx-row-caret ctx-row-caret-leaf" aria-hidden="true"></span>
-          {/if}
-          <!-- A mouse-convenience toggle over the checkbox itself — clicking the
-               box should pick, matching the mockup's whole-row target. The title
-               button (NodeRow's own, with aria-pressed) is the accessible control,
-               so this one is out of the tab order and hidden from AT to avoid a
-               duplicate. -->
+      <div class="ctx-tline" style="margin-left: {row.depth * INDENT_STEP}px">
+        {#if showsCaret(row)}
           <button
             type="button"
-            class="ctx-row-check"
-            tabindex="-1"
-            aria-hidden="true"
-            onclick={row.onToggle}
-          ><PickCheck state={row.state} /></button>
-        {/snippet}
-        {#snippet trailing()}
-          {#if row.count !== null}
-            <span class="ctx-row-count"
-              >{row.count} {row.count === 1 ? row.countNoun : (row.countNounPlural ?? `${row.countNoun}s`)}</span
-            >
-          {/if}
-        {/snippet}
-      </NodeRow>
+            class="ctx-row-caret"
+            aria-label={row.collapsed ? `Expand ${row.title}` : `Collapse ${row.title}`}
+            aria-expanded={!row.collapsed}
+            onclick={row.onCollapse}
+          ><GroupCaret collapsed={row.collapsed} /></button>
+        {:else}
+          <span class="ctx-row-caret ctx-row-caret-leaf" aria-hidden="true"></span>
+        {/if}
+        <NodeRow
+          title={row.title}
+          stripeColor={row.stripeColor ?? null}
+          selected={isPickable(row) ? rowSelected(row.state) : undefined}
+          groupHeader={row.isContainer && !isPickable(row)}
+          onClick={titleAction(row)}
+        >
+          {#snippet leading()}
+            {#if isPickable(row)}
+              <!-- A mouse-convenience toggle over the checkbox itself — clicking
+                   the box picks, matching the mockup's whole-row target. The title
+                   button (NodeRow's own, with aria-pressed) is the accessible
+                   control, so this one is out of the tab order and hidden from AT
+                   to avoid a duplicate. -->
+              <button
+                type="button"
+                class="ctx-row-check"
+                tabindex="-1"
+                aria-hidden="true"
+                onclick={row.onToggle}
+              ><PickCheck state={row.state} /></button>
+            {/if}
+          {/snippet}
+          {#snippet trailing()}
+            {#if row.count !== null}
+              <span class="ctx-row-count"
+                >{row.count} {row.count === 1 ? row.countNoun : (row.countNounPlural ?? `${row.countNoun}s`)}</span
+              >
+            {/if}
+          {/snippet}
+        </NodeRow>
+      </div>
     {/each}
   </NodeList>
 </div>
@@ -107,12 +137,27 @@
     display: flex;
     flex-direction: column;
   }
+  /* One tree line: the caret column, then NodeRow. The wrapper carries the depth
+     indent (margin-left) so NodeRow itself stays at depth 0 — its kind-stripe
+     then starts right after the caret column and hugs the checkbox (#1520),
+     instead of floating at the panel's far-left edge. */
+  .ctx-tline {
+    display: flex;
+    align-items: stretch;
+    min-width: 0;
+  }
+  /* NodeRow fills the rest of the line, right of the caret column. */
+  .ctx-tline > :global(.node-row) {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
   /* The per-row collapse caret — a bare tap target wrapping the shared GroupCaret
-     chevron, sized to line up the PickCheck column across rows (a leaf uses the
-     same-width spacer so its check aligns under a container's). */
+     chevron, sized to line up the PickCheck column across rows (a leaf / the open
+     root uses the same-width spacer so its check aligns under a container's). */
   .ctx-row-caret {
     flex: none;
     width: 22px;
+    align-self: center;
     height: 24px;
     display: inline-flex;
     align-items: center;

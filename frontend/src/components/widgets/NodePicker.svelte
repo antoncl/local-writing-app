@@ -54,6 +54,7 @@
     type SearchFields,
   } from "@/lib/utils/entrySearch";
   import {
+    collapsibleContainerIds,
     flattenManuscript,
     sceneCountForRef,
     togglePickAt,
@@ -270,10 +271,20 @@
   // scenes, materialized server-side (slice 4a). Collapse state is local, reset
   // when the widget re-mounts. A search flattens the tree to matching scenes in
   // context (the scene's title/tags via the shared matcher).
-  let collapsedManuscriptIds = $state<Set<string>>(new Set());
+  // Collapse-by-default (#1520): a container is collapsed unless the user has
+  // expanded it, so drilling into Manuscript opens on the act/chapter level
+  // instead of a wall of scenes. `collapsed = allContainers \ userExpanded`; the
+  // root is never collapsible (excluded here), so it stays open and its acts show.
+  let expandedManuscriptIds = $state<Set<string>>(new Set());
   function toggleManuscriptCollapse(id: string) {
-    collapsedManuscriptIds = toggleInSet(collapsedManuscriptIds, id);
+    expandedManuscriptIds = toggleInSet(expandedManuscriptIds, id);
   }
+  const manuscriptContainerIds = $derived(
+    structure ? collapsibleContainerIds(structure) : new Set<string>(),
+  );
+  const collapsedManuscriptIds = $derived(
+    new Set([...manuscriptContainerIds].filter((id) => !expandedManuscriptIds.has(id))),
+  );
   const manuscriptRows = $derived.by<ManuscriptRow[]>(() => {
     if (!structure || !allowedKinds.includes("manuscript")) return [];
     // The config's scene-subtype allowlist (#1461) — container FQNs stripped, as
@@ -439,18 +450,27 @@
     else next.add(id);
     return next;
   }
-  let collapsedViewIds = $state<Set<string>>(new Set());
-  let collapsedTagIds = $state<Set<string>>(new Set());
-  let collapsedPlotlineIds = $state<Set<string>>(new Set());
+  // Selector groups collapse by default too (#1520): the panel opens on the
+  // container level (a list of tags / views / plotlines), members hidden until
+  // expanded. `collapsed = allGroupIds \ userExpanded`.
+  function collapsedFrom(groups: SelectorGroup[], expanded: Set<string>): Set<string> {
+    return new Set(groups.map((g) => g.ref.id).filter((id) => !expanded.has(id)));
+  }
+  let expandedViewIds = $state<Set<string>>(new Set());
+  let expandedTagIds = $state<Set<string>>(new Set());
+  let expandedPlotlineIds = $state<Set<string>>(new Set());
   function toggleViewCollapse(id: string) {
-    collapsedViewIds = toggleInSet(collapsedViewIds, id);
+    expandedViewIds = toggleInSet(expandedViewIds, id);
   }
   function toggleTagCollapse(id: string) {
-    collapsedTagIds = toggleInSet(collapsedTagIds, id);
+    expandedTagIds = toggleInSet(expandedTagIds, id);
   }
   function togglePlotlineCollapse(id: string) {
-    collapsedPlotlineIds = toggleInSet(collapsedPlotlineIds, id);
+    expandedPlotlineIds = toggleInSet(expandedPlotlineIds, id);
   }
+  const collapsedViewIds = $derived(collapsedFrom(viewGroups, expandedViewIds));
+  const collapsedTagIds = $derived(collapsedFrom(tagGroups, expandedTagIds));
+  const collapsedPlotlineIds = $derived(collapsedFrom(plotlineGroups, expandedPlotlineIds));
 
   // Search + flatten, shared by both selector sections: a selector survives only
   // if its title matches (whole member set shows) or a member matches (just
@@ -501,6 +521,9 @@
       key: row.id,
       depth: row.depth,
       hasChildren: row.hasChildren,
+      // The root (depth 0) has no caret and always shows its acts; deeper
+      // containers collapse (#1520).
+      collapsible: row.depth > 0,
       collapsed: row.collapsed,
       isContainer: !row.isScene,
       state: row.state,
@@ -668,6 +691,67 @@
   // are dropped entirely.
   const excludeIdSet = $derived(new Set(excludeIds));
 
+  // Lore panel: grouped by entry type under collapsible section headers (#1520),
+  // matching the Lore pane and the mockup — not one flat list. A type header is a
+  // pure collapsible section (no tri-state check); its members are binary picks.
+  // Collapsed by default; a search expands every surviving group.
+  let expandedLoreTypeIds = $state<Set<string>>(new Set());
+  function toggleLoreTypeCollapse(id: string) {
+    expandedLoreTypeIds = toggleInSet(expandedLoreTypeIds, id);
+  }
+  const loreTreeRows = $derived.by<PickTreeRow[]>(() => {
+    // Gate on the author config exactly as the flat `visibleGroups` lore group
+    // does — loreGroups itself is ungated, so without this a view-/plot-only
+    // config that still passes loreEntries would sprout a phantom Lore axis.
+    if (!allowedKinds.includes("lore")) return [];
+    const searching = isSearchActive(search);
+    const rows: PickTreeRow[] = [];
+    for (const group of loreGroups) {
+      const collapsed = !searching && !expandedLoreTypeIds.has(group.typeId);
+      rows.push({
+        key: `lore-type:${group.typeId}`,
+        depth: 0,
+        hasChildren: group.entries.length > 0,
+        collapsed,
+        isContainer: true,
+        pickable: false, // an entry type is a section, not a selectable container
+        state: "off",
+        title: group.typeName,
+        stripeColor: null,
+        count: group.entries.length,
+        countNoun: "entry",
+        countNounPlural: "entries",
+        onToggle: () => {},
+        onCollapse: () => toggleLoreTypeCollapse(group.typeId),
+      });
+      if (collapsed) continue;
+      for (const entry of group.entries) {
+        if (excludeIdSet.has(entry.id)) continue;
+        const ref: NodePickerRef = {
+          id: entry.id,
+          kind: "lore",
+          title: entry.title,
+          entry_type: entry.entry_type,
+        };
+        rows.push({
+          key: `lore:${entry.id}`,
+          depth: 1,
+          hasChildren: false,
+          collapsed: false,
+          isContainer: false,
+          state: isPicked(ref) ? "on" : "off",
+          title: entry.title,
+          stripeColor: hexForRef(ref),
+          count: null,
+          countNoun: "",
+          onToggle: () => togglePick(ref),
+          onCollapse: () => {},
+        });
+      }
+    }
+    return rows;
+  });
+
   const visibleGroups = $derived.by(() => {
     type Group = { id: string; label: string; items: NodePickerRef[] };
     const groups: Group[] = [];
@@ -774,8 +858,8 @@
     const out: PickAxis[] = [];
     if (manuscriptTreeRows.length > 0)
       out.push({ id: "manuscript", label: "Manuscript", count: manuscriptRows[0]?.sceneCount ?? 0, rows: manuscriptTreeRows });
-    const lore = flat.get("lore");
-    if (lore) out.push({ id: "lore", label: "Lore", count: lore.items.length, rows: flatGroupToRows(lore.items) });
+    if (loreTreeRows.length > 0)
+      out.push({ id: "lore", label: "Lore", count: flat.get("lore")?.items.length ?? 0, rows: loreTreeRows });
     if (plotlineTreeRows.length > 0)
       out.push({ id: "plotlines", label: "Plot", count: plotlineGroups.length, rows: plotlineTreeRows });
     if (tagTreeRows.length > 0) out.push({ id: "tags", label: "By tag", count: tagGroups.length, rows: tagTreeRows });

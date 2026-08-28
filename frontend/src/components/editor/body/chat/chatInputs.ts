@@ -2,6 +2,7 @@
 // these operate purely on their arguments so they live outside the component
 // and are unit-testable in isolation.
 import { effectivePromptInputs } from "@/lib/editor-core/promptResolution";
+import { decodePickerValue } from "@/lib/utils/promptInputs";
 import type { NodePickerRef, PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
 
 // ---- cost-estimate + TTL strip state ----
@@ -82,7 +83,13 @@ export function decodeChatInputDrafts(
 }
 
 export function isInputMissing(input: PromptInputDefinition, raw: string | undefined): boolean {
-  if (input.type === "entity_ref_list" || input.type === "context_pick") {
+  if (input.type === "context_pick") {
+    // Through the shared codec (#1482) — decode tolerates the encoded string,
+    // a persisted typed seed, and garbage alike.
+    return decodePickerValue(raw).length === 0;
+  }
+  if (input.type === "entity_ref_list") {
+    // An id-list, not a ref-list — plain string[] on the wire.
     try {
       const parsed = JSON.parse(raw || "[]");
       return !Array.isArray(parsed) || parsed.length === 0;
@@ -93,25 +100,11 @@ export function isInputMissing(input: PromptInputDefinition, raw: string | undef
   return !raw?.trim();
 }
 
-export function coerceChatInputValue(raw: string, type: PromptInputDefinition["type"]): unknown {
-  const trimmed = raw.trim();
-  if (type === "number") {
-    if (trimmed === "") return null;
-    const parsed = Number(trimmed);
-    return Number.isFinite(parsed) ? parsed : trimmed;
-  }
-  if (type === "boolean") return trimmed.toLowerCase() === "true";
-  if (type === "entity_ref_list" || type === "context_pick") {
-    if (!trimmed) return type === "context_pick" ? [] : null;
-    try {
-      const parsed = JSON.parse(trimmed);
-      return Array.isArray(parsed) ? parsed : (type === "context_pick" ? [] : null);
-    } catch {
-      return type === "context_pick" ? [] : null;
-    }
-  }
-  return trimmed;
-}
+// coerceChatInputValue is GONE (#1482): it was a fork of promptInputs'
+// coerceInputValue that pre-decoded context_pick values to arrays — which the
+// backend's bind layer short-circuits on, silently skipping ADR-0074 S4
+// container expansion for chat. ChatBodyView now calls the one shared
+// coerceInputValue, so every surface ships the same wire shapes.
 
 // #1436: a rendered/loaded conversation is SELF-SUBMITTABLE — sendable with an
 // empty composer — iff its last turn is a `user` message. Then the model has a

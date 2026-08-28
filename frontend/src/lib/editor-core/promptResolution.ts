@@ -6,7 +6,7 @@
 // pure functions over a context snapshot rather than being duplicated or
 // passed around as a bag of closures.
 
-import { coerceInputValue } from "@/lib/utils/promptInputs";
+import { coerceInputValue, decodePickerValue, encodePickerValue } from "@/lib/utils/promptInputs";
 import {
   inlineDestinationFor,
   outputHandlerFor,
@@ -18,6 +18,7 @@ import type {
   LoreEntrySummary,
   MetadataSchema,
   NodePickerConfig,
+  NodePickerRef,
   PromptContextStrategy,
   PromptEntrySummary,
   PromptInputDefinition,
@@ -334,13 +335,13 @@ export function resolveContextPickToken(
 
   if (candidates.length !== 1) return null;
   const c = candidates[0];
-  const ref: { id: string; kind: string; title: string; entry_type?: string } = {
+  const ref: NodePickerRef = {
     id: c.id,
     kind: c.kind,
     title: c.title,
   };
   if (c.entry_type) ref.entry_type = c.entry_type;
-  return JSON.stringify([ref]);
+  return encodePickerValue([ref]);
 }
 
 export function resolvePromptPositionalArgs(
@@ -434,18 +435,24 @@ export function resolutionSceneIdFromInputs(
   return "";
 }
 
-// Pull the first lore id from a context_pick input value.
+// Pull the first lore id from a context_pick input value. Strict: only a
+// value that decodes to picked refs yields an id — a bare string is NOT
+// treated as an id here, so a misauthored `on_accept.from_input` pointing at
+// a text input can't stamp a mark keyed to arbitrary prose.
 export function characterIdFromInputValue(value: unknown): string | null {
-  if (typeof value !== "string") return null;
+  return decodePickerValue(value)[0]?.id ?? null;
+}
+
+// The entry id a chat's revise-target (`entry`) input draft names. Tolerant
+// where the mark-stamp reader above is strict, because chat seeds carry two
+// shapes (#1482): a context_pick launch stores an encoded ref list
+// (seedSubjectEntryInput), while a scalar-ref launch stores the bare id. An
+// encoded-but-empty list is "no target", not an id.
+export function entryIdFromPickValue(value: unknown): string {
+  const refs = decodePickerValue(value);
+  if (refs.length > 0) return refs[0].id;
+  if (typeof value !== "string") return "";
   const trimmed = value.trim();
-  if (!trimmed.startsWith("[")) return null;
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (!Array.isArray(parsed) || parsed.length === 0) return null;
-    const first = parsed[0];
-    if (first && typeof first === "object" && typeof first.id === "string") return first.id;
-    return null;
-  } catch {
-    return null;
-  }
+  if (!trimmed || trimmed.startsWith("[") || trimmed.startsWith("{")) return "";
+  return trimmed;
 }

@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   coerceInputValue,
+  decodePickerValue,
+  encodePickerValue,
   isListShapedInputType,
   promptInputTypeLabel,
   PROMPT_INPUT_TYPE_CHOICES,
@@ -60,5 +62,68 @@ describe("coerceInputValue — the new list-shaped types parse to real arrays", 
     expect(coerceInputValue("#ff0000", "color")).toBe("#ff0000");
     expect(isListShapedInputType("color")).toBe(false);
     expect(isListShapedInputType("multi_select")).toBe(true);
+  });
+});
+
+// #1482: the ONE NodePickerRef[] ⇄ wire-string codec. Everything that reads or
+// writes a context_pick value routes through these two.
+describe("context_pick value codec (#1482)", () => {
+  const REFS = [
+    { id: "act_1", kind: "manuscript", title: "Act I", entry_type: "manuscript:act" },
+    { id: "lore_a", kind: "lore", title: "Annie", entry_type: "lore:character" },
+  ];
+
+  it("round-trips: decode(encode(refs)) === refs", () => {
+    expect(decodePickerValue(encodePickerValue(REFS as never))).toEqual(REFS);
+  });
+
+  it("decodes an already-decoded array (persisted chat seeds) as-is", () => {
+    expect(decodePickerValue(REFS)).toEqual(REFS);
+  });
+
+  it("unreadable input decodes to [] — empty, garbage, non-array JSON", () => {
+    expect(decodePickerValue("")).toEqual([]);
+    expect(decodePickerValue("   ")).toEqual([]);
+    expect(decodePickerValue("not json")).toEqual([]);
+    expect(decodePickerValue('{"id":"a","kind":"lore"}')).toEqual([]);
+    expect(decodePickerValue(undefined)).toEqual([]);
+    expect(decodePickerValue(42)).toEqual([]);
+  });
+
+  it("drops items that are not ref-shaped (id + kind required)", () => {
+    expect(decodePickerValue('[{"id":"a"}, {"kind":"lore"}, "a", null, {"id":"b","kind":"lore"}]')).toEqual([
+      { id: "b", kind: "lore" },
+    ]);
+  });
+});
+
+describe("coerceInputValue — context_pick stays the encoded wire STRING (#1482)", () => {
+  // The regression this guards: chat's forked coercer pre-decoded picks to an
+  // array, and the backend's bind layer (preview.py::_coerce_input_value)
+  // short-circuits on non-strings — so a chat prompt picking an act/chapter
+  // silently skipped ADR-0074 S4 container expansion. The wire contract is the
+  // STRING; the backend parses it, expands containers, and wraps EntryRefs.
+  const ACT_PICK = '[{"id":"act_1","kind":"manuscript","title":"Act I","entry_type":"manuscript:act"}]';
+
+  it("a container pick ships as a string, byte-stable through coercion", () => {
+    const coerced = coerceInputValue(ACT_PICK, "context_pick");
+    expect(typeof coerced).toBe("string");
+    expect(coerced).toBe(ACT_PICK);
+  });
+
+  it("empty is a defined, EMPTY pick list — never #24-unset", () => {
+    // Create-mode brainstorms branch on `entry(inputs.entry)` being falsy
+    // (revise-entry.md); an unset pick reaching the template as an undefined
+    // name would kill them under StrictUndefined.
+    expect(coerceInputValue("", "context_pick")).toBe("[]");
+    expect(coerceInputValue("   ", "context_pick")).toBe("[]");
+    expect(coerceInputValue("[]", "context_pick")).toBe("[]");
+  });
+
+  it("normalizes stray shapes through the codec instead of shipping garbage", () => {
+    expect(coerceInputValue('[{"id":"a"},{"id":"b","kind":"lore"}]', "context_pick")).toBe(
+      '[{"id":"b","kind":"lore"}]',
+    );
+    expect(coerceInputValue("not json", "context_pick")).toBe("[]");
   });
 });

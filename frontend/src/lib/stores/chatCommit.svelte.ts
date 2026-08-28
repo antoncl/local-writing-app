@@ -32,6 +32,7 @@ import type {
   ReviewMode,
 } from "@/lib/types";
 import { api, HttpError } from "@/lib/api";
+import { entryIdFromPickValue } from "@/lib/editor-core/promptResolution";
 import { entryBrainstorm } from "@/lib/stores/entryBrainstorm.svelte";
 import { treeActions } from "@/lib/stores/treeActions.svelte";
 import {
@@ -160,8 +161,9 @@ export class ChatCommitController {
    *  launched — the target wins over a seeded `entry` (we create, never revise). */
   commitTarget = $derived((this.output?.commit?.target ?? "").trim());
   /** The revise target — the `entry` input the launch seeded (empty in create
-   *  mode). */
-  commitTargetEntryId = $derived((this.inputDrafts["entry"] ?? "").trim());
+   *  mode). The draft may be an encoded context_pick list or a legacy bare id;
+   *  read through the shared decoder, not as a raw string (#1482). */
+  commitTargetEntryId = $derived(entryIdFromPickValue(this.inputDrafts["entry"]));
   // ADR-0046 §6.4 / ADR-0063 S1: the entry_type a create-mode brainstorm drafts.
   // A declared `commit.target` wins; otherwise it's the launch's seeded
   // `entry_type` (create seeds `entry_type`, revise seeds `entry`).

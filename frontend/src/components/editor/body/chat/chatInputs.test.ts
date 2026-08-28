@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PromptEntrySummary, PromptInputDefinition } from "@/lib/types";
 import {
-  coerceChatInputValue,
   decodeChatInputDrafts,
   encodeChatInputDrafts,
   endsInUserTurn,
@@ -20,41 +19,9 @@ const promptWithEntry = (type: PromptInputDefinition["type"] | null): PromptEntr
 
 const SUBJECT = { id: "plot_abc", kind: "plot" as const, title: "Rescue arc", entryType: "plot:plotline" };
 
-describe("coerceChatInputValue", () => {
-  it("trims plain text", () => {
-    expect(coerceChatInputValue("  hi  ", "text")).toBe("hi");
-  });
-
-  it("number: parses finite, null on empty, keeps unparseable as trimmed string", () => {
-    expect(coerceChatInputValue("42", "number")).toBe(42);
-    expect(coerceChatInputValue("  3.5 ", "number")).toBe(3.5);
-    expect(coerceChatInputValue("", "number")).toBeNull();
-    expect(coerceChatInputValue("   ", "number")).toBeNull();
-    expect(coerceChatInputValue("abc", "number")).toBe("abc");
-  });
-
-  it("boolean: only literal 'true' (case-insensitive) is true", () => {
-    expect(coerceChatInputValue("true", "boolean")).toBe(true);
-    expect(coerceChatInputValue(" TRUE ", "boolean")).toBe(true);
-    expect(coerceChatInputValue("false", "boolean")).toBe(false);
-    expect(coerceChatInputValue("", "boolean")).toBe(false);
-    expect(coerceChatInputValue("yes", "boolean")).toBe(false);
-  });
-
-  it("context_pick: empty → [], valid array passes through, junk → []", () => {
-    expect(coerceChatInputValue("", "context_pick")).toEqual([]);
-    expect(coerceChatInputValue('[{"id":"a"}]', "context_pick")).toEqual([{ id: "a" }]);
-    expect(coerceChatInputValue("not json", "context_pick")).toEqual([]);
-    expect(coerceChatInputValue('{"id":"a"}', "context_pick")).toEqual([]);
-  });
-
-  it("entity_ref_list: empty → null, valid array passes through, junk → null", () => {
-    expect(coerceChatInputValue("", "entity_ref_list")).toBeNull();
-    expect(coerceChatInputValue('["a","b"]', "entity_ref_list")).toEqual(["a", "b"]);
-    expect(coerceChatInputValue("nope", "entity_ref_list")).toBeNull();
-    expect(coerceChatInputValue('{"id":"a"}', "entity_ref_list")).toBeNull();
-  });
-});
+// coerceChatInputValue is gone (#1482) — chat coerces through the shared
+// coerceInputValue; its behavior (incl. keeping context_pick values as the
+// encoded wire string) is covered in lib/utils/promptInputs.test.ts.
 
 describe("isInputMissing", () => {
   it("scalar types: missing when blank/whitespace only", () => {
@@ -68,7 +35,10 @@ describe("isInputMissing", () => {
     expect(isInputMissing(input("context_pick"), undefined)).toBe(true);
     expect(isInputMissing(input("context_pick"), "[]")).toBe(true);
     expect(isInputMissing(input("context_pick"), "garbage")).toBe(true);
-    expect(isInputMissing(input("context_pick"), '[{"id":"a"}]')).toBe(false);
+    expect(isInputMissing(input("context_pick"), '[{"id":"a","kind":"lore"}]')).toBe(false);
+    // An item without `kind` was never a real pick — the shared codec (#1482)
+    // filters it, so the value reads as empty.
+    expect(isInputMissing(input("context_pick"), '[{"id":"a"}]')).toBe(true);
     expect(isInputMissing(input("entity_ref_list"), "[]")).toBe(true);
     expect(isInputMissing(input("entity_ref_list"), '["a"]')).toBe(false);
   });

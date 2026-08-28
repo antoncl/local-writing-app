@@ -20,7 +20,7 @@
     resolutionSceneIdFromInputs,
     type PromptResolutionContext,
   } from "@/lib/editor-core/promptResolution";
-  import { coerceInputValue } from "@/lib/utils/promptInputs";
+  import { coerceInputValue, decodePickerValue } from "@/lib/utils/promptInputs";
   import { api } from "@/lib/api";
   import type {
     AssistantEntrySummary,
@@ -214,6 +214,11 @@
       if (input.type === "entity_ref_list") {
         const list = refInputDraftValue(input, raw);
         return !Array.isArray(list) || list.length === 0;
+      }
+      if (input.type === "context_pick") {
+        // A touched-then-emptied picker stores "[]" — non-blank, but empty.
+        // Decode through the shared codec (#1482) instead of trusting trim().
+        return decodePickerValue(raw).length === 0;
       }
       return !raw?.trim();
     });

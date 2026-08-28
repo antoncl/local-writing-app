@@ -809,8 +809,10 @@ def _relevant_lore_ids(
     Modes:
     - `"implicit"` (default): union of (a) lore directly referenced by the
       scene's entity_ref / entity_ref_list metadata, (b) lore whose title or
-      any alias appears in the scene's `summary` field, and (c) one-hop
-      expansion through the entries collected in (a)+(b).
+      any alias appears in the scene's own prose surface — its body plus
+      every `long_text` field (`summary`, `description`, ... — ADR-0075 §2/
+      slice 3, via `_scene_prose_ids`), and (c) one-hop expansion through the
+      entries collected in (a)+(b).
     - `"explicit"`: only the lore directly referenced via entity_ref fields.
     - `"pinned_only"`: empty for now (pin UI ships in a later milestone).
 
@@ -880,10 +882,10 @@ def _implicit_lore_ids(
     found = set(direct) | _always_included_lore_ids(project)
     if journal is None:
         # No chat-session journal — helper is the producer of detected context
-        # (one-shot generates, preview, tests). Run the textual scan on summary.
-        summary = _get_field(scene, "summary") or ""
-        if isinstance(summary, str) and summary.strip():
-            found |= _alias_match(project, summary, scene=scene)
+        # (one-shot generates, preview, tests). Run the textual scan on the
+        # scene's own prose surface: body + every long_text field (ADR-0075
+        # slice 3) — a superset of the old summary-only scan.
+        found |= _scene_prose_ids(project, scene)
     else:
         # Chat-session use: the send-time context expander has already populated
         # the journal with textual detections (incl. depth-1). Trust it.
@@ -1096,6 +1098,46 @@ def _textual_one_hop(
     if not bodies:
         return set()
     return _alias_match(project, "\n".join(bodies), scene=scene)
+
+
+def _scene_prose_ids(
+    project: ProjectService, scene: Any, schema: Any = None
+) -> set[str]:
+    """The lore ids textually detected in `scene`'s own prose surface — its
+    **body** plus the value of every `long_text` field on its entry_type
+    (`summary`, `description`, `notes`, any custom long_text). NOT single-line
+    `text` fields, title/name, or `aliases` (ADR-0075 §2). The single shared
+    definition of "the scene's own detection surface", used by both the
+    one-shot/preview path and the chat send path so they can't drift.
+
+    Each text is scanned SEPARATELY through `_alias_match` and the id sets are
+    UNIONED — never concatenated — so a multi-word name can't false-match
+    across a field/body boundary (body ending "...Bob" + a field starting
+    "Smith..." must not detect "Bob Smith"). `_alias_match` is the one
+    parity-gated matcher entry point, so this already honors `context_policy`
+    (auto-only) and effective names as-of `scene`.
+    """
+    if scene is None:
+        return set()
+    schema = schema or project.read_metadata_schema()
+    texts: list[str] = []
+    body = _attr_or_item(scene, "body")
+    if isinstance(body, str) and body.strip():
+        texts.append(body)
+    entry_type = _get_field(scene, "entry_type")
+    definition = schema.entry_types.get(entry_type) if isinstance(entry_type, str) else None
+    field_ids = list(definition.fields) if definition is not None else []
+    for field_id in field_ids:
+        field = schema.fields.get(field_id)
+        if field is None or field.type != "long_text":
+            continue
+        value = _get_field(scene, field_id)
+        if isinstance(value, str) and value.strip():
+            texts.append(value)
+    found: set[str] = set()
+    for text in texts:
+        found |= _alias_match(project, text, scene=scene)
+    return found
 
 
 _XML_TAG_FALLBACK = "lore_entry"

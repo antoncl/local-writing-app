@@ -68,14 +68,21 @@ def _detect_and_persist_journal(
     chat: ChatSession,
     chat_id: str,
     messages_list: list[dict],
+    scene: Any,
 ) -> list[Any]:
-    """Run the send-time context expander on the last user message and persist
-    any new detections to the chat's journal.
+    """Run the send-time context expander on the last user message + the
+    scene's own prose (ADR-0075 slice 3), and persist any new detections to
+    the chat's journal.
 
     ADR-0057 §4: the expander is an *input* to the one lore selection — it feeds
     the journal `relevant_lore()` reads, not a rival second selector. It runs
     only for a lore-enabled chat; that gate is the caller's (`chat.lore_enabled`).
     Returns the entries newly detected on THIS turn (for the audit UI).
+
+    `scene` is the chat's resolution scene, already loaded by the caller
+    (`_chat_resolution_scene`) — passed through so a renamed entity is
+    detected under its as-of-scene name (#60/#61), and so the scene's body +
+    long_text fields are scannable without a second `read_scene`.
     """
     from app.services.ai.context_expander import expand_context
 
@@ -94,11 +101,7 @@ def _detect_and_persist_journal(
         explicit_picks=chat.context_items,
         source="user_message",
         turn=turn,
-        # The chat's anchored scene is its mutation resolution scene (#60/#61),
-        # so a renamed entity is detected under its as-of-scene name. The anchor
-        # is derived from the chat's `subject` when that subject is a scene
-        # (ADR-0051 S5 folded the old `target_scene_id` field into `subject`).
-        scene=project._subject_scene_id(chat.subject) or None,
+        scene=scene,
     )
     if new_entries:
         project.save_chat_session(
@@ -151,6 +154,7 @@ def _lore_cache_blocks(
     chat: ChatSession,
     chat_id: str,
     journal_for_send: list[Any],
+    scene: Any,
 ) -> list[dict]:
     """The chat's one deduped lore set, placed once *per volatility tier*
     (docs/design/context-caching.md §4). `_relevant_lore_ids` — the single selector
@@ -162,6 +166,10 @@ def _lore_cache_blocks(
     process starts cold (empty baseline → all volatile), which re-settles on the next
     turn — deliberately not persisted (§6). The blocks carry only a `tier`; the
     provider adapter maps it to a ttl/breakpoint (ADR-0060 §5).
+
+    `scene` is the chat's resolution scene, already loaded once by the caller
+    (`_chat_resolution_scene`) and shared with `_detect_and_persist_journal` —
+    avoids a second `read_scene` for the same turn.
     """
     from app.services.ai.helpers import (
         _relevant_lore_ids,
@@ -170,7 +178,6 @@ def _lore_cache_blocks(
     from app.services.ai.lore_block import _format_lore_block
     from app.services.ai.sessions import default_registry
 
-    scene = _chat_resolution_scene(project, chat)
     index = project.build_mutations_index() if scene is not None else None
     session = default_registry.get_or_create(f"chatlore:{chat_id}")
 
@@ -236,8 +243,12 @@ def expand_and_prepare_chat_blocks(
 
     new_entries: list[Any] = []
     journal_for_send: list[Any] = []
+    # Loaded ONCE — the scene EntryRef (body + metadata) shared by detection
+    # (ADR-0075 slice 3 scans its prose) and lore rendering, so a lore-enabled
+    # turn does exactly one `read_scene` for its resolution scene.
+    scene = _chat_resolution_scene(project, chat) if chat.lore_enabled else None
     if chat.lore_enabled:
-        new_entries = _detect_and_persist_journal(project, chat, chat_id, messages_list)
+        new_entries = _detect_and_persist_journal(project, chat, chat_id, messages_list, scene)
         journal_for_send = list(chat.journal) + new_entries
 
     # Slot 1: system + project-stable (per decisions_implicit_context) — the
@@ -255,7 +266,7 @@ def expand_and_prepare_chat_blocks(
     # caps breakpoints (Anthropic: ≤4) and assigns each tier its ttl — the shared
     # layer only orders stable-first (ADR-0060 §5).
     if chat.lore_enabled:
-        blocks.extend(_lore_cache_blocks(project, chat, chat_id, journal_for_send))
+        blocks.extend(_lore_cache_blocks(project, chat, chat_id, journal_for_send, scene))
 
     return (blocks or None), chat_id, list(new_entries)
 

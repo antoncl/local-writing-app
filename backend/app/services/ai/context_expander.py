@@ -25,13 +25,14 @@ Scope notes:
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from app.models import ChatSessionContextItem, ChatSessionJournalEntry
 from app.services.ai.helpers import (
     _alias_match,
     _attr_or_item,
     _safe_read_node,
+    _scene_prose_ids,
     _textual_one_hop,
 )
 
@@ -39,7 +40,9 @@ if TYPE_CHECKING:
     from app.services.project_service import ProjectService
 
 
-JournalSource = Literal["user_message", "rendered_prompt", "depth1_expansion"]
+JournalSource = Literal[
+    "user_message", "rendered_prompt", "depth1_expansion", "scene_prose"
+]
 
 
 def expand_context(
@@ -50,13 +53,22 @@ def expand_context(
     *,
     source: JournalSource = "user_message",
     turn: int = 0,
-    scene: str | None = None,
+    scene: Any = None,
 ) -> list[ChatSessionJournalEntry]:
-    """Scan `text`, expand depth-1, return NEW journal entries.
+    """Scan `text` AND the resolution scene's own prose, expand depth-1,
+    return NEW journal entries.
 
-    `source` labels how the direct matches were discovered (the user's
-    typed message vs the rendered prompt output). Depth-1 expansions
-    always get source="depth1_expansion" regardless.
+    `source` labels how the composer-text direct matches were discovered
+    (the user's typed message vs the rendered prompt output). Direct matches
+    from the scene's own body/long_text fields (ADR-0075 slice 3) always get
+    source="scene_prose"; depth-1 expansions always get
+    source="depth1_expansion" — regardless of `source`.
+
+    `scene` is the chat's resolution scene — a plain id string, a loaded
+    scene node (EntryRef), or None for a scene-less chat. Passed through to
+    `_alias_match`/`_scene_prose_ids` for effective-name resolution; only
+    `_scene_prose_ids` needs the loaded node (an id string yields no prose
+    surface — see there).
 
     `turn` is the message index at which the detection fires (the new
     user message's index). Recorded on each entry for the audit UI.
@@ -65,20 +77,25 @@ def expand_context(
     responsible for appending the returned entries to the session
     journal and saving — the expander is pure.
     """
-    if not isinstance(text, str) or not text.strip():
-        return []
+    composer_text = text if isinstance(text, str) else ""
 
     # Direct textual matches against title + aliases, resolved under each
     # entity's effective name-set as of the chat's resolution scene (#61).
-    direct_ids = _alias_match(project, text, scene=scene)
-    if not direct_ids:
+    direct_ids = _alias_match(project, composer_text, scene=scene) if composer_text.strip() else set()
+    # The scene's own detection surface — body + every long_text field,
+    # scanned field-by-field so a name can't false-match across a field
+    # boundary (ADR-0075 §2/slice 3). Excludes anything the composer already
+    # matched so an id isn't double-labeled across two sources in one turn.
+    prose_ids = _scene_prose_ids(project, scene) - direct_ids
+    if not direct_ids and not prose_ids:
         return []
 
-    # Depth-1 expansion: scan bodies of direct matches for further hits.
-    # Note: this also re-finds names from `text` if they happen to appear
-    # in any direct match's body, so we'll need to subtract direct_ids
-    # below.
-    depth1_ids = _textual_one_hop(project, direct_ids, scene=scene)
+    # Depth-1 expansion: scan bodies of ALL direct matches (composer + scene
+    # prose) for further hits. Note: this also re-finds names already in
+    # `combined_direct` if they happen to appear in any direct match's body,
+    # so we subtract combined_direct below.
+    combined_direct = direct_ids | prose_ids
+    depth1_ids = _textual_one_hop(project, combined_direct, scene=scene)
 
     # What's already pinned via explicit picks or earlier journal turns?
     in_scope: set[str] = set()
@@ -90,11 +107,16 @@ def expand_context(
         if pick.kind == "lore" and pick.id:
             in_scope.add(pick.id)
 
-    new_direct = direct_ids - in_scope
-    new_depth1 = depth1_ids - direct_ids - in_scope
+    # Sorted so the persisted journal's entry order is deterministic run-to-run
+    # (these are sets; the final lore set is order-independent, but a stable
+    # journal keeps the chat node's front-matter free of spurious byte diffs).
+    new_direct = sorted(direct_ids - in_scope)
+    new_prose = sorted(prose_ids - in_scope)
+    new_depth1 = sorted(depth1_ids - combined_direct - in_scope)
 
     entries: list[ChatSessionJournalEntry] = []
     entries.extend(_make_entries(project, new_direct, source=source, turn=turn))
+    entries.extend(_make_entries(project, new_prose, source="scene_prose", turn=turn))
     entries.extend(_make_entries(project, new_depth1, source="depth1_expansion", turn=turn))
     return entries
 

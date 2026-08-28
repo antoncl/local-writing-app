@@ -16,6 +16,7 @@
 import { decodePickerValue, encodePickerValue } from "@/lib/utils/promptInputs";
 import { evaluateView, type EvalNode } from "@/lib/views/evaluateView";
 import { structureToEvalNodes } from "@/lib/views/structureNodes";
+import { reportClientError } from "@/lib/errorLog";
 import type {
   AssistantEntrySummary,
   CardSummary,
@@ -38,8 +39,10 @@ export function isSelectorRef(ref: NodePickerRef): boolean {
 
 /** The rosters + schema needed to evaluate a selector's ViewSource. One is built
  * per surface from whatever node data it has in scope; a kind with no roster
- * simply expands to nothing (graceful — a stale/unavailable selector is empty,
- * never an error). */
+ * expands to nothing — graceful on the live-count path (a rosterless tag is
+ * dropped), but at SEND time an absent roster is a should-never-happen that is
+ * logged (#1553, `selectorExpansionAnomaly`), since it silently shrinks what the
+ * AI sees. */
 export interface SelectorRoster {
   rostersByKind: Partial<Record<string, EvalNode[]>>;
   schema?: MetadataSchema | null;
@@ -82,6 +85,25 @@ export function membersForSelector(ref: NodePickerRef, roster: SelectorRoster): 
   return result.nodes.map((n) => memberRef(n, resolved.kind));
 }
 
+/** Why a selector CANNOT be materialized against this roster — a should-never-
+ * happen that expansion otherwise swallows to `[]` — or null if it can. This
+ * distinguishes an anomaly from a *legitimately* empty result (roster present,
+ * spec matches nothing), which is not flagged:
+ *  - the selector carries no inline spec (a bare `{view:id}` the picker should
+ *    have resolved before storing); or
+ *  - the surface built no roster for the selector's kind (an omitted input to
+ *    `buildSelectorRoster` — a present-but-empty `[]` roster is fine).
+ * Used to log the send-time silent-zero (#1553); NOT called on the live-count
+ * path, which tolerates absent rosters by design (a rosterless tag is dropped). */
+export function selectorExpansionAnomaly(ref: NodePickerRef, roster: SelectorRoster): string | null {
+  const resolved = specForSelector(ref);
+  if (resolved === null) return `selector "${ref.id}" carries no inline spec to evaluate`;
+  if (roster.rostersByKind[resolved.kind] === undefined) {
+    return `no roster for kind "${resolved.kind}" on this surface (selector "${ref.id}")`;
+  }
+  return null;
+}
+
 /** Replace every selector ref in `refs` with its current member refs, passing
  * concrete member/container refs through untouched. Deduped by kind+id. Concrete
  * refs are emitted before selector-expanded members regardless of pick order, so
@@ -101,12 +123,33 @@ export function expandSelectorRefs(refs: NodePickerRef[], roster: SelectorRoster
   return out;
 }
 
+// One report per distinct anomaly per session (see below). A debounced estimate
+// re-expands on every keystroke, so a single broken selector must not flood
+// `errors.log` — deduping on the message keeps it to one durable signal.
+const reportedSelectorAnomalies = new Set<string>();
+
 /** The wire seam: expand any selectors in an encoded context_pick value, leaving
  * a selector-free value untouched (the fast path — most picks carry none). The
- * result is the encoded member-only string the backend can resolve. */
+ * result is the encoded member-only string the backend can resolve.
+ *
+ * A selector that cannot be expanded here (no roster for its kind, or no inline
+ * spec) is a should-never-happen that would otherwise drop the pick silently and
+ * send the AI fewer nodes than the user chose. Because the selector is stripped
+ * before the request, the backend can't recover it — so it is logged to the
+ * durable error log (#1553), not swallowed. Expansion still proceeds (the pick
+ * contributes nothing, as before); the log is the added signal, not a new
+ * failure mode. */
 export function expandSelectorsInEncodedValue(encoded: string, roster: SelectorRoster): string {
   const refs = decodePickerValue(encoded);
   if (!refs.some(isSelectorRef)) return encoded;
+  for (const ref of refs) {
+    if (!isSelectorRef(ref)) continue;
+    const anomaly = selectorExpansionAnomaly(ref, roster);
+    if (anomaly && !reportedSelectorAnomalies.has(anomaly)) {
+      reportedSelectorAnomalies.add(anomaly);
+      reportClientError(new Error(anomaly), "context-pick selector expansion");
+    }
+  }
   return encodePickerValue(expandSelectorRefs(refs, roster));
 }
 

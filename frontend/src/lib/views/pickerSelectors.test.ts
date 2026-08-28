@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { CardSummary, LoreEntrySummary, NodePickerRef, ViewSpec } from "@/lib/types";
 import {
   buildSelectorRoster,
@@ -6,8 +6,12 @@ import {
   expandSelectorsInEncodedValue,
   isSelectorRef,
   membersForSelector,
+  selectorExpansionAnomaly,
 } from "./pickerSelectors";
 import { coerceInputValue, encodePickerValue } from "@/lib/utils/promptInputs";
+import { reportClientError } from "@/lib/errorLog";
+
+vi.mock("@/lib/errorLog", () => ({ reportClientError: vi.fn(), installGlobalErrorLogging: vi.fn() }));
 
 // A tag selector over lore: {kind:"lore", expr:{tagged:"villain"}}. Members are
 // the lore entries whose metadata.tags contains "villain".
@@ -176,5 +180,55 @@ describe("surface composition: coerceInputValue → expandSelectorsInEncodedValu
       "lore:lore_a",
       "lore:lore_c",
     ]);
+  });
+});
+
+// A selector that can't be materialized (no roster for its kind on this surface,
+// or no inline spec) is a should-never-happen the send would otherwise swallow to
+// zero nodes — it must be logged, not silently dropped (#1553).
+describe("selectorExpansionAnomaly + send-time logging", () => {
+  it("is null when the roster is present — including a present-but-empty roster", () => {
+    // ROSTER has a lore roster with members → resolvable.
+    expect(selectorExpansionAnomaly(tagSelector, ROSTER)).toBeNull();
+    // A surface with zero lore still BUILT the lore roster ([]): a legitimately
+    // empty result, not an anomaly.
+    const emptyLore = buildSelectorRoster({ loreEntries: [] });
+    expect(selectorExpansionAnomaly(tagSelector, emptyLore)).toBeNull();
+  });
+
+  it("flags an absent roster (the surface built none for the kind)", () => {
+    const noLore = buildSelectorRoster({ cardEntries: [] }); // plot roster only, no lore
+    expect(selectorExpansionAnomaly(tagSelector, noLore)).toMatch(/no roster for kind "lore"/);
+  });
+
+  it("flags a selector with no inline spec (bare view ref)", () => {
+    const bareView: NodePickerRef = {
+      id: "v_bare",
+      kind: "view",
+      title: "Unresolved view",
+      selector: { view: "view_x" } as unknown as ViewSpec,
+    };
+    expect(selectorExpansionAnomaly(bareView, ROSTER)).toMatch(/no inline spec/);
+  });
+
+  it("logs the anomaly to the durable error log, once, when a send expands it", () => {
+    vi.mocked(reportClientError).mockClear();
+    // A distinct selector id so the module-level dedup can't be pre-tripped.
+    const orphanTag: NodePickerRef = {
+      id: "tag:lore:orphan-uniq",
+      kind: "tag",
+      title: "orphan",
+      selector: { kind: "lore", expr: { tagged: "orphan" } } as ViewSpec,
+    };
+    const noLore = buildSelectorRoster({ cardEntries: [] });
+    const draft = encodePickerValue([orphanTag]);
+    // The pick contributes nothing (as before) but the anomaly is now reported.
+    const wire = expandSelectorsInEncodedValue(draft, noLore);
+    expect(JSON.parse(wire)).toEqual([]);
+    expect(reportClientError).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(reportClientError).mock.calls[0][1]).toBe("context-pick selector expansion");
+    // Re-expanding the same anomaly (e.g. a debounced estimate) does not re-log.
+    expandSelectorsInEncodedValue(draft, noLore);
+    expect(reportClientError).toHaveBeenCalledTimes(1);
   });
 });

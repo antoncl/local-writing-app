@@ -1,142 +1,173 @@
 # Context Picker — Howto
 
-Give a prompt its own **+ Reference** button (or several) that opens a constrained menu of the kinds of nodes the author allows. The author decides what's pickable; the writer just picks. Each `context_pick` input is addressed in the template the same way every other input is — `{{ input.<name> }}` — so one prompt can have a "characters to remember" picker, a "scenes to summarize" picker, and a "preset to attach" picker side by side.
+Give a prompt its own **+ Context** button (or several) that opens a constrained,
+drill-in menu of the things the author allows the writer to pull in. The author
+decides what's pickable; the writer just picks. Each `context_pick` input is
+addressed in the template like every other input — `{{ inputs.<name> }}` — so one
+prompt can carry a "characters to remember" picker and a "scenes to summarise"
+picker side by side.
+
+The design rationale lives in ADR-0074 (`docs/design/adr/`) and its interactive
+mockup (`docs/design/mockups/0074-context-picker-take-two.html`). This is the
+howto.
 
 ## What it gives you
 
-- A new input type **`context_pick`** that sits alongside `text`, `long_text`, `select`, `entity_ref`, etc. in the prompt's Inputs editor.
-- **Constraint at the source** — the author checks which kinds (Scene, Lore, Snippet, Assistant) and which sub-types per kind, plus optional presets (Full Outline / Full Novel Text), and the runtime picker offers exactly that.
-- The **same picker UI is reused for `entity_ref` metadata fields**, with the same config shape. One vocabulary for both surfaces.
-- Picked items render as **chips** in the composer. Click `×` to drop one. Reopen the picker to add more (unless `multiple: false`).
-- Optional **★ target marking** — when enabled, the author can pick several scenes then iterate with ★ moving between them across invocations. Same prompt, N runs against N scenes.
+- A `context_pick` input type alongside `text`, `long_text`, `select`,
+  `entity_ref`, etc. in the prompt's Inputs editor.
+- **Constraint at the source** — the author checks which kinds (Scenes, Lore,
+  Plot) and which sub-types, plus any saved views, and the runtime picker offers
+  exactly that.
+- **Live refs, not snapshots.** Checking a *container* — the whole manuscript, an
+  act, a chapter, a plotline, a tag, or a saved view — stores **one** ref that
+  expands to its **current** members at invocation. Add a scene to that chapter
+  later and the next run includes it, no re-picking.
+- The **same picker is reused for `entity_ref` metadata fields**, with the same
+  config shape. One vocabulary for both surfaces.
 
 ## When to use it
 
-- **`text` / `long_text` / `select`** — free-form or fixed-vocabulary values the user types or picks. Good for inputs the prompt treats as **strings**.
-- **`entity_ref` / `entity_ref_list`** — one specific named ref ("the protagonist of this prompt"). Good for inputs the prompt treats as **a single named entity** (or list of one kind).
-- **`context_pick`** — a heterogeneous pile of refs ("stuff the model should know about"). Good for **author-constrained, runtime-chosen context bundles** — possibly mixing scenes + lore + presets in one button.
+- **`text` / `long_text` / `select`** — free-form or fixed-vocabulary values the
+  writer types or picks. Inputs the prompt treats as **strings**.
+- **`entity_ref` / `entity_ref_list`** — one specific named ref ("the protagonist
+  of this prompt"). Inputs the prompt treats as **a single named entity**.
+- **`context_pick`** — a set of refs ("stuff the model should know about"),
+  possibly mixing scenes, lore, and plot in one button. Author-constrained,
+  writer-chosen context bundles.
 
-Rule of thumb: if you want one named character → `entity_ref`. If you want "let me toss in whatever's relevant" → `context_pick`.
+Rule of thumb: one named character → `entity_ref`. "Let me toss in whatever's
+relevant" → `context_pick`.
 
 ## Set up a prompt with a context picker
 
 1. Open **Prompts** in the top bar and edit (or create) a prompt.
-2. In the **Inputs** editor, click **+ Input**.
-3. Set the input's **Label** (e.g. "Reference scenes"), **Id** (e.g. `reference_scenes` — the template will say `input.reference_scenes`), and **Type** to **context_pick**.
-4. The row expands. Configure:
-   - **Kinds** — check Scene / Lore / Snippet / Assistant. At least one is required (a picker with nothing pickable is a bug, not a config).
-   - **Sub-types** — under each checked kind, optionally restrict to specific sub-types (e.g. Lore → only Character + Location). Leave all checked to allow any sub-type of that kind.
-   - **Presets** — check Full Outline / Full Novel Text if the picker should offer them as one-click attachments.
-   - **Multiple** — leave on for "pick several" (the default). Turn off for single-pick.
-   - **Allow target marking** — only available when scenes are pickable. See [Scene binding](#scene-binding-target-marking) below.
-5. **Required** — if checked, the runtime won't fire the prompt until something is picked.
-6. Save.
+2. In the **Inputs** editor, add an input and set its **Label**, **Id** (the
+   template will say `inputs.<id>`), and **Type** to **Context Picker**.
+3. Configure the source tree:
+   - Check the **kinds** — **Scenes**, **Lore**, **Plot** — and, under each,
+     optionally restrict to specific sub-types (Lore → only Character + Location).
+     Leave a kind's sub-types all-checked to allow any.
+   - Add **saved views** as sources if the picker should offer them.
+   - **Multiple** — on for "pick several" (default); off for single-pick.
+   - **Allow target marking** — only when scenes are pickable; see
+     [Scene binding](#scene-binding-target-marking).
+   - **Required** — if checked, the prompt won't fire until something is picked.
 
-## How it appears to the user
+   (There is no "presets" option any more — "the whole manuscript" is just
+   checking the manuscript root in the tree, and the outline is a rendering the
+   template chooses, not a pick.)
 
-When the prompt is bound to a chat:
+## How it appears to the writer
 
-- **Composer strip** — one **+ <Label>** button per `context_pick` input on the active prompt. Click to open the constrained menu.
-- **Picker menu** —
-  - **Presets** section (if any allowed): one button per preset.
-  - **Browse** section: one expandable group per allowed kind, with a search box if the group has more than ~20 items.
-- **Chips** — each picked item shows above the message textarea. Click `×` to drop one.
-- **Initial inputs dialog** — if the user picks the prompt fresh (vs invoking via `/slash` with positional args), the dialog renders one row per declared input, including the button-and-chips row for each `context_pick`. Picked values seed the chat — no need to reopen the picker after the first turn.
+The picker is a **drill-in popover**:
 
-If you set **Multiple** to off, the menu closes after one pick and any prior pick is replaced.
+- **Root** — a search box and a list of **axes** with counts: Manuscript, Lore,
+  Plot, By tag, Saved views (only the ones the config enables). Tap an axis to
+  drill into it. When a config exposes exactly **one** axis, the picker skips the
+  list and opens straight into that panel.
+- **A panel** — a ← back header, the axis name, and that axis's **tri-state tree**.
+  Every container row (act, chapter, plotline, tag, view) carries an expand caret
+  and a checkbox:
+  - **Check a container** to absorb it — one live ref covering all its current
+    members.
+  - **Expand** it and check individual members to pick them explicitly.
+  - Check a container, then **uncheck one member** — the live ref *splits* into
+    explicit picks of the rest (a deliberate freeze).
+- **Search is contextual** — a query at the root cuts across every axis (grouped
+  results); a query inside a panel filters just that axis. A plain query matches
+  titles, tags, and aliases; a leading `#` narrows to tags.
+- Picked refs show as rows in the context bar under the button, each with its
+  kind stripe and a live member count for containers. Remove one with its `×`.
 
 ## Use it in your template
 
-Picked items expose as a list under `{{ input.<name> }}`. The template iterates:
+Picked items expose as a list under `{{ inputs.<name> }}`. Containers and
+selectors are **already expanded to their concrete members** by the time the
+template renders, so you iterate a flat list of nodes:
 
 ```jinja
-{% for item in input.reference_scenes %}
+{% for item in inputs.reference_scenes %}
 ## {{ item.title }}
 {{ scene(item.id).body }}
 
 {% endfor %}
 ```
 
-For mixed pickers (scenes + lore + presets), each item carries `kind` + `type` you can dispatch on:
+For a mixed picker, dispatch on `item.kind`:
 
 ```jinja
-{% for item in input.references %}
-  {% if item.kind == "preset" and item.id == "full_outline" %}
-{{ full_outline() }}
-  {% elif item.kind == "lore" %}
+{% for item in inputs.references %}
+  {% if item.kind == "lore" %}
 ### {{ item.title }}
 {{ lore(item.id).body }}
-  {% elif item.kind == "scene" %}
+  {% elif item.kind == "manuscript" %}
 {{ scene(item.id).body }}
   {% endif %}
 {% endfor %}
 ```
 
-**Memory note**: picked refs carry only `{kind, id, type, title}` — no body content. Materialization happens server-side when the template renders, via the existing helpers (`scene()`, `lore()`, `full_outline()`, `full_text()`). Picking "Full Novel Text" stores one preset ref, not the prose — the helper iterates scene files at render time.
+**Memory note**: picked refs carry only identity (`kind`, `id`, `title`), never
+body content. Materialisation happens server-side when the template renders, via
+the helpers (`scene()`, `lore()`, …). Checking the manuscript root stores one
+ref, not the prose — the bind layer expands it to the current scene list at
+render time.
 
 ## Scene binding (target marking)
 
-Enable **Allow target marking** in the input config — only available when scenes are pickable. When on:
+Enable **Allow target marking** in the input config — only available when scenes
+are pickable. When on:
 
-- Picked scene chips show **☆ / ★** indicators.
-- The user marks one scene as the **target** by clicking ★. Clicking ★ on another scene moves the mark (single ★ per input).
-- The marked scene wins over the caller's default scene (the editor's open scene). The template sees it as `{{ scene }}` — `scene.body`, `scene.title`, and the scene helpers all resolve to the marked one.
+- Picked scene rows show **☆ / ★**.
+- The writer marks one scene as the **target** with ★; marking another moves it
+  (single ★ per input).
+- The marked scene wins over the caller's default (the editor's open scene). The
+  template sees it as `{{ scene }}` — `scene.title`, `scene.body`, and
+  the scene helpers resolve to the marked one.
 
-**Canonical use case** — the McKee-style evaluator: one prompt with a single `context_pick` input, **Multiple: on** + **Allow target marking: on**. Pick 8 scenes you want to evaluate, then iterate: ★ scene 1 → render → notes; move ★ to scene 2 → render → notes; etc. One prompt, eight runs, no leaving the picker.
+**Canonical use case** — the McKee-style evaluator: one prompt, one `context_pick`
+input with **Multiple** and **Allow target marking** on. Pick the scenes to
+evaluate, then iterate: ★ scene 1 → render → notes; move ★ to scene 2 → render →
+notes. One prompt, N runs, without leaving the picker.
 
-For Continuation / Revise prompts the editor's open scene is the default `scene` binding — marking via context_pick is purely an override. For General prompts (no implicit scene), marking is the only way to bind a scene at all.
+For Continuation / Revise the editor's open scene is the default binding, so
+marking is an override; for a General prompt (no implicit scene) it's the only
+way to bind one.
 
 ## Same widget for metadata fields
 
-`entity_ref` and `entity_ref_list` **metadata fields** use the exact same picker — same kinds + sub-types + multiple config. In the schema editor, opening an entity_ref field reveals the same picker config UI (just without the row-level chrome: no label / required toggle / type select, since the field already owns those).
+`entity_ref` and `entity_ref_list` **metadata fields** use the same picker — same
+kinds, sub-types, and multiple config — without the input-row chrome (the field
+already owns its label / required). The config lives on `PromptInputDefinition.target`
+for prompt inputs and on `MetadataFieldDefinition.picker_config` for metadata
+fields; the same `NodePickerConfig` shape underneath.
 
-The wire-format field name differs by surface:
+## The stored config
 
-- On `PromptInputDefinition` (prompts) the config sits on `target`.
-- On `MetadataFieldDefinition` (metadata) the config sits on `picker_config`.
-
-Same `NodePickerConfig` shape underneath; the UI handles both.
-
-## Inputs reference
-
-The wire shape of a `context_pick` input as stored in the prompt's YAML:
+The wire shape of a `context_pick` input in the prompt's YAML:
 
 ```yaml
-- name: reference_scenes              # macro key: {{ input.reference_scenes }}
+- name: reference_scenes              # {{ inputs.reference_scenes }}
   type: context_pick
   label: "Reference scenes"
   required: true
   target:
-    kinds: ["scene"]                  # at least one required
-    entry_types:                      # optional, per kind
-      lore: ["character", "location"]
-    presets: ["full_outline"]         # optional
+    sources:                          # what's pickable — at least one
+      - { kind: manuscript }          # scenes + their containers
+      - { kind: lore, expr: { type: "lore:character" } }
+      - { view: "arc-tracker" }       # a saved view, by id
     multiple: true                    # default true
     allow_target_marking: true        # default false; only when scenes pickable
 ```
 
-Picked-item shape (what the template iterates):
-
-```yaml
-- kind: scene
-  id: scene_abc
-  type: scene                         # the sub-type (e.g. "scene", "chapter")
-  title: "The Causeway"
-- kind: preset
-  type: preset
-  id: full_outline
-  title: "Full Outline"
-- target: true                        # marked-target flag, when target-marking on
-  kind: scene
-  id: scene_xyz
-  type: scene
-  title: "The Reckoning"
-```
-
 ## Caveats
 
-- **Legacy chat-level `+ Context` is gone.** Old chat sessions with pre-`context_pick` `chatContextItems` still render their items (read-only). Add new context by binding a prompt that declares a `context_pick` input.
-- **Sub-types reference the project schema by id.** If you rename a sub-type after authoring a prompt that whitelisted it, the picker silently drops it from the allowed set. Re-open the input config and re-check.
-- **Presets are server-side helpers.** Picking "Full Novel Text" doesn't pull every scene into the chat session — it stores one preset ref, and `full_text()` iterates at render time. No memory cost.
-- **Per-item treatment ("full text vs summary") is not in the picker** — that's a render-time concern. The template author picks via the helpers (`scene.body` vs `scene.summary`).
-- **Group related kinds into one picker** rather than declaring three separate `context_pick` inputs if they conceptually pick "the same kind of thing" — three pickers = three composer buttons.
+- **Live refs are live.** A checked container reflects membership at *invocation*,
+  not at pick time — that's the point, but it means a run's context can change as
+  the project changes. Uncheck a member to freeze the rest into explicit picks.
+- **Sub-types reference the project schema by id.** Rename a sub-type after
+  whitelisting it and the picker drops it from the allowed set — re-open the
+  config and re-check.
+- **Legacy chat-level `+ Context` is gone.** Old chats keep their pre-`context_pick`
+  items (read-only); add new context by binding a prompt that declares one.
+- **Per-item treatment ("full text vs summary") isn't in the picker** — the
+  template picks via the helpers (`scene.body` vs `scene.summary`).

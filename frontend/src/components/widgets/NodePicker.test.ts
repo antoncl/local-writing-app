@@ -120,7 +120,7 @@ describe("NodePicker plot source — plotline containers (ADR-0074 slice 6)", ()
     await fireEvent.click(screen.getByRole("button", { expanded: false }));
     await tick();
 
-    const plot = (await screen.findAllByRole("group", { name: "Plotlines" }))[0];
+    const plot = (await screen.findAllByRole("group", { name: "Plot" }))[0];
     expect(within(plot).getByText("The Heist")).toBeInTheDocument();
     expect(within(plot).getByText("Romance")).toBeInTheDocument();
     // Drill: The Heist's cards are its members; the Romance card is not.
@@ -143,7 +143,7 @@ describe("NodePicker plot source — plotline containers (ADR-0074 slice 6)", ()
     await fireEvent.click(screen.getByRole("button", { expanded: false }));
     await tick();
 
-    const plot = (await screen.findAllByRole("group", { name: "Plotlines" }))[0];
+    const plot = (await screen.findAllByRole("group", { name: "Plot" }))[0];
     await fireEvent.click(within(plot).getByText("The Heist").closest("button")!);
     await tick();
 
@@ -175,7 +175,7 @@ describe("NodePicker plot source — plotline containers (ADR-0074 slice 6)", ()
     await fireEvent.click(screen.getByRole("button", { expanded: false }));
     await tick();
 
-    const plot = (await screen.findAllByRole("group", { name: "Plotlines" }))[0];
+    const plot = (await screen.findAllByRole("group", { name: "Plot" }))[0];
     await fireEvent.click(within(plot).getByText("The Heist").closest("button")!);
     await tick();
 
@@ -197,7 +197,7 @@ describe("NodePicker plot source — plotline containers (ADR-0074 slice 6)", ()
     await fireEvent.click(screen.getByRole("button", { expanded: false }));
     await tick();
 
-    const plot = (await screen.findAllByRole("group", { name: "Plotlines" }))[0];
+    const plot = (await screen.findAllByRole("group", { name: "Plot" }))[0];
     await fireEvent.click(within(plot).getByText("Break-in").closest("button")!);
     await tick();
 
@@ -486,7 +486,10 @@ describe("NodePicker tag selectors (#1491)", () => {
   it("renders a scoped tag as a selector over its tagged members", async () => {
     renderWithTags();
     const menu = await openMenu();
-    const tags = (await within(menu).findAllByRole("group", { name: "Tags" }))[0];
+    // Multi-axis config (Lore + By tag) → drill into the By-tag axis (ADR-0074 7b).
+    await fireEvent.click(within(menu).getByText("By tag").closest("button")!);
+    await tick();
+    const tags = (await within(menu).findAllByRole("group", { name: "By tag" }))[0];
     expect(within(tags).getByText("villain")).toBeInTheDocument();
     // The count pluralizes correctly — "matches", not the old "matchs" (slice 7a).
     expect(within(tags).getByText("2 matches")).toBeInTheDocument();
@@ -501,7 +504,10 @@ describe("NodePicker tag selectors (#1491)", () => {
     const onChange = vi.fn();
     renderWithTags({ onChange });
     const menu = await openMenu();
-    const tags = (await within(menu).findAllByRole("group", { name: "Tags" }))[0];
+    // Multi-axis config (Lore + By tag) → drill into the By-tag axis (ADR-0074 7b).
+    await fireEvent.click(within(menu).getByText("By tag").closest("button")!);
+    await tick();
+    const tags = (await within(menu).findAllByRole("group", { name: "By tag" }))[0];
     await fireEvent.click(within(tags).getByText("villain").closest("button")!);
     await tick();
     const [detail] = onChange.mock.calls[0];
@@ -524,7 +530,10 @@ describe("NodePicker tag selectors (#1491)", () => {
       },
     });
     const menu = await openMenu();
-    const tags = (await within(menu).findAllByRole("group", { name: "Tags" }))[0];
+    // Multi-axis config (Lore + By tag) → drill into the By-tag axis (ADR-0074 7b).
+    await fireEvent.click(within(menu).getByText("By tag").closest("button")!);
+    await tick();
+    const tags = (await within(menu).findAllByRole("group", { name: "By tag" }))[0];
     expect(within(tags).getByText("Vex")).toBeInTheDocument();
     expect(within(tags).queryByText("Dark Keep")).toBeNull();
   });
@@ -669,5 +678,81 @@ describe("NodePicker widened search (#1468)", () => {
     await type("#harbor");
     menu = document.querySelector(".ctx-menu") as HTMLElement;
     expect(within(menu).getByText("Harbormaster Quill")).toBeInTheDocument();
+  });
+});
+
+// ADR-0074 slice 7b: the picker is a drill-in popover — a root axis list, drill
+// into one axis, ← back to return. Search is contextual (cross-axis at root).
+describe("NodePicker drill-in navigation (ADR-0074 slice 7b)", () => {
+  function renderMulti(extra: Record<string, unknown> = {}) {
+    return render(NodePicker, {
+      props: {
+        // Two axes (Lore + Snippets) → the root axis list, not a short-circuit.
+        config: { sources: [{ kind: "lore" }, { kind: "snippet" }], multiple: true },
+        loreEntries: [loreEntry("l1", "Mara Voss", []), loreEntry("l2", "Quill", [])],
+        promptEntries: [snippet("s1", "Rephrase")],
+        affordance: "add",
+        ...extra,
+      },
+    });
+  }
+  async function openMenu(): Promise<HTMLElement> {
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+    return document.querySelector(".ctx-menu") as HTMLElement;
+  }
+
+  it("opens on the root axis list; a source's rows appear only after drilling in", async () => {
+    renderMulti();
+    const menu = await openMenu();
+    // Axis rows, not the entries.
+    expect(within(menu).getByText("Lore")).toBeInTheDocument();
+    expect(within(menu).getByText("Snippets")).toBeInTheDocument();
+    expect(within(menu).queryByText("Mara Voss")).toBeNull();
+    // Drill into Lore → its entries; the other axis's rows stay out of this panel.
+    await fireEvent.click(within(menu).getByText("Lore").closest("button")!);
+    await tick();
+    expect(within(menu).getByText("Mara Voss")).toBeInTheDocument();
+    expect(within(menu).getByText("Quill")).toBeInTheDocument();
+    expect(within(menu).queryByText("Rephrase")).toBeNull();
+  });
+
+  it("← back returns to the root axis list", async () => {
+    renderMulti();
+    const menu = await openMenu();
+    await fireEvent.click(within(menu).getByText("Lore").closest("button")!);
+    await tick();
+    expect(within(menu).getByText("Mara Voss")).toBeInTheDocument();
+    await fireEvent.click(within(menu).getByRole("button", { name: "Back to sources" }));
+    await tick();
+    expect(within(menu).getByText("Snippets")).toBeInTheDocument();
+    expect(within(menu).queryByText("Mara Voss")).toBeNull();
+  });
+
+  it("a single-axis config skips the root list and shows the panel directly", async () => {
+    render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "lore" }], multiple: true },
+        loreEntries: [loreEntry("l1", "Mara Voss", [])],
+        affordance: "add",
+      },
+    });
+    const menu = await openMenu();
+    // No drill, no back button — the sole axis renders as the panel.
+    expect(within(menu).getByText("Mara Voss")).toBeInTheDocument();
+    expect(within(menu).queryByRole("button", { name: "Back to sources" })).toBeNull();
+  });
+
+  it("a query at the root cuts across every axis", async () => {
+    renderMulti();
+    const menu = await openMenu();
+    const box = menu.querySelector(".ctx-search") as HTMLInputElement;
+    // "r" matches Mara (lore) and Rephrase (snippet) — both axes surface at once.
+    await fireEvent.input(box, { target: { value: "r" } });
+    await tick();
+    expect(within(menu).getByText("Mara Voss")).toBeInTheDocument();
+    expect(within(menu).getByText("Rephrase")).toBeInTheDocument();
+    // Not the axis list — the Snippets axis ROW is replaced by its result rows.
+    expect(within(menu).queryByRole("button", { name: "Back to sources" })).toBeNull();
   });
 });

@@ -1,13 +1,12 @@
 <script module lang="ts">
-  // One labelled, collapsible picker section, shared by EVERY source in the
-  // context picker (ADR-0074 slice 7a): the manuscript tree, plotline / saved-view
-  // / tag selectors, and the flat lore / snippet / research / assistant lists. It
-  // renders through the app's NodeRow/NodeList substrate (ADR-0066/0068) — a
-  // groupHeader NodeRow over a tier panel of candidate NodeRows — so a picker row
-  // is the same row the rest of the app uses: kind stripe, one caret, and the
-  // tri-state PickCheck in the leading slot (retiring PickTree's old bespoke
-  // `.ctx-m*` checkbox/caret/count). Purely presentational — the caller normalizes
-  // its rows and binds each row's toggle/collapse.
+  // The tri-state row list for one context-picker panel (ADR-0074 slice 7b): the
+  // rows of a single drilled-in axis (Manuscript / Plot / Lore / By tag / Saved
+  // views), or one axis's slice of the cross-axis search results. Renders through
+  // the app's NodeRow/NodeList substrate (ADR-0066/0068) — every row is a NodeRow
+  // with the kind stripe, one caret for containers, and the tri-state PickCheck in
+  // the leading slot. Purely presentational: the caller normalizes rows and binds
+  // each row's toggle/collapse. The visible panel label lives in the popover head
+  // (drill-in), so this is a bare `role="group"` wrapper — no section header.
   export type PickTreeState = "on" | "implied" | "indeterminate" | "off";
 
   export interface PickTreeRow {
@@ -45,80 +44,61 @@
   import NodeList from "@/components/widgets/NodeList.svelte";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
-  import CountPill from "@/components/widgets/CountPill.svelte";
   import PickCheck from "@/components/widgets/PickCheck.svelte";
 
   interface Props {
     rows: PickTreeRow[];
-    /** Screen-reader label AND the visible section header (fixes the old
-     * aria-only, header-less tree — a source is now a labelled section). */
+    /** Screen-reader label for the row group (the visible label is the panel
+     * title / result heading the caller renders). */
     ariaLabel: string;
-    /** Total items for the header count pill (defaults to the row count). */
-    count?: number | null;
-    /** Section collapse. When collapsed only the header shows. Caller-owned. */
-    collapsed?: boolean;
-    onToggleSection?: () => void;
   }
-  const { rows, ariaLabel, count = null, collapsed = false, onToggleSection }: Props = $props();
+  const { rows, ariaLabel }: Props = $props();
 </script>
 
-<div class="ctx-section" role="group" aria-label={ariaLabel}>
+<div class="ctx-mtree" role="group" aria-label={ariaLabel}>
   <NodeList mode="tree" density="compact">
-    <NodeRow title={ariaLabel} groupHeader collapsed={collapsed} onClick={onToggleSection}>
-      {#snippet leading()}
-        <GroupCaret collapsed={collapsed} />
-      {/snippet}
-      {#snippet trailing()}
-        <CountPill count={count ?? rows.length} />
-      {/snippet}
-      {#snippet nested()}
-        <NodeList mode="tree" density="compact">
-          {#each rows as row (row.key)}
-            <NodeRow
-              title={row.title}
-              depth={row.depth}
-              stripeColor={row.stripeColor ?? null}
-              selected={rowSelected(row.state)}
-              onClick={row.onToggle}
+    {#each rows as row (row.key)}
+      <NodeRow
+        title={row.title}
+        depth={row.depth}
+        stripeColor={row.stripeColor ?? null}
+        selected={rowSelected(row.state)}
+        onClick={row.onToggle}
+      >
+        {#snippet leading()}
+          {#if row.hasChildren}
+            <button
+              type="button"
+              class="ctx-row-caret"
+              aria-label={row.collapsed ? `Expand ${row.title}` : `Collapse ${row.title}`}
+              aria-expanded={!row.collapsed}
+              onclick={row.onCollapse}
+            ><GroupCaret collapsed={row.collapsed} /></button>
+          {:else}
+            <span class="ctx-row-caret ctx-row-caret-leaf" aria-hidden="true"></span>
+          {/if}
+          <PickCheck state={row.state} />
+        {/snippet}
+        {#snippet trailing()}
+          {#if row.count !== null}
+            <span class="ctx-row-count"
+              >{row.count} {row.count === 1 ? row.countNoun : (row.countNounPlural ?? `${row.countNoun}s`)}</span
             >
-              {#snippet leading()}
-                {#if row.hasChildren}
-                  <button
-                    type="button"
-                    class="ctx-row-caret"
-                    aria-label={row.collapsed ? `Expand ${row.title}` : `Collapse ${row.title}`}
-                    aria-expanded={!row.collapsed}
-                    onclick={row.onCollapse}
-                  ><GroupCaret collapsed={row.collapsed} /></button>
-                {:else}
-                  <span class="ctx-row-caret ctx-row-caret-leaf" aria-hidden="true"></span>
-                {/if}
-                <PickCheck state={row.state} />
-              {/snippet}
-              {#snippet trailing()}
-                {#if row.count !== null}
-                  <span class="ctx-row-count"
-                    >{row.count} {row.count === 1 ? row.countNoun : (row.countNounPlural ?? `${row.countNoun}s`)}</span
-                  >
-                {/if}
-              {/snippet}
-            </NodeRow>
-          {/each}
-        </NodeList>
-      {/snippet}
-    </NodeRow>
+          {/if}
+        {/snippet}
+      </NodeRow>
+    {/each}
   </NodeList>
 </div>
 
 <style>
-  .ctx-section {
+  .ctx-mtree {
     display: flex;
     flex-direction: column;
   }
-  /* The per-row collapse caret — a bare tap target wrapping the shared
-     GroupCaret chevron, sized to line up the PickCheck column across rows
-     (a leaf uses the same-width spacer so its check aligns under a
-     container's). */
+  /* The per-row collapse caret — a bare tap target wrapping the shared GroupCaret
+     chevron, sized to line up the PickCheck column across rows (a leaf uses the
+     same-width spacer so its check aligns under a container's). */
   .ctx-row-caret {
     flex: none;
     width: 22px;

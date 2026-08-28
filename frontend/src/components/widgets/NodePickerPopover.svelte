@@ -171,10 +171,11 @@
        a lore/scene metadata field). Coordinates are JS-computed from
        the trigger's getBoundingClientRect — see NodePicker.positionMenu(). */
     position: fixed;
+    /* Keep width/max-height in sync with MENU_WIDTH / MENU_MAX_HEIGHT in
+       NodePicker.positionMenu() — that math clamps this box to the viewport. */
     width: 344px;
     max-width: calc(100vw - 16px);
     max-height: 420px;
-    overflow-y: auto;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 11px;

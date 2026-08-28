@@ -210,6 +210,8 @@
   // trigger's getBoundingClientRect at open time and on resize/scroll.
   let triggerEl: HTMLButtonElement | undefined = $state();
   let menuStyle = $state("");
+  // Must match .ctx-menu's width / max-height in NodePickerPopover.svelte — this
+  // math clamps the popover to the viewport, so a size change there needs one here.
   const MENU_WIDTH = 344;
   const MENU_MAX_HEIGHT = 420;
 

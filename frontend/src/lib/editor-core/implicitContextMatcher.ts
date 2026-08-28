@@ -1,12 +1,16 @@
 // Regex-OR matcher for implicit-context detection (the in-editor variant
-// of backend helpers.py:_alias_match). Per the perf benchmark at
+// of the backend's `name_matcher.py`). Per the perf benchmark at
 // frontend/benchmarks/results.md, regex-OR beats Aho-Corasick by 2.6–4×
 // at our scale; both implementations agree on hit positions.
 //
-// Word boundaries treat apostrophe as a word-extension character so
-// "Bob" does not match inside "Bob's" (avoids common false positives in
-// English possessives). Single matcher compiled per lore-set change,
-// reused for every scan.
+// ADR-0075 §3: the boundary is the explicit ASCII class `[A-Za-z0-9_']`
+// (not `\w`, which is ASCII-only in JS but Unicode in Python — the two
+// engines would diverge on non-ASCII input) with an optional trailing
+// possessive/enclitic (`'ll`/`'re`/`'ve`/`'s`/`'d`/`'`)
+// consumed but excluded from the reported hit — so "Bob's" detects "Bob"
+// while "O'Brien" still does not yield "Brien" (the apostrophe is inside
+// the token, not a trailing clitic). Single matcher compiled per lore-set
+// change, reused for every scan.
 
 import type { LoreEntrySummary, MetadataSchema } from "@/lib/types";
 import { resolveColor } from "@/lib/utils/colors";
@@ -40,6 +44,28 @@ function escapeRegex(s: string): string {
   return s.replace(RE_ESCAPE, "\\$&");
 }
 
+const SEPARATOR_RE = /[\s-]+/;
+const SEPARATOR_RE_G = /[\s-]+/g;
+const CLITIC = "(?:'ll|'re|'ve|'s|'d|')?";
+const BOUNDARY_LEFT = "(?<![A-Za-z0-9_'])";
+const BOUNDARY_RIGHT = "(?![A-Za-z0-9_'])";
+
+/** Collapse space/hyphen runs to a single ASCII space, trim, lowercase — the
+ *  shared dedup/lookup key (§3 rule 4). Matched text can now differ from the
+ *  stored name (hyphen vs space), so id resolution can no longer key on raw
+ *  matched text. */
+function norm(s: string): string {
+  return s.replace(SEPARATOR_RE_G, " ").trim().toLowerCase();
+}
+
+/** Split on `[\s-]+`, escape each token, rejoin with `[\s-]+` so space and
+ *  hyphen are interchangeable in the compiled fragment (§3 rule 4);
+ *  single-word names are unchanged. */
+function buildFragment(name: string): string {
+  const tokens = name.split(SEPARATOR_RE).filter((t) => t.length > 0);
+  return tokens.map(escapeRegex).join("[\\s\\-]+").toLowerCase();
+}
+
 /** Pull a string-array field from metadata (lore aliases live here). */
 function readAliases(metadata: Record<string, unknown> | undefined): string[] {
   if (!metadata) return [];
@@ -70,9 +96,12 @@ export function compileMatcher(
   schema: MetadataSchema | null = null,
   effectiveNames: Record<string, string[]> | null = null,
 ): CompiledMatcher {
-  // Map name (lowercased) → id, sorted by name-length DESC. Length-desc
-  // alternation makes the regex pick the longest match at a given start
-  // (regex engines' leftmost-longest is contingent on alternation order).
+  // Map norm(name) → id, sorted by (-length, norm(name), id) — a total order
+  // independent of input order. Length-desc alternation makes the regex pick
+  // the longest match at a given start (regex engines' leftmost-longest is
+  // contingent on alternation order); the norm/id tie-break makes equal-length
+  // collisions resolve identically on both sides regardless of entity-list
+  // order (§3; the F1 fix).
   type NamedRef = { name: string; id: string };
   const refs: NamedRef[] = [];
   const lookup = new Map<string, MatcherEntry>();
@@ -106,20 +135,30 @@ export function compileMatcher(
       isEmpty: true,
     };
   }
-  refs.sort((a, b) => b.name.length - a.name.length);
+  refs.sort((a, b) => {
+    if (b.name.length !== a.name.length) return b.name.length - a.name.length;
+    const an = norm(a.name);
+    const bn = norm(b.name);
+    if (an !== bn) return an < bn ? -1 : 1;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
 
-  // Dedup names so the same string doesn't appear twice in the alternation
-  // (it'd just waste regex engine work). First-id-wins on collisions.
+  // Dedup by norm(name) so the same string doesn't appear twice in the
+  // alternation (it'd just waste regex engine work). First-id-wins on
+  // collisions, over the deterministic sort above.
   const nameToId = new Map<string, string>();
+  const fragments: string[] = [];
   for (const r of refs) {
-    const key = r.name.toLowerCase();
-    if (!nameToId.has(key)) nameToId.set(key, r.id);
+    const key = norm(r.name);
+    if (nameToId.has(key)) continue;
+    nameToId.set(key, r.id);
+    fragments.push(buildFragment(r.name));
   }
-  const escaped = [...nameToId.keys()].map(escapeRegex);
-  // Apostrophe-aware boundaries: (?<![\w']) on the left and (?![\w']) on
-  // the right treat ' as a word-character so "Bob" doesn't match in
-  // "Bob's". Without these, JS's standard \b breaks inside possessives.
-  const src = "(?<![\\w'])(" + escaped.join("|") + ")(?![\\w'])";
+  // ADR-0075 §3: explicit ASCII boundary (not \w, which is Unicode) with an
+  // optional trailing possessive/enclitic consumed but excluded from the
+  // capture group — "Bob's" detects "Bob"; "O'Brien" still does not yield
+  // "Brien" (its apostrophe is inside the token, not a trailing clitic).
+  const src = BOUNDARY_LEFT + "(" + fragments.join("|") + ")" + CLITIC + BOUNDARY_RIGHT;
   const regex = new RegExp(src, "gi");
 
   return {
@@ -132,7 +171,7 @@ export function compileMatcher(
       let m: RegExpExecArray | null;
       while ((m = regex.exec(text)) !== null) {
         const matched = m[1];
-        const id = nameToId.get(matched.toLowerCase());
+        const id = nameToId.get(norm(matched));
         if (!id) continue;
         hits.push({
           start: m.index,

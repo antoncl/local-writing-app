@@ -1,5 +1,5 @@
 {
-  "_comment": "ADR-0075 §5 parity corpus. Hand-authored oracle — do NOT regenerate from either matcher. Positions are 0-indexed char offsets, end exclusive. matchedText preserves the input's original casing. Slice 1 = §3 core (longest-match, case-fold, apostrophe-aware boundary matching the FE's CURRENT possessive-blocking behavior). Possessive-attaches and space≡hyphen are slice 2 and are intentionally absent.",
+  "_comment": "ADR-0075 §5 parity corpus. Hand-authored oracle — do NOT regenerate from either matcher. Positions are 0-indexed char offsets, end exclusive. matchedText preserves the input's original casing. Slice 1 = §3 core (longest-match, case-fold, apostrophe-aware boundary). Slice 2 adds possessive/enclitic-attaches, space≡hyphen equivalence (fusion excluded), and a deterministic (length, norm(name), id) tie-break for equal-length collisions (the F1 fix). Case folding (F2) is unchanged: IGNORECASE/`/i` covers common accented letters (e.g. é/É) identically on both sides; the rare fold-divergent characters (Greek final sigma ς/σ, Turkish İ/ı, ß/ẞ) are an accepted known limitation, not guaranteed identical.",
   "cases": [
     { "name": "longest-match wins over overlap",
       "entities": [ {"id":"e_bob","title":"Bob","aliases":[]}, {"id":"e_bobsmith","title":"Bob Smith","aliases":[]} ],
@@ -59,6 +59,46 @@
     { "name": "unicode — a longer word is not a match",
       "entities": [ {"id":"e_zoe","title":"Zoë","aliases":[]} ],
       "text": "Zoëlle danced",
-      "expected": [] }
+      "expected": [] },
+
+    { "name": "possessive 's attaches to the base name",
+      "entities": [ {"id":"e_bob","title":"Bob","aliases":[]} ],
+      "text": "Peter visited Bob's place.",
+      "expected": [ {"id":"e_bob","start":14,"end":17,"matchedText":"Bob"} ] },
+
+    { "name": "plural lone-apostrophe possessive attaches",
+      "entities": [ {"id":"e_smiths","title":"Smiths","aliases":[]} ],
+      "text": "the Smiths' car",
+      "expected": [ {"id":"e_smiths","start":4,"end":10,"matchedText":"Smiths"} ] },
+
+    { "name": "possessive-containing entity outranks base name (maximal munch)",
+      "entities": [ {"id":"e_bob","title":"Bob","aliases":[]}, {"id":"e_house","title":"Bob's house","aliases":[]} ],
+      "text": "Peter walked to Bob's House.",
+      "expected": [ {"id":"e_house","start":16,"end":27,"matchedText":"Bob's House"} ] },
+
+    { "name": "space≡hyphen: multi-word entity matches hyphenated prose",
+      "entities": [ {"id":"e_cw","title":"Code Warrior","aliases":[]} ],
+      "text": "the code-warrior fought",
+      "expected": [ {"id":"e_cw","start":4,"end":16,"matchedText":"code-warrior"} ] },
+
+    { "name": "space≡hyphen: multi-word beats single word by maximal munch",
+      "entities": [ {"id":"e_cw","title":"Code Warrior","aliases":[]}, {"id":"e_w","title":"Warrior","aliases":[]} ],
+      "text": "the code-warrior fought",
+      "expected": [ {"id":"e_cw","start":4,"end":16,"matchedText":"code-warrior"} ] },
+
+    { "name": "fused spelling does not match without an alias",
+      "entities": [ {"id":"e_cw","title":"Code Warrior","aliases":[]} ],
+      "text": "the codewarrior fought",
+      "expected": [] },
+
+    { "name": "cross-entity shared alias resolves to lowest id regardless of input order (F1)",
+      "entities": [ {"id":"e_bob","title":"Bob","aliases":["Kid"]}, {"id":"e_alice","title":"Alice","aliases":["Kid"]} ],
+      "text": "the Kid ran",
+      "expected": [ {"id":"e_alice","start":4,"end":7,"matchedText":"Kid"} ] },
+
+    { "name": "accented name matches case-insensitively (parity-safe non-ASCII)",
+      "entities": [ {"id":"e_zoe2","title":"Zoé","aliases":[]} ],
+      "text": "ZOÉ waved",
+      "expected": [ {"id":"e_zoe2","start":0,"end":3,"matchedText":"ZOÉ"} ] }
   ]
 }

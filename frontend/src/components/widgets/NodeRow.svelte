@@ -41,6 +41,12 @@
     // entry inside a Character group doesn't say "Character · …").
     detail?: string | null;
     active?: boolean;
+    // Selection state for a pickable row — sets `aria-pressed` on the title
+    // button so the whole clickable row carries the pick semantics (a leading
+    // checkbox visual is composed via the `leading` snippet; see PickCheck). A
+    // tri-state pick is "mixed" (some descendants picked). Unset = not a
+    // selectable row (no aria-pressed emitted — backward-compatible default).
+    selected?: boolean | "mixed";
     stripeColor?: string | null;
     // Tree indent. Resolved to `margin-left: depth * 26px` (ADR-0066
     // Amendment 1 — raised from 14 so a nested level steps clearly, and margin
@@ -140,6 +146,7 @@
     title = "",
     detail = null,
     active = false,
+    selected = undefined,
     stripeColor = null,
     depth = 0,
     onClick,
@@ -180,6 +187,11 @@
   const indentStyle = $derived(depth > 0 ? `margin-left: ${depth * 26}px; width: auto` : "");
   const stripeStyle = $derived(stripeColor ? `--row-stripe: ${stripeColor}` : "");
   const rootStyle = $derived([indentStyle, stripeStyle].filter(Boolean).join("; "));
+  // aria-pressed on the clickable title button, tri-state aware. Undefined when
+  // `selected` is unset, so a non-selectable row emits no attribute.
+  const ariaPressed = $derived<"true" | "false" | "mixed" | undefined>(
+    selected === undefined ? undefined : selected === "mixed" ? "mixed" : selected ? "true" : "false",
+  );
   // Effective mode: header rows always bare; otherwise explicit variant
   // prop wins, then enclosing NodeList's mode (via context), then card.
   const effectiveMode = $derived(groupHeader ? "tree" : (variant ?? nodeListMode?.current ?? "card"));
@@ -279,7 +291,7 @@
   {ondragover}
   {ondragleave}
   {ondrop}
->{#if leading}{@render leading()}{/if}{#if titleSlot}{@render titleSlot()}{:else if clickable}<button type="button" class="node-row-click" onclick={onClick} ondblclick={onDblClick}>{@render textBody()}</button>{:else}{@render textBody()}{/if}{#if layerLabel}<span class="node-row-layer" title={`Inherited from ${layerLabel}`}>{layerLabel}</span>{/if}{#if trailing}<span class="node-row-trailing">{@render trailing()}</span>{/if}</div>
+>{#if leading}{@render leading()}{/if}{#if titleSlot}{@render titleSlot()}{:else if clickable}<button type="button" class="node-row-click" aria-pressed={ariaPressed} onclick={onClick} ondblclick={onDblClick}>{@render textBody()}</button>{:else}{@render textBody()}{/if}{#if layerLabel}<span class="node-row-layer" title={`Inherited from ${layerLabel}`}>{layerLabel}</span>{/if}{#if trailing}<span class="node-row-trailing">{@render trailing()}</span>{/if}</div>
 
 {#if nested && !collapsed}
   <div class="node-row-group-children">{@render nested()}</div>

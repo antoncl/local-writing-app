@@ -755,4 +755,24 @@ describe("NodePicker drill-in navigation (ADR-0074 slice 7b)", () => {
     // Not the axis list — the Snippets axis ROW is replaced by its result rows.
     expect(within(menu).queryByRole("button", { name: "Back to sources" })).toBeNull();
   });
+
+  it("clicking the checkbox itself toggles the pick, not only the title", async () => {
+    const onChange = vi.fn();
+    render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "lore" }], multiple: true },
+        loreEntries: [loreEntry("l1", "Mara Voss", [])],
+        affordance: "add",
+        onChange,
+      },
+    });
+    const menu = await openMenu();
+    // The checkbox is its own click target (mouse convenience), not an inert glyph.
+    const check = menu.querySelector(".ctx-row-check") as HTMLButtonElement;
+    expect(check).not.toBeNull();
+    await fireEvent.click(check);
+    await tick();
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange.mock.calls[0][0].value[0]).toMatchObject({ id: "l1", kind: "lore" });
+  });
 });

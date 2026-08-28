@@ -77,7 +77,18 @@
           {:else}
             <span class="ctx-row-caret ctx-row-caret-leaf" aria-hidden="true"></span>
           {/if}
-          <PickCheck state={row.state} />
+          <!-- A mouse-convenience toggle over the checkbox itself — clicking the
+               box should pick, matching the mockup's whole-row target. The title
+               button (NodeRow's own, with aria-pressed) is the accessible control,
+               so this one is out of the tab order and hidden from AT to avoid a
+               duplicate. -->
+          <button
+            type="button"
+            class="ctx-row-check"
+            tabindex="-1"
+            aria-hidden="true"
+            onclick={row.onToggle}
+          ><PickCheck state={row.state} /></button>
         {/snippet}
         {#snippet trailing()}
           {#if row.count !== null}
@@ -118,6 +129,19 @@
   }
   .ctx-row-caret-leaf {
     cursor: default;
+  }
+  /* Bare wrapper making the checkbox a click target (a duplicate of the row's
+     own toggle). Flush around the 16px box so the check column stays aligned. */
+  .ctx-row-check {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    padding: 0;
+    margin: 0;
+    cursor: pointer;
   }
   .ctx-row-count {
     flex: none;

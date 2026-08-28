@@ -9,6 +9,7 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import { assistantTitle, partitionAssistants } from "@/lib/chat/assistantScope";
+  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import type { AssistantEntrySummary, PreviewMessage, PromptEntrySummary } from "@/lib/types";
 
   interface Props {
@@ -169,7 +170,7 @@
       {#if isLocked}
         <span class="cbv-chip-lock" aria-label="locked">🔒</span>
       {:else}
-        <span class="cbv-chip-caret" aria-hidden="true">▾</span>
+        <GroupCaret size="xs" />
       {/if}
     </button>
     {#if promptPickerOpen}
@@ -215,7 +216,7 @@
       {#if isLocked}
         <span class="cbv-chip-lock" aria-label="locked">🔒</span>
       {:else}
-        <span class="cbv-chip-caret" aria-hidden="true">▾</span>
+        <GroupCaret size="xs" />
       {/if}
     </button>
     {#if assistantPickerOpen}
@@ -354,7 +355,6 @@
   .cbv-chip strong { font-weight: 600; }
   .cbv-chip-glyph { font-size: var(--fs-md); }
   .cbv-chip-lock { font-size: var(--fs-xs); opacity: 0.65; }
-  .cbv-chip-caret { font-size: var(--fs-xs); opacity: 0.7; }
   .cbv-chip-locked { opacity: 0.8; }
   .cbv-chip-button { cursor: pointer; font: inherit; }
   .cbv-chip-button[disabled] { cursor: default; }

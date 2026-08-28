@@ -6,6 +6,7 @@
   import { tick } from "svelte";
   import ProjectBreadcrumb from "./ProjectBreadcrumb.svelte";
   import Popover from "./Popover.svelte";
+  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
 
   let {
     // Null when no project is open — switcher shows "Open a project…".
@@ -428,7 +429,7 @@
       aria-expanded={switcherOpen}
       onclick={toggleSwitcher}
     >
-      <span class="chevron" aria-hidden="true">▾</span>
+      <GroupCaret size="xs" />
       {#if currentProjectColor}
         <span class="project-color-dot" aria-hidden="true" style={`background: ${currentProjectColor}`}></span>
       {/if}
@@ -575,11 +576,6 @@
   .top-bar .switcher-button.active {
     background: var(--panel);
     border-color: var(--border);
-  }
-
-  .top-bar .switcher-button .chevron {
-    font-size: var(--fs-xs);
-    color: var(--text-3);
   }
 
   .top-bar .switcher-button .switcher-label {

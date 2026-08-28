@@ -10,6 +10,7 @@
   import { getSwatch } from "@/lib/utils/colors";
   import { portalToBody } from "@/lib/actions/portal";
   import type { SelectOption } from "@/lib/types";
+  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
 
   let {
     value = "",
@@ -123,7 +124,7 @@
       <span class="colored-select-placeholder">{placeholder}</span>
     {/if}
     {#if !readOnly}
-      <span class="colored-select-caret" aria-hidden="true">▾</span>
+      <span class="colored-select-caret" aria-hidden="true"><GroupCaret size="xs" /></span>
     {/if}
   </button>
 
@@ -257,9 +258,8 @@
 
   .colored-select-caret {
     margin-left: auto;
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-    line-height: 1;
+    display: inline-flex;
+    align-items: center;
   }
 
   .colored-select-popover {

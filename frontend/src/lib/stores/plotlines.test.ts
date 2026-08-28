@@ -2,7 +2,7 @@
 // card capture/restore/recreate helpers. A plotline restore refreshes BOTH the roster
 // and the board (its colour/beats feed cards' tint + badges), unlike a card's board-only
 // refresh; these tests pin that shape and the fetch-fresh / create-then-PUT behaviour.
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { get } from "svelte/store";
 import { api } from "@/lib/api";
 import {
@@ -33,6 +33,13 @@ const projection = (): PlotBoardProjection => ({
   containers: [],
   cards: [],
   diagnostics: [],
+});
+
+// A plotline restore/recreate refreshes the board via refreshAfterMutation, which
+// now also refreshes the card roster (ADR-0074 slice 6). Stub listCards so the path
+// doesn't leak a real /plot/cards fetch (#973).
+beforeEach(() => {
+  vi.spyOn(api, "listCards").mockResolvedValue({ entries: [] });
 });
 
 afterEach(() => vi.restoreAllMocks());

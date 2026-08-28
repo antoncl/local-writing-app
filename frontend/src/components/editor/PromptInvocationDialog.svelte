@@ -14,6 +14,7 @@
 <script lang="ts">
   import InputsDialog from "@/components/editor/InputsDialog.svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { cardEntriesStore } from "@/lib/stores/plotCards";
   import {
     effectivePromptInputs,
     promptEntryDescription,
@@ -59,10 +60,11 @@
   }: Props = $props();
 
   const metadataSchema = $derived($metadataSchemaStore);
-  // Roster a context_pick selector (tag/saved view) expands against at invocation
-  // (ADR-0074 slice 5).
+  // Roster a context_pick selector (tag / saved view / plotline) expands against at
+  // invocation (ADR-0074 slice 5/6). Plot cards come from the app-wide store, like
+  // the tag vocabulary — the plot roster is cards, over which a plotline expands.
   const selectorRoster = $derived(
-    buildSelectorRoster({ schema: metadataSchema, structure, loreEntries, assistantEntries }),
+    buildSelectorRoster({ schema: metadataSchema, structure, loreEntries, assistantEntries, cardEntries: $cardEntriesStore }),
   );
   // Minimal context for promptEntryDescription (reads metadataSchema only).
   const descCtx = $derived<PromptResolutionContext>({

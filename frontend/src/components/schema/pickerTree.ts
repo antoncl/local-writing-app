@@ -30,11 +30,15 @@ export type RenderedNode = {
 // `parent` is null; descendants attach via the parent chain. Abstract types act
 // as containers — they're rendered as checkboxes too, but checking them toggles
 // their concrete descendants (abstracts have no instances so they're not stored).
-export function buildTree(schema: MetadataSchema | null, kind: string): SchemaNode[] {
+// `exclude` drops entry types that aren't offerable content sources — the plot
+// kind uses it to hide `plot:board` (a presentation singleton) and `plot:template`
+// (a Library lens), leaving plotline + card (ADR-0074 slice 6).
+export function buildTree(schema: MetadataSchema | null, kind: string, exclude?: Iterable<string>): SchemaNode[] {
   if (!schema) return [];
+  const excludeSet = exclude ? new Set(exclude) : null;
   type Raw = { id: string; name: string; abstract: boolean; parent: string | null };
   const raw: Raw[] = Object.entries(schema.entry_types ?? {})
-    .filter(([, def]) => def.kind === kind)
+    .filter(([id, def]) => def.kind === kind && !excludeSet?.has(id))
     .map(([id, def]) => ({
       id,
       name: def.name || id,

@@ -18,18 +18,22 @@ import { evaluateView, type EvalNode } from "@/lib/views/evaluateView";
 import { structureToEvalNodes } from "@/lib/views/structureNodes";
 import type {
   AssistantEntrySummary,
+  CardSummary,
   LoreEntrySummary,
   MetadataSchema,
   NodePickerRef,
-  PlotlineSummary,
   StructureDocument,
   ViewSource,
   ViewSpec,
 } from "@/lib/types";
 
-/** A selector ref (kind "tag"/"view") carries a `selector`; a member ref does not. */
+/** A selector ref carries an inline `selector` ViewSource (a tag, a saved view,
+ * or a plotline); a concrete member ref — or a backend-expanded manuscript
+ * container — does not. The presence of the spec IS the definition, so a new
+ * selector shape (slice 6's plotline container) needs no change here: no
+ * hardcoded kind list to extend (ADR-0074 slice 6). */
 export function isSelectorRef(ref: NodePickerRef): boolean {
-  return ref.kind === "tag" || ref.kind === "view";
+  return ref.selector != null;
 }
 
 /** The rosters + schema needed to evaluate a selector's ViewSource. One is built
@@ -113,7 +117,10 @@ export interface SelectorRosterInputs {
   structure?: StructureDocument | null;
   loreEntries?: LoreEntrySummary[];
   assistantEntries?: AssistantEntrySummary[];
-  plotEntries?: PlotlineSummary[];
+  // The `plot` roster is CARDS, not plotlines (ADR-0074 slice 6): a plotline is a
+  // container whose selector expands to the cards whose `metadata.plotline` points
+  // at it, so the members it evaluates over are the cards.
+  cardEntries?: CardSummary[];
 }
 
 /** Build the per-surface roster once, reusing the same kind→roster adapters the
@@ -123,7 +130,7 @@ export function buildSelectorRoster(inputs: SelectorRosterInputs): SelectorRoste
   const rostersByKind: Partial<Record<string, EvalNode[]>> = {};
   if (inputs.loreEntries) rostersByKind.lore = inputs.loreEntries as unknown as EvalNode[];
   if (inputs.assistantEntries) rostersByKind.assistant = inputs.assistantEntries as unknown as EvalNode[];
-  if (inputs.plotEntries) rostersByKind.plot = inputs.plotEntries as unknown as EvalNode[];
+  if (inputs.cardEntries) rostersByKind.plot = inputs.cardEntries as unknown as EvalNode[];
   if (inputs.structure) rostersByKind.manuscript = structureToEvalNodes(inputs.structure);
   return { rostersByKind, schema: inputs.schema ?? null };
 }

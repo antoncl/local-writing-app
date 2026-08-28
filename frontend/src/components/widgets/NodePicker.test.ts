@@ -11,17 +11,30 @@ import NodePicker from "./NodePicker.svelte";
 import { api } from "@/lib/api";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import { setKnownTags, clearKnownTags } from "@/lib/stores/tags";
+import { cardEntriesStore } from "@/lib/stores/plotCards";
 import { hideLibraryEntry, openProjectHidden } from "@/lib/stores/hiddenLibrary";
 import type { MetadataSchema, PlotlineSummary, PromptEntrySummary, ViewNodeSummary } from "@/lib/types";
 
 const SCHEMA = {
   entry_types: {
     "prompt:snippet": { name: "Snippet" },
-    "plot:plotline": { name: "Plotline" },
+    "plot:plotline": { name: "Plotline", kind: "plot" },
+    "plot:card": { name: "Card", kind: "plot" },
     "lore:character": { name: "Character", kind: "lore" },
   },
   fields: {},
 } as unknown as MetadataSchema;
+
+// A plot card summary shape (metadata.plotline is the scalar membership ref).
+function plotCard(id: string, title: string, plotlineId: string | null) {
+  return {
+    id,
+    title,
+    body: "",
+    entry_type: "plot:card",
+    metadata: plotlineId ? { plotline: plotlineId } : {},
+  } as never;
+}
 
 function loreEntry(id: string, title: string, tags: string[], aliases: string[] = []) {
   return {
@@ -58,11 +71,13 @@ beforeEach(() => {
   // network (#973). Tags come from knownTagsStore (no fetch) — empty by default.
   vi.spyOn(api, "listViews").mockResolvedValue({ entries: [] });
   clearKnownTags();
+  cardEntriesStore.set([]);
 });
 afterEach(() => {
   openProjectHidden(null);
   localStorage.clear();
   clearKnownTags();
+  cardEntriesStore.set([]);
   vi.restoreAllMocks();
 });
 
@@ -86,37 +101,96 @@ describe("NodePicker snippet picker — hide filter (ADR-0049 #682)", () => {
   });
 });
 
-describe("NodePicker plot source (#742)", () => {
-  it("enumerates plotline candidates for a plot:plotline ref", async () => {
+// ADR-0074 slice 6: a plotline is the 6th container shape — a live selector over
+// the cards whose scalar metadata.plotline points at it, not a leaf node ref.
+describe("NodePicker plot source — plotline containers (ADR-0074 slice 6)", () => {
+  it("renders each plotline as a container over its cards", async () => {
+    cardEntriesStore.set([
+      plotCard("c1", "Break-in", "p1"),
+      plotCard("c2", "Getaway", "p1"),
+      plotCard("c3", "A kiss", "p2"),
+    ]);
     render(NodePicker, {
       props: {
         config: { sources: [{ kind: "plot", expr: { type: "plot:plotline" } }] },
-        plotEntries: [plotline("p1", "Main plot"), plotline("p2", "Romance")],
+        plotEntries: [plotline("p1", "The Heist"), plotline("p2", "Romance")],
         affordance: "add",
       },
     });
     await fireEvent.click(screen.getByRole("button", { expanded: false }));
     await tick();
 
-    // The gap #742 closes: before the plot branch, this list was empty.
-    expect(screen.getByText("Plotlines")).toBeInTheDocument();
-    expect(screen.getByText("Main plot")).toBeInTheDocument();
-    expect(screen.getByText("Romance")).toBeInTheDocument();
+    const plot = (await screen.findAllByRole("group", { name: "Plotlines" }))[0];
+    expect(within(plot).getByText("The Heist")).toBeInTheDocument();
+    expect(within(plot).getByText("Romance")).toBeInTheDocument();
+    // Drill: The Heist's cards are its members; the Romance card is not.
+    expect(within(plot).getByText("Break-in")).toBeInTheDocument();
+    expect(within(plot).getByText("Getaway")).toBeInTheDocument();
+    expect(within(plot).queryByText("A kiss")).not.toBeNull(); // under Romance, still rendered
   });
 
-  it("filters candidates to the config's entry_type whitelist", async () => {
+  it("checking a plotline stores ONE live selector ref, not the plotline node (absorb)", async () => {
+    const onChange = vi.fn();
+    cardEntriesStore.set([plotCard("c1", "Break-in", "p1"), plotCard("c2", "Getaway", "p1")]);
     render(NodePicker, {
       props: {
         config: { sources: [{ kind: "plot", expr: { type: "plot:plotline" } }] },
-        // A stray non-plotline plot node must not leak into the plotline picker.
-        plotEntries: [plotline("p1", "Main plot"), { ...plotline("c1", "A card"), entry_type: "plot:card" }],
+        plotEntries: [plotline("p1", "The Heist")],
+        affordance: "add",
+        onChange,
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+
+    const plot = (await screen.findAllByRole("group", { name: "Plotlines" }))[0];
+    await fireEvent.click(within(plot).getByText("The Heist").closest("button")!);
+    await tick();
+
+    const [detail] = onChange.mock.calls[0];
+    expect(detail.value).toHaveLength(1);
+    expect(detail.value[0]).toMatchObject({ id: "plotline:p1", kind: "plot", entry_type: "plot:plotline" });
+    // The stored ref carries its inline selector spec — the plotline's cards, live.
+    expect(detail.value[0].selector).toMatchObject({ kind: "plot" });
+  });
+
+  it("drilling in and checking a card stores that explicit (ungated) card ref", async () => {
+    const onChange = vi.fn();
+    cardEntriesStore.set([plotCard("c1", "Break-in", "p1"), plotCard("c2", "Getaway", "p1")]);
+    render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "plot", expr: { type: "plot:plotline" } }], multiple: true },
+        plotEntries: [plotline("p1", "The Heist")],
+        affordance: "add",
+        onChange,
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+
+    const plot = (await screen.findAllByRole("group", { name: "Plotlines" }))[0];
+    await fireEvent.click(within(plot).getByText("Break-in").closest("button")!);
+    await tick();
+
+    const [detail] = onChange.mock.calls[0];
+    // A concrete card ref — no selector, so it's ungated and expands to itself.
+    expect(detail.value).toEqual([expect.objectContaining({ id: "c1", kind: "plot" })]);
+    expect(detail.value[0].selector).toBeUndefined();
+  });
+
+  it("does not promote a stray non-plotline node to a container", async () => {
+    render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "plot", expr: { type: "plot:plotline" } }] },
+        // A stray plot:card in the plotline roster must not become a container.
+        plotEntries: [plotline("p1", "The Heist"), { ...plotline("c1", "A card"), entry_type: "plot:card" }],
         affordance: "add",
       },
     });
     await fireEvent.click(screen.getByRole("button", { expanded: false }));
     await tick();
 
-    expect(screen.getByText("Main plot")).toBeInTheDocument();
+    expect(screen.getByText("The Heist")).toBeInTheDocument();
     expect(screen.queryByText("A card")).toBeNull();
   });
 });
@@ -428,13 +502,14 @@ describe("NodePicker tag selectors (#1491)", () => {
 describe("NodePicker onChange callback (runes conversion #49)", () => {
   // The dispatch("change", …) → onChange callback prop is the crux of the runes
   // conversion; lock the payload shape and the multi-select append so a later
-  // edit can't silently regress it.
+  // edit can't silently regress it. Uses a leaf lore source (plot is a container
+  // now, ADR-0074 slice 6).
   it("reports the picked ref through onChange with the { value } payload", async () => {
     const onChange = vi.fn();
     render(NodePicker, {
       props: {
-        config: { sources: [{ kind: "plot", expr: { type: "plot:plotline" } }] },
-        plotEntries: [plotline("p1", "Main plot"), plotline("p2", "Romance")],
+        config: { sources: [{ kind: "lore" }] },
+        loreEntries: [loreEntry("l1", "Mara Voss", []), loreEntry("l2", "Quill", [])],
         affordance: "add",
         onChange,
       },
@@ -442,22 +517,22 @@ describe("NodePicker onChange callback (runes conversion #49)", () => {
     await fireEvent.click(screen.getByRole("button", { expanded: false }));
     await tick();
 
-    await fireEvent.click(screen.getByText("Main plot").closest("button")!);
+    await fireEvent.click(screen.getByText("Mara Voss").closest("button")!);
     await tick();
 
     expect(onChange).toHaveBeenCalledTimes(1);
     const [detail] = onChange.mock.calls[0];
     expect(detail.value).toHaveLength(1);
-    expect(detail.value[0]).toMatchObject({ id: "p1", kind: "plot" });
+    expect(detail.value[0]).toMatchObject({ id: "l1", kind: "lore" });
   });
 
   it("appends to the existing value when multiple selection is allowed", async () => {
     const onChange = vi.fn();
     render(NodePicker, {
       props: {
-        config: { sources: [{ kind: "plot", expr: { type: "plot:plotline" } }] },
-        plotEntries: [plotline("p1", "Main plot"), plotline("p2", "Romance")],
-        value: [{ id: "p2", kind: "plot", title: "Romance" }],
+        config: { sources: [{ kind: "lore" }], multiple: true },
+        loreEntries: [loreEntry("l1", "Mara Voss", []), loreEntry("l2", "Quill", [])],
+        value: [{ id: "l2", kind: "lore", title: "Quill" }],
         affordance: "add",
         onChange,
       },
@@ -465,11 +540,11 @@ describe("NodePicker onChange callback (runes conversion #49)", () => {
     await fireEvent.click(screen.getByRole("button", { expanded: false }));
     await tick();
 
-    await fireEvent.click(screen.getByText("Main plot").closest("button")!);
+    await fireEvent.click(screen.getByText("Mara Voss").closest("button")!);
     await tick();
 
     const [detail] = onChange.mock.calls[0];
-    expect(detail.value.map((r: { id: string }) => r.id)).toEqual(["p2", "p1"]);
+    expect(detail.value.map((r: { id: string }) => r.id)).toEqual(["l2", "l1"]);
   });
 });
 
@@ -481,11 +556,11 @@ describe("NodePicker candidate toggle (ADR-0074 #1464)", () => {
     const onChange = vi.fn();
     render(NodePicker, {
       props: {
-        config: { sources: [{ kind: "plot", expr: { type: "plot:plotline" } }] },
-        plotEntries: [plotline("p1", "Main plot"), plotline("p2", "Romance")],
+        config: { sources: [{ kind: "lore" }], multiple: true },
+        loreEntries: [loreEntry("l1", "Mara Voss", []), loreEntry("l2", "Quill", [])],
         value: [
-          { id: "p1", kind: "plot", title: "Main plot" },
-          { id: "p2", kind: "plot", title: "Romance" },
+          { id: "l1", kind: "lore", title: "Mara Voss" },
+          { id: "l2", kind: "lore", title: "Quill" },
         ],
         affordance: "add",
         onChange,
@@ -494,18 +569,18 @@ describe("NodePicker candidate toggle (ADR-0074 #1464)", () => {
     await fireEvent.click(screen.getByRole("button", { expanded: false }));
     await tick();
 
-    // "Main plot" now renders twice — the candidate row AND the picked chip
+    // "Mara Voss" now renders twice — the candidate row AND the picked chip
     // (both NodeRows, ADR-0068). Scope to the candidate menu; that picked
     // candidate is a live, clickable row (not the old inert one), so clicking
     // it unpicks, leaving the other.
     const menu = document.querySelector(".ctx-menu")!;
     expect(menu).not.toBeNull();
-    const row = within(menu as HTMLElement).getByText("Main plot").closest("button")!;
+    const row = within(menu as HTMLElement).getByText("Mara Voss").closest("button")!;
     await fireEvent.click(row);
     await tick();
 
     const [detail] = onChange.mock.calls[0];
-    expect(detail.value.map((r: { id: string }) => r.id)).toEqual(["p2"]);
+    expect(detail.value.map((r: { id: string }) => r.id)).toEqual(["l2"]);
   });
 });
 

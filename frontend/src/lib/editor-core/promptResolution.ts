@@ -446,10 +446,12 @@ export function resolutionSceneIdFromInputs(
   return "";
 }
 
-// A ref that resolves to a concrete node id, not a tag/view SELECTOR (whose id
-// is a synthetic `view:…`/`tag:…` handle, not a node — ADR-0074 slice 5).
+// A ref that resolves to a concrete node id, not a SELECTOR (a tag / saved view /
+// plotline, whose id is a synthetic `view:…`/`tag:…`/`plotline:…` handle, not a
+// node). Detected by the presence of an inline `selector` spec, so a new selector
+// shape needs no change here (ADR-0074 slice 5/6).
 function isConcreteRef(r: NodePickerRef): boolean {
-  return r.kind !== "tag" && r.kind !== "view";
+  return r.selector == null;
 }
 
 // Pull the first concrete node id from a context_pick input value. Strict: only

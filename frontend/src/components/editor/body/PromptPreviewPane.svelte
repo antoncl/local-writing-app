@@ -16,6 +16,7 @@
   import { coerceInputValue, friendlyTemplateError } from "@/lib/utils/promptInputs";
   import { buildSelectorRoster, expandSelectorsInEncodedValue } from "@/lib/views/pickerSelectors";
   import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { cardEntriesStore } from "@/lib/stores/plotCards";
   import { promptPreviewDrafts } from "@/lib/stores/promptPreviewDrafts.svelte";
   import type {
     DocumentKind,
@@ -91,10 +92,12 @@
 
   const isPrompt = (): boolean => documentKind === "prompt" && !!scene;
 
-  // Roster a context_pick selector (tag/saved view) expands against at invocation
-  // (ADR-0074 slice 5). Author design-time preview — lore + manuscript cover the
-  // authorable view kinds; a rarer assistant/plot selector under-expands here.
-  const selectorRoster = $derived(buildSelectorRoster({ schema: $metadataSchemaStore, structure, loreEntries }));
+  // Roster a context_pick selector (tag / saved view / plotline) expands against at
+  // invocation (ADR-0074 slice 5/6). Author design-time preview — lore + manuscript
+  // + plot cards cover the common kinds; a rarer assistant selector under-expands here.
+  const selectorRoster = $derived(
+    buildSelectorRoster({ schema: $metadataSchemaStore, structure, loreEntries, cardEntries: $cardEntriesStore }),
+  );
 
   // ADR-0062 Amendment 2 / D1: the preview's input values + render state live in a
   // per-document store, not in this component, so a detached preview (a second

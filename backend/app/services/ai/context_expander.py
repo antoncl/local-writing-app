@@ -30,7 +30,8 @@ from typing import TYPE_CHECKING, Any, Literal
 from app.models import ChatSessionContextItem, ChatSessionJournalEntry
 from app.services.ai.helpers import _attr_or_item, _safe_read_node
 from app.services.ai.lore_selection import (
-    _alias_match,
+    _build_scene_matcher,
+    _scan_matcher_ids,
     _scene_prose_ids,
     _textual_one_hop,
 )
@@ -76,9 +77,9 @@ def expand_context(
 
     `scene` is the chat's resolution scene — a plain id string, a loaded
     scene node (EntryRef), or None for a scene-less chat. Passed through to
-    `_alias_match`/`_scene_prose_ids` for effective-name resolution; only
-    `_scene_prose_ids` needs the loaded node (an id string yields no prose
-    surface — see there).
+    `_build_scene_matcher`/`_scene_prose_ids` for effective-name resolution;
+    only `_scene_prose_ids` needs the loaded node (an id string yields no
+    prose surface — see there).
 
     `turn` is the message index at which the detection fires (the new
     user message's index). Recorded on each entry for the audit UI.
@@ -90,20 +91,25 @@ def expand_context(
     composer_text = text if isinstance(text, str) else ""
     rendered = rendered_text if isinstance(rendered_text, str) else ""
 
+    # Built once and threaded through every surface below — the lore set is
+    # fixed for this one detection pass, so there's no need to recompile the
+    # matcher per surface (composer, rendered prompt, scene prose, depth-1).
+    matcher = _build_scene_matcher(project, scene)
+
     # Direct textual matches against title + aliases, resolved under each
     # entity's effective name-set as of the chat's resolution scene (#61).
-    direct_ids = _alias_match(project, composer_text, scene=scene) if composer_text.strip() else set()
+    direct_ids = _scan_matcher_ids(matcher, composer_text) if composer_text.strip() else set()
     # The first-turn rendered prompt output (ADR-0075 §2/slice 3b) — excludes
     # anything the composer already matched so an id isn't double-labeled.
     rendered_ids = (
-        _alias_match(project, rendered, scene=scene) if rendered.strip() else set()
+        _scan_matcher_ids(matcher, rendered) if rendered.strip() else set()
     ) - direct_ids
     # The scene's own detection surface — body + every long_text field,
     # scanned field-by-field so a name can't false-match across a field
     # boundary (ADR-0075 §2/slice 3). Excludes anything the composer or
     # rendered prompt already matched so an id isn't double-labeled across
     # more than one source in one turn.
-    prose_ids = _scene_prose_ids(project, scene) - direct_ids - rendered_ids
+    prose_ids = _scene_prose_ids(project, scene, matcher=matcher) - direct_ids - rendered_ids
     if not direct_ids and not rendered_ids and not prose_ids:
         return []
 
@@ -112,7 +118,7 @@ def expand_context(
     # re-finds names already in `combined_direct` if they happen to appear in
     # any direct match's body, so we subtract combined_direct below.
     combined_direct = direct_ids | rendered_ids | prose_ids
-    depth1_ids = _textual_one_hop(project, combined_direct, scene=scene)
+    depth1_ids = _textual_one_hop(project, combined_direct, scene=scene, matcher=matcher)
 
     # What's already pinned via explicit picks or earlier journal turns?
     in_scope: set[str] = set()

@@ -38,6 +38,7 @@ def _load_script(name: str):
 
 
 dev_backend = _load_script("dev_backend")
+gen_guides = _load_script("gen_guides")
 
 
 class _StubProc:
@@ -613,6 +614,36 @@ def test_precommit_filters_cover_everything_the_scripts_check():
             assert size_re.search(f), f"pre-commit file-size filter misses {f}"
         if style_guard.is_checked(Path(f)):
             assert style_re.search(f), f"pre-commit style filter misses {f}"
+
+
+# --- the guides-bundle filter must name every doc gen_guides.py bundles (#1537)
+#
+# gen_guides.py --check runs unconditionally in CI, but its pre-commit hook only
+# fires on files its `files:` filter matches. A bundled source missing from the
+# filter skips the local regen-clean gate and only trips CI — the asymmetry that
+# cost a round-trip in the picker work. `coverage_errors()` makes the two lists
+# self-enforcing; these pin that it stays wired and actually catches a gap.
+
+
+def test_guides_bundle_filter_covers_every_bundled_source():
+    assert gen_guides.coverage_errors() == []
+
+
+def test_guides_filter_pattern_extracts_the_right_hook_block():
+    """The stdlib parser pulls guides-bundle's own `files:`, not a neighbour's."""
+    pattern = gen_guides._guides_filter_pattern()
+    assert pattern and pattern.startswith("^(") and "context-picker" in pattern
+
+
+def test_coverage_guard_catches_a_source_missing_from_the_filter(monkeypatch):
+    """A bundled source the real filter can't match is reported (mutation guard)."""
+    monkeypatch.setattr(
+        gen_guides,
+        "GUIDES",
+        [*gen_guides.GUIDES, {"id": "x", "title": "X", "source": "docs/not-bundled.md"}],
+    )
+    errors = gen_guides.coverage_errors()
+    assert any("docs/not-bundled.md" in e for e in errors)
 
 
 def test_the_hook_feeds_every_style_checked_file_to_the_style_guard():

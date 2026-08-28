@@ -220,7 +220,7 @@ highlight's promise (§1) is currently only partly kept, which is the live defec
 describes.
 
 The **second axis — the backend matcher was not the §3 algorithm — is now
-closed** (slice 1, #1489). `_alias_match` previously did a per-entry word-**set
+closed** (slice 1, #1486). `_alias_match` previously did a per-entry word-**set
 membership** test (no overlap resolution, no maximal munch: "Bob" and "Bob Smith"
 over "…Bob Smith" returned **both**, and it used standard `\b`). It now delegates
 to a positional longest-match regex-OR (`services/ai/name_matcher.py`) that
@@ -236,6 +236,10 @@ space≡hyphen, and deterministic-tie-break rows are the standing guard. Case
 folding stays IGNORECASE-based: common accented letters (é/É) fold identically
 across Python and JS, while the rare fold-divergent characters (Greek final sigma
 ς/σ, Turkish İ/ı, ß/ẞ) are an accepted known limitation, not guaranteed identical.
+The `[\s-]+` separator class carries the same caveat: ordinary whitespace and
+non-breaking spaces are treated identically on both sides, but the engines' `\s`
+sets differ on a few exotic characters (e.g. U+FEFF), so a name split by one of
+those is a matching corner both sides are not guaranteed to agree on.
 
 **This ADR authorizes closing that gap** — completing the backend surface
 coverage to §2, behind the §5 parity gate — as follow-up implementation slices.

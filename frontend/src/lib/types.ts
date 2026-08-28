@@ -748,12 +748,24 @@ export type NodePickerConfig = {
 // ref marks it as the implicit `scene` binding for the prompt's
 // template (NC-style ★ target). Only one ref per input can be the
 // target; the picker UI enforces single-selection.
+//
+// A ref is one of two things (ADR-0074): a concrete MEMBER pick
+// (kind manuscript/lore/…, resolved directly by the backend), or a
+// SELECTOR (kind "tag"/"view") that carries a `selector` ViewSource
+// expanded frontend-side to its current members at invocation
+// (ADR-0025/Amendment 1 — no backend evaluator). A selector never
+// reaches the wire unexpanded.
 export type NodePickerRef = {
   id: string;
-  kind: "manuscript" | "lore" | "snippet" | "assistant" | "research" | "plot" | "preset";
+  kind: "manuscript" | "lore" | "snippet" | "assistant" | "research" | "plot" | "preset" | "tag" | "view";
   title: string;
   entry_type?: string;
   target?: boolean;
+  // Present only on a selector ref (kind "tag"/"view"): the ViewSource
+  // whose evaluation yields the selector's live members. Slice 5 stores
+  // the resolved ViewSpec inline so expansion is self-contained (roster +
+  // evaluateView), not dependent on a cross-surface view load.
+  selector?: ViewSource;
 };
 
 export type PromptInputDefinition = {

@@ -14,6 +14,8 @@
   import { api } from "@/lib/api";
   import { formatCostEur, formatTokens } from "@/lib/utils/money";
   import { coerceInputValue, friendlyTemplateError } from "@/lib/utils/promptInputs";
+  import { buildSelectorRoster, expandSelectorsInEncodedValue } from "@/lib/views/pickerSelectors";
+  import { metadataSchemaStore } from "@/lib/stores/schema";
   import { promptPreviewDrafts } from "@/lib/stores/promptPreviewDrafts.svelte";
   import type {
     DocumentKind,
@@ -88,6 +90,11 @@
   }: Props = $props();
 
   const isPrompt = (): boolean => documentKind === "prompt" && !!scene;
+
+  // Roster a context_pick selector (tag/saved view) expands against at invocation
+  // (ADR-0074 slice 5). Author design-time preview — lore + manuscript cover the
+  // authorable view kinds; a rarer assistant/plot selector under-expands here.
+  const selectorRoster = $derived(buildSelectorRoster({ schema: $metadataSchemaStore, structure, loreEntries }));
 
   // ADR-0062 Amendment 2 / D1: the preview's input values + render state live in a
   // per-document store, not in this component, so a detached preview (a second
@@ -218,7 +225,9 @@
     const inputs: Record<string, unknown> = {};
     for (const declared of promptPreviewDeclaredInputs) {
       const raw = record.inputDrafts[declared.name] ?? "";
-      const coerced = coerceInputValue(raw, declared.type);
+      let coerced = coerceInputValue(raw, declared.type);
+      if (declared.type === "context_pick")
+        coerced = expandSelectorsInEncodedValue(coerced as string, selectorRoster);
       if (coerced !== null && coerced !== "") inputs[declared.name] = coerced;
     }
     const key = JSON.stringify({ rawBody, sceneId: record.sceneId, inputs });

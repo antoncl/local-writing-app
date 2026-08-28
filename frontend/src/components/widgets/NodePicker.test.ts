@@ -12,6 +12,7 @@ import { api } from "@/lib/api";
 import { metadataSchemaStore } from "@/lib/stores/schema";
 import { setKnownTags, clearKnownTags } from "@/lib/stores/tags";
 import { cardEntriesStore } from "@/lib/stores/plotCards";
+import { setPalette } from "@/lib/utils/colors";
 import { hideLibraryEntry, openProjectHidden } from "@/lib/stores/hiddenLibrary";
 import type { MetadataSchema, PlotlineSummary, PromptEntrySummary, ViewNodeSummary } from "@/lib/types";
 
@@ -360,6 +361,48 @@ describe("NodePicker manuscript tree (#1476)", () => {
     const [detail] = onChange.mock.calls[0];
     expect(detail.value).toHaveLength(1);
     expect(detail.value[0]).toMatchObject({ id: "ch1", kind: "manuscript", entry_type: "manuscript:chapter" });
+  });
+
+  // #1520 follow-up (Anton's dogfood): a chapter that carries its OWN scene_id
+  // must not be dropped when the config restricts scene types. flattenManuscript's
+  // visibility check classified scene-vs-container by `node.scene_id`, so a chapter
+  // (which has a backing scene_id) was run through the scene allowlist and filtered
+  // — hiding the chapter AND its child scene, while the root still counted them.
+  it("keeps a scene_id-bearing chapter under a scene-restricted config", async () => {
+    const nested = {
+      root: {
+        id: "root",
+        type: "root",
+        title: "Manuscript",
+        scene_id: null,
+        children: [
+          { id: "s_a", type: "manuscript:scene", scene_id: "sa", title: "Untitled Scene" },
+          {
+            id: "ch",
+            type: "manuscript:chapter",
+            scene_id: "chp", // a chapter with its own backing prose file
+            title: "Chapter",
+            children: [{ id: "s_b", type: "manuscript:scene", scene_id: "sb", title: "Nested Scene" }],
+          },
+        ],
+      },
+    } as never;
+    render(NodePicker, {
+      props: {
+        // Restricts to scenes — the allowlist that used to swallow the chapter.
+        config: { sources: [{ kind: "manuscript", expr: { type: "manuscript:scene" } }] },
+        structure: nested,
+        affordance: "add",
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+    const menu = document.querySelector(".ctx-menu") as HTMLElement;
+    expect(within(menu).getByText("Untitled Scene")).toBeInTheDocument();
+    // The chapter shows (a pickable container), not swallowed by the scene filter.
+    expect(within(menu).getByText("Chapter")).toBeInTheDocument();
+    await expandGroup(menu, "Chapter");
+    expect(within(menu).getByText("Nested Scene")).toBeInTheDocument();
   });
 
   it("checking the root stores the whole-manuscript ref", async () => {
@@ -811,5 +854,57 @@ describe("NodePicker drill-in navigation (ADR-0074 slice 7b)", () => {
     await tick();
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange.mock.calls[0][0].value[0]).toMatchObject({ id: "l1", kind: "lore" });
+  });
+});
+
+// #1520 follow-up: a node's own metadata.color (instance override, e.g. the
+// Aetheria lore entry's `color: crimson`) must win over the type/kind default in
+// the picker stripe. It was dropped — hexForRef passed null to resolveColor — so
+// a custom-coloured entry showed the kind default like every other row.
+describe("NodePicker instance colour (#1520)", () => {
+  const COLOUR_SCHEMA = {
+    entry_types: { "lore:character": { name: "Character", kind: "lore", color: "type-blue" } },
+    fields: {},
+  } as unknown as MetadataSchema;
+
+  function loreWithColour(id: string, title: string, colour: string | null) {
+    return {
+      id,
+      title,
+      body: "",
+      entry_type: "lore:character",
+      metadata: colour ? { color: colour } : {},
+    } as unknown as import("@/lib/types").LoreEntrySummary;
+  }
+
+  beforeEach(() => {
+    metadataSchemaStore.set(COLOUR_SCHEMA);
+    setPalette([
+      { id: "type-blue", label: "Type Blue", hex: "#0000ff" },
+      { id: "crimson", label: "Crimson", hex: "#dc143c" },
+    ]);
+  });
+  afterEach(() => setPalette([]));
+
+  it("honours a lore entry's own metadata.color over the type default", async () => {
+    render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "lore" }], multiple: true },
+        loreEntries: [loreWithColour("l1", "Aetheria", "crimson"), loreWithColour("l2", "Plainly", null)],
+        affordance: "add",
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+    const menu = document.querySelector(".ctx-menu") as HTMLElement;
+    await fireEvent.click(within(menu).getByRole("button", { name: "Expand Character" }));
+    await tick();
+
+    const custom = within(menu).getByText("Aetheria").closest(".node-row") as HTMLElement;
+    const plain = within(menu).getByText("Plainly").closest(".node-row") as HTMLElement;
+    // The custom entry uses its instance swatch; the plain one falls back to the
+    // type default — they must differ.
+    expect(custom.style.getPropertyValue("--row-stripe")).toBe("#dc143c");
+    expect(plain.style.getPropertyValue("--row-stripe")).toBe("#0000ff");
   });
 });

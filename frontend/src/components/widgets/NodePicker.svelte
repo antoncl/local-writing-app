@@ -34,7 +34,7 @@
     ViewNodeSummary,
     ViewSpec,
   } from "@/lib/types";
-  import { resolveColor } from "@/lib/utils/colors";
+  import { hexForRef, stripeForType, stripeForNode } from "@/lib/utils/pickerStripes";
   import { isViewRef, pickerMembership } from "@/lib/utils/pickerSources";
   import { buildSelectorRoster, membersForSelector } from "@/lib/views/pickerSelectors";
   import {
@@ -65,13 +65,6 @@
   import NodeList from "@/components/widgets/NodeList.svelte";
   import PickTree, { type PickTreeRow, type PickTreeState } from "@/components/widgets/PickTree.svelte";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
-
-  // The resolved kind/sub-type hex for a ref, or null — fed to NodeRow's
-  // `stripeColor` so a candidate row carries the one curved stripe (ADR-0068:
-  // the stripe is the row's single colour treatment; no monogram).
-  function hexForRef(ref: { kind: string; entry_type?: string }): string | null {
-    return resolveColor(null, ref.entry_type, ref.kind, metadataSchema)?.hex ?? null;
-  }
 
   let {
     config = {},
@@ -507,14 +500,6 @@
     }
   }
 
-  // The curved kind stripe for a tree row (ADR-0066): resolved from its
-  // entry_type (kind derived from the `kind:key` prefix). A type with no colour
-  // (e.g. structural manuscript) yields null — no stripe, correctly.
-  function stripeForType(entryType?: string | null): string | null {
-    if (!entryType) return null;
-    return hexForRef({ kind: entryType.split(":")[0], entry_type: entryType });
-  }
-
   // Normalize each tri-state source to PickTree rows with bound handlers, so the
   // shared PickTree renders every source uniformly (NodeRow + PickCheck + stripe).
   const manuscriptTreeRows = $derived<PickTreeRow[]>(
@@ -529,7 +514,7 @@
       isContainer: !row.isScene,
       state: row.state,
       title: row.title,
-      stripeColor: stripeForType(row.type),
+      stripeColor: stripeForNode(row.instanceColor, row.type, metadataSchema),
       count: row.isScene ? null : row.sceneCount,
       countNoun: "scene",
       onToggle: () => toggleManuscriptPick(row.id),
@@ -551,7 +536,7 @@
       isContainer: row.isSelector,
       state: row.state,
       title: row.title,
-      stripeColor: stripeForType(row.entryType),
+      stripeColor: stripeForType(row.entryType, metadataSchema),
       count: row.isSelector ? row.count : null,
       countNoun,
       countNounPlural,
@@ -734,6 +719,10 @@
           title: entry.title,
           entry_type: entry.entry_type,
         };
+        // Honour the entry's own metadata.color (instance override) ahead of the
+        // type/kind default (#1520 follow-up).
+        const instanceColor =
+          typeof entry.metadata?.color === "string" ? entry.metadata.color : null;
         rows.push({
           key: `lore:${entry.id}`,
           depth: 1,
@@ -742,7 +731,7 @@
           isContainer: false,
           state: isPicked(ref) ? "on" : "off",
           title: entry.title,
-          stripeColor: hexForRef(ref),
+          stripeColor: stripeForNode(instanceColor, entry.entry_type, metadataSchema),
           count: null,
           countNoun: "",
           onToggle: () => togglePick(ref),
@@ -841,7 +830,7 @@
       isContainer: false,
       state: (isPicked(ref) ? "on" : "off") as PickTreeState,
       title: ref.title,
-      stripeColor: hexForRef(ref),
+      stripeColor: hexForRef(ref, metadataSchema),
       count: null,
       countNoun: "",
       onToggle: () => togglePick(ref),
@@ -933,7 +922,7 @@
       <div class="ctx-chips">
         <NodeList mode="tree" density={compact ? "dense" : "compact"}>
           {#each value as ref (refKey(ref))}
-            {@const hex = hexForRef(ref)}
+            {@const hex = hexForRef(ref, metadataSchema)}
             <NodeRow
               title={ref.title}
               stripeColor={ref.target ? "var(--star)" : hex}

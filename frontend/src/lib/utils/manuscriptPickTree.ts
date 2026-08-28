@@ -28,6 +28,16 @@ export interface ManuscriptRow {
   collapsed: boolean;
   /** Descendant scene count — 1 for a scene, N for a container. */
   sceneCount: number;
+  /** The node's own `metadata.color` swatch id (an instance override), or null.
+   * Resolved ahead of the type/kind default so a custom-coloured scene keeps its
+   * colour in the picker (#1520 follow-up). */
+  instanceColor: string | null;
+}
+
+/** A node's instance colour override (`metadata.color` swatch id), or null. */
+function readInstanceColor(node: StructureNode): string | null {
+  const color = (node.metadata as Record<string, unknown> | undefined)?.color;
+  return typeof color === "string" ? color : null;
 }
 
 const MANUSCRIPT = "manuscript";
@@ -147,7 +157,11 @@ export function flattenManuscript(
   const { sceneVisible, expandAll = false } = options;
   const sets = pickSets(document, value);
   const visible = (node: StructureNode): boolean => {
-    if (node.scene_id) return sceneVisible ? sceneVisible(node) : true;
+    // Classify by container-vs-scene, NOT by scene_id — a chapter/act carries its
+    // OWN scene_id (a backing prose file), so keying on scene_id here would run the
+    // container through the scene-type allowlist (`sceneVisible`) and drop it,
+    // hiding the chapter and every scene under it (#1520 dogfood).
+    if (isScene(node)) return sceneVisible ? sceneVisible(node) : true;
     return (node.children ?? []).some(visible);
   };
   const rows: ManuscriptRow[] = [];
@@ -167,6 +181,7 @@ export function flattenManuscript(
       state,
       collapsed,
       sceneCount: countScenes(node),
+      instanceColor: readInstanceColor(node),
     });
     if (collapsed) return;
     const childCovered = coveredByAncestor || (!scene && sets.containers.has(node.id));

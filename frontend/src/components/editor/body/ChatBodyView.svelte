@@ -52,6 +52,7 @@
     StructureDocument,
   } from "@/lib/types";
   import { metadataSchemaStore } from "@/lib/stores/schema";
+  import { cardEntriesStore } from "@/lib/stores/plotCards";
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
   import { ChatCommitController } from "@/lib/stores/chatCommit.svelte";
   import { refreshChatSessions } from "@/lib/stores/chats";
@@ -815,10 +816,11 @@
   }
   // metadataSchema is global per-project — read from the store, not a prop (#14 Step 2).
   let metadataSchema = $derived($metadataSchemaStore);
-  // The roster a context_pick SELECTOR (tag/saved view) evaluates against at
-  // invocation (ADR-0074 slice 5). Built from what this surface has in scope.
+  // The roster a context_pick SELECTOR (tag / saved view / plotline) evaluates
+  // against at invocation (ADR-0074 slice 5/6). Built from what this surface has in
+  // scope; plot cards come from the app-wide store (the plot roster is cards).
   let selectorRoster = $derived(
-    buildSelectorRoster({ schema: metadataSchema, structure, loreEntries, assistantEntries }),
+    buildSelectorRoster({ schema: metadataSchema, structure, loreEntries, assistantEntries, cardEntries: $cardEntriesStore }),
   );
   // Discovery context for the chat "Pick a prompt" list. Routing through the
   // shared promptEntriesForSurface seam (#682) drops this project's hidden

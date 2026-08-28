@@ -16,6 +16,7 @@
   import { tick } from "svelte";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { knownTagsStore } from "@/lib/stores/tags";
+  import { cardEntriesStore } from "@/lib/stores/plotCards";
   import { hiddenLibraryStore } from "@/lib/stores/hiddenLibrary";
   import { hidePromptEntries } from "@/lib/editor-core/promptResolution";
   import { api } from "@/lib/api";
@@ -308,8 +309,12 @@
   // ---- Selector sections: saved views + tags (ADR-0074 slice 5) ----
   // Both are tri-state containers over live members. The roster their specs
   // evaluate against, from this surface's own props.
+  // Plot cards — the roster a plotline selector expands over (its members). Read
+  // from the app-wide store like the tag vocabulary, not a prop. `plotEntries`
+  // (plotlines) stays the container *source*, not roster members (ADR-0074 S6).
+  const cardEntries = $derived($cardEntriesStore);
   const selectorRoster = $derived(
-    buildSelectorRoster({ schema: metadataSchema, structure, loreEntries, assistantEntries, plotEntries }),
+    buildSelectorRoster({ schema: metadataSchema, structure, loreEntries, assistantEntries, cardEntries }),
   );
 
   // Saved views: pickerMembership drops view-refs (no `kind`), so read them off
@@ -398,8 +403,41 @@
     return groups;
   });
 
+  // Plotlines: the ADR-0074 6th container shape (ADR-0048 plot). A plotline is a
+  // selector over the cards whose scalar `metadata.plotline` points at it (`overlap`
+  // on a single-valued field is whole-value equality), constrained to `plot:card`.
+  // Mirrors tagSpecFor's intersect; the type constraint lives IN the stored spec, so
+  // a plotline expands to cards only — at invocation too. The plot roster is cards
+  // (buildSelectorRoster), so this resolves to that plotline's current cards, live.
+  function plotlineSpecFor(plotlineId: string): ViewSpec {
+    const expr = {
+      intersect: [{ type: "plot:card" }, { field: { key: "plotline", op: "overlap", value: plotlineId } }],
+    };
+    return { kind: "plot", expr } as ViewSpec;
+  }
+  // One container per plotline whenever the config allows the `plot` kind. Unlike
+  // tags, an empty plotline is NOT dropped — a plotline is a real authored container
+  // (like an act with no scenes yet), not incidental vocabulary.
+  const plotlineGroups = $derived.by<SelectorGroup[]>(() => {
+    if (!allowedKinds.includes("plot")) return [];
+    // Only actual plotlines become containers — a stray non-plotline node in the
+    // roster must not be promoted (the roster is a plotline list, but guard it).
+    return plotEntries
+      .filter((p) => p.entry_type === "plot:plotline")
+      .map((p) => {
+        const ref: NodePickerRef = {
+          id: `plotline:${p.id}`,
+          kind: "plot",
+          title: p.title,
+          entry_type: "plot:plotline",
+          selector: plotlineSpecFor(p.id),
+        };
+        return { ref, members: membersForSelector(ref, selectorRoster) };
+      });
+  });
+
   // Every selector group, for the picked-chip live counts.
-  const selectorGroups = $derived([...viewGroups, ...tagGroups]);
+  const selectorGroups = $derived([...viewGroups, ...tagGroups, ...plotlineGroups]);
 
   function toggleInSet(set: Set<string>, id: string): Set<string> {
     const next = new Set(set);
@@ -409,11 +447,15 @@
   }
   let collapsedViewIds = $state<Set<string>>(new Set());
   let collapsedTagIds = $state<Set<string>>(new Set());
+  let collapsedPlotlineIds = $state<Set<string>>(new Set());
   function toggleViewCollapse(id: string) {
     collapsedViewIds = toggleInSet(collapsedViewIds, id);
   }
   function toggleTagCollapse(id: string) {
     collapsedTagIds = toggleInSet(collapsedTagIds, id);
+  }
+  function togglePlotlineCollapse(id: string) {
+    collapsedPlotlineIds = toggleInSet(collapsedPlotlineIds, id);
   }
 
   // Search + flatten, shared by both selector sections: a selector survives only
@@ -436,6 +478,7 @@
   }
   const viewRows = $derived(selectorRowsFor(viewGroups, collapsedViewIds));
   const tagRows = $derived(selectorRowsFor(tagGroups, collapsedTagIds));
+  const plotlineRows = $derived(selectorRowsFor(plotlineGroups, collapsedPlotlineIds));
 
   // Toggle a selector row (container or member) against its group set.
   function toggleSelectorRow(row: SelectorRow, groups: SelectorGroup[]) {
@@ -488,6 +531,7 @@
   }
   const viewTreeRows = $derived(selectorTreeRows(viewRows, viewGroups, toggleViewCollapse, "item"));
   const tagTreeRows = $derived(selectorTreeRows(tagRows, tagGroups, toggleTagCollapse, "match"));
+  const plotlineTreeRows = $derived(selectorTreeRows(plotlineRows, plotlineGroups, togglePlotlineCollapse, "card"));
 
   // Flatten the research tree's notes (leaves) into a searchable list.
   // Topics are organizational containers with no body — only notes are
@@ -571,16 +615,6 @@
       .filter((a) => {
         const allowed = new Set(membership.entryTypes.assistant ?? []);
         return allowed.size === 0 || allowed.has(a.entry_type);
-      })
-      .filter(matchesSummary),
-  );
-
-  // Plotlines matching the config's per-kind entry_type whitelist + search (#742).
-  const plotCandidates = $derived(
-    plotEntries
-      .filter((p) => {
-        const allowed = new Set(membership.entryTypes.plot ?? []);
-        return allowed.size === 0 || allowed.has(p.entry_type);
       })
       .filter(matchesSummary),
   );
@@ -679,21 +713,19 @@
       if (items.length > 0) groups.push({ id: "assistants", label: "Assistants", items });
     }
 
-    if (allowedKinds.includes("plot")) {
-      const items = dropExcluded(
-        plotCandidates.map((p) => ({
-          id: p.id, kind: "plot" as const, title: p.title, entry_type: p.entry_type,
-        })),
-      );
-      if (items.length > 0) groups.push({ id: "plotlines", label: "Plotlines", items });
-    }
+    // Plot is no longer a flat leaf group — plotlines render as tri-state card
+    // containers through the selector PickTree (ADR-0074 slice 6), above.
 
     return groups;
   });
 
   const hasAnyConfigured = $derived(allowedKinds.length > 0 || configuredViewIds.length > 0);
   const hasAnyResults = $derived(
-    visibleGroups.length > 0 || manuscriptRows.length > 0 || viewRows.length > 0 || tagRows.length > 0,
+    visibleGroups.length > 0 ||
+      manuscriptRows.length > 0 ||
+      viewRows.length > 0 ||
+      tagRows.length > 0 ||
+      plotlineRows.length > 0,
   );
 
   // Total result count for the search-bar live counter. Reflects the
@@ -703,7 +735,8 @@
     visibleGroups.reduce((acc, g) => acc + g.items.length, 0) +
       manuscriptRows.length +
       viewRows.length +
-      tagRows.length,
+      tagRows.length +
+      plotlineRows.length,
   );
 
   const collapseThreshold = $derived(compact ? COLLAPSE_THRESHOLD_COMPACT : COLLAPSE_THRESHOLD_DEFAULT);
@@ -867,6 +900,9 @@
                kind groups. -->
           {#if manuscriptTreeRows.length > 0}
             <PickTree rows={manuscriptTreeRows} ariaLabel="Manuscript" />
+          {/if}
+          {#if plotlineTreeRows.length > 0}
+            <PickTree rows={plotlineTreeRows} ariaLabel="Plotlines" />
           {/if}
           {#if viewTreeRows.length > 0}
             <PickTree rows={viewTreeRows} ariaLabel="Saved views" />

@@ -1076,8 +1076,12 @@ export const api = {
   // the endpoint path is the only family discriminator (the backend enforces an
   // is_a family guard on each). Attach/detach have no endpoint of their own — they
   // are a saveCard that sets / clears the `scene` ref in `metadata` (ADR §1).
-  // (the list-card endpoint exists backend-side; add its client method when a caller
-  // needs it — the board reads the card set via the projection, not a flat list.)
+  // The flat card list — the context picker's plot-card roster (ADR-0074 slice 6),
+  // over which a plotline's selector expands to its current cards. The board still
+  // reads its card set via the projection; this is the light list a picker needs.
+  listCards() {
+    return request<CardList>("/plot/cards");
+  },
   // Create a single unattached card — the board's direct-authoring entry point
   // (#793), the per-card inverse of seed. Returns the created card so the caller can
   // open it to name it. No scene → it projects homeless until attached / realized.

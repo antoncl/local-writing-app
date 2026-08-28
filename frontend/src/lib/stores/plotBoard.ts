@@ -10,6 +10,7 @@
 import { get, writable } from "svelte/store";
 import { api } from "@/lib/api";
 import { setStructure } from "@/lib/stores/structure";
+import { refreshCards } from "@/lib/stores/plotCards";
 import type { CardEntry, PlotBoardLayout, PlotBoardProjection, Scene } from "@/lib/types";
 
 export const plotBoardStore = writable<PlotBoardProjection | null>(null);
@@ -55,7 +56,11 @@ export function refreshPlotBoard(): Promise<void> {
 // drain needs no catch.
 export async function refreshAfterMutation(): Promise<void> {
   if (inFlight) await inFlight;
-  await refreshPlotBoard();
+  // Refresh the board projection AND the lightweight card roster in parallel: the
+  // context picker's plotline selectors expand over that roster (ADR-0074 slice 6),
+  // so a card created / deleted / reassigned here stays live without a reload.
+  // refreshCards records nothing and its failure is independent of the board's.
+  await Promise.all([refreshPlotBoard(), refreshCards().catch(() => {})]);
 }
 
 // Persist the board layout (ADR-0048 S7c) and return the board's advanced

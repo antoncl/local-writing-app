@@ -153,11 +153,16 @@
     { value: "context_pick", label: "Context Picker" },
   ];
 
-  type Kind = "manuscript" | "lore";
+  type Kind = "manuscript" | "lore" | "plot";
   const KINDS: { id: Kind; label: string }[] = [
     { id: "manuscript", label: "Scenes" },
     { id: "lore", label: "Lore" },
+    { id: "plot", label: "Plot" },
   ];
+  // Plot's non-content types: `plot:board` is a presentation singleton, `plot:template`
+  // a Library lens — neither is a pickable source. Hidden from the offered tree so an
+  // author sees only plotline + card (ADR-0074 slice 6).
+  const PLOT_EXCLUDE = ["plot:board", "plot:template"];
 
   const PRESETS: { id: "full_outline" | "full_text"; label: string; tooltip: string }[] = [
     {
@@ -297,6 +302,7 @@
   const trees = $derived({
     manuscript: buildTree(metadataSchema, "manuscript"),
     lore: buildTree(metadataSchema, "lore"),
+    plot: buildTree(metadataSchema, "plot", PLOT_EXCLUDE),
   });
   // Pre-computed render lists per kind, including each node's checkbox
   // state. Runes `$derived` tracks reactive reads inside called functions
@@ -306,12 +312,14 @@
   const renderedByKind = $derived({
     manuscript: flattenForRender(trees.manuscript, selectionFor("manuscript"), collapsedIds),
     lore: flattenForRender(trees.lore, selectionFor("lore"), collapsedIds),
+    plot: flattenForRender(trees.plot, selectionFor("plot"), collapsedIds),
   });
 
   // Per-kind picked-leaf totals (for the kind-bar count).
   const pickedCountByKind = $derived({
     manuscript: selectionFor("manuscript").size,
     lore: selectionFor("lore").size,
+    plot: selectionFor("plot").size,
   });
 
   // Chip projection.
@@ -356,8 +364,7 @@
   });
 
   const hasAnySource = $derived(
-    renderedByKind.manuscript.some((n) => n.state !== "unchecked") ||
-      renderedByKind.lore.some((n) => n.state !== "unchecked") ||
+    KINDS.some((k) => renderedByKind[k.id].some((n) => n.state !== "unchecked")) ||
       viewRefs.length > 0 ||
       (config.presets ?? []).length > 0,
   );

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { LoreEntrySummary, NodePickerRef, ViewSpec } from "@/lib/types";
+import type { CardSummary, LoreEntrySummary, NodePickerRef, ViewSpec } from "@/lib/types";
 import {
   buildSelectorRoster,
   expandSelectorRefs,
@@ -30,12 +30,59 @@ const ROSTER = buildSelectorRoster({
   ],
 });
 
+// A plotline selector over plot cards (ADR-0074 slice 6): {kind:"plot",
+// intersect[type plot:card, field plotline overlap pl_1]}. Members are the cards
+// whose scalar metadata.plotline points at pl_1. The plot roster is CARDS.
+const plotlineSpec: ViewSpec = {
+  kind: "plot",
+  expr: { intersect: [{ type: "plot:card" }, { field: { key: "plotline", op: "overlap", value: "pl_1" } }] },
+} as ViewSpec;
+const plotlineSelector: NodePickerRef = {
+  id: "plotline:pl_1",
+  kind: "plot",
+  title: "The Heist",
+  entry_type: "plot:plotline",
+  selector: plotlineSpec,
+};
+const card = (id: string, title: string, plotline: string | null): CardSummary =>
+  ({ id, title, entry_type: "plot:card", metadata: plotline ? { plotline } : {} }) as unknown as CardSummary;
+const PLOT_ROSTER = buildSelectorRoster({
+  cardEntries: [
+    card("card_a", "Break-in", "pl_1"),
+    card("card_b", "Getaway", "pl_1"),
+    card("card_c", "A subplot beat", "pl_2"),
+    card("card_d", "Orphan card", null),
+  ],
+});
+
 describe("isSelectorRef", () => {
-  it("is true only for tag/view kinds", () => {
+  it("detects a selector by the presence of an inline `selector` spec, not by kind", () => {
+    // Tag / view / plotline all carry a selector → selectors, whatever the kind.
     expect(isSelectorRef(tagSelector)).toBe(true);
     expect(isSelectorRef({ id: "v", kind: "view", title: "V", selector: tagSpec })).toBe(true);
+    expect(isSelectorRef(plotlineSelector)).toBe(true);
+    // Concrete members / backend-expanded containers carry none → not selectors —
+    // including a `plot`-kind CARD member, which shares its kind with the plotline.
+    expect(isSelectorRef({ id: "card_a", kind: "plot", title: "Break-in", entry_type: "plot:card" })).toBe(false);
     expect(isSelectorRef({ id: "lore_a", kind: "lore", title: "Vex" })).toBe(false);
     expect(isSelectorRef({ id: "act_1", kind: "manuscript", title: "Act I" })).toBe(false);
+  });
+});
+
+describe("plotline selector over cards", () => {
+  it("resolves to the cards whose metadata.plotline points at it", () => {
+    const members = membersForSelector(plotlineSelector, PLOT_ROSTER);
+    expect(members.map((m) => m.id).sort()).toEqual(["card_a", "card_b"]);
+    expect(members.every((m) => m.kind === "plot")).toBe(true);
+    expect(members.find((m) => m.id === "card_a")).toMatchObject({ title: "Break-in", entry_type: "plot:card" });
+  });
+
+  it("expands to concrete (ungated) card members through the wire seam", () => {
+    const encoded = encodePickerValue([plotlineSelector]);
+    const out = JSON.parse(expandSelectorsInEncodedValue(encoded, PLOT_ROSTER)) as NodePickerRef[];
+    // No selector survives — the backend only ever sees concrete card refs.
+    expect(out.some((r) => r.selector)).toBe(false);
+    expect(out.map((r) => r.id).sort()).toEqual(["card_a", "card_b"]);
   });
 });
 

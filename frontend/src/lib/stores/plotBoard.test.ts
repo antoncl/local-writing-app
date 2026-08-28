@@ -1,7 +1,7 @@
 // Plot-board store (#757) — the in-flight guard that lets the menu opener and
 // PlotBoardPane's restore-refresh both call refreshPlotBoard without a double
 // fetch. Pure logic, node env.
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { get } from "svelte/store";
 import { api } from "@/lib/api";
 import {
@@ -43,6 +43,14 @@ const projection = (): PlotBoardProjection => ({
   containers: [],
   cards: [],
   diagnostics: [],
+});
+
+// A card mutation now also refreshes the lightweight card roster (ADR-0074 slice 6:
+// the context picker's plotline selectors expand over it) via refreshAfterMutation.
+// Stub it so the mutation ops don't leak a real /plot/cards fetch (#973); no card-op
+// assertion here concerns the card roster.
+beforeEach(() => {
+  vi.spyOn(api, "listCards").mockResolvedValue({ entries: [] });
 });
 
 afterEach(() => {

@@ -907,4 +907,35 @@ describe("NodePicker instance colour (#1520)", () => {
     expect(custom.style.getPropertyValue("--row-stripe")).toBe("#dc143c");
     expect(plain.style.getPropertyValue("--row-stripe")).toBe("#0000ff");
   });
+
+  // #1528 follow-up: a member must carry its own colour in a tag's list too — the
+  // member ref drops metadata, so it resolves through the ref→colour index.
+  it("honours a member's instance colour in a tag's list", async () => {
+    setKnownTags([{ name: "epic", scope: { sources: [{ kind: "lore" }] } }] as never);
+    render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "lore" }], multiple: true },
+        loreEntries: [
+          {
+            id: "l1",
+            title: "Aetheria",
+            body: "",
+            entry_type: "lore:character",
+            metadata: { color: "crimson", tags: ["epic"] },
+          } as unknown as import("@/lib/types").LoreEntrySummary,
+        ],
+        affordance: "add",
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+    const menu = document.querySelector(".ctx-menu") as HTMLElement;
+    // Multi-axis (Lore + By tag) → drill into the By-tag axis, then expand the tag.
+    await fireEvent.click(within(menu).getByText("By tag").closest("button")!);
+    await tick();
+    const tags = (await within(menu).findAllByRole("group", { name: "By tag" }))[0];
+    await expandGroup(tags, "epic");
+    const member = within(tags).getByText("Aetheria").closest(".node-row") as HTMLElement;
+    expect(member.style.getPropertyValue("--row-stripe")).toBe("#dc143c");
+  });
 });

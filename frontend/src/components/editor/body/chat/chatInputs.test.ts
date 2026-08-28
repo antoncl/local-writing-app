@@ -159,6 +159,10 @@ describe("ttlChipsFor", () => {
     expect(chip.ttlLabel).toBe("1h"); // 3600s → "1h"
     expect(chip.expired).toBe(false);
     expect(chip.formatted).toMatch(/m$/); // ~59m remaining → minutes
+    // The raw number rides along so consumers never parse `formatted` back
+    // (ADR-0076 S1 review) — ~59m remaining, allow scheduling slack.
+    expect(chip.remainingSec).toBeGreaterThan(3500);
+    expect(chip.remainingSec).toBeLessThanOrEqual(3540);
   });
 
   it("unknown slot defaults to 5m TTL and can expire", () => {

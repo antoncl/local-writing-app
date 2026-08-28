@@ -1,12 +1,9 @@
 <script lang="ts" module>
   // Lives in <script module> because Svelte 5 disallows type exports from
-  // instance scripts.
-  export type InputsDialogEstimate = {
-    tokens: number;
-    cost_usd: number | null;
-    caching_style: "none" | "auto" | "explicit" | null;
-    cache_blocks: { label: string; tokens: number; tier?: string | null }[];
-  };
+  // instance scripts. One estimate shape for every consumer (ADR-0076 S1):
+  // the alias keeps this dialog's existing import name stable.
+  import type { ChatEstimate } from "@/lib/aiTypes";
+  export type InputsDialogEstimate = ChatEstimate;
 </script>
 
 <script lang="ts">

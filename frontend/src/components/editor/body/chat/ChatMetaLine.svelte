@@ -10,13 +10,7 @@
 <script lang="ts">
   import { formatCostEur, formatTokens } from "@/lib/utils/money";
   import type { TtlChip } from "@/components/editor/body/chat/chatInputs";
-
-  export interface ChatEstimate {
-    tokens: number;
-    cost_usd: number | null;
-    caching_style: "none" | "auto" | "explicit" | null;
-    cache_blocks: { label: string; tokens: number; tier?: string | null }[];
-  }
+  import type { ChatEstimate } from "@/lib/aiTypes";
 
   interface Props {
     estimate: ChatEstimate | null;
@@ -26,23 +20,15 @@
 
   let { estimate, ttlChips, sessionCostUsd }: Props = $props();
 
-  // A TtlChip only carries the already-formatted "Xm"/"Xs" string, not raw
-  // seconds — parse it back so multiple chips can be compared. Today there's
-  // only the `system` slot, so this never actually has to choose; kept
-  // general (not hardcoded to one slot) for when a second slot lands.
-  function remainingSeconds(chip: TtlChip): number {
-    const m = chip.formatted.match(/^(\d+)([ms])$/);
-    if (!m) return Infinity;
-    return m[2] === "m" ? Number(m[1]) * 60 : Number(m[1]);
-  }
-
   let showCacheTerm = $derived(estimate?.caching_style === "explicit" && ttlChips.length > 0);
-  let allCacheExpired = $derived(showCacheTerm && ttlChips.every((c) => c.expired));
-  // The soonest-to-evict non-expired chip — "smallest remaining time".
+  // ANY expired slot means the next send pays a cache re-write — the term
+  // must not read as warm because a sibling slot is still live. The per-slot
+  // detail stays in the tooltip.
+  let anyCacheExpired = $derived(showCacheTerm && ttlChips.some((c) => c.expired));
+  // The soonest-to-evict live chip — smallest raw remaining time.
   let soonestChip = $derived.by(() => {
-    if (!showCacheTerm || allCacheExpired) return null;
-    const live = ttlChips.filter((c) => !c.expired);
-    return live.reduce((a, b) => (remainingSeconds(a) <= remainingSeconds(b) ? a : b));
+    if (!showCacheTerm || anyCacheExpired) return null;
+    return ttlChips.reduce((a, b) => (a.remainingSec <= b.remainingSec ? a : b));
   });
   let cacheTitle = $derived(
     ttlChips.map((c) => `${c.label} (${c.ttlLabel}) ${c.formatted}`).join(", ") +
@@ -59,7 +45,7 @@
     {/if}
     {#if showCacheTerm}
       {#if estimate}<span class="cbv-meta-sep">·</span>{/if}
-      {#if allCacheExpired}
+      {#if anyCacheExpired}
         <span class="cbv-meta-danger" title={cacheTitle}>cache expired</span>
       {:else if soonestChip}
         <span title={cacheTitle}>cache <span class="cbv-meta-num">{soonestChip.formatted}</span></span>

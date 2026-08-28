@@ -39,6 +39,7 @@
   import EntryDraftCard from "@/components/editor/body/chat/EntryDraftCard.svelte";
   import type {
     AssistantEntrySummary,
+    ChatEstimate,
     ChatMessage,
     ChatSession,
     ChatSessionJournalEntry,
@@ -205,12 +206,7 @@
   // a freeform brief renders no template so there's nothing to estimate
   // pre-send (the per-turn actuals on the assistant reply tell the user
   // what it cost retroactively).
-  let chatEstimate: {
-    tokens: number;
-    cost_usd: number | null;
-    caching_style: "none" | "auto" | "explicit" | null;
-    cache_blocks: { label: string; tokens: number; tier?: string | null }[];
-  } | null = $state(null);
+  let chatEstimate: ChatEstimate | null = $state(null);
   // Stale-response guard: every fetch grabs ourToken = ++chatEstimateToken;
   // on resolve we drop the response if the token moved. Out-of-order
   // resolutions are common when the user types fast.
@@ -364,9 +360,9 @@
       // ADR-0076 decision 3: per-turn provenance, so it renders on the
       // transcript's own meta line instead of a floating cbv-meta paragraph.
       // Absent on messages persisted before this slice.
-      provider: m.provider ?? undefined,
-      model: m.model ?? undefined,
-      latency_ms: m.latency_ms ?? undefined,
+      provider: m.provider ?? null,
+      model: m.model ?? null,
+      latency_ms: m.latency_ms ?? null,
     }));
     chatError = null;
     chatInput = "";
@@ -474,9 +470,9 @@
         usage: m.usage ?? null,
         cost_usd: m.cost_usd ?? null,
         // ADR-0076 decision 3: per-turn provenance, echoed through like usage/cost.
-        provider: m.provider ?? undefined,
-        model: m.model ?? undefined,
-        latency_ms: m.latency_ms ?? undefined,
+        provider: m.provider ?? null,
+        model: m.model ?? null,
+        latency_ms: m.latency_ms ?? null,
       })),
       // Persist the per-input drafts so a chat round-trips its inputs across a
       // reload (#654) — previously hardcoded `{}`, which the first post-send
@@ -575,7 +571,12 @@
         if (ev.usage) chatHistory[idx].usage = ev.usage;
         if (typeof ev.cost_usd === "number") {
           chatHistory[idx].cost_usd = ev.cost_usd;
-          pendingTurnCost = (pendingTurnCost ?? 0) + ev.cost_usd;
+          // Only a POSITIVE delta accrues toward the session total — the
+          // backend refuses <= 0 deltas (`_record_chat_cost_delta`), and a
+          // zero-priced turn must not fabricate a "session €0.00" for a chat
+          // whose true total is unknown/None (#697). The per-message stamp
+          // above keeps the honest 0 for the turn itself.
+          if (ev.cost_usd > 0) pendingTurnCost = (pendingTurnCost ?? 0) + ev.cost_usd;
         }
         if (ev.usage && ev.usage.cache_write_tokens > 0) {
           if (!pendingTurnCacheWriteSlots.includes("system")) {
@@ -926,12 +927,15 @@
     (i) => i.required && !i.hidden && isInputMissing(i, chatInputDrafts[i.name]),
   ));
   let ttlChips = $derived(ttlChipsFor(activeChatCacheWriteTimes, ttlTick));
-  // The session-cost line's number, never lagging the transcript (ADR-0076
-  // decision 6). persistActiveChat refreshes chatSession from the save
-  // response and nulls pendingTurnCost in the same tick (:484-497), so
-  // persisted-total + pending-delta never double-counts a turn's cost and
-  // never lags behind what the transcript already shows (a stream `done`
-  // sets pendingTurnCost before the persist round-trip even starts).
+  // The session-cost line's number (ADR-0076 decision 6): the persisted
+  // projection plus the not-yet-persisted delta. A stream `done` sets
+  // pendingTurnCost before the persist round-trip starts, and persistActiveChat
+  // swaps in the save response's total (which now carries the same log
+  // projection the read path computes) while nulling the pending delta in the
+  // same tick — so the display never lags the transcript. Known residual
+  // (#1564): two persists in flight at once can each carry the same
+  // cost_delta_usd to the backend; that is a persistence race, not a display
+  // one — this derived shows whatever the backend recorded.
   let sessionCostUsd = $derived.by(() => {
     const persisted = chatSession?.cost_usd_total ?? null;
     return persisted != null || pendingTurnCost != null ? (persisted ?? 0) + (pendingTurnCost ?? 0) : null;

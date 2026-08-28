@@ -16,7 +16,7 @@ const ESTIMATE = {
 };
 
 function liveChip(overrides: Partial<TtlChip> = {}): TtlChip {
-  return { slot: "system", label: "System", ttlLabel: "1h", formatted: "57m", expired: false, ...overrides };
+  return { slot: "system", label: "System", ttlLabel: "1h", formatted: "57m", expired: false, remainingSec: 3420, ...overrides };
 }
 
 describe("ChatMetaLine", () => {
@@ -55,11 +55,42 @@ describe("ChatMetaLine", () => {
     const estimate = { ...ESTIMATE, caching_style: "explicit" as const };
     const { container } = render(ChatMetaLine, {
       estimate,
-      ttlChips: [liveChip({ expired: true, formatted: "expired" })],
+      ttlChips: [liveChip({ expired: true, formatted: "expired", remainingSec: 0 })],
       sessionCostUsd: null,
     });
     expect(container.textContent).toContain("cache expired");
     expect(container.querySelector(".cbv-meta-danger")).toBeInTheDocument();
+  });
+
+  it("renders 'cache expired' when ANY chip has expired — a live sibling must not mask a cold slot", () => {
+    // system expired + lore live: the next send pays a cache re-write, so the
+    // term must not read as warm (ADR-0076 S1 review).
+    const estimate = { ...ESTIMATE, caching_style: "explicit" as const };
+    const { container } = render(ChatMetaLine, {
+      estimate,
+      ttlChips: [
+        liveChip({ expired: true, formatted: "expired", remainingSec: 0 }),
+        liveChip({ slot: "lore", label: "Lore", ttlLabel: "5m", formatted: "4m", remainingSec: 240 }),
+      ],
+      sessionCostUsd: null,
+    });
+    expect(container.textContent).toContain("cache expired");
+    expect(container.textContent).not.toContain("cache 4m");
+    expect(container.querySelector(".cbv-meta-danger")).toBeInTheDocument();
+  });
+
+  it("shows the soonest-to-evict chip by raw remaining time when all are live", () => {
+    const estimate = { ...ESTIMATE, caching_style: "explicit" as const };
+    const { container } = render(ChatMetaLine, {
+      estimate,
+      ttlChips: [
+        liveChip({ formatted: "57m", remainingSec: 3420 }),
+        liveChip({ slot: "lore", label: "Lore", ttlLabel: "5m", formatted: "4m", remainingSec: 240 }),
+      ],
+      sessionCostUsd: null,
+    });
+    expect(container.textContent).toContain("cache 4m");
+    expect(container.textContent).not.toContain("cache 57m");
   });
 
   it("renders no cache term when caching_style is not explicit", () => {

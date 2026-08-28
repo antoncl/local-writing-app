@@ -217,9 +217,11 @@ export type ChatMessage = {
   cost_usd?: number | null;
   // ADR-0076 decision 3: per-turn provenance, stamped from the stream `done`
   // event. Renders on the transcript's own meta line, not a floating one.
-  provider?: string;
-  model?: string;
-  latency_ms?: number;
+  // `| null` to match the wire (backend: `str | None`) and the usage/cost_usd
+  // siblings — the load/save maps pass nulls through verbatim.
+  provider?: string | null;
+  model?: string | null;
+  latency_ms?: number | null;
 };
 
 export type AIChatRequest = {
@@ -333,10 +335,24 @@ export type ChatSessionMessage = {
   journal_added?: ChatSessionJournalEntry[];
   usage?: ChatUsage | null;
   cost_usd?: number | null;
-  // ADR-0076 decision 3: additive persisted fields — older chats simply lack them.
-  provider?: string;
-  model?: string;
-  latency_ms?: number;
+  // ADR-0076 decision 3: additive persisted fields — older chats simply lack
+  // them. `| null` matches the backend's `str | None` and the siblings above.
+  provider?: string | null;
+  model?: string | null;
+  latency_ms?: number | null;
+};
+
+// The next-turn estimate a chat/dialog surface derives from the preview
+// response — ONE declaration (ADR-0076 S1 review): ChatBodyView owns the
+// fetch, ChatMetaLine and InputsDialog render it.
+export type ChatEstimate = {
+  tokens: number;
+  cost_usd: number | null;
+  caching_style: "none" | "auto" | "explicit" | null;
+  // Block summaries for the readout — label + size (+ tier). Deliberately
+  // narrower than PreviewCacheBlock: no role/text, this is telemetry about
+  // the payload, not the payload.
+  cache_blocks: { label: string; tokens: number; tier?: string | null }[];
 };
 
 export type ChatSessionContextItem = {

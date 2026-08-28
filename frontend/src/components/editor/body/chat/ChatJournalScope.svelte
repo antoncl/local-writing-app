@@ -47,7 +47,7 @@
     background: var(--inset); font-size: var(--fs-xs);
   }
   .cbv-journal-scope-label {
-    font-size: var(--fs-xs); font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-3);
+    font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-3);
   }
   .cbv-journal-scope-chip {
     display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px;

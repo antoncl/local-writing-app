@@ -48,6 +48,15 @@
     <p class="cbv-empty">No messages yet. Ctrl/⌘+Enter to send.</p>
   {/if}
   {#each chatHistory as message, i (i)}
+    <!-- Per-turn provenance (ADR-0076 decision 3), joined from whichever
+         fields the stream stamped — independent of `usage`, which is
+         per-provider optional (a local model reports none, but the "which
+         model answered" cue must still render). -->
+    {@const provenance = [
+      message.provider,
+      message.model,
+      message.latency_ms != null ? `${(message.latency_ms / 1000).toFixed(1)} s` : null,
+    ].filter(Boolean).join(" · ")}
     <div class="cbv-message cbv-message-{message.role}">
       <header class="cbv-message-role">
         {#if message.role === "assistant"}{assistantName}<span class="cbv-role-dot" aria-hidden="true"></span>{:else}You{/if}
@@ -78,15 +87,16 @@
           {/each}
         </div>
       {/if}
-      {#if message.role === "assistant" && message.usage}
-        {@const totalIn = message.usage.input_tokens + message.usage.cached_input_tokens + message.usage.cache_write_tokens}
-        {@const cachePct = totalIn > 0 ? Math.round((message.usage.cached_input_tokens / totalIn) * 100) : 0}
+      {#if message.role === "assistant" && (message.usage || provenance)}
         <div class="cbv-turn-meta">
-          {totalIn} → {message.usage.output_tokens} tok
-          {#if cachePct > 0}<span> · {cachePct}% cached</span>{/if}
-          {#if message.cost_usd != null}<span> · {formatCostEur(message.cost_usd)}</span>{/if}
-          {#if message.provider}<span> · {message.provider} · {message.model}</span>{/if}
-          {#if message.latency_ms != null}<span> · {(message.latency_ms / 1000).toFixed(1)} s</span>{/if}
+          {#if message.usage}
+            {@const totalIn = message.usage.input_tokens + message.usage.cached_input_tokens + message.usage.cache_write_tokens}
+            {@const cachePct = totalIn > 0 ? Math.round((message.usage.cached_input_tokens / totalIn) * 100) : 0}
+            <span>{totalIn} → {message.usage.output_tokens} tok</span>
+            {#if cachePct > 0}<span> · {cachePct}% cached</span>{/if}
+            {#if message.cost_usd != null}<span> · {formatCostEur(message.cost_usd)}</span>{/if}
+          {/if}
+          {#if provenance}<span>{#if message.usage} · {/if}{provenance}</span>{/if}
         </div>
       {/if}
     </div>

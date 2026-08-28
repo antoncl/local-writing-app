@@ -63,4 +63,33 @@ describe("ChatTranscript", () => {
     expect(meta).toBeInTheDocument();
     expect(meta?.textContent).not.toContain("anthropic");
   });
+
+  // A provider that reports no usage (a local model) still stamps
+  // provider/model/latency on `done` — the provenance must render without a
+  // usage block, not vanish with it (S1 review: the usage-less case is
+  // exactly where "which model answered" matters most).
+  it("renders provenance even when the stream reported no usage", () => {
+    const history = [
+      {
+        role: "assistant",
+        content: "The Regent does.",
+        provider: "ollama",
+        model: "llama3.1",
+        latency_ms: 2431,
+      },
+    ] as ChatMessage[];
+    const { container } = render(ChatTranscript, { chatHistory: history, chatRunning: false });
+    const meta = container.querySelector(".cbv-turn-meta");
+    expect(meta?.textContent).toContain("ollama");
+    expect(meta?.textContent).toContain("llama3.1");
+    expect(meta?.textContent).toContain("2.4 s");
+    expect(meta?.textContent).not.toContain("tok");
+  });
+
+  // No usage AND no provenance (an old chat's user-visible-content-only
+  // message) renders no meta line at all.
+  it("renders no meta line when a turn has neither usage nor provenance", () => {
+    const { container } = render(ChatTranscript, { chatHistory: HISTORY, chatRunning: false });
+    expect(container.querySelector(".cbv-turn-meta")).not.toBeInTheDocument();
+  });
 });

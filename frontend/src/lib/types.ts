@@ -1222,6 +1222,7 @@ export type {
   PreviewErrorInfo,
   AIPreviewResponse,
   PromptInputConflict,
+  ChatEstimate,
   ChatMessage,
   AIChatRequest,
   ChatUsage,

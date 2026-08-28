@@ -475,7 +475,7 @@
   }
   .cbv-preview-message { margin-bottom: 10px; }
   .cbv-preview-msg-role {
-    font-size: var(--fs-xs); font-weight: 800; letter-spacing: 0.08em;
+    font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.07em;
     text-transform: uppercase; color: var(--text-3); margin-bottom: 3px;
   }
   /* Local copy of .cbv-meta — the popover's notes use it (the parent's scoped

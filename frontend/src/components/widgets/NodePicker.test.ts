@@ -110,6 +110,28 @@ describe("NodePicker snippet picker — hide filter (ADR-0049 #682)", () => {
   });
 });
 
+// The search box auto-focuses when the picker opens. Pinned because #1538 moved
+// `searchInputEl` across a component boundary: it now binds up from
+// NodePickerPopover via `$bindable`, and the controller focuses it after a tick.
+// Nothing else asserts that cross-component bind + focus still lands.
+describe("NodePicker open-focus (#1538)", () => {
+  it("focuses the search box when the menu opens", async () => {
+    render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "snippet" }] },
+        promptEntries: [snippet("a", "Alpha")],
+        affordance: "add",
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { expanded: false }));
+    await tick();
+    await tick(); // let the controller's post-open `await tick()` + focus() flush
+
+    const searchBox = screen.getByPlaceholderText(/Search/i);
+    expect(document.activeElement).toBe(searchBox);
+  });
+});
+
 // ADR-0074 slice 6: a plotline is the 6th container shape — a live selector over
 // the cards whose scalar metadata.plotline points at it, not a leaf node ref.
 describe("NodePicker plot source — plotline containers (ADR-0074 slice 6)", () => {

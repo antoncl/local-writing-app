@@ -11,6 +11,7 @@
 -->
 <script lang="ts">
   import PromptInputField from "@/components/widgets/PromptInputField.svelte";
+  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import { api } from "@/lib/api";
   import { formatCostEur, formatTokens } from "@/lib/utils/money";
   import { coerceInputValue, friendlyTemplateError } from "@/lib/utils/promptInputs";
@@ -342,7 +343,7 @@
         aria-expanded={!promptPreviewCollapsed}
         onclick={() => (promptPreviewCollapsed = !promptPreviewCollapsed)}
       >
-        <span class="prompt-preview-caret" aria-hidden="true">{promptPreviewCollapsed ? "▸" : "▾"}</span>
+        <GroupCaret collapsed={promptPreviewCollapsed} />
         <strong>Preview</strong>
       </button>
     {/if}
@@ -547,13 +548,6 @@
   .prompt-preview-toggle > strong {
     font-size: var(--fs-md);
     color: inherit;
-  }
-  .prompt-preview-caret {
-    display: inline-block;
-    width: 12px;
-    text-align: center;
-    font-size: var(--fs-xs);
-    color: var(--text-3);
   }
   .prompt-preview-pane-header {
     display: flex;

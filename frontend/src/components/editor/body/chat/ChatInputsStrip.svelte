@@ -6,6 +6,7 @@
 -->
 <script lang="ts">
   import PromptInputField from "@/components/widgets/PromptInputField.svelte";
+  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
   import { isInputMissing } from "@/lib/utils/promptInputs";
   import type {
     LoreEntrySummary,
@@ -53,7 +54,10 @@
       class="cbv-inputs-toggle"
       aria-expanded={!hidden}
       onclick={() => (hidden = !hidden)}
-    >{hidden ? "▸ Show inputs" : "▾ Hide inputs"}</button>
+    >
+      <GroupCaret collapsed={hidden} />
+      <span>{hidden ? "Show inputs" : "Hide inputs"}</span>
+    </button>
   {/if}
   {#if (!isLocked || !hidden) && visibleInputs.length > 0}
     <div class="cbv-inputs-fields">
@@ -92,7 +96,8 @@
     border-radius: 10px; border: 1px solid var(--divider); background: var(--inset);
   }
   .cbv-inputs-toggle {
-    align-self: flex-start; padding: 2px 6px; font-size: var(--fs-xs); font-weight: 600;
+    align-self: flex-start; display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 6px 2px 2px; font-size: var(--fs-xs); font-weight: 600;
     background: transparent; border: none; cursor: pointer; color: var(--text-3);
   }
   .cbv-inputs-fields { display: flex; flex-direction: column; gap: 8px; }

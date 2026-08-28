@@ -18,9 +18,11 @@ from app.services.ai.assistant_validation import (
 from app.services.ai.profiles.registry import capability_profile_for
 
 # A real Anthropic model whose API rejects `temperature` (see
-# `_NO_TEMPERATURE_PREFIXES`), and one that accepts it.
+# `_NO_TEMPERATURE_PREFIXES`), and one that accepts it. Sampling was removed on
+# the newest families (Opus 5, Sonnet 5, Fable 5, Opus 4.7/4.8) but 4.6 and older
+# still accept it, so Sonnet 4.6 is a stable "accepts" pick.
 FORBIDS_TEMPERATURE = "claude-opus-4-8"
-ACCEPTS_TEMPERATURE = "claude-sonnet-5"
+ACCEPTS_TEMPERATURE = "claude-sonnet-4-6"
 
 
 class CoerceOptionalTemperatureTests(unittest.TestCase):

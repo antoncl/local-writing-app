@@ -14,11 +14,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 OUT = REPO / "frontend" / "src" / "lib" / "generated" / "guides.ts"
+PRECOMMIT = REPO / ".pre-commit-config.yaml"
 
 # The guides surfaced in-app, in display order. Each is {id, title, source doc}
 # plus an optional `kind`: "guide" (narrative, the default) or "reference" (a
@@ -69,6 +71,46 @@ def render() -> str:
     )
 
 
+def _guides_filter_pattern() -> str | None:
+    """The `files:` regex of the guides-bundle pre-commit hook, or None.
+
+    Stdlib-only (no PyYAML) so this stays runnable under any Python: isolate the
+    hook block from its `- id:` line to the next hook, then read its `files:`.
+    """
+    text = PRECOMMIT.read_text(encoding="utf-8")
+    anchor = re.search(r"^ *- id: guides-bundle$", text, re.MULTILINE)
+    if anchor is None:
+        return None
+    tail = text[anchor.end() :]
+    nxt = re.search(r"^ *- id: ", tail, re.MULTILINE)
+    block = tail if nxt is None else tail[: nxt.start()]
+    files = re.search(r"^ *files: (.+)$", block, re.MULTILINE)
+    return files.group(1).strip() if files else None
+
+
+def coverage_errors() -> list[str]:
+    """Every bundled source the guides-bundle `files:` filter fails to match.
+
+    Keeps two lists honest: `GUIDES` here and the pre-commit trigger filter. The
+    hook only runs locally on files the filter matches, so a bundled source
+    missing from it silently skips the local regen-clean gate — drift only CI
+    would catch (#1537). Adding a source without widening the filter fails here.
+    """
+    pattern = _guides_filter_pattern()
+    if pattern is None:
+        return [f"could not find the guides-bundle `files:` pattern in {PRECOMMIT.name}"]
+    try:
+        matches = re.compile(pattern)
+    except re.error as exc:
+        return [f"guides-bundle `files:` is not valid regex: {exc}"]
+    return [
+        f"guides-bundle `files:` filter misses bundled source {guide['source']} — "
+        f"add it to the filter in {PRECOMMIT.name}"
+        for guide in GUIDES
+        if not matches.search(guide["source"])
+    ]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="fail if the committed file is stale")
@@ -76,11 +118,15 @@ def main(argv: list[str] | None = None) -> int:
 
     content = render()
     if args.check:
+        errors: list[str] = []
         current = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
         if current != content:
-            print(f"{OUT.relative_to(REPO)} is stale — run: python scripts/gen_guides.py")
+            errors.append(f"{OUT.relative_to(REPO)} is stale — run: python scripts/gen_guides.py")
+        errors.extend(coverage_errors())
+        if errors:
+            print("\n".join(errors))
             return 1
-        print(f"{OUT.relative_to(REPO)} is up to date")
+        print(f"{OUT.relative_to(REPO)} is up to date; guides-bundle filter covers all sources")
         return 0
 
     OUT.parent.mkdir(parents=True, exist_ok=True)

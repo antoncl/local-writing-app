@@ -221,11 +221,16 @@ def openrouter_system_messages(
         return []
     # caching_style != "explicit": collapse blocks to a single string
     # (auto-cache providers index on prefix bytes, no markers needed;
-    # "none" providers don't cache anyway).
+    # "none" providers don't cache anyway). The blocks already include the
+    # system prompt as their first block, so when present they are the whole
+    # system message — collapse ALL of them, not just fall back to the bare
+    # `system_prompt` (which would silently drop the lore + every later block
+    # on auto-cache providers like deepseek/openai/grok).
     collapsed = system_prompt
-    if system_blocks and not collapsed:
-        collapsed = "\n\n".join(
-            b.get("text", "") for b in system_blocks if b.get("text")
+    if system_blocks:
+        collapsed = (
+            "\n\n".join(b.get("text", "") for b in system_blocks if b.get("text"))
+            or system_prompt
         )
     if not collapsed:
         return []

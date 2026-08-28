@@ -453,6 +453,77 @@ def test_tag_selector_pick_materializes_to_tagged_lore_end_to_end(tmp_path, monk
     assert rendered.lore_invoked is True
 
 
+def test_tag_pick_lore_reaches_the_send_lore_tiers_end_to_end(tmp_path, monkeypatch):
+    # The FAITHFUL reproduction (field report): the real chat renders lore via
+    # `{% do use(inputs.lore) %}{{ use_lore() }}` — use_lore() emits nothing; the
+    # lore the model actually receives is the send-path tier block computed from
+    # `used_node_ids` (_preview_lore_tiers -> _relevant_lore_ids -> _format_lore_block).
+    # A tag pick must land its tagged docs in THAT block, not merely in
+    # used_node_ids. Asserting used_node_ids alone (the earlier tests) missed this.
+    monkeypatch.setattr(
+        "app.services.machine_settings.config_path",
+        lambda: tmp_path / "machine_settings.yaml",
+    )
+    from app.models import CreateLoreEntryRequest, SaveLoreEntryRequest
+    from app.services.ai.preview import PreviewRequest, build_preview
+    from app.services.project_service import ProjectService
+
+    service = ProjectService.created_at(tmp_path / "project", "Picks")
+
+    def make(title, entry_type, tags):
+        entry = service.create_lore_entry(CreateLoreEntryRequest(title=title, entry_type=entry_type))
+        return service.save_lore_entry(
+            entry.id,
+            SaveLoreEntryRequest(
+                title=title,
+                body=f"BODY_OF_{title}",
+                base_revision=entry.revision,
+                entry_type=entry_type,
+                metadata={"tags": tags},
+            ),
+        )
+
+    hit = make("Aetheria", "lore:note", ["World-building"])
+    make("Cassini", "lore:note", ["Real-world"])  # wrong tag — must NOT appear
+
+    picks = json.dumps(
+        [
+            {
+                "id": "tag:lore:World-building",
+                "kind": "tag",
+                "title": "World-building",
+                "selector": {
+                    "kind": "lore",
+                    "expr": {
+                        "intersect": [
+                            {"tagged": "World-building"},
+                            {"union": [{"type": "lore:note"}]},
+                        ]
+                    },
+                },
+            }
+        ]
+    )
+    rendered, _ = build_preview(
+        service,
+        PreviewRequest(
+            template_source='{% role "system" %}{% do use(inputs.lore) %}{{ use_lore() }}{% endrole %}',
+            target_scene_id="",
+            session_id=None,
+            inputs={"lore": picks},
+            text_before="",
+            text_after="",
+            commit=False,
+        ),
+    )
+    assert rendered.lore_invoked is True
+    assert rendered.used_node_ids == [hit.id]
+    # The real payload: the lore block the model receives must carry the tagged doc.
+    lore_block = (rendered.send_lore_stable or "") + (rendered.send_lore_volatile or "")
+    assert "Aetheria" in lore_block, f"tagged doc missing from send lore: {lore_block!r}"
+    assert "Cassini" not in lore_block
+
+
 def test_expand_container_picks_skips_structure_read_for_scene_only_picks():
     # The perf gate (the preview re-renders on a debounce): a prompt that picks
     # only scenes (each tagged manuscript:scene) never loads the structure.

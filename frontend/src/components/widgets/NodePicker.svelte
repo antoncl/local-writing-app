@@ -277,10 +277,7 @@
   // context (the scene's title/tags via the shared matcher).
   let collapsedManuscriptIds = $state<Set<string>>(new Set());
   function toggleManuscriptCollapse(id: string) {
-    const next = new Set(collapsedManuscriptIds);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    collapsedManuscriptIds = next;
+    collapsedManuscriptIds = toggleInSet(collapsedManuscriptIds, id);
   }
   const manuscriptRows = $derived.by<ManuscriptRow[]>(() => {
     if (!structure || !allowedKinds.includes("manuscript")) return [];
@@ -365,14 +362,37 @@
     const { kinds } = pickerMembership(tag.scope);
     return kinds.length === 0 || kinds.includes(kind);
   }
+  // A `tagged` leaf INTERSECTED with the config's entry_type constraint for the
+  // kind, so a tag can't over-match past the picker's scope (a lore:character
+  // input must not pull in a lore:location sharing the tag). The stored spec
+  // drives invocation expansion too, so the constraint lives in the spec, not
+  // just the display filter.
+  function tagSpecFor(kind: string, tag: string): ViewSpec {
+    const fqns = membership.entryTypes[kind] ?? [];
+    const typeExpr =
+      fqns.length === 1
+        ? { type: fqns[0] }
+        : fqns.length > 1
+          ? { union: fqns.map((f) => ({ type: f })) }
+          : null;
+    const expr = typeExpr ? { intersect: [{ tagged: tag }, typeExpr] } : { tagged: tag };
+    return { kind, expr } as ViewSpec;
+  }
   const tagGroups = $derived.by<SelectorGroup[]>(() => {
     const groups: SelectorGroup[] = [];
     for (const kind of allowedKinds) {
       for (const tag of knownTags) {
         if (!tagInScopeFor(tag, kind)) continue;
-        const spec: ViewSpec = { kind, expr: { tagged: tag.name } };
-        const ref: NodePickerRef = { id: `tag:${kind}:${tag.name}`, kind: "tag", title: tag.name, selector: spec };
-        groups.push({ ref, members: membersForSelector(ref, selectorRoster) });
+        const ref: NodePickerRef = {
+          id: `tag:${kind}:${tag.name}`,
+          kind: "tag",
+          title: tag.name,
+          selector: tagSpecFor(kind, tag.name),
+        };
+        const members = membersForSelector(ref, selectorRoster);
+        // Skip a tag that resolves to nothing (a kind with no roster, or no
+        // current in-scope members) — an empty, pickable row is noise.
+        if (members.length > 0) groups.push({ ref, members });
       }
     }
     return groups;

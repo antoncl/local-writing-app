@@ -404,6 +404,25 @@ describe("NodePicker tag selectors (#1491)", () => {
     expect(detail.value[0]).toMatchObject({ id: "tag:lore:villain", kind: "tag", title: "villain" });
     expect(detail.value[0].selector).toEqual({ kind: "lore", expr: { tagged: "villain" } });
   });
+
+  it("respects the config's entry_type constraint — a tag can't over-match past scope (#1493 review)", async () => {
+    render(NodePicker, {
+      props: {
+        config: { sources: [{ kind: "lore", expr: { type: "lore:character" } }], multiple: true },
+        loreEntries: [
+          loreEntry("lore_a", "Vex", ["villain"]), // a character
+          // A location sharing the 'villain' tag — must NOT be pulled into a
+          // character-restricted input.
+          { ...loreEntry("loc_1", "Dark Keep", ["villain"]), entry_type: "lore:location" },
+        ],
+        affordance: "add",
+      },
+    });
+    const menu = await openMenu();
+    const tags = (await within(menu).findAllByRole("group", { name: "Tags" }))[0];
+    expect(within(tags).getByText("Vex")).toBeInTheDocument();
+    expect(within(tags).queryByText("Dark Keep")).toBeNull();
+  });
 });
 
 describe("NodePicker onChange callback (runes conversion #49)", () => {

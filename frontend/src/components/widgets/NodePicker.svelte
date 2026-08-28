@@ -65,11 +65,13 @@
     togglePickAt,
     type ManuscriptRow,
   } from "@/lib/utils/manuscriptPickTree";
-  import { portalToBody } from "@/lib/actions/portal";
   import NodeRow from "@/components/widgets/NodeRow.svelte";
   import NodeList from "@/components/widgets/NodeList.svelte";
-  import PickTree, { type PickTreeRow, type PickTreeState } from "@/components/widgets/PickTree.svelte";
-  import GroupCaret from "@/components/widgets/GroupCaret.svelte";
+  import { type PickTreeRow, type PickTreeState } from "@/components/widgets/PickTree.svelte";
+  import NodePickerPopover, {
+    type NodePickerPopoverModel,
+    type PickAxis,
+  } from "@/components/widgets/NodePickerPopover.svelte";
 
   let {
     config = {},
@@ -857,7 +859,7 @@
   // tapping one drills into its panel — ONE level. A panel is that axis's tri-state
   // rows (containers keep their inline expand caret). Order matches the configurator:
   // Manuscript, Lore, Plot, By tag, Saved views, then the flat kinds.
-  type PickAxis = { id: string; label: string; count: number; rows: PickTreeRow[] };
+  // `PickAxis` is defined by NodePickerPopover (the view that renders them).
   const axes = $derived.by<PickAxis[]>(() => {
     const flat = new Map(visibleGroups.map((g) => [g.id, g] as const));
     const out: PickAxis[] = [];
@@ -919,6 +921,22 @@
     const kinds = new Set(AXIS_KINDS[effectiveAxis] ?? []);
     onChange?.({ value: value.filter((r) => !kinds.has(r.kind)) });
   }
+
+  // The presentational view-model handed to NodePickerPopover — all render
+  // state, no domain logic (which stays here in the controller). `search` and
+  // `searchInputEl` bind through separately so this controller keeps owning
+  // positioning + open-focus; the three nav callbacks pass down by reference.
+  const popoverModel: NodePickerPopoverModel = $derived({
+    axes,
+    effectiveAxis,
+    singleAxis,
+    atRoot,
+    activeAxisLabel,
+    activePanelRows,
+    hasAnyConfigured,
+    hasAnyResults,
+    totalVisibleItems,
+  });
 </script>
 
 <svelte:document onmousedown={handleDocumentClick} onkeydown={handleKeydown} />
@@ -1002,111 +1020,18 @@
         {/if}
       </button>
 
-    {#if open}
-      <div class="ctx-menu" class:compact role="menu" style={menuStyle} use:portalToBody>
-        {#snippet emptySearch()}
-          <div class="ctx-empty">
-            <svg class="ctx-empty-icon-svg" width="30" height="30" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <circle cx="10" cy="10" r="6.5" stroke="currentColor" stroke-width="1.4" />
-              <line x1="15" y1="15" x2="21" y2="21" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
-            </svg>
-            <span class="ctx-empty-title">No matches for <strong>"{search}"</strong></span>
-            <span class="ctx-empty-hint">Try a different term, or clear the search to browse.</span>
-          </div>
-        {/snippet}
-
-        <!-- Popover head: ← back (when drilled into an axis) + the panel title +
-             the search box (ADR-0074 slice 7b drill-in). -->
-        <div class="ctx-pop-head">
-          {#if effectiveAxis && !singleAxis}
-            <button type="button" class="ctx-back" aria-label="Back to sources" onclick={backToRoot}>←</button>
-          {/if}
-          {#if effectiveAxis}
-            <span class="ctx-panel-title">{activeAxisLabel}</span>
-          {/if}
-          <label class="ctx-search-wrap" class:has-query={search.length > 0}>
-            <svg class="ctx-search-icon" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-              <circle cx="6" cy="6" r="4.2" stroke="currentColor" stroke-width="1.6" />
-              <line x1="9.2" y1="9.2" x2="12.5" y2="12.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-            </svg>
-            <input
-              class="ctx-search"
-              type="text"
-              placeholder={compact ? "Search…" : "Search titles, tags, aliases…  (#tag)"}
-              bind:value={search}
-              bind:this={searchInputEl}
-            />
-            {#if search.length > 0}
-              <button
-                type="button"
-                class="ctx-search-clear"
-                aria-label="Clear search"
-                onclick={() => (search = "")}
-              >×</button>
-            {:else if hasAnyResults}
-              <span class="ctx-search-count">{totalVisibleItems}{compact ? "" : " items"}</span>
-            {/if}
-          </label>
-        </div>
-
-        <div class="ctx-pop-body">
-          {#if !hasAnyConfigured}
-            <div class="ctx-empty">
-              <span class="ctx-empty-icon" aria-hidden="true">∅</span>
-              <span class="ctx-empty-title">No content sources configured</span>
-              <span class="ctx-empty-hint">
-                This prompt's author didn't enable any pickable types or presets for this input.
-              </span>
-            </div>
-          {:else if isSearchActive(search)}
-            <!-- Search is contextual: cross-axis results at root, within-axis when
-                 drilled in (ADR-0074 slice 7b). -->
-            {#if effectiveAxis}
-              {#if activePanelRows.length > 0}
-                <PickTree rows={activePanelRows} ariaLabel={activeAxisLabel} />
-              {:else}
-                {@render emptySearch()}
-              {/if}
-            {:else if axes.length > 0}
-              {#each axes as ax (ax.id)}
-                <div class="ctx-result-head">{ax.label}</div>
-                <PickTree rows={ax.rows} ariaLabel={ax.label} />
-              {/each}
-            {:else}
-              {@render emptySearch()}
-            {/if}
-          {:else if atRoot}
-            <!-- Root: the axis list. Tap an axis to drill into its panel. -->
-            {#if axes.length > 0}
-              {#each axes as ax (ax.id)}
-                <button type="button" class="ctx-axis-row" onclick={() => drillInto(ax.id)}>
-                  <span class="ctx-axis-name">{ax.label}</span>
-                  <span class="ctx-axis-count">{ax.count}</span>
-                  <GroupCaret size="xs" collapsed />
-                </button>
-              {/each}
-            {:else}
-              <div class="ctx-empty">
-                <span class="ctx-empty-icon" aria-hidden="true">∅</span>
-                <span class="ctx-empty-title">No pickable items in this project yet</span>
-              </div>
-            {/if}
-          {:else if activePanelRows.length > 0}
-            <!-- Drilled-in panel: the axis's tri-state rows. -->
-            <PickTree rows={activePanelRows} ariaLabel={activeAxisLabel} />
-          {:else}
-            <div class="ctx-empty">
-              <span class="ctx-empty-icon" aria-hidden="true">∅</span>
-              <span class="ctx-empty-title">Nothing here yet</span>
-            </div>
-          {/if}
-        </div>
-
-        {#if effectiveAxis && !isSearchActive(search) && activePanelRows.length > 0}
-          <button type="button" class="ctx-clear" onclick={clearActivePanel}>⃠ Clear this panel’s selection</button>
-        {/if}
-      </div>
-    {/if}
+      {#if open}
+        <NodePickerPopover
+          model={popoverModel}
+          {menuStyle}
+          {compact}
+          bind:search
+          bind:searchInputEl
+          onDrillInto={drillInto}
+          onBackToRoot={backToRoot}
+          onClearPanel={clearActivePanel}
+        />
+      {/if}
     </div>
   </div>
 </div>
@@ -1114,11 +1039,8 @@
 <style>
   /* The picker consumes the global role tokens directly (the local
      --ctx-* parallel palette folded into them, #125 phase 1 / ADR-0030).
-     The menu portals to <body> (to escape a transformed Svelte Flow
-     ancestor that would trap its `position: fixed`) — safe, because the
-     role tokens live on :root and reach it anywhere in the tree. */
-  .ctx-picker,
-  .ctx-menu {
+     The popover shell + its styles live in NodePickerPopover.svelte (#1538). */
+  .ctx-picker {
     /* Per-chip colors come from inline `--chip-base` set by the markup
        via resolveColorForKind() — see colors.ts. The soft tint is
        derived in CSS via color-mix so we don't have to ship two values
@@ -1227,215 +1149,6 @@
     padding: 3px 9px;
   }
 
-  /* --- Popover menu ------------------------------------------------ */
-
-  .ctx-menu {
-    /* `fixed` so the popover escapes ancestor overflow:auto/hidden
-       containers (notably .metadata-panel's scroll region that was
-       clipping it when this picker is hosted by ReferencePicker inside
-       a lore/scene metadata field). Coordinates are JS-computed from
-       the trigger's getBoundingClientRect — see positionMenu(). */
-    position: fixed;
-    width: 344px;
-    max-width: calc(100vw - 16px);
-    max-height: 420px;
-    overflow-y: auto;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 11px;
-    box-shadow: var(--elev-2);
-    /* The head (search + back/title) and the per-panel Clear pin; the pop-body
-       scrolls between them (ADR-0074 slice 7b drill-in), so the menu itself
-       clips rather than scrolls and carries no padding of its own. */
-    overflow: hidden;
-    /* Above modal backdrops (InputsDialog's scrim is z-index 1000): this
-       picker is launched from inside the inputs dialog, so a lower value
-       let the scrim paint over the menu and swallow every click (#1274).
-       10000 matches the sibling body-portaled popovers — TagPicker,
-       SwatchPicker, ColoredSelect — which all float above modals. */
-    z-index: 10000;
-    display: flex;
-    flex-direction: column;
-  }
-
-  /* `compact` is set on the menu itself (not just the picker root) so it still
-     applies once the menu portals to <body>. */
-  .ctx-menu.compact {
-    width: 280px;
-  }
-
-  /* --- Drill-in shell: head / body / clear (ADR-0074 slice 7b) ------ */
-  .ctx-pop-head {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px;
-    border-bottom: 1px solid var(--border);
-  }
-  .ctx-pop-head .ctx-search-wrap {
-    flex: 1;
-    min-width: 0;
-  }
-  .ctx-back {
-    flex: none;
-    width: 30px;
-    height: 30px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border: none;
-    background: transparent;
-    color: var(--accent);
-    border-radius: var(--r-md);
-    cursor: pointer;
-    font-size: var(--fs-lg);
-  }
-  .ctx-back:hover {
-    background: var(--inset);
-  }
-  .ctx-panel-title {
-    flex: none;
-    font-family: var(--serif);
-    font-size: var(--fs-lg);
-    white-space: nowrap;
-    padding-right: 2px;
-  }
-  .ctx-pop-body {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    padding: 6px;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-  .ctx-axis-row {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 9px 10px;
-    border: none;
-    background: transparent;
-    border-radius: var(--r-md);
-    cursor: pointer;
-    text-align: left;
-    color: var(--text);
-    font: inherit;
-  }
-  .ctx-axis-row:hover {
-    background: var(--inset);
-  }
-  .ctx-axis-name {
-    flex: 1;
-    min-width: 0;
-  }
-  .ctx-axis-count {
-    flex: none;
-    font-size: var(--fs-sm);
-    color: var(--text-3);
-    font-variant-numeric: tabular-nums;
-  }
-  .ctx-result-head {
-    font-family: var(--serif);
-    font-size: var(--fs-lg);
-    color: var(--text-2);
-    padding: 8px 8px 2px;
-  }
-  .ctx-clear {
-    flex: none;
-    width: 100%;
-    border: none;
-    border-top: 1px solid var(--border);
-    background: transparent;
-    color: var(--text-3);
-    padding: 8px 10px;
-    text-align: left;
-    cursor: pointer;
-    font-size: var(--fs-sm);
-    font-family: inherit;
-  }
-  .ctx-clear:hover {
-    color: var(--text);
-    background: var(--inset);
-  }
-
-  /* Search input — pill with leading icon + trailing count/clear. */
-  .ctx-search-wrap {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 11px;
-    border: 1px solid var(--border-strong);
-    border-radius: 9px;
-    background: var(--surface);
-    transition: border-color 80ms linear, border-width 0s;
-  }
-
-  .ctx-search-wrap:focus-within,
-  .ctx-search-wrap.has-query {
-    border-color: var(--accent);
-  }
-
-  .ctx-search-icon {
-    color: var(--text-3);
-    flex: none;
-  }
-
-  .ctx-search-wrap:focus-within .ctx-search-icon,
-  .ctx-search-wrap.has-query .ctx-search-icon {
-    color: var(--accent);
-  }
-
-  .ctx-search {
-    flex: 1;
-    min-width: 0;
-    appearance: none;
-    border: none;
-    background: transparent;
-    color: var(--text);
-    font-size: var(--fs-md);
-    padding: 0;
-    font-family: inherit;
-  }
-
-  .ctx-search:focus {
-    outline: none;
-  }
-
-  .ctx-search::placeholder {
-    color: var(--text-3);
-  }
-
-  .ctx-search-count {
-    flex: none;
-    font-size: var(--fs-xs);
-    font-weight: 600;
-    color: var(--text-3);
-  }
-
-  .ctx-search-clear {
-    appearance: none;
-    border: none;
-    background: transparent;
-    color: var(--text-3);
-    font-size: var(--fs-md);
-    line-height: 1;
-    cursor: pointer;
-    padding: 0 2px;
-    border-radius: 3px;
-    flex: none;
-  }
-
-  .ctx-search-clear:hover {
-    background: var(--inset);
-    color: var(--text);
-  }
-
-  /* Every candidate row now renders through PickTree → NodeRow (ADR-0074 slice
-     7a): stripe + a leading PickCheck. The old trailing "✓ picked" cue and the
-     bespoke group bars are gone. */
-
   /* Live descendant-scene / member count on a picked container chip. The tree
      rows' own count badge lives in PickTree.svelte. */
   .ctx-count-pill {
@@ -1450,49 +1163,4 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* --- Empty states ------------------------------------------------ */
-
-  .ctx-empty {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-    padding: 30px 22px;
-    text-align: center;
-  }
-
-  .ctx-empty-icon {
-    width: 38px;
-    height: 38px;
-    border-radius: 10px;
-    background: var(--inset);
-    border: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-3);
-    font-size: var(--fs-xl);
-    line-height: 1;
-  }
-
-  .ctx-empty-icon-svg {
-    color: var(--text-3);
-    opacity: 0.6;
-  }
-
-  .ctx-empty-title {
-    font-size: var(--fs-md);
-    color: var(--text-2);
-  }
-
-  .ctx-empty-title strong {
-    color: var(--text);
-    font-weight: 600;
-  }
-
-  .ctx-empty-hint {
-    font-size: var(--fs-sm);
-    color: var(--text-3);
-    line-height: 1.45;
-  }
 </style>

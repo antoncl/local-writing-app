@@ -20,6 +20,7 @@
   import { mutationSetEntriesStore, openNewMutationSet, openEditMutationSet } from "@/lib/stores/mutationSets";
   import { pinnedSetsFor } from "@/lib/views/pinnedSets";
   import { resolveColor } from "@/lib/utils/colors";
+  import { entryTypeIconClass } from "@/lib/utils/fieldIcons";
   import { metadataSchemaStore } from "@/lib/stores/schema";
   import { railSectionCollapse } from "@/lib/stores/railSectionCollapse.svelte";
   import type { MutationSetEntrySummary } from "@/lib/types";
@@ -110,6 +111,7 @@
     title={set.title || "Untitled change"}
     depth={rowCtx.depth}
     stripeColor={resolveColor(null, set.entry_type, "mutation_set", schema)?.hex ?? null}
+    typeIcon={entryTypeIconClass(set.entry_type, schema)}
     onClick={rowCtx.onClick}
   >
     {#snippet trailing()}

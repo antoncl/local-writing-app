@@ -861,6 +861,12 @@ export type EntryTypeDefinition = {
   // Pre-inheritance color — mirrors `own_fields`. Editor uses this to
   // distinguish "set on this type" from "inherited from parent".
   own_color?: string | null;
+  // Type-level Tabler icon name (without the `ti-` prefix), the mnemonic twin
+  // of `color` (#316). Inherits from parent unless set.
+  icon?: string | null;
+  // Pre-inheritance icon — mirrors `own_color`. Distinguishes "set on this
+  // type" from "inherited from parent".
+  own_icon?: string | null;
   default_body?: string;
   default_inputs?: PromptInputDefinition[];
   // Reusable group applications (L2). Each expands into generated prefixed

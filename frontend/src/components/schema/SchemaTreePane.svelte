@@ -22,7 +22,7 @@
   import CountPill from "@/components/widgets/CountPill.svelte";
   import { SvelteSet } from "svelte/reactivity";
   import { resolveColor } from "@/lib/utils/colors";
-  import { fieldTypeLabel } from "@/lib/utils/fieldIcons";
+  import { entryTypeIconClass, fieldTypeLabel } from "@/lib/utils/fieldIcons";
   import {
     sourceBadgeLabel,
     SCHEMA_KINDS as SCHEMA_KIND_ORDER,
@@ -130,6 +130,7 @@
   {@const fieldEntries = node.fieldEntries}
   {@const typeSwatch = resolveColor(null, node.id, node.definition.kind, metadataSchema)}
   {@const stripeHex = typeSwatch?.hex ?? null}
+  {@const typeGlyph = entryTypeIconClass(node.id, metadataSchema)}
   {@const childCount = fieldEntries.length + node.children.length}
   {@const isCollapsed = collapsedTypes.has(node.id)}
   <NodeRow
@@ -137,6 +138,7 @@
     detail={`${node.id}${node.definition.abstract ? " · Abstract" : ""}`}
     groupHeader
     stripeColor={stripeHex}
+    typeIcon={typeGlyph}
     active={selectedSchemaTypeId === node.id}
     ariaLabel={`${node.label} detail type — ${sourceBadgeLabel(typeSource)}`}
     collapsed={childCount === 0 || isCollapsed}

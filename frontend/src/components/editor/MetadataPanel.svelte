@@ -5,7 +5,7 @@
   import SwatchPicker from "@/components/widgets/SwatchPicker.svelte";
   import ColoredSelect from "@/components/widgets/ColoredSelect.svelte";
   import GroupCaret from "@/components/widgets/GroupCaret.svelte";
-  import { fieldIconClass } from "@/lib/utils/fieldIcons";
+  import { fieldIconClass, entryTypeIconClass } from "@/lib/utils/fieldIcons";
   import { resolveColor } from "@/lib/utils/colors";
   import { effectiveFieldLabel, effectiveFieldHidden, metadataValueDisplayString } from "@/lib/utils/schemaTypeHelpers";
   import type {
@@ -154,6 +154,8 @@
   );
 
   const entryTypeDef = $derived(metadataSchema.entry_types[entryType] ?? null);
+  // The open entry's resolved type icon (#316), computed once for the rail header.
+  const railTypeIcon = $derived(entryTypeIconClass(entryType, metadataSchema));
   // Inheritance: a field present on the type but not in its own_fields is
   // inherited from the kind / parent. We only mark when own_fields is
   // explicitly present (older schemas omit it → treat all as own).
@@ -334,6 +336,11 @@
 <section class="scene-metadata" aria-label={`${documentLabel} details`}>
   <!-- Type header: kind/type identity + colour swatch + jump to schema. -->
   <div class="rail-type">
+    {#if railTypeIcon}
+      <!-- The open entry's type icon (#316): the rail twin of the type icon
+           shown on list rows. Quiet, leads the type selector. -->
+      <i class={`rail-type-icon ${railTypeIcon}`} aria-hidden="true"></i>
+    {/if}
     <label class="rail-type-select">
       <span class="rail-type-label">{documentLabel} type</span>
       <select
@@ -453,7 +460,7 @@
           {:else}
             <span class="fr-icon"><i class={fieldIconClass(field)} aria-hidden="true"></i></span>
           {/if}
-          <span class="fr-name" title={field.description || undefined}>{fieldLabel}{#if isMutated(fieldId)}<span class="fr-mutated-marker" title="Changed by here">⤳</span>{/if}</span>
+          <span class="fr-name" title={field.description || undefined}>{fieldLabel}</span>
           <div class="fr-val" class:fr-val-flat={isRefField(field)} title={isLayerInherited(fieldId) && inheritedFromLabel ? `Inherited from ${inheritedFromLabel}` : undefined}>
             {#if isOverridden(fieldId)}
               {#if canResetOverride}
@@ -582,6 +589,13 @@
                 onNavigate={(payload) => onNavigate?.(payload)}
               />
             {/if}
+            {#if isMutated(fieldId)}
+              <!-- Mutation mark (#64) trails the value, co-located with the
+                   `ti-versions` override mark that leads it, so a field that is
+                   both overridden and mutated reads `[versions] Captain ⤳` on
+                   one line — design-language.md §marks, not split across cells (#492). -->
+              <span class="fr-mutated-marker" title="Changed by here">⤳</span>
+            {/if}
           </div>
         </div>
       {/if}
@@ -625,6 +639,15 @@
     gap: 8px;
     padding: 8px 12px 10px;
     border-bottom: 1px solid var(--divider);
+  }
+  /* The open entry's type icon (#316) — muted, aligned to the selector control
+     it leads. Only present when the type declares an icon. */
+  .rail-type-icon {
+    flex: none;
+    align-self: center;
+    color: var(--text-3);
+    font-size: var(--fs-lg);
+    line-height: 1;
   }
   /* Provenance treatment (#313) — the --star axis, matching the level pill and
      the inherited-entry banner. Sits directly under the type header. */
@@ -796,13 +819,20 @@
   }
 
   /* Mutated-by-here rows (#64): the in-prose mutation pill's vocabulary —
-     violet + a miniaturized ⤳ beside the name, like a required-field
-     asterisk. Unchanged rows render plain read-only. */
+     violet + a miniaturized ⤳. Trails the value, co-located with the
+     `ti-versions` override mark that leads it (#492); the `.fr-val` flex gap
+     spaces it, so no own margin. Unchanged rows render plain read-only. */
   .fr-mutated-marker {
-    margin-left: 4px;
+    flex: 0 0 auto;
     color: var(--mutation-color);
     font-weight: 700;
     font-size: var(--fs-sm);
+  }
+  /* Keep the trailing mark on the value's line in wide fields — the value
+     widget flexes to fill, the mark stays its own size (twin of the
+     override-marker rule below). */
+  .field-row.wide .fr-val > .fr-mutated-marker {
+    flex: 0 0 auto;
   }
 
   /* Layer-override mark (#314): the hierarchy twin of `⤳`, leading the value.

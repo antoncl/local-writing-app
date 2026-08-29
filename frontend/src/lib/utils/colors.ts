@@ -58,28 +58,41 @@ export function resolveColorForKind(kind: string | null | undefined): Swatch | n
   return id ? getSwatch(id) : null;
 }
 
-// Walk an entry-type's parent chain looking for an explicit `color` swatch
-// id. The backend resolver already propagates `color` from parent to child
-// through `_resolve_metadata_schema_inheritance`, so a single read on the
-// passed-in entry type should be enough — but we walk defensively in case
-// the schema is consumed before the resolver ran (raw layer file, etc.).
-export function resolveColorForType(
+// Walk an entry-type's parent chain, returning the first non-null value `pick`
+// yields (child wins). The one place the type-inheritance descent is expressed;
+// `resolveColorForType` and `resolveTypeIcon` (fieldIcons.ts) both route through
+// it so the walk — cycle guard included — lives once. The backend resolver
+// already propagates inheritable attributes parent→child, so a single read
+// usually suffices; we walk defensively for a schema consumed pre-resolve (raw
+// layer file, etc.).
+export function firstInEntryTypeChain<T>(
   entryTypeId: string | null | undefined,
   schema: MetadataSchema | null | undefined,
-): Swatch | null {
+  pick: (def: EntryTypeDefinition) => T | null | undefined,
+): T | null {
   if (!entryTypeId || !schema) return null;
   const seen = new Set<string>();
   let current: EntryTypeDefinition | undefined = schema.entry_types?.[entryTypeId];
   while (current && !seen.has(current.name + ":" + (current.parent ?? ""))) {
     seen.add(current.name + ":" + (current.parent ?? ""));
-    if (current.color) {
-      const swatch = getSwatch(current.color);
-      if (swatch) return swatch;
-    }
+    const value = pick(current);
+    if (value != null) return value;
     if (!current.parent) break;
     current = schema.entry_types?.[current.parent];
   }
   return null;
+}
+
+// The first explicit `color` swatch up an entry-type's parent chain, or null.
+// A `color` id that doesn't resolve to a known swatch is skipped (the walk
+// continues to the parent), so a stale swatch id never masks an ancestor's.
+export function resolveColorForType(
+  entryTypeId: string | null | undefined,
+  schema: MetadataSchema | null | undefined,
+): Swatch | null {
+  return firstInEntryTypeChain(entryTypeId, schema, (def) =>
+    def.color ? getSwatch(def.color) : null,
+  );
 }
 
 // Full instance → type → parent → kind-default resolver. Pass the entry's

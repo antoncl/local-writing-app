@@ -108,6 +108,7 @@
   let schemaTypeInitName = $state("");
   let schemaTypeInitId = $state("");
   let schemaTypeInitColor: string | null = $state(null);
+  let schemaTypeInitIcon: string | null = $state(null);
   let schemaTypeDraftToken = $state(0);
 
   // --- Field-row drag-reorder (own fields of a type) --------------------------
@@ -274,6 +275,7 @@
     schemaTypeInitName = "";
     schemaTypeInitId = "";
     schemaTypeInitColor = null;
+    schemaTypeInitIcon = null;
     schemaTypeDraftToken += 1;
     // A new-type draft is a schema-tree action with no owning editor — the null
     // host clears any stale subordinate link so it isn't auto-closed with an
@@ -303,6 +305,8 @@
     // Seed own-color (pre-inheritance). null = "inherit from parent", which the
     // SwatchPicker renders as the "None" cell.
     schemaTypeInitColor = entryType.own_color ?? null;
+    // Seed own-icon (pre-inheritance), same convention as own-color (#316).
+    schemaTypeInitIcon = entryType.own_icon ?? null;
     schemaTypeDraftToken += 1;
     openSubordinatePane("schema_type", ownerPaneId, () => closeSchemaPane("schema_type"));
   }
@@ -661,6 +665,7 @@
         abstract: schemaTypeAbstract,
         fields: previousTypeId ? (existing?.own_fields ?? existing?.fields ?? []) : [],
         color: payload.color || null,
+        icon: payload.icon || null,
       };
       if (previousTypeId && previousTypeId !== nextTypeId) {
         setStatus("Renaming detail types is not available yet");
@@ -833,6 +838,7 @@
     initialName={schemaTypeInitName}
     initialTypeId={schemaTypeInitId}
     initialColor={schemaTypeInitColor}
+    initialIcon={schemaTypeInitIcon}
     bind:schemaTypeLayerId
     bind:expandedSchemaFieldId
     bind:fieldDropTarget

@@ -5,7 +5,8 @@
 // is display-only — the stable macro contract is the field key, never the
 // glyph. See memory note `decisions-metadata-revision` for the table.
 
-import type { MetadataFieldDefinition, MetadataFieldType } from "@/lib/types";
+import { firstInEntryTypeChain } from "@/lib/utils/colors";
+import type { MetadataFieldDefinition, MetadataFieldType, MetadataSchema } from "@/lib/types";
 
 // Default glyph per field type (Tabler names, no `ti-` prefix).
 // `ti-links` is NOT a real Tabler icon — ref-list uses `affiliate`.
@@ -36,6 +37,28 @@ export function fieldGlyph(field: Pick<MetadataFieldDefinition, "type" | "icon">
 // Full Tabler className for a field's icon, e.g. "ti ti-shield-half".
 export function fieldIconClass(field: Pick<MetadataFieldDefinition, "type" | "icon">): string {
   return `ti ti-${fieldGlyph(field)}`;
+}
+
+// The Tabler name for an entry TYPE's icon (#316), the first explicit `icon` up
+// the parent chain — the twin of `resolveColorForType`, sharing its walk via
+// `firstInEntryTypeChain`. Unlike color there is NO kind-default table: a type
+// icon is opt-in, so a type (and its ancestors) without one resolves to null and
+// rows render exactly as before.
+export function resolveTypeIcon(
+  entryTypeId: string | null | undefined,
+  schema: MetadataSchema | null | undefined,
+): string | null {
+  return firstInEntryTypeChain(entryTypeId, schema, (def) => def.icon?.trim() || null);
+}
+
+// Full Tabler className for an entry type's icon, or null when the type (and its
+// ancestors) declare none — callers skip the glyph entirely on null.
+export function entryTypeIconClass(
+  entryTypeId: string | null | undefined,
+  schema: MetadataSchema | null | undefined,
+): string | null {
+  const name = resolveTypeIcon(entryTypeId, schema);
+  return name ? `ti ti-${name}` : null;
 }
 
 // Ordered list of field types surfaced in the Detail Type editor's

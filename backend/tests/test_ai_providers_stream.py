@@ -298,11 +298,13 @@ class OpenAICompatibleStreamTests(unittest.TestCase):
         captured = self._run_capturing_create(OpenRouterProfile(api_key="sk-or"), call)
         self.assertNotIn("temperature", captured)
 
-    def test_openrouter_stream_is_plain_content_only_with_longer_timeout(self):
-        # OpenRouter deliberately does NOT surface reasoning fields as thinking
-        # (byte-identical to the pre-reshape openrouter stream) and uses 300s.
+    def test_openrouter_stream_surfaces_reasoning_and_keeps_content_plain(self):
+        # #1588: reasoning routes stream chain-of-thought on the `reasoning`
+        # field; it must surface as thinking (dropping it made reasoning-only /
+        # truncated turns blank). Content stays PLAIN — no <think>-tag splitting.
+        # Timeout/base_url unchanged.
         chunks = [
-            _chunk(reasoning="ignored", content="Hi"),
+            _chunk(reasoning="pondering", content="Hi"),
             _chunk(finish="stop"),
             _chunk(
                 usage=SimpleNamespace(
@@ -311,12 +313,38 @@ class OpenAICompatibleStreamTests(unittest.TestCase):
             ),
         ]
         events, captured = self._run(OpenRouterProfile(api_key="sk-or"), chunks)
-        thinking = [e for e in events if isinstance(e, StreamThinking)]
+        thinking = [e.text for e in events if isinstance(e, StreamThinking)]
         deltas = [e.text for e in events if isinstance(e, StreamDelta)]
-        self.assertEqual(thinking, [])
+        self.assertEqual(thinking, ["pondering"])
         self.assertEqual("".join(deltas), "Hi")
         self.assertEqual(captured["timeout"], 300.0)
         self.assertEqual(captured["base_url"], "https://openrouter.ai/api/v1")
+
+    def test_openrouter_content_is_not_think_tag_split(self):
+        # The content-only property the original override protected: literal
+        # <think> markers inside content must NOT be re-parsed as thinking.
+        chunks = [_chunk(content="a<think>b</think>c", finish="stop")]
+        events, _ = self._run(OpenRouterProfile(api_key="sk-or"), chunks)
+        thinking = [e for e in events if isinstance(e, StreamThinking)]
+        deltas = [e.text for e in events if isinstance(e, StreamDelta)]
+        self.assertEqual(thinking, [])
+        self.assertEqual("".join(deltas), "a<think>b</think>c")
+
+    def test_openrouter_reasoning_only_turn_is_not_empty(self):
+        # The deepseek-v4-pro failure (#1588): the model burns the whole budget
+        # reasoning and finishes on 'length' with no content. Reasoning must
+        # still reach the client as thinking so the turn is not a blank
+        # "Model returned empty output".
+        chunks = [
+            _chunk(reasoning="thinking and thinking", finish="length"),
+            _chunk(usage=SimpleNamespace(
+                prompt_tokens=3, completion_tokens=4096, prompt_tokens_details=None)),
+        ]
+        with self.assertNoLogs(_DIAG_LOGGER, level="WARNING"):
+            events, _ = self._run(OpenRouterProfile(api_key="sk-or"), chunks)
+        thinking = [e.text for e in events if isinstance(e, StreamThinking)]
+        self.assertEqual("".join(thinking), "thinking and thinking")
+        self.assertEqual([e for e in events if isinstance(e, StreamDelta)], [])
 
     # ---- in-band error surfacing (#1581) --------------------------------
     # OpenRouter's rate-limit / no-provider / upstream-5xx failures ride inside a
@@ -460,15 +488,6 @@ class OpenAICompatibleStreamTests(unittest.TestCase):
         self.assertIn("can't help", logged)
         self.assertIn("content_filter", logged)
 
-    def test_empty_stream_logs_dropped_reasoning(self):
-        # OpenRouter drops reasoning; a reasoning-only turn looks empty. The diag
-        # records the reasoning chars even though no thinking event was emitted.
-        chunks = [_chunk(reasoning="thinking hard", finish="stop")]
-        with self.assertLogs(_DIAG_LOGGER, level="WARNING") as cm:
-            events, _ = self._run(OpenRouterProfile(api_key="sk-or"), chunks)
-        self.assertEqual([e for e in events if isinstance(e, StreamThinking)], [])
-        self.assertIn("reasoning=13", "\n".join(cm.output))
-
     def test_non_empty_stream_does_not_log(self):
         chunks = [
             _chunk(content="Hello", finish="stop"),
@@ -477,6 +496,20 @@ class OpenAICompatibleStreamTests(unittest.TestCase):
         ]
         with self.assertNoLogs(_DIAG_LOGGER, level="WARNING"):
             self._run(OpenRouterProfile(api_key="sk-or"), chunks)
+
+    def test_stream_diag_accumulates_signals(self):
+        # Pin the diagnostic accumulator directly: reasoning chars, the
+        # per-choice content split, choice count, and finish reasons.
+        from app.services.ai.profiles.openai_compatible import _StreamDiag
+
+        diag = _StreamDiag()
+        diag.observe(_chunk(reasoning="think", finish="stop"))
+        diag.observe(_two_choice_chunk(idx0=None, idx1="hi"))
+        self.assertEqual(diag.reasoning, len("think"))
+        self.assertEqual(diag.content_idx0, 0)
+        self.assertEqual(diag.content_other, len("hi"))
+        self.assertEqual(diag.max_choices, 2)
+        self.assertIn((0, "stop"), diag.finishes)
 
     def test_thinking_only_stream_does_not_log(self):
         # Reasoning surfaced as thinking (no content) IS visible output — an

@@ -97,10 +97,24 @@ class OpenRouterProfile(OpenAICompatibleProfile):
     def _stream_delta_events(
         self, delta: Any, splitter: ThinkTagSplitter
     ) -> Iterator[StreamDelta | StreamThinking]:
-        # OpenRouter is treated as a plain content stream — no inline
-        # <think>-tag or reasoning-field processing (byte-identical to the
-        # pre-reshape openrouter stream). The splitter is unused.
-        text = getattr(delta, "content", None) if delta else None
+        # Surface a structured `reasoning` field as thinking. Reasoning routes
+        # (deepseek-v4-pro and others) stream their chain-of-thought here, and
+        # some spend the whole token budget reasoning before any content — so
+        # dropping it turned a reasoning-only or truncated turn into a blank
+        # "Model returned empty output" (#1588). Content stays PLAIN — no inline
+        # <think>-tag splitting — which is the one property the original
+        # content-only override protected (a route that emits literal <think>
+        # markers in content must not have them re-parsed). The splitter stays
+        # unused; that deliberate divergence from the base handler is preserved.
+        if delta is None:
+            return
+        reasoning = (
+            getattr(delta, "reasoning", None)
+            or getattr(delta, "reasoning_content", None)
+        )
+        if reasoning:
+            yield StreamThinking(text=reasoning)
+        text = getattr(delta, "content", None)
         if text:
             yield StreamDelta(text=text)
 

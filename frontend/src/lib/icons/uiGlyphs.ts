@@ -50,6 +50,7 @@ export const UI_GLYPHS: string[] = [
   "player-play",
   "plus",
   "power",
+  "robot",
   "seedling",
   "settings",
   "stack-2",

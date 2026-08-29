@@ -33,6 +33,7 @@ const baseProps = {
   titleFor: (_id: string) => null as string | null,
   onPickPrompt: () => {},
   onPickAssistant: () => {},
+  onNewChatWithSetup: () => {},
 };
 
 const openPreview = async () =>

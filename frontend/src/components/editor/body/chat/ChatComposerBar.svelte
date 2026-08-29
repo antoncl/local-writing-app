@@ -68,6 +68,9 @@
     titleFor: (id: string) => string | null;
     onPickPrompt: (entry: PromptEntrySummary) => void;
     onPickAssistant: (id: string) => void;
+    // ADR-0076 S4: the lock doorway's one action — create a fresh chat seeded
+    // with the same prompt/assistant/input drafts (never the transcript).
+    onNewChatWithSetup: () => void;
   }
 
   let {
@@ -88,6 +91,7 @@
     titleFor,
     onPickPrompt,
     onPickAssistant,
+    onNewChatWithSetup,
   }: Props = $props();
 
   // Cache blocks that carry text — the readable system + lore the model sees.
@@ -121,6 +125,27 @@
   let chatPreviewPopoverOpen = $state(false);
   let chatPreviewBtnEl: HTMLButtonElement | null = $state(null);
   let chatPreviewPopoverEl: HTMLDivElement | null = $state(null);
+
+  // ---- ADR-0076 S4: the lock doorway popover state ----
+  // A locked chip is inert by default (tooltip only); once a prompt is bound
+  // it becomes a doorway to a fresh chat with the same setup (decision 8).
+  let doorwayOpen: "" | "prompt" | "assistant" = $state("");
+  let doorwayPopoverEl: HTMLDivElement | null = $state(null);
+  // The doorway is only honest when its action can actually run: "New chat with
+  // this setup" reuses the bound prompt, so gate on the prompt RESOLVING in the
+  // same roster ChatBodyView's activePromptEntry uses — a bound id that no longer
+  // resolves (a deleted prompt) must not offer a button that silently no-ops.
+  const canDoorway = $derived(isLocked && promptEntries.some((p) => p.id === chatPromptEntryId));
+  function openDoorway(which: "prompt" | "assistant") {
+    // Mutually exclusive with the pickers + Context door.
+    promptPickerOpen = false;
+    assistantPickerOpen = false;
+    chatPreviewPopoverOpen = false;
+    doorwayOpen = which;
+  }
+  function closeDoorway() {
+    doorwayOpen = "";
+  }
 
   let assistantParts = $derived(partitionAssistants(assistantEntries, assistantPickerSearch, assistantScope));
 
@@ -201,6 +226,11 @@
       const insidePreview = chatPreviewPopoverEl?.contains(target) || chatPreviewBtnEl?.contains(target);
       if (!insidePreview) chatPreviewPopoverOpen = false;
     }
+    if (doorwayOpen) {
+      const anchorBtn = doorwayOpen === "prompt" ? promptPickerBtnEl : assistantPickerBtnEl;
+      const inside = doorwayPopoverEl?.contains(target) || anchorBtn?.contains(target);
+      if (!inside) doorwayOpen = "";
+    }
   }
 
   onMount(() => {
@@ -218,8 +248,9 @@
       class:cbv-chip-assigned={!!chatPromptEntryId}
       title={isLocked ? "Prompt is locked while this chat has messages." : "Pick a prompt"}
       bind:this={promptPickerBtnEl}
-      onclick={() => void toggleChatPromptPicker()}
+      onclick={() => (canDoorway ? openDoorway("prompt") : void toggleChatPromptPicker())}
       disabled={isLocked && !chatPromptEntryId}
+      aria-expanded={doorwayOpen === "prompt"}
     >
       <span class="cbv-chip-glyph" aria-hidden="true">✨</span>
       <strong>{promptTitle(chatPromptEntryId)}</strong>
@@ -255,6 +286,9 @@
         {/each}
       </div>
     {/if}
+    {#if doorwayOpen === "prompt"}
+      {@render doorway("Locked after the first message — this prompt shapes every turn.")}
+    {/if}
   </div>
   <div class="cbv-prompt-anchor">
     <button
@@ -263,9 +297,10 @@
       class:cbv-chip-locked={isLocked}
       title={isLocked ? "Assistant is locked while this chat has messages." : "Pick an assistant"}
       bind:this={assistantPickerBtnEl}
-      onclick={() => void toggleAssistantPicker()}
-      disabled={isLocked}
+      onclick={() => (canDoorway ? openDoorway("assistant") : void toggleAssistantPicker())}
+      disabled={isLocked && !chatPromptEntryId}
       aria-label="Assistant"
+      aria-expanded={doorwayOpen === "assistant"}
     >
       <span class="cbv-chip-glyph" aria-hidden="true">🤖</span>
       <strong>{assistantTitle(chatAssistantId, assistantEntries, scopedDefaultId)}</strong>
@@ -311,6 +346,9 @@
         {/if}
       </div>
     {/if}
+    {#if doorwayOpen === "assistant"}
+      {@render doorway("Locked after the first message — this assistant answers every turn.")}
+    {/if}
   </div>
   {#snippet assistantOption(assistant: AssistantEntrySummary)}
     <button
@@ -321,6 +359,26 @@
       <strong>{assistant.title}</strong>
       <small>{assistant.entry_type}</small>
     </button>
+  {/snippet}
+  {#snippet doorway(message: string)}
+    <div
+      class="cbv-doorway-popover"
+      role="dialog"
+      aria-label="Locked — start fresh"
+      bind:this={doorwayPopoverEl}
+    >
+      <p class="cbv-doorway-note">{message}</p>
+      <button
+        type="button"
+        class="cbv-doorway-action"
+        onclick={() => {
+          onNewChatWithSetup();
+          closeDoorway();
+        }}
+      >
+        New chat with this setup
+      </button>
+    </div>
   {/snippet}
   <div class="cbv-preview-anchor">
     <button
@@ -533,6 +591,25 @@
     margin: 5px 6px;
     background: var(--border);
   }
+
+  /* ADR-0076 S4: the lock doorway — a locked chip's popover. One line of
+     constraint, one worded action; no header, no close × (decision 8). Mirrors
+     .cbv-preview-popover's shell, narrower. */
+  .cbv-doorway-popover {
+    position: absolute; top: 100%; left: 0; margin-top: var(--sp-2); z-index: var(--z-dropdown);
+    width: 240px; background: var(--panel); border: 1px solid var(--border-strong);
+    border-radius: var(--r-lg); box-shadow: var(--elev-2);
+    padding: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-3);
+  }
+  .cbv-doorway-note { margin: 0; font-size: var(--fs-sm); color: var(--text-2); line-height: 1.4; }
+  .cbv-doorway-action {
+    /* The §4 `sm` recipe (--fs-xs on --sp-0/--sp-2, --r-md), outline variant —
+       the door's one standalone action. */
+    align-self: flex-start; padding: var(--sp-0) var(--sp-2); font-size: var(--fs-xs); font-weight: 600;
+    border: 1px solid var(--border-strong); border-radius: var(--r-md); background: transparent;
+    color: var(--text); cursor: pointer;
+  }
+  .cbv-doorway-action:hover { background: var(--inset); }
 
   /* Assistant chip = graphite variant of .cbv-chip. Trigger + popover
      mirror the prompt picker exactly so both read at the same height

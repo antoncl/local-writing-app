@@ -557,6 +557,13 @@
     proseBodyView?.highlightEmbeddedTodo(todoId);
   }
 
+  // Rung 2 of the reconcile ladder (ADR-0077): forward the prose three-way merge
+  // to the body view. Absent body view (chat/view) → null, i.e. non-prose, so the
+  // 409 handler falls to the dialog.
+  export function tryMergeProse(baseBody: string, remoteBody: string): Promise<string | null> {
+    return proseBodyView?.tryMergeProse?.(baseBody, remoteBody) ?? Promise.resolve(null);
+  }
+
   $effect.pre(() => {
     if (metadataReload && metadataReload.token !== lastMetadataReloadToken) {
       lastMetadataReloadToken = metadataReload.token;

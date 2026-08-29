@@ -52,9 +52,8 @@ import {
   refreshAfterSave,
   autosaveOnce,
   offerCloseConflictRecovery,
-  tryAdoptLostSave,
+  reconcileOn409,
   RELOAD_GETTERS,
-  type ReloadableDocument,
 } from "@/lib/stores/editorPaneSave";
 import { refreshKnownTags } from "@/lib/stores/tags";
 import { refreshReferenceIndexInBackground } from "@/lib/stores/references";
@@ -92,6 +91,8 @@ export type MetadataReloadSignal = { token: number; metadata: EntryMetadata; sta
 interface EditorPaneComponentHandle {
   reloadScene: (scene: EditableDocument, mode?: "boundary" | "reconcile") => void | Promise<void>;
   highlightEmbeddedTodo: (todoId: string) => void;
+  // Rung 2 (ADR-0077). Required so svelte-check fails if NodeEditor drops the forwarder.
+  tryMergeProse: (baseBody: string, remoteBody: string) => Promise<string | null>;
 }
 
 const AUTO_SAVE_IDLE_MS = 6000;
@@ -354,9 +355,9 @@ class EditorPanesController {
       }
     });
     if (conflict) {
-      // Rung 1 (ADR-0077): a lost-response 409 means our write already landed,
-      // so the close is safe — adopt and tear down without asking.
-      if (await tryAdoptLostSave(this, id)) {
+      // The reconcile ladder (ADR-0077): a lost-response adopt (rung 1) or a
+      // disjoint prose merge (rung 2) settles the close silently; overlap still asks.
+      if ((await reconcileOn409(this, id)) !== "conflict") {
         this.tearDown(id);
         return;
       }
@@ -1457,14 +1458,13 @@ class EditorPanesController {
     return allSaved;
   }
 
-  // Rung-1 adopt (ADR-0077): tryAdoptLostSave (editorPaneSave) verified the
-  // re-fetch equals what this pane last sent, so swap in its fresh revision and
-  // drop dirty. The buffer already holds this content — no editor reload.
-  adoptReloaded(id: string, remote: ReloadableDocument): void {
+  // Shallow-merge `patch` into one pane by id — the single privileged mutation
+  // the reconcile-ladder host hooks build on (rung-1 lost-response adopt, rung-2
+  // prose-merge adopt; the intent lives in editorPaneSave). Cancels autosave first
+  // so a pending timer can't fire against the pre-patch baseline.
+  patchPane(id: string, patch: Partial<EditorPaneState>): void {
     this.#autosave.cancel(id);
-    this.panes = this.panes.map((candidate) =>
-      candidate.id === id ? { ...candidate, scene: remote, dirty: false, recentlySaved: false } : candidate,
-    );
+    this.panes = this.panes.map((candidate) => (candidate.id === id ? { ...candidate, ...patch } : candidate));
   }
 
   async reconcileSceneFromServer(scene: Scene, mode: "boundary" | "reconcile" = "boundary"): Promise<void> {

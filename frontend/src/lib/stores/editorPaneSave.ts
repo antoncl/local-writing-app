@@ -15,8 +15,18 @@ import { refreshTodos, refreshEmbeddedTodos } from "@/lib/stores/todos";
 import { bodyHasMutationMarkers, mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
 import { HttpError, setKeepaliveSaves, api } from "@/lib/api";
 import { confirmService } from "@/lib/stores/confirmService.svelte";
-import { isEditorPaneDirty, type EditorPaneState } from "@/lib/editor-core/editorPaneModel";
-import type { Scene, LoreEntry, PromptEntry, PlotTemplate, CardEntry, PlotlineEntry } from "@/lib/types";
+import { documentStatus, isEditorPaneDirty, type EditorPaneState } from "@/lib/editor-core/editorPaneModel";
+import type {
+  Scene,
+  LoreEntry,
+  PromptEntry,
+  PlotTemplate,
+  CardEntry,
+  PlotlineEntry,
+  EditableDocument,
+  PromptInputDefinition,
+  PromptContextStrategy,
+} from "@/lib/types";
 
 // The document kinds a pane can reload from the server, and the per-kind getter.
 // Wrapped (not bare `api.getX`) so each getter reads the `api` property live at
@@ -107,10 +117,13 @@ export type SaveFailureHost = {
   setError(message: string): void;
   run(action: () => Promise<void>): Promise<boolean>;
   saveEditorPane(id: string, options?: { force?: boolean }): Promise<void>;
-  // Rung 1 of the reconcile ladder (ADR-0077): swap in a re-fetched document's
-  // fresh revision and drop dirty. The pane's buffer already holds this content
-  // (tryAdoptLostSave verified it), so no editor reload — a plain state update.
-  adoptReloaded(id: string, remote: ReloadableDocument): void;
+  // The one privileged pane mutation the reconcile ladder needs (ADR-0077): shallow-
+  // merge a re-fetched baseline (and, on a prose merge, the merged body) into a pane,
+  // cancelling its autosave. The rung intent lives in this file; this just applies it.
+  patchPane(id: string, patch: Partial<EditorPaneState>): void;
+  // The mounted body views by pane id. Rung 2 reaches the prose three-way merge on
+  // the pane's ProseBodyView; `tryMergeProse` is absent for non-prose bodies.
+  editorPaneComponents: Record<string, { tryMergeProse?: (baseBody: string, remoteBody: string) => Promise<string | null> } | undefined>;
   // Light the sticky "Save failed" badge (saveError) and clear `saving`.
   markPaneSaveError(id: string): void;
   // Re-arm a bounded (~ceiling-cadence) autosave retry.
@@ -183,66 +196,115 @@ export function offerCloseConflictRecovery(host: SaveFailureHost, id: string): v
   });
 }
 
-// Rung 1 before the dialog (ADR-0077 / #1621): a lost-response 409 — the on-disk
-// content already equals what this pane last sent, so our own write landed and
-// only the response was lost — adopts the fresh revision silently; only a
-// genuine conflict reaches the recovery prompt. Fire-and-forget from
-// handleSaveFailure: the prompt is async user interaction anyway, and a failed
-// re-fetch degrades to the dialog.
+// A 409 changed-on-disk, resolved through the reconcile ladder before any dialog.
+// Fire-and-forget from handleSaveFailure: the prompt is async user interaction
+// anyway, and every rung degrades to the dialog on failure.
 async function resolveAutosaveConflict(host: SaveFailureHost, id: string): Promise<void> {
-  let adopted = false;
-  try {
-    adopted = await tryAdoptLostSave(host, id);
-  } catch {
-    adopted = false;
-  }
-  if (!adopted) offerAutosaveConflictRecovery(host, id);
+  if ((await reconcileOn409(host, id)) === "conflict") offerAutosaveConflictRecovery(host, id);
 }
 
-// Rung 1 of the reconcile ladder (ADR-0077 / #1621). A 409 whose on-disk content
-// already equals what this pane last sent is a *lost response* — our own write
-// committed and only the reply was lost (backend restart, network blip) — so
-// adopt the fresh revision silently instead of asking. Returns true when
-// adopted; false (no scene, re-fetch failed, or a real difference remains)
-// leaves the caller to offer the "Changed on disk" dialog. Both 409 sites — the
-// autosave path (above) and the close-flush path (editorPanes) — route through
-// it, so every document kind is covered.
-export async function tryAdoptLostSave(host: SaveFailureHost, id: string): Promise<boolean> {
-  const pane = host.panes.find((candidate) => candidate.id === id);
-  if (!pane?.scene) return false;
-  const kind = pane.document?.type ?? "manuscript";
-  const sceneId = pane.scene.id;
+// Which rung of the ladder resolved a 409 (or "conflict" if none could).
+export type ReconcileOutcome = "adopted" | "merged" | "conflict";
+
+// The reconcile ladder for a changed-on-disk 409 (ADR-0077), shared by BOTH 409
+// sites — background autosave and the close-flush — so every document kind is
+// covered from one place. A single re-fetch of the on-disk document feeds every
+// rung:
+//   Rung 1 — lost response: the drafts already equal on disk (our own write
+//     committed, only the reply was lost), so adopt the fresh revision silently.
+//   Rung 2 — disjoint prose merge (#1626): the on-disk change is body-ONLY and its
+//     span is disjoint from the local edit, so merge in the editor, adopt the fresh
+//     revision, and re-save at it. Silent.
+//   Otherwise → "conflict": the caller offers the "changed on disk" dialog.
+// A failed re-fetch or a fresh conflict during the re-save degrades to "conflict" —
+// the dialog, never a guess (prove-disjoint-or-ask, ADR-0077 §4).
+export async function reconcileOn409(host: SaveFailureHost, id: string): Promise<ReconcileOutcome> {
+  const opening = host.panes.find((candidate) => candidate.id === id);
+  if (!opening?.scene) return "conflict";
+  const kind = opening.document?.type ?? "manuscript";
+  const sceneId = opening.scene.id;
   let remote: ReloadableDocument;
   try {
     remote = await (RELOAD_GETTERS[kind] ?? api.getScene)(sceneId);
   } catch {
-    return false; // can't re-fetch → fall through to the dialog
+    return "conflict"; // can't re-fetch → dialog
   }
-  // Re-read the pane AFTER the await: an edit during the re-fetch reassigns
-  // `panes` (new objects), and adopting against the pre-fetch snapshot would
-  // clear dirty on that fresh, unsaved work. Compare the CURRENT drafts; if the
-  // pane moved (typed, switched, closed), decline and let the dialog handle it.
-  const current = host.panes.find((candidate) => candidate.id === id);
-  if (!current?.scene || current.scene.id !== sceneId) return false;
-  // "last-sent == on disk" is exactly: the drafts are not dirty against the
-  // re-fetch. Reusing isEditorPaneDirty (autosave's single dirtiness definition)
-  // compares every kind's fields as a save does — body, status, metadata, the
-  // prompt inputs canonicalization — so a genuine conflict in any field is
-  // caught and only an exact match adopts.
-  const stillDiffers = isEditorPaneDirty(
+  // Re-read the pane AFTER the await: an edit during the re-fetch reassigns `panes`
+  // (new objects), and reconciling against the pre-fetch snapshot would clobber that
+  // fresh, unsaved work. If the pane moved (typed, switched, closed), fall to the
+  // dialog rather than act on a stale snapshot.
+  const pane = host.panes.find((candidate) => candidate.id === id);
+  if (!pane?.scene || pane.scene.id !== sceneId) return "conflict";
+  const base = pane.scene;
+  // Rung 1 — lost response. "last-sent == on disk" is exactly: the drafts are not
+  // dirty against the re-fetch. Reusing isEditorPaneDirty (autosave's single
+  // dirtiness definition) compares every kind's fields as a save does, so only an
+  // exact match adopts and any real difference in any field falls through.
+  if (!draftsDifferFrom(remote, pane)) {
+    host.patchPane(id, { scene: remote, dirty: false, recentlySaved: false });
+    return "adopted";
+  }
+  // Rung 2 — disjoint prose merge. Only when the on-disk change is body-ONLY
+  // (metadata / structured fields are slice C → dialog) and the pane's body view is
+  // a prose editor that can merge (chat/view have no tryMergeProse → dialog).
+  const proseView = host.editorPaneComponents[id];
+  if (proseView?.tryMergeProse && remoteChangedBodyOnly(base, remote)) {
+    let merged: string | null = null;
+    try {
+      merged = await proseView.tryMergeProse(base.body ?? "", remote.body ?? "");
+    } catch {
+      merged = null; // a merge that throws is a conflict, never a corrupt save
+    }
+    if (merged != null) {
+      // Adopt remote's revision + the merged body (which already contains remote's
+      // change), then re-save AT that revision — NO force, so a concurrent third
+      // write still 409s and re-enters the ladder rather than being clobbered.
+      host.patchPane(id, { scene: remote, draftMarkdown: merged, dirty: true, recentlySaved: false });
+      try {
+        await host.saveEditorPane(id);
+        return "merged";
+      } catch {
+        return "conflict"; // a fresh conflict during the re-save → dialog
+      }
+    }
+  }
+  return "conflict";
+}
+
+// Whether the pane's live drafts differ from a re-fetched document, across every
+// field a save round-trips — the rung-1 lost-response test.
+function draftsDifferFrom(remote: ReloadableDocument, pane: EditorPaneState): boolean {
+  return isEditorPaneDirty(
     remote,
-    current.draftTitle,
-    current.draftMarkdown,
-    current.draftStatus,
-    current.draftEntryType,
-    current.draftMetadata,
-    current.draftInputs,
-    current.draftOfferOn,
-    current.draftContextStrategy,
+    pane.draftTitle,
+    pane.draftMarkdown,
+    pane.draftStatus,
+    pane.draftEntryType,
+    pane.draftMetadata,
+    pane.draftInputs,
+    pane.draftOfferOn,
+    pane.draftContextStrategy,
   );
-  if (stillDiffers) return false;
-  host.adoptReloaded(id, remote);
-  return true;
+}
+
+// True when `remote` differs from `base` in the BODY ALONE (title / status /
+// entry_type / metadata / prompt fields unchanged) — the gate for the prose merge
+// (slice B). A non-body change on disk is a structured-field merge (slice C), so
+// this declines and the caller falls to the dialog. Neutralize the body by comparing
+// `remote` against `base` WITH remote's own body, then reuse the single dirtiness
+// definition so every non-body field is checked exactly as a save checks it.
+function remoteChangedBodyOnly(base: EditableDocument, remote: ReloadableDocument): boolean {
+  return !isEditorPaneDirty(
+    remote,
+    base.title,
+    remote.body ?? "",
+    documentStatus(base),
+    base.entry_type,
+    base.metadata ?? {},
+    (base as { inputs?: PromptInputDefinition[] }).inputs,
+    (base as { offer_on?: string[] }).offer_on,
+    (base as { context_strategy?: PromptContextStrategy | null }).context_strategy,
+  );
 }
 
 // The same conflict, detected by a background autosave (#457). Unlike the close

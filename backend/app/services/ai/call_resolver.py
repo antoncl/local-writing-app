@@ -8,6 +8,7 @@ the HTTP layer as a free function taking the project service, matching the
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -27,17 +28,34 @@ if TYPE_CHECKING:
 DEFAULT_MAX_TOKENS = 32768
 
 
+# A trailing dated-snapshot suffix — OpenAI's `-YYYY-MM-DD`
+# (`gpt-4o-2024-08-06`) or Anthropic's `-YYYYMMDD` (`claude-haiku-4-5-20251001`).
+_MODEL_DATE_SUFFIX = re.compile(r"-(?:\d{4}-\d{2}-\d{2}|\d{8})$")
+
+
+def _normalize_model_id(model_id: str) -> str:
+    """Drop a trailing dated-snapshot suffix so a dated id matches its baked base
+    entry: `gpt-4o-2024-08-06` → `gpt-4o`, `claude-haiku-4-5-20251001` →
+    `claude-haiku-4-5`. Without this, a dated id the picker surfaces (OpenAI's
+    live catalogue includes them) escapes the clamp and 400s at the raised
+    floor (#1591). Distinct base models (`gpt-4o` vs `gpt-4o-mini`) are unaffected
+    — neither carries a date, so normalization is identity for them."""
+    return _MODEL_DATE_SUFFIX.sub("", model_id.strip().lower())
+
+
 def _model_max_output(provider: str, model: str) -> int | None:
     """The model's published max output tokens from the baked catalogue — the
     audited source for Anthropic/OpenAI, the only providers that 400 when
-    max_tokens exceeds the model's ceiling. None (a live-only OpenRouter route,
-    Ollama, or an un-audited model) means 'unknown', and the caller keeps the
-    desired value — safe for OpenRouter (clamps server-side) and Ollama (never
-    errors)."""
+    max_tokens exceeds the model's ceiling. Matches on the date-normalized id so
+    a dated snapshot resolves to its base entry. None (a live-only OpenRouter
+    route, Ollama, or an un-audited model) means 'unknown', and the caller keeps
+    the desired value — safe for OpenRouter (clamps server-side) and Ollama
+    (never errors)."""
     from app.services.ai.profiles._loader import baked_in_for
 
+    target = _normalize_model_id(model)
     for descriptor in baked_in_for(provider):
-        if descriptor.id == model:
+        if _normalize_model_id(descriptor.id) == target:
             return descriptor.max_output_tokens
     return None
 

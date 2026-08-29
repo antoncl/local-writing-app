@@ -172,6 +172,32 @@ class MaxTokensClampTests(unittest.TestCase):
         )
         self.assertEqual(resolved.max_tokens, 2048)
 
+    def test_dated_openai_snapshot_clamps_via_base_id(self) -> None:
+        # The picker surfaces live-only dated ids; a dated gpt-4o must resolve to
+        # the baked 'gpt-4o' cap (16384), not escape the clamp and 400 (#1591).
+        resolved = self._resolve(
+            {"ai_provider": "openai", "ai_model": "gpt-4o-2024-08-06"}
+        )
+        self.assertEqual(resolved.max_tokens, 16384)
+
+    def test_dated_snapshot_does_not_collide_with_a_sibling_base(self) -> None:
+        # gpt-4o-mini's dated form must map to gpt-4o-mini (16384), not gpt-4o —
+        # normalization strips only the date, so distinct base ids stay distinct.
+        resolved = self._resolve(
+            {"ai_provider": "openai", "ai_model": "gpt-4o-mini-2024-07-18"}
+        )
+        self.assertEqual(resolved.max_tokens, 16384)
+
+    def test_alias_matches_dated_baked_id(self) -> None:
+        # Haiku's baked id carries a date (…-20251001); referencing it by the
+        # bare alias must still resolve (both sides normalize to claude-haiku-4-5).
+        # Cap 64000 > floor, so the floor stands — proving the match, not a clamp.
+        resolved = self._resolve(
+            {"ai_provider": "anthropic", "ai_model": "claude-haiku-4-5",
+             "ai_max_tokens": 90000}
+        )
+        self.assertEqual(resolved.max_tokens, 64000)
+
     def test_unknown_model_rides_the_floor_unclamped(self) -> None:
         # A live-only OpenRouter route isn't baked → unknown max → the floor
         # (OpenRouter clamps server-side, so this is safe).

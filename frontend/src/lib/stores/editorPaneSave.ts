@@ -15,18 +15,16 @@ import { refreshTodos, refreshEmbeddedTodos } from "@/lib/stores/todos";
 import { bodyHasMutationMarkers, mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
 import { HttpError, setKeepaliveSaves, api } from "@/lib/api";
 import { confirmService } from "@/lib/stores/confirmService.svelte";
-import { documentStatus, isEditorPaneDirty, type EditorPaneState } from "@/lib/editor-core/editorPaneModel";
-import type {
-  Scene,
-  LoreEntry,
-  PromptEntry,
-  PlotTemplate,
-  CardEntry,
-  PlotlineEntry,
-  EditableDocument,
-  PromptInputDefinition,
-  PromptContextStrategy,
-} from "@/lib/types";
+import {
+  bodiesEqual,
+  cloneMetadata,
+  isEditorPaneDirty,
+  mergeStructuredFields,
+  promptFieldsDiffer,
+  type DraftFields,
+  type EditorPaneState,
+} from "@/lib/editor-core/editorPaneModel";
+import type { Scene, LoreEntry, PromptEntry, PlotTemplate, CardEntry, PlotlineEntry, EntryMetadata } from "@/lib/types";
 
 // The document kinds a pane can reload from the server, and the per-kind getter.
 // Wrapped (not bare `api.getX`) so each getter reads the `api` property live at
@@ -124,6 +122,13 @@ export type SaveFailureHost = {
   // The mounted body views by pane id. Rung 2 reaches the prose three-way merge on
   // the pane's ProseBodyView; `tryMergeProse` is absent for non-prose bodies.
   editorPaneComponents: Record<string, { tryMergeProse?: (baseBody: string, remoteBody: string) => Promise<string | null> } | undefined>;
+  // The pane controller's public field-reload signals (title / metadata). A rung-2
+  // field merge (#1633) bumps these so the mounted NodeEditor re-seeds its own title /
+  // status / entry_type / metadata widgets from the merged drafts — replacing the
+  // pane's scene alone does not (the same signals openLore / reconcile use).
+  titleReloadsByPane: Record<string, { token: number; title: string }>;
+  metadataReloadsByPane: Record<string, { token: number; metadata: EntryMetadata; status: string; entryType: string }>;
+  nextMetadataReloadToken: number;
   // Light the sticky "Save failed" badge (saveError) and clear `saving`.
   markPaneSaveError(id: string): void;
   // Re-arm a bounded (~ceiling-cadence) autosave retry.
@@ -212,9 +217,9 @@ export type ReconcileOutcome = "adopted" | "merged" | "conflict";
 // rung:
 //   Rung 1 — lost response: the drafts already equal on disk (our own write
 //     committed, only the reply was lost), so adopt the fresh revision silently.
-//   Rung 2 — disjoint prose merge (#1626): the on-disk change is body-ONLY and its
-//     span is disjoint from the local edit, so merge in the editor, adopt the fresh
-//     revision, and re-save at it. Silent.
+//   Rung 2 — disjoint merge (#1626 prose, #1633 fields): the on-disk change is
+//     disjoint from the local edit — different structured fields, and non-overlapping
+//     prose spans — so merge both, adopt the fresh revision, and re-save at it. Silent.
 //   Otherwise → "conflict": the caller offers the "changed on disk" dialog.
 // A failed re-fetch or a fresh conflict during the re-save degrades to "conflict" —
 // the dialog, never a guess (prove-disjoint-or-ask, ADR-0077 §4).
@@ -244,22 +249,42 @@ export async function reconcileOn409(host: SaveFailureHost, id: string): Promise
     host.patchPane(id, { scene: remote, dirty: false, recentlySaved: false });
     return "adopted";
   }
-  // Rung 2 — disjoint prose merge. Only when the on-disk change is body-ONLY
-  // (metadata / structured fields are slice C → dialog) and the pane's body view is
-  // a prose editor that can merge (chat/view have no tryMergeProse → dialog).
-  const proseView = host.editorPaneComponents[id];
-  if (proseView?.tryMergeProse && remoteChangedBodyOnly(base, remote)) {
-    let merged: string | null = null;
-    try {
-      merged = await proseView.tryMergeProse(base.body ?? "", remote.body ?? "");
-    } catch {
-      merged = null; // a merge that throws is a conflict, never a corrupt save
+  // Rung 2 — three-way merge, fields and body independently. A structured field the
+  // two sides changed to different values is a conflict (#1633); disjoint fields merge.
+  const fieldMerge = mergeStructuredFields(base, remote, {
+    draftTitle: pane.draftTitle,
+    draftStatus: pane.draftStatus,
+    draftEntryType: pane.draftEntryType,
+    draftMetadata: pane.draftMetadata,
+    draftInputs: pane.draftInputs,
+    draftOfferOn: pane.draftOfferOn,
+    draftContextStrategy: pane.draftContextStrategy,
+  });
+  // A prompt's structured fields (inputs / offer_on / context_strategy) have no
+  // out-of-band widget re-seed, so an on-disk change to them can't be merged
+  // silently without the next edit reverting it — keep those on the dialog path.
+  const promptFieldConflict = kind === "prompt" && promptFieldsDiffer(base, remote);
+  if (!fieldMerge.conflict && !promptFieldConflict) {
+    // The body merges independently. Only when `remote` moved the body must it be
+    // reconciled into the live editor (slice B's prose three-way merge, #1626); if it
+    // did not, the local draft body already wins and stands. A prose overlap — like a
+    // field overlap — is null → a conflict.
+    let mergedBody: string | null = pane.draftMarkdown;
+    if (!bodiesEqual(remote.body, base.body)) {
+      const merge = host.editorPaneComponents[id]?.tryMergeProse;
+      mergedBody = merge ? await merge(base.body ?? "", remote.body ?? "").catch(() => null) : null;
     }
-    if (merged != null) {
-      // Adopt remote's revision + the merged body (which already contains remote's
-      // change), then re-save AT that revision — NO force, so a concurrent third
-      // write still 409s and re-enters the ladder rather than being clobbered.
-      host.patchPane(id, { scene: remote, draftMarkdown: merged, dirty: true, recentlySaved: false });
+    if (mergedBody != null) {
+      // Adopt remote's revision + the merged drafts, then re-save AT that revision —
+      // NO force, so a concurrent third write still 409s and re-enters the ladder.
+      host.patchPane(id, {
+        scene: remote,
+        draftMarkdown: mergedBody,
+        ...fieldMerge.fields,
+        dirty: true,
+        recentlySaved: false,
+      });
+      reseedPaneFields(host, id, fieldMerge.fields);
       try {
         await host.saveEditorPane(id);
         return "merged";
@@ -269,6 +294,21 @@ export async function reconcileOn409(host: SaveFailureHost, id: string): Promise
     }
   }
   return "conflict";
+}
+
+// After a rung-2 field merge adopts remote values into the drafts, bump the pane
+// controller's public reload signals so the mounted NodeEditor re-seeds its own
+// title / status / entry_type / metadata widgets to the merged values. Without this
+// the widgets keep the stale local values, and the next edit re-emits them — silently
+// reverting the merge (#1633). One token for both signals is fine: they live in
+// separate per-pane token spaces, and any change from the last token re-seeds.
+function reseedPaneFields(host: SaveFailureHost, id: string, fields: DraftFields): void {
+  const token = host.nextMetadataReloadToken++;
+  host.titleReloadsByPane = { ...host.titleReloadsByPane, [id]: { token, title: fields.draftTitle } };
+  host.metadataReloadsByPane = {
+    ...host.metadataReloadsByPane,
+    [id]: { token, metadata: cloneMetadata(fields.draftMetadata), status: fields.draftStatus, entryType: fields.draftEntryType },
+  };
 }
 
 // Whether the pane's live drafts differ from a re-fetched document, across every
@@ -284,26 +324,6 @@ function draftsDifferFrom(remote: ReloadableDocument, pane: EditorPaneState): bo
     pane.draftInputs,
     pane.draftOfferOn,
     pane.draftContextStrategy,
-  );
-}
-
-// True when `remote` differs from `base` in the BODY ALONE (title / status /
-// entry_type / metadata / prompt fields unchanged) — the gate for the prose merge
-// (slice B). A non-body change on disk is a structured-field merge (slice C), so
-// this declines and the caller falls to the dialog. Neutralize the body by comparing
-// `remote` against `base` WITH remote's own body, then reuse the single dirtiness
-// definition so every non-body field is checked exactly as a save checks it.
-function remoteChangedBodyOnly(base: EditableDocument, remote: ReloadableDocument): boolean {
-  return !isEditorPaneDirty(
-    remote,
-    base.title,
-    remote.body ?? "",
-    documentStatus(base),
-    base.entry_type,
-    base.metadata ?? {},
-    (base as { inputs?: PromptInputDefinition[] }).inputs,
-    (base as { offer_on?: string[] }).offer_on,
-    (base as { context_strategy?: PromptContextStrategy | null }).context_strategy,
   );
 }
 

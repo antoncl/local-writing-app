@@ -187,7 +187,11 @@
       return;
     }
     if (canClearOwn && metadataValueString(metadata.ai_temperature) !== "") {
-      temperatureClearedForModel = metadataValueString(metadata.ai_model) || "this model";
+      // Name the model minus any leading `provider/` route segment (an OpenRouter
+      // id like `anthropic/claude-opus-4-8` → `claude-opus-4-8`; mirrors the
+      // backend's family check). Falls back to "this model" for an empty id.
+      temperatureClearedForModel =
+        metadataValueString(metadata.ai_model).split("/").pop() || "this model";
       clearField("ai_temperature");
     }
   }

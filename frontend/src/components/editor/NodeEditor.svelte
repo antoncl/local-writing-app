@@ -866,11 +866,11 @@
   />
 {/if}
 
-<!-- ADR-0076 S6: the chat body renders the title itself (one row with the
-     setup chips) — this snippet is ONLY the title-input variant chain, no
-     `.title-label` wrapper and no eyebrow text (each input already carries
-     its own `aria-label`). State/persistence stay entirely in NodeEditor;
-     this just relocates where the markup renders. -->
+<!-- The five title-input variants, in ONE place. Two renderers: the non-chat
+     header wraps this in the `.title-label` (with the eyebrow); the chat body
+     renders it bare on its one row (ADR-0076 S6 — the chat title sits with the
+     setup chips, no eyebrow). Each input carries its own `aria-label`, so it
+     needs no label wrapper. State/persistence stay entirely in NodeEditor. -->
 {#snippet chatTitleField()}
   {#if scrubbed}
     <!-- Effective title as of the scrub point — read-only; the draft
@@ -922,35 +922,10 @@
         <div class="scene-title-row">
           <label class="title-label">
             {documentNameLabel}{#if titleMutated}<span class="title-mutated-marker" title="Changed by here">⤳</span>{/if}
-            {#if scrubbed}
-              <!-- Effective title as of the scrub point — read-only; the draft
-                   title stays untouched underneath (stop 0 restores it). -->
-              <input class="title-input" class:mutated={titleMutated} readonly aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (effective, read-only)`} value={effectiveTitle} />
-            {:else if snapshotParked}
-              <!-- Parked: the title flips with the body and the rail, and is
-                   read-only like them. Leaving it editable let an author type
-                   into a document they were not looking at. -->
-              <input
-                class="title-input"
-                class:flipped={snapshots.titleDiffers}
-                class:flip-was={snapshots.titleDiffers && snapshots.view === "was"}
-                readonly
-                aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (snapshot, read-only)`}
-                value={snapshots.titleForView}
-              />
-            {:else if reviewing}
-              <!-- Frozen for AI review (#634): read-only like the parked/scrubbed
-                   title, so the author can't edit an entry mid-review — the review
-                   is a transaction that writes once, not a co-editing surface. -->
-              <input class="title-input" readonly aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (under review, read-only)`} value={title} />
-            {:else if inheritedReadOnly}
-              <!-- Inherited prompt (ADR-0049 Library or an ancestor project, #676):
-                   read-only in place. The title cannot be renamed here; clone it
-                   to edit. -->
-              <input class="title-input" readonly aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (inherited, read-only)`} value={title} />
-            {:else}
-              <input class="title-input" aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()}`} placeholder={documentNameLabel} bind:value={title} oninput={handleTitleInput} />
-            {/if}
+            <!-- Same five title-input variants as the chat header, from the one
+                 `chatTitleField` snippet — here they sit inside the eyebrow
+                 label; chat renders the snippet bare (ADR-0076 S6). -->
+            {@render chatTitleField()}
           </label>
           <!-- Interiority reveal (ADR-0070 S2): a shell affordance, present only
                while the scene holds roleplay. Adaptive-stateful — quiet eye when

@@ -21,6 +21,9 @@
 
   interface Props {
     previewCacheBlocks: PreviewCacheBlock[];
+    // The bound prompt id (or ""). Drives the System panel's pre-send guidance:
+    // a prompt is bound but nothing has rendered yet → "fill the inputs".
+    chatPromptEntryId: string;
     // Post-send: the locked system message. Pre-send: the assembled preview —
     // same fallback chain the System panel has always used.
     chatSystemPrompt: string;
@@ -35,6 +38,7 @@
 
   let {
     previewCacheBlocks,
+    chatPromptEntryId,
     chatSystemPrompt,
     chatPreviewMessages,
     loreEnabled,
@@ -97,7 +101,7 @@
   {#if current.kind === "root"}
     <!-- Root: a menu of section rows, in fixed order, each shown only when it
          has content — the tier rows are what used to be whole-tier <details>. -->
-    {#if systemBlock || (chatSystemPrompt && chatSystemPrompt.trim()) || (chatPreviewMessages && chatPreviewMessages.length > 0)}
+    {#if systemBlock || (chatSystemPrompt && chatSystemPrompt.trim()) || (chatPreviewMessages && chatPreviewMessages.length > 0) || chatPromptEntryId}
       <button type="button" class="ctx-row" onclick={() => drill({ kind: "section", key: "system" })}>
         <span class="ctx-row-label">System</span>
         {#if loreEnabled}<span class="ctx-row-sub">lore-enabled</span>{/if}
@@ -165,6 +169,8 @@
           {/each}
         </div>
       {/each}
+    {:else if chatPromptEntryId}
+      <p class="cbv-meta">Fill the required inputs above and the assembled message will appear here.</p>
     {:else}
       <p class="cbv-meta">No system message will be sent. The model sees only the chat history.</p>
     {/if}

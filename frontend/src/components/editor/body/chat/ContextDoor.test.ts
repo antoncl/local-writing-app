@@ -28,6 +28,7 @@ const titleFor = (id: string) => ({ lore_a: "A", lore_b: "B" })[id] ?? null;
 
 const baseProps = {
   previewCacheBlocks: [] as PreviewCacheBlock[],
+  chatPromptEntryId: "",
   chatSystemPrompt: BASE,
   chatPreviewMessages: null,
   loreEnabled: false,
@@ -112,6 +113,31 @@ describe("ContextDoor", () => {
     await fireEvent.click(screen.getByText("Auto-added this conversation"));
     expect(screen.getByText(/Shenzhen Protocol/)).toBeInTheDocument();
     expect(screen.getByText(/turn 2/)).toBeInTheDocument();
+  });
+
+  it("with a prompt bound but nothing rendered yet, the System row guides the writer to fill inputs", async () => {
+    render(ContextDoor, {
+      ...baseProps,
+      chatPromptEntryId: "p1",
+      chatSystemPrompt: "",
+      previewCacheBlocks: [],
+      chatPreviewMessages: null,
+    });
+    await fireEvent.click(screen.getByText("System"));
+    expect(
+      screen.getByText("Fill the required inputs above and the assembled message will appear here."),
+    ).toBeInTheDocument();
+  });
+
+  it("with no prompt bound and no system content, there is no System row at all", () => {
+    render(ContextDoor, {
+      ...baseProps,
+      chatPromptEntryId: "",
+      chatSystemPrompt: "",
+      previewCacheBlocks: [],
+      chatPreviewMessages: null,
+    });
+    expect(screen.queryByText("System")).not.toBeInTheDocument();
   });
 
   it("shows a defensive message when an entry carries no XML", async () => {

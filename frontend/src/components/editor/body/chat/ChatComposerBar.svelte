@@ -378,6 +378,7 @@
       >
         <ContextDoor
           {previewCacheBlocks}
+          {chatPromptEntryId}
           {chatSystemPrompt}
           {chatPreviewMessages}
           {loreEnabled}

@@ -25,8 +25,12 @@ function fakeHost(): SaveFailureHost & {
   saveEditorPane: ReturnType<typeof vi.fn>;
   run: ReturnType<typeof vi.fn>;
   tearDown: ReturnType<typeof vi.fn>;
+  adoptReloaded: ReturnType<typeof vi.fn>;
 } {
   return {
+    // A pane with no `scene`, so the rung-1 re-fetch (tryAdoptLostSave) declines
+    // without touching the network — a 409 reaches the dialog. The lost-response
+    // *adopt* is exercised against the real controller in Part B.
     panes: [{ ...createEmptyEditorPane("p"), draftTitle: "A Scene" }],
     setError: vi.fn(),
     run: vi.fn(async (action: () => Promise<void>) => {
@@ -34,6 +38,7 @@ function fakeHost(): SaveFailureHost & {
       return true;
     }),
     saveEditorPane: vi.fn(async () => {}),
+    adoptReloaded: vi.fn(),
     markPaneSaveError: vi.fn(),
     scheduleAutosaveRetry: vi.fn(),
     tearDown: vi.fn(),
@@ -65,11 +70,11 @@ describe("handleSaveFailure — classification (#457)", () => {
     expect(host.scheduleAutosaveRetry).not.toHaveBeenCalled();
   });
 
-  it("asks permission to overwrite for a 409 (changed on disk), never a blind retry", () => {
+  it("on a 409, tries the rung-1 adopt first, then offers overwrite when it declines", async () => {
     const request = vi.spyOn(confirmService, "request").mockImplementation(() => {});
-    const host = fakeHost();
+    const host = fakeHost(); // no on-disk twin → the re-fetch declines → dialog
     handleSaveFailure(host, "p", new HttpError("conflict", 409, null));
-    expect(request).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
     expect(request.mock.calls[0][0].confirmLabel).toBe("Overwrite");
     expect(host.scheduleAutosaveRetry).not.toHaveBeenCalled();
     expect(host.markPaneSaveError).not.toHaveBeenCalled();
@@ -185,5 +190,74 @@ describe("autosaveOnce — through the real controller (#457)", () => {
     expect(pane?.saveError).toBe(false);
     expect(pane?.dirty).toBe(false);
     expect(save).toHaveBeenCalledTimes(2);
+  });
+
+  it("adopts a lost-response 409 silently — on-disk == last-sent, so the write landed (ADR-0077 rung 1)", async () => {
+    seedDirtyLorePane();
+    // The save 409s on a stale base_revision, but the on-disk entry already IS
+    // this pane's drafts: our own earlier write committed and only the response
+    // was lost. The re-fetch equals the drafts, so no dialog — adopt the revision.
+    vi.spyOn(api, "saveLoreEntry").mockRejectedValue(new HttpError("conflict", 409, null));
+    vi.spyOn(api, "getLoreEntry").mockResolvedValue({
+      ...LORE,
+      title: "Edited Name",
+      body: "edited body",
+      revision: "r2",
+    });
+    const request = vi.spyOn(confirmService, "request").mockImplementation(() => {});
+
+    await autosaveOnce(editorPanes, "pane_1");
+    await vi.waitFor(() => expect(editorPanes.panes.find((p) => p.id === "pane_1")?.dirty).toBe(false));
+
+    const pane = editorPanes.panes.find((p) => p.id === "pane_1");
+    expect(pane?.scene?.revision).toBe("r2"); // adopted the fresh revision
+    expect(request).not.toHaveBeenCalled(); // never asked
+  });
+
+  it("offers the dialog on a genuine 409 — the on-disk content really differs", async () => {
+    seedDirtyLorePane();
+    vi.spyOn(api, "saveLoreEntry").mockRejectedValue(new HttpError("conflict", 409, null));
+    // A different window's edit landed on disk — not our draft.
+    vi.spyOn(api, "getLoreEntry").mockResolvedValue({
+      ...LORE,
+      title: "Someone Else's Name",
+      body: "their body",
+      revision: "r2",
+    });
+    let request!: Parameters<typeof confirmService.request>[0];
+    vi.spyOn(confirmService, "request").mockImplementation((r) => {
+      request = r;
+    });
+
+    await autosaveOnce(editorPanes, "pane_1");
+    await vi.waitFor(() => expect(request).toBeDefined());
+
+    expect(request.title).toBe("Changed on disk");
+    expect(editorPanes.panes.find((p) => p.id === "pane_1")?.dirty).toBe(true); // still unsaved
+  });
+
+  it("declines the adopt when the pane is edited during the re-fetch — no dirty-clobber (race)", async () => {
+    seedDirtyLorePane(); // draftMarkdown "edited body"
+    vi.spyOn(api, "saveLoreEntry").mockRejectedValue(new HttpError("conflict", 409, null));
+    // The re-fetch resolves to the pane's ORIGINAL last-sent — but a keystroke
+    // lands while it is in flight, so the CURRENT draft has moved on. Adopting
+    // against the pre-fetch snapshot would clear dirty on that unsaved edit.
+    vi.spyOn(api, "getLoreEntry").mockImplementation(async () => {
+      editorPanes.panes = editorPanes.panes.map((p) =>
+        p.id === "pane_1" ? { ...p, draftMarkdown: "even newer body" } : p,
+      );
+      return { ...LORE, title: "Edited Name", body: "edited body", revision: "r2" };
+    });
+    let request!: Parameters<typeof confirmService.request>[0];
+    vi.spyOn(confirmService, "request").mockImplementation((r) => {
+      request = r;
+    });
+
+    await autosaveOnce(editorPanes, "pane_1");
+    await vi.waitFor(() => expect(request).toBeDefined()); // declined → dialog
+
+    const pane = editorPanes.panes.find((p) => p.id === "pane_1");
+    expect(pane?.dirty).toBe(true); // the fresh edit is preserved, not clobbered
+    expect(pane?.draftMarkdown).toBe("even newer body");
   });
 });

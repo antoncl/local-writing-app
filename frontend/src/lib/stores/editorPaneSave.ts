@@ -13,9 +13,26 @@ import { refreshPlotlines } from "@/lib/stores/plotlines";
 import { refreshAssistantEntries } from "@/lib/stores/assistants";
 import { refreshTodos, refreshEmbeddedTodos } from "@/lib/stores/todos";
 import { bodyHasMutationMarkers, mutationsVersion } from "@/lib/stores/mutationsVersion.svelte";
-import { HttpError, setKeepaliveSaves } from "@/lib/api";
+import { HttpError, setKeepaliveSaves, api } from "@/lib/api";
 import { confirmService } from "@/lib/stores/confirmService.svelte";
-import type { EditorPaneState } from "@/lib/editor-core/editorPaneModel";
+import { isEditorPaneDirty, type EditorPaneState } from "@/lib/editor-core/editorPaneModel";
+import type { Scene, LoreEntry, PromptEntry, PlotTemplate, CardEntry, PlotlineEntry } from "@/lib/types";
+
+// The document kinds a pane can reload from the server, and the per-kind getter.
+// Wrapped (not bare `api.getX`) so each getter reads the `api` property live at
+// call time — a bare reference captured at module load can't be intercepted by a
+// test's `vi.spyOn(api, …)`. Home is here (with the conflict recoveries) so both
+// the post-save reload path and the reconcile ladder's rung-1 re-fetch (#1621)
+// share one map.
+export type ReloadableDocument = Scene | LoreEntry | PromptEntry | PlotTemplate | CardEntry | PlotlineEntry;
+
+export const RELOAD_GETTERS: Record<string, (id: string) => Promise<ReloadableDocument>> = {
+  lore: (id) => api.getLoreEntry(id),
+  prompt: (id) => api.getPromptEntry(id),
+  plot_template: (id) => api.getPlotTemplate(id),
+  plot_card: (id) => api.getCard(id),
+  plotline: (id) => api.getPlotline(id),
+};
 
 // The one thing the dispatch needs back from the controller: the project node's
 // title write-back (the top bar + pane reflect a rename). Passed as a narrow host
@@ -90,6 +107,10 @@ export type SaveFailureHost = {
   setError(message: string): void;
   run(action: () => Promise<void>): Promise<boolean>;
   saveEditorPane(id: string, options?: { force?: boolean }): Promise<void>;
+  // Rung 1 of the reconcile ladder (ADR-0077): swap in a re-fetched document's
+  // fresh revision and drop dirty. The pane's buffer already holds this content
+  // (tryAdoptLostSave verified it), so no editor reload — a plain state update.
+  adoptReloaded(id: string, remote: ReloadableDocument): void;
   // Light the sticky "Save failed" badge (saveError) and clear `saving`.
   markPaneSaveError(id: string): void;
   // Re-arm a bounded (~ceiling-cadence) autosave retry.
@@ -125,7 +146,7 @@ export async function autosaveOnce(host: SaveFailureHost, id: string): Promise<v
 export function handleSaveFailure(host: SaveFailureHost, id: string, error: unknown): void {
   const status = error instanceof HttpError ? error.status : undefined;
   if (status === 409) {
-    offerAutosaveConflictRecovery(host, id);
+    void resolveAutosaveConflict(host, id);
   } else if (status !== undefined && status >= 400 && status < 500) {
     host.markPaneSaveError(id);
   } else {
@@ -160,6 +181,68 @@ export function offerCloseConflictRecovery(host: SaveFailureHost, id: string): v
       host.tearDown(id);
     },
   });
+}
+
+// Rung 1 before the dialog (ADR-0077 / #1621): a lost-response 409 — the on-disk
+// content already equals what this pane last sent, so our own write landed and
+// only the response was lost — adopts the fresh revision silently; only a
+// genuine conflict reaches the recovery prompt. Fire-and-forget from
+// handleSaveFailure: the prompt is async user interaction anyway, and a failed
+// re-fetch degrades to the dialog.
+async function resolveAutosaveConflict(host: SaveFailureHost, id: string): Promise<void> {
+  let adopted = false;
+  try {
+    adopted = await tryAdoptLostSave(host, id);
+  } catch {
+    adopted = false;
+  }
+  if (!adopted) offerAutosaveConflictRecovery(host, id);
+}
+
+// Rung 1 of the reconcile ladder (ADR-0077 / #1621). A 409 whose on-disk content
+// already equals what this pane last sent is a *lost response* — our own write
+// committed and only the reply was lost (backend restart, network blip) — so
+// adopt the fresh revision silently instead of asking. Returns true when
+// adopted; false (no scene, re-fetch failed, or a real difference remains)
+// leaves the caller to offer the "Changed on disk" dialog. Both 409 sites — the
+// autosave path (above) and the close-flush path (editorPanes) — route through
+// it, so every document kind is covered.
+export async function tryAdoptLostSave(host: SaveFailureHost, id: string): Promise<boolean> {
+  const pane = host.panes.find((candidate) => candidate.id === id);
+  if (!pane?.scene) return false;
+  const kind = pane.document?.type ?? "manuscript";
+  const sceneId = pane.scene.id;
+  let remote: ReloadableDocument;
+  try {
+    remote = await (RELOAD_GETTERS[kind] ?? api.getScene)(sceneId);
+  } catch {
+    return false; // can't re-fetch → fall through to the dialog
+  }
+  // Re-read the pane AFTER the await: an edit during the re-fetch reassigns
+  // `panes` (new objects), and adopting against the pre-fetch snapshot would
+  // clear dirty on that fresh, unsaved work. Compare the CURRENT drafts; if the
+  // pane moved (typed, switched, closed), decline and let the dialog handle it.
+  const current = host.panes.find((candidate) => candidate.id === id);
+  if (!current?.scene || current.scene.id !== sceneId) return false;
+  // "last-sent == on disk" is exactly: the drafts are not dirty against the
+  // re-fetch. Reusing isEditorPaneDirty (autosave's single dirtiness definition)
+  // compares every kind's fields as a save does — body, status, metadata, the
+  // prompt inputs canonicalization — so a genuine conflict in any field is
+  // caught and only an exact match adopts.
+  const stillDiffers = isEditorPaneDirty(
+    remote,
+    current.draftTitle,
+    current.draftMarkdown,
+    current.draftStatus,
+    current.draftEntryType,
+    current.draftMetadata,
+    current.draftInputs,
+    current.draftOfferOn,
+    current.draftContextStrategy,
+  );
+  if (stillDiffers) return false;
+  host.adoptReloaded(id, remote);
+  return true;
 }
 
 // The same conflict, detected by a background autosave (#457). Unlike the close

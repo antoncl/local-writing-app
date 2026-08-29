@@ -66,6 +66,30 @@ describe("Search pane — results render", () => {
     expect(screen.getByText("scenes/act-1/arrival.md:12")).toBeInTheDocument();
   });
 
+  it("renders hits that share file_id/line/path (regression: each_key_duplicate)", async () => {
+    // A lore entry matching in >1 metadata field yields hits identical on
+    // (file_id, line=1, path) — metadata hits are always line 1. A keyed each on
+    // those fields collides; Svelte throws each_key_duplicate and drops the whole
+    // group, so e.g. searching "Implant" (matches its title AND aliases) found
+    // nothing. The list is unkeyed.
+    vi.mocked(api.search).mockResolvedValue({
+      query: "implant",
+      hits: [
+        hit("Lore / Implant metadata", 1, "title: Implant"),
+        hit("Lore / Implant metadata", 1, "aliases: Implants, Neural interface"),
+      ],
+    });
+    render(Search, { props: { run, onOpenHit: () => {} } });
+
+    const input = screen.getByPlaceholderText("Find in scenes and lore");
+    await fireEvent.input(input, { target: { value: "implant" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+    await tick();
+
+    // Both rows render (title is not highlighted, so the match is clean).
+    expect(screen.getAllByText("Lore / Implant metadata:1")).toHaveLength(2);
+  });
+
   it("opens a clicked hit through onOpenHit", async () => {
     const h = hit("lore/places/citadel.md", 3, "The citadel loomed over the plain.");
     vi.mocked(api.search).mockResolvedValue({ query: "citadel", hits: [h] });

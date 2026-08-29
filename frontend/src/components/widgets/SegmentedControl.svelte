@@ -87,19 +87,32 @@
     color: var(--accent-emphasis);
     border-color: currentColor;
   }
-  /* When a tone-bearing segment is the selected one, its background carries the
-     diff's warm/cool markup tint instead of the neutral accent, tying "I'm
-     reading Current/Proposed" to the colour that side's text wears (#1620). The
-     inset edge keeps the pair apart in greyscale, so hue is never the only cue. */
-  .seg.on[data-tone="warm"] {
+  /* The two version segments carry their diff markup colour PERSISTENTLY — warm
+     for Current (= now), cool for Proposed (= was) — so the pair always reads as
+     the same warm/cool axis the diff runs wear, selected or not (#1620). The
+     selected one deepens from the -soft wash to the -edge tint (also the
+     palette's greyscale-separation channel, so the pair stays apart without
+     relying on hue); the selected weight is inherited from `.seg.on`. Both
+     stays neutral. */
+  .seg[data-tone="warm"] {
     background: var(--diff-now-soft);
+  }
+  .seg[data-tone="cool"] {
+    background: var(--diff-was-soft);
+  }
+  .seg[data-tone="warm"]:hover {
+    background: color-mix(in srgb, var(--diff-now-edge) 45%, var(--diff-now-soft));
+  }
+  .seg[data-tone="cool"]:hover {
+    background: color-mix(in srgb, var(--diff-was-edge) 45%, var(--diff-was-soft));
+  }
+  .seg.on[data-tone="warm"] {
+    background: var(--diff-now-edge);
     color: var(--text);
-    box-shadow: inset 0 -2px 0 var(--diff-now-edge);
   }
   .seg.on[data-tone="cool"] {
-    background: var(--diff-was-soft);
+    background: var(--diff-was-edge);
     color: var(--text);
-    box-shadow: inset 0 -2px 0 var(--diff-was-edge);
   }
   .seg.on[data-tone="warm"] kbd,
   .seg.on[data-tone="cool"] kbd {

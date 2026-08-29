@@ -94,15 +94,15 @@ class OpenRouterProfile(OpenAICompatibleProfile):
     # OpenRouter streams get a longer timeout and plain content handling.
     _stream_timeout = 300.0
 
-    def _stream_delta_events(
-        self, delta: Any, splitter: ThinkTagSplitter
+    def _content_events(
+        self, text: str, splitter: ThinkTagSplitter
     ) -> Iterator[StreamDelta | StreamThinking]:
-        # OpenRouter is treated as a plain content stream — no inline
-        # <think>-tag or reasoning-field processing (byte-identical to the
-        # pre-reshape openrouter stream). The splitter is unused.
-        text = getattr(delta, "content", None) if delta else None
-        if text:
-            yield StreamDelta(text=text)
+        # Content stays PLAIN — no inline <think>-tag splitting. A route that
+        # emits literal <think> markers in content must not have them re-parsed;
+        # the splitter is intentionally unused. Reasoning is surfaced as thinking
+        # by the inherited base handler (#1588), so a reasoning-only or truncated
+        # turn is no longer a blank "Model returned empty output".
+        yield StreamDelta(text=text)
 
     async def list_models(self, *, force_refresh: bool = False) -> list[ModelDescriptor]:
         if not force_refresh and self._cache is not None:

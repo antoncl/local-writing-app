@@ -315,18 +315,29 @@ class OpenAICompatibleProfile(ProviderProfile):
     def _stream_delta_events(
         self, delta: Any, splitter: ThinkTagSplitter
     ) -> Iterator[StreamDelta | StreamThinking]:
-        """Turn one streamed delta into events. The default handles the
-        OpenAI-compatible extensions: a `reasoning`/`reasoning_content` field
-        (DeepSeek, Ollama's /v1 shim) becomes thinking, and content is routed
-        through the <think>-tag splitter for models that emit inline reasoning.
-        OpenRouter overrides this with a plain content-only version.
+        """Turn one streamed delta into events. A `reasoning`/`reasoning_content`
+        field (DeepSeek, Ollama's /v1 shim, OpenRouter's reasoning routes) becomes
+        thinking — handled here for every OpenAI-compatible provider so a new
+        reasoning source can't be added for one and missed for another. Content
+        rendering is the one axis that varies, delegated to `_content_events`
+        (default: the <think>-tag splitter; OpenRouter overrides to plain).
         """
+        if delta is None:
+            return
         reasoning = (
             getattr(delta, "reasoning_content", None)
             or getattr(delta, "reasoning", None)
-        ) if delta else None
+        )
         if reasoning:
             yield StreamThinking(text=reasoning)
-        text = getattr(delta, "content", None) if delta else None
+        text = getattr(delta, "content", None)
         if text:
-            yield from splitter.feed(text)
+            yield from self._content_events(text, splitter)
+
+    def _content_events(
+        self, text: str, splitter: ThinkTagSplitter
+    ) -> Iterator[StreamDelta | StreamThinking]:
+        """Render assistant content. The default routes it through the
+        <think>-tag splitter for models that emit inline reasoning as literal
+        tags. OpenRouter overrides this to emit content verbatim."""
+        yield from splitter.feed(text)

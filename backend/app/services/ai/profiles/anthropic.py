@@ -27,6 +27,7 @@ from app.services.ai.profiles.base import (
     StreamThinking,
     UsageMetrics,
     default_token_count,
+    family_supports_temperature,
 )
 from app.services.ai.profiles.explicit_cache import TIER_TTL, cache_control_indices
 
@@ -40,20 +41,6 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-# Model-id prefixes whose API rejects `temperature` (sampling was removed on
-# these families — see the Anthropic model docs). Add to this tuple as new
-# families adopt the same constraint. Note: 4.6 and older (incl. Haiku 4.5) still
-# accept temperature.
-_NO_TEMPERATURE_PREFIXES: tuple[str, ...] = (
-    "claude-opus-4-7",
-    "claude-opus-4-8",
-    "claude-opus-5",
-    "claude-sonnet-5",
-    "claude-fable-5",
-    "claude-mythos-5",
-)
-
-
 def _set_temperature(kwargs: dict, value: float) -> None:
     """Attach `temperature` to an Anthropic request.
 
@@ -62,19 +49,21 @@ def _set_temperature(kwargs: dict, value: float) -> None:
     raises `TypeError: unexpected keyword argument 'temperature'`. The endpoint
     still honours it on the families that allow sampling (Haiku 4.5, Sonnet/Opus
     4.6 and older), so it goes through the SDK's `extra_body` escape hatch. The
-    families that 400 on it are filtered by `_NO_TEMPERATURE_PREFIXES` before we
-    ever get here.
+    families that 400 on it are filtered by `anthropic_supports_temperature`
+    before we ever get here.
     """
     kwargs.setdefault("extra_body", {})["temperature"] = value
 
 
 def anthropic_supports_temperature(model_id: str) -> bool:
-    """Module-level twin of `AnthropicProfile.supports_temperature` so the
-    provider call sites in providers.py can check without instantiating a
-    profile (which would need an api_key). Both delegate to the same
-    prefix list above.
+    """Whether an Anthropic model accepts a `temperature` parameter.
+
+    A thin module-level alias for the provider-neutral
+    `family_supports_temperature` (base.py), so the send-path call sites here
+    read in Anthropic terms without instantiating a profile (which would need
+    an api_key). The no-sampling family list is single-sourced in base.py.
     """
-    return not any(model_id.startswith(p) for p in _NO_TEMPERATURE_PREFIXES)
+    return family_supports_temperature(model_id)
 
 
 class AnthropicProfile(ProviderProfile):
@@ -144,8 +133,8 @@ class AnthropicProfile(ProviderProfile):
         # a real complaint.
         return default_token_count(text)
 
-    def supports_temperature(self, model_id: str) -> bool:
-        return anthropic_supports_temperature(model_id)
+    # supports_temperature is inherited from ProviderProfile — the base already
+    # delegates to the same provider-neutral family rule, so no override here.
 
     def extract_usage(self, raw_response: Any, model_id: str) -> UsageMetrics:
         # Anthropic's response.usage:
@@ -205,7 +194,7 @@ class AnthropicProfile(ProviderProfile):
         """Enable extended thinking on the streaming request, picking the mode the
         model's API generation accepts.
 
-        The same 4.7+/5 families that dropped sampling (`_NO_TEMPERATURE_PREFIXES`)
+        The same 4.7+/5 families that dropped sampling (`NO_TEMPERATURE_FAMILIES`)
         also dropped the fixed-budget thinking mode: on them a
         `{"type": "enabled", "budget_tokens": N}` request is rejected with a 400,
         and adaptive thinking (the model paces its own depth) is the only on-mode.

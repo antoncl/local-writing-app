@@ -56,7 +56,7 @@ from app.services.ai.preview import (
     build_preview,
     estimate_preview_tokens_and_cost,
 )
-from app.services.ai.profiles import CapabilityTier, ModelDescriptor
+from app.services.ai.profiles import Capability, CapabilityTier, ModelDescriptor
 from app.services.ai.profiles.registry import known_provider_names, profile_for
 from app.services.ai.streaming import transform_provider_events_to_ndjson
 from app.services.ai.usage import translate_usage_to_cost
@@ -127,13 +127,20 @@ def ollama_host_health(request: OllamaHostHealthRequest) -> OllamaHostHealth:
 
 
 def _descriptor_to_wire(descriptor: ModelDescriptor) -> AIModelInfo:
+    # `temperature` is an opt-out capability (present by default, absent only for
+    # the no-sampling families) resolved here from `accepts_temperature` — the
+    # provider signal AND the family rule — so the single catalogue funnel is the
+    # one place it is derived, for live and baked rows on every provider (#1554).
+    capabilities = set(descriptor.capabilities)
+    if descriptor.accepts_temperature:
+        capabilities.add(Capability.TEMPERATURE)
     return AIModelInfo(
         id=descriptor.id,
         display_name=descriptor.display_name,
         provider=descriptor.provider,
         context_window=descriptor.context_window,
         tier=descriptor.tier.value,
-        capabilities=sorted(c.value for c in descriptor.capabilities),
+        capabilities=sorted(c.value for c in capabilities),
         deprecated=descriptor.deprecated,
         sunset_date=descriptor.sunset_date.isoformat() if descriptor.sunset_date else None,
         successor=descriptor.successor,

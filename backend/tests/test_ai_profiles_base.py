@@ -14,7 +14,10 @@ from app.services.ai.profiles._loader import (
     baked_in_catalogue,
     baked_in_for,
 )
-from app.services.ai.profiles.base import ProviderProfile
+from app.services.ai.profiles.base import (
+    ProviderProfile,
+    family_supports_temperature,
+)
 
 
 class _DummyProfile(ProviderProfile):
@@ -171,3 +174,54 @@ def test_descriptor_carries_caching_capability_for_anthropic_models():
     rows = baked_in_for("anthropic")
     sonnet = next(r for r in rows if r.id == "claude-sonnet-4-6")
     assert Capability.CACHING in sonnet.capabilities
+
+
+def _descriptor(model_id: str, *, supports_temperature: bool = True) -> ModelDescriptor:
+    return ModelDescriptor(
+        id=model_id,
+        display_name=model_id,
+        provider="dummy",
+        context_window=8000,
+        tier=CapabilityTier.BALANCED,
+        supports_temperature=supports_temperature,
+    )
+
+
+def test_family_rule_flags_the_no_sampling_families():
+    # The newest families 400 on temperature — native id.
+    assert not family_supports_temperature("claude-opus-4-8")
+    assert not family_supports_temperature("claude-sonnet-5")
+    # 4.6 and older (incl. Haiku 4.5) still accept it.
+    assert family_supports_temperature("claude-sonnet-4-6")
+    assert family_supports_temperature("claude-haiku-4-5-20251001")
+
+
+def test_family_rule_catches_the_same_model_through_openrouter():
+    # Anton's case: OpenRouter serves the model as `anthropic/claude-opus-4-8`.
+    # Stripping the `provider/` route segment must catch it the same as native.
+    assert not family_supports_temperature("anthropic/claude-opus-4-8")
+    assert not family_supports_temperature("anthropic/claude-opus-4-8:free")
+    # A non-Anthropic route is unaffected.
+    assert family_supports_temperature("openai/gpt-4o")
+    assert family_supports_temperature("meta-llama/llama-3.1-70b")
+
+
+def test_base_supports_temperature_delegates_to_family_rule():
+    profile = _DummyProfile()
+    assert not profile.supports_temperature("claude-opus-5")
+    assert not profile.supports_temperature("anthropic/claude-opus-5")
+    assert profile.supports_temperature("claude-haiku-4-5")
+
+
+def test_accepts_temperature_is_provider_signal_and_family_rule():
+    # A temp-ok family with the provider signal on: accepts.
+    assert _descriptor("openai/gpt-4o").accepts_temperature
+    # The family rule overrides a provider that still lists temperature.
+    assert not _descriptor(
+        "anthropic/claude-opus-4-8", supports_temperature=True
+    ).accepts_temperature
+    # A provider that omits temperature from its route params: does not accept,
+    # even for a family the rule would otherwise allow.
+    assert not _descriptor(
+        "openai/gpt-4o", supports_temperature=False
+    ).accepts_temperature

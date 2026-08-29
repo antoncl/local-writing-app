@@ -46,6 +46,12 @@
     // non-bindable prop cannot be reassigned in runes mode. No parent binds
     // them today; they are passed one-way and updated via onChange.
     onChange = () => {},
+    // Surfaces the selected model's capability list to the parent so fields
+    // rendered OUTSIDE this picker (the Temperature field, #1554) can gate on
+    // it. `null` = unknown (catalogue not loaded, or an orphan model not in the
+    // list) so the parent leaves the field editable rather than guessing. Kept
+    // as a callback, not a `$bindable`, to match this picker's one-way contract.
+    onCapabilities = () => {},
   }: {
     provider?: string;
     tier?: AICapabilityTier | "";
@@ -59,6 +65,7 @@
       // (#1412). "" when nothing resolves yet.
       modelLabel: string;
     }) => void;
+    onCapabilities?: (capabilities: string[] | null) => void;
   } = $props();
 
   // Tier display order. LOCAL deliberately last; it's Ollama-only.
@@ -195,6 +202,14 @@
   const customLabel = $derived(
     resolvedModelName || model ? `Custom — ${resolvedModelName || model}` : "Custom (Advanced)",
   );
+
+  // The catalogue row for the currently-stored model (the concrete id lives in
+  // `model` in both tier and custom mode). null until the catalogue loads or for
+  // an orphan id — the parent reads that as "capabilities unknown". #1554.
+  const selectedModelInfo = $derived(models.find((m) => m.id === model) ?? null);
+  $effect(() => {
+    onCapabilities(selectedModelInfo ? selectedModelInfo.capabilities : null);
+  });
 
   async function onProviderChange(newProvider: string) {
     provider = newProvider;

@@ -41,6 +41,11 @@ class Capability(str, Enum):
     TOOLS = "tools"
     THINKING = "thinking"
     CACHING = "caching"
+    # Opt-out, unlike the others: almost every model accepts a `temperature`,
+    # so this flag is present by default and *absent* only for the families
+    # below. The picker keys the read-only Temperature field on its absence
+    # (#1554).
+    TEMPERATURE = "temperature"
 
 
 CachingStyle = Literal["none", "auto", "explicit"]
@@ -71,6 +76,37 @@ def family_from_id(model_id: str) -> str:
     return match.group(0) if match else ident
 
 
+# Model families whose API rejects a `temperature` parameter — sampling was
+# removed on the newest Anthropic families (Opus 4.7/4.8/5, Sonnet 5, Fable 5,
+# Mythos 5). This lives here, provider-neutral, because the *same* model is
+# reachable through more than one provider: OpenRouter serves it as
+# `anthropic/claude-opus-4-8`. `family_supports_temperature` strips any leading
+# `provider/` route segment before matching, so the rule catches the model on
+# every route, not just the native Anthropic id (#1554). Anthropic 4.6 and older
+# (incl. Haiku 4.5) still accept temperature and are deliberately absent.
+NO_TEMPERATURE_FAMILIES: tuple[str, ...] = (
+    "claude-opus-4-7",
+    "claude-opus-4-8",
+    "claude-opus-5",
+    "claude-sonnet-5",
+    "claude-fable-5",
+    "claude-mythos-5",
+)
+
+
+def family_supports_temperature(model_id: str) -> bool:
+    """Whether `model_id`'s family accepts a `temperature` parameter.
+
+    False only for `NO_TEMPERATURE_FAMILIES`. The id is matched with any leading
+    `provider/` route segment stripped (`anthropic/claude-opus-4-8` → checked as
+    `claude-opus-4-8`) so an OpenRouter/other route to a no-sampling model is
+    caught the same as the native id. Variant suffixes (`:free`, `:beta`) ride
+    along after the family prefix and still match via `startswith`.
+    """
+    base = model_id.split("/", 1)[-1]
+    return not any(base.startswith(p) for p in NO_TEMPERATURE_FAMILIES)
+
+
 @dataclass
 class ModelDescriptor:
     """One row in a provider's catalogue. Fields that are unknown at
@@ -97,12 +133,28 @@ class ModelDescriptor:
     # catalogues, which have no audit list to be absent from) stay True. The
     # picker badges the False ones "new".
     verified: bool = True
+    # The provider's own signal on whether this model accepts a `temperature`
+    # parameter. Default True; OpenRouter sets it from the route's published
+    # `supported_parameters`. Combined with the family rule by
+    # `accepts_temperature` — never read this raw for the effective answer.
+    supports_temperature: bool = True
 
     @property
     def family(self) -> str:
         """The catalogue family (id-derived) the picker groups by."""
 
         return family_from_id(self.id)
+
+    @property
+    def accepts_temperature(self) -> bool:
+        """Effective temperature support: the provider's own signal AND the
+        family rule. The no-sampling families reject `temperature` on every
+        route (incl. OpenRouter's `anthropic/…` ids), so the family rule
+        overrides a provider that still lists the parameter. Drives the wire
+        `temperature` capability and the picker's read-only field (#1554).
+        """
+
+        return self.supports_temperature and family_supports_temperature(self.id)
 
     @property
     def free(self) -> bool:
@@ -457,11 +509,13 @@ class ProviderProfile(ABC):
 
     def supports_temperature(self, model_id: str) -> bool:
         """Whether the model accepts a `temperature` parameter on the
-        request. Default True — override for models that 400 on it (e.g.
-        Anthropic's Opus 4.7+ deprecates the param). Call sites should
-        omit `temperature` from the request kwargs when this returns False.
+        request. Delegates to the provider-neutral family rule, so the
+        no-sampling families are rejected on every provider (a `claude-opus-5`
+        reached through OpenRouter as `anthropic/claude-opus-5` is caught the
+        same as the native id). Call sites omit `temperature` from the request
+        kwargs when this returns False.
         """
-        return True
+        return family_supports_temperature(model_id)
 
     def requires_temperature(self, model_id: str) -> bool:
         """Whether the model's API rejects requests that omit `temperature`.

@@ -94,7 +94,7 @@ class OpenAICompatibleProfile(ProviderProfile):
             "max_tokens": call.max_tokens,
             "messages": self._build_messages(call),
         }
-        if call.temperature is not None:
+        if call.temperature is not None and self.supports_temperature(call.model):
             kwargs["temperature"] = call.temperature
         extra_body = self._extra_body(call)
         if extra_body:
@@ -143,7 +143,7 @@ class OpenAICompatibleProfile(ProviderProfile):
             # streaming path never sees usage.
             "stream_options": {"include_usage": True},
         }
-        if call.temperature is not None:
+        if call.temperature is not None and self.supports_temperature(call.model):
             kwargs["temperature"] = call.temperature
         extra_body = self._extra_body(call)
         if extra_body:

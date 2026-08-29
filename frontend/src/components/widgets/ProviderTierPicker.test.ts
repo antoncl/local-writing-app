@@ -49,7 +49,8 @@ vi.mock("@/lib/api", () => {
         provider: "openai",
         context_window: 128000,
         tier: "balanced",
-        capabilities: [],
+        // GPT accepts temperature — the capability is present (#1554).
+        capabilities: ["temperature"],
         deprecated: false,
         cost_in_per_mtok: 2,
         family: "gpt",
@@ -181,6 +182,55 @@ describe("ProviderTierPicker — the model View (ADR-0073 S3)", () => {
     render(ProviderTierPicker, { props: { policy: "cloud-allowed", onChange: vi.fn() } });
     await screen.findByText("Claude Unlisted");
     expect(screen.getByText("new")).toBeTruthy();
+  });
+});
+
+describe("ProviderTierPicker — selected-model capabilities lift (#1554)", () => {
+  it("reports the selected model's capabilities so the parent can gate Temperature", async () => {
+    // gpt-bal carries `temperature`; the parent leaves the field editable.
+    const onCapabilities = vi.fn();
+    render(ProviderTierPicker, {
+      props: { policy: "cloud-allowed", onChange: vi.fn(), onCapabilities },
+    });
+    const subscription = await screen.findByLabelText("Subscription");
+    await fireEvent.change(subscription, { target: { value: "openai" } });
+    await vi.waitFor(() =>
+      expect(onCapabilities).toHaveBeenLastCalledWith(["temperature"]),
+    );
+  });
+
+  it("reports capabilities WITHOUT temperature for a no-sampling model", async () => {
+    // claude-bal has no `temperature` capability — the parent makes the field
+    // read-only. The absence (not a special flag) is what the parent keys on.
+    // A stored model is passed explicitly: a fresh mount leaves `model` empty.
+    const onCapabilities = vi.fn();
+    render(ProviderTierPicker, {
+      props: {
+        provider: "anthropic",
+        tier: "balanced",
+        model: "claude-bal",
+        policy: "cloud-allowed",
+        onChange: vi.fn(),
+        onCapabilities,
+      },
+    });
+    await vi.waitFor(() => expect(onCapabilities).toHaveBeenLastCalledWith([]));
+  });
+
+  it("reports null (unknown) for an orphan model not in the catalogue", async () => {
+    // A stored model id absent from the loaded catalogue → capabilities unknown
+    // → the parent leaves Temperature editable rather than guessing.
+    const onCapabilities = vi.fn();
+    render(ProviderTierPicker, {
+      props: {
+        provider: "anthropic",
+        model: "orphan-not-in-catalogue",
+        policy: "cloud-allowed",
+        onChange: vi.fn(),
+        onCapabilities,
+      },
+    });
+    await vi.waitFor(() => expect(onCapabilities).toHaveBeenLastCalledWith(null));
   });
 });
 

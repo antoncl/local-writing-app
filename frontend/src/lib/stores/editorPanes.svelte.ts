@@ -52,6 +52,9 @@ import {
   refreshAfterSave,
   autosaveOnce,
   offerCloseConflictRecovery,
+  tryAdoptLostSave,
+  RELOAD_GETTERS,
+  type ReloadableDocument,
 } from "@/lib/stores/editorPaneSave";
 import { refreshKnownTags } from "@/lib/stores/tags";
 import { refreshReferenceIndexInBackground } from "@/lib/stores/references";
@@ -128,21 +131,6 @@ export type ReviewCommitter = {
   // 409), so the close guard can keep the pane open instead of dropping the patch.
   commit: () => Promise<boolean>;
   discard: () => void;
-};
-
-// Per-document-kind refetch for the metadata-reload pass — a lookup (the
-// editorPaneDelete label-map convention) rather than a deepening nested ternary; an
-// unlisted kind falls back to the scene endpoint. Bare `api.*` refs are safe: the
-// methods close over the module-level `request`, not `this`. The reloadable kinds
-// are the narrow subset with a required `metadata` (NOT the whole EditableDocument
-// union — ViewNode et al. never reach this pass and carry optional metadata).
-type ReloadableDocument = Scene | LoreEntry | PromptEntry | PlotTemplate | CardEntry | PlotlineEntry;
-const RELOAD_GETTERS: Record<string, (id: string) => Promise<ReloadableDocument>> = {
-  lore: api.getLoreEntry,
-  prompt: api.getPromptEntry,
-  plot_template: api.getPlotTemplate,
-  plot_card: api.getCard,
-  plotline: api.getPlotline,
 };
 
 class EditorPanesController {
@@ -366,6 +354,12 @@ class EditorPanesController {
       }
     });
     if (conflict) {
+      // Rung 1 (ADR-0077): a lost-response 409 means our write already landed,
+      // so the close is safe — adopt and tear down without asking.
+      if (await tryAdoptLostSave(this, id)) {
+        this.tearDown(id);
+        return;
+      }
       offerCloseConflictRecovery(this, id);
       return;
     }
@@ -1461,6 +1455,16 @@ class EditorPanesController {
       if (!saved) allSaved = false;
     }
     return allSaved;
+  }
+
+  // Rung-1 adopt (ADR-0077): tryAdoptLostSave (editorPaneSave) verified the
+  // re-fetch equals what this pane last sent, so swap in its fresh revision and
+  // drop dirty. The buffer already holds this content — no editor reload.
+  adoptReloaded(id: string, remote: ReloadableDocument): void {
+    this.#autosave.cancel(id);
+    this.panes = this.panes.map((candidate) =>
+      candidate.id === id ? { ...candidate, scene: remote, dirty: false, recentlySaved: false } : candidate,
+    );
   }
 
   async reconcileSceneFromServer(scene: Scene, mode: "boundary" | "reconcile" = "boundary"): Promise<void> {

@@ -1,10 +1,13 @@
 """AI provider, preview, chat, generate, streaming, and cost routes (#170 main.py split)."""
 from __future__ import annotations
 
+from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from starlette.concurrency import run_in_threadpool
+from starlette.requests import Request
 
 from app.models import (
     AIChatRequest,
@@ -457,8 +460,44 @@ async def ai_generate(project: CurrentProject, request: AIGenerateRequest) -> AI
 # --- AI: streaming variants (NDJSON) --- (line protocol in services/ai/streaming.py)
 
 
+_STREAM_EXHAUSTED = object()
+
+
+async def stream_ndjson_until_disconnect(
+    sync_lines: Iterator[str], http_request: Request
+) -> AsyncIterator[str]:
+    """Drive a SYNC ndjson stream generator from async code, stopping the moment the
+    client disconnects (frontend Stop aborts the fetch) — #1570. Lives in the web layer
+    (it depends on Starlette's `Request`/threadpool); `services/ai/streaming.py` stays
+    web-free (ADR-0056).
+
+    Why this shape: the provider stream is a sync generator blocked on an upstream
+    network read inside Starlette's threadpool; async cancellation can't reach it, and
+    on modern uvicorn StreamingResponse doesn't listen for disconnect (it only fails on
+    the next send). So we poll `is_disconnected()` between chunks, and — on EVERY exit —
+    close `sync_lines`. Closing it throws GeneratorExit at its suspended yield, which
+    cascades (CPython refcounting drops the nested generators as the frame unwinds)
+    down through `transform_provider_events_to_ndjson` → `ai_providers.chat_stream` →
+    the provider adapter's `chat_stream`, running that adapter's `with`/`finally` that
+    closes the upstream connection and cancels the provider call.
+    """
+    try:
+        while True:
+            if await http_request.is_disconnected():
+                break
+            line = await run_in_threadpool(next, sync_lines, _STREAM_EXHAUSTED)
+            if line is _STREAM_EXHAUSTED:
+                break
+            yield line
+    finally:
+        # Close on disconnect, normal end, AND error — the provider teardown rides this.
+        await run_in_threadpool(sync_lines.close)
+
+
 @router.post("/api/ai/chat/stream")
-async def ai_chat_stream(project: CurrentProject, request: AIChatRequest) -> StreamingResponse:
+async def ai_chat_stream(
+    project: CurrentProject, request: AIChatRequest, http_request: Request
+) -> StreamingResponse:
     settings = machine_settings_service.load_settings()
     resolved = resolve_call_params(
         project,
@@ -498,20 +537,25 @@ async def ai_chat_stream(project: CurrentProject, request: AIChatRequest) -> Str
         policy=policy,
     )
     return StreamingResponse(
-        transform_provider_events_to_ndjson(
-            events, policy=policy,
-            extra_done=(
-                {"journal_added": [e.model_dump() for e in journal_added]}
-                if journal_added else None
+        stream_ndjson_until_disconnect(
+            transform_provider_events_to_ndjson(
+                events, policy=policy,
+                extra_done=(
+                    {"journal_added": [e.model_dump() for e in journal_added]}
+                    if journal_added else None
+                ),
+                descriptor=descriptor,
             ),
-            descriptor=descriptor,
+            http_request,
         ),
         media_type="application/x-ndjson",
     )
 
 
 @router.post("/api/ai/generate/stream")
-async def ai_generate_stream(project: CurrentProject, request: AIGenerateRequest) -> StreamingResponse:
+async def ai_generate_stream(
+    project: CurrentProject, request: AIGenerateRequest, http_request: Request
+) -> StreamingResponse:
     # Render template first — if this fails, return an HTTP error like the
     # non-streaming endpoint does. The stream itself only carries provider events.
     with translate_errors():
@@ -581,11 +625,14 @@ async def ai_generate_stream(project: CurrentProject, request: AIGenerateRequest
         policy=policy,
     )
     return StreamingResponse(
-        transform_provider_events_to_ndjson(
-            events,
-            policy=policy,
-            extra_done={"session_id": session_id, "char_count": char_count},
-            descriptor=descriptor,
+        stream_ndjson_until_disconnect(
+            transform_provider_events_to_ndjson(
+                events,
+                policy=policy,
+                extra_done={"session_id": session_id, "char_count": char_count},
+                descriptor=descriptor,
+            ),
+            http_request,
         ),
         media_type="application/x-ndjson",
     )

@@ -269,48 +269,54 @@ class OpenAICompatibleProfile(ProviderProfile):
         self, call: ChatCall
     ) -> Iterator[StreamDelta | StreamThinking | StreamFinal]:
         stream, extra_body = self._open_stream(call)
-        splitter = ThinkTagSplitter()
-        stop_reason: str | None = None
-        final_chunk: Any = None
-        # #1588: track whether any visible content/thinking reached the client, and
-        # accumulate diagnostics, so a no-content completion logs its cause instead
-        # of ending as a silent "Model returned empty output".
-        emitted = False
-        diag = _StreamDiag()
-        for chunk in stream:
-            diag.observe(chunk)
-            # A choice-nested error frame (OpenRouter's shape for rate-limit /
-            # no-provider / upstream 5xx) does not make the SDK raise — surface it
-            # as a real error instead of a fake-success empty turn (#1581). The
-            # top-level frame already raises in the SDK; guard both levels here.
-            _raise_on_inband(chunk)
-            if getattr(chunk, "usage", None) is not None:
-                final_chunk = chunk
-            choices = getattr(chunk, "choices", None) or []
-            if not choices:
-                continue
-            choice = choices[0]
-            _raise_on_inband(choice)
-            for event in self._stream_delta_events(getattr(choice, "delta", None), splitter):
+        # #1570: the SDK Stream is never closed by iteration alone — close it on EVERY
+        # exit (incl. the GeneratorExit cascade from a client Stop) so the upstream httpx
+        # response, and the provider call it's billing, actually stops.
+        try:
+            splitter = ThinkTagSplitter()
+            stop_reason: str | None = None
+            final_chunk: Any = None
+            # #1588: track whether any visible content/thinking reached the client, and
+            # accumulate diagnostics, so a no-content completion logs its cause instead
+            # of ending as a silent "Model returned empty output".
+            emitted = False
+            diag = _StreamDiag()
+            for chunk in stream:
+                diag.observe(chunk)
+                # A choice-nested error frame (OpenRouter's shape for rate-limit /
+                # no-provider / upstream 5xx) does not make the SDK raise — surface it
+                # as a real error instead of a fake-success empty turn (#1581). The
+                # top-level frame already raises in the SDK; guard both levels here.
+                _raise_on_inband(chunk)
+                if getattr(chunk, "usage", None) is not None:
+                    final_chunk = chunk
+                choices = getattr(chunk, "choices", None) or []
+                if not choices:
+                    continue
+                choice = choices[0]
+                _raise_on_inband(choice)
+                for event in self._stream_delta_events(getattr(choice, "delta", None), splitter):
+                    if event.text:
+                        emitted = True
+                    yield event
+                finish = getattr(choice, "finish_reason", None)
+                if finish:
+                    stop_reason = finish
+            # Flush any pending buffered text after the stream ends.
+            for event in splitter.flush():
                 if event.text:
                     emitted = True
                 yield event
-            finish = getattr(choice, "finish_reason", None)
-            if finish:
-                stop_reason = finish
-        # Flush any pending buffered text after the stream ends.
-        for event in splitter.flush():
-            if event.text:
-                emitted = True
-            yield event
-        if not emitted:
-            diag.log_empty(call, extra_body)
-        usage = (
-            self.extract_usage(final_chunk, call.model)
-            if final_chunk is not None
-            else None
-        )
-        yield StreamFinal(stop_reason=stop_reason, usage=usage)
+            if not emitted:
+                diag.log_empty(call, extra_body)
+            usage = (
+                self.extract_usage(final_chunk, call.model)
+                if final_chunk is not None
+                else None
+            )
+            yield StreamFinal(stop_reason=stop_reason, usage=usage)
+        finally:
+            stream.close()  # OpenAI SDK Stream.close() closes the upstream httpx response
 
     def _stream_delta_events(
         self, delta: Any, splitter: ThinkTagSplitter

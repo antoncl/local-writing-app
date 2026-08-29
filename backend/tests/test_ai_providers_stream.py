@@ -14,6 +14,7 @@ from app.services.ai.profiles.base import (
     StreamThinking,
     ThinkTagSplitter,
 )
+from app.services.ai.profiles.ollama import OllamaProfile
 from app.services.ai.profiles.openai import OpenAIProfile
 from app.services.ai.profiles.openrouter import OpenRouterProfile
 
@@ -158,6 +159,21 @@ def _two_choice_chunk(*, idx0=None, idx1=None, finish0=None, finish1=None):
     )
 
 
+class _FakeSdkStream:
+    """Fake `openai.Stream`: iterable over `chunks`, and records `.close()` (#1570)
+    the way the real SDK `Stream.close()` closes the upstream httpx response."""
+
+    def __init__(self, chunks):
+        self._chunks = list(chunks)
+        self.closed = False
+
+    def __iter__(self):
+        return iter(self._chunks)
+
+    def close(self):
+        self.closed = True
+
+
 _DIAG_LOGGER = "app.services.ai.profiles.openai_compatible"
 
 
@@ -173,7 +189,7 @@ class OpenAICompatibleStreamTests(unittest.TestCase):
             def __init__(self, **kwargs):
                 captured.update(kwargs)
                 self.chat = SimpleNamespace(
-                    completions=SimpleNamespace(create=lambda **_kw: iter(chunks))
+                    completions=SimpleNamespace(create=lambda **_kw: _FakeSdkStream(chunks))
                 )
 
         call = ChatCall(
@@ -216,7 +232,7 @@ class OpenAICompatibleStreamTests(unittest.TestCase):
 
         def _create(**kw):
             captured.update(kw)
-            return iter([_chunk(content="ok", finish="stop")])
+            return _FakeSdkStream([_chunk(content="ok", finish="stop")])
 
         class _FakeOpenAI:
             def __init__(self, **_kwargs):
@@ -385,7 +401,7 @@ class OpenAICompatibleStreamTests(unittest.TestCase):
         class _FakeOpenAI:
             def __init__(self, **_kwargs):
                 self.chat = SimpleNamespace(
-                    completions=SimpleNamespace(create=lambda **_kw: iter(chunks))
+                    completions=SimpleNamespace(create=lambda **_kw: _FakeSdkStream(chunks))
                 )
 
         call = ChatCall(
@@ -519,6 +535,66 @@ class OpenAICompatibleStreamTests(unittest.TestCase):
         with self.assertNoLogs(_DIAG_LOGGER, level="WARNING"):
             events, _ = self._run(OpenAIProfile(api_key="sk-openai"), chunks)
         self.assertTrue([e for e in events if isinstance(e, StreamThinking)])
+
+    # ---- upstream teardown on early stop (#1570) -------------------------
+    # Closing the outer NDJSON generator early (the wrapper's cascade on client
+    # Stop) must reach the SDK `Stream` — proving the `finally: stream.close()`
+    # in `chat_stream` actually runs when the generator unwinds via GeneratorExit
+    # rather than draining to completion.
+
+    def test_openai_stream_closes_upstream_on_early_stop(self):
+        chunks = [
+            _chunk(content="a"),
+            _chunk(content="b"),
+            _chunk(content="c", finish="stop"),
+        ]
+        fake_stream = _FakeSdkStream(chunks)
+
+        class _FakeOpenAI:
+            def __init__(self, **_kwargs):
+                self.chat = SimpleNamespace(
+                    completions=SimpleNamespace(create=lambda **_kw: fake_stream)
+                )
+
+        call = ChatCall(
+            model="m",
+            system_prompt="",
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=64,
+        )
+        with patch("openai.OpenAI", _FakeOpenAI):
+            gen = OpenAIProfile(api_key="sk-openai").chat_stream(call)
+            next(gen)  # consume one event — don't drain the stream
+            gen.close()
+        self.assertTrue(fake_stream.closed)
+
+    def test_ollama_stream_closes_upstream_on_early_stop(self):
+        # Ollama has no chat_stream override — this proves the teardown is
+        # inherited from OpenAICompatibleProfile, not reimplemented per provider.
+        chunks = [
+            _chunk(content="a"),
+            _chunk(content="b"),
+            _chunk(content="c", finish="stop"),
+        ]
+        fake_stream = _FakeSdkStream(chunks)
+
+        class _FakeOpenAI:
+            def __init__(self, **_kwargs):
+                self.chat = SimpleNamespace(
+                    completions=SimpleNamespace(create=lambda **_kw: fake_stream)
+                )
+
+        call = ChatCall(
+            model="m",
+            system_prompt="",
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=64,
+        )
+        with patch("openai.OpenAI", _FakeOpenAI):
+            gen = OllamaProfile(host="http://127.0.0.1:11434").chat_stream(call)
+            next(gen)  # consume one event — don't drain the stream
+            gen.close()
+        self.assertTrue(fake_stream.closed)
 
 
 def _a_delta_event(dtype, *, text=None, thinking=None):
@@ -673,6 +749,49 @@ class AnthropicStreamTests(unittest.TestCase):
         create = captured["create"]
         self.assertNotIn("temperature", create)
         self.assertNotIn("temperature", create.get("extra_body", {}))
+
+    # ---- upstream teardown on early stop (#1570) -------------------------
+
+    def test_anthropic_stream_closes_upstream_on_early_stop(self):
+        # `with client.messages.stream(...) as stream:`'s __exit__ must run even
+        # when the generator is closed early (the GeneratorExit cascade from a
+        # client Stop) — confirms Anthropic already tears down the upstream,
+        # unlike OpenAI-compat's un-closed `Stream` (fixed in openai_compatible.py).
+        captured: dict = {}
+
+        class _FakeStream:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_a):
+                captured["exited"] = True
+                return False
+
+            def __iter__(self):
+                return iter([
+                    _a_delta_event("text_delta", text="a"),
+                    _a_delta_event("text_delta", text="b"),
+                    _a_delta_event("text_delta", text="c"),
+                ])
+
+            def get_final_message(self):
+                return SimpleNamespace(stop_reason="end_turn", usage=None)
+
+        class _FakeAnthropic:
+            def __init__(self, **_kwargs):
+                self.messages = SimpleNamespace(stream=lambda **_kw: _FakeStream())
+
+        call = ChatCall(
+            model="claude-sonnet-4-6",
+            system_prompt="",
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=64,
+        )
+        with patch("anthropic.Anthropic", _FakeAnthropic):
+            gen = AnthropicProfile(api_key="sk-ant").chat_stream(call)
+            next(gen)  # consume one event — don't drain the stream
+            gen.close()
+        self.assertTrue(captured.get("exited"))
 
 
 if __name__ == "__main__":

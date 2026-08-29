@@ -13,6 +13,34 @@ const turndown = new TurndownService({
 });
 
 turndown.use(gfm);
+// Emit clean list markdown (`- item`, `1. item`) instead of turndown's padded
+// default (`-   item` / `1.  item`, #1619). The padding is invisible when
+// rendered but differs from the AI's `- item` on every line, so a padded body
+// diffed against an AI revise stacked whole blocks (#1617 handles the display;
+// this fixes the source). Added AFTER gfm so its task-list rule still wins for
+// checkbox items; this only claims plain `<li>`. Continuation lines indent by
+// the marker width, so nested lists and multi-block items stay well-formed.
+turndown.addRule("listItem", {
+  filter: "li",
+  replacement: (content: string, node: Node): string => {
+    const element = node as HTMLElement;
+    const parent = element.parentNode as HTMLElement | null;
+    let prefix: string;
+    if (parent && parent.nodeName === "OL") {
+      const startAttr = parent.getAttribute("start");
+      const index = Array.prototype.indexOf.call(parent.children, element);
+      prefix = `${startAttr ? Number(startAttr) + index : index + 1}. `;
+    } else {
+      prefix = "- ";
+    }
+    const indent = " ".repeat(prefix.length);
+    const body = content
+      .replace(/^\n+/, "")
+      .replace(/\n+$/, "\n")
+      .replace(/\n/gm, `\n${indent}`);
+    return prefix + body + (element.nextSibling && !/\n$/.test(body) ? "\n" : "");
+  },
+});
 turndown.addRule("todoAnchor", {
   filter: (node: Node) => {
     if (!(node instanceof HTMLElement)) return false;

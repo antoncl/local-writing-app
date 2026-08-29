@@ -31,20 +31,42 @@ describe("markdown round-trip — standard prose constructs", () => {
     });
   }
 
-  // A few constructs are re-emitted in turndown's canonical form on the first
-  // save (a one-time normalization), then stay put. The invariant that matters
-  // for autosave is that they DON'T drift further — no progressive corruption.
-  it("normalizes lists and strikethrough to a stable form, then holds", async () => {
-    const cases: [string, string][] = [
-      ["This is ~~struck~~ text.", "This is ~struck~ text."], // ~~ → ~
-      ["- one\n- two", "-   one\n-   two"], // bullet marker padded
-      ["1. first\n2. second", "1.  first\n2.  second"], // ordered marker padded
+  // Strikethrough is re-emitted in turndown's canonical form on the first save
+  // (a one-time normalization), then stays put. The invariant that matters for
+  // autosave is that it DOESN'T drift further — no progressive corruption.
+  it("normalizes strikethrough to a stable form, then holds", async () => {
+    const once = await roundTrip("This is ~~struck~~ text."); // ~~ → ~
+    expect(once).toBe("This is ~struck~ text.");
+    expect(await roundTrip(once)).toBe(once); // no further drift
+  });
+
+  // #1619: lists serialize CLEAN (`- item`, `1. item`) — no `-   ` padding — so
+  // the editor's output matches standard markdown and the AI's, and a body
+  // diffed against an AI revise no longer stacks whole blocks. Flat and nested
+  // lists round-trip byte-for-byte; the marker-width continuation indent keeps
+  // nested lists well-formed.
+  it("serializes lists clean and round-trips them unchanged", async () => {
+    const cases = [
+      "- one\n- two",
+      "1. first\n2. second",
+      "- outer\n  - inner\n  - inner two\n- outer two",
     ];
-    for (const [input, settled] of cases) {
-      const once = await roundTrip(input);
-      expect(once).toBe(settled); // documents the one-time normalization
-      expect(await roundTrip(once)).toBe(once); // and no further drift
+    for (const md of cases) {
+      const once = await roundTrip(md);
+      expect(once).toBe(md); // clean, no padding, no drift on the first save
+      expect(await roundTrip(once)).toBe(once);
+      expect(once).not.toContain("-   "); // the old turndown padding is gone
     }
+  });
+
+  // #1619: the custom listItem rule claims every <li>, so guard that gfm's
+  // task-list checkboxes still survive it — the checkbox is serialized by gfm's
+  // own rule, listItem only supplies the `- ` marker.
+  it("keeps task-list checkboxes through a round-trip, with a clean marker", async () => {
+    const out = await roundTrip("- [ ] todo item\n- [x] done item");
+    expect(out).toContain("- [ ]"); // unchecked box survived
+    expect(out).toContain("- [x]"); // checked box survived
+    expect(out).not.toContain("-   "); // no turndown marker padding
   });
 
   it("is idempotent on a mixed document: a second round-trip changes nothing", async () => {

@@ -32,6 +32,7 @@
   import MachineSettingsDialog from "@/components/dialogs/MachineSettingsDialog.svelte";
   import ImportDocumentsModal from "@/components/dialogs/ImportDocumentsModal.svelte";
   import ConfirmModal from "@/components/dialogs/ConfirmModal.svelte";
+  import ConflictDiffModal from "@/components/dialogs/ConflictDiffModal.svelte";
   import FinalizeRoleplayDialog from "@/components/dialogs/FinalizeRoleplayDialog.svelte";
   import AIPolicyModal from "@/components/dialogs/AIPolicyModal.svelte";
   import ValidateModal from "@/components/dialogs/ValidateModal.svelte";
@@ -97,6 +98,7 @@
   import { flushDirtyPanesOnHide } from "@/lib/stores/editorPaneSave";
   import { entryBrainstorm } from "@/lib/stores/entryBrainstorm.svelte";
   import { confirmService } from "@/lib/stores/confirmService.svelte";
+  import { conflictDiffService } from "@/lib/stores/conflictDiffService.svelte";
   import { projectChooser } from "@/lib/stores/projectChooser.svelte";
   import { createWizard } from "@/lib/stores/createWizard.svelte";
   import { projectSession } from "@/lib/stores/projectSession.svelte";
@@ -229,6 +231,7 @@
     chatSessions.setError = (message) => { error = message; };
     // Confirm actions flow through App's run() so errors surface in `error`.
     confirmService.onRun = run;
+    conflictDiffService.onRun = run;
     // Project chooser drives only the open-project picker; the projectSession
     // controller owns the open/create lifecycle. App feeds the picker its start
     // dir + error sink and routes its chosen path into projectSession.
@@ -1295,6 +1298,8 @@
     onConfirm={(dontShowAgain) => confirmService.resolve(dontShowAgain)}
     onSecondary={() => confirmService.resolveSecondary()}
   />
+
+  <ConflictDiffModal />
 
   <CreateProjectWizard />
 

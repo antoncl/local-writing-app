@@ -40,6 +40,9 @@ function fakeHost(): SaveFailureHost & {
     saveEditorPane: vi.fn(async () => {}),
     patchPane: vi.fn(),
     editorPaneComponents: {},
+    titleReloadsByPane: {},
+    metadataReloadsByPane: {},
+    nextMetadataReloadToken: 1,
     markPaneSaveError: vi.fn(),
     scheduleAutosaveRetry: vi.fn(),
     tearDown: vi.fn(),
@@ -264,10 +267,11 @@ describe("autosaveOnce — through the real controller (#457)", () => {
     expect(pane?.draftMarkdown).toBe("even newer body");
   });
 
-  // --- Rung 2: disjoint prose merge (ADR-0077 / #1626) -----------------------
-  // The pane's ProseBodyView owns the three-way merge; here it's a fake handle so
-  // the store wiring (gate → merge → adopt-revision → re-save) is tested without a
-  // TipTap mount. The merge primitive itself is covered in documentBoundary.test.ts.
+  // --- Rung 2: three-way merge — prose (#1626) + structured fields (#1633) ----
+  // The pane's ProseBodyView owns the prose merge; here it's a fake handle so the
+  // store wiring (field-merge + body-merge → adopt-revision → re-save, vs conflict →
+  // dialog) is tested without a TipTap mount. The merge primitives themselves are
+  // covered in documentBoundary.test.ts (prose) and editorPaneModel.test.ts (fields).
   function injectMergeHandle(result: string | null): ReturnType<typeof vi.fn> {
     const tryMergeProse = vi.fn(async () => result);
     editorPanes.editorPaneComponents = {
@@ -299,12 +303,50 @@ describe("autosaveOnce — through the real controller (#457)", () => {
     expect(request).not.toHaveBeenCalled(); // never asked
   });
 
-  it("declines the merge and shows the dialog when the on-disk change also touched metadata (slice C)", async () => {
-    seedDirtyLorePane();
-    vi.spyOn(api, "saveLoreEntry").mockRejectedValue(new HttpError("conflict", 409, null));
-    // Body AND metadata changed on disk — beyond a prose merge; a structured-field
-    // merge is slice C, so the body-only gate must decline before touching the editor.
+  it("merges a disjoint on-disk metadata change together with the local body edit — no dialog (slice C)", async () => {
+    seedDirtyLorePane(); // base metadata {}; drafts: title "Edited Name", body "edited body", metadata {}
+    stubSuccessRefreshes();
+    // On disk a NEW metadata key AND the body changed — both disjoint from the local
+    // edits (local never touched `era`), so the field-merge + body-merge both land.
     vi.spyOn(api, "getLoreEntry").mockResolvedValue({ ...LORE, body: "server body", metadata: { era: "future" }, revision: "r2" });
+    const merge = injectMergeHandle("merged body");
+    const save = vi
+      .spyOn(api, "saveLoreEntry")
+      .mockRejectedValueOnce(new HttpError("conflict", 409, null))
+      .mockResolvedValueOnce({ ...LORE, title: "Edited Name", body: "merged body", metadata: { era: "future" }, revision: "r3" });
+    const request = vi.spyOn(confirmService, "request").mockImplementation(() => {});
+
+    await autosaveOnce(editorPanes, "pane_1");
+    await vi.waitFor(() => expect(editorPanes.panes.find((p) => p.id === "pane_1")?.scene?.revision).toBe("r3"));
+
+    const pane = editorPanes.panes.find((p) => p.id === "pane_1");
+    expect(merge).toHaveBeenCalledWith("body", "server body"); // the body was merged too
+    expect(pane?.draftMetadata).toEqual({ era: "future" }); // remote's key merged into the drafts
+    // The mounted editor's metadata widget is re-seeded from the merged drafts, so the
+    // stale local value can't be re-emitted and revert the merge on the next edit.
+    expect(editorPanes.metadataReloadsByPane["pane_1"]?.metadata).toEqual({ era: "future" });
+    expect(pane?.dirty).toBe(false);
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(request).not.toHaveBeenCalled(); // never asked
+  });
+
+  it("falls to the dialog when both sides changed the SAME metadata key to different values (slice C)", async () => {
+    // base era "past"; local drafts era "present"; on disk era "future" → a genuine
+    // field overlap. The field-merge conflicts, so the body merge is never attempted.
+    editorPanes.panes = [
+      {
+        ...createEmptyEditorPane("pane_1"),
+        document: { type: "lore" as const, id: LORE.id },
+        scene: { ...LORE, metadata: { era: "past" } },
+        draftTitle: LORE.title,
+        draftMarkdown: LORE.body,
+        draftEntryType: LORE.entry_type,
+        draftMetadata: { era: "present" },
+        dirty: true,
+      },
+    ];
+    vi.spyOn(api, "saveLoreEntry").mockRejectedValue(new HttpError("conflict", 409, null));
+    vi.spyOn(api, "getLoreEntry").mockResolvedValue({ ...LORE, metadata: { era: "future" }, revision: "r2" });
     const merge = injectMergeHandle("merged body");
     let request!: Parameters<typeof confirmService.request>[0];
     vi.spyOn(confirmService, "request").mockImplementation((r) => {
@@ -314,7 +356,7 @@ describe("autosaveOnce — through the real controller (#457)", () => {
     await autosaveOnce(editorPanes, "pane_1");
     await vi.waitFor(() => expect(request).toBeDefined());
 
-    expect(merge).not.toHaveBeenCalled(); // the gate declined before merging
+    expect(merge).not.toHaveBeenCalled(); // a field conflict declines before the body merge
     expect(request.title).toBe("Changed on disk");
     expect(editorPanes.panes.find((p) => p.id === "pane_1")?.dirty).toBe(true); // still unsaved
   });

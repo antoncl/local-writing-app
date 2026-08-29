@@ -170,6 +170,133 @@ export function isEditorPaneDirty(
   return false;
 }
 
+// The pane's editable non-body fields, as the draft-* bundle the pane holds.
+export type DraftFields = {
+  draftTitle: string;
+  draftStatus: string;
+  draftEntryType: string;
+  draftMetadata: EntryMetadata;
+  draftInputs: PromptInputDefinition[];
+  draftOfferOn: string[];
+  draftContextStrategy: PromptContextStrategy | null;
+};
+
+// The generic three-way rule (ADR-0077 §4/§5): only one side moved off `base` ⇒
+// take the mover; both sides moved to the same place ⇒ take it; both moved to
+// *different* places ⇒ conflict, with `local` kept as the placeholder (the
+// dialog / caller decides what to do with a conflict; this never guesses).
+function threeWay<T>(base: T, local: T, remote: T, eq: (a: T, b: T) => boolean): { value: T; conflict: boolean } {
+  const localChanged = !eq(local, base);
+  const remoteChanged = !eq(remote, base);
+  if (!localChanged) return { value: remote, conflict: false };
+  if (!remoteChanged) return { value: local, conflict: false };
+  if (eq(local, remote)) return { value: local, conflict: false };
+  return { value: local, conflict: true };
+}
+
+const metaEq = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
+// Per-key three-way merge over the union of metadata keys, under the same rule
+// as `threeWay`. A key whose merged value is `undefined` (deleted on the
+// winning side) is omitted from the result, so a delete actually deletes.
+function mergeMetadata(
+  base: EntryMetadata,
+  local: EntryMetadata,
+  remote: EntryMetadata,
+): { value: EntryMetadata; conflict: boolean } {
+  const keys = new Set([...Object.keys(base ?? {}), ...Object.keys(local ?? {}), ...Object.keys(remote ?? {})]);
+  const value: EntryMetadata = {};
+  let conflict = false;
+  for (const key of keys) {
+    const merged = threeWay((base ?? {})[key], (local ?? {})[key], (remote ?? {})[key], metaEq);
+    if (merged.conflict) conflict = true;
+    if (merged.value !== undefined) value[key] = merged.value;
+  }
+  return { value, conflict };
+}
+
+// Field-level three-way merge for a document's structured (non-body) fields
+// (ADR-0077 §4/§5): `base` (last-loaded doc) vs `remote` (re-fetched on-disk
+// doc) vs `local` (the pane's live drafts). Each field applies `threeWay`
+// independently — disjoint fields merge silently; a field both sides changed
+// to *different* values conflicts (local's value rides as the placeholder).
+// Metadata is merged per-key, not as a whole object, so editing different keys
+// on each side never conflicts. `conflict` is the OR across every field/key;
+// `fields` is always fully populated, but only trustworthy when `conflict` is
+// false — a caller that finds a conflict falls to the dialog (§4's
+// prove-disjoint-or-ask bias), never applies `fields` blind.
+export function mergeStructuredFields(
+  base: EditableDocument,
+  remote: EditableDocument,
+  local: DraftFields,
+): { fields: DraftFields; conflict: boolean } {
+  const strEq = (a: string, b: string) => a === b;
+  const title = threeWay(base.title, local.draftTitle, remote.title, strEq);
+  const status = threeWay(documentStatus(base), local.draftStatus, documentStatus(remote), strEq);
+  const entryType = threeWay(base.entry_type, local.draftEntryType, remote.entry_type, strEq);
+  const metadata = mergeMetadata(base.metadata ?? {}, local.draftMetadata ?? {}, remote.metadata ?? {});
+
+  const inputsEq = (a: PromptInputDefinition[], b: PromptInputDefinition[]) =>
+    JSON.stringify(canonicalizeInputDefinitions(a)) === JSON.stringify(canonicalizeInputDefinitions(b));
+  const inputs = threeWay(
+    (base as { inputs?: PromptInputDefinition[] }).inputs ?? [],
+    local.draftInputs,
+    (remote as { inputs?: PromptInputDefinition[] }).inputs ?? [],
+    inputsEq,
+  );
+
+  const arrEq = (a: string[], b: string[]) => JSON.stringify(a) === JSON.stringify(b);
+  const offerOn = threeWay(
+    (base as { offer_on?: string[] }).offer_on ?? [],
+    local.draftOfferOn,
+    (remote as { offer_on?: string[] }).offer_on ?? [],
+    arrEq,
+  );
+
+  const contextStrategy = threeWay(
+    (base as { context_strategy?: PromptContextStrategy | null }).context_strategy ?? null,
+    local.draftContextStrategy,
+    (remote as { context_strategy?: PromptContextStrategy | null }).context_strategy ?? null,
+    metaEq,
+  );
+
+  return {
+    fields: {
+      draftTitle: title.value,
+      draftStatus: status.value,
+      draftEntryType: entryType.value,
+      draftMetadata: metadata.value,
+      draftInputs: inputs.value,
+      draftOfferOn: offerOn.value,
+      draftContextStrategy: contextStrategy.value,
+    },
+    conflict:
+      title.conflict ||
+      status.conflict ||
+      entryType.conflict ||
+      metadata.conflict ||
+      inputs.conflict ||
+      offerOn.conflict ||
+      contextStrategy.conflict,
+  };
+}
+
+// Whether `remote` differs from `base` in the prompt-only structured fields
+// (inputs / offer_on / context_strategy), canonicalized. The rung-2 field merge
+// (#1633) re-seeds the title/status/entry_type/metadata widgets after adopting a
+// remote value, but the prompt-input widgets have no such out-of-band re-seed — so
+// a concurrent change to them is kept on the dialog path rather than silently
+// merged (which the next edit would revert). Prompt panes only; a non-prompt doc
+// carries none of these, so this is always false for them.
+export function promptFieldsDiffer(base: EditableDocument, remote: EditableDocument): boolean {
+  const inputs = (d: EditableDocument) =>
+    JSON.stringify(canonicalizeInputDefinitions((d as { inputs?: PromptInputDefinition[] }).inputs ?? []));
+  const offer = (d: EditableDocument) => JSON.stringify((d as { offer_on?: string[] }).offer_on ?? []);
+  const ctx = (d: EditableDocument) =>
+    JSON.stringify((d as { context_strategy?: PromptContextStrategy | null }).context_strategy ?? null);
+  return inputs(base) !== inputs(remote) || offer(base) !== offer(remote) || ctx(base) !== ctx(remote);
+}
+
 // Map of scene id -> pending (unsaved) title, for panes whose draft title
 // diverges from the saved scene. The manuscript/research trees read this to show
 // live renames before they persist.

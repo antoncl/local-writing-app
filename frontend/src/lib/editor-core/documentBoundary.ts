@@ -136,3 +136,23 @@ export function threeWayMerge(
     return { doc: null, conflict: true };
   }
 }
+
+/**
+ * The editor-state seam of the three-way merge (#1626, ADR-0077 rung 2): merge
+ * `remote` into the live `state.doc` against `base`, and return the minimal
+ * `addToHistory:false` transaction that lands the merge — the same undo-preserving
+ * apply the 2-way reconcile uses (#694), so the author's history maps through it.
+ * The inner `tr` is null when the merge changed nothing to apply (`local` already
+ * held `remote`'s edit); the OUTER return is null on a conflict, so the 409 handler
+ * falls to the "changed on disk" dialog. `threeWayMerge` stays the pure primitive;
+ * this is the one place that couples it to a live `EditorState`.
+ */
+export function threeWayReconcile(
+  state: EditorState,
+  base: ProseMirrorNode,
+  remote: ProseMirrorNode,
+): { tr: Transaction | null } | null {
+  const merged = threeWayMerge(base, state.doc, remote);
+  if (merged.conflict) return null;
+  return { tr: minimalReplaceTransaction(state, merged.doc) };
+}

@@ -7,7 +7,12 @@ import { history, redo, undo, undoDepth } from "@tiptap/pm/history";
 import { EditorState, type Transaction } from "@tiptap/pm/state";
 import { schema } from "@tiptap/pm/schema-basic";
 
-import { minimalReplaceTransaction, stateAtDocumentBoundary, threeWayMerge } from "./documentBoundary";
+import {
+  minimalReplaceTransaction,
+  stateAtDocumentBoundary,
+  threeWayMerge,
+  threeWayReconcile,
+} from "./documentBoundary";
 
 function stateWithHistory(): EditorState {
   return EditorState.create({ schema, plugins: [history()] });
@@ -234,5 +239,31 @@ describe("threeWayMerge (ADR-0077 rung 2, #1621 slice B)", () => {
     const undone = run(state, undo);
     expect(undone.state.doc.child(0).textContent).toBe("one");
     expect(undone.state.doc.child(2).textContent).toBe("three CHANGED");
+  });
+});
+
+describe("threeWayReconcile (ADR-0077 rung 2 / #1626)", () => {
+  it("returns an undo-preserving apply transaction for a disjoint merge", () => {
+    const base = docWithParagraphs("one", "two", "three");
+    let state = EditorState.create({ schema, doc: base, plugins: [history()] });
+    // Local edited paragraph one; remote (on disk) edited a disjoint paragraph three.
+    state = state.apply(state.tr.insertText(" EDITED", paragraphTextEnd(state.doc, 0)));
+    const remote = docWithParagraphs("one", "two", "three CHANGED");
+
+    const merged = threeWayReconcile(state, base, remote);
+    expect(merged).not.toBeNull();
+    state = state.apply(merged!.tr!);
+    expect(state.doc.child(0).textContent).toBe("one EDITED");
+    expect(state.doc.child(2).textContent).toBe("three CHANGED");
+    expect(undoDepth(state)).toBe(1); // the merge apply is addToHistory:false
+  });
+
+  it("returns null on an overlap so the caller falls to the dialog", () => {
+    const base = docWithParagraphs("one", "two", "three");
+    let state = EditorState.create({ schema, doc: base });
+    state = state.apply(state.tr.insertText(" L", paragraphTextEnd(state.doc, 1)));
+    const remote = docWithParagraphs("one", "two R", "three"); // same paragraph → overlap
+
+    expect(threeWayReconcile(state, base, remote)).toBeNull();
   });
 });

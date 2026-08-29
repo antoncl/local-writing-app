@@ -34,6 +34,7 @@
     minimalReplaceTransaction,
     parseHtmlToDoc,
     stateAtDocumentBoundary,
+    threeWayReconcile,
   } from "@/lib/editor-core/documentBoundary";
   import { editorHtmlToSceneMarkdown, sceneMarkdownToHtml } from "@/lib/utils/markdown";
   import { sanitizePastedHtml } from "@/lib/utils/sanitizePastedHtml";
@@ -268,8 +269,6 @@
 
   let slashFilterText = $state("");
 
-
-
   async function loadCharacterCostUsd(sceneId: string): Promise<void> {
     try {
       const result = await api.aiListInvocations({ scene_id: sceneId });
@@ -313,7 +312,6 @@
     if (documentKind !== "manuscript" || !scene?.id || !editor?.view) return;
     setImplicitContext(scene.id, implicitContextIds(editor.view.state));
   }
-
 
   // ---------- Public methods (called via bind:this from parent) ----------
   export function getBody(): string {
@@ -373,6 +371,22 @@
     if (!editor) return;
     const html = await sceneMarkdownToHtml(markdown);
     editor.commands.setContent(html || "<p></p>", true);
+  }
+
+  /** Rung 2 of the reconcile ladder (ADR-0077 / #1626): three-way merge the
+   *  on-disk `remoteBody` into the live editor against `baseBody` (the pane's
+   *  last-loaded body). Disjoint edits land through the same undo-preserving
+   *  reconcile transaction as #694 and the merged Markdown comes back; an overlap
+   *  returns null so the store falls to the "changed on disk" dialog. Editor-owned
+   *  because the schema and the Markdown↔doc pipeline live here. */
+  export async function tryMergeProse(baseBody: string, remoteBody: string): Promise<string | null> {
+    if (!editor) return null;
+    const toDoc = async (md: string) =>
+      parseHtmlToDoc((await sceneMarkdownToHtml(md || "")) || "<p></p>", editor!.state.schema);
+    const merged = threeWayReconcile(editor.state, await toDoc(baseBody), await toDoc(remoteBody));
+    if (!merged) return null;
+    if (merged.tr) editor.view.dispatch(merged.tr);
+    return editorHtmlToSceneMarkdown(editor.getHTML());
   }
 
   export function highlightEmbeddedTodo(todoId: string): void {

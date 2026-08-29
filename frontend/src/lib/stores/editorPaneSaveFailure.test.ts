@@ -25,12 +25,12 @@ function fakeHost(): SaveFailureHost & {
   saveEditorPane: ReturnType<typeof vi.fn>;
   run: ReturnType<typeof vi.fn>;
   tearDown: ReturnType<typeof vi.fn>;
-  adoptReloaded: ReturnType<typeof vi.fn>;
+  patchPane: ReturnType<typeof vi.fn>;
 } {
   return {
-    // A pane with no `scene`, so the rung-1 re-fetch (tryAdoptLostSave) declines
-    // without touching the network — a 409 reaches the dialog. The lost-response
-    // *adopt* is exercised against the real controller in Part B.
+    // A pane with no `scene`, so the reconcile ladder declines without touching the
+    // network — a 409 reaches the dialog. The lost-response adopt and prose merge are
+    // exercised against the real controller in Part B.
     panes: [{ ...createEmptyEditorPane("p"), draftTitle: "A Scene" }],
     setError: vi.fn(),
     run: vi.fn(async (action: () => Promise<void>) => {
@@ -38,7 +38,8 @@ function fakeHost(): SaveFailureHost & {
       return true;
     }),
     saveEditorPane: vi.fn(async () => {}),
-    adoptReloaded: vi.fn(),
+    patchPane: vi.fn(),
+    editorPaneComponents: {},
     markPaneSaveError: vi.fn(),
     scheduleAutosaveRetry: vi.fn(),
     tearDown: vi.fn(),
@@ -70,7 +71,7 @@ describe("handleSaveFailure — classification (#457)", () => {
     expect(host.scheduleAutosaveRetry).not.toHaveBeenCalled();
   });
 
-  it("on a 409, tries the rung-1 adopt first, then offers overwrite when it declines", async () => {
+  it("on a 409, runs the reconcile ladder first, then offers overwrite when it declines", async () => {
     const request = vi.spyOn(confirmService, "request").mockImplementation(() => {});
     const host = fakeHost(); // no on-disk twin → the re-fetch declines → dialog
     handleSaveFailure(host, "p", new HttpError("conflict", 409, null));
@@ -148,6 +149,8 @@ describe("autosaveOnce — through the real controller (#457)", () => {
     // Drop any retry timer a failed attempt armed, so it can't fire into the next test.
     editorPanes.dispose();
     editorPanes.reset();
+    // reset() leaves editorPaneComponents alone; clear the injected merge fakes.
+    editorPanes.editorPaneComponents = {};
   });
 
   it("leaves a retryable (503) failure dirty and unflagged — a retry, not a terminal stop", async () => {
@@ -259,5 +262,78 @@ describe("autosaveOnce — through the real controller (#457)", () => {
     const pane = editorPanes.panes.find((p) => p.id === "pane_1");
     expect(pane?.dirty).toBe(true); // the fresh edit is preserved, not clobbered
     expect(pane?.draftMarkdown).toBe("even newer body");
+  });
+
+  // --- Rung 2: disjoint prose merge (ADR-0077 / #1626) -----------------------
+  // The pane's ProseBodyView owns the three-way merge; here it's a fake handle so
+  // the store wiring (gate → merge → adopt-revision → re-save) is tested without a
+  // TipTap mount. The merge primitive itself is covered in documentBoundary.test.ts.
+  function injectMergeHandle(result: string | null): ReturnType<typeof vi.fn> {
+    const tryMergeProse = vi.fn(async () => result);
+    editorPanes.editorPaneComponents = {
+      pane_1: { tryMergeProse, reloadScene: vi.fn(), highlightEmbeddedTodo: vi.fn() },
+    };
+    return tryMergeProse;
+  }
+
+  it("merges a disjoint prose 409 and re-saves at the fresh revision — no dialog (rung 2)", async () => {
+    seedDirtyLorePane(); // base body "body"; drafts: title "Edited Name", body "edited body"
+    stubSuccessRefreshes();
+    // On disk the BODY changed and nothing else — disjoint from the local edit.
+    vi.spyOn(api, "getLoreEntry").mockResolvedValue({ ...LORE, body: "server body", revision: "r2" });
+    const merge = injectMergeHandle("merged body");
+    const save = vi
+      .spyOn(api, "saveLoreEntry")
+      .mockRejectedValueOnce(new HttpError("conflict", 409, null)) // the initial autosave
+      .mockResolvedValueOnce({ ...LORE, title: "Edited Name", body: "merged body", revision: "r3" }); // rung-2 re-save
+    const request = vi.spyOn(confirmService, "request").mockImplementation(() => {});
+
+    await autosaveOnce(editorPanes, "pane_1");
+    await vi.waitFor(() => expect(editorPanes.panes.find((p) => p.id === "pane_1")?.scene?.revision).toBe("r3"));
+
+    const pane = editorPanes.panes.find((p) => p.id === "pane_1");
+    expect(merge).toHaveBeenCalledWith("body", "server body"); // base body, on-disk body
+    expect(pane?.draftMarkdown).toBe("merged body"); // the merged body was adopted…
+    expect(pane?.dirty).toBe(false); // …and saved, so the pane is caught up
+    expect(save).toHaveBeenCalledTimes(2); // initial 409 + the rung-2 re-save
+    expect(request).not.toHaveBeenCalled(); // never asked
+  });
+
+  it("declines the merge and shows the dialog when the on-disk change also touched metadata (slice C)", async () => {
+    seedDirtyLorePane();
+    vi.spyOn(api, "saveLoreEntry").mockRejectedValue(new HttpError("conflict", 409, null));
+    // Body AND metadata changed on disk — beyond a prose merge; a structured-field
+    // merge is slice C, so the body-only gate must decline before touching the editor.
+    vi.spyOn(api, "getLoreEntry").mockResolvedValue({ ...LORE, body: "server body", metadata: { era: "future" }, revision: "r2" });
+    const merge = injectMergeHandle("merged body");
+    let request!: Parameters<typeof confirmService.request>[0];
+    vi.spyOn(confirmService, "request").mockImplementation((r) => {
+      request = r;
+    });
+
+    await autosaveOnce(editorPanes, "pane_1");
+    await vi.waitFor(() => expect(request).toBeDefined());
+
+    expect(merge).not.toHaveBeenCalled(); // the gate declined before merging
+    expect(request.title).toBe("Changed on disk");
+    expect(editorPanes.panes.find((p) => p.id === "pane_1")?.dirty).toBe(true); // still unsaved
+  });
+
+  it("falls to the dialog when local and remote edited the same region (merge returns null)", async () => {
+    seedDirtyLorePane();
+    vi.spyOn(api, "saveLoreEntry").mockRejectedValue(new HttpError("conflict", 409, null));
+    vi.spyOn(api, "getLoreEntry").mockResolvedValue({ ...LORE, body: "server body", revision: "r2" });
+    const merge = injectMergeHandle(null); // the prose merge reports an overlap
+    let request!: Parameters<typeof confirmService.request>[0];
+    vi.spyOn(confirmService, "request").mockImplementation((r) => {
+      request = r;
+    });
+
+    await autosaveOnce(editorPanes, "pane_1");
+    await vi.waitFor(() => expect(request).toBeDefined());
+
+    expect(merge).toHaveBeenCalledOnce(); // the merge was attempted (body-only gate passed)…
+    expect(request.title).toBe("Changed on disk"); // …but declined → the dialog
+    expect(editorPanes.panes.find((p) => p.id === "pane_1")?.dirty).toBe(true);
   });
 });

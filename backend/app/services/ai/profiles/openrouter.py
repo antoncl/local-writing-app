@@ -94,29 +94,15 @@ class OpenRouterProfile(OpenAICompatibleProfile):
     # OpenRouter streams get a longer timeout and plain content handling.
     _stream_timeout = 300.0
 
-    def _stream_delta_events(
-        self, delta: Any, splitter: ThinkTagSplitter
+    def _content_events(
+        self, text: str, splitter: ThinkTagSplitter
     ) -> Iterator[StreamDelta | StreamThinking]:
-        # Surface a structured `reasoning` field as thinking. Reasoning routes
-        # (deepseek-v4-pro and others) stream their chain-of-thought here, and
-        # some spend the whole token budget reasoning before any content — so
-        # dropping it turned a reasoning-only or truncated turn into a blank
-        # "Model returned empty output" (#1588). Content stays PLAIN — no inline
-        # <think>-tag splitting — which is the one property the original
-        # content-only override protected (a route that emits literal <think>
-        # markers in content must not have them re-parsed). The splitter stays
-        # unused; that deliberate divergence from the base handler is preserved.
-        if delta is None:
-            return
-        reasoning = (
-            getattr(delta, "reasoning", None)
-            or getattr(delta, "reasoning_content", None)
-        )
-        if reasoning:
-            yield StreamThinking(text=reasoning)
-        text = getattr(delta, "content", None)
-        if text:
-            yield StreamDelta(text=text)
+        # Content stays PLAIN — no inline <think>-tag splitting. A route that
+        # emits literal <think> markers in content must not have them re-parsed;
+        # the splitter is intentionally unused. Reasoning is surfaced as thinking
+        # by the inherited base handler (#1588), so a reasoning-only or truncated
+        # turn is no longer a blank "Model returned empty output".
+        yield StreamDelta(text=text)
 
     async def list_models(self, *, force_refresh: bool = False) -> list[ModelDescriptor]:
         if not force_refresh and self._cache is not None:

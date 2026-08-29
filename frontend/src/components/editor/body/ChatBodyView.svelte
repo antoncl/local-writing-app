@@ -595,17 +595,24 @@
     el.scrollTop = el.scrollHeight;
   }
 
+  // Keep a pinned reader glued to the tail through ANY content growth — each
+  // streamed token, and the async KaTeX/markdown render that grows a freshly
+  // opened chat AFTER `tick()` has already run. One observer over all growth
+  // (vs. a per-chunk scroll call) also covers the on-open settle, and it never
+  // fights a reader who scrolled up — their scroll cleared pinnedToBottom. (#1611)
+  $effect(() => {
+    const el = chatScrollEl;
+    if (!el) return;
+    const obs = new MutationObserver(() => {
+      if (pinnedToBottom) el.scrollTop = el.scrollHeight;
+    });
+    obs.observe(el, { childList: true, subtree: true, characterData: true });
+    return () => obs.disconnect();
+  });
+
   async function streamAssistantReply(onError: () => void): Promise<void> {
     chatHistory = [...chatHistory, { role: "assistant", content: "" }];
     const idx = chatHistory.length - 1;
-    let scrollPending = false;
-    const scheduleScroll = async () => {
-      if (scrollPending) return;
-      scrollPending = true;
-      await tick();
-      scrollPending = false;
-      if (pinnedToBottom && chatScrollEl) chatScrollEl.scrollTop = chatScrollEl.scrollHeight;
-    };
     let errored = false;
     // ADR-0076 S3: one abort handle per stream, so Stop can cancel the fetch
     // mid-flight. Cleared in `finally` regardless of how the stream ends.
@@ -623,11 +630,9 @@
         if (ev.type === "delta") {
           chatHistory[idx].content += ev.text;
           chatHistory = chatHistory;
-          scheduleScroll();
         } else if (ev.type === "thinking") {
           chatHistory[idx].thinking = (chatHistory[idx].thinking ?? "") + ev.text;
           chatHistory = chatHistory;
-          scheduleScroll();
         } else if (ev.type === "done") {
           chatHistory[idx].truncated = ev.truncated;
           if (Array.isArray(ev.journal_added) && ev.journal_added.length > 0) {
@@ -771,8 +776,6 @@
       rewindUser();
     } finally {
       chatRunning = false;
-      await tick();
-      if (pinnedToBottom && chatScrollEl) chatScrollEl.scrollTop = chatScrollEl.scrollHeight;
     }
   }
 
@@ -1326,11 +1329,12 @@
      its styles moved to chat/ChatComposerBar.svelte (#1086). */
 
   /* ---- 4 · messages ---- */
-  /* The transcript (.cbv-messages) + its message atoms moved to
-     chat/ChatTranscript.svelte (#99). The flex-child rule below keeps the
-     composer + strips + input + action row at their natural height so only
-     the transcript flexes; ChatTranscript's own .cbv-messages carries the
-     flex: 1 1 0 that makes it scroll. */
+  /* The transcript (.cbv-transcript > .cbv-messages) + its message atoms moved
+     to chat/ChatTranscript.svelte (#99; wrapper added #1611). The flex-child
+     rule below keeps the composer + strips + input + action row at their
+     natural height so only the transcript flexes; ChatTranscript's own
+     .cbv-transcript now carries the flex: 1 1 0, with the inner .cbv-messages
+     (min-height: 0) scrolling and hosting the floating jump-to-latest button. */
   /* The inputs strip carries its own flex: 0 0 auto in chat/ChatInputsStrip.svelte
      (#99). The journal-scope strip retired into the Context door (ADR-0076 S2). */
   /* ChatComposerBar sets flex: 0 0 auto on its own root (.cbv-composer-strip). */

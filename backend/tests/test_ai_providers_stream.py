@@ -392,6 +392,17 @@ class OpenAICompatibleStreamTests(unittest.TestCase):
             self._run_chat(OpenRouterProfile(api_key="sk-or"), response)
         self.assertIn("Rate limited", str(ctx.exception))
 
+    def test_non_stream_chat_surfaces_top_level_error(self):
+        # OpenRouter's non-stream failures arrive as a 200 whose body IS the
+        # error object (no choices). The response-level guard must surface that
+        # message rather than falling through to the generic "no choices" text.
+        response = SimpleNamespace(
+            choices=[], error={"code": 402, "message": "Insufficient credits"}
+        )
+        with self.assertRaises(ProviderError) as ctx:
+            self._run_chat(OpenRouterProfile(api_key="sk-or"), response)
+        self.assertIn("Insufficient credits", str(ctx.exception))
+
     def test_non_stream_chat_guards_empty_choices(self):
         # A 200 with no choices and no error must be a clean ProviderError, not
         # an IndexError on `response.choices[0]`.

@@ -866,6 +866,42 @@
   />
 {/if}
 
+<!-- ADR-0076 S6: the chat body renders the title itself (one row with the
+     setup chips) — this snippet is ONLY the title-input variant chain, no
+     `.title-label` wrapper and no eyebrow text (each input already carries
+     its own `aria-label`). State/persistence stay entirely in NodeEditor;
+     this just relocates where the markup renders. -->
+{#snippet chatTitleField()}
+  {#if scrubbed}
+    <!-- Effective title as of the scrub point — read-only; the draft
+         title stays untouched underneath (stop 0 restores it). -->
+    <input class="title-input" class:mutated={titleMutated} readonly aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (effective, read-only)`} value={effectiveTitle} />
+  {:else if snapshotParked}
+    <!-- Parked: the title flips with the body and the rail, and is
+         read-only like them. Leaving it editable let an author type
+         into a document they were not looking at. -->
+    <input
+      class="title-input"
+      class:flipped={snapshots.titleDiffers}
+      class:flip-was={snapshots.titleDiffers && snapshots.view === "was"}
+      readonly
+      aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (snapshot, read-only)`}
+      value={snapshots.titleForView}
+    />
+  {:else if reviewing}
+    <!-- Frozen for AI review (#634): read-only like the parked/scrubbed
+         title, so the author can't edit an entry mid-review — the review
+         is a transaction that writes once, not a co-editing surface. -->
+    <input class="title-input" readonly aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (under review, read-only)`} value={title} />
+  {:else if inheritedReadOnly}
+    <!-- Inherited prompt (ADR-0049 Library or an ancestor project, #676):
+         read-only in place. The title cannot be renamed here; clone it
+         to edit. -->
+    <input class="title-input" readonly aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (inherited, read-only)`} value={title} />
+  {:else}
+    <input class="title-input" aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()}`} placeholder={documentNameLabel} bind:value={title} oninput={handleTitleInput} />
+  {/if}
+{/snippet}
 
 <div
   class="editor-panel"
@@ -875,83 +911,90 @@
   class:rail-right={scene && !railIsPane && railSide === "right"}
   class:rail-bottom={scene && !railIsPane && railSide === "bottom"}
 >
-  <section class="editor-header">
-    {#if scene}
-      <div class="scene-title-row">
-        <label class="title-label">
-          {documentNameLabel}{#if titleMutated}<span class="title-mutated-marker" title="Changed by here">⤳</span>{/if}
-          {#if scrubbed}
-            <!-- Effective title as of the scrub point — read-only; the draft
-                 title stays untouched underneath (stop 0 restores it). -->
-            <input class="title-input" class:mutated={titleMutated} readonly aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (effective, read-only)`} value={effectiveTitle} />
-          {:else if snapshotParked}
-            <!-- Parked: the title flips with the body and the rail, and is
-                 read-only like them. Leaving it editable let an author type
-                 into a document they were not looking at. -->
-            <input
-              class="title-input"
-              class:flipped={snapshots.titleDiffers}
-              class:flip-was={snapshots.titleDiffers && snapshots.view === "was"}
-              readonly
-              aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (snapshot, read-only)`}
-              value={snapshots.titleForView}
-            />
-          {:else if reviewing}
-            <!-- Frozen for AI review (#634): read-only like the parked/scrubbed
-                 title, so the author can't edit an entry mid-review — the review
-                 is a transaction that writes once, not a co-editing surface. -->
-            <input class="title-input" readonly aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (under review, read-only)`} value={title} />
-          {:else if inheritedReadOnly}
-            <!-- Inherited prompt (ADR-0049 Library or an ancestor project, #676):
-                 read-only in place. The title cannot be renamed here; clone it
-                 to edit. -->
-            <input class="title-input" readonly aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (inherited, read-only)`} value={title} />
-          {:else}
-            <input class="title-input" aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()}`} placeholder={documentNameLabel} bind:value={title} oninput={handleTitleInput} />
+  {#if scene && bodyShape === "chat"}
+    <!-- ADR-0076 S6: the chat header (title + setup) is one row inside the body;
+         the shell contributes no header. LayerAuthoringBar no-ops for chat and
+         EditorCostHint is empty for a typical chat (guarded on documentKind
+         "manuscript" + todo/rollup). -->
+  {:else}
+    <section class="editor-header">
+      {#if scene}
+        <div class="scene-title-row">
+          <label class="title-label">
+            {documentNameLabel}{#if titleMutated}<span class="title-mutated-marker" title="Changed by here">⤳</span>{/if}
+            {#if scrubbed}
+              <!-- Effective title as of the scrub point — read-only; the draft
+                   title stays untouched underneath (stop 0 restores it). -->
+              <input class="title-input" class:mutated={titleMutated} readonly aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (effective, read-only)`} value={effectiveTitle} />
+            {:else if snapshotParked}
+              <!-- Parked: the title flips with the body and the rail, and is
+                   read-only like them. Leaving it editable let an author type
+                   into a document they were not looking at. -->
+              <input
+                class="title-input"
+                class:flipped={snapshots.titleDiffers}
+                class:flip-was={snapshots.titleDiffers && snapshots.view === "was"}
+                readonly
+                aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (snapshot, read-only)`}
+                value={snapshots.titleForView}
+              />
+            {:else if reviewing}
+              <!-- Frozen for AI review (#634): read-only like the parked/scrubbed
+                   title, so the author can't edit an entry mid-review — the review
+                   is a transaction that writes once, not a co-editing surface. -->
+              <input class="title-input" readonly aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (under review, read-only)`} value={title} />
+            {:else if inheritedReadOnly}
+              <!-- Inherited prompt (ADR-0049 Library or an ancestor project, #676):
+                   read-only in place. The title cannot be renamed here; clone it
+                   to edit. -->
+              <input class="title-input" readonly aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()} (inherited, read-only)`} value={title} />
+            {:else}
+              <input class="title-input" aria-label={`${documentLabel} ${documentNameLabel.toLowerCase()}`} placeholder={documentNameLabel} bind:value={title} oninput={handleTitleInput} />
+            {/if}
+          </label>
+          <!-- Interiority reveal (ADR-0070 S2): a shell affordance, present only
+               while the scene holds roleplay. Adaptive-stateful — quiet eye when
+               idle, gaining the name "Interiority" + a tint while revealing. The
+               shortcut lives in the tooltip, never as a compound on the button. -->
+          {#if hasInteriorityBeats}
+            <button
+              type="button"
+              class="interiority-toggle"
+              class:active={interiorityRevealed}
+              aria-pressed={interiorityRevealed}
+              aria-label="Interiority — reveal every beat"
+              title="Interiority — reveal every beat  (Alt+I)"
+              onclick={() => proseBodyView?.toggleInteriority()}
+            >
+              <span class="tg-glyph" aria-hidden="true">{@html INTERIORITY_EYE_SVG}</span>
+              {#if interiorityRevealed}<span class="tg-name">Interiority</span>{/if}
+            </button>
           {/if}
-        </label>
-        <!-- Interiority reveal (ADR-0070 S2): a shell affordance, present only
-             while the scene holds roleplay. Adaptive-stateful — quiet eye when
-             idle, gaining the name "Interiority" + a tint while revealing. The
-             shortcut lives in the tooltip, never as a compound on the button. -->
-        {#if hasInteriorityBeats}
-          <button
-            type="button"
-            class="interiority-toggle"
-            class:active={interiorityRevealed}
-            aria-pressed={interiorityRevealed}
-            aria-label="Interiority — reveal every beat"
-            title="Interiority — reveal every beat  (Alt+I)"
-            onclick={() => proseBodyView?.toggleInteriority()}
-          >
-            <span class="tg-glyph" aria-hidden="true">{@html INTERIORITY_EYE_SVG}</span>
-            {#if interiorityRevealed}<span class="tg-name">Interiority</span>{/if}
-          </button>
-        {/if}
-      </div>
-      <!-- Layer override authoring (#314 / ADR-0042): choose which level this
-           inherited entry's edits write to. Renders only for an inherited lore
-           entry; no-ops otherwise. -->
-      <LayerAuthoringBar
-        {scene}
-        {documentKind}
-        {authoringLayerId}
-        {recentlySaved}
-        {onAuthoringLayerChange}
-      />
-      <EditorCostHint
-        {todoStatusHint}
-        {documentKind}
-        {liveWordCount}
-        characterCosts={characterCostRowsView}
-        {lastInvocationCostUsd}
-        {sceneSessionCostUsd}
-        rollupCost={rollupCostKind}
-      />
-    {:else}
-      <h2>Select a scene</h2>
-    {/if}
-  </section>
+        </div>
+        <!-- Layer override authoring (#314 / ADR-0042): choose which level this
+             inherited entry's edits write to. Renders only for an inherited lore
+             entry; no-ops otherwise. -->
+        <LayerAuthoringBar
+          {scene}
+          {documentKind}
+          {authoringLayerId}
+          {recentlySaved}
+          {onAuthoringLayerChange}
+        />
+        <EditorCostHint
+          {todoStatusHint}
+          {documentKind}
+          {liveWordCount}
+          characterCosts={characterCostRowsView}
+          {lastInvocationCostUsd}
+          {sceneSessionCostUsd}
+          rollupCost={rollupCostKind}
+        />
+      {:else}
+        <h2>Select a scene</h2>
+      {/if}
+    </section>
+  {/if}
 
   {#if bodyShape === "none"}
     <!-- `!detailsDetached`: if the shape flips to none while Details is detached,
@@ -1057,6 +1100,7 @@
       {researchStructure}
       {defaultAssistantId}
       {implicitContextMatcher}
+      titleField={chatTitleField}
       onBodyChange={emitChange}
       onFocus={() => onFocus?.()}
     />

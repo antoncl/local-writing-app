@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<!--
+  ADR-0076 S6 mockup — "The one-row header".
+  NON-NORMATIVE — decision 10 governs; this shows the proposed chat header:
+  the serif title and the setup chips (prompt · assistant · Context) on one
+  row, the "TITLE" caps-eyebrow dropped, the LOCKED chips condensed to a quiet
+  text-and-lock form (chip chrome shed, doorway click kept), and the setup
+  wrapping UNDER the title on a narrow pane. Shown against today's three
+  stacked rows for contrast. Tokens mirrored from styles.css.
+-->
+<title>One-Row Header</title>
+<style>
+  :root {
+    --sans: "Segoe UI", system-ui, sans-serif;
+    --serif: Georgia, "Times New Roman", serif;
+    --fs-xs: 11px; --fs-sm: 12px; --fs-md: 13px; --fs-lg: 15px; --fs-xl: 16px; --fs-2xl: 20px;
+    --r-sm: 4px; --r-md: 6px; --r-lg: 10px; --r-pill: 999px;
+    --surface: #ffffff; --panel: #edf3f1; --inset: #f1f5f3;
+    --border: #cbd6d2; --divider: #dde5e2;
+    --text: #242424; --text-2: #4d5753; --text-3: #74817b;
+    --accent: #2f6f5e; --accent-strong: #234e43;
+    --accent-soft: #edf6f2; --accent-soft2: #dff0ea;
+    --brown: #7a5a43; --brown-soft: #f3ece6; --brown-border: #d9c7b8;
+    --graphite: #6b7280; --graphite-soft: #eef0f2; --graphite-border: #d2d6db;
+    --danger: #b4442f;
+    --elev-2: 0 6px 18px rgba(31,45,40,.18);
+    --canvas: #f6f8f7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --surface: #1f2522; --panel: #20272a; --inset: #242a28;
+      --border: #3a4541; --divider: #313b37;
+      --text: #e8edeb; --text-2: #a9b6b0; --text-3: #7e8a84;
+      --accent: #6cc4a6; --accent-strong: #4ea88c;
+      --accent-soft: #1f3a32; --accent-soft2: #2a4a3f;
+      --brown: #c9a488; --brown-soft: #2f2620; --brown-border: #4a3b30;
+      --graphite: #8b93a0; --graphite-soft: #262b2e; --graphite-border: #3c4247;
+      --danger: #e08a76;
+      --elev-2: 0 6px 18px rgba(0,0,0,.45);
+      --canvas: #171c1a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --surface: #1f2522; --panel: #20272a; --inset: #242a28;
+    --border: #3a4541; --divider: #313b37;
+    --text: #e8edeb; --text-2: #a9b6b0; --text-3: #7e8a84;
+    --accent: #6cc4a6; --accent-strong: #4ea88c;
+    --accent-soft: #1f3a32; --accent-soft2: #2a4a3f;
+    --brown: #c9a488; --brown-soft: #2f2620; --brown-border: #4a3b30;
+    --graphite: #8b93a0; --graphite-soft: #262b2e; --graphite-border: #3c4247;
+    --danger: #e08a76;
+    --elev-2: 0 6px 18px rgba(0,0,0,.45);
+    --canvas: #171c1a;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--canvas); color: var(--text);
+    font-family: var(--sans); font-size: var(--fs-md);
+    -webkit-font-smoothing: antialiased; line-height: 1.5;
+    padding: 32px 24px 80px;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  h1 { font-family: var(--serif); font-size: 26px; font-weight: 700; margin: 0 0 4px; }
+  .lede { color: var(--text-2); margin: 0 0 28px; max-width: 62ch; }
+  .theme-btn {
+    position: fixed; top: 16px; right: 16px; z-index: 10;
+    font: inherit; font-size: var(--fs-sm); color: var(--text-2);
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--r-pill); padding: 6px 14px; cursor: pointer;
+  }
+
+  .step-label {
+    font-size: var(--fs-xs); font-weight: 600; letter-spacing: .07em;
+    text-transform: uppercase; color: var(--text-3);
+    margin: 30px 0 10px;
+  }
+  .note { color: var(--text-2); font-size: var(--fs-sm); margin: 8px 2px 0; max-width: 64ch; }
+  .note b { color: var(--text); font-weight: 600; }
+
+  /* ── the editor frame (a slice of the chat pane) ── */
+  .pane {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--r-lg); box-shadow: var(--elev-2);
+    padding: 16px 18px; overflow: hidden;
+  }
+  .pane.narrow { max-width: 360px; }
+  .pane + .pane { margin-top: 14px; }
+  .transcript-hint {
+    margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--divider);
+    color: var(--text-3); font-size: var(--fs-sm); font-style: italic;
+  }
+
+  /* ── the serif document title ── */
+  .title {
+    font-family: var(--serif); font-size: var(--fs-2xl); font-weight: 700;
+    color: var(--text); border: 0; background: none; padding: 2px 0;
+    border-bottom: 1px solid var(--divider); min-width: 0;
+  }
+  .eyebrow {
+    font-size: var(--fs-xs); font-weight: 700; letter-spacing: .04em;
+    text-transform: uppercase; color: var(--text-3); display: block; margin-bottom: 3px;
+  }
+
+  /* ── chips ── */
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    border-radius: var(--r-pill); border: 1px solid var(--border);
+    background: var(--surface); color: var(--text);
+    font-size: var(--fs-sm); font-weight: 600; padding: 4px 10px;
+    cursor: pointer; white-space: nowrap;
+  }
+  .chip.prompt { background: var(--brown-soft); border-color: var(--brown-border); color: var(--brown); }
+  .chip.assistant { background: var(--graphite-soft); border-color: var(--graphite-border); color: var(--graphite); }
+  .chip svg { width: 14px; height: 14px; }
+  .chip .ico { opacity: .85; }
+  .chip .caret { opacity: .5; }
+
+  /* the Context door — a worded sm button, pushed right */
+  .context {
+    display: inline-flex; align-items: center; gap: 5px;
+    margin-left: auto; font-size: var(--fs-xs); font-weight: 600;
+    color: var(--text-2); background: transparent;
+    border: 1px solid var(--border); border-radius: var(--r-md);
+    padding: 3px 9px; cursor: pointer;
+  }
+  .context svg { width: 13px; height: 13px; opacity: .8; }
+
+  /* LOCKED chip — the quiet form: no pill chrome, plain text + lock. Still a
+     click target (opens the doorway) — a soft hover, no border/fill at rest. */
+  .chip.locked {
+    background: none; border-color: transparent; padding: 4px 4px;
+    cursor: pointer; color: var(--text-2);
+  }
+  .chip.locked.prompt { color: var(--brown); }
+  .chip.locked.assistant { color: var(--graphite); }
+  .chip.locked .lock { opacity: .55; }
+  .chip.locked:hover { background: var(--inset); border-radius: var(--r-md); }
+
+  /* ── TODAY: three stacked rows ── */
+  .rows-3 > * + * { margin-top: 10px; }
+  .chips-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding-bottom: 11px; border-bottom: 1px solid var(--divider); }
+
+  /* ── PROPOSED: one row ── */
+  .header-1 {
+    display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap;
+    padding-bottom: 12px; border-bottom: 1px solid var(--divider);
+  }
+  .header-1 .title { flex: 0 1 auto; }
+  .header-1 .setup {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    flex: 1 1 auto; min-width: 0;
+  }
+
+  .caption { font-size: var(--fs-xs); color: var(--text-3); margin: 0 0 6px 2px; font-weight: 600; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 720px) { .two { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<button class="theme-btn" onclick="document.documentElement.setAttribute('data-theme', document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark')">◐ theme</button>
+<div class="wrap">
+  <h1>The one-row header</h1>
+  <p class="lede">ADR-0076 S6, decision 10. The chat header stops spending three stacked
+  rows on setup that freezes after the first message, and pays a single row instead.
+  Non-normative — a layout preview. Toggle the theme, top-right.</p>
+
+  <!-- ===================== BEFORE ===================== -->
+  <div class="step-label">Today — three stacked rows</div>
+  <div class="pane rows-3">
+    <div><span class="eyebrow">Title</span>
+      <input class="title" value="Elias&#39;s arc" style="width:100%"></div>
+    <div class="chips-row">
+      <span class="chip prompt">✦ Revise / Tone <svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></span>
+      <span class="chip assistant">◈ Muse <svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></span>
+      <span class="context">Context <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></span>
+    </div>
+  </div>
+  <p class="note">Eyebrow, then title, then chips — three rows, all inert once the
+  chat is running.</p>
+
+  <!-- ===================== AFTER — fresh ===================== -->
+  <div class="step-label">Proposed — one row (fresh, editable)</div>
+  <div class="pane">
+    <div class="header-1">
+      <input class="title" value="Elias&#39;s arc">
+      <div class="setup">
+        <span class="chip prompt"><span class="ico">✦</span> Revise / Tone
+          <svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></span>
+        <span class="chip assistant"><span class="ico">◈</span> Muse
+          <svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></span>
+        <span class="context">Context <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></span>
+      </div>
+    </div>
+    <div class="transcript-hint">the conversation…</div>
+  </div>
+  <p class="note">No eyebrow — the field is self-evident. Title and the three setup
+  controls share one row; the pickers still open (caret), Context still drills in.</p>
+
+  <!-- ===================== AFTER — locked ===================== -->
+  <div class="step-label">Proposed — one row (locked, after the first message)</div>
+  <div class="pane">
+    <div class="header-1">
+      <span class="title">Elias&#39;s arc</span>
+      <div class="setup">
+        <span class="chip prompt locked" title="Locked — click for a fresh chat with this setup">
+          <span class="ico">✦</span> Revise / Tone
+          <svg class="lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span>
+        <span class="chip assistant locked" title="Locked — click for a fresh chat with this setup">
+          <span class="ico">◈</span> Muse
+          <svg class="lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span>
+        <span class="context">Context <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></span>
+      </div>
+    </div>
+    <div class="transcript-hint">…14 messages…</div>
+  </div>
+  <p class="note"><b>The taste call:</b> once locked, the chips shed the pill chrome
+  (no border, no fill) and read as quiet text with a trailing lock — lighter than the
+  fresh pills, so a running conversation's header recedes. They're still click targets
+  (a soft hover), opening the "New chat with this setup" doorway. Context keeps its
+  button — it's always live. Say if you want the locked chips <i>quieter</i> (drop the
+  colour too, go grey) or <i>louder</i> (keep a faint outline).</p>
+
+  <!-- ===================== AFTER — narrow ===================== -->
+  <div class="step-label">Proposed — narrow pane (setup wraps under the title)</div>
+  <div class="two">
+    <div>
+      <p class="caption">FRESH</p>
+      <div class="pane narrow">
+        <div class="header-1">
+          <input class="title" value="Elias&#39;s arc" style="flex-basis:100%">
+          <div class="setup">
+            <span class="chip prompt"><span class="ico">✦</span> Revise / Tone
+              <svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></span>
+            <span class="chip assistant"><span class="ico">◈</span> Muse
+              <svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></span>
+            <span class="context">Context <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></span>
+          </div>
+        </div>
+        <div class="transcript-hint">the conversation…</div>
+      </div>
+    </div>
+    <div>
+      <p class="caption">LOCKED</p>
+      <div class="pane narrow">
+        <div class="header-1">
+          <span class="title" style="flex-basis:100%">Elias&#39;s arc</span>
+          <div class="setup">
+            <span class="chip prompt locked"><span class="ico">✦</span> Revise / Tone
+              <svg class="lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span>
+            <span class="chip assistant locked"><span class="ico">◈</span> Muse
+              <svg class="lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span>
+            <span class="context">Context <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></span>
+          </div>
+        </div>
+        <div class="transcript-hint">…14 messages…</div>
+      </div>
+    </div>
+  </div>
+  <p class="note">The title takes the full width and the setup wraps onto the line
+  below rather than the title truncating. (The <span style="font-family:var(--serif)">✦</span>
+  and <span style="font-family:var(--serif)">◈</span> stand in for the S5 Tabler
+  role marks <code>ti-sparkles</code> / <code>ti-robot</code>; the lock is
+  <code>ti-lock</code>.)</p>
+</div>
+</body>
+</html>

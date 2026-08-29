@@ -235,4 +235,29 @@ describe("autosaveOnce — through the real controller (#457)", () => {
     expect(request.title).toBe("Changed on disk");
     expect(editorPanes.panes.find((p) => p.id === "pane_1")?.dirty).toBe(true); // still unsaved
   });
+
+  it("declines the adopt when the pane is edited during the re-fetch — no dirty-clobber (race)", async () => {
+    seedDirtyLorePane(); // draftMarkdown "edited body"
+    vi.spyOn(api, "saveLoreEntry").mockRejectedValue(new HttpError("conflict", 409, null));
+    // The re-fetch resolves to the pane's ORIGINAL last-sent — but a keystroke
+    // lands while it is in flight, so the CURRENT draft has moved on. Adopting
+    // against the pre-fetch snapshot would clear dirty on that unsaved edit.
+    vi.spyOn(api, "getLoreEntry").mockImplementation(async () => {
+      editorPanes.panes = editorPanes.panes.map((p) =>
+        p.id === "pane_1" ? { ...p, draftMarkdown: "even newer body" } : p,
+      );
+      return { ...LORE, title: "Edited Name", body: "edited body", revision: "r2" };
+    });
+    let request!: Parameters<typeof confirmService.request>[0];
+    vi.spyOn(confirmService, "request").mockImplementation((r) => {
+      request = r;
+    });
+
+    await autosaveOnce(editorPanes, "pane_1");
+    await vi.waitFor(() => expect(request).toBeDefined()); // declined → dialog
+
+    const pane = editorPanes.panes.find((p) => p.id === "pane_1");
+    expect(pane?.dirty).toBe(true); // the fresh edit is preserved, not clobbered
+    expect(pane?.draftMarkdown).toBe("even newer body");
+  });
 });

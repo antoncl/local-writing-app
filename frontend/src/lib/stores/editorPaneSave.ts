@@ -211,12 +211,19 @@ export async function tryAdoptLostSave(host: SaveFailureHost, id: string): Promi
   const pane = host.panes.find((candidate) => candidate.id === id);
   if (!pane?.scene) return false;
   const kind = pane.document?.type ?? "manuscript";
+  const sceneId = pane.scene.id;
   let remote: ReloadableDocument;
   try {
-    remote = await (RELOAD_GETTERS[kind] ?? api.getScene)(pane.scene.id);
+    remote = await (RELOAD_GETTERS[kind] ?? api.getScene)(sceneId);
   } catch {
     return false; // can't re-fetch → fall through to the dialog
   }
+  // Re-read the pane AFTER the await: an edit during the re-fetch reassigns
+  // `panes` (new objects), and adopting against the pre-fetch snapshot would
+  // clear dirty on that fresh, unsaved work. Compare the CURRENT drafts; if the
+  // pane moved (typed, switched, closed), decline and let the dialog handle it.
+  const current = host.panes.find((candidate) => candidate.id === id);
+  if (!current?.scene || current.scene.id !== sceneId) return false;
   // "last-sent == on disk" is exactly: the drafts are not dirty against the
   // re-fetch. Reusing isEditorPaneDirty (autosave's single dirtiness definition)
   // compares every kind's fields as a save does — body, status, metadata, the
@@ -224,14 +231,14 @@ export async function tryAdoptLostSave(host: SaveFailureHost, id: string): Promi
   // caught and only an exact match adopts.
   const stillDiffers = isEditorPaneDirty(
     remote,
-    pane.draftTitle,
-    pane.draftMarkdown,
-    pane.draftStatus,
-    pane.draftEntryType,
-    pane.draftMetadata,
-    pane.draftInputs,
-    pane.draftOfferOn,
-    pane.draftContextStrategy,
+    current.draftTitle,
+    current.draftMarkdown,
+    current.draftStatus,
+    current.draftEntryType,
+    current.draftMetadata,
+    current.draftInputs,
+    current.draftOfferOn,
+    current.draftContextStrategy,
   );
   if (stillDiffers) return false;
   host.adoptReloaded(id, remote);

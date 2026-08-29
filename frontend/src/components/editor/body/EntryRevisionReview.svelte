@@ -70,8 +70,8 @@
   // to read whole; a structured-only patch hides it (the rail already shows both
   // sides of each field, and the rail follows the view on its own).
   const VIEWS = [
-    { id: "now", label: "Current", hint: "the entry as it is now", key: "A" },
-    { id: "was", label: "Proposed", hint: "the AI's version", key: "S" },
+    { id: "now", label: "Current", hint: "the entry as it is now", key: "A", tone: "warm" },
+    { id: "was", label: "Proposed", hint: "the AI's version", key: "S", tone: "cool" },
     { id: "both", label: "Both", hint: "both versions, adjacent", key: "B" },
   ] as const;
   const hasProse = $derived(proposedBody !== null || fields.length > 0);

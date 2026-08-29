@@ -10,7 +10,7 @@
  * rides on `reviewBodyProposal` has real coverage.
  */
 import { describe, expect, it } from "vitest";
-import { reviewBodyProposal } from "./entryRevision";
+import { reviewBodyProposal, normalizeReviewWhitespace } from "./entryRevision";
 import { renderDiffRuns } from "./diffRuns";
 import type { DiffRegion } from "./diffRuns";
 import type { DiffRun, DiffView } from "@/lib/types";
@@ -83,5 +83,40 @@ describe("reviewBodyProposal — the proposal feeds the snapshot flip unchanged"
     const { runs, regions } = reviewBodyProposal(CURRENT, CURRENT);
     expect(regions).toEqual([]);
     expect(runs).toEqual([{ kind: "equal", text: CURRENT, stacked: false }]);
+  });
+});
+
+describe("normalizeReviewWhitespace", () => {
+  it("collapses turndown's `-   ` bullets and loose-list padding to clean markdown", () => {
+    const dirty = "-   **Real**, a thing.\n    \n-   **Game**, another.";
+    expect(normalizeReviewWhitespace(dirty)).toBe("- **Real**, a thing.\n\n- **Game**, another.");
+  });
+  it("collapses ordered-list marker padding too", () => {
+    expect(normalizeReviewWhitespace("1.   first\n2.   second")).toBe("1. first\n2. second");
+  });
+  it("blanks a whitespace-only line but keeps trailing spaces after content (a markdown hard break)", () => {
+    // Two trailing spaces are a `<br>` (Shift+Enter → turndown); stripping them
+    // would hide a real break and flatten it on accept. Only the padding line goes.
+    expect(normalizeReviewWhitespace("a line  \n    \nnext")).toBe("a line  \n\nnext");
+  });
+  it("leaves fenced code untouched", () => {
+    const code = "```\n-   not a list, code\n```";
+    expect(normalizeReviewWhitespace(code)).toBe(code);
+  });
+  it("leaves a 4-space indented code line untouched (marker collapse caps at 3 spaces)", () => {
+    expect(normalizeReviewWhitespace("    -   indented code, not a list")).toBe(
+      "    -   indented code, not a list",
+    );
+  });
+  it("is idempotent", () => {
+    const dirty = "-   **Real**, a thing.\n    \n-   **Game**.";
+    const once = normalizeReviewWhitespace(dirty);
+    expect(normalizeReviewWhitespace(once)).toBe(once);
+  });
+  it("a purely cosmetic reformat yields no reviewable regions", () => {
+    // The exact class from #1617: same prose, editor `-   ` vs AI `- `.
+    const current = "Intro.\n\n-   **Real**, a thing.\n    \n-   **Game**, another.";
+    const proposed = "Intro.\n\n- **Real**, a thing.\n\n- **Game**, another.";
+    expect(reviewBodyProposal(current, proposed).regions).toEqual([]);
   });
 });

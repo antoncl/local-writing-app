@@ -247,6 +247,17 @@
     setError: (message) => (chatError = message),
     setNotice: (message) => (chatNotice = message),
     entryTitle: (entryId) => loreTitle(entryId),
+    // The commit publishes its review onto the entry's pane; bring that pane into
+    // view (open or front) so the author sees the proposed-vs-current diff without
+    // hunting for the review-dot. Only a lore subject is resolvable to an opener
+    // from this pane's roster — a scene / plot-card subject keeps the notice-only
+    // hand-off (its kind isn't known here). openLore focuses an already-open pane
+    // or loads a fresh one; best-effort, so a navigation failure never breaks a
+    // successful commit (the notice still names where the review went).
+    revealEntry: (entryId) => {
+      if (loreEntries.some((entry) => entry.id === entryId))
+        void editorPanes.openLore(entryId).catch(() => {});
+    },
     // The set this chat already owns, read at stage time so a re-stage refines it
     // in place (singular edge, §4) instead of minting an orphan.
     getStagedSetId: () => chatStagedSet,
